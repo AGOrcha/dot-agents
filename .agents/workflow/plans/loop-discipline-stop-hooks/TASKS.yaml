@@ -29,7 +29,7 @@ tasks:
       notes: 'Extend gate-critical mappings only - Codex SubagentStop, Copilot agentStop/subagentStop, Cursor subagentStop. Copilot stop is agentStop, not stop. Contract: tasks/p1a-mapper-extensions.contract.md.'
     - id: p1b-canonical-when-values
       title: New canonical HookSpec.When values from Cursor wider surface and May 2026 refresh
-      status: in_progress
+      status: completed
       depends_on:
         - p1a-mapper-extensions
       blocks: []
@@ -42,7 +42,7 @@ tasks:
       notes: 'Add event parity from R6 and D3/D5 after the critical mappings land; document one-to-one mapping, Copilot agentStop, approved non-terminal behavior, and observation-only candidates. Contract: tasks/p1b-canonical-when-values.contract.md.'
     - id: p1c-matcher-verification
       title: Per-event input/matcher verification and when_events schema extension
-      status: in_progress
+      status: completed
       depends_on:
         - p1a-mapper-extensions
       blocks: []
@@ -56,7 +56,7 @@ tasks:
       notes: 'Add backward-compatible `when_events` after verifying inputs, matchers, native remediation outputs, and approved PreToolUse/SubagentStart/PreCompact capabilities from official docs; Cursor provides transcript fields but uses `followup_message`. Contract: tasks/p1c-matcher-verification.contract.md.'
     - id: p1d-claude-lifecycle-parity
       title: Claude documented lifecycle event parity beyond gate-critical events
-      status: pending
+      status: completed
       depends_on:
         - p1b-canonical-when-values
       blocks: []
@@ -190,7 +190,7 @@ tasks:
       app_type: research
     - id: p3-pre-snapshot
       title: Source-skill snapshot to prevent drift during P3/P3b/P4 implementation
-      status: in_progress
+      status: completed
       depends_on: []
       blocks:
         - p3-starter-promotion

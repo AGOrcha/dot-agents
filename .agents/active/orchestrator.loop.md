@@ -68,13 +68,12 @@ go run ./cmd/dot-agents workflow fanout \
   --owner <delegate-name> \
   --write-scope "<bounded paths>" \
   --delegate-profile loop-worker \
-  --project-overlay .agents/active/active.loop.md \
-  --prompt "Read the bundle; load loop-worker; implement write_scope; /iteration-close when done." \
+  --prompt "Read the bundle; execute only your named staged role; emit its required artifact; leave delegation closeout to the parent gate." \
   --context-file .agents/active/loop-state.md \
   --context-file .agents/workflow/plans/<plan-id>/TASKS.yaml
 ```
 
-`--project-overlay` (project/role guidance) and per-delegation prompt (`--prompt` and/or `--prompt-file`) are **different** bundle fields per **D5** (see `decisions.1.md` in this plan’s spec set). **Do not** pass the same file as both `--project-overlay` and `--prompt-file`. `ralph-orchestrate` uses `.agents/active/active.loop.md` for overlay, inline `--prompt` for the default handoff, and only adds `--prompt-file` when `RALPH_DELEGATION_PROMPT_FILE` (or the default `.agents/prompts/loop-worker.project.md` if present) is a path **distinct** from the overlay. Pick role-specific project overlays and prompts when the task is impl-only, verifier, or review (e.g. `.agents/prompts/impl-agent.project.md`, `verifiers/*.project.md`, `review-agent.project.md`).
+`--project-overlay` (project/role guidance) and per-delegation prompt (`--prompt` and/or `--prompt-file`) are **different** bundle fields per **D5** (see `decisions.1.md` in this plan's spec set). **Do not** pass the same file as both `--project-overlay` and `--prompt-file`. For staged execution, the parent first resolves the `app_type` pipeline profile, then injects shared stage instructions plus a named stage prompt and any stage-safe project overlay. `ralph-orchestrate` now defaults to a stage-neutral inline prompt with no implicit overlay until that stage-safe file exists. `.agents/active/active.loop.md` is valid only for explicit legacy/no-stage `loop-worker` dispatch because it includes `/iteration-close`.
 
 **Work directly (no fanout) when:**
 - The task is research, planning, or architectural (no bounded write_scope)
@@ -91,12 +90,11 @@ Agent(
   description="Implement <task_id> in <plan_id>",
   prompt="""
 Delegation bundle: <absolute_bundle_path>
-Worker skill: .agents/skills/loop-worker/
+Stage prompt: .agents/prompts/impl-agent.project.md
 
 Read the bundle (write_scope, task_id, plan_id, feedback_goal, context_files).
-Load the worker skill at the path above.
-Implement the single task within write_scope only.
-Run /iteration-close when done.
+Follow the injected shared stage instructions and the implementation stage prompt.
+Implement the single task within write_scope only, emit impl-handoff.yaml, and stop.
 """,
   mode="auto"
 )
@@ -113,7 +111,7 @@ Use `I_S_P` when:
 - You are in an interactive Claude Code session with Agent tool available
 - Multiple eligible tasks can be fanned out in parallel and you want one isolated stage chain per bundle
 
-Use `ralph-worker.sh` in legacy loop-worker or headless script mode when:
+Use `ralph-worker` without `--stage` in explicit legacy/full-slice mode when:
 - Tasks require many implementation steps or long runtime
 - Running headless/batch without an interactive Claude Code session
 

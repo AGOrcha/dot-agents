@@ -8,8 +8,8 @@ Use this file as **`--prompt-file`** when the delegated role is **batch verifica
 
 | Surface | Responsibility |
 |--------|----------------|
-| Global `~/.agents/profiles/loop-worker.md` | Evidence classification, verify / checkpoint / merge-back when you are also the bounded worker |
-| Repo project overlay (e.g. `.agents/active/active.loop.md`) | Fixture roots, matrix paths, sandbox data dirs, tool binaries, diff tolerances |
+| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable evidence, scope, and sandbox discipline; no merge-back or parent closeout |
+| Stage-safe repo project overlay (to materialize) | Fixture roots, matrix paths, sandbox data dirs, tool binaries, diff tolerances; do not inject legacy `active.loop.md` unchanged |
 | **This file (`verifiers/batch.project.md`)** | Repo wording for **batch** turns: map touched paths → fixtures or jobs under test, positive + negative cases, record **`batch.result.yaml`** |
 | Delegation bundle | Canonical `plan_id`, `task_id`, `feedback_goal`; impl scope is **not** yours unless the bundle says so |
 

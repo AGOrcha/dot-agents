@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ralph-closeout: scan .agents/active/merge-back/*.md for unprocessed merge-backs,
-# run delegation closeout + workflow advance for each.
+# run parent-owned delegation closeout for each contracted merge-back.
 #
 # Env vars:
 #   RALPH_CLOSEOUT_AUTO   1 = auto-close only accepted pending merge-backs (default), 0 = spawn orchestrator review pass
@@ -32,7 +32,7 @@
 #
 # Verification:
 #   No merge-backs → exits 0, logs "no pending merge-backs"
-#   One completed merge-back → delegation closeout + advance run cleanly
+#   One contracted completed merge-back → delegation closeout completes canonical state
 
 set -euo pipefail
 
@@ -326,6 +326,12 @@ if m:
     return 1
   fi
 
+  local contract="$DELEGATION_DIR/${task_id}.yaml"
+  if [[ ! -f "$contract" ]]; then
+    echo "error: merge-back task=$task_id has no active delegation contract; parent gate cannot validate an orphaned return artifact" >&2
+    return 1
+  fi
+
   local gate_json gate_outcome gate_closeout_allowed gate_planning_required gate_reason
   gate_json="$(da --json workflow delegation gate --plan "$plan_id" --task "$task_id")"
   IFS=$'\t' read -r gate_outcome gate_closeout_allowed gate_planning_required gate_reason < <(printf '%s' "$gate_json" | python3 -c "
@@ -347,13 +353,9 @@ print('\t'.join([
     return 1
   fi
 
-  # Verify delegation contract exists
-  local contract="$DELEGATION_DIR/${task_id}.yaml"
-  if [[ ! -f "$contract" ]]; then
-    echo "warning: no delegation contract at $contract for task=$task_id — skipping delegation closeout" >&2
-  else
-    # delegation closeout deletes the contract + bundle; capture id for git add -u on bundle path.
-    delegation_id="$(python3 - "$contract" <<'PY'
+  # Contracted delegated work is completed atomically by delegation closeout.
+  # delegation closeout deletes the contract + bundle; capture id for git add -u on bundle path.
+  delegation_id="$(python3 - "$contract" <<'PY'
 import re, sys
 path = sys.argv[1]
 try:
@@ -366,40 +368,25 @@ except Exception:
     pass
 PY
 )"
-    echo "ralph-closeout: workflow delegation closeout plan=$plan_id task=$task_id --decision accept" >&2
-    local closeout_log
-    closeout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout.XXXXXX")"
-    if da workflow delegation closeout --plan "$plan_id" --task "$task_id" --decision accept >"$closeout_log" 2>&1; then
-      cat "$closeout_log" >&2
-      [[ -n "${LOG_DIR:-}" ]] && cp -f "$closeout_log" "$LOG_DIR/closeout-${task_id}.log"
-    else
-      cat "$closeout_log" >&2
-      rm -f "$closeout_log"
-      echo "error: delegation closeout failed for task=$task_id" >&2
-      return 1
-    fi
-    rm -f "$closeout_log"
-  fi
-
-  echo "ralph-closeout: workflow advance plan=$plan_id task=$task_id completed" >&2
-  local advance_log
-  advance_log="$(mktemp "${TMPDIR:-/tmp}/ralph-advance.XXXXXX")"
-  if da workflow advance "$plan_id" --task "$task_id" --status completed >"$advance_log" 2>&1; then
-    cat "$advance_log" >&2
-    [[ -n "${LOG_DIR:-}" ]] && cp -f "$advance_log" "$LOG_DIR/advance-${task_id}.log"
+  echo "ralph-closeout: workflow delegation closeout plan=$plan_id task=$task_id --decision accept" >&2
+  local closeout_log
+  closeout_log="$(mktemp "${TMPDIR:-/tmp}/ralph-closeout.XXXXXX")"
+  if da workflow delegation closeout --plan "$plan_id" --task "$task_id" --decision accept >"$closeout_log" 2>&1; then
+    cat "$closeout_log" >&2
+    [[ -n "${LOG_DIR:-}" ]] && cp -f "$closeout_log" "$LOG_DIR/closeout-${task_id}.log"
   else
-    cat "$advance_log" >&2
-    rm -f "$advance_log"
-    echo "error: workflow advance failed for task=$task_id" >&2
+    cat "$closeout_log" >&2
+    rm -f "$closeout_log"
+    echo "error: delegation closeout failed for task=$task_id" >&2
     return 1
   fi
-  rm -f "$advance_log"
+  rm -f "$closeout_log"
 
   echo "ralph-closeout: task=$task_id closed successfully" >&2
 
   # Commit closeout state so workstate is clean regardless of what follows.
-  # workflow advance + delegation closeout mutate TASKS.yaml and PLAN.yaml,
-  # remove active artifacts, and archive the merge-back under history/.
+  # Delegation closeout mutates TASKS.yaml and PLAN.yaml, removes active
+  # artifacts, and archives the merge-back under history.
   # Stage the task-scoped archive result as part of the post-archival checkpoint
   # so ralph-pipeline does not leave the repo dirty after a successful closeout.
   local verification_dir="$REPO_ROOT/.agents/active/verification/${task_id}"
@@ -469,9 +456,13 @@ EOF
 
 ## Your deliverables
 For each merge-back, decide: accept or reject.
-For each accepted task, run:
+For each accepted task with an active delegation contract, run:
   da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept
-  da workflow advance <plan_id> --task <task_id> --status completed
+
+Do not accept an orphaned merge-back without an active delegation contract;
+the parent gate cannot validate it. Direct, non-delegated work uses
+`da workflow advance <plan_id> --task <task_id> --status completed` outside
+this merge-back closeout path.
 
 For each rejected task, run:
   da workflow delegation closeout --plan <plan_id> --task <task_id> --decision reject

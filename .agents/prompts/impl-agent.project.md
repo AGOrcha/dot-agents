@@ -1,17 +1,19 @@
 # Impl-agent — repo project overlay (implementation slice)
 
-Use this file as **`--prompt-file`** (or alongside inline `--prompt`) when the delegated role is **implementation-only**: code changes inside `write_scope`, plus a durable handoff for verifiers. It is **not** a substitute for the global `loop-worker` profile and **not** what `bin/tests/ralph-worker` assembles (that script is **Pattern E — loop-worker** with verify / checkpoint / merge-back).
+Use this file as **`--prompt-file`** (or alongside inline `--prompt`) when the delegated role is **implementation-only**: code changes inside `write_scope`, plus a durable handoff for verifiers. In staged mode `bin/tests/ralph-worker --stage impl` loads this surface; legacy no-stage mode remains the full-slice `loop-worker` path with verify / checkpoint / merge-back.
 
 ## Role boundary
 
 | Surface | Responsibility |
 |--------|----------------|
-| Global `~/.agents/profiles/loop-worker.md` | Habits: scope, tests, evidence, closeout cadence |
-| Repo project overlay (e.g. `.agents/active/active.loop.md`) | Paths, matrices, guardrails |
+| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable scope, evidence, and sandbox discipline; no closeout or advancement |
+| Stage-safe repo project overlay (to materialize) | Paths, matrices, guardrails; do not inject legacy `active.loop.md` unchanged |
 | **This file (`impl-agent.project.md`)** | Repo wording for **impl** turns: implement, commit, emit **`impl-handoff.yaml`** |
 | Delegation bundle | Canonical `plan_id`, `task_id`, `write_scope`, `feedback_goal` |
 
 Do **not** fold verifier or review duties into this prompt unless the bundle explicitly assigns them.
+Do **not** load legacy `loop-worker` `/iteration-close` duties into this
+stage; write `impl-handoff.yaml` and stop.
 
 ## Handoff artifact
 

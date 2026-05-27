@@ -8,8 +8,8 @@ Reserve the **`api` verifier** surface (`.agents/prompts/verifiers/api.project.m
 
 | Surface | Responsibility |
 |--------|----------------|
-| Global `~/.agents/profiles/loop-worker.md` | Evidence classification, verify / checkpoint / merge-back when you are also the bounded worker |
-| Repo project overlay (e.g. `.agents/active/active.loop.md`) | Base URL, auth/session fixtures, browser projects, trace retention, matrix paths |
+| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable evidence, scope, and sandbox discipline; no merge-back or parent closeout |
+| Stage-safe repo project overlay (to materialize) | Base URL, auth/session fixtures, browser projects, trace retention, matrix paths; do not inject legacy `active.loop.md` unchanged |
 | **This file (`verifiers/ui-e2e.project.md`)** | Repo wording for **UI E2E** turns: map touched paths → routes or pages under test, positive + negative flows, record **`ui-e2e.result.yaml`** |
 | Delegation bundle | Canonical `plan_id`, `task_id`, `feedback_goal`; impl scope is **not** yours unless the bundle says so |
 

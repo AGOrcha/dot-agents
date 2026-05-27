@@ -6,8 +6,8 @@ Use this file as **`--prompt-file`** when the delegated role is **API verificati
 
 | Surface | Responsibility |
 |--------|----------------|
-| Global `~/.agents/profiles/loop-worker.md` | Evidence classification, verify / checkpoint / merge-back when you are also the bounded worker |
-| Repo project overlay (e.g. `.agents/active/active.loop.md`) | Base URLs, auth fixtures, perf budgets, matrix paths |
+| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable evidence, scope, and sandbox discipline; no merge-back or parent closeout |
+| Stage-safe repo project overlay (to materialize) | Base URLs, auth fixtures, perf budgets, matrix paths; do not inject legacy `active.loop.md` unchanged |
 | **This file (`verifiers/api.project.md`)** | Repo wording for **API** turns: map touched paths → routes or packages under test, positive + negative HTTP cases, record **`api.result.yaml`** |
 | Delegation bundle | Canonical `plan_id`, `task_id`, `feedback_goal`; impl scope is **not** yours unless the bundle says so |
 

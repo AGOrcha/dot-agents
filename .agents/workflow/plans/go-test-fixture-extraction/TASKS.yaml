@@ -414,7 +414,7 @@ tasks:
       app_type: code-fix
     - id: t6b-extend-storetest
       title: Extend internal/graphstore/internal/storetest with Metadata/Edge/NoteSymbolLink runners
-      status: in_progress
+      status: completed
       depends_on:
         - t6-extract-graphstore-tests
       blocks:
@@ -468,7 +468,7 @@ tasks:
       app_type: code-fix
     - id: t6c-graphstore-tests-storetest-migrate
       title: Migrate sqlite_test.go + postgres_test.go onto extended storetest runners
-      status: in_progress
+      status: completed
       depends_on:
         - t6b-extend-storetest
       blocks:
@@ -539,7 +539,7 @@ tasks:
 
     - id: t3b-relocate-platform-coverage-gap-tests
       title: Relocate internal/platform/coverage_gap*_test.go into topic-named test files
-      status: pending
+      status: completed
       depends_on:
         - t3-extract-platform-tests
       blocks:

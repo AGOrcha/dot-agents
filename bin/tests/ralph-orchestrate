@@ -14,8 +14,9 @@
 #   RALPH_FANOUT_WRITE_SCOPE     comma-separated paths (required with manual plan/task)
 #   RALPH_VERIFIER_RETRY_MAX     if set to a positive integer, passed as workflow fanout --verifier-retry-max
 #   RALPH_VERIFIER_SEQUENCE      if non-empty, passed as workflow fanout --verifier-sequence (comma-separated profile ids)
-#   RALPH_DELEGATION_PROMPT_FILE optional repo-relative file for --prompt-file; must not be the same path as
-#                                 RALPH_PROJECT_OVERLAY (D5: bundle fields for overlay vs per-delegation prompt)
+#   RALPH_PROJECT_OVERLAY        optional stage-safe repo-relative overlay file for new bundles
+#   RALPH_DELEGATION_PROMPT_FILE optional stage-safe repo-relative file for --prompt-file; must not be the
+#                                 same path as RALPH_PROJECT_OVERLAY (D5)
 #   RALPH_ORCHESTRATOR_MODEL     orchestrator-only model override
 #   RALPH_MODEL                  fallback model override when no role-specific value is set
 #   RALPH_ORCHESTRATOR_REASONING_EFFORT  codex/copilot/claude orchestrator reasoning effort override
@@ -59,7 +60,7 @@ fi
 
 ORCHESTRATOR_OVERLAY="${RALPH_ORCHESTRATOR_OVERLAY:-$REPO_ROOT/.agents/active/orchestrator.loop.md}"
 LOOP_PROFILE_FILE="${RALPH_LOOP_PROFILE:-$HOME/.agents/profiles/loop-worker.md}"
-WORKER_OVERLAY="${RALPH_PROJECT_OVERLAY:-$REPO_ROOT/.agents/active/active.loop.md}"
+WORKER_OVERLAY="${RALPH_PROJECT_OVERLAY:-}"
 
 # Prefer repo checkout binary
 DOT_AGENTS_CMD=()
@@ -317,28 +318,32 @@ create_bundle() {
     return 1
   fi
 
-  # workflow fanout expects repo-relative paths; strip REPO_ROOT prefix if present
-  local worker_overlay_rel="${WORKER_OVERLAY#$REPO_ROOT/}"
+  # workflow fanout expects repo-relative paths; strip REPO_ROOT prefix if present.
+  local worker_overlay_rel=""
+  if [[ -n "$WORKER_OVERLAY" ]]; then
+    worker_overlay_rel="${WORKER_OVERLAY#$REPO_ROOT/}"
+  fi
   local tasks_yaml_rel=".agents/workflow/plans/${plan_id}/TASKS.yaml"
 
   # D5: --project-overlay and per-delegation prompt are different bundle fields; do not pass
-  # the same repo file for both. Runtime "what to do" defaults to --prompt; optional
-  # RALPH_DELEGATION_PROMPT_FILE (or .agents/prompts/loop-worker.project.md) supplies --prompt-file
-  # when it exists and is not the overlay path.
+  # the same repo file for both. Staged defaults must not inject legacy
+  # active.loop.md or loop-worker closeout into typed child stages.
   local -a fanout_args=( workflow fanout
     --plan "$plan_id"
     --task "$task_id"
     --owner "${RALPH_FANOUT_OWNER:-ralph-orchestrate}"
     --delegate-profile "${RALPH_DELEGATE_PROFILE:-loop-worker}"
     --selection-reason "ralph-orchestrate auto-fanout"
-    --project-overlay "$worker_overlay_rel"
-    --prompt "You are a bounded implementation worker. Read the delegation bundle YAML (path below after fanout) for plan_id, task_id, write_scope, feedback_goal, and context. Load the loop-worker skill, implement only within write_scope, run /iteration-close when the slice is complete."
+    --prompt "You are assigned one bounded stage. Read the delegation bundle YAML for plan_id, task_id, write_scope, feedback_goal, and context. Follow the stage-specific role surface supplied at execution time, emit only that stage's required artifact, and leave delegation closeout to the parent gate."
   )
-  local extra_pf="${RALPH_DELEGATION_PROMPT_FILE:-.agents/prompts/loop-worker.project.md}"
+  if [[ -n "$worker_overlay_rel" ]]; then
+    fanout_args+=( --project-overlay "$worker_overlay_rel" )
+  fi
+  local extra_pf="${RALPH_DELEGATION_PROMPT_FILE:-}"
   extra_pf="${extra_pf#./}"
   extra_pf="${extra_pf#"$REPO_ROOT/"}"
-  if [[ -f "$REPO_ROOT/$extra_pf" ]]; then
-    if [[ "$extra_pf" == "$worker_overlay_rel" ]]; then
+  if [[ -n "$extra_pf" && -f "$REPO_ROOT/$extra_pf" ]]; then
+    if [[ -n "$worker_overlay_rel" && "$extra_pf" == "$worker_overlay_rel" ]]; then
       echo "error: RALPH_DELEGATION_PROMPT_FILE must not equal the project overlay path (got $extra_pf) — D5" >&2
       return 1
     fi
@@ -532,6 +537,40 @@ JSON
     (( _test_passed += 1 )) || true
   else
     echo "  FAIL: empty max_batch — expected 0 entries, got: ${empty_tasks[*]}" >&2
+    (( _test_failed += 1 )) || true
+  fi
+
+  echo ""
+  echo "--- create_bundle: staged prompt composition ---"
+  da() {
+    _captured_fanout_args="$*"
+    return 1
+  }
+  WORKER_OVERLAY=""
+  unset RALPH_DELEGATION_PROMPT_FILE 2>/dev/null || true
+  _captured_fanout_args=""
+  create_bundle "stage-neutral-test-plan" "__stage_neutral_self_test__" "commands/" >/dev/null 2>&1 || true
+  if [[ "$_captured_fanout_args" == *"--prompt "* &&
+        "$_captured_fanout_args" == *"one bounded stage"* &&
+        "$_captured_fanout_args" == *"leave delegation closeout to the parent gate"* &&
+        "$_captured_fanout_args" != *"--project-overlay"* &&
+        "$_captured_fanout_args" != *"active.loop.md"* &&
+        "$_captured_fanout_args" != *"/iteration-close"* ]]; then
+    echo "  ok: staged defaults omit legacy overlay and loop-worker closeout"
+    (( _test_passed += 1 )) || true
+  else
+    echo "  FAIL: staged defaults captured unexpected fanout args: $_captured_fanout_args" >&2
+    (( _test_failed += 1 )) || true
+  fi
+
+  WORKER_OVERLAY="$REPO_ROOT/.agents/prompts/impl-agent.project.md"
+  _captured_fanout_args=""
+  create_bundle "stage-overlay-test-plan" "__stage_overlay_self_test__" "commands/" >/dev/null 2>&1 || true
+  if [[ "$_captured_fanout_args" == *"--project-overlay .agents/prompts/impl-agent.project.md"* ]]; then
+    echo "  ok: explicit stage-safe overlay is forwarded"
+    (( _test_passed += 1 )) || true
+  else
+    echo "  FAIL: explicit stage-safe overlay not forwarded: $_captured_fanout_args" >&2
     (( _test_failed += 1 )) || true
   fi
 

@@ -90,8 +90,26 @@ run_case() {
   echo "PASS: outcome=$outcome rc=$want_rc calls='$want_calls'"
 }
 
-run_case "accept" "accept" "true" "false" 0 "closeout-called advance-called"
+run_case "accept" "accept" "true" "false" 0 "closeout-called"
 run_case "reject" "reject" "false" "false" 1 ""
 run_case "escalate" "escalate" "false" "true" 1 ""
+
+dir="$TMPDIR_ROOT/orphaned-accept"
+setup_repo "$dir" "t1" "p1"
+rm "$dir/.agents/active/delegation/t1.yaml"
+write_fake_da "$dir" "t1" "p1" "accept" "true" "false"
+set +e
+(cd "$dir" && DOT_AGENTS="$dir/fake-da" RALPH_NO_LOG=1 "$CLOSEOUT_SCRIPT") >/dev/null 2>&1
+rc=$?
+set -e
+calls=""
+if [[ -f "$dir/calls.log" ]]; then
+  calls="$(tr '\n' ' ' <"$dir/calls.log" | sed 's/[[:space:]]*$//')"
+fi
+if [[ $rc -ne 1 || -n "$calls" ]]; then
+  echo "FAIL: orphaned merge-back expected rejection before gate/advance, got rc=$rc calls='$calls'" >&2
+  exit 1
+fi
+echo "PASS: orphaned merge-back is rejected before gate or advance"
 
 echo "ALL PASS"

@@ -15,7 +15,7 @@ Top-level operating model:
 
 Orchestrator startup discipline:
 - Load the `orchestrator-session-start` skill when available
-- Read `.agents/active/loop-state.md` before selecting work
+- If present, read `.agents/active/loop-state.md` before selecting work
 - Prefer `dot-agents workflow orient` plus `dot-agents workflow next --plan <id>[,<id>...]` as the authoritative control-plane read
 - When multiple active plans compete and priority is unclear, use the `plan-wave-picker` skill instead of guessing
 
@@ -39,9 +39,11 @@ Step 3: Decide direct work vs fanout
 
 Step 4: Fanout the delegated task
 - Use `dot-agents workflow fanout` to create the bounded contract and bundle for each selected task
+- The parent resolves the `app_type` pipeline profile separately from the stage instruction surface, then injects the named stage definition and any stage-safe repo overlay at dispatch
 - Pass the canonical plan id, task id, owner, write_scope, project overlay, prompt text, prompt files, context files, and verification controls
 - Default orchestrator-side files should mirror the scripted path when they exist:
-  - project overlay: `.agents/active/active.loop.md`
+  - staged project overlay: no implicit overlay until a trimmed stage-safe file is materialized; do not pass `active.loop.md` unchanged to typed stages
+  - legacy/no-stage worker overlay: `.agents/active/active.loop.md`, loaded by that worker path rather than injected into a staged bundle
   - context file: `.agents/active/loop-state.md`
   - context file: `.agents/workflow/plans/<plan_id>/TASKS.yaml`
 - Keep `--project-overlay` and per-delegation prompt files distinct bundle fields; do not pass the same file as both
@@ -62,8 +64,8 @@ Step 5: Drive the staged runtime for that bundle
   - then return to the parent orchestrator / closeout gate for the decision
 - Do not reuse one worker chat/session across multiple stages unless the runtime explicitly requires that fallback
 - Cross-stage handoff must happen through the bundle and typed artifacts, not through assumed chat memory
-- In interactive subagent mode, delegated workers should load the `loop-worker` skill when the bundle or runtime handoff expects it
-- Use `/iteration-close` only in worker-scope closeout, never as a substitute for orchestrator task selection or parent gating
+- In interactive staged mode, delegated stages should receive their named stage definition plus parent-resolved shared stage instructions; these instructions are not an `app_type` profile, and must not inject legacy `loop-worker` closeout into staged children
+- Use `/iteration-close` only for legacy/full-slice worker execution or direct implementation closeout, never for staged child completion or parent gating
 
 Subagent spawn discipline:
 - Every spawned stage worker gets only the task-scoped inputs it needs:
@@ -117,8 +119,8 @@ Review stage:
 Parent gate:
 - The orchestrator or review gate reads the review decision, verifier artifacts, and merge-back
 - If the staged evidence is not acceptable, fail the gate before closeout rather than silently continuing
-- Closeout then processes accepted or rejected merge-backs by running `dot-agents workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept|reject`
-- After accepted closeout, run canonical advancement for that task; do not advance before closeout
+- Closeout processes accepted or rejected merge-backs by running `dot-agents workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept|reject`
+- Accepted delegation closeout reconciles canonical task completion; do not run a second `workflow advance` for a contracted delegated task
 - Only after parent acceptance should archival, cleanup, and continuation logic proceed
 - If the review exposes unresolved planning or architecture questions, pause the scoped completion run instead of continuing automatically
 

@@ -2,7 +2,7 @@
 # ralph-pipeline: full E2E orchestration pipeline.
 #   Phase 1: ralph-orchestrate  → discovers unblocked tasks, creates bundles
 #   Phase 2: ralph-worker       → parallel workers, one per bundle
-#   Phase 3: ralph-closeout     → accept merge-backs, advance canonical tasks
+#   Phase 3: ralph-closeout     → accept merge-backs and reconcile contracted tasks
 #
 # Each phase uses role-pure scripts. Orchestrator does not implement.
 # Workers do not select tasks. Closeout is separate.

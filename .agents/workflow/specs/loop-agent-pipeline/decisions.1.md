@@ -477,6 +477,36 @@ Each `--role` invocation **merges** into the existing `iter-N.yaml` (first call 
 **Accept-path flow**:
 impl-agent commits → writes `impl-handoff.yaml` + `focused-unit.result.yaml` → calls `workflow checkpoint --log-to-iter N --role impl` → pre-verifier TDD-fresh gate (D3) → verifiers each write `<type>.result.yaml` + `workflow checkpoint --log-to-iter N --role verifier --verifier-type <type>` → verifier aggregate calls `workflow merge-back` (filling new verification fields) → reviewer reads validation artifacts → calls `workflow verify record` with structured decision flags (CLI writes `review-decision.yaml` + audit row) → calls `workflow checkpoint --log-to-iter N --role review` → orchestrator closeout (archive + cleanup per D13).
 
+**Runtime clarification (2026-05-26):** The implemented staged runtime does
+not contain the proposed verifier-aggregate step above.
+`bin/tests/ralph-worker --stage review` creates the merge-back return artifact
+after writing the review decision, and parent-owned delegation closeout itself
+reconciles an accepted task to canonical completion. This is the current
+compatibility shape:
+
+| Surface | Owner |
+|---|---|
+| `impl-handoff.yaml` | `impl-agent`, then stop |
+| `<verifier>.result.yaml` | typed verifier, then stop |
+| `review-decision.yaml` and merge-back return artifact | review stage, then stop |
+| delegation closeout / archive and accepted canonical completion | parent gate only |
+| `workflow advance` | direct, non-delegated work only; orphaned merge-backs fail parent gating |
+
+**Target ownership after named reviewer split (design review 2026-05-26):**
+named reviewers must be independently spawnable evidence producers, so none
+of them should own the one merge-back return packet. A deterministic
+return/aggregation gate, resolved and invoked by the parent after reviewer
+evidence is available, owns consolidated `review-decision.yaml` and
+merge-back materialization. Parent/orchestrator closeout remains the only
+owner of canonical task mutation and archival.
+
+The current combined review-stage return is a compatibility implementation
+until that aggregation protocol and its bundle fields land. This target
+supersedes D9's verifier-aggregate ownership and D8's single multiplexed
+staged `loop-worker` direction. Legacy no-stage `loop-worker` remains
+compatible with `/iteration-close`; it is not the instruction base for
+staged children.
+
 ---
 
 ## D10 — Schema + CLI deltas co-located with feature task (no floating schemas)

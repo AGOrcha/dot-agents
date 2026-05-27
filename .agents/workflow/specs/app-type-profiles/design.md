@@ -1,6 +1,6 @@
 # App Type and Verifier Profiles — Design Spec
 
-**Status:** draft
+**Status:** draft; staged-dispatch review inputs added 2026-05-26
 **Written:** 2026-04-22
 **Plan:** (not yet created)
 
@@ -25,6 +25,7 @@
 8. [Worked examples](#8-worked-examples)
 9. [Migration from `app_type_verifier_map`](#9-migration-from-app_type_verifier_map)
 10. [Open questions](#10-open-questions)
+11. [Staged dispatch and config planning inputs](#11-staged-dispatch-and-config-planning-inputs)
 
 ---
 
@@ -46,7 +47,7 @@ This spec does not own the field surface (`app_type`, `app_type_verifier_map`) �
 
 ### 2.1 A profile is a named bundle, not a flag
 
-A profile is a YAML document with a stable name (`go-http-service`, `research`, `resume-ideation`), a semver version, and fields that pin every pipeline plug-point: `write_scope_kind`, `verifier_chain`, `review_kind`, `review_skill`, `graph_backend`, `impact_radius_kind`.
+A profile is a YAML document with a stable name (`go-http-service`, `research`, `resume-ideation`), a semver version, and fields that pin every authored pipeline plug-point: `write_scope_kind`, `verifier_chain`, `review_kind`, `review_skill`, and `graph_backend`. `impact_radius_kind` is derived from the resolved graph adapter and is not an authored profile field.
 
 **Why:** the existing `app_type_verifier_map` treats `app_type` as a flat string key into a flat list of verifier names. That is too narrow — it cannot express review kind, graph backend, or impact radius. It also has no versioning surface, so profile evolution is impossible.
 
@@ -72,11 +73,20 @@ The existing `write_scope` (file paths) generalizes to `artifact_scope` — a ty
 
 **Why:** a research task that "edits section 3.2 of the methodology chapter" is a bounded write scope in exactly the same way that a code task that "edits internal/auth/middleware.go" is. Generalizing `write_scope` unlocks the rest of the pipeline (conflict detection, fanout, merge-back) for non-code work without a parallel pipeline.
 
-### 2.5 Profile sources layer: local today, git v1.5, oci v2
+### 2.5 Profile documents are config layers; executable components are packages
 
-Profile files are resolved through the same `sources` / `packages` machinery defined in config-distribution-model. `local` sources are sufficient for v1 (profiles live in the same repo or a sibling `agents-config` repo). v1.5 adds `git` sources for distribution. v2 adds OCI packages per external-agent-sources §5.
+Profile documents are resolved as Tier 1 declarative configuration through
+the `sources` / `extends` machinery defined in config-distribution-model.
+`local` sources are sufficient for v1 (profiles live in the same repo or a
+sibling `agents-config` repo); git/http config sources provide distributed
+profiles thereafter. A profile may reference Tier 2 OCI-packaged agents,
+skills, and verifiers, but is not itself an OCI package under the currently
+defined media types in external-agent-sources §5.
 
-**Why:** no new transport is needed. Profile distribution is a consumer of the existing config/package tiers.
+**Why:** profiles select policy and compose references; they are not
+executable payloads. Keeping them in Tier 1 avoids adding a `profile` package
+type solely to transport structured policy while preserving digest-pinned
+Tier 2 delivery for executable components.
 
 ### 2.6 Review kind, graph backend, and impact radius are all pluggable
 
@@ -132,9 +142,8 @@ review_skill: rubric-review@^1.0
 # explicitly so the pipeline can precondition graph availability.
 graph_backend: dotagents-builtin:graph/citation@^1.0
 
-# Impact-radius kind. Drives how "what changed" is computed for the review
-# stage and for cross-task conflict detection.
-impact_radius_kind: citation
+# Impact radius is derived from the citation adapter's query contract; it is
+# not separately authored in profile YAML.
 
 # Defaults for the impl stage. Orchestrator may override per-task.
 impl_defaults:
@@ -219,7 +228,7 @@ resolve(composite):
 |---|---|
 | `review_kind` | Composite must declare its own; error if omitted |
 | `graph_backend` | Composite must declare; error if omitted |
-| `impact_radius_kind` | Composite must declare; error if omitted |
+| `impact_radius_kind` | Derived from the resolved composite `graph_backend`; it is not declared by the composite |
 | `write_scope_kind` | Must agree across all children; error if disagree |
 | `impl_output_kind` | Must agree; error if disagree |
 
@@ -446,7 +455,7 @@ verifier_chain:
 review_kind: custom
 review_skill: resume-review@^0.1
 graph_backend: dotagents-builtin:graph/document-cross-ref@^1.0
-impact_radius_kind: custom
+# impact_radius_kind: derived from the document-cross-ref adapter
 impl_defaults:
   allowed_tools: [read, write]
   context_packs: [resume-experience-library, target-jd]
@@ -501,9 +510,15 @@ Step 1's profile files must produce byte-identical verifier invocations to the p
 
 §2.2 forbids override. This is clean but may be too strict for legitimate cases (e.g., a team wants to tighten a child's coverage threshold without forking). An alternative: allow override only if the overriding profile declares `override_justification:` and the change passes its own behavior-preservation gate against a larger corpus. Leaving this open because the "no override, fork instead" rule is easier to reason about and we can relax later.
 
-### Q2: How are verifier skills themselves distributed?
+### Q2: What is the executable verifier contract?
 
-A profile references verifiers by name + version. Where those verifiers live (local skills, git-sourced skills, OCI packages) and how they are resolved is **not specified here**. It interacts with external-agent-sources §5 (packages) and config-distribution-model §4 (source/tier constraints). A separate document should specify "verifier package contract" once this spec stabilizes — probably an addition to external-agent-sources.
+A profile references verifiers by name + version. External-agent-sources §5
+now supplies their distribution class: an executable published verifier uses
+the existing Tier 2 `verifier/<name>` media type, while local development may
+use a local implementation. Still open is the verifier execution contract:
+entrypoint, input/output artifact schema, sandbox/tool permissions, and how
+behavior-corpus gates bind to a package digest. That contract should be
+specified before implementation.
 
 ### Q3: Behavior corpus storage and privacy
 
@@ -532,6 +547,124 @@ Defined in [graph-backend-adapter-contract §12](../graph-backend-adapter-contra
 ### Q9: Cross-adapter view dependency `accepts_breaking_changes` opt-out
 
 Should dependents be allowed to declare `accepts_breaking_changes: true` to opt out of the dependee-upgrade gate, letting the dependee upgrade and accepting view-stale until manual rebuild? Trade-off: faster dependee upgrades vs. potential silent breakage. Lean: yes, opt-in only, requires acknowledgement in lockfile. Tracked in graph-backend-adapter-contract §14 Q2.
+
+---
+
+## 11. Staged dispatch and config planning inputs
+
+This section records requirements exposed by the 2026-05-26 starter-config
+and staged-runtime review. It is input to a follow-on canonical plan; it does
+not assert that the current CLI implements these fields.
+
+### 11.1 Separate pipeline profiles from stage instructions
+
+An `app_type` profile selects pipeline behavior: typed scope, verifier chain,
+review kind, review skill, graph adapter, and its derived impact radius. It
+must not become a second name for an agent system prompt.
+
+At dispatch time the parent/orchestrator should separately resolve and inject:
+
+1. stable bounded-stage instructions;
+2. the named stage agent or reviewer-lens instructions;
+3. a stage-safe project/product overlay; and
+4. task-specific delegation context.
+
+The legacy `loop-worker` instruction surface may continue to include
+full-slice closeout while compatibility mode exists. Typed `impl`, verifier,
+and reviewer stages must not inherit its `/iteration-close` or merge-back
+instructions.
+
+### 11.2 Persist one resolved execution manifest
+
+Resolution should produce one inspectable manifest persisted in the
+delegation bundle, rather than requiring the worker to rediscover config.
+The follow-on schema must decide exact field names, but the manifest needs:
+
+| Concern | Required resolved value |
+|---|---|
+| Pipeline identity | `profile_ref`, resolved version, content digest, composition expansion |
+| Typed routing | `write_scope_kind`, `impl_output_kind`, ordered verifier chain, review kind/skill, graph adapter |
+| Stage dispatch | named stage agent refs, shared-instruction ref/digest, stage-safe overlay refs/digests |
+| Stage protocol | required input artifact and output artifact for every stage |
+| Return/closeout | return-gate owner, closeout owner, and compatibility/full-slice versus staged execution mode |
+| Provenance | winning config layer/source and lock or source digest for every resolved ref |
+
+`da config explain app_type --json` and `workflow app-types --verbose` should
+read this same effective-resolution API. A direct `.agentsrc.json` parser is
+acceptable only during the migration phase.
+
+Packaging follows `external-agent-sources §5.1`: the profile and overlay
+selection remain Tier 1 config; named executable agents, verifiers, and
+skills resolve through their existing Tier 2 package media types. The
+repo-local delegation bundle is persisted dispatch evidence, not an OCI
+`bundle` pointer document.
+
+Per `org-config-resolution §8.6`, this manifest is also a policy-resolution
+result. Organization or team policy may constrain stage agents, reviewer
+lenses, overlays, verifier chains, return-gate behavior, execution modes, and
+package trust requirements. A task/runtime deviation must be rejected or
+explicitly authorized and auditable, rather than silently taking precedence.
+
+### 11.3 Do not assign merge-back to an individual reviewer
+
+Named reviewers are independent evidence producers. A reviewer lens should
+write its typed decision/evidence artifact and stop; it should not create the
+pipeline's single merge-back artifact, because doing so couples return
+materialization to whichever lens happens to run last.
+
+The target staged ownership is:
+
+| Surface | Owner |
+|---|---|
+| Implementation handoff | `impl-agent` |
+| Typed verification results | named verifier stages |
+| Typed review findings/decisions | named reviewer stages |
+| Consolidated review decision and merge-back return packet | deterministic return/aggregation gate resolved and invoked by the parent |
+| Canonical completion, rejection, archive, and cleanup | parent/orchestrator closeout |
+
+The current consolidated `review` stage may continue to write
+`review-decision.yaml` and the merge-back return packet as a compatibility
+implementation until the aggregation gate and stage protocol are available.
+It is not the target ownership model for independently spawnable reviewers.
+
+### 11.4 Config opportunities and required validation
+
+The current local maps (`app_type_verifier_map`, `verifier_profiles`) express
+only part of the intended pipeline. The planning pass should cover:
+
+- dual-read migration from the flat maps to versioned profiles without
+  silently changing verifier invocation order or outcomes;
+- effective-config provenance for profile refs, stage-agent refs, overlays,
+  reviewer lenses, graph adapters, return-gate policy, and feature flags;
+- inherited policy locks and audited override outcomes for stage agents,
+  reviewer lenses, overlays, verifier chains, return/closeout behavior,
+  execution mode, and package trust rules;
+- validation for unresolved refs, conflicting composite fields, non-stage-safe
+  overlays on typed stages, missing stage outputs, and full-slice closeout
+  metadata attached to staged execution;
+- task-level selection or a bounded composition mechanism for repositories
+  where one repo contains multiple pipelines, rather than treating one
+  repo-level `app_type` as sufficient; and
+- source/lock digest persistence so a later review can explain exactly which
+  instructions and pipeline contract were dispatched.
+
+### 11.5 Follow-on canonical artifact
+
+The planning agent should create a focused spec/plan bundle for staged profile
+dispatch and return-gate ownership under `.agents/workflow/specs/` and
+`.agents/workflow/plans/` using the workflow command surface. It must cite:
+
+- this section;
+- `config-distribution-model` and the live `config explain` proposal;
+- `external-agent-sources` §5.1 artifact/tier mapping;
+- `org-config-resolution` §8.6 precedence, locked-policy, and audited
+  override rules;
+- `loop-agent-pipeline/decisions.1.md`;
+- `agent-context-resolution-architecture.md`; and
+- `staged-profile-dispatch-and-return-gate.md`.
+
+That bundle should decide schema fields, migration phases, named-agent
+materialization, and tests before the legacy full-slice contract is retired.
 
 ---
 

@@ -75,7 +75,7 @@ func writeBundleFixture(t *testing.T, dir string, verifierSeq []string) string {
 	bundle.Verification.VerifierSequence = verifierSeq
 	bundle.Verification.FeedbackGoal = "test"
 	bundle.Closeout.WorkerMust = []string{"workflow_verify_record"}
-	bundle.Closeout.ParentMust = []string{"workflow_advance"}
+	bundle.Closeout.ParentMust = []string{"workflow_delegation_closeout"}
 	data, err := yaml.Marshal(bundle)
 	if err != nil {
 		t.Fatal(err)

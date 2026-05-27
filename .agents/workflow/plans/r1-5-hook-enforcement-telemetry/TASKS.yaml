@@ -31,7 +31,7 @@ tasks:
       notes: This consumes the completed loop-discipline gate bundles; do not run concurrently with their implementation task.
     - id: t1b-post-tool-observation-evaluation
       title: Evaluate PostToolUse and PostToolUseFailure as bounded workflow feedback
-      status: in_progress
+      status: completed
       depends_on:
         - t1-capture-outcomes
       blocks: []
@@ -43,7 +43,7 @@ tasks:
       notes: Evaluate vendor payload stability, workflow-command filtering, redaction/privacy, and prevention/remediation deduplication before any observation contributes to scoring; observation is non-blocking by default.
     - id: t2-scoring-signal
       title: Add objective hook-outcome signal to scoring
-      status: pending
+      status: completed
       depends_on:
         - t1b-post-tool-observation-evaluation
       blocks: []
@@ -108,7 +108,7 @@ tasks:
       app_type: research
     - id: t2d-companion-gate-compatibility
       title: Verify companion gates emit R1.5-compatible records without schema change
-      status: pending
+      status: completed
       depends_on:
         - t2-scoring-signal
       blocks: []
@@ -129,7 +129,7 @@ tasks:
       app_type: go-cli
     - id: t-archival-policy
       title: Decide hook-outcome sidecar retention and archival
-      status: in_progress
+      status: completed
       depends_on:
         - t1-capture-outcomes
       blocks: []
@@ -167,7 +167,7 @@ tasks:
       app_type: go-cli
     - id: t-docs
       title: Update OUTCOME_SCORING_RUBRIC.md and HOOKS.md for R1.5
-      status: pending
+      status: completed
       depends_on:
         - t2-scoring-signal
         - t-archival-policy

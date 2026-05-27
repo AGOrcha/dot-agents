@@ -1,7 +1,7 @@
 # Loop Orchestration Spec
 
 Status: Draft
-Last updated: 2026-04-18
+Last updated: 2026-05-26
 Related:
 - `docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md`
@@ -50,7 +50,9 @@ The orchestrator should be a mixed system, not a single new super-agent.
 - `workflow fanout`
   - keep as the bounded write-scope contract creator
 - `workflow merge-back`
-  - keep as the delegate return artifact writer
+  - keep as the return artifact writer: called by a legacy/consolidated
+    compatibility worker today, and by the parent-invoked return/aggregation
+    gate in the target named-reviewer model
 - `workflow fold-back`
   - fold approved low-risk observations into plan notes, matrices, or lessons
 - `workflow delegation closeout`
@@ -118,7 +120,7 @@ The orchestrator should reuse existing canonical artifacts where possible.
 
 Phase 8 models handoff as three layers (do not collapse into a single ad hoc prompt):
 
-1. **Global worker profile** — under `~/.agents/` (stable habits: honor `write_scope`, trust canonical tasks, verification cadence, trace discipline).
+1. **Dispatched stage instructions** — stable system-prompt guidance resolved by the parent/orchestrator (honor `write_scope`, trust canonical tasks, verification cadence, trace discipline).
 2. **Project overlay** — repo-local files (plan locations, regression matrix, validation queue, project loop guidance).
 3. **Per-delegation bundle** — `.agents/active/delegation-bundles/<delegation_id>.yaml`, validated by [`schemas/workflow-delegation-bundle.schema.json`](../schemas/workflow-delegation-bundle.schema.json).
 
@@ -166,15 +168,29 @@ da workflow task add example-service-rollout --id request-validation-fix --title
 
 `workflow fanout --plan example-service-rollout --task request-validation-fix` will read `TASKS.yaml app_type` first, fall back to `PLAN.yaml default_app_type` if needed, and then do an exact lookup in `.agentsrc.json app_type_verifier_map`.
 
-**Closeout responsibilities** — bundle `closeout.worker_must` / `closeout.parent_must` line up with workflow commands as follows:
+**Legacy full-slice closeout responsibilities** — bundle
+`closeout.worker_must` / `closeout.parent_must` describe the compatibility
+`loop-worker` path:
 
 | Role | Schema token | Command |
 |------|----------------|---------|
 | Worker | `workflow_verify_record` | `da workflow verify record …` |
 | Worker | `workflow_checkpoint` | `da workflow checkpoint …` |
 | Worker | `workflow_merge_back` | `da workflow merge-back …` |
-| Parent | `workflow_advance` | `da workflow advance …` |
-| Parent | `workflow_delegation_closeout` | `da workflow delegation closeout --plan <id> --task <id> --decision accept|reject [--note …]` |
+| Parent | `workflow_delegation_closeout` | `da workflow delegation closeout --plan <id> --task <id> --decision accept|reject [--note …]` (accepted closeout reconciles canonical completion) |
+
+**Staged pipeline responsibility** is narrower: `impl` writes
+`impl-handoff.yaml` and stops; each verifier writes its result artifact and
+stops. In the current compatibility runner, consolidated `review` writes
+`review-decision.yaml` plus the merge-back return artifact and stops. The
+target named-reviewer model instead has each reviewer write typed evidence
+and stop; a deterministic parent-invoked return/aggregation gate constructs
+the consolidated decision and merge-back return packet. The parent gate alone
+runs delegation closeout, which completes accepted delegated tasks.
+`workflow advance` is for direct, non-delegated work, not an additional
+delegated-closeout step.
+A merge-back artifact is child output for parent review, not child-owned
+closeout.
 
 ### Plan lifecycle
 
@@ -365,27 +381,39 @@ Phase 8 should formalize delegation handoff as a three-layer model rather than t
 | `--prompt` (repeatable) | `prompt.inline` | What to do for **this** delegation (runtime) |
 | `--prompt-file` (repeatable) | `prompt.prompt_files` | File-backed per-delegation prompt, still distinct from the overlay file |
 
-`bin/tests/ralph-orchestrate` must **not** pass the same file as both `--project-overlay` and `--prompt-file`. The default is overlay + inline `--prompt`; an optional repo file such as `.agents/prompts/loop-worker.project.md` may be used for `--prompt-file` when it exists and is not the overlay path. **Role-aware dispatch** picks the right overlay and prompt file for **impl** vs **verifier** vs **review** (see *Repo prompt files — do not collapse roles* below); the orchestrator uses `.agents/active/orchestrator.loop.md` and the worker uses `active.loop.md` plus delegation prompts — not one file for every role.
+`bin/tests/ralph-orchestrate` must **not** pass the same file as both `--project-overlay` and `--prompt-file`. Staged auto-fanout defaults to a stage-neutral inline `--prompt` and no implicit project overlay; callers may provide a stage-safe `RALPH_PROJECT_OVERLAY` or `RALPH_DELEGATION_PROMPT_FILE` when one has been materialized. **Role-aware staged dispatch** picks the right stage-safe overlay and prompt file for **impl** vs **verifier** vs **review** (see *Repo prompt files — do not collapse roles* below); the orchestrator uses `.agents/active/orchestrator.loop.md`, legacy no-stage `loop-worker` loads `active.loop.md` directly, and typed stages must not inherit that full-slice file.
 
-#### 1. Global worker profile
+#### 1. Shared stage instructions and legacy loop-worker profile
 
-Reusable, user-local behavior under `~/.agents/`:
+Reusable dispatch-time guidance, using `~/.agents/profiles/loop-worker.md`
+as donor material until native stage agents are materialized:
 
 - bounded worker discipline: honor `write_scope`, trust canonical task state, avoid mutating shared workflow state directly
 - verification discipline: run focused tests first, then broader regression only as justified
 - trace discipline: record a concrete `feedback_goal`, use scenario tags, and classify evidence/results
-- closeout discipline:
+- staged-boundary discipline: child stages emit their assigned typed artifact
+  and stop; the parent gate owns delegation closeout and canonical
+  reconciliation
+- legacy full-slice `loop-worker` closeout discipline only:
   - worker records `workflow verify record`
   - worker records `workflow checkpoint`
   - worker returns `workflow merge-back`
-  - parent advances canonical task state
-  - parent runs delegation closeout / archive once accepted
+  - parent runs delegation closeout / archive once accepted; that command
+    reconciles canonical task state
 
-This profile should be stable across repos. It describes how a loop worker behaves, not what one repo is working on.
+The shared stage instruction base should contain only stable bounded-stage
+discipline. It is **not** an `app_type` profile: profiles in
+`.agents/workflow/specs/app-type-profiles/design.md` are versioned pipeline
+configuration selecting verifier chains, review kinds, and graph backends.
+Per `.agents/proposals/agent-context-resolution-architecture.md`, the parent
+orchestrator owns resolving and injecting stage instructions and project
+overlays at dispatch. The compatibility `loop-worker` profile may retain
+full-slice closeout behavior, but staged `impl`, verifier, and reviewer agents
+must not inherit `/iteration-close` or merge-back duties from it.
 
 #### 2. Project overlay
 
-Repo-local guidance layered on top of the worker profile:
+Repo-local guidance layered on top of the dispatched stage instructions:
 
 - plan and loop-state locations
 - preferred verification surfaces
@@ -394,18 +422,20 @@ Repo-local guidance layered on top of the worker profile:
 - higher-layer validation queue path
 - project-specific scenario families and verification heuristics
 
-This is where files like `.agents/active/active.loop.md` or repo-specific loop prompts belong once trimmed into project overlays instead of full worker definitions.
+The recovered `.agents/active/active.loop.md` is still a legacy/full-slice
+overlay because it includes iteration-close procedure. Only a trimmed,
+stage-safe derivative of that content belongs in typed staged agents.
 
 **Repo prompt files — do not collapse roles**
 
-- **`loop-worker` role** (bounded worker that runs tests, `workflow verify record`, `workflow checkpoint`, and `workflow merge-back`): optional repo prompt file is a *worker* overlay (e.g. `.agents/prompts/loop-worker.project.md` if your repo adds one). Same three-layer stack: global profile → project overlay → bundle.
-- **`impl-agent` role** (implementation slice only; hands off to verifiers): use **`.agents/prompts/impl-agent.project.md`** as the repo-owned impl surface. It must not duplicate the global loop-worker profile; it only adds repo wording for implementation + **`impl-handoff.yaml`** emission.
+- **`loop-worker` role** (legacy full-slice worker that runs tests, `workflow verify record`, `workflow checkpoint`, and `workflow merge-back`): optional repo prompt file is a *worker* overlay (e.g. `.agents/prompts/loop-worker.project.md` if your repo adds one). Same three-layer stack: legacy global profile → project overlay → bundle.
+- **`impl-agent` role** (implementation slice only; hands off to verifiers): use **`.agents/prompts/impl-agent.project.md`** as the repo-owned impl surface. It combines with the dispatch-injected shared stage instruction base, not legacy `loop-worker` closeout instructions; it adds repo wording for implementation + **`impl-handoff.yaml`** emission.
 - **`unit` verifier role** (Go test verification only): use **`.agents/prompts/verifiers/unit.project.md`** as the repo-owned unit surface. It consumes **`impl-handoff.yaml`**, runs **scoped** `go test` over packages implied by `write_scope_touched`, then the **full** Go suite per **D12** (`go test ./... -race -count=1 -timeout=300s`), and writes **`.agents/active/verification/<task_id>/unit.result.yaml`** with `verifier_type: unit` and the canonical fields in **`schemas/verification-result.schema.json`**. Scoped-first discipline matches **D12** (parallel verifier isolation): verifiers do not broaden packages beyond what `write_scope_touched` justifies until after that slice is green.
 - **`api` verifier role** (HTTP / contract / API-style verification): use **`.agents/prompts/verifiers/api.project.md`** as the repo-owned API surface. It consumes **`impl-handoff.yaml`**, runs **scoped** checks first (handlers, `httptest`, or targeted HTTP calls tied to `write_scope_touched`), then optional broader **contract** (OpenAPI / golden response / schema diff) and **performance** artifact passes when the plan calls for them, and writes **`.agents/active/verification/<task_id>/api.result.yaml`** with `verifier_type: api` and the canonical fields in **`schemas/verification-result.schema.json`**. When Playwright or similar drives **network-visible** behavior, treat captured HAR / traces / HTML reports as **`artifact_paths`** and keep the same scoped-first rule: do not broaden to unrelated routes or full suites until the slice covering `write_scope_touched` is green.
 - **`ui-e2e` verifier role** (browser / DOM / visual / accessibility verification): use **`.agents/prompts/verifiers/ui-e2e.project.md`** as the repo-owned UI surface. It consumes **`impl-handoff.yaml`**, runs **scoped** browser flows first (pages, components, or tagged suites implied by `write_scope_touched`), then optional broader **visual regression** (screenshots, image diffs, snapshot reports), **accessibility** audits (for example axe output with a configured WCAG level), and **cross-browser** or full navigation suites when the plan calls for them, and writes **`.agents/active/verification/<task_id>/ui-e2e.result.yaml`** with `verifier_type: ui-e2e` and the canonical fields in **`schemas/verification-result.schema.json`**. Prefer the **`api` verifier** prompt when the primary evidence is **HTTP-level** (HAR, intercepted responses); prefer **`ui-e2e`** when the primary evidence is **DOM, layout, screenshots, keyboard interaction, or a11y violations**. Scoped-first discipline matches other verifier roles: do not broaden to unrelated suites until the slice covering `write_scope_touched` is green.
 - **`batch` verifier role** (fixture-driven, golden, or multi-record batch verification): use **`.agents/prompts/verifiers/batch.project.md`** as the repo-owned batch surface. It consumes **`impl-handoff.yaml`**, runs **scoped** batch or fixture jobs first (golden directories, CSV/JSON fixture trees, snapshot or CLI **expected-vs-actual** diffs, schema validation batches, or matrix rows tied to `write_scope_touched`), then optional broader **full fixture passes** or **volume/regression matrix** tiers when the plan calls for them, and writes **`.agents/active/verification/<task_id>/batch.result.yaml`** with `verifier_type: batch` and the canonical fields in **`schemas/verification-result.schema.json`**. Prefer the **`unit` verifier** prompt when the primary evidence is **`go test`** and in-process Go coverage; prefer **`batch`** when the primary evidence is **file-backed or multi-record comparisons** (diff artifacts, golden updates, tabular mismatch reports). Scoped-first discipline matches other verifier roles: do not broaden to unrelated datasets or jobs until the slice covering `write_scope_touched` is green.
 - **`streaming` verifier role** (SSE, WebSocket, or other long-lived / event-ordered verification): use **`.agents/prompts/verifiers/streaming.project.md`** as the repo-owned streaming surface. It consumes **`impl-handoff.yaml`**, runs **scoped** stream checks first (one SSE resource, one WS channel, or tagged stream scenarios tied to `write_scope_touched`), then optional broader **soak**, **fault-injection**, or **multi-session** tiers when the plan calls for them, and writes **`.agents/active/verification/<task_id>/streaming.result.yaml`** with `verifier_type: streaming` and the canonical fields in **`schemas/verification-result.schema.json`**. Evidence should capture **behavior over time**: event ordering, heartbeats, **timeouts**, **backpressure** or slow-consumer behavior, **dropped or duplicated** frames when the contract allows, reconnect semantics, and **artifact_paths** pointing to transcripts, frame logs, HAR excerpts, or trace archives. Prefer the **`api` verifier** prompt when the primary evidence is **finite HTTP** responses; prefer **`streaming`** when the primary evidence is **duplex or incremental** delivery. Scoped-first discipline matches other verifier roles: do not broaden to unrelated feeds or full-cluster soak until the slice covering `write_scope_touched` is green.
-- **`review` role** (human gate after verifiers): use **`.agents/prompts/review-agent.project.md`** as the repo-owned review surface. It reads verifier **`*.result.yaml`** files (and **`impl-handoff.yaml`** when relevant) and performs a **two-lens review**: **phase 1** is the broad product/domain/stability pass ("is the slice moving in the right direction and stable enough for the delegated scope?"), while **phase 2** is the tech-lead / architecture pass ("does the implementation respect repo standards, contracts, and architectural intent?"). The reviewer then records **`da workflow verify record --kind review …`** so the CLI writes **`.agents/active/verification/<task_id>/review-decision.yaml`** validated against **`schemas/verification-decision.schema.json`**, appends a lean **`verification-log.jsonl`** line (`kind: review`, status derived from the consolidated decision), and keeps iteration-log review merges (`workflow checkpoint --log-to-iter --role review`) aligned with the same artifact. Prefer **flags** over hand-editing YAML so **escalation** always carries **`--escalation-reason`** when the consolidated outcome is **escalate**.
+- **`review` role** (current compatibility staged decision/return-artifact producer after verifiers): use **`.agents/prompts/review-agent.project.md`** as the repo-owned review surface. It reads verifier **`*.result.yaml`** files (and **`impl-handoff.yaml`** when relevant) and performs a **two-lens review**: **phase 1** is the broad product/domain/stability pass ("is the slice moving in the right direction and stable enough for the delegated scope?"), while **phase 2** is the tech-lead / architecture pass ("does the implementation respect repo standards, contracts, and architectural intent?"). Until named reviewer stages and a return/aggregation gate land, the consolidated reviewer records **`da workflow verify record --kind review ...`** so the CLI writes **`.agents/active/verification/<task_id>/review-decision.yaml`**, then writes **`.agents/active/merge-back/<task_id>.md`** as its return artifact for the parent gate. It does not run delegation closeout or advancement. In the target model, each named reviewer writes only typed evidence and the parent-invoked return gate writes the consolidated decision and merge-back packet. Prefer **flags** over hand-editing YAML so **escalation** always carries **`--escalation-reason`** when the consolidated outcome is **escalate**.
 
 **`I_S_P` (Interactive Staged Pipeline)** is the interactive/manual counterpart to the scripted staged pipeline: it should follow the same task-scoped chain (`impl -> verifier(s) -> review -> parent gate`), but allow a human or interactive agent to drive the stages stepwise instead of relying on one fully scripted pass. `I_S_P` is a conceptual workflow shape, not a promise that one specific script name or prompt file is permanently canonical. It should evolve alongside `ralph-pipeline` and future `da workflow` command ownership. When scripted control-plane semantics change, `I_S_P` must be updated in the same wave unless the spec records an intentional divergence; review-gate, retry/fallback, pause, and hard-stop behavior should not silently drift between the interactive and scripted staged runtimes. Resumable terminal stage failures (for example provider usage limits) should restart a fresh session for the failed stage only, prefer fallback role-specific bins before generic fallbacks, and preserve already-completed earlier stage artifacts; non-resumable hard stops should remain visible and block silent continuation.
 
@@ -424,9 +454,10 @@ Per-delegation persisted payload at `.agents/active/delegation-bundles/<delegati
 
 This bundle is the transport/persistence layer for a specific delegation, not the definition of the worker itself.
 
-### Phase 8: Reusable testing additions
+### Phase 8: Reusable staged testing additions
 
-The global loop-worker profile should carry six reusable testing/verification additions that are not repo-specific:
+The dispatch-injected shared stage instruction base should carry six reusable
+testing/verification additions that are not repo-specific:
 
 1. `feedback_goal` — every delegated iteration states the concrete question the evidence run must answer.
 2. `scenario_tags` with stable coverage families and paired-state guidance.
@@ -435,7 +466,10 @@ The global loop-worker profile should carry six reusable testing/verification ad
 5. evidence/result `classification` taxonomy such as `ok`, `ok-empty`, `ok-warning`, `retry-recovered`, `impl-bug`, `tool-bug`, `missing-feature`, and `blocked`.
 6. `sandbox_policy` for destructive or stateful verification, so a worker can prove mutating behavior without touching the user's live home/project state.
 
-Global loop-worker behavior should also require negative-path coverage whenever the delegated change introduces new failure modes.
+Shared staged behavior should also require negative-path coverage
+whenever the delegated change introduces new failure modes. The legacy
+`loop-worker` profile can consume the same discipline without becoming the
+instruction base for staged children.
 
 ### Phase 8: Impl-handoff contract (impl-agent → verifiers)
 
@@ -452,7 +486,7 @@ The **impl-agent** role writes a small YAML handoff beside verification artifact
 | `tests_unchanged_justified` | boolean (optional) | When `true`, documents that tests were intentionally not changed under `write_scope_touched` (e.g. doc-only work); omit or `false` when tests were added/updated |
 | `impl_notes` | string | Short cold-start context for verifiers |
 
-Pre-verifier policy can require: either a test file touch under `write_scope_touched`, or `tests_unchanged_justified: true` with an allowed reason. Repo wording for the impl role lives in **`.agents/prompts/impl-agent.project.md`**; loop-worker behavior stays in the global profile + `loop-worker` skill.
+Pre-verifier policy can require: either a test file touch under `write_scope_touched`, or `tests_unchanged_justified: true` with an allowed reason. Repo wording for the impl role lives in **`.agents/prompts/impl-agent.project.md`**; shared staged behavior belongs in dispatch-injected stage instructions. The `loop-worker` profile and skill remain compatibility surfaces for full-slice execution only.
 
 ### Phase 8: Canonical artifact and schema
 
@@ -464,7 +498,7 @@ Use a sibling artifact rather than overloading the core delegation contract:
 
 The schema should be embedded into the binary alongside the other repo-local schemas so later runtime validation can bind directly to the canonical artifact contract.
 
-### Phase 8: Candidate command shape
+### Phase 8: Legacy full-slice candidate command shape
 
 ```bash
 da workflow fanout \
@@ -485,7 +519,7 @@ da workflow fanout \
   --context-file docs/LOOP_ORCHESTRATION_SPEC.md
 ```
 
-### Phase 8: Bundle example
+### Phase 8: Legacy full-slice bundle example
 
 ```yaml
 schema_version: 1
@@ -552,24 +586,24 @@ closeout:
     - workflow_checkpoint
     - workflow_merge_back
   parent_must:
-    - workflow_advance
     - workflow_delegation_closeout
 ```
 
 ### Phase 8: Rules
 
-- the global loop-worker profile stays reusable; project overlays and delegation bundles must not fork that behavior ad hoc
+- dispatch-injected shared stage instructions stay reusable; project overlays and delegation bundles must not fork that behavior ad hoc
+- the legacy `loop-worker` profile is not injected into staged child agents because its closeout sequence would violate stage stop conditions
 - prompt/context inputs must be delegation-specific so different sub-agents can receive different bundles
 - repeatable flags are preferable to comma-separated prompt/context strings
 - the bundle must be inspectable after fanout so the handoff can be reproduced and audited
 - the worker should read from the persisted bundle rather than reconstructing context from memory
 - regression matrix and validation queue references are optional at the schema level but should be supported consistently where a repo uses them
 - negative-path coverage is required when the delegated change introduces new failure modes
-- worker closeout and parent closeout responsibilities must remain distinct
+- child artifact production and parent closeout responsibilities must remain distinct; accepted delegated work is completed by parent-run delegation closeout, without a second `workflow advance`; orphaned merge-backs without a contract must fail parent gating
 
 ### Phase 8: Acceptance shape
 
-- a parent can choose a stable worker profile and add one or more repo-local project overlays
+- a parent can resolve an app-type pipeline profile separately from stable stage instructions and repo-local project overlays
 - a parent can supply inline prompts, prompt files, and multiple context files
 - a delegated worker receives reproducible verification metadata, not just prose instructions
 - two different delegated sub-agents can receive different prompt/context/testing bundles without colliding

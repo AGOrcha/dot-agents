@@ -1,12 +1,12 @@
-# Automated Work Looper Prompt — Worker Overlay (dot-agents)
+# Automated Work Looper Prompt — Legacy Full-Slice Worker Overlay (dot-agents)
 
 Copy the prompt below into a worker agent as: `/loop 1hr <prompt>` (or paste `<prompt>` directly)
 
 ## Project overlay metadata
 
-- **Role:** Worker overlay for the dot-agents repo. Layer 2 of the three-layer model — repo-specific CLI inventory, implementation rules, and safety guardrails. Bundle is your primary task context.
+- **Role:** Legacy/full-slice worker overlay for the dot-agents repo. This file contains implementation and `/iteration-close` duties; do not inject it into typed staged children.
 - **Global `loop-worker` profile:** `~/.agents/profiles/loop-worker.md` (use `--delegate-profile loop-worker` with `workflow fanout`).
-- **Valid fanout reference:** `--project-overlay .agents/active/active.loop.md` (path must stay inside the repo).
+- **Valid legacy/no-stage fanout reference:** `--project-overlay .agents/active/active.loop.md` (path must stay inside the repo).
 - **Skill routing:** In this project prefer `/orchestrator-session-start` over `/agent-start`. `agent-start` is for one-off tasks in repos without a dot-agents workflow setup.
 - **TS port KG (phase-4):** `ports/typescript/src/commands/kg.ts` exposes read-only `runKgHealth` / `runKgQuery`; query is an intentional Go-only stub (no subprocess).
 - **Agent repo mirrors:** On refresh/install, Claude `createAgentsLinks` syncs `~/.agents/agents/<project>/` into repo `.agents/agents/` and `.claude/agents/` (idempotent alongside shared-target projection).

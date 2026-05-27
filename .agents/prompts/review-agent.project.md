@@ -6,12 +6,15 @@ Use this file as **`--prompt-file`** when the delegated role is **review-only**:
 
 | Surface | Responsibility |
 |--------|----------------|
-| Global `~/.agents/profiles/loop-worker.md` | Habits: evidence, scope, closeout cadence (review agents still follow human-judgment steps) |
-| Repo project overlay (e.g. `.agents/active/active.loop.md`) | Paths, matrices, guardrails |
+| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable evidence and scope discipline; no delegation closeout or advancement |
+| Stage-safe repo project overlay (to materialize) | Paths, matrices, guardrails; do not inject legacy `active.loop.md` unchanged |
 | **This file (`review-agent.project.md`)** | Repo wording for **review** turns: what “phase 1 / phase 2” mean here, which gates exist, when to **escalate** |
 | Delegation bundle | Canonical `plan_id`, `task_id`, `write_scope`, `feedback_goal` |
 
 Do **not** fold implementation or verifier execution into this prompt unless the bundle explicitly assigns it.
+In the current staged runtime this role writes the merge-back return artifact
+after recording its decision. The parent gate alone runs delegation closeout
+which reconciles accepted canonical completion.
 
 ## Two-lens review contract
 

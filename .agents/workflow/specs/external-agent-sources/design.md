@@ -116,6 +116,37 @@ Illustrative `.agentsrc` shapes (future integration). All package refs use the
 type — see
 [config-distribution-model §13.2](../config-distribution-model/design.md#132-new-command-subtree-da-packages).
 
+### 5.1 Staged profile dispatch mapping (planning input, 2026-05-26)
+
+The staged-dispatch/profile review introduces new names, but it does not
+justify inventing new executable package types. Map the proposed surfaces to
+the existing two-tier contract as follows:
+
+| Staged surface | Distribution tier / OCI type | Reason |
+|---|---|---|
+| App-type profile document and composition rules | Tier 1 config layer; no OCI package type | Declarative pipeline policy, not executable content |
+| Stage-safe product/project overlay and bounded-stage instruction selection | Tier 1 config layer, unless embedded inside a published agent artifact | Parent-resolved policy/prompt selection must remain explainable by effective config |
+| Named implementation or reviewer agent definition | Tier 2 `agent/<name>` | Executable/prompt-bundled invocation surface already covered by the agent media type |
+| Typed verifier implementation | Tier 2 `verifier/<name>` | Existing verifier media type and behavior-gate subject |
+| Shared review or return-gate procedure implemented as an executable skill | Tier 2 `skill/<name>` | Existing skill media type; a deterministic in-process CLI gate needs no package |
+| Published reusable dependency bundle | Tier 2 `bundle/<name>` pointer manifest | Registry-time grouping of package refs only |
+| `.agents/active/delegation-bundles/<id>.yaml` | Repo-local runtime artifact, not an OCI bundle manifest | Task-specific dispatch evidence and resolved provenance |
+
+This closes two ambiguities before canonical planning:
+
+1. `app-type-profiles` must not say a profile itself becomes an OCI package
+   unless this spec is deliberately extended with a `profile` media type and
+   its trust/validation rules. The lean contract is to keep profile documents
+   in Tier 1 while allowing them to reference Tier 2 agents, skills, and
+   verifiers by digest-pinned refs.
+2. The registry `bundle manifest` is not the workflow delegation bundle.
+   The former distributes reusable dependency refs; the latter records one
+   resolved task dispatch and must remain auditable in the repo.
+
+The canonical staged-profile-dispatch plan must identify the chosen type for
+every resolved component and persist its source/digest provenance for
+`da config explain` readback.
+
 ---
 
 ## 6. Registry wire protocol (OCI Distribution)

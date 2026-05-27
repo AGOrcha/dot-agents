@@ -72,6 +72,9 @@ func assertFanoutBundleDefaults(t *testing.T, bundle delegationBundleYAML, deleg
 	if len(bundle.Closeout.WorkerMust) == 0 || len(bundle.Closeout.ParentMust) == 0 {
 		t.Fatal("expected closeout defaults")
 	}
+	if got := bundle.Closeout.ParentMust; len(got) != 1 || got[0] != "workflow_delegation_closeout" {
+		t.Fatalf("parent closeout defaults = %+v, want [workflow_delegation_closeout]", got)
+	}
 }
 
 func assertDistinctFanoutBundles(t *testing.T, x1, x2 delegationBundleYAML) {

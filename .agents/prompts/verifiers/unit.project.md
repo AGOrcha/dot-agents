@@ -6,8 +6,8 @@ Use this file as **`--prompt-file`** when the delegated role is **unit verificat
 
 | Surface | Responsibility |
 |--------|----------------|
-| Global `~/.agents/profiles/loop-worker.md` | Habits: evidence classification, verify / checkpoint / merge-back when you are also the bounded worker |
-| Repo project overlay (e.g. `.agents/active/active.loop.md`) | Paths, matrices, guardrails |
+| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable evidence, scope, and sandbox discipline; no merge-back or parent closeout |
+| Stage-safe repo project overlay (to materialize) | Paths, matrices, guardrails; do not inject legacy `active.loop.md` unchanged |
 | **This file (`verifiers/unit.project.md`)** | Repo wording for **unit** turns: map touched paths → packages, positive + negative cases, record **`unit.result.yaml`** |
 | Delegation bundle | Canonical `plan_id`, `task_id`, `feedback_goal`; impl scope is **not** yours unless the bundle says so |
 

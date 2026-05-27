@@ -398,6 +398,40 @@ $ da config explain --all
 
 Outputs the effective config object with each field annotated by its winning layer.
 
+### Resolved execution manifest visibility (planning input, 2026-05-26)
+
+When `app_type` profiles replace or supplement `app_type_verifier_map`, config
+explain must expose the whole resolved pipeline contract, not only the
+selected profile name. `da config explain app_type --json` should include:
+
+- selected and resolved profile ref, resolved version, content digest, and
+  composition expansion;
+- ordered verifier chain, review kind/skill, graph adapter, and the adapter's
+  derived impact-radius contract;
+- selected named stage-agent and reviewer-lens refs, shared stage-instruction
+  ref, and stage-safe product/project overlay refs;
+- staged versus legacy/full-slice execution mode and return-gate/closeout
+  policy; and
+- field-level provenance and source/lock digests for each resolved component.
+
+Per external-agent-sources §5.1, the selected profile and overlay policy are
+Tier 1 config-layer values; executable agent, verifier, or skill refs are
+Tier 2 package values. The effective snapshot must preserve that distinction,
+and must not confuse a registry bundle pointer manifest with the repo-local
+delegation bundle written for a task.
+
+Per org-config-resolution §8.6, the snapshot must also expose inherited
+constraints and override outcomes for stage agents, reviewer lenses,
+overlays, verifier chains, return/closeout policy, execution mode, and
+package trust rules. Rejected or explicitly authorized task/runtime
+exceptions are explain output, not hidden runtime behavior.
+
+`workflow app-types --verbose`, bundle materialization, config validation, and
+`config explain` should consume one effective-config snapshot API. Otherwise
+the authoring surface can advertise a valid profile that dispatch resolves
+differently, and review cannot reproduce which instructions a worker
+received.
+
 ### Exit codes
 
 | Code | Meaning |

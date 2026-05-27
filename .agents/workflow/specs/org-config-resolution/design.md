@@ -381,6 +381,28 @@ The product should eventually be able to answer:
 
 If config becomes layered, explanation tooling becomes part of the design, not an optional nicety.
 
+### 7.6 Staged dispatch policy categories (planning input, 2026-05-26)
+
+Staged execution adds policy values that must be classified before they are
+merged:
+
+| Config area | Merge behavior | Override boundary |
+|---|---|---|
+| `app_type_profiles`, `stage_agents`, `reviewer_lenses`, `return_gate_policies` | map merge by stable id | selected refs remain subject to inherited policy and allowlists |
+| ordered verifier or stage chains | replace by default | additive composition only when the profile explicitly declares it |
+| ordered stage-safe overlay chains | replace by default | append only for overlays declared composable and explainable |
+| package source and digest requirements | inherited policy | repo/task/runtime layers cannot silently weaken trust requirements |
+
+An imported organization or team layer may mark `allowed_stage_agents`,
+`required_reviewer_lenses`, `return_gate_policy`, and `execution_mode` as
+locked policy. A repo or task selection outside those constraints must fail
+validation or use an explicit audited exception if the governing policy
+permits one.
+
+Repo-local overlay paths remain repo-owned protected paths. Imported layers
+may provide imported overlay references, but must not redirect execution to
+arbitrary files within a consuming repository.
+
 ## 8. App type and verifier policy under the layered model
 
 ### 8.1 Keep the current narrow mechanism
@@ -445,6 +467,42 @@ Examples:
 - assert Docker or service dependencies are available
 
 That setup contract belongs to repo policy, not to parent-directory inheritance.
+
+### 8.6 Staged execution manifest and override boundaries (planning input, 2026-05-26)
+
+Staged profile dispatch extends resolution output from an effective
+`verifier_sequence` to a resolved execution manifest. The
+parent/orchestrator resolves this manifest before materializing delegation
+work and persists selected refs, digests, provenance, and any approved
+exception in the bundle or associated evidence.
+
+Organization, team, and imported repository policy may govern:
+
+- app-type profile selection and composition;
+- permitted named implementation agents and reviewer lenses;
+- permitted stage-safe overlay references;
+- verifier chain requirements;
+- return-gate and closeout policy;
+- permitted execution modes; and
+- package allowlist, signature, or digest requirements.
+
+Repository-local configuration may choose within permitted values, define a
+repo-owned stage-safe overlay, and supply app-type or task specialization
+where inherited policy allows it. It must not silently replace locked stage
+instructions, reviewer requirements, return-gate ownership, or trust
+requirements.
+
+Task and runtime input supplies execution facts such as task identity,
+bounded write scope, context references, scenario tags, and temporary
+validation queue entries. Existing compatibility flags such as
+`--verifier-sequence` may continue to be accepted by the current runtime, but
+in the staged model any bypass of inherited profile policy is an explicit
+audited override, never an invisible last-writer replacement.
+
+The resolved manifest must explain both applied values and rejected or
+exception-authorized overrides. It is consumed consistently by
+`da config explain`, app-type inspection, bundle materialization, and
+validation.
 
 ## 9. Workspace model
 
@@ -583,6 +641,17 @@ verifiers/
 app-types/
   go-http-service.json
   realtime-stream.json
+profiles/
+  staged-web-app.json
+agents/
+  implementation.json
+  reviewers/
+    scope-reviewer.json
+overlays/
+  products/
+    shared-ui.json
+return-gates/
+  delegated-review-closeout.json
 features/
   rollout.json
 registry/
@@ -679,6 +748,10 @@ Likely additive path:
 4. add imported-layer resolution from declared sources
 5. add effective-config explanation tooling
 6. add feature-rollout fields
+7. add resolved staged execution manifests with provenance for agent,
+   overlay, verifier, return-gate, and closeout selections
+8. add locked-policy and audited-exception validation for repo/task/runtime
+   staged overrides
 
 ### 15.3 Workspace migration rule
 

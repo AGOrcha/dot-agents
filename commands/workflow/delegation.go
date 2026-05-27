@@ -1508,7 +1508,7 @@ func buildDelegationBundleForFanout(req fanoutBundleRequest) (*delegationBundleY
 	applyFanoutEvidencePolicy(&b, f)
 
 	b.Closeout.WorkerMust = []string{"workflow_verify_record", "workflow_checkpoint", "workflow_merge_back"}
-	b.Closeout.ParentMust = []string{"workflow_advance", "workflow_delegation_closeout"}
+	b.Closeout.ParentMust = []string{"workflow_delegation_closeout"}
 
 	return &b, nil
 }
