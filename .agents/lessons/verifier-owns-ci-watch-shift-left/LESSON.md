@@ -29,10 +29,12 @@ Projects on different stacks add a project-local override at `.agents/prompts/ve
 
 | Project stack | Override authors |
 |---|---|
-| Bitbucket + CodeQL | CI fetch via `bb pr show <n>`; SAST fetch via CodeQL CLI or GitHub Advanced Security API |
+| **GitHub + SonarCloud** (dot-agents itself + default starter) | NO override needed — this is the default substrate |
+| GitHub + CodeQL (GitHub Advanced Security) | CI fetch via `gh pr checks`; SAST fetch via CodeQL CLI / GitHub Advanced Security API (CodeQL is GitHub-proprietary — pairs naturally with `gh`) |
+| Bitbucket + 3rd-party SAST (Snyk, Veracode, Checkmarx, etc.) | CI fetch via `bb pr show <n>` (or REST API); SAST fetch via whichever scanner the project standardized on (Bitbucket has no first-party scanner) |
 | GitLab + GitLab Code Quality | CI fetch via `glab mr view <n>`; SAST fetch via GitLab MR Code Quality report |
 | CircleCI + Snyk | CI fetch via CircleCI API; SAST fetch via Snyk CLI |
-| No SAST, just CI | drop the SAST section; keep gh pr checks for CI |
+| No SAST, just CI | drop the SAST section; keep `gh pr checks` (or platform equivalent) |
 | No CI at all | template not applicable — disable `pr-ci` for the project |
 
 The **classification table is identical** in all overrides — only the command snippets change. The override file declares its own substrate at the top (which commands to use for fetch X), and the classification + auto-fix logic stays verbatim from the default.
