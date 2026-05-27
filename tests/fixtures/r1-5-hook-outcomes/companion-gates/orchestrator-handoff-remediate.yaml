@@ -1,0 +1,37 @@
+# Fixture: orchestrator-handoff-gate emits a pre-action prevent (R3.7) at
+# PreToolUse and a terminal remediate (R3.1) at Stop for the same intent.
+#
+# Contract being asserted (per orchestration-companion-stop-hooks design D5
+# and r1-5-hook-enforcement-telemetry design D2/D4):
+#   - The orchestrator-session-start skill is an allowed schema enum value.
+#   - intervention_class prevent_before_action + remediate_at_stop are both
+#     in-scope per t1b (PR #97); other classes are deferred.
+#   - The two records share (correlation_id, rule_id) so D4 dedup collapses
+#     them to a single remediate — the iteration is not double-counted for the
+#     same prevented-then-stop intent.
+#
+# Expected extractor output: SubScore = 0.0 (one collapsed remediate record).
+schema_version: 1
+records:
+  - schema_version: 1
+    sentinel_id: orchestrator-session-start-2026-05-26-001
+    skill: orchestrator-session-start
+    lifecycle_point: pre_tool_use
+    intervention_class: prevent_before_action
+    result: advise
+    rule_id: orchestrator-handoff-gate.R3.7
+    platform: claude
+    ts: "2026-05-26T10:00:00Z"
+    archived_sentinel_path: ""
+    correlation_id: handoff-corr-001
+  - schema_version: 1
+    sentinel_id: orchestrator-session-start-2026-05-26-001
+    skill: orchestrator-session-start
+    lifecycle_point: stop
+    intervention_class: remediate_at_stop
+    result: remediate
+    rule_id: orchestrator-handoff-gate.R3.7
+    platform: claude
+    ts: "2026-05-26T10:00:05Z"
+    archived_sentinel_path: .agents/history/orchestration-companion-stop-hooks/hook-sentinels/2026-05-26/orchestrator-session-start-001.yaml
+    correlation_id: handoff-corr-001
