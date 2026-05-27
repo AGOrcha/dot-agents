@@ -640,6 +640,90 @@ func isClaudeAgentDir(path string) bool {
 	return err == nil
 }
 
+// BrokenLinks implements BrokenLinkReporter for the claude platform.
+//
+// Claude's project-scope managed surface is:
+//
+//  1. .claude/rules/<entry> — managed links (POSIX symlink / Windows
+//     junction OR Windows file hard link). A resolvable managed link
+//     whose target is missing is broken. A non-resolvable entry (plain
+//     file, or a Windows hard-linked file with no reparse point) is
+//     unmanaged user content and silently skipped — matching the
+//     lifecycle-side collectClaudeBrokenLinks contract.
+//
+//  2. .mcp.json — single-file managed link at the repo root. Healthy when
+//     hard-linked to the canonical source under <agentsHome>/mcp/<project>/mcp.json;
+//     reported broken when the link is present but does not resolve to a
+//     known canonical (delegated to ScanSingleFileLinks per the
+//     diagnostics-helpers contract).
+//
+// PlatformID is set on every returned BrokenLink so JSON consumers can
+// self-describe per-entry.
+func (c *claude) BrokenLinks(project, repoPath, agentsHome string) []BrokenLink {
+	var broken []BrokenLink
+	broken = append(broken, c.brokenRuleLinks(repoPath)...)
+	broken = append(broken, c.brokenMCPLink(project, repoPath, agentsHome)...)
+	return broken
+}
+
+// brokenRuleLinks scans .claude/rules for resolvable-but-broken managed
+// links. Extracted so BrokenLinks remains a flat composition.
+func (c *claude) brokenRuleLinks(repoPath string) []BrokenLink {
+	var broken []BrokenLink
+	claudeRulesDir := filepath.Join(repoPath, claudeDir, "rules")
+	entries, err := os.ReadDir(claudeRulesDir)
+	if err != nil {
+		return broken
+	}
+	for _, e := range entries {
+		linkPath := filepath.Join(claudeRulesDir, e.Name())
+		state, raw := classifyManagedLink(linkPath)
+		if state != linkStateBroken {
+			continue
+		}
+		broken = append(broken, BrokenLink{
+			PlatformID:  "claude",
+			LinkPath:    linkPath,
+			Dest:        raw,
+			DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
+		})
+	}
+	return broken
+}
+
+// brokenMCPLink classifies the .mcp.json single-file managed link.
+//
+// .mcp.json on POSIX is a managed symlink to the canonical mcp source under
+// <agentsHome>/mcp/<project>/mcp.json; on Windows the managed link layer
+// renders it as a hard link. The diagnostic contract that the legacy
+// lifecycle path enforced (collectSingleFileBrokenLinks → managedLinkBroken)
+// is "report broken only when the entry is a resolvable managed link AND its
+// target is missing" — a hard-linked or absent .mcp.json is silently passed
+// over. Preserving that contract exactly is what keeps doctor_test's
+// TestCollectBrokenLinks_BrokenClaudeMCP and TestCountProjectLinks_AllHealthyVariants
+// green under the new BrokenLinkReporter delegation.
+//
+// Note: ScanSingleFileLinks is intentionally NOT used here. Its semantics
+// flag every resolvable managed link as broken unless it is hard-linked to a
+// canonical source — that matches cursor's hard-link-only contract but not
+// claude's mixed symlink/hardlink model. project and agentsHome are accepted
+// to keep the signature uniform with the rules helper (they are unused
+// today, but parameterizing now means P3's CountLinks/Badge migration can
+// share the helper without a signature churn).
+func (c *claude) brokenMCPLink(_, repoPath, _ string) []BrokenLink {
+	linkPath := filepath.Join(repoPath, ".mcp.json")
+	state, raw := classifyManagedLink(linkPath)
+	if state != linkStateBroken {
+		return nil
+	}
+	return []BrokenLink{{
+		PlatformID:  "claude",
+		LinkPath:    linkPath,
+		Dest:        raw,
+		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
+	}}
+}
+
 func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project,
 		filepath.Join(claudeDir, "skills"),
