@@ -69,9 +69,17 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 	// (FILE_LIST_DIRECTORY, FILE_TRAVERSE, FILE_READ_ATTRIBUTES, FILE_READ_EA)
 	// are deliberately omitted — this helper is the write-only dual of
 	// MakeDirUnreadable.
+	//
+	// FILE_DELETE_CHILD (0x00000040) is the directory-specific permission that
+	// controls whether a caller can delete entries WITHIN the directory.
+	// golang.org/x/sys/windows ships FILE_WRITE_DATA / FILE_APPEND_DATA but
+	// not FILE_DELETE_CHILD (it is folder-context only — the same bit on a
+	// file means FILE_WRITE_EA). We declare it inline rather than expanding
+	// the upstream constant set; the value is fixed by the Win32 SDK.
+	const fileDeleteChild = 0x00000040
 	const denyMask = windows.FILE_WRITE_DATA |
 		windows.FILE_APPEND_DATA |
-		windows.FILE_DELETE_CHILD
+		fileDeleteChild
 	explicit := []windows.EXPLICIT_ACCESS{{
 		AccessPermissions: windows.ACCESS_MASK(denyMask),
 		AccessMode:        windows.DENY_ACCESS,
