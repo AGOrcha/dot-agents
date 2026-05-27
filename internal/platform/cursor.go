@@ -510,3 +510,84 @@ func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	// Same repo-relative targets as Claude so duplicate intents merge in the shared plan.
 	return BuildSharedAgentMirrorIntents(project, filepath.Join(".claude", "agents"))
 }
+
+// BrokenLinks implements BrokenLinkReporter for the cursor platform.
+//
+// Cursor's project-scope managed surface is .cursor/rules/<scope>--<rest>.mdc
+// where scope is "global" or the project name. Each entry is a hard link to
+// the canonical source under <agentsHome>/rules/<scope>/<rest> (with .mdc → .md
+// fallback). An entry that is no longer hard-linked to either candidate is
+// reported as broken — the canonical contract is "link shares an inode with a
+// known source", not "link merely exists at the expected path".
+//
+// Behavior preserved from the previous lifecycle-side collectCursorBrokenLinks
+// implementation: backup-artifact and non-.mdc entries are skipped silently
+// (they are unmanaged); a missing .cursor/rules dir produces an empty result
+// rather than an error (matches doctor/status "absent != broken").
+//
+// PlatformID is set on every returned BrokenLink so JSON consumers can
+// self-describe per-entry (BrokenLink struct contract).
+func (c *cursor) BrokenLinks(project, repoPath, agentsHome string) []BrokenLink {
+	var broken []BrokenLink
+	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return broken
+	}
+	for _, e := range entries {
+		bl, ok := cursorBrokenRuleEntry(e, rulesDir, project, agentsHome)
+		if !ok {
+			continue
+		}
+		broken = append(broken, bl)
+	}
+	return broken
+}
+
+// cursorBrokenRuleEntry classifies a single .cursor/rules entry. Returns the
+// broken-link record and true when the entry is a managed rule that fails
+// the hard-link check; returns false for unmanaged entries (directories,
+// non-.mdc files, backup artifacts, foreign-scope names) and for healthy
+// hard-linked rules. Extracted from BrokenLinks to keep the loop body flat
+// for cognitive-complexity.
+func cursorBrokenRuleEntry(entry os.DirEntry, rulesDir, project, agentsHome string) (BrokenLink, bool) {
+	if entry.IsDir() {
+		return BrokenLink{}, false
+	}
+	name := entry.Name()
+	scope, rest, ok := cursorBrokenRuleScope(name, project)
+	if !ok {
+		return BrokenLink{}, false
+	}
+	linkPath := filepath.Join(rulesDir, name)
+	sources := cursorRuleSources(agentsHome, scope, rest)
+	if anyHardlinked(linkPath, sources) {
+		return BrokenLink{}, false
+	}
+	// Display destination is the primary canonical (the .mdc form), matching
+	// the lifecycle-side helper's behavior.
+	return BrokenLink{
+		PlatformID:  "cursor",
+		LinkPath:    linkPath,
+		Dest:        sources[0],
+		DisplayDest: config.DisplayPath(sources[0]),
+	}, true
+}
+
+// cursorBrokenRuleScope returns the (scope, rest) pair for a managed cursor
+// rule entry, or ok=false when the entry name is not a managed rule for this
+// project. Mirrors the lifecycle-side cursorRuleScope helper so doctor's
+// existing classification semantics are preserved verbatim.
+func cursorBrokenRuleScope(entryName, projectName string) (scope, rest string, ok bool) {
+	switch {
+	case strings.Contains(entryName, ".dot-agents-backup"):
+		return "", "", false
+	case !strings.HasSuffix(entryName, ".mdc"):
+		return "", "", false
+	case strings.HasPrefix(entryName, globalRulesPrefix):
+		return "global", strings.TrimPrefix(entryName, globalRulesPrefix), true
+	case strings.HasPrefix(entryName, projectName+"--"):
+		return projectName, strings.TrimPrefix(entryName, projectName+"--"), true
+	}
+	return "", "", false
+}

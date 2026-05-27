@@ -357,3 +357,143 @@ func TestCursorRemoveLinksWithExistingAgentLinks(t *testing.T) {
 		t.Error("cursor agent symlink should be removed")
 	}
 }
+
+// ---------- BrokenLinkReporter implementation (P1) ----------
+
+// TestCursorBrokenLinks_EmptyProject covers the "absent rules dir" branch:
+// no managed surface yet, no diagnostics. Mirrors the lifecycle-side
+// TestCollectBrokenLinks_EmptyProject contract that absent != broken.
+func TestCursorBrokenLinks_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &cursor{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("expected no broken links in empty project, got %d: %+v", len(got), got)
+	}
+}
+
+// TestCursorBrokenLinks_BrokenGlobalHardlink is the central broken-hardlink
+// positive case for the global-scope branch. A loose .mdc file under
+// .cursor/rules with the global-- prefix that is NOT hard-linked to the
+// canonical source must surface with PlatformID="cursor".
+func TestCursorBrokenLinks_BrokenGlobalHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	rulesDir := filepath.Join(projectPath, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	loose := filepath.Join(rulesDir, "global--rule.mdc")
+	if err := os.WriteFile(loose, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &cursor{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 broken link, got %d: %+v", len(got), got)
+	}
+	if got[0].PlatformID != "cursor" {
+		t.Errorf("PlatformID = %q, want cursor", got[0].PlatformID)
+	}
+	if got[0].LinkPath != loose {
+		t.Errorf("LinkPath = %q, want %q", got[0].LinkPath, loose)
+	}
+	if got[0].DisplayDest == "" {
+		t.Error("DisplayDest should be populated")
+	}
+}
+
+// TestCursorBrokenLinks_BrokenProjectHardlink mirrors the global-scope test
+// for the project-scope branch (project-- prefix).
+func TestCursorBrokenLinks_BrokenProjectHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	rulesDir := filepath.Join(projectPath, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rulesDir, "proj--rule.mdc"), []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &cursor{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 || got[0].PlatformID != "cursor" {
+		t.Fatalf("expected 1 cursor broken link, got %+v", got)
+	}
+}
+
+// TestCursorBrokenLinks_HealthyHardlinkSkipped is the central negative case:
+// a hard-linked rule whose inode matches the canonical source must NOT be
+// reported as broken (the canonical contract is "shares an inode", not
+// "exists at expected path").
+func TestCursorBrokenLinks_HealthyHardlinkSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	rulesDir := filepath.Join(projectPath, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(agentsHome, "rules", "global", "rule.mdc")
+	if err := os.MkdirAll(filepath.Dir(canonical), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(canonical, filepath.Join(rulesDir, "global--rule.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &cursor{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("healthy hardlink should not be broken, got %+v", got)
+	}
+}
+
+// TestCursorBrokenLinks_UnmanagedEntriesIgnored guards the silent-skip
+// contract for entries that aren't managed cursor rules: backup artifacts,
+// non-.mdc files, and entries that don't carry the global-- or
+// <project>-- prefix.
+func TestCursorBrokenLinks_UnmanagedEntriesIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectPath := filepath.Join(tmp, "proj")
+	rulesDir := filepath.Join(projectPath, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, fname := range []string{
+		"global--rule.mdc.dot-agents-backup",
+		"loose.txt",
+		"foreign-project--rule.mdc",
+	} {
+		if err := os.WriteFile(filepath.Join(rulesDir, fname), []byte("x"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c := &cursor{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("unmanaged entries must be ignored, got %+v", got)
+	}
+}
+
+// TestCursorBrokenLinks_InterfaceConformance pins that cursor satisfies
+// BrokenLinkReporter at compile time, which is what doctor.collectBrokenLinks
+// type-asserts on.
+func TestCursorBrokenLinks_InterfaceConformance(t *testing.T) {
+	var _ BrokenLinkReporter = (*cursor)(nil)
+}
