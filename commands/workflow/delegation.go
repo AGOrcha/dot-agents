@@ -38,22 +38,63 @@ var validCoordinationIntents = map[CoordinationIntent]bool{
 	CoordinationIntentAck:              true,
 }
 
+// DelegationContractMode discriminates contracts written by `workflow fanout`
+// (delegated to a sub-agent worker) from contracts materialized for direct
+// orchestrator-owned work via `workflow contract create`.
+//
+// Both modes share the same on-disk shape, advance through the same closeout
+// pipeline (merge-back → delegation closeout → auto-advance), and contribute
+// equally to the workflow audit trail. The distinction is documentation +
+// downstream tooling (skills, lens routing) deciding which artifacts to expect.
+type DelegationContractMode string
+
+const (
+	// DelegationContractModeDelegated is the legacy mode written by `workflow fanout`.
+	// A sub-agent (loop-worker, codex helper, etc.) owns the write scope until merge-back.
+	DelegationContractModeDelegated DelegationContractMode = "delegated"
+	// DelegationContractModeDirect is the new mode written by `workflow contract create`.
+	// The orchestrator itself owns the write scope; the contract pins guardrails
+	// (write scope, success criteria, closeout discipline) so direct work flows
+	// through the same audit trail as delegated work.
+	DelegationContractModeDirect DelegationContractMode = "direct"
+)
+
+var validDelegationContractModes = map[DelegationContractMode]bool{
+	DelegationContractModeDelegated: true,
+	DelegationContractModeDirect:    true,
+}
+
+func isValidDelegationContractMode(m DelegationContractMode) bool {
+	return validDelegationContractModes[m]
+}
+
+// normalizeDelegationContractMode defaults absent values to "delegated" so v1
+// contracts on disk (written before this field existed) load with their
+// historical semantics intact.
+func normalizeDelegationContractMode(m DelegationContractMode) DelegationContractMode {
+	if m == "" {
+		return DelegationContractModeDelegated
+	}
+	return m
+}
+
 type DelegationContract struct {
-	SchemaVersion            int                `json:"schema_version" yaml:"schema_version"`
-	ID                       string             `json:"id" yaml:"id"`
-	ParentPlanID             string             `json:"parent_plan_id" yaml:"parent_plan_id"`
-	ParentTaskID             string             `json:"parent_task_id" yaml:"parent_task_id"`
-	Title                    string             `json:"title" yaml:"title"`
-	Summary                  string             `json:"summary" yaml:"summary"`
-	WriteScope               []string           `json:"write_scope" yaml:"write_scope"`
-	SuccessCriteria          string             `json:"success_criteria" yaml:"success_criteria"`
-	VerificationExpectations string             `json:"verification_expectations" yaml:"verification_expectations"`
-	MayMutateWorkflowState   bool               `json:"may_mutate_workflow_state" yaml:"may_mutate_workflow_state"`
-	Owner                    string             `json:"owner" yaml:"owner"`
-	Status                   string             `json:"status" yaml:"status"`
-	PendingIntent            CoordinationIntent `json:"pending_intent,omitempty" yaml:"pending_intent,omitempty"`
-	CreatedAt                string             `json:"created_at" yaml:"created_at"`
-	UpdatedAt                string             `json:"updated_at" yaml:"updated_at"`
+	SchemaVersion            int                    `json:"schema_version" yaml:"schema_version"`
+	ID                       string                 `json:"id" yaml:"id"`
+	Mode                     DelegationContractMode `json:"mode,omitempty" yaml:"mode,omitempty"`
+	ParentPlanID             string                 `json:"parent_plan_id" yaml:"parent_plan_id"`
+	ParentTaskID             string                 `json:"parent_task_id" yaml:"parent_task_id"`
+	Title                    string                 `json:"title" yaml:"title"`
+	Summary                  string                 `json:"summary" yaml:"summary"`
+	WriteScope               []string               `json:"write_scope" yaml:"write_scope"`
+	SuccessCriteria          string                 `json:"success_criteria" yaml:"success_criteria"`
+	VerificationExpectations string                 `json:"verification_expectations" yaml:"verification_expectations"`
+	MayMutateWorkflowState   bool                   `json:"may_mutate_workflow_state" yaml:"may_mutate_workflow_state"`
+	Owner                    string                 `json:"owner" yaml:"owner"`
+	Status                   string                 `json:"status" yaml:"status"`
+	PendingIntent            CoordinationIntent     `json:"pending_intent,omitempty" yaml:"pending_intent,omitempty"`
+	CreatedAt                string                 `json:"created_at" yaml:"created_at"`
+	UpdatedAt                string                 `json:"updated_at" yaml:"updated_at"`
 }
 
 var validDelegationStatuses = map[string]bool{
@@ -89,6 +130,10 @@ func loadDelegationContract(projectPath, taskID string) (*DelegationContract, er
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("parse delegation contract %s: %w", taskID, err)
 	}
+	// v1 contracts on disk predate the Mode field — default them to
+	// "delegated" so historical semantics (fanout-style worker ownership)
+	// are preserved without rewriting the file.
+	c.Mode = normalizeDelegationContractMode(c.Mode)
 	return &c, nil
 }
 
@@ -906,12 +951,13 @@ func checkFanoutWriteScopeConflicts(projectPath string, writeScope []string, tas
 	return fmt.Errorf("delegation rejected: write scope overlaps with existing active delegation(s)")
 }
 
-func persistFanoutArtifacts(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML, taskID string) error {
-	contractPath := filepath.Join(delegationDir(projectPath), taskID+".yaml")
-	if err := saveDelegationContract(projectPath, contract); err != nil {
-		return fmt.Errorf("save delegation contract: %w", err)
-	}
+// persistFanoutBundle writes the bundle that accompanies a fanout contract.
+// The contract itself is already persisted by materializeDelegationContract;
+// this helper only handles the bundle write and cleans up the contract file
+// if the bundle write fails, preserving the original all-or-nothing semantics.
+func persistFanoutBundle(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML) error {
 	if err := saveDelegationBundle(projectPath, bundle); err != nil {
+		contractPath := filepath.Join(delegationDir(projectPath), contract.ParentTaskID+".yaml")
 		_ = os.Remove(contractPath)
 		return fmt.Errorf("save delegation bundle: %w", err)
 	}
@@ -1004,20 +1050,22 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	contract := &DelegationContract{
-		SchemaVersion:   1,
-		ID:              fmt.Sprintf("del-%s-%d", taskID, time.Now().Unix()),
-		ParentPlanID:    in.planID,
-		ParentTaskID:    taskID,
+	now := time.Now().UTC()
+	createdAtRFC3339 := now.Format(time.RFC3339)
+	contract, err := materializeDelegationContract(materializeContractRequest{
+		ProjectPath:     project.Path,
+		Mode:            DelegationContractModeDelegated,
+		PlanID:          in.planID,
+		TaskID:          taskID,
 		Title:           targetTask.Title,
 		Summary:         fmt.Sprintf("Delegated from plan %s", plan.Title),
 		WriteScope:      writeScope,
 		SuccessCriteria: targetTask.Notes,
 		Owner:           in.owner,
-		Status:          "active",
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		Now:             now,
+	})
+	if err != nil {
+		return err
 	}
 	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
 		ProjectPath:      project.Path,
@@ -1029,12 +1077,17 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		TargetTask:       targetTask,
 		Contract:         contract,
 		WriteScope:       writeScope,
-		CreatedAtRFC3339: now,
+		CreatedAtRFC3339: createdAtRFC3339,
 	})
 	if err != nil {
+		// Bundle build failed after contract was persisted; clean up the
+		// orphan contract so retries are not blocked by the duplicate-contract
+		// guard at the top of runWorkflowFanout.
+		contractPath := filepath.Join(delegationDir(project.Path), taskID+".yaml")
+		_ = os.Remove(contractPath)
 		return err
 	}
-	if err := persistFanoutArtifacts(project.Path, contract, bundle, taskID); err != nil {
+	if err := persistFanoutBundle(project.Path, contract, bundle); err != nil {
 		return err
 	}
 
