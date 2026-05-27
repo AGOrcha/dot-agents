@@ -1,0 +1,27 @@
+schema_version: 1
+delegation_id: del-t14-import-graph-assertion-1779841818
+plan_id: root-command-decomposition
+task_id: t14-import-graph-assertion
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-27T00:30:18Z"
+scope:
+    write_scope:
+        - tools/importguard/main.go
+        - tools/importguard/main_test.go
+        - .github/workflows/test.yml
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

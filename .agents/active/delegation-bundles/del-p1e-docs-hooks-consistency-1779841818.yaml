@@ -1,0 +1,26 @@
+schema_version: 1
+delegation_id: del-p1e-docs-hooks-consistency-1779841818
+plan_id: loop-discipline-stop-hooks
+task_id: p1e-docs-hooks-consistency
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-27T00:30:18Z"
+scope:
+    write_scope:
+        - docs/HOOKS.md
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: research
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

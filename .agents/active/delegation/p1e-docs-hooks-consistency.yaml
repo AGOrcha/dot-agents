@@ -1,0 +1,22 @@
+schema_version: 1
+id: del-p1e-docs-hooks-consistency-1779841818
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p1e-docs-hooks-consistency
+title: docs/HOOKS.md consistency pass after P1b/P1c/P1d additions
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - docs/HOOKS.md
+success_criteria: |-
+    Three tasks edit docs/HOOKS.md (P1b, P1c, P1d) but no task
+    verifies the final document is internally consistent. Final
+    pass: verify mapping table, when_events syntax examples,
+    per-platform native-output contracts, and Cursor-wider surface
+    section all reconcile after the three additions. Acceptance:
+    docs/HOOKS.md renders, tables are sorted/deduplicated, every
+    canonical When value appears in exactly one row.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-27T00:30:18Z"
+updated_at: "2026-05-27T00:30:18Z"

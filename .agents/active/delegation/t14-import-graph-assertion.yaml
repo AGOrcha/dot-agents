@@ -1,0 +1,26 @@
+schema_version: 1
+id: del-t14-import-graph-assertion-1779841818
+parent_plan_id: root-command-decomposition
+parent_task_id: t14-import-graph-assertion
+title: Add CI assertion that package commands does not import banned internals
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - tools/importguard/main.go
+    - tools/importguard/main_test.go
+    - .github/workflows/test.yml
+success_criteria: |-
+    Per PLAN.yaml verification_strategy: assert that package
+    commands no longer imports internal/links,
+    internal/projectsync, internal/scaffold/home, or
+    internal/scaffold/hooks. Implement as a tiny Go program that
+    walks `go list -json ./commands` and checks the import set,
+    plus a workflow step (or add to existing test.yml as a fast
+    check). Alternative: an analysistest rule. Path names above
+    are placeholders — t01 SHAPE.md may pick a different home
+    (e.g. internal/architest).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-27T00:30:18Z"
+updated_at: "2026-05-27T00:30:18Z"

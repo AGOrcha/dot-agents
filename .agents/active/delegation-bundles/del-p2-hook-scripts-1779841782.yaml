@@ -1,0 +1,28 @@
+schema_version: 1
+delegation_id: del-p2-hook-scripts-1779841782
+plan_id: loop-discipline-stop-hooks
+task_id: p2-hook-scripts
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-05-27T00:29:42Z"
+scope:
+    write_scope:
+        - internal/scaffold/hooks/global/iteration-close-gate/
+        - internal/scaffold/hooks/global/isp-gate/
+        - internal/scaffold/hooks/global/loop-worker-gate/
+        - internal/scaffold/hooks/copy_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_advance
+        - workflow_delegation_closeout

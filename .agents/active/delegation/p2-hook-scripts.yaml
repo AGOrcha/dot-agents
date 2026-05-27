@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-p2-hook-scripts-1779841782
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p2-hook-scripts
+title: Three HOOK.yaml + gate.sh bundles under internal/scaffold/hooks/global/
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - internal/scaffold/hooks/global/iteration-close-gate/
+    - internal/scaffold/hooks/global/isp-gate/
+    - internal/scaffold/hooks/global/loop-worker-gate/
+    - internal/scaffold/hooks/copy_test.go
+success_criteria: 'Add three canonical hook bundles and scaffold-copy assertions. Ship terminal validation, deterministic PreToolUse prevention, loop-worker SubagentStart bootstrap, and PreCompact continuity advice; hard outcomes require observable evidence and native remediation output. Contract: tasks/p2-hook-scripts.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-05-27T00:29:42Z"
+updated_at: "2026-05-27T00:29:42Z"
