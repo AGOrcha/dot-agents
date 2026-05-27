@@ -146,21 +146,20 @@ func ReadOriginURL(repoPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("gitremote: open %s: %w", repoPath, err)
 	}
-	remote, err := repo.Remote("origin")
+	// Read the parsed config directly rather than going through
+	// repo.Remote(name): the latter would force us to translate
+	// ErrRemoteNotFound to our sentinel AND separately handle the
+	// "remote configured but URLs empty" edge case. One Config() call
+	// + a single map lookup collapses both into one ErrNoOrigin branch.
+	cfg, err := repo.Config()
 	if err != nil {
-		// go-git returns ErrRemoteNotFound here; collapse to our sentinel
-		// so callers don't need to import go-git just to recognize the
-		// "no origin" branch.
-		if errors.Is(err, git.ErrRemoteNotFound) {
-			return "", ErrNoOrigin
-		}
-		return "", fmt.Errorf("gitremote: lookup origin in %s: %w", repoPath, err)
+		return "", fmt.Errorf("gitremote: read config for %s: %w", repoPath, err)
 	}
-	urls := remote.Config().URLs
-	if len(urls) == 0 || urls[0] == "" {
+	rc, ok := cfg.Remotes["origin"]
+	if !ok || len(rc.URLs) == 0 || rc.URLs[0] == "" {
 		return "", ErrNoOrigin
 	}
-	return urls[0], nil
+	return rc.URLs[0], nil
 }
 
 // CanonicalRepoID is a convenience wrapper around ParseRemoteURL that

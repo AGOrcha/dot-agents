@@ -92,6 +92,29 @@ func TestParseRemoteURL_Fields(t *testing.T) {
 	}
 }
 
+func TestParseRemoteURL_MalformedInputPropagatesParseError(t *testing.T) {
+	// Inputs go-git's transport.ParseURL rejects with a non-nil error
+	// (vs. silently normalizing to file://). Covers the err-from-ParseURL
+	// branch, which is otherwise hidden because most junk normalizes to a
+	// file:// URL and surfaces as ErrNotRemote instead.
+	cases := []string{
+		"http://[::1",      // unclosed IPv6 literal
+		"ftp://malformed[", // invalid IP-literal
+		"http://\n/path",   // control character in URL
+	}
+	for _, c := range cases {
+		t.Run(c, func(t *testing.T) {
+			_, err := ParseRemoteURL(c)
+			if err == nil {
+				t.Fatalf("ParseRemoteURL(%q): want error, got nil", c)
+			}
+			if errors.Is(err, ErrNotRemote) {
+				t.Errorf("ParseRemoteURL(%q) = ErrNotRemote, want wrapped parse error", c)
+			}
+		})
+	}
+}
+
 func TestParseRemoteURL_NotRemote(t *testing.T) {
 	cases := []struct {
 		name string
@@ -207,5 +230,50 @@ func TestReadOriginURL_NotARepoErrors(t *testing.T) {
 	}
 	if errors.Is(err, ErrNoOrigin) {
 		t.Errorf("ReadOriginURL on non-repo dir should not return ErrNoOrigin (got %v)", err)
+	}
+}
+
+func TestReadOriginURL_OriginWithEmptyURLReturnsSentinel(t *testing.T) {
+	// Corrupt-config edge case: an `[remote "origin"]` section with no
+	// `url = ...` line, or with an empty url. go-git surfaces this as
+	// len(URLs) == 0 (or urls[0] == "") rather than ErrRemoteNotFound,
+	// so ReadOriginURL must collapse it to ErrNoOrigin the same way.
+	dir := t.TempDir()
+	if _, err := git.PlainInit(dir, false); err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	// Overwrite .git/config with an origin section whose url= line is empty.
+	cfgPath := filepath.Join(dir, ".git", "config")
+	cfgBody := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = \n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+	if err := os.WriteFile(cfgPath, []byte(cfgBody), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := ReadOriginURL(dir)
+	if !errors.Is(err, ErrNoOrigin) {
+		t.Errorf("ReadOriginURL with empty origin url: err = %v, want ErrNoOrigin", err)
+	}
+}
+
+func TestReadOriginURL_CorruptConfigWrappedError(t *testing.T) {
+	// PlainOpenWithOptions parses .git/config during Open, so a malformed
+	// config surfaces here as a wrapped open error — distinct from
+	// ErrNoOrigin, so callers can tell "corrupt repo" from "no origin
+	// configured". Without this guarantee, status/probe code would
+	// silently render an empty remote on a broken config.
+	dir := t.TempDir()
+	if _, err := git.PlainInit(dir, false); err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	cfgPath := filepath.Join(dir, ".git", "config")
+	// Unterminated section header — git config parsers reject this.
+	if err := os.WriteFile(cfgPath, []byte("[remote \"origin\"\n\turl = bogus\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	_, err := ReadOriginURL(dir)
+	if err == nil {
+		t.Fatalf("ReadOriginURL with corrupt config: want error, got nil")
+	}
+	if errors.Is(err, ErrNoOrigin) {
+		t.Errorf("ReadOriginURL with corrupt config should not collapse to ErrNoOrigin (got %v)", err)
 	}
 }
