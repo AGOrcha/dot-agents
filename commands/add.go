@@ -30,6 +30,14 @@ type addDeps = lifecycle.AddDeps
 // and tests (stdAddDeps{} literals) keep compiling unchanged.
 type stdAddDeps = lifecycle.StdAddDeps
 
+// Repo-relative canonical filenames shared across the add pipeline's scan,
+// existence-check, and preview tables. Centralized so Sonar dup-literal
+// findings cannot regress and the three lenses cannot drift.
+const (
+	addRootMCPJSON  = ".mcp.json"
+	addRootAgentsMD = "AGENTS.md"
+)
+
 // aiScanPatterns lists file/dir names to look for when scanning for AI configs.
 var aiScanPatterns = []string{
 	// Cursor
@@ -42,9 +50,9 @@ var aiScanPatterns = []string{
 	".claude/settings.json",
 	".claude/settings.local.json",
 	".claude.json",
-	".mcp.json",
+	addRootMCPJSON,
 	// Codex
-	"AGENTS.md",
+	addRootAgentsMD,
 	".codex/instructions.md",
 	".codex/config.json",
 	".codex/hooks.json",
@@ -88,42 +96,41 @@ var skipDirs = map[string]bool{
 // in-package callers (add.go, import_plugins.go) stay unchanged.
 var isBackupArtifact = lifecycle.IsBackupArtifact
 
-// scanExistingAIConfigs walks projectPath and returns all AI config files found,
-// excluding *.dot-agents-backup artifacts.
-func scanExistingAIConfigs(projectPath string) []string {
-	var results []string
-	seen := map[string]bool{}
-
-	add := func(p string) {
-		if isBackupArtifact(filepath.Base(p)) {
-			return
-		}
-		if !seen[p] {
-			seen[p] = true
-			results = append(results, p)
-		}
-	}
-
-	for _, pattern := range aiScanPatterns {
+// scanForFilePatterns appends file matches (non-directory) for each pattern
+// under projectPath. Uses Lstat so symlinks are recorded by name without
+// follow.
+func scanForFilePatterns(projectPath string, patterns []string, add func(string)) {
+	for _, pattern := range patterns {
 		candidate := filepath.Join(projectPath, pattern)
-		if info, err := os.Lstat(candidate); err == nil && !info.IsDir() {
-			add(candidate)
+		info, err := os.Lstat(candidate)
+		if err != nil || info.IsDir() {
+			continue
 		}
+		add(candidate)
 	}
-	for _, dir := range aiScanDirPatterns {
+}
+
+// scanForDirPatterns appends each non-directory child of every dir-pattern
+// under projectPath.
+func scanForDirPatterns(projectPath string, patterns []string, add func(string)) {
+	for _, dir := range patterns {
 		d := filepath.Join(projectPath, dir)
 		entries, err := os.ReadDir(d)
 		if err != nil {
 			continue
 		}
 		for _, e := range entries {
-			if !e.IsDir() {
-				add(filepath.Join(d, e.Name()))
+			if e.IsDir() {
+				continue
 			}
+			add(filepath.Join(d, e.Name()))
 		}
 	}
+}
 
-	// Walk for .aider* and aider.conf* anywhere in the tree
+// scanForAiderConfigs walks the full tree (skipping vendored/build dirs) and
+// appends every .aider*/aider.conf* entry it finds.
+func scanForAiderConfigs(projectPath string, add func(string)) {
 	_ = filepath.WalkDir(projectPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -137,7 +144,26 @@ func scanExistingAIConfigs(projectPath string) []string {
 		}
 		return nil
 	})
+}
 
+// scanExistingAIConfigs walks projectPath and returns all AI config files found,
+// excluding *.dot-agents-backup artifacts.
+func scanExistingAIConfigs(projectPath string) []string {
+	var results []string
+	seen := map[string]bool{}
+	add := func(p string) {
+		if isBackupArtifact(filepath.Base(p)) {
+			return
+		}
+		if !seen[p] {
+			seen[p] = true
+			results = append(results, p)
+		}
+	}
+
+	scanForFilePatterns(projectPath, aiScanPatterns, add)
+	scanForDirPatterns(projectPath, aiScanDirPatterns, add)
+	scanForAiderConfigs(projectPath, add)
 	return results
 }
 
@@ -154,8 +180,8 @@ var (
 // Excludes files already managed by dot-agents and backup artifacts.
 func checkExistingConfigFiles(project, projectPath, agentsHome string) []string {
 	candidates := []string{
-		filepath.Join(projectPath, ".mcp.json"),
-		filepath.Join(projectPath, "AGENTS.md"),
+		filepath.Join(projectPath, addRootMCPJSON),
+		filepath.Join(projectPath, addRootAgentsMD),
 		filepath.Join(projectPath, "opencode.json"),
 		filepath.Join(projectPath, ".github", "copilot-instructions.md"),
 	}
@@ -361,14 +387,14 @@ func addPlatformPreviews(projectName string) []addPlatformPreview {
 				".claude/agents/*.md",
 				".claude/skills/*/",
 				".claude/settings.local.json",
-				".mcp.json",
+				addRootMCPJSON,
 			},
 		},
 		{
 			name:     "Codex",
 			id:       "codex",
 			linkNote: "symlinks",
-			items:    []string{"AGENTS.md", ".agents/skills/*/"},
+			items:    []string{addRootAgentsMD, ".agents/skills/*/"},
 		},
 		{
 			name:     "OpenCode",
