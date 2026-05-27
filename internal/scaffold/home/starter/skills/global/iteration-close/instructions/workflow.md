@@ -176,7 +176,7 @@ The loop orchestrator model (see `docs/LOOP_ORCHESTRATION_SPEC.md`, `loop-orches
 
 | Role | After verify + checkpoint | Who moves canonical task to `completed` |
 |------|---------------------------|----------------------------------------|
-| **Delegated worker** (fanout created a contract + bundle) | `workflow merge-back` | Parent — `workflow advance` and `workflow delegation closeout` after review |
+| **Delegated worker** (fanout created a contract + bundle) | `workflow merge-back` | Parent — `workflow delegation closeout --decision accept` after review (the accepted closeout already sets the canonical task to `completed`; no separate `workflow advance` needed) |
 | **Direct implementer** (no active delegation on this task) | `workflow advance` when work is done | You, in the same session |
 
 **How to tell:** If `.agents/active/delegation/<task-id>.yaml` exists with `status: active` for the task you implemented, you are in the **delegated** path — use **Merge-back**, not Advance.
@@ -197,7 +197,7 @@ da workflow merge-back \
   --integration-notes "<merge/conflict notes for parent>"
 ```
 
-The parent reviews `.agents/active/merge-back/<task-id>.md`, then runs `workflow advance` and `workflow delegation closeout` as appropriate. Do not advance the canonical task yourself — that would violate the parent/child split the plan describes.
+The parent reviews `.agents/active/merge-back/<task-id>.md`, then runs `workflow delegation closeout --decision accept|reject` as appropriate — an accepted closeout already sets the canonical task to `completed` via `applyCloseoutDecisionToTasks` (`commands/workflow/delegation.go`), so a separate `workflow advance` call is redundant. Do not advance the canonical task yourself — that would violate the parent/child split the plan describes.
 
 ---
 
