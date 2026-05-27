@@ -4,8 +4,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // TestSymlink_SameFileIsNoop covers the os.SameFile fast-path early return
@@ -34,9 +35,10 @@ func TestSymlink_SameFileIsNoop(t *testing.T) {
 // existing symlink points somewhere else and is removed via fsops.RemoveAll
 // then recreated.
 func TestSymlink_ReplacesStalePointingElsewhere(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	// testutil.SymlinkOrSkip gates on the per-process symlink capability
+	// (Windows 10+ with Developer Mode satisfies it), so the windows-latest
+	// runner exercises this branch instead of skipping it.
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	// Canonical storage root = tmp, so a link resolving under it is a
 	// dot-agents-OWNED stale managed link (prod: canonical lives under
@@ -100,9 +102,7 @@ func TestPathsResolveToSameFile_ErrorBranches(t *testing.T) {
 // compare branch: the stored symlink dest is absolute while the caller
 // passes a relative target that resolves to the same absolute path.
 func TestIsManagedLink_AbsoluteTargetMatch(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	absTarget := filepath.Join(tmp, "abs-target.txt")
 	if err := os.WriteFile(absTarget, []byte("a"), 0o644); err != nil {
@@ -122,9 +122,7 @@ func TestIsManagedLink_AbsoluteTargetMatch(t *testing.T) {
 // TestIsManagedLinkUnder_AbsolutePrefixBranch covers the branch where the
 // raw prefix does not match but the absolute prefix does.
 func TestIsManagedLinkUnder_AbsolutePrefixBranch(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
