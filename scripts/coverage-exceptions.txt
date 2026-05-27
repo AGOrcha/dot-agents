@@ -45,13 +45,12 @@ internal/graphstore/crg.go                                 # [legacy-tail] 94.69
 internal/graphstore/postgres.go                            # [legacy-tail] 91.56%; cg6 ratchet-loop raises to >=95%
 internal/graphstore/sqlite.go                              # [legacy-tail] 94.65%; cg6 ratchet-loop raises to >=95%
 internal/links/inode_unix.go                               # [platform-tag] 88.89% on merged profile; cg6 confirm-or-raise
-commands/lifecycle/linkcount_unix.go                       # [platform-tag] 85.71% on merged profile; residue is the defensive info.Sys().(*syscall.Stat_t) ok-false guard, unreachable when os.Lstat succeeds on a real path (mirrors internal/links/inode_unix.go's residual guard)
-commands/lifecycle/linkcount_windows.go                    # [platform-tag] residue is best-effort syscall.OpenFile/GetFileInformationByHandle error guards on Windows; unreachable for real existing files on the merged profile (mirrors internal/links/inode_windows.go's pattern)
+commands/internal/lifecycle/linkcount_unix.go              # [platform-tag] 85.71% on merged profile; residue is the defensive info.Sys().(*syscall.Stat_t) ok-false guard, unreachable when os.Lstat succeeds on a real path (mirrors internal/links/inode_unix.go's residual guard)
+commands/internal/lifecycle/linkcount_windows.go           # [platform-tag] residue is best-effort syscall.OpenFile/GetFileInformationByHandle error guards on Windows; unreachable for real existing files on the merged profile (mirrors internal/links/inode_windows.go's pattern)
 internal/links/inode_windows.go                            # [platform-tag] 79.41% on merged profile; cg6 confirm-or-raise
 internal/links/symlink_windows.go                          # [platform-tag] 77.08% on merged profile; cg6 confirm-or-raise
 internal/platform/copilot.go                               # [legacy-tail] 94.71%; cg6 ratchet-loop raises to >=95%
 internal/platform/cursor.go                                # [legacy-tail] 92.58%; cg6 ratchet-loop raises to >=95%
-internal/platform/hooks.go                                 # [legacy-tail] 94.43%; cg6 ratchet-loop raises to >=95%
 internal/platform/mcp_settings.go                          # [legacy-tail] 94.74%; cg6 ratchet-loop raises to >=95%
 internal/platform/opencode.go                              # [legacy-tail] 91.78%; cg6 ratchet-loop raises to >=95%
 internal/platform/plugins.go                               # [legacy-tail] 93.41%; cg6 ratchet-loop raises to >=95%

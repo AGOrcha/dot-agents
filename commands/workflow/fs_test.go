@@ -768,12 +768,9 @@ func TestCopyWorkflowArtifact_IoCopyFailsForDirSource(t *testing.T) {
 // helper errors (here: dst becomes unreadable mid-call so sha256File(dst)
 // fails), the outer must propagate that error verbatim.
 func TestMergePlanDirCompareAndCopy_ShouldSkipErrorPropagates(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod unreadable not supported on windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("chmod unreadable unreliable as root")
-	}
+	// chmodUnreadable delegates to testutil.MakeFileUnreadable, which
+	// handles the per-platform denial (POSIX chmod 0 / Windows byte-range
+	// lock) and skips on root-on-POSIX. No runtime.GOOS gate needed.
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "src.txt")
 	dst := filepath.Join(tmp, "dst.txt")

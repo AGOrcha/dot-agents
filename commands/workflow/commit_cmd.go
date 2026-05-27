@@ -19,6 +19,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// commitErrFmt is the canonical wrap prefix for any error escaping the
+// `da workflow commit` orchestrator (4 sites). Centralized so the user-
+// visible "workflow commit:" tag stays consistent across the staging,
+// commit, push, and disabled-state branches.
+const commitErrFmt = "workflow commit: %w"
+
 // gogitWorktree is the minimal go-git Worktree surface gogitImpl uses,
 // extracted into an interface so tests can inject a stub that exercises
 // the per-method error branches without standing up a corrupted real
@@ -197,7 +203,7 @@ func newWorkflowCommitCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			gg, err := newGogitImpl()
 			if err != nil {
-				return fmt.Errorf("workflow commit: %w", err)
+				return fmt.Errorf(commitErrFmt, err)
 			}
 			return runWorkflowCommit(cmd.OutOrStdout(), gg, dryRun, includes)
 		},
@@ -221,7 +227,7 @@ func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string
 	}
 	entries, err := git.Status()
 	if err != nil {
-		return fmt.Errorf("workflow commit: %w", err)
+		return fmt.Errorf(commitErrFmt, err)
 	}
 	paths := DerivePathSet(entries, includes)
 	if len(paths) == 0 {
@@ -243,7 +249,7 @@ func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string
 		return fmt.Errorf("workflow commit: stage: %w", err)
 	}
 	if err := git.Commit(message); err != nil {
-		return fmt.Errorf("workflow commit: %w", err)
+		return fmt.Errorf(commitErrFmt, err)
 	}
 	fmt.Fprintf(out, "workflow commit: staged %d path(s) and committed\n", len(paths))
 	return nil
@@ -278,7 +284,7 @@ func buildCommitMessage(paths []string) string {
 var iterationCloseCommit = func(out io.Writer) error {
 	gg, err := newGogitImpl()
 	if err != nil {
-		return fmt.Errorf("workflow commit: %w", err)
+		return fmt.Errorf(commitErrFmt, err)
 	}
 	return runWorkflowCommit(out, gg, false, nil)
 }

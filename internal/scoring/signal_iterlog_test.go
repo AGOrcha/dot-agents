@@ -403,6 +403,34 @@ func TestUserCorrections(t *testing.T) {
 
 // --- end-to-end on real iteration-log data ---------------------------------
 
+// assertIterSignalsConsistent checks the canonical SignalValue invariants
+// (SubScore in [0,1] when Present, non-empty Detail) plus the non-negative
+// Retries / UserCorrections invariants. Pulled out of the per-record loop
+// in TestExtractIterlogSignalsRealData so each record's check is one call.
+func assertIterSignalsConsistent(t *testing.T, rec IterationRecord, sig IterlogSignals) {
+	t.Helper()
+	for label, sv := range map[string]SignalValue{
+		"ScopeClaimed":    sig.ScopeClaimed,
+		"TestsClaimed":    sig.TestsClaimed,
+		"Verifier":        sig.Verifier,
+		"VerifierClaimed": sig.VerifierClaimed,
+		"LandedClaimed":   sig.LandedClaimed,
+	} {
+		if sv.Present && (sv.SubScore < 0 || sv.SubScore > 1) {
+			t.Errorf("iter %d %s: SubScore %g out of [0,1]", rec.Iteration, label, sv.SubScore)
+		}
+		if sv.Detail == "" {
+			t.Errorf("iter %d %s: empty Detail", rec.Iteration, label)
+		}
+	}
+	if sig.Retries < 0 {
+		t.Errorf("iter %d: negative Retries %d", rec.Iteration, sig.Retries)
+	}
+	if sig.UserCorrections < 0 {
+		t.Errorf("iter %d: negative UserCorrections %d", rec.Iteration, sig.UserCorrections)
+	}
+}
+
 // TestExtractIterlogSignalsRealData parses every real iteration-log entry and
 // extracts signals from each, asserting only that the call never panics and
 // produces internally consistent values. It is the broad smoke test.
@@ -417,27 +445,7 @@ func TestExtractIterlogSignalsRealData(t *testing.T) {
 	}
 	repoRoot := filepath.Join("..", "..")
 	for _, rec := range records {
-		sig := ExtractIterlogSignals(rec, repoRoot)
-		for label, sv := range map[string]SignalValue{
-			"ScopeClaimed":    sig.ScopeClaimed,
-			"TestsClaimed":    sig.TestsClaimed,
-			"Verifier":        sig.Verifier,
-			"VerifierClaimed": sig.VerifierClaimed,
-			"LandedClaimed":   sig.LandedClaimed,
-		} {
-			if sv.Present && (sv.SubScore < 0 || sv.SubScore > 1) {
-				t.Errorf("iter %d %s: SubScore %g out of [0,1]", rec.Iteration, label, sv.SubScore)
-			}
-			if sv.Detail == "" {
-				t.Errorf("iter %d %s: empty Detail", rec.Iteration, label)
-			}
-		}
-		if sig.Retries < 0 {
-			t.Errorf("iter %d: negative Retries %d", rec.Iteration, sig.Retries)
-		}
-		if sig.UserCorrections < 0 {
-			t.Errorf("iter %d: negative UserCorrections %d", rec.Iteration, sig.UserCorrections)
-		}
+		assertIterSignalsConsistent(t, rec, ExtractIterlogSignals(rec, repoRoot))
 	}
 }
 

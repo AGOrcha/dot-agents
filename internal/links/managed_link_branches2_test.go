@@ -4,16 +4,18 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // TestSymlink_AlreadyCorrectIsNoop covers the existing==target early
 // return (the link already points exactly where requested).
 func TestSymlink_AlreadyCorrectIsNoop(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	// testutil.SymlinkOrSkip gates on the per-process symlink capability;
+	// Windows 10+ with Developer Mode (and the windows-latest GH Actions
+	// runner) can exercise this branch instead of skipping it.
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	target := filepath.Join(tmp, "t.txt")
 	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
@@ -65,9 +67,7 @@ func TestSymlink_ReplacesRegularFileNonSymlink(t *testing.T) {
 // absolute symlink dest and querying with a relative target/prefix from a
 // known working directory.
 func TestIsManagedLink_And_Under_AbsoluteBranches(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, "agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -145,9 +145,7 @@ func TestPathUnder_BoundaryCases(t *testing.T) {
 }
 
 func TestIsManagedLinkUnder_RelativeTargetAndNonLink(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows junction covered by internal/linktest")
-	}
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, ".agents")
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -178,9 +176,14 @@ func TestIsManagedLinkUnder_RelativeTargetAndNonLink(t *testing.T) {
 }
 
 func TestHardlinkWithPolicy_OwnedAndEmptyDir(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX hardlink/symlink primitives; Windows covered by internal/linktest")
-	}
+	// Mixed hardlink+symlink test: the SymlinkOrSkip probe also covers
+	// the hardlink primitive (os.Link on Windows requires the same
+	// SeCreateSymbolicLinkPrivilege-class privileges only for NTFS hard
+	// links across volumes — same-volume os.Link works unprivileged, and
+	// this test only does same-volume operations under t.TempDir). The
+	// symlink probe is the binding constraint here, so SymlinkOrSkip is
+	// the right gate.
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", tmp) // canonical root = tmp → links under it are owned
 	src := filepath.Join(tmp, "src")
@@ -225,9 +228,7 @@ func TestHardlinkWithPolicy_OwnedAndEmptyDir(t *testing.T) {
 // otherwise Symlink/Hardlink/RemoveIfSymlinkUnder would destroy a
 // user-owned link without backup.
 func TestIsManagedLinkUnder_SiblingPrefixNotContained(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows junction path covered by internal/linktest")
-	}
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	root := filepath.Join(tmp, ".agents")
 	sibling := filepath.Join(tmp, ".agents-old")

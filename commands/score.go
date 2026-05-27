@@ -11,13 +11,43 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 
 	"go.yaml.in/yaml/v3"
 
+	wf "github.com/NikashPrakash/dot-agents/commands/workflow"
 	"github.com/NikashPrakash/dot-agents/internal/scoring"
 	"github.com/spf13/cobra"
 )
+
+// scoredHookInterventionClasses are the only intervention_class values that
+// contribute to the v1 `hook_outcomes` sub-score (R1.5 design D3 / D6). The
+// CLI readback honours the same filter as
+// `internal/scoring/signal_hook_outcomes.go`'s extractor so the rendered
+// rule-id / sentinel-id sources cannot suggest a record voted when it did
+// not. Adding a future class to the score is a deliberate edit there AND
+// here.
+var scoredHookInterventionClasses = map[string]bool{
+	"prevent_before_action": true,
+	"remediate_at_stop":     true,
+}
+
+// hookOutcomeSource is the readback projection of one scored hook-outcome
+// sidecar record: enough to attribute the contribution row to its source
+// (sentinel + rule), and to show which lifecycle point + result drove it.
+// Transcript content is excluded by construction — only the fields named
+// here are surfaced (R1.5 spec D2 / docs/OUTCOME_SCORING_RUBRIC.md "expose
+// outcome source and rule identifiers without printing transcript contents").
+type hookOutcomeSource struct {
+	SentinelID        string `json:"sentinel_id" yaml:"sentinel_id"`
+	RuleID            string `json:"rule_id" yaml:"rule_id"`
+	Result            string `json:"result" yaml:"result"`
+	LifecyclePoint    string `json:"lifecycle_point" yaml:"lifecycle_point"`
+	InterventionClass string `json:"intervention_class" yaml:"intervention_class"`
+	CorrelationID     string `json:"correlation_id,omitempty" yaml:"correlation_id,omitempty"`
+}
 
 // defaultIterLogDir is the in-repo iter-log root the CLI assumes when --iter-log-dir
 // is not passed. The path is intentionally repo-relative so commands invoked
@@ -261,11 +291,9 @@ func runScoreIterationRecompute(out io.Writer, iterLogDir, repoDir string, iter 
 	}
 	ps := scoring.BuildPersistedScore(score, rec)
 	if Flags.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(ps)
+		return emitIterationScoreJSON(out, ps, iterLogDir)
 	}
-	renderIterationScore(out, ps, path)
+	renderIterationScoreWithHooks(out, ps, path, iterLogDir)
 	return nil
 }
 
@@ -286,15 +314,50 @@ func runScoreIteration(out io.Writer, iterLogDir string, iter int) error {
 		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	if Flags.JSON {
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(ps)
+		return emitIterationScoreJSON(out, ps, iterLogDir)
 	}
-	renderIterationScore(out, ps, path)
+	renderIterationScoreWithHooks(out, ps, path, iterLogDir)
 	return nil
 }
 
+// iterationScoreJSON is the `da score iteration` JSON envelope: the
+// PersistedScore inline (so existing consumers keep the same top-level
+// fields) plus an optional `hook_outcome_sources` array surfacing the
+// scored-record attributions for the hook_outcomes signal. The array is
+// omitted when the signal did not vote or no sidecar exists — matching
+// the text renderer's gate (hookRowPresent + non-empty sources).
+type iterationScoreJSON struct {
+	scoring.PersistedScore
+	HookOutcomeSources []hookOutcomeSource `json:"hook_outcome_sources,omitempty"`
+}
+
+// emitIterationScoreJSON renders ps as JSON with the hook-outcome attribution
+// list attached when applicable. Splitting it out of the run paths keeps both
+// callers (sidecar-read + recompute) emitting the same shape so a downstream
+// consumer does not have to special-case which subcommand produced the file.
+func emitIterationScoreJSON(out io.Writer, ps scoring.PersistedScore, iterLogDir string) error {
+	payload := iterationScoreJSON{PersistedScore: ps}
+	if hookRowPresent(ps) && iterLogDir != "" {
+		payload.HookOutcomeSources = loadHookOutcomeSources(iterLogDir, ps.Iteration)
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
 func renderIterationScore(out io.Writer, ps scoring.PersistedScore, source string) {
+	renderIterationScoreWithHooks(out, ps, source, "")
+}
+
+// renderIterationScoreWithHooks is the iteration renderer with an explicit
+// hook-outcome sidecar directory. When iterLogDir is non-empty and the
+// hook_outcomes signal contributed to ps, the renderer appends a
+// "Hook outcome sources:" block listing the scored records' sentinel_id and
+// rule_id (and lifecycle_point / result / intervention_class) so an operator
+// can attribute the sub-score to a concrete gate firing. Missing or
+// unreadable sidecars degrade silently — the breakdown table is the
+// authoritative score view; the source list is augmentation.
+func renderIterationScoreWithHooks(out io.Writer, ps scoring.PersistedScore, source, iterLogDir string) {
 	scoreCol := "-"
 	if ps.Scored {
 		scoreCol = fmt.Sprintf("%.3f", ps.Value)
@@ -321,7 +384,89 @@ func renderIterationScore(out io.Writer, ps scoring.PersistedScore, source strin
 		fmt.Fprintf(out, "%-22s  %-7s  %-8s  %-8s  %-8s  %s\n",
 			string(row.Signal), present, sub, weight, contrib, truncStr(row.Detail, 60))
 	}
+	if hookRowPresent(ps) && iterLogDir != "" {
+		if sources := loadHookOutcomeSources(iterLogDir, ps.Iteration); len(sources) > 0 {
+			renderHookOutcomeSources(out, sources)
+		}
+	}
 	fmt.Fprintf(out, "\nSource: %s\n", source)
+}
+
+// hookRowPresent reports whether the persisted score has a present
+// hook_outcomes breakdown row — the gate that decides whether to read and
+// render the sidecar source list. A row that is absent (sidecar missing,
+// no scored records) does not vote and has no sources to surface.
+func hookRowPresent(ps scoring.PersistedScore) bool {
+	for _, row := range ps.Breakdown {
+		if row.Signal == scoring.SignalHookOutcomes && row.Present {
+			return true
+		}
+	}
+	return false
+}
+
+// loadHookOutcomeSources reads iter-N.hook-outcomes.yaml and projects the
+// scored records to the [hookOutcomeSource] readback shape. The filter
+// matches `internal/scoring/signal_hook_outcomes.go`'s
+// `filterScoredHookOutcomes` (only `prevent_before_action` and
+// `remediate_at_stop` vote in v1) so the rendered list and the sub-score
+// row agree on what was scored. A missing or malformed sidecar returns nil
+// — readback is best-effort augmentation, not a hard contract.
+//
+// Output is sorted by (rule_id, sentinel_id) for deterministic rendering
+// and stable test diffs; the on-disk record order is append-time and not
+// meaningful for explainability.
+func loadHookOutcomeSources(iterLogDir string, iter int) []hookOutcomeSource {
+	path := filepath.Join(iterLogDir, fmt.Sprintf("iter-%d.hook-outcomes.yaml", iter))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var sc wf.HookOutcomeSidecar
+	if err := yaml.Unmarshal(data, &sc); err != nil {
+		return nil
+	}
+	out := make([]hookOutcomeSource, 0, len(sc.Records))
+	for _, r := range sc.Records {
+		if !scoredHookInterventionClasses[r.InterventionClass] {
+			continue
+		}
+		out = append(out, hookOutcomeSource{
+			SentinelID:        r.SentinelID,
+			RuleID:            r.RuleID,
+			Result:            r.Result,
+			LifecyclePoint:    r.LifecyclePoint,
+			InterventionClass: r.InterventionClass,
+			CorrelationID:     r.CorrelationID,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].RuleID != out[j].RuleID {
+			return out[i].RuleID < out[j].RuleID
+		}
+		return out[i].SentinelID < out[j].SentinelID
+	})
+	return out
+}
+
+// renderHookOutcomeSources prints the per-record attribution block under the
+// breakdown table. The columns are deliberately minimal — sentinel_id and
+// rule_id are the readback contract (R1.5 spec D2 + OUTCOME_SCORING_RUBRIC.md);
+// lifecycle_point + result are the immediate "why this row scored what it
+// scored" context. No transcript content is loaded or printed.
+func renderHookOutcomeSources(out io.Writer, sources []hookOutcomeSource) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Hook outcome sources:")
+	fmt.Fprintf(out, "  %-40s  %-32s  %-22s  %-10s  %s\n",
+		"RULE_ID", "SENTINEL_ID", "LIFECYCLE", "RESULT", "INTERVENTION")
+	for _, s := range sources {
+		fmt.Fprintf(out, "  %-40s  %-32s  %-22s  %-10s  %s\n",
+			truncStr(s.RuleID, 40),
+			truncStr(s.SentinelID, 32),
+			truncStr(s.LifecyclePoint, 22),
+			truncStr(s.Result, 10),
+			s.InterventionClass)
+	}
 }
 
 func runScoreSession(out io.Writer, iterLogDir, sessionID string) error {

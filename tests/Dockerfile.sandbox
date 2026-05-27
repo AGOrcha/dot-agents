@@ -13,15 +13,34 @@ RUN apt-get update && apt-get install -y \
     vim \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js 20 (required for Claude Code)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
+# Install Node.js 20 (required for Claude Code) via the NodeSource APT
+# repository directly. This avoids the legacy `curl ... | bash` setup script
+# (Sonar docker:S8482: "executing downloaded artifacts directly without
+# verification"). We fetch only the NodeSource signing key + repo config,
+# which apt-get itself authenticates via the pinned keyring before installing.
+RUN mkdir -p /etc/apt/keyrings \
+    && curl --proto "=https" --tlsv1.2 -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install dot-agents
-RUN curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+# Install dot-agents from a pinned commit + verify checksum before executing.
+# Bumping the pin is a deliberate sandbox rebuild action — keeping the SHA
+# pinned guarantees the test sandbox is reproducible and immune to a supply
+# chain compromise of the main branch. `--proto "=https" --tlsv1.2` refuses
+# any redirect to a non-HTTPS URL (Sonar docker:S6506).
+ARG DOT_AGENTS_INSTALL_SHA=7be7111e5799bd370212fc51f4fc1977f617a9bd
+ARG DOT_AGENTS_INSTALL_CHECKSUM=5c919087d94f0322b75a8890c04700c44ff461bf6923848ce61b937fe3db3652
+RUN curl --proto "=https" --tlsv1.2 -fsSL "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" -o /tmp/install-dot-agents.sh \
+    && echo "${DOT_AGENTS_INSTALL_CHECKSUM}  /tmp/install-dot-agents.sh" | sha256sum -c - \
+    && bash /tmp/install-dot-agents.sh \
+    && rm /tmp/install-dot-agents.sh
 ENV PATH="/root/.local/bin:$PATH"
 
 # Create workspace

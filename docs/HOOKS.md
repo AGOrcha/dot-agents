@@ -195,13 +195,19 @@ the authoritative artifact-validation point.
 ### `PostToolUse` and `PostToolUseFailure` are observation candidates
 
 Per [decision D9 in the design spec][d9], `post_tool_use` and
-`post_tool_use_failure` are mapped today so operators may attach
-**observation** and feedback-capture hooks to them under R1.5. They are
-**not** implicit blocking hooks: a failed workflow command produces
-useful improvement evidence, but recording an error is not by itself
-proof that the session should be blocked. Any future blocking use must
-document a deterministic invariant, a portable vendor contract, and an
-acceptable noise / privacy boundary.
+`post_tool_use_failure` are mapped today so operators *may* author
+**observation** hooks against them, but post-tool observation as a
+scored signal was **evaluated and deferred to R1.5.1** in
+`r1-5-hook-enforcement-telemetry/t1b-post-tool-observation-evaluation`
+(PR #97): the four boundary criteria (payload stability, workflow-command
+filter, redaction, dedup) did not all clear v1. As a result, no
+`observe_tool_result` records contribute to the v1 `hook_outcomes`
+sub-score — see [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b).
+These events are also **not** implicit blocking hooks: a failed workflow
+command produces useful improvement evidence, but recording an error is
+not by itself proof that the session should be blocked. Any future
+blocking or scored use must document a deterministic invariant, a
+portable vendor contract, and an acceptable noise / privacy boundary.
 
 ### Lifecycle gates and the hook-outcome telemetry channel
 
@@ -365,12 +371,12 @@ For `apply_patch`, matcher values can also use `Edit` or `Write`.
 | `pre_tool_use`    | Claude / Codex / Cursor expose tool name + tool input to the hook; deterministic command-boundary remediation is possible by parsing input. Copilot exposes `preToolUse` but documents no matcher surface, so gates must parse input. |
 | `subagent_start`  | Claude / Codex / Cursor / Copilot all expose subagent identity / agent_type input. Used only for `loop-worker` bootstrap and later correlation; output is non-blocking. |
 | `pre_compact`     | Claude / Codex / Cursor / Copilot expose hook input but no block-the-compaction contract; used only for non-blocking continuity advice. |
-| `post_tool_use` / `post_tool_use_failure` | Bounded result metadata is documented on Claude / Cursor / Copilot (`post_tool_use` and `post_tool_use_failure`); Codex exposes `post_tool_use` only. Suitable for R1.5 observation hooks — **not** transcript body persistence. |
+| `post_tool_use` / `post_tool_use_failure` | Bounded result metadata is documented on Claude / Cursor / Copilot (`post_tool_use` and `post_tool_use_failure`); Codex exposes `post_tool_use` only. Operator-authored observation hooks are permitted, but post-tool observation as a scored signal is **deferred to R1.5.1 per t1b PR #97** — no `observe_tool_result` records contribute to the v1 `hook_outcomes` sub-score. **Not** for transcript body persistence under either path. |
 
-[d2]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md
-[d3]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md
-[d8]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md
-[d9]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md
+[d2]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md#d2-one-to-one-canonical-hookspecwhen--platform-event-mapping
+[d3]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md#d3-cursors-wider-event-surface-gets-canonical-hookspecwhen-values
+[d8]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md#d8-approved-non-terminal-hooks-prevent-or-preserve-terminal-hooks-prove
+[d9]: ../.agents/workflow/specs/loop-discipline-stop-hooks/design.md#d9-post-tool-events-are-observation-candidates-not-assumed-gates
 
 ## Using hooks
 
