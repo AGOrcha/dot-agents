@@ -149,21 +149,33 @@ func TestClassify(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			v, bad := classify(tc.importer, tc.target)
-			if bad != tc.wantBad {
-				t.Fatalf("classify(%q, %q) bad=%v, want %v (violation=%+v)",
-					tc.importer, tc.target, bad, tc.wantBad, v)
-			}
-			if bad {
-				if v.importer != tc.importer || v.target != tc.target {
-					t.Errorf("violation echoes wrong identifiers: got importer=%q target=%q, want %q/%q",
-						v.importer, v.target, tc.importer, tc.target)
-				}
-				if v.reason == "" {
-					t.Errorf("violation must carry a non-empty reason for CI log")
-				}
-			}
+			assertClassify(t, tc.importer, tc.target, tc.wantBad)
 		})
+	}
+}
+
+// assertClassify is the per-row check extracted from TestClassify so the
+// table loop stays a flat dispatch (cognitive complexity stays well
+// below Sonar's threshold). It runs classify() and validates both the
+// boolean verdict and — when the verdict says "violation" — that the
+// returned struct echoes the inputs and carries a non-empty reason for
+// the CI log.
+func assertClassify(t *testing.T, importer, target string, wantBad bool) {
+	t.Helper()
+	v, bad := classify(importer, target)
+	if bad != wantBad {
+		t.Fatalf("classify(%q, %q) bad=%v, want %v (violation=%+v)",
+			importer, target, bad, wantBad, v)
+	}
+	if !bad {
+		return
+	}
+	if v.importer != importer || v.target != target {
+		t.Errorf("violation echoes wrong identifiers: got importer=%q target=%q, want %q/%q",
+			v.importer, v.target, importer, target)
+	}
+	if v.reason == "" {
+		t.Error("violation must carry a non-empty reason for CI log")
 	}
 }
 
