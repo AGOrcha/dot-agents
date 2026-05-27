@@ -2,8 +2,10 @@ package commands
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -172,6 +174,366 @@ func TestTruncStr(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("truncStr(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.want)
 		}
+	}
+}
+
+// --- t3-cli-readback: hook-outcome source attribution -------------------------
+
+// writeIterScoreSidecar writes a PersistedScore as iter-N.score.yaml under dir.
+// Helper for the hook-outcome readback tests so the table-driven cases focus
+// on the breakdown shape rather than YAML plumbing.
+func writeIterScoreSidecar(t *testing.T, dir string, ps scoring.PersistedScore) {
+	t.Helper()
+	data, err := yaml.Marshal(ps)
+	if err != nil {
+		t.Fatalf("marshal score sidecar: %v", err)
+	}
+	path := filepath.Join(dir, "iter-"+strconv.Itoa(ps.Iteration)+".score.yaml")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// writeHookOutcomesSidecar writes a raw YAML sidecar at the conventional
+// iter-N.hook-outcomes.yaml path. Tests use raw YAML (not the wf struct) so
+// each case can include fields outside the readback's projection — the
+// readback must ignore them without panicking.
+func writeHookOutcomesSidecar(t *testing.T, dir string, iter int, body string) {
+	t.Helper()
+	path := filepath.Join(dir, "iter-"+strconv.Itoa(iter)+".hook-outcomes.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// presentHookRow is a PersistedContribution shaped as the hook_outcomes
+// signal at the remediate band — the most adversarial path through the
+// renderer (sub-score 0.0 is the gate that drove the bug class this task
+// surfaces). Reused across the readback test table.
+func presentHookRow(detail string) scoring.PersistedContribution {
+	return scoring.PersistedContribution{
+		Signal:          scoring.SignalHookOutcomes,
+		Label:           "Hook-gate outcomes",
+		Present:         true,
+		SubScore:        0.0,
+		Detail:          detail,
+		NominalWeight:   0.10,
+		EffectiveWeight: 0.10,
+		Contribution:    0.0,
+	}
+}
+
+// absentHookRow is the breakdown row written when no sidecar voted. The
+// renderer must NOT print a "Hook outcome sources" block when the signal
+// row is absent even if a sidecar happens to exist on disk — the row's
+// Present=false is the load-bearing gate.
+func absentHookRow() scoring.PersistedContribution {
+	return scoring.PersistedContribution{
+		Signal:        scoring.SignalHookOutcomes,
+		Label:         "Hook-gate outcomes",
+		Present:       false,
+		NominalWeight: 0.10,
+	}
+}
+
+// validHookSidecar is a two-record sidecar where one record is scored
+// (remediate_at_stop) and another is deferred (continuity_advice). Only
+// the scored record may surface in the readback list per design D3/D6.
+const validHookSidecar = `schema_version: 1
+records:
+  - schema_version: 1
+    sentinel_id: iteration-close-r1
+    skill: iteration-close
+    lifecycle_point: stop
+    intervention_class: remediate_at_stop
+    result: remediate
+    rule_id: iteration-close.R1.1
+    platform: claude
+    ts: "2026-05-26T00:00:00Z"
+    correlation_id: c1
+  - schema_version: 1
+    sentinel_id: continuity-pre-compact
+    skill: iteration-close
+    lifecycle_point: pre_compact
+    intervention_class: continuity_advice
+    result: advise
+    rule_id: iteration-close.R5.1
+    platform: claude
+    ts: "2026-05-26T00:00:01Z"
+    correlation_id: c2
+`
+
+func TestRunScoreIterationRendersHookOutcomeSources(t *testing.T) {
+	tests := []struct {
+		name            string
+		hookRow         scoring.PersistedContribution
+		sidecar         string
+		wantHookBlock   bool
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:          "present row + scored record renders sentinel and rule",
+			hookRow:       presentHookRow("remediate: iteration-close.R1.1"),
+			sidecar:       validHookSidecar,
+			wantHookBlock: true,
+			wantContains: []string{
+				"Hook outcome sources:",
+				"RULE_ID",
+				"SENTINEL_ID",
+				"iteration-close.R1.1",
+				"iteration-close-r1",
+				"stop",
+				"remediate",
+				"remediate_at_stop",
+			},
+			// The deferred continuity_advice record exists in the sidecar
+			// but MUST NOT appear in the readback — it never voted.
+			wantNotContains: []string{
+				"continuity-pre-compact",
+				"continuity_advice",
+				"iteration-close.R5.1",
+			},
+		},
+		{
+			name:          "absent hook row suppresses the block even when sidecar exists",
+			hookRow:       absentHookRow(),
+			sidecar:       validHookSidecar,
+			wantHookBlock: false,
+			wantNotContains: []string{
+				"Hook outcome sources:",
+				"iteration-close.R1.1",
+			},
+		},
+		{
+			name:          "present row but no sidecar on disk degrades silently",
+			hookRow:       presentHookRow("remediate: iteration-close.R1.1"),
+			sidecar:       "", // no file written
+			wantHookBlock: false,
+			wantNotContains: []string{
+				"Hook outcome sources:",
+				"SENTINEL_ID",
+			},
+		},
+		{
+			name:          "malformed sidecar degrades silently",
+			hookRow:       presentHookRow("remediate: iteration-close.R1.1"),
+			sidecar:       "this: is: not: valid: yaml: at all",
+			wantHookBlock: false,
+			wantNotContains: []string{
+				"Hook outcome sources:",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ps := scoring.PersistedScore{
+				Iteration:     11,
+				RubricVersion: "2.1.0",
+				Scored:        true,
+				Value:         0.5,
+				Band:          "fair",
+				Breakdown:     []scoring.PersistedContribution{tt.hookRow},
+			}
+			writeIterScoreSidecar(t, dir, ps)
+			if tt.sidecar != "" {
+				writeHookOutcomesSidecar(t, dir, ps.Iteration, tt.sidecar)
+			}
+
+			var buf bytes.Buffer
+			if err := runScoreIteration(&buf, dir, ps.Iteration); err != nil {
+				t.Fatalf("runScoreIteration: %v", err)
+			}
+			got := buf.String()
+			for _, want := range tt.wantContains {
+				if !strings.Contains(got, want) {
+					t.Errorf("output missing %q:\n%s", want, got)
+				}
+			}
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(got, notWant) {
+					t.Errorf("output unexpectedly contains %q:\n%s", notWant, got)
+				}
+			}
+			// Belt-and-braces: the readback contract forbids transcript
+			// content. The sidecar schema does not model any such field, so
+			// asserting on a sentinel string proves the renderer is not
+			// fabricating one from elsewhere.
+			if strings.Contains(got, "transcript") {
+				t.Errorf("output leaked the word 'transcript' — readback contract violation:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestRunScoreIterationJSONIncludesHookOutcomeSources(t *testing.T) {
+	tests := []struct {
+		name             string
+		hookRow          scoring.PersistedContribution
+		writeSidecar     bool
+		wantSourcesLen   int
+		wantSourcesField bool // whether hook_outcome_sources should appear in JSON
+		wantSentinelID   string
+		wantRuleID       string
+	}{
+		{
+			name:             "present row emits hook_outcome_sources with scored record only",
+			hookRow:          presentHookRow("remediate: iteration-close.R1.1"),
+			writeSidecar:     true,
+			wantSourcesLen:   1,
+			wantSourcesField: true,
+			wantSentinelID:   "iteration-close-r1",
+			wantRuleID:       "iteration-close.R1.1",
+		},
+		{
+			name:             "absent row omits hook_outcome_sources field",
+			hookRow:          absentHookRow(),
+			writeSidecar:     true,
+			wantSourcesField: false,
+		},
+		{
+			name:             "present row + no sidecar omits hook_outcome_sources field",
+			hookRow:          presentHookRow("remediate: iteration-close.R1.1"),
+			writeSidecar:     false,
+			wantSourcesField: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			ps := scoring.PersistedScore{
+				Iteration:     22,
+				RubricVersion: "2.1.0",
+				Scored:        true,
+				Value:         0.5,
+				Band:          "fair",
+				Breakdown:     []scoring.PersistedContribution{tt.hookRow},
+			}
+			writeIterScoreSidecar(t, dir, ps)
+			if tt.writeSidecar {
+				writeHookOutcomesSidecar(t, dir, ps.Iteration, validHookSidecar)
+			}
+
+			prev := Flags.JSON
+			Flags.JSON = true
+			t.Cleanup(func() { Flags.JSON = prev })
+
+			var buf bytes.Buffer
+			if err := runScoreIteration(&buf, dir, ps.Iteration); err != nil {
+				t.Fatalf("runScoreIteration: %v", err)
+			}
+
+			// Decode into a generic map so we can assert presence/absence of
+			// hook_outcome_sources without coupling the test to the typed
+			// envelope (which is an internal CLI shape).
+			var payload map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+				t.Fatalf("decode JSON: %v\nraw:\n%s", err, buf.String())
+			}
+			raw, present := payload["hook_outcome_sources"]
+			if present != tt.wantSourcesField {
+				t.Fatalf("hook_outcome_sources present=%v, want %v\nraw:\n%s", present, tt.wantSourcesField, buf.String())
+			}
+			if !tt.wantSourcesField {
+				return
+			}
+			arr, ok := raw.([]any)
+			if !ok {
+				t.Fatalf("hook_outcome_sources type = %T, want []any", raw)
+			}
+			if len(arr) != tt.wantSourcesLen {
+				t.Fatalf("hook_outcome_sources len = %d, want %d (raw: %v)", len(arr), tt.wantSourcesLen, arr)
+			}
+			rec, _ := arr[0].(map[string]any)
+			if rec["sentinel_id"] != tt.wantSentinelID {
+				t.Errorf("sentinel_id = %v, want %q", rec["sentinel_id"], tt.wantSentinelID)
+			}
+			if rec["rule_id"] != tt.wantRuleID {
+				t.Errorf("rule_id = %v, want %q", rec["rule_id"], tt.wantRuleID)
+			}
+			// Negative-path inside the JSON case: the disallowed transcript
+			// field name must not appear at any depth, and the deferred
+			// continuity record must not have leaked through the filter.
+			rawJSON := buf.String()
+			if strings.Contains(rawJSON, "transcript") {
+				t.Errorf("JSON output mentions 'transcript' — readback contract violation:\n%s", rawJSON)
+			}
+			if strings.Contains(rawJSON, "continuity") {
+				t.Errorf("JSON output mentions deferred continuity record — filter regression:\n%s", rawJSON)
+			}
+		})
+	}
+}
+
+// Direct test of the loader so a future refactor of the renderer cannot mask
+// a regression in the filter / sort contract.
+func TestLoadHookOutcomeSourcesFilterAndOrder(t *testing.T) {
+	dir := t.TempDir()
+	body := `schema_version: 1
+records:
+  - schema_version: 1
+    sentinel_id: zzz-late
+    skill: loop-worker
+    lifecycle_point: pre_tool_use
+    intervention_class: prevent_before_action
+    result: allow
+    rule_id: loop-worker.R3.1
+    platform: claude
+    ts: "2026-05-26T00:00:02Z"
+    correlation_id: c3
+  - schema_version: 1
+    sentinel_id: aaa-early
+    skill: iteration-close
+    lifecycle_point: stop
+    intervention_class: remediate_at_stop
+    result: remediate
+    rule_id: iteration-close.R1.1
+    platform: claude
+    ts: "2026-05-26T00:00:00Z"
+    correlation_id: c1
+  - schema_version: 1
+    sentinel_id: mid
+    skill: loop-worker
+    lifecycle_point: post_tool_use
+    intervention_class: observe_tool_result
+    result: advise
+    rule_id: loop-worker.R9.1
+    platform: claude
+    ts: "2026-05-26T00:00:01Z"
+    correlation_id: c2
+`
+	writeHookOutcomesSidecar(t, dir, 5, body)
+
+	got := loadHookOutcomeSources(dir, 5)
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2 (observe_tool_result must be filtered): %+v", len(got), got)
+	}
+	// Sort key is (rule_id, sentinel_id); iteration-close.R1.1 sorts before
+	// loop-worker.R3.1 so the remediate record comes first regardless of
+	// on-disk order.
+	if got[0].RuleID != "iteration-close.R1.1" || got[0].SentinelID != "aaa-early" {
+		t.Errorf("got[0] = %+v, want rule iteration-close.R1.1 / sentinel aaa-early", got[0])
+	}
+	if got[1].RuleID != "loop-worker.R3.1" || got[1].SentinelID != "zzz-late" {
+		t.Errorf("got[1] = %+v, want rule loop-worker.R3.1 / sentinel zzz-late", got[1])
+	}
+	for _, s := range got {
+		if !scoredHookInterventionClasses[s.InterventionClass] {
+			t.Errorf("record with non-scored intervention_class slipped through: %+v", s)
+		}
+	}
+}
+
+// Loader returns nil when the sidecar file does not exist — the readback is
+// best-effort, never an error path. Pairs with the missing-sidecar render
+// case above to lock the contract from both sides.
+func TestLoadHookOutcomeSourcesMissingFileReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	if got := loadHookOutcomeSources(dir, 99); got != nil {
+		t.Errorf("missing sidecar returned %+v, want nil", got)
 	}
 }
 
