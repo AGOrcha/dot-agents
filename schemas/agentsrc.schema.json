@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/agentsrc.schema.json",
   "title": "dot-agents project manifest",
-  "description": "Repo-local schema for .agentsrc.json. This intentionally tracks the current Go AgentsRC model and rejects unknown top-level fields.",
+  "description": "Repo-local schema for .agentsrc.json. Accepts both v1 and v2 of the manifest surface. v1 omits the v2 additive fields (repo_id, extends, packages, features, and the Source.id/cache_ttl/auth + http/oci source types). All v2 fields are optional so a v1 file continues to validate against this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,7 +14,8 @@
     },
     "version": {
       "type": "integer",
-      "const": 1
+      "enum": [1, 2],
+      "description": "Schema version. 1 = legacy surface; 2 = surface that activates the v2 additive fields."
     },
     "project": {
       "type": "string",
@@ -112,35 +113,61 @@
     },
     "refresh": {
       "type": "object",
+      "description": "Latest da install/refresh metadata recorded on the project.",
+      "additionalProperties": false,
+      "required": ["version", "commit", "describe", "refreshedAt"],
       "properties": {
         "version": {
           "type": "string",
           "minLength": 1,
           "maxLength": 8,
-          "required": true,
-          "example": "v1.0.0"
+          "examples": ["v1.0.0"]
         },
         "commit": {
           "type": "string",
           "minLength": 1,
           "maxLength": 8,
-          "required": true,
-          "example": "ad213s5e"
+          "examples": ["ad213s5e"]
         },
         "describe": {
           "type": "string",
           "minLength": 1,
           "maxLength": 150,
-          "required": true,
-          "example": "Refreshed dot-agents project from ~/.agents/ into project directories."
+          "examples": ["Refreshed dot-agents project from ~/.agents/ into project directories."]
         },
         "refreshedAt": {
           "type": "string",
           "minLength": 1,
-          "required": true,
-          "format": "datetime",
-          "example": "2026-04-13T12:59:35Z"
+          "format": "date-time",
+          "examples": ["2026-04-13T12:59:35Z"]
         }
+      }
+    },
+    "repo_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "v2: canonical repository identity (e.g. 'github.com/acme/manager-ui'). Protected: imported layers cannot override it."
+    },
+    "extends": {
+      "type": "array",
+      "description": "v2: ordered list of config layer references. Each entry is either a string 'source-id:layer-path[@version]' or an object with optional flag.",
+      "items": {
+        "$ref": "#/$defs/layerRef"
+      }
+    },
+    "packages": {
+      "type": "array",
+      "description": "v2: ordered list of executable package references 'source-id:artifact-path@version-spec'.",
+      "items": {
+        "$ref": "#/$defs/packageRef"
+      }
+    },
+    "features": {
+      "type": "object",
+      "description": "v2: feature-flag overrides keyed by feature name.",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
       }
     }
   },
@@ -174,8 +201,11 @@
           "type": "string",
           "enum": [
             "local",
-            "git"
-          ]
+            "git",
+            "http",
+            "oci"
+          ],
+          "description": "v2: http and oci added per config-distribution-model §4. v1 files declaring only local/git remain valid."
         },
         "path": {
           "type": "string",
@@ -188,6 +218,20 @@
         "ref": {
           "type": "string",
           "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v2: stable local identifier used in extends/packages refs."
+        },
+        "cache_ttl": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v2: tier-1 cache TTL duration (e.g. '4h'). Ignored for oci sources."
+        },
+        "auth": {
+          "type": "object",
+          "description": "v2: opaque auth block. Schema owned by external-agent-sources spec; treated as pass-through here."
         }
       },
       "allOf": [
@@ -206,6 +250,87 @@
             "required": [
               "url"
             ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "oci"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    "layerRef": {
+      "description": "v2: extends entry. Either a plain reference string 'source-id:layer-path[@version]' or an object with optional flag.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+(@[^\\s]+)?$"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+(@[^\\s]+)?$"
+            },
+            "optional": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "packageRef": {
+      "description": "v2: packages entry. Reference string 'source-id:artifact-path@version-spec' or object form.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+@[^\\s]+$"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+@[^\\s]+$"
+            }
           }
         }
       ]

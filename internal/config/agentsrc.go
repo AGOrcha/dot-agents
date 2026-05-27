@@ -113,6 +113,16 @@ type AgentsRCKG struct {
 }
 
 // AgentsRC represents the .agentsrc.json manifest committed to a project repo.
+//
+// Schema versions:
+//   - version=1 (legacy): only the original field surface (project, sources, …) is
+//     meaningful. The v2 additive fields below remain absent/empty on a v1 file.
+//   - version=2: the v2 additive fields (RepoID, Extends, Packages, Features and the
+//     extended Source fields ID/CacheTTL/Auth, plus the http+oci source types)
+//     become first-class. All v2 fields use `omitempty` so a v1 manifest round-trips
+//     byte-for-byte when these fields are absent.
+//
+// See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
 type AgentsRC struct {
 	Schema   string           `json:"$schema,omitempty"`
 	Version  int              `json:"version"`
@@ -127,9 +137,107 @@ type AgentsRC struct {
 	KG       *AgentsRCKG      `json:"kg,omitempty"`
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 
+	// --- v2 additive fields (config-distribution-model §3) ---
+
+	// RepoID is the canonical repository identity (e.g. "github.com/acme/manager-ui").
+	// Protected: imported layers cannot override it. See org-config-resolution §5.
+	RepoID string `json:"repo_id,omitempty"`
+	// Extends references config layers in the form "source-id:layer-path[@version]".
+	// Each entry may be a plain string or an object form `{"ref": "...", "optional": true}`.
+	// Tier constraint (enforced at schema validation): extends entries must reference
+	// git|http|local sources — see config-distribution-model §4.
+	Extends []LayerRef `json:"extends,omitempty"`
+	// Packages references executable OCI/HTTP packages in the form
+	// "source-id:artifact-path@version-spec". Tier constraint: oci|http sources only.
+	Packages []PackageRef `json:"packages,omitempty"`
+	// Features overrides feature-flag defaults (config-distribution-model §3.6).
+	Features map[string]string `json:"features,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// LayerRef is a single entry in AgentsRC.Extends. It accepts either a bare
+// reference string ("acme:org/base") or an object form with an optional flag:
+//
+//	{"ref": "acme:team/experimental", "optional": true}
+//
+// Per config-distribution-model §11.
+type LayerRef struct {
+	// Ref is the layer reference string "source-id:layer-path[@version]".
+	Ref string `json:"ref"`
+	// Optional marks the layer as non-fatal on fetch failure.
+	Optional bool `json:"optional,omitempty"`
+}
+
+// MarshalJSON emits the compact string form when Optional is false, otherwise
+// emits the object form. Round-trip is stable under repeated marshal/unmarshal.
+func (l LayerRef) MarshalJSON() ([]byte, error) {
+	if !l.Optional {
+		return json.Marshal(l.Ref)
+	}
+	type wire struct {
+		Ref      string `json:"ref"`
+		Optional bool   `json:"optional,omitempty"`
+	}
+	return json.Marshal(wire{Ref: l.Ref, Optional: l.Optional})
+}
+
+// UnmarshalJSON accepts either a plain string or the object form.
+func (l *LayerRef) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		l.Ref = s
+		l.Optional = false
+		return nil
+	}
+	type wire struct {
+		Ref      string `json:"ref"`
+		Optional bool   `json:"optional,omitempty"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("extends entry must be string or {ref,optional?}: %w", err)
+	}
+	if w.Ref == "" {
+		return fmt.Errorf("extends entry object form requires non-empty ref")
+	}
+	l.Ref = w.Ref
+	l.Optional = w.Optional
+	return nil
+}
+
+// PackageRef is a single entry in AgentsRC.Packages. The string form is the
+// canonical wire form per config-distribution-model §5; the object form is
+// accepted for forward compatibility with future per-entry options.
+type PackageRef struct {
+	// Ref is the package reference string "source-id:artifact-path@version-spec".
+	Ref string `json:"ref"`
+}
+
+func (p PackageRef) MarshalJSON() ([]byte, error) {
+	return json.Marshal(p.Ref)
+}
+
+func (p *PackageRef) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		p.Ref = s
+		return nil
+	}
+	type wire struct {
+		Ref string `json:"ref"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("packages entry must be string or {ref}: %w", err)
+	}
+	if w.Ref == "" {
+		return fmt.Errorf("packages entry object form requires non-empty ref")
+	}
+	p.Ref = w.Ref
+	return nil
 }
 
 // RefreshMetadata records the latest da install/refresh that updated a project.
@@ -154,15 +262,21 @@ func (a *AgentsRC) SetRefreshMetadata(version, commit, describe string, refreshe
 }
 
 // agentsRCKnown lists all JSON keys owned by AgentsRC's known fields.
+// Per [[schema-usage]]: this MUST stay in sync with the struct, agentsRCCore,
+// MarshalJSON, UnmarshalJSON, and schemas/agentsrc.schema.json — any drift
+// here silently routes the key into ExtraFields instead of the typed field.
 var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
 	"kg": true, "refresh": true,
+	// v2 additive fields (config-distribution-model §3)
+	"repo_id": true, "extends": true, "packages": true, "features": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
 // infinite recursion while still using the standard json encoder.
+// Per [[schema-usage]]: this MUST mirror AgentsRC's typed fields exactly.
 type agentsRCCore struct {
 	Schema   string           `json:"$schema,omitempty"`
 	Version  int              `json:"version"`
@@ -176,6 +290,12 @@ type agentsRCCore struct {
 	Sources  []Source         `json:"sources"`
 	KG       *AgentsRCKG      `json:"kg,omitempty"`
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+
+	// v2 additive fields (config-distribution-model §3)
+	RepoID   string            `json:"repo_id,omitempty"`
+	Extends  []LayerRef        `json:"extends,omitempty"`
+	Packages []PackageRef      `json:"packages,omitempty"`
+	Features map[string]string `json:"features,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -195,6 +315,10 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Sources = core.Sources
 	a.KG = core.KG
 	a.Refresh = core.Refresh
+	a.RepoID = core.RepoID
+	a.Extends = core.Extends
+	a.Packages = core.Packages
+	a.Features = core.Features
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -225,6 +349,10 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Sources:  a.Sources,
 		KG:       a.KG,
 		Refresh:  a.Refresh,
+		RepoID:   a.RepoID,
+		Extends:  a.Extends,
+		Packages: a.Packages,
+		Features: a.Features,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -245,12 +373,29 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// Source describes where to find agent resources.
+// Source describes where to find agent resources. The v1 surface accepts
+// `local` and `git` types; v2 adds `http` and `oci` per config-distribution-model
+// §4. The v2 additive fields (ID, CacheTTL, Auth) all use omitempty so a v1
+// Source round-trips byte-for-byte when those fields are absent.
 type Source struct {
-	Type string `json:"type"`           // "local" | "git"
+	Type string `json:"type"`           // "local" | "git" | "http" | "oci"
 	Path string `json:"path,omitempty"` // override path for "local"
-	URL  string `json:"url,omitempty"`  // repository URL for "git"
-	Ref  string `json:"ref,omitempty"`  // branch/tag for "git"
+	URL  string `json:"url,omitempty"`  // repository URL for "git" / "http" / "oci"
+	Ref  string `json:"ref,omitempty"`  // branch/tag for "git", or OCI tag
+
+	// --- v2 additive fields (config-distribution-model §3.2) ---
+
+	// ID is the stable local identifier used in extends/packages refs.
+	// Required for v2 sources referenced by extends or packages; optional for
+	// bare v1-style sources that exist only for legacy compatibility.
+	ID string `json:"id,omitempty"`
+	// CacheTTL is a duration string (e.g. "4h") governing tier-1 layer TTL.
+	// Ignored for oci sources (which are strictly content-addressed per spec §8).
+	CacheTTL string `json:"cache_ttl,omitempty"`
+	// Auth is an opaque pass-through block whose schema is owned by the
+	// external-agent-sources spec. The config layer treats it as an arbitrary
+	// JSON object and does not introspect it.
+	Auth json.RawMessage `json:"auth,omitempty"`
 }
 
 const AgentsRCFile = ".agentsrc.json"
