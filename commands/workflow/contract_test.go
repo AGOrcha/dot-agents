@@ -311,13 +311,15 @@ func TestWorkflowContractCreate_ForceOverwrites(t *testing.T) {
 	}
 }
 
-func TestResolveContractCreateMode_FlagsAndDefaults(t *testing.T) {
-	cases := []struct {
-		name    string
-		flags   []string
-		want    DelegationContractMode
-		wantErr bool
-	}{
+type resolveModeCase struct {
+	name    string
+	flags   []string
+	want    DelegationContractMode
+	wantErr bool
+}
+
+func resolveModeCases() []resolveModeCase {
+	return []resolveModeCase{
 		{name: "default direct", flags: []string{"--plan", "p", "--task", "t"}, want: DelegationContractModeDirect},
 		{name: "explicit direct", flags: []string{"--plan", "p", "--task", "t", "--direct"}, want: DelegationContractModeDirect},
 		{name: "delegated flag", flags: []string{"--plan", "p", "--task", "t", "--delegated"}, want: DelegationContractModeDelegated},
@@ -328,26 +330,35 @@ func TestResolveContractCreateMode_FlagsAndDefaults(t *testing.T) {
 		{name: "mode direct + --delegated conflict", flags: []string{"--plan", "p", "--task", "t", "--mode", "direct", "--delegated"}, wantErr: true},
 		{name: "mode delegated + --direct conflict", flags: []string{"--plan", "p", "--task", "t", "--mode", "delegated", "--direct"}, wantErr: true},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			createCmd := findCreateSubcommand(t)
-			if err := createCmd.ParseFlags(tc.flags); err != nil {
-				t.Fatalf("parse: %v", err)
-			}
-			got, err := resolveContractCreateMode(createCmd)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got mode=%q", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tc.want {
-				t.Errorf("got %q want %q", got, tc.want)
-			}
-		})
+}
+
+// runResolveModeCase keeps the test loop body small (cognitive-complexity
+// budget per go:S3776) by handling both the success and error branches in a
+// single helper.
+func runResolveModeCase(t *testing.T, tc resolveModeCase) {
+	t.Helper()
+	createCmd := findCreateSubcommand(t)
+	if err := createCmd.ParseFlags(tc.flags); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	got, err := resolveContractCreateMode(createCmd)
+	if tc.wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got mode=%q", got)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != tc.want {
+		t.Errorf("got %q want %q", got, tc.want)
+	}
+}
+
+func TestResolveContractCreateMode_FlagsAndDefaults(t *testing.T) {
+	for _, tc := range resolveModeCases() {
+		t.Run(tc.name, func(t *testing.T) { runResolveModeCase(t, tc) })
 	}
 }
 
@@ -463,5 +474,200 @@ func TestContractsPath_DerivedFromDelegationDir(t *testing.T) {
 	want := delegationDir(repo)
 	if got != want {
 		t.Errorf("contractsPath = %q, want %q", got, want)
+	}
+}
+
+// runContractCreateExpectErr is a small helper that invokes the
+// `workflow contract create` command and returns the resulting error.
+// Centralizes the chdir + cobra-execute boilerplate used by the
+// error-branch coverage tests below.
+func runContractCreateExpectErr(t *testing.T, repo string, args ...string) error {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewCmdForTest()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs(append([]string{"contract", "create"}, args...))
+	return cmd.Execute()
+}
+
+func TestWorkflowContractCreate_RejectsMissingPlan(t *testing.T) {
+	repo := initWorkflowTestRepo(t) // no canonical plan seeded
+	err := runContractCreateExpectErr(t, repo,
+		"--plan", "ghost-plan", "--task", "x",
+	)
+	if err == nil || !strings.Contains(err.Error(), "plan ghost-plan not found") {
+		t.Fatalf("expected plan-not-found error, got: %v", err)
+	}
+}
+
+func TestWorkflowContractCreate_RejectsEmptyWriteScope(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	// Seed a plan + task whose TASKS.yaml write_scope is empty so the
+	// fallback path produces nothing and the explicit CSV is also blank.
+	planID := "plan-empty-scope"
+	plansDir := filepath.Join(repo, ".agents", "workflow", "plans", planID)
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	plan := CanonicalPlan{
+		SchemaVersion: 1, ID: planID, Title: "Empty Scope", Status: "active",
+		CreatedAt: "2026-05-26T00:00:00Z", UpdatedAt: "2026-05-26T00:00:00Z",
+	}
+	pd, _ := yaml.Marshal(plan)
+	if err := os.WriteFile(filepath.Join(plansDir, "PLAN.yaml"), pd, 0644); err != nil {
+		t.Fatal(err)
+	}
+	tf := CanonicalTaskFile{
+		SchemaVersion: 1, PlanID: planID,
+		Tasks: []CanonicalTask{{ID: "t-noscope", Title: "no scope", Status: "pending"}},
+	}
+	td, _ := yaml.Marshal(tf)
+	if err := os.WriteFile(filepath.Join(plansDir, "TASKS.yaml"), td, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runContractCreateExpectErr(t, repo, "--plan", planID, "--task", "t-noscope")
+	if err == nil || !strings.Contains(err.Error(), "write scope is empty") {
+		t.Fatalf("expected empty-write-scope error, got: %v", err)
+	}
+}
+
+func TestWorkflowContractCreate_RejectsConflictingMode(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	directContractTestPlan(t, repo)
+	err := runContractCreateExpectErr(t, repo,
+		"--plan", "plan-direct", "--task", "task-direct",
+		"--direct", "--delegated",
+	)
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected mutually-exclusive error, got: %v", err)
+	}
+}
+
+func TestWorkflowContractCreate_WriteScopeConflictRejected(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	directContractTestPlan(t, repo)
+
+	// Pre-seed an active contract on a different task whose write_scope
+	// overlaps with the one we are about to materialize. The conflict check
+	// is shared with fanout, so this exercises the same gate from the new
+	// path.
+	now := time.Now().UTC().Format(time.RFC3339)
+	pre := &DelegationContract{
+		SchemaVersion: 1, ID: "del-other",
+		ParentPlanID: "plan-direct", ParentTaskID: "task-other",
+		Title:      "blocker",
+		WriteScope: []string{"commands/workflow/contract.go"},
+		Status:     "active", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, pre); err != nil {
+		t.Fatal(err)
+	}
+	err := runContractCreateExpectErr(t, repo,
+		"--plan", "plan-direct", "--task", "task-direct",
+	)
+	if err == nil || !strings.Contains(err.Error(), "write scope overlaps") {
+		t.Fatalf("expected write-scope-overlap error, got: %v", err)
+	}
+}
+
+func TestWorkflowContractCreate_JSONOutput(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	directContractTestPlan(t, repo)
+
+	prev := workflowTestJSON
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = prev })
+
+	executeWorkflowCommandOutput(t, repo,
+		"contract", "create", "--plan", "plan-direct", "--task", "task-direct",
+	)
+	// JSON output writes to os.Stdout (not cobra's buffer); assert via disk.
+	got, err := loadDelegationContract(repo, "task-direct")
+	if err != nil {
+		t.Fatalf("load after JSON-mode create: %v", err)
+	}
+	if got.Mode != DelegationContractModeDirect {
+		t.Errorf("mode after JSON create: got %q want direct", got.Mode)
+	}
+}
+
+func TestWorkflowContractList_EmptyAndPopulated(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	directContractTestPlan(t, repo)
+
+	// Empty case — should succeed and emit the "no contracts" message.
+	// Asserted via successful execution (text output goes to os.Stdout).
+	executeWorkflowCommandOutput(t, repo, "contract", "list")
+
+	// Populate three contracts: two delegated (to force the same-mode sort
+	// comparator to fall through to alphabetical-by-task-id ordering) plus
+	// one direct. This exercises both branches of the comparator in
+	// runWorkflowContractList.
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, c := range []*DelegationContract{
+		{SchemaVersion: 1, ID: "del-a", Mode: DelegationContractModeDelegated,
+			ParentPlanID: "p1", ParentTaskID: "task-b", Title: "A",
+			WriteScope: []string{"commands/a/"}, Status: "active",
+			CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "del-b", Mode: DelegationContractModeDelegated,
+			ParentPlanID: "p1", ParentTaskID: "task-a", Title: "B",
+			WriteScope: []string{"commands/b/"}, Status: "active",
+			CreatedAt: now, UpdatedAt: now},
+		{SchemaVersion: 1, ID: "del-c", Mode: DelegationContractModeDirect,
+			ParentPlanID: "p1", ParentTaskID: "task-c", Title: "C",
+			WriteScope: []string{"commands/c/"}, Status: "active",
+			CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := saveDelegationContract(repo, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	executeWorkflowCommandOutput(t, repo, "contract", "list")
+
+	prev := workflowTestJSON
+	workflowTestJSON = true
+	t.Cleanup(func() { workflowTestJSON = prev })
+	executeWorkflowCommandOutput(t, repo, "contract", "list")
+}
+
+func TestWorkflowContractList_PropagatesListError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	// Replace the delegation dir with an unreadable directory so
+	// listDelegationContracts surfaces a ReadDir error to the list runner.
+	dir := delegationDir(repo)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadableDir(t, dir)
+
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewCmdForTest()
+	cmd.SilenceUsage = true
+	cmd.SilenceErrors = true
+	cmd.SetArgs([]string{"contract", "list"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "list contracts") {
+		t.Fatalf("expected list-contracts error, got: %v", err)
+	}
+}
+
+func TestResolveContractWriteScope_EmptyEverything(t *testing.T) {
+	// When neither an explicit CSV nor a TASKS.yaml fallback exists the
+	// resolver returns nil — the caller (runWorkflowContractCreate) then
+	// surfaces the friendly "write scope is empty" error.
+	got := resolveContractWriteScope("", false, nil)
+	if got != nil {
+		t.Errorf("expected nil for empty-everything, got %v", got)
 	}
 }
