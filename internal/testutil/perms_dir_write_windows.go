@@ -209,18 +209,23 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 			nil,
 		)
 		runtime.KeepAlive(origSD)
-		// Close the sharing-lock handles. t.TempDir's RemoveAll runs after
-		// our cleanup so the freshly-unlocked children become deletable.
-		for _, h := range heldHandles {
-			_ = windows.CloseHandle(h)
+		// Close the sharing-lock handles in REVERSE walk order. WalkDir
+		// visits directories before their contents (pre-order, lexical), so
+		// handles were appended parent-before-child. t.TempDir's recursive
+		// RemoveAll deletes children before their parents, so we must
+		// release file handles BEFORE the enclosing directory handles —
+		// otherwise the dir-handle release order would not match RemoveAll's
+		// traversal and leave handles open during child deletion attempts.
+		for i := len(heldHandles) - 1; i >= 0; i-- {
+			_ = windows.CloseHandle(heldHandles[i])
 		}
 		_ = heldPaths // retained for diagnostics if a future failure mode wants paths-with-handles
 	})
 
-	// Probe 1: attempt to create a transient child. If the create succeeds
-	// the parent deny-ACE was not applied (elevated SeBackup/SeRestore,
-	// non-NTFS volume); skip rather than mislead the caller. Clean up the
-	// probe file on the unexpected success path.
+	// Probe: attempt to create a transient child. If the create succeeds the
+	// deny-ACE was not applied (elevated SeBackup/SeRestore, non-NTFS
+	// volume); skip rather than mislead the caller. Clean up the probe file
+	// on the unexpected success path.
 	probe := filepath.Join(dir, ".makedirwritedenied-probe")
 	if f, err := os.OpenFile(probe, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
 		_ = f.Close()

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -157,16 +158,32 @@ func TestClearExistingCanonical_ForceRealDirRemoveError(t *testing.T) {
 
 // TestMaterializePromoteSource_RollbackCrossFsCopyFails covers the cross-fs
 // rollback path where CopyTree also fails (lines 179–182). We swap osSymlink
-// to fail, osRename to return EXDEV, and chmod the project bucket dir
-// read-only so the rollback CopyTree cannot recreate the source. We do this
-// by injecting via osRename rather than CopyTree, because CopyTree is not
+// to fail, osRename to return EXDEV, and deny writes on the project bucket
+// dir so the rollback CopyTree cannot recreate the source. We do this by
+// injecting via osRename rather than CopyTree, because CopyTree is not
 // itself a seam.
 //
-// Easiest path: make the source bucket dir read-only AFTER the source has
+// Easiest path: deny writes on the source bucket dir AFTER the source has
 // been removed (during materialize). We accomplish this by also wrapping
-// osSymlink — by the time it runs, the source has been removed; chmod the
-// parent then.
+// osSymlink — by the time it runs, the source has been removed;
+// MakeDirWriteDenied the parent then.
+//
+// Windows-skipped: the rollback path is gated on MkdirAll(bucket/alpha)
+// failing. On the github-actions windows-latest runner, the DACL deny-ACE
+// blocks file create (FILE_ADD_FILE = 0x0002) but the runner's effective
+// token still grants directory create (FILE_ADD_SUBDIRECTORY = 0x0004),
+// so CopyTree's MkdirAll succeeds and the rollback completes — no error
+// to assert. The full sharing-mode lock used by MakeDirWriteDenied for
+// child-deletion denial doesn't apply here because the bucket has zero
+// children at install time (alpha was already removed). The behaviour the
+// test exercises is POSIX-specific and was acknowledged as such by the
+// original author with an explicit runtime.GOOS == "windows" skip; the
+// dir-write-denied migration accidentally dropped that gate.
 func TestMaterializePromoteSource_RollbackCrossFsCopyFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows runner grants FILE_ADD_SUBDIRECTORY despite the parent DACL deny on FILE_ADD_FILE / FILE_DELETE_CHILD, so CopyTree's MkdirAll succeeds and the asserted rollback-failure path cannot be reached; POSIX-only assertion")
+	}
+
 	_, projectPath := atomicEnv(t, "xdevcopy")
 	writeWidget(t, projectPath, "alpha")
 
