@@ -9,6 +9,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // writeClaudeProjectJSONL creates ~/.claude/projects/<slug>/<sessionID>.jsonl
@@ -802,5 +803,72 @@ func TestIsClaudeAgentDir(t *testing.T) {
 	}
 	if isClaudeAgentDir(notDir) {
 		t.Error("expected false for non-directory")
+	}
+}
+
+// ---------- P3: Badge + CountLinks (StatusBadger + LinkCounter) ----------
+
+// TestClaudeBadge_EmptyProject pins the empty-project contract: no
+// .claude tree means Present=false, Broken=false.
+func TestClaudeBadge_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	got := NewClaude().(*claude).Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if got.Name != "Claude" {
+		t.Errorf("Badge.Name = %q, want %q", got.Name, "Claude")
+	}
+	if got.Present || got.Broken {
+		t.Errorf("empty project: Badge = %+v, want Present=false Broken=false", got)
+	}
+}
+
+// TestClaudeCountLinks_BrokenRuleSymlink covers the broken-link branch:
+// a dangling .claude/rules symlink surfaces as (ok=0, broken=1) and
+// Badge.Broken=true.
+func TestClaudeCountLinks_BrokenRuleSymlink(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+
+	tmp := t.TempDir()
+	rulesDir := filepath.Join(tmp, ".claude", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(tmp, "gone.md"), filepath.Join(rulesDir, "missing.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	ok, broken := c.CountLinks("proj", tmp, filepath.Join(tmp, ".agents"))
+	if ok != 0 || broken != 1 {
+		t.Errorf("CountLinks = (%d,%d), want (0,1)", ok, broken)
+	}
+	b := c.Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if b.Present || !b.Broken {
+		t.Errorf("Badge = %+v, want Present=false Broken=true", b)
+	}
+}
+
+// TestClaudeCountLinks_HealthyManagedFile covers the positive single-file
+// branch: a resolvable .mcp.json symlink to an existing target counts as
+// (ok=1, broken=0) and Badge surfaces Present=true.
+func TestClaudeCountLinks_HealthyManagedFile(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "real-mcp.json")
+	if err := os.WriteFile(target, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(tmp, ".mcp.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewClaude().(*claude)
+	ok, broken := c.CountLinks("proj", tmp, filepath.Join(tmp, ".agents"))
+	if ok != 1 || broken != 0 {
+		t.Errorf("CountLinks = (%d,%d), want (1,0)", ok, broken)
+	}
+	b := c.Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if !b.Present || b.Broken {
+		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
 	}
 }

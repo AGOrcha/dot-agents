@@ -197,3 +197,28 @@ func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error)
 	}
 	return append(append(skills, plugins...), agents...), nil
 }
+
+// CountLinks implements LinkCounter for the opencode platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter that previously lived in status.go's
+// opencodeTextBadge.
+//
+// Healthy: opencode.json when it is a resolvable managed link, plus any
+// resolvable entry under .opencode/agent/ or .agents/skills/. Broken: a
+// resolvable managed link whose target is missing.
+func (o *opencode) CountLinks(_, repoPath, _ string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, opencodeJSON),
+	})
+	addManagedDirCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, opencodeDir, "agent"),
+		filepath.Join(repoPath, ".agents", "skills"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the opencode platform.
+func (o *opencode) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := o.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "OpenCode", Present: ok > 0, Broken: broken > 0}
+}

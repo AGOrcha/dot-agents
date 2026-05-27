@@ -481,3 +481,32 @@ func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	}
 	return append(skills, tomls...), nil
 }
+
+// CountLinks implements LinkCounter for the codex platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter previously inlined in status.go's
+// codexTextBadge.
+//
+// Healthy: AGENTS.md, .codex/config.toml, .codex/hooks.json (when each is a
+// resolvable managed link with a reachable target, or any present file —
+// matching the historical addManagedCounts contract), plus any resolvable
+// entry under .codex/agents/ or .agents/skills/. Broken: a resolvable
+// managed link whose target is missing.
+func (c *codex) CountLinks(_, repoPath, _ string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, codexAgentsMarkdown),
+		filepath.Join(repoPath, codexDir, "config.toml"),
+		filepath.Join(repoPath, codexDir, codexHooksJSON),
+	})
+	addManagedDirCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, codexDir, "agents"),
+		filepath.Join(repoPath, codexAgentsDir, "skills"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the codex platform.
+func (c *codex) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := c.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "Codex", Present: ok > 0, Broken: broken > 0}
+}

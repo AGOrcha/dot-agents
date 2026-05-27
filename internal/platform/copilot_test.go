@@ -243,3 +243,41 @@ func TestCopilotRemoveLinksFullSweep(t *testing.T) {
 		t.Error("hook symlink should be removed")
 	}
 }
+
+// ---------- P3: Badge + CountLinks (StatusBadger + LinkCounter) ----------
+
+// TestCopilotBadge_EmptyProject pins the empty-project contract.
+func TestCopilotBadge_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	got := NewCopilot().(*copilot).Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if got.Name != "Copilot" {
+		t.Errorf("Badge.Name = %q, want %q", got.Name, "Copilot")
+	}
+	if got.Present || got.Broken {
+		t.Errorf("empty project: Badge = %+v, want Present=false Broken=false", got)
+	}
+}
+
+// TestCopilotCountLinks_HealthyInstructionsFile covers the positive
+// single-file branch: a present .github/copilot-instructions.md counts as
+// healthy and Badge surfaces Present=true.
+func TestCopilotCountLinks_HealthyInstructionsFile(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, ".github")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "copilot-instructions.md"), []byte("# x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	ok, broken := c.CountLinks("proj", tmp, filepath.Join(tmp, ".agents"))
+	if ok < 1 || broken != 0 {
+		t.Errorf("CountLinks = (%d,%d), want (>=1,0)", ok, broken)
+	}
+	b := c.Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if !b.Present || b.Broken {
+		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
+	}
+}
