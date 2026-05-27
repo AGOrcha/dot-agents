@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-gcc5-verify-close-unblock-1779848143
+parent_plan_id: graphstore-concurrency-contract
+parent_task_id: gcc5-verify-close-unblock
+title: Verify done-criteria; close; notify downstream unblocked
+summary: Delegated from plan Graphstore concurrency contract (Path A)
+write_scope: []
+success_criteria: |-
+    All spec done criteria proven: one published contract, all
+    callers+Deps bound, bounds+timeout uniform, maxNodes Low-1 closed,
+    OD-1 closed. go test ./... green; cov gate satisfied (interface
+    seams, no new allowlist). Archive plan. Notify: di-refactor-rollout
+    is unblocked (Deps boundary pinned at gcc1) and the cg6b 95% tail
+    may now use the pinned contract-bound seam pattern for its
+    [defensive-unreachable] files.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-27T02:15:43Z"
+updated_at: "2026-05-27T02:23:48Z"
