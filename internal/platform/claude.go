@@ -24,6 +24,7 @@ const (
 	claudeSettingsLocalJSON = "settings.local.json"
 	claudeDir               = ".claude"
 	claudeAgentsBucketDir   = ".agents"
+	claudeMCPFile           = ".mcp.json"
 )
 
 func NewClaude() Platform { return &claude{io: stdPlatformIO{}} }
@@ -315,7 +316,7 @@ func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
 func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) error {
 	if src := resolveScopedFile(agentsHome, "mcp", project, "claude.json", "mcp.json"); src != "" {
 		// Managed-replace at a fixed owned repo path (.mcp.json).
-		return links.SymlinkReplacing(src, filepath.Join(repoPath, ".mcp.json"), backupSidecar)
+		return links.SymlinkReplacing(src, filepath.Join(repoPath, claudeMCPFile), backupSidecar)
 	}
 	return nil
 }
@@ -531,7 +532,7 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 func (c *claude) RemoveLinks(project, repoPath string) error {
 	agentsHome := config.AgentsHome()
 
-	mcpPath := filepath.Join(repoPath, ".mcp.json")
+	mcpPath := filepath.Join(repoPath, claudeMCPFile)
 	return errors.Join(
 		c.removeProjectRuleLinks(project, repoPath, agentsHome),
 		c.removeProjectSettingsLink(project, repoPath, agentsHome),
@@ -711,7 +712,7 @@ func (c *claude) brokenRuleLinks(repoPath string) []BrokenLink {
 // today, but parameterizing now means P3's CountLinks/Badge migration can
 // share the helper without a signature churn).
 func (c *claude) brokenMCPLink(_, repoPath, _ string) []BrokenLink {
-	linkPath := filepath.Join(repoPath, ".mcp.json")
+	linkPath := filepath.Join(repoPath, claudeMCPFile)
 	state, raw := classifyManagedLink(linkPath)
 	if state != linkStateBroken {
 		return nil
