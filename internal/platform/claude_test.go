@@ -872,3 +872,134 @@ func TestClaudeCountLinks_HealthyManagedFile(t *testing.T) {
 		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
 	}
 }
+
+// TestHasMultipleHardLinks_PlatformPkg exercises the canonical
+// hasMultipleHardLinks helper (and its HasMultipleHardLinks public
+// wrapper) directly from the platform package. The lifecycle-side
+// coverage of the same helper still exists (status_exports_test.go), but
+// the platform-package coverage profile only attributes hits to a file
+// when the test lives in that file's package — hence this local copy.
+// Build-tagged so the unix file is covered on POSIX runners and the
+// windows file picks up coverage on the Windows runner (the merged
+// multi-OS coverage profile fuses both).
+func TestHasMultipleHardLinks_PlatformPkg(t *testing.T) {
+	tmp := t.TempDir()
+
+	// Absent path → false.
+	if HasMultipleHardLinks(filepath.Join(tmp, "ghost")) {
+		t.Error("HasMultipleHardLinks(absent) = true, want false")
+	}
+
+	// Regular file → false.
+	regular := filepath.Join(tmp, "regular.txt")
+	if err := os.WriteFile(regular, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if HasMultipleHardLinks(regular) {
+		t.Error("HasMultipleHardLinks(single-link) = true, want false")
+	}
+
+	// Hard-link best-effort: skip if the runner's filesystem rejects.
+	linked := filepath.Join(tmp, "linked.txt")
+	if err := os.Link(regular, linked); err != nil {
+		t.Logf("os.Link unsupported on this filesystem (%v); skipping multi-link assertion", err)
+		return
+	}
+	if !HasMultipleHardLinks(regular) {
+		t.Error("HasMultipleHardLinks(2-link) = false, want true")
+	}
+	if !HasMultipleHardLinks(linked) {
+		t.Error("HasMultipleHardLinks(2-link via alias) = false, want true")
+	}
+}
+
+// TestClaudeCountRules_ManagedFileBranch hits the hard-link (Windows
+// reparse-point-free) branch of claudeCountRules: a regular file in
+// .claude/rules whose link count > 1 is treated as a Windows managed
+// rule and counted ok. Hard-link creation is best-effort: skip the
+// assertion on filesystems that reject os.Link.
+func TestClaudeCountRules_ManagedFileBranch(t *testing.T) {
+	tmp := t.TempDir()
+	rulesDir := filepath.Join(tmp, "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(tmp, "src.md")
+	if err := os.WriteFile(source, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(rulesDir, "alias.md")
+	if err := os.Link(source, managed); err != nil {
+		t.Skipf("os.Link unsupported (%v); skipping", err)
+	}
+	ok, broken := claudeCountRules(rulesDir)
+	if ok != 1 || broken != 0 {
+		t.Errorf("managed hardlink: got (%d,%d), want (1,0)", ok, broken)
+	}
+
+	// Plain regular file (link count 1) → ignored entirely.
+	plain := filepath.Join(rulesDir, "plain.md")
+	if err := os.WriteFile(plain, []byte("plain"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ok2, broken2 := claudeCountRules(rulesDir)
+	if ok2 != 1 || broken2 != 0 {
+		t.Errorf("with plain file present: got (%d,%d), want (1,0) (plain ignored)", ok2, broken2)
+	}
+}
+
+// TestAddManagedFileCounts_BrokenSymlink covers the broken-link
+// classification branch of addManagedFileCounts.
+func TestAddManagedFileCounts_BrokenSymlink(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+
+	tmp := t.TempDir()
+	broken := filepath.Join(tmp, "broken.json")
+	if err := os.Symlink(filepath.Join(tmp, "missing.json"), broken); err != nil {
+		t.Fatal(err)
+	}
+	regular := filepath.Join(tmp, "real.txt")
+	if err := os.WriteFile(regular, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	absent := filepath.Join(tmp, "ghost")
+
+	ok, b := 0, 0
+	addManagedFileCounts(&ok, &b, []string{absent, regular, broken})
+	if ok != 1 || b != 1 {
+		t.Errorf("addManagedFileCounts: got ok=%d broken=%d, want ok=1 broken=1 (absent skipped)", ok, b)
+	}
+}
+
+// TestAddManagedDirCounts_MixedEntries exercises the directory walk: one
+// healthy symlink, one broken symlink, one plain file. Expect ok=2 (plain
+// classified as not-a-link → ok), broken=1.
+func TestAddManagedDirCounts_MixedEntries(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "dir")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(tmp, "real.md")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, "healthy")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(tmp, "vanished"), filepath.Join(dir, "broken")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plain.md"), []byte("p"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Absent dir is silently skipped.
+	ok, br := 0, 0
+	addManagedDirCounts(&ok, &br, []string{filepath.Join(tmp, "missing"), dir})
+	if ok != 2 || br != 1 {
+		t.Errorf("addManagedDirCounts: got ok=%d broken=%d, want ok=2 broken=1 (absent dir skipped)", ok, br)
+	}
+}
