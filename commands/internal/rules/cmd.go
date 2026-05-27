@@ -1,14 +1,17 @@
 package rules
 
 import (
+	"github.com/NikashPrakash/dot-agents/commands/internal/canonical"
 	"github.com/spf13/cobra"
 )
 
 // NewRulesCmd builds the `da rules` command tree from injected dependencies.
 // Mirrors agents.NewAgentsCmd / skills.NewSkillsCmd: helpers come from Deps so
-// the subpackage stays independent of the parent commands/ package.
+// the subpackage stays independent of the parent commands/ package. The
+// cobra-tree assembly is delegated to canonical.NewCanonicalResourceCmd so
+// mcp/settings/rules share one implementation.
 func NewRulesCmd(deps Deps) *cobra.Command {
-	cmd := &cobra.Command{
+	return canonical.NewCanonicalResourceCmd(canonical.ResourceCmdSpec{
 		Use:   "rules",
 		Short: "Inspect and manage canonical ~/.agents/rules files",
 		Long: `Commands for rule files stored under ~/.agents/rules/<scope>/.
@@ -26,17 +29,30 @@ platform copies unless you know they are unmanaged.`,
 			"  da rules show global rules.mdc",
 			"  da rules remove global old-rule.mdc",
 		),
-	}
-	cmd.AddCommand(NewListCmd(deps))
-	cmd.AddCommand(NewShowCmd(deps))
-	cmd.AddCommand(NewRemoveCmd(deps))
-	return cmd
+		List:   newListSpec(deps),
+		Show:   newShowSpec(deps),
+		Remove: newRemoveSpec(deps),
+	})
 }
 
 // NewListCmd builds the `da rules list` cobra command. Exported so the
 // parent-package shim can wire it for cross-cutting RunE coverage tests.
-func NewListCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+func NewListCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newListSpec(deps)) }
+
+// NewShowCmd builds the `da rules show` cobra command. Exported so the
+// parent-package shim can wire it for cross-cutting RunE coverage tests.
+func NewShowCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newShowSpec(deps)) }
+
+// NewRemoveCmd builds the `da rules remove` cobra command. Exported so the
+// parent-package shim can wire it for cross-cutting RunE coverage tests.
+func NewRemoveCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newRemoveSpec(deps)) }
+
+// newListSpec returns the canonical.SubCmdSpec for `da rules list`. Note
+// RunList in rules takes (deps, scope) — unlike mcp/settings where it
+// takes just (scope) — and the closure captures deps here so the spec
+// stays parameter-symmetric across subpackages.
+func newListSpec(deps Deps) canonical.SubCmdSpec {
+	return canonical.SubCmdSpec{
 		Use:   "list [scope]",
 		Short: "List canonical rule files for a scope",
 		Example: exampleBlock(
@@ -54,10 +70,9 @@ func NewListCmd(deps Deps) *cobra.Command {
 	}
 }
 
-// NewShowCmd builds the `da rules show` cobra command. Exported so the
-// parent-package shim can wire it for cross-cutting RunE coverage tests.
-func NewShowCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+// newShowSpec returns the canonical.SubCmdSpec for `da rules show`.
+func newShowSpec(deps Deps) canonical.SubCmdSpec {
+	return canonical.SubCmdSpec{
 		Use:   "show <scope> <name>",
 		Short: "Show metadata for one rule file under ~/.agents/rules/",
 		Args:  deps.ExactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` is the file (e.g. rules.mdc) or stem (rules)."),
@@ -67,10 +82,9 @@ func NewShowCmd(deps Deps) *cobra.Command {
 	}
 }
 
-// NewRemoveCmd builds the `da rules remove` cobra command. Exported so the
-// parent-package shim can wire it for cross-cutting RunE coverage tests.
-func NewRemoveCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+// newRemoveSpec returns the canonical.SubCmdSpec for `da rules remove`.
+func newRemoveSpec(deps Deps) canonical.SubCmdSpec {
+	return canonical.SubCmdSpec{
 		Use:   "remove <scope> <name>",
 		Short: "Remove a rule file from ~/.agents/rules/ (canonical storage only)",
 		Long: `Deletes the file from managed rule storage only (not repo links). After removal,

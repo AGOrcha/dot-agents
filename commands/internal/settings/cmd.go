@@ -1,12 +1,17 @@
 package settings
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/NikashPrakash/dot-agents/commands/internal/canonical"
+	"github.com/spf13/cobra"
+)
 
 // NewCmd builds the `da settings` command tree from injected dependencies.
 // Mirrors agents.NewAgentsCmd / skills.NewSkillsCmd: helpers come from Deps
-// so the subpackage stays independent of the parent commands/ package.
+// so the subpackage stays independent of the parent commands/ package. The
+// cobra-tree assembly is delegated to canonical.NewCanonicalResourceCmd
+// so mcp/settings/rules share one implementation.
 func NewCmd(deps Deps) *cobra.Command {
-	cmd := &cobra.Command{
+	return canonical.NewCanonicalResourceCmd(canonical.ResourceCmdSpec{
 		Use:   "settings",
 		Short: "Inspect and manage canonical ~/.agents/settings files",
 		Long: `Commands for platform settings files stored under ~/.agents/settings/<scope>/.
@@ -23,16 +28,24 @@ Prefer editing canonical paths here, then run refresh or install.`,
 			"  da settings show global cursor.json",
 			"  da settings remove proj cursorignore",
 		),
-	}
-	cmd.AddCommand(NewListCmd(deps))
-	cmd.AddCommand(NewShowCmd(deps))
-	cmd.AddCommand(NewRemoveCmd(deps))
-	return cmd
+		List:   newListSpec(deps),
+		Show:   newShowSpec(deps),
+		Remove: newRemoveSpec(deps),
+	})
 }
 
-// NewListCmd builds the `da settings list` subcommand.
-func NewListCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+// NewListCmd builds the `da settings list` subcommand standalone.
+func NewListCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newListSpec(deps)) }
+
+// NewShowCmd builds the `da settings show` subcommand standalone.
+func NewShowCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newShowSpec(deps)) }
+
+// NewRemoveCmd builds the `da settings remove` subcommand standalone.
+func NewRemoveCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newRemoveSpec(deps)) }
+
+// newListSpec returns the canonical.SubCmdSpec for `da settings list`.
+func newListSpec(deps Deps) canonical.SubCmdSpec {
+	return canonical.SubCmdSpec{
 		Use:   "list [scope]",
 		Short: "List canonical settings files for a scope",
 		Example: exampleBlock(
@@ -50,9 +63,9 @@ func NewListCmd(deps Deps) *cobra.Command {
 	}
 }
 
-// NewShowCmd builds the `da settings show` subcommand.
-func NewShowCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+// newShowSpec returns the canonical.SubCmdSpec for `da settings show`.
+func newShowSpec(deps Deps) canonical.SubCmdSpec {
+	return canonical.SubCmdSpec{
 		Use:   "show <scope> <name>",
 		Short: "Show metadata for one settings file under ~/.agents/settings/",
 		Args:  deps.ExactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` is the file (e.g. cursor.json) or stem."),
@@ -62,9 +75,9 @@ func NewShowCmd(deps Deps) *cobra.Command {
 	}
 }
 
-// NewRemoveCmd builds the `da settings remove` subcommand.
-func NewRemoveCmd(deps Deps) *cobra.Command {
-	return &cobra.Command{
+// newRemoveSpec returns the canonical.SubCmdSpec for `da settings remove`.
+func newRemoveSpec(deps Deps) canonical.SubCmdSpec {
+	return canonical.SubCmdSpec{
 		Use:   "remove <scope> <name>",
 		Short: "Remove a settings file from ~/.agents/settings/ (canonical storage only)",
 		Long: `Deletes the file from managed settings storage only (not repo links). After removal,
