@@ -1,0 +1,100 @@
+schema_version: 1
+task_id: adhoc-2026-05-26T23-24-00Z
+parent_plan_id: adhoc
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: |-
+  ## KG Context (Step 0)
+
+  ### kg changes --brief
+  Change Impact
+  Analyzed 34 changed file(s):
+  - 3 changed function(s)/class(es)
+  - 0 affected flow(s)
+  - 3 test gap(s)
+  - Overall risk score: 0.30
+  - Untested: writeBundleFixture, buildDelegationBundleForFanout, assertFanoutBundleDefaults
+  Note: run 'kg code-status' to verify the code graph is current.
+  Note: the dirty worktree includes concurrent workflow-state artifacts outside
+  this review scope; the scoped impact command below names this pass's files.
+
+  ### kg impact <reviewed files>
+  Impact Radius
+  Blast radius for 30 reviewed file(s):
+  - 180 nodes directly changed
+  - 50 nodes impacted (within 2 hops)
+  - 7 additional files affected
+  - Results truncated: showing 50 of 230 impacted nodes
+  The detailed command readback identified downstream command/add/agent and
+  workflow tests; full Go regression coverage passed after review.
+
+  ## Per-file review
+
+  - Workflow code and tests (`commands/workflow/`, `tests/test-ralph-closeout-gate.sh`):
+    accepted. Generated parent closeout metadata now matches the existing
+    closeout implementation, and shell coverage includes contracted accept
+    and orphaned-return rejection.
+  - Runtime scripts (`bin/tests/ralph-*`): accepted. Staged fanout no longer
+    injects legacy full-slice instructions by default; self-tests pin that
+    boundary.
+  - Prompts, overlays, specs, and salvage records: accepted. They keep
+    `app_type` pipeline profiles distinct from parent-resolved stage
+    instructions, correct authored use of derived `impact_radius_kind`, and
+    specify the resolved execution manifest required for later planning.
+  - Return ownership decision: accepted. Named reviewers now target typed
+    evidence only; a deterministic parent-invoked return/aggregation gate is
+    identified as the correct future owner for consolidated decision and
+    merge-back output. Current consolidated-review output is documented as
+    compatibility behavior rather than silently treated as the target.
+  - Restored proposals: accepted. `agent-context-resolution-architecture.md`
+    and `verify-record-review-direct-iteration.md` match the PA-cursor branch
+    by object hash. `config-explain-live-surface.md` and
+    `scope-routed-da-review.md` restore the branch text with only a terminal
+    newline normalization relative to the source blobs.
+  - New planning input proposal: accepted.
+    `staged-profile-dispatch-and-return-gate.md` consolidates config,
+    dispatch, artifact-ownership, and follow-on `da` planning requirements.
+  - External-source boundary: accepted. `external-agent-sources` now states
+    that app-type profiles and overlay selection remain Tier 1 policy, while
+    executable stage resources may use existing Tier 2 media types; runtime
+    delegation bundles are explicitly distinct from registry bundle pointers.
+  - Organization resolution boundary: accepted. `org-config-resolution` now
+    extends layered precedence to the staged execution manifest, with
+    inherited locks and audited exceptions for stage agents, reviewers,
+    overlays, verifier chains, return/closeout policy, execution mode, and
+    package trust constraints.
+
+  Residual risk: generated bundles still carry compatibility-shaped
+  `worker.profile: loop-worker` and `closeout.worker_must` metadata until
+  named native stage agents and an execution-mode/per-stage schema are
+  materialized. This is documented rather than silently treated as resolved.
+
+  ## §1.6 telemetry envelope
+
+  ```yaml
+  resource_type: skill
+  resource_id: self-review
+  invoked_at: "2026-05-27T00:01:57Z"
+  invoked_by: orchestrator
+  task_id: adhoc-2026-05-26T23-24-00Z
+
+  outcome:
+    declared: success
+    agent_self_assessment: "Scoped closeout, salvage, external-source classification, and organization-resolution policy input cleanup is covered; native stage schema and return-gate implementation are explicitly delegated to canonical planning."
+
+  post_invocation:
+    agent_actions_after_skill_returned: []
+    user_corrections: []
+    retries_in_loop: 0
+
+  improvement_signals:
+    missing_in_skill: []
+    redundant_in_skill: []
+    tooling_gap: { present: false, note: "" }
+    script_gap: { present: true, note: "tests/test-claude-configs.sh hardcodes /workspace and cannot run from this local checkout." }
+    instruction_gap: { present: false, note: "" }
+  ```
+recorded_at: "2026-05-27T00:01:57Z"
+recorded_by: self-review (skill)
