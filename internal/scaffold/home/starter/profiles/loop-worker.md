@@ -45,7 +45,7 @@ for delegated work; it is the direct, non-delegated completion path.
 
 ## Parent closeout (orchestrator)
 
-After accepting delegated output: `workflow delegation closeout --plan <id> --task <id> --decision accept|reject`. Accepted closeout already reconciles canonical delegated completion; do not run `workflow advance` for delegated closeout. `workflow advance` remains the direct, non-delegated completion path.
+After accepting delegate output: `workflow delegation closeout --plan <id> --task <id> --decision accept|reject` — an accepted closeout already advances the canonical task to `completed` (see `commands/workflow/delegation.go` `applyCloseoutDecisionToTasks`), so a separate `workflow advance` call is redundant. `workflow advance` remains the direct, non-delegated completion path.
 
 ## Reusable verification metadata (bundle / flags)
 

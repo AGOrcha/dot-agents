@@ -33,7 +33,7 @@ when one is configured.
 
 - Load `.agents/prompts/review-agent.project.md`.
 - Run as its own dedicated subagent session (medium).
-- Two-lens contract: phase 1 (product, domain, stability) → phase 2 (tech-lead, architecture, standards).
+- Three-lens contract: spawn one reviewer per lens — `architecture-standards-reviewer`, `acceptance-invariants-reviewer`, `adversarial-reviewer` (see `~/.agents/agents/global/<lens>-reviewer/AGENT.md` and the lens definitions in `~/.agents/profiles/loop-worker.md` § "Review lenses"). Each lens emits its own findings + pass/fail verdict; the parent aggregates.
 - Persist decision: `da workflow verify record --kind review`.
 - Write merge-back: `da workflow merge-back ...`
 - Produce `accept`, `reject`, or `escalate`, then stop.
@@ -42,9 +42,7 @@ when one is configured.
 
 - Read review decision, verifier artifacts, and merge-back.
 - If evidence is not acceptable, fail the gate before closeout.
-- Run: `da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept|reject`
-- Accepted delegation closeout completes the delegated task; do not also run
-  `workflow advance`. Advancement remains for direct, non-delegated work.
+- Run: `da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept|reject` — Accepted delegation closeout completes the delegated task by setting the canonical task to `completed` (see `commands/workflow/delegation.go` `applyCloseoutDecisionToTasks`); do not also call `workflow advance`. Advancement remains for direct, non-delegated work.
 - After acceptance: archival, cleanup, and continuation logic.
 - If review exposes unresolved planning/architecture questions, pause and do not auto-continue.
 
