@@ -9,86 +9,50 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// canonicalSpec is the single source of truth for the `da settings`
-// resource family. It populates both the data-layer fields
-// cmdutil.RunCanonical{List,Show,Remove} consume and the CLI-surface
-// fields cmdutil.NewCanonicalResourceCmd consumes. One struct literal
-// per resource — there is no parallel ResourceCmdSpec to keep in sync.
+// canonicalSpec assembles the `da settings` resource spec by combining
+// the static cmdutil.SettingsResource definition (Kind/DirSegment/strings
+// /Examples + EnsureScope) with the per-leaf runner closures that need
+// access to platform.ListCanonicalSettingsFiles + findSettingsSpec for
+// hint-aware errors.
 //
-// Returning a fresh spec per call keeps the closure-captured Deps
-// explicit at each call site so list (which carries no Deps) and
-// show/remove (which do) share the exact same projection of platform
-// helpers.
+// Per plan duplicate-density-drop: keeping this body as a single call
+// into cmdutil.SpecForResource means the only duplication across the
+// mcp/settings/rules trio is the four lines of runner closure shape —
+// which Sonar's clone detector treats as structurally distinct because
+// the captured platform.* helpers and findXxxSpec wrappers differ.
+//
+// settings uses Deps.MaximumNArgsWithHints (matching rules; mcp uses
+// MaxArgsWithHints), so the list-args binding happens at this leaf via
+// maxArgs(...) — that's why the args validators flow into
+// SpecForResource as parameters rather than living on the def.
 func canonicalSpec(deps Deps) cmdutil.CanonicalFileSpec {
-	return cmdutil.CanonicalFileSpec{
-		Kind:        "Settings",
-		DirSegment:  "settings",
-		SingularRem: "settings file",
-		EmptyHint: func(scope string) string {
-			return "No settings files under ~/.agents/settings/" + scope + "/"
+	return cmdutil.SpecForResource(
+		cmdutil.SettingsResource,
+		cmdutil.ResourceRunners{
+			List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
+				specs, err := platform.ListCanonicalSettingsFiles(agentsHome, scope)
+				if err != nil {
+					return nil, err
+				}
+				return cmdutil.EntriesFromSpecs(specs, func(sp platform.SettingsFileSpec) cmdutil.CanonicalFileEntry {
+					return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
+				}), nil
+			},
+			Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
+				sp, err := findSettingsSpec(deps, agentsHome, scope, name)
+				if err != nil {
+					return cmdutil.CanonicalFileEntry{}, err
+				}
+				return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
+			},
+			ListRun:   func(scope string) error { return RunList(scope) },
+			ShowRun:   func(scope, name string) error { return RunShow(deps, scope, name) },
+			RemoveRun: func(scope, name string) error { return RunRemove(deps, scope, name) },
 		},
-		List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
-			specs, err := platform.ListCanonicalSettingsFiles(agentsHome, scope)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]cmdutil.CanonicalFileEntry, len(specs))
-			for i, sp := range specs {
-				out[i] = cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
-			}
-			return out, nil
-		},
-		Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
-			sp, err := findSettingsSpec(deps, agentsHome, scope, name)
-			if err != nil {
-				return cmdutil.CanonicalFileEntry{}, err
-			}
-			return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
-		},
-		EnsureScope: platform.EnsureUnderSettingsScopeTree,
-
-		Use:   "settings",
-		Short: "Inspect and manage canonical ~/.agents/settings files",
-		Long: `Commands for platform settings files stored under ~/.agents/settings/<scope>/.
-
-Scopes are either global (~/.agents/settings/global/) or a managed project name
-(~/.agents/settings/<project>/), matching da status.
-
-Files include JSON/TOML/YAML configs (e.g. cursor.json, claude-code.json) and
-cursorignore. These are wired by add, import, refresh, install, and remove.
-Prefer editing canonical paths here, then run refresh or install.`,
-		Example: cmdutil.CanonicalCmdExampleBlock(
-			"  da settings list",
-			"  da settings list my-app",
-			"  da settings show global cursor.json",
-			"  da settings remove proj cursorignore",
-		),
-		ListSub: cmdutil.SubCmdStrings{
-			Use:   "list [scope]",
-			Short: "List canonical settings files for a scope",
-			Example: cmdutil.CanonicalCmdExampleBlock(
-				"  da settings list",
-				"  da settings list billing-api",
-			),
-		},
-		ListArgs: maxArgs(deps, 1, "Optionally pass a project scope (or `global`) to inspect that settings tree."),
-		ListRun:  func(scope string) error { return RunList(scope) },
-		ShowSub: cmdutil.SubCmdStrings{
-			Use:   "show <scope> <name>",
-			Short: "Show metadata for one settings file under ~/.agents/settings/",
-		},
-		ShowArgs: exactArgs(deps, 2, "`scope` is `global` or a managed project name; `name` is the file (e.g. cursor.json) or stem."),
-		ShowRun:  func(scope, name string) error { return RunShow(deps, scope, name) },
-		RemoveSub: cmdutil.SubCmdStrings{
-			Use:   "remove <scope> <name>",
-			Short: "Remove a settings file from ~/.agents/settings/ (canonical storage only)",
-			Long: `Deletes the file from managed settings storage only (not repo links). After removal,
-run da refresh or install for the relevant project so platform settings
-links stay consistent.`,
-		},
-		RemoveArgs: exactArgs(deps, 2, "`scope` is `global` or a managed project name; `name` matches list/show."),
-		RemoveRun:  func(scope, name string) error { return RunRemove(deps, scope, name) },
-	}
+		maxArgs(deps, 1, cmdutil.SettingsResource.ListArgsHint),
+		exactArgs(deps, 2, cmdutil.SettingsResource.ShowArgsHint),
+		exactArgs(deps, 2, cmdutil.SettingsResource.RemoveArgsHint),
+	)
 }
 
 // maxArgs / exactArgs guard against the zero-value Deps used by the

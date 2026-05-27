@@ -9,93 +9,49 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// canonicalSpec is the single source of truth for the `da mcp` resource
-// family. It populates both the data-layer fields cmdutil.RunCanonical{
-// List,Show,Remove} consume (Kind/DirSegment/List/Resolve/...) and the
-// CLI-surface fields cmdutil.NewCanonicalResourceCmd consumes
-// (Use/Short/Long/Example and the per-verb SubCmdStrings + Args + Run).
-// One struct literal per resource — there is no parallel ResourceCmdSpec
-// to keep in sync.
+// canonicalSpec assembles the `da mcp` resource spec by combining the
+// static cmdutil.MCPResource definition (Kind/DirSegment/strings/Examples
+// + EnsureScope) with the per-leaf runner closures that need access to
+// platform.ListCanonicalMCPFiles + findMCPSpec for hint-aware errors.
 //
-// deps is threaded through so the Resolve callback can wrap
-// platform.ResolveCanonicalMCPFile errors via findMCPSpec, which prefers
-// deps.ErrorWithHints / deps.UsageError when provided (matching the parent
-// commands package's user-facing error shape). mcp uses
-// MaxArgsWithHints (not MaximumNArgsWithHints like settings/rules), so
-// the ListArgs binding happens here, not in cmdutil.
+// Per plan duplicate-density-drop: keeping this body as a single call
+// into cmdutil.SpecForResource means the only duplication across the
+// mcp/settings/rules trio is the four lines of runner closure shape —
+// which Sonar's clone detector treats as structurally distinct because
+// the captured platform.* helpers and findXxxSpec wrappers differ.
+//
+// mcp uses Deps.MaxArgsWithHints (not MaximumNArgsWithHints like
+// settings/rules), so the list-args binding happens at this leaf via
+// maxArgs(...) — that's why the args validators flow into
+// SpecForResource as parameters rather than living on the def.
 func canonicalSpec(deps Deps) cmdutil.CanonicalFileSpec {
-	return cmdutil.CanonicalFileSpec{
-		Kind:        "MCP",
-		DirSegment:  "mcp",
-		SingularRem: "MCP file",
-		EmptyHint: func(scope string) string {
-			return "No MCP config files (.json/.yaml/.yml/.toml) under ~/.agents/mcp/" + scope + "/"
+	return cmdutil.SpecForResource(
+		cmdutil.MCPResource,
+		cmdutil.ResourceRunners{
+			List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
+				specs, err := platform.ListCanonicalMCPFiles(agentsHome, scope)
+				if err != nil {
+					return nil, err
+				}
+				return cmdutil.EntriesFromSpecs(specs, func(sp platform.MCPFileSpec) cmdutil.CanonicalFileEntry {
+					return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
+				}), nil
+			},
+			Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
+				sp, err := findMCPSpec(deps, agentsHome, scope, name)
+				if err != nil {
+					return cmdutil.CanonicalFileEntry{}, err
+				}
+				return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
+			},
+			ListRun:   func(scope string) error { return RunList(scope) },
+			ShowRun:   func(scope, name string) error { return RunShow(deps, scope, name) },
+			RemoveRun: func(scope, name string) error { return RunRemove(deps, scope, name) },
 		},
-		MissingDirHint: func(scope string) string {
-			return "No ~/.agents/mcp/" + scope + "/ directory yet (no canonical MCP files for this scope)."
-		},
-		List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
-			specs, err := platform.ListCanonicalMCPFiles(agentsHome, scope)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]cmdutil.CanonicalFileEntry, len(specs))
-			for i, sp := range specs {
-				out[i] = cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}
-			}
-			return out, nil
-		},
-		Resolve: func(agentsHome, scope, name string) (cmdutil.CanonicalFileEntry, error) {
-			sp, err := findMCPSpec(deps, agentsHome, scope, name)
-			if err != nil {
-				return cmdutil.CanonicalFileEntry{}, err
-			}
-			return cmdutil.CanonicalFileEntry{Scope: sp.Scope, BaseName: sp.BaseName, SourcePath: sp.SourcePath}, nil
-		},
-		EnsureScope: platform.EnsureUnderMCPScopeTree,
-
-		Use:   "mcp",
-		Short: "Inspect and manage canonical ~/.agents/mcp config files",
-		Long: `Commands for MCP server configs stored under ~/.agents/mcp/<scope>/.
-
-Scopes are either global (~/.agents/mcp/global/) or a managed project name
-(~/.agents/mcp/<project>/), matching da status.
-
-These files are what add, import, refresh, install, and remove wire into
-Cursor, Claude Code, Copilot, and related projections. Prefer editing canonical
-paths here, then run refresh or install for the project.`,
-		Example: cmdutil.CanonicalCmdExampleBlock(
-			"  da mcp list",
-			"  da mcp list my-app",
-			"  da mcp show global mcp.json",
-			"  da mcp remove global stale.json",
-		),
-		ListSub: cmdutil.SubCmdStrings{
-			Use:   "list [scope]",
-			Short: "List canonical MCP config files for a scope",
-			Example: cmdutil.CanonicalCmdExampleBlock(
-				"  da mcp list",
-				"  da mcp list billing-api",
-			),
-		},
-		ListArgs: maxArgs(deps, 1, "Optionally pass a project scope (or `global`) to inspect that MCP tree."),
-		ListRun:  func(scope string) error { return RunList(scope) },
-		ShowSub: cmdutil.SubCmdStrings{
-			Use:   "show <scope> <name>",
-			Short: "Show metadata for one MCP file under ~/.agents/mcp/",
-		},
-		ShowArgs: exactArgs(deps, 2, "`scope` is `global` or a managed project name; `name` is the file (e.g. mcp.json) or stem (mcp)."),
-		ShowRun:  func(scope, name string) error { return RunShow(deps, scope, name) },
-		RemoveSub: cmdutil.SubCmdStrings{
-			Use:   "remove <scope> <name>",
-			Short: "Remove an MCP file from ~/.agents/mcp/ (canonical storage only)",
-			Long: `Deletes the file from managed MCP storage only (not repo links). After removal,
-run da refresh or install for the relevant project so platform MCP
-links stay consistent.`,
-		},
-		RemoveArgs: exactArgs(deps, 2, "`scope` is `global` or a managed project name; `name` matches list/show."),
-		RemoveRun:  func(scope, name string) error { return RunRemove(deps, scope, name) },
-	}
+		maxArgs(deps, 1, cmdutil.MCPResource.ListArgsHint),
+		exactArgs(deps, 2, cmdutil.MCPResource.ShowArgsHint),
+		exactArgs(deps, 2, cmdutil.MCPResource.RemoveArgsHint),
+	)
 }
 
 // maxArgs / exactArgs guard against the zero-value Deps used by the
