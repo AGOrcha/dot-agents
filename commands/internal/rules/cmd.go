@@ -1,98 +1,25 @@
 package rules
 
 import (
-	"github.com/NikashPrakash/dot-agents/commands/internal/canonical"
+	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/spf13/cobra"
 )
 
 // NewRulesCmd builds the `da rules` command tree from injected dependencies.
 // Mirrors agents.NewAgentsCmd / skills.NewSkillsCmd: helpers come from Deps so
 // the subpackage stays independent of the parent commands/ package. The
-// cobra-tree assembly is delegated to canonical.NewCanonicalResourceCmd so
-// mcp/settings/rules share one implementation.
+// cobra-tree assembly lives in cmdutil so mcp/settings/rules share one
+// implementation; the per-resource description lives in a single
+// CanonicalFileSpec built by canonicalSpec (see list.go).
 func NewRulesCmd(deps Deps) *cobra.Command {
-	return canonical.NewCanonicalResourceCmd(canonical.ResourceCmdSpec{
-		Use:   "rules",
-		Short: "Inspect and manage canonical ~/.agents/rules files",
-		Long: `Commands for rule files stored under ~/.agents/rules/<scope>/.
-
-Scopes are either global (~/.agents/rules/global/) or a managed project name
-(~/.agents/rules/<project>/), matching da status.
-
-These files are what add, import, refresh, install, and remove wire into
-Cursor, Claude Code, Codex, and Copilot projections. Prefer editing canonical
-paths here, then run refresh or install for the project — do not hand-edit
-platform copies unless you know they are unmanaged.`,
-		Example: exampleBlock(
-			"  da rules list",
-			"  da rules list my-app",
-			"  da rules show global rules.mdc",
-			"  da rules remove global old-rule.mdc",
-		),
-		List:   newListSpec(deps),
-		Show:   newShowSpec(deps),
-		Remove: newRemoveSpec(deps),
-	})
+	return cmdutil.NewCanonicalResourceCmd(canonicalSpec(deps))
 }
 
-// NewListCmd builds the `da rules list` cobra command. Exported so the
-// parent-package shim can wire it for cross-cutting RunE coverage tests.
-func NewListCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newListSpec(deps)) }
-
-// NewShowCmd builds the `da rules show` cobra command. Exported so the
-// parent-package shim can wire it for cross-cutting RunE coverage tests.
-func NewShowCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newShowSpec(deps)) }
-
-// NewRemoveCmd builds the `da rules remove` cobra command. Exported so the
-// parent-package shim can wire it for cross-cutting RunE coverage tests.
-func NewRemoveCmd(deps Deps) *cobra.Command { return canonical.NewSubCmd(newRemoveSpec(deps)) }
-
-// newListSpec returns the canonical.SubCmdSpec for `da rules list`. Note
-// RunList in rules takes (deps, scope) — unlike mcp/settings where it
-// takes just (scope) — and the closure captures deps here so the spec
-// stays parameter-symmetric across subpackages.
-func newListSpec(deps Deps) canonical.SubCmdSpec {
-	return canonical.SubCmdSpec{
-		Use:   "list [scope]",
-		Short: "List canonical rule files for a scope",
-		Example: exampleBlock(
-			"  da rules list",
-			"  da rules list billing-api",
-		),
-		Args: deps.MaximumNArgsWithHints(1, "Optionally pass a project scope (or `global`) to inspect that rules tree."),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			scope := "global"
-			if len(args) > 0 {
-				scope = args[0]
-			}
-			return RunList(deps, scope)
-		},
-	}
-}
-
-// newShowSpec returns the canonical.SubCmdSpec for `da rules show`.
-func newShowSpec(deps Deps) canonical.SubCmdSpec {
-	return canonical.SubCmdSpec{
-		Use:   "show <scope> <name>",
-		Short: "Show metadata for one rule file under ~/.agents/rules/",
-		Args:  deps.ExactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` is the file (e.g. rules.mdc) or stem (rules)."),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunShow(deps, args[0], args[1])
-		},
-	}
-}
-
-// newRemoveSpec returns the canonical.SubCmdSpec for `da rules remove`.
-func newRemoveSpec(deps Deps) canonical.SubCmdSpec {
-	return canonical.SubCmdSpec{
-		Use:   "remove <scope> <name>",
-		Short: "Remove a rule file from ~/.agents/rules/ (canonical storage only)",
-		Long: `Deletes the file from managed rule storage only (not repo links). After removal,
-run da refresh or install for the relevant project so platform rule
-links stay consistent.`,
-		Args: deps.ExactArgsWithHints(2, "`scope` is `global` or a managed project name; `name` matches list/show."),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return RunRemove(deps, args[0], args[1])
-		},
-	}
+// NewListCmd / NewShowCmd / NewRemoveCmd build each subcommand standalone.
+// Exported so the parent-package shim can wire them for cross-cutting
+// RunE coverage tests.
+func NewListCmd(deps Deps) *cobra.Command { return cmdutil.NewCanonicalListCmd(canonicalSpec(deps)) }
+func NewShowCmd(deps Deps) *cobra.Command { return cmdutil.NewCanonicalShowCmd(canonicalSpec(deps)) }
+func NewRemoveCmd(deps Deps) *cobra.Command {
+	return cmdutil.NewCanonicalRemoveCmd(canonicalSpec(deps))
 }

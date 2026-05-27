@@ -16,6 +16,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/spf13/cobra"
 )
 
 // CanonicalFileEntry is the projection of platform.{Settings,MCP,Rule}FileSpec
@@ -27,7 +28,22 @@ type CanonicalFileEntry struct {
 	SourcePath string
 }
 
-// CanonicalFileSpec parameterizes RunCanonicalList/Show/Remove.
+// CanonicalFileSpec parameterizes both the data-layer
+// RunCanonicalList/Show/Remove helpers and the cobra-tree assembly in
+// NewCanonicalResourceCmd. Settings/MCP/Rules each populate one of these
+// — there is exactly one struct literal per resource family.
+//
+// The fields split into three groups:
+//
+//   - Resource identity (Kind, DirSegment, SingularRem)
+//   - User-facing message hooks (EmptyHint, MissingDirHint)
+//   - Data-layer callbacks (List, Resolve, EnsureScope)
+//   - CLI-surface strings (Use, Short, Long, Example and the per-verb
+//     SubCmdStrings + cobra.PositionalArgs)
+//
+// Leaves wire their per-verb runners through the package-level
+// RunList/RunShow/RunRemove functions so this spec stays a pure data
+// description with no behavior.
 type CanonicalFileSpec struct {
 	// Kind is the capitalized header label ("Settings" | "MCP" | "Rules").
 	Kind string
@@ -56,6 +72,42 @@ type CanonicalFileSpec struct {
 	Resolve func(agentsHome, scope, name string) (CanonicalFileEntry, error)
 	// EnsureScope verifies target is under <agentsHome>/<DirSegment>/<scope>/.
 	EnsureScope func(agentsHome, scope, target string) error
+
+	// Use / Short / Long / Example populate the parent cobra.Command
+	// (the `da <kind>` node). Example is a pre-joined string — leaves
+	// build multi-line examples with CanonicalCmdExampleBlock(...) or
+	// a plain string literal.
+	Use     string
+	Short   string
+	Long    string
+	Example string
+
+	// List / Show / Remove subcommand strings + Args validators.
+	// Args is the pre-bound cobra.PositionalArgs validator from the
+	// leaf's Deps (mcp uses MaxArgsWithHints, settings/rules use
+	// MaximumNArgsWithHints, so binding stays at the leaf). Run is the
+	// leaf-specific runner that receives unpacked scope/name args from
+	// the canonical RunE wrapper.
+	ListSub    SubCmdStrings
+	ListArgs   cobra.PositionalArgs
+	ListRun    func(scope string) error
+	ShowSub    SubCmdStrings
+	ShowArgs   cobra.PositionalArgs
+	ShowRun    func(scope, name string) error
+	RemoveSub  SubCmdStrings
+	RemoveArgs cobra.PositionalArgs
+	RemoveRun  func(scope, name string) error
+}
+
+// SubCmdStrings carries the per-leaf strings for one canonical
+// subcommand. Use/Short are required; Long/Example are optional.
+// Mirrors what the old commands/internal/canonical package exposed so
+// the leaf spec literals retain a familiar shape.
+type SubCmdStrings struct {
+	Use     string
+	Short   string
+	Long    string
+	Example string
 }
 
 // RemoveDeps carries the user-facing flags consumed by RunCanonicalRemove.
