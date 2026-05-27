@@ -2903,3 +2903,95 @@ func TestLifecycleSeam_RestoreCanonicalResourceFileFn_WriteErrorPropagates(t *te
 		t.Fatalf("expected disk-full error, got %v", err)
 	}
 }
+
+// ─── stp3 regression: import relink SharedTargetProjection wiring ───────────
+//
+// These tests pin the stp1-wire-import-relink behavior (import.go:1553) at the
+// dry-run and idempotence axes that the existing
+// TestRelinkImportedProjects_RunsSharedTargetProjection does not cover. They
+// fail if a future refactor drops `Flags.DryRun` from the projection call, or
+// if the projection's Execute path stops being idempotent.
+
+// TestRelinkImportedProjects_DryRunNoMutation asserts the dry-run contract for
+// the import-relink projection wiring: with Flags.DryRun=true, the projection
+// MUST NOT materialize repo .codex/agents/<name>.toml. A regression that wired
+// the projection without forwarding Flags.DryRun (e.g. passing `false`
+// hard-coded) would write the file and fail this test.
+func TestRelinkImportedProjects_DryRunNoMutation(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "dryrunproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRelinkCodexAgentFixture(t, agentsHome, "dryrunproj", "implementer")
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("dryrunproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	relinkImportedProjects(cfg, map[string]bool{"dryrunproj": true})
+
+	tomlPath := filepath.Join(projectPath, ".codex", "agents", "implementer.toml")
+	if _, err := os.Stat(tomlPath); err == nil {
+		t.Fatalf("dry-run must NOT materialize %s; projection wiring is ignoring Flags.DryRun", tomlPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error for %s: %v", tomlPath, err)
+	}
+}
+
+// TestRelinkImportedProjects_Idempotent asserts that two back-to-back relink
+// passes produce a byte-identical repo tree under .codex/. The projection's
+// Execute path must be a no-op when state is already correct — a regression
+// that always re-renders (or churns mtimes via os.Remove+Write) would fail
+// the content-hash compare on the second pass.
+func TestRelinkImportedProjects_Idempotent(t *testing.T) {
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "idemproj")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRelinkCodexAgentFixture(t, agentsHome, "idemproj", "implementer")
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("idemproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	relinkImportedProjects(cfg, map[string]bool{"idemproj": true})
+	codexDir := filepath.Join(projectPath, ".codex")
+	first := snapshotTree(t, codexDir)
+	if len(first) == 0 {
+		t.Fatalf("first relink produced no .codex/ artifacts; projection did not run")
+	}
+
+	relinkImportedProjects(cfg, map[string]bool{"idemproj": true})
+	second := snapshotTree(t, codexDir)
+
+	if msg, ok := snapshotsEqual(first, second); !ok {
+		t.Fatalf("import relink not idempotent under .codex/: %s\nfirst=%d second=%d",
+			msg, len(first), len(second))
+	}
+}
