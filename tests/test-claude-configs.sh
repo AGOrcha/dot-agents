@@ -11,14 +11,15 @@ PASS=0
 FAIL=0
 
 log_test() {
+  local test_name="$1"
   echo ""
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "TEST: $1"
+  echo "TEST: $test_name"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 }
 
-log_pass() { echo "✅ PASS: $1"; ((PASS++)); }
-log_fail() { echo "❌ FAIL: $1"; ((FAIL++)); }
+log_pass() { local msg="$1"; echo "✅ PASS: $msg"; ((PASS++)); }
+log_fail() { local msg="$1"; echo "❌ FAIL: $msg"; ((FAIL++)); }
 
 # Setup
 echo "Setting up test environment..."
