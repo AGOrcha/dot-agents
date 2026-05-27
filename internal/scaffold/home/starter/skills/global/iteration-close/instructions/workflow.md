@@ -197,7 +197,14 @@ da workflow merge-back \
   --integration-notes "<merge/conflict notes for parent>"
 ```
 
-The parent reviews `.agents/active/merge-back/<task-id>.md`, then runs `workflow delegation closeout --decision accept|reject` as appropriate — an accepted closeout already sets the canonical task to `completed` via `applyCloseoutDecisionToTasks` (`commands/workflow/delegation.go`), so a separate `workflow advance` call is redundant. Do not advance the canonical task yourself — that would violate the parent/child split the plan describes.
+The parent reviews `.agents/active/merge-back/<task-id>.md`, then runs
+`workflow delegation closeout --decision accept|reject` as appropriate.
+Accepted delegation closeout already sets the canonical task to `completed`
+via `applyCloseoutDecisionToTasks` (`commands/workflow/delegation.go`), so a
+separate `workflow advance` call is redundant. Do not advance the canonical
+task yourself — that would violate the parent/child split the plan describes.
+`workflow advance` is reserved
+for direct, non-delegated completion.
 
 ---
 

@@ -12,9 +12,16 @@ task_id:        <string>        the specific task you are implementing
 write_scope:    [list]          files/directories you are allowed to modify
 feedback_goal:  <string>        the concrete question your CLI evidence must answer
 context_files:  [list]          additional files to read before starting
+stage:          <absent>        typed stages are not executed by loop-worker
 ```
 
 Do NOT derive plan_id or task_id from workflow orient or workflow next — the bundle is authoritative.
+
+If the bundle assigns a typed `stage` or `role` (`impl`, verifier, or
+reviewer), stop. The parent must dispatch a named staged agent with
+stage-safe instructions; the legacy `loop-worker` path would inject
+full-slice merge-back behavior into a child that should instead emit a typed
+artifact and stop.
 
 ## Step 2 — Confirm task status
 
