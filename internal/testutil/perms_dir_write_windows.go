@@ -55,32 +55,29 @@ import (
 func makeDirWriteDenied(t *testing.T, dir string) {
 	t.Helper()
 
-	// --- Phase 1: open a no-sharing handle on each existing descendant so
-	// DeleteFile / RemoveDirectory against them returns ERROR_SHARING_VIOLATION
-	// while the test is running. Walk depth-first so directories are opened
-	// AFTER their children — closing in reverse order at cleanup time lets
-	// the children be deleted (by the surrounding t.TempDir) before their
-	// parents lose the no-share lock.
+	heldHandles, heldPaths := openHeldHandles(t, dir)
+	sid, origSD, origDACL := getSIDAndSnapshot(t, dir, heldHandles)
+	installDenyACL(t, dir, heldHandles, sid, origSD, origDACL)
+	probeInstallation(t, dir, heldPaths)
+}
+
+// openHeldHandles walks dir and opens a no-sharing handle on each descendant.
+// Returns the list of held handles and paths in walk order (parent-before-child).
+// Returns early on walk errors by closing handles and calling t.Fatalf.
+func openHeldHandles(t *testing.T, dir string) ([]windows.Handle, []string) {
 	var heldHandles []windows.Handle
 	var heldPaths []string
 	walkErr := filepath.WalkDir(dir, func(p string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return nil
-		}
-		if p == dir {
+		if walkErr != nil || p == dir {
 			return nil
 		}
 		utf16Path, uErr := windows.UTF16PtrFromString(p)
 		if uErr != nil {
 			return nil
 		}
-		// FILE_FLAG_BACKUP_SEMANTICS is required to open a directory handle
-		// via CreateFile. It is harmless on file handles. GENERIC_READ is
-		// the minimum access we need; the share mode is what does the work:
-		// FILE_SHARE_READ allows the test (and antivirus) to keep reading
-		// the file, but the absence of FILE_SHARE_DELETE / FILE_SHARE_WRITE
-		// causes any DeleteFile / RemoveDirectory against the path to fail
-		// with ERROR_SHARING_VIOLATION until our handle closes.
+		// FILE_FLAG_BACKUP_SEMANTICS required to open directory handle;
+		// FILE_SHARE_READ allows reading, absence of FILE_SHARE_DELETE
+		// causes DeleteFile / RemoveDirectory to fail with ERROR_SHARING_VIOLATION.
 		h, cErr := windows.CreateFile(
 			utf16Path,
 			windows.GENERIC_READ,
@@ -91,35 +88,26 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 			0,
 		)
 		if cErr != nil {
-			// Best effort: skip entries we can't open (already-locked,
-			// reparse-point dance, etc.). The probe at the end of this
-			// function catches the case where the parent DACL deny also
-			// silently fails.
-			return nil
+			return nil // Best effort: skip entries we can't open
 		}
 		heldHandles = append(heldHandles, h)
 		heldPaths = append(heldPaths, p)
 		return nil
 	})
 	if walkErr != nil {
-		// WalkDir's first-arg callback already swallowed any per-entry
-		// error; this can only fire on a totally broken root. Treat as
-		// fatal so the test does not silently fail to install.
 		for _, h := range heldHandles {
 			_ = windows.CloseHandle(h)
 		}
 		t.Fatalf("MakeDirWriteDenied: WalkDir %q: %v", dir, walkErr)
 	}
+	return heldHandles, heldPaths
+}
 
-	// --- Phase 2: install a DACL deny-ACE on the parent so NEW child create
-	// fails. FILE_WRITE_DATA + FILE_APPEND_DATA deny the CreateFile-with-
-	// write path; FILE_DELETE_CHILD is included for defence-in-depth against
-	// children created AFTER the helper runs (the sharing-mode lock only
-	// covers descendants present at install time).
-
-	// Capture current user's SID so we can deny exactly the access this
-	// process would otherwise have. Denying Everyone would also lock out the
-	// t.Cleanup restore path on some runners.
+// getSIDAndSnapshot retrieves the current process's user SID and snapshots
+// the existing security descriptor and DACL on dir. Closes heldHandles
+// and calls t.Fatalf on any error.
+func getSIDAndSnapshot(t *testing.T, dir string, heldHandles []windows.Handle) (
+	*windows.SID, *windows.SECURITY_DESCRIPTOR, *windows.ACL) {
 	token := windows.GetCurrentProcessToken()
 	user, err := token.GetTokenUser()
 	if err != nil {
@@ -128,12 +116,7 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 		}
 		t.Fatalf("MakeDirWriteDenied: GetTokenUser: %v", err)
 	}
-	sid := user.User.Sid
 
-	// Snapshot the existing security descriptor so we can recover the
-	// original DACL and put it back during cleanup. origSD owns the
-	// underlying memory backing origDACL; keep it referenced for the
-	// lifetime of the test via the closure capture below.
 	origSD, err := windows.GetNamedSecurityInfo(
 		dir,
 		windows.SE_FILE_OBJECT,
@@ -153,13 +136,13 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 		t.Fatalf("MakeDirWriteDenied: origSD.DACL %q: %v", dir, err)
 	}
 
-	// FILE_DELETE_CHILD (0x00000040) is the directory-specific permission
-	// that controls whether a caller can delete entries WITHIN the
-	// directory. golang.org/x/sys/windows ships FILE_WRITE_DATA /
-	// FILE_APPEND_DATA but not FILE_DELETE_CHILD (it is folder-context only
-	// — the same bit on a file means FILE_WRITE_EA). We declare it inline
-	// rather than expanding the upstream constant set; the value is fixed
-	// by the Win32 SDK.
+	return user.User.Sid, origSD, origDACL
+}
+
+// installDenyACL constructs and installs a DACL deny-ACE on dir, then
+// registers cleanup to restore the original DACL and close all handles.
+func installDenyACL(t *testing.T, dir string, heldHandles []windows.Handle,
+	sid *windows.SID, origSD *windows.SECURITY_DESCRIPTOR, origDACL *windows.ACL) {
 	const fileDeleteChild = 0x00000040
 	const parentDenyMask = windows.FILE_WRITE_DATA |
 		windows.FILE_APPEND_DATA |
@@ -197,9 +180,6 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 	}
 
 	t.Cleanup(func() {
-		// Restore parent DACL first so subsequent operations against the
-		// directory (including t.TempDir's recursive RemoveAll) can proceed
-		// once the per-child handles are released.
 		_ = windows.SetNamedSecurityInfo(
 			dir,
 			windows.SE_FILE_OBJECT,
@@ -209,23 +189,15 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 			nil,
 		)
 		runtime.KeepAlive(origSD)
-		// Close the sharing-lock handles in REVERSE walk order. WalkDir
-		// visits directories before their contents (pre-order, lexical), so
-		// handles were appended parent-before-child. t.TempDir's recursive
-		// RemoveAll deletes children before their parents, so we must
-		// release file handles BEFORE the enclosing directory handles —
-		// otherwise the dir-handle release order would not match RemoveAll's
-		// traversal and leave handles open during child deletion attempts.
 		for i := len(heldHandles) - 1; i >= 0; i-- {
 			_ = windows.CloseHandle(heldHandles[i])
 		}
-		_ = heldPaths // retained for diagnostics if a future failure mode wants paths-with-handles
 	})
+}
 
-	// Probe: attempt to create a transient child. If the create succeeds the
-	// deny-ACE was not applied (elevated SeBackup/SeRestore, non-NTFS
-	// volume); skip rather than mislead the caller. Clean up the probe file
-	// on the unexpected success path.
+// probeInstallation verifies the deny-ACE and sharing-mode locks work.
+// Skips the test if installation failed (elevated privilege or non-NTFS volume).
+func probeInstallation(t *testing.T, dir string, heldPaths []string) {
 	probe := filepath.Join(dir, ".makedirwritedenied-probe")
 	if f, err := os.OpenFile(probe, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
 		_ = f.Close()
@@ -233,13 +205,6 @@ func makeDirWriteDenied(t *testing.T, dir string) {
 		t.Skip("DACL deny-ACE did not produce a write denial (elevated SeBackup/SeRestore or non-NTFS volume?); cannot exercise the assertion")
 	}
 
-	// Probe 2: if we held any handles, verify the sharing-mode delete
-	// denial works by trying to delete the first held child. We re-open it
-	// only long enough to call os.Remove and confirm the failure. On
-	// success (denial held) we do nothing; on the unexpected success of
-	// os.Remove (denial broken) we skip with a clear reason. Skip if there
-	// are no held descendants — the caller is exercising the create-new
-	// path only, which probe 1 already covered.
 	if len(heldPaths) > 0 {
 		if err := os.Remove(heldPaths[0]); err == nil {
 			t.Skip("sharing-mode no-FILE_SHARE_DELETE handle did not produce a delete denial; cannot exercise the assertion")
