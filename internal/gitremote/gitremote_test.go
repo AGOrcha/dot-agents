@@ -76,19 +76,24 @@ func TestParseRemoteURL_Fields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseRemoteURL(%q) err = %v", c.in, err)
 			}
-			if ref.Host != c.wantHost {
-				t.Errorf("Host = %q, want %q", ref.Host, c.wantHost)
-			}
-			if ref.Owner != c.wantOwner {
-				t.Errorf("Owner = %q, want %q", ref.Owner, c.wantOwner)
-			}
-			if ref.Repo != c.wantRepo {
-				t.Errorf("Repo = %q, want %q", ref.Repo, c.wantRepo)
-			}
-			if ref.Path != c.wantPath {
-				t.Errorf("Path = %q, want %q", ref.Path, c.wantPath)
-			}
+			assertRemoteRefFields(t, c.in, ref, c.wantHost, c.wantOwner, c.wantRepo, c.wantPath)
 		})
+	}
+}
+
+func assertRemoteRefFields(t *testing.T, in string, ref RemoteRef, wantHost, wantOwner, wantRepo, wantPath string) {
+	t.Helper()
+	if ref.Host != wantHost {
+		t.Errorf("ParseRemoteURL(%q) Host = %q, want %q", in, ref.Host, wantHost)
+	}
+	if ref.Owner != wantOwner {
+		t.Errorf("ParseRemoteURL(%q) Owner = %q, want %q", in, ref.Owner, wantOwner)
+	}
+	if ref.Repo != wantRepo {
+		t.Errorf("ParseRemoteURL(%q) Repo = %q, want %q", in, ref.Repo, wantRepo)
+	}
+	if ref.Path != wantPath {
+		t.Errorf("ParseRemoteURL(%q) Path = %q, want %q", in, ref.Path, wantPath)
 	}
 }
 
