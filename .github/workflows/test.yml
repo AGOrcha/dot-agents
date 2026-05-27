@@ -186,8 +186,13 @@ jobs:
         with:
           name: coverage-${{ matrix.os }}
           path: coverage-${{ matrix.os }}.out
-          retention-days: 7
+          retention-days: 1
           if-no-files-found: warn
+
+      - name: Cleanup local coverage profile
+        if: always()
+        shell: bash
+        run: rm -f "coverage-${{ matrix.os }}.out"
 
       # Coverage gating moved to the post-matrix `coverage-gate` job: it
       # merges every OS's uploaded profile so platform build-tagged files
@@ -452,3 +457,7 @@ jobs:
           COVERAGE_PKG_MODE: warn
           COVERAGE_FILE_MODE: enforce
         run: bash scripts/coverage-gate.sh
+
+      - name: Cleanup merged coverage profile
+        if: always()
+        run: rm -rf coverage.out covprofiles
