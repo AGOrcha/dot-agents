@@ -323,15 +323,22 @@ func TestScanSymlinkDir_HealthyAndBrokenClassified(t *testing.T) {
 
 // TestResolveLinkDest covers both branches of the private helper —
 // absolute target unchanged, relative target joined against link's dir.
+// Uses t.TempDir() so the absolute-path branch is exercised with a
+// platform-correct absolute path (Windows treats "/abs/target" as
+// relative because it lacks a drive letter).
 func TestResolveLinkDest(t *testing.T) {
-	if got := resolveLinkDest("/x/link", ""); got != "" {
+	dir := t.TempDir()
+	linkPath := filepath.Join(dir, "link")
+	absTarget := filepath.Join(dir, "abs", "target")
+
+	if got := resolveLinkDest(linkPath, ""); got != "" {
 		t.Errorf("empty dest should pass through, got %q", got)
 	}
-	if got := resolveLinkDest("/x/link", "/abs/target"); got != "/abs/target" {
-		t.Errorf("absolute dest should pass through, got %q", got)
+	if got := resolveLinkDest(linkPath, absTarget); got != absTarget {
+		t.Errorf("absolute dest should pass through, got %q want %q", got, absTarget)
 	}
-	got := resolveLinkDest("/x/link", "rel/target")
-	want := filepath.Clean("/x/rel/target")
+	got := resolveLinkDest(linkPath, filepath.Join("rel", "target"))
+	want := filepath.Clean(filepath.Join(dir, "rel", "target"))
 	if got != want {
 		t.Errorf("relative dest = %q, want %q", got, want)
 	}
