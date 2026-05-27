@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/projectsync"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // fakeAddDeps is the interface-DI test double for addDeps (per
@@ -1081,16 +1081,6 @@ func TestRestoreFromResourcesCounted_NonDirIsError(t *testing.T) {
 // A non-ENOENT stat error (permission denied on a parent component) must be
 // propagated, not collapsed to (0, nil).
 func TestRestoreFromResourcesCounted_StatErrorIsPropagated(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// chmod 0000 on a directory only toggles the read-only attribute
-		// on Windows; it does NOT deny traversal/stat of children, so the
-		// non-ENOENT stat error cannot be induced here. The propagation
-		// contract is covered on POSIX.
-		t.Skip("read-only-dir chmod does not deny stat on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: permission bits do not deny stat")
-	}
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -1100,11 +1090,13 @@ func TestRestoreFromResourcesCounted_StatErrorIsPropagated(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Deny traversal into resources/ so stat(resources/proj) fails with
-	// EACCES (a non-ENOENT error).
-	if err := os.Chmod(resourcesRoot, 0000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(resourcesRoot, 0755) })
+	// a non-ENOENT error. testutil.MakeDirUnreadable covers both POSIX
+	// (chmod 0) and Windows (deny-DACL on FILE_LIST_DIRECTORY |
+	// FILE_TRAVERSE | FILE_READ_ATTRIBUTES | FILE_READ_EA — the
+	// FILE_TRAVERSE bit is what makes child stat fail on Windows). The
+	// helper t.Skips on root-on-POSIX and on elevated-priv / non-NTFS
+	// Windows configurations where the denial does not stick.
+	testutil.MakeDirUnreadable(t, resourcesRoot)
 
 	n, err := restoreFromResourcesCounted("proj", tmp)
 	if n != 0 {
