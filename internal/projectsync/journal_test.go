@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // journalAgentsHome returns an isolated AGENTS_HOME tempdir for journal tests.
@@ -480,12 +482,6 @@ func TestPromoteJournal_ListPendingSkipsNonEntries(t *testing.T) {
 // per-entry read by creating an unreadable .json file (chmod 0000). Skipped
 // on platforms where chmod does not restrict read for the owner (root, etc.).
 func TestPromoteJournal_ListPendingReadFileSkip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod-0 unreadable semantics differ on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root can read 0o000 files; skipping")
-	}
 	home := journalAgentsHome(t)
 	dir := promoteJournalDirPath(home)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -495,10 +491,10 @@ func TestPromoteJournal_ListPendingReadFileSkip(t *testing.T) {
 	if err := os.WriteFile(unreadable, []byte(`{}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(unreadable, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(unreadable, 0o644) })
+	// testutil.MakeFileUnreadable covers both POSIX (chmod 0) and Windows
+	// (byte-range lock) and t.Skips on root-on-POSIX where mode bits are
+	// bypassed.
+	testutil.MakeFileUnreadable(t, unreadable)
 
 	pending, err := ListPendingPromoteJournals(home)
 	if err != nil {
