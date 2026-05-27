@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
-	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
-	"github.com/NikashPrakash/dot-agents/commands/mcp"
-	"github.com/NikashPrakash/dot-agents/commands/rules"
-	"github.com/NikashPrakash/dot-agents/commands/settings"
+	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
+	"github.com/NikashPrakash/dot-agents/commands/internal/mcp"
+	"github.com/NikashPrakash/dot-agents/commands/internal/rules"
+	"github.com/NikashPrakash/dot-agents/commands/internal/settings"
 	"github.com/spf13/cobra"
 )
 

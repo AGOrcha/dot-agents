@@ -177,6 +177,18 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
+      # Locks cross-leaf isolation between the four commands/internal/*
+      # composition leaves established by plan root-command-decomposition
+      # (t13a + t13a-pre + t13b + t15). Outsider-prevention is enforced by
+      # Go's built-in internal/ rule at compile time, so this step only
+      # fails if commands/internal/{lifecycle,mcp,settings,rules} start
+      # importing each other. The check runs before the coverage gate so
+      # the regression cannot ride a green test suite into master. See
+      # tools/importguard/main.go for the exact policy and main_test.go
+      # for the unit table that pins the decision matrix.
+      - name: Import boundary guard (commands/internal/* cross-leaf)
+        run: go run ./tools/importguard ./...
+
       - name: Go test
         run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="coverage-${{ matrix.os }}.out" ./...
 
