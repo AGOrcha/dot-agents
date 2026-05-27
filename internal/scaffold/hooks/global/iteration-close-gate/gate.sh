@@ -37,12 +37,13 @@ set -eu
 # canonical snake_case used by HookSpec.When. Unknown names fall through to
 # the input so $DA_HOOK_WHEN can pass canonical values directly.
 vendor_to_canonical() {
-  case "$1" in
+  vendor="$1"
+  case "$vendor" in
     PreToolUse|pre_tool_use)        printf 'pre_tool_use\n' ;;
     PreCompact|preCompact|pre_compact) printf 'pre_compact\n' ;;
     Stop|stop|agentStop)            printf 'stop\n' ;;
     SubagentStop|subagentStop|subagent_stop) printf 'subagent_stop\n' ;;
-    *) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$vendor" ;;
   esac
 }
 
@@ -117,7 +118,8 @@ emit_outcome() {
 # json_escape escapes backslashes and double quotes for a JSON string body.
 # Portable POSIX sed - no jq dependency.
 json_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+  raw="$1"
+  printf '%s' "$raw" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 # emit_hard_block prints the native block payload for the active platform
@@ -140,7 +142,8 @@ emit_hard_block() {
 
 # emit_advisory writes the message to stderr and exits 0 (R5.2).
 emit_advisory() {
-  printf 'iteration-close-gate (advisory): %s\n' "$1" >&2
+  message="$1"
+  printf 'iteration-close-gate (advisory): %s\n' "$message" >&2
 }
 
 # ---------- rule helpers ----------

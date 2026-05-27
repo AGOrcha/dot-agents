@@ -24,12 +24,13 @@ set -eu
 # ---------- canonical event resolution ----------
 
 vendor_to_canonical() {
-  case "$1" in
+  vendor="$1"
+  case "$vendor" in
     SubagentStart|subagentStart|subagent_start) printf 'subagent_start\n' ;;
     PreToolUse|pre_tool_use)                     printf 'pre_tool_use\n' ;;
     PreCompact|preCompact|pre_compact)           printf 'pre_compact\n' ;;
     SubagentStop|subagentStop|subagent_stop)     printf 'subagent_stop\n' ;;
-    *) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$vendor" ;;
   esac
 }
 
@@ -98,7 +99,8 @@ emit_outcome() {
 }
 
 json_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+  raw="$1"
+  printf '%s' "$raw" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 emit_hard_block() {
@@ -117,7 +119,8 @@ emit_hard_block() {
 }
 
 emit_advisory() {
-  printf 'loop-worker-gate (advisory): %s\n' "$1" >&2
+  message="$1"
+  printf 'loop-worker-gate (advisory): %s\n' "$message" >&2
 }
 
 # ---------- rule helpers ----------
@@ -170,6 +173,7 @@ path_matches_scope() {
     case "$path" in
       "$scope") IFS="$IFS_BACKUP"; return 0 ;;
       "$scope"*) IFS="$IFS_BACKUP"; return 0 ;;
+      *) ;;  # no match for this scope entry; loop tries the next one
     esac
   done
   IFS="$IFS_BACKUP"

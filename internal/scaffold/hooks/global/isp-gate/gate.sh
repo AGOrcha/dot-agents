@@ -26,10 +26,11 @@ set -eu
 # ---------- canonical event resolution ----------
 
 vendor_to_canonical() {
-  case "$1" in
+  vendor="$1"
+  case "$vendor" in
     PreCompact|preCompact|pre_compact) printf 'pre_compact\n' ;;
     Stop|stop|agentStop)               printf 'stop\n' ;;
-    *) printf '%s\n' "$1" ;;
+    *) printf '%s\n' "$vendor" ;;
   esac
 }
 
@@ -88,7 +89,8 @@ emit_outcome() {
 }
 
 json_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+  raw="$1"
+  printf '%s' "$raw" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
 
 emit_hard_block() {
@@ -107,7 +109,8 @@ emit_hard_block() {
 }
 
 emit_advisory() {
-  printf 'isp-gate (advisory): %s\n' "$1" >&2
+  message="$1"
+  printf 'isp-gate (advisory): %s\n' "$message" >&2
 }
 
 missing_expected_artifacts() {
