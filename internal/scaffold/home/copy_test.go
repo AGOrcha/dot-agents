@@ -64,6 +64,48 @@ func TestCopyMissingStarterAssetsCopiesStarterBundle(t *testing.T) {
 	}
 }
 
+func assertStarterText(t *testing.T, root, rel string, required, forbidden []string) {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+	if err != nil {
+		t.Fatalf("read starter asset %s: %v", rel, err)
+	}
+	text := string(content)
+	for _, needle := range required {
+		if !strings.Contains(text, needle) {
+			t.Errorf("%s missing required text %q", rel, needle)
+		}
+	}
+	for _, needle := range forbidden {
+		if strings.Contains(text, needle) {
+			t.Errorf("%s retains forbidden legacy/staged drift %q", rel, needle)
+		}
+	}
+}
+
+func TestStarterStagedDispatchDoesNotInjectLegacyCloseoutSurface(t *testing.T) {
+	tmp := t.TempDir()
+	if err := CopyMissingStarterAssets(tmp); err != nil {
+		t.Fatalf("CopyMissingStarterAssets: %v", err)
+	}
+
+	assertStarterText(t, tmp, "profiles/loop-worker.md",
+		[]string{"legacy/full-slice compatibility only", "direct, non-delegated completion path"},
+		[]string{"After accepting delegate output: `workflow advance`"})
+	assertStarterText(t, tmp, "agents/global/loop-worker/AGENT.md",
+		[]string{"legacy/full-slice compatibility worker", "Do not use this agent for typed ISP"},
+		[]string{"performs exactly one stage (impl, verify, or review)"})
+	assertStarterText(t, tmp, "skills/global/isp/instructions/fanout.md",
+		[]string{"Do not inject `.agents/active/active.loop.md`", "compatibility metadata"},
+		[]string{"--project-overlay .agents/active/active.loop.md", "--prompt-file .agents/prompts/loop-worker.project.md"})
+	assertStarterText(t, tmp, "skills/global/isp/instructions/staged-runtime.md",
+		[]string{"Accepted delegation closeout completes the delegated task"},
+		[]string{"After accepted closeout, run canonical advancement."})
+	assertStarterText(t, tmp, "skills/global/iteration-close/instructions/workflow.md",
+		[]string{"Accepted delegation closeout", "reserved\nfor direct, non-delegated completion"},
+		[]string{"`workflow advance` and `workflow delegation closeout` after review"})
+}
+
 // TestCopyMissingStarterAssetsSetsExecBitOnEmbeddedShScripts asserts that
 // real `.sh` scripts in the embedded starter (e.g. iteration-close's
 // propose.sh promoted in P3) land with the POSIX exec bit set. The generic

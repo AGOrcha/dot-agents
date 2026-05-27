@@ -29,6 +29,12 @@ workflow spec and plan authored with `da`, not ad hoc runtime edits.
   `review-decision.yaml` and the merge-back artifact.
 - `workflow delegation closeout --decision accept` is the parent-owned
   operation that changes canonical task state and archives artifacts.
+- The embedded `da init` starter now includes `loop-worker`, ISP, and
+  iteration-close instruction surfaces. This pass aligns new starter seeds
+  with the legacy-versus-staged boundary and parent-only delegated closeout.
+- `CopyMissingStarterAssets` preserves existing destination files, so updated
+  embedded defaults do not remediate an already customized
+  `~/.agents/profiles/loop-worker.md` installation.
 - The live `config explain` and scope-routed `da review` proposals from the
   PA-cursor branch remain needed and are restored beside this proposal.
 
@@ -100,7 +106,20 @@ return owner, or a locked verifier chain. Compatibility overrides such as an
 explicit verifier sequence remain viable only when recorded as policy-bypass
 evidence and allowed by the applicable policy.
 
-### 6. Individual reviewers are the wrong merge-back owner
+### 6. Starter defaults and installed configuration need separate migration lanes
+
+The shipped starter can be made internally consistent for new installs, but
+the current installer deliberately does not overwrite existing shared-home
+assets. That is the right safety default for user-modified prompts and
+profiles; it also means the installed `~/.agents/profiles/loop-worker.md`
+cannot be treated as repaired merely because the embedded seed is corrected.
+
+The planning pass needs seed provenance and an explicit non-destructive
+upgrade flow: identify unchanged shipped assets that can be refreshed,
+surface local divergence for review, and migrate customized legacy
+loop-worker material only through an explicit reviewed action.
+
+### 7. Individual reviewers are the wrong merge-back owner
 
 When review is a single compatibility stage, writing the return packet there
 is workable. Once `reviewer-acceptance-invariants`,
@@ -169,6 +188,10 @@ The canonical spec and plan should address:
 9. Resolution-boundary validation against `org-config-resolution`: expose
    inherited staged-policy locks and require audited authorization for
    permitted task/runtime deviations.
+10. Non-destructive starter migration: version or digest shipped starter
+    assets, distinguish new-install defaults from locally edited installed
+    config, and provide an explicit reviewed upgrade path for legacy
+    `loop-worker` installations.
 
 ## Relationship To Other Live Proposals
 
@@ -179,6 +202,7 @@ The canonical spec and plan should address:
 | `scope-routed-da-review.md` | Review/approval routing for durable configuration and proposal changes |
 | `verify-record-review-direct-iteration.md` | Direct-work contract gap; remains distinct from staged delegated ownership |
 | `delegation-bundle-contract-divergence-scoping.md` | Adjacent contract projection/schema work; coordinate bundle fields rather than duplicate them |
+| `../workflow/specs/config-distribution-model/design.md` | Effective snapshot plus installed starter-seed provenance and non-destructive migration rules |
 | `../workflow/specs/external-agent-sources/design.md` | OCI media types, digest pinning, registry bundle meaning, and transport/auth contract |
 | `../workflow/specs/org-config-resolution/design.md` | Staged precedence, protected fields, locked policy, and audited override boundaries |
 
@@ -196,6 +220,8 @@ workflow surface, for a focused feature such as
 - native named-stage materialization and project overlay rules;
 - reviewer evidence and deterministic aggregation artifact schemas;
 - return-gate versus parent-closeout command ownership;
+- shipped-starter versus installed-config provenance and reviewed upgrade
+  semantics;
 - compatibility and migration sequencing; and
 - validation, explain, and non-regression acceptance tests.
 
@@ -213,3 +239,5 @@ both touch bundle/contract ownership and schema.
   native instruction base for typed stages.
 - No implementation task assigns the consolidated merge-back packet to an
   individual named reviewer.
+- No migration task silently overwrites customized installed starter assets
+  when bringing legacy `loop-worker` configuration forward.

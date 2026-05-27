@@ -14,6 +14,19 @@ Before fanning out, check `evidence_confidence` for each selected task:
 
 Sidecar path: `.agents/workflow/evidence/<task_id>.scope.yaml`
 
+## Staged-dispatch boundary
+
+Do not inject `.agents/active/active.loop.md`, a loop-worker prompt file, or
+the global loop-worker profile contents into typed `impl`, verifier, or
+review stages. Those surfaces carry full-slice closeout behavior. The parent
+loads each role-specific prompt and any explicit stage-safe product/project
+overlay when it spawns that stage.
+
+`--delegate-profile loop-worker` below remains compatibility metadata in the
+current bundle schema until native named stage references are materialized;
+it is not permission for a typed stage to load the legacy loop-worker
+instructions.
+
 ## Fanout command
 
 ```bash
@@ -23,10 +36,8 @@ da workflow fanout \
   --write-scope "<scope>" \
   --owner "<worker-name>" \
   --delegate-profile loop-worker \
-  --project-overlay .agents/active/active.loop.md \
   --feedback-goal "<concrete question evidence must answer>" \
-  --prompt "<inline instruction>" \
-  --prompt-file .agents/prompts/loop-worker.project.md \
+  --prompt "Staged dispatch bundle: parent supplies role-specific stage instructions and any stage-safe overlay at stage spawn; typed children emit only their stage artifact." \
   --context-file .agents/active/loop-state.md \
   --context-file .agents/workflow/plans/<plan_id>/TASKS.yaml \
   [--context-file .agents/workflow/evidence/<task_id>.scope.yaml]  # when confidence >= medium

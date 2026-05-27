@@ -2,6 +2,11 @@
 
 After fanout, drive the staged chain: `impl → verifier(s) → review → parent gate`.
 
+Do not load the legacy `loop-worker` profile, agent, or
+`.agents/active/active.loop.md` into these typed stages. The parent injects
+the role-specific prompt plus an explicit stage-safe product/project overlay
+when one is configured.
+
 ## Impl stage
 
 - Read the delegation bundle and required context files.
@@ -24,7 +29,7 @@ After fanout, drive the staged chain: `impl → verifier(s) → review → paren
 - Each verifier writes `.agents/active/verification/<task_id>/<verifier>.result.yaml`.
 - Do not implement product code in verifier stages.
 
-## Review stage
+## Review stage (current consolidated compatibility stage)
 
 - Load `.agents/prompts/review-agent.project.md`.
 - Run as its own dedicated subagent session (medium).
@@ -38,7 +43,8 @@ After fanout, drive the staged chain: `impl → verifier(s) → review → paren
 - Read review decision, verifier artifacts, and merge-back.
 - If evidence is not acceptable, fail the gate before closeout.
 - Run: `da workflow delegation closeout --plan <plan_id> --task <task_id> --decision accept|reject`
-- After accepted closeout, run canonical advancement.
+- Accepted delegation closeout completes the delegated task; do not also run
+  `workflow advance`. Advancement remains for direct, non-delegated work.
 - After acceptance: archival, cleanup, and continuation logic.
 - If review exposes unresolved planning/architecture questions, pause and do not auto-continue.
 

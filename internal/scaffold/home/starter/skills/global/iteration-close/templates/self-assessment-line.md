@@ -7,7 +7,9 @@ After running iteration-close commands, confirm these in the loop-state self-ass
 - proposal_queued: yes (<id>) | no
 ```
 
-If you closed a **delegated** slice, mention that merge-back was recorded (parent still owes `advance` / `delegation closeout`), e.g.:
+If you closed a **delegated** slice, mention that merge-back was recorded
+(parent still owes `delegation closeout`; it does not also advance the
+delegated task), e.g.:
 
 ```
 - delegation_handoff: merge-back recorded for <task-id>; parent to close out
