@@ -928,36 +928,25 @@ func seedManagedProject(agentsHome, name, path string) error {
 	return os.WriteFile(filepath.Join(agentsHome, "config.json"), data, 0644)
 }
 
-// chmodUnreadable sets a path to 0o000 and restores 0644 on cleanup. Skips
-// the test on platforms where chmod cannot reliably make a file unreadable
-// for the current user (e.g. running as root in some CI environments).
+// chmodUnreadable makes a file unreadable for the duration of the test using
+// the OS-native denial mechanism. Delegates to testutil.MakeFileUnreadable so
+// the per-platform machinery (POSIX chmod 0 / Windows byte-range lock) lives
+// in exactly one place — see internal/testutil/perms.go for the rationale and
+// the root-on-POSIX skip handling.
 func chmodUnreadable(t *testing.T, path string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod unreadable not supported on windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("chmod unreadable unreliable as root")
-	}
-	if err := os.Chmod(path, 0o000); err != nil {
-		t.Fatalf("chmod 0: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+	testutil.MakeFileUnreadable(t, path)
 }
 
-// chmodUnreadableDir locks a directory at 0o000 and restores 0755 on cleanup.
+// chmodUnreadableDir makes a directory unenumerable for the duration of the
+// test using the OS-native denial mechanism. Delegates to
+// testutil.MakeDirUnreadable so the per-platform machinery (POSIX chmod 0 /
+// Windows DACL deny-ACE) lives in exactly one place — see
+// internal/testutil/perms_dir.go for the rationale and the root/elevated-priv
+// skip handling.
 func chmodUnreadableDir(t *testing.T, path string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod unreadable not supported on windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("chmod unreadable unreliable as root")
-	}
-	if err := os.Chmod(path, 0o000); err != nil {
-		t.Fatalf("chmod 0: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(path, 0o755) })
+	testutil.MakeDirUnreadable(t, path)
 }
 
 func mustParseRFC3339(t *testing.T, s string) time.Time {

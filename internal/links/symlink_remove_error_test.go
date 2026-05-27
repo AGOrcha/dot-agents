@@ -4,17 +4,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 // TestSymlink_DanglingButCorrectIsNoop covers the existing==target return
 // when the SameFile fast-path cannot fire because the target does not
 // exist (a dangling symlink whose stored text already equals target).
 func TestSymlink_DanglingButCorrectIsNoop(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	// testutil.SymlinkOrSkip gates on the capability to create a symbolic
+	// link in the current process rather than the OS — Windows 10+ with
+	// Developer Mode (and the windows-latest GH Actions runner) can create
+	// symlinks, picking up coverage the runtime.GOOS gate threw away.
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	missingTarget := filepath.Join(tmp, "not-created.txt")
 	link := filepath.Join(tmp, "lnk")
@@ -36,9 +39,7 @@ func TestSymlink_DanglingButCorrectIsNoop(t *testing.T) {
 // regular file via plain Symlink is now refused with ErrUnmanagedTarget
 // BEFORE any removal, so that is no longer a removal-error branch.
 func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX symlink primitive; Windows path covered by internal/linktest/linktest_test.go")
-	}
+	testutil.SymlinkOrSkip(t)
 	tmp := t.TempDir()
 	// Canonical root = tmp so a link resolving under it is OWNED and the
 	// stale-managed-link removal branch (fsopsRemoveAll) is reachable.

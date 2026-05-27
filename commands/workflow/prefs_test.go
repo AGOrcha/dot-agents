@@ -878,12 +878,8 @@ func TestSetLocalPreference_MkdirAllError(t *testing.T) {
 // preferences.local.yaml is chmod'd unreadable so os.ReadFile returns a
 // permission error that is NOT os.IsNotExist.
 func TestSetLocalPreference_ReadFileNonNotExistError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod unreadable not portable on windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("chmod unreadable unreliable as root")
-	}
+	// chmodUnreadable delegates to testutil.MakeFileUnreadable, which
+	// handles the per-platform denial and root-on-POSIX skip.
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", tmp)
 	ctx := filepath.Join(tmp, "context", "locked-proj")

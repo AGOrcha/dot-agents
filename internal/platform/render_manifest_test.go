@@ -6,8 +6,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestLoadRenderManifest_AbsentAndCorruptAreEmpty(t *testing.T) {
@@ -228,17 +229,6 @@ func TestWriteManagedFile_BackupFailurePreservesUserEdit(t *testing.T) {
 // hold an unsaved user edit we can neither compare nor back up. Overwriting
 // it must block, not silently destroy it while reporting success.
 func TestWriteManagedFile_UnreadableExistingFileBlocksAndPreserves(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// POSIX mode bits cannot model an unreadable-but-removable file
-		// on Windows (chmod 000 does not deny the owner read), so the
-		// data-loss path under test is unreachable there.
-		t.Skip("requires POSIX permission semantics")
-	}
-	if os.Geteuid() == 0 {
-		// root bypasses the read permission bit, so os.ReadFile would
-		// succeed and the blocking branch would not be exercised.
-		t.Skip("requires non-root to enforce read perms")
-	}
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	tmp := t.TempDir()
 	dst := filepath.Join(tmp, "settings.json")
@@ -246,20 +236,28 @@ func TestWriteManagedFile_UnreadableExistingFileBlocksAndPreserves(t *testing.T)
 	if err := os.WriteFile(dst, []byte(precious), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// File unreadable, but its parent dir stays writable so the old
-	// remove/overwrite path could have destroyed it.
-	if err := os.Chmod(dst, 0); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dst, 0644) })
+	// Scope the unreadability to a subtest so the helper's t.Cleanup
+	// restores access before we read the file back in the outer test.
+	// This matters on Windows where MakeFileUnreadable holds a
+	// byte-range lock for the lifetime of its test scope — a same-scope
+	// read-after-overwrite-attempt would itself fail with
+	// ERROR_LOCK_VIOLATION. POSIX behaves the same way once we route
+	// through the cross-platform helper. Using a subtest yields a clean
+	// "denial active during writeManagedFile; access restored before
+	// readback" envelope on both platforms.
+	t.Run("overwrite-blocked-while-unreadable", func(t *testing.T) {
+		// testutil.MakeFileUnreadable covers both POSIX (chmod 0) and
+		// Windows (byte-range lock) and skips on root-on-POSIX where
+		// mode bits do not enforce read denial.
+		testutil.MakeFileUnreadable(t, dst)
 
-	if err := writeManagedFile(stdPlatformIO{}, dst, []byte("rerendered")); err == nil {
-		t.Fatal("unreadable existing destination must block the overwrite")
-	}
+		if err := writeManagedFile(stdPlatformIO{}, dst, []byte("rerendered")); err == nil {
+			t.Fatal("unreadable existing destination must block the overwrite")
+		}
+	})
 
-	if err := os.Chmod(dst, 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Subtest finished; helper Cleanup released the denial. Now the
+	// outer test can read the bytes and assert preservation.
 	if b, _ := os.ReadFile(dst); string(b) != precious {
 		t.Errorf("original file must survive an unreadable-destination refresh, got %q", string(b))
 	}

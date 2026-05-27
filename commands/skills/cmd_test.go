@@ -3,11 +3,11 @@ package skills
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -459,12 +459,6 @@ func TestSkillsPromoteCmd_RunESuccessPath(t *testing.T) {
 // access remains) but rc.Save's call to os.WriteFile fails because it
 // cannot create the temp-rename intermediate in a read-only dir.
 func TestAppendSkillToAgentsRC_SaveError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("chmod-based read-only dir not portable on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses chmod restrictions")
-	}
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
@@ -483,11 +477,12 @@ func TestAppendSkillToAgentsRC_SaveError(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// testutil.MakeFileReadOnly applies 0o444 cross-platform: POSIX honours
+	// it via mode bits, Windows via FILE_ATTRIBUTE_READONLY (Go's syscall
+	// layer translates the W bit). The helper t.Skips on root-on-POSIX
+	// where mode bits do not enforce write denial.
 	manifest := filepath.Join(projPath, ".agentsrc.json")
-	if err := os.Chmod(manifest, 0o400); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(manifest, 0o644) })
+	testutil.MakeFileReadOnly(t, manifest)
 
 	got := AppendSkillToAgentsRC("late", "p")
 	if got != "" {
