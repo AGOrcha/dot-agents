@@ -4,13 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v6/plumbing/transport"
 	"golang.org/x/sys/execabs"
 )
 
@@ -59,40 +59,54 @@ func DeriveRepoIDFromGit(repoPath string) string {
 
 // normalizeRemoteURL converts a git remote URL into the canonical
 // "<host>/<path>" repo_id form. Returns "" when the URL cannot be parsed
-// as a remote (callers fall back to leaving repo_id empty).
-//
-// Parsing is delegated to go-git's transport.ParseURL, which already handles
-// the full git remote URL grammar: standard schemes (https/http/ssh/git),
-// SCP-style SSH (git@host:path), embedded userinfo, ports, and Windows
-// path edge cases. This file only owns the canonicalization layer on top
-// (lowercase host, strip leading/trailing slashes, strip .git suffix).
+// (callers fall back to leaving repo_id empty).
 func normalizeRemoteURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
 	}
 
-	u, err := transport.ParseURL(raw)
-	if err != nil {
+	host, path := splitRemoteHostPath(raw)
+	if host == "" || path == "" {
 		return ""
 	}
-	// transport.ParseURL classifies anything without a recognized scheme
-	// (bare paths, junk strings) as scheme=file. Those are not remotes,
-	// so callers should leave repo_id blank rather than fabricate one.
-	if u.Scheme == "file" {
-		return ""
-	}
-	host := strings.ToLower(u.Hostname()) // strips userinfo + port
-	if host == "" {
-		return ""
-	}
-	path := strings.TrimPrefix(u.Path, "/")
+
+	host = strings.ToLower(host)
+	path = strings.TrimPrefix(path, "/")
 	path = strings.TrimSuffix(path, "/")
 	path = strings.TrimSuffix(path, ".git")
 	if path == "" {
 		return ""
 	}
 	return host + "/" + path
+}
+
+// splitRemoteHostPath extracts (host, path) from a git remote URL.
+// Returns ("", "") on any form it cannot parse.
+func splitRemoteHostPath(raw string) (string, string) {
+	// SCP-style "user@host:path" (no scheme). The first ":" separates host
+	// from path; "/" before that ":" disqualifies (it's a real URL).
+	if !strings.Contains(raw, "://") {
+		if idx := strings.Index(raw, ":"); idx > 0 && !strings.Contains(raw[:idx], "/") {
+			hostPart := raw[:idx]
+			pathPart := raw[idx+1:]
+			if at := strings.LastIndex(hostPart, "@"); at >= 0 {
+				hostPart = hostPart[at+1:]
+			}
+			return hostPart, pathPart
+		}
+		return "", ""
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", ""
+	}
+	host := u.Hostname() // strips userinfo + port
+	if host == "" {
+		return "", ""
+	}
+	return host, u.Path
 }
 
 // isDirEntry reports whether the path is a directory, following symlinks.
