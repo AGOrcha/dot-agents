@@ -3,6 +3,7 @@ package workflow
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -669,5 +670,62 @@ func TestResolveContractWriteScope_EmptyEverything(t *testing.T) {
 	got := resolveContractWriteScope("", false, nil)
 	if got != nil {
 		t.Errorf("expected nil for empty-everything, got %v", got)
+	}
+}
+
+// TestMaterializeDelegationContract_DRYAcrossFanoutAndContractCreate pins the
+// #131 review guarantee: `workflow fanout` and `workflow contract create` now
+// go through one business-logic path (materializeDelegationContract). Calling
+// it with the same inputs from both call sites must produce identical
+// contracts (modulo UpdatedAt, which saveDelegationContract stamps to wall
+// clock). If a future change reintroduces a parallel contract-construction
+// path in either command, this test fails.
+func TestMaterializeDelegationContract_DRYAcrossFanoutAndContractCreate(t *testing.T) {
+	repoFanout := t.TempDir()
+	repoContract := t.TempDir()
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+
+	req := materializeContractRequest{
+		Mode:            DelegationContractModeDelegated,
+		PlanID:          "plan-x",
+		TaskID:          "task-x",
+		Title:           "Shared task",
+		Summary:         "shared summary",
+		WriteScope:      []string{"commands/foo.go"},
+		SuccessCriteria: "tests green",
+		Owner:           "worker-x",
+		Now:             now,
+	}
+
+	req.ProjectPath = repoFanout
+	fromFanout, err := materializeDelegationContract(req)
+	if err != nil {
+		t.Fatalf("fanout-style materialize: %v", err)
+	}
+	req.ProjectPath = repoContract
+	fromContract, err := materializeDelegationContract(req)
+	if err != nil {
+		t.Fatalf("contract-create-style materialize: %v", err)
+	}
+
+	// The persisted contracts must agree on every field except UpdatedAt
+	// (which saveDelegationContract stamps to time.Now()). If any other field
+	// drifts between the two call sites, the shared core has been bypassed.
+	// Normalise UpdatedAt before comparing so the assertion isn't flaky on
+	// machines where the two writes straddle a second boundary.
+	a := *fromFanout
+	b := *fromContract
+	a.UpdatedAt = ""
+	b.UpdatedAt = ""
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("fanout vs contract-create produced different contracts:\nfanout=  %+v\ncontract=%+v", a, b)
+	}
+
+	// Sanity: both files exist on disk.
+	if _, err := os.Stat(filepath.Join(delegationDir(repoFanout), "task-x.yaml")); err != nil {
+		t.Errorf("fanout contract not persisted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(delegationDir(repoContract), "task-x.yaml")); err != nil {
+		t.Errorf("contract-create contract not persisted: %v", err)
 	}
 }

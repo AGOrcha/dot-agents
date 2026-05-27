@@ -80,24 +80,20 @@ func runWorkflowContractCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	contract := &DelegationContract{
-		SchemaVersion:   1,
-		ID:              fmt.Sprintf("del-%s-%d", taskID, time.Now().Unix()),
+	contract, err := materializeDelegationContract(materializeContractRequest{
+		ProjectPath:     project.Path,
 		Mode:            mode,
-		ParentPlanID:    planID,
-		ParentTaskID:    taskID,
+		PlanID:          planID,
+		TaskID:          taskID,
 		Title:           targetTask.Title,
 		Summary:         contractSummaryFor(mode, planID),
 		WriteScope:      writeScope,
 		SuccessCriteria: targetTask.Notes,
 		Owner:           owner,
-		Status:          "active",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := saveDelegationContract(project.Path, contract); err != nil {
-		return fmt.Errorf("save delegation contract: %w", err)
+		Now:             time.Now().UTC(),
+	})
+	if err != nil {
+		return err
 	}
 
 	if deps.Flags.JSON() {

@@ -951,12 +951,13 @@ func checkFanoutWriteScopeConflicts(projectPath string, writeScope []string, tas
 	return fmt.Errorf("delegation rejected: write scope overlaps with existing active delegation(s)")
 }
 
-func persistFanoutArtifacts(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML, taskID string) error {
-	contractPath := filepath.Join(delegationDir(projectPath), taskID+".yaml")
-	if err := saveDelegationContract(projectPath, contract); err != nil {
-		return fmt.Errorf("save delegation contract: %w", err)
-	}
+// persistFanoutBundle writes the bundle that accompanies a fanout contract.
+// The contract itself is already persisted by materializeDelegationContract;
+// this helper only handles the bundle write and cleans up the contract file
+// if the bundle write fails, preserving the original all-or-nothing semantics.
+func persistFanoutBundle(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML) error {
 	if err := saveDelegationBundle(projectPath, bundle); err != nil {
+		contractPath := filepath.Join(delegationDir(projectPath), contract.ParentTaskID+".yaml")
 		_ = os.Remove(contractPath)
 		return fmt.Errorf("save delegation bundle: %w", err)
 	}
@@ -1049,21 +1050,22 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
-	contract := &DelegationContract{
-		SchemaVersion:   1,
-		ID:              fmt.Sprintf("del-%s-%d", taskID, time.Now().Unix()),
+	now := time.Now().UTC()
+	createdAtRFC3339 := now.Format(time.RFC3339)
+	contract, err := materializeDelegationContract(materializeContractRequest{
+		ProjectPath:     project.Path,
 		Mode:            DelegationContractModeDelegated,
-		ParentPlanID:    in.planID,
-		ParentTaskID:    taskID,
+		PlanID:          in.planID,
+		TaskID:          taskID,
 		Title:           targetTask.Title,
 		Summary:         fmt.Sprintf("Delegated from plan %s", plan.Title),
 		WriteScope:      writeScope,
 		SuccessCriteria: targetTask.Notes,
 		Owner:           in.owner,
-		Status:          "active",
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		Now:             now,
+	})
+	if err != nil {
+		return err
 	}
 	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
 		ProjectPath:      project.Path,
@@ -1075,12 +1077,17 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		TargetTask:       targetTask,
 		Contract:         contract,
 		WriteScope:       writeScope,
-		CreatedAtRFC3339: now,
+		CreatedAtRFC3339: createdAtRFC3339,
 	})
 	if err != nil {
+		// Bundle build failed after contract was persisted; clean up the
+		// orphan contract so retries are not blocked by the duplicate-contract
+		// guard at the top of runWorkflowFanout.
+		contractPath := filepath.Join(delegationDir(project.Path), taskID+".yaml")
+		_ = os.Remove(contractPath)
 		return err
 	}
-	if err := persistFanoutArtifacts(project.Path, contract, bundle, taskID); err != nil {
+	if err := persistFanoutBundle(project.Path, contract, bundle); err != nil {
 		return err
 	}
 
