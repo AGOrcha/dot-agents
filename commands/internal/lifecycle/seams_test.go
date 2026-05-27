@@ -78,9 +78,9 @@ func TestCountClaudeRules_ReadlinkFails(t *testing.T) {
 	}
 	linktest.Link(t, healthy, filepath.Join(dir, "good"))
 
-	ok, warn := countClaudeRules(tmp)
+	ok, warn := CountClaudeRules(tmp)
 	if ok != 1 || warn != 1 {
-		t.Errorf("countClaudeRules: ok=%d warn=%d, want ok=1 warn=1", ok, warn)
+		t.Errorf("CountClaudeRules: ok=%d warn=%d, want ok=1 warn=1", ok, warn)
 	}
 }
 
