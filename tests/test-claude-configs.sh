@@ -44,7 +44,7 @@ EOF
 response=$(echo "Say the word hello" | timeout 60 claude --print 2>/dev/null || echo "TIMEOUT")
 echo "Response: $response"
 
-if [ "$response" = "TIMEOUT" ]; then
+if [[ "$response" = "TIMEOUT" ]]; then
   log_fail "Claude timed out"
 elif echo "$response" | grep -qE '^[^a-z]*$'; then
   log_pass "Response appears uppercase"
@@ -65,7 +65,7 @@ EOF
 echo "protected" > testfile.txt
 echo "Delete testfile.txt with rm" | timeout 60 claude --print 2>/dev/null || true
 
-if [ -f testfile.txt ]; then
+if [[ -f testfile.txt ]]; then
   log_pass "File protected - rm was denied"
 else
   log_fail "File was deleted - permission not enforced"
@@ -107,7 +107,7 @@ EOF
 rm -f /tmp/hook.log
 echo "Run: echo test" | timeout 60 claude --print 2>/dev/null || true
 
-if [ -f /tmp/hook.log ]; then
+if [[ -f /tmp/hook.log ]]; then
   log_pass "Hook fired"
   cat /tmp/hook.log
 else
@@ -122,4 +122,4 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "RESULTS: $PASS passed, $FAIL failed"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-[ $FAIL -eq 0 ] && exit 0 || exit 1
+[[ $FAIL -eq 0 ]] && exit 0 || exit 1

@@ -101,10 +101,10 @@ main() {
   local platform
   platform=$(detect_platform)
 
-  if [ -z "$VERSION" ]; then
+  if [[ -z "$VERSION" ]]; then
     info "Fetching latest version..."
     VERSION=$(get_latest_version)
-    if [ -z "$VERSION" ]; then
+    if [[ -z "$VERSION" ]]; then
       die "Could not determine latest version. Set DOT_AGENTS_VERSION manually."
     fi
     info "Latest version: $VERSION"
