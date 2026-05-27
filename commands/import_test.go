@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
+	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
 	"github.com/NikashPrakash/dot-agents/internal/platform"

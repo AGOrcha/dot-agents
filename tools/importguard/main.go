@@ -1,26 +1,30 @@
-// Command importguard enforces the commands/* subpackage import boundary
-// established by plan root-command-decomposition (t13a + t13a-pre + t13b).
+// Command importguard enforces cross-leaf isolation between the four
+// commands/internal/* composition leaves established by plan
+// root-command-decomposition (t13a + t13a-pre + t13b + t15).
 //
-// Contract (locked here so CI fails if it drifts):
+// Background: outsider-prevention is now handled by Go's built-in
+// internal/ package convention — only code rooted at or below
+// commands/ may import commands/internal/lifecycle (etc.). The Go
+// compiler enforces that for us. What the compiler does NOT enforce is
+// sibling isolation: commands/internal/lifecycle is free, as far as
+// Go is concerned, to import commands/internal/mcp. This tool exists
+// solely to forbid those cross-leaf edges.
 //
-//   - commands/lifecycle, commands/mcp, commands/settings, commands/rules
-//     are leaf composition targets. They MUST NOT import each other.
-//   - commands/mcp, commands/settings, commands/rules may only be imported
-//     by the root commands package (commands/root.go and sibling files) or
-//     by the cmd/dot-agents entrypoint.
-//   - commands/lifecycle may only be imported by the root commands package,
-//     by the cmd/dot-agents entrypoint, or by code inside the
-//     commands/lifecycle subtree itself.
+// Contract:
 //
-// Test files inside the root commands/ package and inside each subpackage
-// share the same import budget as their owning package — the policy is
-// applied at the importing-package level, not the file level.
+//   - commands/internal/lifecycle, commands/internal/mcp,
+//     commands/internal/settings, commands/internal/rules are leaf
+//     composition targets. They MUST NOT import each other.
+//
+// Test files inside each leaf share the same import budget as their
+// owning package — the policy is applied at the importing-package
+// level, not the file level.
 //
 // Usage: importguard [packages...]
 // Defaults to "./..." when no package patterns are supplied. The tool
-// exits non-zero (and prints the violation list) the moment any forbidden
-// edge appears, which is what the CI job in .github/workflows/test.yml
-// keys off.
+// exits non-zero (and prints the violation list) the moment any
+// forbidden cross-leaf edge appears, which is what the CI job in
+// .github/workflows/test.yml keys off.
 package main
 
 import (
@@ -36,31 +40,21 @@ import (
 
 const modulePath = "github.com/NikashPrakash/dot-agents"
 
-// guardedSubpackages enumerates the four commands/* leaves whose import
-// edges the guard polices. Each entry is the canonical package import path
-// (no trailing slash). The order here is only used for deterministic
-// rendering — lookups are by string match.
+// guardedSubpackages enumerates the four commands/internal/* leaves
+// whose cross-edges the guard polices. Each entry is the canonical
+// package import path (no trailing slash). The order here is only used
+// for deterministic rendering — lookups are by string match.
 var guardedSubpackages = []string{
-	modulePath + "/commands/lifecycle",
-	modulePath + "/commands/mcp",
-	modulePath + "/commands/settings",
-	modulePath + "/commands/rules",
+	modulePath + "/commands/internal/lifecycle",
+	modulePath + "/commands/internal/mcp",
+	modulePath + "/commands/internal/settings",
+	modulePath + "/commands/internal/rules",
 }
 
-// allowedRootImporters is the closed set of importers that may pull in any
-// guarded leaf from outside the leaf's own subtree. Everything else is
-// forbidden. The root commands package owns composition (root.go wires the
-// AddCommand calls); cmd/dot-agents is the binary entrypoint that depends
-// on commands.NewRootCmd. Membership is an exact package-path match.
-var allowedRootImporters = map[string]struct{}{
-	modulePath + "/commands":       {},
-	modulePath + "/cmd/dot-agents": {},
-}
-
-// violation captures one disallowed import edge for reporting. We surface
-// the importing package and the target subpackage import path so the
-// failure log points straight at the offending source file once a developer
-// runs `go list -f '{{.GoFiles}}' <importer>`.
+// violation captures one disallowed import edge for reporting. We
+// surface the importing leaf and the target leaf so the failure log
+// points straight at the offending source file once a developer runs
+// `go list -f '{{.GoFiles}}' <importer>`.
 type violation struct {
 	importer string
 	target   string
@@ -89,8 +83,8 @@ func mainRun(args []string, stderr io.Writer, load runFunc) int {
 		fmt.Fprintf(stderr,
 			"usage: importguard [packages...]\n"+
 				"  default packages: ./...\n"+
-				"  exits non-zero on any disallowed import edge into\n"+
-				"  commands/{lifecycle,mcp,settings,rules}.\n")
+				"  exits non-zero on any cross-leaf import edge between\n"+
+				"  commands/internal/{lifecycle,mcp,settings,rules}.\n")
 	}
 	if err := fs.Parse(args); err != nil {
 		// flag.ContinueOnError already wrote the usage to stderr;
@@ -144,8 +138,8 @@ var loadPackages = func(patterns []string) ([]*packages.Package, error) {
 		// is intentionally evaluated against the build graph, not the
 		// test graph: tests inside an allowed package inherit the
 		// package's import budget, and out-of-package tests are loaded
-		// as their own package (e.g. commands_test) which carries no
-		// allow-list entry and would always violate if checked here.
+		// as their own package which carries no leaf identity and would
+		// always pass.
 		Tests: false,
 	}
 	return packages.Load(cfg, patterns...)
@@ -153,9 +147,8 @@ var loadPackages = func(patterns []string) ([]*packages.Package, error) {
 
 // checkPackages inspects every loaded package's direct imports against the
 // policy and accumulates violations. The traversal stays shallow on
-// purpose: transitive dependencies are covered because every package that
-// imports a guarded leaf transitively is itself loaded by packages.Load
-// when given ./..., and a direct edge is what the policy regulates.
+// purpose: a direct edge from one leaf to another is what the policy
+// regulates, and packages.Load(./...) loads every leaf anyway.
 func checkPackages(pkgs []*packages.Package) []violation {
 	var out []violation
 	for _, p := range pkgs {
@@ -189,34 +182,40 @@ func checkPackages(pkgs []*packages.Package) []violation {
 
 // classify is the single decision point: given an importer package path
 // and one of its direct imports, return whether the edge violates the
-// policy. Splitting the rule out makes it cheap to table-test.
+// cross-leaf rule. An edge is forbidden iff both endpoints sit in
+// different guarded leaves. Same-leaf edges (including internal
+// helpers under the leaf's subtree) and edges where either endpoint is
+// not a guarded leaf at all (root commands package, cmd entrypoint,
+// stdlib, third-party) are all allowed.
 func classify(importer, target string) (violation, bool) {
-	sub := guardedSubpackageFor(target)
-	if sub == "" {
+	targetLeaf := guardedSubpackageFor(target)
+	if targetLeaf == "" {
 		return violation{}, false // target is not a guarded leaf
 	}
-	// Same-subtree imports are always allowed: a file under
-	// commands/lifecycle/ may freely import commands/lifecycle/internal/x
-	// or its own root path. inSubpackage covers both equality and
-	// prefix-with-slash so commands/lifecyclextra never matches
-	// commands/lifecycle.
-	if inSubpackage(importer, sub) {
+	importerLeaf := guardedSubpackageFor(importer)
+	if importerLeaf == "" {
+		// Outsider importers are now blocked by Go's internal/ rule at
+		// compile time; if one somehow reaches this code (e.g. the
+		// rename was undone), let the compiler fail the build before
+		// we do — return false to keep this tool single-purpose.
 		return violation{}, false
 	}
-	if _, ok := allowedRootImporters[importer]; ok {
-		return violation{}, false
+	if importerLeaf == targetLeaf {
+		return violation{}, false // same-leaf edge is always fine
 	}
 	return violation{
 		importer: importer,
 		target:   target,
-		reason:   reasonFor(importer, sub),
+		reason: fmt.Sprintf("subpackage %s must not import sibling subpackage %s",
+			trimModule(importerLeaf), trimModule(targetLeaf)),
 	}, true
 }
 
 // guardedSubpackageFor returns the guarded leaf path that owns the given
 // import path, or "" if the import is unrelated to the policy. Matching
 // uses exact equality OR prefix-with-slash so a hypothetical sibling like
-// commands/lifecyclehelper is not folded into commands/lifecycle's budget.
+// commands/internal/lifecyclehelper is not folded into
+// commands/internal/lifecycle's budget.
 func guardedSubpackageFor(importPath string) string {
 	for _, sub := range guardedSubpackages {
 		if inSubpackage(importPath, sub) {
@@ -236,22 +235,8 @@ func inSubpackage(candidate, sub string) bool {
 	return strings.HasPrefix(candidate, sub+"/")
 }
 
-// reasonFor produces a short, human-actionable explanation that names the
-// rule each violation breaks. Cross-leaf edges (mcp -> settings) and
-// outsider edges (some internal/... -> commands/lifecycle) read
-// differently, so we branch on the importer.
-func reasonFor(importer, sub string) string {
-	if other := guardedSubpackageFor(importer); other != "" && other != sub {
-		return fmt.Sprintf("subpackage %s must not import sibling subpackage %s",
-			trimModule(other), trimModule(sub))
-	}
-	return fmt.Sprintf("package %s is not in the allowed-importer set for %s "+
-		"(allowed: commands, cmd/dot-agents, %s subtree)",
-		trimModule(importer), trimModule(sub), trimModule(sub))
-}
-
 // trimModule strips the module prefix off a package path so the CI log
-// shows "commands/lifecycle" instead of the full Go import path.
+// shows "commands/internal/lifecycle" instead of the full Go import path.
 func trimModule(pkgPath string) string {
 	return strings.TrimPrefix(pkgPath, modulePath+"/")
 }
@@ -259,12 +244,14 @@ func trimModule(pkgPath string) string {
 // reportViolations renders the failure list. Kept in main.go (not a
 // helper package) because the tool has exactly one consumer.
 func reportViolations(w io.Writer, vs []violation) {
-	fmt.Fprintf(w, "importguard: %d disallowed import edge(s):\n", len(vs))
+	fmt.Fprintf(w, "importguard: %d disallowed cross-leaf import edge(s):\n", len(vs))
 	for _, v := range vs {
 		fmt.Fprintf(w, "  %s -> %s\n      %s\n",
 			trimModule(v.importer), trimModule(v.target), v.reason)
 	}
-	fmt.Fprintf(w, "\nThis tool locks the commands/* subpackage boundary set\n"+
-		"by plan root-command-decomposition. If the violation is intentional,\n"+
-		"update tools/importguard/main.go and explain why in the commit.\n")
+	fmt.Fprintf(w, "\nThis tool locks cross-leaf isolation between the\n"+
+		"commands/internal/{lifecycle,mcp,settings,rules} composition\n"+
+		"leaves. Outsider imports are blocked by Go's internal/ rule.\n"+
+		"If the violation is intentional, update tools/importguard/main.go\n"+
+		"and explain why in the commit.\n")
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/commands/lifecycle"
+	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
