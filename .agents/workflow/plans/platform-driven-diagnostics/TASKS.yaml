@@ -153,19 +153,20 @@ tasks:
         surfacing across cursor/claude/codex/copilot/opencode). That is why it
         is a MINOR rather than patch-train: behavior the user sees in doctor/
         status output is broadened, not just refactored.
-        FOLDS INTO 0.4.0: P0–P3 already SHIPPED (P0 via PR #118, P3 via the
-        merged badge-and-countlinks PR #135), and the delivered surface lands
-        inside the imminent 0.4.0 window. Treat this tail as a record that the
-        capability folds into 0.4.0 — NO separate version bump if the relevant
-        surface is already released under 0.4.0. If the remaining P4–P6
-        abstraction-cleanup tasks ship after 0.4.0 has cut and add no further
-        user-visible surface (pure internal contract test + helper deletion),
-        this tail is effectively a no-op record and feeds the patch train at
-        that point.
+        FOLDS INTO 0.3.3: P0–P3 already SHIPPED (P0 via PR #118, P3 via the
+        merged badge-and-countlinks PR #135). Per the 2026-05-28 maintainer
+        ruling, that accumulated merged work ships under the PATCH release
+        0.3.3 (#145), NOT 0.4.0 (0.4.0 is reserved for the next feature land).
+        So the user-visible doctor/status surface this plan delivered is
+        already captured by 0.3.3. Treat this tail as a no-op record — NO
+        separate version bump, because the surface is released under 0.3.3.
+        The remaining P4–P6 abstraction-cleanup tasks are pure internal
+        (contract test + helper deletion, no new user surface), so they feed
+        the PATCH train rather than warranting a minor.
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode); expected to already be covered by 0.4.0.
+        ready-time (do NOT hardcode); but in practice this tail does not bump
+        — the capability already shipped under 0.3.3.
         Action: confirm the doctor/status capability is documented in the
-        0.4.0 CHANGELOG section; only bump VERSION if a separate minor is
-        genuinely required (i.e. surface not yet released). Merge to master
-        fires auto-release.yml when a bump is warranted.
+        0.3.3 CHANGELOG section (it is, via #145); only bump VERSION if a
+        genuinely unreleased new surface remains. Otherwise close as no-op.
       app_type: release

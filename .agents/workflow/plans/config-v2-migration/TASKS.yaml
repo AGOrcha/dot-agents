@@ -521,13 +521,15 @@ tasks:
         and packages tier. That is additive, no public surface removed, so a
         MINOR.
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). Maintainer confirmed the config-v2 tail
-        targets the NEXT minor AFTER 0.4.0 — i.e. 0.5.0 expected (the de-facto
-        0.4.0 release window per the convention is already accounted for by
-        #145; config-explain/#162 holds for THIS tail -> 0.5.0, NOT 0.4.0).
-        With VERSION at 0.3.2 today and 0.4.0 imminent, resolve the exact
-        number from VERSION when this task becomes ready (expected 0.5.0);
-        serialize at the VERSION bump if another minor ships first.
+        ready-time (do NOT hardcode). Maintainer ruling 2026-05-28 revised the
+        release lineup: the accumulated infra/docs/distribution work (#145)
+        ships as PATCH 0.3.3, NOT 0.4.0 — 0.4.0 is reserved for the next
+        genuine feature land. config-v2 (da config explain + resolver) IS that
+        feature, so this tail is expected to claim 0.4.0 (next minor after
+        0.3.3). config-explain/#162 holds for THIS tail -> 0.4.0, NOT 0.3.3.
+        Resolve the exact number from VERSION when this task becomes ready
+        (expected 0.4.0); serialize at the VERSION bump if another feature
+        plan's minor tail ships first (then this becomes 0.5.0).
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, documenting the v2 config model
         and `da config explain`. Merge to master fires auto-release.yml.
