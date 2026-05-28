@@ -206,3 +206,49 @@ Sequence under either a new sub-plan `thermo-nuclear-meld` (preferred — cleanl
 - `[[layered-pr-fanout-with-pr-open-status]]` §3.3 lists thermo-nuclear as a possible 4th merge-gate lens — this proposal recommends it does NOT land as such. Parent proposal should drop "(thermo-nuclear if added — see ...)" wording and the §5.1 "open: do we want two distinct sub-statuses" note loses one consideration (lens-count goes from "3 with potential 4th" to "3 stable").
 - `[[lens-evidence-policy-renderings]]` §2.1 Strategy A/B and §2.3 Strategy C explicitly reference thermo-nuclear as a tier-3 / opt-out lens. Under this recommendation those become `architecture-standards.mode=thermo-nuclear` references with no loss of expressive power; rendering doc edits captured as task t4.
 - The pr10-branch-split plan's `thermo-nuclear-lens-evaluation` task closes out at "decision recorded; implementation deferred to follow-up plan." This proposal *is* the closeout artifact.
+
+---
+
+## §7. Maintainer redirection — mode-as-skill, not mode-as-inline-prompt (added 2026-05-28 review fold-in)
+
+The §4 recommendation lands the meld behind a `mode: standard | thermo-nuclear` toggle wired in `.agentsrc.json`. Maintainer review (PR #153, file-comment at `.agents/proposals/thermo-nuclear-lens-evaluation.md:135`) flags that the *mechanism* — inline-prompt mode-aware content — is the wrong vector. Quoted:
+
+> The tone-divergence and mode questioning gives me the idea of setting up the different modes as a part of a skill they can use, were they load the specific mode's instructions, and have one template used, so architectural-standards and others if they gain a variant / mode to use. As you said with v1.5 this AGENT.md is overloaded and can be optimized better to use skills and templates + rubrics properly. would want to recheck / plan / think the path forward
+
+This reframes §4 / §5 in a load-bearing way and supersedes the v1 "single AGENT.md with inline mode text" path. Capturing the redirection here, ahead of any C.4-style planning round.
+
+### §7.1 The redirected architecture
+
+- **Each lens AGENT.md becomes a thin template** — orchestrator role, output contract, dispatch rules. No mode-specific rubric content inline. (Matches skill-architect principle #1 "orchestrator + loaded rules.")
+- **Each mode is a skill under `~/.agents/skills/global/<lens>.<mode>/`** — `architecture-standards.standard`, `architecture-standards.thermo-nuclear`, future `architecture-standards.<mode-N>`. Contains the rubric, severity calibration, "concretely check" bullets, tone calibration.
+- **Per-finding rubric files** under each skill — codifies the BLOCKER/HIGH/MEDIUM/LOW gradient + the deletion-bias + 1k-line rule as standalone rubric documents the agent loads on demand, not inline-baked.
+- **Shared template** for all three (later: four+) lenses — a single `lens-template.md` (or starter scaffold) holds the orchestrator pattern; lens-specific instantiation parameterizes via `name`, `loaded-skills[]`, `output-contract-extras`.
+- **Mode selection** happens at dispatch time — the review-gate dispatcher reads `architecture_standards.mode` from `.agentsrc.json` (per §4 escape hatch) and instructs the lens to load the corresponding skill instead of forking which agent it spawns.
+
+### §7.2 What stays from §4 / §5
+
+- The **decision** (Hybrid B-leaning meld; no separate 4th lens) is unchanged.
+- The **`.agentsrc.json` `architecture_standards.mode` flag** is unchanged — it's the right surface; only what it controls shifts (loaded skill, not inline prompt branch).
+- The **archive of `~/.agents/skills/global/thermo-nuclear-code-quality-review/`** still happens; the archived content gets re-cast as `architecture-standards.thermo-nuclear` (one of the per-mode skills) rather than deleted outright.
+- The **deletion-bias / 1k-line rule** still lives in the *standard* mode (default), not gated behind opt-in — but it lives in the standard-mode skill file, not in the AGENT.md prompt.
+
+### §7.3 What changes from §4 / §5
+
+- **t1 "extend AGENT.md with five additive bullets"** → REPLACED by t1' "create `architecture-standards.standard` skill (default-loaded) + `architecture-standards.thermo-nuclear` skill (mode-loaded) + slim down AGENT.md to template-only." More work; clearer separation of concerns.
+- **t2 "archive cursor-team-kit thermo-nuclear with redirect stub"** → REPLACED by t2' "re-cast cursor-team-kit thermo-nuclear content as the body of the `architecture-standards.thermo-nuclear` skill." Same write-scope target, different framing.
+- **t3 "schema add `architecture_standards.mode`"** → UNCHANGED; same surface.
+- **NEW t6 "design + land lens-template scaffold"** — the shared orchestrator + parameterization template that all three lenses (and future modes) instantiate against. This is the v1.5 hygiene work the maintainer flagged as overdue.
+- **NEW t7 "migrate acceptance-invariants + adversarial lenses to the same template + skills shape"** — once the template lands, the other two lenses should follow for consistency. Don't ship a one-lens-uses-template-others-don't surface area; that's a half-meld.
+
+### §7.4 Cost re-estimate
+
+§4 said "Small — 30-50 lines added to one AGENT.md." This redirection is **Medium** — new skill-files for 2-3 modes per lens × 3 lenses = 6-9 skill files, template scaffold, schema field, dispatcher wiring. Still well under "Large" (no review-gate behavior change, no test scaffold change beyond skill-file fixtures), but no longer a single-PR meld.
+
+### §7.5 Recommendation update
+
+**Recheck / plan / think** the path forward per the maintainer's ask. Recommended next step: open a sibling design proposal `lens-template-and-mode-skills.md` (under `.agents/proposals/`) that captures §7.1-§7.4 in spec-quality detail, then thread its outcomes back here as a §4.5 superseding the current §4 recommendation. Do NOT block this current proposal's decision-record on that — the meld-vs-4th-lens question is independently answered (meld); the mechanism question becomes its own design loop.
+
+### §7.6 Open question added
+
+- **OQ-A (NEW) — mode-skill naming convention.** Use dotted `<lens>.<mode>` (e.g., `architecture-standards.thermo-nuclear`) or hierarchical directories (`architecture-standards/modes/thermo-nuclear/SKILL.md`)? Either resolves; pick one and stick. Recommend dotted (cheaper to grep, mirrors how `[[verifier_profiles]]` are referenced).
+- **OQ-B (NEW) — backward compatibility during template migration.** Two paths: (a) flag-day swap all three lenses + template + skills in one PR (high-risk, easy review); (b) per-lens migration, each lens self-converts and the dispatcher reads either inline-AGENT or template+skill (lower risk, longer in-flight inconsistency). Recommend (b) per the `[[parallel-worker-branch-drift]]` lesson — concurrent lens edits + template edits is exactly the partial-coherence trap.
