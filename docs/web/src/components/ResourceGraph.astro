@@ -1,7 +1,13 @@
 ---
-// Interactive node-link graph rendered with Cytoscape.js. The graph data is
-// passed in as a JSON-stringified prop and consumed client-side by an inline
-// script. Clicking a node populates the inspector pane with that node's data.
+// Interactive node-link graph rendered with Cytoscape.js. Graph data is
+// serialized into a data attribute on the canvas and consumed by a
+// bundled client-side script (no define:vars — that prevented Astro
+// from processing the script as a module, so the bare `import` of
+// `cytoscape` failed to resolve at runtime).
+//
+// Theme colors for node labels / edges / outlines are read from CSS
+// custom properties (--graph-*) at init time and re-applied when the
+// theme changes (see `theme-changed` event in BaseLayout).
 interface GraphNode {
   id: string;
   label: string;
@@ -29,7 +35,13 @@ const { graph, graphId, layoutName = 'cose' } = Astro.props;
 const serialized = JSON.stringify({ graph, layoutName });
 ---
 <div class="graph-page">
-  <div id={`canvas-${graphId}`} class="graph-canvas" data-graph={serialized}></div>
+  <div
+    id={`canvas-${graphId}`}
+    class="graph-canvas"
+    data-resource-graph
+    data-graph-id={graphId}
+    data-graph={serialized}
+  ></div>
   <aside class="graph-inspector" id={`inspector-${graphId}`}>
     <h3>Inspector</h3>
     <p class="hint">Click a node to view its details.</p>
@@ -47,28 +59,141 @@ const serialized = JSON.stringify({ graph, layoutName });
   </aside>
 </div>
 
-<script define:vars={{ graphId }}>
-  // Wrap dynamic import so the cytoscape bundle is split off the main entry.
-  async function init() {
-    const cytoscape = (await import('cytoscape')).default;
-    const canvas = document.getElementById(`canvas-${graphId}`);
-    const inspector = document.getElementById(`inspector-${graphId}`);
-    if (!canvas || !inspector) return;
+<script>
+  import cytoscape from 'cytoscape';
+
+  type CyInstance = ReturnType<typeof cytoscape>;
+  type MountedGraph = {
+    el: HTMLElement;
+    inspector: HTMLElement | null;
+    graphId: string;
+    graph: any;
+    layoutName: string;
+    cy?: CyInstance;
+  };
+
+  const mounted: MountedGraph[] = [];
+
+  function readThemeColors(): Record<string, string> {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name: string, fallback: string) => {
+      const raw = cs.getPropertyValue(name).trim();
+      return raw || fallback;
+    };
+    return {
+      label: v('--graph-label', '#e5edf7'),
+      labelOutline: v('--graph-label-outline', '#0b1220'),
+      nodeBorder: v('--graph-node-border', '#0b1220'),
+      nodeSelected: v('--graph-node-selected', '#f59e0b'),
+      edge: v('--graph-edge', '#3b4d77'),
+      edgeLabel: v('--graph-edge-label', '#8aa0c0'),
+      edgeLabelBg: v('--graph-edge-label-bg', '#0b1220'),
+    };
+  }
+
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderInspector(inspector: HTMLElement, node: any, kindColors: Record<string, string>, defaultColor: string) {
+    const d = node.data();
+    const payload = d.payload ?? {};
+    const rows = Object.entries(payload)
+      .map(([k, v]) => {
+        let value;
+        if (Array.isArray(v)) {
+          value = v.map((x) => `<span class="badge">${escapeHtml(String(x))}</span>`).join(' ');
+        } else if (typeof v === 'object' && v !== null) {
+          value = `<pre style="white-space:pre-wrap; font-size:0.78rem; margin:0;">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
+        } else {
+          value = escapeHtml(String(v));
+        }
+        return `<dt>${escapeHtml(k)}</dt><dd>${value}</dd>`;
+      })
+      .join('');
+    inspector.innerHTML = `
+      <h3>${escapeHtml(d.label)}</h3>
+      <dl>
+        <dt>Kind</dt><dd><span class="badge" style="background:${kindColors[d.kind] ?? defaultColor}">${escapeHtml(d.kind)}</span></dd>
+        <dt>ID</dt><dd><code>${escapeHtml(d.id)}</code></dd>
+        ${rows}
+      </dl>
+    `;
+  }
+
+  function buildStyle(kindColors: Record<string, string>, defaultColor: string): any[] {
+    const t = readThemeColors();
+    return [
+      {
+        selector: 'node',
+        style: {
+          'background-color': (ele: any) => kindColors[ele.data('kind')] ?? defaultColor,
+          label: 'data(label)',
+          color: t.label,
+          'font-size': 11,
+          'text-outline-color': t.labelOutline,
+          'text-outline-width': 2,
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'text-wrap': 'wrap',
+          'text-max-width': 90,
+          width: 'label',
+          height: 'label',
+          padding: '10px',
+          shape: 'round-rectangle',
+          'border-width': 1,
+          'border-color': t.nodeBorder,
+        },
+      },
+      {
+        selector: 'node:selected',
+        style: {
+          'border-color': t.nodeSelected,
+          'border-width': 3,
+        },
+      },
+      {
+        selector: 'edge',
+        style: {
+          width: 1.4,
+          'line-color': t.edge,
+          'target-arrow-color': t.edge,
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          label: 'data(label)',
+          'font-size': 9,
+          color: t.edgeLabel,
+          'text-rotation': 'autorotate',
+          'text-background-color': t.edgeLabelBg,
+          'text-background-opacity': 0.8,
+          'text-background-padding': 2,
+        },
+      },
+    ];
+  }
+
+  function mountGraph(canvas: HTMLElement) {
+    const graphId = canvas.getAttribute('data-graph-id') ?? '';
     const raw = canvas.getAttribute('data-graph');
     if (!raw) return;
+    const inspector = document.getElementById(`inspector-${graphId}`);
     const { graph, layoutName } = JSON.parse(raw);
 
-    // Map node kind -> color (kept in sync with legend in JSON data).
-    const kindColors = Object.fromEntries(
-      (graph.legend ?? []).map((l) => [l.kind, l.color])
+    const kindColors: Record<string, string> = Object.fromEntries(
+      (graph.legend ?? []).map((l: any) => [l.kind, l.color]),
     );
     const defaultColor = '#64748b';
 
     const elements = [
-      ...graph.nodes.map((n) => ({
+      ...graph.nodes.map((n: any) => ({
         data: { id: n.id, label: n.label, kind: n.kind, payload: n.data ?? {} },
       })),
-      ...graph.edges.map((e, i) => ({
+      ...graph.edges.map((e: any, i: number) => ({
         data: {
           id: `e${i}`,
           source: e.source,
@@ -81,105 +206,52 @@ const serialized = JSON.stringify({ graph, layoutName });
     const cy = cytoscape({
       container: canvas,
       elements,
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'background-color': (ele) => kindColors[ele.data('kind')] ?? defaultColor,
-            label: 'data(label)',
-            color: '#e5edf7',
-            'font-size': 11,
-            'text-outline-color': '#0b1220',
-            'text-outline-width': 2,
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'text-wrap': 'wrap',
-            'text-max-width': 90,
-            width: 'label',
-            height: 'label',
-            padding: '10px',
-            shape: 'round-rectangle',
-            'border-width': 1,
-            'border-color': '#0b1220',
-          },
-        },
-        {
-          selector: 'node:selected',
-          style: {
-            'border-color': '#f59e0b',
-            'border-width': 3,
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            width: 1.4,
-            'line-color': '#3b4d77',
-            'target-arrow-color': '#3b4d77',
-            'target-arrow-shape': 'triangle',
-            'curve-style': 'bezier',
-            label: 'data(label)',
-            'font-size': 9,
-            color: '#8aa0c0',
-            'text-rotation': 'autorotate',
-            'text-background-color': '#0b1220',
-            'text-background-opacity': 0.8,
-            'text-background-padding': 2,
-          },
-        },
-      ],
+      style: buildStyle(kindColors, defaultColor),
       layout: layoutName === 'breadthfirst'
         ? { name: 'breadthfirst', directed: true, padding: 24, spacingFactor: 1.25 }
         : { name: 'cose', padding: 24, animate: false, nodeRepulsion: 8000, idealEdgeLength: 110 },
       wheelSensitivity: 0.2,
     });
 
-    function renderInspector(node) {
-      const d = node.data();
-      const payload = d.payload ?? {};
-      const rows = Object.entries(payload)
-        .map(([k, v]) => {
-          let value;
-          if (Array.isArray(v)) {
-            value = v.map((x) => `<span class="badge">${escapeHtml(String(x))}</span>`).join(' ');
-          } else if (typeof v === 'object' && v !== null) {
-            value = `<pre style="white-space:pre-wrap; font-size:0.78rem; margin:0;">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
-          } else {
-            value = escapeHtml(String(v));
-          }
-          return `<dt>${escapeHtml(k)}</dt><dd>${value}</dd>`;
-        })
-        .join('');
-      inspector.innerHTML = `
-        <h3>${escapeHtml(d.label)}</h3>
-        <dl>
-          <dt>Kind</dt><dd><span class="badge" style="background:${kindColors[d.kind] ?? defaultColor}">${escapeHtml(d.kind)}</span></dd>
-          <dt>ID</dt><dd><code>${escapeHtml(d.id)}</code></dd>
-          ${rows}
-        </dl>
-      `;
+    if (inspector) {
+      cy.on('tap', 'node', (evt: any) => renderInspector(inspector, evt.target, kindColors, defaultColor));
+      cy.on('tap', (evt: any) => {
+        if (evt.target === cy) {
+          inspector.innerHTML = '<h3>Inspector</h3><p class="hint">Click a node to view its details.</p>';
+        }
+      });
     }
 
-    function escapeHtml(s) {
-      return s
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    }
-
-    cy.on('tap', 'node', (evt) => renderInspector(evt.target));
-    cy.on('tap', (evt) => {
-      if (evt.target === cy) {
-        inspector.innerHTML = '<h3>Inspector</h3><p class="hint">Click a node to view its details.</p>';
-      }
-    });
+    mounted.push({ el: canvas, inspector, graphId, graph, layoutName, cy });
   }
 
+  function initAll() {
+    const canvases = Array.from(document.querySelectorAll<HTMLElement>('[data-resource-graph]'));
+    for (const canvas of canvases) {
+      // Defer one animation frame so the container has measured size; Cytoscape
+      // refuses to render into a 0×0 container and a layout-engine-during-init
+      // race can leave the canvas blank if the parent grid hasn't resolved.
+      requestAnimationFrame(() => mountGraph(canvas));
+    }
+  }
+
+  // Re-init all mounted graphs against the new theme palette. We rebuild the
+  // style array (function-based color resolvers are baked in at .style() time).
+  function onThemeChange() {
+    for (const m of mounted) {
+      if (!m.cy) continue;
+      const kindColors: Record<string, string> = Object.fromEntries(
+        (m.graph.legend ?? []).map((l: any) => [l.kind, l.color]),
+      );
+      m.cy.style(buildStyle(kindColors, '#64748b'));
+    }
+  }
+
+  window.addEventListener('theme-changed', onThemeChange);
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', initAll);
   } else {
-    init();
+    initAll();
   }
 </script>

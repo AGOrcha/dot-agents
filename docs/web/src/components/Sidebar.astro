@@ -1,4 +1,5 @@
 ---
+import ThemeToggle from './ThemeToggle.astro';
 interface Props {
   currentPath: string;
 }
@@ -9,6 +10,10 @@ const isActive = (p: string) => {
   const full = link(p).replace(/\/$/, '');
   const cur = currentPath.replace(/\/$/, '');
   return cur === full || cur === full + '/index';
+};
+const startsWith = (prefix: string) => {
+  const full = link(prefix);
+  return currentPath.startsWith(full);
 };
 
 const sections = [
@@ -26,6 +31,16 @@ const sections = [
       { href: '/demos/demo_diagram/', label: 'Architecture diagrams' },
       { href: '/demos/demo_workflow_walkthrough/', label: 'Workflow walkthrough' },
       { href: '/demos/demo_lessons_narrative/', label: 'Lessons narrative' },
+    ],
+  },
+  {
+    heading: 'Canonical',
+    links: [
+      { href: '/canonical/', label: 'Index' },
+      { href: '/canonical/#docs', label: 'Docs' },
+      { href: '/canonical/#lessons', label: 'Lessons' },
+      { href: '/canonical/#specs', label: 'Specs' },
+      { href: '/canonical/#proposals', label: 'Proposals (drafts)' },
     ],
   },
   {
@@ -47,23 +62,42 @@ const sections = [
 ];
 ---
 <aside class="sidebar">
-  <h1>dot-agents</h1>
+  <a class="brand" href={link('/')} aria-label="dot-agents — home">
+    <img
+      src={`${import.meta.env.BASE_URL}branding/agorcha-ouroboros-512.png`}
+      alt=""
+      width="48"
+      height="48"
+      class="brand-mark"
+    />
+    <h1>dot-agents</h1>
+  </a>
   <div class="tagline">Interactive docs</div>
+  <ThemeToggle />
   <nav>
     {sections.map((section) => (
       <div>
         <h2>{section.heading}</h2>
         <ul>
-          {section.links.map((l) => (
-            <li>
-              <a
-                href={link(l.href)}
-                aria-current={isActive(l.href) ? 'page' : undefined}
-              >
-                {l.label}
-              </a>
-            </li>
-          ))}
+          {section.links.map((l) => {
+            // Anchor links (e.g. '/canonical/#docs') should highlight when the
+            // /canonical/ index page is active; treat any link with '#' as a
+            // sub-anchor of its parent path.
+            const hashIdx = l.href.indexOf('#');
+            const active = hashIdx >= 0
+              ? startsWith(l.href.slice(0, hashIdx)) && currentPath.replace(/\/$/, '') === link(l.href.slice(0, hashIdx)).replace(/\/$/, '')
+              : isActive(l.href);
+            return (
+              <li>
+                <a
+                  href={link(l.href)}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {l.label}
+                </a>
+              </li>
+            );
+          })}
         </ul>
       </div>
     ))}

@@ -1,25 +1,38 @@
 ---
-// Client-only mermaid renderer. Scans the page for <pre><code class="language-mermaid">
-// blocks and replaces them with rendered SVG. Astro's default markdown pipeline
-// emits mermaid fences as code blocks with that class — we don't need a remark
-// plugin; we just hydrate after page load.
+// Client-only mermaid renderer. Scans the page for <pre data-language="mermaid">
+// blocks (emitted by Shiki for ```mermaid fences) and replaces them with
+// rendered SVG. Re-renders when the theme changes so the embedded diagram
+// follows light/dark.
 ---
 <script>
   import mermaid from 'mermaid';
 
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'neutral',
-    securityLevel: 'loose',
-    flowchart: { htmlLabels: true, useMaxWidth: true },
-  });
+  type Theme = 'default' | 'dark';
 
+  function activeTheme(): Theme {
+    // Honour an explicit data-theme override first; otherwise mirror the
+    // OS-level prefers-color-scheme so "system" follows the system.
+    const explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'light') return 'default';
+    if (explicit === 'dark') return 'dark';
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'default' : 'dark';
+  }
+
+  function initMermaid() {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: activeTheme(),
+      securityLevel: 'loose',
+      flowchart: { htmlLabels: true, useMaxWidth: true },
+    });
+  }
+
+  // Cache the original source on the rendered wrapper so we can re-render on
+  // theme change without re-parsing the page's pre blocks (those have already
+  // been replaced).
   async function renderAll() {
-    // Astro+Shiki renders mermaid fences as <pre data-language="mermaid">…</pre>
-    // with no separate <code> element exposing the raw source. We extract the
-    // plain text from the <pre> (Shiki preserves it inside <span class="line">
-    // children) and feed it to mermaid.
-    const blocks = document.querySelectorAll('pre[data-language="mermaid"]');
+    initMermaid();
+    const blocks = document.querySelectorAll<HTMLElement>('pre[data-language="mermaid"]');
     let i = 0;
     for (const pre of Array.from(blocks)) {
       if (pre.dataset.mermaidRendered === '1') continue;
@@ -29,6 +42,7 @@
         const { svg } = await mermaid.render(id, source);
         const wrapper = document.createElement('div');
         wrapper.className = 'mermaid-block';
+        wrapper.dataset.mermaidSource = source;
         wrapper.innerHTML = svg;
         pre.replaceWith(wrapper);
       } catch (err) {
@@ -37,6 +51,26 @@
       }
     }
   }
+
+  async function rerenderForTheme() {
+    initMermaid();
+    const wrappers = document.querySelectorAll<HTMLElement>('.mermaid-block[data-mermaid-source]');
+    let i = 0;
+    for (const wrapper of Array.from(wrappers)) {
+      const source = wrapper.dataset.mermaidSource ?? '';
+      const id = `mermaid-rt-${Date.now()}-${i++}`;
+      try {
+        const { svg } = await mermaid.render(id, source);
+        wrapper.innerHTML = svg;
+      } catch (err) {
+        console.error('Mermaid re-render error', err);
+      }
+    }
+  }
+
+  window.addEventListener('theme-changed', () => {
+    rerenderForTheme();
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', renderAll);
