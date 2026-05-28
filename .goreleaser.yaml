@@ -87,21 +87,26 @@ release:
     owner: NikashPrakash
     name: dot-agents
 
+# Dual-cask emit:
+#   - dot-agents.rb            — unversioned "latest" pointer (overwritten each release)
+#   - dot-agents@{version}.rb  — version-pinned (new file per release, never deleted)
+# Both casks land in the same PR per release via the shared `goreleaser-cask-<v>`
+# branch. Binary name stays `da` either way; only the cask identifier differs.
 homebrew_casks:
   - name: dot-agents
-    ids:
+    ids: &cask_ids
       - unix
-    binaries:
+    binaries: &cask_binaries
       - da
-    commit_author:
+    commit_author: &cask_commit_author
       name: github-actions[bot]
       email: github-actions[bot]@users.noreply.github.com
       signing:
         enabled: true
         key: "{{ .Env.HOMEBREW_TAP_GPG_KEY_ID }}"
-    url:
+    url: &cask_url
       verified: "github.com/NikashPrakash/dot-agents/"
-    repository:
+    repository: &cask_repository
       owner: AGOrcha
       name: homebrew-tap
       branch: "goreleaser-cask-{{ .Version }}"
@@ -112,4 +117,13 @@ homebrew_casks:
         base:
           branch: main
     description: "Manage AI agent configurations across projects"
-    homepage: "https://github.com/NikashPrakash/dot-agents"
+    homepage: &cask_homepage "https://github.com/NikashPrakash/dot-agents"
+
+  - name: "dot-agents@{{ .Version }}"
+    ids: *cask_ids
+    binaries: *cask_binaries
+    commit_author: *cask_commit_author
+    url: *cask_url
+    repository: *cask_repository
+    description: "Manage AI agent configurations across projects (v{{ .Version }} pinned)"
+    homepage: *cask_homepage
