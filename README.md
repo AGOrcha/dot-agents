@@ -148,6 +148,13 @@ go build -o ./bin/da ./cmd/dot-agents
 export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
 
+### Verify a release (optional)
+
+Releases are signed with [Cosign](https://github.com/sigstore/cosign) using
+keyless signing via Sigstore + GitHub OIDC. See
+[`docs/RELEASE_VERIFICATION.md`](docs/RELEASE_VERIFICATION.md) for the
+step-by-step `cosign verify-blob` recipe.
+
 ## Quick Start
 
 ```bash
