@@ -1,7 +1,8 @@
 # Spec: managed worktree platform for delegation/branch isolation
 
-Status: draft / open-decision (maintainer-proposed 2026-05-17). Needs
-the git-layer fork (below) decided before it graduates to a plan.
+Status: draft / git-layer decision VERIFIED (wt0 spike, 2026-05-28).
+Decision A (pure go-git v6) confirmed feasible incl. all 4 residuals —
+see "wt0 spike findings" below. Ready to graduate to wt1 implementation.
 
 ## Problem
 
@@ -118,6 +119,157 @@ worktree/sub-branch with a recorded base.
 - Cleanup prunes unchanged worktrees deterministically.
 - Chosen git mechanism (A/B/C) implemented behind one typed interface;
   callers/skills bind to the interface only.
+
+## wt0 spike findings (VERIFY, 2026-05-28)
+
+Decision A (pure go-git v6, zero shell-git) is **CONFIRMED**. The 4
+residuals left open after the swarm-cd reference mining are all
+resolved below. None disproved Decision A — no hybrid shell-git
+fallback is required for any operation. swarm-cd was found on disk at
+`/Users/nikashp/Documents/payout/swarm-cd/swarmcd/worktree.go` and
+re-read: it is exactly the pattern the spec described
+(`gitworktree.New(repo.Storer)` → `Add`/`Remove`/`Open`, typed errors,
+TTL last-used marker stale-cleanup), using detached-HEAD + `WithCommit`.
+
+Each residual below was proved against the version dot-agents already
+pins (`go-git/v6 v6.0.0-alpha.4`) by a throwaway `go run` program (built
+and run clean, not committed). The exported worktree API verified:
+
+```go
+package github.com/go-git/go-git/v6/x/plumbing/worktree
+func New(storer storage.Storer) (*Worktree, error)
+func (w *Worktree) Add(wt billy.Filesystem, name string, opts ...Option) error
+func (w *Worktree) Remove(name string) error
+func (w *Worktree) List() ([]string, error)
+func (w *Worktree) Open(wt billy.Filesystem) (*git.Repository, error)
+func (w *Worktree) Init(wt billy.Filesystem, name string) error
+// options:
+func WithCommit(commit plumbing.Hash) Option
+func WithDetachedHead() Option
+// typed errors:
+var ErrWorktreeNotFound, ErrWorktreeAlreadyExists
+```
+
+### Residual 1 — branch-mode worktree create: **PASS**
+
+go-git v6's `Add` already does branch-mode; swarm-cd just opted out of
+it. The mechanism (verified in `worktree.go`'s `Add`):
+
+```go
+opt := &git.CheckoutOptions{Hash: o.commit}
+if !o.detachedHead {            // <- omit WithDetachedHead()
+    opt.Branch = plumbing.NewBranchReferenceName(name)  // branch named == worktree name
+    opt.Create = true          // creates the branch
+}
+return work.Checkout(opt)
+```
+
+So `mgr.Add(osfs.New(path), "feature-x", gitworktree.WithCommit(base))`
+(no `WithDetachedHead`) creates a linked worktree checked out onto a
+**new branch `refs/heads/feature-x`**. Empirically:
+
+- worktree `HEAD = refs/heads/feature-x` (`Head().Name().IsBranch() == true`)
+- the branch ref is created in the **shared** object store, visible to
+  the main repo (`repo.Reference("refs/heads/feature-x")` resolves).
+- shell `git worktree list` agrees: the linked dir is `[feature-x]`,
+  not detached.
+
+**Constraints a wt1 implementer must honor (load-bearing):**
+
+1. **Branch name == worktree name**, and the name must match
+   `^[a-zA-Z0-9\-]+$` (enforced by `worktreeNameRE` in `Add`). Slashes,
+   dots, underscores are rejected. Sanitize/encode caller branch names
+   into this charset (swarm-cd uses an md5-digest `wt-%x` scheme for the
+   worktree name and a separate path — adopt that: derive a safe
+   worktree *name* from a hash and keep the human branch/path mapping in
+   our wt2 registry).
+2. `Add` always does `Create=true` for branch mode — it creates a
+   **new** branch and **errors if the branch already exists**
+   (`a branch named "refs/heads/<name>" already exists`, verified).
+   For "worktree on an *existing* branch," wt1 must either (a) create
+   the worktree detached on the branch's tip commit then
+   `Checkout(existing-branch)` via the opened worktree, or (b) ensure
+   the branch does not pre-exist. The common delegation flow (new
+   sub-branch per delegated slice) hits the supported happy path
+   directly. This is an API shape to wrap, **not** a fallback to shell.
+
+### Residual 2 — per-worktree index isolation: **PASS**
+
+`mgr.Open(osfs.New(path)).Worktree()` yields a worktree whose index and
+HEAD are independent of the main repo's. Empirically, with the main
+repo on `refs/heads/master` and the linked worktree on
+`refs/heads/feature-x`:
+
+- committing `wt-only.txt` in the linked worktree advanced
+  `feature-x` to `49473e3` while main's `master` stayed at `acc64a2`
+  — the branches diverged independently, the commit did **not** touch
+  main's branch.
+- main repo `Status()` is **clean** (zero entries); `wt-only.txt` is
+  not in main's working tree or index.
+- conversely, staging `main-only.txt` in the main repo does **not**
+  appear in the linked worktree's `Status()` staging area.
+
+This is the exact guarantee `workflow-commit-command` finding #3 binds
+to: a `da workflow commit` run inside a managed worktree can only stage
+that worktree's tree. (Note: the object **store** is shared — that is
+correct and desired; isolation is at the index/HEAD/working-tree level,
+which is what matters for concurrent committers. Each `Open` builds a
+fresh `filesystem.NewStorage` over the worktree's dual-FS, so the
+per-worktree index lives under `.git/worktrees/<name>/`.)
+
+### Residual 3 — List support: **PASS (native)**
+
+go-git v6 exposes `func (w *Worktree) List() ([]string, error)` which
+enumerates `.git/worktrees/<name>` dirs. Verified: returns
+`["feature-x"]` after one add. So enumeration is native — wt2 does
+**not** need a registry merely to *list* worktrees. The wt2 registry is
+still required for the **semantic** metadata go-git does not store
+(true base ref, parent PR, purpose, created-at, last-used) — `List`
+gives names, the registry gives meaning. Reconcile the two by keying
+the registry on the worktree name returned by `List`.
+
+### Residual 4 — pinned go-git v6 version: `v6.0.0-alpha.4`
+
+**Pin `github.com/go-git/go-git/v6 v6.0.0-alpha.4`** (with
+`github.com/go-git/go-billy/v6 v6.0.0-alpha.1`). dot-agents **already
+pins exactly this** in `go.mod`/`go.sum` (resolved time
+`2026-05-18T13:59:25Z`), and the `x/plumbing/worktree` package is
+present and imports clean under it — so wt1 adds **no new
+supply-chain surface** for the worktree mechanism beyond what is already
+vendored.
+
+Notes for the implementer:
+
+- `alpha.4` is a **tagged** release (cleaner to pin than a
+  pseudo-version). It is *newer* than the pseudo-version swarm-cd uses
+  (`v6.0.0-20260305211659-2083cf940afa`); the only delta in the
+  worktree pkg is that `alpha.4` adds extra `Storer`/`Close` safety in
+  `Add`/`Open` (it avoids closing the shared storer and cleans up the
+  storage on `Open` error). The branch-mode `Add` logic and the options
+  are byte-identical between the two. So adopting swarm-cd's pattern on
+  `alpha.4` is strictly safe.
+- `osfs.New(path)` (`go-git/go-billy/v6/osfs`) is the `billy.Filesystem`
+  passed to `Add`/`Open`, matching swarm-cd.
+
+### Typed interface seam for wt1 (derived from the verified API)
+
+```go
+// internal/gitwt — implementation wraps go-git v6 x/plumbing/worktree.
+type Manager interface {
+    // Create a linked worktree at path on a NEW branch (branch name derived
+    // from name; must match ^[a-zA-Z0-9-]+$). Records base in the wt2 registry.
+    AddBranch(name, path string, base plumbing.Hash) error
+    // Create detached (swarm-cd style), for read-only/ephemeral checkouts.
+    AddDetached(name, path string, commit plumbing.Hash) error
+    Remove(name string) error          // wraps mgr.Remove + os.RemoveAll(path)
+    List() ([]string, error)           // wraps mgr.List()
+    Open(path string) (Worktree, error)// wraps mgr.Open -> repo.Worktree (own index)
+}
+```
+
+wt1 binds callers to `Manager`; the go-git mechanism stays behind it so
+a future swap (or the hybrid fallback, which this spike showed is **not
+needed**) is invisible.
 
 ## Relationships
 
