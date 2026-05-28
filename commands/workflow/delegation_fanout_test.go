@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1499,5 +1500,35 @@ func TestEvidencePolicyUnmarshal_NoWarningWithoutLegacyKey(t *testing.T) {
 	}
 	if p.LensChainMax == nil || *p.LensChainMax != 3 {
 		t.Fatalf("expected lens_chain_max=3, got %+v", p.LensChainMax)
+	}
+}
+
+func TestEvidencePolicyUnmarshal_DefaultWarnerWritesToStderr(t *testing.T) {
+	// Cover the default evidencePolicyDeprecationWarner closure (writes via
+	// fmt.Fprintf to os.Stderr). We redirect os.Stderr to a pipe so the
+	// production code path executes without polluting test output.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = origStderr })
+
+	evidencePolicyDeprecationWarner("warning: %s\n", "deprecated")
+	_ = w.Close()
+	buf, _ := io.ReadAll(r)
+	if !strings.Contains(string(buf), "warning: deprecated") {
+		t.Fatalf("expected default warner to write to stderr, got %q", string(buf))
+	}
+}
+
+func TestEvidencePolicyUnmarshal_DecodeError(t *testing.T) {
+	// Feed a scalar node where a mapping is expected; value.Decode should fail
+	// and UnmarshalYAML must propagate the error.
+	var p delegationEvidencePolicy
+	// "42" is a plain scalar; decoding into the struct alias produces an error.
+	if err := yaml.Unmarshal([]byte("42\n"), &p); err == nil {
+		t.Fatal("expected decode error for non-mapping yaml, got nil")
 	}
 }
