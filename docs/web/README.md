@@ -52,13 +52,20 @@ npm run dev          # local dev server with HMR on http://localhost:4321
 
 ```bash
 cd docs/web
-npm run build        # outputs static site to dist/
+npm run build        # outputs static site to dist/  (GitHub-Pages base path)
 npm run preview      # serve dist/ locally to verify
 ```
 
-The built artifact is plain HTML/CSS/JS and can be served by any static host
-(GitHub Pages, S3, Netlify, etc.). A follow-up task will wire `.github/workflows/`
-to deploy `dist/` to GitHub Pages on push to master.
+By default the build uses base `/dot-agents/` (suitable for
+`nikashprakash.github.io/dot-agents/`). For the Cloudflare Workers
+deploy at `agorcha.dev`, the CI workflow sets `DEPLOY_TARGET=cloudflare`
+so all asset URLs are root-relative:
+
+```bash
+DEPLOY_TARGET=cloudflare npm run build
+```
+
+See the **Deploy** section below for the full Cloudflare flow.
 
 ## Project layout
 
@@ -118,6 +125,73 @@ docs/web/
 
 - Lens dispatch diagram (stub page only).
 - Verifier registry / app_type_verifier_map diagram (stub page only).
-- GitHub Pages publish workflow under `.github/workflows/`.
 - Live JSON ingestion for workspace state (currently a snapshot committed
   into `src/data/workspace-state.json`).
+
+## Deploy — Cloudflare Workers at agorcha.dev
+
+The site ships as a static-asset Cloudflare Worker. A thin pass-through
+worker (`src/worker.js`) delegates every request to the
+[`assets`](https://developers.cloudflare.com/workers/static-assets/)
+binding, which serves files from `dist/` directly with the configured
+`not_found_handling`. JSON schemas from `<repo-root>/schemas/` are
+copied into `public/schemas/` at build time by `scripts/copy-schemas.sh`
+(invoked from the `prebuild` npm script), so they are served at:
+
+```
+https://agorcha.dev/schemas/<name>.json
+```
+
+### CI workflow
+
+`.github/workflows/deploy-docs.yml` builds and deploys on:
+
+- **push to `master`** that touches `docs/web/**`, `docs/DEMO_*.md`,
+  `schemas/**`, or the workflow file itself → **production deploy**
+  to `agorcha.dev`.
+- **pull requests** touching the same paths → **preview deploy** to a
+  separate Worker named `agorcha-dev-docs-preview` (deployed via
+  `wrangler deploy --name agorcha-dev-docs-preview`), reachable at
+  `agorcha-dev-docs-preview.<account>.workers.dev` (no custom-domain
+  route; intended for review).
+
+### Required GitHub secrets (one-time maintainer setup)
+
+The deploy job will fail until both of these are set on the repo:
+
+```bash
+# 1. Cloudflare API token with the Workers Scripts:Edit + Workers Routes:Edit
+#    permissions (scoped to the account that owns agorcha.dev).
+gh secret set CLOUDFLARE_API_TOKEN
+
+# 2. Cloudflare account ID (Dashboard → Workers & Pages → right-hand sidebar).
+gh secret set CLOUDFLARE_ACCOUNT_ID
+```
+
+Once both secrets exist, the next push to `master` matching the path
+filter triggers an automatic production deploy. No further manual action
+is needed for routine releases.
+
+### Verifying a deploy
+
+After CI reports success:
+
+1. `curl -sI https://agorcha.dev/ | head -5` — expect `HTTP/2 200` and a
+   `cf-ray` response header.
+2. `curl -s https://agorcha.dev/schemas/agentsrc.schema.json | jq .title`
+   — confirms the schema-copy hook ran.
+3. Open `https://agorcha.dev/` in a browser; the landing page and at
+   least one demo route should render.
+
+### Local preview without deploying
+
+```bash
+cd docs/web
+npm install
+npm run build                  # runs prebuild (copy-schemas) + astro build
+npm run preview                # serves dist/ via Astro's preview server
+```
+
+`wrangler dev` is also supported once `wrangler` is installed globally
+and `.dev.vars` is populated from `.dev.vars.example` — but the static
+output is identical, so `npm run preview` is usually sufficient.

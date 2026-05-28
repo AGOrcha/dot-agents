@@ -1,0 +1,37 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agorcha-dev-docs",
+  "compatibility_date": "2025-01-01",
+  // account_id is injected from the CLOUDFLARE_ACCOUNT_ID secret in CI
+  // (see .github/workflows/deploy-docs.yml). Do NOT hardcode it here.
+  //
+  // Static-asset Worker: src/worker.js is a thin pass-through that serves
+  // ./dist via the ASSETS binding. This shape works on all modern Wrangler
+  // versions; a bare `assets` block without `main` is only supported on
+  // very recent wrangler releases and breaks older CI runners.
+  "main": "src/worker.js",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page"
+  },
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+  // Production-only routes: agorcha.dev custom_domain. Preview deploys
+  // (PR branches) skip this env entirely and land at
+  // <name>.<account>.workers.dev — they cannot bind a production custom
+  // domain owned by another Worker.
+  "env": {
+    "production": {
+      "name": "agorcha-dev-docs",
+      "routes": [
+        { "pattern": "agorcha.dev", "custom_domain": true },
+        { "pattern": "agorcha.dev/*", "custom_domain": true }
+      ],
+      "vars": {
+        "ENVIRONMENT": "production"
+      }
+    }
+  }
+}

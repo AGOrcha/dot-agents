@@ -2,7 +2,17 @@
 import { defineConfig } from 'astro/config';
 import { visit } from 'unist-util-visit';
 
-const SITE_BASE = '/dot-agents';
+// SITE_BASE / SITE_URL switch between the two supported hosts:
+//   * Cloudflare Workers @ agorcha.dev (root)   — set DEPLOY_TARGET=cloudflare
+//   * GitHub Pages  @ /dot-agents/   (default)  — any other value
+// The Cloudflare CI workflow sets DEPLOY_TARGET=cloudflare so the built
+// assets reference root-relative URLs instead of /dot-agents/...
+const DEPLOY_TARGET = process.env.DEPLOY_TARGET ?? 'github-pages';
+const IS_CLOUDFLARE = DEPLOY_TARGET === 'cloudflare';
+const SITE_BASE = IS_CLOUDFLARE ? '' : '/dot-agents';
+const SITE_URL = IS_CLOUDFLARE
+  ? 'https://agorcha.dev'
+  : 'https://nikashprakash.github.io';
 const GITHUB_BLOB = 'https://github.com/NikashPrakash/dot-agents/blob/master';
 
 // Rewrite intra-doc markdown links so that:
@@ -20,7 +30,7 @@ function rewriteRelativeLinks() {
       if (demoMatch) {
         const slug = demoMatch[1].toLowerCase();
         const anchor = demoMatch[2] ?? '';
-        node.properties.href = `${SITE_BASE}/demos/demo_${slug}/${anchor}`;
+        node.properties.href = `${SITE_BASE || ''}/demos/demo_${slug}/${anchor}`;
         return;
       }
       // Anything else relative: send to GitHub blob URL.
@@ -42,8 +52,8 @@ function rewriteRelativeLinks() {
 // Mermaid is rendered client-side inside MermaidRenderer.astro to avoid
 // pulling a headless-browser dep into the build pipeline.
 export default defineConfig({
-  site: 'https://nikashprakash.github.io',
-  base: '/dot-agents/',
+  site: SITE_URL,
+  base: IS_CLOUDFLARE ? '/' : '/dot-agents/',
   trailingSlash: 'ignore',
   build: {
     format: 'directory',

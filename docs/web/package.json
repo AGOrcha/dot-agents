@@ -6,6 +6,7 @@
   "description": "Interactive HTML docs site for dot-agents — Astro + Cytoscape.js.",
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "bash scripts/copy-schemas.sh",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check"
