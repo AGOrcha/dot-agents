@@ -27,6 +27,7 @@ type cursor struct {
 const (
 	cursorHooksFile   = "hooks.json"
 	cursorJSON        = "cursor.json"
+	cursorMCPJSON     = "mcp.json"
 	cursorDir         = ".cursor"
 	globalRulesPrefix = "global--"
 
@@ -359,8 +360,8 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
-	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
-		dst := filepath.Join(repoPath, cursorDir, "mcp.json")
+	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, cursorMCPJSON); src != "" {
+		dst := filepath.Join(repoPath, cursorDir, cursorMCPJSON)
 		// Managed-replace at a fixed owned path (.cursor/mcp.json).
 		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
@@ -525,7 +526,7 @@ func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 func (c *cursor) CountLinks(project, repoPath, agentsHome string) (ok, broken int) {
 	ok, broken = cursorCountRules(project, repoPath, agentsHome)
 	addManagedFileCounts(&ok, &broken, []string{
-		filepath.Join(repoPath, cursorDir, "mcp.json"),
+		filepath.Join(repoPath, cursorDir, cursorMCPJSON),
 		filepath.Join(repoPath, cursorDir, "settings.json"),
 		filepath.Join(repoPath, cursorDir, cursorHooksFile),
 		filepath.Join(repoPath, ".cursorignore"),

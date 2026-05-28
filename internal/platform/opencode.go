@@ -19,8 +19,9 @@ type opencode struct {
 }
 
 const (
-	opencodeJSON = "opencode.json"
-	opencodeDir  = ".opencode"
+	opencodeJSON      = "opencode.json"
+	opencodeDir       = ".opencode"
+	opencodeAgentsDir = ".agents"
 )
 
 func NewOpenCode() Platform { return &opencode{io: stdPlatformIO{}} }
@@ -172,7 +173,7 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 		}
 	}
 
-	skillsDir := filepath.Join(repoPath, ".agents", "skills")
+	skillsDir := filepath.Join(repoPath, opencodeAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
 			errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
@@ -210,7 +211,7 @@ func (o *opencode) BrokenLinks(_, repoPath, _ string) []BrokenLink {
 }
 
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
-	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(opencodeAgentsDir, "skills"))
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +240,7 @@ func (o *opencode) CountLinks(_, repoPath, _ string) (ok, broken int) {
 	})
 	addManagedDirCounts(&ok, &broken, []string{
 		filepath.Join(repoPath, opencodeDir, "agent"),
-		filepath.Join(repoPath, ".agents", "skills"),
+		filepath.Join(repoPath, opencodeAgentsDir, "skills"),
 	})
 	return ok, broken
 }
