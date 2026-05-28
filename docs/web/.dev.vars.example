@@ -1,0 +1,9 @@
+# Local development env vars for `wrangler dev`.
+#
+# Copy to `.dev.vars` (gitignored) and fill in any locally needed values.
+# Wrangler loads this file automatically when running `wrangler dev`.
+#
+# The production agorcha.dev deploy is a pure static-asset Worker — no
+# runtime secrets are required today. This file is a stub for future
+# bindings (e.g. when we add API routes).
+ENVIRONMENT=development

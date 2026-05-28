@@ -1,0 +1,73 @@
+name: Deploy docs to agorcha.dev
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/web/**'
+      - 'docs/DEMO_*.md'
+      - 'schemas/**'
+      - '.github/workflows/deploy-docs.yml'
+  pull_request:
+    paths:
+      - 'docs/web/**'
+      - 'docs/DEMO_*.md'
+      - 'schemas/**'
+      - '.github/workflows/deploy-docs.yml'
+
+concurrency:
+  group: deploy-docs-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: docs/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs/web
+        # --ignore-scripts: per Sonar S6505; we control the deps + their
+        # postinstall scripts via package-lock.json, so install-time scripts
+        # are not needed for CI builds. The 'astro build' step below runs
+        # the real build (the only script we need).
+        run: npm ci --ignore-scripts
+
+      - name: Build site
+        working-directory: docs/web
+        env:
+          # Switches astro.config.mjs to root-base URLs for agorcha.dev
+          # (GitHub Pages would use /dot-agents/ instead).
+          DEPLOY_TARGET: cloudflare
+        run: npm run build
+
+      - name: Deploy to Cloudflare Workers
+        # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.
+        # Update via: gh api repos/cloudflare/wrangler-action/commits/v3 -q .sha
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: docs/web
+          # Pin wrangler v4 — v3.90 (action default) wasn't reliably reading
+          # the `main:` field from wrangler.jsonc when combined with --name,
+          # producing "Missing entry-point" even though src/worker.js is set.
+          wranglerVersion: "4"
+          # PRs deploy to a separate preview Worker reachable at
+          # <name>.<account>.workers.dev — top-level config (no env) = no
+          # custom-domain routes. Master push uses --env production to
+          # activate the agorcha.dev routes from env.production in wrangler.jsonc.
+          command: ${{ github.event_name == 'pull_request' && 'deploy --name agorcha-dev-docs-preview' || 'deploy --env production' }}

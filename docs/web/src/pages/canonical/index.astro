@@ -1,0 +1,90 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+function titleize(s: string): string {
+  return s
+    .replace(/\.md$/, '')
+    .replace(/\/(LESSON|design)$/, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
+function slugOf(id: string): string {
+  let s = id.replace(/\.md$/, '');
+  if (s.endsWith('/LESSON')) s = s.slice(0, -'/LESSON'.length);
+  if (s.endsWith('/design')) s = s.slice(0, -'/design'.length);
+  return s;
+}
+
+const [docs, lessons, specs, proposals] = await Promise.all([
+  getCollection('docsCanonical'),
+  getCollection('lessons'),
+  getCollection('specs'),
+  getCollection('proposals'),
+]);
+
+const sections = [
+  {
+    bucket: 'docs',
+    heading: 'Docs (canonical)',
+    description: 'Authoritative project docs under docs/ (excluding DEMO_*).',
+    entries: docs,
+  },
+  {
+    bucket: 'lessons',
+    heading: 'Lessons',
+    description: 'Repo-local lessons captured after corrections.',
+    entries: lessons,
+  },
+  {
+    bucket: 'specs',
+    heading: 'Specs',
+    description: 'Workflow specs (the contract a plan implements).',
+    entries: specs,
+  },
+  {
+    bucket: 'proposals',
+    heading: 'Proposals (drafts)',
+    description: 'Pre-decision drafts; may not reflect what shipped.',
+    entries: proposals,
+  },
+];
+---
+<BaseLayout title="Canonical docs" description="Canonical (non-demo) docs surfaced from the repo">
+  <h1>Canonical docs</h1>
+  <p>
+    Authoritative project content surfaced directly from the repo —
+    <code>docs/</code>, <code>.agents/lessons/</code>,
+    <code>.agents/workflow/specs/</code>, and <code>.agents/proposals/</code>.
+    Demo material lives under <a href={`${base}/demos/demo_index/`}>/demos</a>.
+  </p>
+
+  {sections.map((s) => (
+    <section>
+      <h2 id={s.bucket}>{s.heading}</h2>
+      <p>{s.description}</p>
+      <div class="cards">
+        {s.entries
+          .slice()
+          .sort((a, b) => slugOf(a.id).localeCompare(slugOf(b.id)))
+          .map((entry) => {
+            const slug = slugOf(entry.id);
+            const t = (entry.data as any).title
+              ?? (entry.data as any).name
+              ?? titleize(entry.id);
+            const desc = (entry.data as any).description ?? '';
+            return (
+              <a class="card" href={`${base}/canonical/${s.bucket}/${slug}/`}>
+                <span class="label">{s.bucket}</span>
+                <span class="title">{t}</span>
+                {desc && <span style="display:block; margin-top:6px; color:var(--text-dim); font-size:0.8rem;">{desc}</span>}
+              </a>
+            );
+          })}
+      </div>
+    </section>
+  ))}
+</BaseLayout>

@@ -1,0 +1,79 @@
+---
+import { getCollection, render } from 'astro:content';
+import BaseLayout from '../../../layouts/BaseLayout.astro';
+import MermaidRenderer from '../../../components/MermaidRenderer.astro';
+
+function titleize(s: string): string {
+  return s
+    .replace(/\.md$/, '')
+    .replace(/\/(LESSON|design)$/, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
+export async function getStaticPaths() {
+  // Buckets surface the markdown sources defined in src/content.config.ts.
+  // Each bucket maps a route segment to a collection name. Defined inline
+  // because getStaticPaths runs in an isolated scope and cannot reference
+  // module-level consts in Astro 5.
+  const BUCKETS = {
+    docs: 'docsCanonical',
+    lessons: 'lessons',
+    specs: 'specs',
+    proposals: 'proposals',
+  } as const;
+  const out: any[] = [];
+  for (const bucket of Object.keys(BUCKETS) as (keyof typeof BUCKETS)[]) {
+    const collection = BUCKETS[bucket];
+    const entries = await getCollection(collection as any);
+    for (const entry of entries) {
+      // Strip trailing /LESSON or /design segments — the parent directory
+      // is the meaningful slug for those collections.
+      let slug = entry.id.replace(/\.md$/, '');
+      if (slug.endsWith('/LESSON')) slug = slug.slice(0, -'/LESSON'.length);
+      if (slug.endsWith('/design')) slug = slug.slice(0, -'/design'.length);
+      out.push({
+        params: { bucket, slug },
+        props: { entry, bucket },
+      });
+    }
+  }
+  return out;
+}
+
+const { entry, bucket } = Astro.props;
+const { Content, headings } = await render(entry);
+
+const titleRaw = (entry.data as any).title
+  ?? (entry.data as any).name
+  ?? titleize(entry.id);
+const title = `${bucket}: ${titleRaw}`;
+const description = (entry.data as any).description
+  ?? `Canonical ${bucket} content surfaced from the repo.`;
+const isProposal = bucket === 'proposals';
+---
+<BaseLayout title={title} description={description}>
+  <article>
+    {isProposal && (
+      <div class="callout-warn">
+        <strong>Draft proposal.</strong> Proposals are pre-decision artifacts;
+        they may not reflect what shipped. Cross-reference against the spec or
+        plan they cite before treating as authoritative.
+      </div>
+    )}
+    <Content />
+  </article>
+  {headings.length > 0 && (
+    <aside style="margin-top:3em; padding-top:1em; border-top:1px solid var(--border); color:var(--text-dim); font-size:0.85rem;">
+      <strong>On this page</strong>
+      <ul style="list-style:none; padding:0; margin:6px 0 0;">
+        {headings.filter((h) => h.depth <= 3).map((h) => (
+          <li style={`margin-left:${(h.depth - 1) * 12}px`}>
+            <a href={`#${h.slug}`}>{h.text}</a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )}
+  <MermaidRenderer />
+</BaseLayout>

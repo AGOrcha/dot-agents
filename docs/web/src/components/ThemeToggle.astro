@@ -1,0 +1,70 @@
+---
+// 3-way theme toggle: light / dark / system. Persists to localStorage
+// under the key `theme`. The early-paint script in BaseLayout reads the
+// stored value before first paint to avoid a flash of unstyled colors.
+// When the user picks "system" we clear data-theme so the
+// `prefers-color-scheme` media query in global.css takes over.
+---
+<div class="theme-toggle" role="group" aria-label="Color theme">
+  <button type="button" data-theme-choice="light" aria-pressed="false" title="Light theme">light</button>
+  <button type="button" data-theme-choice="dark" aria-pressed="false" title="Dark theme">dark</button>
+  <button type="button" data-theme-choice="system" aria-pressed="true" title="Follow system theme">system</button>
+</div>
+
+<script>
+  type Choice = 'light' | 'dark' | 'system';
+  const KEY = 'theme';
+
+  function currentChoice(): Choice {
+    const stored = localStorage.getItem(KEY);
+    if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+    return 'system';
+  }
+
+  function apply(choice: Choice) {
+    if (choice === 'system') {
+      document.documentElement.removeAttribute('data-theme');
+      localStorage.removeItem(KEY);
+    } else {
+      document.documentElement.setAttribute('data-theme', choice);
+      localStorage.setItem(KEY, choice);
+    }
+    // Notify theme-sensitive components (Cytoscape, Mermaid) to re-render.
+    window.dispatchEvent(new CustomEvent('theme-changed', { detail: { choice } }));
+    syncButtons();
+  }
+
+  function syncButtons() {
+    const choice = currentChoice();
+    const buttons = document.querySelectorAll<HTMLButtonElement>('.theme-toggle button[data-theme-choice]');
+    buttons.forEach((b) => {
+      b.setAttribute('aria-pressed', b.dataset.themeChoice === choice ? 'true' : 'false');
+    });
+  }
+
+  function wire() {
+    const buttons = document.querySelectorAll<HTMLButtonElement>('.theme-toggle button[data-theme-choice]');
+    buttons.forEach((b) => {
+      b.addEventListener('click', () => {
+        const c = b.dataset.themeChoice as Choice;
+        apply(c);
+      });
+    });
+    syncButtons();
+  }
+
+  // When following system, mirror system changes to the `theme-changed` event
+  // so Cytoscape/Mermaid re-skin without a reload.
+  const mq = window.matchMedia('(prefers-color-scheme: light)');
+  mq.addEventListener('change', () => {
+    if (currentChoice() === 'system') {
+      window.dispatchEvent(new CustomEvent('theme-changed', { detail: { choice: 'system' } }));
+    }
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+</script>
