@@ -125,6 +125,136 @@ inputs are the full `KGNote` corpus, not just lessons. Lessons are one
 NoteType; restricting scope to lessons would re-do the work for every
 other NoteType. Section §4 has been amended to reflect this.
 
+### Adjacent evaluations — lessons/skills graduation pipeline (added 2026-05-28 second fold-in)
+
+A second pass through `research/evaluations/*.md` (six files) and
+`research/AUTONOMOUS_WORKFLOW_MANAGEMENT_RESEARCH.md` materially adds to
+the picture. The dream-cycle / consolidation primitive is **named under
+five different synonyms** across these evaluations, all pointing at the
+same operation:
+
+| Synonym (source) | Eval file | What it labels |
+|---|---|---|
+| dream cycle (Thoth, KG-adjacent) | `articles-evaluation-kg-and-adjacent.md` (folded above) | 4-phase nightly KG maintenance |
+| reweave (arscontexta) | `lessons-and-memory.md` §A; `workflow-orchestration.md` W.5, B-3 | Backward-pass update of prior artifacts after a new one lands |
+| `memify()` (akshay_pachaar) | `articles-evaluation-kg-and-adjacent.md` (folded above) | Four ops: strengthen / prune / auto-tune / add-derived |
+| graduation (second-brain-needs-two-authors, skill-tiering-contract) | `skills-rules-graduation.md` S.4, S.7, F.4; `lessons-and-memory.md` Part C | `author: agent → author: human` flip + version bump + behavior-preservation gate |
+| promotion / managed compounding (intuitiveml, witcheer L4) | `workflow-orchestration.md` G.2 (in inventory addendum); `skills-rules-graduation.md` Part B | Lifecycle: observe → evaluate → retire; not chaotic proliferation |
+
+**Synonym-reconciliation recommendation** (new OQ-F below): adopt
+**"consolidation"** as the canonical umbrella term in dot-agents'
+in-repo vocabulary, with the following narrower terms reserved for the
+specific phase they describe:
+
+- **Consolidation** = the umbrella class of "scheduled, idempotent,
+  proposal-gated work that re-derives durable artifacts from
+  accumulated raw signal." Synonyms above all map here. This is what
+  the C.4 spec slot should be named.
+- **Dream cycle** = the specific scheduler task implementing
+  consolidation against the `KGNote` corpus (Thoth's 4 phases). One
+  task, one name, no overload.
+- **Graduation** = the specific *write step* inside consolidation that
+  flips `author: agent → author: human` AND bumps `version: x.y.z` AND
+  passes the app-type profile's §6.2 behavior-preservation gate
+  (`skills-rules-graduation.md` F.4). Always a proposal/review-gated act.
+- **Reweave** = the propagation walker that runs as a sub-phase of
+  consolidation against the *plan graph* — distinct store, shared
+  shape (`workflow-orchestration.md` second-pass finding #3:
+  *"Reweave (plan graph) and KG derivation propagation are one
+  primitive"*).
+- **Promotion** = the user-facing CLI verb (`da kg promote`,
+  `da review approve`, hypothetical `da memory promote`) that lands a
+  graduation. Mirrors OpenClaw's `memory promote` so users coming
+  from that ecosystem keep their vocabulary.
+
+So: `consolidation` (class) ⊃ `dream cycle` (task) ⊃ `reweave` (sub-phase) +
+`graduation` (write step) ⊆ `promotion` (CLI surface).
+
+**Critical load-bearing constraint (`workflow-spec-plan-inventory.md`
+"Logical Flaws to Correct" §1, quoted verbatim):**
+
+> "Nightly consolidation must not be confused with KG staleness. The
+> scoped-KG spec is explicit: staleness is event-driven, while time-based
+> review nudges are separate. A dream cycle can dedupe, propose links, and
+> raise review nudges, but it must not mark facts stale merely because
+> they aged."
+
+This is THE governing rule for the §4 `scoped-kg-dream-cycle` task. The
+§4 phase 4 ("Confidence decay") already complied with this in spirit
+(no clock-based staleness; fires `review_due` only when access_count=0
+AND no linked plans AND no derivation children). Calling the constraint
+out explicitly here, with its canonical statement, removes any future
+ambiguity. Section §4 phase 4 is now considered the authoritative
+encoding of this constraint.
+
+Other material adds from this second fold-in:
+
+- **One schema, three projections** (`lessons-and-memory.md` F.1;
+  reaffirmed in `workflow-spec-plan-inventory.md` second-pass #5).
+  `KGNote` is the canonical schema; lessons (`LESSON.md`), Claude-Code
+  auto-memory files, Cursor rules, Codex prompts are projections that
+  read/write the same warm-store rows. **Consequence for the §4 task
+  tree:** the per-NoteType sub-tasks (`lesson-consolidator`,
+  `decision-consolidator`, etc.) are not separate consolidators; they are
+  consolidation passes parameterized by NoteType against the single
+  `KGNote` store. Earlier framing implied per-store dialects; correct
+  framing is per-NoteType *projection rules* on one canonical schema.
+- **Same-scope vs cross-scope contradiction** (`lessons-and-memory.md`
+  E, F.4; `workflow-spec-plan-inventory.md` second-pass #4). Same-scope
+  contradictions auto-stale the older entry; cross-scope disagreements
+  remain fresh on both sides and surface in `contradictions` read-time
+  metadata. **Consequence for §4 phase 4:** the `review_due` pruning
+  candidate score uses only same-scope contradiction count; cross-scope
+  disagreement is never a pruning signal.
+- **Graduation = author flip + version bump + behavior-preservation
+  gate, in that order** (`skills-rules-graduation.md` F.4). Refines the
+  earlier `proposal/review` framing: graduation is not one write but
+  three independently-auditable steps. A scheduler task emitting a
+  graduation proposal must produce all three diffs, not just the
+  `author:` flip.
+- **First production scheduled job is `fold-back triage`, not
+  `scoped-kg-dream-cycle`** (`hooks-and-platform.md` H.5;
+  `lessons-and-memory.md` L.3 + L.4 sequencing). Triage is simpler
+  (read fold-back observations, cluster, score, propose plan updates)
+  and uses existing primitives; it's the right MVP before the broader
+  dream-cycle task. **Recommendation update for §4 ordering:** before
+  `scoped-kg-dream-cycle`, land `fold-back-triage` as the v1.1
+  scheduler task. Both are scope-aware; both are proposal-gated;
+  triage is the smaller surface and surfaces operational lessons that
+  shape the dream-cycle's design.
+- **Architect role + cell vs compound vs molecule**
+  (`skills-rules-graduation.md` F.1; `agent-execution.md` F.1;
+  `workflow-spec-plan-inventory.md` second-pass #2). Specs are T3
+  cells; plans+bundles are T2 compounds; the *runtime* is the
+  orchestrator. The proposal/review loop is the **Architect's** primary
+  workflow primitive. Consolidation tasks therefore emit *proposals*
+  (cell-tier candidates) that the Architect graduates; they never
+  produce compound-tier artifacts directly. This matches OpenClaw's
+  "only Deep Sleep writes; only after gating" exactly: consolidation
+  proposes, the Architect (or `da review approve`) writes.
+- **Scheduled jobs must declare `--scope` per write**
+  (`hooks-and-platform.md` F.3). Already noted but worth elevating:
+  any task on `da service` that writes to the warm store names its
+  target scope. Cross-scope dedup is read-time metadata, never a write.
+- **Verifier hooks ride app-type-profiles, not freelance scripts**
+  (`hooks-and-platform.md` F.5). Tangential to naming but governs how
+  consolidation tasks self-verify: a `scoped-kg-dream-cycle` proposal
+  goes through `da profile verify` against the relevant profile (e.g.
+  the `research` profile for research-claim NoteTypes; the `code`
+  profile for rule NoteTypes), not against a freelance verifier.
+- **Recursive accountability** (`workflow-spec-plan-inventory.md`
+  second-pass #10). This proposal itself, once acted on, should be
+  re-verified quarterly against the `research` profile. Cite this
+  proposal in any v1.x C.4 spec as the research artifact whose
+  freshness needs to age out.
+
+**Operator-mode evidence** from `AUTONOMOUS_WORKFLOW_MANAGEMENT_RESEARCH.md`
+line 306: the future-work bucket ("promote future work to active work,
+split into subplans, or archive completed work") is the operator-mode
+projection of consolidation against the *plan graph*. Reweave at plan
+close already covered this in §4; the autonomous-workflow doc validates
+the framing from a second in-repo source.
+
 ## §2 Background-tasks pattern survey
 
 | Platform / pattern | Scheduling | Auth + secrets | State persistence | Failure semantics | Relevance to dot-agents |
@@ -243,15 +373,22 @@ and the canonical-source survey above sharpens its scope to the **full
 
 ```
 da service run
-  ├── task: iterlog-ingester               (fsnotify, real-time)
-  ├── task: rescore-on-rubric-bump         (interval, idempotent)
-  ├── task: kg-staleness-refresh           (deferred per OQ1; consumed by below)
-  └── task: scoped-kg-dream-cycle          (NEW — Thoth 4-phase; deferred to C.4 spec)
-       ├── lesson-consolidator             (lessons NoteType only)
-       ├── decision-consolidator           (decisions NoteType only)
-       ├── research-claim-consolidator     (research-claims NoteType only)
+  ├── task: iterlog-ingester               (R3 v1; fsnotify, real-time)
+  ├── task: rescore-on-rubric-bump         (R3 v1; interval, idempotent)
+  ├── task: fold-back-triage               (NEW v1.1 MVP — intuitiveml-style; see OQ-G)
+  ├── task: kg-staleness-refresh           (deferred per R3 OQ1; consumed by below)
+  └── task: scoped-kg-dream-cycle          (NEW v1.2 — Thoth 4-phase; canonical C.4 home)
+       ├── pass: lesson-NoteType           (projection of one canonical schema)
+       ├── pass: decision-NoteType         (same store; projection rule differs)
+       ├── pass: research-claim-NoteType   (same store; profile = `research`)
        └── ... per NoteType
 ```
+
+Note: the per-NoteType nodes are **projection passes against the single
+`KGNote` warm store**, not separate consolidators. Earlier framing in this
+proposal implied per-store dialects; §1.6 fold-in (`lessons-and-memory.md`
+F.1) corrects this to one canonical schema with per-NoteType projection
+rules.
 
 `scoped-kg-dream-cycle` would implement Thoth's 4 phases against the
 `KGNote` corpus (per-scope), gated through the proposal/review loop. The
@@ -353,6 +490,24 @@ each scheduler task as `active` (auto-research) vs `latent` (auto-dream)
   ergonomics (`memory promote`, `memory rem-harness`, `memory status`)
   available foreground without spinning up a long-running service, that's
   a separate command parent. Decide whether to reserve `da memory` now.
+- **OQ-F — Adopt the consolidation/dream-cycle/reweave/graduation/promotion
+  taxonomy** as the canonical in-repo vocabulary? (Per §1.6 fold-in.) The
+  five terms above currently appear as informal synonyms across
+  `research/evaluations/*.md`, and that ambiguity will leak into spec /
+  task / proposal text once C.4 opens. **Recommendation:** land a
+  one-paragraph "consolidation taxonomy" block in
+  `.agents/rules/dot-agents/workflow-artifact-model.md` (or a new
+  `consolidation-vocabulary.md` rule) before C.4. This is a rule-level
+  edit, not a code change; cost is one PR; reversibility is trivial; it
+  saves every future C.4 reviewer the cost of re-deriving the taxonomy.
+- **OQ-G — Sequencing: `fold-back-triage` MVP before
+  `scoped-kg-dream-cycle`?** Per `hooks-and-platform.md` H.5 +
+  `lessons-and-memory.md` L.3/L.4. Fold-back triage is the smaller
+  surface (read fold-back observations, cluster, propose plan updates),
+  uses existing primitives, and surfaces operational signals that shape
+  the bigger dream-cycle task. **Recommendation:** land `fold-back-triage`
+  as the first `da service` scheduler task beyond R3's two v1 tasks; then
+  build `scoped-kg-dream-cycle` once C.4 spec exists.
 
 ## §7 Existing `da` surface — classification table
 
