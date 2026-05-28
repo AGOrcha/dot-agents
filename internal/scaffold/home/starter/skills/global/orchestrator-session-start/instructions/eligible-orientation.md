@@ -14,6 +14,8 @@ Or without scope filter to see all active plans:
 da --json workflow eligible
 ```
 
+`<scope>` is a comma-separated list of plan IDs the user wants to focus on. Plans live at `.agents/workflow/plans/<plan-id>/` — the CLI reads `PLAN.yaml` / `TASKS.yaml` there as the source of truth (NOT the markdown).
+
 ## What to extract and present
 
 From the JSON output:
@@ -43,6 +45,22 @@ Active delegations: <count from ls .agents/active/delegation-bundles/ | grep -v 
 
 If `total_eligible == 0`: surface the lock/pause state from `workflow orient` and stop.
 
+## Stale-status drift check (before announcing the batch)
+
+`workflow eligible` reports tasks by TASKS.yaml `status`, which drifts behind merged PRs after parallel-worker batches. For each task in `max_batch`, spot-check against the forge:
+
+```bash
+gh pr list --state merged --search "<task-id>" --limit 3
+```
+
+If a task's work shipped, do NOT include it in the batch you hand to ISP. Instead, run:
+
+```bash
+da workflow delegation closeout --plan <plan-id> --task <task-id> --decision accept
+```
+
+That step advances status AND archives the delegation artifacts. Do NOT also call `workflow advance` for delegated work.
+
 ## Parallel fanout trigger
 
 Announce whether parallel mode is active:
@@ -62,10 +80,14 @@ Extract and surface to ISP:
 - `decision_locks` — constraints that must not be violated (surface as locked decisions in the bundle `--prompt`)
 - `confidence` — confirm it matches the eligible output value
 
-Pass the sidecar path to ISP as an additional context artifact. ISP's Step 4 (`instructions/fanout.md`) will include it as `--context-file` when building the delegation bundle.
+Pass the sidecar path to ISP as an additional context artifact. ISP's fanout step will include it as `--context-file` when building the delegation bundle.
 
-For `low` or `none` confidence: skip sidecar loading. Note thin context for the worker in the orientation summary.
+For `low` or `none` confidence: skip sidecar loading. Note thin context for the worker in the orientation summary; consider running `da workflow plan derive-scope <plan-id> <task-id>` to author a sidecar before fanout.
+
+## Validate write_scope against HEAD
+
+Before passing any task in `max_batch` downstream, confirm that every file the proposed `--write-scope` references exists on HEAD, and run a code-graph + `grep -rln '<symbol>\b'` pass for symbol callers to catch test files and cross-package call sites the static plan notes missed. Note any expansion to the orientation summary so ISP's fanout step uses the corrected scope rather than the stale plan-notes one.
 
 ## Chain to ISP skill
 
-After presenting the summary (and loading any sidecars for medium/high tasks), load the `isp` skill with the eligible JSON output and sidecar content as pre-gathered context. The ISP skill's Step 1 (`instructions/orientation.md`) reads this output rather than re-running eligible.
+After presenting the summary (and loading any sidecars for medium/high tasks), load the `isp` skill with the eligible JSON output and sidecar content as pre-gathered context. The ISP skill's orientation step reads this output rather than re-running eligible.
