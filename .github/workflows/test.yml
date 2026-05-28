@@ -1,11 +1,13 @@
 name: Test
 
 on:
+  # Run on direct pushes to master (post-merge baseline) and on PRs.
+  # PR branch pushes are covered by the pull_request lane only — narrowing
+  # push: to master eliminates the duplicate runs that occurred when a PR
+  # branch matched both push:branches (feature/*, pr*/*) and pull_request.
   push:
     branches:
       - master
-      - feature/*
-      - pr*/*
   pull_request:
     branches:
       - master
@@ -13,8 +15,13 @@ on:
       - pr*/*
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Use head_ref (the PR source branch) for pull_request events so that
+  # repeated pushes to the same PR cancel earlier in-flight runs. For push
+  # events (master) fall back to ref. cancel-in-progress is guarded to only
+  # cancel pull_request runs — master pushes complete so release-tag and
+  # baseline invariants are preserved.
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
