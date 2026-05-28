@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -126,13 +127,16 @@ func TestAddFindRemoveRoundTrip(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// File must be 0600 because it stores secrets.
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Fatalf("users file perm=%o want 0600", perm)
+	// File must be 0600 because it stores secrets. Windows does not honor
+	// Unix permission bits, so this invariant is only asserted elsewhere.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Fatalf("users file perm=%o want 0600", perm)
+		}
 	}
 
 	reloaded, err := LoadUsersFile(path)
