@@ -103,18 +103,27 @@ Spawn the worker with the bundle path. Patterns:
 
 The worker then follows `instructions/bundle-to-execution.md`.
 
-## 3. Verifier turn (between worker and parent closeout)
+## 3. Verifier turn(s) (between worker and parent closeout)
 
-If the project registers a verifier_profile (e.g. `pr-ci`) in `.agentsrc.json`'s `verifier_profiles` and `app_type_verifier_map`, the verifier runs automatically after the worker's `merge-back` and before the parent's closeout. The verifier:
+The verifier sequence is project-defined, not hard-coded. `.agentsrc.json` declares `verifier_profiles` (a map of profile id → profile definition) and `app_type_verifier_map` (which sequence runs for each app_type). A profile can be any verifier type the project needs: a CI-watch profile, a SAST scanner, an integration-test harness, an acceptance-suite runner, a security-review prompt overlay, a maintainer-defined custom agent — anything addressable by id.
 
-1. Polls the PR / CI / SAST surface to terminal state.
-2. Auto-fixes mechanical issues (coverage <gate, cog complexity, dup literals, stale allowlist entries, missing focused tests).
-3. Writes `.agents/active/verification/<task-id>/<profile>.result.yaml` with a terminal `READY` or fold-back signal.
-4. Returns a structured fix-up brief to the impl worker for anything architectural/security/spec — never autofixes intent.
+After the worker writes `merge-back`, the workflow runtime resolves the task's `app_type` against `app_type_verifier_map` and runs each verifier in the resolved sequence. Each verifier:
 
-The worker exits cleanly at merge-back; the verifier owns the PR-readiness loop end-to-end. The parent sees a single terminal signal rather than a stream of mechanical-fix round trips.
+1. Reads its inputs (PR ref, target files, prior verifier outputs) per its profile definition.
+2. Executes its check (poll CI, run SAST, dispatch a prompt-driven review, etc.).
+3. Auto-fixes mechanical issues in its domain when the profile permits (e.g. CI-watch profiles fix coverage <gate / cog complexity / dup literals; SAST profiles re-trigger after a sanitizer change; agent profiles never autofix intent).
+4. Writes `.agents/active/verification/<task-id>/<profile-id>.result.yaml` with a terminal `READY` or fold-back signal.
+5. Returns a structured fix-up brief to the impl worker for anything architectural/security/spec — never autofixes intent.
 
-If the project has **not** registered a verifier_profile, the impl worker owns the readiness loop itself (fallback mode — poll `gh pr checks` + SonarCloud / equivalent gate, auto-fix mechanical issues, do not allowlist new code).
+Common profile types you may see:
+- **CI-watch** (e.g. `pr-ci`): polls `gh pr checks` + the project's quality gate, auto-fixes mechanical signals
+- **SAST/security** (e.g. `snyk-watch`, `codeql-watch`): polls the security-analysis surface, brief workers on findings
+- **Acceptance / integration** (e.g. `unit`, `api`, `batch`, `streaming`, `ui-e2e`): executes the project's domain test suite for the relevant app_type
+- **Agent / prompt-overlay** (e.g. a custom `<project>-spec-conformance` profile): dispatches a prompt-driven check that emits structured findings
+
+The worker exits cleanly at merge-back; the verifier sequence owns the PR-readiness loop end-to-end. The parent sees a single terminal signal per profile (and a sequence-aggregate READY) rather than a stream of mechanical-fix round trips.
+
+If the project has **not** registered any verifier_profile for the task's app_type, the impl worker owns the readiness loop itself (fallback mode — poll `gh pr checks` + project's quality gate, auto-fix mechanical issues, do not allowlist new code).
 
 ## 4. Merge-back (worker)
 
