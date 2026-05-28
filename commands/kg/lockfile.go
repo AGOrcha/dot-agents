@@ -22,9 +22,17 @@ func lockfilePath() string {
 // builtinRegistry returns a registry with every adapter that ships inside
 // `da` registered. The `none` adapter is the only built-in for this task;
 // later tasks register their adapters here too.
+//
+// registerBuiltins is a seam: production registers the `none` adapter, and a
+// test overrides it to exercise the registration-failure branch (which a
+// fresh registry never hits in production).
+var registerBuiltins = func(reg *registry.Registry) error {
+	return none.Register(reg)
+}
+
 func builtinRegistry() (*registry.Registry, error) {
 	reg := registry.New()
-	if err := none.Register(reg); err != nil {
+	if err := registerBuiltins(reg); err != nil {
 		return nil, err
 	}
 	return reg, nil

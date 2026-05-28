@@ -3,6 +3,7 @@ package kg
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,6 +222,47 @@ func TestRunLockfileReconcileLoadError(t *testing.T) {
 		t.Fatal("runLockfileReconcile on a directory want error")
 	}
 }
+
+func TestRunLockfileReconcileSaveError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "lock.yaml")
+	lf := lockfile.New()
+	lf.Activate("comp", "s", "d", time.Now())
+	lf.Adapters["comp"].MaterializedViews = map[string]*lockfile.View{
+		"v": {ViewStatus: lockfile.StatusReady, ViewDigest: "sha256:v"},
+	}
+	if err := lockfile.Save(path, lf); err != nil {
+		t.Fatal(err)
+	}
+	// Make the parent dir read-only so the atomic Save (which writes a temp
+	// file into it) fails after Reconcile produces a change.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	err := runLockfileReconcile(&bytes.Buffer{}, path, false)
+	if err == nil {
+		t.Skip("filesystem permitted write to read-only dir (running as root?)")
+	}
+}
+
+func TestBuiltinRegistryError(t *testing.T) {
+	orig := registerBuiltins
+	t.Cleanup(func() { registerBuiltins = orig })
+	registerBuiltins = func(*registry.Registry) error { return errReg }
+	if _, err := builtinRegistry(); err == nil {
+		t.Fatal("builtinRegistry want error when registration fails")
+	}
+	if _, err := resolveBackend("none"); err == nil {
+		t.Fatal("resolveBackend want error when registration fails")
+	}
+}
+
+var errReg = errorString("register failed")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }
 
 func TestNewLockfileCmdWiring(t *testing.T) {
 	dir := t.TempDir()
