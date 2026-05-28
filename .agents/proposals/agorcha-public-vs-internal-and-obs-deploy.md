@@ -232,6 +232,15 @@ That model is **correct for the local single-user case** but does not generalise
 
 The cleanest framing: **r2 v1 stays as designed (local single-user); this proposal adds an r2-v2 / "remote" mode that's a different deployment of the same UI, backed by a CF-native store.**
 
+**Transport revision (maintainer feedback 2026-05-28):** the r2-v1 design assumed SSE for live updates because the local UI only ever *reads* from a one-way stream. For the remote deploy this proposal addresses, **WebSocket** is preferred over SSE because:
+
+- Live updates are bidirectional in the multi-node future — workers, the daemon (§5.X), the dashboard, and (eventually) cross-node agent-state coordination all need to push *and* pull. SSE is unidirectional and forces a second channel (POST) for client→server traffic, doubling the auth and connection-lifecycle surface.
+- Cloudflare Workers + Durable Objects natively support WebSocket via the **Hibernation API** — sockets survive eviction without holding a DO instance hot, which keeps the free-tier duration budget (§4.3) easily under cap even with many idle subscribers.
+- The same CF Access / bearer-token auth model that gates SSE in r2-v1 works unchanged for the WebSocket upgrade handshake (`Upgrade: websocket` requests carry the same cookies/headers).
+- One transport for live state across workers ↔ daemon ↔ dashboard means one reconnect strategy, one heartbeat, one message envelope.
+
+This decision applies only to the remote deploy (§4 onwards). r2-v1's local SSE is fine as-is — no need to rewrite the local path for a transport change motivated entirely by the multi-node remote case.
+
 ### 4.2 Runtime options
 
 | Option | Storage | Notes |
@@ -260,7 +269,7 @@ Conservative growth model:
 - D1 relational compression ~5× → ~10 MB/yr in D1
 - After 5 years: 50 MB. **1% of the 5GB D1 free tier.**
 
-SSE / DO event rate:
+WebSocket / DO event rate:
 - Average 5 active runs × 20 iterations × 1 event/iteration = 100 events/day per project
 - 10 projects × 100 = 1000 events/day
 - DO duration per event ~50ms → 50s/day = 0.0006 GB-s/day. Trivial.
@@ -271,7 +280,7 @@ SSE / DO event rate:
 
 Specifically:
 
-- **DO per project** (DO ID = `project_id` hash) holds: in-flight iteration buffer (last 100 iterations), current SSE subscriber list, per-project rolling counters. State persists in DO storage; eviction TTL = 24h after last activity.
+- **DO per project** (DO ID = `project_id` hash) holds: in-flight iteration buffer (last 100 iterations), current WebSocket subscriber list (Hibernation API — see §4.1 transport revision), per-project rolling counters. State persists in DO storage; eviction TTL = 24h after last activity.
 - **D1 single database** holds: append-only `iterations`, `sessions`, `scores`, `correction_observations` tables, keyed by `(project_id, iteration_id)`. Read-only from the dashboard; written-to by the ingest path (which lives in the DO; DO writes through to D1 on each accepted event).
 - **R2 for raw transcript blobs** (deferred to v2; iter-log records reference R2 keys, but v1 only ingests metadata + scores, not raw transcripts).
 
@@ -284,7 +293,7 @@ Why this shape:
 ### 4.6 Why not the alternatives
 
 - **Worker + DO only**: queries across projects require fan-out across DOs; not D1-shaped SQL. Pushes more logic into the Worker.
-- **Worker + D1 only**: loses per-project state isolation for SSE; every subscriber bookkeeping becomes a D1 write. Higher write volume = closer to D1 free-tier write cap.
+- **Worker + D1 only**: loses per-project state isolation for WebSocket subscribers; every subscriber bookkeeping becomes a D1 write. Higher write volume = closer to D1 free-tier write cap.
 - **External service**: a single-user maintainer dashboard is not worth the second platform. CF stays in lock-step with the agorcha.dev Worker we already deploy.
 
 ### 4.7 Decision
@@ -346,28 +355,71 @@ POST `obs.agorcha.dev/api/ingest` with body:
 
 `schema_version` reserved so the payload can evolve without breaking older clients; server accepts any version it understands.
 
-### 5.4 Auth model — bearer token storage
+### 5.4 Auth model — reuse external-agent-sources
 
-The CF Access Service Token is a `(Client-ID, Client-Secret)` pair issued in step §3.4 App 2.
+**Maintainer feedback 2026-05-28: reuse the auth model already defined for `external-agent-sources` rather than designing a parallel one for observability.** The intent is to keep the surface area of credential handling small — one shape, one storage location, one set of refresh/rotation semantics across `sources:`, observability, and (future) MCP/package-registry auth.
 
-Storage options:
-- **`.agentsrc.json` `observability.service_token`** — *no*: this file is committed to repo. Secret leak.
-- **`.dev.vars` next to `.agentsrc.json` (gitignored)** — viable for local dev parity with Wrangler conventions.
-- **OS keychain / `da observability login` writes to `~/.config/da/credentials.json` (0600 perms)** — cleanest. Matches how other CLI tools (`gh`, `op`) work.
+Existing shape (current state, as of `schemas/agentsrc.schema.json`):
 
-**Recommendation:** `~/.config/da/credentials.json` with structure:
+- `.agentsrc.json` already carries a `sources:` array (`internal/config/agentsrc.go` `Source` struct).
+- Each `Source` has an opaque `auth` field — `json.RawMessage` in Go (`schemas/agentsrc.schema.json` line ~234: *"v2: opaque auth block. Schema owned by external-agent-sources spec; treated as pass-through here."*).
+- The schema for what goes inside `auth` is owned by the **external-agent-sources spec**, not by the config layer. The config layer passes it through.
+- This already handles the "secret never lives in the committed file" problem: `auth` blocks reference credentials by id (`{"kind": "credential-ref", "id": "obs-token"}`), and the actual secrets live in `~/.config/da/credentials.json` (or OS keychain) keyed by that id.
+
+Observability auth reuse plan:
+
+1. The obs endpoint is represented as **a `Source` entry of `type: "observability"`** (or carried inline under a new `observability:` block that points at a credential by the same `id` mechanism — final shape ratified at impl time). Either way, the `auth` field follows the external-agent-sources schema verbatim.
+2. The credential id is stored in `.agentsrc.json` (e.g. `{"auth": {"kind": "credential-ref", "id": "agorcha-obs"}}`); the secret material lives in `~/.config/da/credentials.json` (0600), addressed by id. Same file, same format, same loader as `sources:` credentials.
+3. For the agorcha.dev reference deploy the credential **value** is a CF Access Service Token pair — but the **shape** (`{client_id, client_secret}`) plugs into the existing credential schema. Self-hosted deploys can use the same id-indirection with whatever credential kind their backend accepts.
+4. `da observability login` does not introduce new storage — it delegates to the same credential-write path `da sources login` (or equivalent) already uses. If that command does not yet exist, the obs work writes it once and `sources:` benefits too.
+
+Concrete `.agentsrc.json` slice (illustrative; final shape per external-agent-sources spec):
 
 ```json
 {
   "observability": {
+    "enabled": true,
     "endpoint": "https://obs.agorcha.dev",
-    "client_id": "<UUID>.access",
-    "client_secret": "<secret>"
+    "auth": { "kind": "credential-ref", "id": "agorcha-obs" }
   }
 }
 ```
 
-`da observability login` prompts for the pair (or accepts `--from-env`); the file is mode 0600 and gitignored by being outside the repo. `.agentsrc.json` carries only `observability.endpoint` (non-secret) and `observability.enabled: true|false`. The CLI reads the secret from `~/.config/da/credentials.json`.
+`~/.config/da/credentials.json`:
+
+```json
+{
+  "credentials": {
+    "agorcha-obs": {
+      "kind": "cf-access-service-token",
+      "client_id": "<UUID>.access",
+      "client_secret": "<secret>"
+    }
+  }
+}
+```
+
+**Anti-pattern explicitly rejected:** introducing an `observability.service_token` block parallel to `sources[].auth` with its own loader, refresh logic, and storage format. That doubles the credential surface and forces every future auth target (MCP, package registry, daemon proxy) to pick a side. One shape, owned by external-agent-sources, reused by everything that needs outbound auth.
+
+Storage location (`~/.config/da/credentials.json`, 0600) and the principle "secrets never live in repo-committed files" both stay — those are unchanged from the original recommendation. What changes is the *schema and loader* of that file: it is now the external-agent-sources credential store, not an observability-specific store.
+
+### 5.5 Future direction: `da daemon` as local auth proxy / injector
+
+**Maintainer feedback 2026-05-28: given the proliferating outbound-auth surface** — `sources:` registries, observability ingest, MCP connections, package registry, plus future REST/CLI access to other systems — the credential-handling boundary belongs in **one process per host**, not scattered across every call site.
+
+Proposed direction (defer past v1; capture as a parked design):
+
+- **`da daemon`** (or an extension of the `workflow-orchestrator-daemon` proposal — see cross-ref below) runs locally as a long-lived process. It owns:
+  - The credential vault (the loader from §5.4 lives in the daemon, not in every CLI invocation).
+  - Per-target auth injection: outbound HTTP/WS requests are proxied through `localhost:<daemon-port>`; the daemon attaches the right credential for the target host (CF Access Service Token headers for `obs.agorcha.dev`, mTLS for a self-hosted backend, OIDC bearer for a package registry, etc.).
+  - Token refresh and rotation (the daemon notices expiry and refreshes ahead of in-flight requests, so individual workers never see a 401).
+  - Audit log of who-asked-for-what-credential-when (debuggable single source of truth for credential use).
+- **Workers, CLI invocations, and MCP clients** become *credential-unaware*: they POST/GET to `localhost:<port>/proxy/<target>` and the daemon owns the auth side. This removes the §5.4 loader from every call site and lets us add new auth kinds without touching every consumer.
+- **Bootstrap fallback:** when the daemon is not running (CI environment, offline use), the call sites fall back to loading credentials directly from `~/.config/da/credentials.json` per §5.4. The daemon is an optimization layer, not a required dependency.
+
+**Cross-ref:** `[[workflow-orchestrator-daemon]]` — the parked proposal at `.agents/proposals/workflow-orchestrator-daemon.md` (per pr10-branch-split task notes, ratified 2026-05-28). That daemon already owns: slot ledger, watch loop, auto-closeout, event-stream contract with workers/monitors. **These likely consolidate** — adding "credential proxy/injector" to the same daemon is a natural fit because it already runs as a long-lived local process with privileged state, already owns the IPC surface workers talk to, and already has a deploy/lifecycle story. The alternative — a separate `da auth-daemon` process — duplicates the process management, the socket/port allocation, and the user-visible "what's running" surface.
+
+Suggested follow-up: when the workflow-orchestrator-daemon proposal promotes to a spec, fold "credential proxy/injector" in as one of the daemon's owned responsibilities, alongside the existing slot ledger + watch loop + event stream. No separate spec needed.
 
 ### 5.5 Decision
 
@@ -375,7 +427,7 @@ Storage options:
 - Push live events on `da workflow checkpoint` / `verify record` (best-effort, queues on failure).
 - `da observability sync` for catch-up / backfill (idempotent).
 - No cron / GH Actions in v1.
-- Bearer token = CF Access Service Token, stored in `~/.config/da/credentials.json` (mode 0600), endpoint in `.agentsrc.json`.
+- Auth **reuses the external-agent-sources credential model** (`auth` block in `.agentsrc.json` references credentials by id; secrets live in `~/.config/da/credentials.json` mode 0600, addressed by id). For the agorcha.dev reference deploy the credential kind is a CF Access Service Token pair, but the shape is interchangeable per the external-agent-sources schema. **No parallel observability-specific auth loader.**
 
 ---
 
@@ -403,6 +455,35 @@ Recommended derivation: `project_id` = the canonical git remote URL normalised t
 - Service Token issuance: one Service Token per project (created on first `da observability login --project <project_id>`). Server registers the token's Client-ID against the project_id allowlist on first use. **Per-project tokens contain the project they're authorised for**; cross-project POSTs are rejected.
 
 **For v1 single-maintainer use, a single Service Token covering all the maintainer's projects is acceptable** — the simplification is: one token, server trusts it to write under any `project_id` the request carries. Per-project tokens are the v2 hardening for multi-maintainer scenarios.
+
+### 6.2b Retention + pruning policy (scope-aware)
+
+Maintainer feedback 2026-05-28 surfaced an older repo-local-pruning thread: now that §6.1 names local `.agents/history/` as canonical, the unbounded-growth problem on the local disk needs an explicit policy. The right policy depends on deployment scope — solo, team, and org/multi-org usage face different cost/audit tradeoffs.
+
+`da workflow plan archive` already does **per-plan pruning** (collapses an archived plan's working artifacts into `history/<plan>/` with merge-back consolidation). What's missing is a **cross-plan retention policy** — once `history/` accumulates dozens of archived plans, the canonical local store grows without bound.
+
+Scope-tiered defaults (configurable per project via `.agentsrc.json` `observability.retention:`):
+
+| Scope | Local `.agents/history/` | Remote (D1 + DO) | Rationale |
+|---|---|---|---|
+| **Solo** | Keep indefinitely (cheap; user disk; full audit trail at zero cost) | Pruned at 90d; aggregate-only thereafter | Local disk is the cheapest store the maintainer owns; remote is convenience-tier |
+| **Team** | Pruned at 1y (rolling); compress >90d | Remote authoritative for historical aggregates; full-fidelity 1y | Local stays useful for in-flight work; remote owns shared history view |
+| **Org / multi-org** | Pruned at 90d (rolling) | Remote = source-of-truth for aggregates; **full-fidelity snapshots retained for audit** (R2-backed, lifecycle-tiered) | Local disk doesn't scale to many maintainers; audit requirements force remote-canonical for compliance windows |
+
+Implementation notes:
+
+- Solo is the v1 default — matches the single-maintainer assumption already throughout this proposal. Team / org tiers ratify the upgrade path without forcing it.
+- The remote-canonical flip for org scope is a **soft inversion**: local is still where commands write first (offline-tolerant per §5.2 outbox), but the *historical record beyond the retention window* lives remote-only. Reading deep history requires the remote, which is acceptable because org tier already requires the remote to exist (multi-maintainer means shared state).
+- Pruning is non-destructive when remote is reachable: `da workflow history prune` only deletes local entries the server confirms it has (per the `(project_id, plan_id, ...)` idempotency key from §5.3). Offline pruning is a separate destructive flag.
+- The per-plan `da workflow plan archive` pruning stays as-is; this is the cross-plan layer above it.
+- Schema-wise, `observability.retention` is a new `.agentsrc.json` block — same lifecycle obligations as the other observability fields tracked in §8 open question 4.
+
+**Extension-friendly hosting (maintainer feedback 2026-05-28):** the tool's goal is to remain **generic enough that the obs server can be self-hosted** rather than locked to `obs.agorcha.dev`. Concretely:
+
+- `observability.endpoint` in `.agentsrc.json` is already a URL, not a fixed hostname — pointing it at a self-hosted Worker (or even a non-CF backend that implements the §5.3 ingest schema) is a config change, not a code change.
+- The auth abstraction must not assume CF Access Service Tokens specifically — see §5.4 revision below, which routes auth through the same `external-agent-sources` shape so custom hosts can plug in their own auth model (mTLS, OIDC, static bearer, etc.).
+- The ingest schema (§5.3) and retention model above are independent of the storage backend. A self-hosted variant could swap DO+D1 for Postgres or SQLite without changing the wire protocol.
+- The agorcha.dev deploy is the **reference implementation**, not the only supported target.
 
 ### 6.3 Per-project token issuance flow (v1)
 
@@ -435,7 +516,7 @@ Next-task list with deps. Each is a candidate task on the `pr10-branch-split` pl
 
 5. **`obs-worker-scaffold`** — `[deps: 1, 4]` — new directory `obs/` (top-level or under `docs/web/`); Wrangler config for `obs.agorcha.dev`; DO + D1 bindings; minimal ingest endpoint accepting `POST /api/ingest`; reject everything else.
 
-6. **`obs-dashboard-frontend`** — `[deps: 5]` — Astro/React UI served at `obs.agorcha.dev/` (or move r2's existing React/TS plan here); reads from `/api/runs`, `/api/iterations/...`; SSE channel; CF Access protected per §3.4.
+6. **`obs-dashboard-frontend`** — `[deps: 5]` — Astro/React UI served at `obs.agorcha.dev/` (or move r2's existing React/TS plan here); reads from `/api/runs`, `/api/iterations/...`; WebSocket channel (DO Hibernation API) for live updates per §4.1 transport revision; CF Access protected per §3.4.
 
 7. **`da-observability-cli`** — `[deps: 5]` — new commands: `da observability login`, `da observability sync`, `da observability status`. Read endpoint from `.agentsrc.json`, secret from `~/.config/da/credentials.json`.
 
