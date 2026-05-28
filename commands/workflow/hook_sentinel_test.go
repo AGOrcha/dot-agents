@@ -1095,3 +1095,556 @@ func TestWorkflowHookSentinelEmbeddedSchemaMatchesCanonical(t *testing.T) {
 		t.Fatal("commands/workflow/static/workflow-hook-sentinel.schema.json is out of sync with schemas/workflow-hook-sentinel.schema.json — copy the canonical file after editing")
 	}
 }
+
+// ── T1 companion-skill / operation matrix ────────────────────────────────────
+
+// newValidFanoutHandoffInputs returns inputs that should validate cleanly for
+// orchestrator-session-start + fanout_handoff. Tests mutate one field at a
+// time to exercise rejection branches.
+func newValidFanoutHandoffInputs() hookSentinelWriteInputs {
+	return hookSentinelWriteInputs{
+		Skill:          "orchestrator-session-start",
+		RunID:          "r-fan",
+		PlanID:         "plan-1",
+		TaskID:         "t1",
+		AgentType:      "main",
+		Operation:      hookSentinelOpFanoutHandoff,
+		DelegationPath: ".agents/active/delegation/t1.yaml",
+		BundlePath:     ".agents/active/delegation-bundles/del-t1.yaml",
+		WriteScope:     []string{"commands/workflow/"},
+	}
+}
+
+func newValidExistingBundleHandoffInputs() hookSentinelWriteInputs {
+	return hookSentinelWriteInputs{
+		Skill:          "orchestrator-session-start",
+		RunID:          "r-exist",
+		PlanID:         "plan-1",
+		TaskID:         "t1",
+		AgentType:      "main",
+		Operation:      hookSentinelOpExistingBundleHandoff,
+		DelegationPath: ".agents/active/delegation/t1.yaml",
+		BundlePath:     ".agents/active/delegation-bundles/del-t1.yaml",
+		WriteScope:     []string{"commands/workflow/"},
+	}
+}
+
+func newValidParentCloseoutInputs() hookSentinelWriteInputs {
+	return hookSentinelWriteInputs{
+		Skill:                    "delegation-lifecycle",
+		RunID:                    "r-close",
+		PlanID:                   "plan-1",
+		TaskID:                   "t1",
+		AgentType:                "main",
+		Operation:                hookSentinelOpParentCloseout,
+		Decision:                 hookSentinelDecisionAccept,
+		ExpectedArchiveArtifacts: []string{".agents/history/plan-1/t1/merge-back.md"},
+		ExpectedCleanupPaths:     []string{".agents/active/delegation/t1.yaml"},
+	}
+}
+
+func TestValidHookSentinelSkill_CompanionSkillsAccepted(t *testing.T) {
+	for _, s := range []string{"orchestrator-session-start", "delegation-lifecycle"} {
+		if !validHookSentinelSkill(s) {
+			t.Errorf("expected companion skill %q to be valid", s)
+		}
+	}
+}
+
+func TestValidHookSentinelOperation_Matrix(t *testing.T) {
+	cases := []struct {
+		skill, operation string
+		want             bool
+	}{
+		// Empty operation always valid (upstream skills declare no operation).
+		{"orchestrator-session-start", "", true},
+		{"iteration-close", "", true},
+		// Companion-allowed pairs.
+		{"orchestrator-session-start", hookSentinelOpFanoutHandoff, true},
+		{"orchestrator-session-start", hookSentinelOpExistingBundleHandoff, true},
+		{"delegation-lifecycle", hookSentinelOpParentCloseout, true},
+		// Cross-skill operation NOT allowed.
+		{"delegation-lifecycle", hookSentinelOpFanoutHandoff, false},
+		{"orchestrator-session-start", hookSentinelOpParentCloseout, false},
+		// Upstream skills cannot declare a companion operation.
+		{"iteration-close", hookSentinelOpFanoutHandoff, false},
+		{"isp", hookSentinelOpParentCloseout, false},
+		{"loop-worker", hookSentinelOpExistingBundleHandoff, false},
+		// Unknown operation rejected.
+		{"orchestrator-session-start", "made_up", false},
+	}
+	for _, c := range cases {
+		if got := validHookSentinelOperation(c.skill, c.operation); got != c.want {
+			t.Errorf("validHookSentinelOperation(%q,%q)=%v want %v", c.skill, c.operation, got, c.want)
+		}
+	}
+}
+
+func TestValidHookSentinelDecision(t *testing.T) {
+	for _, d := range []string{"accept", "reject"} {
+		if !validHookSentinelDecision(d) {
+			t.Errorf("expected %q valid", d)
+		}
+	}
+	for _, d := range []string{"", "ACCEPT", "defer", "maybe"} {
+		if validHookSentinelDecision(d) {
+			t.Errorf("expected %q invalid", d)
+		}
+	}
+}
+
+func TestIsRepoRelativePath(t *testing.T) {
+	cases := map[string]bool{
+		".agents/active/delegation/t1.yaml": true,
+		"commands/workflow/":                true,
+		"a/b/c":                             true,
+		"./a":                               true,
+		"":                                  false,
+		"   ":                               false,
+		"/abs/path":                         false,
+		"../outside":                        false,
+		"a/../b":                            false,
+		"C:/win/path":                       false,
+	}
+	for in, want := range cases {
+		if got := isRepoRelativePath(in); got != want {
+			t.Errorf("isRepoRelativePath(%q)=%v want %v", in, got, want)
+		}
+	}
+}
+
+func TestValidateRepoRelativePathList(t *testing.T) {
+	if err := validateRepoRelativePathList("--x", []string{"a", "b/c"}); err != nil {
+		t.Errorf("expected nil for clean list, got %v", err)
+	}
+	if err := validateRepoRelativePathList("--x", []string{"a", "/abs"}); err == nil ||
+		!strings.Contains(err.Error(), "[1]") {
+		t.Errorf("expected error on second entry, got %v", err)
+	}
+}
+
+func TestValidateCompanionContext_FanoutHandoffHappy(t *testing.T) {
+	if err := validateCompanionContext(newValidFanoutHandoffInputs()); err != nil {
+		t.Errorf("expected fanout_handoff to validate: %v", err)
+	}
+}
+
+func TestValidateCompanionContext_ExistingBundleHappy(t *testing.T) {
+	if err := validateCompanionContext(newValidExistingBundleHandoffInputs()); err != nil {
+		t.Errorf("expected existing_bundle_handoff to validate: %v", err)
+	}
+}
+
+func TestValidateCompanionContext_ParentCloseoutHappy(t *testing.T) {
+	if err := validateCompanionContext(newValidParentCloseoutInputs()); err != nil {
+		t.Errorf("expected parent_closeout to validate: %v", err)
+	}
+	in := newValidParentCloseoutInputs()
+	in.Decision = hookSentinelDecisionReject
+	if err := validateCompanionContext(in); err != nil {
+		t.Errorf("expected reject decision to validate: %v", err)
+	}
+}
+
+func TestValidateCompanionContext_UpstreamRejectsOperation(t *testing.T) {
+	in := newValidHookSentinelWriteInputs() // skill=loop-worker
+	in.Operation = hookSentinelOpFanoutHandoff
+	err := validateCompanionContext(in)
+	if err == nil || !strings.Contains(err.Error(), "not supported for skill") {
+		t.Errorf("expected upstream-skill operation rejection, got %v", err)
+	}
+}
+
+func TestValidateCompanionContext_CompanionRequiresOperation(t *testing.T) {
+	for _, skill := range []string{"orchestrator-session-start", "delegation-lifecycle"} {
+		in := hookSentinelWriteInputs{
+			Skill: skill, RunID: "r", PlanID: "p", TaskID: "t", AgentType: "main",
+		}
+		err := validateCompanionContext(in)
+		if err == nil || !strings.Contains(err.Error(), "--operation is required") {
+			t.Errorf("skill %q without operation: expected --operation required, got %v", skill, err)
+		}
+	}
+}
+
+func TestValidateCompanionContext_RejectsCrossSkillOperation(t *testing.T) {
+	in := newValidParentCloseoutInputs()
+	in.Skill = "orchestrator-session-start"
+	err := validateCompanionContext(in)
+	if err == nil || !strings.Contains(err.Error(), "not valid for skill") {
+		t.Errorf("expected cross-skill operation rejection, got %v", err)
+	}
+}
+
+func TestValidateFanoutHandoffEvidence_RequiredFields(t *testing.T) {
+	type mut func(*hookSentinelWriteInputs)
+	cases := map[string]struct {
+		mut  mut
+		want string
+	}{
+		"missing-delegation-path": {func(in *hookSentinelWriteInputs) { in.DelegationPath = "" }, "--delegation-path"},
+		"abs-delegation-path":     {func(in *hookSentinelWriteInputs) { in.DelegationPath = "/abs" }, "--delegation-path"},
+		"missing-bundle-path":     {func(in *hookSentinelWriteInputs) { in.BundlePath = "" }, "--bundle-path"},
+		"missing-write-scope":     {func(in *hookSentinelWriteInputs) { in.WriteScope = nil }, "--write-scope"},
+		"bad-write-scope-entry":   {func(in *hookSentinelWriteInputs) { in.WriteScope = []string{"ok", "/abs"} }, "--write-scope"},
+		"bad-sidecar":             {func(in *hookSentinelWriteInputs) { in.RequiredSidecarPath = "/abs/sidecar" }, "--required-sidecar-path"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := newValidFanoutHandoffInputs()
+			c.mut(&in)
+			err := validateCompanionContext(in)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("expected error mentioning %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateFanoutHandoffEvidence_SidecarRelativeAccepted(t *testing.T) {
+	in := newValidFanoutHandoffInputs()
+	in.RequiredSidecarPath = ".agents/active/sidecar.yaml"
+	in.EvidenceConfidence = "high"
+	if err := validateCompanionContext(in); err != nil {
+		t.Errorf("expected sidecar+evidence to validate: %v", err)
+	}
+}
+
+func TestValidateExistingBundleHandoffEvidence_RequiredFields(t *testing.T) {
+	type mut func(*hookSentinelWriteInputs)
+	cases := map[string]struct {
+		mut  mut
+		want string
+	}{
+		"missing-delegation": {func(in *hookSentinelWriteInputs) { in.DelegationPath = "" }, "--delegation-path"},
+		"missing-bundle":     {func(in *hookSentinelWriteInputs) { in.BundlePath = "" }, "--bundle-path"},
+		"missing-scope":      {func(in *hookSentinelWriteInputs) { in.WriteScope = nil }, "--write-scope"},
+		"bad-scope-entry":    {func(in *hookSentinelWriteInputs) { in.WriteScope = []string{"../oops"} }, "--write-scope"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := newValidExistingBundleHandoffInputs()
+			c.mut(&in)
+			err := validateCompanionContext(in)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("expected error mentioning %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestValidateParentCloseoutEvidence_RequiredFields(t *testing.T) {
+	type mut func(*hookSentinelWriteInputs)
+	cases := map[string]struct {
+		mut  mut
+		want string
+	}{
+		"bad-decision":      {func(in *hookSentinelWriteInputs) { in.Decision = "maybe" }, "--decision"},
+		"missing-archive":   {func(in *hookSentinelWriteInputs) { in.ExpectedArchiveArtifacts = nil }, "--expected-archive-artifact"},
+		"bad-archive-entry": {func(in *hookSentinelWriteInputs) { in.ExpectedArchiveArtifacts = []string{"/abs"} }, "--expected-archive-artifact"},
+		"missing-cleanup":   {func(in *hookSentinelWriteInputs) { in.ExpectedCleanupPaths = nil }, "--expected-cleanup-path"},
+		"bad-cleanup-entry": {func(in *hookSentinelWriteInputs) { in.ExpectedCleanupPaths = []string{"../escape"} }, "--expected-cleanup-path"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := newValidParentCloseoutInputs()
+			c.mut(&in)
+			err := validateCompanionContext(in)
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("expected error mentioning %q, got %v", c.want, err)
+			}
+		})
+	}
+}
+
+func TestJoinAllowedOperations_StableOrder(t *testing.T) {
+	got := joinAllowedOperations("orchestrator-session-start")
+	// sorted alphabetically: existing_bundle_handoff, fanout_handoff
+	want := "existing_bundle_handoff, fanout_handoff"
+	if got != want {
+		t.Errorf("joinAllowedOperations = %q, want %q", got, want)
+	}
+}
+
+func TestBuildHookSentinelDoc_FanoutHandoffPopulatesContext(t *testing.T) {
+	dir := t.TempDir()
+	doc, err := buildHookSentinelDoc(stdHookSentinelDeps{}, dir, newValidFanoutHandoffInputs())
+	if err != nil {
+		t.Fatalf("buildHookSentinelDoc: %v", err)
+	}
+	if doc.Context == nil {
+		t.Fatal("expected non-nil context for fanout_handoff")
+	}
+	if doc.Context.Operation != hookSentinelOpFanoutHandoff {
+		t.Errorf("Operation=%q", doc.Context.Operation)
+	}
+	if doc.Context.DelegationPath == "" || doc.Context.BundlePath == "" {
+		t.Errorf("expected paths populated: %+v", doc.Context)
+	}
+	if len(doc.Context.WriteScope) == 0 {
+		t.Error("expected write_scope populated")
+	}
+}
+
+func TestBuildHookSentinelDoc_ParentCloseoutPopulatesContext(t *testing.T) {
+	dir := t.TempDir()
+	in := newValidParentCloseoutInputs()
+	in.ExpectedArchiveArtifacts = []string{
+		".agents/history/plan-1/t1/merge-back.md",
+		".agents/history/plan-1/t1/verification.yaml",
+	}
+	in.ExpectedCleanupPaths = []string{
+		".agents/active/delegation/t1.yaml",
+		".agents/active/delegation-bundles/del-t1.yaml",
+	}
+	doc, err := buildHookSentinelDoc(stdHookSentinelDeps{}, dir, in)
+	if err != nil {
+		t.Fatalf("buildHookSentinelDoc: %v", err)
+	}
+	if doc.Context.Operation != hookSentinelOpParentCloseout {
+		t.Errorf("Operation=%q", doc.Context.Operation)
+	}
+	if doc.Context.Decision != hookSentinelDecisionAccept {
+		t.Errorf("Decision=%q", doc.Context.Decision)
+	}
+	if len(doc.Context.ExpectedArchiveArtifacts) != 2 {
+		t.Errorf("ExpectedArchiveArtifacts=%v", doc.Context.ExpectedArchiveArtifacts)
+	}
+	if len(doc.Context.ExpectedCleanupPaths) != 2 {
+		t.Errorf("ExpectedCleanupPaths=%v", doc.Context.ExpectedCleanupPaths)
+	}
+}
+
+func TestBuildHookSentinelDoc_CompanionRejectsBadInput(t *testing.T) {
+	dir := t.TempDir()
+	in := newValidFanoutHandoffInputs()
+	in.DelegationPath = ""
+	if _, err := buildHookSentinelDoc(stdHookSentinelDeps{}, dir, in); err == nil {
+		t.Fatal("expected fanout_handoff validation failure for empty delegation_path")
+	}
+}
+
+// ── Schema validation covers companion documents end-to-end ─────────────────
+
+func newValidFanoutHandoffDoc() *HookSentinelDoc {
+	return &HookSentinelDoc{
+		SchemaVersion:  1,
+		Skill:          "orchestrator-session-start",
+		RunID:          "r-fan",
+		StartedAt:      "2026-05-28T12:00:00Z",
+		PlanID:         "plan-1",
+		TaskID:         "t1",
+		AgentType:      "main",
+		LifecyclePoint: "skill_entry",
+		Context: &HookSentinelContext{
+			Operation:      hookSentinelOpFanoutHandoff,
+			DelegationPath: ".agents/active/delegation/t1.yaml",
+			BundlePath:     ".agents/active/delegation-bundles/del-t1.yaml",
+			WriteScope:     []string{"commands/workflow/"},
+		},
+	}
+}
+
+func newValidParentCloseoutDoc() *HookSentinelDoc {
+	return &HookSentinelDoc{
+		SchemaVersion:  1,
+		Skill:          "delegation-lifecycle",
+		RunID:          "r-close",
+		StartedAt:      "2026-05-28T12:00:00Z",
+		PlanID:         "plan-1",
+		TaskID:         "t1",
+		AgentType:      "main",
+		LifecyclePoint: "skill_entry",
+		Context: &HookSentinelContext{
+			Operation:                hookSentinelOpParentCloseout,
+			Decision:                 hookSentinelDecisionAccept,
+			ExpectedArchiveArtifacts: []string{".agents/history/plan-1/t1/merge-back.md"},
+			ExpectedCleanupPaths:     []string{".agents/active/delegation/t1.yaml"},
+		},
+	}
+}
+
+func TestValidateHookSentinelDoc_CompanionFanoutValid(t *testing.T) {
+	if err := validateHookSentinelDoc(newValidFanoutHandoffDoc()); err != nil {
+		t.Fatalf("expected fanout_handoff doc to schema-validate: %v", err)
+	}
+}
+
+func TestValidateHookSentinelDoc_CompanionParentCloseoutValid(t *testing.T) {
+	if err := validateHookSentinelDoc(newValidParentCloseoutDoc()); err != nil {
+		t.Fatalf("expected parent_closeout doc to schema-validate: %v", err)
+	}
+}
+
+func TestValidateHookSentinelDoc_CompanionRequiresOperation(t *testing.T) {
+	doc := newValidFanoutHandoffDoc()
+	doc.Context.Operation = ""
+	doc.Context.DelegationPath = ""
+	doc.Context.BundlePath = ""
+	doc.Context.WriteScope = nil
+	if err := validateHookSentinelDoc(doc); err == nil {
+		t.Error("schema should reject orchestrator-session-start without operation")
+	}
+}
+
+func TestValidateHookSentinelDoc_CompanionRejectsCrossSkillOperation(t *testing.T) {
+	doc := newValidFanoutHandoffDoc()
+	doc.Context.Operation = hookSentinelOpParentCloseout
+	// parent_closeout requires decision + archive + cleanup; even if those were
+	// supplied the per-skill enum filter rejects this operation for the orch
+	// session-start skill.
+	if err := validateHookSentinelDoc(doc); err == nil {
+		t.Error("schema should reject parent_closeout under orchestrator-session-start")
+	}
+}
+
+func TestValidateHookSentinelDoc_UpstreamRejectsOperation(t *testing.T) {
+	doc := newValidHookSentinelDoc()
+	doc.Context = &HookSentinelContext{Operation: hookSentinelOpFanoutHandoff}
+	if err := validateHookSentinelDoc(doc); err == nil {
+		t.Error("schema should reject operation under upstream skill")
+	}
+}
+
+func TestValidateHookSentinelDoc_ParentCloseoutMissingDecision(t *testing.T) {
+	doc := newValidParentCloseoutDoc()
+	doc.Context.Decision = ""
+	if err := validateHookSentinelDoc(doc); err == nil {
+		t.Error("schema should reject parent_closeout missing decision")
+	}
+}
+
+// ── Write/clear round-trip for companion sentinels reuses durable contract ──
+
+func TestWriteHookSentinelAtomically_FanoutHandoffRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	doc := newValidFanoutHandoffDoc()
+	path, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc)
+	if err != nil {
+		t.Fatalf("write companion sentinel: %v", err)
+	}
+	// File must land under the upstream active dir (no parallel location).
+	wantPrefix := filepath.Join(dir, ".agents", "active", "hook-sentinels")
+	if !strings.HasPrefix(path, wantPrefix) {
+		t.Errorf("companion sentinel landed outside %s: %s", wantPrefix, path)
+	}
+	got, err := readHookSentinel(stdHookSentinelDeps{}, path)
+	if err != nil {
+		t.Fatalf("read companion sentinel: %v", err)
+	}
+	if got.Context == nil || got.Context.Operation != hookSentinelOpFanoutHandoff {
+		t.Errorf("round-trip lost operation: %+v", got.Context)
+	}
+}
+
+func TestClearHookSentinel_CompanionUsesDurableArchiveDestination(t *testing.T) {
+	dir := t.TempDir()
+	doc := newValidParentCloseoutDoc()
+	doc.PlanID = "plan-companion"
+	doc.StartedAt = "2026-05-28T12:00:00Z"
+	if _, err := writeHookSentinelAtomically(stdHookSentinelDeps{}, dir, doc); err != nil {
+		t.Fatal(err)
+	}
+	_, archive, err := clearHookSentinel(stdHookSentinelDeps{}, dir, doc.Skill, doc.RunID)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	// Same durable destination shape as upstream records (T1 contract: "same
+	// durable history destination").
+	wantPrefix := filepath.Join(dir, ".agents", "history", "plan-companion", "hook-sentinels", "2026-05-28")
+	if !strings.HasPrefix(archive, wantPrefix) {
+		t.Errorf("companion archive %s not under %s", archive, wantPrefix)
+	}
+}
+
+// ── CLI flag wiring covers new companion flags ──────────────────────────────
+
+func TestWorkflowHookSentinelCLI_FanoutHandoffWriteRead(t *testing.T) {
+	dir := t.TempDir()
+	withTempCwd(t, dir)
+	if err := executeWorkflowCommand(t, dir,
+		"hook-sentinel", "write", "orchestrator-session-start",
+		"--run-id", "rfan",
+		"--plan", "plan-1",
+		"--task", "t1",
+		"--agent-type", "main",
+		"--operation", "fanout_handoff",
+		"--delegation-path", ".agents/active/delegation/t1.yaml",
+		"--bundle-path", ".agents/active/delegation-bundles/del-t1.yaml",
+		"--write-scope", "commands/workflow/",
+		"--required-sidecar-path", ".agents/active/sidecar.yaml",
+		"--evidence-confidence", "high",
+	); err != nil {
+		t.Fatalf("companion write: %v", err)
+	}
+	out := captureWorkflowStdout(t, func() {
+		if err := executeWorkflowCommand(t, dir,
+			"hook-sentinel", "read", "orchestrator-session-start", "--latest",
+		); err != nil {
+			t.Fatalf("companion read: %v", err)
+		}
+	})
+	if !strings.Contains(out, "operation=fanout_handoff") {
+		t.Errorf("expected operation in text output, got %q", out)
+	}
+	if !strings.Contains(out, "delegation_path=") || !strings.Contains(out, "bundle_path=") {
+		t.Errorf("expected delegation_path + bundle_path lines, got %q", out)
+	}
+}
+
+func TestWorkflowHookSentinelCLI_ParentCloseoutWriteRead(t *testing.T) {
+	dir := t.TempDir()
+	withTempCwd(t, dir)
+	if err := executeWorkflowCommand(t, dir,
+		"hook-sentinel", "write", "delegation-lifecycle",
+		"--run-id", "rclose",
+		"--plan", "plan-1",
+		"--task", "t1",
+		"--agent-type", "main",
+		"--operation", "parent_closeout",
+		"--decision", "accept",
+		"--expected-archive-artifact", ".agents/history/plan-1/t1/merge-back.md",
+		"--expected-cleanup-path", ".agents/active/delegation/t1.yaml",
+	); err != nil {
+		t.Fatalf("companion write: %v", err)
+	}
+	out := captureWorkflowStdout(t, func() {
+		if err := executeWorkflowCommand(t, dir,
+			"hook-sentinel", "read", "delegation-lifecycle", "--latest",
+		); err != nil {
+			t.Fatalf("companion read: %v", err)
+		}
+	})
+	if !strings.Contains(out, "operation=parent_closeout") || !strings.Contains(out, "decision=accept") {
+		t.Errorf("expected operation+decision lines, got %q", out)
+	}
+	if !strings.Contains(out, "expected_archive_artifacts") ||
+		!strings.Contains(out, "expected_cleanup_paths") {
+		t.Errorf("expected closeout artifact lines, got %q", out)
+	}
+}
+
+func TestWorkflowHookSentinelCLI_CompanionInvalidOperationRejected(t *testing.T) {
+	dir := t.TempDir()
+	withTempCwd(t, dir)
+	err := executeWorkflowCommand(t, dir,
+		"hook-sentinel", "write", "orchestrator-session-start",
+		"--run-id", "rbad",
+		"--plan", "plan-1",
+		"--task", "t1",
+		"--agent-type", "main",
+		"--operation", "parent_closeout", // wrong skill for this operation
+	)
+	if err == nil || !strings.Contains(err.Error(), "not valid for skill") {
+		t.Errorf("expected cross-skill rejection from CLI, got %v", err)
+	}
+}
+
+// TestPreservedUpstreamSentinelFixtureStillValidates pins T1 acceptance: the
+// pre-existing upstream sentinel fixture continues to validate without
+// migration after the companion extension lands.
+func TestPreservedUpstreamSentinelFixtureStillValidates(t *testing.T) {
+	if err := validateHookSentinelDoc(newValidHookSentinelDoc()); err != nil {
+		t.Fatalf("upstream-style document must keep validating post-extension: %v", err)
+	}
+}
