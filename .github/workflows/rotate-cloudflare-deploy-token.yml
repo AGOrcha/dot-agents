@@ -1,0 +1,315 @@
+name: Rotate Cloudflare deploy token
+
+# Phase 2 of the Cloudflare deploy bootstrap. The deploy token
+# (CLOUDFLARE_API_TOKEN) is minted with a 60d TTL; this workflow refreshes
+# it monthly, swaps the GH Actions secret, then revokes prior dated tokens
+# after a 7d grace period (so any in-flight deploy jobs still finish).
+#
+# Auth bootstrap: Option A — long-lived rotation-scoped CF API token
+# (CLOUDFLARE_ROTATION_TOKEN). Scoped to only User:API Tokens Read/Write.
+# Option B (CF↔GitHub OIDC federation) is not yet GA in the public Cloudflare
+# API surface as of 2026-05; revisit when Cloudflare publishes a
+# Workload-Identity equivalent for /user/tokens.
+#
+# Secret writes use a fine-grained PAT (GH_ROTATION_PAT, Actions:write +
+# Secrets:write on this repo only) because GITHUB_TOKEN has no Secrets:write
+# scope.
+#
+# Required repository secrets before the first run:
+#   - CLOUDFLARE_ROTATION_TOKEN  CF API token, User:API Tokens Read+Write only
+#   - CLOUDFLARE_ACCOUNT_ID      Cloudflare account id (already set in phase 1)
+#   - CLOUDFLARE_ZONE_ID         agorcha.dev zone id
+#   - CLOUDFLARE_USER_ID         Cloudflare user tag for User:Details:Read
+#   - GH_ROTATION_PAT            fine-grained PAT, Actions:write + Secrets:write
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of every month. Token TTL is 60d, so monthly
+    # rotation gives a ~30d overlap window before old tokens expire.
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force rotation even if newest token has >7d remaining'
+        type: boolean
+        default: false
+
+concurrency:
+  group: cloudflare-token-rotation
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  rotate:
+    name: Mint and swap CLOUDFLARE_API_TOKEN
+    runs-on: ubuntu-latest
+    outputs:
+      rotated: ${{ steps.mint.outputs.rotated }}
+      new_token_name: ${{ steps.mint.outputs.new_token_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Mint new deploy token and update GH secret
+        id: mint
+        env:
+          CF_ROTATION_TOKEN: ${{ secrets.CLOUDFLARE_ROTATION_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          CF_USER_ID: ${{ secrets.CLOUDFLARE_USER_ID }}
+          GH_TOKEN: ${{ secrets.GH_ROTATION_PAT }}
+          FORCE: ${{ inputs.force }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Mask anything we receive from Cloudflare or set as a secret. ::add-mask::
+          # is the only safe way to keep tokens out of step logs even if a later
+          # command accidentally echoes them.
+          mask() { printf '::add-mask::%s\n' "$1"; }
+          mask "$CF_ROTATION_TOKEN"
+          mask "$GH_TOKEN"
+
+          CF_API="https://api.cloudflare.com/client/v4"
+          TOKEN_NAME_PREFIX="agorcha-dev-docs-deploy"
+          NEW_TOKEN_NAME="${TOKEN_NAME_PREFIX}-$(date -u +%Y%m%d)"
+
+          # Permission group IDs (from phase 1 bootstrap, cached as constants).
+          WORKERS_SCRIPTS_WRITE="e086da7e2179491d91ee5f35b3ca210a"
+          ACCOUNT_SETTINGS_READ="c1fde68c7bcc44588cbb6ddbc16d6480"
+          WORKERS_ROUTES_WRITE="28f4b596e7d643029c524985477ae49a"
+          DNS_WRITE="4755a26eedb94da69e1066d98aa820be"
+          ZONE_READ="c8fed203ed3043cba015a93ad1616f1f"
+          USER_DETAILS_READ="8acbe5bb0d54464ab867149d7f7cf8ac"
+
+          cf() {
+            # Wrapper: emits HTTP body to stdout, non-zero exit on HTTP >= 400
+            # or success:false in the response.
+            local method="$1"; shift
+            local path="$1"; shift
+            local body="${1:-}"
+            local resp http
+            if [ -n "$body" ]; then
+              resp=$(curl --proto '=https' --tlsv1.2 -sS \
+                -w '\n%{http_code}' \
+                -X "$method" "${CF_API}${path}" \
+                -H "Authorization: Bearer ${CF_ROTATION_TOKEN}" \
+                -H "Content-Type: application/json" \
+                --data "$body")
+            else
+              resp=$(curl --proto '=https' --tlsv1.2 -sS \
+                -w '\n%{http_code}' \
+                -X "$method" "${CF_API}${path}" \
+                -H "Authorization: Bearer ${CF_ROTATION_TOKEN}")
+            fi
+            http=$(printf '%s' "$resp" | tail -n1)
+            body=$(printf '%s' "$resp" | sed '$d')
+            if [ "$http" -ge 400 ]; then
+              echo "Cloudflare API ${method} ${path} failed: HTTP ${http}" >&2
+              echo "$body" | jq -r '.errors // .' >&2 || echo "$body" >&2
+              return 1
+            fi
+            if ! printf '%s' "$body" | jq -e '.success == true' >/dev/null; then
+              echo "Cloudflare API ${method} ${path} returned success=false" >&2
+              printf '%s' "$body" | jq -r '.errors' >&2 || true
+              return 1
+            fi
+            printf '%s' "$body"
+          }
+
+          # ---------------------------------------------------------------
+          # 1. Inventory existing tokens matching our prefix.
+          # ---------------------------------------------------------------
+          echo "Listing existing tokens..."
+          tokens_json=$(cf GET "/user/tokens")
+
+          # Filter to dated deploy tokens, sort by expires_on descending.
+          existing=$(printf '%s' "$tokens_json" \
+            | jq --arg pfx "$TOKEN_NAME_PREFIX-" '
+                [.result[]
+                  | select(.name | startswith($pfx))]
+                | sort_by(.expires_on)
+                | reverse')
+          count=$(printf '%s' "$existing" | jq 'length')
+          echo "Found ${count} existing token(s) matching ${TOKEN_NAME_PREFIX}-*"
+
+          # ---------------------------------------------------------------
+          # 2. Skip if newest token has >7d left and --force not set.
+          # ---------------------------------------------------------------
+          if [ "$count" -gt 0 ] && [ "$FORCE" != "true" ]; then
+            newest_expires=$(printf '%s' "$existing" \
+              | jq -r '.[0].expires_on // empty')
+            if [ -n "$newest_expires" ]; then
+              now_epoch=$(date -u +%s)
+              exp_epoch=$(date -u -d "$newest_expires" +%s 2>/dev/null \
+                || python3 -c "import datetime,sys;print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "$newest_expires")
+              remaining=$(( (exp_epoch - now_epoch) / 86400 ))
+              echo "Newest token expires in ${remaining}d (${newest_expires})"
+              if [ "$remaining" -gt 7 ]; then
+                echo "Rotation skipped: newest token has >7d remaining. Use workflow_dispatch with force=true to override."
+                echo "rotated=false" >> "$GITHUB_OUTPUT"
+                echo "new_token_name=" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            fi
+          fi
+
+          # ---------------------------------------------------------------
+          # 3. Mint new deploy token (same policies as phase 1 bootstrap).
+          # ---------------------------------------------------------------
+          expires_on=$(python3 -c "import datetime;print((datetime.datetime.utcnow()+datetime.timedelta(days=60)).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+          echo "Minting ${NEW_TOKEN_NAME} (expires ${expires_on})..."
+
+          create_body=$(jq -n \
+            --arg name "$NEW_TOKEN_NAME" \
+            --arg account "com.cloudflare.api.account.${CF_ACCOUNT_ID}" \
+            --arg zone "com.cloudflare.api.account.zone.${CF_ZONE_ID}" \
+            --arg user "com.cloudflare.api.user.${CF_USER_ID}" \
+            --arg expires "$expires_on" \
+            --arg pg_ws "$WORKERS_SCRIPTS_WRITE" \
+            --arg pg_as "$ACCOUNT_SETTINGS_READ" \
+            --arg pg_wr "$WORKERS_ROUTES_WRITE" \
+            --arg pg_dns "$DNS_WRITE" \
+            --arg pg_zr "$ZONE_READ" \
+            --arg pg_ud "$USER_DETAILS_READ" \
+            '{
+              name: $name,
+              expires_on: $expires,
+              policies: [
+                {
+                  effect: "allow",
+                  resources: { ($account): "*" },
+                  permission_groups: [
+                    { id: $pg_ws }, { id: $pg_as }
+                  ]
+                },
+                {
+                  effect: "allow",
+                  resources: { ($zone): "*" },
+                  permission_groups: [
+                    { id: $pg_wr }, { id: $pg_dns }, { id: $pg_zr }
+                  ]
+                },
+                {
+                  effect: "allow",
+                  resources: { ($user): "*" },
+                  permission_groups: [
+                    { id: $pg_ud }
+                  ]
+                }
+              ]
+            }')
+
+          created=$(cf POST "/user/tokens" "$create_body")
+          new_token_value=$(printf '%s' "$created" | jq -r '.result.value')
+          new_token_id=$(printf '%s' "$created" | jq -r '.result.id')
+
+          if [ -z "$new_token_value" ] || [ "$new_token_value" = "null" ]; then
+            echo "Cloudflare did not return a token value" >&2
+            exit 1
+          fi
+          mask "$new_token_value"
+          mask "$new_token_id"
+          echo "Minted token id=${new_token_id} (value masked)"
+
+          # ---------------------------------------------------------------
+          # 4. Verify the new token works before swapping the GH secret.
+          # ---------------------------------------------------------------
+          verify_http=$(curl --proto '=https' --tlsv1.2 -sS \
+            -o /dev/null -w '%{http_code}' \
+            "${CF_API}/user/tokens/verify" \
+            -H "Authorization: Bearer ${new_token_value}")
+          if [ "$verify_http" != "200" ]; then
+            echo "New token failed /user/tokens/verify (HTTP ${verify_http}); aborting before secret swap" >&2
+            # Best-effort revoke so we don't leave an unused token around.
+            cf DELETE "/user/tokens/${new_token_id}" >/dev/null || true
+            exit 1
+          fi
+          echo "New token verified."
+
+          # ---------------------------------------------------------------
+          # 5. Update the CLOUDFLARE_API_TOKEN GH Actions secret.
+          # When --body is omitted, gh secret set reads the value from
+          # stdin. This keeps the token out of the process arg list (which
+          # would otherwise be visible to anything reading /proc on the
+          # runner).
+          # ---------------------------------------------------------------
+          printf '%s' "$new_token_value" \
+            | gh secret set CLOUDFLARE_API_TOKEN --repo "$REPO"
+          echo "GH secret CLOUDFLARE_API_TOKEN updated."
+
+          echo "rotated=true" >> "$GITHUB_OUTPUT"
+          echo "new_token_name=${NEW_TOKEN_NAME}" >> "$GITHUB_OUTPUT"
+
+  revoke-stale:
+    name: Revoke prior tokens past grace period
+    needs: rotate
+    if: needs.rotate.outputs.rotated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete tokens older than 7d grace
+        env:
+          CF_ROTATION_TOKEN: ${{ secrets.CLOUDFLARE_ROTATION_TOKEN }}
+          NEW_TOKEN_NAME: ${{ needs.rotate.outputs.new_token_name }}
+        run: |
+          set -euo pipefail
+          printf '::add-mask::%s\n' "$CF_ROTATION_TOKEN"
+
+          CF_API="https://api.cloudflare.com/client/v4"
+          TOKEN_NAME_PREFIX="agorcha-dev-docs-deploy"
+          # Grace cutoff: tokens whose name date is older than 7d ago get revoked.
+          # The just-minted token (NEW_TOKEN_NAME) is always preserved.
+          cutoff_epoch=$(( $(date -u +%s) - 7 * 86400 ))
+
+          tokens_json=$(curl --proto '=https' --tlsv1.2 -sS \
+            "${CF_API}/user/tokens" \
+            -H "Authorization: Bearer ${CF_ROTATION_TOKEN}")
+
+          if ! printf '%s' "$tokens_json" | jq -e '.success == true' >/dev/null; then
+            echo "Failed to list tokens" >&2
+            printf '%s' "$tokens_json" | jq -r '.errors' >&2 || true
+            exit 1
+          fi
+
+          # Build a list of {id, name} for dated deploy tokens other than the
+          # newly minted one.
+          candidates=$(printf '%s' "$tokens_json" \
+            | jq -r --arg pfx "$TOKEN_NAME_PREFIX-" --arg keep "$NEW_TOKEN_NAME" '
+                .result[]
+                | select(.name | startswith($pfx))
+                | select(.name != $keep)
+                | "\(.id) \(.name)"')
+
+          if [ -z "$candidates" ]; then
+            echo "No stale tokens to consider."
+            exit 0
+          fi
+
+          echo "Candidate tokens for revocation:"
+          echo "$candidates"
+
+          while read -r id name; do
+            [ -z "$id" ] && continue
+            # Extract YYYYMMDD suffix from the name.
+            datepart="${name##*-}"
+            if ! [[ "$datepart" =~ ^[0-9]{8}$ ]]; then
+              echo "Skip ${name}: name does not end in YYYYMMDD"
+              continue
+            fi
+            name_epoch=$(date -u -d "${datepart:0:4}-${datepart:4:2}-${datepart:6:2}" +%s 2>/dev/null \
+              || python3 -c "import datetime,sys;d=sys.argv[1];print(int(datetime.datetime(int(d[0:4]),int(d[4:6]),int(d[6:8])).timestamp()))" "$datepart")
+            if [ "$name_epoch" -lt "$cutoff_epoch" ]; then
+              echo "Revoking ${name} (id=${id})"
+              http=$(curl --proto '=https' --tlsv1.2 -sS \
+                -o /dev/null -w '%{http_code}' \
+                -X DELETE "${CF_API}/user/tokens/${id}" \
+                -H "Authorization: Bearer ${CF_ROTATION_TOKEN}")
+              if [ "$http" -ge 400 ]; then
+                echo "WARN: revoke of ${name} returned HTTP ${http}" >&2
+              fi
+            else
+              echo "Keep ${name}: within 7d grace window"
+            fi
+          done <<< "$candidates"
