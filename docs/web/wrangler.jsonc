@@ -5,9 +5,11 @@
   // account_id is injected from the CLOUDFLARE_ACCOUNT_ID secret in CI
   // (see .github/workflows/deploy-docs.yml). Do NOT hardcode it here.
   //
-  // Pure static-asset Worker: no `main` entrypoint — Wrangler serves
-  // ./dist directly via the ASSETS binding. This matches Astro's
-  // `output: 'static'` build target.
+  // Static-asset Worker: src/worker.js is a thin pass-through that serves
+  // ./dist via the ASSETS binding. This shape works on all modern Wrangler
+  // versions; a bare `assets` block without `main` is only supported on
+  // very recent wrangler releases and breaks older CI runners.
+  "main": "src/worker.js",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -19,17 +21,8 @@
   ],
   "vars": {
     "ENVIRONMENT": "production"
-  },
-  "env": {
-    "preview": {
-      "name": "agorcha-dev-docs-preview",
-      "assets": {
-        "directory": "./dist",
-        "binding": "ASSETS",
-        "not_found_handling": "404-page"
-      }
-      // No custom routes — preview deploys land at the
-      // auto-generated agorcha-dev-docs-preview.<account>.workers.dev URL.
-    }
   }
+  // Preview deploys land at <name>.<account>.workers.dev by way of
+  // `wrangler deploy --name agorcha-dev-docs-preview` in the PR branch
+  // of the CI workflow — no separate env block needed.
 }

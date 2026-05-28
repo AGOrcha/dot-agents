@@ -130,10 +130,11 @@ docs/web/
 
 ## Deploy — Cloudflare Workers at agorcha.dev
 
-The site ships as a pure static-asset Cloudflare Worker. The build output
-in `dist/` is uploaded verbatim and served from the `agorcha.dev` custom
-domain via the [`assets`](https://developers.cloudflare.com/workers/static-assets/)
-binding (no SSR runtime). JSON schemas from `<repo-root>/schemas/` are
+The site ships as a static-asset Cloudflare Worker. A thin pass-through
+worker (`src/worker.js`) delegates every request to the
+[`assets`](https://developers.cloudflare.com/workers/static-assets/)
+binding, which serves files from `dist/` directly with the configured
+`not_found_handling`. JSON schemas from `<repo-root>/schemas/` are
 copied into `public/schemas/` at build time by `scripts/copy-schemas.sh`
 (invoked from the `prebuild` npm script), so they are served at:
 
@@ -148,7 +149,9 @@ https://agorcha.dev/schemas/<name>.json
 - **push to `master`** that touches `docs/web/**`, `docs/DEMO_*.md`,
   `schemas/**`, or the workflow file itself → **production deploy**
   to `agorcha.dev`.
-- **pull requests** touching the same paths → **preview deploy** to
+- **pull requests** touching the same paths → **preview deploy** to a
+  separate Worker named `agorcha-dev-docs-preview` (deployed via
+  `wrangler deploy --name agorcha-dev-docs-preview`), reachable at
   `agorcha-dev-docs-preview.<account>.workers.dev` (no custom-domain
   route; intended for review).
 
