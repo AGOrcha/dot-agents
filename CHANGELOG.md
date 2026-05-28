@@ -7,6 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No entries yet. Feature PRs add their lines here; the next release task
+finalizes them into a version section._
+
+## [0.3.3] - 2026-05-28
+
+This patch release organizes by **theme** rather than the Keep-a-Changelog
+Added/Changed/Fixed split, because the 0.3.3 surface is dominated by
+coordinated infrastructure/distribution efforts (the agorcha.dev docs site,
+signing & release hardening, platform-driven diagnostics, reviewer
+infrastructure, and config-v2 groundwork) where a single theme cuts across
+all three categories. Per the release-gated-plans convention, distribution
+and infrastructure work rides the patch train; `0.4.0` is reserved for the
+next genuine feature land.
+
+### Docs site (agorcha.dev)
+
+- Interactive Astro + Cytoscape documentation site under `docs/web/`,
+  deployed to agorcha.dev (PR #143).
+- Cloudflare Worker deploy pipeline (`deploy-docs.yml`) plus a scheduled
+  deploy-token auto-rotation workflow (PRs #150, #151).
+- Demo → pitch reframing: a 5-section pitch deck with presenter notes
+  alongside the existing demo pages (PR #164).
+- Usability fixes: fluid graph canvas + persistent legend (PR #163),
+  mobile sidebar / heading / theming polish, and a demo-title prefix
+  fallback (PRs #159, #166).
+
+### Signing & release
+
+- Cosign keyless signing via sigstore + GitHub OIDC, wired into
+  goreleaser (PR #138). Every release artifact + checksum is signed;
+  verify with `cosign verify-blob` per `docs/RELEASE_VERIFICATION.md`.
+- Homebrew dual-cask emit: unversioned `dot-agents.rb` + versioned
+  `dot-agents@{version}.rb` (PR #144).
+- `VERSION` file + `auto-release.yml` continue to drive tag/sign/publish:
+  bumping `VERSION` on a merge to `master` is the release trigger.
+- Native macOS (Apple Developer ID) + Windows (Authenticode) code
+  signing remain **deferred** (secrets pending).
+
+### Configuration (config-v2)
+
+- Additive config-v2 schema extension: new fields layered onto
+  `.agentsrc.json` without breaking existing configs (PRs #124, #141).
+- `da explain` top-level command surfacing config/resolution detail.
+
+  Note: the codex-track "snapshot API + `da config explain` subtree"
+  (P4) has **not** shipped in 0.3.3 and is tracked for a later release.
+
+### Platform-driven diagnostics
+
+- `doctor` + `status` now dispatch over the
+  `internal/platform.Platform` interface instead of hand-rolled
+  per-platform branches (PRs #118, #128, #130, #133, #135). Adds
+  `BrokenLinkReporter`, `Badge`, and `CountLinks` across
+  cursor / claude / codex / copilot / opencode.
+- Multi-OS coverage (macOS + Linux + Windows test matrices).
+
+### Reviewer infrastructure & skills
+
+- 3 starter reviewer-lens agents
+  (architecture-standards, acceptance-invariants, adversarial)
+  + AGENT.md scaffolding + a lens-count assertion test (PRs #122, #134).
+- `da workflow review_gate` staged-dispatch machinery
+  (PR #119; codex follow-on split out as PR #120) and a `pr-ci`
+  `verifier_profile` default (PR #129).
+- `isp.prompt.md` ↔ `verifier_profile` cross-reference enforcement test
+  (PR #140) prevents scaffold drift from stranding `verifier_sequence`
+  refs.
+- Orchestration skills promoted to global starter via `da skills promote`
+  (PR #141): `orchestrator-session-start`, `delegation-lifecycle`,
+  `plan-wave-picker`, `provider-consumer-pair`, `iteration-close`,
+  `isp`, `loop-worker`. `da init` now scaffolds the full chain.
+
+### Workflow tooling
+
+- `da workflow archive-orphans` sweep to reconcile stranded delegation /
+  merge-back artifacts (PR #158).
+- Hook-sentinel companion ops: expanded `commands/workflow/hook_sentinel`
+  + schema (PR #157).
+- Evidence-policy schema cleanup on delegation/fanout types (PR #148).
+- History-archive location unified (PR #154).
+
+### Renames & refactors
+
+- `cmd/dot-agents/` → `cmd/da/` (PR #139) — Go convention; binary name
+  matches install path. Module path stays
+  `github.com/NikashPrakash/dot-agents` (project identity preserved).
+- `cmdutil` judo refactor: folded `canonical/` into `cmdutil/`; extracted
+  shared resource-cmd helpers (PR #115).
+- `internal/` package rename + importguard narrowing (PR #117).
+- Canonical `internal/gitremote` package: `ParseRemoteURL` +
+  `CanonicalRepoID` + `ReadOriginURL` (go-git in-process, no subprocess);
+  `repo_id` derivation from git remote (PR #127).
+- `internal/testutil.MakeDirWriteDenied` + 9-site migration (PR #128).
+- DRY `commands/workflow/contract_core.go`: fanout calls contract core
+  (PR #131).
+
+### CI & quality
+
+- Deduplicated push + PR CI pipelines (PR #146).
+- Sonar-scanner worktree-path fix (PR #147).
+- Coverage lift on global-flag handling (PR #137).
+
+### Design & research (proposals/specs — not shipped capability)
+
+These PRs landed **design artifacts only**: no runtime behavior shipped.
+They scope future work and are recorded here for traceability.
+
+- `layered-pr-fanout` spec (PR #149).
+- `lens-evidence-policy` spec (PR #152).
+- agorcha public/internal split + observability deploy architecture
+  proposal (PR #156).
+- Monitor PR review/comment routing proposal (PR #160).
+- Auto-dream + background-tasks research proposal (PR #161).
+
 ## [0.3.2] - 2026-05-17
 
 Knowledge-graph subpackage line (PR3c).
@@ -171,7 +285,9 @@ plus test-structure hygiene.
 - Windows support deferred to future release
 - Tasks and History features are opt-in and not yet implemented
 
-[Unreleased]: https://github.com/Nikashprakash/dot-agents/compare/v0.1.9...HEAD
+[Unreleased]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.2...v0.3.3
+[0.3.2]: https://github.com/NikashPrakash/dot-agents/releases/tag/v0.3.2
 [0.1.8]: https://github.com/dot-agents/dot-agents/compare/v0.1.8...v0.1.9
 [0.1.8]: https://github.com/dot-agents/dot-agents/compare/v0.1.7...v0.1.8
 [0.1.7]: https://github.com/dot-agents/dot-agents/compare/v0.1.0...v0.1.7

@@ -49,7 +49,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    main["cmd/dot-agents/main.go<br/>Cobra entrypoint"]
+    main["cmd/da/main.go<br/>Cobra entrypoint"]
     root["commands/root.go<br/>global flags + command registration"]
 
     subgraph Commands["commands/"]
@@ -111,7 +111,7 @@ flowchart TB
 
 ### Reading notes
 
-- The CLI entrypoint is thin: `cmd/dot-agents/main.go` hands off to Cobra commands in `commands/`.
+- The CLI entrypoint is thin: `cmd/da/main.go` hands off to Cobra commands in `commands/`.
 - `commands/` is the orchestration layer; most reusable behavior lives in `internal/`.
 - `internal/platform` is the key projection layer. It knows platform adapters, shared-target intents, and how repo-local outputs get created.
 - `internal/config` owns the user-level and repo-level configuration contracts.

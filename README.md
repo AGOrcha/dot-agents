@@ -4,6 +4,8 @@
 
 One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and more.
 
+📖 Docs & interactive walkthrough: [agorcha.dev](https://agorcha.dev)
+
 ```bash
 # Install
 brew tap AGOrcha/tap && brew install dot-agents
@@ -178,7 +180,7 @@ da install
 
 ## Commands
 
-`da` exposes 20 top-level commands.
+`da` exposes 21 top-level commands.
 
 ### Project Management
 
@@ -275,6 +277,7 @@ queries — so humans and agents can resume work safely.
 | Command | Description |
 |---------|-------------|
 | `workflow fanout --plan <id> --task <id>` | Delegate a task to a sub-agent with a bounded write scope |
+| `workflow contract` | Materialize and inspect delegation contracts for direct orchestrator work |
 | `workflow merge-back --task <id> --summary <s>` | Record a sub-agent's completed work as a merge-back artifact |
 | `workflow delegation closeout` | Archive merge-back artifacts and reconcile canonical task state |
 | `workflow delegation gate --task <id>` | Evaluate task-local review evidence into a parent-gate outcome |
@@ -287,6 +290,17 @@ queries — so humans and agents can resume work safely.
 |---------|-------------|
 | `workflow drift` | Detect workflow drift across managed repos (read-only) |
 | `workflow sweep` | Plan and optionally apply fixes for workflow drift (`--apply`) |
+| `workflow archive-orphans` | Sweep stale active merge-back/delegation artifacts after plan archive |
+
+#### Iteration client & hook sentinels
+
+| Command | Description |
+|---------|-------------|
+| `workflow start-task` | Start-of-iteration client: activate plan → focus task → derive scope → commit |
+| `workflow close-task` | End-of-iteration client: checkpoint → score → advance → focus → commit |
+| `workflow commit` | Stage and commit workflow-state changes (managed roots + declared session paths) |
+| `workflow hook-sentinel` | Write/read/clear hook sentinels declaring per-skill stop-gate context |
+| `workflow hook-outcome` | Append hook gate outcomes to the active iteration's sidecar |
 
 ### Knowledge Graph
 
@@ -334,6 +348,17 @@ structured project memory, bridge queries, and code-to-note context.
 | `kg communities` | List detected code communities |
 | `kg postprocess` | Rebuild flows, communities, and FTS index |
 | `kg link add\|list\|remove` | Manage note→code symbol cross-references |
+
+### Outcome Scoring
+
+`da score` scores agent-run iterations against the versioned outcome-scoring
+rubric (`docs/OUTCOME_SCORING_RUBRIC.md`).
+
+| Command | Description |
+|---------|-------------|
+| `score run` | Score every iteration in the active log and write score sidecars |
+| `score iteration` | Render a persisted per-iteration score (`--recompute` to recompute) |
+| `score session` | Render a persisted per-session score |
 
 ### Sync
 

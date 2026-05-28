@@ -50,13 +50,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <li>Clickable graph: <strong>workflow resources</strong> (pr10-branch-split tasks + delegations + lessons).</li>
     <li>Snapshot view: <strong>workspace state</strong> (worktrees + active delegations + eligible queue).</li>
     <li>Tier model diagram (spec → plan → tasks → history) with click-to-expand.</li>
+    <li>
+      Automated deploy: the site publishes to <a href="https://agorcha.dev" target="_blank" rel="noopener">agorcha.dev</a>
+      via a Cloudflare Worker pipeline (<code>.github/workflows/deploy-docs.yml</code>).
+    </li>
   </ul>
 
   <h2>Stubbed for follow-up</h2>
   <ul>
     <li>Lens dispatch diagram.</li>
     <li>Verifier registry / <code>app_type_verifier_map</code> diagram.</li>
-    <li>GitHub Pages publish workflow under <code>.github/workflows/</code>.</li>
     <li>Live JSON ingestion for workspace state (currently a committed snapshot).</li>
     <li>Search across demo pages.</li>
   </ul>

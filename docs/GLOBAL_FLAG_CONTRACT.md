@@ -5,7 +5,7 @@
 
 ## Persistent globals
 
-The root command registers these **persistent** flags (bound to `commands.Flags` in `cmd/dot-agents/main.go`):
+The root command registers these **persistent** flags (bound to `commands.Flags` in `cmd/da/main.go`):
 
 | Long | Short | Purpose (intended) |
 |------|-------|-------------------|

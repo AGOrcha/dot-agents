@@ -58,8 +58,8 @@ You edit **one** file in `~/.agents/`. Every project, every agent picks it up.
 
 ```bash
 # 1. Install (assumes Go 1.24+)
-go install ./cmd/dot-agents
-alias da=dot-agents   # or symlink
+go install ./cmd/da
+# installs the `da` binary onto your Go bin PATH
 
 # 2. Initialize the canonical home
 da init
