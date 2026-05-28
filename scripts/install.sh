@@ -3,8 +3,8 @@
 # https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
+#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install.sh | bash -s -- --port ts
 #
 # Options:
 #   --port go|ts                 Install target (default: go)
@@ -177,7 +177,7 @@ install_ts_target() {
     tmpdir=$(mktemp -d)
     trap 'rm -rf "$tmpdir"' RETURN
     if [[ "$version" = "main" ]]; then
-      url="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+      url="https://github.com/${REPO}/archive/refs/heads/master.tar.gz"
     else
       url="https://github.com/${REPO}/archive/refs/tags/${version}.tar.gz"
     fi

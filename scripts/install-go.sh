@@ -3,7 +3,7 @@
 # https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install-go.sh | bash
 #
 # Options (via environment variables):
 #   DOT_AGENTS_INSTALL_DIR - Installation directory (default: ~/.local/bin)

@@ -132,13 +132,13 @@ brew install dot-agents
 ### Direct Install (Go CLI, default)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install.sh | bash
 ```
 
 ### Windows PowerShell (Go CLI)
 
 ```powershell
-irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.ps1 | iex
+irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install-go.ps1 | iex
 ```
 
 ### Manual
