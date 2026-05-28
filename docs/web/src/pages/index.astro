@@ -267,13 +267,14 @@ const link = (p: string) => `${base}${p}`;
         <li><strong>Code graph</strong> — Tree-sitter symbol/import/call
         graph bridged into the same store. Lets the orchestrator
         pre-flight a write scope against the code graph before fanout
-        (lesson: <code>bundle-scope-via-code-graph</code>) and lets reviewers see
+        (lesson: <a href={link('/canonical/lessons/bundle-scope-via-code-graph/')}><code>bundle-scope-via-code-graph</code></a>) and lets reviewers see
         blast-radius before approving a change.</li>
       </ul>
       <p>
-        The bridge is contract-stable: see <code>graph-bridge-contract</code> in
-        <a href={link('/canonical/#specs')}>specs</a>. An MCP server exposes
-        the whole surface to every platform that speaks MCP.
+        The bridge is contract-stable: see the
+        <a href={link('/canonical/specs/graph-bridge-contract/')}><code>graph-bridge-contract</code></a>
+        spec. An MCP server exposes the whole surface to every platform that
+        speaks MCP.
       </p>
 
       <h3>3.5 The verifier — shift-left CI ownership</h3>
@@ -360,19 +361,19 @@ const link = (p: string) => `${base}${p}`;
       <ul>
         <li>
           <strong>The <code>cd</code> that swapped two branches</strong>
-          (<code>worktree-no-cd</code>) — was a cross-worktree
+          (<a href={link('/canonical/lessons/worktree-no-cd/')}><code>worktree-no-cd</code></a>) — was a cross-worktree
           contamination bug. After the lesson became a rule, no
           subsequent multi-worktree session has reproduced it.
         </li>
         <li>
           <strong>Impl agents re-learning the Sonar API every PR</strong>
-          (<code>verifier-owns-ci-watch-shift-left</code>) — the <code>pr-ci</code>
+          (<a href={link('/canonical/lessons/verifier-owns-ci-watch-shift-left/')}><code>verifier-owns-ci-watch-shift-left</code></a>) — the <code>pr-ci</code>
           verifier profile encodes that knowledge once. Per the lesson:
           <em>next wave runs ~3–5× cheaper</em> (token estimate, see §4.4 caveat).
         </li>
         <li>
           <strong>Stale TASKS.yaml driving fanout</strong>
-          (<code>verify-task-status-vs-pr-history</code>) — was a near-miss
+          (<a href={link('/canonical/lessons/verify-task-status-vs-pr-history/')}><code>verify-task-status-vs-pr-history</code></a>) — was a near-miss
           ship-a-revert incident. The pre-fanout reconciliation rule has
           held since.
         </li>
@@ -413,8 +414,8 @@ const link = (p: string) => `${base}${p}`;
         <thead><tr><th>Step</th><th>Artifact</th></tr></thead>
         <tbody>
           <tr><td>Pattern noticed in a wave</td><td>Impl agents kept re-learning SonarCloud's API and the <code>gh pr checks</code> schema, eating context.</td></tr>
-          <tr><td>Lesson captured</td><td><code>.agents/lessons/verifier-owns-ci-watch-shift-left/LESSON.md</code></td></tr>
-          <tr><td>Proposal queued</td><td><code>~/.agents/proposals/verifier-profile-pr-ci.yaml</code></td></tr>
+          <tr><td>Lesson captured</td><td><a href={link('/canonical/lessons/verifier-owns-ci-watch-shift-left/')}><code>verifier-owns-ci-watch-shift-left</code></a></td></tr>
+          <tr><td>Proposal queued</td><td><a href={link('/canonical/proposals/pr-ci-verifier-integration-audit/')}><code>pr-ci-verifier-integration-audit</code></a></td></tr>
           <tr><td>Reviewed + approved</td><td><code>da review approve</code> → landed in <code>~/.agents/</code></td></tr>
           <tr><td>Behavior now baked in</td><td><code>pr-ci</code> verifier profile in <code>.agentsrc.json</code>; impl agents exit at merge-back; next wave consistently cheaper.</td></tr>
         </tbody>
@@ -433,8 +434,8 @@ const link = (p: string) => `${base}${p}`;
         session log</em>, not instrumented telemetry. We don't yet measure
         tokens-per-PR, wall-clock-per-task, or recurrence-rate-by-lesson
         with anything more rigorous than memory. That instrumentation is
-        exactly what the <strong>agent-run-scoring observability
-        platform</strong> (R2–R5 in §5) is being built to provide.
+        exactly what the <strong><a href={link('/canonical/specs/agent-run-scoring-observability-platform/')}>agent-run-scoring observability
+        platform</a></strong> (R2–R5 in §5) is being built to provide.
       </div>
 
       <h3>4.5 Multi-platform parity (shipped)</h3>
@@ -479,7 +480,7 @@ const link = (p: string) => `${base}${p}`;
             <li>Status name: <code>awaiting_review</code> with <code>agent</code>/<code>owner</code> sub-states.</li>
             <li>Verifier/lens split — objective signals unblock eligibility, subjective signals gate merge.</li>
             <li>Self-correcting topology — merges fast-forward downstream; rejections cascade-block visibly.</li>
-            <li>Spec: <code>layered-pr-fanout</code> (accepted 2026-05-28).</li>
+            <li>Spec: <a href={link('/canonical/specs/layered-pr-fanout/')}><code>layered-pr-fanout</code></a> (accepted 2026-05-28).</li>
           </ul>
         </div>
 
@@ -496,7 +497,7 @@ const link = (p: string) => `${base}${p}`;
             <li>Event-driven staleness (not clock-based) — a fact stays true until something invalidates it.</li>
             <li>Per-scope backends — sqlite locally, Postgres for shared, HTTP for read-only public.</li>
             <li>Cross-scope contradictions surface as read-time metadata, not stale tags.</li>
-            <li>Spec: <code>scoped-knowledge-graphs</code>.</li>
+            <li>Spec: <a href={link('/canonical/specs/scoped-knowledge-graphs/')}><code>scoped-knowledge-graphs</code></a>.</li>
           </ul>
         </div>
 
@@ -514,7 +515,8 @@ const link = (p: string) => `${base}${p}`;
           <ul>
             <li>Single binary, single subcommand. Existing <code>da</code> CLI machinery.</li>
             <li>Pub/sub bus so the dashboard updates in real time, not by polling.</li>
-            <li>Plan: <code>r3-background-worker-service</code>.</li>
+            {/* TODO: needs canonical route — plans are not yet a canonical bucket (only docs/lessons/specs/proposals). */}
+            <li>Plan: <code>.agents/workflow/plans/r3-background-worker-service/design.md</code>.</li>
           </ul>
         </div>
       </div>
@@ -529,7 +531,7 @@ const link = (p: string) => `${base}${p}`;
             patterns the active loop missed, propose new lessons, prune
             stale notes. Modeled on memory consolidation in the
             articles-evaluation research. Research lives in
-            <code>research-auto-dream-and-background-tasks</code>.
+            <a href={link('/canonical/proposals/research-auto-dream-and-background-tasks/')}><code>research-auto-dream-and-background-tasks</code></a>.
           </p>
         </div>
         <div class="pitch-card">
@@ -548,7 +550,8 @@ const link = (p: string) => `${base}${p}`;
           <p>
             Dashboard + review/labeling for every iteration the loop runs.
             Closes the §4.4 gap: replaces operator memory with instrumented
-            telemetry. R3 (above) is the hosting substrate.
+            telemetry. R3 (above) is the hosting substrate. Spec:
+            <a href={link('/canonical/specs/agent-run-scoring-observability-platform/')}><code>agent-run-scoring-observability-platform</code></a>.
           </p>
         </div>
         <div class="pitch-card">

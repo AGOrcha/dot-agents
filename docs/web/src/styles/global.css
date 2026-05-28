@@ -783,3 +783,158 @@ main blockquote {
 .pitch-mini-nav a { color: var(--text-dim); }
 .pitch-mini-nav a:hover { color: var(--accent); text-decoration: none; }
 .pitch-mini-nav a.current { color: var(--accent); font-weight: 600; }
+
+/* ===========================================================================
+ * Pitch present-mode slide deck (/pitch/)
+ *
+ * Audience-facing: one slide per pitch section, large type, few words.
+ * Presenter notes (.notes) are hidden until body.notes-on is set by the
+ * "N" key toggle or the ?notes URL param.
+ * ========================================================================= */
+
+.deck-body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.deck {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0 32px 64px;
+}
+
+.deck-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 0;
+  font-size: 0.82rem;
+}
+
+.deck-home { color: var(--text-dim); }
+.deck-home:hover { color: var(--accent); text-decoration: none; }
+.deck-hint { color: var(--text-dim); }
+.deck-hint kbd {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
+.slide {
+  min-height: calc(100vh - 110px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 48px 0;
+  border-bottom: 1px solid var(--border);
+}
+.slide:last-child { border-bottom: none; }
+
+.slide-num {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 14px;
+}
+
+.slide h1 {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.08;
+  margin: 8px 0 18px;
+}
+.slide h2 {
+  font-size: clamp(1.6rem, 3.6vw, 2.6rem);
+  line-height: 1.12;
+  margin: 0 0 26px;
+}
+
+.slide-title { text-align: left; }
+.slide-lede {
+  font-size: clamp(1.1rem, 2vw, 1.45rem);
+  color: var(--text-dim);
+  max-width: 36ch;
+}
+
+.slide-points {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.slide-points li {
+  position: relative;
+  padding-left: 28px;
+  font-size: clamp(1.05rem, 1.9vw, 1.5rem);
+  line-height: 1.35;
+}
+.slide-points li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0.62em;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.slide-link a {
+  color: var(--link);
+  font-size: clamp(0.95rem, 1.5vw, 1.1rem);
+  font-weight: 600;
+}
+
+.slide-stats {
+  display: flex;
+  gap: 36px;
+  flex-wrap: wrap;
+  margin: 0 0 26px;
+}
+.slide-stats .stat { display: flex; flex-direction: column; }
+.slide-stats .num {
+  font-size: clamp(2.4rem, 6vw, 4rem);
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+}
+.slide-stats .lbl {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+/* Presenter notes — hidden by default, revealed by body.notes-on. */
+.slide .notes { display: none; }
+body.notes-on .slide .notes {
+  display: block;
+  margin-top: 28px;
+  padding: 16px 18px;
+  border-left: 3px solid var(--accent-2);
+  background: var(--bg-elev);
+  border-radius: 0 8px 8px 0;
+  font-size: 0.95rem;
+  color: var(--text-dim);
+}
+body.notes-on .slide .notes strong { color: var(--text); }
+body.notes-on .slide .notes ul { margin: 8px 0 0; padding-left: 20px; }
+body.notes-on .slide .notes li { margin: 5px 0; line-height: 1.4; }
+
+@media (max-width: 600px) {
+  .deck { padding: 0 18px 48px; }
+  .slide { min-height: auto; padding: 36px 0; }
+  .slide-stats { gap: 24px; }
+}
