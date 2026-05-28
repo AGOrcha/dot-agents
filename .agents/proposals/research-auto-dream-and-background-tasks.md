@@ -163,9 +163,9 @@ specific phase they describe:
   *"Reweave (plan graph) and KG derivation propagation are one
   primitive"*).
 - **Promotion** = the user-facing CLI verb (`da kg promote`,
-  `da review approve`, hypothetical `da memory promote`) that lands a
-  graduation. Mirrors OpenClaw's `memory promote` so users coming
-  from that ecosystem keep their vocabulary.
+  `da review approve`) that lands a graduation. In dot-agents
+  vocabulary, **promotion always operates on `KGNote` rows**, not on
+  a separate memory file — see "Memory IS the KG" subsection below.
 
 So: `consolidation` (class) ⊃ `dream cycle` (task) ⊃ `reweave` (sub-phase) +
 `graduation` (write step) ⊆ `promotion` (CLI surface).
@@ -222,7 +222,65 @@ Other material adds from this second fold-in:
   scheduler task. Both are scope-aware; both are proposal-gated;
   triage is the smaller surface and surfaces operational lessons that
   shape the dream-cycle's design.
-- **Architect role + cell vs compound vs molecule**
+### Memory IS the KG (added 2026-05-28 third fold-in — maintainer correction)
+
+A material reframing applies to every "memory" reference in §1–§7 of the
+original draft. **dot-agents has no separate memory layer.** What the
+external corpus calls "memory" (OpenClaw `MEMORY.md`, Claude Code
+`/mnt/memory/`, Hermes Dreaming workspace store) is in dot-agents
+**precisely the `KGNote` corpus** behind the graph-backend adapter.
+
+Sources confirming this:
+
+- `.agents/workflow/specs/graph-backend-adapter-contract/design.md` —
+  the canonical contract for note + edge + symbol-link storage. There
+  is no second store for "memory." The `KGNoteStore` and
+  `NoteSymbolLinkStore` interfaces are the entire persistence surface
+  for the memory class of artifacts.
+- `.agents/workflow/specs/scoped-knowledge-graphs/design.md` §4.3
+  "review-nudge policy expression" — review-nudge IS the
+  consolidation-trigger mechanism; it is defined per-note-type on the
+  KG, not on any separate memory layer.
+- `lessons-and-memory.md` F.1 (already cited in §1.6 above) —
+  "**one schema, three projections**" — `KGNote` is the canonical
+  schema; lessons / Claude-Code auto-memory / Cursor rules / Codex
+  prompts are all *projections* that read and write the same
+  warm-store rows.
+
+**Consequences for this proposal (corrections applied throughout):**
+
+1. **No `da memory` namespace.** The proposed `da memory consolidate`
+   and `da memory promote` commands (§5, §6 OQ-E, §7 "future") were
+   wrong-shaped. The correct surface is `da kg consolidate` and
+   `da kg promote`, operating on `KGNote` rows. `da memory` would
+   imply a second store; none exists, none is planned.
+2. **No "memory storage" question in OQ-D.** The graph-backend adapter
+   already owns this surface. The watermark sidecars R3 specifies are
+   service-internal scheduler bookkeeping, not memory. The
+   `last_accessed_at` / `access_count` / `capture_lag_seconds` /
+   `version_state` GAP-ADOPT items are additive `KGNote` columns
+   landed via an adapter schema migration (per the adapter contract's
+   §10 migration machinery), not a new store.
+3. **OpenClaw `MEMORY.md` / Claude Code memory-file references in §1**
+   describe an external ecosystem's choice. The dot-agents analogue is
+   "a `KGNote` of NoteType=lesson|decision|rule|... reached
+   `version_state: approved` via the graduation step in §1.6." Reading
+   that note IS reading memory.
+4. **Scheduler tasks under `da service` write proposals against the
+   KG**, not against any memory file. `scoped-kg-dream-cycle` is named
+   exactly right for this reason — it operates on the scoped KG.
+5. **`da kg` becomes the canonical CLI surface for consolidation /
+   promotion / dream-cycle status**, alongside its existing query +
+   CRUD verbs. Reserve verbs: `consolidate`, `promote`, `dream-status`,
+   `review-due` (the latter already implied by scoped-KG §4.3).
+
+OpenClaw vocabulary (`memory promote`, `memory status`, `memory
+rem-harness`) maps cleanly onto `da kg promote`, `da kg dream-status`,
+`da kg dream-replay` if we want to preserve ergonomic transfer for
+users from that ecosystem — without committing to a second store the
+spec stack does not have.
+
+### Architect role + cell vs compound vs molecule
   (`skills-rules-graduation.md` F.1; `agent-execution.md` F.1;
   `workflow-spec-plan-inventory.md` second-pass #2). Specs are T3
   cells; plans+bundles are T2 compounds; the *runtime* is the
@@ -435,10 +493,12 @@ discipline:
   biological metaphor — `lesson-consolidator`, `kg-staleness-refresh`,
   `rescore-on-rubric-bump`, `iterlog-ingester`.
 - **User-facing batch commands (cron-callable):** noun + verb pair —
-  `da workflow sweep`, `da workflow drift`. If/when a memory-consolidation
-  CLI lands ahead of the scheduler task, name it `da memory consolidate`
-  (foreground analogue) and `da memory promote` (mirrors OpenClaw's CLI
-  surface, which users may already know).
+  `da workflow sweep`, `da workflow drift`. **Per "Memory IS the KG"
+  fold-in (§1.7 above):** consolidation/promotion CLI lands under
+  `da kg` (`da kg consolidate`, `da kg promote`, `da kg dream-status`),
+  NOT under a separate `da memory` namespace. OpenClaw's `memory
+  promote` ergonomics transfer cleanly without committing to a second
+  store.
 
 **Do not** name a top-level command `da dream` or `da auto-dream`. Reasons:
 
@@ -477,19 +537,22 @@ each scheduler task as `active` (auto-research) vs `latent` (auto-dream)
   `.agents/workflow/specs/scoped-kg-dream-cycle/design.md`. The 4-phase
   shape is well-understood (Thoth + Blockify + memify converge); gating
   via proposals is already in place.
-- **OQ-D — Does the v1 service need a memory-store at all,** or only the
-  watermark sidecars R3 already specifies? Auto-dream-class work (read iter
-  logs → emit proposals) does not need new storage; reuses the existing
-  iter-log + proposals dirs. **However** the GAP-ADOPT items
-  (`last_accessed_at`, `access_count`, `capture_lag_seconds`,
-  `version_state`) are additive `KGNote` fields — they extend the existing
-  warm store, not introduce a new one. Confirm before opening any v1.x
-  ticket; if accepted, these become part of the C.4 spec's "consumed
-  inputs" section.
-- **OQ-E — `da memory` namespace?** If the user wants the OpenClaw CLI
-  ergonomics (`memory promote`, `memory rem-harness`, `memory status`)
-  available foreground without spinning up a long-running service, that's
-  a separate command parent. Decide whether to reserve `da memory` now.
+- **OQ-D — ~~Does the v1 service need a memory-store at all~~?**
+  **RESOLVED 2026-05-28 (maintainer correction, see §1.7 "Memory IS the
+  KG"):** there is no separate memory store. The graph-backend adapter
+  contract is the persistence surface; `KGNote` rows ARE the memory.
+  The GAP-ADOPT items (`last_accessed_at`, `access_count`,
+  `capture_lag_seconds`, `version_state`) land as additive `KGNote`
+  columns via an adapter schema migration (per
+  graph-backend-adapter-contract §10), not as a new store. R3
+  watermark sidecars are service-internal scheduler bookkeeping,
+  unrelated to memory.
+- **OQ-E — ~~`da memory` namespace?~~** **RESOLVED 2026-05-28
+  (maintainer correction, see §1.7):** no separate namespace. The
+  consolidation/promotion CLI surface lands under `da kg`
+  (`da kg consolidate`, `da kg promote`, `da kg dream-status`,
+  `da kg review-due`). OpenClaw vocabulary maps onto these verbs
+  without implying a second store.
 - **OQ-F — Adopt the consolidation/dream-cycle/reweave/graduation/promotion
   taxonomy** as the canonical in-repo vocabulary? (Per §1.6 fold-in.) The
   five terms above currently appear as informal synonyms across
@@ -545,13 +608,13 @@ the workflow surface owned the lifetime of a daemon, which it doesn't.
 `da service` cleanly says: "this is the long-running process that the other
 workloads hang off of."
 
-### Where a future `da memory` (if approved per OQ-E) would slot in
+### ~~Where a future `da memory` would slot in~~ — NOT APPLICABLE
 
-`da memory` would join `da kg` and `da score` in the **runtime** category —
-all three are noun-scoped CRUD-and-query surfaces for a single data domain
-(graph, scores, memory). A `da memory consolidate` foreground command would
-mirror `da score run`; a `da memory promote` would mirror `da workflow advance`.
-Defer until the user confirms OQ-C + OQ-E.
+Removed 2026-05-28 (third fold-in, see §1.7 "Memory IS the KG"). There
+is no separate memory store in dot-agents; the graph-backend adapter
+already owns this surface. Consolidation/promotion verbs land under
+`da kg` (`da kg consolidate`, `da kg promote`, `da kg dream-status`,
+`da kg review-due`), not under a new `da memory` parent.
 
 ## Decision request
 
@@ -562,8 +625,12 @@ Defer until the user confirms OQ-C + OQ-E.
    inside `da service`**, not as a peer top-level command.
 3. **Resolve OQ-B** by unifying `workflow-orchestrator-daemon` references
    with `r3-background-worker-service`.
-4. **Defer** OQ-C/OQ-D/OQ-E (lesson-consolidator, memory storage, `da memory`
-   namespace) until R3 v1 ships, then re-open as v1.x proposals.
+4. **OQ-D / OQ-E resolved** by §1.7 "Memory IS the KG" fold-in — no
+   separate memory store, no `da memory` namespace; consolidation
+   verbs land under `da kg`.
+5. **Defer** OQ-C (scoped-kg-dream-cycle scheduler task + C.4 spec
+   slot) until R3 v1 ships, then re-open as v1.x proposal alongside
+   the C.4 spec under `.agents/workflow/specs/scoped-kg-dream-cycle/`.
 
 ## Sources
 
@@ -583,7 +650,10 @@ Defer until the user confirms OQ-C + OQ-E.
 - `~/Documents/tmp/lacp/config/lacp-brain-nightly.cron` (cron template)
 - `.agents/workflow/specs/r3-background-worker-service/design.md` (accepted R3 spec)
 - `.agents/workflow/specs/agent-run-scoring-observability-platform/design.md` (umbrella spec)
-- `.agents/workflow/specs/scoped-knowledge-graphs/design.md` (NoteType + 4 drivers)
+- `.agents/workflow/specs/scoped-knowledge-graphs/design.md` (NoteType + 4 drivers + review-nudge)
+- `.agents/workflow/specs/graph-backend-adapter-contract/design.md` (canonical persistence surface — KGNoteStore IS the memory layer; cited in §1.7)
+- `.agents/workflow/specs/graph-bridge-contract/design.md` (workflow_memory intent referenced via context lane)
+- `.agents/workflow/specs/kg-command-surface-readiness/design.md` (existing `da kg` verbs + breakdown)
 - `.agents/lessons/agents-lack-autonomous-timers/LESSON.md` (timer trap)
 - [AI Agent Memory in 2026: Auto Dream, Context Files, and What Actually Works (Quimby, dev.to)](https://dev.to/max_quimby/ai-agent-memory-in-2026-auto-dream-context-files-and-what-actually-works-39m8)
 - [OpenClaw Dreaming Guide 2026: Background Memory Consolidation for AI Agents (czmilo, dev.to)](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)
