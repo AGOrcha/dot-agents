@@ -228,15 +228,15 @@ Sequenced under a new sub-plan `lens-template-and-mode-skills` (cleanly separabl
 
 ## §6.5 Execution-model benchmark (empirical, pre-impl)
 
-OQ-2 is resolved in *policy* (multi-mode is allowed) but the *mechanism* — how a lens runs N modes and combines their output — is an empirical question that must be answered before the final execution model is locked. The maintainer's anecdote ("when informing for manual lens spawn it kinda synthesized before giving all back to me, and the combined results did catch some cross-cutting stuff a lens didn't by itself") names a specific winner hypothesis but is one data point. Benchmark the candidates before committing.
+OQ-2 is resolved in *policy* (multi-mode is allowed) but the *mechanism* — how a lens runs N modes and combines their output — is an empirical question that must be answered before the final execution model is locked. The maintainer's anecdote ("when informing for manual lens spawn it kinda synthesized before giving all back to me, and the combined results did catch some cross-cutting stuff a lens didn't by itself") describes **separate per-lens/per-mode spawns followed by a synthesis pass** — i.e. model 3 (parallel-invocation-then-synthesize) below: "manual lens spawn" = independent invocations, "synthesized before giving all back" = a synthesis step over those independent outputs. It is one data point, not proof. Benchmark the candidates before committing.
 
 ### Execution models to test
 
 1. **single-mode-per-invocation** — each mode = a separate agent run. N modes → N invocations; results **concatenated** with no synthesis pass. This is the cheapest to wire (it's just the v1 single-mode dispatch run N times) and the baseline against which synthesis is measured. Recall on cross-cutting findings is expected to be the floor — concatenation does no reconciliation.
 
-2. **single-agent-multi-mode-in-series** — one agent loads multiple mode skills, runs them in series within one context, and **synthesizes** the combined findings before returning (deduping, escalating findings that recur across modes, surfacing cross-cutting issues that only emerge when modes are read together). **The maintainer's anecdotal winner** — the "combined results caught cross-cutting stuff a single lens didn't." Hypothesis to beat.
+2. **single-agent-multi-mode-in-series** — one agent loads multiple mode skills, runs them in series within one context, and **synthesizes** the combined findings before returning (deduping, escalating findings that recur across modes, surfacing cross-cutting issues that only emerge when modes are read together). A candidate; tests whether shared-context-across-modes adds synthesis quality over model 3's post-hoc reconciliation. NOT what the anecdote describes (the anecdote was separate spawns, not one in-series agent).
 
-3. **parallel-invocation-then-synthesize** — N parallel mode runs (like model 1, wall-clock-cheap) followed by a dedicated **reconciliation/synthesis pass** (a second agent step that reads all N outputs and produces the combined verdict). Decouples per-mode review from synthesis; tests whether synthesis quality depends on shared-context (model 2) or can be recovered post-hoc from independent runs.
+3. **parallel-invocation-then-synthesize** — N parallel (independent) mode/lens runs (like model 1, wall-clock-cheap) followed by a dedicated **reconciliation/synthesis pass** (a second agent step that reads all N outputs and produces the combined verdict). **This is the maintainer's anecdotal winner** — "manual lens spawn" = independent invocations, "synthesized before giving all back to me" = the synthesis pass, and "the combined results caught cross-cutting stuff a single lens didn't" = the synthesis recovering cross-cutting findings from independent runs. **Hypothesis to beat.** The open question it tests: can a post-hoc synthesis pass over independent outputs match (or beat) the shared-context synthesis of model 2 — the anecdote says yes, the benchmark confirms.
 
 4. **single-agent-multi-mode-interleaved** — one agent runs the modes **interleaved**, letting each mode's findings inform the next during the pass (rather than series-then-synthesize). Tests whether cross-cutting catch improves when modes cross-pollinate *during* review vs. only at a terminal synthesis step.
 
@@ -251,7 +251,7 @@ OQ-2 is resolved in *policy* (multi-mode is allowed) but the *mechanism* — how
 
 ### Gate
 
-Empirical results **gate the final execution-model choice**. This proposal recommends **model 2 (single-agent-multi-mode-in-series-then-synthesize)** as the hypothesis to beat (per the anecdote), but the benchmark must run and report recall/cost/overhead before any model is locked into the dispatcher (§4.3) or the t8 batch-rework (§5). No execution model is hard-committed until the corpus measurement is in.
+Empirical results **gate the final execution-model choice**. This proposal recommends **model 3 (parallel-invocation-then-synthesize)** as the hypothesis to beat (it is what the maintainer's anecdote actually describes — independent lens/mode spawns + a synthesis pass), but the benchmark must run and report recall/cost/overhead before any model is locked into the dispatcher (§4.3) or the t8 batch-rework (§5). No execution model is hard-committed until the corpus measurement is in.
 
 ## §7. Open questions
 
