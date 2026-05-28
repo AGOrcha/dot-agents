@@ -104,10 +104,36 @@ cmd_sonar() {
   # diagnostics can read it. Export so the child docker inherits it.
   export SONAR_TOKEN
   export SONAR_HOST_URL="${SONAR_HOST_URL:-https://sonarcloud.io}"
+
+  # Worktree handling: in a git worktree, $repo_root/.git is a FILE containing
+  # `gitdir: <abs-path>/.git/worktrees/<name>` — a host-absolute path. When the
+  # scanner container only has $repo_root mounted, JGit (the scanner's SCM
+  # probe) follows that pointer, cannot resolve it inside the container, and
+  # blows up with `RepositoryNotFoundException: .git/worktrees/<name>`. Every
+  # worker session was working around this with SKIP=sonar-scanner.
+  #
+  # Fix: mount the parent .git/ at the same absolute path the gitfile
+  # references, so the pointer resolves identically inside the container. This
+  # preserves full SCM data (vs. -Dsonar.scm.disabled=true which would drop
+  # blame info and pollute SonarCloud history for the branch).
+  worktree_mount_args=()
+  git_dir="$(git rev-parse --git-dir 2>/dev/null || true)"
+  git_common_dir="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+  if [[ -n "$git_dir" && -n "$git_common_dir" && "$git_dir" != "$git_common_dir" ]]; then
+    # Resolve to absolute paths (git-common-dir is absolute from a worktree,
+    # but normalize defensively in case future git versions change that).
+    git_common_abs="$(cd "$git_common_dir" && pwd)"
+    say sonar "worktree detected — mounting $git_common_abs into container so JGit can resolve gitfile pointer"
+    # Mount the parent .git/ at its host-absolute path inside the container.
+    # :ro because the scanner only reads SCM data, never writes.
+    worktree_mount_args=(-v "$git_common_abs:$git_common_abs:ro")
+  fi
+
   docker run --rm \
     -e SONAR_TOKEN \
     -e SONAR_HOST_URL \
     -v "$repo_root:/usr/src" \
+    ${worktree_mount_args[@]+"${worktree_mount_args[@]}"} \
     sonarsource/sonar-scanner-cli:latest \
     -Dsonar.qualitygate.wait=true \
     || fail "sonar-scanner: SonarCloud quality gate failed (or analysis errored)"
