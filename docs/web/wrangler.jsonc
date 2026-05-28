@@ -25,9 +25,12 @@
   "env": {
     "production": {
       "name": "agorcha-dev-docs",
+      // A custom_domain on the apex routes ALL paths for that hostname to
+      // this Worker — `agorcha.dev/*` is both redundant and invalid as a
+      // custom_domain (Cloudflare rejects wildcards/paths in Custom Domains).
+      // One apex custom_domain entry serves the whole site.
       "routes": [
-        { "pattern": "agorcha.dev", "custom_domain": true },
-        { "pattern": "agorcha.dev/*", "custom_domain": true }
+        { "pattern": "agorcha.dev", "custom_domain": true }
       ],
       "vars": {
         "ENVIRONMENT": "production"
