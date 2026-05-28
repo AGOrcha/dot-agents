@@ -938,3 +938,121 @@ body.notes-on .slide .notes li { margin: 5px 0; line-height: 1.4; }
   .slide { min-height: auto; padding: 36px 0; }
   .slide-stats { gap: 24px; }
 }
+
+/* ===========================================================================
+ * Mobile navigation (hamburger + slide-in sidebar)
+ *
+ * Mobile-first defaults below: the sidebar is an off-canvas overlay and a
+ * hamburger button toggles it. The ≥768px media query at the bottom restores
+ * the desktop two-column grid and hides the hamburger / overlay scrim.
+ * ========================================================================= */
+
+.nav-toggle {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  appearance: none;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.nav-toggle:hover { border-color: var(--accent); }
+
+.nav-toggle .nav-toggle-icon,
+.nav-toggle .nav-toggle-icon::before,
+.nav-toggle .nav-toggle-icon::after {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.nav-toggle .nav-toggle-icon { position: relative; }
+.nav-toggle .nav-toggle-icon::before,
+.nav-toggle .nav-toggle-icon::after {
+  content: '';
+  position: absolute;
+  left: 0;
+}
+.nav-toggle .nav-toggle-icon::before { top: -6px; }
+.nav-toggle .nav-toggle-icon::after { top: 6px; }
+
+/* Open state: morph the icon into an X. */
+body.nav-open .nav-toggle .nav-toggle-icon { background: transparent; }
+body.nav-open .nav-toggle .nav-toggle-icon::before { transform: translateY(6px) rotate(45deg); }
+body.nav-open .nav-toggle .nav-toggle-icon::after { transform: translateY(-6px) rotate(-45deg); }
+
+/* Scrim behind the open sidebar; tap to close. */
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+}
+
+body.nav-open .nav-scrim {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Mobile-first: single column, sidebar off-canvas. */
+.layout {
+  grid-template-columns: 1fr;
+}
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 25;
+  width: min(var(--sidebar-w), 85vw);
+  height: 100vh;
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+}
+
+body.nav-open .sidebar { transform: translateX(0); }
+
+main {
+  /* Leave room for the fixed hamburger on small screens. */
+  padding-top: 64px;
+}
+
+/* ≥768px: restore desktop layout, hide mobile chrome. */
+@media (min-width: 768px) {
+  .nav-toggle,
+  .nav-scrim {
+    display: none;
+  }
+
+  .layout {
+    grid-template-columns: var(--sidebar-w) 1fr;
+  }
+
+  .sidebar {
+    position: sticky;
+    z-index: auto;
+    width: auto;
+    transform: none;
+    transition: none;
+  }
+
+  main {
+    padding-top: 36px;
+  }
+}
