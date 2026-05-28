@@ -14,9 +14,12 @@ export async function getStaticPaths() {
 const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
 
+// Glob-loader ids are lowercased (e.g. `demo_readme`), so strip the prefix
+// case-insensitively — otherwise the `DEMO ` fallback double-prefixes to
+// "DEMO demo readme".
 const titleFromId = entry.id
   .replace(/\.md$/, '')
-  .replace(/^DEMO_/, '')
+  .replace(/^demo_/i, '')
   .replace(/_/g, ' ');
 const title = entry.data.title ?? `DEMO ${titleFromId}`;
 ---
