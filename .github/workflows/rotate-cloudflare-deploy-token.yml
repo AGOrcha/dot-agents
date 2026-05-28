@@ -38,13 +38,12 @@ concurrency:
   group: cloudflare-token-rotation
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 jobs:
   rotate:
     name: Mint and swap CLOUDFLARE_API_TOKEN
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       rotated: ${{ steps.mint.outputs.rotated }}
       new_token_name: ${{ steps.mint.outputs.new_token_name }}
