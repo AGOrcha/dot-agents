@@ -1,0 +1,40 @@
+schema_version: 1
+plan_id: release-patch-train
+tasks:
+    - id: release-patch
+      title: 'Release: cadence patch bump + finalize CHANGELOG for bundled fixes'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Recurring patch-train release task (hybrid convention, PATCH path).
+        NOT tied to any single plan's completion — it is a standing cadence
+        vehicle. On each tick, bundle everything merged since the last
+        v-tag that is patch-eligible (fixes, refactors, internal work, test
+        hygiene, coverage lifts, Sonar cleanups, doc-only changes) into one
+        patch bump.
+        Recurring lifecycle: after the bump merges and auto-release fires,
+        reset this task back to pending for the next cadence tick rather
+        than marking it permanently completed. depends_on is intentionally
+        empty — it does not gate on any plan; it gathers whatever has
+        landed.
+        Scope guard: if any merged change since the last tag added a
+        user-visible surface (new da command/flag, .agentsrc.json schema
+        addition, generated-config shape, skill/agent/hook contract) it
+        belongs to a MINOR plan tail, not here; a removed/renamed/
+        incompatible surface belongs to a MAJOR plan tail. Only patch-
+        eligible work rides this train.
+        Target version = current VERSION with the patch digit incremented
+        at ready-time (do NOT hardcode). With VERSION at 0.3.2 today the
+        next patch tick would be 0.3.3, but after the imminent 0.4.0
+        feature release it becomes 0.4.1 -> 0.4.2 ...; always resolve from
+        the current VERSION when the task becomes ready.
+        Action: bump VERSION one patch digit and finalize the CHANGELOG
+        "## [<target>]" section from the Unreleased entries that are
+        patch-eligible. Merge to master fires auto-release.yml.
+      app_type: release

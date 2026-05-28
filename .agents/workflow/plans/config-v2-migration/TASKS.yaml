@@ -1,0 +1,538 @@
+schema_version: 1
+plan_id: config-v2-migration
+tasks:
+    - id: p0-schema-additive-extension
+      title: 'Phase 0: additive v2 schema extension (preserves v1 compat)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - internal/config/schema_roundtrip_test.go
+        - schemas/agentsrc.schema.json
+        - internal/config/testdata/
+      verification_required: true
+      notes: |-
+        Per spec config-distribution-model/design.md §3-§5 and §15.2 of org-config-resolution:
+
+        Add v2 fields ADDITIVELY; keep v1 loadable:
+        - Source: add id, cache_ttl, auth (opaque); expand type enum to local|git|http|oci
+        - AgentsRC: add Extends []LayerRef, Packages []PackageRef, RepoID string, Features map[string]string
+        - Bump schema version to support both 1 and 2 (do NOT remove version 1)
+        - Tier constraint validation at schema time: extends must reference git|http|local; packages must reference oci|http
+
+        Acceptance:
+        - internal/config/testdata/v1/.agentsrc.json (current shape) loads unchanged
+        - internal/config/testdata/v2/.agentsrc.json (extends+packages+repo_id) loads and validates
+        - agentsRCKnown updated with new keys (per [[schema-usage]] four-place rule)
+        - agentsrc.schema.json: add Source.id, Source.cache_ttl; add http+oci to type enum; add extends, packages, repo_id, features as new top-level optional props
+        - additionalProperties: false on nested objects to catch drift
+        - No new CLI behavior — schema/struct only
+
+        Verification: go test ./internal/config/... -run 'TestAgentsRC|TestSchema' must pass on both v1 and v2 fixtures.
+      app_type: go-cli
+    - id: p0b-repo-id-bootstrap
+      title: 'Phase 0b: repo_id field + da init auto-populate from git remote'
+      status: completed
+      depends_on:
+        - p0-schema-additive-extension
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - commands/init.go
+        - commands/init_test.go
+      verification_required: true
+      notes: |-
+        Per org-config-resolution §5 (repo identity model):
+
+        - AgentsRC.RepoID field landed in p0; here we wire bootstrap.
+        - da init derives RepoID from 'git -C <repo> remote get-url origin' via normalization:
+          - github.com/<org>/<repo>, gitlab.acme.internal/<group>/<repo>, etc.
+          - strip .git suffix; lowercase host
+        - If no git remote (or detached), RepoID stays empty and da doctor warns
+        - RepoID is the protected field per spec §3 (cannot be overridden by imported layers); enforced in p1 resolver, not here.
+
+        Acceptance:
+        - new repo via 'da init' in a git checkout writes repo_id automatically
+        - existing v1 .agentsrc.json without repo_id is preserved unchanged on subsequent saves (round-trip preserves omitempty)
+        - normalization unit test covers github/gitlab/ssh/https forms
+
+        No resolver behavior change yet.
+      app_type: go-cli
+    - id: p1-resolver-core-flat
+      title: 'Phase 1: effective-config snapshot API (flat scope first)'
+      status: in_progress
+      depends_on:
+        - p0-schema-additive-extension
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/snapshot.go
+        - internal/config/snapshot_test.go
+        - internal/config/resolver.go
+        - internal/config/resolver_test.go
+      verification_required: true
+      notes: |-
+        Per spec §6 (two-pass resolution) — but FLAT first (no network/git fetch). Foundation for p2+.
+
+        Introduce internal/config/snapshot.go with a Resolver interface that produces:
+          type Snapshot struct {
+            Effective AgentsRC
+            Provenance map[string]FieldProvenance   // field-path -> winning layer + full layer stack
+            Layers []ResolvedLayer
+          }
+          type FieldProvenance struct {
+            ActiveLayer string
+            Layers []LayerValue   // ordered by precedence
+          }
+
+        Initial Resolver impl: FlatResolver
+        - inputs: product defaults (built-in), user-local ~/.agents/agentsrc.json (if exists), repo-local .agentsrc.json
+        - pass-1 walks these three sources only (no extends fetch yet)
+        - emits provenance per the layer model in org-config-resolution §4
+
+        Why now: per codex examination §6 Phase-4 task config-snapshot-api, and per [[additive-state-fields]] (use []T{} not nil, pointer for distinguishable absence). This unblocks 'da config explain' (p4) and 'workflow app-types' refactor without waiting on tier-1 fetching.
+
+        Acceptance:
+        - snapshot for a field returns full layer stack with one ActiveLayer
+        - merge category rules per spec org-config-resolution §7.2 (scalar last-writer, set-union, map-merge, ordered-replace) covered by table-driven tests
+        - Protected fields (repo_id, project) honored: an attempt to override emits a non-fatal warning event in a returned []ProvenanceWarning
+
+        NO command surface change in this task — pure API + tests.
+      app_type: go-cli
+    - id: p1b-resolver-extends-tier1
+      title: 'Phase 1b: resolver tier-1 extends (git+http+local layer fetch)'
+      status: pending
+      depends_on:
+        - p1-resolver-core-flat
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/resolver.go
+        - internal/config/resolver_test.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_test.go
+        - internal/config/layer_schema.go
+      verification_required: true
+      notes: |-
+        Per spec §6 (pass 1) + §7 (lockfile config section) + §8 (tier-1 caching).
+
+        Extend FlatResolver into LayeredResolver:
+        - pass-1 walks: product defaults -> user-local -> extends[] (left-to-right) -> repo-local -> plan/task/runtime overrides
+        - fetcher: git (clone/fetch to ~/.cache/dot-agents/sources/<sha>/...), http (GET layer.json), local (direct path)
+        - ref-syntax parse: 'source-id:layer-path[@version]' per spec §5
+        - tier-constraint check at resolve time: extends entry referencing oci source -> fail with config.import.failed reason=schema
+        - layer schema validation against AgentsRC layer schema (subset of full schema; layers cannot set repo_id/project)
+        - optional entries supported per spec §11 ({\"ref\":\"...\",\"optional\":true}) — skipped with warning on fetch failure
+
+        Lockfile config section (also in this task — keep cohesive):
+        - write .agentsrc.lock with resolved layers: {resolved_sha, fetched_at, ttl_expires_at} per spec §7
+        - caching: content-addressed by SHA under ~/.agents/cache/config/<source-id>/<layer-path>/<sha>/layer.json
+        - TTL-based re-check (not eviction) per spec §8
+        - offline behavior: use last resolved SHA from lockfile; emit cache_hit_offline warning
+
+        Acceptance:
+        - test fixture: local source with two layer files (org/base.json + team/frontend.json) resolves end-to-end
+        - a third git source fetch is mocked (interface seam) — no live network in tests; cover via fakeFetcher
+        - lockfile round-trip preserves both sections (config + empty packages stub)
+        - protected-field violation on imported layer is dropped + warning surfaced
+        - 'config explain' (still not wired) can be sanity-called from a test as the snapshot API consumer
+
+        Per [[validate-bundle-against-head]]: confirm internal/config/snapshot.go (from p1) exists at HEAD before authoring tests that import it.
+      app_type: go-cli
+    - id: p2-lockfile-doctor-status
+      title: 'Phase 2: lockfile drift surfaces (da doctor + da status)'
+      status: pending
+      depends_on:
+        - p1b-resolver-extends-tier1
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/doctor.go
+        - commands/doctor_test.go
+        - commands/status.go
+        - commands/status_test.go
+      verification_required: true
+      notes: |-
+        Per spec §13.4 (health surfaces).
+
+        da doctor additions:
+        - WARN if any layer's TTL has expired and 'da config sync' has not been run since
+        - ERROR if .agentsrc.json declares a layer or package not present in .agentsrc.lock (drift detector)
+        - WARN on any non-fatal config.field.protection_violation events from the last resolution
+
+        da status additions:
+        - show each declared layer with resolved SHA and TTL expiry
+        - show each declared package with resolved tag + digest + cache presence
+
+        NO new resolver behavior; this consumes the snapshot+lock from p1b.
+
+        Acceptance:
+        - doctor fixture with stale lock fails with actionable error pointing at 'da config sync'
+        - status output deterministic + golden-file test
+        - existing v1 (no lock file) is a no-op (legacy path unchanged)
+      app_type: go-cli
+    - id: p3-audit-events
+      title: 'Phase 3: audit event taxonomy (config.* events)'
+      status: pending
+      depends_on:
+        - p1b-resolver-extends-tier1
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/audit.go
+        - internal/config/audit_test.go
+        - internal/config/resolver.go
+      verification_required: true
+      notes: |-
+        Per spec §9 (audit event taxonomy).
+
+        Emit structured audit events from the resolver:
+        - config.source.fetch (source_id; resolved_sha; cache_hit bool)
+        - config.layer.resolve (source_id:layer_path; field_count; sha)
+        - config.field.overridden (field_path; from_layer; to_layer; value_summary)
+        - config.field.protection_violation (field_path; attempted_by_layer; outcome=dropped)
+        - config.import.failed (source_id:layer_path; reason ∈ {transport,auth,content,schema,not_found})
+        - config.effective.produced (repo_id; layer_count; package_count; trace_id)
+
+        Base schema per external-agent-sources §8: {timestamp, actor, principal, action, target, outcome, trace_id}.
+
+        Sink: log line under .agents/active/audit/config-YYYY-MM-DD.jsonl (rotation per day; not in this task). Pluggable Sink interface so r2-observability-dashboard can consume later.
+
+        Acceptance:
+        - table-driven test asserting one fetch+resolve+effective.produced per resolver call
+        - protection-violation emitted exactly once per dropped field
+        - trace_id correlates events within a single resolution
+
+        No CLI change. Wires from p1b resolver.
+      app_type: go-cli
+    - id: p4-config-explain-cli
+      title: 'Phase 4: da config explain command + da config subtree'
+      status: in_progress
+      depends_on:
+        - p1-resolver-core-flat
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/root.go
+        - commands/config/cmd.go
+        - commands/config/explain.go
+        - commands/config/explain_test.go
+      verification_required: true
+      notes: |-
+        Per spec §10 + proposal config-explain-live-surface.md.
+
+        Net-new 'da config' subtree (no existing surface to migrate per codex examination §2.2).
+        - commands/root.go: register NewConfigCmd()
+        - commands/config/cmd.go: cobra parent
+        - commands/config/explain.go:
+          - 'da config explain [field-path]' default human-readable per spec §10 example
+          - --all: full effective config annotated by winning layer
+          - --flags: feature flag resolution view
+          - --value-only: just the value
+          - --origin-only: just the winning layer id
+          - --json: machine-readable {field, value, active_layer, layers[]}
+          - field-path syntax: dot-separated (e.g. app_type_verifier_map.go-cli)
+
+        Exit codes per spec §10: 0 success, 1 layer fetch failure, 2 schema validation, 3 auth failure.
+
+        Consumes snapshot API from p1; works on flat scope without needing p1b (degrades gracefully when no extends).
+
+        Per spec §10 'Resolved execution manifest visibility' addendum: explain output for app_type (json mode) MUST include {selected_profile_ref, resolved_version, content_digest, composition_expansion, verifier_chain[], review_kind, graph_adapter, stage_agents, reviewer_lenses, overlays, execution_mode, return_gate_policy} when those fields exist in the effective config. If not present, omit gracefully — do not invent.
+
+        Acceptance:
+        - explain output matches spec §10 example for both single-field and --all
+        - --json schema documented inline (godoc on the output struct)
+        - consumed by tests via 'go test ./commands/config/...'
+        - one bash smoke test under tests/test-config-explain.sh covering --value-only piped to a follow-on command
+      app_type: go-cli
+    - id: p4b-app-types-snapshot-refactor
+      title: 'Phase 4b: refactor workflow app-types to consume snapshot API'
+      status: pending
+      depends_on:
+        - p4-config-explain-cli
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/app_types.go
+        - commands/workflow/app_types_test.go
+      verification_required: true
+      notes: |-
+        Per codex examination §2.2 task #3 and proposal config-explain-live-surface.md 'Phase 3'.
+
+        'workflow app-types' currently reads .agentsrc.json directly. Refactor to consume the snapshot API from p1 so layered (extended) repos report layered app types.
+
+        User-facing contract MUST be preserved: same flag surface, same output unless --verbose, same exit codes. This is a load-bearing pre-requisite for future scope-routed da review and staged-dispatch consumers reading the same snapshot.
+
+        Acceptance:
+        - snapshot-tests confirm identical output for a flat-only fixture (no extends)
+        - new fixture with synthetic extends layer adds an inherited app_type and 'app-types --verbose' shows winning layer
+        - existing app_types_test.go cases remain green
+
+        Cross-link: spec config-distribution-model §10 'one effective-config snapshot API' requirement.
+      app_type: go-cli
+    - id: p4c-config-sync-lint
+      title: 'Phase 4c: da config sync + da config lint + da config verify commands'
+      status: pending
+      depends_on:
+        - p4-config-explain-cli
+        - p1b-resolver-extends-tier1
+        - p2-lockfile-doctor-status
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/sync.go
+        - commands/config/lint.go
+        - commands/config/verify.go
+        - commands/config/sync_test.go
+        - commands/config/lint_test.go
+        - commands/config/verify_test.go
+      verification_required: true
+      notes: |-
+        Per spec §13.1 (new config subtree commands).
+
+        - 'da config sync' — re-fetch all config layers (force), re-run pass 1, update lock config section. --layer source-id:path scopes to one layer.
+        - 'da config lint' — validate all declared layer files against the AgentsRC layer schema (spec §14 Q1).
+        - 'da config verify' — run repo setup contract checks (hooks present, binary readiness, doctor); standalone (no fetch).
+
+        Per spec §13.3: do NOT alias da refresh to config sync (per codex examination open question 4 + spec recommendation kept). Keep both surfaces distinct; da refresh is the existing projection-refresh path.
+
+        Acceptance:
+        - 'config sync' updates lockfile timestamps + re-resolves SHAs
+        - 'config lint' fails with structured error on a corrupt layer fixture
+        - 'config verify' delegates to existing doctor primitives without re-fetching
+      app_type: go-cli
+    - id: p5-source-types-http-oci
+      title: 'Phase 5: source-type expansion (http+oci) + signing posture stub'
+      status: pending
+      depends_on:
+        - p1b-resolver-extends-tier1
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher_http.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher_test.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: |-
+        Per spec §4 (source types) — http fetch + oci wire-protocol stub (read-only; write/publish in p6).
+
+        http fetcher:
+        - GET layer.json from URL; content-hash for cache key
+        - auth provider opaque (delegated to external-agent-sources spec); credential-helper interface
+
+        oci fetcher (read-only):
+        - OCI Distribution v2 manifest GET + blob GET per external-agent-sources §6
+        - digest-pinnable; immutable cache under ~/.agents/cache/packages/<digest>/
+        - packages tier ONLY (validation rejects oci in extends)
+
+        Signing posture (per spec §14 Q3 + human addendum: 'let's bring in signing earlier'):
+        - introduce a Verifier interface for layer/package signing; default impl is permissive (warn-only) in this phase
+        - record signature_status in audit events (config.layer.resolve, registry.blob.fetch)
+        - actual key management deferred to external-agent-sources spec
+
+        Acceptance:
+        - fakeHTTPFetcher + fakeOCIFetcher test seams (no live network)
+        - digest-pin fixture: re-fetch with same digest produces zero-byte network call
+        - oci-in-extends rejected at schema validation BEFORE network call
+      app_type: go-cli
+    - id: p6-packages-pass2-cli
+      title: 'Phase 6: Tier 2 packages resolution (pass 2) + da packages subtree'
+      status: pending
+      depends_on:
+        - p5-source-types-http-oci
+        - p4c-config-sync-lint
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/packages.go
+        - internal/config/packages_test.go
+        - commands/packages/cmd.go
+        - commands/packages/install.go
+        - commands/packages/update.go
+        - commands/packages/list.go
+        - commands/packages/publish.go
+        - commands/packages/install_test.go
+        - commands/root.go
+      verification_required: true
+      notes: |-
+        Per spec §6 (pass 2) + §7 (lockfile packages section) + §13.2 (da packages subtree).
+
+        Resolver pass-2:
+        - read effective config 'packages' field from p1 snapshot
+        - per ref: resolve version spec ({semver|tag|pinned:digest}) against OCI registry
+        - content-addressed cache lookup by digest; on miss fetch blob
+        - write resolved digest to .agentsrc.lock packages section
+        - skipped if no packages declared
+
+        CLI:
+        - da packages install — install all; write lock packages section
+        - da packages update [ref] — re-resolve semver ranges; write new digests
+        - da packages list — show installed (resolved tag + digest + cache presence)
+        - da packages publish <type> <path> — publish to declared OCI source (replaces conceptual 'da publish agent|verifier|skill|bundle')
+
+        Per spec §11: error contract identifies which entry failed and category {transport|auth|content|schema|not_found}.
+
+        Acceptance:
+        - end-to-end test: install a fake-OCI package (digest-pinned) -> verify cache layout -> 'packages list' shows it -> 'packages update' is a no-op for pinned refs
+        - semver-range package re-resolves and writes new lockfile digest on update
+        - publish dry-run constructs the OCI manifest without uploading (live publish gated behind --confirm)
+      app_type: go-cli
+    - id: p7-v1-deprecation-warnings
+      title: 'Phase 7: v1 surface deprecation warnings (post-soak)'
+      status: pending
+      depends_on:
+        - p6-packages-pass2-cli
+        - p4b-app-types-snapshot-refactor
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/migrate.go
+        - internal/config/migrate_test.go
+        - commands/init.go
+        - commands/doctor.go
+      verification_required: true
+      notes: |-
+        Per spec §15.3 (deprecation cadence). NOT for the same release as p0; soak v2 for at least one minor cycle first.
+
+        Behaviors:
+        - LoadAgentsRC: if version=1 detected, emit one-time deprecation notice (to stderr) recommending 'da config migrate' to v2
+        - new 'da config migrate' subcommand: converts v1 to v2 in-place
+          - 'sources: [{type: local}, {type: git, url, ref}]' -> rewrites to v2 source-id'd form
+          - adds repo_id auto-derived from git remote
+          - adds extends: [] (empty, opt-in)
+          - bumps version: 1 -> 2
+          - idempotent; --dry-run prints diff
+        - 'da doctor' WARN if v1 .agentsrc.json detected
+        - 'da init' on a fresh repo writes v2 by default
+
+        DO NOT remove v1 loading code in this phase. Final removal is a separate plan after a documented soak window.
+
+        Acceptance:
+        - migrate on a real-shape v1 fixture (the project's own .agentsrc.json shape pre-migration) produces a valid v2 file that re-loads identically (semantic equivalence)
+        - migrate --dry-run prints unified diff
+        - existing v1 file continues to load (with warning)
+
+        Open question for the user: how long is the soak window? Recommended: 2 minor releases. Document in §5 of dependency-map proposal.
+      app_type: go-cli
+    - id: p1c-verifier-profile-source-aware
+      title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
+      status: pending
+      depends_on:
+        - p1b-resolver-extends-tier1
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/workflow/bundle.go
+        - commands/workflow/bundle_test.go
+      verification_required: true
+      notes: |-
+        Q1 ruling: Option B — force typed objects everywhere. p1c is CRITICAL-PATH (not optional). Scope expands to:
+        - Migrate ALL existing verifier_profiles entries across dot-agents .agentsrc.json + the embedded starter
+        - Bulk migration of prompt_files [string] → [{source, path, version}] for unit/api/batch/streaming/ui-e2e
+        - Update unit.project.md / api.project.md / etc. references in resolver to use typed-object lookup
+        - Add migration test fixtures (legacy flat → expected typed)
+        - Cross-link in lesson `[[verifier-owns-ci-watch-shift-left]]`
+      app_type: go-cli
+    - id: p7b-v1-auto-migrator
+      title: 'Phase 7b: v1→v2 auto-migrator with 1-day sunset'
+      status: pending
+      depends_on:
+        - p7-v1-deprecation-warnings
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/migrate.go
+        - commands/config/migrate_test.go
+        - internal/config/migrate.go
+        - internal/config/migrate_test.go
+        - internal/config/testdata/migrate/
+      verification_required: true
+      notes: |-
+        Q3 ruling: 1-day v1 sunset paired with auto-migrator. After p7 ships deprecation warnings, this phase ships:
+
+        1. Auto-detection: on `.agentsrc.json` load, if v1 schema detected (no extends/packages/repo_id, flat prompt_files), trigger migration
+        2. Migration logic: produce v2-schema-shaped .agentsrc.json + .agentsrc.json.v1.bak sidecar
+        3. Migration runs on appropriate triggers: `da install`, `da config sync`, first `da workflow *` call after deprecation date
+        4. User-visible: clear log line "migrating v1 .agentsrc.json to v2 (backup at .v1.bak)"
+        5. Idempotent: running on already-v2 file is a no-op
+
+        After this phase ships + the 1-day sunset window passes, v1 loading is REMOVED entirely (becomes a separate small PR after p7b proves the migrator covers).
+      app_type: go-cli
+    - id: p4d-da-install-repurpose
+      title: 'Phase 4d: repurpose da install per spec §13.3'
+      status: pending
+      depends_on:
+        - p4-config-explain-cli
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/install.go
+        - commands/install_test.go
+        - commands/lifecycle/install.go
+      verification_required: true
+      notes: |-
+        Q4 ruling: repurpose `da install` to run combined sequence per spec §13.3:
+          da install ≡ da config sync && da packages install (+ existing install flow)
+
+        User-contract change. Document migration in CHANGELOG. Tests must cover:
+        - Backward compat: existing install args still work
+        - New combined flow: config sync runs first, then packages install, then traditional install
+        - Failure modes: config sync failure → don't proceed to packages install (atomic semantics)
+      app_type: go-cli
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the config-v2 minor'
+      status: pending
+      depends_on:
+        - p0-schema-additive-extension
+        - p0b-repo-id-bootstrap
+        - p1-resolver-core-flat
+        - p1b-resolver-extends-tier1
+        - p2-lockfile-doctor-status
+        - p3-audit-events
+        - p4-config-explain-cli
+        - p4b-app-types-snapshot-refactor
+        - p4c-config-sync-lint
+        - p5-source-types-http-oci
+        - p6-packages-pass2-cli
+        - p7-v1-deprecation-warnings
+        - p1c-verifier-profile-source-aware
+        - p7b-v1-auto-migrator
+        - p4d-da-install-repurpose
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). Added per
+        maintainer ruling 2026-05-28 (plan now committed on this branch).
+        This plan delivers a new user-visible capability — the v2
+        config-distribution model: the `da config explain` command plus the
+        two-pass effective-config resolver, lockfile, layered sources/extends,
+        and packages tier. That is additive, no public surface removed, so a
+        MINOR.
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). Maintainer ruling 2026-05-28 revised the
+        release lineup: the accumulated infra/docs/distribution work (#145)
+        ships as PATCH 0.3.3, NOT 0.4.0 — 0.4.0 is reserved for the next
+        genuine feature land. config-v2 (da config explain + resolver) IS that
+        feature, so this tail is expected to claim 0.4.0 (next minor after
+        0.3.3). config-explain/#162 holds for THIS tail -> 0.4.0, NOT 0.3.3.
+        Resolve the exact number from VERSION when this task becomes ready
+        (expected 0.4.0); serialize at the VERSION bump if another feature
+        plan's minor tail ships first (then this becomes 0.5.0).
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, documenting the v2 config model
+        and `da config explain`. Merge to master fires auto-release.yml.
+        Caution: this plan has in-flight tasks (p1 + p4 in_progress) — the
+        tail only becomes eligible once every dependency is completed.
+      app_type: release

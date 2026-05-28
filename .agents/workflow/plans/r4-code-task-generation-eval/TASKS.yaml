@@ -365,3 +365,46 @@ tasks:
         feed R1. Cross-link from OUTCOME_SCORING_RUBRIC.md noting
         "eval-source" iterations are scored under the same rubric.
       app_type: go-cli
+
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the eval-harness minor'
+      status: pending
+      depends_on:
+        - design-doc
+        - taskspec-and-registry
+        - kg-query-layer
+        - difficulty-derivation
+        - generator-go
+        - generator-python
+        - generator-typescript
+        - sandbox-worktree
+        - verifier-go
+        - verifier-python
+        - verifier-typescript
+        - agent-runner
+        - scoring-bridge
+        - harness-driver
+        - persistence
+        - cli-eval
+        - r2-visibility-contract
+        - docs
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers a new user-visible surface — the `da eval` command and the
+        code-task generation/evaluation harness across Go/Python/TypeScript,
+        feeding R1-scored outcomes into R2. New command + new capability,
+        MINOR not MAJOR (no public surface removed or incompatibly changed).
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
+        minor is 0.4.0, but resolve from VERSION when this task becomes
+        ready; serialize at the VERSION bump if another minor ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the eval-harness entries
+        out of Unreleased. Merge to master fires auto-release.yml.
+      app_type: release

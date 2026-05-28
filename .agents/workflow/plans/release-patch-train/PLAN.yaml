@@ -1,0 +1,11 @@
+schema_version: 1
+id: release-patch-train
+title: Release patch train (cadence)
+status: active
+summary: 'Standing, recurring release vehicle for the PATCH digit. Bundles merged fixes, refactors, internal/test/docs/coverage/lint work since the last tag into a patch bump on a cadence. Not tied to any one plan completion; the internal-only plans (root-command-decomposition, seam-interface-di-migration, production-code-helper-extraction, coverage-*, sonarqube-pr10, cross-platform-test-skips-audit, refresh-skill-relink, shared-target-projection-wiring, workflow-client-commands, workflow-commit-command, pr10-branch-split) feed this train rather than owning their own version.'
+created_at: "2026-05-28T00:00:00Z"
+updated_at: "2026-05-28T00:00:00Z"
+owner: dot-agents
+success_criteria: 'On each cadence tick with merged patch-eligible work since the last tag, VERSION is bumped one patch digit and the CHANGELOG section is finalized, firing auto-release.yml. The task is recurring — reset to pending after each release rather than completed-and-archived.'
+verification_strategy: 'git log since last v-tag shows only patch-eligible changes (fixes/refactors/internal/test/docs/coverage/lint, no new user-visible surface and no breaking change); VERSION bumped exactly one patch digit from the previous tag; CHANGELOG section matches the merged set; auto-release.yml tags + publishes on merge to master.'
+current_focus_task: release-patch
