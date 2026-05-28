@@ -5,7 +5,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -131,6 +133,158 @@ func TestCopyMissingStarterAssetsSetsExecBitOnEmbeddedShScripts(t *testing.T) {
 	}
 	if fi.Mode().Perm()&0111 == 0 {
 		t.Errorf("expected exec bit on embedded propose.sh; got mode %v", fi.Mode())
+	}
+}
+
+// starterVerifierSurface is the canonical set of verifier_profile IDs the
+// starter's isp prompt files are allowed to reference. It mirrors the
+// "Verifier prompt surfaces" enumeration in
+// starter/skills/global/isp/instructions/staged-runtime.md and the registry
+// shape consumed by `commands/workflow/delegation.go`'s
+// `validateVerifierProfileRefs`. When a new verifier surface is added to a
+// starter prompt, it must also be added here; conversely, removing one here
+// without dropping its prompt references will surface the stranded ref.
+//
+// This is the test-side analog of the `verifier_profiles` map an installed
+// project carries in its `.agentsrc.json`. The starter itself does not
+// (today) ship a `.agentsrc.json` template, so the canonical surface for the
+// scaffold-level cross-reference lives here — see
+// [[verifier-owns-ci-watch-shift-left]] for the broader contract.
+var starterVerifierSurface = map[string]bool{
+	"unit":      true,
+	"api":       true,
+	"ui-e2e":    true,
+	"batch":     true,
+	"streaming": true,
+}
+
+// verifierSurfaceListPattern matches the inline backtick-quoted enumeration
+// of verifier IDs in starter prompts, e.g. the
+// "Verifier prompt surfaces: `unit`, `api`, `ui-e2e`, ..." line in
+// staged-runtime.md. The regex captures one ID per match; the test iterates
+// all matches across all walked files.
+var verifierSurfaceListPattern = regexp.MustCompile("Verifier prompt surfaces:\\s*((?:`[a-z0-9-]+`(?:,\\s*)?)+)")
+
+// verifierIDInListPattern extracts each backticked ID from a captured list
+// (the inner group of verifierSurfaceListPattern).
+var verifierIDInListPattern = regexp.MustCompile("`([a-z0-9-]+)`")
+
+// verifiersPromptPathPattern matches references to the
+// `.agents/prompts/verifiers/<id>.project.md` overlay path that appears in
+// staged-runtime.md and in any future prompt that names a concrete verifier
+// surface. The `<type>` placeholder used in current prose is filtered out by
+// the lookup below; only resolved IDs are checked.
+var verifiersPromptPathPattern = regexp.MustCompile(`prompts/verifiers/([a-z0-9-]+)\.project\.md`)
+
+// verifierRef pairs an extracted verifier_profile ID with the relative
+// starter prompt file it was sourced from. Used by the cross-reference test
+// helpers to report stranded refs with file context.
+type verifierRef struct {
+	id   string
+	file string
+}
+
+// extractVerifierRefsFromText pulls every verifier_profile ID reference out
+// of a single prompt file's text. Two surfaces are scanned: the inline
+// backtick-quoted enumeration (verifierSurfaceListPattern) and the resolved
+// `.agents/prompts/verifiers/<id>.project.md` path (verifiersPromptPathPattern).
+func extractVerifierRefsFromText(text, rel string) []verifierRef {
+	var refs []verifierRef
+	// Capture IDs from the "Verifier prompt surfaces: `a`, `b`, ..." line.
+	for _, listMatch := range verifierSurfaceListPattern.FindAllStringSubmatch(text, -1) {
+		for _, idMatch := range verifierIDInListPattern.FindAllStringSubmatch(listMatch[1], -1) {
+			refs = append(refs, verifierRef{id: idMatch[1], file: rel})
+		}
+	}
+	// Capture IDs from any resolved `.agents/prompts/verifiers/<id>.project.md`
+	// path reference. The literal `<type>` placeholder used in prose is
+	// not a regex match (the character class excludes `<` and `>`) so it
+	// is silently filtered out — only resolved IDs land in refs.
+	for _, pathMatch := range verifiersPromptPathPattern.FindAllStringSubmatch(text, -1) {
+		refs = append(refs, verifierRef{id: pathMatch[1], file: rel})
+	}
+	return refs
+}
+
+// collectVerifierRefs walks the starter skills tree under root and returns
+// every verifier_profile reference extracted from markdown prompt files.
+// Non-markdown files (templates, scripts) are skipped because they are not
+// part of the prompt-reference surface.
+func collectVerifierRefs(root, tmp string) ([]verifierRef, error) {
+	var refs []verifierRef
+	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		rel, _ := filepath.Rel(tmp, path)
+		refs = append(refs, extractVerifierRefsFromText(string(content), rel)...)
+		return nil
+	})
+	return refs, walkErr
+}
+
+// findStrandedVerifierRefs returns the deduplicated, sorted list of
+// "<id> @ <file>" entries whose ID is not present in the canonical
+// starterVerifierSurface map.
+func findStrandedVerifierRefs(refs []verifierRef) []string {
+	var stranded []string
+	seen := map[string]bool{}
+	for _, r := range refs {
+		if starterVerifierSurface[r.id] {
+			continue
+		}
+		key := r.id + " @ " + r.file
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		stranded = append(stranded, key)
+	}
+	sort.Strings(stranded)
+	return stranded
+}
+
+// TestStarterVerifierSurfaceCrossReference walks every starter prompt file
+// shipped via CopyMissingStarterAssets and asserts that every verifier_profile
+// ID referenced by name resolves to an entry in `starterVerifierSurface` —
+// the test-side mirror of the `verifier_profiles` registry an installed
+// project carries in `.agentsrc.json`.
+//
+// This is the verifier-surface companion to
+// TestCopyStarterAssetsIncludesReviewerLensAgents: that test prevents
+// stranded reviewer-lens AGENT.md refs; this test prevents stranded
+// verifier_profile refs. Together they enforce that scaffold-shipped prompts
+// never point at non-existent dispatched roles.
+//
+// Per [[verifier-owns-ci-watch-shift-left]]: the verifier_profiles registry
+// is the canonical source of "what verifier runs when"; prompts reference by
+// ID; this test enforces that invariant at scaffold-build time.
+func TestStarterVerifierSurfaceCrossReference(t *testing.T) {
+	tmp := t.TempDir()
+	if err := CopyMissingStarterAssets(tmp); err != nil {
+		t.Fatalf("CopyMissingStarterAssets: %v", err)
+	}
+
+	refs, err := collectVerifierRefs(filepath.Join(tmp, "skills", "global"), tmp)
+	if err != nil {
+		t.Fatalf("walk starter skills: %v", err)
+	}
+	if len(refs) == 0 {
+		// Sentinel: if the regexes stop matching the prompts entirely the
+		// test silently becomes a no-op. Fail loudly so a future prompt
+		// rewrite is forced to update the extraction patterns.
+		t.Fatal("no verifier_profile references extracted from starter prompts; extraction regexes may be stale")
+	}
+	if stranded := findStrandedVerifierRefs(refs); len(stranded) > 0 {
+		t.Fatalf("starter prompt files reference verifier_profile IDs not present in starterVerifierSurface (potential stranded refs after scaffold drift); either add the ID to starterVerifierSurface and the project's verifier_profiles registry, or drop the prompt reference:\n  - %s",
+			strings.Join(stranded, "\n  - "))
 	}
 }
 
