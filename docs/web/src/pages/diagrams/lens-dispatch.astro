@@ -1,0 +1,22 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<BaseLayout title="Lens dispatch (stub)">
+  <h1>Lens reviewer dispatch flow</h1>
+  <div class="callout-warn">
+    <strong>Stubbed for follow-up.</strong> This page will render the
+    <code>lens-agents</code> dispatch flow (architect / adversarial / behavior /
+    delivery lenses → per-lens prompt overlay → reviewer agent → consolidated
+    review).
+  </div>
+  <p>
+    Tracked in the <code>pr-a-lens-agents</code> worktree and the
+    <code>thermo-nuclear-lens-evaluation</code> task. Once that work lands,
+    a structured graph view will replace this stub.
+  </p>
+  <p>
+    Until then, the source-of-truth for the lens dispatch contract is in
+    <code>commands/review.go</code> and the per-lens agent overlays under
+    <code>~/.agents/agents/</code>.
+  </p>
+</BaseLayout>

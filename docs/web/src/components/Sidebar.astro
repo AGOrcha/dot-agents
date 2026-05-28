@@ -1,0 +1,71 @@
+---
+interface Props {
+  currentPath: string;
+}
+const { currentPath } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const link = (p: string) => `${base}${p}`;
+const isActive = (p: string) => {
+  const full = link(p).replace(/\/$/, '');
+  const cur = currentPath.replace(/\/$/, '');
+  return cur === full || cur === full + '/index';
+};
+
+const sections = [
+  {
+    heading: 'Overview',
+    links: [
+      { href: '/', label: 'Home' },
+    ],
+  },
+  {
+    heading: 'Demo material',
+    links: [
+      { href: '/demos/demo_index/', label: 'Index' },
+      { href: '/demos/demo_readme/', label: 'One-minute overview' },
+      { href: '/demos/demo_diagram/', label: 'Architecture diagrams' },
+      { href: '/demos/demo_workflow_walkthrough/', label: 'Workflow walkthrough' },
+      { href: '/demos/demo_lessons_narrative/', label: 'Lessons narrative' },
+    ],
+  },
+  {
+    heading: 'Resource graphs',
+    links: [
+      { href: '/graphs/da-resources/', label: 'da resources' },
+      { href: '/graphs/workflow-resources/', label: 'Workflow resources' },
+      { href: '/graphs/workspace-state/', label: 'Workspace state' },
+    ],
+  },
+  {
+    heading: 'Diagrams',
+    links: [
+      { href: '/diagrams/tier-model/', label: 'Tier model' },
+      { href: '/diagrams/lens-dispatch/', label: 'Lens dispatch (stub)' },
+      { href: '/diagrams/verifier-registry/', label: 'Verifier registry (stub)' },
+    ],
+  },
+];
+---
+<aside class="sidebar">
+  <h1>dot-agents</h1>
+  <div class="tagline">Interactive docs</div>
+  <nav>
+    {sections.map((section) => (
+      <div>
+        <h2>{section.heading}</h2>
+        <ul>
+          {section.links.map((l) => (
+            <li>
+              <a
+                href={link(l.href)}
+                aria-current={isActive(l.href) ? 'page' : undefined}
+              >
+                {l.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ))}
+  </nav>
+</aside>

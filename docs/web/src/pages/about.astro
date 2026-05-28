@@ -1,0 +1,69 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+<BaseLayout title="About this site">
+  <h1>About this site</h1>
+
+  <h2>Tech stack</h2>
+  <p>
+    <strong>Astro 5.x</strong> for the static-site shell and markdown pipeline.
+    Astro was chosen because it is markdown-native (front-matter, MDX, code
+    highlight, remark/rehype plugins all built in), ships zero JS by default,
+    and hydrates only the interactive widgets ("islands"). Alternatives
+    considered were VitePress (forces Vue for widgets) and Docusaurus (heavier
+    React dep tree — overkill for a docs site).
+  </p>
+  <p>
+    <strong>Cytoscape.js 3.x</strong> for the interactive graphs. It is
+    framework-agnostic (no React/Vue coupling), has good built-in layouts
+    (cose, breadthfirst), and pairs cleanly with Astro's island model.
+    React Flow was rejected because it would force React into the bundle
+    for one widget; d3-force because it requires too much hand-rolled glue.
+  </p>
+  <p>
+    <strong>Mermaid 11.x</strong> for the diagrams embedded in the demo
+    markdown. Rendered client-side — the markdown source uses standard
+    <code>```mermaid</code> fences and the <code>MermaidRenderer</code>
+    island swaps them for SVG after page load.
+  </p>
+
+  <h2>Source-of-truth strategy</h2>
+  <p>
+    The canonical demo content lives in <code>docs/DEMO_*.md</code>. This site
+    does <strong>not</strong> duplicate that content; Astro's content collection
+    uses a glob loader pointed at <code>../</code> (i.e. <code>docs/</code>
+    relative to <code>docs/web/src/content/</code>) so the markdown files
+    remain a single source of truth.
+  </p>
+  <p>
+    Until <a href="https://github.com/NikashPrakash/dot-agents/pull/136" target="_blank" rel="noopener">PR #136</a>
+    lands, local builds need the files staged into <code>docs/DEMO_*.md</code>
+    (e.g. via <code>git show origin/feature/docs-for-demo:docs/&lt;file&gt;.md</code>).
+  </p>
+
+  <h2>What's shipped in this first version</h2>
+  <ul>
+    <li>All 5 DEMO pages rendered as styled markdown with sidebar nav, anchors, and code highlight.</li>
+    <li>Mermaid block rendering inside demo pages.</li>
+    <li>Clickable resource graph: <strong>da resources</strong> (skills, agents, rules, hooks, MCP, scaffolds).</li>
+    <li>Clickable graph: <strong>workflow resources</strong> (pr10-branch-split tasks + delegations + lessons).</li>
+    <li>Snapshot view: <strong>workspace state</strong> (worktrees + active delegations + eligible queue).</li>
+    <li>Tier model diagram (spec → plan → tasks → history) with click-to-expand.</li>
+  </ul>
+
+  <h2>Stubbed for follow-up</h2>
+  <ul>
+    <li>Lens dispatch diagram.</li>
+    <li>Verifier registry / <code>app_type_verifier_map</code> diagram.</li>
+    <li>GitHub Pages publish workflow under <code>.github/workflows/</code>.</li>
+    <li>Live JSON ingestion for workspace state (currently a committed snapshot).</li>
+    <li>Search across demo pages.</li>
+  </ul>
+
+  <h2>Local development</h2>
+  <pre><code>cd docs/web
+npm install
+npm run dev       # http://localhost:4321
+npm run build     # outputs static site to dist/
+npm run preview   # serve dist/ to verify</code></pre>
+</BaseLayout>

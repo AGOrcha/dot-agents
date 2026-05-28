@@ -1,0 +1,185 @@
+---
+// Interactive node-link graph rendered with Cytoscape.js. The graph data is
+// passed in as a JSON-stringified prop and consumed client-side by an inline
+// script. Clicking a node populates the inspector pane with that node's data.
+interface GraphNode {
+  id: string;
+  label: string;
+  kind: string;
+  // Free-form metadata shown in inspector
+  data?: Record<string, unknown>;
+}
+interface GraphEdge {
+  source: string;
+  target: string;
+  label?: string;
+}
+interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  legend?: { kind: string; color: string; description?: string }[];
+}
+interface Props {
+  graph: GraphData;
+  graphId: string;
+  layoutName?: string;
+}
+
+const { graph, graphId, layoutName = 'cose' } = Astro.props;
+const serialized = JSON.stringify({ graph, layoutName });
+---
+<div class="graph-page">
+  <div id={`canvas-${graphId}`} class="graph-canvas" data-graph={serialized}></div>
+  <aside class="graph-inspector" id={`inspector-${graphId}`}>
+    <h3>Inspector</h3>
+    <p class="hint">Click a node to view its details.</p>
+    {graph.legend && (
+      <div>
+        <dt>Legend</dt>
+        {graph.legend.map((l) => (
+          <div>
+            <span class="badge" style={`background:${l.color}`}>{l.kind}</span>
+            {l.description && <span style="color:var(--text-dim); font-size:0.78rem;"> {l.description}</span>}
+          </div>
+        ))}
+      </div>
+    )}
+  </aside>
+</div>
+
+<script define:vars={{ graphId }}>
+  // Wrap dynamic import so the cytoscape bundle is split off the main entry.
+  async function init() {
+    const cytoscape = (await import('cytoscape')).default;
+    const canvas = document.getElementById(`canvas-${graphId}`);
+    const inspector = document.getElementById(`inspector-${graphId}`);
+    if (!canvas || !inspector) return;
+    const raw = canvas.getAttribute('data-graph');
+    if (!raw) return;
+    const { graph, layoutName } = JSON.parse(raw);
+
+    // Map node kind -> color (kept in sync with legend in JSON data).
+    const kindColors = Object.fromEntries(
+      (graph.legend ?? []).map((l) => [l.kind, l.color])
+    );
+    const defaultColor = '#64748b';
+
+    const elements = [
+      ...graph.nodes.map((n) => ({
+        data: { id: n.id, label: n.label, kind: n.kind, payload: n.data ?? {} },
+      })),
+      ...graph.edges.map((e, i) => ({
+        data: {
+          id: `e${i}`,
+          source: e.source,
+          target: e.target,
+          label: e.label ?? '',
+        },
+      })),
+    ];
+
+    const cy = cytoscape({
+      container: canvas,
+      elements,
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'background-color': (ele) => kindColors[ele.data('kind')] ?? defaultColor,
+            label: 'data(label)',
+            color: '#e5edf7',
+            'font-size': 11,
+            'text-outline-color': '#0b1220',
+            'text-outline-width': 2,
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'text-wrap': 'wrap',
+            'text-max-width': 90,
+            width: 'label',
+            height: 'label',
+            padding: '10px',
+            shape: 'round-rectangle',
+            'border-width': 1,
+            'border-color': '#0b1220',
+          },
+        },
+        {
+          selector: 'node:selected',
+          style: {
+            'border-color': '#f59e0b',
+            'border-width': 3,
+          },
+        },
+        {
+          selector: 'edge',
+          style: {
+            width: 1.4,
+            'line-color': '#3b4d77',
+            'target-arrow-color': '#3b4d77',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
+            label: 'data(label)',
+            'font-size': 9,
+            color: '#8aa0c0',
+            'text-rotation': 'autorotate',
+            'text-background-color': '#0b1220',
+            'text-background-opacity': 0.8,
+            'text-background-padding': 2,
+          },
+        },
+      ],
+      layout: layoutName === 'breadthfirst'
+        ? { name: 'breadthfirst', directed: true, padding: 24, spacingFactor: 1.25 }
+        : { name: 'cose', padding: 24, animate: false, nodeRepulsion: 8000, idealEdgeLength: 110 },
+      wheelSensitivity: 0.2,
+    });
+
+    function renderInspector(node) {
+      const d = node.data();
+      const payload = d.payload ?? {};
+      const rows = Object.entries(payload)
+        .map(([k, v]) => {
+          let value;
+          if (Array.isArray(v)) {
+            value = v.map((x) => `<span class="badge">${escapeHtml(String(x))}</span>`).join(' ');
+          } else if (typeof v === 'object' && v !== null) {
+            value = `<pre style="white-space:pre-wrap; font-size:0.78rem; margin:0;">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
+          } else {
+            value = escapeHtml(String(v));
+          }
+          return `<dt>${escapeHtml(k)}</dt><dd>${value}</dd>`;
+        })
+        .join('');
+      inspector.innerHTML = `
+        <h3>${escapeHtml(d.label)}</h3>
+        <dl>
+          <dt>Kind</dt><dd><span class="badge" style="background:${kindColors[d.kind] ?? defaultColor}">${escapeHtml(d.kind)}</span></dd>
+          <dt>ID</dt><dd><code>${escapeHtml(d.id)}</code></dd>
+          ${rows}
+        </dl>
+      `;
+    }
+
+    function escapeHtml(s) {
+      return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    cy.on('tap', 'node', (evt) => renderInspector(evt.target));
+    cy.on('tap', (evt) => {
+      if (evt.target === cy) {
+        inspector.innerHTML = '<h3>Inspector</h3><p class="hint">Click a node to view its details.</p>';
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+</script>

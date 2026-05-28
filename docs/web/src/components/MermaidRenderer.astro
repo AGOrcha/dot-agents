@@ -1,0 +1,46 @@
+---
+// Client-only mermaid renderer. Scans the page for <pre><code class="language-mermaid">
+// blocks and replaces them with rendered SVG. Astro's default markdown pipeline
+// emits mermaid fences as code blocks with that class — we don't need a remark
+// plugin; we just hydrate after page load.
+---
+<script>
+  import mermaid from 'mermaid';
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'neutral',
+    securityLevel: 'loose',
+    flowchart: { htmlLabels: true, useMaxWidth: true },
+  });
+
+  async function renderAll() {
+    // Astro+Shiki renders mermaid fences as <pre data-language="mermaid">…</pre>
+    // with no separate <code> element exposing the raw source. We extract the
+    // plain text from the <pre> (Shiki preserves it inside <span class="line">
+    // children) and feed it to mermaid.
+    const blocks = document.querySelectorAll('pre[data-language="mermaid"]');
+    let i = 0;
+    for (const pre of Array.from(blocks)) {
+      if (pre.dataset.mermaidRendered === '1') continue;
+      const source = pre.textContent ?? '';
+      const id = `mermaid-${Date.now()}-${i++}`;
+      try {
+        const { svg } = await mermaid.render(id, source);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-block';
+        wrapper.innerHTML = svg;
+        pre.replaceWith(wrapper);
+      } catch (err) {
+        console.error('Mermaid render error', err);
+        pre.dataset.mermaidRendered = '1';
+      }
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderAll);
+  } else {
+    renderAll();
+  }
+</script>

@@ -1,0 +1,78 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const link = (p: string) => `${base}${p}`;
+---
+<BaseLayout title="Home" description="Interactive dot-agents docs site">
+  <h1>dot-agents — interactive docs</h1>
+  <p>
+    A single canonical home (<code>~/.agents/</code>) for AI coding-agent rules,
+    skills, agents, hooks, and MCP servers — projected into every repo by the
+    <code>da</code> CLI, and orchestrated through a structured workflow loop.
+  </p>
+  <p>
+    This site renders the demo material in <code>docs/DEMO_*.md</code> as
+    structured pages, and surfaces the agent operating model through
+    clickable graphs of <strong>da resources</strong>, <strong>workflow
+    resources</strong>, and <strong>workspace state</strong>.
+  </p>
+
+  <h2>Start here</h2>
+  <div class="cards">
+    <a class="card" href={link('/demos/demo_readme/')}>
+      <span class="label">One-minute overview</span>
+      <span class="title">DEMO_README</span>
+    </a>
+    <a class="card" href={link('/demos/demo_diagram/')}>
+      <span class="label">Architecture + loop</span>
+      <span class="title">DEMO_DIAGRAM</span>
+    </a>
+    <a class="card" href={link('/demos/demo_workflow_walkthrough/')}>
+      <span class="label">End-to-end wave</span>
+      <span class="title">DEMO_WORKFLOW_WALKTHROUGH</span>
+    </a>
+    <a class="card" href={link('/demos/demo_lessons_narrative/')}>
+      <span class="label">Hard-won lessons</span>
+      <span class="title">DEMO_LESSONS_NARRATIVE</span>
+    </a>
+    <a class="card" href={link('/demos/demo_index/')}>
+      <span class="label">All demo material</span>
+      <span class="title">DEMO_INDEX</span>
+    </a>
+  </div>
+
+  <h2>Explore interactively</h2>
+  <div class="cards">
+    <a class="card" href={link('/graphs/da-resources/')}>
+      <span class="label">Resource graph</span>
+      <span class="title">da resources</span>
+      <span style="color:var(--text-dim); font-size:0.82rem;">skills, agents, rules, hooks, MCP</span>
+    </a>
+    <a class="card" href={link('/graphs/workflow-resources/')}>
+      <span class="label">Resource graph</span>
+      <span class="title">Workflow resources</span>
+      <span style="color:var(--text-dim); font-size:0.82rem;">plans · tasks · delegations · lessons</span>
+    </a>
+    <a class="card" href={link('/graphs/workspace-state/')}>
+      <span class="label">Snapshot</span>
+      <span class="title">Workspace state</span>
+      <span style="color:var(--text-dim); font-size:0.82rem;">worktrees · delegations · eligible queue</span>
+    </a>
+    <a class="card" href={link('/diagrams/tier-model/')}>
+      <span class="label">Diagram</span>
+      <span class="title">Tier model</span>
+      <span style="color:var(--text-dim); font-size:0.82rem;">spec → plan → tasks → history</span>
+    </a>
+  </div>
+
+  <h2>About this site</h2>
+  <p>
+    Built with <a href="https://astro.build" target="_blank" rel="noopener">Astro</a>
+    (markdown pipeline, islands hydration) and
+    <a href="https://js.cytoscape.org/" target="_blank" rel="noopener">Cytoscape.js</a>
+    (interactive graphs). Markdown source-of-truth is <code>docs/DEMO_*.md</code>;
+    the site ingests it via Astro's content collection glob loader — no duplication.
+    See <a href={`${base}/about/`}>about</a> for the full tech-stack rationale
+    and what's stubbed for follow-up.
+  </p>
+</BaseLayout>

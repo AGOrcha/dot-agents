@@ -1,0 +1,84 @@
+{
+  "title": "Workflow artifact tiers",
+  "description": "Four artifact tiers between an idea and shipped code. Each tier has a distinct owner, scope, and lifecycle. Do not collapse them.",
+  "tiers": [
+    {
+      "id": "spec",
+      "name": "Spec",
+      "scope": "WHAT & WHY",
+      "lives_in": "workflow/specs/<id>/design.md",
+      "summary": "Owns problem statement, decisions, requirements, open questions, done criteria, deferred items. Written before implementation begins.",
+      "contents": [
+        "Problem statement and goals",
+        "Explicit decisions with rationale",
+        "Requirements (behavioral, not implementation)",
+        "Open questions / gaps",
+        "Done criteria (verifiable)",
+        "Deferred items (explicitly out of scope)",
+        "Relationship to other specs and plans"
+      ],
+      "does_not_contain": [
+        "File paths or function names",
+        "Dependency ordering",
+        "Task breakdowns",
+        "Implementation details"
+      ],
+      "authority": "If implementation drifts from the spec, the spec is the authority."
+    },
+    {
+      "id": "plan",
+      "name": "Plan",
+      "scope": "HOW & IN WHAT ORDER",
+      "lives_in": "workflow/plans/<id>/PLAN.yaml + TASKS.yaml + <id>.plan.md",
+      "summary": "Owns all decisions needed to write the code: function names, file locations, interfaces, data shapes, edge cases. Bridges spec → code.",
+      "contents": [
+        "Concrete implementation decisions",
+        "Task breakdown with explicit depends_on",
+        "Write scopes per task (which files each touches)",
+        "Verification strategy per task",
+        "Trace from each task back to a spec done criterion"
+      ],
+      "does_not_contain": [
+        "Open research questions (belong in spec)",
+        "Behavioral requirements (belong in spec)"
+      ],
+      "authority": "The plan is accountable to the spec; the plan's success criteria must trace back to the spec's done criteria."
+    },
+    {
+      "id": "tasks",
+      "name": "Tasks",
+      "scope": "WORK QUEUE",
+      "lives_in": "TASKS.yaml",
+      "summary": "Generated from the plan; updated as work progresses. Tracks status, dependencies, and write scope per concrete unit of work.",
+      "contents": [
+        "Concrete, bounded units of work",
+        "Explicit depends_on relationships",
+        "status: pending → in_progress → completed",
+        "write_scope (file globs)",
+        "verification_required flag"
+      ],
+      "does_not_contain": [
+        "Implementation prose (lives in plan or merge-back)",
+        "Decisions (lives in spec or plan)"
+      ],
+      "authority": "Status is moved by `da workflow advance` / `delegation closeout`, not by hand."
+    },
+    {
+      "id": "history",
+      "name": "History",
+      "scope": "PERMANENT RECORD",
+      "lives_in": "history/<id>/",
+      "summary": "Archived at the end of a plan's lifecycle. Includes final PLAN.yaml + TASKS.yaml, impl-results (when applicable), delegation merge-back artifacts, and the original spec.",
+      "contents": [
+        "Final PLAN.yaml + TASKS.yaml",
+        "impl-results.md (direct work, or cross-task narrative)",
+        "Delegation merge-back artifacts (delegate-merge-back-archive/)",
+        "Spec document"
+      ],
+      "does_not_contain": [
+        "Anything still actively planned (those live in .agents/active/ or workflow/plans/)"
+      ],
+      "authority": "Written by `da workflow plan archive --plan <id>`; never edited after."
+    }
+  ]
+}
