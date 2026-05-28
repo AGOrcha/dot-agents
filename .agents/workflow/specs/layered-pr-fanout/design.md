@@ -205,6 +205,7 @@ Slot accounting is per task, gated on the sub-status of
 | `in_progress`                | Yes                                 |
 | `awaiting_agent_review`      | **Yes** (lens dispatch can bounce work back) |
 | `awaiting_owner_review`      | **No** (human-review timeline is unbounded; slot freed) |
+| `blocked-on:<ref>`           | **No** (slot freed — but tracked in a separate `blocked` bucket per §3.4.3 so pathological "all blocked" state is visible) |
 | `completed` / `blocked` / `cancelled` | No                         |
 
 When a task in `awaiting_owner_review` bounces back (maintainer
@@ -274,6 +275,101 @@ A task in `awaiting_owner_review` for more than **24 hours** without
 merge is surfaced in `da workflow eligible` output with a
 `needs_review_since` annotation. This is a maintainer-visibility
 signal; it does not change eligibility computation.
+
+### 3.4 `blocked-on:<ref>` parameterized state
+
+A task may be paused on an external blocker — another in-flight task,
+a missing secret, a pending maintainer decision, an external service
+outage. The state is `blocked-on:<ref>`, where `<ref>` is part of the
+state, not a separate field:
+
+- `blocked-on:task:<plan>/<task>` — waiting for another task to reach
+  `completed` (or any other named status)
+- `blocked-on:secret:<NAME>` — waiting for a GH/repo secret to exist
+  (detected via `gh secret list`)
+- `blocked-on:decision:<id>` — waiting for an explicit maintainer
+  decision (consumed via `da workflow unblock`)
+- `blocked-on:condition:<predicate>` — generic predicate the runtime
+  can re-evaluate on every event tick (e.g.
+  `condition:gh-checks(<pr>)=green`)
+
+#### 3.4.1 Entry edges
+
+| From | Trigger |
+|---|---|
+| `in_progress` | Worker fold-back artifact declares a transient blocker; runtime parses the fold-back's `blocked_on:` field and applies the parameterized state instead of forcing re-spawn |
+| `awaiting_review` | Lens reviewer or maintainer comment requests change that depends on external resolution; status regresses to `blocked-on:<ref>` (not all the way to `in_progress`) |
+| Direct CLI | `da workflow block <task> --on <ref> --note <reason>` for explicit maintainer-driven pause |
+
+#### 3.4.2 Exit edges
+
+| To | Trigger |
+|---|---|
+| `in_progress` | Auto-resume when the blocker's predicate evaluates true (the runtime owns the watch); or `da workflow unblock <task> --resume-as in_progress` for manual override |
+| `pending` | Manual override `da workflow unblock <task> --resume-as pending` (e.g., scope changed during the pause) |
+| `cancelled` | Maintainer cancels a long-stuck blocker via `da workflow advance --status cancelled` |
+
+#### 3.4.3 Slot semantics
+
+`blocked-on:<ref>` **frees the slot** (same as `awaiting_owner_review`
+per §2.8) — no active compute, just a held place in the DAG. This is
+load-bearing: lets downstream work consume the slot while the blocked
+task waits for its blocker to resolve.
+
+A new slot-ledger bucket — `blocked` — is tracked separately from
+`code-impl` / `design` / `hygiene` so the "all N slots blocked,
+nothing actually running" pathology is visible to the orchestrator
+(and the productionized
+[[workflow-orchestrator-daemon]]).
+
+#### 3.4.4 Eligibility decay for blocked tasks
+
+A task `blocked-on:<ref>` for more than **N days** (default N=7,
+configurable per project via `.agentsrc.json`) without the blocker's
+predicate evaluating true is surfaced in `da workflow eligible` output
+with a `blocker_stale_since` annotation — a gentle nudge before
+silent-zombie territory. Maintainer can then `da workflow unblock` or
+`--status cancelled` explicitly.
+
+#### 3.4.5 Auto-resume contract
+
+The runtime polls each `blocked-on:<ref>` predicate on every event
+tick (worker terminal, PR merge, gh-secret event, scheduled wake).
+Predicate evaluation is:
+
+- `task:<plan>/<task>` → status of the named task is `completed`
+- `secret:<NAME>` → `gh secret list` includes the name
+- `decision:<id>` → an explicit `da workflow resolve-decision <id>`
+  has landed
+- `condition:<predicate>` → predicate-specific evaluator (CI green,
+  external HTTP probe, etc.); evaluator registry pluggable per project
+
+On predicate true, transition to `in_progress` (the implicit default;
+overridable in the original `block` call via `--resume-as`).
+
+#### 3.4.6 Cascade semantics with §2.6 (hard-block downstream)
+
+If task A is `blocked-on:<ref>` and task B `depends_on: [A]`:
+- B's eligibility computation already requires A to be in
+  `{completed, awaiting_owner_review}` per §3.1
+- A in `blocked-on:*` does NOT satisfy B's dep (unlike
+  `awaiting_owner_review` which does)
+- Therefore B stays `pending`, no implicit block-on-block cascade
+- Maintainer may explicitly `block` B on A if they want decay
+  signals to surface the wait
+
+#### 3.4.7 Concrete in-flight cases (illustrative)
+
+- `pr10-branch-split/signing-native-mac-windows` (folded back today
+  awaiting Apple Dev ID secret) — would be
+  `blocked-on:secret:APPLE_DEVELOPER_ID_CERT_P12_BASE64` with
+  auto-resume when `gh secret list` shows it
+- `pr10-branch-split/pr8b-org-migration` (HOLD pending maintainer
+  ratification on module path canonical) — would be
+  `blocked-on:decision:agorcha-module-path-cut`
+
+These two cases motivated the state addition (review comment on
+PR #149, 2026-05-28).
 
 ---
 
