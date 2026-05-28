@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -583,14 +582,6 @@ func TestRemoveManagedIntentTarget_DirectFileHardLinkRemoved(t *testing.T) {
 // A removal failure on the hard-link path must surface, not be swallowed
 // (otherwise da remove reports success while the managed file is still live).
 func TestRemoveManagedIntentTarget_DirectFileHardLinkRemovalFailureSurfaces(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		// Fault injection here relies on a read-only parent directory
-		// denying child deletion. On Windows os.Chmod only toggles the
-		// read-only attribute and does NOT prevent deleting children, so
-		// RemoveAll would succeed and the failure path cannot be
-		// exercised. The error-propagation contract is covered on POSIX.
-		t.Skip("read-only-dir fault injection does not deny deletion on Windows")
-	}
 	tmp := t.TempDir()
 	repo := filepath.Join(tmp, "repo")
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -611,14 +602,11 @@ func TestRemoveManagedIntentTarget_DirectFileHardLinkRemovalFailureSurfaces(t *t
 	if err := os.Link(src, target); err != nil {
 		t.Fatalf("hard link: %v", err)
 	}
-	// Make the parent dir read-only so the hard-link removal fails.
-	if err := os.Chmod(targetDir, 0500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(targetDir, 0755) })
-	if os.Geteuid() == 0 {
-		t.Skip("requires non-root to enforce directory write perms")
-	}
+	// Deny child writes/deletes on the parent dir so the hard-link removal
+	// fails. MakeDirWriteDenied installs POSIX chmod 0o500 / Windows deny-ACE
+	// on FILE_DELETE_CHILD, covering both platforms; it also handles the
+	// root-bypass and elevated-Windows cases internally.
+	testutil.MakeDirWriteDenied(t, targetDir)
 
 	intent := ResourceIntent{
 		IntentID:   "agents.file.proj.x",

@@ -1003,3 +1003,148 @@ func TestAddManagedDirCounts_MixedEntries(t *testing.T) {
 		t.Errorf("addManagedDirCounts: got ok=%d broken=%d, want ok=2 broken=1 (absent dir skipped)", ok, br)
 	}
 }
+
+// ---------- BrokenLinkReporter implementation (P1) ----------
+
+// TestClaudeBrokenLinks_EmptyProject is the absent-surface sentinel:
+// nothing managed yet, no diagnostics. Matches the lifecycle-side empty-
+// project contract.
+func TestClaudeBrokenLinks_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &claude{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("expected no broken links in empty project, got %d: %+v", len(got), got)
+	}
+}
+
+// TestClaudeBrokenLinks_HealthySymlinkSkipped guards the rules-dir healthy
+// branch: a symlink whose target exists is NOT reported.
+func TestClaudeBrokenLinks_HealthySymlinkSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+
+	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("# rules"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	claudeRulesDir := filepath.Join(projectPath, claudeDir, "rules")
+	if err := os.MkdirAll(claudeRulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, target, filepath.Join(claudeRulesDir, "proj--agents.md"))
+
+	c := &claude{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("expected no broken links for healthy symlink, got %+v", got)
+	}
+}
+
+// TestClaudeBrokenLinks_BrokenRuleSymlink is the central broken-rule case:
+// a dangling symlink under .claude/rules must surface with
+// PlatformID="claude".
+func TestClaudeBrokenLinks_BrokenRuleSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+
+	claudeRulesDir := filepath.Join(projectPath, claudeDir, "rules")
+	if err := os.MkdirAll(claudeRulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(claudeRulesDir, "proj--ghost.md"))
+
+	c := &claude{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 broken link, got %d: %+v", len(got), got)
+	}
+	if got[0].PlatformID != "claude" {
+		t.Errorf("PlatformID = %q, want claude", got[0].PlatformID)
+	}
+	if got[0].LinkPath == "" || got[0].DisplayDest == "" {
+		t.Errorf("LinkPath/DisplayDest unset: %+v", got[0])
+	}
+}
+
+// TestClaudeBrokenLinks_BrokenMCPJSON exercises the single-file .mcp.json
+// branch: a dangling .mcp.json at the repo root must surface as a claude
+// broken-link entry. This is the entry that previously lived in
+// doctor.go's projectSingleFiles table.
+func TestClaudeBrokenLinks_BrokenMCPJSON(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, ".mcp.json"))
+
+	c := &claude{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 || got[0].PlatformID != "claude" {
+		t.Fatalf("expected 1 claude broken link for .mcp.json, got %+v", got)
+	}
+}
+
+// TestClaudeBrokenLinks_PlainMCPJSONIgnored guards the contract carried over
+// from lifecycle's managedLinkBroken: a plain regular file at .mcp.json
+// (not a managed link) is unmanaged user content and must NOT be reported.
+func TestClaudeBrokenLinks_PlainMCPJSONIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectPath, ".mcp.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &claude{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("plain .mcp.json must be ignored by broken-link reporter, got %+v", got)
+	}
+}
+
+// TestClaudeBrokenLinks_HealthyRuleNotLink confirms that a non-link entry
+// (regular file dropped into .claude/rules) is silently skipped — only
+// resolvable managed links whose target is missing should be reported.
+// This is the explicit "not a link" branch of classifyManagedLink.
+func TestClaudeBrokenLinks_HealthyRuleNotLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	claudeRulesDir := filepath.Join(projectPath, claudeDir, "rules")
+	if err := os.MkdirAll(claudeRulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeRulesDir, "plain.md"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &claude{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("plain file in .claude/rules must be ignored, got %+v", got)
+	}
+}
+
+// TestClaudeBrokenLinks_InterfaceConformance pins compile-time conformance
+// with BrokenLinkReporter so doctor.collectBrokenLinks's type assertion
+// will not silently regress.
+func TestClaudeBrokenLinks_InterfaceConformance(t *testing.T) {
+	var _ BrokenLinkReporter = (*claude)(nil)
+}

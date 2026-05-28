@@ -32,11 +32,11 @@ PORT="${DOT_AGENTS_PORT:-go}"
 VERSION="${DOT_AGENTS_VERSION:-}"
 LOCAL_SRC="${DOT_AGENTS_LOCAL_SRC:-}"
 
-info()    { echo -e "${BLUE}[INFO]${NC} $1"; }
-success() { echo -e "${GREEN}[OK]${NC} $1"; }
-warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error()   { echo -e "${RED}[ERROR]${NC} $1" >&2; }
-die()     { error "$1"; exit 1; }
+info()    { local msg="$1"; echo -e "${BLUE}[INFO]${NC} $msg"; }
+success() { local msg="$1"; echo -e "${GREEN}[OK]${NC} $msg"; }
+warn()    { local msg="$1"; echo -e "${YELLOW}[WARN]${NC} $msg"; }
+error()   { local msg="$1"; echo -e "${RED}[ERROR]${NC} $msg" >&2; }
+die()     { local msg="$1"; error "$msg"; exit 1; }
 
 usage() {
   cat <<'EOF'

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -823,5 +824,136 @@ func TestRunRefresh_SeededClaudeDryRunExercisesDryRunBranches(t *testing.T) {
 
 	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
 		t.Errorf("runRefresh dry-run with installed claude: %v", err)
+	}
+}
+
+// ─── stp3 regression: refresh SharedTargetProjection wiring ────────────────
+//
+// These tests pin the refresh-side projection wiring landed by
+// fix-shared-skill-relink (refresh.go:238 runSharedTargetsForRefresh). They
+// assert (a) the projection materializes its expected projected artifact —
+// not merely that .agentsrc.json was written; (b) dry-run produces NO
+// projected artifacts; (c) two back-to-back refreshes leave the repo's
+// projected tree byte-identical. A regression that drops the projection
+// call, hard-codes dryRun=false, or breaks Execute idempotence will fail.
+
+// writeRefreshCodexAgentFixture writes a canonical Codex agent under
+// <agentsHome>/agents/<project>/<name>/AGENT.md so the shared-target
+// projection emits a repo .codex/agents/<name>.toml when refresh runs.
+func writeRefreshCodexAgentFixture(t *testing.T, agentsHome, project, name string) {
+	t.Helper()
+	dir := filepath.Join(agentsHome, "agents", project, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nname: " + name + "\ndescription: refresh stp3 fixture\n---\n\n# Body\nShip it.\n"
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedRefreshProjectWithCodexAgent scaffolds the minimum env for refresh to
+// run the shared-target projection against an installed codex platform with
+// one canonical agent. Returns (tmp, agentsHome, projectPath, projectName).
+func seedRefreshProjectWithCodexAgent(t *testing.T, projectName, agentName string) (string, string, string) {
+	t.Helper()
+	tmp := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, projectName)
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRefreshCodexAgentFixture(t, agentsHome, projectName, agentName)
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject(projectName, projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	return tmp, agentsHome, projectPath
+}
+
+// TestRunRefresh_SharedTargetProjectionMaterializesCodexToml asserts the
+// projection's ONLY observable effect (the projected .codex/agents/<n>.toml)
+// after a real refresh — proving the projection ran, not merely the metadata
+// stamp. CreateLinks does not produce this file; only the projection does.
+func TestRunRefresh_SharedTargetProjectionMaterializesCodexToml(t *testing.T) {
+	_, _, projectPath := seedRefreshProjectWithCodexAgent(t, "refproj", "implementer")
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	tomlPath := filepath.Join(projectPath, ".codex", "agents", "implementer.toml")
+	b, err := os.ReadFile(tomlPath)
+	if err != nil {
+		t.Fatalf("expected refresh's shared-target projection to write %s: %v", tomlPath, err)
+	}
+	body := string(b)
+	if !strings.Contains(body, `name = "implementer"`) || !strings.Contains(body, "Ship it.") {
+		t.Fatalf("projected codex toml has unexpected content:\n%s", body)
+	}
+}
+
+// TestRunRefresh_SharedTargetProjectionDryRunNoMutation asserts that with
+// Flags.DryRun=true the projection's planned artifact is NOT materialized.
+// A regression that hard-codes dryRun=false (or drops Flags.DryRun from the
+// RunSharedTargetProjection call) would create the file and fail this test.
+func TestRunRefresh_SharedTargetProjectionDryRunNoMutation(t *testing.T) {
+	_, _, projectPath := seedRefreshProjectWithCodexAgent(t, "drrproj", "implementer")
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh dry-run: %v", err)
+	}
+
+	tomlPath := filepath.Join(projectPath, ".codex", "agents", "implementer.toml")
+	if _, err := os.Stat(tomlPath); err == nil {
+		t.Fatalf("dry-run refresh must NOT materialize %s; projection wiring is ignoring Flags.DryRun", tomlPath)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("unexpected stat error for %s: %v", tomlPath, err)
+	}
+}
+
+// TestRunRefresh_SharedTargetProjectionIdempotent asserts two back-to-back
+// refreshes leave the projected .codex/ tree byte-identical (content hash +
+// kind). A regression that always re-renders / churns mtimes via
+// os.Remove+Write would fail the per-entry compare on the second pass.
+func TestRunRefresh_SharedTargetProjectionIdempotent(t *testing.T) {
+	_, _, projectPath := seedRefreshProjectWithCodexAgent(t, "idemref", "implementer")
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("first runRefresh: %v", err)
+	}
+	codexDir := filepath.Join(projectPath, ".codex")
+	first := snapshotTree(t, codexDir)
+	if len(first) == 0 {
+		t.Fatalf("first refresh produced no .codex/ artifacts; projection did not run")
+	}
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("second runRefresh: %v", err)
+	}
+	second := snapshotTree(t, codexDir)
+
+	if msg, ok := snapshotsEqual(first, second); !ok {
+		t.Fatalf("refresh not idempotent under .codex/: %s\nfirst=%d second=%d",
+			msg, len(first), len(second))
 	}
 }

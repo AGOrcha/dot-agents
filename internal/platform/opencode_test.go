@@ -170,3 +170,95 @@ func TestOpenCodeCountLinks_HealthyOpenCodeJSON(t *testing.T) {
 		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
 	}
 }
+
+// ---------- BrokenLinkReporter implementation (P2) ----------
+
+// TestOpenCodeBrokenLinks_EmptyProject is the absent-surface sentinel:
+// no managed opencode.json means no diagnostics.
+func TestOpenCodeBrokenLinks_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	o := &opencode{io: stdPlatformIO{}}
+	got := o.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("expected no broken links in empty project, got %d: %+v", len(got), got)
+	}
+}
+
+// TestOpenCodeBrokenLinks_BrokenOpenCodeJSON migrates doctor's
+// TestCollectBrokenLinks_BrokenOpenCodeJSON: a dangling opencode.json
+// at the repo root must surface as an opencode broken-link.
+func TestOpenCodeBrokenLinks_BrokenOpenCodeJSON(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, opencodeJSON))
+
+	o := &opencode{io: stdPlatformIO{}}
+	got := o.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 || got[0].PlatformID != "opencode" {
+		t.Fatalf("expected 1 opencode broken link, got %+v", got)
+	}
+	if got[0].LinkPath == "" || got[0].DisplayDest == "" {
+		t.Errorf("LinkPath/DisplayDest unset: %+v", got[0])
+	}
+}
+
+// TestOpenCodeBrokenLinks_PlainFileIgnored guards the managedLinkBroken
+// contract: a plain regular opencode.json (not a managed link) is unmanaged
+// user content and must NOT be reported.
+func TestOpenCodeBrokenLinks_PlainFileIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectPath, opencodeJSON), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	o := &opencode{io: stdPlatformIO{}}
+	got := o.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("plain opencode.json must be ignored, got %+v", got)
+	}
+}
+
+// TestOpenCodeBrokenLinks_HealthySymlinkIgnored confirms a managed symlink
+// whose target exists is NOT reported.
+func TestOpenCodeBrokenLinks_HealthySymlinkIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(agentsHome, "settings", "global", opencodeJSON)
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, target, filepath.Join(projectPath, opencodeJSON))
+
+	o := &opencode{io: stdPlatformIO{}}
+	got := o.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("healthy opencode.json symlink must not be broken, got %+v", got)
+	}
+}
+
+// TestOpenCodeBrokenLinks_InterfaceConformance pins compile-time conformance.
+func TestOpenCodeBrokenLinks_InterfaceConformance(t *testing.T) {
+	var _ BrokenLinkReporter = (*opencode)(nil)
+}

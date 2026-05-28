@@ -175,7 +175,7 @@ func TestCheckFanoutWriteScopeConflicts_SameTaskAllowed(t *testing.T) {
 	}
 }
 
-func TestPersistFanoutArtifacts_BundleSaveRollback(t *testing.T) {
+func TestPersistFanoutBundle_BundleSaveRollback(t *testing.T) {
 	repo := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339)
 	contract := &DelegationContract{
@@ -183,10 +183,16 @@ func TestPersistFanoutArtifacts_BundleSaveRollback(t *testing.T) {
 		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
 		CreatedAt: now, UpdatedAt: now,
 	}
+	// The fanout flow now materializes the contract (writes it to disk) before
+	// the bundle is built. persistFanoutBundle's contract is the prior write
+	// to roll back if the bundle save fails.
+	if err := saveDelegationContract(repo, contract); err != nil {
+		t.Fatalf("seed contract: %v", err)
+	}
 
 	bundle := &delegationBundleYAML{}
 
-	err := persistFanoutArtifacts(repo, contract, bundle, "t1")
+	err := persistFanoutBundle(repo, contract, bundle)
 	if err == nil || !strings.Contains(err.Error(), "save delegation bundle") {
 		t.Fatalf("expected bundle save error, got %v", err)
 	}

@@ -14,13 +14,13 @@ $REPO = "NikashPrakash/dot-agents"
 $InstallDir = if ($env:DOT_AGENTS_INSTALL_DIR) { $env:DOT_AGENTS_INSTALL_DIR } elseif ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { "$env:LOCALAPPDATA\Programs\dot-agents" }
 $Version = $env:DOT_AGENTS_VERSION
 
-function Write-Info  { Write-Host "[INFO] $args" -ForegroundColor Cyan }
-function Write-Ok    { Write-Host "[ OK ] $args" -ForegroundColor Green }
-function Write-Warn  { Write-Host "[WARN] $args" -ForegroundColor Yellow }
-function Write-Fail  { Write-Host "[FAIL] $args" -ForegroundColor Red; exit 1 }
+function Write-Info  { Write-Output "[INFO] $args" }
+function Write-Ok    { Write-Output "[ OK ] $args" }
+function Write-Warn  { Write-Output "[WARN] $args" }
+function Write-Fail  { Write-Output "[FAIL] $args"; exit 1 }
 
 function Get-Arch {
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    $arch = [System.Runtime.InteropServices.RuntimeInformation,mscorlib]::OSArchitecture
     switch ($arch) {
         'X64'   { return 'amd64' }
         'Arm64' { return 'arm64' }
@@ -35,9 +35,9 @@ function Get-LatestVersion {
 }
 
 function Install-DotAgents {
-    Write-Host ""
-    Write-Host "da installer" -ForegroundColor White -BackgroundColor DarkBlue
-    Write-Host ""
+    Write-Output ""
+    Write-Output "da installer"
+    Write-Output ""
 
     $arch = Get-Arch
 
@@ -83,10 +83,10 @@ function Install-DotAgents {
         Write-Warn "Restart your terminal for PATH changes to take effect"
     }
 
-    Write-Host ""
-    Write-Host "Run: da --help"
-    Write-Host "Initialize: da init"
-    Write-Host ""
+    Write-Output ""
+    Write-Output "Run: da --help"
+    Write-Output "Initialize: da init"
+    Write-Output ""
 
     # Note about symlinks on Windows
     Write-Warn "Windows Note: Symlink creation requires Developer Mode or Administrator privileges."

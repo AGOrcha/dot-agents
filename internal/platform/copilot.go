@@ -487,6 +487,48 @@ func (c *copilot) removeHookLinks(project, repoPath, agentsHome string) error {
 	return errors.Join(errs...)
 }
 
+// BrokenLinks implements BrokenLinkReporter for the copilot platform.
+//
+// Copilot owns two project-scope single-file managed links:
+//
+//  1. .github/copilot-instructions.md — managed symlink to the highest-
+//     priority canonical source under <agentsHome>/rules/ (see
+//     createInstructionsLink / resolveInstructionsSrc).
+//  2. .vscode/mcp.json — managed symlink to the canonical mcp source
+//     resolved by createMCPLinks.
+//
+// The diagnostic contract preserved from doctor's previous inline
+// projectSingleFiles table is "report broken only when the entry is a
+// resolvable managed link AND its target is missing" — a hard-linked or
+// absent file is silently passed over. classifyManagedLink encodes that
+// semantic exactly, matching the claude.brokenMCPLink shape used for the
+// equivalent claude .mcp.json single-file entry.
+//
+// PlatformID is set on every returned BrokenLink so JSON consumers can
+// self-describe per-entry.
+func (c *copilot) BrokenLinks(_, repoPath, _ string) []BrokenLink {
+	var broken []BrokenLink
+	broken = append(broken, classifyCopilotSingleFile(filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))...)
+	broken = append(broken, classifyCopilotSingleFile(filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON))...)
+	return broken
+}
+
+// classifyCopilotSingleFile mirrors classifyCodexSingleFile for the two
+// copilot-owned single-file managed paths. Extracted so BrokenLinks remains
+// a flat composition and the per-entry semantic stays identical.
+func classifyCopilotSingleFile(linkPath string) []BrokenLink {
+	state, raw := classifyManagedLink(linkPath)
+	if state != linkStateBroken {
+		return nil
+	}
+	return []BrokenLink{{
+		PlatformID:  "copilot",
+		LinkPath:    linkPath,
+		Dest:        raw,
+		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
+	}}
+}
+
 func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
 	if err != nil {

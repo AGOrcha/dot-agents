@@ -9,6 +9,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/NikashPrakash/dot-agents/internal/testutil"
 )
 
 func TestSymlink(t *testing.T) {
@@ -271,9 +272,6 @@ func TestSymlinkParentDirCreation(t *testing.T) {
 }
 
 func TestRemoveIfHardlinkedToAny_RemovalFailurePropagates(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("uses POSIX dir-perm to force a removal failure")
-	}
 	tmp := t.TempDir()
 	canonical := filepath.Join(tmp, "canonical")
 	if err := os.WriteFile(canonical, []byte("c"), 0o644); err != nil {
@@ -288,10 +286,7 @@ func TestRemoveIfHardlinkedToAny_RemovalFailurePropagates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := os.Chmod(holder, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(holder, 0o755) })
+	testutil.MakeDirWriteDenied(t, holder)
 
 	ok, err := links.RemoveIfHardlinkedToAny(managed, []string{canonical})
 	if !ok || err == nil {

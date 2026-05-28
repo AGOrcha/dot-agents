@@ -281,3 +281,131 @@ func TestCopilotCountLinks_HealthyInstructionsFile(t *testing.T) {
 		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
 	}
 }
+
+// ---------- BrokenLinkReporter implementation (P2) ----------
+
+// TestCopilotBrokenLinks_EmptyProject is the absent-surface sentinel:
+// neither .github/copilot-instructions.md nor .vscode/mcp.json present
+// means no diagnostics.
+func TestCopilotBrokenLinks_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &copilot{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("expected no broken links in empty project, got %d: %+v", len(got), got)
+	}
+}
+
+// TestCopilotBrokenLinks_BrokenInstructions migrates doctor's
+// TestCollectBrokenLinks_BrokenCopilotInstructions: a dangling
+// .github/copilot-instructions.md must surface as copilot broken-link.
+func TestCopilotBrokenLinks_BrokenInstructions(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	ghDir := filepath.Join(projectPath, copilotGitHubDir)
+	if err := os.MkdirAll(ghDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(ghDir, copilotInstructionsMD))
+
+	c := &copilot{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 || got[0].PlatformID != "copilot" {
+		t.Fatalf("expected 1 copilot broken link, got %+v", got)
+	}
+	if got[0].LinkPath == "" || got[0].DisplayDest == "" {
+		t.Errorf("LinkPath/DisplayDest unset: %+v", got[0])
+	}
+}
+
+// TestCopilotBrokenLinks_BrokenVSCodeMCP migrates doctor's
+// TestCollectBrokenLinks_BrokenVSCodeMCP: a dangling .vscode/mcp.json
+// must surface as a copilot broken-link.
+func TestCopilotBrokenLinks_BrokenVSCodeMCP(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	vsDir := filepath.Join(projectPath, copilotVSCodeDir)
+	if err := os.MkdirAll(vsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(vsDir, copilotMCPJSON))
+
+	c := &copilot{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 || got[0].PlatformID != "copilot" {
+		t.Fatalf("expected 1 copilot mcp broken link, got %+v", got)
+	}
+}
+
+// TestCopilotBrokenLinks_BothBroken exercises the multi-entry path: both
+// owned single-file links broken simultaneously must produce two records,
+// each carrying PlatformID="copilot". This is the case the previous
+// projectSingleFiles table covered with two consecutive copilot entries.
+func TestCopilotBrokenLinks_BothBroken(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	ghDir := filepath.Join(projectPath, copilotGitHubDir)
+	vsDir := filepath.Join(projectPath, copilotVSCodeDir)
+	if err := os.MkdirAll(ghDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(vsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(ghDir, copilotInstructionsMD))
+	linktest.DanglingLink(t, filepath.Join(vsDir, copilotMCPJSON))
+
+	c := &copilot{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 broken links, got %d: %+v", len(got), got)
+	}
+	for _, bl := range got {
+		if bl.PlatformID != "copilot" {
+			t.Errorf("PlatformID = %q, want copilot", bl.PlatformID)
+		}
+	}
+}
+
+// TestCopilotBrokenLinks_PlainFilesIgnored guards the contract carried over
+// from lifecycle's managedLinkBroken: plain regular files at the owned paths
+// (not managed links) are unmanaged user content and must NOT be reported.
+func TestCopilotBrokenLinks_PlainFilesIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	ghDir := filepath.Join(projectPath, copilotGitHubDir)
+	vsDir := filepath.Join(projectPath, copilotVSCodeDir)
+	if err := os.MkdirAll(ghDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(vsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ghDir, copilotInstructionsMD), []byte("plain"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vsDir, copilotMCPJSON), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &copilot{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("plain files must be ignored, got %+v", got)
+	}
+}
+
+// TestCopilotBrokenLinks_InterfaceConformance pins compile-time conformance.
+func TestCopilotBrokenLinks_InterfaceConformance(t *testing.T) {
+	var _ BrokenLinkReporter = (*copilot)(nil)
+}

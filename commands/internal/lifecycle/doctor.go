@@ -608,25 +608,15 @@ func claudeRuleHardlinked(linkPath, entryName, projectName, agentsHome string) b
 	return linked
 }
 
-// cursorRuleScope returns the (scope, rest) pair for a cursor rule entry, or
-// ("", "", false) if the entry is not a managed cursor rule for this project.
-func cursorRuleScope(entryName, projectName string) (scope, rest string, ok bool) {
-	switch {
-	case strings.Contains(entryName, ".dot-agents-backup"):
-		return "", "", false
-	case !strings.HasSuffix(entryName, ".mdc"):
-		return "", "", false
-	case strings.HasPrefix(entryName, doctorGlobalPrefix):
-		return "global", strings.TrimPrefix(entryName, doctorGlobalPrefix), true
-	case strings.HasPrefix(entryName, projectName+"--"):
-		return projectName, strings.TrimPrefix(entryName, projectName+"--"), true
-	}
-	return "", "", false
-}
-
 // cursorRuleHardlinkedAny reports whether linkPath is a hardlink to the
 // canonical cursor source (with .mdc→.md fallback) and returns the primary
 // source path used (regardless of which one matched).
+//
+// Surviving caller after P1 broken-link migration: countCursorOk in this
+// file (P3 scope). The cursor broken-link enumeration moved to
+// internal/platform/cursor.go (BrokenLinkReporter), which carries its own
+// hard-link helpers; this lifecycle copy stays until the OK-count path also
+// migrates in P3.
 func cursorRuleHardlinkedAny(linkPath, scope, rest, agentsHome string) (src string, linked bool) {
 	src = filepath.Join(agentsHome, "rules", scope, rest)
 	if ok, _ := links.AreHardlinked(linkPath, src); ok {
@@ -640,105 +630,36 @@ func cursorRuleHardlinkedAny(linkPath, scope, rest, agentsHome string) (src stri
 	return src, false
 }
 
-// collectCursorBrokenLinks walks the cursor rules dir and appends one
-// brokenLink per managed entry that fails the hardlink check.
-func collectCursorBrokenLinks(name, path, agentsHome string, rel func(string) string) []brokenLink {
-	var broken []brokenLink
-	cursorRulesDir := filepath.Join(path, ".cursor", "rules")
-	entries, err := os.ReadDir(cursorRulesDir)
-	if err != nil {
-		return broken
-	}
-	for _, e := range entries {
-		scope, rest, ok := cursorRuleScope(e.Name(), name)
-		if !ok {
-			continue
-		}
-		f := filepath.Join(cursorRulesDir, e.Name())
-		src, linked := cursorRuleHardlinkedAny(f, scope, rest, agentsHome)
-		if linked {
-			continue
-		}
-		broken = append(broken, brokenLink{
-			platformID: "cursor",
-			linkPath:   rel(f),
-			dest:       config.DisplayPath(src),
-		})
-	}
-	return broken
-}
-
-// collectClaudeBrokenLinks walks the claude rules dir and appends one
-// brokenLink per resolvable-but-broken managed link.
-func collectClaudeBrokenLinks(path string, rel func(string) string) []brokenLink {
-	var broken []brokenLink
-	claudeRulesDir := filepath.Join(path, doctorClaudeDir, "rules")
-	entries, err := os.ReadDir(claudeRulesDir)
-	if err != nil {
-		return broken
-	}
-	for _, e := range entries {
-		linkPath := filepath.Join(claudeRulesDir, e.Name())
-		dest, isLink, isBroken := managedLinkBroken(linkPath)
-		if !isLink || !isBroken {
-			continue
-		}
-		broken = append(broken, brokenLink{
-			platformID: "claude",
-			linkPath:   rel(linkPath),
-			dest:       config.DisplayPath(dest),
-		})
-	}
-	return broken
-}
-
-// projectSingleFiles returns the canonical (platform, path) tuples for the
-// single-file managed links checked by both collectBrokenLinks and
-// countProjectLinks.
-func projectSingleFiles(path string) []struct {
-	platformID string
-	path       string
-} {
-	return []struct {
-		platformID string
-		path       string
-	}{
-		{"codex", filepath.Join(path, doctorAgentsMD)},
-		{"copilot", filepath.Join(path, ".github", doctorCopilotInstr)},
-		{"copilot", filepath.Join(path, ".vscode", doctorMCPJSON)},
-		{"claude", filepath.Join(path, ".mcp.json")},
-		{"opencode", filepath.Join(path, doctorOpenCodeJSON)},
-	}
-}
-
-// collectSingleFileBrokenLinks checks each canonical single-file managed link
-// for the project and appends one brokenLink per resolvable-but-broken entry.
-func collectSingleFileBrokenLinks(path string, rel func(string) string) []brokenLink {
-	var broken []brokenLink
-	for _, sf := range projectSingleFiles(path) {
-		dest, isLink, isBroken := managedLinkBroken(sf.path)
-		if !isLink || !isBroken {
-			continue
-		}
-		broken = append(broken, brokenLink{
-			platformID: sf.platformID,
-			linkPath:   rel(sf.path),
-			dest:       config.DisplayPath(dest),
-		})
-	}
-	return broken
-}
-
 // collectBrokenLinks returns all broken managed links for a project.
+//
+// Per platform-driven-diagnostics P2, every platform implements
+// BrokenLinkReporter and owns its own enumeration. doctor delegates by
+// type-assertion (sister-interface pattern from
+// internal/platform/diagnostics.go) and does no per-platform classification
+// of its own — the legacy projectSingleFiles table + collectSingleFileBrokenLinks
+// helper were deleted in P2 because every platform now reports its own
+// single-file links (codex AGENTS.md, copilot .github/copilot-instructions.md +
+// .vscode/mcp.json, opencode opencode.json). Adding a new platform from this
+// point forward is a single internal/platform/<name>.go change.
 func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 	displayBase := path + "/"
 	rel := func(p string) string {
 		return strings.TrimPrefix(p, displayBase)
 	}
 	var broken []brokenLink
-	broken = append(broken, collectCursorBrokenLinks(name, path, agentsHome, rel)...)
-	broken = append(broken, collectClaudeBrokenLinks(path, rel)...)
-	broken = append(broken, collectSingleFileBrokenLinks(path, rel)...)
+	for _, p := range platform.All() {
+		r, ok := p.(platform.BrokenLinkReporter)
+		if !ok {
+			continue
+		}
+		for _, bl := range r.BrokenLinks(name, path, agentsHome) {
+			broken = append(broken, brokenLink{
+				platformID: bl.PlatformID,
+				linkPath:   rel(bl.LinkPath),
+				dest:       bl.DisplayDest,
+			})
+		}
+	}
 	return broken
 }
 

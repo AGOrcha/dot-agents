@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/NikashPrakash/dot-agents/internal/linktest"
 )
 
 const codexAgentMarkdownFile = "AGENT.md"
@@ -705,4 +706,104 @@ func TestCodexCountLinks_HealthyAGENTSMarkdown(t *testing.T) {
 	if !b.Present || b.Broken {
 		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
 	}
+}
+
+// ---------- BrokenLinkReporter implementation (P2) ----------
+
+// TestCodexBrokenLinks_EmptyProject is the absent-surface sentinel: no
+// managed AGENTS.md yet means no diagnostics. Matches doctor's empty-
+// project contract that absent != broken.
+func TestCodexBrokenLinks_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &codex{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("expected no broken links in empty project, got %d: %+v", len(got), got)
+	}
+}
+
+// TestCodexBrokenLinks_BrokenAGENTSMD is the central broken-symlink case
+// migrated from doctor's TestCollectBrokenLinks_BrokenAgentsMD: a dangling
+// AGENTS.md at the repo root must surface with PlatformID="codex".
+func TestCodexBrokenLinks_BrokenAGENTSMD(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.DanglingLink(t, filepath.Join(projectPath, codexAgentsMarkdown))
+
+	c := &codex{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 broken link, got %d: %+v", len(got), got)
+	}
+	if got[0].PlatformID != "codex" {
+		t.Errorf("PlatformID = %q, want codex", got[0].PlatformID)
+	}
+	if got[0].LinkPath == "" || got[0].DisplayDest == "" {
+		t.Errorf("LinkPath/DisplayDest unset: %+v", got[0])
+	}
+}
+
+// TestCodexBrokenLinks_PlainAGENTSMDIgnored guards the contract carried over
+// from lifecycle's managedLinkBroken: a plain regular file at AGENTS.md
+// (not a managed link) is unmanaged user content and must NOT be reported.
+// This is the negative branch of classifyManagedLink (linkStateNotALink).
+func TestCodexBrokenLinks_PlainAGENTSMDIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projectPath, codexAgentsMarkdown), []byte("plain"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := &codex{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("plain AGENTS.md must be ignored by broken-link reporter, got %+v", got)
+	}
+}
+
+// TestCodexBrokenLinks_HealthyAGENTSMDIgnored confirms a managed symlink
+// whose target exists is NOT reported. Mirrors the
+// TestClaudeBrokenLinks_HealthySymlinkSkipped contract for codex.
+func TestCodexBrokenLinks_HealthyAGENTSMDIgnored(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(agentsHome, "rules", "global", "agents.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("# agents"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, target, filepath.Join(projectPath, codexAgentsMarkdown))
+
+	c := &codex{io: stdPlatformIO{}}
+	got := c.BrokenLinks("proj", projectPath, agentsHome)
+	if len(got) != 0 {
+		t.Errorf("healthy AGENTS.md symlink must not be broken, got %+v", got)
+	}
+}
+
+// TestCodexBrokenLinks_InterfaceConformance pins compile-time conformance
+// with BrokenLinkReporter so doctor.collectBrokenLinks's type assertion
+// cannot silently regress.
+func TestCodexBrokenLinks_InterfaceConformance(t *testing.T) {
+	var _ BrokenLinkReporter = (*codex)(nil)
 }
