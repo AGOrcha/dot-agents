@@ -22,6 +22,7 @@ type codex struct {
 const (
 	codexAgentsDir      = ".agents"
 	codexDir            = ".codex"
+	codexConfigTOML     = "config.toml"
 	codexHooksJSON      = "hooks.json"
 	codexAgentsMarkdown = "AGENTS.md"
 	codexAgentMDFile    = "AGENT.md"
@@ -196,7 +197,7 @@ func (c *codex) linkCodexConfigToml(project, repoPath, agentsHome string) error 
 	}
 	if src := resolveScopedFile(agentsHome, "settings", project, "codex.toml"); src != "" {
 		// Managed-replace at a fixed owned path (.codex/config.toml).
-		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexDir, "config.toml"), backupSidecar); err != nil {
+		if err := links.SymlinkReplacing(src, filepath.Join(repoPath, codexDir, codexConfigTOML), backupSidecar); err != nil {
 			return err
 		}
 	}
@@ -289,7 +290,7 @@ func (c *codex) RemoveLinks(project, repoPath string) error {
 	var errs []error
 	errs = append(errs,
 		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexAgentsMarkdown), agentsHome),
-		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, "config.toml"), agentsHome),
+		links.RemoveIfSymlinkUnder(filepath.Join(repoPath, codexDir, codexConfigTOML), agentsHome),
 	)
 	repoBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global", project)
 	if err == nil && len(repoBundles) > 0 {
@@ -522,4 +523,33 @@ func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 		return nil, err
 	}
 	return append(skills, tomls...), nil
+}
+
+// CountLinks implements LinkCounter for the codex platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter previously inlined in status.go's
+// codexTextBadge.
+//
+// Healthy: AGENTS.md, .codex/config.toml, .codex/hooks.json (when each is a
+// resolvable managed link with a reachable target, or any present file —
+// matching the historical addManagedCounts contract), plus any resolvable
+// entry under .codex/agents/ or .agents/skills/. Broken: a resolvable
+// managed link whose target is missing.
+func (c *codex) CountLinks(_, repoPath, _ string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, codexAgentsMarkdown),
+		filepath.Join(repoPath, codexDir, codexConfigTOML),
+		filepath.Join(repoPath, codexDir, codexHooksJSON),
+	})
+	addManagedDirCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, codexDir, "agents"),
+		filepath.Join(repoPath, codexAgentsDir, "skills"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the codex platform.
+func (c *codex) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := c.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "Codex", Present: ok > 0, Broken: broken > 0}
 }

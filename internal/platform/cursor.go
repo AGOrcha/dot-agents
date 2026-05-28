@@ -27,6 +27,7 @@ type cursor struct {
 const (
 	cursorHooksFile   = "hooks.json"
 	cursorJSON        = "cursor.json"
+	cursorMCPJSON     = "mcp.json"
 	cursorDir         = ".cursor"
 	globalRulesPrefix = "global--"
 
@@ -359,8 +360,8 @@ func (c *cursor) createMCPLinks(project, repoPath, agentsHome string) error {
 	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
-	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, "mcp.json"); src != "" {
-		dst := filepath.Join(repoPath, cursorDir, "mcp.json")
+	if src := resolveScopedFile(agentsHome, "mcp", project, cursorJSON, cursorMCPJSON); src != "" {
+		dst := filepath.Join(repoPath, cursorDir, cursorMCPJSON)
 		// Managed-replace at a fixed owned path (.cursor/mcp.json).
 		return links.HardlinkReplacing(src, dst, backupSidecar)
 	}
@@ -509,6 +510,82 @@ func cursorRuleSources(agentsHome, scope, name string) []string {
 func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	// Same repo-relative targets as Claude so duplicate intents merge in the shared plan.
 	return BuildSharedAgentMirrorIntents(project, filepath.Join(".claude", "agents"))
+}
+
+// CountLinks implements LinkCounter for the cursor platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter that previously lived in status.go's
+// cursorTextBadge / countCursorRules / addManagedCounts.
+//
+// Healthy entries: hard-linked .cursor/rules/<scope>--<name> files (matched
+// against ~/.agents/rules/<scope>/<name> with the .mdc → .md fallback),
+// plus a resolvable .cursor/mcp.json, .cursor/settings.json,
+// .cursor/hooks.json, or .cursorignore. Broken: a managed-rule entry whose
+// canonical inode no longer matches, or a resolvable managed link whose
+// target is missing.
+func (c *cursor) CountLinks(project, repoPath, agentsHome string) (ok, broken int) {
+	ok, broken = cursorCountRules(project, repoPath, agentsHome)
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, cursorDir, cursorMCPJSON),
+		filepath.Join(repoPath, cursorDir, "settings.json"),
+		filepath.Join(repoPath, cursorDir, cursorHooksFile),
+		filepath.Join(repoPath, ".cursorignore"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the cursor platform — the single source
+// of truth replacing the parallel cursorTextBadge / platformStatus("Cursor", …)
+// paths in status.go.
+func (c *cursor) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := c.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: c.DisplayName(), Present: ok > 0, Broken: broken > 0}
+}
+
+// cursorCountRules walks .cursor/rules/ and counts hardlinks to the global
+// and project-scoped rules stores as ok, mismatches as warnings. Mirrors the
+// historical countCursorRules in status.go.
+func cursorCountRules(project, repoPath, agentsHome string) (ok, broken int) {
+	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return 0, 0
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
+			continue
+		}
+		scope, rest, isManaged := cursorEntryScope(e.Name(), project)
+		if !isManaged {
+			continue
+		}
+		f := filepath.Join(rulesDir, e.Name())
+		if linked, _ := links.AreHardlinked(f, filepath.Join(agentsHome, "rules", scope, rest)); linked {
+			ok++
+			continue
+		}
+		fallback := strings.TrimSuffix(rest, ".mdc") + ".md"
+		if linked, _ := links.AreHardlinked(f, filepath.Join(agentsHome, "rules", scope, fallback)); linked {
+			ok++
+			continue
+		}
+		broken++
+	}
+	return ok, broken
+}
+
+// cursorEntryScope returns the (scope, rest, ok) tuple for a cursor rule entry
+// name. scope is "global" or project; rest is the canonical filename relative
+// to ~/.agents/rules/<scope>/. ok=false when the entry is not a managed
+// cursor rule for this project.
+func cursorEntryScope(name, project string) (scope, rest string, ok bool) {
+	switch {
+	case strings.HasPrefix(name, globalRulesPrefix):
+		return "global", strings.TrimPrefix(name, globalRulesPrefix), true
+	case strings.HasPrefix(name, project+"--"):
+		return project, strings.TrimPrefix(name, project+"--"), true
+	}
+	return "", "", false
 }
 
 // BrokenLinks implements BrokenLinkReporter for the cursor platform.

@@ -26,6 +26,7 @@ const (
 	copilotInstructionsMD    = "copilot-instructions.md"
 	copilotGitHubDir         = ".github"
 	copilotVSCodeDir         = ".vscode"
+	copilotAgentsDir         = ".agents"
 )
 
 func NewCopilot() Platform { return &copilot{io: stdPlatformIO{}} }
@@ -429,7 +430,7 @@ func (c *copilot) removeClaudeCompatSettings(project, repoPath, agentsHome strin
 }
 
 func (c *copilot) removeSkillsLinks(repoPath, agentsHome string) error {
-	skillsDir := filepath.Join(repoPath, ".agents", "skills")
+	skillsDir := filepath.Join(repoPath, copilotAgentsDir, "skills")
 	entries, err := os.ReadDir(skillsDir)
 	if err != nil {
 		return nil
@@ -530,7 +531,7 @@ func classifyCopilotSingleFile(linkPath string) []BrokenLink {
 }
 
 func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
-	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(copilotAgentsDir, "skills"))
 	if err != nil {
 		return nil, err
 	}
@@ -539,4 +540,34 @@ func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) 
 		return nil, err
 	}
 	return append(skills, agents...), nil
+}
+
+// CountLinks implements LinkCounter for the copilot platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter that previously lived in status.go's
+// copilotTextBadge.
+//
+// Healthy: .github/copilot-instructions.md, .vscode/mcp.json, and (yes —
+// shared with claude) .claude/settings.local.json when each is a resolvable
+// managed link, plus any resolvable entry under .github/agents/,
+// .github/hooks/, or .agents/skills/. Broken: a resolvable managed link
+// whose target is missing.
+func (c *copilot) CountLinks(_, repoPath, _ string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD),
+		filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON),
+		filepath.Join(repoPath, copilotClaudeDir, copilotSettingsLocalJSON),
+	})
+	addManagedDirCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, copilotGitHubDir, "agents"),
+		filepath.Join(repoPath, copilotGitHubDir, "hooks"),
+		filepath.Join(repoPath, copilotAgentsDir, "skills"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the copilot platform.
+func (c *copilot) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := c.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "Copilot", Present: ok > 0, Broken: broken > 0}
 }

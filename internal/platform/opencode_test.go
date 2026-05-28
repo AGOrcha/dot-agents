@@ -137,6 +137,40 @@ func TestOpencodeRemoveLinksFullPath(t *testing.T) {
 	}
 }
 
+// ---------- P3: Badge + CountLinks (StatusBadger + LinkCounter) ----------
+
+// TestOpenCodeBadge_EmptyProject pins the empty-project contract.
+func TestOpenCodeBadge_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	got := NewOpenCode().(*opencode).Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if got.Name != "OpenCode" {
+		t.Errorf("Badge.Name = %q, want %q", got.Name, "OpenCode")
+	}
+	if got.Present || got.Broken {
+		t.Errorf("empty project: Badge = %+v, want Present=false Broken=false", got)
+	}
+}
+
+// TestOpenCodeCountLinks_HealthyOpenCodeJSON covers the positive single-file
+// branch: a present opencode.json counts as healthy and Badge surfaces
+// Present=true.
+func TestOpenCodeCountLinks_HealthyOpenCodeJSON(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmp, "opencode.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	o := NewOpenCode().(*opencode)
+	ok, broken := o.CountLinks("proj", tmp, filepath.Join(tmp, ".agents"))
+	if ok < 1 || broken != 0 {
+		t.Errorf("CountLinks = (%d,%d), want (>=1,0)", ok, broken)
+	}
+	b := o.Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if !b.Present || b.Broken {
+		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
+	}
+}
+
 // ---------- BrokenLinkReporter implementation (P2) ----------
 
 // TestOpenCodeBrokenLinks_EmptyProject is the absent-surface sentinel:

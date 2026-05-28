@@ -399,7 +399,7 @@ func TestRunStatus_JSONFlagEndToEnd(t *testing.T) {
 
 func TestCollectProjectPlatforms_StableLength(t *testing.T) {
 	tmp := t.TempDir()
-	got := collectProjectPlatforms(tmp)
+	got := collectProjectPlatforms("proj", tmp, t.TempDir())
 	if len(got) != 5 {
 		t.Errorf("expected 5 platforms (cursor/claude/codex/opencode/copilot), got %d", len(got))
 	}
@@ -418,38 +418,61 @@ func TestCollectUserConfigPlatforms_FilterIsolation(t *testing.T) {
 	}
 }
 
-// ---------- printBadgeRow / cursorTextBadge integration ----------
+// ---------- printBadgeRow / per-platform Badge integration ----------
+//
+// After P3, the legacy cursorTextBadge / claudeTextBadge / countCursorRules /
+// countClaudeRules helpers no longer live in this package — each platform
+// owns its Badge + CountLinks via the StatusBadger / LinkCounter sister
+// interfaces (see internal/platform/diagnostics.go). The lifecycle-side
+// tests below preserve their original behavioral assertions by driving the
+// same scenarios through collectProjectTextBadges (the iterator that
+// replaced the per-platform inline helpers) and CountClaudeRules (the
+// thin shim retained for the legacy seam).
 
-func TestCursorTextBadge_NoConfig(t *testing.T) {
+// TestCollectProjectTextBadges_EmptyProject confirms the iterator returns one
+// not-present, not-broken badge per platform when the project tree is empty.
+// Replaces the prior TestCursorTextBadge_NoConfig / TestClaudeTextBadge_NoRules
+// pair with one assertion that covers every platform's empty branch via the
+// public iterator.
+func TestCollectProjectTextBadges_EmptyProject(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	badge := cursorTextBadge(tmp, agentsHome)
-	if badge.present {
-		t.Errorf("expected no present badge for empty project, got %+v", badge)
+	got := collectProjectTextBadges("proj", tmp, agentsHome)
+	if len(got) != 5 {
+		t.Fatalf("expected 5 badges, got %d (%+v)", len(got), got)
+	}
+	for _, b := range got {
+		if b.present {
+			t.Errorf("%s badge.present = true for empty project, want false", b.name)
+		}
+		if b.broken {
+			t.Errorf("%s badge.broken = true for empty project, want false", b.name)
+		}
 	}
 }
 
-func TestClaudeTextBadge_NoRules(t *testing.T) {
-	tmp := t.TempDir()
-	badge := claudeTextBadge(tmp)
-	if badge.present {
-		t.Errorf("expected no present badge for empty project, got %+v", badge)
-	}
-}
-
+// TestCountClaudeRules_ReportsBrokenSymlinks exercises the lifecycle-side
+// CountClaudeRules shim (kept exported for the legacy commands seams_test
+// callers). The underlying classification logic now lives in the platform
+// package; this test pins that the shim continues to surface
+// (ok=0, warn=1) for a dangling .claude/rules symlink.
 func TestCountClaudeRules_ReportsBrokenSymlinks(t *testing.T) {
 	tmp := t.TempDir()
 	rulesDir := filepath.Join(tmp, ".claude", "rules")
 	os.MkdirAll(rulesDir, 0755)
 	linktest.DanglingLink(t, filepath.Join(rulesDir, "missing.md"))
 
-	ok, warn := countClaudeRules(tmp)
+	ok, warn := CountClaudeRules(tmp)
 	if ok != 0 || warn != 1 {
 		t.Errorf("expected (0,1) for broken claude rules, got (%d,%d)", ok, warn)
 	}
 }
 
-func TestCountCursorRules_GlobalHardlink(t *testing.T) {
+// TestCollectProjectTextBadges_CursorGlobalHardlink replaces
+// TestCountCursorRules_GlobalHardlink: drives the cursor.CountLinks branch
+// via the iterator and asserts the Cursor badge surfaces as
+// present+not-broken when the project hosts a healthy global hardlink.
+func TestCollectProjectTextBadges_CursorGlobalHardlink(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	src := filepath.Join(agentsHome, "rules", "global", "myrule.mdc")
@@ -462,15 +485,19 @@ func TestCountCursorRules_GlobalHardlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ok, warn := countCursorRules(tmp, agentsHome)
-	if ok != 1 || warn != 0 {
-		t.Errorf("expected (1,0) for healthy cursor hardlink, got (%d,%d)", ok, warn)
+	got := collectProjectTextBadges("proj", tmp, agentsHome)
+	cursor := findBadge(t, got, "Cursor")
+	if !cursor.present || cursor.broken {
+		t.Errorf("expected Cursor badge present+ok, got %+v", cursor)
 	}
 }
 
-// TestCountCursorRules_MDFallbackAndWarn covers the .md fallback success branch
-// and the "no link found" warn branch.
-func TestCountCursorRules_MDFallbackAndWarn(t *testing.T) {
+// TestCollectProjectTextBadges_CursorMDFallbackAndWarn covers the same .md
+// fallback + warn-branch combination the prior TestCountCursorRules_*
+// suite asserted: one healthy fallback link, one orphan (warn), plus
+// background entries (non-global prefix, non-mdc, backup artifact) that
+// must be ignored.
+func TestCollectProjectTextBadges_CursorMDFallbackAndWarn(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 
@@ -488,20 +515,35 @@ func TestCountCursorRules_MDFallbackAndWarn(t *testing.T) {
 	// Unlinked global rule → warn++ branch.
 	os.WriteFile(filepath.Join(rulesDir, "global--orphan.mdc"), []byte("o"), 0644)
 
-	// Non-global prefix (continue branch)
+	// Non-global prefix (continue branch).
 	os.WriteFile(filepath.Join(rulesDir, "proj--ignored.mdc"), []byte("p"), 0644)
-	// Non-mdc (continue)
+	// Non-mdc (continue).
 	os.WriteFile(filepath.Join(rulesDir, "notrule.txt"), []byte("x"), 0644)
-	// Backup artifact (continue)
+	// Backup artifact (continue).
 	os.WriteFile(filepath.Join(rulesDir, "global--x.mdc.dot-agents-backup"), []byte("x"), 0644)
 
-	ok, warn := countCursorRules(tmp, agentsHome)
-	if ok != 1 {
-		t.Errorf("expected ok=1 (md fallback), got %d", ok)
+	got := collectProjectTextBadges("proj", tmp, agentsHome)
+	cursor := findBadge(t, got, "Cursor")
+	if !cursor.present {
+		t.Errorf("expected Cursor.present=true (md fallback link), got %+v", cursor)
 	}
-	if warn != 1 {
-		t.Errorf("expected warn=1 (orphan), got %d", warn)
+	if !cursor.broken {
+		t.Errorf("expected Cursor.broken=true (orphan global rule), got %+v", cursor)
 	}
+}
+
+// findBadge fishes one badge out of the iterator result by name; fails the
+// surrounding test when the badge is missing, since every platform.All()
+// entry that implements StatusBadger is expected to appear in the slice.
+func findBadge(t *testing.T, badges []platformBadge, name string) platformBadge {
+	t.Helper()
+	for _, b := range badges {
+		if b.name == name {
+			return b
+		}
+	}
+	t.Fatalf("badge %q not found in %+v", name, badges)
+	return platformBadge{}
 }
 
 // ---------- additional coverage ----------
@@ -1088,16 +1130,21 @@ func TestCollectUserConfigPlatforms_Populated(t *testing.T) {
 	}
 }
 
-// codexTextBadge / opencodeTextBadge / copilotTextBadge basic smoke.
+// TestPlatformTextBadges_Empty — codex/opencode/copilot basic smoke. After
+// P3 each badge is produced by the platform.StatusBadger implementation
+// for the named platform, surfaced through collectProjectTextBadges (the
+// status.go iterator). The empty-project assertion is identical to the
+// pre-P3 behavior: every badge reports not-present, not-broken.
 func TestPlatformTextBadges_Empty(t *testing.T) {
 	tmp := t.TempDir()
-	for _, badge := range []platformBadge{
-		codexTextBadge(tmp),
-		opencodeTextBadge(tmp),
-		copilotTextBadge(tmp),
-	} {
+	got := collectProjectTextBadges("proj", tmp, filepath.Join(tmp, ".agents"))
+	for _, label := range []string{"Codex", "OpenCode", "Copilot"} {
+		badge := findBadge(t, got, label)
 		if badge.present {
-			t.Errorf("expected no present badge for empty project, got %+v", badge)
+			t.Errorf("expected %s badge.present=false for empty project, got %+v", label, badge)
+		}
+		if badge.broken {
+			t.Errorf("expected %s badge.broken=false for empty project, got %+v", label, badge)
 		}
 	}
 }

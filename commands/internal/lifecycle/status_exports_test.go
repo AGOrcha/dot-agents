@@ -7,6 +7,7 @@ import (
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/NikashPrakash/dot-agents/internal/platform"
 )
 
 // The trampolines below (RunStatus, RunStatusDefault, PrintAudit,
@@ -134,19 +135,23 @@ func TestCountClaudeRules_ExportTrampoline(t *testing.T) {
 	}
 }
 
-// TestDefaultHasMultipleHardLinks_RegularAndHardlink exercises the
-// per-platform defaultHasMultipleHardLinks helper backing the
-// HasMultipleHardLinks seam in backup.go. The Lstat-fail branch is exercised
-// by the absent path; the link-count branch is exercised by a regular file
-// (link count 1, returns false). Hard-link creation on tmpfs is best-effort
-// — skipped via the os.Link error so the test stays portable on systems
-// that reject cross-device or unsupported-link calls.
-func TestDefaultHasMultipleHardLinks_RegularAndHardlink(t *testing.T) {
+// TestHasMultipleHardLinks_RegularAndHardlink exercises the canonical
+// helper backing the lifecycle HasMultipleHardLinks seam. After the P3
+// fold-back absorption the canonical implementation lives at
+// platform.HasMultipleHardLinks (see
+// internal/platform/claude_linkcount_{unix,windows}.go); the lifecycle
+// seam is now a thin pointer to that platform export. The Lstat-fail
+// branch is exercised by the absent path; the link-count branch is
+// exercised by a regular file (link count 1, returns false). Hard-link
+// creation on tmpfs is best-effort — skipped via the os.Link error so the
+// test stays portable on systems that reject cross-device or unsupported-
+// link calls.
+func TestHasMultipleHardLinks_RegularAndHardlink(t *testing.T) {
 	tmp := t.TempDir()
 
 	// Absent path → Lstat fails → false.
-	if defaultHasMultipleHardLinks(filepath.Join(tmp, "ghost")) {
-		t.Error("defaultHasMultipleHardLinks(absent) = true, want false")
+	if platform.HasMultipleHardLinks(filepath.Join(tmp, "ghost")) {
+		t.Error("platform.HasMultipleHardLinks(absent) = true, want false")
 	}
 
 	// Regular file with link count 1 → false.
@@ -154,8 +159,8 @@ func TestDefaultHasMultipleHardLinks_RegularAndHardlink(t *testing.T) {
 	if err := os.WriteFile(regular, []byte("x"), 0o644); err != nil {
 		t.Fatalf("WriteFile regular: %v", err)
 	}
-	if defaultHasMultipleHardLinks(regular) {
-		t.Error("defaultHasMultipleHardLinks(single-link) = true, want false")
+	if platform.HasMultipleHardLinks(regular) {
+		t.Error("platform.HasMultipleHardLinks(single-link) = true, want false")
 	}
 
 	// Best-effort hard link → true if the platform/filesystem allows it.
@@ -164,35 +169,35 @@ func TestDefaultHasMultipleHardLinks_RegularAndHardlink(t *testing.T) {
 		// os.Link can fail on filesystems that disallow hard links
 		// (e.g. some sandboxed runners on Windows). Treat the failure
 		// as an environmental skip: the regular-file branch above and
-		// the absent-path branch already gave the seam two reachable
+		// the absent-path branch already gave the helper two reachable
 		// branches; the multi-link branch is exercised on platforms
 		// where os.Link succeeds (which is the case on the CI Linux
 		// and macOS runners).
 		t.Logf("os.Link unsupported on this filesystem (%v); skipping multi-link assertion", err)
 		return
 	}
-	if !defaultHasMultipleHardLinks(regular) {
-		t.Error("defaultHasMultipleHardLinks(2-link) = false, want true")
+	if !platform.HasMultipleHardLinks(regular) {
+		t.Error("platform.HasMultipleHardLinks(2-link) = false, want true")
 	}
-	if !defaultHasMultipleHardLinks(linked) {
-		t.Error("defaultHasMultipleHardLinks(2-link via alias) = false, want true")
+	if !platform.HasMultipleHardLinks(linked) {
+		t.Error("platform.HasMultipleHardLinks(2-link via alias) = false, want true")
 	}
 }
 
 // TestHasMultipleHardLinks_SeamDefault pins that the package-level
-// HasMultipleHardLinks func-var defaults to defaultHasMultipleHardLinks
-// (and therefore behaves identically on a known input). backup_test.go
-// already exercises the override pattern; this test guarantees the default
-// binding is not silently replaced by a no-op stub.
+// HasMultipleHardLinks func-var still points at the canonical
+// platform-package implementation. backup_test.go already exercises the
+// override pattern; this test guarantees the default binding has not been
+// silently replaced by a no-op stub during the P3 fold-back relocation.
 func TestHasMultipleHardLinks_SeamDefault(t *testing.T) {
 	tmp := t.TempDir()
 	regular := filepath.Join(tmp, "regular.txt")
 	if err := os.WriteFile(regular, []byte("x"), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	// Single-link regular file: both the seam and the default impl
-	// must agree (false).
-	if HasMultipleHardLinks(regular) != defaultHasMultipleHardLinks(regular) {
-		t.Error("HasMultipleHardLinks seam diverges from defaultHasMultipleHardLinks")
+	// Single-link regular file: the lifecycle seam must agree with the
+	// canonical platform-package implementation it now wraps.
+	if HasMultipleHardLinks(regular) != platform.HasMultipleHardLinks(regular) {
+		t.Error("HasMultipleHardLinks seam diverges from platform.HasMultipleHardLinks")
 	}
 }

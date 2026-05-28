@@ -742,3 +742,110 @@ func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	out = append(out, agents...)
 	return out, nil
 }
+
+// CountLinks implements LinkCounter for the claude platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter that previously lived in status.go's
+// claudeTextBadge / countClaudeRules.
+//
+// Healthy: a .claude/rules/ entry that is either a resolvable managed link
+// with a reachable target OR a Windows hard-linked managed file (link
+// count > 1); a resolvable .mcp.json or .claude/settings.local.json; or any
+// resolvable entry under .claude/agents/ or .claude/skills/. Broken: a
+// resolvable managed link whose target is missing.
+func (c *claude) CountLinks(_, repoPath, _ string) (ok, broken int) {
+	ok, broken = claudeCountRules(filepath.Join(repoPath, claudeDir, "rules"))
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, ".mcp.json"),
+		filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON),
+	})
+	addManagedDirCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, claudeDir, "agents"),
+		filepath.Join(repoPath, claudeDir, "skills"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the claude platform.
+func (c *claude) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := c.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "Claude", Present: ok > 0, Broken: broken > 0}
+}
+
+// claudeCountRules walks the .claude/rules directory and reports ok/broken
+// counts. Mirrors the historical countClaudeRules in status.go: a resolvable
+// managed link is ok or broken by target reachability, and a non-resolvable
+// entry with multiple hard links is treated as a Windows managed-file link
+// (counted ok). Plain regular files are skipped.
+func claudeCountRules(rulesDir string) (ok, broken int) {
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		return 0, 0
+	}
+	for _, e := range entries {
+		linkPath := filepath.Join(rulesDir, e.Name())
+		switch state, _ := classifyManagedLink(linkPath); state {
+		case linkStateHealthy:
+			ok++
+		case linkStateBroken:
+			broken++
+		case linkStateNotALink:
+			// A Windows managed file link is a hard link with no reparse
+			// point; ManagedLinkTarget cannot resolve it. Count it as ok
+			// only when nlink > 1, matching status.go's existing behavior.
+			if hasMultipleHardLinks(linkPath) {
+				ok++
+			}
+		}
+	}
+	return ok, broken
+}
+
+// addManagedFileCounts evaluates each managed-file path and increments ok/broken
+// counters: an absent path is silently skipped (not present), a resolvable
+// managed link is ok when its target resolves and broken otherwise, and any
+// other present path is ok (regular file or Windows hard link). Mirrors
+// status.go's countManagedFileOK so per-platform CountLinks impls don't
+// duplicate the branching.
+func addManagedFileCounts(ok, broken *int, files []string) {
+	for _, path := range files {
+		if _, err := os.Lstat(path); err != nil {
+			continue
+		}
+		switch state, _ := classifyManagedLink(path); state {
+		case linkStateHealthy:
+			*ok++
+		case linkStateBroken:
+			*broken++
+		case linkStateNotALink:
+			*ok++
+		}
+	}
+}
+
+// addManagedDirCounts walks each directory and increments ok/broken counters
+// per entry using the same classification rules as addManagedFileCounts.
+// Absent directories are silently skipped — matching status.go's
+// countManagedDirEntries contract.
+func addManagedDirCounts(ok, broken *int, dirs []string) {
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
+			if _, err := os.Lstat(path); err != nil {
+				continue
+			}
+			switch state, _ := classifyManagedLink(path); state {
+			case linkStateHealthy:
+				*ok++
+			case linkStateBroken:
+				*broken++
+			case linkStateNotALink:
+				*ok++
+			}
+		}
+	}
+}

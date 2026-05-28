@@ -19,8 +19,9 @@ type opencode struct {
 }
 
 const (
-	opencodeJSON = "opencode.json"
-	opencodeDir  = ".opencode"
+	opencodeJSON      = "opencode.json"
+	opencodeDir       = ".opencode"
+	opencodeAgentsDir = ".agents"
 )
 
 func NewOpenCode() Platform { return &opencode{io: stdPlatformIO{}} }
@@ -172,7 +173,7 @@ func (o *opencode) RemoveLinks(project, repoPath string) error {
 		}
 	}
 
-	skillsDir := filepath.Join(repoPath, ".agents", "skills")
+	skillsDir := filepath.Join(repoPath, opencodeAgentsDir, "skills")
 	if entries, err := os.ReadDir(skillsDir); err == nil {
 		for _, e := range entries {
 			errs = append(errs, links.RemoveIfSymlinkUnder(filepath.Join(skillsDir, e.Name()), agentsHome))
@@ -210,7 +211,7 @@ func (o *opencode) BrokenLinks(_, repoPath, _ string) []BrokenLink {
 }
 
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
-	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(".agents", "skills"))
+	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(opencodeAgentsDir, "skills"))
 	if err != nil {
 		return nil, err
 	}
@@ -223,4 +224,29 @@ func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error)
 		return nil, err
 	}
 	return append(append(skills, plugins...), agents...), nil
+}
+
+// CountLinks implements LinkCounter for the opencode platform: returns the
+// (ok, broken) tally of managed links under the project's repo. Mirrors the
+// per-platform inline counter that previously lived in status.go's
+// opencodeTextBadge.
+//
+// Healthy: opencode.json when it is a resolvable managed link, plus any
+// resolvable entry under .opencode/agent/ or .agents/skills/. Broken: a
+// resolvable managed link whose target is missing.
+func (o *opencode) CountLinks(_, repoPath, _ string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, opencodeJSON),
+	})
+	addManagedDirCounts(&ok, &broken, []string{
+		filepath.Join(repoPath, opencodeDir, "agent"),
+		filepath.Join(repoPath, opencodeAgentsDir, "skills"),
+	})
+	return ok, broken
+}
+
+// Badge implements StatusBadger for the opencode platform.
+func (o *opencode) Badge(project, repoPath, agentsHome string) PlatformBadge {
+	ok, broken := o.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "OpenCode", Present: ok > 0, Broken: broken > 0}
 }

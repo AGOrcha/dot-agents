@@ -358,6 +358,79 @@ func TestCursorRemoveLinksWithExistingAgentLinks(t *testing.T) {
 	}
 }
 
+// ---------- P3: Badge + CountLinks (StatusBadger + LinkCounter) ----------
+
+// TestCursorBadge_EmptyProject pins the empty-project contract: no .cursor
+// tree means Present=false, Broken=false. Negative test for the
+// StatusBadger conformance.
+func TestCursorBadge_EmptyProject(t *testing.T) {
+	tmp := t.TempDir()
+	got := NewCursor().(*cursor).Badge("proj", tmp, filepath.Join(tmp, ".agents"))
+	if got.Name != "Cursor" {
+		t.Errorf("Badge.Name = %q, want %q", got.Name, "Cursor")
+	}
+	if got.Present || got.Broken {
+		t.Errorf("empty project: Badge = %+v, want Present=false Broken=false", got)
+	}
+}
+
+// TestCursorCountLinks_HealthyGlobalHardlink covers the positive path:
+// a global-scoped hardlink to ~/.agents/rules/global/<name>.mdc returns
+// (ok=1, broken=0) and Badge surfaces Present=true.
+func TestCursorCountLinks_HealthyGlobalHardlink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	src := filepath.Join(agentsHome, "rules", "global", "rule.mdc")
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rulesDir := filepath.Join(tmp, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(src, filepath.Join(rulesDir, "global--rule.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCursor().(*cursor)
+	ok, broken := c.CountLinks("proj", tmp, agentsHome)
+	if ok != 1 || broken != 0 {
+		t.Errorf("CountLinks = (%d,%d), want (1,0)", ok, broken)
+	}
+	b := c.Badge("proj", tmp, agentsHome)
+	if !b.Present || b.Broken {
+		t.Errorf("Badge = %+v, want Present=true Broken=false", b)
+	}
+}
+
+// TestCursorCountLinks_UnmatchedRuleIsBroken covers the negative branch:
+// a global-prefixed entry with no matching canonical source increments
+// the broken counter and Badge surfaces Broken=true.
+func TestCursorCountLinks_UnmatchedRuleIsBroken(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	rulesDir := filepath.Join(tmp, ".cursor", "rules")
+	if err := os.MkdirAll(rulesDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rulesDir, "global--orphan.mdc"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCursor().(*cursor)
+	ok, broken := c.CountLinks("proj", tmp, agentsHome)
+	if ok != 0 || broken != 1 {
+		t.Errorf("CountLinks = (%d,%d), want (0,1)", ok, broken)
+	}
+	b := c.Badge("proj", tmp, agentsHome)
+	if b.Present || !b.Broken {
+		t.Errorf("Badge = %+v, want Present=false Broken=true", b)
+	}
+}
+
 // ---------- BrokenLinkReporter implementation (P1) ----------
 
 // TestCursorBrokenLinks_EmptyProject covers the "absent rules dir" branch:
