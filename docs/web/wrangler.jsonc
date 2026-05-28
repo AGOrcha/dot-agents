@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agorcha-dev-docs",
+  "compatibility_date": "2025-01-01",
+  // account_id is injected from the CLOUDFLARE_ACCOUNT_ID secret in CI
+  // (see .github/workflows/deploy-docs.yml). Do NOT hardcode it here.
+  //
+  // Pure static-asset Worker: no `main` entrypoint — Wrangler serves
+  // ./dist directly via the ASSETS binding. This matches Astro's
+  // `output: 'static'` build target.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "agorcha.dev", "custom_domain": true },
+    { "pattern": "agorcha.dev/*", "custom_domain": true }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+  "env": {
+    "preview": {
+      "name": "agorcha-dev-docs-preview",
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "404-page"
+      }
+      // No custom routes — preview deploys land at the
+      // auto-generated agorcha-dev-docs-preview.<account>.workers.dev URL.
+    }
+  }
+}
