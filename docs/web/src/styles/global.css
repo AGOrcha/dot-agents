@@ -490,3 +490,296 @@ main blockquote {
   color: var(--accent);
   box-shadow: 0 0 0 1px var(--border) inset;
 }
+
+/* ===========================================================================
+ * Pitch page — single-page founder narrative (Problem → Approach → Actions →
+ * Results → Next). Scroll-anchored sections with light-touch interactions.
+ * ========================================================================= */
+
+.pitch-main {
+  /* The pitch breaks out of the 920px column for hero + section bands but
+     keeps body prose within a comfortable measure. */
+  max-width: 1120px;
+}
+
+.pitch-hero {
+  padding: 8px 0 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 32px;
+}
+
+.pitch-hero .eyebrow {
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.pitch-hero h1 {
+  font-size: 2.4rem;
+  line-height: 1.15;
+  margin: 0 0 14px;
+  letter-spacing: -0.01em;
+}
+
+.pitch-hero .lede {
+  font-size: 1.15rem;
+  color: var(--text-dim);
+  margin: 0 0 22px;
+  max-width: 720px;
+}
+
+.pitch-toc {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-top: 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.pitch-toc li { margin: 0; }
+
+.pitch-toc a {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 0.85rem;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pitch-toc a:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+  background: var(--panel);
+}
+
+.pitch-toc .step {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+@media (max-width: 900px) {
+  .pitch-toc { grid-template-columns: 1fr 1fr; }
+  .pitch-hero h1 { font-size: 1.9rem; }
+}
+
+.pitch-section {
+  scroll-margin-top: 24px;
+  padding: 24px 0 8px;
+}
+
+.pitch-section + .pitch-section { border-top: 1px solid var(--border); }
+
+.pitch-section .section-header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.pitch-section .section-num {
+  font-size: 0.75rem;
+  color: var(--accent);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+
+.pitch-section h2 {
+  margin: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+  font-size: 1.55rem;
+  letter-spacing: -0.01em;
+}
+
+.pitch-section .section-sub {
+  color: var(--text-dim);
+  margin: 0 0 18px;
+  font-size: 1rem;
+}
+
+.pitch-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin: 16px 0;
+}
+
+.pitch-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 16px 0;
+}
+
+@media (max-width: 900px) {
+  .pitch-grid-2, .pitch-grid-3 { grid-template-columns: 1fr; }
+}
+
+.pitch-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 18px;
+}
+
+.pitch-card h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  color: var(--accent);
+}
+
+.pitch-card p { margin: 0; color: var(--text); font-size: 0.92rem; }
+
+.pitch-card .small {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 4px;
+}
+
+.pitch-stat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  text-align: center;
+}
+
+.pitch-stat .num {
+  display: block;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.pitch-stat .lbl {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.pitch-stat .src {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+}
+
+.pitch-callout {
+  background: var(--panel);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.95rem;
+}
+
+.pitch-callout strong { color: var(--accent); }
+
+.pitch-honest {
+  background: var(--callout-warn-bg);
+  border: 1px solid var(--callout-warn-border);
+  color: var(--callout-warn-text);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 14px 0;
+  font-size: 0.88rem;
+}
+
+.pitch-honest strong { color: var(--callout-warn-text); }
+
+.pitch-timeline {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin: 18px 0;
+}
+
+@media (max-width: 900px) {
+  .pitch-timeline { grid-template-columns: 1fr; }
+}
+
+.pitch-timeline .lane {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.pitch-timeline .lane h3 {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+  color: var(--accent);
+}
+
+.pitch-timeline .lane .horizon {
+  display: block;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.pitch-timeline .lane ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 0.9rem;
+}
+
+.pitch-timeline .lane li { margin-bottom: 4px; }
+
+.pitch-deeplinks {
+  margin: 24px 0 0;
+}
+
+.pitch-deeplinks h3 {
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 10px;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 6px;
+}
+
+.pitch-section table { margin: 14px 0; }
+
+/* Sticky-ish in-page nav for sections; opt-in by adding to body. */
+.pitch-mini-nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 18px;
+  padding: 10px 0;
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+}
+
+.pitch-mini-nav a { color: var(--text-dim); }
+.pitch-mini-nav a:hover { color: var(--accent); text-decoration: none; }
+.pitch-mini-nav a.current { color: var(--accent); font-weight: 600; }
