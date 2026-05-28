@@ -119,6 +119,10 @@ historical loop evidence and are archived under
 `.agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/`, not retained under
 active state.
 
+> Convergence target: the sentinel shape here is one of the surfaces meant to
+> adopt the generic registry-driven envelope in `[[unified-pluggable-event-contract]]`
+> (so new sentinel kinds become registry entries, not central parse/route edits).
+
 ### D6. Loop-worker matcher logic self-filters in `gate.sh`
 
 **Decision:** Claude's `subagent_type == "loop-worker"` matcher is

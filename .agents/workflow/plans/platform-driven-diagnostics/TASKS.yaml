@@ -125,8 +125,8 @@ tasks:
       verification_required: true
       notes: Contract test asserts every platform.All() entry implements every sister interface it advertises. Stub noopPlatform proves abstraction (single-file change surfaces in doctor + status automatically).
       app_type: go-cli
-    - id: release-minor
-      title: 'Release: bump VERSION + finalize CHANGELOG for platform-driven diagnostics'
+    - id: release-record-0.3.3-fold
+      title: 'Release record: capability folds into 0.3.3 (no separate bump)'
       status: pending
       depends_on:
         - p0-types-and-helpers

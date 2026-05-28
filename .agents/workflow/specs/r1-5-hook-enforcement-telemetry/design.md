@@ -42,6 +42,11 @@ This plan is the bridge layer between R1 (shipped scoring) and R5 (human labels)
 
 **Rationale.** Mirrors R1's `iter-N.score.yaml` pattern (`internal/scoring/persist.go`) and the broader iteration-log convention (`internal/scoring/iterlog.go`). Keeps R2/R3/R5 reads uniform: every per-iteration artifact is `iter-N.<facet>.yaml`. Avoids mutating the shipped `iter-N.score.yaml` schema mid-plan and prevents an R1 sidecar read from blocking on hook-outcome aggregation.
 
+> Convergence target: the `HookOutcome` / sentinel-anchored record shape is one of
+> the surfaces meant to adopt the generic registry-driven envelope in
+> `[[unified-pluggable-event-contract]]` (new hook-outcome/sentinel kinds become
+> registry entries, not per-type sidecar-schema edits).
+
 **Rejected.**
 - *Embed inside `iter-N.score.yaml`.* Couples R1.5 schema to R1's shipped schema; any future hook addition would touch the shipped score sidecar shape. Worse for backward compat with sessions scored under RubricVersion 2.0.2.
 - *Single global ledger* (`.agents/active/iteration-log/hook-outcomes.jsonl`). Looks attractive but breaks the iteration-keyed read pattern; CLI rendering would have to scan a growing global file per iteration query.

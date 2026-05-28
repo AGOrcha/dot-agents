@@ -154,6 +154,11 @@ starter copy pattern. It extends the accepted skill/operation context only as
 needed for these two new gates; it does not invent a second sentinel format or
 platform mapper.
 
+> Convergence target: the reused sentinel/native-output contract is one of the
+> surfaces meant to adopt the generic registry-driven envelope in
+> `[[unified-pluggable-event-contract]]` — so the companion gates' sentinel kinds
+> register against the shared contract rather than forking it.
+
 ### D5. Emit R1.5-compatible outcomes when telemetry is available
 
 New gates must use the same rule/result vocabulary as the upstream gate
