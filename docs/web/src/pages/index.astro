@@ -3,76 +3,593 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const link = (p: string) => `${base}${p}`;
 ---
-<BaseLayout title="Home" description="Interactive dot-agents docs site">
-  <h1>dot-agents — interactive docs</h1>
-  <p>
-    A single canonical home (<code>~/.agents/</code>) for AI coding-agent rules,
-    skills, agents, hooks, and MCP servers — projected into every repo by the
-    <code>da</code> CLI, and orchestrated through a structured workflow loop.
-  </p>
-  <p>
-    This site renders the demo material in <code>docs/DEMO_*.md</code> as
-    structured pages, and surfaces the agent operating model through
-    clickable graphs of <strong>da resources</strong>, <strong>workflow
-    resources</strong>, and <strong>workspace state</strong>.
-  </p>
+<BaseLayout
+  title="Pitch"
+  description="dot-agents — the operating layer for AI coding agents. A 5-section founder pitch: problem, approach, actions, results, what's next."
+>
+  <div class="pitch-main">
+    <!-- ===================== HERO ===================== -->
+    <header class="pitch-hero">
+      <div class="eyebrow">dot-agents — founder pitch</div>
+      <h1>Stop treating AI coding agents like chat windows. Run them like operators.</h1>
+      <p class="lede">
+        One canonical home for every agent's config. A structured workflow
+        loop those agents drive themselves. A knowledge graph so the work
+        compounds instead of resetting every session. Built and battle-tested
+        on its own codebase.
+      </p>
 
-  <h2>Start here</h2>
-  <div class="cards">
-    <a class="card" href={link('/demos/demo_readme/')}>
-      <span class="label">One-minute overview</span>
-      <span class="title">DEMO_README</span>
-    </a>
-    <a class="card" href={link('/demos/demo_diagram/')}>
-      <span class="label">Architecture + loop</span>
-      <span class="title">DEMO_DIAGRAM</span>
-    </a>
-    <a class="card" href={link('/demos/demo_workflow_walkthrough/')}>
-      <span class="label">End-to-end wave</span>
-      <span class="title">DEMO_WORKFLOW_WALKTHROUGH</span>
-    </a>
-    <a class="card" href={link('/demos/demo_lessons_narrative/')}>
-      <span class="label">Hard-won lessons</span>
-      <span class="title">DEMO_LESSONS_NARRATIVE</span>
-    </a>
-    <a class="card" href={link('/demos/demo_index/')}>
-      <span class="label">All demo material</span>
-      <span class="title">DEMO_INDEX</span>
-    </a>
+      <nav aria-label="Pitch sections">
+        <ol class="pitch-toc">
+          <li><a href="#problem"><span class="step">§1 · Problem</span>Why every team rebuilds the same context every morning</a></li>
+          <li><a href="#approach"><span class="step">§2 · Approach</span>One canonical home, one operating loop, structured memory</a></li>
+          <li><a href="#actions"><span class="step">§3 · Actions</span>The CLI, the workflow surface, the KG, the verifiers</a></li>
+          <li><a href="#results"><span class="step">§4 · Results</span>What we can measure, what we can only point at</a></li>
+          <li><a href="#next"><span class="step">§5 · Next</span>Background service, scoped KG, layered PR fanout</a></li>
+        </ol>
+      </nav>
+    </header>
+
+    <!-- ===================== §1 PROBLEM ===================== -->
+    <section id="problem" class="pitch-section">
+      <div class="section-header">
+        <span class="section-num">§1</span>
+        <h2>The problem — context resets every session, configs sprawl every machine</h2>
+      </div>
+      <p class="section-sub">
+        Anyone running AI coding agents past hobby scale feels both pains.
+        They compound.
+      </p>
+
+      <h3>1.1 Config fragmentation</h3>
+      <p>
+        Every AI coding agent has its own config location and format.
+        Cursor wants <code>.cursor/rules/*.mdc</code>. Claude Code wants
+        <code>CLAUDE.md</code> and <code>.claude/</code>. Codex wants
+        <code>AGENTS.md</code>. GitHub Copilot wants files scattered under
+        <code>.github/</code>. OpenCode wants its own. Today, the only way
+        to keep a coding standard or skill in sync across all five is
+        copy-paste — across N repos and M agents.
+      </p>
+
+      <div class="pitch-grid-2">
+        <div class="pitch-card">
+          <span class="small">Symptom</span>
+          <h3>Rules drift</h3>
+          <p>A team-wide convention edits cleanly in one repo's <code>CLAUDE.md</code>, then doesn't make it into the other six repos or the two new laptops. By the time someone notices, "the rule" exists in four mutually-contradictory forms.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Symptom</span>
+          <h3>Platform lock-in by accident</h3>
+          <p>Once a team writes 30 hard-won rules into Cursor's format, switching to Claude Code or Codex stops being a real option. The friction isn't the agent — it's the config debt.</p>
+        </div>
+      </div>
+
+      <h3>1.2 Workflow fragmentation</h3>
+      <p>
+        Agents already <em>behave</em> like a workflow system — they resume work
+        across sessions, persist plans, verify as they go. But every
+        platform scatters that state in its own format, in its own place, with
+        no contract for the next session to pick it up.
+      </p>
+
+      <table>
+        <thead><tr><th>Pain today</th><th>What it costs</th></tr></thead>
+        <tbody>
+          <tr><td>30–40 min/session re-explaining yesterday's work</td><td>Direct token + wall-clock loss; staff-engineer attention burned on context reload</td></tr>
+          <tr><td>Agents rediscover what's broken every session</td><td>Re-running tests, re-reading errors, re-deriving fixes that were already on disk somewhere</td></tr>
+          <tr><td>No safe way to run agents in parallel</td><td>Either serialize (slow) or watch them clobber each other's branches</td></tr>
+          <tr><td>Tribal knowledge stays tribal</td><td>Why we chose Postgres, why this rule exists, what we tried before — all forgotten</td></tr>
+          <tr><td>Agents can't improve their own setup</td><td>Every wave the same mistakes recur until a human encodes the rule</td></tr>
+        </tbody>
+      </table>
+
+      <h3>1.3 Who feels it</h3>
+      <div class="pitch-grid-3">
+        <div class="pitch-card">
+          <span class="small">Persona</span>
+          <h3>Solo engineer, multi-agent</h3>
+          <p>One human, one repo, three agents — Claude in one window, Codex in another, Cursor running locally. Every rule has to be written three times, and nobody owns the canonical version.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Persona</span>
+          <h3>Small team, shared standards</h3>
+          <p>Standards-as-prose live in a Notion page nobody reads. Standards-as-config drift across each developer's <code>~/.cursor/</code>. Code review keeps catching the same five anti-patterns.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Persona</span>
+          <h3>Org with parallel agents</h3>
+          <p>The next obvious productivity unlock is fanning work out to multiple agents at once. Without bounded write scopes and structured merge-back, parallel agents are a race condition machine.</p>
+        </div>
+      </div>
+
+      <div class="pitch-callout">
+        <strong>The honest statement of the problem:</strong> agents already
+        do the work; the failure mode is the <em>operational layer around them</em> —
+        config, state, memory, coordination. Nobody ships that layer. So
+        every team builds half of it, badly, repeatedly.
+      </div>
+    </section>
+
+    <!-- ===================== §2 APPROACH ===================== -->
+    <section id="approach" class="pitch-section">
+      <div class="section-header">
+        <span class="section-num">§2</span>
+        <h2>The approach — agent-as-operator, with structured boundaries</h2>
+      </div>
+      <p class="section-sub">
+        Three commitments. Each one inverts a default that AI coding tools
+        ship with today.
+      </p>
+
+      <h3>2.1 One canonical home, projected — not copied</h3>
+      <p>
+        <code>~/.agents/</code> holds <code>rules/</code>, <code>skills/</code>,
+        <code>agents/</code>, <code>hooks/</code>, <code>mcp/</code>, and
+        <code>settings/</code>. The <code>da</code> CLI projects them into each
+        repo in the shape each platform expects — symlinks where they're
+        supported, hard links where they aren't (Cursor), files generated
+        from templates where the platform demands its own shape (Copilot).
+        Edit once. Every repo, every agent picks it up on the next refresh.
+      </p>
+      <p>
+        This is not "another config tool." It's an explicit rejection of the
+        idea that each agent's config format gets its own source of truth.
+        Multi-agent is the world; the canonical home is the substrate.
+      </p>
+
+      <h3>2.2 The agent runs the operating layer, not the human</h3>
+      <p>
+        The previous default — humans learn a workflow CLI, then drive
+        their agent through it — multiplies cognitive load instead of
+        reducing it. dot-agents inverts the loop:
+      </p>
+      <div class="pitch-grid-2">
+        <div class="pitch-card">
+          <span class="small">Before</span>
+          <h3>CLI-first</h3>
+          <p>Human runs <code>da sync</code>, <code>da refresh</code>, <code>da workflow resume</code>. The agent benefits from managed state, but the human owns every command.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">After</span>
+          <h3>Agent-first with escape hatches</h3>
+          <p>Agent runs <code>da workflow orient</code> at session start, <code>checkpoint</code> at breakpoints, <code>workflow fanout</code> when it needs help. <code>da review</code> is the one command the human owns — approve/reject what the agent proposes.</p>
+        </div>
+      </div>
+      <p>
+        The <em>approval gradient</em> matters more than the command list:
+        agents auto-apply safe operations (checkpoint state, persist verification
+        results, write lessons). They <em>propose</em> things that change shared
+        state (new rules, skill edits, workflow config). They <em>escalate</em>
+        the rest. Humans steer; agents handle the mechanical work.
+      </p>
+
+      <h3>2.3 Bounded delegation with structured merge-back</h3>
+      <p>
+        Parallel agents are the next obvious productivity unlock — and the
+        next obvious way to corrupt your tree. dot-agents treats every fan-out
+        as a contract: an explicit <em>write scope</em> (which files this
+        agent may touch), a verification clause, a structured merge-back
+        artifact, and a parent who closes out the task once the work lands.
+        Worktrees isolate filesystems; bundles isolate intent; the
+        orchestrator is the only thing that crosses those boundaries.
+      </p>
+
+      <h3>2.4 Memory that compounds — the knowledge graph</h3>
+      <p>
+        A local KG (sqlite by default, Postgres-backed for shared scopes)
+        holds three things: structured notes (decisions, entities, lessons),
+        a code graph keyed off Tree-sitter, and a bridge between the two so
+        a decision can pin itself to a function or a file. The
+        <em>scoped</em> KG (§5) adds <code>repo / user / team / org / public</code>
+        as a precedence chain — a team convention can outrank an
+        org-wide default without leaking into someone else's repo graph.
+      </p>
+
+      <div class="pitch-callout">
+        The philosophy: <strong>treat agents as operators with shape</strong> —
+        bounded scopes, structured state, durable memory, explicit human
+        review gates. Not chat windows you nudge.
+      </div>
+    </section>
+
+    <!-- ===================== §3 ACTIONS ===================== -->
+    <section id="actions" class="pitch-section">
+      <div class="section-header">
+        <span class="section-num">§3</span>
+        <h2>The actions — what's shipped, today, on master</h2>
+      </div>
+      <p class="section-sub">
+        Concrete moves. Each one is in the binary or the repo; each one
+        is reachable by a command you can run right now.
+      </p>
+
+      <h3>3.1 The <code>da</code> CLI</h3>
+      <p>
+        Single Go binary. Cobra subcommands. Reaches every part of the
+        operating layer.
+      </p>
+      <div class="pitch-grid-2">
+        <div class="pitch-card">
+          <span class="small">Config surface</span>
+          <h3>init · add · refresh · install · doctor · status · explain</h3>
+          <p>Bootstrap the canonical home, adopt a repo, re-project after pulls, sanity-check links and projections, surface a human-readable explanation of what's managed where.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Workflow surface</span>
+          <h3>{'workflow { orient · next · eligible · fanout · merge-back · delegation closeout · fold-back · checkpoint · verify · advance · plan · plan archive }'}</h3>
+          <p>The full plan / task / slice / verification / delegation / fold-back surface — explained in the live workflow walkthrough.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Resource surface</span>
+          <h3>rules · skills · agents · hooks · mcp · settings</h3>
+          <p>Each managed resource has the same six subcommands (list / add / remove / show / promote / sync) per the resource-command contract.</p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Review surface</span>
+          <h3>da review</h3>
+          <p>The one command humans really need. Inspect a pending proposal; approve it (it lands in <code>~/.agents/</code>); reject it (it gets archived with the reason). Scoped to global by default; project-local proposal support is on the roadmap.</p>
+        </div>
+      </div>
+
+      <h3>3.2 The skills layer — durable agent procedures</h3>
+      <p>
+        Skills sit between rules ("always-on guidelines") and agents
+        ("subagent definitions"). A skill is an on-demand procedure: at a
+        certain trigger, load this prompt and these tools. Canonical
+        examples shipped today:
+      </p>
+      <ul>
+        <li><strong>orchestrator-session-start</strong> — eligible-orient → KG readback → fanout-vs-direct decision → bundle authoring.</li>
+        <li><strong>loop-worker</strong> — bounded implementation worker for a delegated task. Cold-start capable; reads a bundle, implements the write scope, calls <code>iteration-close</code>.</li>
+        <li><strong>iteration-close</strong> — verify → checkpoint → merge-back / advance. Fixes the canonical <em>persisted_via_workflow_commands: no</em> anti-pattern.</li>
+        <li><strong>delegation-lifecycle</strong> — the contract a delegating agent commits to: bundle → spawn → merge-back → closeout.</li>
+        <li><strong>plan-wave-picker</strong> · <strong>isp</strong> · <strong>review-pr</strong> · <strong>build-graph</strong> · <strong>review-delta</strong> — the rest of the working surface.</li>
+      </ul>
+
+      <h3>3.3 Hooks — the lifecycle automation</h3>
+      <p>
+        Hooks fire at platform-defined moments (session start, pre-commit,
+        post-test, on-error). They're how dot-agents stays out of the
+        human's way: the orient hook loads context at session start; the
+        post-commit hook updates the code graph; the stop hook runs the
+        verifier and gates the next iteration.
+      </p>
+
+      <h3>3.4 The knowledge graph — <code>da kg</code></h3>
+      <p>Two integrated layers:</p>
+      <ul>
+        <li><strong>Notes</strong> — structured frontmatter + body, typed
+        (<code>decision</code>, <code>entity</code>, <code>lesson</code>),
+        addressable by intent (<code>decision_lookup</code>,
+        <code>entity_recall</code>). Warm-store row in sqlite/Postgres;
+        hot-file source-of-truth on disk.</li>
+        <li><strong>Code graph</strong> — Tree-sitter symbol/import/call
+        graph bridged into the same store. Lets the orchestrator
+        pre-flight a write scope against the code graph before fanout
+        (lesson: <a href={link('/canonical/lessons/bundle-scope-via-code-graph/')}><code>bundle-scope-via-code-graph</code></a>) and lets reviewers see
+        blast-radius before approving a change.</li>
+      </ul>
+      <p>
+        The bridge is contract-stable: see the
+        <a href={link('/canonical/specs/graph-bridge-contract/')}><code>graph-bridge-contract</code></a>
+        spec. An MCP server exposes the whole surface to every platform that
+        speaks MCP.
+      </p>
+
+      <h3>3.5 The verifier — shift-left CI ownership</h3>
+      <p>
+        Earlier waves asked the impl agent to babysit the PR — write the
+        code <em>and</em> watch SonarCloud, fix mechanical issues, re-run
+        until green. That model burned 5–10× the necessary context per PR.
+        Today a <code>pr-ci</code> verifier profile (configured in
+        <code>.agentsrc.json</code>) owns the CI watch loop. The impl agent
+        exits at merge-back; the verifier auto-fixes cog, dup, cov, and
+        allowlist issues; only the genuinely-novel failures escalate as a
+        structured fix-up brief.
+      </p>
+
+      <h3>3.6 The fold-back and proposal loop — the system improves itself</h3>
+      <p>
+        When a worker notices its bundle would push it outside its write
+        scope, it doesn't silently expand — it emits a
+        <em>fold-back</em>. The fold-back becomes a task in the plan; the
+        orchestrator schedules it next wave. When the agent notices a
+        recurring pattern worth codifying, it queues a
+        <em>proposal</em> — a structured artifact under
+        <code>~/.agents/proposals/</code> (global scope) or
+        <code>.agents/proposals/</code> (project-local). The human runs
+        <code>da review</code>; approved proposals flow into the canonical
+        home and the next session's orient picks them up.
+      </p>
+
+      <h3>3.7 The lessons corpus — durable mistake memory</h3>
+      <p>
+        <code>.agents/lessons/&lt;name&gt;/LESSON.md</code> entries
+        capture mistakes that wasted real time. Every lesson has a
+        consistent shape — pattern, root cause, rule, cross-references.
+        The corpus is the working memory of what <em>not</em> to do.
+        We're at <strong>34 lessons and counting</strong>.
+      </p>
+
+      <div class="pitch-deeplinks">
+        <h3>Live walkthroughs (existing demo material)</h3>
+        <div class="cards">
+          <a class="card" href={link('/demos/demo_readme/')}>
+            <span class="label">One-minute overview</span>
+            <span class="title">DEMO_README</span>
+          </a>
+          <a class="card" href={link('/demos/demo_diagram/')}>
+            <span class="label">Architecture + loop</span>
+            <span class="title">DEMO_DIAGRAM</span>
+          </a>
+          <a class="card" href={link('/demos/demo_workflow_walkthrough/')}>
+            <span class="label">End-to-end wave (PRs #118/#130/#133/#135)</span>
+            <span class="title">DEMO_WORKFLOW_WALKTHROUGH</span>
+          </a>
+          <a class="card" href={link('/demos/demo_lessons_narrative/')}>
+            <span class="label">7 hard-won lessons, story-format</span>
+            <span class="title">DEMO_LESSONS_NARRATIVE</span>
+          </a>
+          <a class="card" href={link('/demos/demo_index/')}>
+            <span class="label">All demo material</span>
+            <span class="title">DEMO_INDEX</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== §4 RESULTS ===================== -->
+    <section id="results" class="pitch-section">
+      <div class="section-header">
+        <span class="section-num">§4</span>
+        <h2>The results — what changed, with evidence</h2>
+      </div>
+      <p class="section-sub">
+        Honest about what's measured vs. claimed. Everything below is
+        either a count we can point at on this repo, or a pattern we can
+        trace through merged PRs and lesson files.
+      </p>
+
+      <h3>4.1 Repeat-mistake reduction (counted)</h3>
+      <p>
+        The lessons corpus is the canonical evidence channel. Each entry
+        names a mistake that wasted time, the root cause, and the rule
+        that prevents it. After a lesson lands as a rule, hook, or skill,
+        the same class of mistake stops recurring. Examples:
+      </p>
+      <ul>
+        <li>
+          <strong>The <code>cd</code> that swapped two branches</strong>
+          (<a href={link('/canonical/lessons/worktree-no-cd/')}><code>worktree-no-cd</code></a>) — was a cross-worktree
+          contamination bug. After the lesson became a rule, no
+          subsequent multi-worktree session has reproduced it.
+        </li>
+        <li>
+          <strong>Impl agents re-learning the Sonar API every PR</strong>
+          (<a href={link('/canonical/lessons/verifier-owns-ci-watch-shift-left/')}><code>verifier-owns-ci-watch-shift-left</code></a>) — the <code>pr-ci</code>
+          verifier profile encodes that knowledge once. Per the lesson:
+          <em>next wave runs ~3–5× cheaper</em> (token estimate, see §4.4 caveat).
+        </li>
+        <li>
+          <strong>Stale TASKS.yaml driving fanout</strong>
+          (<a href={link('/canonical/lessons/verify-task-status-vs-pr-history/')}><code>verify-task-status-vs-pr-history</code></a>) — was a near-miss
+          ship-a-revert incident. The pre-fanout reconciliation rule has
+          held since.
+        </li>
+      </ul>
+
+      <h3>4.2 Throughput (counted)</h3>
+      <div class="pitch-grid-3">
+        <div class="pitch-stat">
+          <span class="num">143</span>
+          <span class="lbl">Merged PRs on dot-agents itself</span>
+          <span class="src">Source: <code>gh pr list --state merged --limit 200</code>, as of this build</span>
+        </div>
+        <div class="pitch-stat">
+          <span class="num">61</span>
+          <span class="lbl">Plans archived to <code>.agents/history/</code></span>
+          <span class="src">Source: <code>ls .agents/history/</code></span>
+        </div>
+        <div class="pitch-stat">
+          <span class="num">34</span>
+          <span class="lbl">Lessons captured + cross-referenced</span>
+          <span class="src">Source: <code>.agents/lessons/index.md</code></span>
+        </div>
+      </div>
+      <p>
+        dot-agents is the primary case study for itself. Every PR went
+        through the orient → act → persist → delegate → propose loop the
+        product ships. Every lesson is a real mistake that became a real
+        rule. Every archived plan is a real wave of work — bundles, merge-backs,
+        verifications, the whole shape.
+      </p>
+
+      <h3>4.3 Pattern → platform behavior (traced)</h3>
+      <p>
+        The most important result isn't a number — it's that the system
+        improves itself in a way you can trace. One worked example:
+      </p>
+      <table>
+        <thead><tr><th>Step</th><th>Artifact</th></tr></thead>
+        <tbody>
+          <tr><td>Pattern noticed in a wave</td><td>Impl agents kept re-learning SonarCloud's API and the <code>gh pr checks</code> schema, eating context.</td></tr>
+          <tr><td>Lesson captured</td><td><a href={link('/canonical/lessons/verifier-owns-ci-watch-shift-left/')}><code>verifier-owns-ci-watch-shift-left</code></a></td></tr>
+          <tr><td>Proposal queued</td><td><a href={link('/canonical/proposals/pr-ci-verifier-integration-audit/')}><code>pr-ci-verifier-integration-audit</code></a></td></tr>
+          <tr><td>Reviewed + approved</td><td><code>da review approve</code> → landed in <code>~/.agents/</code></td></tr>
+          <tr><td>Behavior now baked in</td><td><code>pr-ci</code> verifier profile in <code>.agentsrc.json</code>; impl agents exit at merge-back; next wave consistently cheaper.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        This shape — observation → lesson → proposal → review → canonical
+        change — has repeated through at least the seven lessons featured in
+        the lessons narrative, and is the operating-loop's most-load-bearing
+        claim.
+      </p>
+
+      <h3>4.4 What we'd measure but can't yet (the honest gap)</h3>
+      <div class="pitch-honest">
+        <strong>Caveat:</strong> the "~3–5× cheaper" and "30–40 min/session"
+        numbers above are <em>operator estimates from a single maintainer's
+        session log</em>, not instrumented telemetry. We don't yet measure
+        tokens-per-PR, wall-clock-per-task, or recurrence-rate-by-lesson
+        with anything more rigorous than memory. That instrumentation is
+        exactly what the <strong><a href={link('/canonical/specs/agent-run-scoring-observability-platform/')}>agent-run-scoring observability
+        platform</a></strong> (R2–R5 in §5) is being built to provide.
+      </div>
+
+      <h3>4.5 Multi-platform parity (shipped)</h3>
+      <p>
+        Five platforms ship today: <strong>Cursor</strong>,
+        <strong>Claude Code</strong>, <strong>Codex CLI</strong>,
+        <strong>GitHub Copilot</strong>, <strong>OpenCode</strong>. The
+        <code>platform-driven-diagnostics</code> wave (PRs #118/#130/#133/#135)
+        was the canonical migration: per-platform diagnostics moved off a
+        central lifecycle table onto platform-owned sister interfaces
+        (<code>BrokenLinkReporter</code>, <code>StatusBadger</code>,
+        <code>LinkCounter</code>). Adding a sixth platform is now a known
+        shape — implement three interfaces, no edits to <code>lifecycle/</code>.
+        See the <a href={link('/demos/demo_workflow_walkthrough/')}>walkthrough</a>
+        for the wave-by-wave trace.
+      </p>
+    </section>
+
+    <!-- ===================== §5 NEXT STEPS ===================== -->
+    <section id="next" class="pitch-section">
+      <div class="section-header">
+        <span class="section-num">§5</span>
+        <h2>What's next — near, mid, far</h2>
+      </div>
+      <p class="section-sub">
+        Tied to in-flight specs in the repo. Every entry below either has
+        an accepted spec under <code>.agents/workflow/specs/</code> or a
+        plan-design under <code>.agents/workflow/plans/</code>.
+      </p>
+
+      <div class="pitch-timeline">
+        <div class="lane">
+          <span class="horizon">Near · in-flight</span>
+          <h3>Layered PR fanout</h3>
+          <p>
+            Downstream tasks become eligible the moment an upstream PR is
+            open and green — not when it's merged. Decouples implementation
+            velocity from maintainer review cadence; encodes the wave
+            pattern the orchestrator already runs mentally.
+          </p>
+          <ul>
+            <li>Status name: <code>awaiting_review</code> with <code>agent</code>/<code>owner</code> sub-states.</li>
+            <li>Verifier/lens split — objective signals unblock eligibility, subjective signals gate merge.</li>
+            <li>Self-correcting topology — merges fast-forward downstream; rejections cascade-block visibly.</li>
+            <li>Spec: <a href={link('/canonical/specs/layered-pr-fanout/')}><code>layered-pr-fanout</code></a> (accepted 2026-05-28).</li>
+          </ul>
+        </div>
+
+        <div class="lane">
+          <span class="horizon">Mid · spec accepted</span>
+          <h3>Scoped knowledge graphs</h3>
+          <p>
+            The KG today is single-scope. The next pass models the
+            developer's actual world: <code>repo → user → team → org → public</code>
+            as an ordered precedence chain. Reads fan out; writes target
+            exactly one scope. Every result carries its origin.
+          </p>
+          <ul>
+            <li>Event-driven staleness (not clock-based) — a fact stays true until something invalidates it.</li>
+            <li>Per-scope backends — sqlite locally, Postgres for shared, HTTP for read-only public.</li>
+            <li>Cross-scope contradictions surface as read-time metadata, not stale tags.</li>
+            <li>Spec: <a href={link('/canonical/specs/scoped-knowledge-graphs/')}><code>scoped-knowledge-graphs</code></a>.</li>
+          </ul>
+        </div>
+
+        <div class="lane">
+          <span class="horizon">Mid · plan-design ready</span>
+          <h3>R3 background-worker service</h3>
+          <p>
+            <code>da service run</code> — a long-running process that
+            hosts the telemetry-ingestion watcher, the scoring-recompute
+            task, and the HTTP surface for the dashboard (R2) and
+            review/labeling collection (R5). In-process scheduler;
+            fsnotify + cron triggers; YAML watermark sidecars for
+            durability. Foreground; daemonization is the operator's call.
+          </p>
+          <ul>
+            <li>Single binary, single subcommand. Existing <code>da</code> CLI machinery.</li>
+            <li>Pub/sub bus so the dashboard updates in real time, not by polling.</li>
+            {/* TODO: needs canonical route — plans are not yet a canonical bucket (only docs/lessons/specs/proposals). */}
+            <li>Plan: <code>.agents/workflow/plans/r3-background-worker-service/design.md</code>.</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>5.2 What's further out</h3>
+      <div class="pitch-grid-2">
+        <div class="pitch-card">
+          <span class="small">Far · research-stage</span>
+          <h3>Dream-cycle / background consolidation</h3>
+          <p>
+            Idle-time agent work: replay yesterday's sessions, look for
+            patterns the active loop missed, propose new lessons, prune
+            stale notes. Modeled on memory consolidation in the
+            articles-evaluation research. Research lives in
+            <a href={link('/canonical/proposals/research-auto-dream-and-background-tasks/')}><code>research-auto-dream-and-background-tasks</code></a>.
+          </p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Far · design pass</span>
+          <h3>Two-tier config distribution</h3>
+          <p>
+            <code>sources/</code> + <code>extends/</code> + <code>packages/</code>
+            model so an org can publish a base config, a team can layer
+            its own, and a repo can locally override — auditable, version-pinned,
+            with explicit conflict semantics.
+          </p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Far · design pass</span>
+          <h3>Agent-run scoring &amp; observability (R2 / R5)</h3>
+          <p>
+            Dashboard + review/labeling for every iteration the loop runs.
+            Closes the §4.4 gap: replaces operator memory with instrumented
+            telemetry. R3 (above) is the hosting substrate. Spec:
+            <a href={link('/canonical/specs/agent-run-scoring-observability-platform/')}><code>agent-run-scoring-observability-platform</code></a>.
+          </p>
+        </div>
+        <div class="pitch-card">
+          <span class="small">Far · design pass</span>
+          <h3>Project-local <code>da review</code></h3>
+          <p>
+            Today <code>da review</code> processes global proposals
+            (<code>~/.agents/proposals/</code>) only. Project-local
+            proposals live alongside as markdown drafts. Roadmap: the same
+            schema and CLI surface, scoped to a repo's <code>.agents/</code>.
+          </p>
+        </div>
+      </div>
+
+      <h3>5.3 What's intentionally <em>not</em> on the roadmap</h3>
+      <ul>
+        <li><strong>An "all-in-one" platform UI.</strong> The agent is the UI. The dashboard is for humans to <em>review</em>, not <em>operate</em>.</li>
+        <li><strong>A new agent runtime.</strong> dot-agents projects into Cursor, Claude Code, Codex, Copilot, OpenCode — the agents are the runtimes; we're the operating layer between them.</li>
+        <li><strong>A hosted SaaS by default.</strong> Local-first is a commitment: sqlite, files on disk, your repo. Hosted scopes (team/org KG, observability) are opt-in.</li>
+      </ul>
+
+      <div class="pitch-callout">
+        <strong>Closing frame.</strong> dot-agents is the substrate.
+        Your rules, skills, plans, and the institutional memory around
+        them are the product. The CLI gets out of your way; the
+        canonical home stays honest; the loop keeps working while you
+        sleep.
+      </div>
+
+      <p style="margin-top:24px; color:var(--text-dim); font-size:0.88rem;">
+        Want to dig deeper? Start with the
+        <a href={link('/demos/demo_workflow_walkthrough/')}>workflow walkthrough</a>
+        (a real wave, end-to-end), then the
+        <a href={link('/demos/demo_lessons_narrative/')}>lessons narrative</a>
+        (does this actually work?), then the
+        <a href={link('/canonical/')}>canonical index</a> for the underlying specs.
+        For the interactive graphs of resources, workflow, and workspace state, see the sidebar.
+      </p>
+    </section>
   </div>
-
-  <h2>Explore interactively</h2>
-  <div class="cards">
-    <a class="card" href={link('/graphs/da-resources/')}>
-      <span class="label">Resource graph</span>
-      <span class="title">da resources</span>
-      <span style="color:var(--text-dim); font-size:0.82rem;">skills, agents, rules, hooks, MCP</span>
-    </a>
-    <a class="card" href={link('/graphs/workflow-resources/')}>
-      <span class="label">Resource graph</span>
-      <span class="title">Workflow resources</span>
-      <span style="color:var(--text-dim); font-size:0.82rem;">plans · tasks · delegations · lessons</span>
-    </a>
-    <a class="card" href={link('/graphs/workspace-state/')}>
-      <span class="label">Snapshot</span>
-      <span class="title">Workspace state</span>
-      <span style="color:var(--text-dim); font-size:0.82rem;">worktrees · delegations · eligible queue</span>
-    </a>
-    <a class="card" href={link('/diagrams/tier-model/')}>
-      <span class="label">Diagram</span>
-      <span class="title">Tier model</span>
-      <span style="color:var(--text-dim); font-size:0.82rem;">spec → plan → tasks → history</span>
-    </a>
-  </div>
-
-  <h2>About this site</h2>
-  <p>
-    Built with <a href="https://astro.build" target="_blank" rel="noopener">Astro</a>
-    (markdown pipeline, islands hydration) and
-    <a href="https://js.cytoscape.org/" target="_blank" rel="noopener">Cytoscape.js</a>
-    (interactive graphs). Markdown source-of-truth is <code>docs/DEMO_*.md</code>;
-    the site ingests it via Astro's content collection glob loader — no duplication.
-    See <a href={`${base}/about/`}>about</a> for the full tech-stack rationale
-    and what's stubbed for follow-up.
-  </p>
 </BaseLayout>

@@ -18,15 +18,21 @@ const startsWith = (prefix: string) => {
 
 const sections = [
   {
-    heading: 'Overview',
+    heading: 'Pitch',
     links: [
-      { href: '/', label: 'Home' },
+      { href: '/', label: 'Home (full narrative)' },
+      { href: '/pitch/', label: 'Present (slide deck)' },
+      { href: '/#problem', label: '§1 · Problem' },
+      { href: '/#approach', label: '§2 · Approach' },
+      { href: '/#actions', label: '§3 · Actions' },
+      { href: '/#results', label: '§4 · Results' },
+      { href: '/#next', label: '§5 · Next' },
     ],
   },
   {
-    heading: 'Demo material',
+    heading: 'Live walkthroughs',
     links: [
-      { href: '/demos/demo_index/', label: 'Index' },
+      { href: '/demos/demo_index/', label: 'All demos · index' },
       { href: '/demos/demo_readme/', label: 'One-minute overview' },
       { href: '/demos/demo_diagram/', label: 'Architecture diagrams' },
       { href: '/demos/demo_workflow_walkthrough/', label: 'Workflow walkthrough' },
