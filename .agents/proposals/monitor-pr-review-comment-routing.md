@@ -202,21 +202,39 @@ but must not rename or remove the existing ones.
 2. **Inverse direction.** Should the orchestrator be able to POST replies
    back to GH via the same daemon? Out of scope here; track as a separate
    proposal.
-3. **Webhook vs poll.** The daemon could expose a webhook receiver for
-   GH push notifications instead of polling. Lower latency, but requires
-   a public endpoint and webhook secret. Cross-ref to
-   `[[workflow-orchestrator-daemon]]` event-ingest section.
-4. **Spam-rate protection.** If a maintainer posts 20 comments in 60s
-   during a long review pass, should we batch them into a single digest
-   event (`review_batch.posted` with count + path list) instead of 20
-   individual events? Threshold and batching window TBD.
+3. **Webhook vs poll.** ~~The daemon could expose a webhook receiver
+   instead of polling.~~ **RESOLVED 2026-05-28 (maintainer review #160
+   line 44):** support **both** — webhook is the preferred push transport
+   for new-event arrival; poll is the fallback / catch-up mechanism when
+   webhook delivery is missed or the daemon hasn't been publicly reachable.
+   The contract surface MUST tolerate either source emitting the same event
+   shape (idempotency-keyed on `<pr_id, comment_id|review_id, sub_type>`).
+4. **Spam-rate protection.** ~~Threshold and batching window TBD.~~
+   **RESOLVED 2026-05-28 (maintainer review #160 line 44):** batching is
+   **required**, not optional. Add `review_batch.posted` digest event with
+   `count` + `path[]` + `comment_id[]`. Default window: **60s**
+   (configurable per-project via `.agentsrc.json`). Linked-comments
+   correlation: when a single review's comments target related files,
+   group them into one digest entry with `linked_comments: true`.
 5. **Promoted to spec.** Once the daemon proposal stabilizes, §4 should
    graduate to `workflow/specs/workflow-orchestrator-daemon/design.md`
    as the canonical event-shape definition.
+6. **NEW — pluggable event-contract surface.** Maintainer review #160 line
+   147 surfaced cross-PR convergence: this proposal's event-contract pattern
+   and #157's hook-sentinels-generic/custom path want the **same** generic-
+   pluggable shape so dot-agents doesn't have to rework code each time a new
+   event / sentinel / hook type is added. Tracked as sibling task
+   `[[unified-pluggable-event-contract]]` (added to pr10-branch-split plan
+   2026-05-28). This proposal's §4 event-shape registry SHOULD be one of
+   the first consumers of that contract once landed (model:
+   `verifier_profiles` registry — schema-additive, pluggable, no central
+   code edits per new type). Cross-ref:
+   `[[hook-schema-extension-mechanism]]` (#157 followup) — same underlying
+   request, sentinel side.
 
-Of the four, **(3) webhook vs poll** and **(4) spam-rate batching** are
-the only ones that materially change the contract surface. The others
-are tunables.
+Of the original four, **(3) webhook vs poll** and **(4) spam-rate batching**
+are now resolved and folded above. **(6) pluggable event-contract** is the
+new contract-affecting open question pending the sibling task's design.
 
 ## §9 Relationship to other proposals
 
