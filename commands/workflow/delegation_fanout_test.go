@@ -399,8 +399,8 @@ func TestFanout_VerifierRetryMaxInBundle(t *testing.T) {
 	if err := yaml.Unmarshal(data, &bundle); err != nil {
 		t.Fatal(err)
 	}
-	if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.PrimaryChainMax == nil || *bundle.Verification.EvidencePolicy.PrimaryChainMax != 4 {
-		t.Fatalf("expected primary_chain_max 4, got %+v", bundle.Verification.EvidencePolicy)
+	if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.VerifierChainMax == nil || *bundle.Verification.EvidencePolicy.VerifierChainMax != 4 {
+		t.Fatalf("expected verifier_chain_max 4, got %+v", bundle.Verification.EvidencePolicy)
 	}
 }
 
@@ -1401,5 +1401,103 @@ func TestFanout_MkdirVerifyDirError(t *testing.T) {
 		"--plan", "plan-001", "--task", "task-001", "--owner", "w")
 	if err == nil {
 		t.Fatal("expected mkdir fault")
+	}
+}
+
+func TestFanout_LensRetryMaxInBundle(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--lens-retry-max", "2",
+	); err != nil {
+		t.Fatal(err)
+	}
+	bundle := loadFanoutBundle(t, repo, "task-001")
+	if bundle.Verification.EvidencePolicy == nil || bundle.Verification.EvidencePolicy.LensChainMax == nil || *bundle.Verification.EvidencePolicy.LensChainMax != 2 {
+		t.Fatalf("expected lens_chain_max 2, got %+v", bundle.Verification.EvidencePolicy)
+	}
+	if bundle.Verification.EvidencePolicy.VerifierChainMax != nil {
+		t.Fatalf("expected verifier_chain_max unset when only --lens-retry-max passed, got %+v", bundle.Verification.EvidencePolicy.VerifierChainMax)
+	}
+}
+
+func TestFanout_BothRetryMaxesInBundle(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--verifier-retry-max", "3", "--lens-retry-max", "5",
+	); err != nil {
+		t.Fatal(err)
+	}
+	bundle := loadFanoutBundle(t, repo, "task-001")
+	if bundle.Verification.EvidencePolicy == nil {
+		t.Fatalf("expected evidence_policy, got nil")
+	}
+	if bundle.Verification.EvidencePolicy.VerifierChainMax == nil || *bundle.Verification.EvidencePolicy.VerifierChainMax != 3 {
+		t.Fatalf("expected verifier_chain_max 3, got %+v", bundle.Verification.EvidencePolicy.VerifierChainMax)
+	}
+	if bundle.Verification.EvidencePolicy.LensChainMax == nil || *bundle.Verification.EvidencePolicy.LensChainMax != 5 {
+		t.Fatalf("expected lens_chain_max 5, got %+v", bundle.Verification.EvidencePolicy.LensChainMax)
+	}
+}
+
+func TestEvidencePolicyUnmarshal_PrimaryChainMaxDeprecationAlias(t *testing.T) {
+	var captured []string
+	prev := evidencePolicyDeprecationWarner
+	evidencePolicyDeprecationWarner = func(format string, args ...any) {
+		captured = append(captured, format)
+	}
+	t.Cleanup(func() { evidencePolicyDeprecationWarner = prev })
+
+	src := []byte("primary_chain_max: 4\nsandbox_mutations: true\n")
+	var p delegationEvidencePolicy
+	if err := yaml.Unmarshal(src, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.VerifierChainMax == nil || *p.VerifierChainMax != 4 {
+		t.Fatalf("expected legacy primary_chain_max=4 to alias to VerifierChainMax, got %+v", p.VerifierChainMax)
+	}
+	if p.SandboxMutations == nil || !*p.SandboxMutations {
+		t.Fatalf("expected sandbox_mutations to round-trip, got %+v", p.SandboxMutations)
+	}
+	if len(captured) != 1 || !strings.Contains(captured[0], "primary_chain_max is deprecated") {
+		t.Fatalf("expected deprecation warning, got %#v", captured)
+	}
+}
+
+func TestEvidencePolicyUnmarshal_NewKeyWinsOverDeprecatedAlias(t *testing.T) {
+	prev := evidencePolicyDeprecationWarner
+	evidencePolicyDeprecationWarner = func(format string, args ...any) {}
+	t.Cleanup(func() { evidencePolicyDeprecationWarner = prev })
+
+	src := []byte("verifier_chain_max: 7\nprimary_chain_max: 4\n")
+	var p delegationEvidencePolicy
+	if err := yaml.Unmarshal(src, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.VerifierChainMax == nil || *p.VerifierChainMax != 7 {
+		t.Fatalf("expected new verifier_chain_max=7 to win over legacy alias, got %+v", p.VerifierChainMax)
+	}
+}
+
+func TestEvidencePolicyUnmarshal_NoWarningWithoutLegacyKey(t *testing.T) {
+	var called int
+	prev := evidencePolicyDeprecationWarner
+	evidencePolicyDeprecationWarner = func(format string, args ...any) { called++ }
+	t.Cleanup(func() { evidencePolicyDeprecationWarner = prev })
+
+	src := []byte("verifier_chain_max: 2\nlens_chain_max: 3\n")
+	var p delegationEvidencePolicy
+	if err := yaml.Unmarshal(src, &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if called != 0 {
+		t.Fatalf("expected no deprecation warning when only new keys present, got %d", called)
+	}
+	if p.VerifierChainMax == nil || *p.VerifierChainMax != 2 {
+		t.Fatalf("expected verifier_chain_max=2, got %+v", p.VerifierChainMax)
+	}
+	if p.LensChainMax == nil || *p.LensChainMax != 3 {
+		t.Fatalf("expected lens_chain_max=3, got %+v", p.LensChainMax)
 	}
 }

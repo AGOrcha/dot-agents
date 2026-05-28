@@ -28,6 +28,19 @@ Confirm the `target` resolves to a real branch / PR / commit before reviewing. I
 
 Apply the adversarial lens to the target. Default stance: assume the change is wrong until proven right. Read with hostile intent — look for what the happy-path tests do not cover. Use Read / Grep / Glob to map the blast radius; use Bash only for non-mutating inspection (`git diff`, `git log`, `gh pr diff`, targeted greps for swallowed errors). **No production edits.**
 
+## When `sandbox_mutations` is enabled
+
+Inspect `verification.evidence_policy.sandbox_mutations` on the bundle. When it is `true`, the adversarial lens is permitted to escalate from read-only review to **active probing inside the sandbox**. Active probing means the lens may:
+
+- Run targeted boundary-condition mutations against the change in a sandbox (e.g. flip an off-by-one, swap an error-return for a swallow) and check whether the test suite still passes; a passing suite under mutation is a HIGH finding.
+- Inject controlled faults (timeouts, partial writes, dropped errors, unexpected EOF) against the diff's seams to see whether postconditions still hold.
+- Execute fuzzed inputs against newly introduced parsers / validators / boundary checks.
+- Drive scripted negative scenarios (auth failure, malformed payload, oversized input, race-window contention) past the new code path.
+
+Probes still run inside the sandbox — they must never touch the real working tree, real branches, or any out-of-sandbox resource. Each active probe must show up in the findings under `scenario:` with the exact mutation or fault that produced the failure, so the finding is reproducible.
+
+When `sandbox_mutations` is `false` (or absent), stay in read-only mode: no mutation runs, no fault injection, no fuzzing. Findings come from static inspection only. Do not silently upgrade to active probing without the flag.
+
 Concretely check:
 
 - Security: command / SQL / shell injection, secret / credential leakage in logs or artifacts, privilege escalation, untrusted PATH lookups

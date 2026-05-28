@@ -1,5 +1,12 @@
 package workflow
 
+import (
+	"fmt"
+	"os"
+
+	"go.yaml.in/yaml/v3"
+)
+
 const (
 	workflowDefaultNextAction        = "Review active plan"
 	workflowDefaultVerificationState = "unknown"
@@ -168,11 +175,60 @@ type workflowDelegationCloseoutRecord struct {
 
 // delegationEvidencePolicy is the evidence_policy block under
 // delegationBundleYAML.Verification (schemas/workflow-delegation-bundle.schema.json).
+//
+// VerifierChainMax is the retry budget for the verifier chain (formerly
+// `primary_chain_max`). LensChainMax is the per-lens retry budget used when
+// the lens-sequenced review path runs. Splitting the two prevents the
+// historical verifier-only knob from silently doubling as a lens-retry budget
+// once lens sequencing lands.
+//
+// Backward compatibility: bundles written before the rename use the
+// `primary_chain_max` key. UnmarshalYAML accepts that legacy key as an alias
+// for `verifier_chain_max` and emits a one-shot deprecation warning on stderr.
+// MarshalYAML always writes the new key.
 type delegationEvidencePolicy struct {
 	RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
-	ClassificationRequired  *bool `yaml:"classification_required,omitempty"`
 	SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
-	PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+	VerifierChainMax        *int  `yaml:"verifier_chain_max,omitempty"`
+	LensChainMax            *int  `yaml:"lens_chain_max,omitempty"`
+}
+
+// evidencePolicyDeprecationWarner is overridable in tests so warnings can be
+// captured without writing to the real stderr.
+var evidencePolicyDeprecationWarner = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, format, args...)
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler to accept the deprecated
+// `primary_chain_max` key as an alias for `verifier_chain_max`. When the
+// legacy key is present a deprecation warning is emitted on stderr. If both
+// keys are present the explicit new key wins.
+func (p *delegationEvidencePolicy) UnmarshalYAML(value *yaml.Node) error {
+	// Shadow alias suppresses recursion into this method while still mapping
+	// every documented field. The shadow carries the deprecated key as well so
+	// it can be detected without manual node walking.
+	type evidencePolicyAlias struct {
+		RequireNegativeCoverage *bool `yaml:"require_negative_coverage,omitempty"`
+		SandboxMutations        *bool `yaml:"sandbox_mutations,omitempty"`
+		VerifierChainMax        *int  `yaml:"verifier_chain_max,omitempty"`
+		LensChainMax            *int  `yaml:"lens_chain_max,omitempty"`
+		PrimaryChainMax         *int  `yaml:"primary_chain_max,omitempty"`
+	}
+	var raw evidencePolicyAlias
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	p.RequireNegativeCoverage = raw.RequireNegativeCoverage
+	p.SandboxMutations = raw.SandboxMutations
+	p.VerifierChainMax = raw.VerifierChainMax
+	p.LensChainMax = raw.LensChainMax
+	if raw.PrimaryChainMax != nil {
+		if p.VerifierChainMax == nil {
+			p.VerifierChainMax = raw.PrimaryChainMax
+		}
+		evidencePolicyDeprecationWarner("warning: evidence_policy.primary_chain_max is deprecated; use verifier_chain_max instead\n")
+	}
+	return nil
 }
 
 // delegationBundleYAML matches schemas/workflow-delegation-bundle.schema.json (Phase 8).
