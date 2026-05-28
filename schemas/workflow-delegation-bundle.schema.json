@@ -204,15 +204,25 @@
             "require_negative_coverage": {
               "type": "boolean"
             },
-            "classification_required": {
-              "type": "boolean"
-            },
             "sandbox_mutations": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "When true, the verifier may exercise mutation paths in a sandbox AND the adversarial review lens may run active mutation-based probing instead of read-only inspection. See adversarial-reviewer AGENT.md."
+            },
+            "verifier_chain_max": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Retry budget for the verifier chain. Replaces the deprecated primary_chain_max."
+            },
+            "lens_chain_max": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Per-lens retry budget for the lens-sequenced review path. Separate from verifier_chain_max so verifier and lens budgets do not silently share a knob."
             },
             "primary_chain_max": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "deprecated": true,
+              "description": "DEPRECATED: alias for verifier_chain_max retained for one release cycle. Bundles using this key trigger a deprecation warning on load. Use verifier_chain_max instead."
             }
           }
         }

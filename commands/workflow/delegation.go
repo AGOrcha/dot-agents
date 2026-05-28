@@ -1374,19 +1374,20 @@ func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan 
 }
 
 type fanoutBundleFlags struct {
-	profile         string
-	feedbackGoal    string
-	validationQueue string
-	selReason       string
-	overlays        []string
-	promptLines     []string
-	promptFiles     []string
-	contextFiles    []string
-	scenarioTags    []string
-	regressionArts  []string
-	reqNeg          bool
-	sandbox         bool
-	retryMax        int
+	profile          string
+	feedbackGoal     string
+	validationQueue  string
+	selReason        string
+	overlays         []string
+	promptLines      []string
+	promptFiles      []string
+	contextFiles     []string
+	scenarioTags     []string
+	regressionArts   []string
+	reqNeg           bool
+	sandbox          bool
+	verifierRetryMax int
+	lensRetryMax     int
 }
 
 func collectFanoutBundleFlags(cmd *cobra.Command) *fanoutBundleFlags {
@@ -1414,7 +1415,8 @@ func collectFanoutBundleFlags(cmd *cobra.Command) *fanoutBundleFlags {
 
 	f.reqNeg, _ = cmd.Flags().GetBool("require-negative-coverage")
 	f.sandbox, _ = cmd.Flags().GetBool("sandbox-mutations")
-	f.retryMax, _ = cmd.Flags().GetInt("verifier-retry-max")
+	f.verifierRetryMax, _ = cmd.Flags().GetInt("verifier-retry-max")
+	f.lensRetryMax, _ = cmd.Flags().GetInt("lens-retry-max")
 	return f
 }
 
@@ -1463,12 +1465,19 @@ func applyFanoutEvidencePolicy(b *delegationBundleYAML, f *fanoutBundleFlags) {
 			b.Verification.EvidencePolicy.SandboxMutations = &v
 		}
 	}
-	if f.retryMax > 0 {
+	if f.verifierRetryMax > 0 {
 		if b.Verification.EvidencePolicy == nil {
 			b.Verification.EvidencePolicy = newDelegationEvidencePolicy()
 		}
-		rm := f.retryMax
-		b.Verification.EvidencePolicy.PrimaryChainMax = &rm
+		rm := f.verifierRetryMax
+		b.Verification.EvidencePolicy.VerifierChainMax = &rm
+	}
+	if f.lensRetryMax > 0 {
+		if b.Verification.EvidencePolicy == nil {
+			b.Verification.EvidencePolicy = newDelegationEvidencePolicy()
+		}
+		rm := f.lensRetryMax
+		b.Verification.EvidencePolicy.LensChainMax = &rm
 	}
 }
 

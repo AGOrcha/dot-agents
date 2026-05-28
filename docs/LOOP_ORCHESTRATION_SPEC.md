@@ -576,9 +576,9 @@ verification:
     - go test ./...
   evidence_policy:
     require_negative_coverage: true
-    classification_required: true
-    sandbox_mutations: true
-    primary_chain_max: 3
+    sandbox_mutations: true        # also enables adversarial-lens active probing
+    verifier_chain_max: 3          # verifier retry budget (renamed from primary_chain_max)
+    lens_chain_max: 2              # per-lens review retry budget
 
 closeout:
   worker_must:
