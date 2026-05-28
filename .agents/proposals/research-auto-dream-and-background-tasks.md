@@ -75,6 +75,56 @@ Auto-research is *active* (changing the world); auto-dream is *latent*
 "the agent asleep." Both are pre-conditions for long-running agent systems;
 neither replaces the other.
 
+### In-repo canonical source (added 2026-05-28 fold-in)
+
+The original draft above was outside-in. A primary in-repo source was missed:
+**`research/articles-evaluation-kg-and-adjacent.md`** (947 lines) catalogues
+the same primitive under three converging external names and already files
+`[GAP-ADOPT]` action items against dot-agents:
+
+- **Thoth's dream cycle** (line 244) — concrete 4-phase nightly process:
+  (i) duplicate merging at 0.93+ similarity → (ii) description enrichment →
+  (iii) relationship inference → (iv) confidence decay on relations older
+  than 90 days. Caveat lifted at line 244: *"in dot-agents this should
+  produce `review_due` / proposed links, not clock-based staleness"* —
+  matches the gating discipline (§4 below).
+- **arscontexta's reweave** + **akshay_pachaar's `memify()`** (lines 124, 137,
+  299, 317, 627) — three independent articles on the same consolidation
+  primitive. The research doc names this convergence as the strongest signal
+  in the corpus: *"three independent articles on the same consolidation
+  primitive."*
+- **`memify()`'s four ops** (line 124) — `strengthen / prune / auto-tune /
+  add-derived` — are near-1:1 with scoped-KG's four drivers
+  (source-mutation / derivation-mutation / revocation / contradiction).
+- **C.4 placeholder** — the corpus expects a `dream-cycle / consolidation`
+  spec at index C.4. That is the natural canonical home for the scheduler
+  task this proposal names below.
+- **"Reread the past"** (lines 299, 317) — the load-bearing motivation, not
+  hygiene: meaning is re-derived as the ontology evolves. Sharpens our §2.6
+  propagation work.
+
+`[GAP-ADOPT]` items already filed against dot-agents in that research file
+that an auto-dream-class scheduler task would consume:
+
+- **dream-cycle / nightly consolidation job** (line 254) — direct adoption
+  recommendation; Thoth's 4 phases map onto scoped-KG maintenance.
+- **`last_accessed_at` + `access_count` on `KGNote`** (line 282) — two
+  additive fields; feed (1) `kg query` recency scoring, (2) pruning
+  candidate set (access_count = 0 in window + no linked active plans).
+- **`capture_lag_seconds` on `KGNote`** (line 358) — "speed-of-surfacing"
+  metric; weights recently-captured notes higher for review-nudge firing.
+- **Semantic deduplication pass** (line 164) — Blockify's 80–85% cosine
+  dedup is the model; human-validated merge proposals, not autonomous.
+- **`version_state` enum on `KGNote`** (line 165) — pairs with author field
+  and the dream-cycle's pruning decision.
+
+**Material correction to §4 below:** the recommended scheduler task in
+§4 was originally named `lesson-consolidator`. The in-repo corpus points
+at a **broader, KG-scoped consolidator** (`scoped-kg-dream-cycle`) whose
+inputs are the full `KGNote` corpus, not just lessons. Lessons are one
+NoteType; restricting scope to lessons would re-do the work for every
+other NoteType. Section §4 has been amended to reflect this.
+
 ## §2 Background-tasks pattern survey
 
 | Platform / pattern | Scheduling | Auth + secrets | State persistence | Failure semantics | Relevance to dot-agents |
@@ -187,30 +237,53 @@ This gives two complementary invocation modes:
 
 The R3 spec lists 2 v1 tasks (iter-log fsnotify ingester + rescore-on-rubric-bump).
 It explicitly defers a KG-staleness-refresh task (OQ1). The natural slot for
-auto-dream-class work is **a third scheduler task** added in v1.1 or v1.2:
+auto-dream-class work is **a third scheduler task** added in v1.1 or v1.2,
+and the canonical-source survey above sharpens its scope to the **full
+`KGNote` corpus**, not just lessons:
 
 ```
 da service run
-  ├── task: iterlog-ingester          (fsnotify, real-time)
-  ├── task: rescore-on-rubric-bump    (interval, idempotent)
-  ├── task: kg-staleness-refresh      (deferred per OQ1)
-  └── task: lesson-consolidator       (NEW — auto-dream analogue; deferred)
+  ├── task: iterlog-ingester               (fsnotify, real-time)
+  ├── task: rescore-on-rubric-bump         (interval, idempotent)
+  ├── task: kg-staleness-refresh           (deferred per OQ1; consumed by below)
+  └── task: scoped-kg-dream-cycle          (NEW — Thoth 4-phase; deferred to C.4 spec)
+       ├── lesson-consolidator             (lessons NoteType only)
+       ├── decision-consolidator           (decisions NoteType only)
+       ├── research-claim-consolidator     (research-claims NoteType only)
+       └── ... per NoteType
 ```
 
-`lesson-consolidator` would:
+`scoped-kg-dream-cycle` would implement Thoth's 4 phases against the
+`KGNote` corpus (per-scope), gated through the proposal/review loop. The
+4 ops map to `memify()`'s vocabulary (strengthen / prune / auto-tune /
+add-derived) which converges with scoped-KG's existing 4 drivers:
 
-1. **Light Sleep equivalent** — read iter-logs + active/fold-back observations
-   over a lookback window. Stage candidates. Never write.
-2. **REM Sleep equivalent** — cluster candidates against existing
-   `.agents/lessons/*/LESSON.md` headlines. Identify recurring patterns
-   that should become lessons OR additions to existing lessons. Never write.
-3. **Deep Sleep equivalent** — emit `.agents/proposals/lesson-<name>.md`
-   (project-local proposals; never auto-modify `~/.agents/rules/`). The
-   user reviews via `da review` (global) or by hand (project-local).
+1. **Duplicate merging** (Thoth phase 1 / `memify().prune`) — cluster notes
+   within scope by cosine similarity ≥0.93 (Thoth) or 0.80–0.85 (Blockify);
+   emit `.agents/proposals/kg-merge-<scope>-<id>.md` per candidate cluster.
+   Never auto-merges. Human reviews via `da review`.
+2. **Description enrichment** (Thoth phase 2 / `memify().add-derived`) —
+   re-derive note frontmatter where the ontology has grown (per
+   `[[scoped-knowledge-graphs]]` §2.6 propagation). Emit proposals.
+3. **Relationship inference** (Thoth phase 3 / `memify().strengthen`) —
+   infer missing links from co-citation patterns. Emit proposals; existing
+   `derivation-mutation` driver consumes if approved.
+4. **Confidence decay** (Thoth phase 4 / `memify().auto-tune`) — NOT
+   clock-based per the research-file caveat; instead fire `review_due`
+   when access_count = 0 in lookback window AND no linked active plans
+   AND no derivation children. Consumes the `last_accessed_at` /
+   `access_count` GAP-ADOPT fields above.
 
 This keeps **all writes gated through the existing proposal/review loop** —
 the auto-dream task suggests, the operator promotes. Mirrors OpenClaw's
-"only Deep Sleep writes; only after gating" discipline.
+"only Deep Sleep writes; only after gating" discipline AND Thoth's "produce
+proposed links, not clock-based staleness" caveat from the research-file
+fold-in.
+
+`lesson-consolidator` shrinks to one NoteType-specific sub-task inside
+the broader `scoped-kg-dream-cycle` host — preserves the original
+narrowed-shape recommendation while making room for `decision-consolidator`
+and per-NoteType siblings to come on the same scheduler hook.
 
 ## §5 Naming-consistency review
 
@@ -258,15 +331,24 @@ each scheduler task as `active` (auto-research) vs `latent` (auto-dream)
   same concept under a different name (`da service`). **Recommendation:**
   treat them as the same plan; rename `workflow-orchestrator-daemon` proposals
   to point at `r3-background-worker-service` to avoid two names for one thing.
-- **OQ-C — Does the project want a `lesson-consolidator` task in v1.x?** Not
-  scoped by any current spec. If yes, fold into r3 as a deferred task; if no,
-  document as a future proposal. The shape is well-understood (OpenClaw maps
-  it almost 1:1) and the gating (proposals not direct writes) is already in
-  place.
+- **OQ-C — Does the project want a `scoped-kg-dream-cycle` task in v1.x?**
+  Broader than the original `lesson-consolidator` framing — the in-repo
+  research file (`research/articles-evaluation-kg-and-adjacent.md`) names
+  the **C.4 dream-cycle / consolidation spec** as the canonical home and
+  files `[GAP-ADOPT]` items that this task would consume. If yes, fold into
+  r3 as a deferred task and **also** open the C.4 spec under
+  `.agents/workflow/specs/scoped-kg-dream-cycle/design.md`. The 4-phase
+  shape is well-understood (Thoth + Blockify + memify converge); gating
+  via proposals is already in place.
 - **OQ-D — Does the v1 service need a memory-store at all,** or only the
   watermark sidecars R3 already specifies? Auto-dream-class work (read iter
   logs → emit proposals) does not need new storage; reuses the existing
-  iter-log + proposals dirs. Confirm before opening any v1.x ticket.
+  iter-log + proposals dirs. **However** the GAP-ADOPT items
+  (`last_accessed_at`, `access_count`, `capture_lag_seconds`,
+  `version_state`) are additive `KGNote` fields — they extend the existing
+  warm store, not introduce a new one. Confirm before opening any v1.x
+  ticket; if accepted, these become part of the C.4 spec's "consumed
+  inputs" section.
 - **OQ-E — `da memory` namespace?** If the user wants the OpenClaw CLI
   ergonomics (`memory promote`, `memory rem-harness`, `memory status`)
   available foreground without spinning up a long-running service, that's
@@ -330,11 +412,23 @@ Defer until the user confirms OQ-C + OQ-E.
 
 ## Sources
 
+**Primary in-repo source (fold-in 2026-05-28):**
+
+- `research/articles-evaluation-kg-and-adjacent.md` (947 lines) — corpus
+  evaluation; cites Thoth's dream cycle (line 244), arscontexta's reweave
+  (line 124), akshay_pachaar's `memify()` (lines 117, 124, 137), Blockify's
+  semantic dedup pipeline (lines 155, 164), Weng's episodic/semantic/procedural
+  taxonomy (lines 117, 120). Names the C.4 consolidation spec as the
+  canonical home; files `[GAP-ADOPT]` items consumed by this proposal's §4.
+
+**dot-agents internal:**
+
 - `~/Documents/tmp/lacp/config/autoresearch-program.md` (LACP autoresearch loop)
 - `~/Documents/tmp/lacp/autoresearch/program.md` (LACP brain autoresearch)
 - `~/Documents/tmp/lacp/config/lacp-brain-nightly.cron` (cron template)
 - `.agents/workflow/specs/r3-background-worker-service/design.md` (accepted R3 spec)
 - `.agents/workflow/specs/agent-run-scoring-observability-platform/design.md` (umbrella spec)
+- `.agents/workflow/specs/scoped-knowledge-graphs/design.md` (NoteType + 4 drivers)
 - `.agents/lessons/agents-lack-autonomous-timers/LESSON.md` (timer trap)
 - [AI Agent Memory in 2026: Auto Dream, Context Files, and What Actually Works (Quimby, dev.to)](https://dev.to/max_quimby/ai-agent-memory-in-2026-auto-dream-context-files-and-what-actually-works-39m8)
 - [OpenClaw Dreaming Guide 2026: Background Memory Consolidation for AI Agents (czmilo, dev.to)](https://dev.to/czmilo/openclaw-dreaming-guide-2026-background-memory-consolidation-for-ai-agents-585e)
