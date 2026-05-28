@@ -38,11 +38,92 @@ const { title, description = 'dot-agents — interactive docs', currentPath } = 
     </script>
   </head>
   <body>
+    <button
+      type="button"
+      class="nav-toggle"
+      id="nav-toggle"
+      aria-label="Toggle navigation"
+      aria-controls="site-sidebar"
+      aria-expanded="false"
+    >
+      <span class="nav-toggle-icon" aria-hidden="true"></span>
+    </button>
+    <div class="nav-scrim" id="nav-scrim" hidden></div>
     <div class="layout">
       <Sidebar currentPath={currentPath ?? Astro.url.pathname} />
       <main>
         <slot />
       </main>
     </div>
+    {/* Mobile nav toggle: flips a `nav-open` body class + button aria-expanded.
+        Inline + is:inline so it is present without waiting for a bundled module.
+        All sliding/hiding is CSS-driven; this only manages open/closed state,
+        outside-tap + Esc close, and a simple Tab focus-trap while open. */}
+    <script is:inline>
+      (function () {
+        var btn = document.getElementById('nav-toggle');
+        var scrim = document.getElementById('nav-scrim');
+        var sidebar = document.getElementById('site-sidebar');
+        if (!btn || !scrim || !sidebar) return;
+        var body = document.body;
+
+        function isOpen() { return body.classList.contains('nav-open'); }
+
+        function open() {
+          body.classList.add('nav-open');
+          btn.setAttribute('aria-expanded', 'true');
+          scrim.hidden = false;
+          var first = sidebar.querySelector('a, button');
+          if (first) first.focus();
+        }
+
+        function close() {
+          body.classList.remove('nav-open');
+          btn.setAttribute('aria-expanded', 'false');
+          scrim.hidden = true;
+          btn.focus();
+        }
+
+        btn.addEventListener('click', function () {
+          isOpen() ? close() : open();
+        });
+
+        scrim.addEventListener('click', close);
+
+        document.addEventListener('keydown', function (e) {
+          if (!isOpen()) return;
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            close();
+            return;
+          }
+          if (e.key !== 'Tab') return;
+          // Focus-trap: cycle Tab/Shift+Tab within the toggle + sidebar links.
+          var items = [btn].concat(
+            Array.prototype.slice.call(
+              sidebar.querySelectorAll('a[href], button:not([disabled])')
+            )
+          );
+          if (!items.length) return;
+          var firstEl = items[0];
+          var lastEl = items[items.length - 1];
+          var activeEl = document.activeElement;
+          if (e.shiftKey && activeEl === firstEl) {
+            e.preventDefault();
+            lastEl.focus();
+          } else if (!e.shiftKey && activeEl === lastEl) {
+            e.preventDefault();
+            firstEl.focus();
+          }
+        });
+
+        // If the viewport grows past the desktop breakpoint while the menu is
+        // open, reset to the closed/desktop state so focus + body class are sane.
+        var mq = window.matchMedia('(min-width: 768px)');
+        function onChange(e) { if (e.matches && isOpen()) close(); }
+        if (mq.addEventListener) mq.addEventListener('change', onChange);
+        else if (mq.addListener) mq.addListener(onChange);
+      })();
+    </script>
   </body>
 </html>
