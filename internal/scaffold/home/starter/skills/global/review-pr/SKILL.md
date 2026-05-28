@@ -10,8 +10,8 @@ Perform a structured review of a pull request or branch diff using **`da kg`** f
 
 ## Binary
 
-- Prefer `dot-agents` on `PATH`.
-- In the **dot-agents** repo, use `go run ./cmd/dot-agents …` when needed.
+- Prefer `da` on `PATH`.
+- In the **dot-agents** repo, use `go run ./cmd/da …` when needed.
 
 ## Workflow
 

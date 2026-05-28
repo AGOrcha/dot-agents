@@ -27,7 +27,7 @@ Worker-specific failure modes. Read before implementing.
 
 ## CLI Broken Fallback
 
-- **If `dot-agents` won't build or the binary is missing** — mark `persisted_via_workflow_commands: paused — <reason>` in your iteration log. Create a fold-back: `go run ./cmd/dot-agents workflow fold-back create --plan <id> --observation '[tool-bug]: <detail>' --propose`. Continue with implementation; run deferred persist commands at the start of the next iteration.
+- **If `da` won't build or the binary is missing** — mark `persisted_via_workflow_commands: paused — <reason>` in your iteration log. Create a fold-back: `go run ./cmd/da workflow fold-back create --plan <id> --observation '[tool-bug]: <detail>' --propose`. Continue with implementation; run deferred persist commands at the start of the next iteration.
 
 ## Merge-Back Ownership
 

@@ -7,14 +7,14 @@ Check which project is active and resolve the binary path:
 **dot-agents repo** (`/Users/nikashp/Documents/dot-agents` or wherever `.agentsrc.json` has `"project": "dot-agents"`):
 ```bash
 # Use installed binary or go run from repo root
-which da 2>/dev/null || echo "go run ./cmd/dot-agents"
+which da 2>/dev/null || echo "go run ./cmd/da"
 ```
-Run commands as: `da workflow ...` (or `go run ./cmd/dot-agents workflow ...`)
+Run commands as: `da workflow ...` (or `go run ./cmd/da workflow ...`)
 
 **payout repo** (`/Users/nikashp/Documents/payout` or wherever `.agentsrc.json` has `"project": "payout"`):
 ```bash
 # Build dev binary from sibling repo if not already fresh
-go -C ../dot-agents build -o /tmp/dot-agents-dev ./cmd/dot-agents
+go -C ../dot-agents build -o /tmp/dot-agents-dev ./cmd/da
 ```
 Run commands as: `/tmp/dot-agents-dev workflow ...`
 
@@ -253,7 +253,7 @@ command -v da
 da --help
 ```
 
-If the `PATH` entry still points at an older wrapper or stale build, note that explicitly and keep using `go run ./cmd/dot-agents ...` until the shell/runtime wiring is corrected.
+If the `PATH` entry still points at an older wrapper or stale build, note that explicitly and keep using `go run ./cmd/da ...` until the shell/runtime wiring is corrected.
 
 ---
 

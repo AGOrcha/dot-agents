@@ -5,7 +5,7 @@
 If the output was not passed in (or is stale), re-run:
 
 ```bash
-go run ./cmd/dot-agents workflow eligible --json --plan <scope>
+da workflow eligible --json --plan <scope>
 ```
 
 Key fields to extract from the JSON:

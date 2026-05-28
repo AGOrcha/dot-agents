@@ -14,7 +14,7 @@ tasks:
         - internal/adapters/builtin/none/
         - internal/kg/registry/
         - internal/kg/lockfile/
-        - cmd/dot-agents/commands/kg/
+        - cmd/da/commands/kg/
       verification_required: true
       notes: |-
         Smallest possible adapter; exercises the whole pipeline (schema

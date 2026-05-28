@@ -18,7 +18,7 @@ R3 is foundational: R2 and R5 cannot complete integration until R3's HTTP + even
 **Decision:** R3 ships as `da service run` (plus `da service status`, `da service stop`), a long-running cobra subcommand of the existing `da` binary. Foreground process; daemonization is the operator's responsibility (systemd unit / launchd plist / `nohup`). No separate binary.
 
 **Rationale.**
-- Single `da` binary already built from `cmd/dot-agents/main.go`. Every existing capability is a cobra subcommand. A new subcommand reuses rooted flag/help/JSON-output machinery.
+- Single `da` binary already built from `cmd/da/main.go`. Every existing capability is a cobra subcommand. A new subcommand reuses rooted flag/help/JSON-output machinery.
 - The service consumes in-repo state (`.agents/active/iteration-log/`, `.ralph-loop-streams/`, the KG sqlite under `internal/graphstore/`) — co-locating it with the CLI that produces that state avoids a cross-binary contract.
 - Operators already invoke `da` repeatedly per session; `da service status` is the discoverable health check, matching the umbrella verification clause.
 - Daemonization (process supervision, log rotation, restart-on-crash) is a deployment concern, not a code concern. Go process exits cleanly on SIGINT/SIGTERM and ships structured logs to stderr; systemd/launchd handle the rest. No supervisor code in-tree.
@@ -48,7 +48,7 @@ R3 is foundational: R2 and R5 cannot complete integration until R3's HTTP + even
 ## Architecture sketch
 
 ```
-cmd/dot-agents/main.go           (unchanged)
+cmd/da/main.go                   (unchanged)
 commands/service/                (NEW — cobra subcommand surface)
   service.go                       `da service run|status|stop`
   run.go

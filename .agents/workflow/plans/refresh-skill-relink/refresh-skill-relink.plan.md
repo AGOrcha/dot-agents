@@ -7,7 +7,7 @@ Depends on: `docs/rfcs/resource-intent-centralization-rfc.md` plus resource-inte
 
 ## Problem
 
-`go run ./cmd/dot-agents refresh dot-agents` successfully imports repo-local skill files from `.agents/skills/plan-wave-picker/**` into canonical `~/.agents/skills/dot-agents/plan-wave-picker/**`, but refresh then warns for Claude, Codex, and Copilot when relinking `.agents/skills/plan-wave-picker`.
+`go run ./cmd/da refresh dot-agents` successfully imports repo-local skill files from `.agents/skills/plan-wave-picker/**` into canonical `~/.agents/skills/dot-agents/plan-wave-picker/**`, but refresh then warns for Claude, Codex, and Copilot when relinking `.agents/skills/plan-wave-picker`.
 
 Observed warning:
 
@@ -52,4 +52,4 @@ Rather than letting each platform call generic link helpers directly for shared 
 - [ ] Add regression coverage for refresh + skills:
   repo `.agents/skills/<name>/SKILL.md` imports into canonical `skills/<project>/<name>/SKILL.md`, then refresh relinks `.agents/skills/<name>` successfully.
 - [ ] Add platform coverage for shared mirror targets used by Claude, Codex, and Copilot so one platform cannot succeed while the shared target still fails or is redundantly rewritten.
-- [ ] Verify with focused tests first, then `go test ./...`, and rerun `go run ./cmd/dot-agents refresh dot-agents` to confirm warnings disappear.
+- [ ] Verify with focused tests first, then `go test ./...`, and rerun `go run ./cmd/da refresh dot-agents` to confirm warnings disappear.

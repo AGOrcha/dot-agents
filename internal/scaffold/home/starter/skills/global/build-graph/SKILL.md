@@ -10,8 +10,8 @@ Build or incrementally update the persistent **code-structure graph** for this r
 
 ## Binary
 
-- Prefer `dot-agents` on `PATH`.
-- In the **dot-agents** repo checkout, use `go run ./cmd/dot-agents …` when `PATH` is stale.
+- Prefer `da` on `PATH`.
+- In the **dot-agents** repo checkout, use `go run ./cmd/da …` when `PATH` is stale.
 
 ## Steps
 

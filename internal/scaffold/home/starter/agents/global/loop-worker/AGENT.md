@@ -24,7 +24,7 @@ Read the YAML at the path given in your prompt. Extract: `plan_id`, `task_id`, `
 
 **Step 2 — Confirm task status**
 ```
-go run ./cmd/dot-agents workflow tasks <plan_id>
+da workflow tasks <plan_id>
 ```
 Your `task_id` must be `in_progress` or `pending` with dependencies met. If it is `completed`, stop immediately.
 
