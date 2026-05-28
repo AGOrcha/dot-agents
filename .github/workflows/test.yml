@@ -263,7 +263,11 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_GPG_KEY_ID: ${{ secrets.HOMEBREW_TAP_GPG_KEY_ID }}
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
-        run: goreleaser release --snapshot --clean
+        # Skip the cosign sign step in snapshot mode: snapshots run on PR
+        # branches that do not have OIDC id-token: write permission, and
+        # cosign is not installed in this validator job. The sign step is
+        # exercised on the real release in auto-release.yml.
+        run: goreleaser release --snapshot --clean --skip=sign
 
       # ── Smoke isolation ──────────────────────────────────────────────────
       # All smoke steps below override HOME and AGENTS_HOME so they cannot
