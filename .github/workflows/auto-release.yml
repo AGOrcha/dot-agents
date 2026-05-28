@@ -12,6 +12,10 @@ concurrency:
 
 permissions:
   contents: write
+  # id-token: write is required for Cosign keyless signing via Sigstore.
+  # GitHub mints a short-lived OIDC token that cosign exchanges for a
+  # signing certificate from Fulcio; the signing event is logged to Rekor.
+  id-token: write
 
 env:
   GO_TEST_FLAGS: -race -count=1 -timeout=300s
@@ -103,6 +107,11 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
+      - name: Install Cosign
+        if: steps.check.outputs.exists == 'false'
+        # Pinned to v4.1.2 commit SHA per supply-chain hardening (S7637-adjacent).
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
       - name: Install GoReleaser
         if: steps.check.outputs.exists == 'false'
         uses: goreleaser/goreleaser-action@v6
@@ -141,6 +150,25 @@ jobs:
 
           # Let GoReleaser handle GitHub release + archives + Homebrew
           goreleaser release --clean --verbose
+
+      - name: Verify Cosign signature on checksums.txt
+        if: steps.check.outputs.exists == 'false'
+        # Catches sign-then-fail-to-verify drift: re-runs the exact verification
+        # recipe documented in docs/RELEASE_VERIFICATION.md against the just-built
+        # artifacts in dist/. Fails the release if the consumer-facing recipe is broken.
+        env:
+          REF: ${{ github.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -la checksums.txt*
+          cosign verify-blob \
+            --certificate checksums.txt.pem \
+            --signature checksums.txt.sig \
+            --certificate-identity "https://github.com/${REPO}/.github/workflows/auto-release.yml@${REF}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            checksums.txt
 
       - name: Cleanup smoke home
         if: always()
