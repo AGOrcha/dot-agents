@@ -223,6 +223,15 @@ main {
   width: 100%;
 }
 
+/* Graph routes need the full available width — drop the prose max-width cap
+   so the canvas can fluid-fill on wide displays, and tighten the horizontal
+   padding so the canvas reaches closer to the viewport edge. */
+main:has(.graph-page) {
+  max-width: none;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
 main h1 { margin-top: 0; }
 main h1, main h2, main h3 { color: var(--text); }
 main h2 { border-bottom: 1px solid var(--border); padding-bottom: 0.3em; margin-top: 2em; }
@@ -283,7 +292,8 @@ main blockquote {
 
 .graph-page {
   display: grid;
-  grid-template-columns: 1fr 320px;
+  /* Inspector is responsive: at least 280px, never more than 30vw, target 360px. */
+  grid-template-columns: 1fr clamp(280px, 30vw, 360px);
   gap: 18px;
   height: calc(100vh - 120px);
   min-height: 540px;
@@ -304,6 +314,9 @@ main blockquote {
   padding: 16px;
   overflow-y: auto;
   font-size: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .graph-inspector h3 {
@@ -315,6 +328,30 @@ main blockquote {
 .graph-inspector dl { margin: 0; }
 .graph-inspector dt { color: var(--text-dim); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; margin-top: 10px; }
 .graph-inspector dd { margin: 2px 0 0; }
+
+.graph-legend {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.graph-legend h3 { margin-bottom: 8px; }
+
+.graph-legend .legend-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.graph-legend .legend-desc {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.graph-detail { min-height: 0; }
+.graph-detail h3 { margin-bottom: 8px; }
 
 .graph-inspector .badge {
   display: inline-block;
