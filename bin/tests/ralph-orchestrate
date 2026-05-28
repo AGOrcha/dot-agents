@@ -67,12 +67,12 @@ DOT_AGENTS_CMD=()
 if [[ -n "${DOT_AGENTS:-}" ]]; then
   # shellcheck disable=SC2206
   DOT_AGENTS_CMD=( $DOT_AGENTS )
-elif [[ -f "$REPO_ROOT/cmd/dot-agents/main.go" ]]; then
-  DOT_AGENTS_CMD=(go run ./cmd/dot-agents)
+elif [[ -f "$REPO_ROOT/cmd/da/main.go" ]]; then
+  DOT_AGENTS_CMD=(go run ./cmd/da)
 elif command -v da >/dev/null 2>&1; then
   DOT_AGENTS_CMD=(da)
 else
-  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/dot-agents" >&2
+  echo "error: da not on PATH and not buildable from $REPO_ROOT/cmd/da" >&2
   exit 1
 fi
 

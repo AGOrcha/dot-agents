@@ -86,14 +86,14 @@ lifecycle file references either symbol.
 
 ### 3a. Definitely stay in `commands` (composition root + UX layer)
 
-These have external importers (`cmd/dot-agents/main.go`,
+These have external importers (`cmd/da/main.go`,
 `internal/globalflagcov`) or are referenced via documentation / coverage
 tooling. **Do not move.**
 
 | Symbol                             | Defined in              | Why it stays                                                                                                  |
 |------------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------|
-| `NewRootCommand`                   | `commands/root.go`      | Imported by `cmd/dot-agents/main.go` and `internal/globalflagcov/analyze.go`.                                 |
-| `RenderCommandError`               | `commands/ux.go`        | Imported by `cmd/dot-agents/main.go`.                                                                         |
+| `NewRootCommand`                   | `commands/root.go`      | Imported by `cmd/da/main.go` and `internal/globalflagcov/analyze.go`.                                 |
+| `RenderCommandError`               | `commands/ux.go`        | Imported by `cmd/da/main.go`.                                                                         |
 | `Version`                          | `commands/refresh.go`   | Read by `NewRootCommand` for the `--version` template; root-package var.                                      |
 | `Flags`, `GlobalFlags`             | `commands/flags.go`     | Persistent flag struct wired in `NewRootCommand`. Read by globalflagcov tooling.                              |
 | `ConfigureRootCommandUX`           | `commands/ux.go`        | Called by `NewRootCommand`; package-internal but exported for symmetry with the other UX entry points.        |
@@ -393,8 +393,8 @@ Go module with no plugin loading):
 
 ```
 grep -rn "\"github.com/NikashPrakash/dot-agents/commands\"" --include="*.go"
-# → cmd/dot-agents/main.go
-# → cmd/dot-agents/main_test.go
+# → cmd/da/main.go
+# → cmd/da/main_test.go
 # → internal/globalflagcov/static.go
 # → internal/globalflagcov/analyze.go
 
@@ -417,8 +417,8 @@ grep -rn 'commands\.(RunInstall|RunInstallGenerate|RunAdd|RunRemove|RunRefresh|R
 
 | Symbol                       | Caller                                       | Survives shim deletion? |
 |------------------------------|----------------------------------------------|-------------------------|
-| `commands.NewRootCommand`    | `cmd/dot-agents/main.go`, `internal/globalflagcov/analyze.go`, `cmd/dot-agents/main_test.go` | Yes — stays in root.    |
-| `commands.RenderCommandError`| `cmd/dot-agents/main.go`                     | Yes — stays in root.    |
+| `commands.NewRootCommand`    | `cmd/da/main.go`, `internal/globalflagcov/analyze.go`, `cmd/da/main_test.go` | Yes — stays in root.    |
+| `commands.RenderCommandError`| `cmd/da/main.go`                     | Yes — stays in root.    |
 
 No other external callers exist. **Zero OD entries open for t13.**
 

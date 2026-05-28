@@ -26,7 +26,7 @@ artifact and stop.
 ## Step 2 — Confirm task status
 
 ```bash
-go run ./cmd/dot-agents workflow tasks <plan_id from bundle>
+da workflow tasks <plan_id from bundle>
 ```
 
 Confirm:

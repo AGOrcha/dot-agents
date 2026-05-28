@@ -3,7 +3,7 @@
 ## Binary Resolution
 
 - **Payout: missing dev binary** — `/tmp/dot-agents-dev` doesn't exist or is stale (binary from a prior session, not current `../dot-agents` HEAD). Always check `ls -la /tmp/dot-agents-dev` and compare mtime to `../dot-agents` last commit. Rebuild if uncertain.
-- **dot-agents: `go run` is slow** — prefer `go run ./cmd/dot-agents workflow ...` only if `da` isn't in PATH. The installed binary is faster and avoids accidental compilation errors masking the verify step.
+- **dot-agents: `go run` is slow** — prefer `go run ./cmd/da workflow ...` only if `da` isn't in PATH. The installed binary is faster and avoids accidental compilation errors masking the verify step.
 - **Wrong working directory** — `workflow verify record` and `workflow checkpoint` read `.agentsrc.json` for project context. Must run from the repo root, not a subdirectory.
 - **`make build-prod` is not an every-iteration step** — Use it after a major section or feature is stable. Running it in the middle of rapid iteration adds noise and can hide whether you are actually testing source vs binary behavior.
 - **Fresh build, stale PATH target** — `make build-prod` updates `./bin/da`, but your shell may still resolve `da` to another location. Check `command -v da` after the build before assuming the new binary is active.

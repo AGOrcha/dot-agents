@@ -10,8 +10,8 @@ Perform a focused, token-efficient code review of changed code and its blast rad
 
 ## Binary
 
-- Prefer `dot-agents` on `PATH`.
-- In the **dot-agents** repo, use `go run ./cmd/dot-agents …` when needed.
+- Prefer `da` on `PATH`.
+- In the **dot-agents** repo, use `go run ./cmd/da …` when needed.
 
 ## Workflow
 

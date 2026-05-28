@@ -618,7 +618,7 @@ tasks:
         SHAPE.md, root.go's AddCommand calls switch from
         commands.NewInstallCmd / etc. to lifecycle.NewInstallCmd,
         lifecycle.NewDoctorCmd, ..., mcp.NewCmd, settings.NewCmd,
-        rules.NewCmd. Verify cmd/dot-agents/main.go still compiles
+        rules.NewCmd. Verify cmd/da/main.go still compiles
         unchanged (it should — it only calls
         commands.NewRootCommand()). Any external importer of
         commands.NewXxxCmd surfaced by t01's KG query must already
@@ -1035,6 +1035,6 @@ tasks:
         and are out of scope here.
 
         Hard gate: go test ./... -race -count=1 green; per-file
-        coverage stays clean. cmd/dot-agents/main.go must compile
+        coverage stays clean. cmd/da/main.go must compile
         unchanged.
       app_type: code-fix
