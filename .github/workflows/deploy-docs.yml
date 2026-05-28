@@ -62,6 +62,10 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: docs/web
+          # Pin wrangler v4 — v3.90 (action default) wasn't reliably reading
+          # the `main:` field from wrangler.jsonc when combined with --name,
+          # producing "Missing entry-point" even though src/worker.js is set.
+          wranglerVersion: "4"
           # PRs deploy to a separate Worker (agorcha-dev-docs-preview) reachable
           # at <name>.<account-subdomain>.workers.dev with no custom-domain route.
           # Master deploys to the production Worker bound to agorcha.dev.
