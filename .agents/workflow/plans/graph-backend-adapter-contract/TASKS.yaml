@@ -247,8 +247,8 @@ tasks:
           met. If even one consumer's lockfile still has
           `reads_from: [crg-bridge]`, keep the bridge.
 
-    - id: release-major
-      title: 'Release: bump VERSION + finalize CHANGELOG for the graph-backend major'
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the graph-backend minor'
       status: pending
       depends_on:
         - t1-none-adapter-end-to-end
@@ -264,26 +264,25 @@ tasks:
         - CHANGELOG.md
       verification_required: true
       notes: |-
-        Release-gated tail task (hybrid convention, MAJOR path). MAJOR rather
-        than MINOR because t6-bridge-decommission removes a consumed contract
-        — it flips `da` core to prefer the new kg-native namespace, removes
-        the crg-bridge adapter from core, and deletes the Python subprocess
-        bridge machinery. That is an incompatible change to the graph-backend
-        surface consumers depend on => MAJOR.
-        Ambiguity flag (for maintainer ruling): the bulk of this plan
-        (t1–t5: built-in adapters, DSL, cross-adapter reads) is purely
-        additive and on its own would be a MINOR. Only the final gated
-        decommission (t6) makes it breaking, and t6 is fenced behind a
-        multi-week §11.4 parity gate and a "keep the bridge if any consumer
-        still reads it" anti-scope. If t6 is split off into its own plan or
-        deferred indefinitely, this plan reverts to a MINOR tail and the
-        decommission carries the MAJOR.
-        Target version = next major computed from current VERSION at
+        Release-gated tail task (hybrid convention, MINOR path).
+        Maintainer ruling 2026-05-28: MINOR, not MAJOR. The functionality
+        does not semantically change — only the under-the-hood backend. The
+        Python-bridge removal in t6-bridge-decommission is an internal backend
+        swap (Python subprocess bridge -> native kg adapter), invisible to
+        `da` consumers: no public-surface or contract change. The graph-backend
+        surface callers depend on is preserved end-to-end, so SemVer rule keys
+        MINOR (additive adapters/DSL + invisible backend migration), not MAJOR.
+        t1–t5 (built-in adapters, DSL, cross-adapter reads) are purely additive.
+        t6 is fenced behind a multi-week §11.4 parity gate and a "keep the
+        bridge if any consumer still reads it" anti-scope, so the swap only
+        completes once parity is proven — keeping the consumer-visible behavior
+        identical, which is why it stays MINOR.
+        Target version = next minor computed from current VERSION at
         ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        major is 1.0.0, but resolve from VERSION when this task becomes
-        ready; rebase recomputes if the major line has already advanced.
-        Action: bump VERSION to the resolved next major and finalize the
-        CHANGELOG "## [<target>]" section, documenting the bridge removal as
-        a BREAKING CHANGE with the migration note. Merge to master fires
-        auto-release.yml.
+        minor is 0.4.0, but resolve from VERSION when this task becomes
+        ready; serialize at the VERSION bump if another minor ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, documenting the bridge migration as
+        an internal backend swap (no consumer-facing change). Merge to master
+        fires auto-release.yml.
       app_type: release

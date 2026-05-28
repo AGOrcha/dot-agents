@@ -11,14 +11,15 @@ active workflow plans.
   enumerate `app_type` at all (it is not even a declared task property), so it imposes no
   constraint; `da workflow eligible/status` parse every edited file cleanly. No fallback needed.
 - **Surveyed against `origin/master`** (worktree base). Note: `config-v2-migration` and
-  `platform-driven-diagnostics` named in the task brief / convention do **not** exist on
-  `origin/master` — they were not present to edit (see "Notes / discrepancies" below).
+  `platform-driven-diagnostics` were untracked-only local plans at sweep time; per maintainer
+  ruling 2026-05-28 they are now **committed on this branch** and carry release tails (see
+  "Maintainer rulings 2026-05-28" below).
 
 ## Classification table
 
 | Plan | Delivered surface | Classification | Release tail added | Target-version note |
 |---|---|---|---|---|
-| graph-backend-adapter-contract | New adapter contract/DSL (additive) **+ t6 decommissions Python bridge & removes crg-bridge from `da` core** | **MAJOR** (ambiguous) | y (`release-major`) | next major from VERSION (1.0.0 today) |
+| graph-backend-adapter-contract | New adapter contract/DSL (additive) + t6 swaps Python bridge for native kg adapter (internal backend swap, no contract change) | **MINOR** (ruling 2026-05-28; was MAJOR) | y (`release-minor`) | next minor from VERSION (0.4.0 today) |
 | loop-discipline-stop-hooks | New sentinel CLI, hooks+skills in starter, platform mapper ext | MINOR | y (`release-minor`) | next minor (0.4.0 today) |
 | orchestration-companion-stop-hooks | New companion terminal gates + starter skills | MINOR | y (`release-minor`) | next minor (0.4.0 today) |
 | r1-5-hook-enforcement-telemetry | Persisted hook outcomes + new scoring signals + CLI readback | MINOR | y (`release-minor`) | next minor (0.4.0 today) |
@@ -26,7 +27,9 @@ active workflow plans.
 | r3-background-worker-service | New `da service` command + HTTP surface | MINOR | y (`release-minor`) | next minor (0.4.0 today) |
 | r4-code-task-generation-eval | New `da eval` command + multi-language harness | MINOR | y (`release-minor`) | next minor (0.4.0 today) |
 | r5-review-labeling-access | New review UI, admin CLI, RBAC, R1 feedback signal | MINOR | y (`release-minor`) | next minor (0.4.0 today) |
-| worktree-platform | New managed-worktree capability (gitwt + skills integration) | MINOR (ambiguous) | y (`release-minor`) | next minor (0.4.0 today) |
+| worktree-platform | Managed-worktree gitwt + skills integration — mostly internal `internal/gitwt/` plumbing | **patch-train** (ruling 2026-05-28; was MINOR) | n (tail dropped) | feeds patch train; no plan-tail task |
+| config-v2-migration | New v2 config-distribution model: `da config explain` + two-pass resolver, lockfile, layered sources/extends, packages tier | MINOR (ruling 2026-05-28; now committed) | y (`release-minor`) | **next minor AFTER 0.4.0 — 0.5.0 expected** (config-explain/#162 holds for THIS tail -> 0.5.0, not 0.4.0) |
+| platform-driven-diagnostics | Multi-agent + multi-OS doctor/status via Platform interface dispatch | MINOR (ruling 2026-05-28; now committed) | y (`release-minor`, folds into 0.4.0) | folds into 0.4.0 (P0–P3 shipped via #118/#135); no separate bump if already released |
 | pr10-branch-split | Branch-split logistics / retire stale branches — no product surface | patch-train (N/A) | n | feeds patch train; release logistics only |
 | r1-outcome-scoring | Scoring + CLI (delivered, **status: completed**) | MINOR-delivered | n (see note) | folds into imminent 0.4.0 via PR #145 |
 | **release-patch-train** (new) | Standing cadence vehicle for the patch digit | PATCH train | y (`release-patch`, recurring) | next patch from VERSION at each tick |
@@ -36,7 +39,8 @@ active workflow plans.
 `root-command-decomposition`, `seam-interface-di-migration`, `production-code-helper-extraction`,
 `coverage-95-staged`, `coverage-gate-per-file`, `sonarqube-pr10`, `cross-platform-test-skips-audit`,
 `refresh-skill-relink`, `shared-target-projection-wiring`, `workflow-client-commands`,
-`workflow-commit-command`. Left untouched per instructions.
+`workflow-commit-command`. Left untouched per instructions. Per ruling 2026-05-28,
+`worktree-platform` joins this list (its `release-minor` tail was dropped — PATCH-train).
 
 ## Patch-train placement
 
@@ -63,11 +67,38 @@ patch-eligible work; anything user-visible -> MINOR tail; anything breaking -> M
 3. **r1-outcome-scoring** is `status: completed` and its work folds into the imminent **0.4.0**
    (PR #145 / the de-facto 0.4.0 release task per the convention's "Immediate application"). No tail
    added to a completed plan; its release is already accounted for by 0.4.0. Surfaced here for a ruling.
-4. **config-v2-migration not present on origin/master.** The brief asked to add a tail to it (mid-flight,
-   p1 in_progress, deps incl p1/p4, note 0.4.0-vs-0.5.0 fold). The plan directory does not exist on the
-   worktree base, so no edit was possible. Add the tail when/if that plan lands on master.
-5. **platform-driven-diagnostics not present on origin/master** either (named in the convention's
-   immediate-application list as folding into 0.4.0). No action possible here.
+4. **config-v2-migration** was untracked-only at sweep time; **resolved by ruling 2026-05-28** —
+   committed on this branch with a `release-minor` tail targeting 0.5.0 (next minor after 0.4.0).
+5. **platform-driven-diagnostics** was untracked-only at sweep time; **resolved by ruling 2026-05-28** —
+   committed on this branch with a `release-minor` tail that folds into 0.4.0.
+
+## Maintainer rulings 2026-05-28
+
+Four corrections applied to the original sweep:
+
+1. **Commit the two untracked plans.** `config-v2-migration` and `platform-driven-diagnostics` existed
+   only as untracked local files in the main working tree (never committed to any branch) yet drove
+   real merged work. Both plan dirs (`PLAN.yaml` + `TASKS.yaml`) are now committed on this branch
+   **as-is** (config-v2 p1/p4 kept `in_progress` — committing canonical current state, not editing it),
+   so they become tracked and merge to master with this PR. Loss-risk parity with the "9 lost lesson
+   files" incident.
+2. **graph-backend-adapter-contract: MAJOR -> MINOR.** Ruling: the functionality does not semantically
+   change, only the under-the-hood backend. The t6 Python->native bridge migration is an internal
+   backend swap invisible to `da` consumers — no public-surface or contract change — so MINOR, not MAJOR.
+   Tail id and semver rationale updated; target now next minor (0.4.0 today).
+3. **worktree-platform: drop its tail (-> patch-train).** Ruling: mostly internal `internal/gitwt/`
+   plumbing, no user-facing surface. The `release-minor` tail task was removed; the plan now feeds the
+   patch train like the other internal plans (no plan-tail task).
+4. **Add release tails to the two now-committed plans.**
+   - `config-v2-migration` -> `release-minor`, `depends_on` every other task in the plan (incl. p1, p4).
+     Target = next minor, **0.5.0 expected** (`da config explain` + config resolver feature). Maintainer
+     confirmed #162/config-explain holds for the config-v2 tail -> 0.5.0, NOT 0.4.0. Target resolved from
+     VERSION at ready-time.
+   - `platform-driven-diagnostics` -> `release-minor` (multi-OS doctor/status from the Platform interface
+     is a user-visible capability). P0–P3 already shipped (PR #118 / #135) and the surface folds into
+     0.4.0, so the tail is marked "folds into 0.4.0, no separate bump if already released"; if remaining
+     P4–P6 ship as pure internal cleanup after 0.4.0 cuts, the tail is a no-op record feeding the patch
+     train.
 
 ## Verification
 
