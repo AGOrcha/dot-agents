@@ -48,6 +48,11 @@ const (
 	orphanClassUnknownTask archiveOrphanClass = "unknown_task"
 )
 
+// dmaArchiveDirName is the per-plan subdirectory under history/<plan>/ where
+// `workflow plan archive` lands delegate merge-back artifacts. Centralised so
+// both the duplicate-detection lookup and the two move targets agree.
+const dmaArchiveDirName = "delegate-merge-back-archive"
+
 // archiveOrphanAction is one orphan resolution recorded for the run summary.
 type archiveOrphanAction struct {
 	TaskID  string             `json:"task_id" yaml:"task_id"`
@@ -272,77 +277,98 @@ func indexTasksFromDir(base, source string, idx taskPlanIndex) error {
 		if !e.IsDir() {
 			continue
 		}
-		planID := e.Name()
-		tasksPath := filepath.Join(base, planID, workflowTasksFileName)
-		data, readErr := os.ReadFile(tasksPath)
-		if readErr != nil {
-			if os.IsNotExist(readErr) {
-				continue
-			}
-			return readErr
-		}
-		var tf CanonicalTaskFile
-		if uerr := yaml.Unmarshal(data, &tf); uerr != nil {
-			// A malformed TASKS.yaml in one plan should not block sweep on
-			// the rest of the tree; we treat it as if the plan contributes
-			// no tasks.
-			continue
-		}
-		for _, t := range tf.Tasks {
-			if t.ID == "" {
-				continue
-			}
-			if existing, ok := idx[t.ID]; ok && existing.Source == "active" {
-				continue
-			}
-			idx[t.ID] = taskPlanInfo{PlanID: planID, Status: t.Status, Source: source}
+		if err := mergePlanTasksIntoIndex(base, e.Name(), source, idx); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
+// mergePlanTasksIntoIndex reads one plan's TASKS.yaml and merges its task
+// rows into idx. A missing or malformed TASKS.yaml contributes no rows; a
+// real read error is propagated so the sweep aborts loudly.
+func mergePlanTasksIntoIndex(base, planID, source string, idx taskPlanIndex) error {
+	tasksPath := filepath.Join(base, planID, workflowTasksFileName)
+	data, err := os.ReadFile(tasksPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var tf CanonicalTaskFile
+	if yaml.Unmarshal(data, &tf) != nil {
+		// A malformed TASKS.yaml in one plan should not block sweep on
+		// the rest of the tree; we treat it as if the plan contributes
+		// no tasks.
+		return nil
+	}
+	for _, t := range tf.Tasks {
+		if t.ID == "" {
+			continue
+		}
+		if existing, ok := idx[t.ID]; ok && existing.Source == "active" {
+			continue
+		}
+		idx[t.ID] = taskPlanInfo{PlanID: planID, Status: t.Status, Source: source}
+	}
+	return nil
+}
+
 // classifyOrphan applies the four-class rule documented on archiveOrphanClass.
-// The returned class is what resolveArchiveOrphan dispatches on.
+// The returned class is what resolveArchiveOrphan dispatches on. Each branch
+// dispatches to a per-shape helper so the per-helper cognitive complexity
+// stays well under the Sonar S3776 budget.
 func classifyOrphan(projectPath string, cand orphanCandidate, idx taskPlanIndex) (archiveOrphanClass, string) {
+	switch {
+	case cand.mergeBackPath != "" && cand.delegationPath == "":
+		return classifyMergeBackOnly(projectPath, cand)
+	case cand.delegationPath != "" && cand.mergeBackPath == "":
+		return classifyDelegationOnly(projectPath, cand, idx)
+	default:
+		// Both files present together is not an orphan — the live merge-back
+		// pipeline still owns the closeout. Mark as unknown so the action
+		// shows up in the report without mutation.
+		return orphanClassUnknownTask, "both delegation and merge-back present; not an archive orphan"
+	}
+}
+
+// classifyMergeBackOnly handles cases 1+2: a merge-back.md sits in active/
+// with no companion delegation contract. The decision tree picks remove vs
+// move based on whether the same task already has an archive entry.
+func classifyMergeBackOnly(projectPath string, cand orphanCandidate) (archiveOrphanClass, string) {
 	planID := cand.effectivePlanID()
-
-	// Case 1 + 2: merge-back present, no delegation.
-	if cand.mergeBackPath != "" && cand.delegationPath == "" {
-		if planID == "" {
-			return orphanClassUnknownTask, "merge-back missing parent_plan_id"
-		}
-		if archivedMergeBackExists(projectPath, planID, cand.taskID) {
-			return orphanClassRemoveDuplicate, ""
-		}
-		if !planHasHistoryDir(projectPath, planID) {
-			return orphanClassUnknownTask, fmt.Sprintf("plan %s has no history dir; not safe to archive automatically", planID)
-		}
-		return orphanClassMoveMergeBack, ""
+	if planID == "" {
+		return orphanClassUnknownTask, "merge-back missing parent_plan_id"
 	}
-
-	// Case 3 + 4: delegation present, no merge-back.
-	if cand.delegationPath != "" && cand.mergeBackPath == "" {
-		info, known := idx[cand.taskID]
-		if !known {
-			return orphanClassUnknownTask, "task id not present in any TASKS.yaml"
-		}
-		if info.Source != "history" || info.Status != "completed" {
-			return orphanClassUnknownTask, fmt.Sprintf("task %s/%s is %s in %s plan (not a sweep candidate)", info.PlanID, cand.taskID, info.Status, info.Source)
-		}
-		if !planHasHistoryDir(projectPath, info.PlanID) {
-			return orphanClassUnknownTask, fmt.Sprintf("plan %s has no history dir; not safe to archive automatically", info.PlanID)
-		}
-		return orphanClassMoveDelegation, ""
+	if archivedMergeBackExists(projectPath, planID, cand.taskID) {
+		return orphanClassRemoveDuplicate, ""
 	}
+	if !planHasHistoryDir(projectPath, planID) {
+		return orphanClassUnknownTask, fmt.Sprintf("plan %s has no history dir; not safe to archive automatically", planID)
+	}
+	return orphanClassMoveMergeBack, ""
+}
 
-	// Both files present together is not an orphan — the live merge-back
-	// pipeline still owns the closeout. Mark as unknown so the action shows
-	// up in the report without mutation.
-	return orphanClassUnknownTask, "both delegation and merge-back present; not an archive orphan"
+// classifyDelegationOnly handles cases 3+4: a delegation.yaml sits in
+// active/ with no companion merge-back. Only `completed` tasks in archived
+// plans are sweep-eligible; everything else is recorded as unknown.
+func classifyDelegationOnly(projectPath string, cand orphanCandidate, idx taskPlanIndex) (archiveOrphanClass, string) {
+	info, known := idx[cand.taskID]
+	if !known {
+		return orphanClassUnknownTask, "task id not present in any TASKS.yaml"
+	}
+	if info.Source != "history" || info.Status != "completed" {
+		return orphanClassUnknownTask, fmt.Sprintf("task %s/%s is %s in %s plan (not a sweep candidate)", info.PlanID, cand.taskID, info.Status, info.Source)
+	}
+	if !planHasHistoryDir(projectPath, info.PlanID) {
+		return orphanClassUnknownTask, fmt.Sprintf("plan %s has no history dir; not safe to archive automatically", info.PlanID)
+	}
+	return orphanClassMoveDelegation, ""
 }
 
 func archivedMergeBackExists(projectPath, planID, taskID string) bool {
-	dmaBase := filepath.Join(historyBaseDir(projectPath), planID, "delegate-merge-back-archive")
+	dmaBase := filepath.Join(historyBaseDir(projectPath), planID, dmaArchiveDirName)
 	entries, err := readDirIfExists(dmaBase)
 	if err != nil || len(entries) == 0 {
 		return false
@@ -384,7 +410,7 @@ func resolveArchiveOrphan(projectPath string, cand orphanCandidate, idx taskPlan
 		return action, nil
 
 	case orphanClassMoveMergeBack:
-		target := filepath.Join(historyBaseDir(projectPath), planID, "delegate-merge-back-archive", dateStamp, cand.taskID, "merge-back.md")
+		target := filepath.Join(historyBaseDir(projectPath), planID, dmaArchiveDirName, dateStamp, cand.taskID, "merge-back.md")
 		action.Source = cand.mergeBackPath
 		action.Target = target
 		if dryRun {
@@ -397,7 +423,7 @@ func resolveArchiveOrphan(projectPath string, cand orphanCandidate, idx taskPlan
 		return action, nil
 
 	case orphanClassMoveDelegation:
-		target := filepath.Join(historyBaseDir(projectPath), planID, "delegate-merge-back-archive", dateStamp, cand.taskID, "delegation.yaml")
+		target := filepath.Join(historyBaseDir(projectPath), planID, dmaArchiveDirName, dateStamp, cand.taskID, "delegation.yaml")
 		action.Source = cand.delegationPath
 		action.Target = target
 		if dryRun {
