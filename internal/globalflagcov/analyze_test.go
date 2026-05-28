@@ -110,3 +110,13 @@ func TestReportBadModuleRoot(t *testing.T) {
 		t.Fatal("expected error for invalid module root")
 	}
 }
+
+// TestRuntimeFuncNameNilTypedFunc covers the pc==0 branch (L114-116) of
+// runtimeFuncName: a typed-nil func value yields reflect.Value.IsValid()
+// true but Pointer() == 0.
+func TestRuntimeFuncNameNilTypedFunc(t *testing.T) {
+	var fn func(*cobra.Command, []string) error // typed nil
+	if got := runtimeFuncName(fn); got != "" {
+		t.Fatalf("typed-nil func: want empty, got %q", got)
+	}
+}
