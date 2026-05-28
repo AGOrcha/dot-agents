@@ -8,7 +8,48 @@ import (
 	"path/filepath"
 	"sort"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/gitremote"
 )
+
+// gitRemoteOriginURL is the seam that returns the origin URL for repoPath.
+// Defaults to gitremote.ReadOriginURL, which reads the on-disk git config
+// in-process via go-git/v6 — no subprocess, no PATH lookup, no porcelain
+// text parsing. Tests override the seam to inject SSH/HTTPS/edge-case URLs
+// without standing up a real .git directory.
+//
+// The seam returns a wrapped error when the directory is not a git repo
+// and gitremote.ErrNoOrigin when the repo exists but has no `origin`
+// remote — DeriveRepoIDFromGit collapses both branches to "" so callers
+// leave repo_id blank rather than fabricate one (spec §5.3 fallback).
+var gitRemoteOriginURL = gitremote.ReadOriginURL
+
+// DeriveRepoIDFromGit returns the canonical repo_id for the project at
+// repoPath, derived from its `origin` git remote. The canonical form is
+// `<host>/<path>` with the `.git` suffix stripped and the host lowercased,
+// e.g. `github.com/acme/po-core-api-se` (per org-config-resolution §5.2).
+//
+// Accepted remote forms:
+//   - SSH:    git@github.com:acme/repo.git              → github.com/acme/repo
+//   - SCP-style with user: ssh://git@github.com/acme/repo.git → github.com/acme/repo
+//   - HTTPS:  https://github.com/acme/repo.git          → github.com/acme/repo
+//   - HTTP:   http://gitlab.acme.internal/g/r           → gitlab.acme.internal/g/r
+//   - git://: git://github.com/acme/repo.git            → github.com/acme/repo
+//
+// Returns "" (no error) when:
+//   - the directory is not a git checkout
+//   - the repo has no `origin` remote (e.g. `git init` only)
+//   - the remote URL cannot be parsed into a host+path pair
+//
+// Per spec §5.3 git derivation is a FALLBACK — callers must not overwrite
+// an explicit repo_id set in the manifest. See MergeGenerateAgentsRC.
+func DeriveRepoIDFromGit(repoPath string) string {
+	raw, err := gitRemoteOriginURL(repoPath)
+	if err != nil || raw == "" {
+		return ""
+	}
+	return gitremote.CanonicalRepoID(raw)
+}
 
 // isDirEntry reports whether the path is a directory, following symlinks.
 func isDirEntry(path string) bool {
@@ -466,6 +507,11 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 		Sources: []Source{{Type: "local"}},
 	}
 
+	// Auto-derive repo_id from the project's git remote (org-config-resolution §5).
+	// Empty string when there is no git checkout / no origin remote — left
+	// blank rather than fabricated so `da doctor` can warn (p2+ scope).
+	rc.RepoID = DeriveRepoIDFromGit(projectPath)
+
 	scopes := []string{"global", projectName}
 	rc.Skills = collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
 	rc.Agents = collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
@@ -494,6 +540,14 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	out.Sources = mergeSourceSlices(generated.Sources, existing.Sources)
 	if existing.Project != "" {
 		out.Project = existing.Project
+	}
+	// repo_id is a PROTECTED scalar per org-config-resolution §7.4 — an
+	// explicit value committed in the manifest must survive regeneration.
+	// Falling back to the generated (derived-from-git) value when existing
+	// is empty preserves the bootstrap behaviour for v1 manifests being
+	// upgraded in place.
+	if existing.RepoID != "" {
+		out.RepoID = existing.RepoID
 	}
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)

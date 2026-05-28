@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/gitremote"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 	"golang.org/x/sys/execabs"
 )
@@ -65,8 +66,19 @@ func printBranchStatus(agentsHome string) {
 }
 
 func printRemoteStatus(agentsHome string) bool {
-	remoteOut, _ := execabs.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
-	remoteStr := strings.TrimSpace(string(remoteOut))
+	// Origin URL is read in-process via go-git rather than shelled out, and
+	// rendered in the spec §5.2 canonical "<host>/<path>" form so the
+	// Remote line stays consistent across SSH/HTTPS/.git-suffix transports
+	// (PR #127 review). Falls back to the raw URL when canonicalization
+	// produces "" so unusual configs still print something useful.
+	remoteStr := ""
+	if raw, err := gitremote.ReadOriginURL(agentsHome); err == nil {
+		if canon := gitremote.CanonicalRepoID(raw); canon != "" {
+			remoteStr = canon
+		} else {
+			remoteStr = raw
+		}
+	}
 	hasRemote := remoteStr != ""
 	if hasRemote {
 		fmt.Fprintf(os.Stdout, "  Remote:  %s%s%s\n", ui.Dim, remoteStr, ui.Reset)

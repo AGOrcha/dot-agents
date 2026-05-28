@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sys/execabs"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/NikashPrakash/dot-agents/internal/gitremote"
 	"github.com/NikashPrakash/dot-agents/internal/links"
 	"github.com/NikashPrakash/dot-agents/internal/platform"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
@@ -250,8 +251,20 @@ func probeAgentsHomeGit(agentsHome string) agentsHomeGitProbe {
 	}
 	branchOut, _ := execabs.Command("git", "-C", agentsHome, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	branch := strings.TrimSpace(string(branchOut))
-	remoteOut, _ := execabs.Command("git", "-C", agentsHome, "remote", "get-url", "origin").Output()
-	remote := strings.TrimSpace(string(remoteOut))
+	// Origin URL is read in-process via go-git rather than shelled out, and
+	// rendered in the spec §5.2 canonical "<host>/<path>" form so the
+	// status line stays consistent across SSH/HTTPS/.git-suffix transports
+	// (PR #127 review). Falls back to the raw URL when canonicalization
+	// produces "" (e.g. a non-URL local remote) so unusual configs still
+	// surface something useful.
+	remote := ""
+	if raw, err := gitremote.ReadOriginURL(agentsHome); err == nil {
+		if canon := gitremote.CanonicalRepoID(raw); canon != "" {
+			remote = canon
+		} else {
+			remote = raw
+		}
+	}
 	return agentsHomeGitProbe{IsRepo: true, Branch: branch, Remote: remote}
 }
 

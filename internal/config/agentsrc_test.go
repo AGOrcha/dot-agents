@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1499,5 +1500,187 @@ func TestSourceMergeKey_AllBranches(t *testing.T) {
 	}
 	if k := sourceMergeKey(Source{Type: "custom"}); !strings.HasPrefix(k, "type:custom") {
 		t.Errorf("default: %q", k)
+	}
+}
+
+// ── repo_id derivation (org-config-resolution §5) ────────────────────────────
+
+// withGitRemoteOriginURL temporarily replaces the gitRemoteOriginURL seam
+// for a single test and restores it on cleanup.
+func withGitRemoteOriginURL(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	prev := gitRemoteOriginURL
+	gitRemoteOriginURL = fn
+	t.Cleanup(func() { gitRemoteOriginURL = prev })
+}
+
+// URL-parsing matrix coverage (SCP, ssh://, https://, http://, git://,
+// embedded user[:token]@, ports, .git suffix, trailing slash, uppercase
+// host, nested groups, empty/whitespace/junk/bare-path fallbacks) lives
+// in internal/gitremote/gitremote_test.go — the canonical helper this
+// package delegates to. The DeriveRepoIDFromGit_* tests below cover the
+// seam end-to-end with a representative sample.
+
+func TestDeriveRepoIDFromGit_SeamFormVariants(t *testing.T) {
+	cases := []struct {
+		name   string
+		remote string
+		want   string
+	}{
+		{"github ssh", "git@github.com:acme/repo.git", "github.com/acme/repo"},
+		{"github https", "https://github.com/acme/repo.git", "github.com/acme/repo"},
+		{"gitlab nested", "git@gitlab.acme.internal:payments/settlement-engine.git", "gitlab.acme.internal/payments/settlement-engine"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			withGitRemoteOriginURL(t, func(string) (string, error) {
+				return c.remote, nil
+			})
+			if got := DeriveRepoIDFromGit(t.TempDir()); got != c.want {
+				t.Errorf("DeriveRepoIDFromGit = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestDeriveRepoIDFromGit_NoRemoteReturnsEmpty(t *testing.T) {
+	// Simulate `git -C <dir> remote get-url origin` failing with exit 1
+	// (the real CLI behavior when no origin remote is configured). The
+	// helper must swallow it and return "" so callers leave repo_id blank
+	// rather than fabricating a value (per spec §5.3 fallback contract).
+	withGitRemoteOriginURL(t, func(string) (string, error) {
+		return "", fmt.Errorf("fatal: No such remote 'origin'")
+	})
+	if got := DeriveRepoIDFromGit(t.TempDir()); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with no remote = %q, want empty", got)
+	}
+}
+
+func TestDeriveRepoIDFromGit_BlankOriginReturnsEmpty(t *testing.T) {
+	// Some edge cases (broken git config) can return a blank URL with no
+	// error. Treat that the same as "no remote".
+	withGitRemoteOriginURL(t, func(string) (string, error) {
+		return "  \n", nil
+	})
+	if got := DeriveRepoIDFromGit(t.TempDir()); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with blank URL = %q, want empty", got)
+	}
+}
+
+func TestDeriveRepoIDFromGit_WeirdFormReturnsEmpty(t *testing.T) {
+	// A non-URL string flows through gitremote.CanonicalRepoID and falls out
+	// as "". Caller (GenerateAgentsRC) leaves repo_id blank, doctor warns
+	// later (p2+).
+	withGitRemoteOriginURL(t, func(string) (string, error) {
+		return "this is not a url", nil
+	})
+	if got := DeriveRepoIDFromGit(t.TempDir()); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with weird URL = %q, want empty", got)
+	}
+}
+
+func TestGenerateAgentsRC_PopulatesRepoIDFromGitRemote(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	withGitRemoteOriginURL(t, func(string) (string, error) {
+		return "git@github.com:NikashPrakash/dot-agents.git", nil
+	})
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if rc.RepoID != "github.com/NikashPrakash/dot-agents" {
+		t.Errorf("RepoID: got %q, want %q", rc.RepoID, "github.com/NikashPrakash/dot-agents")
+	}
+}
+
+func TestGenerateAgentsRC_NoGitRemoteLeavesRepoIDEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	withGitRemoteOriginURL(t, func(string) (string, error) {
+		return "", fmt.Errorf("not a git repository")
+	})
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if rc.RepoID != "" {
+		t.Errorf("RepoID should be empty when no git remote, got %q", rc.RepoID)
+	}
+}
+
+func TestMergeGenerateAgentsRC_PreservesExplicitRepoID(t *testing.T) {
+	// Explicit repo_id in the on-disk manifest must survive --generate
+	// even when the git remote would normalize to a different value (per
+	// spec §7.4 — repo_id is a protected scalar).
+	existing := &AgentsRC{
+		Version: 2,
+		Project: "myproject",
+		RepoID:  "github.com/acme/explicit-override",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Project: "myproject",
+		RepoID:  "github.com/NikashPrakash/dot-agents", // would-be derived
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		Skills:  []string{"s"},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.RepoID != "github.com/acme/explicit-override" {
+		t.Errorf("RepoID: got %q, want preserved existing", out.RepoID)
+	}
+}
+
+func TestMergeGenerateAgentsRC_FillsRepoIDWhenExistingEmpty(t *testing.T) {
+	// A v1 manifest without repo_id must be upgraded in place: when
+	// existing.RepoID is empty, the freshly derived value wins so the
+	// next `da install --generate` writes the bootstrapped value.
+	existing := &AgentsRC{
+		Version: 1,
+		Project: "myproject",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Project: "myproject",
+		RepoID:  "github.com/NikashPrakash/dot-agents",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.RepoID != "github.com/NikashPrakash/dot-agents" {
+		t.Errorf("RepoID: got %q, want derived value to win", out.RepoID)
+	}
+}
+
+func TestMergeGenerateAgentsRC_V1ManifestWithoutRepoIDRoundTripsByteForByte(t *testing.T) {
+	// Acceptance criterion from p0b: "existing v1 .agentsrc.json without
+	// repo_id is preserved unchanged on subsequent saves (round-trip
+	// preserves omitempty)". Verify the marshalled bytes do not contain
+	// "repo_id" when neither existing nor generated populated it.
+	existing := &AgentsRC{
+		Version: 1,
+		Project: "myproject",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Project: "myproject",
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		// RepoID intentionally empty — simulates GenerateAgentsRC on a
+		// non-git project directory.
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.RepoID != "" {
+		t.Fatalf("RepoID should stay empty, got %q", out.RepoID)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "repo_id") {
+		t.Errorf("marshalled output should omit repo_id when empty: %s", data)
 	}
 }
