@@ -170,10 +170,12 @@ func (m *manager) Prune() ([]string, error) {
 
 func (m *manager) Open(path string) (Worktree, error) {
 	// Guard: m.mgr.Open silently falls back to the main repo's storer when the
-	// path has no linked-worktree .git pointer, which would hand the caller the
-	// main repo instead of an isolated worktree. Require a real .git file.
-	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-		return nil, fmt.Errorf("gitwt: open worktree %q: not a linked worktree: %w", path, err)
+	// path's .git file is absent or not a valid "gitdir:" pointer (e.g. garbage
+	// content), which would hand the caller the MAIN repo instead of the
+	// isolated linked worktree — a cross-worktree contamination footgun. Require
+	// a .git file that actually points at a linked-worktree admin dir.
+	if err := assertLinkedWorktree(path); err != nil {
+		return nil, fmt.Errorf("gitwt: open worktree %q: %w", path, err)
 	}
 	repo, err := m.mgr.Open(osfs.New(path))
 	if err != nil {
@@ -184,6 +186,36 @@ func (m *manager) Open(path string) (Worktree, error) {
 		return nil, fmt.Errorf("gitwt: worktree handle %q: %w", path, err)
 	}
 	return &worktree{repo: repo, wt: wt}, nil
+}
+
+// assertLinkedWorktree verifies that path is a linked worktree: its .git is a
+// regular file containing a "gitdir: <admindir>" pointer, and that admin dir
+// exists and carries the linked-worktree "commondir" marker. This rejects both
+// a missing .git and a garbage .git (which would otherwise make go-git's Open
+// silently fall back to the main repository).
+func assertLinkedWorktree(path string) error {
+	gitFile := filepath.Join(path, ".git")
+	info, err := os.Stat(gitFile)
+	if err != nil {
+		return fmt.Errorf("not a linked worktree: %w", err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("not a linked worktree: %s is a directory (main worktree?)", gitFile)
+	}
+	data, err := os.ReadFile(gitFile)
+	if err != nil {
+		return fmt.Errorf("not a linked worktree: %w", err)
+	}
+	const prefix = "gitdir:"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, prefix) {
+		return fmt.Errorf("not a linked worktree: .git has no gitdir pointer")
+	}
+	adminDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if _, err := os.Stat(filepath.Join(adminDir, "commondir")); err != nil {
+		return fmt.Errorf("not a linked worktree: admin dir invalid: %w", err)
+	}
+	return nil
 }
 
 // adminDir returns the .git/worktrees/<name> filesystem path for a worktree's

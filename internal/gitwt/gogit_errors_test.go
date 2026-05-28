@@ -105,18 +105,60 @@ func TestPrune_WorktreeMissingGitdir(t *testing.T) {
 }
 
 func TestOpen_BadGitFile(t *testing.T) {
-	f := newFixture(t)
-	bad := f.wtPath("badgit")
-	if err := os.MkdirAll(bad, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
+	tests := []struct {
+		name        string
+		gitContent  string
+		makeGitFile bool
+	}{
+		{"nonexistent gitdir", "gitdir: /nonexistent/path/.git\n", true},
+		{"garbage no gitdir prefix", "garbage\n", true}, // would silently open MAIN repo
+		{"missing .git entirely", "", false},
 	}
-	// A .git file that points nowhere valid -> mgr.Open / git.Open fails.
-	if err := os.WriteFile(filepath.Join(bad, ".git"), []byte("gitdir: /nonexistent/path/.git\n"), 0o644); err != nil {
-		t.Fatalf("write .git: %v", err)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			bad := f.wtPath("badgit")
+			if err := os.MkdirAll(bad, 0o755); err != nil {
+				t.Fatalf("mkdir: %v", err)
+			}
+			if tc.makeGitFile {
+				if err := os.WriteFile(filepath.Join(bad, ".git"), []byte(tc.gitContent), 0o644); err != nil {
+					t.Fatalf("write .git: %v", err)
+				}
+			}
+			wt, err := f.mgr.Open(bad)
+			if err == nil {
+				t.Fatalf("want Open error, got worktree %v (silent fallback to main repo?)", wt)
+			}
+		})
 	}
-	if _, err := f.mgr.Open(bad); err == nil {
-		t.Fatal("want Open error for bad .git pointer")
-	}
+
+	t.Run("main worktree (.git is a dir)", func(t *testing.T) {
+		f := newFixture(t)
+		// The main repo's .git is a directory, not a linked-worktree pointer.
+		if _, err := f.mgr.Open(f.repoPath); err == nil {
+			t.Fatal("want Open error: main worktree is not a linked worktree")
+		}
+	})
+
+	t.Run("gitdir points outside a worktree admin dir", func(t *testing.T) {
+		f := newFixture(t)
+		bad := f.wtPath("noadmin")
+		if err := os.MkdirAll(bad, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		// gitdir points at an existing dir that lacks the commondir marker.
+		target := filepath.Join(f.worktreeRoot, "plain")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatalf("mkdir target: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bad, ".git"), []byte("gitdir: "+target+"\n"), 0o644); err != nil {
+			t.Fatalf("write .git: %v", err)
+		}
+		if _, err := f.mgr.Open(bad); err == nil {
+			t.Fatal("want Open error: admin dir lacks commondir marker")
+		}
+	})
 }
 
 func TestWorktreeDir_NoGitdir(t *testing.T) {
