@@ -161,25 +161,34 @@ Load → instructions/gotchas.md    # abstain-conditions (don't flag 1k lines on
 
 Review-gate lens dispatch is currently a Task-spawn of the scaffold lens agent (no Go dispatcher enumerates lenses yet — confirmed by grep: lens dispatch is prompt/skill-driven today). When the layered-fanout lens-dispatch lands (`[[layered-pr-fanout-with-pr-open-status]]` §3.3), the dispatcher gains a mode-resolution step:
 
-1. For each lens in the bundle's `lens_set`, resolve mode: `lens_modes.<lens>` → template `default_mode` → `standard` (D4).
-2. Spawn the `<lens>-reviewer` worker with the resolved mode injected so its `Load → <lens>.<mode>` directive points at the right skill.
+1. For each lens in the bundle's `lens_set`, resolve the mode **set** via the config-v2 resolver (§4.4): effective `lens_modes.<lens>` (single value or array) → template `default_mode` → `standard` (D4). A single value resolves to a one-element set; an array resolves to the multi-mode set (OQ-2 resolved).
+2. Spawn the `<lens>-reviewer` worker(s) with the resolved mode set injected so the `Load → <lens>.<mode>` directive(s) point at the right skill(s). How the worker runs >1 mode (series-then-synthesize, parallel-then-reconcile, interleaved, or per-invocation) is the §6.5 execution-model choice — the dispatcher consumes the resolved set; the chosen execution model (and its synthesis/reconciliation step) is wired in t8.
 3. (D3) If the lens AGENT.md is still legacy inline-shape (`lens_template_version` absent), spawn as-is and ignore mode.
 
-The dispatcher never branches *which agent* it spawns on mode — only *which skill the agent loads*. This keeps the agent-count == lens-count invariant the copy-test asserts.
+The dispatcher never branches *which agent* it spawns on mode — only *which skill(s) the agent loads* and how many modes it runs. This keeps the agent-count == lens-count invariant the copy-test asserts even when a lens runs multiple modes (multi-mode is one lens worker loading multiple mode skills, not multiple lens agents).
 
 ### §4.4 `.agentsrc.json` `lens_modes` field
 
-A new optional top-level object field, keyed by lens name → mode name, mirroring `verifier_profiles`:
+A new optional top-level object field, keyed by lens name → mode name (single value **or** an array — see below), mirroring `verifier_profiles`:
 
 ```json
 "lens_modes": {
-  "architecture-standards": "thermo-nuclear",
+  "architecture-standards": ["standard", "thermo-nuclear"],
   "acceptance-invariants": "standard",
   "adversarial": "standard"
 }
 ```
 
-Absent field or absent key = `standard`. Per `[[schema-usage]]`, adding this field touches all six sync points: struct + `agentsRCCore` mirror + `UnmarshalJSON` + `MarshalJSON` + `agentsRCKnown` map + `schemas/agentsrc.schema.json` (with `additionalProperties` constrained to string values and an enum is **not** used — modes are open-ended per D5 user-defined-mode future, so the value is `type: string`, validated against discovered skills at dispatch, not at schema time).
+Per OQ-2 (resolved — §7), the value is **single-OR-array**: a string runs one mode, an array (`[standard, thermo-nuclear]`) runs the lens in multiple modes. Absent field or absent key = `standard`. Per `[[schema-usage]]`, adding this field touches all six sync points: struct + `agentsRCCore` mirror + `UnmarshalJSON` + `MarshalJSON` + `agentsRCKnown` map + `schemas/agentsrc.schema.json` (with `additionalProperties` accepting `{ "oneOf": [ { "type": "string" }, { "type": "array", "items": { "type": "string" } } ] }` — modes are open-ended per D5 user-defined-mode future, so no enum is used; values are validated against discovered skills at dispatch, not at schema time).
+
+#### Mode resolution routes through config-v2 / `config explain`
+
+The `lens_modes` value (which mode(s) a lens runs) is **not** read directly off raw `.agentsrc.json`. It resolves through the **config-v2 effective-config resolver** — the same layered-resolution path `verifier_profiles` uses, and what `da workflow app-types` originally started doing. Concretely:
+
+- The resolved mode set for any lens is **inspectable via `da config explain lens_modes.<lens>`** — an operator can ask "which modes will `architecture-standards` run?" and get the effective answer (config layer + template `default_mode` + hard fallback), with provenance, *before* a review fires. This is the "refresh time should be properly resolvable through config explain" requirement: the resolved mode set must be answerable by `da config explain` at refresh time so an operator sees which modes run before dispatch.
+- **Resolution order is the config-v2 resolver's job, not the dispatcher's** — the dispatcher (§4.3) consumes the already-resolved mode set. Order: effective `lens_modes.<lens>` (config-v2 layered) → template `default_mode` (D4) → hard fallback `standard`.
+
+**config-v2 coordination item:** `da workflow app-types` (and config-v2's currently-planned scope) may need **expansion beyond what config-v2 has planned** to carry mode-resolution — `lens_modes` is a new resolvable key class (lens → mode-set) that config-v2's resolver and `config explain` registry must learn. Flagged as a cross-ref coordination item with `[[config-v2-migration]]`; this proposal's t5 must land against whatever resolver/registry surface config-v2 ships, not a bespoke reader.
 
 ---
 
@@ -201,7 +210,9 @@ Sequenced under a new sub-plan `lens-template-and-mode-skills` (cleanly separabl
 
 7. **t7 — Rip out backward-compat.** write_scope: dispatcher (`commands/workflow`, once lens dispatch lands), remove the D3 inline-shape branch; `lens_template_version` becomes a required-frontmatter assertion in copy-test. Depends on t2-t4 all landed. Verification: dispatcher tests; copy-test asserts every lens AGENT.md carries `lens_template_version`.
 
-**Dependency order:** t1 → {t2, t3, t4} (parallelizable after t1) ; t5 independent (can run with t1) ; t6 after t2 (needs thermo-nuclear-as-mode to exist) ; t7 after t2+t3+t4.
+8. **t8 — Batch-rework all lenses + their mode skills to the benchmark winner.** write_scope: every lens AGENT.md (`*-reviewer/AGENT.md`), every mode skill (`skills/global/<lens>.<mode>/`), the dispatcher's multi-mode execution path (`commands/workflow`). Once the §6.5 execution-model benchmark picks a winner, re-fit each lens's template + mode-skill set to the chosen multi-mode execution model uniformly — so the whole lens-set runs the *same* execution model (no per-lens divergence). This is the cleanup pass that applies the empirical winner across all lenses. Depends on the §6.5 benchmark landing a decision **and** t1-t7. Verification: copy-test; dispatcher multi-mode tests against the chosen model; readback of one multi-mode lens.
+
+**Dependency order:** t1 → {t2, t3, t4} (parallelizable after t1) ; t5 independent (can run with t1) ; t6 after t2 (needs thermo-nuclear-as-mode to exist) ; t7 after t2+t3+t4 ; t8 after the §6.5 benchmark decision + t1-t7 (final uniform rework pass).
 
 ---
 
@@ -215,11 +226,38 @@ Sequenced under a new sub-plan `lens-template-and-mode-skills` (cleanly separabl
 
 ---
 
+## §6.5 Execution-model benchmark (empirical, pre-impl)
+
+OQ-2 is resolved in *policy* (multi-mode is allowed) but the *mechanism* — how a lens runs N modes and combines their output — is an empirical question that must be answered before the final execution model is locked. The maintainer's anecdote ("when informing for manual lens spawn it kinda synthesized before giving all back to me, and the combined results did catch some cross-cutting stuff a lens didn't by itself") names a specific winner hypothesis but is one data point. Benchmark the candidates before committing.
+
+### Execution models to test
+
+1. **single-mode-per-invocation** — each mode = a separate agent run. N modes → N invocations; results **concatenated** with no synthesis pass. This is the cheapest to wire (it's just the v1 single-mode dispatch run N times) and the baseline against which synthesis is measured. Recall on cross-cutting findings is expected to be the floor — concatenation does no reconciliation.
+
+2. **single-agent-multi-mode-in-series** — one agent loads multiple mode skills, runs them in series within one context, and **synthesizes** the combined findings before returning (deduping, escalating findings that recur across modes, surfacing cross-cutting issues that only emerge when modes are read together). **The maintainer's anecdotal winner** — the "combined results caught cross-cutting stuff a single lens didn't." Hypothesis to beat.
+
+3. **parallel-invocation-then-synthesize** — N parallel mode runs (like model 1, wall-clock-cheap) followed by a dedicated **reconciliation/synthesis pass** (a second agent step that reads all N outputs and produces the combined verdict). Decouples per-mode review from synthesis; tests whether synthesis quality depends on shared-context (model 2) or can be recovered post-hoc from independent runs.
+
+4. **single-agent-multi-mode-interleaved** — one agent runs the modes **interleaved**, letting each mode's findings inform the next during the pass (rather than series-then-synthesize). Tests whether cross-cutting catch improves when modes cross-pollinate *during* review vs. only at a terminal synthesis step.
+
+### Benchmark definition
+
+- **Ground-truth corpus:** `.agents/active/reviews/pr3b` and `.agents/active/reviews/pr3c` — prior multi-lens review runs whose TRIAGE.md records the issues a known-good *combined* review caught, with explicit per-finding lens attribution (e.g. pr3b #4 across all three lenses; pr3b #5 arch+adversarial; pr3c #4 arch+test+adversarial). These cross-attributed findings are the cross-cutting recall targets.
+- **Metrics per model:**
+  - **Cross-cutting recall** — fraction of the corpus's multi-lens-attributed findings the model surfaces in its combined output. This is the primary metric (it's what the anecdote claims models 2-4 win on).
+  - **Cost** — agent invocations (model 1 = N, model 2/4 = 1, model 3 = N+1 with the synthesis pass).
+  - **Reconciliation overhead** — added tokens/latency of the synthesize/reconcile step (zero for model 1's concatenation; non-trivial for 2/3/4).
+- **Reconciliation framing:** the double-verdict reconciliation cost `[[thermo-nuclear-lens-evaluation]]` §4 worried about is **real** — but the synthesize step is the *mitigation*, not a reason to forbid multi-mode. Reconciliation is therefore a **design requirement** of models 2, 3, and 4 (model 1 is the no-synthesis baseline that exposes the cost of *not* reconciling). A model that produces double verdicts without synthesizing fails the benchmark.
+
+### Gate
+
+Empirical results **gate the final execution-model choice**. This proposal recommends **model 2 (single-agent-multi-mode-in-series-then-synthesize)** as the hypothesis to beat (per the anecdote), but the benchmark must run and report recall/cost/overhead before any model is locked into the dispatcher (§4.3) or the t8 batch-rework (§5). No execution model is hard-committed until the corpus measurement is in.
+
 ## §7. Open questions
 
 - **OQ-1 — Mode-skill testing via `eval/` subdir.** Each mode skill is a review rubric; per skill-architect principle #8 the high-stakes ones need an `eval/` layer. Proposal: `skills/global/<lens>.<mode>/eval/checklist.md` (pass/fail gate: "did the rubric flag at least one in-band concern when one demonstrably exists; did it abstain on the documented out-of-band cases; did it emit the structured finding format"). Open: do we gate t2-t4 on eval coverage, or land rubrics first and add evals as a t8 hardening pass? Lean: evals are a follow-up (don't block the structural migration).
 
-- **OQ-2 — Multi-mode-per-PR.** Can a single PR run a lens in two modes (e.g., architecture-standards in both `standard` and `thermo-nuclear`)? Today `lens_modes.<lens>` is a single value. A future `lens_modes.<lens>: [standard, thermo-nuclear]` array would spawn two workers for one lens — but that re-introduces the double-verdict reconciliation cost the thermo-nuclear meld was designed to avoid. Defer; single-mode-per-lens-per-PR for v1.
+- **OQ-2 — Multi-mode-per-lens — RESOLVED: ALLOWED (was "defer").** A single PR **can** run a lens in more than one mode (e.g., `architecture-standards` in both `standard` and `thermo-nuclear`). `lens_modes.<lens>` therefore becomes **single-OR-array** (`"thermo-nuclear"` or `["standard", "thermo-nuclear"]`), per §4.4. This overturns the earlier v1 lean to defer. The double-verdict reconciliation cost the thermo-nuclear meld worried about (`[[thermo-nuclear-lens-evaluation]]` §4) is **real but mitigated by a synthesize step**, not avoided by forbidding multi-mode — see the §6.5 execution-model benchmark, which makes "synthesize before returning" a design requirement of every multi-mode execution model. Evidence motivating the overturn: prior multi-lens review runs (`.agents/active/reviews/pr3b`, `pr3c`) show the *combined* (synthesized) output caught cross-cutting findings no single lens caught alone — pr3b finding #4 (`draft_plans` JSON-contract field) surfaced in all three lenses and #5 (`migrations.go` idempotent-not-versioned) in arch+adversarial; pr3c finding #4 (`persistReweavedNote` body-loss) in arch+test+adversarial. The convergence/synthesis at the TRIAGE layer is what elevated those from per-lens nits to actioned fixes. The execution-model that produces that synthesis is the open empirical question, not whether multi-mode is allowed.
 
 - **OQ-3 — User-defined modes.** D5 makes `da skills new architecture-standards.<custom>` + `lens_modes.architecture-standards = <custom>` work end-to-end. Open: do we validate that a configured mode resolves to an installed skill at `da refresh` time (fail-fast) or at dispatch time (fail-soft to `standard`)? Lean: warn at `da refresh`, fall back to `standard` at dispatch so a typo never hard-blocks a review.
 
@@ -233,3 +271,5 @@ Sequenced under a new sub-plan `lens-template-and-mode-skills` (cleanly separabl
 - `[[schema-usage]]` — the six-point AgentsRC field sync discipline for t5.
 - `[[parallel-worker-branch-drift]]` — the lesson grounding D2's per-lens (not flag-day) migration.
 - `[[verifier_profiles]]` (`.agentsrc.json`) — the object-keyed-by-name precedent for D1 naming and the §4.4 `lens_modes` field shape.
+- `[[config-v2-migration]]` — the effective-config resolver + `da config explain` surface that §4.4 routes `lens_modes` resolution through; flagged coordination item (mode-resolution may need expansion beyond config-v2's currently-planned scope).
+- `.agents/active/reviews/pr3b`, `.agents/active/reviews/pr3c` — prior multi-lens review corpus; the §6.5 benchmark's cross-cutting-recall ground truth and the evidence resolving OQ-2.

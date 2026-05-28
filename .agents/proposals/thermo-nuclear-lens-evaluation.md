@@ -225,6 +225,14 @@ This reframes §4 / §5 in a load-bearing way and supersedes the v1 "single AGEN
 - **Shared template** for all three (later: four+) lenses — a single `lens-template.md` (or starter scaffold) holds the orchestrator pattern; lens-specific instantiation parameterizes via `name`, `loaded-skills[]`, `output-contract-extras`.
 - **Mode selection** happens at dispatch time — the review-gate dispatcher reads `architecture_standards.mode` from `.agentsrc.json` (per §4 escape hatch) and instructs the lens to load the corresponding skill instead of forking which agent it spawns.
 
+### §7.1a Multi-mode-per-lens is now ALLOWED (per #167 OQ-2, added 2026-05-28)
+
+The sibling `[[lens-template-and-mode-skills]]` proposal resolved its **OQ-2 to ALLOW multi-mode-per-lens** (PR #167) — a lens can run in more than one mode in a single PR (e.g. `architecture-standards` in both `standard` and `thermo-nuclear`). This is a *mechanism* refinement on top of this proposal's §4 decision and does **not** change the meld decision below.
+
+The reconciliation-cost concern this proposal raised (§3 Path A cons, §4 rationale — "two parallel verdicts on the same surface increase reconciliation cost") is **reconciled, not contradicted**: that cost is real, but it is **addressed by a synthesize step** (models 2-4 of #167 §6.5's execution-model benchmark — single-agent-multi-mode-in-series-then-synthesize, parallel-then-reconcile, interleaved), not by forbidding multi-mode. The meld's "avoid double-verdict reconciliation" framing was correct about the *cost* but the right mitigation is a synthesis/reconciliation pass — which #167 makes a design requirement of every multi-mode execution model — rather than a hard single-mode constraint. Evidence: the prior `.agents/active/reviews/{pr3b,pr3c}` runs show the *combined* (synthesized) output caught cross-cutting findings no single lens caught alone, which is exactly what motivates allowing a lens to run multiple modes and synthesize.
+
+**The §4 meld decision is unchanged** — still no separate 4th lens; thermo-nuclear stays a *mode* of architecture-standards. Multi-mode-allowed means that one melded lens can now run both its modes in a single PR (and synthesize), which strengthens the meld rather than reopening the 4th-lens question.
+
 ### §7.2 What stays from §4 / §5
 
 - The **decision** (Hybrid B-leaning meld; no separate 4th lens) is unchanged.
