@@ -40,7 +40,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: docs/web
-        run: npm ci
+        # --ignore-scripts: per Sonar S6505; we control the deps + their
+        # postinstall scripts via package-lock.json, so install-time scripts
+        # are not needed for CI builds. The 'astro build' step below runs
+        # the real build (the only script we need).
+        run: npm ci --ignore-scripts
 
       - name: Build site
         working-directory: docs/web
