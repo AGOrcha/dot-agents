@@ -43,19 +43,23 @@ const serialized = JSON.stringify({ graph, layoutName });
     data-graph={serialized}
   ></div>
   <aside class="graph-inspector" id={`inspector-${graphId}`}>
-    <h3>Inspector</h3>
-    <p class="hint">Click a node to view its details.</p>
     {graph.legend && (
-      <div>
-        <dt>Legend</dt>
-        {graph.legend.map((l) => (
-          <div>
-            <span class="badge" style={`background:${l.color}`}>{l.kind}</span>
-            {l.description && <span style="color:var(--text-dim); font-size:0.78rem;"> {l.description}</span>}
-          </div>
-        ))}
-      </div>
+      <section class="graph-legend" aria-label="Legend">
+        <h3>Legend</h3>
+        <ul class="legend-list">
+          {graph.legend.map((l) => (
+            <li>
+              <span class="badge" style={`background:${l.color}`}>{l.kind}</span>
+              {l.description && <span class="legend-desc"> {l.description}</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
     )}
+    <section class="graph-detail" id={`detail-${graphId}`} aria-label="Selected node">
+      <h3>Selected node</h3>
+      <p class="hint">Click a node to view its details.</p>
+    </section>
   </aside>
 </div>
 
@@ -65,7 +69,7 @@ const serialized = JSON.stringify({ graph, layoutName });
   type CyInstance = ReturnType<typeof cytoscape>;
   type MountedGraph = {
     el: HTMLElement;
-    inspector: HTMLElement | null;
+    detail: HTMLElement | null;
     graphId: string;
     graph: any;
     layoutName: string;
@@ -100,7 +104,7 @@ const serialized = JSON.stringify({ graph, layoutName });
       .replace(/'/g, '&#39;');
   }
 
-  function renderInspector(inspector: HTMLElement, node: any, kindColors: Record<string, string>, defaultColor: string) {
+  function renderDetail(detail: HTMLElement, node: any, kindColors: Record<string, string>, defaultColor: string) {
     const d = node.data();
     const payload = d.payload ?? {};
     const rows = Object.entries(payload)
@@ -116,7 +120,7 @@ const serialized = JSON.stringify({ graph, layoutName });
         return `<dt>${escapeHtml(k)}</dt><dd>${value}</dd>`;
       })
       .join('');
-    inspector.innerHTML = `
+    detail.innerHTML = `
       <h3>${escapeHtml(d.label)}</h3>
       <dl>
         <dt>Kind</dt><dd><span class="badge" style="background:${kindColors[d.kind] ?? defaultColor}">${escapeHtml(d.kind)}</span></dd>
@@ -124,6 +128,10 @@ const serialized = JSON.stringify({ graph, layoutName });
         ${rows}
       </dl>
     `;
+  }
+
+  function resetDetail(detail: HTMLElement) {
+    detail.innerHTML = '<h3>Selected node</h3><p class="hint">Click a node to view its details.</p>';
   }
 
   function buildStyle(kindColors: Record<string, string>, defaultColor: string): any[] {
@@ -181,7 +189,7 @@ const serialized = JSON.stringify({ graph, layoutName });
     const graphId = canvas.getAttribute('data-graph-id') ?? '';
     const raw = canvas.getAttribute('data-graph');
     if (!raw) return;
-    const inspector = document.getElementById(`inspector-${graphId}`);
+    const detail = document.getElementById(`detail-${graphId}`);
     const { graph, layoutName } = JSON.parse(raw);
 
     const kindColors: Record<string, string> = Object.fromEntries(
@@ -213,16 +221,16 @@ const serialized = JSON.stringify({ graph, layoutName });
       wheelSensitivity: 0.2,
     });
 
-    if (inspector) {
-      cy.on('tap', 'node', (evt: any) => renderInspector(inspector, evt.target, kindColors, defaultColor));
+    if (detail) {
+      cy.on('tap', 'node', (evt: any) => renderDetail(detail, evt.target, kindColors, defaultColor));
       cy.on('tap', (evt: any) => {
         if (evt.target === cy) {
-          inspector.innerHTML = '<h3>Inspector</h3><p class="hint">Click a node to view its details.</p>';
+          resetDetail(detail);
         }
       });
     }
 
-    mounted.push({ el: canvas, inspector, graphId, graph, layoutName, cy });
+    mounted.push({ el: canvas, detail, graphId, graph, layoutName, cy });
   }
 
   function initAll() {
