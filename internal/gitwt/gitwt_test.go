@@ -33,6 +33,17 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("init repo: %v", err)
 	}
+	// Set a committer identity in repo config so nil-opts commits do not depend
+	// on the CI runner's ambient git config (which is absent on CI).
+	cfg, err := repo.Config()
+	if err != nil {
+		t.Fatalf("config: %v", err)
+	}
+	cfg.User.Name = "Fixture"
+	cfg.User.Email = "fixture@example.com"
+	if err := repo.SetConfig(cfg); err != nil {
+		t.Fatalf("set config: %v", err)
+	}
 	base := commitFile(t, repo, "README.md", "hello\n", "initial")
 
 	mgr, err := NewManager(repoPath)
