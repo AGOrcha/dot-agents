@@ -12,7 +12,7 @@
   ],
   "nodes": [
     { "id": "plan:pr10", "label": "pr10-branch-split", "kind": "plan",
-      "data": { "lives_in": ".agents/workflow/plans/pr10-branch-split/", "task_count": 19, "purpose": "Carve a mega-branch into PR-sized slices and ship each through CI" } },
+      "data": { "lives_in": ".agents/workflow/plans/pr10-branch-split/", "task_count": 25, "purpose": "Carve a mega-branch into PR-sized slices and ship each through CI" } },
 
     { "id": "t:pr1-foundation", "label": "pr1-foundation", "kind": "task-completed",
       "data": { "pr": "#12", "write_scope": ["internal/config/", "cmd/dot-agents/", ".goreleaser.yaml", "schemas/"], "notes": "Foundation: config, binary rename, Homebrew tap, CI, JSON schemas" } },

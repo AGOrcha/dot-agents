@@ -18,7 +18,7 @@
       "kind": "cli",
       "data": {
         "purpose": "Cobra entrypoint; init, add, refresh, doctor, install, status, workflow, kg, review, skills, rules, agents, hooks, mcp, settings, ux",
-        "lives_in": "cmd/dot-agents/main.go + commands/",
+        "lives_in": "cmd/da/main.go + commands/",
         "platforms_managed": ["Cursor", "Claude Code", "Codex", "GitHub Copilot", "OpenCode"]
       }
     },
@@ -33,83 +33,83 @@
     },
     {
       "id": "agent:loop-worker", "label": "loop-worker", "kind": "agent",
-      "data": { "purpose": "Bounded implementation worker for delegated tasks", "lives_in": "~/.agents/agents/loop-worker/" }
+      "data": { "purpose": "Bounded implementation worker for delegated tasks", "lives_in": "~/.agents/agents/global/loop-worker/" }
     },
     {
       "id": "agent:verifier", "label": "verifier", "kind": "agent",
-      "data": { "purpose": "Profile-driven verification + PR-readiness loop (unit, api, batch, pr-ci, docs)", "lives_in": "~/.agents/agents/verifier/" }
+      "data": { "purpose": "Profile-driven verification + PR-readiness loop (unit, api, batch, pr-ci, docs)", "lives_in": "~/.agents/agents/global/verifier/" }
     },
     {
       "id": "agent:test-runner", "label": "test-runner", "kind": "agent",
-      "data": { "purpose": "Runs tests under bounded scope and reports results", "lives_in": "~/.agents/agents/test-runner/" }
+      "data": { "purpose": "Runs tests under bounded scope and reports results", "lives_in": "~/.agents/agents/global/test-runner/" }
     },
     {
       "id": "skill:orchestrator-session-start", "label": "orchestrator-session-start", "kind": "skill",
-      "data": { "purpose": "Pre-flight + orient + pick next task + fanout decision", "lives_in": "~/.agents/skills/orchestrator-session-start/" }
+      "data": { "purpose": "Pre-flight + orient + pick next task + fanout decision", "lives_in": "~/.agents/skills/global/orchestrator-session-start/" }
     },
     {
       "id": "skill:isp", "label": "isp", "kind": "skill",
-      "data": { "purpose": "Interactive staged pipeline: impl → verifier → review → parent gate", "lives_in": "~/.agents/skills/isp/" }
+      "data": { "purpose": "Interactive staged pipeline: impl → verifier → review → parent gate", "lives_in": "~/.agents/skills/global/isp/" }
     },
     {
       "id": "skill:iteration-close", "label": "iteration-close", "kind": "skill",
-      "data": { "purpose": "Persist iteration evidence: verify → checkpoint → advance/merge-back", "lives_in": "~/.agents/skills/iteration-close/" }
+      "data": { "purpose": "Persist iteration evidence: verify → checkpoint → advance/merge-back", "lives_in": "~/.agents/skills/global/iteration-close/" }
     },
     {
       "id": "skill:delegation-lifecycle", "label": "delegation-lifecycle", "kind": "skill",
-      "data": { "purpose": "Manage delegated write-scope tasks end-to-end", "lives_in": "~/.agents/skills/delegation-lifecycle/" }
+      "data": { "purpose": "Manage delegated write-scope tasks end-to-end", "lives_in": "~/.agents/skills/global/delegation-lifecycle/" }
     },
     {
       "id": "skill:loop-worker", "label": "loop-worker (skill)", "kind": "skill",
-      "data": { "purpose": "Cold-start capable worker procedure consumed by the loop-worker agent", "lives_in": "~/.agents/skills/loop-worker/" }
+      "data": { "purpose": "Cold-start capable worker procedure consumed by the loop-worker agent", "lives_in": "~/.agents/skills/global/loop-worker/" }
     },
     {
       "id": "skill:plan-wave-picker", "label": "plan-wave-picker", "kind": "skill",
-      "data": { "purpose": "Pick the next eligible wave when multiple plans are active", "lives_in": "~/.agents/skills/plan-wave-picker/" }
+      "data": { "purpose": "Pick the next eligible wave when multiple plans are active", "lives_in": "~/.agents/skills/global/plan-wave-picker/" }
     },
     {
       "id": "skill:provider-consumer-pair", "label": "provider-consumer-pair", "kind": "skill",
-      "data": { "purpose": "Sequence contract producer + consumer waves together", "lives_in": "~/.agents/skills/provider-consumer-pair/" }
+      "data": { "purpose": "Sequence contract producer + consumer waves together", "lives_in": "~/.agents/skills/global/provider-consumer-pair/" }
     },
     {
       "id": "skill:self-review", "label": "self-review", "kind": "skill",
-      "data": { "purpose": "Reviewer-mode pass before commit / PR", "lives_in": "~/.agents/skills/self-review/" }
+      "data": { "purpose": "Reviewer-mode pass before commit / PR", "lives_in": "~/.agents/skills/global/self-review/" }
     },
     {
       "id": "skill:review-pr", "label": "review-pr", "kind": "skill",
-      "data": { "purpose": "PR review with KG-backed structural context", "lives_in": "~/.agents/skills/review-pr/" }
+      "data": { "purpose": "PR review with KG-backed structural context", "lives_in": "~/.agents/skills/global/review-pr/" }
     },
     {
       "id": "skill:review-delta", "label": "review-delta", "kind": "skill",
-      "data": { "purpose": "Token-efficient review of diff since last commit", "lives_in": "~/.agents/skills/review-delta/" }
+      "data": { "purpose": "Token-efficient review of diff since last commit", "lives_in": "~/.agents/skills/global/review-delta/" }
     },
     {
       "id": "skill:build-graph", "label": "build-graph", "kind": "skill",
-      "data": { "purpose": "Build/update code-review knowledge graph", "lives_in": "~/.agents/skills/build-graph/" }
+      "data": { "purpose": "Build/update code-review knowledge graph", "lives_in": "~/.agents/skills/global/build-graph/" }
     },
     {
       "id": "skill:split-reviewable-commits", "label": "split-reviewable-commits", "kind": "skill",
-      "data": { "purpose": "Rewrite branch into small semantic commits", "lives_in": "~/.agents/skills/split-reviewable-commits/" }
+      "data": { "purpose": "Rewrite branch into small semantic commits", "lives_in": "~/.agents/skills/global/split-reviewable-commits/" }
     },
     {
       "id": "skill:gh-fix-ci", "label": "gh-fix-ci", "kind": "skill",
-      "data": { "purpose": "Inspect failing CI checks and propose fixes", "lives_in": "~/.agents/skills/gh-fix-ci/" }
+      "data": { "purpose": "Inspect failing CI checks and propose fixes", "lives_in": "~/.agents/skills/global/gh-fix-ci/" }
     },
     {
       "id": "skill:skill-architect", "label": "skill-architect", "kind": "skill",
-      "data": { "purpose": "Design/transform/audit/improve other skills", "lives_in": "~/.agents/skills/skill-architect/" }
+      "data": { "purpose": "Design/transform/audit/improve other skills", "lives_in": "~/.agents/skills/global/skill-architect/" }
     },
     {
       "id": "skill:agent-handoff", "label": "agent-handoff", "kind": "skill",
-      "data": { "purpose": "Package session context into a handoff doc", "lives_in": "~/.agents/skills/agent-handoff/" }
+      "data": { "purpose": "Package session context into a handoff doc", "lives_in": "~/.agents/skills/global/agent-handoff/" }
     },
     {
       "id": "skill:agent-start", "label": "agent-start", "kind": "skill",
-      "data": { "purpose": "Session bootstrap: load active state + relevant lessons", "lives_in": "~/.agents/skills/agent-start/" }
+      "data": { "purpose": "Session bootstrap: load active state + relevant lessons", "lives_in": "~/.agents/skills/global/agent-start/" }
     },
     {
       "id": "skill:platform-docs-refresh", "label": "platform-docs-refresh", "kind": "skill",
-      "data": { "purpose": "Refresh docs/PLATFORM_DIRS_DOCS.md against vendor docs", "lives_in": "~/.agents/skills/platform-docs-refresh/" }
+      "data": { "purpose": "Refresh docs/PLATFORM_DIRS_DOCS.md against vendor docs", "lives_in": "~/.agents/skills/global/platform-docs-refresh/" }
     },
     {
       "id": "rule:agents.md", "label": "agents.md (project)", "kind": "rule",
