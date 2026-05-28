@@ -15,14 +15,23 @@
     "binding": "ASSETS",
     "not_found_handling": "404-page"
   },
-  "routes": [
-    { "pattern": "agorcha.dev", "custom_domain": true },
-    { "pattern": "agorcha.dev/*", "custom_domain": true }
-  ],
   "vars": {
-    "ENVIRONMENT": "production"
+    "ENVIRONMENT": "development"
+  },
+  // Production-only routes: agorcha.dev custom_domain. Preview deploys
+  // (PR branches) skip this env entirely and land at
+  // <name>.<account>.workers.dev — they cannot bind a production custom
+  // domain owned by another Worker.
+  "env": {
+    "production": {
+      "name": "agorcha-dev-docs",
+      "routes": [
+        { "pattern": "agorcha.dev", "custom_domain": true },
+        { "pattern": "agorcha.dev/*", "custom_domain": true }
+      ],
+      "vars": {
+        "ENVIRONMENT": "production"
+      }
+    }
   }
-  // Preview deploys land at <name>.<account>.workers.dev by way of
-  // `wrangler deploy --name agorcha-dev-docs-preview` in the PR branch
-  // of the CI workflow — no separate env block needed.
 }

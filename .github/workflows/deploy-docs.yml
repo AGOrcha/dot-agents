@@ -66,7 +66,8 @@ jobs:
           # the `main:` field from wrangler.jsonc when combined with --name,
           # producing "Missing entry-point" even though src/worker.js is set.
           wranglerVersion: "4"
-          # PRs deploy to a separate Worker (agorcha-dev-docs-preview) reachable
-          # at <name>.<account-subdomain>.workers.dev with no custom-domain route.
-          # Master deploys to the production Worker bound to agorcha.dev.
-          command: ${{ github.event_name == 'pull_request' && 'deploy --name agorcha-dev-docs-preview' || 'deploy' }}
+          # PRs deploy to a separate preview Worker reachable at
+          # <name>.<account>.workers.dev — top-level config (no env) = no
+          # custom-domain routes. Master push uses --env production to
+          # activate the agorcha.dev routes from env.production in wrangler.jsonc.
+          command: ${{ github.event_name == 'pull_request' && 'deploy --name agorcha-dev-docs-preview' || 'deploy --env production' }}
