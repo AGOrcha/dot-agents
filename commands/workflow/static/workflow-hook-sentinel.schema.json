@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "./schemas/workflow-hook-sentinel.schema.json",
   "title": "da workflow hook sentinel",
-  "description": "Schema for `.agents/active/hook-sentinels/<skill>-<run-id>.json`, written by `da workflow hook-sentinel write` at skill entry. Each enforced skill (iteration-close, isp, loop-worker) declares plan/task/agent context and expected artifacts so a downstream Stop/SubagentStop gate can validate them before allowing the agent to stop. `clear --run-id` on the success path archives the record under `.agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/`; no record is silently deleted in v1.",
+  "description": "Schema for `.agents/active/hook-sentinels/<skill>-<run-id>.json`, written by `da workflow hook-sentinel write` at skill entry. Each enforced skill (iteration-close, isp, loop-worker, orchestrator-session-start, delegation-lifecycle) declares plan/task/agent context and expected artifacts so a downstream Stop/SubagentStop gate can validate them before allowing the agent to stop. Companion skills (orchestrator-session-start, delegation-lifecycle) additionally declare an `operation` discriminator scoped to their gate. `clear --run-id` on the success path archives the record under `.agents/history/<plan-id>/hook-sentinels/<YYYY-MM-DD>/`; no record is silently deleted in v1.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -18,12 +18,18 @@
     "schema_version": {
       "type": "integer",
       "const": 1,
-      "description": "Schema version 1 — initial sentinel contract."
+      "description": "Schema version 1 — initial sentinel contract (plus T1 companion extension)."
     },
     "skill": {
       "type": "string",
-      "enum": ["iteration-close", "isp", "loop-worker"],
-      "description": "Enforced skill whose contract the gate will validate at stop/subagent-stop."
+      "enum": [
+        "iteration-close",
+        "isp",
+        "loop-worker",
+        "orchestrator-session-start",
+        "delegation-lifecycle"
+      ],
+      "description": "Enforced skill whose contract the gate will validate at stop/subagent-stop. Companion skills (orchestrator-session-start, delegation-lifecycle) extend the upstream trio per the T1 contract."
     },
     "run_id": {
       "type": "string",
@@ -87,8 +93,123 @@
         "trace_path_hint": {
           "type": "string",
           "description": "Optional caller-supplied hint to a readable transcript/trace path. Hook stdin remains authoritative when it provides a platform trace path (D7)."
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "fanout_handoff",
+            "existing_bundle_handoff",
+            "parent_closeout"
+          ],
+          "description": "Companion-gate operation discriminator (T1). Only valid when skill is orchestrator-session-start or delegation-lifecycle; the per-skill conditional below restricts the allowed enum to the operations supported by each companion gate."
+        },
+        "delegation_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Companion (handoff operations): repo-relative path to the delegation YAML the orchestrator either expects to materialize (fanout_handoff) or routes the worker to (existing_bundle_handoff)."
+        },
+        "bundle_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Companion (handoff operations): repo-relative path to the delegation-bundle YAML the worker will consume."
+        },
+        "required_sidecar_path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Companion (fanout_handoff only): optional repo-relative sidecar artifact path required by the gate before the fanout is allowed to publish."
+        },
+        "evidence_confidence": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Companion (fanout_handoff only): optional evidence-confidence label captured at handoff time."
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["accept", "reject"],
+          "description": "Companion (parent_closeout only): the closeout decision the parent will assert against."
+        },
+        "expected_archive_artifacts": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Companion (parent_closeout only): repo-relative archive-bound artifacts the closeout gate expects to find under `.agents/history/<plan-id>/...`."
+        },
+        "expected_cleanup_paths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Companion (parent_closeout only): repo-relative active paths the closeout gate expects to clear (delegation YAML, bundle YAML, merge-back drafts, etc.)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operation": { "const": "fanout_handoff" } }, "required": ["operation"] },
+          "then": {
+            "required": ["delegation_path", "bundle_path", "write_scope"],
+            "not": { "required": ["decision"] }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "existing_bundle_handoff" } }, "required": ["operation"] },
+          "then": {
+            "required": ["delegation_path", "bundle_path", "write_scope"],
+            "not": { "required": ["decision"] }
+          }
+        },
+        {
+          "if": { "properties": { "operation": { "const": "parent_closeout" } }, "required": ["operation"] },
+          "then": {
+            "required": ["decision", "expected_archive_artifacts", "expected_cleanup_paths"]
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "skill": { "const": "orchestrator-session-start" } },
+        "required": ["skill"]
+      },
+      "then": {
+        "properties": {
+          "context": {
+            "required": ["operation"],
+            "properties": {
+              "operation": { "enum": ["fanout_handoff", "existing_bundle_handoff"] }
+            }
+          }
+        },
+        "required": ["context"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "skill": { "const": "delegation-lifecycle" } },
+        "required": ["skill"]
+      },
+      "then": {
+        "properties": {
+          "context": {
+            "required": ["operation"],
+            "properties": {
+              "operation": { "enum": ["parent_closeout"] }
+            }
+          }
+        },
+        "required": ["context"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "skill": { "enum": ["iteration-close", "isp", "loop-worker"] } },
+        "required": ["skill"]
+      },
+      "then": {
+        "properties": {
+          "context": {
+            "not": { "required": ["operation"] }
+          }
         }
       }
     }
-  }
+  ]
 }
