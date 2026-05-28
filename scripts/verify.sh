@@ -17,7 +17,7 @@ if [[ -x "./bin/da" ]]; then
 elif command -v da >/dev/null 2>&1; then
   DOT_AGENTS="da"
 elif command -v go >/dev/null 2>&1; then
-  DOT_AGENTS="go run ./cmd/dot-agents"
+  DOT_AGENTS="go run ./cmd/da"
 else
   echo -e "${RED}Error: da not found${NC}" >&2
   exit 1

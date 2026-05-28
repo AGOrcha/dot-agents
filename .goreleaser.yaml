@@ -8,7 +8,7 @@ before:
 
 builds:
   - id: dot-agents-unix
-    main: ./cmd/dot-agents
+    main: ./cmd/da
     binary: da
     env:
       - CGO_ENABLED=0
@@ -25,7 +25,7 @@ builds:
       - -X github.com/NikashPrakash/dot-agents/commands.Describe={{.Tag}}
 
   - id: dot-agents-windows
-    main: ./cmd/dot-agents
+    main: ./cmd/da
     binary: da
     env:
       - CGO_ENABLED=0

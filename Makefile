@@ -2,13 +2,13 @@
 .PHONY: run build test coverage acceptance-coverage coverage-html
 
 run:
-	go run ./cmd/dot-agents
+	go run ./cmd/da
 
 build:
-	go build -o ./bin/da ./cmd/dot-agents
+	go build -o ./bin/da ./cmd/da
 
 build-prod:
-	go build -ldflags "-s -w" -o ./bin/da ./cmd/dot-agents
+	go build -ldflags "-s -w" -o ./bin/da ./cmd/da
 
 test:
 	go test ./...

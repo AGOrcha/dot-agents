@@ -114,7 +114,7 @@ func TestWorkflowGraphQueryCodeStructureRoutesToKGBridge(t *testing.T) {
 
 	repoRoot := dotAgentsRepoRoot(t)
 	bin := filepath.Join(t.TempDir(), "dot-agents")
-	build := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/dot-agents")
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/da")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build dot-agents: %v\n%s", err, out)

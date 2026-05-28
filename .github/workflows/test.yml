@@ -237,7 +237,7 @@ jobs:
       - name: Build CLI
         run: |
           mkdir -p ./bin
-          go build -o "${DA_BIN}" ./cmd/dot-agents
+          go build -o "${DA_BIN}" ./cmd/da
 
       - name: Verify built binary is real Go binary (not a shim)
         run: |

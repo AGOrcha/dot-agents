@@ -110,7 +110,7 @@ func buildLifecycleDeps() lifecycle.Deps {
 }
 
 // NewRootCommand builds the root cobra command with persistent global flags and all
-// subcommands. It mirrors cmd/dot-agents/main.go so tooling (e.g. global flag coverage)
+// subcommands. It mirrors cmd/da/main.go so tooling (e.g. global flag coverage)
 // can inspect the live command tree without importing package main.
 func NewRootCommand() *cobra.Command {
 	root := &cobra.Command{

@@ -87,8 +87,8 @@ func TestClassify(t *testing.T) {
 			wantBad:  false,
 		},
 		{
-			name:     "cmd/dot-agents edge into leaf is allowed",
-			importer: mod + "cmd/dot-agents",
+			name:     "cmd/da edge into leaf is allowed",
+			importer: mod + "cmd/da",
 			target:   mod + "commands/internal/lifecycle",
 			wantBad:  false,
 		},

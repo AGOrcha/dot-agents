@@ -97,7 +97,7 @@ func dotAgentsRepoRoot(t *testing.T) string {
 func runKGSetupViaCLI(t *testing.T) {
 	t.Helper()
 	repoRoot := dotAgentsRepoRoot(t)
-	cmd := exec.Command("go", "run", "./cmd/dot-agents", "kg", "setup")
+	cmd := exec.Command("go", "run", "./cmd/da", "kg", "setup")
 	cmd.Dir = repoRoot
 	cmd.Env = os.Environ()
 	out, err := cmd.CombinedOutput()

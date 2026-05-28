@@ -144,7 +144,7 @@ irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/inst
 ```bash
 git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
 cd ~/.dot-agents
-go build -o ./bin/da ./cmd/dot-agents
+go build -o ./bin/da ./cmd/da
 export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
 
