@@ -12,25 +12,38 @@ import (
 )
 
 func TestDefaultUsersPath(t *testing.T) {
-	t.Run("AGENTS_HOME override", func(t *testing.T) {
-		t.Setenv("AGENTS_HOME", "/tmp/agents-home")
+	t.Run("XDG_CONFIG_HOME override", func(t *testing.T) {
+		dir := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", dir)
 		got, err := DefaultUsersPath()
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := filepath.Join("/tmp/agents-home", "review", "users.yaml")
+		want := filepath.Join(dir, "da", "review", "users.yaml")
 		if got != want {
 			t.Fatalf("got %q want %q", got, want)
 		}
 	})
 	t.Run("home fallback", func(t *testing.T) {
-		t.Setenv("AGENTS_HOME", "")
+		t.Setenv("XDG_CONFIG_HOME", "")
 		got, err := DefaultUsersPath()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.HasSuffix(got, filepath.Join(".agents", "review", "users.yaml")) {
+		if !strings.HasSuffix(got, filepath.Join(".config", "da", "review", "users.yaml")) {
 			t.Fatalf("unexpected path %q", got)
+		}
+	})
+	t.Run("never resolves into AGENTS_HOME", func(t *testing.T) {
+		// Auth state must never live in the git-synced AGENTS_HOME tree.
+		t.Setenv("AGENTS_HOME", filepath.Join(t.TempDir(), "agents-home"))
+		t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+		got, err := DefaultUsersPath()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, "agents-home") {
+			t.Fatalf("users path %q must not resolve into AGENTS_HOME", got)
 		}
 	})
 }

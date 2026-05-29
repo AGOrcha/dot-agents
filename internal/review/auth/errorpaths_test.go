@@ -56,7 +56,7 @@ func TestAddUserHashError(t *testing.T) {
 }
 
 func TestDefaultUsersPathHomeError(t *testing.T) {
-	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "")
 	orig := userHomeDir
 	userHomeDir = func() (string, error) { return "", errors.New("no home") }
 	defer func() { userHomeDir = orig }()

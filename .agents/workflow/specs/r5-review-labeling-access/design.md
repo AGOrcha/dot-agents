@@ -46,9 +46,15 @@ Per the umbrella spec D3, any change to the signal mix requires a major rubric v
 
 The service expects an `Authorization: Bearer <token>` header. Tokens are issued by admin-only CLI (`da review users add --role reviewer <email>`) and recorded with a hashed secret and role in an admin-managed local users file. A pluggable authenticator interface keeps the door open to swap in OIDC later.
 
-**Why:** single-tenant per umbrella D5. No OAuth dependency; the auth surface is auditable as plain YAML. The CLI is the same surface that already manages other agent configuration.
+The users file lives at **`~/.config/da/review/users.yaml`** — honoring `$XDG_CONFIG_HOME` (→ `$XDG_CONFIG_HOME/da/review/users.yaml`) and falling back to `~/.config/da/review/users.yaml`. It is **per-host, never synced**, written 0600.
 
-**Rejected:** no auth (umbrella D5 mandates RBAC); OAuth/OIDC first (heavy dependency for a single-tenant tool); SSH-key-based auth (couples to the user's shell config; doesn't extend to a browser session).
+**Why this path (not AGENTS_HOME):** AGENTS_HOME is the git-synced config tree that `da sync` commits and pushes. RBAC users carry hashed secrets and are per-deployment, so they must never resolve into AGENTS_HOME — committing them would push auth state to the shared remote. Cross-host/team RBAC is the obs-server's job, not a synced file. The users file therefore lives in the same local-secrets home as the existing `~/.config/da/credentials.json` (external-agent-sources / agorcha §5.4), where the future auth-proxy injector centralizes credential handling.
+
+**Why bearer + CLI:** single-tenant per umbrella D5. No OAuth dependency; the auth surface is auditable as plain YAML. The CLI is the same surface that already manages other agent configuration.
+
+**Rejected:** no auth (umbrella D5 mandates RBAC); OAuth/OIDC first (heavy dependency for a single-tenant tool); SSH-key-based auth (couples to the user's shell config; doesn't extend to a browser session); users file in AGENTS_HOME (git-synced — would leak hashed secrets to the shared remote on every `da sync`).
+
+> **Principle — secrets never live in AGENTS_HOME.** Any secret / auth / credential state resolves into the per-host local-secrets home `~/.config/da/` (honoring `$XDG_CONFIG_HOME`), NEVER AGENTS_HOME (which `da sync` git-commits and pushes). This covers `~/.config/da/credentials.json` (external-agent-sources / agorcha §5.4) and `~/.config/da/review/users.yaml` (this spec), and is the home the future auth-proxy injector centralizes on.
 
 ### D5.4 — Audit log is append-only JSON-lines with hash-chained records
 

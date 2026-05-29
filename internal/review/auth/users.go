@@ -20,7 +20,7 @@ type User struct {
 	CreatedAt string `yaml:"created_at"`
 }
 
-// UsersFile is the on-disk shape of ~/.agents/review/users.yaml.
+// UsersFile is the on-disk shape of ~/.config/da/review/users.yaml.
 type UsersFile struct {
 	SchemaVersion int    `yaml:"schema_version"`
 	Users         []User `yaml:"users"`
@@ -60,18 +60,22 @@ var (
 	ErrUserExists = errors.New("auth: user already exists")
 )
 
-// DefaultUsersPath returns ~/.agents/review/users.yaml. It honors the
-// AGENTS_HOME override (used by tests and non-standard installs) before falling
-// back to the OS home directory.
+// DefaultUsersPath returns ~/.config/da/review/users.yaml, honoring
+// XDG_CONFIG_HOME first (-> $XDG_CONFIG_HOME/da/review/users.yaml) before
+// falling back to ~/.config/da/review/users.yaml.
+//
+// Secrets never live in AGENTS_HOME (the git-synced config tree pushed by
+// `da sync`); auth state is per-host local and resolves only into the
+// local-secrets home, alongside ~/.config/da/credentials.json.
 func DefaultUsersPath() (string, error) {
-	if home := os.Getenv("AGENTS_HOME"); home != "" {
-		return filepath.Join(home, "review", "users.yaml"), nil
+	if cfg := os.Getenv("XDG_CONFIG_HOME"); cfg != "" {
+		return filepath.Join(cfg, "da", "review", "users.yaml"), nil
 	}
 	home, err := userHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("auth: resolve home dir: %w", err)
 	}
-	return filepath.Join(home, ".agents", "review", "users.yaml"), nil
+	return filepath.Join(home, ".config", "da", "review", "users.yaml"), nil
 }
 
 // LoadUsersFile reads and parses a users file. A missing file is not an error:
