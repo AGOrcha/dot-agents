@@ -4,6 +4,8 @@
 `t04-sse-broker`, `t08-frontend-skeleton`.
 **Spec:** `../../../specs/r2-observability-dashboard/design.md` (requirements R1–R10, done criteria, OQ1–OQ6).
 **Plan design:** `../design.md` (decisions Q1–Q6).
+**Governing convention:** `[[api-conventions]]` — `/api/v1/<domain>/<resource>`. This dashboard is
+the `observability` domain; all paths below conform to that shape (`/api/v1/observability/...`).
 **Schemas:** `schemas/dashboard-run.schema.json`, `schemas/dashboard-iteration.schema.json`,
 `schemas/dashboard-rubric.schema.json`, `schemas/dashboard-event.schema.json`.
 
@@ -20,10 +22,11 @@ endpoint behaviour (methods, params, status codes, semantics).
 
 ### 1.1 Versioning
 
-`/api/v1/...` is reserved. **v1 elides the version segment in the URL path** (e.g. `/api/runs`,
-not `/api/v1/runs`); a contract test asserts this elision so the move to `/api/v2/...` later is a
-deliberate, testable break. All payloads carry a stable schema validated by the shipped JSON
-Schemas (spec R8).
+Per `[[api-conventions]]`, the version is **version-first at the root and always present in the
+URL**: every path is `/api/v1/observability/<resource>` (e.g. `/api/v1/observability/runs`). There
+is no per-domain version segment and no version elision. A contract test asserts the literal
+`/api/v1/observability/` prefix so the move to `/api/v2/...` later is a deliberate, testable break.
+All payloads carry a stable schema validated by the shipped JSON Schemas (spec R8).
 
 ### 1.2 Response envelope
 
@@ -95,17 +98,21 @@ endpoints are anonymous read-only. No write endpoints exist (anti-scope).
 
 ## 2. Endpoint catalogue
 
-Seven endpoints. All `GET`. Base path `/api`.
+Seven endpoints. All `GET`. Base path `/api/v1/observability` (the `observability` domain of
+`[[api-conventions]]`).
 
-| # | Method | Path                                  | Returns (data)                | Schema                          |
-|---|--------|---------------------------------------|-------------------------------|---------------------------------|
-| 1 | GET    | `/api/runs`                           | `RunSummary[]`                | dashboard-run                   |
-| 2 | GET    | `/api/runs/{session_id}`              | `RunDetail`                   | dashboard-run                   |
-| 3 | GET    | `/api/runs/{session_id}/iterations`   | `IterationSummary[]`          | dashboard-iteration             |
-| 4 | GET    | `/api/iterations/{n}`                 | `IterationDetail`             | dashboard-iteration             |
-| 5 | GET    | `/api/rubric`                         | `RubricDoc`                   | dashboard-rubric                |
-| 6 | GET    | `/api/health`                         | `Health` (inline §3.6)        | — (inline)                      |
-| 7 | GET    | `/api/stream`                         | `text/event-stream`           | dashboard-event (per `data:`)   |
+| # | Method | Path                                                | Returns (data)                | Schema                          |
+|---|--------|-----------------------------------------------------|-------------------------------|---------------------------------|
+| 1 | GET    | `/api/v1/observability/runs`                        | `RunSummary[]`                | dashboard-run                   |
+| 2 | GET    | `/api/v1/observability/runs/{session_id}`           | `RunDetail`                   | dashboard-run                   |
+| 3 | GET    | `/api/v1/observability/runs/{session_id}/iterations`| `IterationSummary[]`          | dashboard-iteration             |
+| 4 | GET    | `/api/v1/observability/iterations/{n}`              | `IterationDetail`             | dashboard-iteration             |
+| 5 | GET    | `/api/v1/observability/rubric`                      | `RubricDoc`                   | dashboard-rubric                |
+| 6 | GET    | `/api/v1/observability/health`                      | `Health` (inline §3.6)        | — (inline)                      |
+| 7 | GET    | `/api/v1/observability/events`                      | `text/event-stream`           | dashboard-event (per `data:`)   |
+
+The event stream lives at `/api/v1/observability/events` per the `[[api-conventions]]` event-stream
+rule (`/api/v1/<domain>/events`); SSE is the transport for this loopback single-user build.
 
 `RunSummary` / `RunDetail` are the same schema (`dashboard-run`); a **summary** omits the optional
 `per_iteration` array to keep the list payload small, a **detail** includes it. Likewise
@@ -143,7 +150,7 @@ type Store interface {
 
 ## 3. Endpoint reference
 
-### 3.1 `GET /api/runs` — list runs (spec R1)
+### 3.1 `GET /api/v1/observability/runs` — list runs (spec R1)
 
 List every session discovered across resolved iter-log roots.
 
@@ -182,13 +189,13 @@ List every session discovered across resolved iter-log roots.
 }
 ```
 
-### 3.2 `GET /api/runs/{session_id}` — one run (spec R1)
+### 3.2 `GET /api/v1/observability/runs/{session_id}` — one run (spec R1)
 
 **Path param** `session_id` (string, required).
 **Response** `200` — `data: RunDetail` (includes `per_iteration`). `404 not_found` if the session
 is in none of the resolved roots.
 
-### 3.3 `GET /api/runs/{session_id}/iterations` — iteration list (spec R2)
+### 3.3 `GET /api/v1/observability/runs/{session_id}/iterations` — iteration list (spec R2)
 
 Iterations for one run, ascending by `iteration`.
 
@@ -199,7 +206,7 @@ omitted). **A listed iteration whose `iter-N.score.yaml` sidecar is not yet writ
 R2, OQ2). `404 not_found` only if the `session_id` itself is unknown (an empty iteration list for a
 known session is `200` with `[]`).
 
-### 3.4 `GET /api/iterations/{n}` — one iteration, full detail (spec R3)
+### 3.4 `GET /api/v1/observability/iterations/{n}` — one iteration, full detail (spec R3)
 
 **Path param** `n` (integer ≥1). Non-integer → `bad_request`.
 **Query param** `iter_log_dir` (string, optional) — disambiguate when `n` exists in more than one
@@ -210,14 +217,14 @@ score sidecar is missing/stale, the handler MAY trigger recompute-on-miss (`t06`
 returns `scored: false` / `score: null` with the non-score fields still populated. `404 not_found`
 if no iter-log entry for `n` in the resolved root.
 
-### 3.5 `GET /api/rubric` — active rubric (spec R4)
+### 3.5 `GET /api/v1/observability/rubric` — active rubric (spec R4)
 
 **No params.** Response `200` — `data: RubricDoc` per `dashboard-rubric`: `version`, `combination`,
 `signals[]` (id, label, weight, description, two_way), `bands[]` (name, min). Sourced from
 `DefaultRubric()` at process start; the etag is the rubric version, so it is effectively immutable
 per process.
 
-### 3.6 `GET /api/health` — liveness + counts (spec R9)
+### 3.6 `GET /api/v1/observability/health` — liveness + counts (spec R9)
 
 **No params.** Response `200` — `data` (inline, not a separate file schema):
 
@@ -237,7 +244,7 @@ per process.
 when no roots contain any file. `subscriber_count` is the live SSE subscriber count from the
 broker (`t04`). This endpoint never returns 5xx while the process is up.
 
-### 3.7 `GET /api/stream` — SSE channel (spec R5–R7, design.md Q3)
+### 3.7 `GET /api/v1/observability/events` — SSE channel (spec R5–R7, design.md Q3)
 
 Long-lived `text/event-stream` response. Server→client push only (see §4 for why SSE not
 WebSocket). The connection stays open; the server emits one SSE frame per event.
