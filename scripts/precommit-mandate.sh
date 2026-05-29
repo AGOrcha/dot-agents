@@ -27,6 +27,43 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_EXEC_PATH \
 say()  { local label="${1:-?}" msg="${2:-}"; printf '\n\033[1m[mandate:%s] %s\033[0m\n' "$label" "$msg"; }
 fail() { local reason="${1:-}"; printf '\n\033[31m[mandate] BLOCKED: %s\033[0m\n' "$reason" >&2; exit 1; }
 
+# sonar_gate_diagnostics — on a quality-gate failure, print the failing gate
+# CONDITIONS and the new-code SECURITY HOTSPOTS to the error log so the block is
+# actionable (IntelliJ-style), instead of the opaque "gate failed". The new
+# ISSUES detail is already printed by sonar-new-issues-gate.sh, but that runs
+# only after a PASS — a hotspot/coverage gate failure exits before it. Best
+# effort: needs SONAR_TOKEN (resolved by cmd_sonar) + sonar-project.properties;
+# any query hiccup degrades to the dashboard pointer. $1 = branch name.
+sonar_gate_diagnostics() {
+  local branch="${1:-}" host="${SONAR_HOST_URL:-https://sonarcloud.io}" key org bq=""
+  key="$(sed -n 's/^sonar\.projectKey=//p' "$repo_root/sonar-project.properties" 2>/dev/null | head -1)"
+  org="$(sed -n 's/^sonar\.organization=//p' "$repo_root/sonar-project.properties" 2>/dev/null | head -1)"
+  [[ -z "${SONAR_TOKEN:-}" || -z "$key" ]] && return 0
+  [[ -n "$branch" ]] && bq="&branch=$(printf '%s' "$branch" | sed 's:/:%2F:g')"
+
+  say sonar "FAILED quality-gate conditions:"
+  curl -sSf -H "Authorization: Bearer ${SONAR_TOKEN}" \
+    "${host}/api/qualitygates/project_status?projectKey=${key}&organization=${org}${bq}" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: ps=json.load(sys.stdin).get("projectStatus",{})
+except Exception: sys.exit(0)
+for c in ps.get("conditions",[]):
+    if c.get("status")!="OK":
+        print("  - %s: actual=%s threshold=%s" % (c.get("metricKey"),c.get("actualValue","?"),c.get("errorThreshold","?")))' 2>/dev/null || true
+
+  say sonar "New-code security hotspots to review (SonarCloud UI → Security Hotspots):"
+  curl -sSf -H "Authorization: Bearer ${SONAR_TOKEN}" \
+    "${host}/api/hotspots/search?projectKey=${key}&organization=${org}${bq}&sinceLeakPeriod=true&ps=50" 2>/dev/null \
+    | python3 -c 'import json,sys
+try: d=json.load(sys.stdin)
+except Exception: sys.exit(0)
+for h in d.get("hotspots",[]):
+    comp=h.get("component","").split(":")[-1]
+    print("  - %s:%s  %s  %s" % (comp,h.get("line","?"),h.get("ruleKey",""),(h.get("message","") or "")[:90]))' 2>/dev/null || true
+
+  printf '  Dashboard: %s/dashboard?id=%s%s\n' "$host" "$key" "${branch:+&branch=$branch}" >&2
+}
+
 cmd_fmt() {
   say fmt "gofmt"
   u="$(gofmt -l ./cmd ./commands ./internal 2>/dev/null || true)"
@@ -129,14 +166,40 @@ cmd_sonar() {
     worktree_mount_args=(-v "$git_common_abs:$git_common_abs:ro")
   fi
 
-  docker run --rm \
-    -e SONAR_TOKEN \
-    -e SONAR_HOST_URL \
-    -v "$repo_root:/usr/src" \
-    ${worktree_mount_args[@]+"${worktree_mount_args[@]}"} \
-    sonarsource/sonar-scanner-cli:latest \
-    -Dsonar.qualitygate.wait=true \
-    || fail "sonar-scanner: SonarCloud quality gate failed (or analysis errored)"
+  # Branch-scope the analysis so the gate evaluates THIS branch's new code, not
+  # the default branch. Run locally there is no CI env for the scanner to
+  # auto-detect the branch; without -Dsonar.branch.name it analyzes against the
+  # main branch and inherits master's gate state.
+  local branch_name; branch_name="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  local -a branch_args=(); [[ -n "$branch_name" ]] && branch_args=(-Dsonar.branch.name="$branch_name")
+
+  # Retry the intermittent SonarCloud CE "Task finished abnormally" (server-side
+  # processing flake, common with the emulated amd64 scanner on arm64 hosts):
+  # that is infra, not a quality signal. A genuine QUALITY GATE STATUS: FAILED
+  # is NOT retried — it is surfaced with actionable conditions/hotspots.
+  local logf attempt=0 max=3 rc
+  logf="$(mktemp -t sonar-scan.XXXXXX)"
+  while :; do
+    attempt=$((attempt + 1))
+    docker run --rm \
+      -e SONAR_TOKEN \
+      -e SONAR_HOST_URL \
+      -v "$repo_root:/usr/src" \
+      ${worktree_mount_args[@]+"${worktree_mount_args[@]}"} \
+      sonarsource/sonar-scanner-cli:latest \
+      -Dsonar.qualitygate.wait=true \
+      ${branch_args[@]+"${branch_args[@]}"} 2>&1 | tee "$logf"
+    rc=${PIPESTATUS[0]}
+    [[ "$rc" -eq 0 ]] && break
+    if grep -q 'CE Task finished abnormally' "$logf" && [[ "$attempt" -lt "$max" ]]; then
+      say sonar "SonarCloud CE processing flaked (attempt ${attempt}/${max}) — retrying"
+      continue
+    fi
+    rm -f "$logf"
+    sonar_gate_diagnostics "$branch_name"
+    fail "sonar-scanner: SonarCloud quality gate failed (see conditions/hotspots above)"
+  done
+  rm -f "$logf"
 
   # Free-tier strict gate: the built-in "Sonar way" gate tolerates some new
   # issues (a custom new_issues=0 gate needs a paid plan we don't have), so
