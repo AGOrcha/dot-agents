@@ -27,23 +27,35 @@ RUN mkdir -p /etc/apt/keyrings \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI globally
+# Install Claude Code CLI globally (root: system-wide npm prefix)
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install dot-agents from a pinned commit + verify checksum before executing.
-# Bumping the pin is a deliberate sandbox rebuild action — keeping the SHA
-# pinned guarantees the test sandbox is reproducible and immune to a supply
-# chain compromise of the main branch. `--proto "=https" --tlsv1.2` refuses
-# any redirect to a non-HTTPS URL (Sonar docker:S6506).
+# Run the test workload as a non-root user (least privilege; Sonar docker:S6471).
+# Root above is used only for the system-level apt / npm-global installs;
+# everything below is per-user. This also mirrors how `da` actually runs under a
+# normal user's $HOME, making the sandbox more representative.
+RUN useradd --create-home --shell /bin/bash sandbox \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+USER sandbox
+WORKDIR /home/sandbox
+
+# Install dot-agents from a pinned commit + verify checksum before executing, as
+# the non-root sandbox user (install.sh is a pure user-level installer — it
+# writes only to ~/.local; no root needed). Bumping the pin is a deliberate
+# sandbox rebuild action — keeping the SHA pinned guarantees the test sandbox is
+# reproducible and immune to a supply chain compromise of the main branch.
+# `--proto "=https" --tlsv1.2` refuses any redirect to a non-HTTPS URL
+# (Sonar docker:S6506).
 ARG DOT_AGENTS_INSTALL_SHA=7be7111e5799bd370212fc51f4fc1977f617a9bd
 ARG DOT_AGENTS_INSTALL_CHECKSUM=5c919087d94f0322b75a8890c04700c44ff461bf6923848ce61b937fe3db3652
 RUN curl --proto "=https" --tlsv1.2 -fsSL "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" -o /tmp/install-dot-agents.sh \
     && echo "${DOT_AGENTS_INSTALL_CHECKSUM}  /tmp/install-dot-agents.sh" | sha256sum -c - \
     && bash /tmp/install-dot-agents.sh \
     && rm /tmp/install-dot-agents.sh
-ENV PATH="/root/.local/bin:$PATH"
+ENV PATH="/home/sandbox/.local/bin:$PATH"
 
-# Create workspace
+# Default workspace (owned by the sandbox user)
 WORKDIR /workspace
 
 # Default command
