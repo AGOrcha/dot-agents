@@ -136,6 +136,59 @@ auth terminates **at or ahead of** the `/api/v1/` envelope, never per-domain.
 
 ---
 
+## Decision: an OpenAPI 3.1 spec per resource-family
+
+The prose above governs **structure** (paths, verbs, envelope, versioning). The **machine-readable
+contract** for each domain is a versioned **OpenAPI 3.1 spec**, one per resource-family:
+
+```
+schemas/openapi/<domain>.v1.yaml
+```
+
+(under the repo's existing `schemas/` tree — see `[[schema-usage]]`; the sibling of
+`schemas/agentsrc.schema.json` and the `workflow-*.schema.json` set.) One file per domain —
+`workflow`, `review`, `kg`, `observability`, `config`, `registry` — each describing that family's
+paths, payloads, and status codes.
+
+- **One spec PER family, all at the same `/api/v1/` envelope.** The `.v1` in the filename tracks
+  the single product version, not a per-domain version — consistent with the version-first decision
+  (per-domain versioning stays rejected). When the product bumps to `v2`, every family's spec moves
+  to `<domain>.v2.yaml` together.
+- **The OpenAPI doc is the source of truth for paths, payloads, and status codes.** Where this prose
+  convention and a spec disagree on structure, the prose wins (it is the cross-cutting rule); within
+  that structure, the OpenAPI file is the authoritative shape a consumer codes against.
+- **All consumers validate against it:** the CLI, the MCP server, external-agent-sources, and any
+  generated clients. A surface's own contract doc (e.g. `design/API.md`) prose-describes intent; the
+  OpenAPI spec is what tests and generators consume.
+
+This makes the per-surface contracts (`[[r2-observability-dashboard]]` etc.) accountable to a
+checkable artifact rather than prose alone, and keeps `[[api-conventions]]` the governing rule with
+the OpenAPI files as its enforced instances.
+
+---
+
+## Decision: auto-sync OpenAPI ↔ published web docs
+
+The published API reference on the agorcha.dev docs site (the canonical Astro docs) MUST be
+**generated from** `schemas/openapi/*.yaml`, never hand-authored — so the published reference can
+never drift from the contract.
+
+- **A docs build step ingests `schemas/openapi/*.yaml`** and emits the docs-site API reference pages
+  — via a Redoc / Scalar / Swagger-UI render or a custom Astro integration (renderer choice is a
+  docs-site implementation detail; the input contract is the OpenAPI set).
+- **Tie regeneration to the docs deploy** — the agorcha Cloudflare Worker build (see
+  `[[agorcha-public-vs-internal-and-obs-deploy]]`). Every API change that lands a spec edit
+  regenerates the published reference on the next deploy; there is no manual docs-update step to
+  forget.
+- This is the **API analogue of the release-task docs-accuracy pass** (`[[release-gated-plans-convention]]`):
+  just as a release verifies docs match shipped behavior, the contract and its published docs stay
+  in lockstep automatically — the spec is edited once and the reference follows.
+
+Cross-ref the docs-site work (`[[docs-site-usability-review]]`) and the agorcha deploy
+(`[[agorcha-public-vs-internal-and-obs-deploy]]`).
+
+---
+
 ## Relationship to other specs
 
 - `[[r2-observability-dashboard]]` — first consumer; its `design/API.md` adopts
@@ -146,3 +199,10 @@ auth terminates **at or ahead of** the `/api/v1/` envelope, never per-domain.
   multi-node WS transport + auth-proxy direction.
 - `[[unified-pluggable-event-contract]]` — the registry-driven, version-additive envelope every
   `/api/v1/<domain>/events` channel carries.
+- `[[schema-usage]]` — the `schemas/` tree that hosts `schemas/openapi/<domain>.v1.yaml`, the
+  machine-readable per-family contract.
+- `[[docs-site-usability-review]]` / `[[agorcha-public-vs-internal-and-obs-deploy]]` — the docs site
+  that auto-renders the OpenAPI specs and the Cloudflare Worker build that regenerates the published
+  API reference on every deploy.
+- `[[release-gated-plans-convention]]` — the release docs-accuracy pass this OpenAPI↔docs auto-sync
+  is the API analogue of.
