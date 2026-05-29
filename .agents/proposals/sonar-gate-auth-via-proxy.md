@@ -11,7 +11,7 @@ logic, couples the script to `.mcp.json`'s shape, and spreads credential handlin
 across surfaces.
 
 ## The fix (once available)
-Per `[[agorcha-public-vs-internal-and-obs-deploy]]` §5.5, a **`da daemon` auth-proxy
+Per `[[agorcha-public-vs-internal-and-obs-deploy]]` §5.5, a **`da service` (run -d) auth-proxy
 injector** is the planned single point that holds credentials and injects them for
 registry / observability / MCP / CLI / external-agent-sources access — so workers,
 CLI, and scripts become credential-unaware (talk to a localhost proxy). When that

@@ -68,7 +68,8 @@ have_jq() { command -v jq >/dev/null 2>&1; }
 resolve_token() {
   if [[ -n "${SONAR_TOKEN:-}" ]]; then return 0; fi
   if [[ -n "${SONARQUBE_TOKEN:-}" ]]; then SONAR_TOKEN="$SONARQUBE_TOKEN"; return 0; fi
-  # TODO(auth-proxy): stopgap — route via `da daemon` auth-proxy injector once live
+  # NOTE(auth-proxy): stopgap token resolution; the `da service` (run -d) auth-proxy
+  # injector supersedes this once live —
   # (see .agents/proposals/sonar-gate-auth-via-proxy.md).
   # Reuse the SonarQube MCP credentials from .mcp.json (gitignored). Look in
   # the current worktree, then the primary worktree (where .mcp.json lives).
