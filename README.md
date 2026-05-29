@@ -127,7 +127,7 @@ brew tap AGOrcha/tap
 brew install dot-agents
 ```
 
-### Direct Install (Go CLI, default)
+### Direct Install (Go CLI)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
@@ -136,7 +136,7 @@ curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scrip
 ### Windows PowerShell (Go CLI)
 
 ```powershell
-irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.ps1 | iex
+irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.ps1 | iex
 ```
 
 ### Manual
@@ -416,7 +416,7 @@ da add ~/Github/myproject  # Re-link your projects
 ## Requirements
 
 - **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
-- **Windows:** use `scripts/install-go.ps1` for the Go CLI.
+- **Windows:** use `scripts/install.ps1` for the Go CLI.
 - **git** (for sync features)
 
 ## Configuration
