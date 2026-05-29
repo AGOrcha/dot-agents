@@ -26,6 +26,9 @@ const LabelSchemaVersion = "1.0.0"
 // FreeTextMaxLen bounds the human-readable comment per spec D5.7.
 const FreeTextMaxLen = 4000
 
+// errFmtWrapQuoted is the error format string for wrapping a value as a quoted string.
+const errFmtWrapQuoted = "%w: %q"
+
 // Role is the actor role recorded on a label. It mirrors the RBAC roles owned
 // by internal/review/auth but is duplicated here as a plain string enum so
 // this package stays independent of the auth package.
@@ -190,10 +193,10 @@ func validateStructured(s Structured) error {
 		return fmt.Errorf("%w: %d (want %d..%d)", ErrCorrectnessRange, s.Correctness, CorrectnessMin, CorrectnessMax)
 	}
 	if !validScope(s.ScopeJudgement) {
-		return fmt.Errorf("%w: %q", ErrInvalidScope, s.ScopeJudgement)
+		return fmt.Errorf(errFmtWrapQuoted, ErrInvalidScope, s.ScopeJudgement)
 	}
 	if !validHallucination(s.Hallucination) {
-		return fmt.Errorf("%w: %q", ErrInvalidHalluc, s.Hallucination)
+		return fmt.Errorf(errFmtWrapQuoted, ErrInvalidHalluc, s.Hallucination)
 	}
 	return nil
 }
@@ -204,7 +207,7 @@ func validateEdit(e Edit) error {
 		return ErrEmptyActor
 	}
 	if !validRole(e.Role) {
-		return fmt.Errorf("%w: %q", ErrInvalidRole, e.Role)
+		return fmt.Errorf(errFmtWrapQuoted, ErrInvalidRole, e.Role)
 	}
 	if len(e.FreeText) > FreeTextMaxLen {
 		return fmt.Errorf("%w: %d > %d", ErrFreeTextTooLong, len(e.FreeText), FreeTextMaxLen)
@@ -223,7 +226,7 @@ func (l Label) Validate() error {
 		return ErrEmptyActor
 	}
 	if !validRole(l.Role) {
-		return fmt.Errorf("%w: %q", ErrInvalidRole, l.Role)
+		return fmt.Errorf(errFmtWrapQuoted, ErrInvalidRole, l.Role)
 	}
 	if l.Iteration < 0 {
 		return ErrNegativeIteration
