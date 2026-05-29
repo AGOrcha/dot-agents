@@ -137,6 +137,16 @@ cmd_sonar() {
     sonarsource/sonar-scanner-cli:latest \
     -Dsonar.qualitygate.wait=true \
     || fail "sonar-scanner: SonarCloud quality gate failed (or analysis errored)"
+
+  # Free-tier strict gate: the built-in "Sonar way" gate tolerates some new
+  # issues (a custom new_issues=0 gate needs a paid plan we don't have), so
+  # enforce zero new issues ourselves via the API. The scan above ran with
+  # -Dsonar.qualitygate.wait=true so the analysis is ingested by now and the
+  # gate queries the just-uploaded results. SONAR_TOKEN/SONAR_HOST_URL are
+  # already resolved + exported above and reused by the child script.
+  say sonar "enforcing zero new SonarCloud issues (new_violations=0)"
+  bash "$repo_root/scripts/sonar-new-issues-gate.sh" \
+    || fail "sonar: new SonarCloud issues introduced (new_violations>0)"
 }
 
 case "${1:-}" in
