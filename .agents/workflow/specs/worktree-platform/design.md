@@ -53,6 +53,14 @@ testcontainers concern).
    shared-index requirement is satisfied by construction here).
 4. **Typed git layer** — the platform exposes typed Go operations, not
    stringly-typed shell calls, regardless of the mechanism chosen below.
+5. **Worktree config is auto-provisioned on create and torn down on
+   remove.** Only the project's **main** worktree path is registered with
+   `da` today; a freshly created linked worktree is an unknown path with
+   no agent config/links, so an agent spawned there has no skills, agents,
+   hooks, or MCP wiring. The platform therefore provisions the worktree's
+   config as part of `create` (reusing the canonical `add` + `install`
+   setup path, not a reimplementation) and tears it down as part of
+   `remove`. See "Worktree config provisioning lifecycle" below.
 
 ## DECISION (maintainer 2026-05-17): A — pure go-git **v6**
 
@@ -103,6 +111,56 @@ create-on/with a branch (and branch creation). Also confirm
 (the guarantee `workflow-commit-command` binds to), and whether the
 pkg exposes a `List` or we enumerate via our own registry.
 
+## Worktree config provisioning lifecycle
+
+**Problem.** `da` knows a project only by its **main worktree path** (the
+`cfg.AddProject(name, path)` entry written at `da add`). A linked worktree
+created by this platform is a *different path on disk* that `da` has never
+seen, so none of the project's managed config (skill/agent/hook links, MCP
+wiring, generated platform files) exists there. An agent spawned in that
+worktree runs with empty config.
+
+**Decision.** `create` provisions the worktree's config; `remove` tears it
+down. Both **reuse the canonical setup path** rather than re-linking by hand:
+
+- `RegisterInstallProject(projectName, projectPath, deps)` +
+  `RunInstall(strict, deps)` (`commands/internal/lifecycle/install.go`) —
+  already exported, callable library functions — are the "two command
+  trees" that materialize a project's config at a path. (`da add`'s
+  `runAdd` scaffolds + registers; `da install` applies the `.agentsrc.json`
+  manifest. Provisioning composes the install-side entry points so it does
+  not re-implement linking.)
+- Provisioning reflects the **current effective config** (post
+  config-v2: the resolved/merged config, not a stale snapshot), so a new
+  worktree always gets up-to-date links.
+
+**Ephemeral identity (open question for the plan).** A naïve
+`RegisterInstallProject` of the worktree path under the *same project name*
+would **clobber the parent project's registration** (same name, different
+path). The provisioned worktree must therefore carry an **ephemeral identity
+keyed to the worktree** (e.g. `<project>@wt-<hash>`, matching the
+`worktreeNameRE` charset constraints from Residual 1) **or** the install
+path must be scoped under the parent project without overwriting its
+`projects[]` entry. The plan must pick one; the registry (wt2) records which
+ephemeral identity maps to which worktree so teardown is unambiguous.
+
+**Layering.** `da add` / `da install` live in `commands/` and
+`commands/internal/lifecycle/`; the typed git `Manager` lives in
+`internal/gitwt` and **must not import `commands`**. So config provisioning
+is **orchestrated one layer up** — the `da worktree create` / `remove`
+command (or the orchestration/skill layer) composes
+`gitwt.AddBranch(...)` **then** the install lifecycle, and on teardown
+`uninstall/deregister` **then** `gitwt.Remove(...)`. `internal/gitwt` stays
+git-only; provisioning is never wired inside the `Manager`.
+
+**Cleanup contract.** `remove` must:
+- tear down exactly what `create` provisioned (the worktree's links + the
+  ephemeral registration) and **never touch the parent/main project's**
+  config entry or AGENTS_HOME dirs;
+- be idempotent (safe on a partially-provisioned or already-clean worktree);
+- integrate with the existing auto-prune-if-unchanged path so an unchanged
+  worktree's config is also reclaimed.
+
 ## Skills integration
 
 `delegation-lifecycle`, `isp`, `loop-worker` consume the platform so
@@ -119,6 +177,12 @@ worktree/sub-branch with a recorded base.
 - Cleanup prunes unchanged worktrees deterministically.
 - Chosen git mechanism (A/B/C) implemented behind one typed interface;
   callers/skills bind to the interface only.
+- **Config provisioning round-trip:** a created worktree has working agent
+  config (skills/agents/hooks/MCP present and resolving) materialized via
+  the `add`/`install` path under an ephemeral identity; `remove` tears it
+  down completely and the **parent project's registration + config is
+  provably untouched** (a before/after diff of the parent project's
+  `projects[]` entry and AGENTS_HOME dir is identical).
 
 ## wt0 spike findings (VERIFY, 2026-05-28)
 
