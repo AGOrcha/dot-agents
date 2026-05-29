@@ -219,3 +219,21 @@ Cross-ref the schema-sync wheel (`docs/web/scripts/copy-schemas.sh`), the docs-s
   Cloudflare Worker build that regenerates the published API reference on every deploy.
 - `[[release-gated-plans-convention]]` — the release docs-accuracy pass this OpenAPI↔docs auto-sync
   is the API analogue of.
+
+## Published API reference URL (agorcha public surface)
+
+The Scalar-rendered OpenAPI reference (per the OpenAPI-per-family + docs-autosync
+conventions above) is published at a **public** agorcha route:
+
+```
+agorcha.dev/api/                  PUBLIC   (rendered API reference — Scalar over schemas/openapi/*.yaml)
+```
+
+This is the rendered *reference documentation*, served by the docs Worker — it hosts
+no live endpoints, so it does not collide with the live API contract paths
+(`/api/v1/<domain>/<resource>`, which are served by the service/obs hosts, e.g. the
+gated `obs.agorcha.dev/api/*`). It sits alongside the existing public routes
+(`/`, `/demos/*`, `/canonical/*`, `/schemas/*`) and rebuilds on every docs deploy via
+the extended `copy-schemas.sh` wheel. Add this row to the agorcha URL structure
+(`[[agorcha-public-vs-internal-and-obs-deploy]]` "Concrete URL shape"): `/api/` PUBLIC,
+no CF Access (same posture as `/schemas/*` — reference material is public).
