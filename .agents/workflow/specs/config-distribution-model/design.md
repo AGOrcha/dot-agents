@@ -369,6 +369,15 @@ and the graph adapter depend on — neither imports the other):
   double-read. Throughput is not the point (the lockfile is written a handful of times per
   invocation, never in a loop); the point is fewer writes and no partially-updated intermediate
   states.
+- **Parallel resolution, serialized write.** Where throughput *does* matter is the **resolver
+  stage**, and that stays maximally parallel: pass-1 config layers and pass-2 packages are
+  fetched/resolved concurrently (network-bound — see §6), each producing its section content.
+  The shared writer is the safe convergence point for those parallel producers: `SetSection` is
+  concurrency-safe (in-process mutex), so resolver goroutines stage their results into the buffer
+  without racing, and the single flush is the one serialized write. Producers fan out to the
+  degree the resolver can; only the write is serial. The writer never throttles resolution — it
+  just guarantees that however parallel the producers are, the on-disk lockfile is always written
+  safely and whole.
 - **Flush preserves untouched sections (this is the RMW guarantee).** Because the writer loaded
   the current document and only replaces staged sections, a flush writes the whole document back
   with sibling sections verbatim. This holds the cross-invocation contract too: a later, separate
@@ -380,10 +389,12 @@ and the graph adapter depend on — neither imports the other):
 - **Flush is callable more than once.** The single-flush case is the optimization, not a
   constraint: a command may flush `config` before a slow adapter activation (crash-safety) and
   flush `adapters` after — each flush is atomic and section-preserving.
-- **Locking.** The single writer is the natural home for the in-process mutex, and for the future
-  cross-process file-lock if the background service ever writes sections concurrently (tracked in
-  r3). v1 needs no section-level locking — within one invocation there is one writer instance, and
-  across invocations the load+atomic-flush discipline tolerates the interleavings.
+- **Locking.** The single writer guards concurrent `SetSection` calls with an in-process mutex
+  (what makes parallel resolution above safe), and is the natural home for a future cross-process
+  file-lock if the background service ever writes sections from separate processes concurrently
+  (tracked in r3). v1 needs no cross-process file lock — within one invocation a single
+  mutex-guarded writer instance serves all goroutines, and across invocations the
+  load+atomic-flush discipline tolerates the interleavings.
 - **`lock_version`** is shared across all sections; bumping it is a coordinated migration, not
   a per-section concern.
 
