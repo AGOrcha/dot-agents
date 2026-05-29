@@ -16,12 +16,12 @@ func TestGenerateTokenRandError(t *testing.T) {
 	}
 }
 
-func TestHashTokenBcryptError(t *testing.T) {
-	orig := bcryptHash
-	bcryptHash = func([]byte, int) ([]byte, error) { return nil, errors.New("boom") }
-	defer func() { bcryptHash = orig }()
+func TestHashTokenSaltError(t *testing.T) {
+	orig := randRead
+	randRead = func([]byte) (int, error) { return 0, errors.New("boom") }
+	defer func() { randRead = orig }()
 	if _, err := HashToken(tokenPrefix + "abc"); err == nil {
-		t.Fatal("expected error when bcrypt fails")
+		t.Fatal("expected error when salt generation fails")
 	}
 }
 
@@ -36,9 +36,19 @@ func TestAddUserTokenGenError(t *testing.T) {
 }
 
 func TestAddUserHashError(t *testing.T) {
-	orig := bcryptHash
-	bcryptHash = func([]byte, int) ([]byte, error) { return nil, errors.New("boom") }
-	defer func() { bcryptHash = orig }()
+	// AddUser calls GenerateToken (first randRead) then HashToken (second
+	// randRead for the salt). Fail only the salt draw so the hash step is the
+	// one that errors.
+	orig := randRead
+	calls := 0
+	randRead = func(b []byte) (int, error) {
+		calls++
+		if calls == 1 {
+			return orig(b)
+		}
+		return 0, errors.New("boom")
+	}
+	defer func() { randRead = orig }()
 	uf := &UsersFile{}
 	if _, err := uf.AddUser("a@b.com", RoleAdmin); err == nil {
 		t.Fatal("AddUser should propagate hash failure")

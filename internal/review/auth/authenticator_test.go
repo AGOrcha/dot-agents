@@ -101,12 +101,12 @@ func TestLocalUsersAuthenticatorLoadError(t *testing.T) {
 }
 
 // TestLocalUsersAuthenticatorSkipsCorruptRow proves one user row with a
-// non-bcrypt hash does not lock out a valid user that appears after it.
+// malformed hash does not lock out a valid user that appears after it.
 func TestLocalUsersAuthenticatorSkipsCorruptRow(t *testing.T) {
 	tok, _ := GenerateToken()
 	hash, _ := HashToken(tok)
 	uf := &UsersFile{Users: []User{
-		{Email: "corrupt@b.com", Role: RoleAdmin, TokenHash: "not-bcrypt"},
+		{Email: "corrupt@b.com", Role: RoleAdmin, TokenHash: "not-a-hash"},
 		{Email: "good@b.com", Role: RoleReviewer, TokenHash: hash},
 	}}
 	auth := &LocalUsersAuthenticator{

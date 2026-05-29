@@ -12,7 +12,7 @@ import (
 )
 
 // User is one entry in the admin-managed users file. The token plaintext is
-// never persisted — only TokenHash (bcrypt) is stored.
+// never persisted — only TokenHash (argon2id) is stored.
 type User struct {
 	Email     string `yaml:"email"`
 	Role      Role   `yaml:"role"`

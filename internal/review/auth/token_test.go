@@ -84,14 +84,57 @@ func TestVerifyTokenMalformedReturnsFalseNoError(t *testing.T) {
 	}
 }
 
+func TestHashTokenIsArgon2idPHC(t *testing.T) {
+	tok, _ := GenerateToken()
+	hash, err := HashToken(tok)
+	if err != nil {
+		t.Fatalf("HashToken: %v", err)
+	}
+	if !strings.HasPrefix(hash, "$argon2id$v=") {
+		t.Fatalf("hash %q is not an argon2id PHC string", hash)
+	}
+	if !strings.Contains(hash, "m=65536,t=1,p=4") {
+		t.Fatalf("hash %q missing expected params", hash)
+	}
+}
+
+func TestHashTokenSaltIsUnique(t *testing.T) {
+	tok, _ := GenerateToken()
+	h1, _ := HashToken(tok)
+	h2, _ := HashToken(tok)
+	if h1 == h2 {
+		t.Fatal("hashing the same token twice must yield distinct salts/hashes")
+	}
+	// Both must still verify against the same plaintext.
+	for _, h := range []string{h1, h2} {
+		ok, err := VerifyToken(tok, h)
+		if err != nil || !ok {
+			t.Fatalf("VerifyToken(%q) ok=%v err=%v", h, ok, err)
+		}
+	}
+}
+
 func TestVerifyTokenCorruptHashReturnsError(t *testing.T) {
 	tok, _ := GenerateToken()
-	ok, err := VerifyToken(tok, "not-a-bcrypt-hash")
-	if err == nil {
-		t.Fatal("VerifyToken with corrupt hash should error")
+	cases := []string{
+		"not-a-hash",
+		"$argon2id$v=19$m=65536,t=1,p=4$badsalt",     // too few fields
+		"$bcrypt$v=19$m=1,t=1,p=1$c2FsdA$a2V5",       // wrong algorithm
+		"$argon2id$v=99$m=65536,t=1,p=4$c2FsdA$a2V5", // wrong version
+		"$argon2id$vX$m=65536,t=1,p=4$c2FsdA$a2V5",   // unparsable version
+		"$argon2id$v=19$mX$c2FsdA$a2V5",              // unparsable params
+		"$argon2id$v=19$m=65536,t=1,p=4$!!!$a2V5",    // bad base64 salt
+		"$argon2id$v=19$m=65536,t=1,p=4$c2FsdA$!!!",  // bad base64 key
+		"$argon2id$v=19$m=65536,t=1,p=4$c2FsdA$",     // empty key
 	}
-	if ok {
-		t.Fatal("VerifyToken with corrupt hash should be false")
+	for _, h := range cases {
+		ok, err := VerifyToken(tok, h)
+		if err == nil {
+			t.Errorf("VerifyToken with corrupt hash %q should error", h)
+		}
+		if ok {
+			t.Errorf("VerifyToken with corrupt hash %q should be false", h)
+		}
 	}
 }
 
