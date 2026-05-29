@@ -10,9 +10,7 @@
       "unit"
     ]
   },
-  "hooks": [
-    "PostToolUse"
-  ],
+  "hooks": true,
   "mcp": [
     "code-review-graph",
     "sonarqube"
