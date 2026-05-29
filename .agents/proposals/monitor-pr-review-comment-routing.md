@@ -3,7 +3,7 @@
 **Status:** draft
 **Created:** 2026-05-28
 **Scope:** project-local (dot-agents)
-**Related:** `[[workflow-orchestrator-daemon]]`, `[[layered-pr-fanout-spec]]`
+**Related:** `[[r3-background-worker-service]]` (background-worker service), `[[layered-pr-fanout-spec]]`
 
 ## §1 Problem
 
@@ -33,7 +33,7 @@ The gap caused 2 missed maintainer reviews in a single session:
 In both cases the maintainer had to re-mention the feedback in chat for the
 orchestrator to act on it. This proposal formalizes the polling contract
 that closes the gap, both for today's coach-driven monitor and for tomorrow's
-productionized `workflow-orchestrator-daemon`.
+productionized background-worker service (`da service` in detached/daemon mode).
 
 ## §2 API endpoints and dedup contract
 
@@ -181,17 +181,17 @@ respawns, the polling responsibility must be added to the coach charter
 at `.agents/active/coach/overnight-strategy.md` as a follow-up doc edit
 (out of scope for this proposal).
 
-## §7 Tomorrow's implementation: workflow-orchestrator-daemon
+## §7 Tomorrow's implementation: background-worker service
 
-The productionized `workflow-orchestrator-daemon` (see
-`[[workflow-orchestrator-daemon]]`) absorbs this polling as part of its
-event-stream contract. The same §4 payload shapes flow into the daemon's
-event ingester; the daemon emits to whatever orchestrator is currently
+The productionized background-worker service (`da service` in detached mode,
+per r3-background-worker-service spec) absorbs this polling as part of its
+event-stream contract. The same §4 payload shapes flow into the service's
+event ingester; the service emits to whatever orchestrator is currently
 attached (coach, headless loop, dashboard).
 
-**Co-design implication:** the daemon's event schema must include these
+**Co-design implication:** the service's event schema must include these
 four event types as first-class citizens — not bolted on later. The
-field shapes in §4 are the contract surface; the daemon may add fields
+field shapes in §4 are the contract surface; the service may add fields
 but must not rename or remove the existing ones.
 
 ## §8 Open questions
@@ -216,8 +216,8 @@ but must not rename or remove the existing ones.
    (configurable per-project via `.agentsrc.json`). Linked-comments
    correlation: when a single review's comments target related files,
    group them into one digest entry with `linked_comments: true`.
-5. **Promoted to spec.** Once the daemon proposal stabilizes, §4 should
-   graduate to `workflow/specs/workflow-orchestrator-daemon/design.md`
+5. **Promoted to spec.** Once the background-worker service spec finalizes, §4 should
+   graduate to `workflow/specs/r3-background-worker-service/design.md` (or a sibling event-contract spec)
    as the canonical event-shape definition.
 6. **NEW — pluggable event-contract surface.** Maintainer review #160 line
    147 surfaced cross-PR convergence: this proposal's event-contract pattern
@@ -238,7 +238,7 @@ new contract-affecting open question pending the sibling task's design.
 
 ## §9 Relationship to other proposals
 
-- `[[workflow-orchestrator-daemon]]` — consumes this contract as part of
+- `[[r3-background-worker-service]]` (background-worker service / `da service`) — consumes this contract as part of
   its event-stream surface; §4 payload shapes are first-class
 - `[[layered-pr-fanout-spec]]` §3.2 — `awaiting_owner_review` sub-status;
   `review.submitted` with `state == CHANGES_REQUESTED` transitions tasks
