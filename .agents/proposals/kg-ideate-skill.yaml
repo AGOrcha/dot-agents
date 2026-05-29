@@ -1,0 +1,300 @@
+schema_version: 1
+id: kg-ideate-skill
+status: draft
+type: skill
+action: create
+target: ~/.agents/skills/kg-ideate/
+rationale: |
+  The current workflow has a cold-start problem: specs are written from scratch without
+  querying accumulated KG knowledge (prior decisions, research findings, contradictions,
+  lessons). This produces repeated rediscovery of the same design space, inconsistent
+  terminology across specs, and decisions that ignore or contradict prior work.
+
+  A two-phase kg-ideate skill fixes this:
+  - Phase 1 (Briefing Producer): automated read-only pass — queries KG, research corpus,
+    and lessons, produces a structured context block the model holds in working memory.
+  - Phase 2 (Spec Scaffolding): interactive — uses the briefing to ask precise questions,
+    resolve contradictions, convert gaps into open questions, then writes the spec.
+
+  The phase ordering is deliberate. Scaffolding without a briefing produces generic
+  spec-template prompts the author ignores. A briefing without scaffolding produces
+  context that sits unread. Sequencing them — automated grounding then guided creation —
+  ensures the KG actually shapes the output.
+
+  Designed to extend cleanly to the citation graph backend now defined in
+  `.agents/workflow/specs/graph-backend-adapter-contract/design.md` §13.4
+  (built-in adapter `dotagents-builtin:graph/citation@^1.0`). Once citation adapter notes
+  are populated, Phase 1 traversals become structural not just semantic, using the adapter's
+  named queries (`claims_citing_source`, `claims_supported_by_source`, `contradicting_claims`).
+created_at: "2026-05-10T00:00:00Z"
+created_by: claude-sonnet-4-6
+content: |
+  ## SKILL.md
+
+  ```markdown
+  ---
+  name: "kg-ideate"
+  description: |-
+    Ground new work in accumulated KG knowledge before spec creation. Two phases:
+    (1) Briefing Producer — queries KG, research corpus, and lessons to produce a
+    structured context block; (2) Spec Scaffolding — uses the briefing interactively
+    to resolve contradictions, convert gaps to open questions, and write the spec.
+    Use when starting a new spec or when the user asks what we know about a topic.
+  argument-hint: "<topic-or-task-id>"
+  ---
+
+  # KG-Ideate
+
+  Ground new work in accumulated KG knowledge. Phase 1 brief, Phase 2 scaffold.
+
+  ## Phase 1 — Briefing Producer
+
+  1. **KG traversal**
+     Load → `instructions/kg-queries.md`
+     Run semantic_search_nodes_tool + query_graph_tool in parallel against the topic.
+     Pull decision-type nodes, entities, and contradiction nodes. If topic touches
+     existing code, run get_impact_radius_tool.
+
+  2. **Research corpus scan**
+     Load → `instructions/corpus-scan.md`
+     Search research/articles-evaluation-kg-and-adjacent.md §C for applicable proposals.
+     Pull top-5 §A entries and §B themes by relevance. Note research gaps.
+
+  3. **Lessons and spec overlap**
+     Load → `instructions/context-scan.md`
+     Preflight: verify .agents/workflow/specs/ exists before scanning — halt and report if absent.
+     Read .agents/lessons/index.md; pull full lesson files that match the topic.
+     List .agents/workflow/specs/ — flag prior specs that share scope or terminology.
+
+  4. **Produce briefing**
+     Load → `templates/briefing-output.md`
+     Render structured briefing block and present to user before proceeding.
+     Do not write any spec file in this phase.
+
+  ## Phase 2 — Spec Scaffolding
+
+  5. **Prior decision review**
+     Load → `instructions/decision-review.md`
+     For each prior_decision in briefing: present it and ask whether it still applies
+     or needs revisiting in the new spec. Record responses.
+
+  6. **Gap → open questions**
+     Load → `instructions/gap-conversion.md`
+     For each gap in briefing: propose it as a candidate open question.
+     Confirm which to include; discard the rest.
+
+  7. **Contradiction → decision points**
+     Load → `instructions/contradiction-framing.md`
+     For each contradiction in briefing: frame it as a decision the spec must explicitly
+     resolve. Draft the decision statement; get user input before locking.
+
+  8. **Done criteria draft**
+     Load → `instructions/done-criteria.md`
+     Propose 3-5 verifiable done criteria derived from briefing context. Revise with user.
+
+  9. **Write spec**
+     Load → `templates/spec-output.md`
+     Once scaffolding steps are confirmed, write .agents/workflow/specs/<id>/design.md.
+     Preflight: verify .agents/workflow/specs/ exists before writing — create the directory if absent.
+     Structure: problem statement, decisions with rationale, requirements (behavioral),
+     open questions, done criteria, deferred items.
+     Never include file paths, function names, or task breakdowns — those belong in the plan.
+  ```
+
+  ---
+
+  ## Instruction files to create
+
+  ### instructions/kg-queries.md
+  Rules for Phase 1 KG traversal:
+  - **CLI-first**: prefer `da kg query "<topic>"` (deterministic, intent-aware) over MCP tools.
+    Fall back to MCP tools only when the da CLI is unavailable or returns no results.
+  - When using MCP: run semantic_search_nodes_tool and query_graph_tool in parallel.
+  - Filter query_graph_tool results to NoteType in [decision, entity] only.
+  - **Contradiction handling is adapter-conditional** (no longer globally disabled):
+    Before Phase 2 step 7, check whether the active profile's adapter ships a
+    `contradicting_claims` named query. Preflight: run
+    `da graph query --list-queries` (or inspect the adapter schema) — if
+    `contradicting_claims` is present, contradiction handling is enabled for this session.
+    If absent, fall through to competing-decisions treatment (two decision nodes with
+    conflicting rationale). The `dotagents-builtin:graph/citation@^1.0` adapter ships
+    `contradicting_claims` and can be used today for citation-backed projects.
+  - query_graph_tool degrades to generic search for unrecognized intents — if the intent
+    field is unsupported, treat the result as semantic search output, not as a structured
+    decision list. Label it accordingly in the briefing.
+  - If semantic results return > 10 nodes, narrow to top 5 by relevance score.
+  - get_impact_radius_tool: only call if topic explicitly names a file, function, or module.
+  - If no KG nodes match, note "KG has no prior decisions on this topic" — do not fabricate.
+  - When the active profile selects `dotagents-builtin:graph/citation@^1.0`, prefer
+    structural traversal via the adapter's named queries (`claims_citing_source`,
+    `claims_supported_by_source`, `contradicting_claims`) over semantic search for
+    citation-bearing topics. Per the v1 DSL, patterns the adapter doesn't ship as named
+    queries go through adapter escape hatches (spec §8.5): additional named queries,
+    materialized views, or an adapter-owned MCP server.
+
+  ### instructions/corpus-scan.md
+  Rules for Phase 1 research corpus scan:
+  - Primary target: research/articles-evaluation-kg-and-adjacent.md
+    - §C entries: scan for proposal IDs that overlap with topic keywords
+    - §B themes: pull theme titles; flag any that the topic touches
+    - §A entries: note the 3-5 most relevant article evaluations
+  - If no §C proposals match, note "no prior research proposals on this topic."
+  - **Flagged summary escalation**: if a §A evaluation entry will be used to justify a spec
+    decision (not just background), and that entry carries a citation-presence, freshness,
+    or rubric-check flag (per Part G of the corpus doc), you MUST read the underlying article
+    file at research/articles/<filename>.md before including the finding in the briefing.
+    Do not promote a flagged secondary summary as authoritative spec rationale.
+  - For non-decision background context, §A summaries are sufficient — escalation is only
+    required when the finding will directly shape a spec decision or done criterion.
+  - Record the doc line numbers for any §C proposals found (enables later cross-reference).
+
+  ### instructions/context-scan.md
+  Rules for Phase 1 lessons + spec overlap check:
+  - Read .agents/lessons/index.md in full; pull any lesson file whose title or tags
+    could apply to the topic (err on the side of inclusion).
+  - **Preflight**: check that .agents/workflow/specs/ exists before scanning.
+    If absent, note "no prior specs directory found" in the briefing — do not error or create it.
+  - Run: ls .agents/workflow/specs/ — for each spec directory, read the first 20 lines of
+    design.md to check for scope overlap. Flag if found; do not read full spec files.
+  - Canonical spec root is always .agents/workflow/specs/ — never workflow/specs/ (bare).
+
+  ### instructions/decision-review.md
+  Rules for Phase 2 prior decision review:
+  - Present each prior_decision with its source (KGNote ID or §C proposal ID) and rationale.
+  - Ask one of: "Does this still apply?", "Does this need to be revisited?", "Is this
+    out of scope for the new spec?"
+  - If user says revisit: add it to open_questions in the spec, not decisions.
+  - If user says out of scope: note it as a deferred item.
+  - If no prior decisions exist: skip this step and say so explicitly.
+
+  ### instructions/gap-conversion.md
+  Rules for Phase 2 gap → open question conversion:
+  - Each gap from the briefing becomes a candidate open question in the form:
+    "How should the new spec handle X, given that the KG has no prior decision on it?"
+  - Present all gaps at once (not one-by-one) to reduce interaction overhead.
+  - User selects which to include; unselected gaps are not added to the spec.
+  - Open questions in the spec must be phrased as questions the plan will answer, not
+    as design decisions. (Design decisions belong in the decisions section of the spec.)
+
+  ### instructions/contradiction-framing.md
+  **Status: adapter-conditional** — execute Phase 2 step 7 only when the active profile's
+  adapter ships a `contradicting_claims` named query (preflight in kg-queries.md).
+  The built-in `dotagents-builtin:graph/citation@^1.0` adapter ships this query today
+  (contract §13.4); contradiction handling is available for citation-backed projects now.
+
+  Contradictions are represented as `claim -[:contradicts]-> claim` edges, not as a
+  separate NoteType. The preflight check is adapter capability, not schema NoteType.
+
+  Rules when adapter-enabled:
+  - For each load-bearing decision in the briefing, run:
+    `da graph query contradicting_claims --param claim_id=<id>`
+    to retrieve claims that structurally contradict it.
+  - Each returned contradiction must become an explicit decision point in the spec.
+    Do not silently pick one side.
+  - Frame as: "The citation graph surfaces a contradiction on X: [claim A] vs [claim B].
+    The spec must resolve this. Which approach does this spec take and why?"
+  - Record the user's answer as a decision entry with rationale.
+  - If the user defers: add it as an open question, not a decision.
+
+  Fallback when adapter lacks `contradicting_claims`: present competing decisions surfaced
+  during Phase 1 (two decision nodes with conflicting rationale) in Phase 2 step 5
+  as "competing decisions — choose one" rather than as structured contradictions.
+
+  ### instructions/done-criteria.md
+  Rules for Phase 2 done criteria:
+  - Criteria must be verifiable (exit code, file exists, test passes, metric threshold).
+  - Criteria must not be vague ("works correctly", "is implemented") — flag and reject.
+  - Propose 3-5; let user add/remove/rephrase before locking.
+  - Reference relevant §C proposal success criteria from briefing when available.
+
+  ### templates/briefing-output.md
+  Briefing block template:
+
+  ```
+  ## KG Briefing: <topic>
+  Generated: <date>
+
+  ### Prior Decisions (<N> found)
+  <For each: KGNote ID or §C proposal ID — decision summary — rationale source>
+  [none] if empty
+
+  ### Research Findings (<N> relevant)
+  <§A article title — key insight — §B theme it supports>
+  [none] if empty
+
+  ### Contradictions (<N> found)
+  <Contradiction description — competing positions — source refs>
+  [none] if empty
+
+  ### Applicable Lessons (<N> found)
+  <Lesson name — relevant pattern>
+  [none] if empty
+
+  ### Gaps (<N> identified)
+  <Gap description — why it matters for this spec>
+  [none] if empty
+
+  ### Prior Spec Overlap
+  <Spec ID — scope overlap description>
+  [none] if empty
+  ```
+
+  ### templates/spec-output.md
+  Spec file template (written to .agents/workflow/specs/<id>/design.md):
+
+  ```markdown
+  # <Spec Title>
+
+  **Spec ID**: <id>
+  **KG Briefing**: Generated <date> — <N> prior decisions, <N> research findings, <N> contradictions
+  **Status**: draft
+
+  ## Problem Statement
+  <What problem does this solve and why does it matter now>
+
+  ## Goals
+  <Bulleted, scoped outcomes — not implementation steps>
+
+  ## Decisions
+  <Each decision: what was chosen, why, what alternatives were rejected>
+
+  ## Requirements
+  <Behavioral requirements — no file paths, no function names>
+
+  ## Open Questions
+  <Questions this spec leaves open; the plan must resolve them>
+
+  ## Done Criteria
+  <Verifiable: exit code / file exists / test passes / metric threshold>
+
+  ## Deferred
+  <Explicitly out of scope for this spec/plan>
+
+  ## Related
+  <Cross-references to prior specs, §C proposals, KGNote IDs>
+  ```
+
+  ---
+
+  ## Integration notes
+
+  - **agent-start**: kg-ideate runs after agent-start when the session goal is a new spec.
+  - **orchestrator-session-start**: briefing output can be passed as additional context to
+    eligible/orientation if the spec feeds an active plan.
+  - **workflow-artifact-model.md**: Phase 2 output must respect the spec tier — no file paths,
+    function names, task lists, or implementation details in the spec file.
+  - **Canonical spec path**: all spec reads and writes use .agents/workflow/specs/ — never
+    the bare workflow/specs/ path, which does not exist in this repo.
+  - **KG query surface**: Phase 1 is CLI-first (`da kg query`), MCP fallback. Contradiction
+    handling is adapter-conditional: enabled when the active adapter ships
+    `contradicting_claims` (e.g., `dotagents-builtin:graph/citation@^1.0`), falls back to
+    competing-decisions treatment otherwise. Note: `da kg query` CLI shape is not yet
+    normative in the adapter contract — if this skill drives strong opinions about that
+    surface, write them up as input to the contract work.
+  - **upcoming citation-graph backend**: Phase 1 traversals use `da kg query` + MCP today;
+    once the research profile graph backend is live, add structural traversal via citation
+    edges (finding → decision). The kg-queries.md instruction update is the only change needed.
+  - **graph_backend field in app-type-profiles**: when a project's profile sets
+    `graph_backend: dotagents-builtin:graph/citation@^1.0`, kg-ideate Phase 1 should prefer
+    the citation adapter's named queries (per contract §13.4) over semantic search for
+    research-type topics.
