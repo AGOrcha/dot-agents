@@ -3,10 +3,10 @@ package scoring
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -236,25 +236,5 @@ func writeYAMLAtomic(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".score-*.yaml.tmp")
-	if err != nil {
-		return fmt.Errorf("temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename: %w", err)
-	}
-	return nil
+	return fsops.WriteFileAtomic(path, data, 0o600)
 }

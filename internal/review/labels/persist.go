@@ -7,24 +7,15 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/fsops"
 	"go.yaml.in/yaml/v3"
 )
 
-// tempFile is the subset of *os.File that writeYAMLAtomic uses. It is an
-// interface so tests can inject a temp file whose Write or Close fails,
-// covering the atomic-write error paths deterministically (filesystem
-// permission tricks are not portable across CI hosts).
-type tempFile interface {
-	Write([]byte) (int, error)
-	Close() error
-	Name() string
-}
-
-// createTemp is the seam for opening the atomic-write temp file. It defaults to
-// os.CreateTemp and is overridable in tests.
-var createTemp = func(dir, pattern string) (tempFile, error) {
-	return os.CreateTemp(dir, pattern)
-}
+// writeFileAtomic is the seam for atomically persisting the marshaled sidecar
+// bytes. It defaults to fsops.WriteFileAtomic and is overridable in tests to
+// drive the write-error branches (the atomic temp+rename primitive and its
+// granular error paths are owned and tested by the fsops package).
+var writeFileAtomic = fsops.WriteFileAtomic
 
 // IterationLabelsPath returns the sidecar path for an iteration's labels: the
 // iter-N.labels.yaml file adjacent to iter-N.yaml (and iter-N.score.yaml) in
@@ -218,34 +209,13 @@ func List(iterLogDir string, iteration int) ([]Label, error) {
 	return sc.Labels, nil
 }
 
-// writeYAMLAtomic marshals v to YAML and writes it to path atomically: a temp
-// file in the same directory is renamed into place. It mirrors scoring's
-// helper of the same name but is private to this package to keep the package
-// independent.
+// writeYAMLAtomic marshals v to YAML and writes it to path atomically via the
+// shared fsops atomic-write primitive (temp file in the same directory renamed
+// into place), so a concurrent reader never observes a partial sidecar.
 func writeYAMLAtomic(path string, v any) error {
 	data, err := yaml.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	dir := filepath.Dir(path)
-	tmp, err := createTemp(dir, ".labels-*.yaml.tmp")
-	if err != nil {
-		return fmt.Errorf("temp file: %w", err)
-	}
-	tmpPath := tmp.Name()
-	cleanup := func() { _ = os.Remove(tmpPath) }
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		cleanup()
-		return fmt.Errorf("write temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		cleanup()
-		return fmt.Errorf("close temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		cleanup()
-		return fmt.Errorf("rename: %w", err)
-	}
-	return nil
+	return writeFileAtomic(path, data, 0o600)
 }

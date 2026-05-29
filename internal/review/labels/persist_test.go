@@ -397,11 +397,22 @@ func TestCRUDPropagateReadError(t *testing.T) {
 	})
 }
 
-// TestAddWritePropagatesError verifies Add surfaces a write failure (the
-// createTemp seam returns an error), covering Add's WriteSidecar error path.
+// withWriteFileAtomic overrides the atomic-write seam to drive the persist
+// error branches deterministically. The granular temp/write/close/rename
+// failures of the atomic primitive itself are owned and tested by the fsops
+// package; here we only need WriteSidecar's callers to surface a write error.
+func withWriteFileAtomic(t *testing.T, fn func(path string, data []byte, perm os.FileMode) error) {
+	t.Helper()
+	orig := writeFileAtomic
+	writeFileAtomic = fn
+	t.Cleanup(func() { writeFileAtomic = orig })
+}
+
+// TestAddWritePropagatesError verifies Add surfaces a write failure, covering
+// Add's WriteSidecar error path.
 func TestAddWritePropagatesError(t *testing.T) {
-	withCreateTemp(t, func(string, string) (tempFile, error) {
-		return nil, errors.New("no temp")
+	withWriteFileAtomic(t, func(string, []byte, os.FileMode) error {
+		return errors.New("no write")
 	})
 	if _, err := Add(t.TempDir(), 1, sampleAdd()); err == nil {
 		t.Fatal("want write error from Add")
@@ -416,8 +427,8 @@ func TestEditLabelWritePropagatesError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed Add: %v", err)
 	}
-	withCreateTemp(t, func(string, string) (tempFile, error) {
-		return nil, errors.New("no temp")
+	withWriteFileAtomic(t, func(string, []byte, os.FileMode) error {
+		return errors.New("no write")
 	})
 	_, err = EditLabel(dir, 1, lbl.ID, EditInput{
 		Actor: "reviewer@example.com", Role: RoleReviewer, Structured: validStructured(), Now: fixedNow().Add(time.Minute),
@@ -427,75 +438,24 @@ func TestEditLabelWritePropagatesError(t *testing.T) {
 	}
 }
 
+// TestWriteSidecarPropagatesWriteError verifies WriteSidecar surfaces an atomic
+// write failure from the fsops seam.
+func TestWriteSidecarPropagatesWriteError(t *testing.T) {
+	withWriteFileAtomic(t, func(string, []byte, os.FileMode) error {
+		return errors.New("disk full")
+	})
+	_, err := WriteSidecar(t.TempDir(), Sidecar{Iteration: 1, SchemaVersion: LabelSchemaVersion, Labels: []Label{}})
+	if err == nil {
+		t.Fatal("want write error")
+	}
+}
+
 func TestAddRejectsInvalidInput(t *testing.T) {
 	dir := t.TempDir()
 	in := sampleAdd()
 	in.Structured.Correctness = 99 // out of range → label.Validate fails inside Add
 	if _, err := Add(dir, 1, in); !errors.Is(err, ErrCorrectnessRange) {
 		t.Fatalf("want ErrCorrectnessRange, got %v", err)
-	}
-}
-
-// errOnWriteFile is a tempFile whose Write always fails, driving the
-// write-temp error branch. It still writes nowhere and reports a real Name so
-// cleanup is exercised.
-type errOnWriteFile struct{ name string }
-
-func (f errOnWriteFile) Write([]byte) (int, error) { return 0, errors.New("disk full") }
-func (f errOnWriteFile) Close() error              { return nil }
-func (f errOnWriteFile) Name() string              { return f.name }
-
-// errOnCloseFile is a tempFile whose Write succeeds but Close fails, driving
-// the close-temp error branch.
-type errOnCloseFile struct {
-	name string
-	f    *os.File
-}
-
-func (f errOnCloseFile) Write(p []byte) (int, error) { return f.f.Write(p) }
-func (f errOnCloseFile) Close() error                { _ = f.f.Close(); return errors.New("close failed") }
-func (f errOnCloseFile) Name() string                { return f.name }
-
-func withCreateTemp(t *testing.T, fn func(dir, pattern string) (tempFile, error)) {
-	t.Helper()
-	orig := createTemp
-	createTemp = fn
-	t.Cleanup(func() { createTemp = orig })
-}
-
-func TestWriteYAMLAtomicTempCreateFailure(t *testing.T) {
-	withCreateTemp(t, func(string, string) (tempFile, error) {
-		return nil, errors.New("no temp")
-	})
-	_, err := WriteSidecar(t.TempDir(), Sidecar{Iteration: 1, SchemaVersion: LabelSchemaVersion, Labels: []Label{}})
-	if err == nil {
-		t.Fatal("want temp-create error")
-	}
-}
-
-func TestWriteYAMLAtomicWriteFailure(t *testing.T) {
-	dir := t.TempDir()
-	withCreateTemp(t, func(d, _ string) (tempFile, error) {
-		return errOnWriteFile{name: filepath.Join(d, ".labels-fake.tmp")}, nil
-	})
-	_, err := WriteSidecar(dir, Sidecar{Iteration: 1, SchemaVersion: LabelSchemaVersion, Labels: []Label{}})
-	if err == nil {
-		t.Fatal("want write-temp error")
-	}
-}
-
-func TestWriteYAMLAtomicCloseFailure(t *testing.T) {
-	dir := t.TempDir()
-	withCreateTemp(t, func(d, pattern string) (tempFile, error) {
-		real, err := os.CreateTemp(d, pattern)
-		if err != nil {
-			return nil, err
-		}
-		return errOnCloseFile{name: real.Name(), f: real}, nil
-	})
-	_, err := WriteSidecar(dir, Sidecar{Iteration: 1, SchemaVersion: LabelSchemaVersion, Labels: []Label{}})
-	if err == nil {
-		t.Fatal("want close-temp error")
 	}
 }
 
