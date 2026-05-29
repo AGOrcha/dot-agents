@@ -89,4 +89,12 @@ set -e
 chk "$rc5" "1" "branch context drives the gate"
 grep -q "branch 'master'" <<<"$out5" && echo "ok: reports branch context" || { echo "FAIL: missing branch context"; fail=1; }
 
+# 6) Malformed 200 body => degrade to 0 new issues (exit 0), never crash.
+printf 'not json at all\n' > "$tmp/junk.json"
+set +e
+out6="$(SONAR_TOKEN=dummy bash "$gate" --fixture "$tmp/junk.json" --pr 5 2>&1)"; rc6=$?
+set -e
+chk "$rc6" "0" "malformed response degrades to 0 (no crash)"
+grep -q "could not parse" <<<"$out6" && echo "ok: warns on unparseable total" || { echo "FAIL: no parse warning"; fail=1; }
+
 [[ $fail -eq 0 ]] && echo "sonar-new-issues-gate.test: PASS" || { echo "sonar-new-issues-gate.test: FAIL"; exit 1; }

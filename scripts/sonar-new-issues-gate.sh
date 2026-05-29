@@ -200,8 +200,13 @@ main() {
     exit 0
   fi
 
-  total="$(printf '%s' "$payload" | json_total)"
-  total="${total:-0}"
+  # json_total may fail on a malformed 200 body; never let that abort the
+  # gate. Default to 0 and require a clean integer before comparing.
+  total="$(printf '%s' "$payload" | json_total 2>/dev/null || true)"
+  if ! [[ "$total" =~ ^[0-9]+$ ]]; then
+    warn "could not parse issue total from the response — treating as 0 new issues."
+    total=0
+  fi
 
   if [[ "$total" -gt 0 ]]; then
     printf '\033[31m[sonar-new-issues] BLOCKED: %s new issue(s) introduced in the new-code period:\033[0m\n' "$total" >&2
