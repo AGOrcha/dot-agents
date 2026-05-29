@@ -22,7 +22,10 @@ function Write-Warn  { Write-Output "[WARN] $args" }
 function Write-Fail  { Write-Output "[FAIL] $args"; exit 1 }
 
 function Get-Arch {
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    # Assembly-qualify with ,mscorlib so Windows PowerShell 5.x (.NET Framework)
+    # resolves RuntimeInformation; on PS Core mscorlib is a type-forwarder so it
+    # stays valid there too.
+    $arch = [System.Runtime.InteropServices.RuntimeInformation,mscorlib]::OSArchitecture
     switch ($arch) {
         'X64'   { return 'amd64' }
         'Arm64' { return 'arm64' }
