@@ -155,10 +155,13 @@ build_ts_dist_if_needed() {
   info "Building TypeScript port..."
   (
     cd "$ts_root"
+    # --ignore-scripts: don't let a dependency's lifecycle script execute during
+    # the TypeScript-port build (shell:S6505). `npm run build` (tsc) is a project
+    # script and runs normally.
     if [[ -f package-lock.json ]]; then
-      npm ci
+      npm ci --ignore-scripts
     else
-      npm install
+      npm install --ignore-scripts
     fi
     npm run build
   )

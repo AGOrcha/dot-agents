@@ -54,7 +54,7 @@ get_latest_version() {
   if command -v curl &>/dev/null; then
     curl --proto "=https" --tlsv1.2 -fsSL "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
   elif command -v wget &>/dev/null; then
-    wget --https-only -qO- "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
+    wget --https-only --max-redirect=0 -qO- "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
   else
     die "curl or wget is required to download da"
   fi
