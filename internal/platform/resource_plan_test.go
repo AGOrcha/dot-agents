@@ -1702,6 +1702,51 @@ func makeAgentsBucketARegularFile(t *testing.T, agentsHome, scope string) {
 	}
 }
 
+// testSharedAgentIntentBuilderCase runs one test case (has-entries, missing-bucket, or error)
+// for a named builder function with optional error fragment text.
+func testSharedAgentIntentBuilderCase(t *testing.T, name string, caseType string,
+	fn func(agentsHome string) ([]ResourceIntent, error), errFragment string) {
+	switch caseType {
+	case "has-entries":
+		_, agentsHome := setupRepoAgentsHome(t)
+		writeFixtureAgent(t, agentsHome, "proj", "reviewer", "# Reviewer\n")
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		intents, err := fn(agentsHome)
+		if err != nil {
+			t.Fatalf("builder returned error: %v", err)
+		}
+		if len(intents) != 1 || intents[0].LogicalName != "reviewer" {
+			t.Fatalf("expected one reviewer intent, got %+v", intents)
+		}
+
+	case "missing-bucket-is-empty":
+		_, agentsHome := setupRepoAgentsHome(t)
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		intents, err := fn(agentsHome)
+		if err != nil {
+			t.Fatalf("missing bucket should be a nil-error no-op, got %v", err)
+		}
+		if len(intents) != 0 {
+			t.Fatalf("missing bucket should yield no intents, got %+v", intents)
+		}
+
+	case "non-enoent-error-wrapped":
+		_, agentsHome := setupRepoAgentsHome(t)
+		makeAgentsBucketARegularFile(t, agentsHome, "proj")
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		_, err := fn(agentsHome)
+		if err == nil {
+			t.Fatal("expected wrapped error for non-listable bucket, got nil")
+		}
+		if !strings.Contains(err.Error(), "listing canonical agents for "+errFragment) {
+			t.Fatalf("error %q missing caller context %q", err, errFragment)
+		}
+	}
+}
+
 // TestSharedAgentIntentBuilders_CanonicalEntryPreamble exercises the
 // listCanonicalAgentEntries helper extracted from
 // BuildSharedAgentFileSymlinkIntents and BuildSharedCodexAgentTomlIntents.
@@ -1726,44 +1771,15 @@ func TestSharedAgentIntentBuilders_CanonicalEntryPreamble(t *testing.T) {
 
 	for name, fn := range build {
 		t.Run(name+"/has-entries", func(t *testing.T) {
-			_, agentsHome := setupRepoAgentsHome(t)
-			writeFixtureAgent(t, agentsHome, "proj", "reviewer", "# Reviewer\n")
-			t.Setenv("AGENTS_HOME", agentsHome)
-
-			intents, err := fn(agentsHome)
-			if err != nil {
-				t.Fatalf("builder returned error: %v", err)
-			}
-			if len(intents) != 1 || intents[0].LogicalName != "reviewer" {
-				t.Fatalf("expected one reviewer intent, got %+v", intents)
-			}
+			testSharedAgentIntentBuilderCase(t, name, "has-entries", fn, "")
 		})
 
 		t.Run(name+"/missing-bucket-is-empty", func(t *testing.T) {
-			_, agentsHome := setupRepoAgentsHome(t)
-			t.Setenv("AGENTS_HOME", agentsHome)
-
-			intents, err := fn(agentsHome)
-			if err != nil {
-				t.Fatalf("missing bucket should be a nil-error no-op, got %v", err)
-			}
-			if len(intents) != 0 {
-				t.Fatalf("missing bucket should yield no intents, got %+v", intents)
-			}
+			testSharedAgentIntentBuilderCase(t, name, "missing-bucket-is-empty", fn, "")
 		})
 
 		t.Run(name+"/non-enoent-error-wrapped", func(t *testing.T) {
-			_, agentsHome := setupRepoAgentsHome(t)
-			makeAgentsBucketARegularFile(t, agentsHome, "proj")
-			t.Setenv("AGENTS_HOME", agentsHome)
-
-			_, err := fn(agentsHome)
-			if err == nil {
-				t.Fatal("expected wrapped error for non-listable bucket, got nil")
-			}
-			if !strings.Contains(err.Error(), "listing canonical agents for "+errFragment[name]) {
-				t.Fatalf("error %q missing caller context %q", err, errFragment[name])
-			}
+			testSharedAgentIntentBuilderCase(t, name, "non-enoent-error-wrapped", fn, errFragment[name])
 		})
 	}
 }
