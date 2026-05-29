@@ -35,6 +35,9 @@ RUN useradd --create-home --shell /bin/bash sandbox \
     && mkdir -p /workspace \
     && chown sandbox:sandbox /workspace
 USER sandbox
+# Docker does not set HOME on a USER switch; install.sh writes to $HOME/.local,
+# so point it at the sandbox user's home explicitly.
+ENV HOME=/home/sandbox
 WORKDIR /home/sandbox
 
 # Fetch + integrity-verify the pinned dot-agents installer via ADD --checksum
@@ -44,10 +47,14 @@ WORKDIR /home/sandbox
 # the sandbox reproducible and immune to a supply-chain compromise of master.
 ARG DOT_AGENTS_INSTALL_SHA=7be7111e5799bd370212fc51f4fc1977f617a9bd
 ARG DOT_AGENTS_INSTALL_CHECKSUM=sha256:5c919087d94f0322b75a8890c04700c44ff461bf6923848ce61b937fe3db3652
-ADD --chown=sandbox:sandbox --checksum=${DOT_AGENTS_INSTALL_CHECKSUM} \
+# No --chown: the copied installer stays root-owned 0644 (the sandbox user can
+# read+execute it but not modify it — avoids docker:S6504 "write permissions on
+# the copied resource"). It is integrity-pinned by --checksum and consumed once;
+# the leftover in /tmp of this ephemeral test image is harmless.
+ADD --checksum=${DOT_AGENTS_INSTALL_CHECKSUM} \
     "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" \
     /tmp/install-dot-agents.sh
-RUN bash /tmp/install-dot-agents.sh && rm /tmp/install-dot-agents.sh
+RUN bash /tmp/install-dot-agents.sh
 ENV PATH="/home/sandbox/.local/bin:$PATH"
 
 # Default workspace (owned by the sandbox user)
