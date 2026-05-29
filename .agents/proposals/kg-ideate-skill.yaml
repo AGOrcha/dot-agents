@@ -61,6 +61,14 @@ content: |
     Use when starting a new spec/plan, when the user asks what we know about a topic, or
     when prepping work for delegation.
   argument-hint: "<topic-or-task-id>"
+  tier: compound
+  calls:
+    - kg-brief
+    - spec-scaffold
+    - plan-scaffold
+    - staged-execution-handoff
+  verifier: batch
+  review_gate: default
   ---
 
   # KG-Ideate
@@ -72,7 +80,34 @@ content: |
   The four-tier artifact model (spec → plan → tasks → history) governs all output —
   cross-ref `.agents/rules/dot-agents/workflow-artifact-model.md`.
 
-  ## Phase 1 — Briefing Producer
+  ## Tiered composition (per skill-tiering-contract)
+
+  kg-ideate is a **T2 compound orchestrator**. It does not inline the phase logic; it
+  **dispatches in order** to four **T1 molecule** skills, each independently invocable and
+  separately authored (the `calls:` list above). Composition is declared, not discovered at
+  runtime, and dispatch depth is compound → molecule → atom = **2 hops** — within the reliable
+  bound (skill-tiering-contract §1.2) and honoring "push composition into the skill" (§1.3).
+
+  | Phase | Molecule skill | Tier | Owns | `calls:` (atoms) | Verifier |
+  |-------|----------------|------|------|------------------|----------|
+  | 1 | `kg-brief` | molecule | KG/research/lessons traversal → the shared briefing block | kg-query, corpus-scan, context-scan, briefing-render | batch |
+  | 2 | `spec-scaffold` | molecule | briefing → decisions/open-questions → `design.md` | decision-review, gap-conversion, contradiction-framing, done-criteria, spec-write | batch |
+  | 3 | `plan-scaffold` | molecule | spec → tasks/write-scopes/dep-order → PLAN/TASKS | task-breakdown, write-scope-derive, plan-write | batch |
+  | 4 | `staged-execution-handoff` | molecule | spec+plan → fanout/ISP staged execution | fanout-decision, staged-handoff | batch |
+
+  Each molecule's body is the correspondingly-numbered **Phase section below** — those sections
+  are the per-molecule specifications, authored as separate `SKILL.md` files at implementation
+  time, not inline steps of this orchestrator. The orchestrator's own logic is only: brief →
+  (spec ⇄ plan, per the concurrency fork in Phase 3) → handoff, passing the shared
+  briefing/spec/plan artifacts between molecules. A molecule may be invoked on its own (e.g.
+  `spec-scaffold` when a briefing already exists, `plan-scaffold` when a spec is stable) — the
+  orchestrator is the convenience path over reusable primitives, not the only entry point.
+
+  Each molecule self-declares `tier: molecule` + its `calls:` + `verifier: batch` in its own
+  frontmatter; this orchestrator declares `tier: compound` and `calls:` the four (above). The
+  per-molecule atom breakdown is indicative — the implementing skills finalize their atom set.
+
+  ## Phase 1 — Briefing Producer (molecule: `kg-brief`)
 
   1. **KG traversal**
      Load → `instructions/kg-queries.md`
@@ -98,7 +133,7 @@ content: |
      The briefing is the single shared artifact consumed by Phases 2–4 (and by a spawned
      subagent planner — see "Subagent-planning path").
 
-  ## Phase 2 — Spec Scaffolding
+  ## Phase 2 — Spec Scaffolding (molecule: `spec-scaffold`)
 
   5. **Prior decision review**
      Load → `instructions/decision-review.md`
@@ -130,7 +165,7 @@ content: |
      open questions, done criteria, deferred items.
      Never include file paths, function names, or task breakdowns — those belong in the plan.
 
-  ## Phase 3 — Plan Scaffolding
+  ## Phase 3 — Plan Scaffolding (molecule: `plan-scaffold`)
 
   Spec↔plan concurrency is a deliberate fork, governed by the workflow-artifact-model rule
   "Spec before plan… unless the work is purely mechanical." Decide the mode before drafting:
@@ -167,7 +202,7 @@ content: |
       Author the plan via the canonical CLI surface (`da workflow plan create <id>`), then keep
       PLAN.yaml / TASKS.yaml / <id>.plan.md in sync. Do not hand-edit task status.
 
-  ## Phase 4 — Execution Handoff
+  ## Phase 4 — Execution Handoff (molecule: `staged-execution-handoff`)
 
   The pipeline's tail is the concurrent staged-execution flow (fanout / ISP). kg-ideate
   produces the spec+plan that feed it; it does NOT itself implement.
