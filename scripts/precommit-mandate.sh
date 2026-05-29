@@ -33,17 +33,17 @@ fail() { local reason="${1:-}"; printf '\n\033[31m[mandate] BLOCKED: %s\033[0m\n
 # ISSUES detail is already printed by sonar-new-issues-gate.sh, but that runs
 # only after a PASS — a hotspot/coverage gate failure exits before it. Best
 # effort: needs SONAR_TOKEN (resolved by cmd_sonar) + sonar-project.properties;
-# any query hiccup degrades to the dashboard pointer. $1 = branch name.
+# any query hiccup degrades to the dashboard pointer. Queries the main branch
+# (free-tier SonarCloud analyzes locally as main — branch analysis is paid).
 sonar_gate_diagnostics() {
-  local branch="${1:-}" host="${SONAR_HOST_URL:-https://sonarcloud.io}" key org bq=""
+  local host="${SONAR_HOST_URL:-https://sonarcloud.io}" key org
   key="$(sed -n 's/^sonar\.projectKey=//p' "$repo_root/sonar-project.properties" 2>/dev/null | head -1)"
   org="$(sed -n 's/^sonar\.organization=//p' "$repo_root/sonar-project.properties" 2>/dev/null | head -1)"
   [[ -z "${SONAR_TOKEN:-}" || -z "$key" ]] && return 0
-  [[ -n "$branch" ]] && bq="&branch=$(printf '%s' "$branch" | sed 's:/:%2F:g')"
 
   say sonar "FAILED quality-gate conditions:"
   curl -sSf -H "Authorization: Bearer ${SONAR_TOKEN}" \
-    "${host}/api/qualitygates/project_status?projectKey=${key}&organization=${org}${bq}" 2>/dev/null \
+    "${host}/api/qualitygates/project_status?projectKey=${key}&organization=${org}" 2>/dev/null \
     | python3 -c 'import json,sys
 try: ps=json.load(sys.stdin).get("projectStatus",{})
 except Exception: sys.exit(0)
@@ -53,7 +53,7 @@ for c in ps.get("conditions",[]):
 
   say sonar "New-code security hotspots to review (SonarCloud UI → Security Hotspots):"
   curl -sSf -H "Authorization: Bearer ${SONAR_TOKEN}" \
-    "${host}/api/hotspots/search?projectKey=${key}&organization=${org}${bq}&sinceLeakPeriod=true&ps=50" 2>/dev/null \
+    "${host}/api/hotspots/search?projectKey=${key}&organization=${org}&sinceLeakPeriod=true&ps=50" 2>/dev/null \
     | python3 -c 'import json,sys
 try: d=json.load(sys.stdin)
 except Exception: sys.exit(0)
@@ -61,7 +61,7 @@ for h in d.get("hotspots",[]):
     comp=h.get("component","").split(":")[-1]
     print("  - %s:%s  %s  %s" % (comp,h.get("line","?"),h.get("ruleKey",""),(h.get("message","") or "")[:90]))' 2>/dev/null || true
 
-  printf '  Dashboard: %s/dashboard?id=%s%s\n' "$host" "$key" "${branch:+&branch=$branch}" >&2
+  printf '  Dashboard: %s/dashboard?id=%s\n' "$host" "$key" >&2
 }
 
 cmd_fmt() {
@@ -166,12 +166,12 @@ cmd_sonar() {
     worktree_mount_args=(-v "$git_common_abs:$git_common_abs:ro")
   fi
 
-  # Branch-scope the analysis so the gate evaluates THIS branch's new code, not
-  # the default branch. Run locally there is no CI env for the scanner to
-  # auto-detect the branch; without -Dsonar.branch.name it analyzes against the
-  # main branch and inherits master's gate state.
-  local branch_name; branch_name="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-  local -a branch_args=(); [[ -n "$branch_name" ]] && branch_args=(-Dsonar.branch.name="$branch_name")
+  # NOTE: we deliberately do NOT pass -Dsonar.branch.name. SonarCloud branch
+  # analysis is a paid feature; on this free-tier project the scanner only
+  # supports the main branch (+ PR analysis in CI). Setting branch.name makes
+  # the gate-status check fail with "Project not found". Locally the working
+  # tree is therefore analyzed as the main branch, so the gate reflects main's
+  # state — keep main green (review/fix its hotspots) and clean branches pass.
 
   # Retry the intermittent SonarCloud CE "Task finished abnormally" (server-side
   # processing flake, common with the emulated amd64 scanner on arm64 hosts):
@@ -187,8 +187,7 @@ cmd_sonar() {
       -v "$repo_root:/usr/src" \
       ${worktree_mount_args[@]+"${worktree_mount_args[@]}"} \
       sonarsource/sonar-scanner-cli:latest \
-      -Dsonar.qualitygate.wait=true \
-      ${branch_args[@]+"${branch_args[@]}"} 2>&1 | tee "$logf"
+      -Dsonar.qualitygate.wait=true 2>&1 | tee "$logf"
     rc=${PIPESTATUS[0]}
     [[ "$rc" -eq 0 ]] && break
     if grep -q 'CE Task finished abnormally' "$logf" && [[ "$attempt" -lt "$max" ]]; then
@@ -196,7 +195,7 @@ cmd_sonar() {
       continue
     fi
     rm -f "$logf"
-    sonar_gate_diagnostics "$branch_name"
+    sonar_gate_diagnostics
     fail "sonar-scanner: SonarCloud quality gate failed (see conditions/hotspots above)"
   done
   rm -f "$logf"
