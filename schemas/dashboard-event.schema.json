@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/dashboard-event.schema.json",
+  "title": "R2 dashboard SSE event DTO",
+  "description": "Shape of one event delivered over the Server-Sent Events channel at GET /api/stream (design.md Q3: SSE chosen over WebSocket because traffic is server->client only). This schema validates the JSON carried in the SSE frame's `data:` field. The SSE frame itself adds transport metadata: `event: <type>` (the topic, mirrored in `type` below), `id: <seq>` (monotonic per-connection sequence), and for heartbeats a bare `: ping` comment line. v1 has NO server-side replay of missed events (spec D2.2 fallback): on reconnect the client refetches affected queries. So `seq` is per-connection and resets on reconnect — it is for client-side ordering/dedupe within a single connection, not durable cursoring.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "seq", "payload"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "iteration.scored",
+        "session.updated",
+        "score.recomputed",
+        "rubric.changed",
+        "heartbeat"
+      ],
+      "description": "Event topic, mirrored in the SSE `event:` field. iteration.scored: a new iter-N.score.yaml sidecar appeared (spec R5). session.updated: a session-<id>.score.yaml was rewritten under the same rubric version (spec R6). score.recomputed: an existing iteration score changed in place. rubric.changed: the rubric was recomputed under a NEW version — a broadcast that triggers a full client reload (spec R7). heartbeat: 15s keepalive to defeat proxy idle-timeouts (usually sent as a `: ping` comment, but also valid as a typed event)."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Monotonic per-connection sequence number, mirrored in the SSE `id:` field. Resets to 0 on a new connection (no durable replay in v1)."
+    },
+    "ts": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC3339 UTC time the event was published.",
+      "default": ""
+    },
+    "payload": {
+      "description": "Event-type-specific body. Keyed identifiers (session_id, iteration) let the client invalidate exactly the affected TanStack Query keys. The payload is intentionally a thin key set, NOT the full DTO — the client refetches the affected resource on receipt.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session_id", "iteration"],
+          "description": "iteration.scored and score.recomputed payload.",
+          "properties": {
+            "session_id": { "type": "string", "minLength": 1 },
+            "iteration": { "type": "integer", "minimum": 1 },
+            "band": {
+              "type": "string",
+              "enum": ["excellent", "good", "fair", "poor", "unscored"],
+              "description": "New band for the iteration, so the UI can tint a live tick without an immediate refetch.",
+              "default": "unscored"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session_id"],
+          "description": "session.updated payload.",
+          "properties": {
+            "session_id": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rubric_version"],
+          "description": "rubric.changed payload — triggers a full client reload.",
+          "properties": {
+            "rubric_version": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "heartbeat payload — empty object.",
+          "properties": {}
+        }
+      ]
+    }
+  }
+}
