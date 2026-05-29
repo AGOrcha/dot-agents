@@ -111,6 +111,43 @@ func relevantOp(op fsnotify.Op) bool {
 	return op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename|fsnotify.Remove) != 0
 }
 
+// debouncer coalesces a burst of raw events into a single tick. timer is nil
+// when no burst is pending; arm (re)starts the quiet window and C exposes the
+// fire channel for the select loop (nil when disarmed, so it never fires).
+type debouncer struct {
+	window time.Duration
+	timer  *time.Timer
+	C      <-chan time.Time
+}
+
+// arm (re)starts the debounce window. A pending timer is reset; a fresh one is
+// created on the first event of a burst.
+func (d *debouncer) arm() {
+	if d.timer == nil {
+		d.timer = time.NewTimer(d.window)
+		d.C = d.timer.C
+		return
+	}
+	if !d.timer.Stop() {
+		// Drain a possibly-already-fired timer so Reset is clean.
+		select {
+		case <-d.timer.C:
+		default:
+		}
+	}
+	d.timer.Reset(d.window)
+}
+
+// disarm clears the pending window so C stops selecting. Called after a tick is
+// emitted and on shutdown.
+func (d *debouncer) disarm() {
+	if d.timer != nil {
+		d.timer.Stop()
+		d.timer = nil
+		d.C = nil
+	}
+}
+
 // Start implements Trigger. It registers every path on a single watcher and
 // coalesces bursts using a debounce timer.
 func (t *FSNotifyTrigger) Start(ctx context.Context) (<-chan time.Time, error) {
@@ -130,63 +167,49 @@ func (t *FSNotifyTrigger) Start(ctx context.Context) (<-chan time.Time, error) {
 	}
 
 	out := make(chan time.Time)
-	go func() {
-		defer close(out)
-		defer func() { _ = w.Close() }()
-
-		// timer is nil when no burst is pending. When an event arrives we (re)arm
-		// it; when it fires we emit one coalesced tick.
-		var timer *time.Timer
-		var timerC <-chan time.Time
-		arm := func() {
-			if timer == nil {
-				timer = time.NewTimer(debounce)
-				timerC = timer.C
-				return
-			}
-			if !timer.Stop() {
-				// Drain a possibly-already-fired timer so Reset is clean.
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(debounce)
-		}
-		stopTimer := func() {
-			if timer != nil {
-				timer.Stop()
-				timer = nil
-				timerC = nil
-			}
-		}
-		defer stopTimer()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-w.Events():
-				if !ok {
-					return
-				}
-				if relevantOp(ev.Op) {
-					arm()
-				}
-			case <-w.Errors():
-				// Swallow watcher errors here; surfacing them is the scheduler's
-				// job via task last-error, and a watcher error does not by itself
-				// mean we should stop watching.
-			case <-timerC:
-				timer = nil
-				timerC = nil
-				select {
-				case out <- time.Now():
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
+	go t.watchLoop(ctx, w, &debouncer{window: debounce}, out)
 	return out, nil
+}
+
+// watchLoop reads watcher events, coalesces them via d, and emits one tick per
+// settled burst on out. It returns (closing out) when ctx is cancelled or the
+// watcher's event channel closes.
+func (t *FSNotifyTrigger) watchLoop(ctx context.Context, w fsWatcher, d *debouncer, out chan<- time.Time) {
+	defer close(out)
+	defer func() { _ = w.Close() }()
+	defer d.disarm()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-w.Events():
+			if !ok {
+				return
+			}
+			if relevantOp(ev.Op) {
+				d.arm()
+			}
+		case <-w.Errors():
+			// Swallow watcher errors here; surfacing them is the scheduler's job
+			// via task last-error, and a watcher error does not by itself mean we
+			// should stop watching.
+		case <-d.C:
+			d.disarm()
+			if !emit(ctx, out) {
+				return
+			}
+		}
+	}
+}
+
+// emit delivers a coalesced tick, preferring ctx cancellation over blocking on a
+// full channel. It reports whether the loop should continue (false on cancel).
+func emit(ctx context.Context, out chan<- time.Time) bool {
+	select {
+	case out <- time.Now():
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }

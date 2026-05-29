@@ -12,6 +12,15 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// drain reads a trigger channel to completion. Used after context cancel to
+// confirm the channel closes (and to avoid leaving an unread, soon-to-close
+// channel) without an empty for-range block.
+func drain(ch <-chan time.Time) {
+	for range ch {
+		continue
+	}
+}
+
 func TestIntervalTriggerFires(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -241,9 +250,7 @@ func TestFSNotifyTriggerStopsOnContextCancel(t *testing.T) {
 	select {
 	case _, ok := <-ch:
 		if ok {
-			// drain until closed
-			for range ch {
-			}
+			drain(ch)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("channel did not close on context cancel")
@@ -359,8 +366,7 @@ func TestFSNotifyTriggerCancelWithPendingTimer(t *testing.T) {
 	select {
 	case _, ok := <-ch:
 		if ok {
-			for range ch {
-			}
+			drain(ch)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("channel did not close after cancel with pending timer")

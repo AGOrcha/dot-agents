@@ -89,12 +89,12 @@ type Scheduler struct {
 	// now is a clock seam for deterministic tests.
 	now func() time.Time
 
-	// trigCtx governs the trigger loops; cancelling it stops new dispatches.
-	// runCtx is the parent of every RunFn's context; Stop cancels it only after
+	// trigCancel stops the trigger loops; cancelling it halts new dispatches.
+	// runCancel cancels every in-flight RunFn's context; Stop calls it only after
 	// the drain timeout elapses (notes: "drain ... then cancel their context").
-	trigCtx    context.Context
+	// The contexts themselves are not stored as fields (S8242): trigCtx is passed
+	// to each loop goroutine and runCtx is threaded through loop -> dispatch.
 	trigCancel context.CancelFunc
-	runCtx     context.Context
 	runCancel  context.CancelFunc
 	// wg tracks trigger loops; inFlight tracks executing RunFns so Stop can
 	// drain them separately from the trigger goroutines.
@@ -152,9 +152,7 @@ func (s *Scheduler) Start(ctx context.Context) error {
 	// in-flight RunFns drain before their own context is cancelled.
 	trigCtx, trigCancel := context.WithCancel(ctx)
 	runCtx, runCancel := context.WithCancel(ctx)
-	s.trigCtx = trigCtx
 	s.trigCancel = trigCancel
-	s.runCtx = runCtx
 	s.runCancel = runCancel
 	// Snapshot tasks under lock for trigger startup outside the lock.
 	rts := make([]*taskRuntime, 0, len(s.order))
@@ -171,8 +169,8 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.wg.Wait()
 			s.mu.Lock()
 			s.started = false
-			s.trigCtx, s.trigCancel = nil, nil
-			s.runCtx, s.runCancel = nil, nil
+			s.trigCancel = nil
+			s.runCancel = nil
 			s.mu.Unlock()
 			return fmt.Errorf("scheduler: start trigger for %q: %w", rt.task.Name, err)
 		}
@@ -183,15 +181,15 @@ func (s *Scheduler) Start(ctx context.Context) error {
 			s.mu.Unlock()
 		}
 		s.wg.Add(1)
-		go s.loop(trigCtx, rt, ch)
+		go s.loop(trigCtx, runCtx, rt, ch)
 	}
 	return nil
 }
 
 // loop reads ticks for a single task and dispatches RunFn. trigCtx stops the
-// loop on shutdown; the RunFn itself runs under s.runCtx so it can outlive the
+// loop on shutdown; runCtx is passed down to each RunFn so it can outlive the
 // trigger loop during Stop's drain window.
-func (s *Scheduler) loop(trigCtx context.Context, rt *taskRuntime, ch <-chan time.Time) {
+func (s *Scheduler) loop(trigCtx, runCtx context.Context, rt *taskRuntime, ch <-chan time.Time) {
 	defer s.wg.Done()
 	for {
 		select {
@@ -201,7 +199,7 @@ func (s *Scheduler) loop(trigCtx context.Context, rt *taskRuntime, ch <-chan tim
 			if !ok {
 				return
 			}
-			s.dispatch(rt)
+			s.dispatch(runCtx, rt)
 		}
 	}
 }
@@ -212,7 +210,7 @@ func (s *Scheduler) loop(trigCtx context.Context, rt *taskRuntime, ch <-chan tim
 // stays responsive and can observe — and drop — ticks that arrive during the
 // run. A single task therefore never runs two RunFns concurrently, but the loop
 // never blocks on a long run either.
-func (s *Scheduler) dispatch(rt *taskRuntime) {
+func (s *Scheduler) dispatch(runCtx context.Context, rt *taskRuntime) {
 	s.mu.Lock()
 	if rt.running {
 		rt.dropped++
@@ -220,7 +218,6 @@ func (s *Scheduler) dispatch(rt *taskRuntime) {
 		return
 	}
 	rt.running = true
-	runCtx := s.runCtx
 	s.mu.Unlock()
 
 	s.inFlight.Add(1)
