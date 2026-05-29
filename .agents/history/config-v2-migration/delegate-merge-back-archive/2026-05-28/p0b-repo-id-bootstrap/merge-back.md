@@ -1,0 +1,31 @@
+---
+schema_version: 1
+task_id: p0b-repo-id-bootstrap
+parent_plan_id: config-v2-migration
+title: 'Phase 0b: repo_id field + da init auto-populate from git remote'
+summary: 'Bootstrap .agentsrc.json#repo_id from git remote origin inside config.GenerateAgentsRC; protected scalar preserved by MergeGenerateAgentsRC. PR #127 READY; CI green on 3 OS, coverage gate, SonarCloud (after switching exec.Command -> execabs.Command per project convention to satisfy go:S4036). Tests: 6 normalization shapes + 4 derive scenarios + 3 Merge contracts + 1 GenerateAgentsRC integration.'
+files_changed:
+    - .agents/workflow/plans/cross-platform-test-skips-audit/PLAN.yaml
+    - .agents/workflow/plans/cross-platform-test-skips-audit/TASKS.yaml
+    - .agents/workflow/plans/loop-discipline-stop-hooks/PLAN.yaml
+    - .agents/workflow/plans/loop-discipline-stop-hooks/TASKS.yaml
+    - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/PLAN.yaml
+    - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/TASKS.yaml
+    - .agents/workflow/plans/refresh-skill-relink/PLAN.yaml
+    - .agents/workflow/plans/refresh-skill-relink/TASKS.yaml
+    - .agents/workflow/specs/coverage-gate-per-file/design.md
+    - .agents/workflow/specs/production-code-helper-extraction/design.md
+verification_result:
+    status: pass
+    summary: 'Bundle write_scope was stale post t13b lifecycle move (commands/init.go no longer exists; commands/init_test.go is a 57-line smoke test). All edits landed in internal/config/agentsrc.go (in scope) + internal/config/agentsrc_test.go. Fold-back recorded at .agents/active/fold-back/p0b-bundle-write-scope-stale.md per [[validate-bundle-against-head]]. Branch HEAD verified == origin/feature/p0b-repo-id-bootstrap (5902aeb541f898b6e14b83b7a1f452a3584e0a62) per [[parallel-worker-branch-drift]]. Parent should merge #127 then run ''workflow advance'' on p0b-repo-id-bootstrap.'
+integration_notes: 'Bundle write_scope was stale post t13b lifecycle move (commands/init.go no longer exists; commands/init_test.go is a 57-line smoke test). All edits landed in internal/config/agentsrc.go (in scope) + internal/config/agentsrc_test.go. Fold-back recorded at .agents/active/fold-back/p0b-bundle-write-scope-stale.md per [[validate-bundle-against-head]]. Branch HEAD verified == origin/feature/p0b-repo-id-bootstrap (5902aeb541f898b6e14b83b7a1f452a3584e0a62) per [[parallel-worker-branch-drift]]. Parent should merge #127 then run ''workflow advance'' on p0b-repo-id-bootstrap.'
+created_at: "2026-05-27T17:21:10Z"
+---
+
+## Summary
+
+Bootstrap .agentsrc.json#repo_id from git remote origin inside config.GenerateAgentsRC; protected scalar preserved by MergeGenerateAgentsRC. PR #127 READY; CI green on 3 OS, coverage gate, SonarCloud (after switching exec.Command -> execabs.Command per project convention to satisfy go:S4036). Tests: 6 normalization shapes + 4 derive scenarios + 3 Merge contracts + 1 GenerateAgentsRC integration.
+
+## Integration Notes
+
+Bundle write_scope was stale post t13b lifecycle move (commands/init.go no longer exists; commands/init_test.go is a 57-line smoke test). All edits landed in internal/config/agentsrc.go (in scope) + internal/config/agentsrc_test.go. Fold-back recorded at .agents/active/fold-back/p0b-bundle-write-scope-stale.md per [[validate-bundle-against-head]]. Branch HEAD verified == origin/feature/p0b-repo-id-bootstrap (5902aeb541f898b6e14b83b7a1f452a3584e0a62) per [[parallel-worker-branch-drift]]. Parent should merge #127 then run 'workflow advance' on p0b-repo-id-bootstrap.

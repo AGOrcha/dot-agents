@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-cloudflare-token-auto-rotation-1779951026
+parent_plan_id: pr10-branch-split
+parent_task_id: cloudflare-token-auto-rotation
+title: 'GH Action: auto-rotate CLOUDFLARE_API_TOKEN every 30d via API mint+revoke (scope identical, name dated)'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .github/workflows/rotate-cloudflare-deploy-token.yml
+success_criteria: 'Phase 2 of CF deploy infra. Phase 1 (just landed inline 2026-05-28): scoped token agorcha-dev-docs-deploy-20260528 expires 2026-07-27, set as CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID GH secrets on NikashPrakash/dot-agents. Phase 2 deliverable: scheduled workflow that mints a fresh scoped token (same policies as bootstrap), updates the GH secret, then revokes prior dated tokens after a 7-day grace period. Bootstrap mechanism: needs an auth context capable of POST /user/tokens — easiest path is a small ''rotation token'' with User:API Tokens Edit + User:API Tokens Read perms (long-lived, separate GH secret CLOUDFLARE_ROTATION_TOKEN). Alternative: Cloudflare OIDC federation w/ GitHub OIDC eliminates long-lived secrets entirely — research whether CF supports OIDC for token-mint operations yet (was beta as of early 2026). Secret-update mechanism: gh-CLI in workflow uses a fine-grained PAT scoped to Actions:write+Secrets:write on this single repo (GITHUB_TOKEN cannot write secrets). Cron: monthly on the 1st 06:00 UTC + workflow_dispatch. Token naming: ''agorcha-dev-docs-deploy-YYYYMMDD'' so old tokens are auto-discoverable for revocation. Lifecycle: mint new → swap secret → wait 24h grace → revoke tokens matching name prefix AND created >30d ago. Reference policy IDs (cached at /tmp/cf-perms.json from phase 1; should bake into the rotation script as constants): Workers Scripts Write=e086da7e..., Account Settings Read=c1fde68c..., Workers Routes Write=28f4b596..., DNS Write=4755a26e..., Zone Read=c8fed203..., User Details Read=8acbe5bb....'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: cf-rotation-worker
+status: completed
+created_at: "2026-05-28T06:50:26Z"
+updated_at: "2026-05-28T14:52:10Z"

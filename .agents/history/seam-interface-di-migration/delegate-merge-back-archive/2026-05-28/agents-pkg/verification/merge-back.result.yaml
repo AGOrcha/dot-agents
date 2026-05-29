@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: agents-pkg
+parent_plan_id: seam-interface-di-migration
+verifier_type: merge-back
+status: pass
+summary: Behavior-preserving. All commands/agents tests pass under -race. Branch feature/agents-pkg-interface-di pushed. Do NOT merge — parent reviews; concurrent worktrees kg-pkg/skills-pkg/platform-pkg/etc have no overlap with commands/agents/. Pre-existing unrelated test failure in internal/graphstore TestCRGBridgeFreshBuildRealCRG (missing code_review_graph python module) is environment, not introduced by this change.
+recorded_at: "2026-05-24T23:08:26Z"
+delegation_id: del-agents-pkg-1779663650
+artifact_paths:
+    - .agents/active/delegation/t02-introduce-lifecycle-skeleton.yaml

@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: fsops-windows-tests
+parent_plan_id: cross-platform-test-skips-audit
+verifier_type: merge-back
+status: pass
+summary: 'Do NOT merge until windows-latest CI passes — these tests are skipped at compile time on POSIX hosts so green local CI does not prove the test bodies are correct. Parent should: (1) wait for windows-latest workflow to run on PR #73, (2) confirm internal/fsops/fsops_windows.go coverage > 0% in the report, (3) confirm none of the deny-ACE tests trigger the t.Skip path on the runner (which would mean the fixture silently failed). The deny-ACE branches in Remove/RemoveAll/WriteFile intentionally tolerate PowerShell-fallback success with t.Skip — if every runner skips, the parent should consider tightening the assertion. Once merged, cg6-prune can drop the internal/fsops/fsops_windows.go [platform-tag] 0.00% allowlist entry.'
+recorded_at: "2026-05-25T13:59:19Z"
+delegation_id: del-fsops-windows-tests-1779717271

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p1a-mapper-extensions
+parent_plan_id: loop-discipline-stop-hooks
+verifier_type: unit
+status: pass
+summary: 'p1a mapper extensions: 4 gate-critical mappings + table + negative copilot-stop regression all green'
+recorded_at: "2026-05-26T12:30:02Z"
+delegation_id: del-p1a-mapper-extensions-1779798327
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/platform -race -count=1

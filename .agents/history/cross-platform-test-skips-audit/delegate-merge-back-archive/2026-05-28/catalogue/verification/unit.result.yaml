@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: catalogue
+parent_plan_id: cross-platform-test-skips-audit
+verifier_type: unit
+status: pass
+summary: 'catalogue: 97 grep hits / 89 skip sites classified (3 file-perm, 15 dir-perm, 0 mode, 10 symlink, 61 genuine-posix) + 7 not-a-skip; findings.md authored; PR #68; fsops-windows-tests + io/seam build-tag follow-ups flagged'
+recorded_at: "2026-05-25T00:52:29Z"
+delegation_id: del-catalogue-1779669681
+recorded_by: da workflow verify record
+commands:
+    - grep -rn runtime.GOOS=="windows" --include=*_test.go

@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: p2-broken-links-remaining
+parent_plan_id: platform-driven-diagnostics
+verifier_type: unit
+status: pass
+summary: 'P2 platform-driven-diagnostics complete: codex/copilot/opencode implement BrokenLinkReporter; doctor.collectBrokenLinks collapsed to platform.All() loop.'
+recorded_at: "2026-05-27T23:16:27Z"
+delegation_id: del-p2-broken-links-remaining-1779922677
+recorded_by: da workflow verify record

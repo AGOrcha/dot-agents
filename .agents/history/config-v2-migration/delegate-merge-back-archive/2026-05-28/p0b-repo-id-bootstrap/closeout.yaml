@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: config-v2-migration
+task_id: p0b-repo-id-bootstrap
+delegation_id: del-p0b-repo-id-bootstrap-1779900554
+decision: accept
+closed_at: "2026-05-28T05:29:52Z"

@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: t07-move-refresh
+parent_plan_id: root-command-decomposition
+verifier_type: test
+status: pass
+summary: t07 refresh cobra constructor moved to commands/lifecycle/; tests green
+recorded_at: "2026-05-25T14:10:49Z"
+delegation_id: del-t07-move-refresh-1779717269
+recorded_by: da workflow verify record

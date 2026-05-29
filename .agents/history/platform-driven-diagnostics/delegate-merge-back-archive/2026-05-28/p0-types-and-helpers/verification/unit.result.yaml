@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: p0-types-and-helpers
+parent_plan_id: platform-driven-diagnostics
+verifier_type: unit
+status: pass
+summary: 'P0 platform diagnostics types + helpers shipped: 6 sister interfaces, 4 types, 2 helpers (ScanSingleFileLinks, ScanSymlinkDir). PR #118 — Tests/Lint/Coverage/Sonar green on latest SHA. 100% per-helper coverage, 95.3% package.'
+recorded_at: "2026-05-27T12:48:14Z"
+delegation_id: del-p0-types-and-helpers-1779883937
+recorded_by: da workflow verify record

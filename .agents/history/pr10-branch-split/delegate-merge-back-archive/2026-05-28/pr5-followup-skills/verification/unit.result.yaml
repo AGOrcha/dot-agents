@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: pr5-followup-skills
+parent_plan_id: pr10-branch-split
+verifier_type: unit
+status: pass
+summary: All 3 scaffold packages pass (home, hooks, templates) after promoting 4 orchestration skills to starter
+recorded_at: "2026-05-28T02:28:04Z"
+delegation_id: del-pr5-followup-skills-1779933992
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/scaffold/... -count=1

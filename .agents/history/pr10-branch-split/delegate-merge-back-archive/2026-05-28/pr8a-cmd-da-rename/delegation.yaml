@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-pr8a-cmd-da-rename-1779934007
+parent_plan_id: pr10-branch-split
+parent_task_id: pr8a-cmd-da-rename
+title: 'PR 8a: rename cmd/dot-agents → cmd/da (Go convention)'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - cmd/
+    - .goreleaser.yaml
+    - Makefile
+    - .github/workflows/test.yml
+    - .github/workflows/auto-release.yml
+    - scripts/verify.sh
+    - README.md
+    - commands/root.go
+    - .agents/skills/
+success_criteria: 'READY NEXT WAVE — must land BEFORE #138 (goreleaser signing). Both touch .goreleaser.yaml (cmd/ main path + signs:); doing pr8a first lets #138 rebase cleanly with the renamed main: cmd/da/main.go. Original notes: split from pr8-org-migration §A. Independent of org migration (pr8b held). Rename cmd/dot-agents → cmd/da. Update: .goreleaser.yaml main:, Makefile build/run targets, both CI workflows, scripts/verify.sh, README, every ''go run ./cmd/dot-agents'' usage (including delegation-bundle templates + agents.md). After: ''go install <module>/cmd/da@latest'' yields ''da'' natively. Per [[validate-bundle-against-head]]: grep ''go run ./cmd/dot-agents'' across .agents/ + docs/ before fanout. Per [[bundle-scope-via-code-graph]]: file_summary on cmd/ to confirm no other binaries.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: cmd-rename-worker
+status: completed
+created_at: "2026-05-28T02:06:47Z"
+updated_at: "2026-05-28T02:51:02Z"

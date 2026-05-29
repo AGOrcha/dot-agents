@@ -1,0 +1,17 @@
+schema_version: 1
+task_id: t08-move-status
+parent_plan_id: root-command-decomposition
+verifier_type: merge-back
+status: pass
+summary: |-
+    Open PR; do not auto-merge - coordinate with t09 (depends on this) and
+    t04/t03/t05/t06/t07 (parallel siblings under root-command-decomposition).
+    t09 owner should pick up the export reversal: collapse the
+    managedLinkBroken/resolveLinkDest duplicates, lowercase HasMultipleHardLinks
+    and the four lifecycle helper exports (PrintAudit, PrintSymlinkDirAudit,
+    CountClaudeRules, RunStatus, StatusConfigLoader). After t13 strips the
+    root shims, internal/globalflagcov/static.go's loadCommandPackages call
+    needs ./commands/lifecycle added to its load set (tracked as a follow-up
+    in the t13 PR description per the t08 NewStatusCmd doc comment).
+recorded_at: "2026-05-25T14:26:30Z"
+delegation_id: del-t08-move-status-1779717269

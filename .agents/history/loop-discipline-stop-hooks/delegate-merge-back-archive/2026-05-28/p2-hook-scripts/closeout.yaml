@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: loop-discipline-stop-hooks
+task_id: p2-hook-scripts
+delegation_id: del-p2-hook-scripts-1779841782
+decision: accept
+closed_at: "2026-05-28T05:31:02Z"

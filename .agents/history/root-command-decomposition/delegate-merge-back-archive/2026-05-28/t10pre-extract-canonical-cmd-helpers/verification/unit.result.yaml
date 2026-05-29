@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t10pre-extract-canonical-cmd-helpers
+parent_plan_id: root-command-decomposition
+verifier_type: unit
+status: pass
+summary: Behavior-preserving extraction of CanonicalCmdFlags + CanonicalCmdExampleBlock into commands/internal/cmdutil; package commands tests (91s) + new cmdutil tests (1s) + go vet + gofmt all green.
+recorded_at: "2026-05-24T23:09:10Z"
+delegation_id: del-t10pre-extract-canonical-cmd-helpers-1779663650
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands ./commands/internal/cmdutil -race -count=1

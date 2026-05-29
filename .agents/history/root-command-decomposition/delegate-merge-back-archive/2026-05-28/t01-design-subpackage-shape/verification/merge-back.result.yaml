@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: t01-design-subpackage-shape
+parent_plan_id: root-command-decomposition
+verifier_type: merge-back
+status: pass
+summary: 'DO NOT MERGE the PR before parent review. ODs to track for downstream: OD-1 (re-run KG queries before t13), OD-2 (linkcount helper export window t08->t09), OD-3 (wiring_test.go post-shim-strip viability), OD-4 (testutil promotion decision at t11), OD-5 (importguard home for t14), OD-6 (t10pre->t10c serialization), OD-7 (NewDeps factory naming convention). All 7 are routed to specific downstream tasks — none block t01 advance. KG MCP tools were unreachable in this sandbox; grep -rn fallback over the Go module is equivalent for an internal module with no go:linkname. Re-running via mcp__code-review-graph before t13 is OD-1.'
+recorded_at: "2026-05-24T19:10:30Z"
+delegation_id: del-t01-design-subpackage-shape-1779649327

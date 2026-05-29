@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: p0-schema-additive-extension
+parent_plan_id: config-v2-migration
+verifier_type: merge-back
+status: pass
+summary: Next phase p1-resolver-core-flat consumes these fields. No CLI behavior change in this PR. Cross-tier source matching (extends->git|http|local, packages->oci|http) is shape-validated by patterns; the source-id lookup constraint is resolver-layer (p1b). Schema accepts both version 1 and 2.
+recorded_at: "2026-05-27T16:26:24Z"
+delegation_id: del-p0-schema-additive-extension-1779897740

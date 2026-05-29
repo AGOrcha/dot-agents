@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: p0-types-and-helpers
+parent_plan_id: platform-driven-diagnostics
+verifier_type: merge-back
+status: pass
+summary: P0 types + helpers shipped
+recorded_at: "2026-05-27T12:48:27Z"
+delegation_id: del-p0-types-and-helpers-1779883937

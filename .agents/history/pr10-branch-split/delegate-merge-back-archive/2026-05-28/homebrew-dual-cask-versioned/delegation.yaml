@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-homebrew-dual-cask-versioned-1779945558
+parent_plan_id: pr10-branch-split
+parent_task_id: homebrew-dual-cask-versioned
+title: 'homebrew_casks: emit both unversioned dot-agents.rb + versioned dot-agents@{version}.rb so ''brew install agorcha/tap/dot-agents@0.3.2'' works alongside latest'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .goreleaser.yaml
+success_criteria: 'User clarified (2026-05-28): keep dot-agents.rb (matches module path identity); add dot-agents@{{.Version}}.rb alongside. Cask name = install identifier (what users type after brew install); binary inside cask = what''s executed (decoupled, currently ''da''). Implementation: goreleaser .goreleaser.yaml homebrew_casks: block becomes a list of TWO entries — (1) name: dot-agents (unversioned, overwritten each release, points to latest) + (2) name: dot-agents@{{ .Version }} (new file per release, never deleted, supports ''brew install agorcha/tap/dot-agents@0.3.2'' for pinning). Both write to AGOrcha/homebrew-tap Casks/ via the existing goreleaser-cask-{{ .Version }} branch + PR flow. Verify post-merge that the next release run creates BOTH cask files in the tap PR. Per [[no-lazy-allowlist-tech-debt]]: real two-entry config, not a single entry with conditional. Per [[validate-bundle-against-head]]: confirm AGORCHA_PAT + HOMEBREW_TAP_GPG_KEY_ID secrets allow writes to both new files (they should — same write surface).'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: homebrew-dual-cask-worker
+status: completed
+created_at: "2026-05-28T05:19:18Z"
+updated_at: "2026-05-28T05:39:50Z"

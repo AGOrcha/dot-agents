@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p3-badge-and-countlinks
+parent_plan_id: platform-driven-diagnostics
+verifier_type: unit
+status: pass
+summary: 'P3 Badge + CountLinks: 5 platforms implement StatusBadger + LinkCounter; status.go badges + JSON collapsed to platform.All() iterator; HasMultipleHardLinks relocated to internal/platform/claude_linkcount_*.go (absorbed P1 fold-back). PR #135 READY: all CI green (coverage gate, SonarCloud, macOS/Linux/Windows tests). CLI output byte-identical pre/post for status, status --json, doctor --json.'
+recorded_at: "2026-05-27T23:56:29Z"
+delegation_id: del-p3-badge-and-countlinks-1779923836
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/platform/... ./commands/internal/lifecycle/... -count=1

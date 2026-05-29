@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: pr10-branch-split
+task_id: homebrew-dual-cask-versioned
+delegation_id: del-homebrew-dual-cask-versioned-1779945558
+decision: accept
+closed_at: "2026-05-28T05:39:50Z"

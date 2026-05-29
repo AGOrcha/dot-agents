@@ -1,0 +1,23 @@
+---
+schema_version: 1
+task_id: cg6b-b3a-globalflagcov-lift
+parent_plan_id: coverage-gate-per-file
+title: 'cg6b-B3a: lift internal/globalflagcov coverage 91.30% → ≥95%'
+summary: 'cg6b-globalflagcov · branch feature/cg6b-globalflagcov-lift · commit 90301286 · coverage 91.30% -> 96.1% (target ≥95) · 11 tests added + 1 rewritten · LOCAL READY but PR NOT pushed (pre-push gate blocked by pre-existing kg + graphstore failures unrelated to this task; fold-back filed). Production code untouched. Verifier sequence pass: go test ./internal/globalflagcov/... -count=1 (all green); go build + go vet clean; gofmt clean. Per [[no-lazy-allowlist-tech-debt]]: no coverage-exceptions.txt entries added. Per [[worker-owns-pr-readiness-loop]] hard-constraint clause: orthogonal failures outside write_scope must not be fixed by widening scope — see .agents/active/fold-back/cg6b-b3a-precommit-blocked-by-unrelated-failures.md for recommended split into separate fix-tasks.'
+files_changed:
+    - .agents/workflow/plans/coverage-gate-per-file/PLAN.yaml
+    - .agents/workflow/plans/coverage-gate-per-file/TASKS.yaml
+verification_result:
+    status: pass
+    summary: ""
+integration_notes: ""
+created_at: "2026-05-28T00:52:59Z"
+---
+
+## Summary
+
+cg6b-globalflagcov · branch feature/cg6b-globalflagcov-lift · commit 90301286 · coverage 91.30% -> 96.1% (target ≥95) · 11 tests added + 1 rewritten · LOCAL READY but PR NOT pushed (pre-push gate blocked by pre-existing kg + graphstore failures unrelated to this task; fold-back filed). Production code untouched. Verifier sequence pass: go test ./internal/globalflagcov/... -count=1 (all green); go build + go vet clean; gofmt clean. Per [[no-lazy-allowlist-tech-debt]]: no coverage-exceptions.txt entries added. Per [[worker-owns-pr-readiness-loop]] hard-constraint clause: orthogonal failures outside write_scope must not be fixed by widening scope — see .agents/active/fold-back/cg6b-b3a-precommit-blocked-by-unrelated-failures.md for recommended split into separate fix-tasks.
+
+## Integration Notes
+
+

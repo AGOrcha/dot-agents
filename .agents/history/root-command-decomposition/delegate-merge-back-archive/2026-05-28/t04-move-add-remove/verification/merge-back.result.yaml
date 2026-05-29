@@ -1,0 +1,12 @@
+schema_version: 1
+task_id: t04-move-add-remove
+parent_plan_id: root-command-decomposition
+verifier_type: merge-back
+status: partial
+summary: 'Parent should NOT run workflow advance for t04 -- task remains pending. Reconcile fold-back routed_to (task_note:root-command-decomposition/t04-move-add-remove) before respawning a t04 worker. Recommended next step: spawn a t02b precursor worker per resolution (c), or extend lifecycle.Deps (resolution a) as a one-shot infra task, then re-fanout t04+t05+t06+t07+t08+t09 against the new helper home. Worktree can be removed (git worktree remove .agents/worktrees/t04) or kept for the respawned worker.'
+recorded_at: "2026-05-25T14:03:34Z"
+delegation_id: del-t04-move-add-remove-1779717269
+artifact_paths:
+    - .agents/active/delegation/fsops-windows-tests.yaml
+    - .agents/active/delegation/t06-move-import.yaml
+    - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
