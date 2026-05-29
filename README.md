@@ -148,6 +148,8 @@ toolchain:
 
 ```bash
 go install github.com/NikashPrakash/dot-agents/cmd/da@latest
+# or
+go install github.com/NikashPrakash/dot-agents/cmd/da@<release-version>
 ```
 
 The `da` binary is placed in `$(go env GOBIN)` (falling back to
@@ -158,7 +160,7 @@ The `da` binary is placed in `$(go env GOBIN)` (falling back to
 ```bash
 git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
 cd ~/.dot-agents
-go build -o ./bin/da ./cmd/da
+go build -ldflags "-s -w" -o ./bin/da ./cmd/da
 export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
 
