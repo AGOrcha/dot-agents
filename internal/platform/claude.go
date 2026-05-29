@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -228,7 +227,7 @@ func (c *claude) ScanSessionTokens(home, projectPath, sessionID, afterTimestamp 
 }
 
 func (c *claude) IsInstalled() bool {
-	if _, err := exec.LookPath("claude"); err == nil {
+	if probeInstalled("claude") {
 		return true
 	}
 	home, _ := config.UserHomeDir()
@@ -237,11 +236,7 @@ func (c *claude) IsInstalled() bool {
 }
 
 func (c *claude) Version() string {
-	out, err := exec.Command("claude", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	return probeVersionLine("claude")
 }
 
 func (c *claude) HasDeprecatedFormat(repoPath string) bool {

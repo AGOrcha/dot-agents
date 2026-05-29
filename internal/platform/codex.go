@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -96,16 +95,11 @@ func (c *codex) ScanSessionTokens(home, _ /* projectPath */, sessionID, afterTim
 }
 
 func (c *codex) IsInstalled() bool {
-	_, err := exec.LookPath("codex")
-	return err == nil
+	return probeInstalled("codex")
 }
 
 func (c *codex) Version() string {
-	out, err := exec.Command("codex", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	return probeVersionLine("codex")
 }
 
 func (c *codex) HasDeprecatedFormat(repoPath string) bool { return false }
