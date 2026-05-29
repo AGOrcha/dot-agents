@@ -49,22 +49,26 @@ func TestPublishToMultipleSubscribers(t *testing.T) {
 			b.Publish(TopicIterationScored, "payload-1")
 
 			for i, ch := range chans {
-				select {
-				case evt := <-ch:
-					if evt.Topic != TopicIterationScored {
-						t.Errorf("subscriber %d: topic %q, want %q", i, evt.Topic, TopicIterationScored)
-					}
-					if evt.Payload != "payload-1" {
-						t.Errorf("subscriber %d: payload %v, want payload-1", i, evt.Payload)
-					}
-					if evt.Timestamp.IsZero() {
-						t.Errorf("subscriber %d: timestamp not set", i)
-					}
-				case <-time.After(time.Second):
-					t.Fatalf("subscriber %d: no event received", i)
-				}
+				validatePublishedEvent(t, i, ch, TopicIterationScored, "payload-1")
 			}
 		})
+	}
+}
+
+func validatePublishedEvent(t *testing.T, subIdx int, ch <-chan Event, topic string, payload interface{}) {
+	select {
+	case evt := <-ch:
+		if evt.Topic != topic {
+			t.Errorf("subscriber %d: topic %q, want %q", subIdx, evt.Topic, topic)
+		}
+		if evt.Payload != payload {
+			t.Errorf("subscriber %d: payload %v, want %v", subIdx, evt.Payload, payload)
+		}
+		if evt.Timestamp.IsZero() {
+			t.Errorf("subscriber %d: timestamp not set", subIdx)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("subscriber %d: no event received", subIdx)
 	}
 }
 

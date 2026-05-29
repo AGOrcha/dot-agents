@@ -137,7 +137,9 @@ func (b *Bus) SubscribeBuffered(topic string, buffer int) (<-chan Event, func())
 		// Bus already closed: hand back a closed channel and a no-op
 		// unsubscribe so callers never block on receive.
 		close(s.ch)
-		return s.ch, func() {}
+		return s.ch, func() {
+			// Intentionally empty: unsubscribe after bus close is a no-op.
+		}
 	}
 	b.subscribers[topic] = append(b.subscribers[topic], s)
 	b.mu.Unlock()
