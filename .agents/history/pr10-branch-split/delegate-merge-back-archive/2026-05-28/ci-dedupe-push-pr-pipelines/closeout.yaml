@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: pr10-branch-split
+task_id: ci-dedupe-push-pr-pipelines
+delegation_id: del-ci-dedupe-push-pr-pipelines-1779948127
+decision: accept
+closed_at: "2026-05-28T14:52:08Z"

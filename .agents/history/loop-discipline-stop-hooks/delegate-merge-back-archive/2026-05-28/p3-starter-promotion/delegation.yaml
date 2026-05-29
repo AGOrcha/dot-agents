@@ -1,0 +1,20 @@
+schema_version: 1
+id: del-p3-starter-promotion-1779841783
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p3-starter-promotion
+title: Promote iteration-close, isp, loop-worker skills + AGENT.md + loop-worker profile into starter
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - internal/scaffold/home/starter/skills/global/iteration-close/
+    - internal/scaffold/home/starter/skills/global/isp/
+    - internal/scaffold/home/starter/skills/global/loop-worker/
+    - internal/scaffold/home/starter/agents/global/loop-worker/
+    - internal/scaffold/home/starter/profiles/loop-worker.md
+    - internal/scaffold/home/copy_test.go
+success_criteria: 'Copy the existing assets into the starter and extend `TestCopyMissingStarterAssetsCopiesStarterBundle`. `CopyMissingStarterAssets` already walks arbitrary nested tiers, including new `agents/` and `profiles/` content; no loader code is expected. Contract: tasks/p3-starter-promotion.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-27T00:29:43Z"
+updated_at: "2026-05-28T02:06:06Z"

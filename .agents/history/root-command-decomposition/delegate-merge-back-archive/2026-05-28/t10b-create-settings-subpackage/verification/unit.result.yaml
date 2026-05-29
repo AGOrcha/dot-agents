@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t10b-create-settings-subpackage
+parent_plan_id: root-command-decomposition
+verifier_type: unit
+status: pass
+summary: 'settings subpackage extraction in worktree .agents/worktrees/t10b on branch feature/t10b-settings-subpackage: build/vet/gofmt clean; settings + commands tests PASS; only failing module-wide test is pre-existing internal/graphstore env-only failure (missing code_review_graph python module, unrelated). PR https://github.com/NikashPrakash/dot-agents/pull/74 opened (not merged).'
+recorded_at: "2026-05-25T14:06:26Z"
+delegation_id: del-t10b-create-settings-subpackage-1779717270
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/settings/... ./commands/...

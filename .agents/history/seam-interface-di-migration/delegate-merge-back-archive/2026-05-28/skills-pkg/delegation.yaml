@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-skills-pkg-1779663650
+parent_plan_id: seam-interface-di-migration
+parent_task_id: skills-pkg
+title: Convert commands/skills/seams.go to interface-DI
+summary: Delegated from plan Migrate func-var test seams to interface-DI
+write_scope:
+    - commands/skills/
+success_criteria: 4 func-var seams. Behavior-preserving conversion.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: skills-pkg-worker
+status: completed
+created_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:11:04Z"

@@ -1,0 +1,36 @@
+schema_version: 1
+id: del-p0-schema-additive-extension-1779897740
+parent_plan_id: config-v2-migration
+parent_task_id: p0-schema-additive-extension
+title: 'Phase 0: additive v2 schema extension (preserves v1 compat)'
+summary: Delegated from plan v1->v2 config-distribution-model migration
+write_scope:
+    - internal/config/agentsrc.go
+    - internal/config/agentsrc_test.go
+    - internal/config/schema_roundtrip_test.go
+    - schemas/agentsrc.schema.json
+    - internal/config/testdata/
+success_criteria: |-
+    Per spec config-distribution-model/design.md §3-§5 and §15.2 of org-config-resolution:
+
+    Add v2 fields ADDITIVELY; keep v1 loadable:
+    - Source: add id, cache_ttl, auth (opaque); expand type enum to local|git|http|oci
+    - AgentsRC: add Extends []LayerRef, Packages []PackageRef, RepoID string, Features map[string]string
+    - Bump schema version to support both 1 and 2 (do NOT remove version 1)
+    - Tier constraint validation at schema time: extends must reference git|http|local; packages must reference oci|http
+
+    Acceptance:
+    - internal/config/testdata/v1/.agentsrc.json (current shape) loads unchanged
+    - internal/config/testdata/v2/.agentsrc.json (extends+packages+repo_id) loads and validates
+    - agentsRCKnown updated with new keys (per [[schema-usage]] four-place rule)
+    - agentsrc.schema.json: add Source.id, Source.cache_ttl; add http+oci to type enum; add extends, packages, repo_id, features as new top-level optional props
+    - additionalProperties: false on nested objects to catch drift
+    - No new CLI behavior — schema/struct only
+
+    Verification: go test ./internal/config/... -run 'TestAgentsRC|TestSchema' must pass on both v1 and v2 fixtures.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-27T16:02:20Z"
+updated_at: "2026-05-27T16:26:24Z"

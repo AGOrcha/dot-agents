@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-history-archive-location-unify-1779979344
+parent_plan_id: pr10-branch-split
+parent_task_id: history-archive-location-unify
+title: Unify two distinct archive locations (history/archived-delegations vs history/<plan>/delegate-merge-back-archive)
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .agents/proposals/history-archive-location-unify.md
+success_criteria: 'Surfaced by backlog-hygiene-sweep 2026-05-28. Two archive locations exist: (1) .agents/history/archived-delegations/<date>/<task>/ — older format, delegation YAML only; (2) .agents/history/<plan>/delegate-merge-back-archive/<date>/<task>/ — current format, includes merge-back + closeout decision. Either document the transition (in workflow-artifact-model.md) or unify (migrate old format to new + remove the older code path). Cross-references workflow-archive-orphan-sweep task.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: history-unify-worker
+status: completed
+created_at: "2026-05-28T14:42:24Z"
+updated_at: "2026-05-28T16:16:36Z"

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t1-capture-outcomes
+parent_plan_id: r1-5-hook-enforcement-telemetry
+verifier_type: unit
+status: pass
+summary: hook-outcome CLI + 3 gate.sh wired per R2.1; tests pass; commit b8c8e4f5
+recorded_at: "2026-05-26T12:37:06Z"
+delegation_id: del-t1-capture-outcomes-1779798327
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/workflow -race -count=1

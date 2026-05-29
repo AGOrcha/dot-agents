@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-evidence-policy-schema-cleanup-1779948127
+parent_plan_id: pr10-branch-split
+parent_task_id: evidence-policy-schema-cleanup
+title: 'evidence_policy schema cleanup: surface/remove classification_required (F1) + split primary_chain_max into verifier_chain_max+lens_chain_max (F2) + extend sandbox_mutations to adversarial-lens probing (F3)'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - commands/workflow/types.go
+    - commands/workflow/delegation.go
+    - commands/workflow/cmd.go
+    - internal/scaffold/home/starter/agents/global/adversarial-reviewer/
+success_criteria: 'Implementation findings from layered-pr-fanout proposal lens-renderings exercise. F1: delegationEvidencePolicy.classification_required field exists in types.go:169-176 with no CLI flag + no docs — either give it a --classification-required flag + document semantics, OR remove the field if dead code (verify via grep that nothing reads it). F2: primary_chain_max is documented as verifier retry budget (cmd.go:844) but schema name implies bundle-wide; split into verifier_chain_max + lens_chain_max so reusing for lens retries doesn''t silently shift semantics. F3: extend sandbox_mutations field''s surface so the adversarial-lens AGENT.md can opt into active mutation-based probes when sandbox_mutations=true (don''t add a new field; extend the existing semantic). Combined task because all 3 touch the same files; one PR.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: evidence-policy-worker
+status: completed
+created_at: "2026-05-28T06:02:07Z"
+updated_at: "2026-05-28T14:52:09Z"

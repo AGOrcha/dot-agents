@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-sonar-scanner-worktree-fix-1779948127
+parent_plan_id: pr10-branch-split
+parent_task_id: sonar-scanner-worktree-fix
+title: Fix sonar-scanner pre-push hook to work inside git worktrees (JGit gitfile pointer)
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .pre-commit-config.yaml
+    - scripts/
+success_criteria: 'Every worker in this session has hit ''JGit RepositoryNotFoundException: .git/worktrees/<name>'' and used SKIP=sonar-scanner workaround. Per [[seam-loop-lock-2026-05-19]] this is a known JGit limitation: it can''t resolve the worktree''s gitfile pointer back to the parent .git/ dir for the SCM probe. Possible fixes: (a) replace sonar-scanner CLI in pre-commit with a wrapper that sets SONAR_PROJECT_BASE_DIR to the real parent .git/ when invoked from a worktree; (b) docker-mount the parent .git/ into the scanner container; (c) defer scanner to CI only + skip locally (cheapest but loses pre-push signal). Pick the cheapest correct fix; document the choice in the lesson [[seam-loop-lock-2026-05-19]].'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: sonar-worktree-worker
+status: completed
+created_at: "2026-05-28T06:02:07Z"
+updated_at: "2026-05-28T06:57:50Z"

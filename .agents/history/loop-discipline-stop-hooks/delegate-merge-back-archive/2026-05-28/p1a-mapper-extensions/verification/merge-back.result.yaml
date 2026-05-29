@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: p1a-mapper-extensions
+parent_plan_id: loop-discipline-stop-hooks
+verifier_type: merge-back
+status: pass
+summary: Bundle write_scope listed codex.go/copilot.go/cursor.go but the event-mapping switch statements live in internal/platform/hooks.go. Worker proceeded under the contract (the authoritative artifact). Fold-back at .agents/active/fold-back/p1a-bundle-write-scope-points-at-wrong-files.md. Reviewer to confirm matcher behaviour for new SubagentStop (left unset per contract D6). Sibling P1b/P1c/P1d/P1e still pending.
+recorded_at: "2026-05-26T12:30:20Z"
+delegation_id: del-p1a-mapper-extensions-1779798327

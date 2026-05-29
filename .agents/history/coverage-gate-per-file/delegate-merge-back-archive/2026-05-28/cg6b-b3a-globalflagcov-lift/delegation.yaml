@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-cg6b-b3a-globalflagcov-lift-1779928730
+parent_plan_id: coverage-gate-per-file
+parent_task_id: cg6b-b3a-globalflagcov-lift
+title: 'cg6b-B3a: lift internal/globalflagcov coverage 91.30% → ≥95%'
+summary: Delegated from plan Per-file platform-aware coverage gate (phased -> hard 95%)
+write_scope:
+    - internal/globalflagcov/static.go
+    - internal/globalflagcov/analyze.go
+    - internal/globalflagcov/static_test.go
+    - internal/globalflagcov/analyze_test.go
+success_criteria: 'Spun out from cg6b ratchet to unblock PR #127''s local pre-push coverage gate. Package currently at 91.30% — needs +3.7pp to reach 95. Focused unit tests for uncovered branches (use go tool cover -func to identify). Per [[no-lazy-allowlist-tech-debt]]: NO allowlist entries; add real coverage. Pre-flight: HEAD-verify with go test -coverprofile=/tmp/gfc.out ./internal/globalflagcov/ && go tool cover -func=/tmp/gfc.out | grep -v 100%.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-28T00:38:50Z"
+updated_at: "2026-05-28T00:52:59Z"

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: stp3-regression-parity
+parent_plan_id: shared-target-projection-wiring
+verifier_type: unit
+status: pass
+summary: 'stp3-regression-parity: 8 behavior-asserting tests pass (3 import, 3 refresh, 3 doctor minus initial 2 imports = 8 new). PR #134 READY: 11 CI checks pass (linux/macos/windows), mergeStateStatus=CLEAN, SonarCloud green, coverage gate green. Pre-existing TestCRGBridgeFreshBuildRealCRG env failure (missing code_review_graph module) unrelated and also fails on master.'
+recorded_at: "2026-05-27T23:28:04Z"
+delegation_id: del-stp3-regression-parity-1779923393
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands -run 'TestRelinkImported|TestRunRefresh_SharedTargetProjection|TestDoctorRepair' -count=1 -v

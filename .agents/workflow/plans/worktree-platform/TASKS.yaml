@@ -3,7 +3,7 @@ plan_id: worktree-platform
 tasks:
   - id: wt0-spike-git-mechanism
     title: 'Spike: VERIFY go-git v6 x/plumbing/worktree (+ mine swarm-cd)'
-    status: pending
+    status: completed
     depends_on: []
     blocks:
       - wt1-typed-git-iface
@@ -12,19 +12,14 @@ tasks:
       - .agents/workflow/specs/worktree-platform/design.md
     verification_required: true
     notes: |-
-      Decision A (pure go-git v6) CONFIRMED feasible: payout/swarm-cd
-      swarmcd/worktree.go is a working pure-go-git-v6 linked-worktree
-      manager (go-git/v6 + x/plumbing/worktree, zero shell-git) — see
-      the Reference implementation section in design.md; adopt that
-      pattern (gitworktree.New(Storer) -> mgr.Add/Remove/Open, typed
-      errors, TTL stale-cleanup helpers). Spike is now narrow + bounded,
-      VERIFY-only residuals: (1) branch-mode worktree create/branch
-      creation (swarm-cd uses detached-HEAD+commit; we need branches
-      for sub-branch->merge-back); (2) per-worktree index isolation via
-      mgr.Open(...).Worktree() (the workflow-commit-command guarantee);
-      (3) List support vs enumerate-via-our-registry; (4) pin the go-git
-      v6 pseudo-version. Hybrid fallback only if a residual disproves.
-      Still GATES the plan but materially de-risked.
+      DONE — MERGED via #171 (spec design.md: "VERIFIED 2026-05-28, all 4
+      residuals confirmed"). Decision A is pure go-git v6; all 4 residuals
+      confirmed PASS against the pinned version: (1) branch-mode worktree
+      create/branch creation PASS; (2) per-worktree index isolation via
+      mgr.Open(...).Worktree() PASS; (3) List support native PASS; (4)
+      version pinned go-git/v6 v6.0.0-alpha.4 (go-billy/v6 v6.0.0-alpha.1).
+      No hybrid fallback needed — pure go-git v6, zero shell-git. The
+      typed Manager seam derived from the verified API landed in wt1 (#181).
   - id: wt1-typed-git-iface
     title: 'Typed git/worktree interface (the contract callers bind to)'
     status: pending
@@ -118,3 +113,35 @@ tasks:
       isolation, deterministic prune, single typed interface. go
       build/test/gate green. Archive plan; notify workflow-commit-command
       its blocker (finding #3) is cleared.
+  - id: release-minor
+    title: 'Release: bump VERSION + finalize CHANGELOG for the worktree-platform minor'
+    status: pending
+    depends_on:
+      - wt0-spike-git-mechanism
+      - wt1-typed-git-iface
+      - wt2-worktree-registry
+      - wt3-subbranch-mergeback
+      - wt4-index-isolation
+      - wt5-skills-integration
+      - wt6-verify-close
+    blocks: []
+    owner: dot-agents
+    write_scope:
+      - VERSION
+      - CHANGELOG.md
+    verification_required: true
+    notes: |-
+      Release-gated tail task (hybrid convention, MINOR path; see
+      [[release-gated-plans-convention]]). This plan delivers user-visible
+      delegated-work isolation — managed git worktrees with recorded-base
+      sub-branch/merge-back and per-worktree index isolation consumed by the
+      orchestration skills. New user-visible capability = MINOR (no public
+      surface removed or incompatibly changed).
+      Target version = next minor computed from current VERSION at ready-time
+      (do NOT hardcode). Resolve from VERSION when this task becomes ready;
+      if another minor ships first, a rebase recomputes the number.
+      Action: bump VERSION to the resolved next minor and finalize the
+      CHANGELOG "## [<target>]" section, moving the worktree-platform entries
+      out of Unreleased, plus the required docs-accuracy pass. Merge to master
+      fires auto-release.yml (tag + publish).
+    app_type: release

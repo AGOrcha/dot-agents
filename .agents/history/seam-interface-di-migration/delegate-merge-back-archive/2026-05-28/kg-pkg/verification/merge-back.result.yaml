@@ -1,0 +1,15 @@
+schema_version: 1
+task_id: kg-pkg
+parent_plan_id: seam-interface-di-migration
+verifier_type: merge-back
+status: pass
+summary: 'PR is open, do NOT merge per delegation bundle. Concurrent fanout workers in sibling worktrees (skills-pkg, agents-pkg, wc-path-derivation, t3, gcc4, t02, t10pre) — scope commands/kg/ does not overlap any of them. Pattern set here mirrors PR #59 (platform-pkg) exactly — a sibling skills-pkg / agents-pkg worker can model their conversion on this PR. Note for next conversions in the package: kgIO is one role-named interface for the whole package (not per-file) consistent with the convention rule ''convert the whole package as one unit''.'
+recorded_at: "2026-05-24T23:31:51Z"
+delegation_id: del-kg-pkg-1779663650
+artifact_paths:
+    - .agents/active/delegation/agents-pkg.yaml
+    - .agents/active/delegation/gcc4-regression-close-od1.yaml
+    - .agents/active/delegation/skills-pkg.yaml
+    - .agents/active/delegation/t02-introduce-lifecycle-skeleton.yaml
+    - .agents/active/delegation/t10pre-extract-canonical-cmd-helpers.yaml
+    - .agents/active/delegation/t3-extract-platform-tests.yaml

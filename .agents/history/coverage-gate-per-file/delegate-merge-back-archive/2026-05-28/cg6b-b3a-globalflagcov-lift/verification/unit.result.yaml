@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: cg6b-b3a-globalflagcov-lift
+parent_plan_id: coverage-gate-per-file
+verifier_type: unit
+status: pass
+summary: internal/globalflagcov coverage lifted 91.30% -> 96.1% via 11 new focused branch tests + 1 rewritten tightestFuncLit test; production code untouched; go test/build/vet clean; pre-push gate blocked by orthogonal kg + graphstore failures (see fold-back)
+recorded_at: "2026-05-28T00:52:45Z"
+delegation_id: del-cg6b-b3a-globalflagcov-lift-1779928730
+recorded_by: da workflow verify record

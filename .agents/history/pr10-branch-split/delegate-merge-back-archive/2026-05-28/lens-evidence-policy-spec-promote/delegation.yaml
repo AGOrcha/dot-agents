@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-lens-evidence-policy-spec-promote-1779975246
+parent_plan_id: pr10-branch-split
+parent_task_id: lens-evidence-policy-spec-promote
+title: Promote lens-evidence-policy-renderings → workflow/specs/lens-evidence-policy/design.md (sibling to layered-pr-fanout spec)
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .agents/workflow/specs/lens-evidence-policy/
+success_criteria: 'User accepted proposal 2026-05-28 with 3 addenda. Promote .agents/proposals/lens-evidence-policy-renderings.md → .agents/workflow/specs/lens-evidence-policy/design.md per [[workflow-artifact-model]]. Spec covers: lens reviewer concurrency model locked to project-configurable default=parallel; 4 additive bundle schema fields (lens_set, lens_concurrency, lens_chain, lens_tier_gate, lens_routing) reserved for impl alongside layered-pr-fanout; trade-off matrix per project shape; recommended adoption sequence (bundle-overlay → CLI flags → .agentsrc.json). Sibling spec to [[layered-pr-fanout-spec]] (PR #149) — co-design. User addenda: wire telemetry, split primary_chain_max (already done #148), wire sandbox_mutations to adversarial lens. Implementation tracked separately.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: lens-spec-worker
+status: completed
+created_at: "2026-05-28T13:34:06Z"
+updated_at: "2026-05-28T14:52:11Z"

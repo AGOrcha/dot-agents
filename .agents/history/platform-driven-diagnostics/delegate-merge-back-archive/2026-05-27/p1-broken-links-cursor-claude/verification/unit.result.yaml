@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p1-broken-links-cursor-claude
+parent_plan_id: platform-driven-diagnostics
+verifier_type: unit
+status: pass
+summary: 'P1 BrokenLinkReporter migration: cursor + claude implement interface; doctor delegates via type-assert. 12 new platform-package tests; all doctor_test.go behavior assertions preserved. PR #130 READY (all CI green: lint, 3-OS test matrix, coverage gate, SonarCloud). HasMultipleHardLinks move folded back to P3 - too many lifecycle callers outside P1 write_scope (see .agents/active/fold-back/p1-hasmultiplehardlinks-move-deferred-to-p3.md).'
+recorded_at: "2026-05-27T17:12:35Z"
+delegation_id: del-p1-broken-links-cursor-claude-1779900538
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/platform/... ./commands/internal/lifecycle/... -count=1

@@ -1,0 +1,27 @@
+schema_version: 1
+id: del-t08-move-status-1779717269
+parent_plan_id: root-command-decomposition
+parent_task_id: t08-move-status
+title: Move status command (incl. linkcount build-tagged helpers) into commands/lifecycle/
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/lifecycle/status.go
+    - commands/lifecycle/status_test.go
+    - commands/lifecycle/linkcount_unix.go
+    - commands/lifecycle/linkcount_windows.go
+    - commands/status.go
+    - commands/status_test.go
+    - commands/linkcount_unix.go
+    - commands/linkcount_windows.go
+success_criteria: |-
+    Move linkcount_{unix,windows}.go alongside status — doctor.go
+    also uses them, so make the helpers exported in lifecycle and
+    have doctor.go (still in root before t09) import them. After
+    t09 lands, the cross-package import collapses into intra-
+    lifecycle calls.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t08-worker
+status: completed
+created_at: "2026-05-25T13:54:29Z"
+updated_at: "2026-05-28T05:32:09Z"

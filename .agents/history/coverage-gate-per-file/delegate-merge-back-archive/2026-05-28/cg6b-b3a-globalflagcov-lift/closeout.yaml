@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: coverage-gate-per-file
+task_id: cg6b-b3a-globalflagcov-lift
+delegation_id: del-cg6b-b3a-globalflagcov-lift-1779928730
+decision: accept
+closed_at: "2026-05-28T05:29:47Z"

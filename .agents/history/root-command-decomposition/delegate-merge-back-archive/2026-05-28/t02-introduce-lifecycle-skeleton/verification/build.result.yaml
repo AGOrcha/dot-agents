@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t02-introduce-lifecycle-skeleton
+parent_plan_id: root-command-decomposition
+verifier_type: build
+status: pass
+summary: lifecycle skeleton compiles; gofmt clean; commands tests green. Pre-existing internal/graphstore CRG python-env failure unrelated.
+recorded_at: "2026-05-24T23:05:58Z"
+delegation_id: del-t02-introduce-lifecycle-skeleton-1779663678
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./... -count=1 && gofmt -l commands/lifecycle/

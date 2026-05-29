@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p0b-repo-id-bootstrap
+parent_plan_id: config-v2-migration
+verifier_type: unit
+status: pass
+summary: 'p0b repo_id derivation: 6 normalization shapes + 4 derive scenarios + 3 Merge contracts + 1 GenerateAgentsRC integration; all pass on ubuntu/macos/windows in CI; full ./... regression clean except pre-existing TestCRGBridgeFreshBuildRealCRG worktree-env failure (passes on main checkout)'
+recorded_at: "2026-05-27T17:20:52Z"
+delegation_id: del-p0b-repo-id-bootstrap-1779900554
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/config/... -count=1

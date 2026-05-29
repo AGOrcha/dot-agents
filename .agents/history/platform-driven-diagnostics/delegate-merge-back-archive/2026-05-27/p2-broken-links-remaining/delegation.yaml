@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-p2-broken-links-remaining-1779922677
+parent_plan_id: platform-driven-diagnostics
+parent_task_id: p2-broken-links-remaining
+title: 'P2: BrokenLinkReporter for codex/copilot/opencode'
+summary: Delegated from plan Platform-driven diagnostics (doctor + status delegate to internal/platform sister interfaces)
+write_scope:
+    - internal/platform/codex.go
+    - internal/platform/copilot.go
+    - internal/platform/opencode.go
+    - internal/platform/codex_test.go
+    - internal/platform/copilot_test.go
+    - internal/platform/opencode_test.go
+    - commands/lifecycle/doctor.go
+success_criteria: Remaining 3 platforms implement BrokenLinkReporter. collectBrokenLinks collapses to for-range over platform.All(). singleFiles table deleted from doctor.go.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-27T22:57:57Z"
+updated_at: "2026-05-27T23:16:43Z"

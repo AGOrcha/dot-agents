@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+task_id: p1-broken-links-cursor-claude
+delegation_id: del-p1-broken-links-cursor-claude-1779900538
+decision: accept
+closed_at: "2026-05-27T23:09:07Z"

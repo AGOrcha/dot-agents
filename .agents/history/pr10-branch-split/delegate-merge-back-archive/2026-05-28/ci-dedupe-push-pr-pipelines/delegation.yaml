@@ -1,0 +1,15 @@
+schema_version: 1
+id: del-ci-dedupe-push-pr-pipelines-1779948127
+parent_plan_id: pr10-branch-split
+parent_task_id: ci-dedupe-push-pr-pipelines
+title: 'CI: dedupe push-trigger + pr-trigger pipelines (each test runs twice today)'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .github/workflows/test.yml
+success_criteria: 'Surfaced by #127 + observed during monitor events (''Test on macos-latest'' appears twice per PR). Either consolidate triggers (push-only with explicit PR include via paths-ignore: !.github/) OR add concurrency: group: <branch>+cancel-in-progress to dedupe. Doesn''t reduce actual test surface, just compute waste + monitor noise.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ci-dedupe-worker
+status: completed
+created_at: "2026-05-28T06:02:07Z"
+updated_at: "2026-05-28T14:52:08Z"
