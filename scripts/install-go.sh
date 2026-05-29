@@ -3,7 +3,7 @@
 # https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.sh | bash
+#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install-go.sh | bash
 #
 # Options (via environment variables):
 #   DOT_AGENTS_INSTALL_DIR - Installation directory (default: ~/.local/bin)
@@ -52,9 +52,9 @@ detect_platform() {
 get_latest_version() {
   local url="https://api.github.com/repos/${REPO}/releases/latest"
   if command -v curl &>/dev/null; then
-    curl -fsSL "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
+    curl --proto "=https" --tlsv1.2 -fsSL "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
   elif command -v wget &>/dev/null; then
-    wget -qO- "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
+    wget --https-only -qO- "$url" | grep '"tag_name"' | sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/'
   else
     die "curl or wget is required to download da"
   fi
@@ -80,9 +80,9 @@ download_binary() {
   info "Downloading da ${version} for ${platform}..."
 
   if command -v curl &>/dev/null; then
-    curl -fsSL "$url" -o "$tmpdir/$filename"
+    curl --proto "=https" --tlsv1.2 -fsSL "$url" -o "$tmpdir/$filename"
   else
-    wget -qO "$tmpdir/$filename" "$url"
+    wget --https-only -qO "$tmpdir/$filename" "$url"
   fi
 
   if [[ "$ext" == "zip" ]]; then

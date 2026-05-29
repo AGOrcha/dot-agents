@@ -3,8 +3,8 @@
 # https://github.com/NikashPrakash/dot-agents
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
+#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash -s -- --port ts
 #
 # Options:
 #   --port go|ts                 Install target (default: go)
@@ -101,7 +101,7 @@ get_latest_version() {
     return
   fi
   local version
-  version=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
+  version=$(curl --proto "=https" --tlsv1.2 -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null |
     grep '"tag_name"' |
     sed 's/.*"tag_name": *"\(v[^"]*\)".*/\1/' || true)
   if [[ -n "$version" ]]; then
@@ -132,7 +132,7 @@ run_go_installer() {
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' RETURN
   info "Fetching Go installer..."
-  curl -fsSL "https://raw.githubusercontent.com/${REPO}/${ref}/scripts/install-go.sh" -o "$tmp"
+  curl --proto "=https" --tlsv1.2 -fsSL "https://raw.githubusercontent.com/${REPO}/${ref}/scripts/install-go.sh" -o "$tmp"
   DOT_AGENTS_INSTALL_DIR="$INSTALL_DIR" DOT_AGENTS_VERSION="$VERSION" bash "$tmp"
 }
 
@@ -182,7 +182,7 @@ install_ts_target() {
       url="https://github.com/${REPO}/archive/refs/tags/${version}.tar.gz"
     fi
     info "Downloading source bundle ${version}..."
-    curl -fsSL "$url" -o "$tmpdir/dot-agents.tar.gz"
+    curl --proto "=https" --tlsv1.2 -fsSL "$url" -o "$tmpdir/dot-agents.tar.gz"
     tar -xzf "$tmpdir/dot-agents.tar.gz" -C "$tmpdir"
     repo_root=$(find "$tmpdir" -maxdepth 1 -type d -name 'dot-agents*' | head -1)
     [[ -n "$repo_root" ]] || die "Could not resolve extracted source bundle"
