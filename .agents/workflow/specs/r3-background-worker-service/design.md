@@ -107,6 +107,40 @@ ships `/healthz` and `/api/tasks` (the scheduler.State() projection). R2's
 the same registration call. R3 ships stub `RegisterR2Mount(srv, nil)`-style
 no-op test wiring to prove the contract.
 
+### D6 — Service lifecycle: optional now, value-gated scaling
+
+**`da service` is OPTIONAL — never required. The CLI core works fully
+standalone with no daemon dependency.**
+
+Phased adoption strategy:
+
+- **v1 (now): optional, never required.** The CLI core (`init`, `add`,
+  `refresh`, `rules`, `skills`, `workflow`-reads, `config explain`) works
+  fully standalone with NO daemon dependency. Current + near-term features
+  don't need a running service, so don't force one.
+- **`da service run` foreground + `da service run -d` / `da service install`
+  (systemd/launchd)** = opt-in always-on. Deliberate opt-in, like
+  `systemctl enable` — NOT auto-started at `da install`.
+- **Graceful degradation / CLI-routes-when-present:** commands that benefit
+  (warm-state `eligible`/`orient`, anything needing the auth-proxy or
+  event-stream) detect a running service and route through it; if absent,
+  fall back to direct cold-file operation. The service is an **accelerator/
+  enabler when present, never a requirement.**
+- **Value scales with responsibilities:** as the observability dashboard
+  (R2), auth-proxy injector (agorcha §5.5), scheduler tasks (dream-cycle/
+  rescore/iterlog), and orchestrator watch-loop land on `da service`,
+  always-on becomes the compelling single ops primitive (one health/metrics/
+  event/auth surface). It MAY graduate to always-on-recommended (still not
+  forced) once enough hangs off it — that decision is triggered by impl
+  pace of sibling plans, not a fixed date.
+- **Bonus rationale:** an always-on service owning warm runtime state also
+  mitigates stale-local-checkout bugs (`eligible` queries the live source-
+  of-truth instead of cold-reading possibly-stale files).
+
+Framing: `da`'s core is git-like (pure CLI, no daemon), its background/team
+features are docker-like (want a daemon) — so the service is optional-but-
+able-to-be-always-on, value-gated on obs/service features landing.
+
 ## 3. Requirements (behavioral, not implementation)
 
 1. The service runs continuously in the foreground and exits cleanly on
