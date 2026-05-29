@@ -25,7 +25,7 @@ func withRenameFunc(t *testing.T, fn func(oldPath, newPath string) error) {
 func TestWriteFileAtomicHappyPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.txt")
-	if err := WriteFileAtomic(path, []byte("hello"), 0o600); err != nil {
+	if err := WriteFileAtomic(path, []byte("hello")); err != nil {
 		t.Fatalf("WriteFileAtomic: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -54,10 +54,10 @@ func TestWriteFileAtomicHappyPath(t *testing.T) {
 func TestWriteFileAtomicOverwrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "out.txt")
-	if err := WriteFileAtomic(path, []byte("first"), 0o600); err != nil {
+	if err := WriteFileAtomic(path, []byte("first")); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
-	if err := WriteFileAtomic(path, []byte("second"), 0o600); err != nil {
+	if err := WriteFileAtomic(path, []byte("second")); err != nil {
 		t.Fatalf("second write: %v", err)
 	}
 	got, err := os.ReadFile(path)
@@ -70,7 +70,7 @@ func TestWriteFileAtomicTempCreateFailure(t *testing.T) {
 	withCreateTemp(t, func(string, string) (atomicTempFile, error) {
 		return nil, errors.New("no temp")
 	})
-	if err := WriteFileAtomic(filepath.Join(t.TempDir(), "x"), []byte("y"), 0); err == nil {
+	if err := WriteFileAtomic(filepath.Join(t.TempDir(), "x"), []byte("y")); err == nil {
 		t.Fatal("want temp-create error")
 	}
 }
@@ -93,7 +93,7 @@ func TestWriteFileAtomicWriteFailure(t *testing.T) {
 		_ = real.Close()
 		return errWriteTemp{name: real.Name()}, nil
 	})
-	if err := WriteFileAtomic(filepath.Join(dir, "x"), []byte("y"), 0); err == nil {
+	if err := WriteFileAtomic(filepath.Join(dir, "x"), []byte("y")); err == nil {
 		t.Fatal("want write-temp error")
 	}
 }
@@ -114,32 +114,15 @@ func TestWriteFileAtomicCloseFailure(t *testing.T) {
 		}
 		return errCloseTemp{f: real}, nil
 	})
-	if err := WriteFileAtomic(filepath.Join(dir, "x"), []byte("y"), 0); err == nil {
+	if err := WriteFileAtomic(filepath.Join(dir, "x"), []byte("y")); err == nil {
 		t.Fatal("want close-temp error")
-	}
-}
-
-// noFileTemp reports a Name() that does not exist on disk, so a chmod against
-// it fails (driving the chmod error branch when perm != 0).
-type noFileTemp struct{ name string }
-
-func (noFileTemp) Write(p []byte) (int, error) { return len(p), nil }
-func (noFileTemp) Close() error                { return nil }
-func (f noFileTemp) Name() string              { return f.name }
-
-func TestWriteFileAtomicChmodFailure(t *testing.T) {
-	withCreateTemp(t, func(d, _ string) (atomicTempFile, error) {
-		return noFileTemp{name: filepath.Join(d, "does-not-exist.tmp")}, nil
-	})
-	if err := WriteFileAtomic(filepath.Join(t.TempDir(), "x"), []byte("y"), 0o600); err == nil {
-		t.Fatal("want chmod error")
 	}
 }
 
 func TestWriteFileAtomicRenameFailure(t *testing.T) {
 	dir := t.TempDir()
 	withRenameFunc(t, func(string, string) error { return errors.New("rename boom") })
-	if err := WriteFileAtomic(filepath.Join(dir, "x"), []byte("y"), 0); err == nil {
+	if err := WriteFileAtomic(filepath.Join(dir, "x"), []byte("y")); err == nil {
 		t.Fatal("want rename error")
 	}
 	// The temp file must have been cleaned up on the failed rename.

@@ -28,15 +28,16 @@ var createTemp = func(dir, pattern string) (atomicTempFile, error) {
 var renameFunc = os.Rename
 
 // WriteFileAtomic writes data to path atomically: a temp file in the same
-// directory is written and closed, optionally chmod'd to perm, then renamed
-// into place, so a concurrent reader never observes a partial file. The parent
-// directory must already exist. A perm of 0 leaves the temp file's OS-default
-// mode (0600 from os.CreateTemp) in place.
+// directory is written and closed, then renamed into place, so a concurrent
+// reader never observes a partial file. The parent directory must already
+// exist. The resulting file carries os.CreateTemp's owner-only mode (0600),
+// matching the prior sidecar writers; callers needing a different mode chmod
+// the final path themselves.
 //
 // This is the single atomic-write primitive shared by the YAML sidecar writers
 // (scoring, review/labels) and the lockfile writer; callers marshal their own
 // bytes and hand them here rather than re-implementing temp+rename.
-func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+func WriteFileAtomic(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := createTemp(dir, ".fsops-*.tmp")
 	if err != nil {
@@ -52,12 +53,6 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		cleanup()
 		return fmt.Errorf("fsops: close temp: %w", err)
-	}
-	if perm != 0 {
-		if err := os.Chmod(tmpPath, perm); err != nil {
-			cleanup()
-			return fmt.Errorf("fsops: chmod temp: %w", err)
-		}
 	}
 	if err := renameFunc(tmpPath, path); err != nil {
 		cleanup()

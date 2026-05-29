@@ -401,7 +401,7 @@ func TestCRUDPropagateReadError(t *testing.T) {
 // error branches deterministically. The granular temp/write/close/rename
 // failures of the atomic primitive itself are owned and tested by the fsops
 // package; here we only need WriteSidecar's callers to surface a write error.
-func withWriteFileAtomic(t *testing.T, fn func(path string, data []byte, perm os.FileMode) error) {
+func withWriteFileAtomic(t *testing.T, fn func(path string, data []byte) error) {
 	t.Helper()
 	orig := writeFileAtomic
 	writeFileAtomic = fn
@@ -411,7 +411,7 @@ func withWriteFileAtomic(t *testing.T, fn func(path string, data []byte, perm os
 // TestAddWritePropagatesError verifies Add surfaces a write failure, covering
 // Add's WriteSidecar error path.
 func TestAddWritePropagatesError(t *testing.T) {
-	withWriteFileAtomic(t, func(string, []byte, os.FileMode) error {
+	withWriteFileAtomic(t, func(string, []byte) error {
 		return errors.New("no write")
 	})
 	if _, err := Add(t.TempDir(), 1, sampleAdd()); err == nil {
@@ -427,7 +427,7 @@ func TestEditLabelWritePropagatesError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed Add: %v", err)
 	}
-	withWriteFileAtomic(t, func(string, []byte, os.FileMode) error {
+	withWriteFileAtomic(t, func(string, []byte) error {
 		return errors.New("no write")
 	})
 	_, err = EditLabel(dir, 1, lbl.ID, EditInput{
@@ -441,7 +441,7 @@ func TestEditLabelWritePropagatesError(t *testing.T) {
 // TestWriteSidecarPropagatesWriteError verifies WriteSidecar surfaces an atomic
 // write failure from the fsops seam.
 func TestWriteSidecarPropagatesWriteError(t *testing.T) {
-	withWriteFileAtomic(t, func(string, []byte, os.FileMode) error {
+	withWriteFileAtomic(t, func(string, []byte) error {
 		return errors.New("disk full")
 	})
 	_, err := WriteSidecar(t.TempDir(), Sidecar{Iteration: 1, SchemaVersion: LabelSchemaVersion, Labels: []Label{}})

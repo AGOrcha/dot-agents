@@ -236,5 +236,5 @@ func writeYAMLAtomic(path string, v any) error {
 	if err != nil {
 		return fmt.Errorf("marshal: %w", err)
 	}
-	return fsops.WriteFileAtomic(path, data, 0o600)
+	return fsops.WriteFileAtomic(path, data)
 }
