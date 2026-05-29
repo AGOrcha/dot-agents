@@ -127,19 +127,33 @@ brew tap AGOrcha/tap
 brew install dot-agents
 ```
 
-### Direct Install (Go CLI)
+### Install script
+
+Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required:
 
 ```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
 ```
 
-### Windows PowerShell (Go CLI)
-
 ```powershell
+# Windows PowerShell
 irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.ps1 | iex
 ```
 
-### Manual
+### Go toolchain (`go install`)
+
+If you already have Go, install the CLI straight from source with the Go
+toolchain:
+
+```bash
+go install github.com/NikashPrakash/dot-agents/cmd/da@latest
+```
+
+The `da` binary is placed in `$(go env GOBIN)` (falling back to
+`$(go env GOPATH)/bin`); ensure that directory is on your `PATH`.
+
+### Manual (from source)
 
 ```bash
 git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
