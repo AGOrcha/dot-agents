@@ -259,7 +259,19 @@ Pass 2 is skipped if the effective config has no `packages` entries.
 
 ## 7. Lockfile format
 
-`.agentsrc.lock` is a committed JSON file with two sections:
+`.agentsrc.lock` is a committed JSON file — the single resolved-state companion to
+`.agentsrc.json`. It carries three sections, each owned by a distinct writer:
+
+| Section | Owner | Contents |
+|---|---|---|
+| `config` | config resolver (this spec, two-pass engine §6) | resolved config-layer SHAs + TTL |
+| `packages` | package resolver (this spec, pass 2 §6) | resolved OCI tags + content digests |
+| `adapters` | graph-backend adapter (graph-backend-adapter-contract §10.1) | activated adapter source/schema digests + per-materialized-view state machine |
+
+There is exactly one lockfile. The adapter lockfile defined in
+graph-backend-adapter-contract §10.1 is **not** a separate file — it is the `adapters`
+section of this document. See [§7.4](#74-section-ownership-and-concurrent-writes) for the
+read-modify-write discipline that lets independent writers share one file.
 
 ```json
 {
@@ -287,9 +299,31 @@ Pass 2 is skipped if the effective config has no `packages` entries.
       "digest": "sha256:def456abc123...",
       "fetched_at": "2026-04-19T14:00:00Z"
     }
+  },
+  "adapters": {
+    "kuzu": {
+      "source_digest": "sha256:aa11bb22...",
+      "schema_digest": "sha256:cc33dd44...",
+      "activated_at": "2026-04-19T14:00:00Z",
+      "materialized_views": {
+        "decision_index": {
+          "view_digest": "sha256:ee55ff66...",
+          "view_status": "ready",
+          "depends_on": [
+            { "adapter": "kuzu", "schema_digest": "sha256:cc33dd44...", "version": "1" }
+          ],
+          "last_rebuilt_at": "2026-04-19T14:00:00Z"
+        }
+      }
+    }
   }
 }
 ```
+
+The `adapters` section schema (per-adapter `source_digest`/`schema_digest`/`activated_at`,
+the per-view `view_status` four-value enum, `depends_on`, and the bounded `state_history`
+audit log) is normative in graph-backend-adapter-contract §10.1.1–§10.1.3; this spec owns
+only that it lives here, as a peer section of `config` and `packages`.
 
 ### Config section semantics
 
@@ -304,6 +338,34 @@ Pass 2 is skipped if the effective config has no `packages` entries.
 - `digest` is the OCI content digest; immutable once written
 - No TTL; packages do not expire automatically
 - Update via `da packages update [package-ref]` which re-resolves the semver range
+
+### Adapters section semantics
+
+- Owned and mutated exclusively by the graph-backend adapter lifecycle
+  (graph-backend-adapter-contract §10.1). The config/package resolver never reads or writes it.
+- Written on adapter activation (init state machine) and on fail-closed reconcile; the
+  four-value `view_status` enum and per-view transitions are normative in §10.1.1–§10.1.3.
+- Absent `adapters` section ≡ no adapter activated (built-in `none`); a fresh `.agentsrc.lock`
+  written by config resolution before any adapter activates simply omits the key.
+
+### 7.4 Section ownership and concurrent writes
+
+`.agentsrc.lock` has three independent writers (config resolver, package resolver, adapter
+lifecycle) that run at different times and may run while another section is already populated.
+To keep one file shared safely:
+
+- **Section-scoped read-modify-write.** Every writer (a) reads the whole document, (b) mutates
+  only the keys under its own section, (c) writes the whole document back. A writer MUST
+  preserve unknown/sibling sections verbatim — it never drops `adapters` because it only knows
+  about `config`, and never drops `config` because it only knows about `adapters`.
+- **Atomic replace.** Write to a temp file in the same directory and `rename(2)` over the
+  target, so a concurrent reader sees either the old or new whole document, never a partial.
+- **No section-level locking required for v1.** Writers are not expected to race within a
+  single `da` invocation; the read-modify-write + atomic-rename discipline tolerates the
+  interleavings that occur across separate invocations. A future file-lock may be added if
+  the background service writes sections concurrently (tracked in r3).
+- **`lock_version`** is shared across all sections; bumping it is a coordinated migration, not
+  a per-section concern.
 
 ### Update commands
 
