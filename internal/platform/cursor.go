@@ -30,12 +30,6 @@ const (
 	cursorMCPJSON     = "mcp.json"
 	cursorDir         = ".cursor"
 	globalRulesPrefix = "global--"
-
-	// cliVersionProbeTimeout bounds subprocess wall time for --version / defaults probes.
-	cliVersionProbeTimeout = 5 * time.Second
-	// cliExecPipeWaitDelay is exec.Cmd.WaitDelay: without this, Cmd.Output can block forever
-	// in awaitGoroutines after the process is killed if pipe copy goroutines stall (Go 1.20+).
-	cliExecPipeWaitDelay = 3 * time.Second
 )
 
 func NewCursor() Platform { return &cursor{io: stdPlatformIO{}} }
@@ -172,11 +166,7 @@ func (c *cursor) IsInstalled() bool {
 	if _, err := os.Stat("/Applications/Cursor.app"); err == nil {
 		return true
 	}
-	if _, err := exec.LookPath("agent"); err == nil {
-		return true
-	}
-	_, err := exec.LookPath("cursor")
-	return err == nil
+	return probeInstalled("agent") || probeInstalled("cursor")
 }
 
 func (c *cursor) Version() string {
@@ -223,18 +213,15 @@ func firstCLIPeekVersion(binNames ...string) string {
 	return ""
 }
 
-// peekCLIVersionLine runs a CLI `--version` probe with a wall-clock bound so doctor and
-// tests cannot hang when a shim blocks (e.g. TTY/GUI interaction).
+// peekCLIVersionLine runs a CLI `--version` probe with a wall-clock bound (via
+// the shared probe seam) so doctor and tests cannot hang when a shim blocks
+// (e.g. TTY/GUI interaction).
 func peekCLIVersionLine(path string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cliVersionProbeTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, path, "--version")
-	cmd.WaitDelay = cliExecPipeWaitDelay
-	out, err := cmd.Output()
+	out, err := probeVersionAtPath(path, "--version")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(strings.Split(string(out), "\n")[0]), nil
+	return firstLine(out), nil
 }
 
 func (c *cursor) HasDeprecatedFormat(repoPath string) bool {

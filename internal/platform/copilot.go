@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -146,8 +145,7 @@ func (c *copilot) IsInstalled() bool {
 			}
 		}
 	}
-	_, err := exec.LookPath("copilot")
-	return err == nil
+	return probeInstalled("copilot")
 }
 
 func (c *copilot) Version() string {
@@ -171,11 +169,7 @@ func (c *copilot) Version() string {
 			}
 		}
 	}
-	out, err := exec.Command("copilot", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	return probeVersionLine("copilot")
 }
 
 func (c *copilot) HasDeprecatedFormat(repoPath string) bool { return false }
