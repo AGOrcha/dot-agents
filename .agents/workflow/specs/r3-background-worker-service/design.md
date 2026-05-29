@@ -34,18 +34,23 @@ launchd own daemonization).
 ### D1 — Hosting model: `da service` cobra subcommand
 
 R3 ships as `da service run` (plus `da service status`, `da service stop`),
-a long-running subcommand of the existing `da` binary. Foreground process;
-daemonization is the operator's responsibility (systemd unit / launchd
-plist / nohup). No second binary.
+a long-running subcommand of the existing `da` binary. The service runs in
+the foreground by default; it can be daemonized via `da service run -d`
+(alias `--detach`), which self-backgrounds the process, writes a pidfile,
+and detaches. This self-backgrounding mode enables the "daemon" form
+without requiring separate tooling. Alternatively, operators can supervise
+the foreground mode via systemd/launchd (both forms coexist). No second binary.
 
 Rationale: every existing capability is a cobra subcommand, the service
 reads in-repo state (`.agents/active/iteration-log/`, the KG sqlite under
 `internal/graphstore/`), and co-locating it with the CLI avoids a cross-
-binary contract. Daemonization is deployment, not code.
+binary contract. The `-d`/`--detach` mode handles self-daemonization; operator
+supervision (systemd/launchd) handles the always-on deployment model.
 
 Rejected: standalone `da-service` binary (cosmetic, second install target);
 sidecar to CLI invocations (wrong lifetime for an ingester); embedding
-into `da workflow watch` (conflates loop concerns with observability).
+into `da workflow watch` (conflates loop concerns with observability);
+a separate `da daemon` command (no — daemon is a mode, not a command).
 
 ### D2 — Task framework: minimal in-process scheduler
 
@@ -145,8 +150,10 @@ no-op test wiring to prove the contract.
 
 ## 5. Done criteria
 
-- `da service run` starts, registers the two v1 tasks, serves `/healthz`
-  + `/api/tasks`, and exits cleanly on SIGINT within 5s.
+- `da service run` starts in foreground, registers the two v1 tasks, serves
+  `/healthz` + `/api/tasks`, and exits cleanly on SIGINT within 5s.
+- `da service run -d` (or `--detach`) self-backgrounds, writes a pidfile,
+  and allows the command to return immediately.
 - Integration test: write `iter-N.yaml` to a temp iter-log dir under a
   running service; assert the score sidecar appears AND an
   `iteration.scored` event lands on a test subscriber within 2s.
@@ -171,7 +178,6 @@ These trace back to umbrella spec
   `river` per D2's re-evaluation trigger.
 - RBAC on HTTP endpoints — R5's plan owns this.
 - Frontend (R2 plan owns it).
-- Daemonization scaffolding (operator concern).
 - Log rotation / structured logging beyond stderr (operator concern).
 - A second sibling Publisher interface for async/queue-backed events —
   per `event-bus` task notes, that's a follow-up if/when needed.
