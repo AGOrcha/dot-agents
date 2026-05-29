@@ -382,30 +382,40 @@ func TestBaseRefRecordRead(t *testing.T) {
 	}
 
 	t.Run("unknown worktree", func(t *testing.T) {
-		if _, err := f.mgr.BaseRef("nope"); !errors.Is(err, ErrWorktreeNotFound) {
-			t.Fatalf("want ErrWorktreeNotFound, got %v", err)
-		}
-		if err := f.mgr.RecordBaseRef("nope", f.base); !errors.Is(err, ErrWorktreeNotFound) {
-			t.Fatalf("RecordBaseRef want ErrWorktreeNotFound, got %v", err)
-		}
+		assertBaseRefUnknownWorktree(t, f)
 	})
 
 	t.Run("not recorded", func(t *testing.T) {
-		// AddDetached records a base too, so use a worktree then strip the file.
-		if err := f.mgr.AddBranch("nobase", f.wtPath("nobase"), f.base); err != nil {
-			t.Fatalf("AddBranch: %v", err)
-		}
-		dir, ok := f.mgr.(*manager).adminDir("nobase")
-		if !ok {
-			t.Fatal("adminDir not found")
-		}
-		if err := os.Remove(filepath.Join(dir, baseRefFile)); err != nil {
-			t.Fatalf("rm base-ref: %v", err)
-		}
-		if _, err := f.mgr.BaseRef("nobase"); !errors.Is(err, ErrBaseRefNotRecorded) {
-			t.Fatalf("want ErrBaseRefNotRecorded, got %v", err)
-		}
+		assertBaseRefNotRecorded(t, f)
 	})
+}
+
+// assertBaseRefUnknownWorktree checks both readers reject an unknown worktree.
+func assertBaseRefUnknownWorktree(t *testing.T, f *fixture) {
+	if _, err := f.mgr.BaseRef("nope"); !errors.Is(err, ErrWorktreeNotFound) {
+		t.Fatalf("want ErrWorktreeNotFound, got %v", err)
+	}
+	if err := f.mgr.RecordBaseRef("nope", f.base); !errors.Is(err, ErrWorktreeNotFound) {
+		t.Fatalf("RecordBaseRef want ErrWorktreeNotFound, got %v", err)
+	}
+}
+
+// assertBaseRefNotRecorded creates a worktree, strips its base-ref file, and
+// checks BaseRef reports it as not recorded.
+func assertBaseRefNotRecorded(t *testing.T, f *fixture) {
+	if err := f.mgr.AddBranch("nobase", f.wtPath("nobase"), f.base); err != nil {
+		t.Fatalf("AddBranch: %v", err)
+	}
+	dir, ok := f.mgr.(*manager).adminDir("nobase")
+	if !ok {
+		t.Fatal("adminDir not found")
+	}
+	if err := os.Remove(filepath.Join(dir, baseRefFile)); err != nil {
+		t.Fatalf("rm base-ref: %v", err)
+	}
+	if _, err := f.mgr.BaseRef("nobase"); !errors.Is(err, ErrBaseRefNotRecorded) {
+		t.Fatalf("want ErrBaseRefNotRecorded, got %v", err)
+	}
 }
 
 func TestOpenError(t *testing.T) {
@@ -429,16 +439,25 @@ func TestIndexIsolation(t *testing.T) {
 		t.Fatalf("AddBranch b: %v", err)
 	}
 
-	wtA, err := f.mgr.Open(pathA)
-	if err != nil {
-		t.Fatalf("Open a: %v", err)
-	}
-	wtB, err := f.mgr.Open(pathB)
-	if err != nil {
-		t.Fatalf("Open b: %v", err)
-	}
+	wtA := openWorktree(t, f, pathA, "a")
+	wtB := openWorktree(t, f, pathB, "b")
 
-	// Write + stage + commit a file only in worktree A.
+	hashA := commitOnlyInA(t, wtA, pathA)
+	assertBranchAdvanced(t, f, hashA)
+	assertWorktreeBClean(t, wtB, pathB)
+	assertMainRepoClean(t, f)
+}
+
+func openWorktree(t *testing.T, f *fixture, path, label string) Worktree {
+	wt, err := f.mgr.Open(path)
+	if err != nil {
+		t.Fatalf("Open %s: %v", label, err)
+	}
+	return wt
+}
+
+// commitOnlyInA writes, stages, and commits a file only in worktree A.
+func commitOnlyInA(t *testing.T, wtA Worktree, pathA string) plumbing.Hash {
 	if err := os.WriteFile(filepath.Join(pathA, "a-only.txt"), []byte("a\n"), 0o644); err != nil {
 		t.Fatalf("write a-only: %v", err)
 	}
@@ -449,8 +468,11 @@ func TestIndexIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit a: %v", err)
 	}
+	return hashA
+}
 
-	// A's branch advanced past base; B's branch did not.
+// assertBranchAdvanced checks A advanced to hashA while B stayed at base.
+func assertBranchAdvanced(t *testing.T, f *fixture, hashA plumbing.Hash) {
 	branchA, _ := f.repo.Reference(plumbing.NewBranchReferenceName("iso-a"), false)
 	if branchA.Hash() != hashA || hashA == f.base {
 		t.Fatalf("iso-a should advance to %s (got %s, base %s)", hashA, branchA.Hash(), f.base)
@@ -459,8 +481,10 @@ func TestIndexIsolation(t *testing.T) {
 	if branchB.Hash() != f.base {
 		t.Fatalf("iso-b must stay at base %s, got %s", f.base, branchB.Hash())
 	}
+}
 
-	// B's index/working tree never saw a-only.txt.
+// assertWorktreeBClean checks B never saw a-only.txt and stays clean.
+func assertWorktreeBClean(t *testing.T, wtB Worktree, pathB string) {
 	if _, err := os.Stat(filepath.Join(pathB, "a-only.txt")); !os.IsNotExist(err) {
 		t.Fatalf("a-only.txt must not exist in worktree B, stat err=%v", err)
 	}
@@ -471,8 +495,10 @@ func TestIndexIsolation(t *testing.T) {
 	if !statusB.IsClean() {
 		t.Fatalf("worktree B should be clean, got %v", statusB)
 	}
+}
 
-	// Main repo branch is untouched and clean.
+// assertMainRepoClean checks a-only.txt never leaked into the main repo.
+func assertMainRepoClean(t *testing.T, f *fixture) {
 	mainWT, err := f.repo.Worktree()
 	if err != nil {
 		t.Fatalf("main worktree: %v", err)
@@ -492,12 +518,28 @@ func TestStatusAndCommitFlow(t *testing.T) {
 	if err := f.mgr.AddBranch("flow", path, f.base); err != nil {
 		t.Fatalf("AddBranch: %v", err)
 	}
-	wt, err := f.mgr.Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	wt := openWorktree(t, f, path, "flow")
 
-	// Clean to start.
+	assertCleanThenDirty(t, wt, path)
+	commitInitialFile(t, wt, path)
+
+	t.Run("commit options - all and empty", func(t *testing.T) {
+		assertEmptyCommit(t, wt)
+	})
+
+	t.Run("commit All stages tracked modification", func(t *testing.T) {
+		assertCommitAll(t, wt, path)
+	})
+
+	t.Run("stage missing path errors", func(t *testing.T) {
+		if err := wt.Stage("does-not-exist.txt"); err == nil {
+			t.Fatal("staging a missing path should error")
+		}
+	})
+}
+
+// assertCleanThenDirty checks a fresh worktree is clean, then dirty after write.
+func assertCleanThenDirty(t *testing.T, wt Worktree, path string) {
 	st, err := wt.Status()
 	if err != nil {
 		t.Fatalf("Status: %v", err)
@@ -505,7 +547,6 @@ func TestStatusAndCommitFlow(t *testing.T) {
 	if !st.IsClean() {
 		t.Fatalf("fresh worktree not clean: %v", st)
 	}
-
 	if err := os.WriteFile(filepath.Join(path, "f.txt"), []byte("v1\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
@@ -513,7 +554,10 @@ func TestStatusAndCommitFlow(t *testing.T) {
 	if st.IsClean() {
 		t.Fatal("status should be dirty after write")
 	}
+}
 
+// commitInitialFile stages f.txt (nil opts), commits, and checks HEAD advanced.
+func commitInitialFile(t *testing.T, wt Worktree, path string) {
 	if err := wt.Stage("f.txt"); err != nil {
 		t.Fatalf("Stage: %v", err)
 	}
@@ -528,36 +572,31 @@ func TestStatusAndCommitFlow(t *testing.T) {
 	if head.Hash() != hash {
 		t.Fatalf("HEAD=%s, want commit %s", head.Hash(), hash)
 	}
+}
 
-	t.Run("commit options - all and empty", func(t *testing.T) {
-		// AllowEmpty path with explicit author.
-		h2, err := wt.Commit("empty", &CommitOptions{
-			AuthorName: "X", AuthorEmail: "x@y", AllowEmpty: true,
-		})
-		if err != nil {
-			t.Fatalf("empty commit: %v", err)
-		}
-		if h2.IsZero() {
-			t.Fatal("empty commit returned zero hash")
-		}
+// assertEmptyCommit drives the AllowEmpty path with an explicit author.
+func assertEmptyCommit(t *testing.T, wt Worktree) {
+	h2, err := wt.Commit("empty", &CommitOptions{
+		AuthorName: "X", AuthorEmail: "x@y", AllowEmpty: true,
 	})
+	if err != nil {
+		t.Fatalf("empty commit: %v", err)
+	}
+	if h2.IsZero() {
+		t.Fatal("empty commit returned zero hash")
+	}
+}
 
-	t.Run("commit All stages tracked modification", func(t *testing.T) {
-		if err := os.WriteFile(filepath.Join(path, "f.txt"), []byte("v2\n"), 0o644); err != nil {
-			t.Fatalf("modify: %v", err)
-		}
-		if _, err := wt.Commit("modify f", &CommitOptions{All: true}); err != nil {
-			t.Fatalf("commit -a: %v", err)
-		}
-		st, _ := wt.Status()
-		if !st.IsClean() {
-			t.Fatalf("after commit -a worktree should be clean: %v", st)
-		}
-	})
-
-	t.Run("stage missing path errors", func(t *testing.T) {
-		if err := wt.Stage("does-not-exist.txt"); err == nil {
-			t.Fatal("staging a missing path should error")
-		}
-	})
+// assertCommitAll checks commit -a stages a tracked modification.
+func assertCommitAll(t *testing.T, wt Worktree, path string) {
+	if err := os.WriteFile(filepath.Join(path, "f.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("modify: %v", err)
+	}
+	if _, err := wt.Commit("modify f", &CommitOptions{All: true}); err != nil {
+		t.Fatalf("commit -a: %v", err)
+	}
+	st, _ := wt.Status()
+	if !st.IsClean() {
+		t.Fatalf("after commit -a worktree should be clean: %v", st)
+	}
 }

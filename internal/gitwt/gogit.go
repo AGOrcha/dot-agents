@@ -28,6 +28,9 @@ var worktreeNameRE = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
 // recorded base ref lives until the wt2 registry takes over richer metadata.
 const baseRefFile = "base-ref"
 
+// errFmtWrap wraps a sentinel error with a contextual name/string argument.
+const errFmtWrap = "%w: %s"
+
 // manager is the go-git v6 implementation of Manager. It owns a worktree
 // manager bound to the repository's shared storer.
 type manager struct {
@@ -79,7 +82,7 @@ func (m *manager) AddBranch(name, path string, base plumbing.Hash) error {
 	}
 	branchRef := plumbing.NewBranchReferenceName(name)
 	if _, err := m.repo.Reference(branchRef, false); err == nil {
-		return fmt.Errorf("%w: %s", ErrBranchExists, name)
+		return fmt.Errorf(errFmtWrap, ErrBranchExists, name)
 	}
 	if err := m.add(name, path, base, false); err != nil {
 		return err
@@ -109,7 +112,7 @@ func (m *manager) add(name, path string, commit plumbing.Hash, detached bool) er
 	}
 	err := m.mgr.Add(osfs.New(path), name, opts...)
 	if errors.Is(err, gogitwt.ErrWorktreeAlreadyExists) {
-		return fmt.Errorf("%w: %s", ErrWorktreeExists, name)
+		return fmt.Errorf(errFmtWrap, ErrWorktreeExists, name)
 	}
 	if err != nil {
 		return fmt.Errorf("gitwt: add worktree %q: %w", name, err)
@@ -123,7 +126,7 @@ func (m *manager) Remove(name, path string) error {
 	}
 	err := m.mgr.Remove(name)
 	if errors.Is(err, gogitwt.ErrWorktreeNotFound) {
-		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, name)
+		return fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
 	}
 	if err != nil {
 		return fmt.Errorf("gitwt: remove worktree %q: %w", name, err)
@@ -249,7 +252,7 @@ func (m *manager) worktreeDir(name string) (string, bool) {
 func (m *manager) RecordBaseRef(name string, base plumbing.Hash) error {
 	dir, ok := m.adminDir(name)
 	if !ok {
-		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, name)
+		return fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
 	}
 	content := base.String() + "\n"
 	if err := os.WriteFile(filepath.Join(dir, baseRefFile), []byte(content), 0o644); err != nil {
@@ -261,11 +264,11 @@ func (m *manager) RecordBaseRef(name string, base plumbing.Hash) error {
 func (m *manager) BaseRef(name string) (plumbing.Hash, error) {
 	dir, ok := m.adminDir(name)
 	if !ok {
-		return plumbing.ZeroHash, fmt.Errorf("%w: %s", ErrWorktreeNotFound, name)
+		return plumbing.ZeroHash, fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, baseRefFile))
 	if errors.Is(err, os.ErrNotExist) {
-		return plumbing.ZeroHash, fmt.Errorf("%w: %s", ErrBaseRefNotRecorded, name)
+		return plumbing.ZeroHash, fmt.Errorf(errFmtWrap, ErrBaseRefNotRecorded, name)
 	}
 	if err != nil {
 		return plumbing.ZeroHash, fmt.Errorf("gitwt: read base ref for %q: %w", name, err)
