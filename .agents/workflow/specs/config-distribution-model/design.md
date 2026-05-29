@@ -348,22 +348,42 @@ only that it lives here, as a peer section of `config` and `packages`.
 - Absent `adapters` section ≡ no adapter activated (built-in `none`); a fresh `.agentsrc.lock`
   written by config resolution before any adapter activates simply omits the key.
 
-### 7.4 Section ownership and concurrent writes
+### 7.4 Section ownership and the shared lockfile writer
 
-`.agentsrc.lock` has three independent writers (config resolver, package resolver, adapter
+`.agentsrc.lock` has three section writers (config resolver, package resolver, adapter
 lifecycle) that run at different times and may run while another section is already populated.
-To keep one file shared safely:
+They do **not** each open and rewrite the file independently. Instead they share a single
+**lockfile writer** (a small dedicated package, e.g. `internal/agentslock`, that both config-v2
+and the graph adapter depend on — neither imports the other):
 
-- **Section-scoped read-modify-write.** Every writer (a) reads the whole document, (b) mutates
-  only the keys under its own section, (c) writes the whole document back. A writer MUST
-  preserve unknown/sibling sections verbatim — it never drops `adapters` because it only knows
-  about `config`, and never drops `config` because it only knows about `adapters`.
-- **Atomic replace.** Write to a temp file in the same directory and `rename(2)` over the
+- **Schema-agnostic section buffer.** The writer owns the whole document and treats sections as
+  **opaque** values: `Section(name, into)` reads a section, `SetSection(name, raw)` stages one.
+  It never knows the `config`/`packages`/`adapters` shapes — each subsystem marshals its own
+  section and hands the bytes over. This is what keeps the layering clean: the writer is the
+  only shared surface, and adding a fourth section later needs no change to it.
+- **Load once, flush once.** A command opens the writer (which loads the current file, so any
+  section another subsystem already wrote is in hand), each active subsystem stages its section
+  into the in-memory buffer, and the command flushes **once**. This collapses what would
+  otherwise be N separate read-whole/mutate/write-whole cycles (e.g. `da install` touching
+  `config` *and* `packages`) into a single atomic write — one `fsync`+`rename`, no intra-process
+  double-read. Throughput is not the point (the lockfile is written a handful of times per
+  invocation, never in a loop); the point is fewer writes and no partially-updated intermediate
+  states.
+- **Flush preserves untouched sections (this is the RMW guarantee).** Because the writer loaded
+  the current document and only replaces staged sections, a flush writes the whole document back
+  with sibling sections verbatim. This holds the cross-invocation contract too: a later, separate
+  `da` process opens a fresh writer, loads the file written by the earlier process, and stages
+  only its own section. The read-modify-write discipline lives **inside** the writer's
+  load/flush, not in three hand-rolled copies.
+- **Atomic replace.** Flush writes to a temp file in the same directory and `rename(2)`s over the
   target, so a concurrent reader sees either the old or new whole document, never a partial.
-- **No section-level locking required for v1.** Writers are not expected to race within a
-  single `da` invocation; the read-modify-write + atomic-rename discipline tolerates the
-  interleavings that occur across separate invocations. A future file-lock may be added if
-  the background service writes sections concurrently (tracked in r3).
+- **Flush is callable more than once.** The single-flush case is the optimization, not a
+  constraint: a command may flush `config` before a slow adapter activation (crash-safety) and
+  flush `adapters` after — each flush is atomic and section-preserving.
+- **Locking.** The single writer is the natural home for the in-process mutex, and for the future
+  cross-process file-lock if the background service ever writes sections concurrently (tracked in
+  r3). v1 needs no section-level locking — within one invocation there is one writer instance, and
+  across invocations the load+atomic-flush discipline tolerates the interleavings.
 - **`lock_version`** is shared across all sections; bumping it is a coordinated migration, not
   a per-section concern.
 

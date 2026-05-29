@@ -1260,11 +1260,12 @@ state (dependent views).
 
 This adapter state is **not a separate lockfile**. It is the `adapters` section of the single
 `.agentsrc.lock` document (config-distribution-model §7), a peer of the `config` and `packages`
-sections. The adapter lifecycle is its sole writer and MUST follow the section-scoped
-read-modify-write discipline in config-distribution-model §7.4: read the whole `.agentsrc.lock`
-JSON document, mutate only the `adapters` key, write the whole document back atomically —
-preserving the `config` and `packages` sections written by the config/package resolver. The
-on-disk file is JSON; the YAML below is illustrative for readability only.
+sections. The adapter lifecycle is its sole writer and MUST write through the **shared lockfile
+writer** (config-distribution-model §7.4) rather than opening and rewriting the file itself:
+stage the `adapters` section via `SetSection("adapters", …)` and flush. The writer loads the
+current document, preserves the `config`/`packages` sections written by the config/package
+resolver, and flushes atomically. The on-disk file is JSON; the YAML below is illustrative for
+readability only.
 
 The `adapters` section carries per-adapter state including a per-view state machine for
 cross-adapter cutover:
