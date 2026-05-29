@@ -29,3 +29,16 @@ the rest of refresh (don't clobber user-edited hook bundles).
 - PR #187 (dogfood enablement that found this)
 - the hooks package + `da refresh` (commands) — where the self-heal lands
 - `[[init-bypasses-hooks-package]]` lesson (related: init/settings hook wiring)
+
+## Maintainer ruling 2026-05-29 (PR #187 comment): broaden beyond hooks
+
+Not just `~/.agents/hooks/global/` — `da refresh` (and a `da doctor` check) should
+self-heal **any missing managed starter content as a whole**: hooks, skills, agents,
+rules, settings, MCP config. The same silent-dormancy failure applies to every
+managed-resource family — if `~/.agents/<family>/` was never seeded (set up before a
+family landed, or `da init` not re-run), `da refresh` links nothing for it and emits
+no signal. Generalize the fix: refresh detects ANY absent/empty managed family under
+`~/.agents/` and re-seeds it from the embedded scaffold (idempotent, managed-content
+only — never clobber user-edited bundles), with a one-line notice; `da doctor` reports
+any unseeded family. Title/scope updated accordingly: this is "refresh self-heals
+missing starter content", hooks being the instance that surfaced it.
