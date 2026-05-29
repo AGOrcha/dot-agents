@@ -10,6 +10,7 @@
 package none
 
 import (
+	// blank import: enables the //go:embed directive on schemaYAML below.
 	_ "embed"
 
 	"github.com/NikashPrakash/dot-agents/internal/kg/registry"

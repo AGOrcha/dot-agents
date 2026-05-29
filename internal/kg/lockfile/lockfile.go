@@ -252,46 +252,68 @@ func (lf *Lockfile) Reconcile(present ViewPresenceFunc, now time.Time) []Inconsi
 	var found []Inconsistency
 	for _, an := range lf.AdapterNames() {
 		ad := lf.Adapters[an]
-		viewNames := make([]string, 0, len(ad.MaterializedViews))
-		for vn := range ad.MaterializedViews {
-			viewNames = append(viewNames, vn)
-		}
-		sort.Strings(viewNames)
-		for _, vn := range viewNames {
-			v := ad.MaterializedViews[vn]
-			switch v.ViewStatus {
-			case StatusReady:
-				ok := false
-				if present != nil {
-					p, digest := present(an, vn)
-					ok = p && digest == v.ViewDigest
-				}
-				if !ok {
-					reason := "view tables absent"
-					if present != nil {
-						if p, _ := present(an, vn); p {
-							reason = "view digest mismatch"
-						}
-					}
-					from := v.ViewStatus
-					v.recordTransition(StatusPendingRebuild, "reconcile:"+reason, now)
-					found = append(found, Inconsistency{
-						Adapter: an, View: vn, From: from, To: StatusPendingRebuild, Reason: reason,
-					})
-				}
-			case StatusPendingRecompatCheck, StatusPendingRebuild, StatusDSLUpdateRequired:
-				// No reconcile action: pending-rebuild and dsl-update-required
-				// are handled by their own flows; pending-recompat-check is
-				// re-validated by `da kg view validate`, not the reconcile pass.
-			default:
-				// Unknown/empty status: force pending-rebuild fail-closed.
-				from := v.ViewStatus
-				v.recordTransition(StatusPendingRebuild, "reconcile:invalid-status", now)
-				found = append(found, Inconsistency{
-					Adapter: an, View: vn, From: from, To: StatusPendingRebuild, Reason: "invalid view_status",
-				})
+		for _, vn := range sortedViewNames(ad) {
+			if inc := reconcileView(an, vn, ad.MaterializedViews[vn], present, now); inc != nil {
+				found = append(found, *inc)
 			}
 		}
 	}
 	return found
+}
+
+// sortedViewNames returns an adapter's materialized-view names in sorted order.
+func sortedViewNames(ad *Adapter) []string {
+	viewNames := make([]string, 0, len(ad.MaterializedViews))
+	for vn := range ad.MaterializedViews {
+		viewNames = append(viewNames, vn)
+	}
+	sort.Strings(viewNames)
+	return viewNames
+}
+
+// reconcileView applies the §10.1.3 reconcile rule to a single view, mutating
+// its state when a transition is required. It returns the resulting
+// Inconsistency, or nil when the view needs no action.
+func reconcileView(adapter, view string, v *View, present ViewPresenceFunc, now time.Time) *Inconsistency {
+	switch v.ViewStatus {
+	case StatusReady:
+		return reconcileReadyView(adapter, view, v, present, now)
+	case StatusPendingRecompatCheck, StatusPendingRebuild, StatusDSLUpdateRequired:
+		// No reconcile action: pending-rebuild and dsl-update-required
+		// are handled by their own flows; pending-recompat-check is
+		// re-validated by `da kg view validate`, not the reconcile pass.
+		return nil
+	default:
+		// Unknown/empty status: force pending-rebuild fail-closed.
+		return transitionView(adapter, view, v, "invalid-status", "invalid view_status", now)
+	}
+}
+
+// reconcileReadyView cross-checks a ready view against on-disk presence and
+// flips it to pending-rebuild when absent or digest-mismatched. It returns nil
+// when the view is consistent on disk.
+func reconcileReadyView(adapter, view string, v *View, present ViewPresenceFunc, now time.Time) *Inconsistency {
+	if present != nil {
+		if p, digest := present(adapter, view); p && digest == v.ViewDigest {
+			return nil
+		}
+	}
+	reason := "view tables absent"
+	if present != nil {
+		if p, _ := present(adapter, view); p {
+			reason = "view digest mismatch"
+		}
+	}
+	return transitionView(adapter, view, v, reason, reason, now)
+}
+
+// transitionView records a pending-rebuild transition on v and returns the
+// matching Inconsistency. transitionReason labels the recorded transition;
+// inconsistencyReason is reported to the caller.
+func transitionView(adapter, view string, v *View, transitionReason, inconsistencyReason string, now time.Time) *Inconsistency {
+	from := v.ViewStatus
+	v.recordTransition(StatusPendingRebuild, "reconcile:"+transitionReason, now)
+	return &Inconsistency{
+		Adapter: adapter, View: view, From: from, To: StatusPendingRebuild, Reason: inconsistencyReason,
+	}
 }

@@ -137,15 +137,21 @@ func TestParseRef(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseRef(%q) unexpected error: %v", tt.in, err)
 			}
-			if got.Name != tt.wantName {
-				t.Fatalf("ParseRef(%q).Name = %q, want %q", tt.in, got.Name, tt.wantName)
-			}
-			if got.Builtin != tt.wantBuiltin {
-				t.Fatalf("ParseRef(%q).Builtin = %v, want %v", tt.in, got.Builtin, tt.wantBuiltin)
-			}
-			if (got.Constraint != nil) != tt.wantConstraint {
-				t.Fatalf("ParseRef(%q) constraint present = %v, want %v", tt.in, got.Constraint != nil, tt.wantConstraint)
-			}
+			assertRef(t, tt.in, got, tt.wantName, tt.wantBuiltin, tt.wantConstraint)
 		})
+	}
+}
+
+// assertRef checks a parsed Ref's fields against the expected values.
+func assertRef(t *testing.T, in string, got Ref, wantName string, wantBuiltin, wantConstraint bool) {
+	t.Helper()
+	if got.Name != wantName {
+		t.Fatalf("ParseRef(%q).Name = %q, want %q", in, got.Name, wantName)
+	}
+	if got.Builtin != wantBuiltin {
+		t.Fatalf("ParseRef(%q).Builtin = %v, want %v", in, got.Builtin, wantBuiltin)
+	}
+	if (got.Constraint != nil) != wantConstraint {
+		t.Fatalf("ParseRef(%q) constraint present = %v, want %v", in, got.Constraint != nil, wantConstraint)
 	}
 }

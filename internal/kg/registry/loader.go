@@ -41,16 +41,32 @@ func ValidateSchema(s Schema) error {
 	if s.ImpactRadius.MaxDepth < 0 {
 		return fmt.Errorf("adapter schema: %q impact_radius.max_depth is negative", s.Name)
 	}
+	declared, err := validateNoteTypes(s)
+	if err != nil {
+		return err
+	}
+	return validateEdgeTypes(s, declared)
+}
+
+// validateNoteTypes checks each note_type has a non-empty, unique name and
+// returns the set of declared note-type names for edge validation.
+func validateNoteTypes(s Schema) (map[string]bool, error) {
 	declared := make(map[string]bool, len(s.NoteTypes))
 	for _, nt := range s.NoteTypes {
 		if nt.Name == "" {
-			return fmt.Errorf("adapter schema: %q has a note_type with empty name", s.Name)
+			return nil, fmt.Errorf("adapter schema: %q has a note_type with empty name", s.Name)
 		}
 		if declared[nt.Name] {
-			return fmt.Errorf("adapter schema: %q declares note_type %q twice", s.Name, nt.Name)
+			return nil, fmt.Errorf("adapter schema: %q declares note_type %q twice", s.Name, nt.Name)
 		}
 		declared[nt.Name] = true
 	}
+	return declared, nil
+}
+
+// validateEdgeTypes checks each edge_type has a non-empty name and references
+// only declared note types for its from/to endpoints.
+func validateEdgeTypes(s Schema, declared map[string]bool) error {
 	for _, et := range s.EdgeTypes {
 		if et.Name == "" {
 			return fmt.Errorf("adapter schema: %q has an edge_type with empty name", s.Name)
