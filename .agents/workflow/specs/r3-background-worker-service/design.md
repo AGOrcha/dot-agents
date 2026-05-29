@@ -99,6 +99,33 @@ authoritative deliveries. R2 will subscribe via SSE; R5 will mount its
 collection endpoint as an HTTP handler that doesn't even need bus access
 for v1. Keeping the bus tiny preserves the cross-plan contract surface.
 
+#### D4.1 — Concurrency: per-topic locking (deferred optimization, decision recorded)
+
+The v1 bus (shipped via the event-bus PR) guards the whole
+`subscribers map[string][]*subscriber` + the fan-out with a **single
+`sync.Mutex`**. Correct and low-contention at the current scale (2-4
+internal topics, fast non-blocking drop-oldest delivery, lock held only
+for the synchronous fan-out). NOTE: as topic count grows — and it will,
+once the `[[unified-pluggable-event-contract]]` lands many event/sentinel
+types — a single global mutex serializes publish/subscribe **across
+unrelated topics** (publishing to topic A briefly blocks topic B).
+
+**Decision (deferred to implement, recorded now): move to per-topic
+locking when topic count or cross-topic publish contention warrants.**
+The shape is NOT "replace the mutex" — it is two-level:
+- An `RWMutex` (or a sharded lock) on the **registry** (the map itself),
+  taken only for add-topic / remove-topic / subscribe / unsubscribe.
+- A **per-topic mutex** guarding that topic's subscriber slice + its
+  fan-out, so `Publish` to different topics runs concurrently.
+
+Trigger to implement: the unified-pluggable-event-contract surface
+landing (many topics) OR measured cross-topic publish contention. Until
+then the single mutex stays — do not pre-optimize a tiny low-contention
+bus. Per-topic delivery goroutines are a further option if ordering
+guarantees per topic are needed independently. (Per-subscriber buffer
+strategy — currently bounded drop-oldest — is a separate, already-decided
+axis; revisit only if a different back-pressure policy is wanted.)
+
 ### D5 — HTTP surface is reservation, not implementation
 
 `internal/service/http` exposes `RegisterMount(prefix, handler)`. R3 only
