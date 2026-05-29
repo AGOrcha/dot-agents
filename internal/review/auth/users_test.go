@@ -78,6 +78,23 @@ func writeUsersYAML(t *testing.T, path, body string) {
 	}
 }
 
+// assertSecretFilePerm verifies the users file is 0600 because it stores
+// secrets. Windows does not honor Unix permission bits, so the check is a
+// no-op there (the invariant is asserted elsewhere on POSIX).
+func assertSecretFilePerm(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Fatalf("users file perm=%o want 0600", perm)
+	}
+}
+
 func TestLoadUsersFileValidationErrors(t *testing.T) {
 	tests := []struct {
 		name string
@@ -127,17 +144,7 @@ func TestAddFindRemoveRoundTrip(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// File must be 0600 because it stores secrets. Windows does not honor
-	// Unix permission bits, so this invariant is only asserted elsewhere.
-	if runtime.GOOS != "windows" {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if perm := info.Mode().Perm(); perm != 0600 {
-			t.Fatalf("users file perm=%o want 0600", perm)
-		}
-	}
+	assertSecretFilePerm(t, path)
 
 	reloaded, err := LoadUsersFile(path)
 	if err != nil {
