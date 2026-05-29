@@ -462,6 +462,22 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # qualitygate.wait blocks until SonarCloud finishes ingesting the
+          # analysis, so the new-issues gate below can query issues/search and
+          # get the just-uploaded results (not a stale prior analysis).
+          args: -Dsonar.qualitygate.wait=true
+
+      # Free-tier replacement for the unassignable `dot-agents-strict` quality
+      # gate: SonarCloud custom gates require a paid plan, so we enforce
+      # new_violations=0 ourselves via the web API after the scan is ingested.
+      # Hard-fails (no continue-on-error) if the PR/branch introduces ANY new
+      # issue in the new-code period. Runs in the SAME job, AFTER the scan, so
+      # the analysis is guaranteed ingested (qualitygate.wait above).
+      - name: Enforce zero new Sonar issues
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: bash scripts/sonar-new-issues-gate.sh
 
       # Phase 2 (cg6) = PER-FILE ENFORCE via the ratchet.
       # The merged multi-OS profile is STRICTER than the old per-OS gate:
