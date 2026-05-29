@@ -171,21 +171,33 @@ the OpenAPI files as its enforced instances.
 
 The published API reference on the agorcha.dev docs site (the canonical Astro docs) MUST be
 **generated from** `schemas/openapi/*.yaml`, never hand-authored — so the published reference can
-never drift from the contract.
+never drift from the contract. **Reuse the existing schema-sync wheel; do not build a parallel
+pipeline.**
 
-- **A docs build step ingests `schemas/openapi/*.yaml`** and emits the docs-site API reference pages
-  — via a Redoc / Scalar / Swagger-UI render or a custom Astro integration (renderer choice is a
-  docs-site implementation detail; the input contract is the OpenAPI set).
-- **Tie regeneration to the docs deploy** — the agorcha Cloudflare Worker build (see
-  `[[agorcha-public-vs-internal-and-obs-deploy]]`). Every API change that lands a spec edit
-  regenerates the published reference on the next deploy; there is no manual docs-update step to
-  forget.
+- **Ride the existing `docs/web/scripts/copy-schemas.sh` flow.** That prebuild hook already copies
+  repo-root `schemas/*.json` into `docs/web/public/schemas/` (served at `agorcha.dev/schemas/...`)
+  on every `npm run build`, and the agorcha Cloudflare build picks them up. The OpenAPI specs live
+  in the same `schemas/` tree (`schemas/openapi/<domain>.v1.yaml`) and ride the same wheel — the
+  required change is a **one-line glob extension** so `copy-schemas.sh` also copies `openapi/*.yaml`
+  (e.g. add `"${SRC}"/openapi/*.yaml` to the `schemas=(…)` glob) alongside the existing `*.json`.
+  The "auto-sync with web docs" requirement is satisfied by that existing copy-on-build pipeline
+  plus a render step over the copied specs — not a new build.
+- **Render step over the copied specs, with a pluggable renderer.** An Astro integration renders the
+  copied `schemas/openapi/*.yaml` into the API reference pages. **Default to Scalar**
+  (scalar.com — modern, OpenAPI-3.1-native, good static/Astro integration, open-source). Keep the
+  renderer **pluggable via build config**: **Swagger UI** selectable as the classic alternative, and
+  **Redoc** as an optional clean three-panel middle-ground. Scalar is the default; Swagger/Redoc are
+  per-deployment opt-in toggles, never hard-wired.
+- **Regeneration is tied to the docs deploy** — the agorcha Cloudflare Worker build (see
+  `[[agorcha-public-vs-internal-and-obs-deploy]]`) — because it runs through the same prebuild hook.
+  Every API change that lands a spec edit regenerates the published reference on the next deploy;
+  there is no manual docs-update step to forget.
 - This is the **API analogue of the release-task docs-accuracy pass** (`[[release-gated-plans-convention]]`):
   just as a release verifies docs match shipped behavior, the contract and its published docs stay
   in lockstep automatically — the spec is edited once and the reference follows.
 
-Cross-ref the docs-site work (`[[docs-site-usability-review]]`) and the agorcha deploy
-(`[[agorcha-public-vs-internal-and-obs-deploy]]`).
+Cross-ref the schema-sync wheel (`docs/web/scripts/copy-schemas.sh`), the docs-site work
+(`[[docs-site-usability-review]]`), and the agorcha deploy (`[[agorcha-public-vs-internal-and-obs-deploy]]`).
 
 ---
 
@@ -202,7 +214,8 @@ Cross-ref the docs-site work (`[[docs-site-usability-review]]`) and the agorcha 
 - `[[schema-usage]]` — the `schemas/` tree that hosts `schemas/openapi/<domain>.v1.yaml`, the
   machine-readable per-family contract.
 - `[[docs-site-usability-review]]` / `[[agorcha-public-vs-internal-and-obs-deploy]]` — the docs site
-  that auto-renders the OpenAPI specs and the Cloudflare Worker build that regenerates the published
-  API reference on every deploy.
+  that auto-renders the OpenAPI specs (via the existing `docs/web/scripts/copy-schemas.sh` prebuild
+  wheel, glob extended to `openapi/*.yaml`; Scalar default renderer, Swagger UI/Redoc opt-in) and the
+  Cloudflare Worker build that regenerates the published API reference on every deploy.
 - `[[release-gated-plans-convention]]` — the release docs-accuracy pass this OpenAPI↔docs auto-sync
   is the API analogue of.
