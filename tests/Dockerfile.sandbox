@@ -25,15 +25,16 @@ RUN apt-get update \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
     && npm install -g --ignore-scripts @anthropic-ai/claude-code@2.1.156 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Run the test workload as a non-root user (least privilege; Sonar docker:S6471).
-# Root above is used only for the system-level installs; everything below is
-# per-user. This also mirrors how `da` runs under a normal user's $HOME, making
-# the sandbox more representative.
-RUN useradd --create-home --shell /bin/bash sandbox \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /bin/bash sandbox \
     && mkdir -p /workspace \
     && chown sandbox:sandbox /workspace
+
+# Run the test workload as a non-root user (least privilege; Sonar docker:S6471).
+# The single root RUN above does all system-level setup (installs + the sandbox
+# user, in one layer per docker:S7031); everything below is per-user. This also
+# mirrors how `da` runs under a normal user's $HOME, making the sandbox more
+# representative.
 USER sandbox
 # Docker does not set HOME on a USER switch; install.sh writes to $HOME/.local,
 # so point it at the sandbox user's home explicitly.
