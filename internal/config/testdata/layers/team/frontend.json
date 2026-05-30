@@ -1,0 +1,7 @@
+{
+  "skills": ["frontend-skill"],
+  "agents": ["cursor"],
+  "features": {
+    "history": "on"
+  }
+}
