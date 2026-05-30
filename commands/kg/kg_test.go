@@ -2453,8 +2453,12 @@ func TestRunKGSync_NoSourceDir(t *testing.T) {
 
 func TestRunKGPostprocess_NoGraph(t *testing.T) {
 	// postprocess requires a CRG binary; with no .venv or CRG on PATH,
-	// NewCRGBridge should fail gracefully. If CRG is installed but the
-	// repo has no graph, it should still return an error.
+	// NewCRGBridge should fail gracefully. Neutralize CRG discovery so the
+	// no-binary error path is exercised deterministically regardless of what
+	// is installed on the host — otherwise DiscoverCRGBin finds a real CRG on
+	// PATH and postprocess builds an empty graph and returns nil. (Matches the
+	// PATH-isolation pattern used by the sibling no-CRG tests in this package.)
+	t.Setenv("PATH", t.TempDir())
 	repo := t.TempDir()
 
 	cmd := &cobra.Command{}
