@@ -1080,44 +1080,16 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	now := time.Now().UTC()
-	createdAtRFC3339 := now.Format(time.RFC3339)
-	contract, err := materializeDelegationContract(materializeContractRequest{
-		ProjectPath:     project.Path,
-		Mode:            DelegationContractModeDelegated,
-		PlanID:          in.planID,
-		TaskID:          taskID,
-		Title:           targetTask.Title,
-		Summary:         fmt.Sprintf("Delegated from plan %s", plan.Title),
-		WriteScope:      writeScope,
-		SuccessCriteria: targetTask.Notes,
-		Owner:           in.owner,
-		Now:             now,
+	contract, err := materializeFanoutContractAndBundle(cmd, fanoutMaterializeRequest{
+		Project:    project,
+		In:         in,
+		Plan:       plan,
+		TargetTask: targetTask,
+		TaskID:     taskID,
+		WriteScope: writeScope,
+		BaseRes:    &baseRes,
 	})
 	if err != nil {
-		return err
-	}
-	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
-		ProjectPath:      project.Path,
-		Cmd:              cmd,
-		PlanID:           in.planID,
-		TaskID:           taskID,
-		SliceID:          in.sliceID,
-		Plan:             plan,
-		TargetTask:       targetTask,
-		Contract:         contract,
-		WriteScope:       writeScope,
-		CreatedAtRFC3339: createdAtRFC3339,
-	})
-	if err != nil {
-		// Bundle build failed after contract was persisted; clean up the
-		// orphan contract so retries are not blocked by the duplicate-contract
-		// guard at the top of runWorkflowFanout.
-		contractPath := filepath.Join(delegationDir(project.Path), taskID+".yaml")
-		_ = os.Remove(contractPath)
-		return err
-	}
-	if err := persistFanoutBundleWithBase(project.Path, contract, bundle, &baseRes); err != nil {
 		return err
 	}
 
@@ -1665,6 +1637,63 @@ func splitQualifiedDep(qid string) (planID, taskID string) {
 		return "", qid
 	}
 	return qid[:idx], qid[idx+1:]
+}
+
+// fanoutMaterializeRequest carries the inputs to materializeFanoutContractAndBundle.
+type fanoutMaterializeRequest struct {
+	Project    workflowProjectRef
+	In         fanoutInputs
+	Plan       *CanonicalPlan
+	TargetTask *CanonicalTask
+	TaskID     string
+	WriteScope []string
+	BaseRes    *baseResolution
+}
+
+// materializeFanoutContractAndBundle creates the delegation contract, builds the
+// bundle, and persists the bundle with the §4.2 base-resolution fields. On
+// bundle-build failure it removes the orphan contract so retries are not blocked
+// by the duplicate-contract guard. Extracted from runWorkflowFanout to keep that
+// function's cognitive complexity under the project ceiling.
+func materializeFanoutContractAndBundle(cmd *cobra.Command, req fanoutMaterializeRequest) (*DelegationContract, error) {
+	now := time.Now().UTC()
+	createdAtRFC3339 := now.Format(time.RFC3339)
+	contract, err := materializeDelegationContract(materializeContractRequest{
+		ProjectPath:     req.Project.Path,
+		Mode:            DelegationContractModeDelegated,
+		PlanID:          req.In.planID,
+		TaskID:          req.TaskID,
+		Title:           req.TargetTask.Title,
+		Summary:         fmt.Sprintf("Delegated from plan %s", req.Plan.Title),
+		WriteScope:      req.WriteScope,
+		SuccessCriteria: req.TargetTask.Notes,
+		Owner:           req.In.owner,
+		Now:             now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
+		ProjectPath:      req.Project.Path,
+		Cmd:              cmd,
+		PlanID:           req.In.planID,
+		TaskID:           req.TaskID,
+		SliceID:          req.In.sliceID,
+		Plan:             req.Plan,
+		TargetTask:       req.TargetTask,
+		Contract:         contract,
+		WriteScope:       req.WriteScope,
+		CreatedAtRFC3339: createdAtRFC3339,
+	})
+	if err != nil {
+		contractPath := filepath.Join(delegationDir(req.Project.Path), req.TaskID+".yaml")
+		_ = os.Remove(contractPath)
+		return nil, err
+	}
+	if err := persistFanoutBundleWithBase(req.Project.Path, contract, bundle, req.BaseRes); err != nil {
+		return nil, err
+	}
+	return contract, nil
 }
 
 // fanoutResolveBase reads the optional --base-branch flag and computes the §4.1
