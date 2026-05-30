@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/agentslock"
@@ -552,11 +554,28 @@ func (r *LayeredResolver) loadUserLayer() (ResolvedLayer, bool, error) {
 	return ResolvedLayer{ID: LayerUserLocal, Present: true, Raw: raw}, true, nil
 }
 
+// extendsResult is one layer's fetch outcome, collected per-index so the
+// precedence order of the imported stack and the warning sequence stay
+// deterministic regardless of which goroutine finishes first.
+type extendsResult struct {
+	layer ResolvedLayer
+	lock  LockedLayer
+	warns []ProvenanceWarning
+	err   error
+}
+
 // resolveExtends walks the repo-local manifest's `extends` array left-to-right,
 // fetching + validating each layer, and returns the imported ResolvedLayers (in
 // precedence order), the lockfile entries to persist, and any non-fatal
 // warnings. The repo manifest is parsed into a typed AgentsRC to read its typed
 // sources/extends rather than re-walking the generic map.
+//
+// Each layer fetch is independent network/IO work, so the fetches run
+// concurrently with a bounded worker pool; the .agentsrc.lock write stays a
+// single serialized flush downstream (spec §7.4 "parallel resolution,
+// serialized write"). Results are reduced in entry order afterwards so the
+// imported stack, the warning sequence, and the first non-optional failure are
+// identical to a sequential walk.
 func (r *LayeredResolver) resolveExtends(projectPath string, repoRaw map[string]any) ([]ResolvedLayer, map[string]LockedLayer, []ProvenanceWarning, error) {
 	rc, err := decodeEffective(repoRaw)
 	if err != nil {
@@ -575,22 +594,56 @@ func (r *LayeredResolver) resolveExtends(projectPath string, repoRaw map[string]
 		}
 	}
 
+	// Fetch all layers concurrently. Each goroutine writes its own result slot
+	// (no shared mutation); sources and prevLocked are read-only.
+	results := make([]extendsResult, len(rc.Extends))
+	sem := make(chan struct{}, resolveConcurrency(len(rc.Extends)))
+	var wg sync.WaitGroup
+	for i, entry := range rc.Extends {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, entry LayerRef) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			layer, lock, warns, err := r.resolveOneLayer(entry, sources, prevLocked)
+			results[i] = extendsResult{layer: layer, lock: lock, warns: warns, err: err}
+		}(i, entry)
+	}
+	wg.Wait()
+
+	// Reduce in entry order: deterministic precedence, warnings, and the first
+	// non-optional failure (matching the prior sequential semantics).
 	imported := make([]ResolvedLayer, 0, len(rc.Extends))
 	warnings := []ProvenanceWarning{}
-	for _, entry := range rc.Extends {
-		layer, lock, warns, err := r.resolveOneLayer(entry, sources, prevLocked)
-		warnings = append(warnings, warns...)
-		if err != nil {
+	for i, entry := range rc.Extends {
+		res := results[i]
+		warnings = append(warnings, res.warns...)
+		if res.err != nil {
 			if entry.Optional {
-				warnings = append(warnings, optionalSkipWarning(entry.Ref, err))
+				warnings = append(warnings, optionalSkipWarning(entry.Ref, res.err))
 				continue
 			}
-			return nil, nil, nil, err
+			return nil, nil, nil, res.err
 		}
-		imported = append(imported, layer)
-		locked[entry.Ref] = lock
+		imported = append(imported, res.layer)
+		locked[entry.Ref] = res.lock
 	}
 	return imported, locked, warnings, nil
+}
+
+// resolveConcurrency bounds the extends-fetch worker pool. Layer fetches are
+// network/IO-bound, so the cap oversubscribes the CPU count (always >=4 since
+// GOMAXPROCS is >=1), clamped to the number of layers — never spawn more
+// workers than there is work.
+func resolveConcurrency(n int) int {
+	if n < 1 {
+		return 1
+	}
+	limit := runtime.GOMAXPROCS(0) * 4
+	if n < limit {
+		return n
+	}
+	return limit
 }
 
 // resolveOneLayer resolves a single extends entry: parse ref, locate source,
