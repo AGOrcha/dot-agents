@@ -127,17 +127,33 @@ func Digest(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// openLock is a seam over agentslock.Open so Load/Save's open-error branch is
-// testable without crafting a malformed .agentsrc.lock on disk. Production
-// wires the shared writer.
-var openLock = agentslock.Open
+// lockOpener is the narrow collaborator Load/Save need from the shared writer:
+// open a .agentsrc.lock document for reading/staging its sections. It is the
+// interface-DI test seam (docs/TEST_SEAMS.md) over agentslock.Open, letting the
+// open-error branch be faulted without crafting a malformed lock on disk.
+type lockOpener interface {
+	Open(path string) (*agentslock.Lockfile, error)
+}
+
+// stdLockOpener is the production lockOpener, backed by the real shared writer.
+type stdLockOpener struct{}
+
+func (stdLockOpener) Open(path string) (*agentslock.Lockfile, error) {
+	return agentslock.Open(path)
+}
 
 // Load reads the "adapters" section of the .agentsrc.lock document at path. A
 // missing file or absent section yields an empty lockfile and no error (a
 // not-yet-initialized graph is valid). Sibling sections (config, packages) are
 // not loaded here — they belong to other writers (§7.4).
 func Load(path string) (*Lockfile, error) {
-	doc, err := openLock(path)
+	return loadWith(stdLockOpener{}, path)
+}
+
+// loadWith is Load's injection point: production passes stdLockOpener{}; tests
+// pass a fake to exercise the open/decode error branches.
+func loadWith(opener lockOpener, path string) (*Lockfile, error) {
+	doc, err := opener.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("lockfile: open %s: %w", path, err)
 	}
@@ -157,10 +173,16 @@ func Load(path string) (*Lockfile, error) {
 // verbatim: Save opens the live document, replaces only "adapters", and writes
 // the whole thing back. The shared writer owns the atomic temp-file+rename.
 func Save(path string, lf *Lockfile) error {
+	return saveWith(stdLockOpener{}, path, lf)
+}
+
+// saveWith is Save's injection point: production passes stdLockOpener{}; tests
+// pass a fake to exercise the open-error branch.
+func saveWith(opener lockOpener, path string, lf *Lockfile) error {
 	if lf == nil {
 		return fmt.Errorf("lockfile: cannot save nil lockfile")
 	}
-	doc, err := openLock(path)
+	doc, err := opener.Open(path)
 	if err != nil {
 		return fmt.Errorf("lockfile: open %s: %w", path, err)
 	}

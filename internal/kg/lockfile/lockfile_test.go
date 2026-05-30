@@ -2,15 +2,32 @@ package lockfile
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NikashPrakash/dot-agents/internal/agentslock"
 )
 
 var fixedTime = time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
+
+// fakeLockOpener is the interface-DI fake for lockOpener (docs/TEST_SEAMS.md):
+// a nil open field delegates to the real agentslock.Open, so a test overrides
+// only the open-error branch it wants to fault-inject.
+type fakeLockOpener struct {
+	open func(string) (*agentslock.Lockfile, error)
+}
+
+func (f fakeLockOpener) Open(path string) (*agentslock.Lockfile, error) {
+	if f.open != nil {
+		return f.open(path)
+	}
+	return agentslock.Open(path)
+}
 
 func TestViewStatusValid(t *testing.T) {
 	valid := []ViewStatus{StatusReady, StatusPendingRecompatCheck, StatusPendingRebuild, StatusDSLUpdateRequired}
@@ -222,6 +239,51 @@ func TestSaveOpenError(t *testing.T) {
 	}
 	if err := Save(path, New()); err == nil || !strings.Contains(err.Error(), "open") {
 		t.Fatalf("Save open error = %v", err)
+	}
+}
+
+// TestLoadWithInjectedOpenError drives Load's open-error branch through the
+// injected lockOpener instead of an on-disk malformed file, proving the
+// interface-DI seam faults deterministically.
+func TestLoadWithInjectedOpenError(t *testing.T) {
+	sentinel := errors.New("boom")
+	opener := fakeLockOpener{open: func(string) (*agentslock.Lockfile, error) {
+		return nil, sentinel
+	}}
+	_, err := loadWith(opener, "ignored")
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("loadWith open error = %v, want wrap of sentinel", err)
+	}
+}
+
+// TestSaveWithInjectedOpenError is the Save-side seam proof: the injected
+// opener faults and saveWith wraps it.
+func TestSaveWithInjectedOpenError(t *testing.T) {
+	sentinel := errors.New("boom")
+	opener := fakeLockOpener{open: func(string) (*agentslock.Lockfile, error) {
+		return nil, sentinel
+	}}
+	if err := saveWith(opener, "ignored", New()); !errors.Is(err, sentinel) {
+		t.Fatalf("saveWith open error = %v, want wrap of sentinel", err)
+	}
+}
+
+// TestSeamDelegatesToReal proves the nil-field fake delegates to the real
+// agentslock.Open, so loadWith/saveWith round-trip through the production path.
+func TestSeamDelegatesToReal(t *testing.T) {
+	path := lockPath(t)
+	opener := fakeLockOpener{} // nil open => real agentslock.Open
+	lf := New()
+	lf.Activate("none", "sha256:src", "sha256:schema", fixedTime)
+	if err := saveWith(opener, path, lf); err != nil {
+		t.Fatalf("saveWith delegate: %v", err)
+	}
+	got, err := loadWith(opener, path)
+	if err != nil {
+		t.Fatalf("loadWith delegate: %v", err)
+	}
+	if _, ok := got.Adapters["none"]; !ok {
+		t.Fatal("seam delegation lost adapter none")
 	}
 }
 
