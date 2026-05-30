@@ -231,7 +231,14 @@
         },
         "auth": {
           "type": "object",
-          "description": "v2: opaque auth block. Schema owned by external-agent-sources spec; treated as pass-through here."
+          "description": "v2: opaque auth block. Schema owned by external-agent-sources spec; treated as pass-through here. Well-known pass-through keys read by the config layer: 'signing' (unsigned|optional|required — package signing-posture stub, config-distribution-model §12) and 'token' (bearer token for http package pulls).",
+          "properties": {
+            "signing": {
+              "type": "string",
+              "enum": ["unsigned", "optional", "required"],
+              "description": "v2 (p5 stub): package signing posture. 'required' fails resolution for an unverifiable artifact once cosign/sigstore verification lands; defaults to 'unsigned'."
+            }
+          }
         }
       },
       "allOf": [
