@@ -9,15 +9,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/kg/lockfile"
 	"github.com/NikashPrakash/dot-agents/internal/kg/registry"
 )
 
+// chdir switches the process working directory to dir for the duration of the
+// test, restoring it afterward. The adapter lockfile is resolved relative to
+// the working directory (project root), so tests that touch it must isolate
+// the cwd from the package source tree.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	orig, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(orig) })
+}
+
 func TestLockfilePath(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("KG_HOME", dir)
-	want := filepath.Join(dir, "self", "adapters.lock.yaml")
-	if got := lockfilePath(); got != want {
+	chdir(t, dir)
+	// The lockfile is the project-root .agentsrc.lock resolved through the
+	// canonical config helper, no longer a KG_HOME sidecar. EvalSymlinks
+	// reconciles macOS /private temp-dir symlinking.
+	got := lockfilePath()
+	wantDir, _ := os.Getwd()
+	want := config.AgentsLockPath(wantDir)
+	if got != want {
 		t.Fatalf("lockfilePath() = %q, want %q", got, want)
 	}
 }
@@ -265,8 +287,9 @@ type errorString string
 func (e errorString) Error() string { return string(e) }
 
 func TestNewLockfileCmdWiring(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("KG_HOME", dir)
+	// Isolate cwd so the command resolves a fresh, absent project-root
+	// .agentsrc.lock rather than one in the package source tree.
+	chdir(t, t.TempDir())
 	deps := Deps{ExampleBlock: func(lines ...string) string { return "" }}
 	cmd := newLockfileCmd(deps)
 	if cmd.Use != "lockfile" {
@@ -280,7 +303,7 @@ func TestNewLockfileCmdWiring(t *testing.T) {
 		t.Fatalf("missing subcommands: %v", sub)
 	}
 
-	// Execute `show` through the cobra tree against an empty KG_HOME.
+	// Execute `show` through the cobra tree against an empty project root.
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetArgs([]string{"show"})

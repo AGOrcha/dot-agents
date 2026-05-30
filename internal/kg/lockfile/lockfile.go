@@ -3,23 +3,33 @@
 //
 // The lockfile pins each activated adapter's source and schema digests and
 // tracks a per-materialized-view state machine for cross-adapter cutover.
-// This package provides the value types, atomic read/write (§10.1.2), the
-// view_status enumeration (§10.1.1), state-machine init on activation, and
-// fail-closed reconciliation (§10.1.3). Cross-adapter transitions beyond
-// init/reconcile are owned by later tasks in this plan.
+// This package provides the value types, the view_status enumeration
+// (§10.1.1), state-machine init on activation, and fail-closed reconciliation
+// (§10.1.3). Cross-adapter transitions beyond init/reconcile are owned by
+// later tasks in this plan.
+//
+// Persistence is NOT hand-rolled here. Adapter state is the "adapters" section
+// of the shared .agentsrc.lock document (config-distribution-model §7.4):
+// Load/Save route through internal/agentslock, which owns the whole JSON
+// document, the atomic write, and the preservation of sibling sections
+// (config, packages, …). The path argument is always the canonical
+// config.AgentsLockPath — never a standalone *.lock file.
 package lockfile
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"time"
 
-	"go.yaml.in/yaml/v3"
+	"github.com/NikashPrakash/dot-agents/internal/agentslock"
 )
+
+// lockSectionAdapters is the agentslock section name this package owns. It is
+// a sibling of the config resolver's "config" and the package resolver's
+// "packages" sections in the same .agentsrc.lock document (§7.4).
+const lockSectionAdapters = "adapters"
 
 // ViewStatus is the normative four-value enum from §10.1.1.
 type ViewStatus string
@@ -51,28 +61,28 @@ const maxStateHistory = 20
 
 // StateTransition is one entry in a view's bounded audit log (§10.1.1).
 type StateTransition struct {
-	At      string     `yaml:"at" json:"at"`
-	From    ViewStatus `yaml:"from,omitempty" json:"from,omitempty"`
-	To      ViewStatus `yaml:"to" json:"to"`
-	Trigger string     `yaml:"trigger" json:"trigger"`
+	At      string     `json:"at"`
+	From    ViewStatus `json:"from,omitempty"`
+	To      ViewStatus `json:"to"`
+	Trigger string     `json:"trigger"`
 }
 
 // ViewDependency records a dependee's schema digest at the time the view was
 // last rebuilt and validated (§10.1).
 type ViewDependency struct {
-	Adapter      string `yaml:"adapter" json:"adapter"`
-	SchemaDigest string `yaml:"schema_digest" json:"schema_digest"`
-	Version      string `yaml:"version" json:"version"`
+	Adapter      string `json:"adapter"`
+	SchemaDigest string `json:"schema_digest"`
+	Version      string `json:"version"`
 }
 
 // View is the per-materialized-view lockfile state (§10.1).
 type View struct {
-	ViewDigest       string            `yaml:"view_digest,omitempty" json:"view_digest,omitempty"`
-	ViewStatus       ViewStatus        `yaml:"view_status" json:"view_status"`
-	DependsOn        []ViewDependency  `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
-	LastRebuiltAt    string            `yaml:"last_rebuilt_at,omitempty" json:"last_rebuilt_at,omitempty"`
-	LastValidationAt string            `yaml:"last_validation_at,omitempty" json:"last_validation_at,omitempty"`
-	StateHistory     []StateTransition `yaml:"state_history,omitempty" json:"state_history,omitempty"`
+	ViewDigest       string            `json:"view_digest,omitempty"`
+	ViewStatus       ViewStatus        `json:"view_status"`
+	DependsOn        []ViewDependency  `json:"depends_on,omitempty"`
+	LastRebuiltAt    string            `json:"last_rebuilt_at,omitempty"`
+	LastValidationAt string            `json:"last_validation_at,omitempty"`
+	StateHistory     []StateTransition `json:"state_history,omitempty"`
 }
 
 // recordTransition appends a transition and truncates to the last
@@ -93,15 +103,17 @@ func (v *View) recordTransition(to ViewStatus, trigger string, now time.Time) {
 
 // Adapter is the per-adapter lockfile state (§10.1).
 type Adapter struct {
-	SourceDigest      string           `yaml:"source_digest" json:"source_digest"`
-	SchemaDigest      string           `yaml:"schema_digest" json:"schema_digest"`
-	ActivatedAt       string           `yaml:"activated_at" json:"activated_at"`
-	MaterializedViews map[string]*View `yaml:"materialized_views,omitempty" json:"materialized_views,omitempty"`
+	SourceDigest      string           `json:"source_digest"`
+	SchemaDigest      string           `json:"schema_digest"`
+	ActivatedAt       string           `json:"activated_at"`
+	MaterializedViews map[string]*View `json:"materialized_views,omitempty"`
 }
 
-// Lockfile is the top-level adapter lockfile document (§10.1).
+// Lockfile is the in-memory view of the "adapters" section of .agentsrc.lock
+// (§10.1). It is a typed projection of one section; the surrounding document
+// (config, packages, lock_version) is owned and preserved by agentslock.
 type Lockfile struct {
-	Adapters map[string]*Adapter `yaml:"adapters" json:"adapters"`
+	Adapters map[string]*Adapter `json:"adapters"`
 }
 
 // New returns an empty lockfile.
@@ -115,19 +127,23 @@ func Digest(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// Load reads and parses the lockfile at path. A missing file yields an empty
-// lockfile and no error (a not-yet-initialized graph is valid).
+// openLock is a seam over agentslock.Open so Load/Save's open-error branch is
+// testable without crafting a malformed .agentsrc.lock on disk. Production
+// wires the shared writer.
+var openLock = agentslock.Open
+
+// Load reads the "adapters" section of the .agentsrc.lock document at path. A
+// missing file or absent section yields an empty lockfile and no error (a
+// not-yet-initialized graph is valid). Sibling sections (config, packages) are
+// not loaded here — they belong to other writers (§7.4).
 func Load(path string) (*Lockfile, error) {
-	data, err := os.ReadFile(path)
+	doc, err := openLock(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return New(), nil
-		}
-		return nil, fmt.Errorf("lockfile: read %s: %w", path, err)
+		return nil, fmt.Errorf("lockfile: open %s: %w", path, err)
 	}
 	lf := New()
-	if err := yaml.Unmarshal(data, lf); err != nil {
-		return nil, fmt.Errorf("lockfile: parse %s: %w", path, err)
+	if _, err := doc.Section(lockSectionAdapters, &lf.Adapters); err != nil {
+		return nil, fmt.Errorf("lockfile: decode adapters %s: %w", path, err)
 	}
 	if lf.Adapters == nil {
 		lf.Adapters = map[string]*Adapter{}
@@ -135,68 +151,25 @@ func Load(path string) (*Lockfile, error) {
 	return lf, nil
 }
 
-// tempFile is the subset of *os.File the atomic-write protocol uses. It is a
-// seam so Save's write/fsync/close error branches are testable without a
-// fault-injecting filesystem.
-type tempFile interface {
-	Name() string
-	Write(p []byte) (int, error)
-	Sync() error
-	Close() error
-}
-
-// Save's filesystem collaborators, overridable in tests. Production wires the
-// os package.
-var (
-	saveMkdirAll   = os.MkdirAll
-	saveCreateTemp = func(dir, pattern string) (tempFile, error) {
-		return os.CreateTemp(dir, pattern)
-	}
-	saveRename = os.Rename
-	saveRemove = os.Remove
-)
-
-// Save writes the lockfile atomically (§10.1.2): marshal, write to a temp
-// file alongside the target, fsync, rename. The parent directory is created
-// if absent.
+// Save stages the lockfile as the "adapters" section of the .agentsrc.lock
+// document at path and flushes it atomically via agentslock (§7.4). Any
+// sibling sections already present (config, packages, …) are preserved
+// verbatim: Save opens the live document, replaces only "adapters", and writes
+// the whole thing back. The shared writer owns the atomic temp-file+rename.
 func Save(path string, lf *Lockfile) error {
 	if lf == nil {
 		return fmt.Errorf("lockfile: cannot save nil lockfile")
 	}
-	data, err := yaml.Marshal(lf)
+	doc, err := openLock(path)
 	if err != nil {
-		return fmt.Errorf("lockfile: marshal: %w", err)
+		return fmt.Errorf("lockfile: open %s: %w", path, err)
 	}
-	dir := filepath.Dir(path)
-	if err := saveMkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("lockfile: mkdir %s: %w", dir, err)
+	if err := doc.SetSection(lockSectionAdapters, lf.Adapters); err != nil {
+		return fmt.Errorf("lockfile: stage adapters: %w", err)
 	}
-	tmp, err := saveCreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("lockfile: create temp: %w", err)
+	if err := doc.Flush(); err != nil {
+		return fmt.Errorf("lockfile: flush %s: %w", path, err)
 	}
-	tmpName := tmp.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = saveRemove(tmpName)
-		}
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return fmt.Errorf("lockfile: write temp: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("lockfile: fsync temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("lockfile: close temp: %w", err)
-	}
-	if err := saveRename(tmpName, path); err != nil {
-		return fmt.Errorf("lockfile: rename temp: %w", err)
-	}
-	cleanup = false
 	return nil
 }
 

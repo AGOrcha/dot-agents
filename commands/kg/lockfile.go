@@ -4,19 +4,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"path/filepath"
+	"os"
 	"sort"
 	"time"
 
 	"github.com/NikashPrakash/dot-agents/internal/adapters/builtin/none"
+	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/kg/lockfile"
 	"github.com/NikashPrakash/dot-agents/internal/kg/registry"
 	"github.com/spf13/cobra"
 )
 
-// lockfilePath returns the adapter lockfile location under KG_HOME.
+// lockfilePath returns the canonical adapter lockfile location: the "adapters"
+// section lives in the project-root .agentsrc.lock alongside .agentsrc.json
+// (config-distribution-model §7.4), resolved through config.AgentsLockPath so
+// the path can never drift from the config and package resolvers' lockfile.
+// The project root is the current working directory, where the CLI is run.
 func lockfilePath() string {
-	return filepath.Join(kgHome(), "self", "adapters.lock.yaml")
+	// os.Getwd is effectively infallible on a live process; an empty path
+	// resolves the lockfile relative to "." which is the same directory.
+	cwd, _ := os.Getwd()
+	return config.AgentsLockPath(cwd)
 }
 
 // builtinRegistry returns a registry with every adapter that ships inside

@@ -1,7 +1,7 @@
 package lockfile
 
 import (
-	"errors"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,8 +11,6 @@ import (
 )
 
 var fixedTime = time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)
-
-var errFake = errors.New("fake io error")
 
 func TestViewStatusValid(t *testing.T) {
 	valid := []ViewStatus{StatusReady, StatusPendingRecompatCheck, StatusPendingRebuild, StatusDSLUpdateRequired}
@@ -39,8 +37,14 @@ func TestDigest(t *testing.T) {
 	}
 }
 
+// lockPath returns a .agentsrc.lock path inside a fresh temp dir.
+func lockPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), ".agentsrc.lock")
+}
+
 func TestLoadMissingFile(t *testing.T) {
-	lf, err := Load(filepath.Join(t.TempDir(), "absent.yaml"))
+	lf, err := Load(lockPath(t))
 	if err != nil {
 		t.Fatalf("Load missing: %v", err)
 	}
@@ -49,22 +53,22 @@ func TestLoadMissingFile(t *testing.T) {
 	}
 }
 
-func TestLoadParseError(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.yaml")
-	if err := os.WriteFile(path, []byte("adapters: [unterminated"), 0o644); err != nil {
+func TestLoadOpenError(t *testing.T) {
+	// agentslock.Open fails when the document is not valid JSON.
+	path := lockPath(t)
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
-		t.Fatal("Load malformed want error")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "open") {
+		t.Fatalf("Load malformed = %v, want open error", err)
 	}
 }
 
-func TestLoadEmptyAdaptersKey(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "lock.yaml")
-	// Explicit null adapters -> Load must normalize to an empty map.
-	if err := os.WriteFile(path, []byte("adapters: null\n"), 0o644); err != nil {
+func TestLoadAbsentAdaptersSection(t *testing.T) {
+	// A lock document with only a config section and no adapters key must
+	// Load to an empty (non-nil) adapter map.
+	path := lockPath(t)
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"config":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	lf, err := Load(path)
@@ -76,109 +80,20 @@ func TestLoadEmptyAdaptersKey(t *testing.T) {
 	}
 }
 
-// fakeTemp is a fault-injecting tempFile.
-type fakeTemp struct {
-	writeErr error
-	syncErr  error
-	closeErr error
-	closed   bool
-}
-
-func (f *fakeTemp) Name() string { return "/tmp/fake" }
-func (f *fakeTemp) Write(p []byte) (int, error) {
-	if f.writeErr != nil {
-		return 0, f.writeErr
+func TestLoadDecodeError(t *testing.T) {
+	// adapters present but the wrong JSON shape (array, not object) -> the
+	// section decode into map[string]*Adapter fails.
+	path := lockPath(t)
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"adapters":[1,2,3]}`), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	return len(p), nil
-}
-func (f *fakeTemp) Sync() error { return f.syncErr }
-func (f *fakeTemp) Close() error {
-	f.closed = true
-	return f.closeErr
-}
-
-// swapSaveSeams overrides the package save collaborators for the duration of
-// a test and restores them afterward.
-func swapSaveSeams(t *testing.T, mk func(string, os.FileMode) error, ct func(string, string) (tempFile, error), rn func(string, string) error, rm func(string) error) {
-	t.Helper()
-	om, oc, orn, orm := saveMkdirAll, saveCreateTemp, saveRename, saveRemove
-	if mk != nil {
-		saveMkdirAll = mk
-	}
-	if ct != nil {
-		saveCreateTemp = ct
-	}
-	if rn != nil {
-		saveRename = rn
-	}
-	if rm != nil {
-		saveRemove = rm
-	}
-	t.Cleanup(func() {
-		saveMkdirAll, saveCreateTemp, saveRename, saveRemove = om, oc, orn, orm
-	})
-}
-
-func TestSaveCreateTempError(t *testing.T) {
-	swapSaveSeams(t, nil, func(string, string) (tempFile, error) {
-		return nil, errFake
-	}, nil, nil)
-	if err := Save("/tmp/whatever/lock.yaml", New()); err == nil || !strings.Contains(err.Error(), "create temp") {
-		t.Fatalf("Save create-temp error = %v", err)
-	}
-}
-
-func TestSaveWriteError(t *testing.T) {
-	ft := &fakeTemp{writeErr: errFake}
-	swapSaveSeams(t, nil, func(string, string) (tempFile, error) { return ft, nil }, nil, func(string) error { return nil })
-	if err := Save("/tmp/lock.yaml", New()); err == nil || !strings.Contains(err.Error(), "write temp") {
-		t.Fatalf("Save write error = %v", err)
-	}
-	if !ft.closed {
-		t.Fatal("temp file not closed on write error")
-	}
-}
-
-func TestSaveSyncError(t *testing.T) {
-	swapSaveSeams(t, nil, func(string, string) (tempFile, error) { return &fakeTemp{syncErr: errFake}, nil }, nil, func(string) error { return nil })
-	if err := Save("/tmp/lock.yaml", New()); err == nil || !strings.Contains(err.Error(), "fsync temp") {
-		t.Fatalf("Save fsync error = %v", err)
-	}
-}
-
-func TestSaveCloseError(t *testing.T) {
-	swapSaveSeams(t, nil, func(string, string) (tempFile, error) { return &fakeTemp{closeErr: errFake}, nil }, nil, func(string) error { return nil })
-	if err := Save("/tmp/lock.yaml", New()); err == nil || !strings.Contains(err.Error(), "close temp") {
-		t.Fatalf("Save close error = %v", err)
-	}
-}
-
-func TestSaveRenameError(t *testing.T) {
-	removed := false
-	swapSaveSeams(t, nil,
-		func(string, string) (tempFile, error) { return &fakeTemp{}, nil },
-		func(string, string) error { return errFake },
-		func(string) error { removed = true; return nil },
-	)
-	if err := Save("/tmp/lock.yaml", New()); err == nil || !strings.Contains(err.Error(), "rename temp") {
-		t.Fatalf("Save rename error = %v", err)
-	}
-	if !removed {
-		t.Fatal("temp file not cleaned up on rename error")
-	}
-}
-
-func TestLoadReadError(t *testing.T) {
-	// A directory cannot be read as a file -> non-IsNotExist error.
-	dir := t.TempDir()
-	if _, err := Load(dir); err == nil {
-		t.Fatal("Load of a directory want error")
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "decode adapters") {
+		t.Fatalf("Load bad adapters shape = %v, want decode error", err)
 	}
 }
 
 func TestSaveAndLoadRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "nested", "adapters.lock.yaml")
+	path := lockPath(t)
 	lf := New()
 	lf.Activate("none", "sha256:src", "sha256:schema", fixedTime)
 	if err := Save(path, lf); err != nil {
@@ -198,31 +113,133 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if ad.ActivatedAt != fixedTime.Format(time.RFC3339) {
 		t.Fatalf("ActivatedAt = %q", ad.ActivatedAt)
 	}
-	// No leftover temp files.
+	// The persisted document is JSON (the shared .agentsrc.lock format), not
+	// a standalone YAML file.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(raw) {
+		t.Fatalf("lockfile is not JSON:\n%s", raw)
+	}
+	// No leftover temp files in the document directory.
 	entries, _ := os.ReadDir(filepath.Dir(path))
 	for _, e := range entries {
-		if strings.Contains(e.Name(), ".tmp-") {
+		if strings.Contains(e.Name(), ".tmp") {
 			t.Fatalf("leftover temp file: %s", e.Name())
 		}
 	}
 }
 
+// TestSavePreservesSiblingSections is the forward-compat proof (§7.4): writing
+// the "adapters" section through the shared writer must leave a pre-existing
+// "config" and "packages" section (owned by the config-v2 resolver) byte-for-
+// byte intact. This guards against the lockfile package ever reverting to
+// owning the whole file.
+func TestSavePreservesSiblingSections(t *testing.T) {
+	path := lockPath(t)
+	// Seed a lock document the config-v2 resolver would have written.
+	seed := `{
+  "lock_version": 1,
+  "config": {
+    "acme:org/base": {"sha": "abc123", "ttl_until": "2026-06-01T00:00:00Z"}
+  },
+  "packages": {
+    "graph/none": {"version": "1.0.0"}
+  }
+}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Activate an adapter and Save only the adapters section.
+	lf, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load seed: %v", err)
+	}
+	lf.Activate("none", "sha256:src", "sha256:schema", fixedTime)
+	if err := Save(path, lf); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Re-read the whole document and assert all three sections coexist.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("re-parse document: %v\n%s", err, raw)
+	}
+	for _, section := range []string{"config", "packages", "adapters", "lock_version"} {
+		if _, ok := doc[section]; !ok {
+			t.Fatalf("Save dropped %q section; document = %s", section, raw)
+		}
+	}
+
+	// The sibling sections must be unchanged in content.
+	var config map[string]struct {
+		SHA      string `json:"sha"`
+		TTLUntil string `json:"ttl_until"`
+	}
+	if err := json.Unmarshal(doc["config"], &config); err != nil {
+		t.Fatalf("config section corrupted: %v", err)
+	}
+	if config["acme:org/base"].SHA != "abc123" {
+		t.Fatalf("config sha mutated: %+v", config)
+	}
+	var packages map[string]struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(doc["packages"], &packages); err != nil {
+		t.Fatalf("packages section corrupted: %v", err)
+	}
+	if packages["graph/none"].Version != "1.0.0" {
+		t.Fatalf("packages version mutated: %+v", packages)
+	}
+
+	// And the adapters section round-trips back through Load.
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if _, ok := reloaded.Adapters["none"]; !ok {
+		t.Fatal("adapters section lost after preservation save")
+	}
+}
+
 func TestSaveNil(t *testing.T) {
-	if err := Save(filepath.Join(t.TempDir(), "x.yaml"), nil); err == nil {
+	if err := Save(lockPath(t), nil); err == nil {
 		t.Fatal("Save(nil) want error")
 	}
 }
 
-func TestSaveMkdirError(t *testing.T) {
-	dir := t.TempDir()
-	// Make a file where a directory is needed.
-	blocker := filepath.Join(dir, "blocker")
-	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+func TestSaveOpenError(t *testing.T) {
+	// A malformed document makes the open inside Save fail.
+	path := lockPath(t)
+	if err := os.WriteFile(path, []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(blocker, "sub", "lock.yaml")
-	if err := Save(path, New()); err == nil {
-		t.Fatal("Save under a file-path want error")
+	if err := Save(path, New()); err == nil || !strings.Contains(err.Error(), "open") {
+		t.Fatalf("Save open error = %v", err)
+	}
+}
+
+func TestSaveFlushError(t *testing.T) {
+	// agentslock.Flush writes a temp file into the document's directory; a
+	// read-only directory makes that fail, exercising the flush-error branch.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".agentsrc.lock")
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	err := Save(path, New())
+	if err == nil {
+		t.Skip("filesystem permitted write to read-only dir (running as root?)")
+	}
+	if !strings.Contains(err.Error(), "flush") {
+		t.Fatalf("Save flush error = %v", err)
 	}
 }
 
