@@ -1734,7 +1734,9 @@ func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []str
 
 	var incomplete []string
 	for _, dep := range deps {
-		if statusByID[dep] != "completed" {
+		// §3.4.6/§4: an upstream in {completed, awaiting_owner_review} satisfies
+		// the dep; in_progress / awaiting_agent_review do NOT.
+		if !depSatisfiesDownstream(statusByID[dep]) {
 			incomplete = append(incomplete, dep)
 		}
 	}
@@ -1787,7 +1789,8 @@ func crossPlanDepIncomplete(projectPath, dep string, cache map[string]*Canonical
 
 	for _, t := range tf.Tasks {
 		if t.ID == refTaskID {
-			return t.Status != "completed"
+			// §3.4.6/§4: completed OR awaiting_owner_review satisfies the dep.
+			return !depSatisfiesDownstream(t.Status)
 		}
 	}
 	if warnings != nil {
@@ -1810,7 +1813,8 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 	var incomplete []string
 	for _, dep := range deps {
 		if !strings.Contains(dep, "/") {
-			if statusByID[dep] != "completed" {
+			// §3.4.6/§4: completed OR awaiting_owner_review satisfies the dep.
+			if !depSatisfiesDownstream(statusByID[dep]) {
 				incomplete = append(incomplete, dep)
 			}
 			continue
