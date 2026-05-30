@@ -178,6 +178,51 @@ audit-log primitive rather than fall back to an unaudited delete.
   consolidation task will integrate it with the rest of the R1.5 doc
   delta.
 
+## Q4 / D5 — RubricVersion ordering with R5
+
+**Resolving task.** `t2c-rubric-version-coordination` (this delegation).
+
+**Resolution: lookup-at-execution, first-to-merge-wins, second-rebases —
+no plan-authored version target.** R1.5 and `r5-review-labeling-access`
+both mutate the `RubricVersion` constant in `internal/scoring/rubric.go`,
+so the two plans must not both claim the same number. The coordination
+rule is:
+
+1. The rubric-bump task in each plan **reads the current `RubricVersion`
+   constant at the moment it runs** — never at plan-authoring time.
+2. It **picks the next free version on top of the current value**, sized
+   per the versioning policy: R1.5 ships `hook_outcomes` as a **minor**
+   bump (weights rebalanced, signal set widened by one, combination
+   method unchanged); R5 ships `human_label` as a **major** bump because
+   it introduces the first signal that depends on **external human
+   input** rather than agent-run telemetry — a qualitatively new
+   dependency surface.
+3. **First to merge wins the bump it planned for; the second rebases.**
+   R1.5 observed `2.0.2` at execution time and took the next free minor,
+   `2.1.0` (the shipped value). If R5 merges first to `3.0.0`, R1.5's
+   later mutator would instead target `3.1.0`; if R1.5 merges first (as
+   it did), R5 sees `2.1.0` and targets `3.0.0`.
+
+**Rationale.** A plan-authored target ("we will be 2.1.0") goes stale the
+moment another in-flight plan rebases to a new base, producing a
+merge-conflict-by-version where two open plans both claim the same
+number. Reading the constant on the day the task ships keeps the version
+ladder monotonic without requiring either plan to predict the other.
+This decision is operationalized in the rubric's
+[RubricVersion ordering for concurrent plans](../../../../docs/OUTCOME_SCORING_RUBRIC.md)
+section, which records the same rule and the cross-plan version table.
+
+### Cross-references
+
+- **R5 RubricVersion mutation.** `specs/r5-review-labeling-access/design.md`
+  D5.3 — R5's `human_label` signal is the concurrent rubric mutator this
+  ordering rule coordinates with.
+- **Spec D5/Q4 (this question).** The spec defers concurrent-version
+  ordering to execution time; this section is the operative resolution.
+- **`docs/OUTCOME_SCORING_RUBRIC.md` → Versioning policy.** The
+  authoritative, user-facing statement of the lookup-at-execution rule
+  and the R1.5↔R5 coordination note.
+
 ## Other open questions
 
 The remaining spec open questions are resolved by their own tasks and are
@@ -188,7 +233,7 @@ and code/doc changes those tasks produce, not in this file.
   first three real iterations score under 2.1.0.
 - Q2 (advisory-rule sub-scoring) — resolved by
   `t1b-post-tool-observation-evaluation`.
-- Q4 (RubricVersion ordering with R5) — resolved at execution time by
-  `t2c-rubric-version-coordination`.
+- Q4 (RubricVersion ordering with R5) — resolved above in
+  [Q4 / D5 — RubricVersion ordering with R5](#q4--d5--rubricversion-ordering-with-r5).
 - Q5 (cross-iteration `correlation_id` grouping) — out of scope for v1
   per the spec; revisit only if real compaction patterns demand it.
