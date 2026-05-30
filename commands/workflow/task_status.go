@@ -1,6 +1,9 @@
 package workflow
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Task status vocabulary for canonical TASKS.yaml rows and the
 // `da workflow advance --status` command. Centralized here so every
@@ -172,4 +175,46 @@ func taskStatusVocabularyHint() string {
 		quoted[i] = "`" + s + "`"
 	}
 	return "Valid values: " + strings.Join(quoted, ", ") + "."
+}
+
+// transitionRejectedHint renders the operator hint for a rejected transition,
+// naming the legal next statuses when the from-status has any.
+func transitionRejectedHint(from string) string {
+	if allowed := allowedTaskStatusTransitions(from); len(allowed) > 0 {
+		return fmt.Sprintf("From %q the allowed next statuses are: %s.", from, strings.Join(allowed, ", "))
+	}
+	return "This transition is not allowed by the task state machine (design.md §3.1)."
+}
+
+// validateTaskStatusTransition returns a hinted error when moving a task from
+// its current status to newStatus is not a legal §3.1/§3.2 edge, and nil when
+// the transition is allowed. The caller mutates persisted state only on a nil
+// return, so a rejected transition leaves the task status untouched.
+func validateTaskStatusTransition(taskID, from, newStatus string) error {
+	if isValidTaskStatusTransition(from, newStatus) {
+		return nil
+	}
+	return deps.ErrorWithHints(
+		fmt.Sprintf("invalid status transition %q → %q for task %q", from, newStatus, taskID),
+		transitionRejectedHint(from),
+	)
+}
+
+// applyTaskStatusTransition finds taskID in tf, validates the §3.1/§3.2 edge
+// from its current status to newStatus, and—only when the edge is legal—sets
+// the task's status in place. It returns the task title for downstream
+// focus-task bookkeeping. A rejected transition or a missing task returns an
+// error and leaves tf untouched.
+func applyTaskStatusTransition(tf *CanonicalTaskFile, planID, taskID, newStatus string) (string, error) {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID != taskID {
+			continue
+		}
+		if err := validateTaskStatusTransition(taskID, tf.Tasks[i].Status, newStatus); err != nil {
+			return "", err
+		}
+		tf.Tasks[i].Status = newStatus
+		return tf.Tasks[i].Title, nil
+	}
+	return "", fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
 }

@@ -247,3 +247,68 @@ func TestTaskStatusVocabularyHint(t *testing.T) {
 		t.Errorf("vocabulary hint must not mention rejected pr_open name: %s", hint)
 	}
 }
+
+// TestTransitionRejectedHint covers both branches: a from-status with legal
+// next statuses lists them; a terminal from-status falls back to the generic
+// state-machine message.
+func TestTransitionRejectedHint(t *testing.T) {
+	withNext := transitionRejectedHint(TaskStatusInProgress)
+	if !strings.Contains(withNext, TaskStatusAwaitingAgentReview) {
+		t.Errorf("hint for in_progress should name allowed next statuses; got %q", withNext)
+	}
+	terminal := transitionRejectedHint(TaskStatusCompleted)
+	if !strings.Contains(terminal, "§3.1") {
+		t.Errorf("terminal from-status should fall back to state-machine hint; got %q", terminal)
+	}
+}
+
+// TestApplyTaskStatusTransition exercises the helper directly: legal edge
+// mutates in place and returns the title; rejected edge and missing task both
+// error and leave the slice untouched.
+func TestApplyTaskStatusTransition(t *testing.T) {
+	newTaskFile := func() *CanonicalTaskFile {
+		return &CanonicalTaskFile{
+			SchemaVersion: 1,
+			PlanID:        "p",
+			Tasks: []CanonicalTask{
+				{ID: "t1", Title: "first", Status: TaskStatusInProgress},
+			},
+		}
+	}
+
+	t.Run("legal edge mutates and returns title", func(t *testing.T) {
+		tf := newTaskFile()
+		title, err := applyTaskStatusTransition(tf, "p", "t1", TaskStatusAwaitingAgentReview)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if title != "first" {
+			t.Errorf("title = %q, want %q", title, "first")
+		}
+		if tf.Tasks[0].Status != TaskStatusAwaitingAgentReview {
+			t.Errorf("status not applied: %q", tf.Tasks[0].Status)
+		}
+	})
+
+	t.Run("illegal edge (skips agent gate) leaves status untouched", func(t *testing.T) {
+		tf := newTaskFile()
+		_, err := applyTaskStatusTransition(tf, "p", "t1", TaskStatusAwaitingOwnerReview)
+		if err == nil {
+			t.Fatal("expected rejection for in_progress→awaiting_owner_review")
+		}
+		if tf.Tasks[0].Status != TaskStatusInProgress {
+			t.Errorf("rejected transition mutated status to %q", tf.Tasks[0].Status)
+		}
+	})
+
+	t.Run("missing task errors", func(t *testing.T) {
+		tf := newTaskFile()
+		_, err := applyTaskStatusTransition(tf, "p", "nope", TaskStatusInProgress)
+		if err == nil {
+			t.Fatal("expected not-found error")
+		}
+		if !strings.Contains(err.Error(), "nope") {
+			t.Errorf("error should name the missing task id; got %q", err.Error())
+		}
+	})
+}
