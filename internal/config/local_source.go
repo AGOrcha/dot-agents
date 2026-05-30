@@ -28,6 +28,8 @@ import (
 	"sort"
 	"strings"
 
+	"golang.org/x/sys/execabs"
+
 	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
 
@@ -110,8 +112,13 @@ func (execGitRunner) Run(dir string, args ...string) (string, error) {
 
 // runGit invokes the git binary in dir and returns trimmed stdout, wrapping a
 // non-zero exit with the captured stderr for a diagnosable error.
+//
+// It uses execabs (not os/exec) so "git" is resolved to an absolute path on
+// PATH and a relative resolution from the current working directory is refused
+// — the canonical mitigation for an untrusted-PATH lookup (S4036), matching
+// internal/scoring/signal_git.go.
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	cmd := execabs.Command("git", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
