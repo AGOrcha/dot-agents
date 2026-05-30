@@ -89,14 +89,10 @@ func TestEnsureBootstrapped(t *testing.T) {
 			s := NewLocalSource(tc.root, tc.git)
 			gotInit, err := s.EnsureBootstrapped()
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
+				requireErr(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			requireNoErr(t, err)
 			if gotInit != tc.wantInit {
 				t.Fatalf("initialized = %v, want %v", gotInit, tc.wantInit)
 			}
@@ -152,14 +148,10 @@ func TestResolvedRef(t *testing.T) {
 			s := NewLocalSource("/tmp/agents", tc.git)
 			got, err := s.ResolvedRef()
 			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
+				requireErr(t, err)
 				return
 			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+			requireNoErr(t, err)
 			if got != tc.want {
 				t.Fatalf("ref = %q, want %q", got, tc.want)
 			}
@@ -588,4 +580,22 @@ func readFile(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+// requireErr fails the test unless err is non-nil. Extracting the wantErr
+// assertion keeps the table-test loop bodies flat (under cognitive-complexity
+// 15) instead of nesting an if inside the wantErr branch.
+func requireErr(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+}
+
+// requireNoErr fails the test when err is non-nil.
+func requireNoErr(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
