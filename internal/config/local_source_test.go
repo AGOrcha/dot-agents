@@ -179,6 +179,8 @@ func TestResolvedRef(t *testing.T) {
 
 func TestLockKey(t *testing.T) {
 	t.Parallel()
+	// A slash-style root resolves identically on POSIX and Windows because
+	// relPath slash-normalizes both sides before the lexical containment check.
 	root := "/home/u/.agents"
 	tests := []struct {
 		name     string
@@ -191,7 +193,7 @@ func TestLockKey(t *testing.T) {
 			want:     "local:skills/foo/SKILL.md@" + testHead,
 		},
 		{
-			name:     "absolute path under root is made relative",
+			name:     "path under root is made relative",
 			unitPath: root + "/agents/bar.md",
 			want:     "local:agents/bar.md@" + testHead,
 		},
@@ -205,6 +207,69 @@ func TestLockKey(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			s := NewLocalSource(root, &fakeGit{isRepo: true, head: testHead})
+			got, err := s.LockKey(tc.unitPath)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("key = %q, want %q", got, tc.want)
+			}
+			if strings.ContainsRune(got, '\\') {
+				t.Fatalf("lock key leaked a backslash separator: %q", got)
+			}
+		})
+	}
+}
+
+// TestLockKeyOSNativeSeparators is the cross-OS regression for the Windows-only
+// failure: an OS-native absolute path (built with filepath.Join, so it uses `\`
+// on Windows and `/` on POSIX) under an OS-native root must yield a key whose
+// path component is slash-delimited and root-relative on every platform.
+func TestLockKeyOSNativeSeparators(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "dot-agents")
+	unitPath := filepath.Join(root, "agents", "team", "bar.md")
+	s := NewLocalSource(root, &fakeGit{isRepo: true, head: testHead})
+	got, err := s.LockKey(unitPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := "local:agents/team/bar.md@" + testHead
+	if got != want {
+		t.Fatalf("key = %q, want %q", got, want)
+	}
+	if strings.ContainsRune(got, '\\') {
+		t.Fatalf("lock key leaked a backslash separator: %q", got)
+	}
+}
+
+// TestLockKeyUnderRootEdges covers underRoot's exact-match and degenerate-root
+// branches that the main table does not reach.
+func TestLockKeyUnderRootEdges(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		root     string
+		unitPath string
+		want     string
+	}{
+		{
+			name:     "path equal to root resolves to dot",
+			root:     "/home/u/.agents",
+			unitPath: "/home/u/.agents",
+			want:     "local:.@" + testHead,
+		},
+		{
+			name:     "dot root never claims a path",
+			root:     ".",
+			unitPath: "skills/x.md",
+			want:     "local:skills/x.md@" + testHead,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := NewLocalSource(tc.root, &fakeGit{isRepo: true, head: testHead})
 			got, err := s.LockKey(tc.unitPath)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)

@@ -220,18 +220,42 @@ func (s *LocalSource) LockKey(unitPath string) (string, error) {
 	return localSourceID + pathSeparator + rel + versionSeparator + ref, nil
 }
 
-// relPath normalizes unitPath to a slash-delimited path relative to Root. An
-// absolute path under Root is made relative; a path already relative is just
-// slash-normalized. A path that does not sit under Root is returned cleaned as
-// given (the caller passed a deliberately external path).
+// relPath normalizes unitPath to a slash-delimited path relative to Root. A
+// path that resolves under Root is made relative; one already relative is just
+// slash-normalized; one that resolves outside Root is returned cleaned as given
+// (the caller passed a deliberately external path).
+//
+// It is separator-agnostic: both inputs are slash-normalized before the
+// containment check and the result is slash-joined, so a lock key is byte-for-
+// byte identical on POSIX and Windows regardless of which separator the caller
+// used. filepath.Rel handles OS-native absolute paths (drive letters/volumes);
+// the slash-prefix fallback handles POSIX-style paths that are not "absolute"
+// under Windows' filepath but still sit under a slash-style Root.
 func (s *LocalSource) relPath(unitPath string) string {
-	clean := filepath.Clean(unitPath)
-	if filepath.IsAbs(clean) {
-		if rel, err := filepath.Rel(s.Root, clean); err == nil && !strings.HasPrefix(rel, "..") {
-			clean = rel
-		}
+	slashPath := filepath.ToSlash(filepath.Clean(unitPath))
+	slashRoot := filepath.ToSlash(filepath.Clean(s.Root))
+	if rel, ok := underRoot(slashRoot, slashPath); ok {
+		return rel
 	}
-	return filepath.ToSlash(clean)
+	return slashPath
+}
+
+// underRoot reports whether slashPath sits under slashRoot and, if so, returns
+// the slash-delimited path relative to root. Both arguments must already be
+// slash-normalized and cleaned. The comparison is purely lexical (no filesystem
+// access) so it behaves identically on every OS.
+func underRoot(slashRoot, slashPath string) (string, bool) {
+	if slashRoot == "" || slashRoot == "." {
+		return "", false
+	}
+	if slashPath == slashRoot {
+		return ".", true
+	}
+	prefix := strings.TrimSuffix(slashRoot, "/") + "/"
+	if rel := strings.TrimPrefix(slashPath, prefix); rel != slashPath {
+		return rel, true
+	}
+	return "", false
 }
 
 // EnsureProvenanceGitignore writes the idempotent da-owned block into the local
