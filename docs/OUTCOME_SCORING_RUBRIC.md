@@ -79,6 +79,18 @@ version ladder monotonic without requiring plans to predict each other,
 and avoids a merge-conflict-by-version where two open plans both claim
 the same number.
 
+**R1.5 / R5 coordination (current state).** The two in-flight plans that
+mutate `RubricVersion` are `r1-5-hook-enforcement-telemetry` (minor —
+`hook_outcomes`) and `r5-review-labeling-access` (major — `human_label`).
+R1.5 merged first and observed `2.0.2` at execution, so it took the next
+free minor, `2.1.0` (the shipped value). R5, running later, reads `2.1.0`
+and targets `3.0.0` for its major bump; no rebase of R1.5 is required.
+The plan-side resolution and rationale live in R1.5 plan design,
+section `Q4 / D5 — RubricVersion ordering with R5`
+(`.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md`).
+Any future concurrent rubric mutator follows the same five-step rule
+above rather than hard-coding a target number here.
+
 ## Two-way checks and the integrity track
 
 A signal can have **two** sources for the same fact:
