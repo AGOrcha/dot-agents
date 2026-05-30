@@ -2,11 +2,14 @@ package workflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
 func TestWorkflowAppTypesJSONSingleRecommended(t *testing.T) {
@@ -89,6 +92,10 @@ func setupWorkflowAppTypesProject(t *testing.T, agentsrc string) string {
 	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(agentsrc), 0644); err != nil {
 		t.Fatal(err)
 	}
+	// Isolate the user-local config layer the snapshot resolver merges in, so a
+	// stray developer ~/.agents/.agentsrc.json cannot leak app_type_verifier_map
+	// entries into these table cases.
+	t.Setenv("AGENTS_HOME", t.TempDir())
 	return repo
 }
 
@@ -234,6 +241,142 @@ func TestRunWorkflowAppTypes_FormatJSONConflict(t *testing.T) {
 	})
 	_ = out
 }
+
+// TestWorkflowAppTypesMergesUserLocalLayer proves the snapshot refactor reads
+// the *effective* (layered) config: a user-local app_type_verifier_map entry
+// must surface alongside the repo-local one, which the pre-refactor raw
+// repo-only read could never do.
+func TestWorkflowAppTypesMergesUserLocalLayer(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(`{
+  "project":"svc","version":1,"sources":[{"type":"local"}],
+  "app_type_verifier_map":{"go-cli":["unit"]}
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	userHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(userHome, ".agentsrc.json"), []byte(`{
+  "app_type_verifier_map":{"my-local-type":["unit","lint"]}
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", userHome)
+
+	out := captureWorkflowOutput(t, repo, func() error {
+		workflowTestJSON = true
+		defer func() { workflowTestJSON = false }()
+		return executeWorkflowCommand(t, repo, "app-types")
+	})
+
+	var parsed workflowAppTypesView
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("parse json output: %v\n%s", err, out)
+	}
+	names := map[string][]string{}
+	for _, e := range parsed.AppTypes {
+		names[e.Name] = e.VerifierSequence
+	}
+	if _, ok := names["go-cli"]; !ok {
+		t.Fatalf("repo-local app_type missing from effective view: %#v", parsed.AppTypes)
+	}
+	seq, ok := names["my-local-type"]
+	if !ok {
+		t.Fatalf("user-local layer app_type not merged into effective view: %#v", parsed.AppTypes)
+	}
+	if strings.Join(seq, ",") != "unit,lint" {
+		t.Fatalf("user-local verifier sequence = %v, want [unit lint]", seq)
+	}
+}
+
+// TestWorkflowAppTypesNoManifestIsEmpty proves the negative path: a project with
+// no repo-local .agentsrc.json resolves to an empty view with no error, matching
+// the pre-refactor no-file behavior even though the FLAT resolver treats a
+// missing manifest as fatal internally.
+func TestWorkflowAppTypesNoManifestIsEmpty(t *testing.T) {
+	repo := t.TempDir()
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	out := captureWorkflowOutput(t, repo, func() error {
+		return executeWorkflowCommand(t, repo, "app-types")
+	})
+	if !strings.Contains(out, "No app_types found") {
+		t.Fatalf("missing-manifest project should print empty notice, got:\n%s", out)
+	}
+}
+
+func TestDecodeAppTypeVerifierMap(t *testing.T) {
+	// Nil / wrong-typed / empty inputs all collapse to an empty map, no error.
+	for _, v := range []any{nil, "not-an-object", map[string]any{}, []any{"x"}} {
+		got, err := decodeAppTypeVerifierMap(v)
+		if err != nil {
+			t.Fatalf("decode(%#v) err = %v", v, err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("decode(%#v) = %#v, want empty", v, got)
+		}
+	}
+
+	// Well-formed entries preserve order; non-array and non-string members are
+	// skipped without aborting the whole map.
+	in := map[string]any{
+		"go-cli":  []any{"unit", "lint"},
+		"bad-seq": "scalar-not-array",
+		"mixed":   []any{"unit", 42, "api"},
+	}
+	got, err := decodeAppTypeVerifierMap(in)
+	if err != nil {
+		t.Fatalf("decode err = %v", err)
+	}
+	if strings.Join(got["go-cli"], ",") != "unit,lint" {
+		t.Errorf("go-cli = %v, want [unit lint]", got["go-cli"])
+	}
+	if _, ok := got["bad-seq"]; ok {
+		t.Errorf("non-array entry should be skipped: %v", got["bad-seq"])
+	}
+	if strings.Join(got["mixed"], ",") != "unit,api" {
+		t.Errorf("mixed = %v, want [unit api] (non-string dropped)", got["mixed"])
+	}
+}
+
+func TestIsMissingManifestErr(t *testing.T) {
+	if !isMissingManifestErr(fmt.Errorf("no %s found at /tmp/x", config.AgentsRCFile)) {
+		t.Error("resolver missing-manifest message should be classified as missing")
+	}
+	if !isMissingManifestErr(os.ErrNotExist) {
+		t.Error("fs.ErrNotExist should be classified as missing")
+	}
+	if isMissingManifestErr(fmt.Errorf("parsing repo-local: unexpected end of JSON input")) {
+		t.Error("a parse error must NOT be swallowed as missing-manifest")
+	}
+}
+
+func TestResolveEffectiveAppTypeMap_ResolverError(t *testing.T) {
+	// A non-missing resolver error must propagate, not be swallowed.
+	orig := appTypeSnapshotResolver
+	t.Cleanup(func() { appTypeSnapshotResolver = orig })
+	appTypeSnapshotResolver = func() config.Resolver {
+		return stubResolver{err: fmt.Errorf("boom: layer fetch failed")}
+	}
+	if _, err := resolveEffectiveAppTypeMap(t.TempDir()); err == nil {
+		t.Fatal("expected resolver error to propagate")
+	}
+
+	// A missing-manifest resolver error is swallowed to an empty map.
+	appTypeSnapshotResolver = func() config.Resolver {
+		return stubResolver{err: fmt.Errorf("no %s found at /x", config.AgentsRCFile)}
+	}
+	got, err := resolveEffectiveAppTypeMap(t.TempDir())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("missing-manifest err should yield empty map: got %#v, %v", got, err)
+	}
+}
+
+type stubResolver struct {
+	snap *config.Snapshot
+	err  error
+}
+
+func (s stubResolver) Resolve(string) (*config.Snapshot, error) { return s.snap, s.err }
 
 func TestRunWorkflowAppTypes_EmptyAndDocFormat(t *testing.T) {
 

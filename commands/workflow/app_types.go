@@ -2,7 +2,9 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +13,14 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
+
+// appTypeSnapshotResolver builds the effective-config Snapshot that app-type
+// detection reads. It is a package var so tests can isolate layers; production
+// uses the shared FLAT resolver so `workflow app-types` resolves the same
+// effective config as `da config explain` and the rest of internal/config.
+var appTypeSnapshotResolver func() config.Resolver = func() config.Resolver {
+	return config.NewFlatResolver()
+}
 
 type workflowAppTypesView struct {
 	Project  string                 `json:"project"`
@@ -126,16 +136,17 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 		Path:    project.Path,
 		Source:  config.DisplayPath(filepathAgentsRC(project.Path)),
 	}
-	d, err := loadAgentsrcFanoutDispatch(project.Path)
+
+	appTypeMap, err := resolveEffectiveAppTypeMap(project.Path)
 	if err != nil {
 		return view, err
 	}
-	if d == nil || len(d.AppTypeVerifierMap) == 0 {
+	if len(appTypeMap) == 0 {
 		return view, nil
 	}
 
-	entries := make([]workflowAppTypeEntry, 0, len(d.AppTypeVerifierMap))
-	for name, seq := range d.AppTypeVerifierMap {
+	entries := make([]workflowAppTypeEntry, 0, len(appTypeMap))
+	for name, seq := range appTypeMap {
 		entries = append(entries, workflowAppTypeEntry{
 			Name:             name,
 			VerifierSequence: append([]string(nil), seq...),
@@ -147,6 +158,68 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 	markRecommendedAppTypes(entries, project.Name)
 	view.AppTypes = entries
 	return view, nil
+}
+
+// resolveEffectiveAppTypeMap reads the effective app_type_verifier_map from the
+// shared config Snapshot so app-type detection sees the same merged config every
+// other surface does (config-v2 §4 layer model), rather than re-reading only the
+// repo-local .agentsrc.json. The map lives in ExtraFields, so it is read off the
+// snapshot's EffectiveRaw() projection (which round-trips through the AgentsRC
+// marshaler and therefore includes ExtraFields).
+//
+// A missing repo-local manifest is not an error here: it yields an empty map, so
+// `workflow app-types` prints the same "No app_types found" notice it did before
+// the snapshot refactor instead of failing.
+func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, error) {
+	snap, err := appTypeSnapshotResolver().Resolve(projectPath)
+	if err != nil {
+		if isMissingManifestErr(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	raw, err := snap.EffectiveRaw()
+	if err != nil {
+		return nil, err
+	}
+	return decodeAppTypeVerifierMap(raw["app_type_verifier_map"])
+}
+
+// decodeAppTypeVerifierMap coerces the generic app_type_verifier_map value from
+// the effective config into name → ordered verifier sequence. Non-string/array
+// shapes are tolerated (skipped) so a malformed entry never panics the command;
+// each sequence preserves declared order (CategoryOrderedReplace).
+func decodeAppTypeVerifierMap(v any) (map[string][]string, error) {
+	obj, ok := v.(map[string]any)
+	if !ok || len(obj) == 0 {
+		return nil, nil
+	}
+	out := make(map[string][]string, len(obj))
+	for name, rawSeq := range obj {
+		arr, ok := rawSeq.([]any)
+		if !ok {
+			continue
+		}
+		seq := make([]string, 0, len(arr))
+		for _, item := range arr {
+			if s, ok := item.(string); ok {
+				seq = append(seq, s)
+			}
+		}
+		out[name] = seq
+	}
+	return out, nil
+}
+
+// isMissingManifestErr reports whether err is the resolver's "no repo-local
+// manifest" condition. The FlatResolver surfaces an absent .agentsrc.json as a
+// fatal error; app-type detection treats absence as "no app_types" instead, so
+// the pre-refactor no-file behavior is preserved.
+func isMissingManifestErr(err error) bool {
+	if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+		return true
+	}
+	return strings.Contains(err.Error(), "no "+config.AgentsRCFile+" found")
 }
 
 func markRecommendedAppTypes(entries []workflowAppTypeEntry, projectName string) {
