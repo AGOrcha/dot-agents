@@ -615,15 +615,6 @@ func isValidPlanStatus(s string) bool {
 	}
 }
 
-func isValidTaskStatus(s string) bool {
-	switch s {
-	case "pending", "in_progress", "blocked", "completed", "cancelled":
-		return true
-	default:
-		return false
-	}
-}
-
 func runWorkflowPlanList() error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -1988,7 +1979,7 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if !isValidTaskStatus(newStatus) {
 		return deps.ErrorWithHints(
 			fmt.Sprintf("invalid task status %q", newStatus),
-			"Valid values: `pending`, `in_progress`, `blocked`, `completed`, `cancelled`.",
+			taskStatusVocabularyHint(),
 		)
 	}
 	project, err := currentWorkflowProject()
@@ -2003,6 +1994,16 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	var taskTitle string
 	for i, t := range tf.Tasks {
 		if t.ID == taskID {
+			if !isValidTaskStatusTransition(t.Status, newStatus) {
+				hint := "This transition is not allowed by the task state machine (design.md §3.1)."
+				if allowed := allowedTaskStatusTransitions(t.Status); len(allowed) > 0 {
+					hint = fmt.Sprintf("From %q the allowed next statuses are: %s.", t.Status, strings.Join(allowed, ", "))
+				}
+				return deps.ErrorWithHints(
+					fmt.Sprintf("invalid status transition %q → %q for task %q", t.Status, newStatus, taskID),
+					hint,
+				)
+			}
 			tf.Tasks[i].Status = newStatus
 			taskTitle = t.Title
 			found = true
