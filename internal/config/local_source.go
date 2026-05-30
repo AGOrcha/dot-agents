@@ -23,12 +23,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"golang.org/x/sys/execabs"
+	git "github.com/go-git/go-git/v6"
 
 	"github.com/NikashPrakash/dot-agents/internal/fsops"
 )
@@ -70,72 +69,93 @@ const (
 	gitignoreFileName   = ".gitignore"
 )
 
-// GitRunner is the seam over the git operations the local source needs. The real
-// implementation shells out to git; tests inject a fake so bootstrap and ref
-// resolution run with no real git binary, repo, or network.
+// GitRepo is the seam over the git operations the local source needs. The
+// production implementation is in-process via go-git (no `git` subprocess, no
+// PATH lookup — the repo-wide policy since the config fetcher rewrite); tests
+// inject a fake so bootstrap and ref resolution run with no real repo or
+// network.
 //
-// Run executes a git subcommand in dir and returns trimmed stdout. IsRepo
-// reports whether dir is the top of a git work tree. Init initializes a repo at
-// dir. Keeping these three apart (rather than one opaque Run) lets a fake model
-// "not a repo yet" → "init" → "is a repo" without parsing git argv.
-type GitRunner interface {
+// IsRepo reports whether dir is a git work tree. Init initializes a repo at dir.
+// Resolve returns the HEAD commit hash plus whether the working tree is dirty;
+// an unborn branch (freshly-init'd, no commits) is reported as an empty commit
+// with no error so the caller can fall back to a deterministic empty-tree ref.
+type GitRepo interface {
 	// IsRepo reports whether dir is a git work tree.
 	IsRepo(dir string) bool
 	// Init initializes a new git repository rooted at dir.
 	Init(dir string) error
-	// Run executes `git <args...>` in dir and returns trimmed stdout.
-	Run(dir string, args ...string) (string, error)
+	// Resolve returns the HEAD commit hash and working-tree dirtiness for the
+	// repo at dir. An unborn branch yields ("", dirty, nil).
+	Resolve(dir string) (commit string, dirty bool, err error)
 }
 
-// execGitRunner is the production GitRunner: it shells out to the git binary.
-type execGitRunner struct{}
+// goGitRepo is the production GitRepo: every operation runs in-process via
+// go-git, so there is no exec, no $PATH, and no command-injection surface.
+type goGitRepo struct{}
 
-// NewExecGitRunner returns the production GitRunner backed by the git binary.
-func NewExecGitRunner() GitRunner { return execGitRunner{} }
+// NewGoGitRepo returns the production GitRepo backed by the in-process go-git
+// library.
+func NewGoGitRepo() GitRepo { return goGitRepo{} }
 
-func (execGitRunner) IsRepo(dir string) bool {
-	out, err := runGit(dir, "rev-parse", "--is-inside-work-tree")
-	return err == nil && out == "true"
+func (goGitRepo) IsRepo(dir string) bool {
+	_, err := git.PlainOpen(dir)
+	return err == nil
 }
 
-func (execGitRunner) Init(dir string) error {
+func (goGitRepo) Init(dir string) error {
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("local source: mkdir %s: %w", dir, err)
 	}
-	_, err := runGit(dir, "init")
-	return err
+	if _, err := git.PlainInit(dir, false); err != nil {
+		return fmt.Errorf("local source: git init %s: %w", dir, err)
+	}
+	return nil
 }
 
-func (execGitRunner) Run(dir string, args ...string) (string, error) {
-	return runGit(dir, args...)
-}
-
-// runGit invokes the git binary in dir and returns trimmed stdout, wrapping a
-// non-zero exit with the captured stderr for a diagnosable error.
-//
-// It uses execabs (not os/exec) so "git" is resolved to an absolute path on
-// PATH and a relative resolution from the current working directory is refused
-// — the canonical mitigation for an untrusted-PATH lookup (S4036), matching
-// internal/scoring/signal_git.go.
-func runGit(dir string, args ...string) (string, error) {
-	cmd := execabs.Command("git", args...)
-	cmd.Dir = dir
-	out, err := cmd.Output()
+func (goGitRepo) Resolve(dir string) (string, bool, error) {
+	repo, err := git.PlainOpen(dir)
 	if err != nil {
-		return "", gitError(args, err)
+		return "", false, fmt.Errorf("local source: open %s: %w", dir, err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return headCommitHash(repo), worktreeDirty(repo), nil
 }
 
-// gitError formats a git invocation failure, surfacing stderr when the failure
-// was a non-zero exit so the caller sees git's own diagnostic.
-func gitError(args []string, err error) error {
-	joined := strings.Join(args, " ")
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return fmt.Errorf("git %s: %w: %s", joined, err, strings.TrimSpace(string(exitErr.Stderr)))
+// headCommitHash returns HEAD's full commit hash, or "" when there is no
+// resolvable commit yet — an unborn branch on a freshly-init'd repo, which
+// go-git surfaces either as a Head error or as an all-zero reference. Both map
+// to "" so the caller falls back to the deterministic empty-tree ref (§7A.1);
+// the version is never an empty string.
+func headCommitHash(repo *git.Repository) string {
+	head, err := repo.Head()
+	if err != nil {
+		return ""
 	}
-	return fmt.Errorf("git %s: %w", joined, err)
+	if hash := head.Hash(); !hash.IsZero() {
+		return hash.String()
+	}
+	return ""
+}
+
+// worktreeDirty reports whether the repo's working tree has uncommitted
+// changes. An error obtaining the worktree status conservatively reports clean,
+// because the commit ref alone is already a valid version (§7A.4).
+func worktreeDirty(repo *git.Repository) bool {
+	st, err := worktreeStatus(repo)
+	if err != nil {
+		return false
+	}
+	return !st.IsClean()
+}
+
+// worktreeStatus returns the repo's working-tree status, folding the two
+// fallible go-git steps (open worktree, compute status) into one error path so
+// worktreeDirty has a single, testable failure branch.
+func worktreeStatus(repo *git.Repository) (git.Status, error) {
+	wt, err := repo.Worktree()
+	if err != nil {
+		return nil, err
+	}
+	return wt.Status()
 }
 
 // LocalSource is the git-backed `local` source rooted at Root (the `~/.agents`
@@ -144,17 +164,17 @@ type LocalSource struct {
 	// Root is the absolute path of the local source repo (`~/.agents`).
 	Root string
 	// Git is the seam over git operations; never nil after NewLocalSource.
-	Git GitRunner
+	Git GitRepo
 }
 
-// NewLocalSource builds a LocalSource for the repo rooted at root. A nil runner
-// defaults to the production exec-backed runner, so callers that do not need a
-// fake can pass nil.
-func NewLocalSource(root string, runner GitRunner) *LocalSource {
-	if runner == nil {
-		runner = NewExecGitRunner()
+// NewLocalSource builds a LocalSource for the repo rooted at root. A nil repo
+// defaults to the production in-process go-git implementation, so callers that
+// do not need a fake can pass nil.
+func NewLocalSource(root string, repo GitRepo) *LocalSource {
+	if repo == nil {
+		repo = NewGoGitRepo()
 	}
-	return &LocalSource{Root: root, Git: runner}
+	return &LocalSource{Root: root, Git: repo}
 }
 
 // EnsureBootstrapped makes the local source resolvable on first resolve / init
@@ -184,33 +204,17 @@ func (s *LocalSource) ResolvedRef() (string, error) {
 	if !s.Git.IsRepo(s.Root) {
 		return "", fmt.Errorf("local source: %s is not a git repository (call EnsureBootstrapped)", s.Root)
 	}
-	commit := s.headCommit()
-	if s.isDirty() {
+	commit, dirty, err := s.Git.Resolve(s.Root)
+	if err != nil {
+		return "", err
+	}
+	if commit == "" {
+		commit = emptyTreeRef
+	}
+	if dirty {
 		return commit + dirtySuffix, nil
 	}
 	return commit, nil
-}
-
-// headCommit resolves HEAD to a full commit hash, falling back to emptyTreeRef
-// for an unborn branch (a freshly-init'd repo with no commits).
-func (s *LocalSource) headCommit() string {
-	out, err := s.Git.Run(s.Root, "rev-parse", "HEAD")
-	if err != nil || out == "" {
-		return emptyTreeRef
-	}
-	return out
-}
-
-// isDirty reports whether the working tree or index has changes relative to
-// HEAD. `git status --porcelain` prints one line per change, so any output means
-// dirty; an error (e.g. unborn branch quirks) conservatively reports clean,
-// because the commit ref alone is already a valid version.
-func (s *LocalSource) isDirty() bool {
-	out, err := s.Git.Run(s.Root, "status", "--porcelain")
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(out) != ""
 }
 
 // LockKey returns the uniform unit ref / lock key for a unit at unitPath within

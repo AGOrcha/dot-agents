@@ -3,24 +3,27 @@ package config
 import (
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	git "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/object"
 )
 
-// fakeGit is a hermetic GitRunner: no real git, repo, or network. It models the
-// three states the local-source bootstrap cares about — "not a repo", "init'd
-// but unborn", "has a commit" — plus scripted dirtiness, so tests exercise every
-// branch deterministically.
+// fakeGit is a hermetic GitRepo: no real repo or network. It models the states
+// the local-source bootstrap cares about — "not a repo", "init'd but unborn",
+// "has a commit" — plus scripted dirtiness and a resolve error, so tests
+// exercise every branch deterministically.
 type fakeGit struct {
-	isRepo    bool
-	initErr   error
-	initCalls int
-	head      string // "" => unborn branch (rev-parse HEAD fails)
-	headErr   error
-	dirty     bool
-	statusErr error
+	isRepo     bool
+	initErr    error
+	initCalls  int
+	head       string // "" => unborn branch (Resolve returns empty commit)
+	resolveErr error
+	dirty      bool
 }
 
 func (f *fakeGit) IsRepo(string) bool { return f.isRepo }
@@ -34,24 +37,11 @@ func (f *fakeGit) Init(string) error {
 	return nil
 }
 
-func (f *fakeGit) Run(_ string, args ...string) (string, error) {
-	switch strings.Join(args, " ") {
-	case "rev-parse HEAD":
-		if f.headErr != nil {
-			return "", f.headErr
-		}
-		return f.head, nil
-	case "status --porcelain":
-		if f.statusErr != nil {
-			return "", f.statusErr
-		}
-		if f.dirty {
-			return " M skills/x/SKILL.md\n", nil
-		}
-		return "", nil
-	default:
-		return "", errors.New("unexpected git args: " + strings.Join(args, " "))
+func (f *fakeGit) Resolve(string) (string, bool, error) {
+	if f.resolveErr != nil {
+		return "", false, f.resolveErr
 	}
+	return f.head, f.dirty, nil
 }
 
 const testHead = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
@@ -137,18 +127,18 @@ func TestResolvedRef(t *testing.T) {
 		},
 		{
 			name: "unborn branch resolves to empty-tree ref",
-			git:  &fakeGit{isRepo: true, head: "", headErr: errors.New("unborn")},
+			git:  &fakeGit{isRepo: true, head: ""},
 			want: emptyTreeRef,
 		},
 		{
 			name: "unborn but dirty still versions deterministically",
-			git:  &fakeGit{isRepo: true, headErr: errors.New("unborn"), dirty: true},
+			git:  &fakeGit{isRepo: true, head: "", dirty: true},
 			want: emptyTreeRef + dirtySuffix,
 		},
 		{
-			name: "status error treated as clean",
-			git:  &fakeGit{isRepo: true, head: testHead, statusErr: errors.New("boom")},
-			want: testHead,
+			name:    "resolve error propagates",
+			git:     &fakeGit{isRepo: true, resolveErr: errors.New("boom")},
+			wantErr: true,
 		},
 		{
 			name:    "non-repo errors",
@@ -289,14 +279,14 @@ func TestLockKeyResolveError(t *testing.T) {
 	}
 }
 
-func TestNewLocalSourceNilRunnerDefaults(t *testing.T) {
+func TestNewLocalSourceNilRepoDefaults(t *testing.T) {
 	t.Parallel()
 	s := NewLocalSource("/tmp/agents", nil)
 	if s.Git == nil {
-		t.Fatalf("expected default runner, got nil")
+		t.Fatalf("expected default repo, got nil")
 	}
-	if _, ok := s.Git.(execGitRunner); !ok {
-		t.Fatalf("expected exec-backed runner, got %T", s.Git)
+	if _, ok := s.Git.(goGitRepo); !ok {
+		t.Fatalf("expected in-process go-git repo, got %T", s.Git)
 	}
 }
 
@@ -429,13 +419,14 @@ func TestSplitLinesEmpty(t *testing.T) {
 	}
 }
 
-func TestExecGitRunnerRoundTrip(t *testing.T) {
+// TestGoGitRepoRoundTrip exercises the in-process go-git GitRepo through its
+// full lifecycle on a real on-disk repo (no `git` binary, no PATH, no network):
+// not-a-repo → init → unborn resolve → commit → committed resolve → dirty
+// resolve. go-git is cross-platform, so this runs identically on every OS.
+func TestGoGitRepoRoundTrip(t *testing.T) {
 	t.Parallel()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
 	root := t.TempDir()
-	r := NewExecGitRunner()
+	r := NewGoGitRepo()
 	if r.IsRepo(root) {
 		t.Fatalf("fresh dir should not be a repo")
 	}
@@ -445,73 +436,149 @@ func TestExecGitRunnerRoundTrip(t *testing.T) {
 	if !r.IsRepo(root) {
 		t.Fatalf("dir should be a repo after init")
 	}
-	// rev-parse HEAD on an unborn branch fails => ResolvedRef falls back.
+
+	// Unborn branch: empty commit, not dirty, no error => empty-tree ref.
 	s := NewLocalSource(root, r)
-	ref, err := s.ResolvedRef()
+	if ref, err := s.ResolvedRef(); err != nil || ref != emptyTreeRef {
+		t.Fatalf("unborn ResolvedRef = (%q, %v), want (%q, nil)", ref, err, emptyTreeRef)
+	}
+
+	// Make a commit: Resolve must report the full 40-char hash, clean.
+	hash := commitFile(t, root, "README.md", "hello")
+	commit, dirty, err := r.Resolve(root)
 	if err != nil {
-		t.Fatalf("resolved ref: %v", err)
+		t.Fatalf("resolve after commit: %v", err)
 	}
-	if ref != emptyTreeRef && !strings.HasPrefix(ref, emptyTreeRef) {
-		t.Fatalf("unexpected ref for unborn repo: %q", ref)
+	if commit != hash.String() {
+		t.Fatalf("commit = %q, want %q", commit, hash.String())
 	}
-	// A failing git subcommand surfaces an error via Run.
-	if _, err := r.Run(root, "rev-parse", "--verify", "definitely-not-a-ref"); err == nil {
-		t.Fatalf("expected error for bad ref")
+	if dirty {
+		t.Fatalf("clean tree reported dirty")
+	}
+	if got, _ := s.ResolvedRef(); got != hash.String() {
+		t.Fatalf("ResolvedRef = %q, want committed hash %q", got, hash.String())
+	}
+
+	// Now dirty the tree: Resolve reports dirty and ResolvedRef gets the suffix.
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("changed"), 0o644); err != nil {
+		t.Fatalf("dirty write: %v", err)
+	}
+	if _, dirty, _ := r.Resolve(root); !dirty {
+		t.Fatalf("modified tree not reported dirty")
+	}
+	if got, _ := s.ResolvedRef(); got != hash.String()+dirtySuffix {
+		t.Fatalf("dirty ResolvedRef = %q, want %q", got, hash.String()+dirtySuffix)
 	}
 }
 
-func TestExecGitRunnerInitMkdirFailure(t *testing.T) {
+func TestGoGitRepoResolveNonRepo(t *testing.T) {
 	t.Parallel()
-	// Place the would-be repo dir under a regular file so MkdirAll fails before
-	// git runs, exercising Init's mkdir-error branch.
-	parent := t.TempDir()
-	fileBlock := filepath.Join(parent, "blocker")
+	r := NewGoGitRepo()
+	if _, _, err := r.Resolve(t.TempDir()); err == nil {
+		t.Fatalf("expected open error resolving a non-repo dir")
+	}
+}
+
+func TestGoGitRepoInitAlreadyExists(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	r := NewGoGitRepo()
+	if err := r.Init(root); err != nil {
+		t.Fatalf("first init: %v", err)
+	}
+	// Re-initializing an existing repo makes go-git's PlainInit fail, exercising
+	// Init's git-init error branch (mkdir succeeds, init does not).
+	if err := r.Init(root); err == nil {
+		t.Fatalf("expected error re-initializing an existing repo")
+	}
+}
+
+func TestGoGitRepoResolveZeroHashHead(t *testing.T) {
+	t.Parallel()
+	// go-git resolves an unparseable HEAD to an all-zero reference (not an
+	// error), so headCommitHash's zero-hash branch maps it to "" and Resolve
+	// falls back to the deterministic empty-tree ref rather than emitting 40
+	// literal zeros as a "real" commit.
+	root := t.TempDir()
+	r := NewGoGitRepo()
+	if err := r.Init(root); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "HEAD"), []byte("garbage-not-a-ref\n"), 0o644); err != nil {
+		t.Fatalf("corrupt HEAD: %v", err)
+	}
+	commit, _, err := r.Resolve(root)
+	if err != nil {
+		t.Fatalf("resolve zero-hash HEAD: %v", err)
+	}
+	if commit != "" {
+		t.Fatalf("zero-hash HEAD commit = %q, want empty", commit)
+	}
+	if ref, _ := NewLocalSource(root, r).ResolvedRef(); ref != emptyTreeRef {
+		t.Fatalf("ResolvedRef = %q, want %q", ref, emptyTreeRef)
+	}
+}
+
+func TestGoGitRepoResolveBareRepoIsClean(t *testing.T) {
+	t.Parallel()
+	// A bare repo has no worktree, so worktreeStatus errors and worktreeDirty
+	// conservatively reports clean. Resolve must still succeed with a non-dirty
+	// (empty-tree) result rather than failing.
+	root := t.TempDir()
+	if _, err := git.PlainInit(root, true); err != nil {
+		t.Fatalf("bare init: %v", err)
+	}
+	commit, dirty, err := NewGoGitRepo().Resolve(root)
+	if err != nil {
+		t.Fatalf("resolve bare repo: %v", err)
+	}
+	if dirty {
+		t.Fatalf("bare repo (no worktree) must not report dirty")
+	}
+	if commit != "" {
+		t.Fatalf("unborn bare repo commit = %q, want empty", commit)
+	}
+}
+
+func TestGoGitRepoInitMkdirFailure(t *testing.T) {
+	t.Parallel()
+	// Place the would-be repo dir under a regular file so MkdirAll fails,
+	// exercising Init's mkdir-error branch with no real git involved.
+	fileBlock := filepath.Join(t.TempDir(), "blocker")
 	if err := os.WriteFile(fileBlock, []byte("x"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	r := NewExecGitRunner()
+	r := NewGoGitRepo()
 	if err := r.Init(filepath.Join(fileBlock, "repo")); err == nil {
 		t.Fatalf("expected mkdir failure under a file path")
 	}
 }
 
-func TestExecGitRunnerExitErrorStderr(t *testing.T) {
-	t.Parallel()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
+// commitFile stages and commits a single file into the repo at root, returning
+// the new commit hash. It uses go-git's in-process worktree API.
+func commitFile(t *testing.T, root, name, content string) plumbing.Hash {
+	t.Helper()
+	repo, err := git.PlainOpen(root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
 	}
-	root := t.TempDir()
-	r := NewExecGitRunner()
-	if err := r.Init(root); err != nil {
-		t.Fatalf("init: %v", err)
+	if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
 	}
-	// A non-zero git exit carries stderr; gitError must surface it.
-	_, err := r.Run(root, "rev-parse", "--verify", "no-such-ref")
-	if err == nil {
-		t.Fatalf("expected non-zero exit error")
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("expected wrapped *exec.ExitError, got %v", err)
+	if _, err := wt.Add(name); err != nil {
+		t.Fatalf("add: %v", err)
 	}
-}
-
-func TestExecGitRunnerNonExitError(t *testing.T) {
-	t.Parallel()
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
+	hash, err := wt.Commit("seed", &git.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@x", When: time.Unix(0, 0)},
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
 	}
-	r := NewExecGitRunner()
-	// A non-existent working directory makes exec fail to start the process —
-	// a non-ExitError failure, exercising gitError's fallback branch.
-	_, err := r.Run(filepath.Join(t.TempDir(), "does-not-exist"), "status")
-	if err == nil {
-		t.Fatalf("expected start failure for missing working dir")
-	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		t.Fatalf("expected a non-ExitError failure, got ExitError: %v", err)
-	}
+	return hash
 }
 
 func readFile(t *testing.T, path string) string {
