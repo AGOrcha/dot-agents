@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/dashboard-rubric.schema.json",
+  "title": "R2 dashboard rubric DTO",
+  "description": "Presentation projection of the active outcome-scoring rubric for the R2 dashboard rubric-explainer view. Returned by GET /api/rubric. Sourced from internal/scoring.DefaultRubric() at process start (spec R4): version, combination method, the signal set with weights + labels + descriptions, and the band ladder. Read-only; the rubric is versioned (spec D3) so every iteration/run DTO carries the rubric_version it was scored under and the UI flags a mismatch against this active version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "combination", "signals", "bands"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Active rubric semantic version (Rubric.Version / scoring.RubricVersion, e.g. '2.1.0')."
+    },
+    "combination": {
+      "type": "string",
+      "enum": ["weighted_mean_renormalized"],
+      "description": "How per-signal sub-scores combine (Rubric.Combination / CombinationMethod). v1 only ships weighted_mean_renormalized."
+    },
+    "signals": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The rubric's signals in declared order (Rubric.Signals / SignalSpec). Weights sum to 1.0.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "weight", "description", "two_way"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "landed",
+              "verifier",
+              "tests",
+              "correction_pressure",
+              "scope",
+              "hook_outcomes",
+              "token_efficiency"
+            ],
+            "description": "Signal id (SignalSpec.ID)."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Human-readable label (SignalSpec.Label)."
+          },
+          "weight": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "description": "Nominal weight in the combination (SignalSpec.Weight)."
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "description": "One-line description of what the signal measures (SignalSpec.Description)."
+          },
+          "two_way": {
+            "type": "boolean",
+            "description": "True when the signal has both an objective and a self-reported source and therefore emits an integrity observation (SignalSpec.TwoWay)."
+          }
+        }
+      }
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Score-band ladder sorted descending by min (Rubric.Bands / ScoreBand). The lowest band is anchored at min 0 so every score in [0,1] lands. The 'unscored' band is implicit (no numeric range) and is NOT listed here; DTOs report band 'unscored' when scored is false.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "min"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["excellent", "good", "fair", "poor"],
+            "description": "Band name (ScoreBand.Name)."
+          },
+          "min": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Inclusive lower bound for the band (ScoreBand.Min)."
+          }
+        }
+      }
+    }
+  }
+}

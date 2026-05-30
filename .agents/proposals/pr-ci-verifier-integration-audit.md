@@ -191,6 +191,35 @@ Regardless of how the lenses are packaged, the **conceptual distinction** is cle
 
 They are siblings in the ownership tree, not the same family.
 
+### 4.9 SonarCloud quality-gate pass-criterion: `new_violations > 0 → FAIL`
+
+**Critical pass-criterion:** A PR is **NOT review-ready** if SonarCloud reports **ANY new issue** (`new_violations > 0`), regardless of whether the quality gate shows green.
+
+**Why this matters:** SonarCloud's built-in "Sonar way" gate uses rating-based conditions (`new_maintainability_rating ≤ A`, `new_coverage ≥ 80`). A maintainability rating stays at "A" even when a PR introduces several CRITICAL code smells on a meaningfully-sized new-code surface — the few smells dilute into an overall "good" rating. Result: "Quality Gate passed" can mask new CRITICAL issues. Bit us in 7 slate PRs (#172/#176/#177/#178/#179/#181 + merged #174) shipping new S3776/S1192 issues on green gates.
+
+**Server-side enforcement:** A custom gate `dot-agents-strict` was created with explicit `new_violations=0 → FAIL` + `new_coverage < 95 → FAIL` (bumped from default 80). Assign this gate to the project in SonarCloud UI (`https://sonarcloud.io/organizations/<org>/quality_gates`) and set it as default.
+
+**Agent-side belt-and-suspenders:** The `pr-ci-watch` verifier **must independently check new-issue count** (via sonar MCP `search_sonar_issues_in_projects` with `pullRequestId=<n>` + `issueStatuses=[OPEN,CONFIRMED]`) and block on count>0, **not** rely solely on the gate-green badge:
+
+```python
+# Sonar MCP call (pseudocode)
+issues = search_sonar_issues_in_projects(
+  projects=[project_key],
+  pullRequestId=pr_number,
+  issueStatuses=["OPEN", "CONFIRMED"]
+)
+if len(issues) > 0:
+  # Block: new issues found, regardless of quality-gate status
+  escalate("new_violations > 0 — PR not ready per new_issues=0 gate")
+```
+
+This ensures the verifier enforces the zero-new-issues rule independently, catching cases where:
+1. The server gate assignment hasn't taken effect yet.
+2. The gate is misconfigured.
+3. The gate is accidentally disabled during project maintenance.
+
+The verifier's check becomes the ground truth on the agent side, complementing the server-side gate as a defense-in-depth pair. Document this in the AGENT.md's **Pass Criteria** section (§5 new item §4, between "Merge conflict resolution" and "Escalation rules").
+
 ---
 
 ## 5. Recommended AGENT.md outline
@@ -208,12 +237,13 @@ Section list:
 1. **Role** — single-paragraph mandate; explicitly contrast against `verifier` (#14), ISP verifier stages (#7), and lens reviewers
 2. **Inputs** (prompt-passed): `pr_number`, `task_id`, `plan_id`, `impl_agent_id` (for fix-up briefs), optional `feedback_channel_path`
 3. **Startup** (3 steps): read merge-back artifact; confirm PR open; confirm task status pending/in_progress
-4. **Watch loop** — polling cadence (60-90s), `gh pr checks <n>` schema, SonarCloud QG endpoint, terminal-state detection
-5. **Classification table** — verbatim from lesson §3 (S3776, S1192, coverage, allowlist, security hotspot vs vulnerability, CPD-tabular, test failures, merge conflicts)
-6. **Auto-fix patterns** — for each mechanical class, the canonical refactor + cross-link to lessons (`[[const-extraction-triggers-cpd-on-tables]]`, `[[no-lazy-allowlist-tech-debt]]`)
-7. **Escalation format** — markdown brief schema written to `.agents/active/pr-ci-watch/<task_id>/escalation.md`; one entry per escalation
-8. **Closeout** — single `verify record --kind custom --verifier-type pr-readiness`; on READY, also run `delegation closeout --decision accept` (the missing step from `[[verify-task-status-vs-pr-history]]`)
-9. **Guardrails** — no orchestrator commands (`workflow orient`, `next`, `status`); no merge-back rewrite; never widens write_scope beyond auto-fix patterns; tabular-CPD check before any S1192 fix
+4. **Pass Criteria** (new) — (a) all GitHub CI checks pass (not just "passing" in terms of no failures, but specifically green terminal state); (b) SonarCloud quality-gate shows "Passed"; **(c) new_issues count = 0** (independent sonar MCP query per §4.9, blocks on any OPEN/CONFIRMED issue); (d) test coverage meets project threshold (95% per new_coverage gate); (e) no merge conflicts, no unresolved manual review threads
+5. **Watch loop** — polling cadence (60-90s), `gh pr checks <n>` schema, SonarCloud `/api/qualitygates/project_status` endpoint, terminal-state detection
+6. **Classification table** — issue types encountered (S3776 cog complexity, S1192 dup literals, S108 empty block, S1186 empty func, S8242 ctx field, coverage gap, test timeout, merge conflict, security hotspot)
+7. **Auto-fix patterns** — for each mechanical class, the canonical refactor + cross-link to lessons (`[[const-extraction-triggers-cpd-on-tables]]`, `[[no-lazy-allowlist-tech-debt]]`)
+8. **Escalation format** — markdown brief schema written to `.agents/active/pr-ci-watch/<task_id>/escalation.md`; one entry per escalation; non-mechanical issues or new_issues > 0 (if they cannot be auto-fixed) escalate to impl
+9. **Closeout** — single `verify record --kind custom --verifier-type pr-readiness`; on READY, also run `delegation closeout --decision accept` (the missing step from `[[verify-task-status-vs-pr-history]]`)
+10. **Guardrails** — no orchestrator commands (`workflow orient`, `next`, `status`); no merge-back rewrite; never widens write_scope beyond auto-fix patterns; tabular-CPD check before any S1192 fix; do not suppress new_issues checks via allowlist or gate disable
 
 ---
 

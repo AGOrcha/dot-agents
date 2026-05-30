@@ -2,10 +2,10 @@
 
 **Status:** draft design proposal, project-local (`.agents/proposals/`) per `[[proposal-routing]]`.
 **Created:** 2026-05-28
-**Routing rationale:** alters dot-agents-local surfaces — the daemon event schema, the hook-sentinel
+**Routing rationale:** alters dot-agents-local surfaces — the service event schema (from r3-background-worker-service), the hook-sentinel
 schema, and the registry-driven dispatch in `commands/` / `internal/` — so it is project-scope, not a
 shared `~/.agents/` resource. Candidate to graduate to
-`workflow/specs/workflow-orchestrator-daemon/design.md` once the contract stabilizes.
+`workflow/specs/r3-background-worker-service/design.md` (or a sibling event-contract spec) once the contract stabilizes.
 **Plan:** sibling task on `pr10-branch-split` (added 2026-05-28), surfaced by maintainer review #160
 line 147 as the convergence target for #157 + #160.
 **Parents / siblings:**
@@ -101,13 +101,13 @@ host) is written once against the registry, and the per-kind cost collapses to a
 This is a **design proposal**, not an implementation plan. It does not:
 
 - Define the final envelope field names down to the wire (left to the spec graduation under
-  `workflow/specs/workflow-orchestrator-daemon/design.md`).
+  `workflow/specs/r3-background-worker-service/design.md` or a sibling event-contract spec).
 - Enumerate the registry's storage location or the exact `.agentsrc.json` key name — that is a
-  planning decision once the daemon + hook-sentinel work converges.
-- Re-decide the §4 daemon event shapes or the #157 sentinel shapes — those stand; this proposal makes
+  planning decision once the service event + hook-sentinel work converges.
+- Re-decide the §4 service event shapes or the #157 sentinel shapes — those stand; this proposal makes
   them registry-driven rather than hand-switched.
 - Land code. The pr10-branch-split sibling task owns sequencing the implementation against whatever
-  registry surface the daemon and hook-sentinel work ship.
+  registry surface the service event and hook-sentinel work ship.
 
 ## §6. Open questions
 
@@ -128,4 +128,4 @@ This is a **design proposal**, not an implementation plan. It does not:
 - `[[monitor-pr-review-comment-routing]]` §4 + §8.6 — event schemas + the open item naming this task.
 - `[[hook-schema-extension-mechanism]]` — the hook-sentinel side of the same convergence (#157).
 - `[[schema-usage]]` — AgentsRC field-sync + open-registry discipline.
-- `[[workflow-orchestrator-daemon]]` — the spec this contract graduates into once stable.
+- `[[r3-background-worker-service]]` — the spec this contract graduates into once stable (background-worker service / `da service`).

@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/dashboard-run.schema.json",
+  "title": "R2 dashboard run (session) DTO",
+  "description": "Presentation projection of a single agent-run session for the R2 observability dashboard. A 'run' is one session_id's worth of iterations discovered in a resolved iter-log root. RunSummary is the row shape returned by GET /api/runs; RunDetail (the full object) is returned by GET /api/runs/{session_id}. Sourced from internal/scoring.SessionScore plus iter-log walk over internal/scoring.IterationRecord. v1 is read-only; R5 augments this payload behind a composition point (e.g. a labels[] array) without forking the shape — so additionalProperties is false here to catch drift, and additive evolution happens via explicit new optional fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "session_id",
+    "rubric_version",
+    "iteration_count",
+    "scored",
+    "score",
+    "band"
+  ],
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable session identifier (IterationRecord.Agent.SessionID). The addressable key for GET /api/runs/{session_id} and the session-<id>.score.yaml sidecar."
+    },
+    "harness": {
+      "type": "string",
+      "description": "Agent platform harness for the session (claude-code, codex, cursor). Taken from the most recent iteration's AgentInfo.Harness; empty when no iteration carried agent identity.",
+      "default": ""
+    },
+    "model": {
+      "type": "string",
+      "description": "Model id for the session (AgentInfo.Model); empty when unknown.",
+      "default": ""
+    },
+    "wave": {
+      "type": "string",
+      "description": "Plan id active at the session's last iteration (IterationRecord.Wave); empty when unknown.",
+      "default": ""
+    },
+    "rubric_version": {
+      "type": "string",
+      "description": "Rubric version the session aggregate was scored under (SessionScore.RubricVersion). May differ from the active rubric reported by /api/rubric; the UI renders a mismatch pill (spec D3)."
+    },
+    "iteration_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of iterations belonging to this session (len(SessionScore.Iterations)). 0 is valid for a session present in the log with no scorable iterations."
+    },
+    "scored": {
+      "type": "boolean",
+      "description": "False when no iteration in the session has a numeric score (SessionScore.Scored). When false, `score` is null and `band` is 'unscored'."
+    },
+    "score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Mean of the scored per-iteration values (SessionScore.Value). null when scored is false. Never an error — missing scores degrade to null per spec R2."
+    },
+    "band": {
+      "type": "string",
+      "enum": ["excellent", "good", "fair", "poor", "unscored"],
+      "description": "Human-readable band for `score` (SessionScore.Band), or 'unscored' when scored is false."
+    },
+    "first_iteration": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Lowest iteration number in the session; null when iteration_count is 0.",
+      "default": null
+    },
+    "last_iteration": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "Highest iteration number in the session; null when iteration_count is 0.",
+      "default": null
+    },
+    "last_update": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC3339 UTC mtime of the newest contributing iter-log or score sidecar file for the session. Drives the runs-grid 'last update' column and is the basis for the response ETag. null when no file mtime is resolvable.",
+      "default": null
+    },
+    "iter_log_dir": {
+      "type": "string",
+      "description": "Resolved iter-log root this session was discovered in (per design.md Q5 root list). Lets the client pass ?iter_log_dir= back on drill-down endpoints for non-active roots.",
+      "default": ""
+    },
+    "per_iteration": {
+      "type": "array",
+      "description": "Lightweight per-iteration score refs (SessionScore.PerIteration) so the runs grid can sparkline a session without fetching every iteration sidecar. Present in RunDetail; omitted from RunSummary rows to keep the list payload small.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["iteration", "scored", "score", "band"],
+        "properties": {
+          "iteration": { "type": "integer", "minimum": 1 },
+          "scored": { "type": "boolean" },
+          "score": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "band": {
+            "type": "string",
+            "enum": ["excellent", "good", "fair", "poor", "unscored"]
+          }
+        }
+      },
+      "default": []
+    },
+    "mean_cache_hit_rate": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Mean of per-iteration session_tokens.cache_hit_rate across iterations that captured token telemetry; null when none did. Feeds the aggregate cache-trend view.",
+      "default": null
+    }
+  }
+}

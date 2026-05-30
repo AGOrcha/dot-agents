@@ -403,23 +403,23 @@ Concrete `.agentsrc.json` slice (illustrative; final shape per external-agent-so
 
 Storage location (`~/.config/da/credentials.json`, 0600) and the principle "secrets never live in repo-committed files" both stay — those are unchanged from the original recommendation. What changes is the *schema and loader* of that file: it is now the external-agent-sources credential store, not an observability-specific store.
 
-### 5.5 Future direction: `da daemon` as local auth proxy / injector
+### 5.5 Future direction: `da service` (run -d) as local auth proxy / injector
 
 **Maintainer feedback 2026-05-28: given the proliferating outbound-auth surface** — `sources:` registries, observability ingest, MCP connections, package registry, plus future REST/CLI access to other systems — the credential-handling boundary belongs in **one process per host**, not scattered across every call site.
 
 Proposed direction (defer past v1; capture as a parked design):
 
-- **`da daemon`** (or an extension of the `workflow-orchestrator-daemon` proposal — see cross-ref below) runs locally as a long-lived process. It owns:
-  - The credential vault (the loader from §5.4 lives in the daemon, not in every CLI invocation).
-  - Per-target auth injection: outbound HTTP/WS requests are proxied through `localhost:<daemon-port>`; the daemon attaches the right credential for the target host (CF Access Service Token headers for `obs.agorcha.dev`, mTLS for a self-hosted backend, OIDC bearer for a package registry, etc.).
-  - Token refresh and rotation (the daemon notices expiry and refreshes ahead of in-flight requests, so individual workers never see a 401).
+- **`da service` (run -d)** — the background-worker service, in daemonized mode (self-backgrounding via the `-d`/`--detach` flag) — runs locally as a long-lived process. It owns:
+  - The credential vault (the loader from §5.4 lives in the service, not in every CLI invocation).
+  - Per-target auth injection: outbound HTTP/WS requests are proxied through `localhost:<service-port>`; the service attaches the right credential for the target host (CF Access Service Token headers for `obs.agorcha.dev`, mTLS for a self-hosted backend, OIDC bearer for a package registry, etc.).
+  - Token refresh and rotation (the service notices expiry and refreshes ahead of in-flight requests, so individual workers never see a 401).
   - Audit log of who-asked-for-what-credential-when (debuggable single source of truth for credential use).
-- **Workers, CLI invocations, and MCP clients** become *credential-unaware*: they POST/GET to `localhost:<port>/proxy/<target>` and the daemon owns the auth side. This removes the §5.4 loader from every call site and lets us add new auth kinds without touching every consumer.
-- **Bootstrap fallback:** when the daemon is not running (CI environment, offline use), the call sites fall back to loading credentials directly from `~/.config/da/credentials.json` per §5.4. The daemon is an optimization layer, not a required dependency.
+- **Workers, CLI invocations, and MCP clients** become *credential-unaware*: they POST/GET to `localhost:<port>/proxy/<target>` and the service owns the auth side. This removes the §5.4 loader from every call site and lets us add new auth kinds without touching every consumer.
+- **Bootstrap fallback:** when the service is not running (CI environment, offline use), the call sites fall back to loading credentials directly from `~/.config/da/credentials.json` per §5.4. The service is an optimization layer, not a required dependency.
 
-**Cross-ref:** `[[workflow-orchestrator-daemon]]` — the parked proposal at `.agents/proposals/workflow-orchestrator-daemon.md` (per pr10-branch-split task notes, ratified 2026-05-28). That daemon already owns: slot ledger, watch loop, auto-closeout, event-stream contract with workers/monitors. **These likely consolidate** — adding "credential proxy/injector" to the same daemon is a natural fit because it already runs as a long-lived local process with privileged state, already owns the IPC surface workers talk to, and already has a deploy/lifecycle story. The alternative — a separate `da auth-daemon` process — duplicates the process management, the socket/port allocation, and the user-visible "what's running" surface.
+**Cross-ref:** `[[workflow-orchestrator-daemon]]` (referred to as "daemon" in earlier proposals — this is the "daemon mode" of `da service run -d`) — the background-worker-service capability already owns: iter-log ingestion, rescore loop, event-stream contract with workers/monitors, and (via R3 spec D1) self-backgrounding via `-d`/`--detach`. **Credential proxy/injector naturally consolidates** into the same service because it already runs as a long-lived background process with privileged state, already owns the IPC/HTTP surface workers talk to, and already has a deploy/lifecycle story (foreground or daemonized via `-d`). No separate auth-daemon process needed.
 
-Suggested follow-up: when the workflow-orchestrator-daemon proposal promotes to a spec, fold "credential proxy/injector" in as one of the daemon's owned responsibilities, alongside the existing slot ledger + watch loop + event stream. No separate spec needed.
+Suggested follow-up: when the r3-background-worker-service spec is finalized and implementation proceeds, fold "credential proxy/injector" in as one of the service's owned responsibilities, alongside the existing iter-log ingestion + rescore loop + event stream. No separate spec needed; the service command is the single integration point.
 
 ### 5.5 Decision
 
