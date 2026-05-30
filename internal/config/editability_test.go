@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// stubBackend is a test PolicyBackend that returns a fixed verdict and/or
+// stubAuthorizer is a test WriteAuthorizer that returns a fixed verdict and/or
 // error, recording the call so tests can assert delegation happened.
-type stubBackend struct {
+type stubAuthorizer struct {
 	verdict Verdict
 	err     error
 	calls   int
@@ -15,11 +15,53 @@ type stubBackend struct {
 	gotS    WriteTarget
 }
 
-func (b *stubBackend) CanWrite(p Principal, s WriteTarget) (Verdict, error) {
+func (b *stubAuthorizer) Authorize(p Principal, s WriteTarget) (Verdict, error) {
 	b.calls++
 	b.gotP = p
 	b.gotS = s
 	return b.verdict, b.err
+}
+
+// assertVerdict fails the test unless the verdict matches the wanted decision
+// and scope and carries a non-empty reason. Centralizing these checks keeps the
+// table-test loops below under the cognitive-complexity ceiling.
+func assertVerdict(t *testing.T, got Verdict, wantDecision Decision, wantScope EditScope) {
+	t.Helper()
+	if got.Decision != wantDecision {
+		t.Fatalf("decision = %q, want %q (reason: %s)", got.Decision, wantDecision, got.Reason)
+	}
+	if got.Scope != wantScope {
+		t.Fatalf("scope = %q, want %q", got.Scope, wantScope)
+	}
+	if got.Reason == "" {
+		t.Fatalf("verdict returned empty reason")
+	}
+	if want := wantDecision == DecisionAllow; got.Allowed() != want {
+		t.Fatalf("Allowed() = %v, want %v", got.Allowed(), want)
+	}
+}
+
+// assertDelegated fails the test unless the authorizer was invoked exactly once
+// with the expected principal and target.
+func assertDelegated(t *testing.T, b *stubAuthorizer, wantP, wantS string) {
+	t.Helper()
+	if b.calls != 1 {
+		t.Fatalf("authorizer.calls = %d, want 1 (delegation expected)", b.calls)
+	}
+	if b.gotP.ID != wantP {
+		t.Fatalf("authorizer got principal %q, want %q", b.gotP.ID, wantP)
+	}
+	if b.gotS.ID != wantS {
+		t.Fatalf("authorizer got target %q, want %q", b.gotS.ID, wantS)
+	}
+}
+
+// assertNotDelegated fails the test if the authorizer was invoked at all.
+func assertNotDelegated(t *testing.T, b *stubAuthorizer) {
+	t.Helper()
+	if b.calls != 0 {
+		t.Fatalf("authorizer.calls = %d, want 0 (no delegation expected)", b.calls)
+	}
 }
 
 func TestEditScopeValid(t *testing.T) {
@@ -67,7 +109,7 @@ func TestVerdictAllowed(t *testing.T) {
 	}
 }
 
-// TestCheckerCanWrite_NoBackend covers the default Checker (nil backend): the
+// TestCheckerCanWrite_NoBackend covers the default Checker (nil authorizer): the
 // scope-derivation rules with NO policy backend wired, which is the shipped
 // state. Local + personal project allow; governed tiers fall back to the safe
 // prompt; unknown scope denies.
@@ -77,49 +119,49 @@ func TestCheckerCanWrite_NoBackend(t *testing.T) {
 
 	tests := []struct {
 		name         string
-		source       WriteTarget
+		target       WriteTarget
 		wantDecision Decision
 		wantScope    EditScope
 	}{
 		{
 			name:         "local is always writable",
-			source:       WriteTarget{ID: "home", Scope: ScopeLocal},
+			target:       WriteTarget{ID: "home", Scope: ScopeLocal},
 			wantDecision: DecisionAllow,
 			wantScope:    ScopeLocal,
 		},
 		{
 			name:         "personal project derives to local-writable",
-			source:       WriteTarget{ID: "manager-ui", Scope: ScopeProject, Owner: ""},
+			target:       WriteTarget{ID: "manager-ui", Scope: ScopeProject, Owner: ""},
 			wantDecision: DecisionAllow,
 			wantScope:    ScopeLocal,
 		},
 		{
 			name:         "team scope governed but no backend -> safe prompt",
-			source:       WriteTarget{ID: "team-src", Scope: ScopeTeam, Owner: "payments"},
+			target:       WriteTarget{ID: "team-src", Scope: ScopeTeam, Owner: "payments"},
 			wantDecision: DecisionPrompt,
 			wantScope:    ScopeTeam,
 		},
 		{
 			name:         "org scope governed but no backend -> safe prompt",
-			source:       WriteTarget{ID: "org-src", Scope: ScopeOrg, Owner: "acme"},
+			target:       WriteTarget{ID: "org-src", Scope: ScopeOrg, Owner: "acme"},
 			wantDecision: DecisionPrompt,
 			wantScope:    ScopeOrg,
 		},
 		{
 			name:         "owned project derives to governance, no backend -> safe prompt",
-			source:       WriteTarget{ID: "team-proj", Scope: ScopeProject, Owner: "payments"},
+			target:       WriteTarget{ID: "team-proj", Scope: ScopeProject, Owner: "payments"},
 			wantDecision: DecisionPrompt,
 			wantScope:    ScopeProject,
 		},
 		{
 			name:         "unknown scope is denied",
-			source:       WriteTarget{ID: "weird", Scope: EditScope("runtime")},
+			target:       WriteTarget{ID: "weird", Scope: EditScope("runtime")},
 			wantDecision: DecisionDeny,
 			wantScope:    EditScope("runtime"),
 		},
 		{
 			name:         "empty scope is denied",
-			source:       WriteTarget{ID: "blank", Scope: EditScope("")},
+			target:       WriteTarget{ID: "blank", Scope: EditScope("")},
 			wantDecision: DecisionDeny,
 			wantScope:    EditScope(""),
 		},
@@ -128,36 +170,23 @@ func TestCheckerCanWrite_NoBackend(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := NewChecker(nil)
-			got := c.CanWrite(principal, tt.source)
-			if got.Decision != tt.wantDecision {
-				t.Fatalf("CanWrite() decision = %q, want %q (reason: %s)",
-					got.Decision, tt.wantDecision, got.Reason)
-			}
-			if got.Scope != tt.wantScope {
-				t.Fatalf("CanWrite() scope = %q, want %q", got.Scope, tt.wantScope)
-			}
-			if got.Reason == "" {
-				t.Fatalf("CanWrite() returned empty reason for %q", tt.name)
-			}
-			// Allowed() must agree with the decision.
-			if want := tt.wantDecision == DecisionAllow; got.Allowed() != want {
-				t.Fatalf("Allowed() = %v, want %v", got.Allowed(), want)
-			}
+			got := NewChecker(nil).CanWrite(principal, tt.target)
+			assertVerdict(t, got, tt.wantDecision, tt.wantScope)
 		})
 	}
 }
 
 // TestCheckerCanWrite_BackendDelegation covers the governed path WITH a backend
 // wired: the Checker must delegate team/org and owned-project writes to the
-// backend and surface its verdict.
+// authorizer and surface its verdict, and must NOT delegate local or personal
+// project writes.
 func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 	t.Parallel()
 	principal := Principal{ID: "bob", Groups: []string{"acme"}}
 
 	tests := []struct {
 		name          string
-		source        WriteTarget
+		target        WriteTarget
 		backendReturn Verdict
 		wantDecision  Decision
 		wantScope     EditScope
@@ -165,7 +194,7 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 	}{
 		{
 			name:          "team allow from backend",
-			source:        WriteTarget{ID: "team-src", Scope: ScopeTeam, Owner: "acme"},
+			target:        WriteTarget{ID: "team-src", Scope: ScopeTeam, Owner: "acme"},
 			backendReturn: Verdict{Decision: DecisionAllow, Reason: "member of acme", Scope: ScopeTeam},
 			wantDecision:  DecisionAllow,
 			wantScope:     ScopeTeam,
@@ -173,7 +202,7 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 		},
 		{
 			name:          "org deny from backend",
-			source:        WriteTarget{ID: "org-src", Scope: ScopeOrg, Owner: "acme"},
+			target:        WriteTarget{ID: "org-src", Scope: ScopeOrg, Owner: "acme"},
 			backendReturn: Verdict{Decision: DecisionDeny, Reason: "not an org admin", Scope: ScopeOrg},
 			wantDecision:  DecisionDeny,
 			wantScope:     ScopeOrg,
@@ -181,7 +210,7 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 		},
 		{
 			name:          "owned project delegates and reports project scope",
-			source:        WriteTarget{ID: "team-proj", Scope: ScopeProject, Owner: "acme"},
+			target:        WriteTarget{ID: "team-proj", Scope: ScopeProject, Owner: "acme"},
 			backendReturn: Verdict{Decision: DecisionAllow, Reason: "owner match", Scope: ScopeProject},
 			wantDecision:  DecisionAllow,
 			wantScope:     ScopeProject,
@@ -189,7 +218,7 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 		},
 		{
 			name:          "local never reaches the backend",
-			source:        WriteTarget{ID: "home", Scope: ScopeLocal},
+			target:        WriteTarget{ID: "home", Scope: ScopeLocal},
 			backendReturn: Verdict{Decision: DecisionDeny, Reason: "should not be called"},
 			wantDecision:  DecisionAllow,
 			wantScope:     ScopeLocal,
@@ -197,7 +226,7 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 		},
 		{
 			name:          "personal project never reaches the backend",
-			source:        WriteTarget{ID: "mine", Scope: ScopeProject, Owner: ""},
+			target:        WriteTarget{ID: "mine", Scope: ScopeProject, Owner: ""},
 			backendReturn: Verdict{Decision: DecisionDeny, Reason: "should not be called"},
 			wantDecision:  DecisionAllow,
 			wantScope:     ScopeLocal,
@@ -208,28 +237,14 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			backend := &stubBackend{verdict: tt.backendReturn}
-			c := NewChecker(backend)
-			got := c.CanWrite(principal, tt.source)
+			backend := &stubAuthorizer{verdict: tt.backendReturn}
+			got := NewChecker(backend).CanWrite(principal, tt.target)
 
-			if got.Decision != tt.wantDecision {
-				t.Fatalf("decision = %q, want %q", got.Decision, tt.wantDecision)
-			}
-			if got.Scope != tt.wantScope {
-				t.Fatalf("scope = %q, want %q", got.Scope, tt.wantScope)
-			}
+			assertVerdict(t, got, tt.wantDecision, tt.wantScope)
 			if tt.wantDelegate {
-				if backend.calls != 1 {
-					t.Fatalf("backend.calls = %d, want 1 (delegation expected)", backend.calls)
-				}
-				if backend.gotP.ID != principal.ID {
-					t.Fatalf("backend got principal %q, want %q", backend.gotP.ID, principal.ID)
-				}
-				if backend.gotS.ID != tt.source.ID {
-					t.Fatalf("backend got source %q, want %q", backend.gotS.ID, tt.source.ID)
-				}
-			} else if backend.calls != 0 {
-				t.Fatalf("backend.calls = %d, want 0 (no delegation expected)", backend.calls)
+				assertDelegated(t, backend, principal.ID, tt.target.ID)
+			} else {
+				assertNotDelegated(t, backend)
 			}
 		})
 	}
@@ -240,29 +255,18 @@ func TestCheckerCanWrite_BackendDelegation(t *testing.T) {
 // the safe DecisionPrompt.
 func TestCheckerCanWrite_BackendError(t *testing.T) {
 	t.Parallel()
-	backend := &stubBackend{
+	backend := &stubAuthorizer{
 		verdict: Verdict{Decision: DecisionAllow, Reason: "ignored on error"},
 		err:     errors.New("policy service unreachable"),
 	}
-	c := NewChecker(backend)
 
-	got := c.CanWrite(
+	got := NewChecker(backend).CanWrite(
 		Principal{ID: "carol"},
 		WriteTarget{ID: "org-src", Scope: ScopeOrg, Owner: "acme"},
 	)
 
-	if got.Decision != DecisionPrompt {
-		t.Fatalf("decision = %q, want %q (fail-closed)", got.Decision, DecisionPrompt)
-	}
-	if got.Allowed() {
-		t.Fatal("Allowed() = true on backend error, want false (must fail closed)")
-	}
-	if got.Scope != ScopeOrg {
-		t.Fatalf("scope = %q, want %q", got.Scope, ScopeOrg)
-	}
-	if backend.calls != 1 {
-		t.Fatalf("backend.calls = %d, want 1", backend.calls)
-	}
+	assertVerdict(t, got, DecisionPrompt, ScopeOrg)
+	assertDelegated(t, backend, "carol", "org-src")
 }
 
 // TestCheckerCanWrite_BackendVerdictNormalized covers the branch where the
@@ -270,23 +274,16 @@ func TestCheckerCanWrite_BackendError(t *testing.T) {
 // fill in the derived scope and a default reason rather than emitting blanks.
 func TestCheckerCanWrite_BackendVerdictNormalized(t *testing.T) {
 	t.Parallel()
-	backend := &stubBackend{
+	backend := &stubAuthorizer{
 		verdict: Verdict{Decision: DecisionAllow}, // no Scope, no Reason
 	}
-	c := NewChecker(backend)
 
-	got := c.CanWrite(
+	got := NewChecker(backend).CanWrite(
 		Principal{ID: "dave"},
 		WriteTarget{ID: "team-src", Scope: ScopeTeam, Owner: "acme"},
 	)
 
-	if got.Decision != DecisionAllow {
-		t.Fatalf("decision = %q, want %q", got.Decision, DecisionAllow)
-	}
-	if got.Scope != ScopeTeam {
-		t.Fatalf("scope = %q, want %q (should normalize to derived tier)", got.Scope, ScopeTeam)
-	}
-	if got.Reason == "" {
-		t.Fatal("reason was not normalized; want a non-empty default reason")
-	}
+	// assertVerdict checks the normalized scope is ScopeTeam and reason is
+	// non-empty (the normalization branch in governed()).
+	assertVerdict(t, got, DecisionAllow, ScopeTeam)
 }

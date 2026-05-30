@@ -121,7 +121,7 @@ func (v Verdict) Allowed() bool {
 	return v.Decision == DecisionAllow
 }
 
-// PolicyBackend is the policy-backend-AGNOSTIC seam org/team governance plugs
+// WriteAuthorizer is the policy-backend-AGNOSTIC seam org/team governance plugs
 // into (the adapter-contract pattern). A backend answers, for a governed
 // (team/org) source, whether the principal may write it. The default Checker
 // calls a backend only for governed scopes; local and personal-project writes
@@ -129,29 +129,29 @@ func (v Verdict) Allowed() bool {
 //
 // Backends are intentionally NOT registered here — registration/selection is a
 // downstream concern. This file ships only the contract and a nil-safe default.
-type PolicyBackend interface {
-	// CanWrite returns the verdict for a governed source. Implementations
+type WriteAuthorizer interface {
+	// Authorize returns the verdict for a governed source. Implementations
 	// should return DecisionAllow/DecisionDeny per their policy; returning a
 	// non-nil error signals the backend could not reach a decision (e.g. the
 	// policy service was unreachable), which the Checker treats as a safe
 	// fail-closed prompt rather than an allow.
-	CanWrite(p Principal, s WriteTarget) (Verdict, error)
+	Authorize(p Principal, s WriteTarget) (Verdict, error)
 }
 
 // Checker decides editability. It owns the scope-derivation rules and delegates
-// the governed (team/org) tiers to an optional PolicyBackend. A zero Checker
-// (nil Backend) is valid and SAFE: governed sources resolve to DecisionPrompt
+// the governed (team/org) tiers to an optional WriteAuthorizer. A zero Checker
+// (nil Authorizer) is valid and SAFE: governed sources resolve to DecisionPrompt
 // (deny-then-confirm), never a silent allow.
 type Checker struct {
-	// Backend is the pluggable policy implementation. When nil, no backend is
-	// wired and governed scopes fall back to the safe default.
-	Backend PolicyBackend
+	// Authorizer is the pluggable policy implementation. When nil, no backend
+	// is wired and governed scopes fall back to the safe default.
+	Authorizer WriteAuthorizer
 }
 
-// NewChecker returns a Checker bound to backend. Passing nil yields the safe
+// NewChecker returns a Checker bound to authorizer. Passing nil yields the safe
 // default-deny-or-prompt behavior for governed scopes.
-func NewChecker(backend PolicyBackend) *Checker {
-	return &Checker{Backend: backend}
+func NewChecker(authorizer WriteAuthorizer) *Checker {
+	return &Checker{Authorizer: authorizer}
 }
 
 // CanWrite answers "can principal p write source s?".
@@ -201,7 +201,7 @@ func (c *Checker) CanWrite(p Principal, s WriteTarget) Verdict {
 // backend cannot decide. derived is the scope reported back to the caller so an
 // owned project surfaces ScopeProject while team/org surface their own tier.
 func (c *Checker) governed(p Principal, s WriteTarget, derived EditScope) Verdict {
-	if c.Backend == nil {
+	if c.Authorizer == nil {
 		return Verdict{
 			Decision: DecisionPrompt,
 			Reason: fmt.Sprintf(
@@ -211,7 +211,7 @@ func (c *Checker) governed(p Principal, s WriteTarget, derived EditScope) Verdic
 			Scope: derived,
 		}
 	}
-	v, err := c.Backend.CanWrite(p, s)
+	v, err := c.Authorizer.Authorize(p, s)
 	if err != nil {
 		return Verdict{
 			Decision: DecisionPrompt,
