@@ -53,9 +53,12 @@ func TestFreesSlot(t *testing.T) {
 	}
 }
 
-// TestIsBlockedOnStatus distinguishes a parameterized blocked-on:<ref> from the
-// bare terminal/external `blocked` status (§3.1 vs §3.4).
-func TestIsBlockedOnStatus(t *testing.T) {
+// TestSlotIsBlockedOnStatus distinguishes a parameterized blocked-on:<ref> from
+// the bare terminal/external `blocked` status (§3.1 vs §3.4), for the slot-ledger
+// helper. Named distinctly from blocked_on_test.go's TestIsBlockedOnStatus (which
+// covers the exported IsBlockedOnStatus) to avoid a redeclaration after the
+// lpf-b/lpf-c merges.
+func TestSlotIsBlockedOnStatus(t *testing.T) {
 	cases := []struct {
 		status string
 		want   bool

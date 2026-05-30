@@ -1,7 +1,7 @@
 # coverage-gate per-file exceptions allowlist
 #
 # === RATCHET ===
-# ratchet-max-entries: 35
+# ratchet-max-entries: 29
 # The coverage gate fails if the allowlist grows above this number.
 # To add a new entry: prove there is no test-driven path to the threshold,
 # bump this line in the same commit, and include the rationale in PR review.
@@ -55,9 +55,4 @@ internal/platform/mcp_settings.go                          # [legacy-tail] 94.74
 internal/platform/opencode.go                              # [legacy-tail] 91.78%; cg6 ratchet-loop raises to >=95%
 internal/platform/plugins.go                               # [legacy-tail] 93.41%; cg6 ratchet-loop raises to >=95%
 internal/platform/render_manifest.go                       # [legacy-tail] 93.94%; cg6 ratchet-loop raises to >=95%
-internal/platform/resource_plan.go                         # [legacy-tail] 94.47%; cg6 ratchet-loop raises to >=95%
-internal/projectsync/promote.go                            # [legacy-tail] 94.02%; cg6 ratchet-loop raises to >=95%
 internal/globalflagcov/analyze.go                          # [defensive-guards] 89.58% local; residue is unreachable pc==0 / FuncForPC==nil guards on a known-valid handler func, plus the "no handler symbol" note unproducible by a wired cobra command
-internal/globalflagcov/static.go                           # [defensive-guards] 91.21% local; residue is malformed-AST/types guards (nil TypesInfo, non-*types.Func defs, packages.Load failure) that the real ./commands type-check pipeline never yields
-internal/scoring/objective_checks.go                       # [legacy-tail] 94.92%; pre-existing R1 carry-over (objective-checks task); cg6 ratchet-loop raises to >=95%
-internal/scoring/persist.go                                # [defensive-guards] 89.41% local; residue is writeYAMLAtomic's OS error branches (yaml.Marshal nil-input, os.CreateTemp/Write/Close/Rename failures) that the real fs path cannot trigger from a Go test without mocking
