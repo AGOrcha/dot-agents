@@ -9,12 +9,18 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/go-git/go-billy/v6"
+	"github.com/go-git/go-billy/v6/memfs"
+	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/storage/memory"
+
 	"github.com/NikashPrakash/dot-agents/internal/fsops"
+	"github.com/NikashPrakash/dot-agents/internal/gitremote"
 )
 
 // maxLayerBytes caps a fetched layer.json so a hostile or runaway source cannot
@@ -197,22 +203,42 @@ func writeCachedLayer(cacheDir, sha string, data []byte) error {
 
 // --- git fetcher -----------------------------------------------------------
 
-// gitFetcher resolves a git source ref to a commit SHA, fetches the layer file
-// at that SHA, and caches it content-addressed by SHA. It shells out to `git`
-// via os/exec; on Go 1.26 os/exec already carries the execabs CWD guard, so a
-// bare exec.Command("git", …) is safe — no golang.org/x/sys/execabs needed.
+// gitFetcher resolves a git source ref to a commit SHA, reads the layer file at
+// that SHA, and caches it content-addressed by SHA. It uses go-git (no `git`
+// subprocess, so no exec/PATH lookup and no go:S4036 hotspot): a single shallow
+// single-branch clone resolves the ref→SHA and the file@SHA in one operation,
+// replacing the old `git ls-remote` + `git archive` pair.
 type gitFetcher struct {
-	// runner is a test seam over command execution. Nil uses the real git.
-	runner func(args ...string) ([]byte, error)
+	// cloner is a test seam over the go-git clone. Nil uses gitCloneShallow.
+	// It returns the cloned repository (for HEAD resolution) and the worktree
+	// filesystem (for reading the layer file).
+	cloner func(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error)
 }
 
-func (f *gitFetcher) run(args ...string) ([]byte, error) {
-	if f.runner != nil {
-		return f.runner(args...)
+func (f *gitFetcher) clone(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
+	if f.cloner != nil {
+		return f.cloner(ctx, url, ref)
 	}
-	// Constant binary name + arg slice (never a shell string): the safe exec
-	// pattern. On Go 1.26 os/exec already carries the execabs CWD guard.
-	return exec.Command("git", args...).Output()
+	return gitCloneShallow(ctx, url, ref)
+}
+
+// gitCloneShallow performs a Depth:1, single-branch in-memory clone of url at
+// ref. The objects live in an in-memory storer and the checkout in an in-memory
+// billy filesystem, so nothing is written to disk and no temp dir cleanup is
+// needed. Returns the repository (for HEAD) and the worktree filesystem.
+func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
+	fs := memfs.New()
+	repo, err := gogit.CloneContext(ctx, memory.NewStorage(), fs, &gogit.CloneOptions{
+		URL:           url,
+		ReferenceName: plumbing.ReferenceName(ref),
+		SingleBranch:  true,
+		Depth:         1,
+		Tags:          plumbing.NoTags,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return repo, fs, nil
 }
 
 func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
@@ -223,37 +249,63 @@ func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (Fe
 	if ref == "" {
 		ref = "main"
 	}
-	// Resolve the ref to an immutable SHA so the cache is content-addressed.
-	out, err := f.run("ls-remote", src.URL, ref)
-	if err != nil {
-		return FetchedLayer{}, fmt.Errorf("git ls-remote %s %s: %w", src.URL, ref, err)
+	// Validate/classify the source URL up front so a malformed remote fails
+	// before any network work. file:// (local fixture / on-disk repo) is a
+	// legitimate clone source for hermetic use, so an ErrNotRemote "file"
+	// classification is not itself an error here — only a hard parse failure
+	// (and a non-file, non-empty result confirms a real remote).
+	if _, err := gitremote.ParseRemoteURL(src.URL); err != nil && !errors.Is(err, gitremote.ErrNotRemote) {
+		return FetchedLayer{}, fmt.Errorf("git source url %q: %w", src.URL, err)
 	}
-	sha := firstField(string(out))
+
+	// A clone resolves both the ref→SHA and the file@SHA. The ref may be a
+	// branch or a tag; normalize to a full ref so go-git's single-branch
+	// clone targets it. We accept the caller's value as-is first (already a
+	// full refs/… name), else try it as a branch.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
+	if err != nil {
+		return FetchedLayer{}, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err)
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		return FetchedLayer{}, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err)
+	}
+	sha := head.Hash().String()
 	if sha == "" {
 		return FetchedLayer{}, fmt.Errorf("git ref %q not found at %s", ref, src.URL)
 	}
 	if cached, ok := readCachedLayer(cacheDir, sha); ok {
 		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true}, nil
 	}
-	// Fetch just the layer file content at the resolved SHA without a full
-	// checkout: archive the single path and read it from the cache.
-	data, err := f.run("archive", "--remote="+src.URL, sha, parts.LayerPath)
+
+	fh, err := wfs.Open(filepath.FromSlash(parts.LayerPath))
 	if err != nil {
-		return FetchedLayer{}, fmt.Errorf("git fetch %s@%s: %w", parts.LayerPath, sha, err)
+		return FetchedLayer{}, fmt.Errorf("git read %s@%s: %w", parts.LayerPath, sha, err)
 	}
+	defer func() { _ = fh.Close() }()
+	data, err := readAllLimited(fh)
+	if err != nil {
+		return FetchedLayer{}, fmt.Errorf("git read %s@%s: %w", parts.LayerPath, sha, err)
+	}
+
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
 	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
 }
 
-// firstField returns the first whitespace-delimited field of s (the SHA column
-// of `git ls-remote` output), or "" if s is blank.
-func firstField(s string) string {
-	for _, f := range strings.Fields(s) {
-		return f
+// gitFullRef expands a bare branch/tag name to a full refs/heads/<name> so
+// go-git's single-branch clone targets it. A value already starting with
+// "refs/" is passed through unchanged (caller pinned a full ref). This mirrors
+// how clients normally resolve a branch-name clone target.
+func gitFullRef(ref string) string {
+	if strings.HasPrefix(ref, "refs/") {
+		return ref
 	}
-	return ""
+	return "refs/heads/" + ref
 }
 
 // --- http fetcher ----------------------------------------------------------

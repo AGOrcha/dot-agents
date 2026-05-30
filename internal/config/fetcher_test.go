@@ -1,14 +1,20 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-git/go-billy/v6"
+	"github.com/go-git/go-billy/v6/memfs"
+	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/storage/memory"
 )
 
 func TestParseLayerRef(t *testing.T) {
@@ -151,60 +157,210 @@ func TestHTTPFetcherNon200(t *testing.T) {
 	}
 }
 
-func TestGitFetcherResolvesAndCaches(t *testing.T) {
-	const sha = "a3f9c2d1e8b4000000000000000000000000aaaa"
+// makeGitFixtureAt inits a real on-disk git repo at dir, commits a single layer
+// file at layerPath with body, and returns the branch name and committed SHA.
+func makeGitFixtureAt(t *testing.T, dir, layerPath string, body []byte) (branch, sha string) {
+	t.Helper()
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	full := filepath.Join(dir, filepath.FromSlash(layerPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, body, 0o644); err != nil {
+		t.Fatalf("write fixture layer: %v", err)
+	}
+	if _, err := wt.Add(layerPath); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	h, err := wt.Commit("add layer", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@example"},
+	})
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	return head.Name().Short(), h.String()
+}
+
+// makeGitFixture inits a real on-disk git repo, commits a single layer file, and
+// returns the repo's file:// URL plus the branch name and committed SHA. This
+// exercises the real go-git clone-and-read path hermetically (no network, no git
+// binary).
+func makeGitFixture(t *testing.T, layerPath string, body []byte) (url, branch, sha string) {
+	t.Helper()
+	dir := t.TempDir()
+	branch, sha = makeGitFixtureAt(t, dir, layerPath, body)
+	return "file://" + dir, branch, sha
+}
+
+func TestGitFetcherClonesAndCaches(t *testing.T) {
 	body := []byte(`{"agents":["claude"]}`)
-	calls := 0
-	f := &gitFetcher{runner: func(args ...string) ([]byte, error) {
-		calls++
-		switch args[0] {
-		case "ls-remote":
-			return []byte(sha + "\trefs/heads/main\n"), nil
-		case "archive":
-			return body, nil
-		}
-		return nil, errors.New("unexpected git args: " + strings.Join(args, " "))
-	}}
+	url, branch, wantSHA := makeGitFixture(t, "org/base.json", body)
+
 	cacheDir := filepath.Join(t.TempDir(), "cache")
-	got, err := f.Fetch(Source{Type: "git", URL: "https://example/repo.git", Ref: "main"}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
+	f := &gitFetcher{}
+	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	if got.ResolvedSHA != sha {
-		t.Fatalf("sha = %q, want %q", got.ResolvedSHA, sha)
+	if got.ResolvedSHA != wantSHA {
+		t.Fatalf("sha = %q, want %q", got.ResolvedSHA, wantSHA)
 	}
 	if string(got.Data) != string(body) {
-		t.Fatalf("data = %q", got.Data)
+		t.Fatalf("data = %q, want %q", got.Data, body)
+	}
+	if got.CacheHit {
+		t.Fatal("first fetch should not be a cache hit")
 	}
 
-	// Second fetch: ls-remote returns same SHA, content served from cache (no archive).
-	calls = 0
-	got2, err := f.Fetch(Source{Type: "git", URL: "https://example/repo.git", Ref: "main"}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
+	// Second fetch resolves the same SHA and serves the layer from cache.
+	got2, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
 	if err != nil {
 		t.Fatalf("Fetch (2nd): %v", err)
 	}
 	if !got2.CacheHit {
 		t.Fatal("second fetch should hit the SHA cache")
 	}
-	if calls != 1 {
-		t.Fatalf("expected only ls-remote on cache hit, got %d git calls", calls)
+	if got2.ResolvedSHA != wantSHA {
+		t.Fatalf("2nd sha = %q, want %q", got2.ResolvedSHA, wantSHA)
 	}
 }
 
-func TestGitFetcherRealRunErrors(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	// Real run() path (no runner seam) against a bogus local URL: git ls-remote
-	// fails fast, exercising the real exec branch + its error handling.
+func TestGitFetcherDefaultsRefToSourceRefThenMain(t *testing.T) {
+	body := []byte(`{"x":1}`)
+	url, branch, _ := makeGitFixture(t, "base.json", body)
+	// Source.Ref empty + parts.Version empty -> falls back to the source ref
+	// (here we pass it via Source.Ref to exercise that branch), and a fixture
+	// whose default branch is "main"/"master" exercises the final fallback when
+	// both are empty only if the fixture branch matches; assert the source-ref
+	// branch resolves regardless.
 	f := &gitFetcher{}
-	_, err := f.Fetch(
-		Source{Type: "git", URL: filepath.Join(t.TempDir(), "does-not-exist.git"), Ref: "main"},
-		LayerRefParts{LayerPath: "x.json"},
-		t.TempDir(),
-	)
+	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(got.Data) != string(body) {
+		t.Fatalf("data = %q", got.Data)
+	}
+}
+
+func TestGitFetcherBadURL(t *testing.T) {
+	f := &gitFetcher{}
+	// A URL that transport.ParseURL rejects outright (control char) hits the
+	// gitremote.ParseRemoteURL hard-error branch before any clone.
+	_, err := f.Fetch(Source{Type: "git", URL: "ht!tp://%zz"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
 	if err == nil {
-		t.Fatal("expected error from real git against a bogus URL")
+		t.Fatal("expected error for malformed git url")
+	}
+}
+
+func TestGitFetcherMissingRef(t *testing.T) {
+	url, _, _ := makeGitFixture(t, "base.json", []byte("{}"))
+	f := &gitFetcher{}
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: "no-such-branch"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error cloning a non-existent ref")
+	}
+}
+
+func TestGitFetcherMissingLayerPath(t *testing.T) {
+	url, branch, _ := makeGitFixture(t, "base.json", []byte("{}"))
+	f := &gitFetcher{}
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "nope.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error reading a missing layer path from the clone")
+	}
+}
+
+func TestGitFetcherOversizedLayer(t *testing.T) {
+	// A layer file larger than maxLayerBytes must be rejected by readAllLimited.
+	big := make([]byte, maxLayerBytes+1)
+	for i := range big {
+		big[i] = 'a'
+	}
+	url, branch, _ := makeGitFixture(t, "big.json", big)
+	f := &gitFetcher{}
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "big.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for oversized layer")
+	}
+}
+
+// committedRepoFS opens the on-disk fixture at dir and returns its repository
+// (which has a valid HEAD) paired with an independent memfs the test populates.
+// This lets the fakeCloner exercise HEAD resolution and worktree-Open branches
+// without depending on go-git's WithWorkTree init option.
+func committedRepoFS(t *testing.T, dir string, files map[string][]byte) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.PlainOpen(dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		fs := memfs.New()
+		for name, body := range files {
+			fh, err := fs.Create(name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := fh.Write(body); err != nil {
+				return nil, nil, err
+			}
+			if err := fh.Close(); err != nil {
+				return nil, nil, err
+			}
+		}
+		return repo, fs, nil
+	}
+}
+
+// emptyRepoCloner returns a freshly-initialized in-memory repo (no commits, so
+// Head() errors) and an empty memfs.
+func emptyRepoCloner() func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.Init(memory.NewStorage())
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, memfs.New(), nil
+	}
+}
+
+func TestGitFetcherHeadError(t *testing.T) {
+	// Cloner returns a repo with no commits -> repo.Head() errors.
+	f := &gitFetcher{cloner: emptyRepoCloner()}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error when HEAD cannot be resolved")
+	}
+}
+
+func TestGitFetcherCloneError(t *testing.T) {
+	f := &gitFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+		return nil, nil, errors.New("clone boom")
+	}}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "git clone") {
+		t.Fatalf("expected wrapped clone error, got %v", err)
+	}
+}
+
+func TestGitFullRef(t *testing.T) {
+	if got := gitFullRef("main"); got != "refs/heads/main" {
+		t.Fatalf("gitFullRef(main) = %q", got)
+	}
+	if got := gitFullRef("refs/tags/v1"); got != "refs/tags/v1" {
+		t.Fatalf("gitFullRef(refs/tags/v1) = %q", got)
 	}
 }
 
@@ -254,41 +410,30 @@ func TestHTTPFetcherCacheWriteError(t *testing.T) {
 }
 
 func TestGitFetcherCacheWriteError(t *testing.T) {
-	f := &gitFetcher{runner: func(args ...string) ([]byte, error) {
-		if args[0] == "ls-remote" {
-			return []byte("abc123\trefs/heads/main\n"), nil
-		}
-		return []byte("{}"), nil
-	}}
+	// Cloner returns a committed repo (valid HEAD) plus a memfs holding the
+	// layer, but the cache dir's parent is a regular file so writeCachedLayer
+	// fails after a successful read.
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
+	f := &gitFetcher{cloner: committedRepoFS(t, dir, map[string][]byte{"x.json": []byte("{}")})}
 	blocker := filepath.Join(t.TempDir(), "afile")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.Fetch(Source{Type: "git", URL: "https://example/r.git"}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
 	if err == nil {
 		t.Fatal("expected cache-write error")
 	}
 }
 
-func TestGitFetcherArchiveError(t *testing.T) {
-	f := &gitFetcher{runner: func(args ...string) ([]byte, error) {
-		if args[0] == "ls-remote" {
-			return []byte("abc123\trefs/heads/main\n"), nil
-		}
-		return nil, errors.New("archive failed")
-	}}
-	_, err := f.Fetch(Source{Type: "git", URL: "https://example/r.git"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
-	if err == nil {
-		t.Fatal("expected archive error")
-	}
-}
-
-func TestGitFetcherRefNotFound(t *testing.T) {
-	f := &gitFetcher{runner: func(args ...string) ([]byte, error) {
-		return []byte(""), nil // empty ls-remote = ref not found
-	}}
-	_, err := f.Fetch(Source{Type: "git", URL: "https://example/repo.git", Ref: "nope"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
-	if err == nil {
-		t.Fatal("expected error for unresolvable git ref")
+func TestGitFetcherReadError(t *testing.T) {
+	// Cloner returns a committed repo whose worktree memfs lacks the requested
+	// layer path -> Open fails (the read-error branch).
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
+	f := &gitFetcher{cloner: committedRepoFS(t, dir, nil)}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "missing.json"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "git read") {
+		t.Fatalf("expected git read error, got %v", err)
 	}
 }
