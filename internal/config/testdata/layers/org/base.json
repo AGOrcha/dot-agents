@@ -1,0 +1,10 @@
+{
+  "skills": ["org-base-skill"],
+  "rules": ["org-rule"],
+  "features": {
+    "tasks": "on"
+  },
+  "kg": {
+    "backend": "sqlite"
+  }
+}
