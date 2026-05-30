@@ -1630,3 +1630,156 @@ func TestRepairManagedProject_NoInstalledPlatformsIsNoOp(t *testing.T) {
 		t.Errorf("no installed platforms must relink nothing, got fixed=%d", fixed)
 	}
 }
+
+// ---------- .agentsrc.lock health (config-v2 p2) ----------
+
+// seedDoctorLockProject writes a manifest and (optionally) a committed
+// .agentsrc.lock into a fresh project dir, returning the path.
+func seedDoctorLockProject(t *testing.T, manifest string, layers map[string]config.LockedLayer) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, config.AgentsRCFile), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if layers != nil {
+		if err := config.WriteConfigLock(dir, layers); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestReportOneProjectLockHealth_NoExtendsNotApplicable(t *testing.T) {
+	dir := seedDoctorLockProject(t, `{"version":2}`, nil)
+	applicable, issue := false, false
+	out := captureDoctorOutput(t, func() {
+		applicable, issue = reportOneProjectLockHealth("p", dir)
+	})
+	if applicable || issue {
+		t.Errorf("expected not applicable/no issue, got applicable=%v issue=%v", applicable, issue)
+	}
+	if out != "" {
+		t.Errorf("expected no bullet for no-extends project, got %q", out)
+	}
+}
+
+func TestReportOneProjectLockHealth_MissingManifestSilent(t *testing.T) {
+	dir := t.TempDir() // no manifest
+	applicable, issue := false, false
+	captureDoctorOutput(t, func() {
+		applicable, issue = reportOneProjectLockHealth("p", dir)
+	})
+	if applicable || issue {
+		t.Errorf("missing manifest must be silent here, got applicable=%v issue=%v", applicable, issue)
+	}
+}
+
+func TestReportOneProjectLockHealth_NoLockWarns(t *testing.T) {
+	dir := seedDoctorLockProject(t, `{"extends":["acme:org/base.json"]}`, nil)
+	var applicable, issue bool
+	out := captureDoctorOutput(t, func() {
+		applicable, issue = reportOneProjectLockHealth("p", dir)
+	})
+	if !applicable || !issue {
+		t.Errorf("expected applicable && issue, got applicable=%v issue=%v", applicable, issue)
+	}
+	if !strings.Contains(out, "no .agentsrc.lock") {
+		t.Errorf("expected missing-lock warning, got %q", out)
+	}
+}
+
+func TestReportOneProjectLockHealth_HealthyLock(t *testing.T) {
+	dir := seedDoctorLockProject(t, `{"extends":["acme:org/base.json"]}`, map[string]config.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
+	})
+	var applicable, issue bool
+	out := captureDoctorOutput(t, func() {
+		applicable, issue = reportOneProjectLockHealth("p", dir)
+	})
+	if !applicable || issue {
+		t.Errorf("expected applicable && no issue, got applicable=%v issue=%v", applicable, issue)
+	}
+	if !strings.Contains(out, "locked and fresh") {
+		t.Errorf("expected healthy lock bullet, got %q", out)
+	}
+}
+
+func TestReportOneProjectLockHealth_DriftWarns(t *testing.T) {
+	dir := seedDoctorLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
+	})
+	var issue bool
+	out := captureDoctorOutput(t, func() {
+		_, issue = reportOneProjectLockHealth("p", dir)
+	})
+	if !issue {
+		t.Error("expected issue=true for drifted lock")
+	}
+	if !strings.Contains(out, "acme:org/missing.json") || !strings.Contains(out, "da config sync") {
+		t.Errorf("expected per-layer drift warning with hint, got %q", out)
+	}
+}
+
+func TestReportLockHealth_AllProjectsLocalNoApplicable(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	dir := seedDoctorLockProject(t, `{"version":2}`, nil)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", dir)
+
+	out := captureDoctorOutput(t, func() { reportLockHealth(cfg, cfg.ListProjects()) })
+	if !strings.Contains(out, "not applicable") {
+		t.Errorf("expected not-applicable summary, got %q", out)
+	}
+}
+
+func TestReportLockHealth_AllFreshSummary(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	dir := seedDoctorLockProject(t, `{"extends":["acme:org/base.json"]}`, map[string]config.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
+	})
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", dir)
+
+	out := captureDoctorOutput(t, func() { reportLockHealth(cfg, cfg.ListProjects()) })
+	if !strings.Contains(out, "locked and fresh") {
+		t.Errorf("expected per-project fresh bullet, got %q", out)
+	}
+}
+
+func TestReportLockHealth_SkipsMissingDir(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("ghost", filepath.Join(tmp, "does-not-exist"))
+
+	out := captureDoctorOutput(t, func() { reportLockHealth(cfg, cfg.ListProjects()) })
+	if !strings.Contains(out, "not applicable") {
+		t.Errorf("expected not-applicable summary when dir missing, got %q", out)
+	}
+}
+
+func TestLockDriftMessageAndHint(t *testing.T) {
+	cases := []struct {
+		status   config.LockDriftStatus
+		inMsg    string
+		wantHint string
+	}{
+		{config.LockStatusMissingFromLock, "absent from lock", "  hint: da config sync"},
+		{config.LockStatusExtraInLock, "no longer declared", "  hint: da config sync to prune"},
+		{config.LockStatusTTLExpired, "TTL expired", "  hint: da config sync"},
+		{config.LockDriftStatus("weird"), "weird", ""},
+	}
+	for _, tc := range cases {
+		if msg := lockDriftMessage(tc.status); !strings.Contains(msg, tc.inMsg) {
+			t.Errorf("lockDriftMessage(%q) = %q, want substring %q", tc.status, msg, tc.inMsg)
+		}
+		if hint := lockDriftHint(tc.status); hint != tc.wantHint {
+			t.Errorf("lockDriftHint(%q) = %q, want %q", tc.status, hint, tc.wantHint)
+		}
+	}
+}

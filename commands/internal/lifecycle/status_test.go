@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1595,5 +1596,114 @@ func TestStatusJSONClosure_Toggle(t *testing.T) {
 	}
 	if calls < 2 {
 		t.Errorf("expected jsonOutput closure to be invoked per RunE, got %d calls", calls)
+	}
+}
+
+// ---------- .agentsrc.lock summary (config-v2 p2) ----------
+
+// captureStatusStdout redirects stdout for the duration of fn and returns the
+// captured bytes — used to assert the lock summary line content.
+func captureStatusStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// seedLockProject creates a project dir with a manifest and (optionally) a
+// committed .agentsrc.lock holding the given locked layers.
+func seedLockProject(t *testing.T, manifest string, layers map[string]config.LockedLayer) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, config.AgentsRCFile), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if layers != nil {
+		if err := config.WriteConfigLock(dir, layers); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestPrintStatusProjectLockSummary_NoExtendsSilent(t *testing.T) {
+	dir := seedLockProject(t, `{"version":2}`, nil)
+	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
+	if out != "" {
+		t.Errorf("expected no output for manifest without extends, got %q", out)
+	}
+}
+
+func TestPrintStatusProjectLockSummary_MissingManifestSilent(t *testing.T) {
+	dir := t.TempDir() // no manifest at all
+	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
+	if out != "" {
+		t.Errorf("expected no output for missing manifest, got %q", out)
+	}
+}
+
+func TestPrintStatusProjectLockSummary_NoLock(t *testing.T) {
+	dir := seedLockProject(t, `{"extends":["acme:org/base.json"]}`, nil)
+	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
+	if !strings.Contains(out, "no .agentsrc.lock") {
+		t.Errorf("expected missing-lock notice, got %q", out)
+	}
+}
+
+func TestPrintStatusProjectLockSummary_Locked(t *testing.T) {
+	dir := seedLockProject(t, `{"extends":["acme:org/base.json"]}`, map[string]config.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
+	})
+	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
+	if !strings.Contains(out, "lock") || !strings.Contains(out, "1 extends layer(s) locked") {
+		t.Errorf("expected locked summary, got %q", out)
+	}
+}
+
+func TestPrintStatusProjectLockSummary_Drifted(t *testing.T) {
+	// Declared but not in lock → drift.
+	dir := seedLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
+	})
+	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
+	if !strings.Contains(out, "drifted") || !strings.Contains(out, "da config sync") {
+		t.Errorf("expected drift summary with sync hint, got %q", out)
+	}
+}
+
+func TestBuildStatusJSONLock_NotApplicable(t *testing.T) {
+	dir := seedLockProject(t, `{"version":2}`, nil)
+	if got := buildStatusJSONLock(dir); got != nil {
+		t.Errorf("expected nil lock JSON for no-extends manifest, got %+v", got)
+	}
+}
+
+func TestBuildStatusJSONLock_ReportsDrift(t *testing.T) {
+	dir := seedLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
+	})
+	got := buildStatusJSONLock(dir)
+	if got == nil {
+		t.Fatal("expected lock JSON, got nil")
+	}
+	if !got.Present {
+		t.Error("expected Present=true")
+	}
+	if got.TotalLayers != 2 {
+		t.Errorf("expected 2 total layers, got %d", got.TotalLayers)
+	}
+	if len(got.DriftedLayers) != 1 || got.DriftedLayers[0] != "acme:org/missing.json" {
+		t.Errorf("expected one drifted layer acme:org/missing.json, got %+v", got.DriftedLayers)
 	}
 }
