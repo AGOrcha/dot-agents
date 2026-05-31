@@ -2,18 +2,24 @@
 // CI-aware loader described in external-agent-sources design §4.1.
 //
 // The local store keeps secrets in an encrypted file at
-// ~/.config/da/credentials.json. A per-host data key is generated on first use
-// and stored in the OS keychain via a credential helper (macOS Keychain /
-// Windows Credential Manager / Linux Secret Service); the file is sealed with
-// AES-256-GCM using that key. Call sites address credentials by id and never
-// see the raw key — keychain access lives behind the Keyring seam so tests can
-// inject a fake and never touch the real platform store.
+// ~/.config/da/credentials.json. On first use a hybrid post-quantum recipient
+// keypair (X25519 + ML-KEM-768) is generated; its private seed material lives in
+// the OS keychain via a credential helper (macOS Keychain / Windows Credential
+// Manager / Linux Secret Service) behind the Keyring seam. The file is sealed
+// with AES-256-GCM under a key derived from a hybrid KEM so the data stays
+// confidential if EITHER the classical (X25519) or the post-quantum (ML-KEM)
+// primitive remains unbroken. Call sites address credentials by id and never
+// see the raw key; tests inject a fake Keyring and never touch the real store.
 package credstore
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/ecdh"
+	"crypto/hkdf"
+	"crypto/mlkem"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,30 +30,42 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
 
-// dataKeyLen is the AES-256 key length in bytes.
-const dataKeyLen = 32
-
-// errPrefix tags every error this package returns.
-const errPrefix = "credstore"
-
-// storeSchemaVersion is the current on-disk credentials-file schema version.
-const storeSchemaVersion = 1
-
-// keyringService is the account/service name under which the data key lives in
-// the OS keychain.
-const keyringService = "da-credstore-datakey"
+const (
+	// dataKeyLen is the AES-256 key length in bytes.
+	dataKeyLen = 32
+	// errPrefix tags every error this package returns.
+	errPrefix = "credstore"
+	// formatVersion is the on-disk envelope version. v2 is the hybrid-KEM
+	// envelope; v1 (single AES key) is intentionally unsupported — #219 has not
+	// shipped, so there is no v1 data to migrate.
+	formatVersion = 2
+	// keyringService is the account/service name under which the hybrid private
+	// seed blob lives in the OS keychain.
+	keyringService = "da-credstore-hybridkey"
+	// hkdfInfo is the domain-separation label binding a derived key to this
+	// scheme and version, so a key derived here cannot be confused with one from
+	// any other context or future format.
+	hkdfInfo = "da-credstore-hybrid-v2"
+	// x25519ScalarLen is the X25519 private scalar length in bytes.
+	x25519ScalarLen = 32
+	// seedBlobLen is the keyring seed blob: x25519 scalar || ml-kem seed.
+	seedBlobLen = x25519ScalarLen + mlkem.SeedSize
+)
 
 var (
 	// ErrCredentialNotFound is returned when no credential matches an id.
 	ErrCredentialNotFound = errors.New(errPrefix + ": credential not found")
-	// ErrBadKeyLength is returned when the keyring yields a key of the wrong
-	// size for AES-256-GCM (corrupt or foreign keychain entry).
-	ErrBadKeyLength = errors.New(errPrefix + ": data key has wrong length")
-	// ErrCiphertextTooShort is returned when a sealed file is shorter than the
-	// GCM nonce it must carry, i.e. it is truncated or not a credstore blob.
-	ErrCiphertextTooShort = errors.New(errPrefix + ": ciphertext shorter than nonce")
+	// ErrBadSeedLength is returned when the keyring yields a seed blob of the
+	// wrong size (corrupt or foreign keychain entry).
+	ErrBadSeedLength = errors.New(errPrefix + ": key seed has wrong length")
+	// ErrBadFormatVersion is returned when the on-disk envelope is not a format
+	// version this build can decrypt.
+	ErrBadFormatVersion = errors.New(errPrefix + ": unsupported envelope format version")
+	// ErrBadNonceLength is returned when the envelope's GCM nonce is not the
+	// AEAD nonce size, i.e. the file is truncated or not a credstore envelope.
+	ErrBadNonceLength = errors.New(errPrefix + ": gcm nonce has wrong length")
 	// ErrKeyNotFound is the sentinel a Keyring returns (directly or wrapped)
-	// when a key is absent, so EnsureDataKey mints a fresh one rather than fail.
+	// when a key is absent, so the store mints a fresh one rather than fail.
 	ErrKeyNotFound = errors.New(errPrefix + ": keyring key not found")
 )
 
@@ -86,6 +104,12 @@ type sysShim interface {
 	HomeDir() (string, error)
 	// LookupEnv mirrors os.LookupEnv (value, set) for the loader's env steps.
 	LookupEnv(key string) (string, bool)
+	// DeriveKey runs the HKDF combine; seamed so its defensive error branch
+	// (unreachable with the fixed SHA-256/length parameters) is provable.
+	DeriveKey(secret []byte) ([]byte, error)
+	// NewAEAD builds the AES-256-GCM AEAD; seamed so the cipher-construction
+	// error branches (unreachable with a valid 32-byte key) are provable.
+	NewAEAD(key []byte) (cipher.AEAD, error)
 }
 
 // stdSys is the production sysShim backed by the real os/crypto-rand/config
@@ -103,19 +127,46 @@ func (stdSys) CreateTemp(dir, pattern string) (tempFile, error) {
 	return os.CreateTemp(dir, pattern)
 }
 
-// storeFile is the on-disk shape of the encrypted credentials file. Only
-// Sealed (the GCM nonce + ciphertext) is ever written; the plaintext map of
-// credentials lives in memory after Open decrypts it.
-type storeFile struct {
-	SchemaVersion int    `json:"schema_version"`
-	Sealed        []byte `json:"sealed"`
+func (stdSys) DeriveKey(secret []byte) ([]byte, error) {
+	return hkdf.Key(sha256.New, secret, nil, hkdfInfo, dataKeyLen)
+}
+
+func (stdSys) NewAEAD(key []byte) (cipher.AEAD, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("%s: init cipher: %w", errPrefix, err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("%s: init gcm: %w", errPrefix, err)
+	}
+	return gcm, nil
+}
+
+// hybridKey is the recipient's reconstructed private key material: the X25519
+// private key and the ML-KEM-768 decapsulation key, both rebuilt from the
+// keyring seed blob. It never leaves process memory.
+type hybridKey struct {
+	x25519 *ecdh.PrivateKey
+	mlkem  *mlkem.DecapsulationKey768
+}
+
+// envelope is the self-describing on-disk sealed form. All byte fields are
+// base64-encoded by encoding/json. Only ciphertext/public material is stored;
+// the plaintext map lives in memory after openSealed decrypts it.
+type envelope struct {
+	FormatVersion   int    `json:"format_version"`
+	X25519EphPub    []byte `json:"x25519_ephemeral_pub"`
+	MLKEMCiphertext []byte `json:"mlkem_ciphertext"`
+	GCMNonce        []byte `json:"gcm_nonce"`
+	GCMCiphertext   []byte `json:"gcm_ciphertext"`
 }
 
 // Store is an opened, decrypted credential store. Mutations are persisted with
-// Save, which re-seals the whole map.
+// Save, which re-seals the whole map under the hybrid KEM.
 type Store struct {
 	path        string
-	key         []byte
+	hk          *hybridKey
 	credentials map[string]string
 	sys         sysShim
 }
@@ -137,59 +188,78 @@ func defaultPath(sys sysShim) (string, error) {
 	return filepath.Join(home, ".config", "da", "credentials.json"), nil
 }
 
-// EnsureDataKey returns the per-host AES-256 data key, minting and persisting a
-// fresh one in the keyring on first use. The key never leaves process memory
-// except sealed inside the keyring.
-func EnsureDataKey(ring Keyring) ([]byte, error) { return ensureDataKey(ring, stdSys{}) }
-
-// ensureDataKey is EnsureDataKey with an injected sysShim (for the rand seam).
-func ensureDataKey(ring Keyring, sys sysShim) ([]byte, error) {
-	key, err := ring.Get(keyringService)
+// ensureHybridKey returns the recipient hybrid key, minting and persisting a
+// fresh seed blob in the keyring on first use.
+func ensureHybridKey(ring Keyring, sys sysShim) (*hybridKey, error) {
+	seed, err := ring.Get(keyringService)
 	if err == nil {
-		if len(key) != dataKeyLen {
-			return nil, ErrBadKeyLength
-		}
-		return key, nil
+		return hybridKeyFromSeed(seed)
 	}
 	if !errors.Is(err, ErrKeyNotFound) {
-		return nil, fmt.Errorf("%s: read data key: %w", errPrefix, err)
+		return nil, fmt.Errorf("%s: read key seed: %w", errPrefix, err)
 	}
-	return mintDataKey(ring, sys)
+	return mintHybridKey(ring, sys)
 }
 
-// mintDataKey generates a fresh data key and persists it in the keyring.
-func mintDataKey(ring Keyring, sys sysShim) ([]byte, error) {
-	fresh := make([]byte, dataKeyLen)
-	if _, err := sys.RandRead(fresh); err != nil {
-		return nil, fmt.Errorf("%s: generate data key: %w", errPrefix, err)
+// mintHybridKey generates a fresh hybrid keypair and persists its seed blob.
+func mintHybridKey(ring Keyring, sys sysShim) (*hybridKey, error) {
+	xScalar := make([]byte, x25519ScalarLen)
+	if _, err := sys.RandRead(xScalar); err != nil {
+		return nil, fmt.Errorf("%s: generate x25519 seed: %w", errPrefix, err)
 	}
-	if err := ring.Set(keyringService, fresh); err != nil {
-		return nil, fmt.Errorf("%s: store data key: %w", errPrefix, err)
+	mlSeed := make([]byte, mlkem.SeedSize)
+	if _, err := sys.RandRead(mlSeed); err != nil {
+		return nil, fmt.Errorf("%s: generate ml-kem seed: %w", errPrefix, err)
 	}
-	return fresh, nil
+	seed := make([]byte, 0, seedBlobLen)
+	seed = append(append(seed, xScalar...), mlSeed...)
+	hk, err := hybridKeyFromSeed(seed)
+	if err != nil {
+		return nil, err
+	}
+	if err := ring.Set(keyringService, seed); err != nil {
+		return nil, fmt.Errorf("%s: store key seed: %w", errPrefix, err)
+	}
+	return hk, nil
 }
 
-// Open reads and decrypts the store at path, minting the data key via ring on
+// hybridKeyFromSeed reconstructs both private keys from a seed blob.
+func hybridKeyFromSeed(seed []byte) (*hybridKey, error) {
+	if len(seed) != seedBlobLen {
+		return nil, ErrBadSeedLength
+	}
+	xPriv, err := ecdh.X25519().NewPrivateKey(seed[:x25519ScalarLen])
+	if err != nil {
+		return nil, fmt.Errorf("%s: rebuild x25519 key: %w", errPrefix, err)
+	}
+	mlDecap, err := mlkem.NewDecapsulationKey768(seed[x25519ScalarLen:])
+	if err != nil {
+		return nil, fmt.Errorf("%s: rebuild ml-kem key: %w", errPrefix, err)
+	}
+	return &hybridKey{x25519: xPriv, mlkem: mlDecap}, nil
+}
+
+// Open reads and decrypts the store at path, minting the hybrid key via ring on
 // first use. A missing file yields an empty store so first-run callers can Set
 // without a separate init step.
 func Open(path string, ring Keyring) (*Store, error) { return openWith(path, ring, stdSys{}) }
 
 // openWith is Open with an injected sysShim for hermetic tests.
 func openWith(path string, ring Keyring, sys sysShim) (*Store, error) {
-	key, err := ensureDataKey(ring, sys)
+	hk, err := ensureHybridKey(ring, sys)
 	if err != nil {
 		return nil, err
 	}
-	creds, err := readCredentials(sys, path, key)
+	creds, err := readCredentials(sys, path, hk)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{path: path, key: key, credentials: creds, sys: sys}, nil
+	return &Store{path: path, hk: hk, credentials: creds, sys: sys}, nil
 }
 
 // readCredentials loads and decrypts the credential map, returning an empty map
 // when the file does not yet exist.
-func readCredentials(sys sysShim, path string, key []byte) (map[string]string, error) {
+func readCredentials(sys sysShim, path string, hk *hybridKey) (map[string]string, error) {
 	data, err := sys.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -197,11 +267,11 @@ func readCredentials(sys sysShim, path string, key []byte) (map[string]string, e
 		}
 		return nil, fmt.Errorf("%s: read store %s: %w", errPrefix, path, err)
 	}
-	var sf storeFile
-	if uerr := json.Unmarshal(data, &sf); uerr != nil {
+	var env envelope
+	if uerr := json.Unmarshal(data, &env); uerr != nil {
 		return nil, fmt.Errorf("%s: parse store %s: %w", errPrefix, path, uerr)
 	}
-	plain, err := decrypt(key, sf.Sealed)
+	plain, err := openSealed(hk, &env, sys)
 	if err != nil {
 		return nil, err
 	}
@@ -240,18 +310,18 @@ func (s *Store) Delete(id string) {
 	delete(s.credentials, id)
 }
 
-// Save re-seals the credential map and writes it atomically (temp file +
-// rename) with 0600 perms because it holds secrets.
+// Save re-seals the credential map under the hybrid KEM and writes it
+// atomically (temp file + rename) with 0600 perms because it holds secrets.
 func (s *Store) Save() error {
 	plain, err := json.Marshal(s.credentials)
 	if err != nil {
 		return fmt.Errorf("%s: marshal credentials: %w", errPrefix, err)
 	}
-	sealed, err := encrypt(s.key, plain, s.sys)
+	env, err := seal(s.hk, plain, s.sys)
 	if err != nil {
 		return err
 	}
-	data, err := json.Marshal(storeFile{SchemaVersion: storeSchemaVersion, Sealed: sealed})
+	data, err := json.Marshal(env)
 	if err != nil {
 		return fmt.Errorf("%s: marshal store file: %w", errPrefix, err)
 	}
@@ -297,52 +367,151 @@ func finishTempWrite(tmp tempFile, data []byte) error {
 	return nil
 }
 
-// newGCM builds the AES-256-GCM AEAD from key, validating its length first.
-func newGCM(key []byte) (cipher.AEAD, error) {
-	if len(key) != dataKeyLen {
-		return nil, ErrBadKeyLength
-	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("%s: init cipher: %w", errPrefix, err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("%s: init gcm: %w", errPrefix, err)
-	}
-	return gcm, nil
-}
-
-// encrypt seals plain with AES-256-GCM, returning nonce||ciphertext.
-func encrypt(key, plain []byte, sys sysShim) ([]byte, error) {
-	gcm, err := newGCM(key)
+// seal encrypts plain to the recipient hybrid public key, producing a versioned
+// envelope. The AES key is derived from BOTH the ML-KEM and X25519 shared
+// secrets, so confidentiality holds if either primitive is unbroken. The
+// derived key and shared secrets are zeroed after use.
+func seal(hk *hybridKey, plain []byte, sys sysShim) (*envelope, error) {
+	mlSS, mlCT := hk.mlkem.EncapsulationKey().Encapsulate()
+	defer zero(mlSS)
+	ephPub, xSS, err := x25519Encapsulate(hk, sys)
 	if err != nil {
 		return nil, err
 	}
-	nonce := make([]byte, gcm.NonceSize())
+	defer zero(xSS)
+	key, err := combineKey(xSS, mlSS, sys)
+	if err != nil {
+		return nil, err
+	}
+	defer zero(key)
+	nonce, ciphertext, err := gcmSeal(key, plain, sys)
+	if err != nil {
+		return nil, err
+	}
+	return &envelope{
+		FormatVersion:   formatVersion,
+		X25519EphPub:    ephPub,
+		MLKEMCiphertext: mlCT,
+		GCMNonce:        nonce,
+		GCMCiphertext:   ciphertext,
+	}, nil
+}
+
+// openSealed reverses seal: it rebuilds both shared secrets from the recipient
+// private keys, re-derives the AES key, and AEAD-opens the ciphertext (which
+// fails closed on tamper or wrong key). Derived material is zeroed after use.
+func openSealed(hk *hybridKey, env *envelope, sys sysShim) ([]byte, error) {
+	if env.FormatVersion != formatVersion {
+		return nil, fmt.Errorf("%w: %d", ErrBadFormatVersion, env.FormatVersion)
+	}
+	mlSS, err := hk.mlkem.Decapsulate(env.MLKEMCiphertext)
+	if err != nil {
+		return nil, fmt.Errorf("%s: ml-kem decapsulate: %w", errPrefix, err)
+	}
+	defer zero(mlSS)
+	xSS, err := x25519Decapsulate(hk, env.X25519EphPub)
+	if err != nil {
+		return nil, err
+	}
+	defer zero(xSS)
+	key, err := combineKey(xSS, mlSS, sys)
+	if err != nil {
+		return nil, err
+	}
+	defer zero(key)
+	return gcmOpen(key, env.GCMNonce, env.GCMCiphertext, sys)
+}
+
+// x25519Encapsulate generates an ephemeral X25519 keypair and runs ECDH against
+// the recipient public key, returning the ephemeral public key and the secret.
+func x25519Encapsulate(hk *hybridKey, sys sysShim) (ephPub, sharedSecret []byte, err error) {
+	scalar := make([]byte, x25519ScalarLen)
+	if _, rerr := sys.RandRead(scalar); rerr != nil {
+		return nil, nil, fmt.Errorf("%s: generate ephemeral x25519 key: %w", errPrefix, rerr)
+	}
+	defer zero(scalar)
+	eph, err := ecdh.X25519().NewPrivateKey(scalar)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: build ephemeral x25519 key: %w", errPrefix, err)
+	}
+	ss, err := eph.ECDH(hk.x25519.PublicKey())
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: x25519 ecdh: %w", errPrefix, err)
+	}
+	return eph.PublicKey().Bytes(), ss, nil
+}
+
+// x25519Decapsulate runs ECDH between the recipient private key and the sealed
+// ephemeral public key, recovering the X25519 shared secret.
+func x25519Decapsulate(hk *hybridKey, ephPubBytes []byte) ([]byte, error) {
+	ephPub, err := ecdh.X25519().NewPublicKey(ephPubBytes)
+	if err != nil {
+		return nil, fmt.Errorf("%s: parse ephemeral x25519 key: %w", errPrefix, err)
+	}
+	ss, err := hk.x25519.ECDH(ephPub)
+	if err != nil {
+		return nil, fmt.Errorf("%s: x25519 ecdh: %w", errPrefix, err)
+	}
+	return ss, nil
+}
+
+// combineKey derives the AES-256 key from the concatenated X25519 and ML-KEM
+// shared secrets via HKDF-SHA256, domain-separated by hkdfInfo (see
+// stdSys.DeriveKey). The error branch is unreachable with the fixed parameters
+// but provable through the seam.
+func combineKey(x25519SS, mlkemSS []byte, sys sysShim) ([]byte, error) {
+	secret := make([]byte, 0, len(x25519SS)+len(mlkemSS))
+	secret = append(append(secret, x25519SS...), mlkemSS...)
+	defer zero(secret)
+	key, err := sys.DeriveKey(secret)
+	if err != nil {
+		return nil, fmt.Errorf("%s: derive key: %w", errPrefix, err)
+	}
+	return key, nil
+}
+
+// gcmSeal AES-256-GCM encrypts plain under key with a fresh random nonce.
+func gcmSeal(key, plain []byte, sys sysShim) (nonce, ciphertext []byte, err error) {
+	gcm, err := newGCM(key, sys)
+	if err != nil {
+		return nil, nil, err
+	}
+	nonce = make([]byte, gcm.NonceSize())
 	if _, rerr := sys.RandRead(nonce); rerr != nil {
-		return nil, fmt.Errorf("%s: generate nonce: %w", errPrefix, rerr)
+		return nil, nil, fmt.Errorf("%s: generate nonce: %w", errPrefix, rerr)
 	}
-	return gcm.Seal(nonce, nonce, plain, nil), nil
+	return nonce, gcm.Seal(nil, nonce, plain, nil), nil
 }
 
-// decrypt opens a nonce||ciphertext blob sealed by encrypt. An empty blob
-// (never-written store) decrypts to empty plaintext.
-func decrypt(key, sealed []byte) ([]byte, error) {
-	if len(sealed) == 0 {
-		return nil, nil
-	}
-	gcm, err := newGCM(key)
+// gcmOpen AES-256-GCM decrypts ciphertext under key; AEAD fails closed on any
+// tamper or wrong key.
+func gcmOpen(key, nonce, ciphertext []byte, sys sysShim) ([]byte, error) {
+	gcm, err := newGCM(key, sys)
 	if err != nil {
 		return nil, err
 	}
-	if len(sealed) < gcm.NonceSize() {
-		return nil, ErrCiphertextTooShort
+	if len(nonce) != gcm.NonceSize() {
+		return nil, ErrBadNonceLength
 	}
-	nonce, ciphertext := sealed[:gcm.NonceSize()], sealed[gcm.NonceSize():]
 	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%s: decrypt credentials: %w", errPrefix, err)
 	}
 	return plain, nil
+}
+
+// newGCM builds the AES-256-GCM AEAD from key, validating its length first then
+// delegating construction to the seam.
+func newGCM(key []byte, sys sysShim) (cipher.AEAD, error) {
+	if len(key) != dataKeyLen {
+		return nil, ErrBadSeedLength
+	}
+	return sys.NewAEAD(key)
+}
+
+// zero best-effort wipes sensitive bytes after use.
+func zero(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
