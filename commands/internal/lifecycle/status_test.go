@@ -1666,7 +1666,7 @@ func TestPrintStatusProjectLockSummary_Locked(t *testing.T) {
 		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
 	})
 	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "lock") || !strings.Contains(out, "1 extends layer(s) locked") {
+	if !strings.Contains(out, "lock") || !strings.Contains(out, "1 unit(s) locked") {
 		t.Errorf("expected locked summary, got %q", out)
 	}
 }

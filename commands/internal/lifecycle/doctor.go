@@ -323,10 +323,10 @@ func partitionManifestGitSources(rc *config.AgentsRC) (missing, present []string
 }
 
 // reportLockHealth prints the "Lockfile (.agentsrc.lock)" section: per-project
-// drift between the committed lockfile and the declared `extends` layers. It is
-// read-only — doctor never repairs the lock, it only surfaces drift (config-v2
-// p2). Projects that declare no extends are silent (lock drift is not
-// applicable to a local-only manifest).
+// drift between the committed lockfile and the declared `extends`/`packages`
+// units. It is read-only — doctor never repairs the lock, it only surfaces
+// drift (config-v2 p2). Projects that declare no units are silent (lock drift
+// is not applicable to a local-only manifest).
 func reportLockHealth(cfg *config.Config, names []string) {
 	ui.Section("Lockfile (.agentsrc.lock)")
 	anyApplicable := false
@@ -341,11 +341,11 @@ func reportLockHealth(cfg *config.Config, names []string) {
 		anyIssue = anyIssue || issue
 	}
 	if !anyApplicable {
-		ui.Bullet("ok", "No projects declare extends layers — lockfile drift not applicable")
+		ui.Bullet("ok", "No projects declare config units — lockfile drift not applicable")
 		return
 	}
 	if !anyIssue {
-		ui.Bullet("ok", "All declared extends layers are locked and fresh")
+		ui.Bullet("ok", "All declared config units are locked")
 	}
 }
 
@@ -360,16 +360,16 @@ func reportOneProjectLockHealth(name, path string) (applicable, issue bool) {
 		// double-report here.
 		return false, false
 	}
-	if !drift.HasExtends {
+	if !drift.HasDeclaredUnits {
 		return false, false
 	}
 	if !drift.LockPresent {
-		ui.Bullet("warn", fmt.Sprintf("%s — declares extends but has no .agentsrc.lock  hint: da install", name))
+		ui.Bullet("warn", fmt.Sprintf("%s — declares units but has no .agentsrc.lock  hint: da install", name))
 		return true, true
 	}
 	problems := drift.Problems()
 	if len(problems) == 0 {
-		ui.Bullet("ok", fmt.Sprintf("%s — %d extends layer(s) locked and fresh", name, len(drift.Layers)))
+		ui.Bullet("ok", fmt.Sprintf("%s — %d unit(s) locked", name, len(drift.Units)))
 		return true, false
 	}
 	for _, p := range problems {
@@ -382,11 +382,9 @@ func reportOneProjectLockHealth(name, path string) (applicable, issue bool) {
 func lockDriftMessage(s config.LockDriftStatus) string {
 	switch s {
 	case config.LockStatusMissingFromLock:
-		return "declared in extends but absent from lock"
+		return "declared in manifest but absent from lock"
 	case config.LockStatusExtraInLock:
-		return "in lock but no longer declared in extends"
-	case config.LockStatusTTLExpired:
-		return "lock TTL expired — cached SHA due for re-check"
+		return "in lock but no longer declared in manifest"
 	default:
 		return string(s)
 	}
@@ -395,7 +393,7 @@ func lockDriftMessage(s config.LockDriftStatus) string {
 // lockDriftHint maps a drift status to a remediation hint suffix.
 func lockDriftHint(s config.LockDriftStatus) string {
 	switch s {
-	case config.LockStatusMissingFromLock, config.LockStatusTTLExpired:
+	case config.LockStatusMissingFromLock:
 		return "  hint: da config sync"
 	case config.LockStatusExtraInLock:
 		return "  hint: da config sync to prune"

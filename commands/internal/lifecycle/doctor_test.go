@@ -1699,7 +1699,7 @@ func TestReportOneProjectLockHealth_HealthyLock(t *testing.T) {
 	if !applicable || issue {
 		t.Errorf("expected applicable && no issue, got applicable=%v issue=%v", applicable, issue)
 	}
-	if !strings.Contains(out, "locked and fresh") {
+	if !strings.Contains(out, "unit(s) locked") {
 		t.Errorf("expected healthy lock bullet, got %q", out)
 	}
 }
@@ -1745,7 +1745,7 @@ func TestReportLockHealth_AllFreshSummary(t *testing.T) {
 	cfg.AddProject("p", dir)
 
 	out := captureDoctorOutput(t, func() { reportLockHealth(cfg, cfg.ListProjects()) })
-	if !strings.Contains(out, "locked and fresh") {
+	if !strings.Contains(out, "unit(s) locked") {
 		t.Errorf("expected per-project fresh bullet, got %q", out)
 	}
 }
@@ -1771,7 +1771,6 @@ func TestLockDriftMessageAndHint(t *testing.T) {
 	}{
 		{config.LockStatusMissingFromLock, "absent from lock", "  hint: da config sync"},
 		{config.LockStatusExtraInLock, "no longer declared", "  hint: da config sync to prune"},
-		{config.LockStatusTTLExpired, "TTL expired", "  hint: da config sync"},
 		{config.LockDriftStatus("weird"), "weird", ""},
 	}
 	for _, tc := range cases {
