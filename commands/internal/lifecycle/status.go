@@ -90,6 +90,19 @@ type statusJSONProject struct {
 	Platforms     []statusJSONPlatform `json:"platforms"`
 	ManifestFound bool                 `json:"manifest_found"`
 	LastRefreshed string               `json:"last_refreshed,omitempty"`
+	Lock          *statusJSONLock      `json:"lock,omitempty"`
+}
+
+// statusJSONLock summarizes a project's .agentsrc.lock state for the JSON
+// report (config-v2 p2). It is omitted entirely when the manifest declares no
+// `extends`/`packages` units (lock drift is not applicable). The total_layers/
+// drifted_layers JSON keys are retained for output-contract stability; they now
+// count units. DriftedLayers lists the non-OK unit refs so an AI agent can
+// reason about exactly which units need a re-sync.
+type statusJSONLock struct {
+	Present       bool     `json:"present"`
+	TotalLayers   int      `json:"total_layers"`
+	DriftedLayers []string `json:"drifted_layers,omitempty"`
 }
 
 // StatusConfigLoader is the narrow collaborator status.go's fault-injectable
@@ -385,6 +398,51 @@ func printStatusProjectManifestSummary(path string) {
 		ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
 }
 
+// printStatusProjectLockSummary renders the per-project .agentsrc.lock state:
+// a single line summarizing how many declared `extends`/`packages` units are
+// locked and whether any drift (missing/extra) exists (config-v2 p2). Projects
+// that declare no units, or whose manifest cannot be read, print nothing —
+// the manifest summary line already owns the missing/corrupt-manifest case and
+// a local-only manifest has no lock to report.
+func printStatusProjectLockSummary(path string) {
+	drift, err := config.LockDrift(path)
+	if err != nil || !drift.HasDeclaredUnits {
+		return
+	}
+	if !drift.LockPresent {
+		fmt.Fprintf(os.Stdout, "  %s!%s lock  %sno .agentsrc.lock — run: da install%s\n",
+			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	problems := drift.Problems()
+	if len(problems) == 0 {
+		fmt.Fprintf(os.Stdout, "  %s✓%s lock  %s%d unit(s) locked%s\n",
+			ui.Green, ui.Reset, ui.Dim, len(drift.Units), ui.Reset)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "  %s!%s lock  %s%d/%d unit(s) drifted — run: da config sync%s\n",
+		ui.Yellow, ui.Reset, ui.Dim, len(problems), len(drift.Units), ui.Reset)
+}
+
+// buildStatusJSONLock returns the JSON lock summary for one project, or nil
+// when the manifest declares no `extends`/`packages` units / cannot be read (lock drift
+// is not applicable). Read-only — it inspects the lock via config.LockDrift and
+// never writes.
+func buildStatusJSONLock(path string) *statusJSONLock {
+	drift, err := config.LockDrift(path)
+	if err != nil || !drift.HasDeclaredUnits {
+		return nil
+	}
+	out := &statusJSONLock{
+		Present:     drift.LockPresent,
+		TotalLayers: len(drift.Units),
+	}
+	for _, p := range drift.Problems() {
+		out.DriftedLayers = append(out.DriftedLayers, p.Ref)
+	}
+	return out
+}
+
 // RunStatus is the exported entry point used by the root commands/status.go
 // shim during the t08→t11 window. After t11 splits seams_test.go into
 // commands/lifecycle/seams_test.go, the only remaining caller is the shim
@@ -476,6 +534,7 @@ func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string,
 
 	printBadgeRow(collectProjectTextBadges(name, path, agentsHome))
 	printStatusProjectManifestSummary(path)
+	printStatusProjectLockSummary(path)
 
 	if ts := readRefreshTimestamp(path); ts != "" {
 		fmt.Fprintf(os.Stdout, "  %slast refreshed: %s%s\n", ui.Dim, ts, ui.Reset)
@@ -522,6 +581,7 @@ func buildStatusJSONReport(cfg *config.Config, agentsHome, agentFilter string) (
 			Platforms:     collectProjectPlatforms(name, path, agentsHome),
 			ManifestFound: pathExists(filepath.Join(path, config.AgentsRCFile)),
 			LastRefreshed: readRefreshTimestamp(path),
+			Lock:          buildStatusJSONLock(path),
 		}
 		report.Projects = append(report.Projects, project)
 	}
