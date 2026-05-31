@@ -265,12 +265,12 @@ func decodeAppTypeVerifierMap(v any) (map[string][]string, error) {
 // fatal error; app-type detection treats absence as "no app_types" instead, so
 // the pre-refactor no-file behavior is preserved.
 //
-// TODO(config): the substring match below is a fragile cross-package contract on
-// the exact wording of FlatResolver.loadLayers' error (resolver.go ~147). Replace
-// with errors.Is against a shared typed sentinel (e.g. config.ErrNoManifest) once
-// internal/config exports one — that is a config change outside this PR's write
-// scope. TestIsMissingManifestErr pins the current string so a wording drift
-// fails in CI until the sentinel lands.
+// Follow-up (internal/config): the substring match below is a fragile
+// cross-package contract on the exact wording of FlatResolver.loadLayers' error
+// (resolver.go ~147). It should become errors.Is against a shared typed sentinel
+// (e.g. config.ErrNoManifest) once internal/config exports one — that is a config
+// change outside this PR's write scope. TestIsMissingManifestErr pins the current
+// string so a wording drift fails in CI until the sentinel lands.
 func isMissingManifestErr(err error) bool {
 	if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
 		return true
