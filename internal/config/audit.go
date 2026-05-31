@@ -98,7 +98,11 @@ type AuditEmitter interface {
 type noopEmitter struct{}
 
 // Emit discards the event.
-func (noopEmitter) Emit(AuditEvent) {}
+func (noopEmitter) Emit(AuditEvent) {
+	// Intentionally empty: noopEmitter is the default sink used when no audit
+	// emitter is wired, so resolution behavior is unchanged and events are
+	// silently dropped.
+}
 
 // NoopEmitter returns the shared no-op AuditEmitter. Callers that want auditing
 // off use it explicitly; the resolver also falls back to it when none is set.
