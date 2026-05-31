@@ -1,0 +1,11 @@
+name: none
+version: 1.0.0
+description: |-
+  Null adapter for profiles that do not consume a graph backend.
+note_types: []
+edge_types: []
+impact_radius:
+  query: |-
+    RETURN $changed_ids AS id
+  max_depth: 0
+staleness_drivers: []
