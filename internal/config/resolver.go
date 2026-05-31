@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -426,6 +427,9 @@ type LayeredResolver struct {
 	offline bool
 	// now is the clock seam for TTL math (test override). Nil uses time.Now.
 	now func() time.Time
+	// emitter receives config.* audit events emitted during resolution. Nil
+	// means no auditing (normalized to the no-op sink per resolve).
+	emitter AuditEmitter
 }
 
 // NewLayeredResolver returns a LayeredResolver wrapping a default FlatResolver.
@@ -465,6 +469,14 @@ func (r *LayeredResolver) WithClock(now func() time.Time) *LayeredResolver {
 	return r
 }
 
+// WithEmitter registers the AuditEmitter that receives config.* events emitted
+// during resolution (spec §9). A nil emitter disables auditing. Returns the
+// receiver for chaining.
+func (r *LayeredResolver) WithEmitter(e AuditEmitter) *LayeredResolver {
+	r.emitter = e
+	return r
+}
+
 func (r *LayeredResolver) clock() time.Time {
 	if r.now != nil {
 		return r.now()
@@ -484,6 +496,8 @@ func (r *LayeredResolver) fetcherFor(sourceType string) (Fetcher, error) {
 // .agentsrc.lock. Layer fetch/validation errors surface as *ImportError for
 // non-optional entries; optional entries that fail are skipped with a warning.
 func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
+	trace := newAuditTrace(r.emitter)
+
 	repoLayer, repoRaw, err := r.loadRepoLayer(projectPath)
 	if err != nil {
 		return nil, err
@@ -498,7 +512,7 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 		stack = append(stack, userLayer)
 	}
 
-	imported, locked, importWarnings, err := r.resolveExtends(projectPath, repoRaw)
+	imported, locked, importWarnings, err := r.resolveExtends(trace, projectPath, repoRaw)
 	if err != nil {
 		return nil, err
 	}
@@ -511,10 +525,51 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	}
 	snap.Warnings = append(snap.Warnings, importWarnings...)
 
+	// Field-level audit derives from the produced snapshot so the shared merge
+	// core (resolveSnapshot) stays unchanged: overrides come from the provenance
+	// stacks, protection violations from the recorded warnings.
+	emitFieldEvents(trace, snap)
+	trace.emit(effectiveProducedEvent(repoLayerID(snap), len(snap.Layers)))
+
 	if err := WriteConfigLock(projectPath, locked); err != nil {
 		return nil, fmt.Errorf("writing %s: %w", AgentsLockFile, err)
 	}
 	return snap, nil
+}
+
+// emitFieldEvents emits config.field.overridden for every effective field that
+// more than one layer set (the higher-precedence layer wins) and
+// config.field.protection_violation for every recorded protected-field drop.
+// It reads only the produced snapshot, so it never affects merge semantics.
+func emitFieldEvents(trace auditTrace, snap *Snapshot) {
+	for _, name := range snap.FieldNames() {
+		fp := snap.Provenance[name]
+		// Collect the layers that actually contributed a value, in precedence
+		// order. An override exists only when two or more layers set the field.
+		var setLayers []LayerValue
+		for _, lv := range fp.Layers {
+			if lv.Value != nil {
+				setLayers = append(setLayers, lv)
+			}
+		}
+		if len(setLayers) < 2 {
+			continue
+		}
+		winner := setLayers[len(setLayers)-1]
+		prev := setLayers[len(setLayers)-2]
+		trace.emit(fieldOverriddenEvent(name, prev.Layer, winner.Layer, winner.Value))
+	}
+	for _, w := range snap.Warnings {
+		if w.Outcome == "dropped" {
+			trace.emit(protectionViolationEvent(w.FieldPath, w.AttemptedByLayer))
+		}
+	}
+}
+
+// repoLayerID returns the effective repo_id for the terminal effective-produced
+// event, or "" when the resolved manifest declares none.
+func repoLayerID(snap *Snapshot) string {
+	return snap.Effective.RepoID
 }
 
 func (r *LayeredResolver) productDefaults() map[string]any {
@@ -576,7 +631,7 @@ type extendsResult struct {
 // serialized write"). Results are reduced in entry order afterwards so the
 // imported stack, the warning sequence, and the first non-optional failure are
 // identical to a sequential walk.
-func (r *LayeredResolver) resolveExtends(projectPath string, repoRaw map[string]any) ([]ResolvedLayer, map[string]LockedLayer, []ProvenanceWarning, error) {
+func (r *LayeredResolver) resolveExtends(trace auditTrace, projectPath string, repoRaw map[string]any) ([]ResolvedLayer, map[string]LockedLayer, []ProvenanceWarning, error) {
 	rc, err := decodeEffective(repoRaw)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("decoding repo manifest: %w", err)
@@ -605,7 +660,7 @@ func (r *LayeredResolver) resolveExtends(projectPath string, repoRaw map[string]
 		go func(i int, entry LayerRef) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			layer, lock, warns, err := r.resolveOneLayer(entry, sources, prevLocked)
+			layer, lock, warns, err := r.resolveOneLayer(trace, entry, sources, prevLocked)
 			results[i] = extendsResult{layer: layer, lock: lock, warns: warns, err: err}
 		}(i, entry)
 	}
@@ -619,6 +674,7 @@ func (r *LayeredResolver) resolveExtends(projectPath string, repoRaw map[string]
 		res := results[i]
 		warnings = append(warnings, res.warns...)
 		if res.err != nil {
+			trace.emit(importFailedEvent(asImportError(entry.Ref, res.err), entry.Optional))
 			if entry.Optional {
 				warnings = append(warnings, optionalSkipWarning(entry.Ref, res.err))
 				continue
@@ -650,7 +706,7 @@ func resolveConcurrency(n int) int {
 // enforce the tier constraint, fetch (cache/TTL/offline), validate, and produce
 // the ResolvedLayer + lockfile entry. Errors are *ImportError so callers can map
 // to config.import.failed with the right reason.
-func (r *LayeredResolver) resolveOneLayer(entry LayerRef, sources map[string]Source, prevLocked map[string]LockedLayer) (ResolvedLayer, LockedLayer, []ProvenanceWarning, error) {
+func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sources map[string]Source, prevLocked map[string]LockedLayer) (ResolvedLayer, LockedLayer, []ProvenanceWarning, error) {
 	parts, err := ParseLayerRef(entry.Ref)
 	if err != nil {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, Reason: ReasonSchema, Err: err}
@@ -667,7 +723,7 @@ func (r *LayeredResolver) resolveOneLayer(entry LayerRef, sources map[string]Sou
 	}
 
 	cacheDir := layerCacheDir(parts.SourceID, parts.LayerPath)
-	fetched, warns, err := r.fetchLayer(entry, parts, src, fetcher, cacheDir, prevLocked)
+	fetched, warns, err := r.fetchLayer(trace, parts, entry, src, fetcher, cacheDir, prevLocked)
 	if err != nil {
 		return ResolvedLayer{}, LockedLayer{}, warns, err
 	}
@@ -684,13 +740,16 @@ func (r *LayeredResolver) resolveOneLayer(entry LayerRef, sources map[string]Sou
 
 	layer := ResolvedLayer{ID: entry.Ref, Present: true, Raw: sanitized}
 	lock := r.lockEntry(src, fetched.ResolvedSHA)
+	// The layer is validated and admitted to the stack: record its resolution
+	// with the number of top-level fields it contributes and its resolved SHA.
+	trace.emit(layerResolveEvent(entry.Ref, fetched.ResolvedSHA, len(sanitized)))
 	return layer, lock, warns, nil
 }
 
 // fetchLayer performs the cache/TTL/offline-aware fetch for one layer. In
 // offline mode it serves the last resolved SHA from the lockfile cache (with a
 // cache_hit_offline warning) and never contacts the source.
-func (r *LayeredResolver) fetchLayer(entry LayerRef, parts LayerRefParts, src Source, fetcher Fetcher, cacheDir string, prevLocked map[string]LockedLayer) (FetchedLayer, []ProvenanceWarning, error) {
+func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entry LayerRef, src Source, fetcher Fetcher, cacheDir string, prevLocked map[string]LockedLayer) (FetchedLayer, []ProvenanceWarning, error) {
 	if r.offline {
 		prev, ok := prevLocked[entry.Ref]
 		if !ok || prev.ResolvedSHA == "" {
@@ -701,12 +760,14 @@ func (r *LayeredResolver) fetchLayer(entry LayerRef, parts LayerRefParts, src So
 			return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("offline and SHA %s not in cache", prev.ResolvedSHA)}
 		}
 		warns := []ProvenanceWarning{{FieldPath: entry.Ref, AttemptedByLayer: entry.Ref, Outcome: "cache_hit_offline"}}
+		trace.emit(sourceFetchEvent(parts.SourceID, prev.ResolvedSHA, true))
 		return FetchedLayer{Data: data, ResolvedSHA: prev.ResolvedSHA, CacheHit: true}, warns, nil
 	}
 	fetched, err := fetcher.Fetch(src, parts, cacheDir)
 	if err != nil {
 		return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: err}
 	}
+	trace.emit(sourceFetchEvent(parts.SourceID, fetched.ResolvedSHA, fetched.CacheHit))
 	return fetched, nil, nil
 }
 
@@ -734,6 +795,19 @@ func indexSources(srcs []Source) map[string]Source {
 		}
 	}
 	return m
+}
+
+// asImportError coerces a resolve error into the *ImportError it almost always
+// already is, so config.import.failed events carry the structured reason. Errors
+// that are not (or do not wrap) an *ImportError — which the resolver does not
+// currently produce on the import path — are wrapped with ReasonContent so the
+// event still has a valid reason from the taxonomy rather than an empty one.
+func asImportError(ref string, err error) *ImportError {
+	var ie *ImportError
+	if errors.As(err, &ie) {
+		return ie
+	}
+	return &ImportError{Ref: ref, Reason: ReasonContent, Err: err}
 }
 
 // optionalSkipWarning records that an optional extends entry was skipped after a
