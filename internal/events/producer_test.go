@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -191,20 +193,40 @@ func TestFetchSpecMode(t *testing.T) {
 	}
 }
 
+// echoArgv builds a portable argv that prints s verbatim to stdout. On Windows
+// echo is a cmd.exe builtin (not an executable), so route through cmd /c; on
+// Unix printf avoids the trailing newline echo would add.
+func echoArgv(s string) []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd", "/c", "echo", s}
+	}
+	return []string{"printf", "%s", s}
+}
+
+// failArgv is a non-zero-exit command on every supported OS.
+func failArgv() []string {
+	if runtime.GOOS == "windows" {
+		return []string{"cmd", "/c", "exit", "1"}
+	}
+	return []string{"false"}
+}
+
 func TestDefaultFetcherExec(t *testing.T) {
 	f := DefaultFetcher{}
-	out, err := f.Fetch(context.Background(), FetchSpec{Argv: []string{"printf", `{"ok":1}`}})
+	out, err := f.Fetch(context.Background(), FetchSpec{Argv: echoArgv(`{"ok":1}`)})
 	if err != nil {
 		t.Fatalf("exec fetch: %v", err)
 	}
-	if string(out) != `{"ok":1}` {
-		t.Fatalf("exec output = %q", out)
+	// cmd.exe echo appends CRLF; trim trailing newline/CR for a portable assert.
+	got := strings.TrimRight(string(out), "\r\n")
+	if got != `{"ok":1}` {
+		t.Fatalf("exec output = %q", got)
 	}
 }
 
 func TestDefaultFetcherExecError(t *testing.T) {
 	f := DefaultFetcher{}
-	if _, err := f.Fetch(context.Background(), FetchSpec{Argv: []string{"false"}}); err == nil {
+	if _, err := f.Fetch(context.Background(), FetchSpec{Argv: failArgv()}); err == nil {
 		t.Fatalf("expected exec error")
 	}
 }
