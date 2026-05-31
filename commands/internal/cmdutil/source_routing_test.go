@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
 )
@@ -29,20 +30,18 @@ func (f *fakeAuthorizer) Authorize(p config.Principal, s config.WriteTarget) (co
 	return f.verdict, f.err
 }
 
+// testPrincipal is the actor reused across the routing tests.
+var testPrincipal = config.Principal{ID: "alice", Groups: []string{"acme-team"}}
+
 func TestBindScopeSourceFlags(t *testing.T) {
 	cmd := &cobra.Command{Use: "demo"}
 	var f ScopeSourceFlags
 	BindScopeSourceFlags(cmd, &f)
 
-	scopeFlag := cmd.Flags().Lookup(FlagScope)
-	if scopeFlag == nil {
-		t.Fatalf("--%s not registered", FlagScope)
-	}
+	assertFlagRegistered(t, cmd, FlagSource)
+	scopeFlag := assertFlagRegistered(t, cmd, FlagScope)
 	if scopeFlag.DefValue != string(config.ScopeLocal) {
 		t.Errorf("--%s default = %q, want %q", FlagScope, scopeFlag.DefValue, config.ScopeLocal)
-	}
-	if cmd.Flags().Lookup(FlagSource) == nil {
-		t.Fatalf("--%s not registered", FlagSource)
 	}
 
 	// Parsing writes back into the bound struct.
@@ -54,14 +53,27 @@ func TestBindScopeSourceFlags(t *testing.T) {
 	}
 }
 
-func TestResolveTarget(t *testing.T) {
-	tests := []struct {
-		name      string
-		flags     ScopeSourceFlags
-		owner     string
-		wantScope config.EditScope
-		wantErr   bool
-	}{
+// assertFlagRegistered fails the test when name is not registered on cmd and
+// returns the looked-up flag for further assertions.
+func assertFlagRegistered(t *testing.T, cmd *cobra.Command, name string) *pflag.Flag {
+	t.Helper()
+	f := cmd.Flags().Lookup(name)
+	if f == nil {
+		t.Fatalf("--%s not registered", name)
+	}
+	return f
+}
+
+type resolveCase struct {
+	name      string
+	flags     ScopeSourceFlags
+	owner     string
+	wantScope config.EditScope
+	wantErr   bool
+}
+
+func resolveCases() []resolveCase {
+	return []resolveCase{
 		{
 			name:      "empty scope defaults to local",
 			flags:     ScopeSourceFlags{Scope: "", Source: "personal"},
@@ -94,32 +106,47 @@ func TestResolveTarget(t *testing.T) {
 			wantErr: true,
 		},
 	}
+}
 
-	for _, tt := range tests {
+func TestResolveTarget(t *testing.T) {
+	for _, tt := range resolveCases() {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ResolveTarget(tt.flags, tt.owner)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got target %+v", got)
-				}
-				if !strings.Contains(err.Error(), "--"+FlagScope) {
-					t.Errorf("error %q should name the --%s flag", err, FlagScope)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got.Scope != tt.wantScope {
-				t.Errorf("scope = %q, want %q", got.Scope, tt.wantScope)
-			}
-			if got.SourceID != tt.flags.Source {
-				t.Errorf("source id = %q, want %q", got.SourceID, tt.flags.Source)
-			}
-			if got.Owner != tt.owner {
-				t.Errorf("owner = %q, want %q", got.Owner, tt.owner)
-			}
+			checkResolveResult(t, tt, got, err)
 		})
+	}
+}
+
+// checkResolveResult asserts the ResolveTarget outcome for one case, keeping
+// the table loop body flat.
+func checkResolveResult(t *testing.T, tt resolveCase, got RoutedTarget, err error) {
+	t.Helper()
+	if tt.wantErr {
+		assertResolveErr(t, err)
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Scope != tt.wantScope {
+		t.Errorf("scope = %q, want %q", got.Scope, tt.wantScope)
+	}
+	if got.SourceID != tt.flags.Source {
+		t.Errorf("source id = %q, want %q", got.SourceID, tt.flags.Source)
+	}
+	if got.Owner != tt.owner {
+		t.Errorf("owner = %q, want %q", got.Owner, tt.owner)
+	}
+}
+
+// assertResolveErr asserts an invalid-scope error names the --scope flag.
+func assertResolveErr(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--"+FlagScope) {
+		t.Errorf("error %q should name the --%s flag", err, FlagScope)
 	}
 }
 
@@ -138,18 +165,18 @@ func TestNewRouterNilCheckerSafeDefault(t *testing.T) {
 	}
 }
 
-func TestCheckWrite(t *testing.T) {
-	prin := config.Principal{ID: "alice", Groups: []string{"acme-team"}}
+type checkWriteCase struct {
+	name         string
+	authorizer   *fakeAuthorizer // nil → no backend wired
+	target       RoutedTarget
+	wantDecision config.Decision
+	wantErr      bool
+	errContains  string
+	wantBackend  bool // whether the authorizer should have been consulted
+}
 
-	tests := []struct {
-		name         string
-		authorizer   *fakeAuthorizer // nil → no backend wired
-		target       RoutedTarget
-		wantDecision config.Decision
-		wantErr      bool
-		errContains  string
-		wantBackend  bool // whether the authorizer should have been consulted
-	}{
+func checkWriteCases() []checkWriteCase {
+	return []checkWriteCase{
 		{
 			name:         "local always allowed without backend",
 			target:       RoutedTarget{Scope: config.ScopeLocal, SourceID: "personal"},
@@ -208,91 +235,117 @@ func TestCheckWrite(t *testing.T) {
 			errContains: "no write target resolved",
 		},
 	}
+}
 
-	for _, tt := range tests {
+func TestCheckWrite(t *testing.T) {
+	for _, tt := range checkWriteCases() {
 		t.Run(tt.name, func(t *testing.T) {
-			var checker *config.Checker
-			if tt.authorizer != nil {
-				checker = config.NewChecker(tt.authorizer)
-			}
-			r := NewRouter(checker)
+			r := NewRouter(checkerFor(tt.authorizer))
+			verdict, err := r.CheckWrite(testPrincipal, tt.target)
 
-			verdict, err := r.CheckWrite(prin, tt.target)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got verdict %+v", verdict)
-				}
-				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("error %q should contain %q", err, tt.errContains)
-				}
-			} else if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			// Empty-scope rejection never produces a decision.
-			if tt.errContains != "no write target resolved" && verdict.Decision != tt.wantDecision {
-				t.Errorf("decision = %q, want %q", verdict.Decision, tt.wantDecision)
-			}
-
-			if tt.authorizer != nil {
-				if tt.authorizer.called != tt.wantBackend {
-					t.Errorf("backend called = %v, want %v", tt.authorizer.called, tt.wantBackend)
-				}
-				if tt.wantBackend && tt.authorizer.gotPrin.ID != prin.ID {
-					t.Errorf("backend principal = %+v, want id %q", tt.authorizer.gotPrin, prin.ID)
-				}
-			}
+			assertCheckErr(t, tt, verdict, err)
+			assertCheckDecision(t, tt, verdict)
+			assertBackendConsulted(t, tt)
 		})
 	}
 }
 
-func TestRoute(t *testing.T) {
-	prin := config.Principal{ID: "alice"}
+// checkerFor builds the Checker a case needs: nil authorizer → no backend
+// wired (nil checker), otherwise a Checker bound to the fake.
+func checkerFor(auth *fakeAuthorizer) *config.Checker {
+	if auth == nil {
+		return nil
+	}
+	return config.NewChecker(auth)
+}
 
-	t.Run("resolve error short-circuits before check", func(t *testing.T) {
-		auth := &fakeAuthorizer{verdict: config.Verdict{Decision: config.DecisionAllow}}
-		r := NewRouter(config.NewChecker(auth))
-
-		target, verdict, err := r.Route(ScopeSourceFlags{Scope: "bogus"}, prin, "")
-		if err == nil {
-			t.Fatalf("expected resolve error")
-		}
-		if auth.called {
-			t.Errorf("backend must not be consulted when resolution fails")
-		}
-		if target.Scope != "" || verdict.Decision != "" {
-			t.Errorf("zero target/verdict expected on error, got %+v / %+v", target, verdict)
-		}
-	})
-
-	t.Run("happy path resolves and allows local", func(t *testing.T) {
-		r := NewRouter(nil)
-		target, verdict, err := r.Route(ScopeSourceFlags{Source: "personal"}, prin, "")
+// assertCheckErr asserts the error expectation (presence + substring) for a
+// CheckWrite case.
+func assertCheckErr(t *testing.T, tt checkWriteCase, verdict config.Verdict, err error) {
+	t.Helper()
+	if !tt.wantErr {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if target.Scope != config.ScopeLocal || target.SourceID != "personal" {
-			t.Errorf("target = %+v, want local/personal", target)
-		}
-		if !verdict.Allowed() {
-			t.Errorf("verdict should be allowed, got %+v", verdict)
-		}
-	})
+		return
+	}
+	if err == nil {
+		t.Fatalf("expected error, got verdict %+v", verdict)
+	}
+	if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
+		t.Errorf("error %q should contain %q", err, tt.errContains)
+	}
+}
 
-	t.Run("governed path surfaces verdict and error together", func(t *testing.T) {
-		auth := &fakeAuthorizer{verdict: config.Verdict{Decision: config.DecisionDeny, Reason: "blocked"}}
-		r := NewRouter(config.NewChecker(auth))
+// assertCheckDecision asserts the verdict decision, skipping the empty-target
+// rejection which never produces a decision.
+func assertCheckDecision(t *testing.T, tt checkWriteCase, verdict config.Verdict) {
+	t.Helper()
+	if tt.errContains == "no write target resolved" {
+		return
+	}
+	if verdict.Decision != tt.wantDecision {
+		t.Errorf("decision = %q, want %q", verdict.Decision, tt.wantDecision)
+	}
+}
 
-		target, verdict, err := r.Route(ScopeSourceFlags{Scope: "team", Source: "acme"}, prin, "acme-team")
-		if err == nil {
-			t.Fatalf("expected deny error")
-		}
-		if target.SourceID != "acme" {
-			t.Errorf("target should still carry the source id, got %+v", target)
-		}
-		if verdict.Decision != config.DecisionDeny {
-			t.Errorf("verdict decision = %q, want deny", verdict.Decision)
-		}
-	})
+// assertBackendConsulted verifies whether the fake authorizer was called and,
+// when it was, that it saw the test principal.
+func assertBackendConsulted(t *testing.T, tt checkWriteCase) {
+	t.Helper()
+	if tt.authorizer == nil {
+		return
+	}
+	if tt.authorizer.called != tt.wantBackend {
+		t.Errorf("backend called = %v, want %v", tt.authorizer.called, tt.wantBackend)
+	}
+	if tt.wantBackend && tt.authorizer.gotPrin.ID != testPrincipal.ID {
+		t.Errorf("backend principal = %+v, want id %q", tt.authorizer.gotPrin, testPrincipal.ID)
+	}
+}
+
+func TestRouteResolveErrorShortCircuits(t *testing.T) {
+	auth := &fakeAuthorizer{verdict: config.Verdict{Decision: config.DecisionAllow}}
+	r := NewRouter(config.NewChecker(auth))
+
+	target, verdict, err := r.Route(ScopeSourceFlags{Scope: "bogus"}, testPrincipal, "")
+	if err == nil {
+		t.Fatalf("expected resolve error")
+	}
+	if auth.called {
+		t.Errorf("backend must not be consulted when resolution fails")
+	}
+	if target.Scope != "" || verdict.Decision != "" {
+		t.Errorf("zero target/verdict expected on error, got %+v / %+v", target, verdict)
+	}
+}
+
+func TestRouteHappyPathLocalAllow(t *testing.T) {
+	r := NewRouter(nil)
+	target, verdict, err := r.Route(ScopeSourceFlags{Source: "personal"}, testPrincipal, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if target.Scope != config.ScopeLocal || target.SourceID != "personal" {
+		t.Errorf("target = %+v, want local/personal", target)
+	}
+	if !verdict.Allowed() {
+		t.Errorf("verdict should be allowed, got %+v", verdict)
+	}
+}
+
+func TestRouteGovernedSurfacesVerdictAndError(t *testing.T) {
+	auth := &fakeAuthorizer{verdict: config.Verdict{Decision: config.DecisionDeny, Reason: "blocked"}}
+	r := NewRouter(config.NewChecker(auth))
+
+	target, verdict, err := r.Route(ScopeSourceFlags{Scope: "team", Source: "acme"}, testPrincipal, "acme-team")
+	if err == nil {
+		t.Fatalf("expected deny error")
+	}
+	if target.SourceID != "acme" {
+		t.Errorf("target should still carry the source id, got %+v", target)
+	}
+	if verdict.Decision != config.DecisionDeny {
+		t.Errorf("verdict decision = %q, want deny", verdict.Decision)
+	}
 }
