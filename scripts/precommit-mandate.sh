@@ -166,6 +166,22 @@ cmd_sonar() {
     worktree_mount_args=(-v "$git_common_abs:$git_common_abs:ro")
   fi
 
+  # The git fsmonitor daemon keeps a Unix-domain socket at
+  # .git/fsmonitor--daemon.ipc and churns it. The containerized scanner walks the
+  # bind-mounted repo and stat()s that socket mid-walk, dying with
+  # NoSuchFileException and aborting the scan (intermittent — only when a daemon is
+  # live, e.g. an editor's git integration keeps one alive, which is why manual
+  # `fsmonitor--daemon stop` "fixed" it). The socket cannot be bind-masked — runc
+  # can't openat2 a socket as a mount target ("operation not supported") — so stop
+  # the daemon and remove the socket before scanning. fsmonitor is a perf cache
+  # (off by default in this repo) that won't auto-restart during the scan; .git SCM
+  # data is untouched. Covers normal checkouts and the worktree common dir.
+  git fsmonitor--daemon stop >/dev/null 2>&1 || true
+  rm -f "$repo_root/.git/fsmonitor--daemon.ipc" 2>/dev/null || true
+  if [[ -n "${git_common_abs:-}" ]]; then
+    rm -f "$git_common_abs/fsmonitor--daemon.ipc" 2>/dev/null || true
+  fi
+
   # NOTE: we deliberately do NOT pass -Dsonar.branch.name. SonarCloud branch
   # analysis is a paid feature; on this free-tier project the scanner only
   # supports the main branch (+ PR analysis in CI). Setting branch.name makes
