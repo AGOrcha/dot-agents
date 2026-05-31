@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -166,6 +167,9 @@ func (statResult) IsDir() bool         { return false }
 func (statResult) Sys() any            { return nil }
 
 func TestResolvePlaintextFileInsecurePermsRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on Windows; ACL-governed")
+	}
 	for _, mode := range []fs.FileMode{0o644, 0o640, 0o604, 0o666} {
 		path := writeSecureFile(t, `{"id":"secret"}`)
 		sys := envSys(map[string]string{envFileVar: path})

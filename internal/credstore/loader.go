@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -251,10 +252,19 @@ func (l *Loader) readPlaintextFile(path string) (map[string]string, error) {
 
 // assertSecurePerms refuses a plaintext credentials file that is readable by
 // group or other (mode&0077 != 0), mirroring the encrypted store's 0600 writes.
+//
+// The bit-check is POSIX-only. On Windows, Go's os layer does not map NTFS ACLs
+// onto Unix permission bits — os.Stat reports a synthetic 0666/0444 mode for
+// every file regardless of its real ACL — so the mask would reject every file.
+// Access control there is governed by ACLs the loader cannot inspect through
+// FileMode, so the check is skipped rather than enforced on a meaningless value.
 func (l *Loader) assertSecurePerms(path string) error {
 	info, err := l.sys.Stat(path)
 	if err != nil {
 		return fmt.Errorf("%s: stat plaintext credentials file: %w", errPrefix, err)
+	}
+	if runtime.GOOS == "windows" {
+		return nil
 	}
 	if info.Mode().Perm()&insecurePermMask != 0 {
 		return fmt.Errorf("%w: %s has mode %#o (require 0600)", ErrInsecurePlaintextFile, path, info.Mode().Perm())
