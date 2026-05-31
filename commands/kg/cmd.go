@@ -317,6 +317,7 @@ manually only to repair stale derived data without rebuilding the full graph.`,
 		kgLintCmd, kgMaintainCmd, kgBridgeCmd, kgSyncCmd, kgWarmCmd, kgLinkCmd,
 		kgBuildCmd, kgUpdateCmd, kgCodeStatusCmd, kgChangesCmd,
 		kgImpactCmd, kgFlowsCmd, kgCommunitiesCmd, kgPostprocessCmd,
+		newLockfileCmd(deps),
 	)
 	return kgCmd
 }
