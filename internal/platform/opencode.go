@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -93,16 +92,11 @@ func opencodeScanSessionTokens(home, afterTimestamp string) SessionTokenMetrics 
 }
 
 func (o *opencode) IsInstalled() bool {
-	_, err := exec.LookPath("opencode")
-	return err == nil
+	return probeInstalled("opencode")
 }
 
 func (o *opencode) Version() string {
-	out, err := exec.Command("opencode", "--version").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	return probeVersionLine("opencode")
 }
 
 func (o *opencode) HasDeprecatedFormat(repoPath string) bool { return false }

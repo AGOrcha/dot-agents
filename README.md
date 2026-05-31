@@ -4,8 +4,6 @@
 
 One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and more.
 
-📖 Docs & interactive walkthrough: [agorcha.dev](https://agorcha.dev)
-
 ```bash
 # Install
 brew tap AGOrcha/tap && brew install dot-agents
@@ -129,24 +127,40 @@ brew tap AGOrcha/tap
 brew install dot-agents
 ```
 
-### Direct Install (Go CLI, default)
+### Install script
+
+Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install.sh | bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
 ```
-
-### Windows PowerShell (Go CLI)
 
 ```powershell
-irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/master/scripts/install-go.ps1 | iex
+# Windows PowerShell
+irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.ps1 | iex
 ```
 
-### Manual
+### Go toolchain (`go install`)
+
+If you already have Go, install the CLI straight from source with the Go
+toolchain:
+
+```bash
+go install github.com/NikashPrakash/dot-agents/cmd/da@latest
+# or
+go install github.com/NikashPrakash/dot-agents/cmd/da@<release-version>
+```
+
+The `da` binary is placed in `$(go env GOBIN)` (falling back to
+`$(go env GOPATH)/bin`); ensure that directory is on your `PATH`.
+
+### Manual (from source)
 
 ```bash
 git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
 cd ~/.dot-agents
-go build -o ./bin/da ./cmd/da
+go build -ldflags "-s -w" -o ./bin/da ./cmd/da
 export PATH="$HOME/.dot-agents/bin:$PATH"
 ```
 
@@ -180,7 +194,7 @@ da install
 
 ## Commands
 
-`da` exposes 21 top-level commands.
+`da` exposes 20 top-level commands.
 
 ### Project Management
 
@@ -277,7 +291,6 @@ queries — so humans and agents can resume work safely.
 | Command | Description |
 |---------|-------------|
 | `workflow fanout --plan <id> --task <id>` | Delegate a task to a sub-agent with a bounded write scope |
-| `workflow contract` | Materialize and inspect delegation contracts for direct orchestrator work |
 | `workflow merge-back --task <id> --summary <s>` | Record a sub-agent's completed work as a merge-back artifact |
 | `workflow delegation closeout` | Archive merge-back artifacts and reconcile canonical task state |
 | `workflow delegation gate --task <id>` | Evaluate task-local review evidence into a parent-gate outcome |
@@ -290,17 +303,6 @@ queries — so humans and agents can resume work safely.
 |---------|-------------|
 | `workflow drift` | Detect workflow drift across managed repos (read-only) |
 | `workflow sweep` | Plan and optionally apply fixes for workflow drift (`--apply`) |
-| `workflow archive-orphans` | Sweep stale active merge-back/delegation artifacts after plan archive |
-
-#### Iteration client & hook sentinels
-
-| Command | Description |
-|---------|-------------|
-| `workflow start-task` | Start-of-iteration client: activate plan → focus task → derive scope → commit |
-| `workflow close-task` | End-of-iteration client: checkpoint → score → advance → focus → commit |
-| `workflow commit` | Stage and commit workflow-state changes (managed roots + declared session paths) |
-| `workflow hook-sentinel` | Write/read/clear hook sentinels declaring per-skill stop-gate context |
-| `workflow hook-outcome` | Append hook gate outcomes to the active iteration's sidecar |
 
 ### Knowledge Graph
 
@@ -348,17 +350,6 @@ structured project memory, bridge queries, and code-to-note context.
 | `kg communities` | List detected code communities |
 | `kg postprocess` | Rebuild flows, communities, and FTS index |
 | `kg link add\|list\|remove` | Manage note→code symbol cross-references |
-
-### Outcome Scoring
-
-`da score` scores agent-run iterations against the versioned outcome-scoring
-rubric (`docs/OUTCOME_SCORING_RUBRIC.md`).
-
-| Command | Description |
-|---------|-------------|
-| `score run` | Score every iteration in the active log and write score sidecars |
-| `score iteration` | Render a persisted per-iteration score (`--recompute` to recompute) |
-| `score session` | Render a persisted per-session score |
 
 ### Sync
 
@@ -441,7 +432,7 @@ da add ~/Github/myproject  # Re-link your projects
 ## Requirements
 
 - **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
-- **Windows:** use `scripts/install-go.ps1` for the Go CLI.
+- **Windows:** use `scripts/install.ps1` for the Go CLI.
 - **git** (for sync features)
 
 ## Configuration

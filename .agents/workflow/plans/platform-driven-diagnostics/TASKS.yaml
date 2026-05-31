@@ -1,0 +1,172 @@
+schema_version: 1
+plan_id: platform-driven-diagnostics
+tasks:
+    - id: p0-types-and-helpers
+      title: 'P0: BrokenLink/PlatformBadge types + sister interfaces + ScanSingleFileLinks/ScanSymlinkDir helpers'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/diagnostics.go
+        - internal/platform/diagnostics_helpers.go
+        - internal/platform/diagnostics_test.go
+      verification_required: true
+      notes: 'SHIPPED via PR #118. Marker task — advance to completed immediately after creation.'
+      app_type: go-cli
+    - id: p1-broken-links-cursor-claude
+      title: 'P1: BrokenLinkReporter for cursor + claude'
+      status: completed
+      depends_on:
+        - p0-types-and-helpers
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/cursor.go
+        - internal/platform/claude.go
+        - internal/platform/claude_linkcount_unix.go
+        - internal/platform/claude_linkcount_windows.go
+        - internal/platform/cursor_test.go
+        - internal/platform/claude_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/linkcount_unix.go
+        - commands/lifecycle/linkcount_windows.go
+      verification_required: true
+      notes: cursor + claude implement BrokenLinkReporter. doctor.collectBrokenLinks delegates to p.(BrokenLinkReporter) for those two. Move HasMultipleHardLinks from commands/lifecycle/linkcount_*.go into internal/platform/claude_linkcount_*.go.
+      app_type: go-cli
+    - id: p2-broken-links-remaining
+      title: 'P2: BrokenLinkReporter for codex/copilot/opencode'
+      status: completed
+      depends_on:
+        - p1-broken-links-cursor-claude
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/opencode.go
+        - internal/platform/codex_test.go
+        - internal/platform/copilot_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/doctor.go
+      verification_required: true
+      notes: Remaining 3 platforms implement BrokenLinkReporter. collectBrokenLinks collapses to for-range over platform.All(). singleFiles table deleted from doctor.go.
+      app_type: go-cli
+    - id: p3-badge-and-countlinks
+      title: 'P3: Badge + CountLinks across 5 platforms'
+      status: completed
+      depends_on:
+        - p2-broken-links-remaining
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/cursor.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/opencode.go
+        - internal/platform/cursor_test.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/copilot_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/status.go
+        - commands/lifecycle/doctor.go
+      verification_required: true
+      notes: Badge() + CountLinks() per platform. status's 5 *TextBadge helpers + collectProjectPlatforms become a single loop. doctor's countProjectLinks = sum across platforms.
+      app_type: go-cli
+    - id: p4-orphan-canonicals-and-userconfig
+      title: 'P4: OrphanCanonicalReporter + UserConfigReporter'
+      status: pending
+      depends_on:
+        - p3-badge-and-countlinks
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/opencode.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/status.go
+      verification_required: true
+      notes: OrphanCanonicalReporter by claude+codex; UserConfigReporter by claude+codex+opencode. collectOrphanCanonicals + collectUserConfigPlatforms reduce to platform iteration.
+      app_type: go-cli
+    - id: p5-audit-printer-and-cleanup
+      title: 'P5: AuditPrinter + delete per-platform helpers'
+      status: pending
+      depends_on:
+        - p4-orphan-canonicals-and-userconfig
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/cursor.go
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+        - internal/platform/opencode.go
+        - commands/lifecycle/status.go
+        - commands/lifecycle/doctor.go
+      verification_required: true
+      notes: printCursorAudit/printClaudeAudit/etc. move to AuditPrinter impls. printAudit becomes loop respecting agentFilter via p.ID() + platform.Filter(all, agentFilter). All per-platform-by-name helpers deleted.
+      app_type: go-cli
+    - id: p6-proof-of-abstraction
+      title: 'P6: Contract test + stub-platform proof'
+      status: pending
+      depends_on:
+        - p5-audit-printer-and-cleanup
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/contract_test.go
+        - internal/platform/noop_test.go
+      verification_required: true
+      notes: Contract test asserts every platform.All() entry implements every sister interface it advertises. Stub noopPlatform proves abstraction (single-file change surfaces in doctor + status automatically).
+      app_type: go-cli
+    - id: release-record-0.3.3-fold
+      title: 'Release record: capability folds into 0.3.3 (no separate bump)'
+      status: pending
+      depends_on:
+        - p0-types-and-helpers
+        - p1-broken-links-cursor-claude
+        - p2-broken-links-remaining
+        - p3-badge-and-countlinks
+        - p4-orphan-canonicals-and-userconfig
+        - p5-audit-printer-and-cleanup
+        - p6-proof-of-abstraction
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). Added per
+        maintainer ruling 2026-05-28 (plan now committed on this branch).
+        Classification reasoning: this plan migrates `da doctor` + `da status`
+        to sister-interface dispatch over internal/platform.Platform.All(),
+        delivering consistent multi-agent + multi-OS (cross-platform) doctor/
+        status reporting — a user-visible capability (broken-link reporting,
+        per-platform badges/link counts, orphan-canonical + user-config
+        surfacing across cursor/claude/codex/copilot/opencode). That is why it
+        is a MINOR rather than patch-train: behavior the user sees in doctor/
+        status output is broadened, not just refactored.
+        FOLDS INTO 0.3.3: P0–P3 already SHIPPED (P0 via PR #118, P3 via the
+        merged badge-and-countlinks PR #135). Per the 2026-05-28 maintainer
+        ruling, that accumulated merged work ships under the PATCH release
+        0.3.3 (#145), NOT 0.4.0 (0.4.0 is reserved for the next feature land).
+        So the user-visible doctor/status surface this plan delivered is
+        already captured by 0.3.3. Treat this tail as a no-op record — NO
+        separate version bump, because the surface is released under 0.3.3.
+        The remaining P4–P6 abstraction-cleanup tasks are pure internal
+        (contract test + helper deletion, no new user surface), so they feed
+        the PATCH train rather than warranting a minor.
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode); but in practice this tail does not bump
+        — the capability already shipped under 0.3.3.
+        Action: confirm the doctor/status capability is documented in the
+        0.3.3 CHANGELOG section (it is, via #145); only bump VERSION if a
+        genuinely unreleased new surface remains. Otherwise close as no-op.
+      app_type: release

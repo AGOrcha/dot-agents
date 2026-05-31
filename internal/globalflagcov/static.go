@@ -58,6 +58,7 @@ func loadCommandPackages(absDir string) ([]*packages.Package, error) {
 	pkgs, err := packages.Load(cfg,
 		"./commands",
 		"./commands/agents",
+		"./commands/config",
 		"./commands/internal/lifecycle",
 		"./commands/sync",
 		"./commands/hooks",

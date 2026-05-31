@@ -246,3 +246,43 @@ tasks:
           Do NOT delete bridge until ALL §11.4 gate conditions are
           met. If even one consumer's lockfile still has
           `reads_from: [crg-bridge]`, keep the bridge.
+
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the graph-backend minor'
+      status: pending
+      depends_on:
+        - t1-none-adapter-end-to-end
+        - t2-compliance-read-only
+        - t3-ttrpg-dogfood
+        - t4-crg-dual-read
+        - t5-cross-adapter-reads-from
+        - t6-bridge-decommission
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path).
+        Maintainer ruling 2026-05-28: MINOR, not MAJOR. The functionality
+        does not semantically change — only the under-the-hood backend. The
+        Python-bridge removal in t6-bridge-decommission is an internal backend
+        swap (Python subprocess bridge -> native kg adapter), invisible to
+        `da` consumers: no public-surface or contract change. The graph-backend
+        surface callers depend on is preserved end-to-end, so SemVer rule keys
+        MINOR (additive adapters/DSL + invisible backend migration), not MAJOR.
+        t1–t5 (built-in adapters, DSL, cross-adapter reads) are purely additive.
+        t6 is fenced behind a multi-week §11.4 parity gate and a "keep the
+        bridge if any consumer still reads it" anti-scope, so the swap only
+        completes once parity is proven — keeping the consumer-visible behavior
+        identical, which is why it stays MINOR.
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
+        minor is 0.4.0, but resolve from VERSION when this task becomes
+        ready; serialize at the VERSION bump if another minor ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, documenting the bridge migration as
+        an internal backend swap (no consumer-facing change). Merge to master
+        fires auto-release.yml.
+      app_type: release

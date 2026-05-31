@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/NikashPrakash/dot-agents/commands/config"
 	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
 	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
 	"github.com/NikashPrakash/dot-agents/commands/internal/mcp"
@@ -12,6 +13,18 @@ import (
 	"github.com/NikashPrakash/dot-agents/commands/internal/settings"
 	"github.com/spf13/cobra"
 )
+
+// rootConfigDeps builds the config.Deps passed to config.NewConfigCmd. The
+// config subtree only needs the hint-emitting UX helpers from root — it does
+// not consume DryRun/Force/Yes today because explain is read-only.
+func rootConfigDeps() config.Deps {
+	return config.Deps{
+		ErrorWithHints:        ErrorWithHints,
+		UsageError:            UsageError,
+		MaximumNArgsWithHints: MaximumNArgsWithHints,
+		ExactArgsWithHints:    ExactArgsWithHints,
+	}
+}
 
 // rootMCPDeps builds the mcp.Deps passed to mcp.NewCmd. Inlined here after
 // t13a deleted commands/mcp.go's mcpCommandDeps helper.
@@ -156,6 +169,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(rules.NewRulesCmd(rootRulesDeps()))
 	root.AddCommand(mcp.NewCmd(rootMCPDeps()))
 	root.AddCommand(settings.NewCmd(rootSettingsDeps()))
+	root.AddCommand(config.NewConfigCmd(rootConfigDeps()))
 	root.AddCommand(NewReviewCmd())
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewExplainCmd())

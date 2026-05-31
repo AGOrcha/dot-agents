@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-t09-move-doctor-1779795320
+parent_plan_id: root-command-decomposition
+parent_task_id: t09-move-doctor
+title: Move doctor command into commands/lifecycle/
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/lifecycle/doctor.go
+    - commands/lifecycle/doctor_test.go
+    - commands/lifecycle/doctor_repair_e2e_test.go
+    - commands/doctor.go
+    - commands/doctor_test.go
+    - commands/doctor_repair_e2e_test.go
+success_criteria: |-
+    Depends on t08 because doctor uses the linkcount helpers that
+    move with status. After this, the lifecycle cluster is
+    complete.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t09-worker
+status: completed
+created_at: "2026-05-26T11:35:20Z"
+updated_at: "2026-05-26T12:03:45Z"

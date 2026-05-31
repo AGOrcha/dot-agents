@@ -5,6 +5,7 @@
 node_modules/
 vendor/
 .venv/
+.venv
 __pycache__/
 *.pyc
 *.pyo
@@ -124,3 +125,5 @@ pip-delete-this-directory.txt
 # Regenerated from iter-N.yaml + git topology + (optional) transcripts, so
 # committing them would pin a snapshot that drifts from the rubric/inputs.
 .agents/active/iteration-log/*.score.yaml
+# Per-worktree CRG Python venv symlink (see venv-symlink-into-worktrees lesson) — never commit
+.venv

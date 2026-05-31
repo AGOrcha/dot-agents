@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-p1a-mapper-extensions-1779798327
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p1a-mapper-extensions
+title: 'Platform mapper extensions: Codex SubagentStop, Copilot agentStop, Cursor subagentStop'
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - internal/platform/codex.go
+    - internal/platform/copilot.go
+    - internal/platform/cursor.go
+    - internal/platform/coverage_gap_test.go
+success_criteria: 'Extend gate-critical mappings only - Codex SubagentStop, Copilot agentStop/subagentStop, Cursor subagentStop. Copilot stop is agentStop, not stop. Contract: tasks/p1a-mapper-extensions.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: p1a-worker
+status: completed
+created_at: "2026-05-26T12:25:27Z"
+updated_at: "2026-05-26T12:30:20Z"

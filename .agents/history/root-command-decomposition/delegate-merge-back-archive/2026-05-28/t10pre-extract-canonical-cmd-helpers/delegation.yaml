@@ -1,0 +1,37 @@
+schema_version: 1
+id: del-t10pre-extract-canonical-cmd-helpers-1779663650
+parent_plan_id: root-command-decomposition
+parent_task_id: t10pre-extract-canonical-cmd-helpers
+title: 'Precursor: lift canonicalCmdFlags + canonicalCmdExampleBlock into commands/internal/cmdutil'
+summary: Delegated from plan Root commands package decomposition
+write_scope:
+    - commands/internal/cmdutil/canonical_cmd.go
+    - commands/internal/cmdutil/canonical_cmd_test.go
+    - commands/rules.go
+    - commands/mcp.go
+    - commands/settings.go
+success_criteria: |-
+    Today `canonicalCmdFlags` (struct) and
+    `canonicalCmdExampleBlock` (helper) live in commands/rules.go
+    (with a comment noting "rules was the first consumer; reused
+    from mcp.go and settings.go via the shared cmdutil pattern").
+    All three resource commands access them via same-package
+    scope. The moment any one of those three splits into its own
+    subpackage, that same-package access breaks.
+
+    Lift both into commands/internal/cmdutil as the new exported
+    `cmdutil.CanonicalCmdFlags` and
+    `cmdutil.CanonicalCmdExampleBlock`. Update the three root
+    call sites to use the cmdutil-qualified names. No behavior
+    change; tests in commands/{mcp,settings,rules}_test.go must
+    stay green.
+
+    This task MUST land before t10a/b/c. After it lands, each of
+    the three subpackages can split cleanly and independently
+    in parallel.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t10pre-worker
+status: completed
+created_at: "2026-05-24T23:00:50Z"
+updated_at: "2026-05-24T23:09:35Z"

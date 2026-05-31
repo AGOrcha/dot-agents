@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/dashboard-iteration.schema.json",
+  "title": "R2 dashboard iteration DTO",
+  "description": "Presentation projection of a single agent-run iteration for the R2 observability dashboard. IterationSummary is the row shape inside GET /api/runs/{session_id}/iterations; IterationDetail (the full object, with breakdown + integrity + objective) is returned by GET /api/iterations/{n}. Sourced from internal/scoring.IterationRecord plus the iter-N.score.yaml sidecar (internal/scoring.PersistedScore). A listed iteration with no sidecar yet returns score: null / scored: false (spec R2) — never an error.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "iteration",
+    "rubric_version",
+    "scored",
+    "score",
+    "band"
+  ],
+  "properties": {
+    "iteration": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Iteration number (IterationRecord.Iteration / PersistedScore.Iteration). Addressable key for GET /api/iterations/{n}."
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Session this iteration belongs to (IterationRecord.Agent.SessionID); empty for pre-v2 (flat) entries that never carried agent identity.",
+      "default": ""
+    },
+    "schema_version": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "Iteration-log schema version the record was normalized from (IterationRecord.SchemaVersion).",
+      "default": 2
+    },
+    "date": {
+      "type": "string",
+      "description": "Checkpoint date as recorded in the iter-log (IterationRecord.Date, YYYY-MM-DD); empty when absent.",
+      "default": ""
+    },
+    "wave": {
+      "type": "string",
+      "description": "Plan id active at checkpoint time (IterationRecord.Wave).",
+      "default": ""
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Task id for the iteration (IterationRecord.TaskID).",
+      "default": ""
+    },
+    "commit": {
+      "type": "string",
+      "description": "Git commit SHA at checkpoint time (IterationRecord.Commit); empty when none.",
+      "default": ""
+    },
+    "rubric_version": {
+      "type": "string",
+      "description": "Rubric version the score was computed under (PersistedScore.RubricVersion). Empty string when the iteration is unscored and no sidecar exists yet."
+    },
+    "scored": {
+      "type": "boolean",
+      "description": "False when no rubric signal was present (PersistedScore.Scored) OR when the score sidecar has not been written yet (staleness window, spec R2 / OQ2). The UI renders a 'scoring…' pill for the latter."
+    },
+    "score": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Numeric score in [0,1] (PersistedScore.Value); null when scored is false."
+    },
+    "band": {
+      "type": "string",
+      "enum": ["excellent", "good", "fair", "poor", "unscored"],
+      "description": "Human-readable band for `score` (PersistedScore.Band), or 'unscored'."
+    },
+    "files_changed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "IterationRecord.FilesChanged.",
+      "default": 0
+    },
+    "lines_added": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "IterationRecord.LinesAdded.",
+      "default": 0
+    },
+    "lines_removed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "IterationRecord.LinesRemoved.",
+      "default": 0
+    },
+    "retries": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Implementation-role retries (IterationRecord.Impl.Retries).",
+      "default": 0
+    },
+    "integrity_observation_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of comparable integrity observations (claimed AND observed present) for this iteration. Drives the integrity badge on the iteration row without sending the full observation list. Present on both summary and detail.",
+      "default": 0
+    },
+    "transcript_turn_count": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Assistant turns scanned for the iteration (session_tokens.message_count when captured); null when unavailable. Spec R3.",
+      "default": null
+    },
+    "token_usage": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Per-iteration token telemetry (IterationRecord.SessionTokens / TokenUsage); null when the entry never captured token telemetry.",
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "cache_read_tokens": { "type": "integer", "minimum": 0 },
+        "cache_creation_tokens": { "type": "integer", "minimum": 0 },
+        "cache_hit_rate": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "default": null
+    },
+    "verifiers": {
+      "type": "array",
+      "description": "Per-verifier outcomes (IterationRecord.Verifiers). Present in IterationDetail only.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "status"],
+        "properties": {
+          "type": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail", "partial", "unknown"]
+          },
+          "gate_passed": { "type": "boolean", "default": false },
+          "tests_added": { "type": "integer", "minimum": 0, "default": 0 },
+          "retries": { "type": "integer", "minimum": 0, "default": 0 }
+        }
+      },
+      "default": []
+    },
+    "breakdown": {
+      "type": "array",
+      "description": "Per-signal score breakdown, one row per rubric signal in rubric order (PersistedScore.Breakdown / PersistedContribution). Present in IterationDetail only. Empty array when the iteration is unscored.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "signal",
+          "label",
+          "present",
+          "sub_score",
+          "nominal_weight",
+          "effective_weight",
+          "contribution"
+        ],
+        "properties": {
+          "signal": {
+            "type": "string",
+            "enum": [
+              "landed",
+              "verifier",
+              "tests",
+              "correction_pressure",
+              "scope",
+              "hook_outcomes",
+              "token_efficiency"
+            ],
+            "description": "Rubric signal id (PersistedContribution.Signal)."
+          },
+          "label": { "type": "string" },
+          "present": {
+            "type": "boolean",
+            "description": "False when the telemetry to compute the signal was absent; an absent signal contributes 0 (effective_weight 0)."
+          },
+          "sub_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Signal sub-score in [0,1]; meaningful only when present."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Short human-readable note explaining the sub-score (PersistedContribution.Detail).",
+            "default": ""
+          },
+          "nominal_weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Signal's declared rubric weight before renormalization."
+          },
+          "effective_weight": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Weight after renormalizing over present signals; 0 when absent."
+          },
+          "contribution": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "effective_weight * sub_score; present-signal contributions sum to `score`."
+          }
+        }
+      },
+      "default": []
+    },
+    "integrity": {
+      "type": "array",
+      "description": "Claimed-vs-observed integrity observations for two-way signals (internal/scoring.IntegrityObservation). Never affects the numeric score. Present in IterationDetail only.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["signal", "role", "claimed", "observed", "comparable"],
+        "properties": {
+          "signal": {
+            "type": "string",
+            "enum": ["landed", "verifier", "tests", "scope"],
+            "description": "The two-way signal observed (IntegrityObservation.Signal)."
+          },
+          "role": {
+            "type": "string",
+            "enum": ["impl", "verifier", "review"],
+            "description": "Role that made the self-reported claim (IntegrityObservation.Role)."
+          },
+          "claimed": {
+            "$ref": "#/$defs/signalSide",
+            "description": "Self-reported side (IntegrityObservation.Claimed)."
+          },
+          "observed": {
+            "$ref": "#/$defs/signalSide",
+            "description": "Objective side (IntegrityObservation.Observed)."
+          },
+          "comparable": {
+            "type": "boolean",
+            "description": "True when both claimed and observed are present (IntegrityObservation.Comparable); only then is `delta` meaningful."
+          },
+          "delta": {
+            "type": ["number", "null"],
+            "minimum": -1,
+            "maximum": 1,
+            "description": "observed.sub_score - claimed.sub_score when comparable; negative is an over-claim. null when not comparable.",
+            "default": null
+          }
+        }
+      },
+      "default": []
+    },
+    "objective": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "Transcript-derived objective process checks (internal/scoring.IterationObjectives) — facts with no self-reported counterpart. Present in IterationDetail; null when no transcript was scanned.",
+      "properties": {
+        "ran_cli_command": { "$ref": "#/$defs/signalSide" },
+        "committed_after_tests": { "$ref": "#/$defs/signalSide" },
+        "read_loop_state": { "$ref": "#/$defs/signalSide" }
+      },
+      "default": null
+    }
+  },
+  "$defs": {
+    "signalSide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present"],
+      "description": "Mirror of internal/scoring.SignalValue: present + sub_score + detail. sub_score is meaningful only when present.",
+      "properties": {
+        "present": { "type": "boolean" },
+        "sub_score": { "type": "number", "minimum": 0, "maximum": 1, "default": 0 },
+        "detail": { "type": "string", "default": "" }
+      }
+    }
+  }
+}

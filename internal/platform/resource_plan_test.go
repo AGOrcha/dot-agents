@@ -1687,3 +1687,136 @@ func TestSyncScopedFileSymlinks(t *testing.T) {
 		t.Errorf("missing bucket should be no-op, got %v", err)
 	}
 }
+
+// makeAgentsBucketARegularFile writes a regular file at
+// <agentsHome>/agents/<scope> so listScopedResourceDirs surfaces the
+// non-ENOENT "exists but is not a listable directory" error that
+// listCanonicalAgentEntries must wrap (rather than swallow as empty).
+func makeAgentsBucketARegularFile(t *testing.T, agentsHome, scope string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents"), 0o755); err != nil {
+		t.Fatalf("mkdir agents: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "agents", scope), []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write bucket file: %v", err)
+	}
+}
+
+// testSharedAgentIntentBuilderCase runs one test case (has-entries, missing-bucket, or error)
+// for a named builder function with optional error fragment text.
+func testSharedAgentIntentBuilderCase(t *testing.T, name string, caseType string,
+	fn func(agentsHome string) ([]ResourceIntent, error), errFragment string) {
+	switch caseType {
+	case "has-entries":
+		_, agentsHome := setupRepoAgentsHome(t)
+		writeFixtureAgent(t, agentsHome, "proj", "reviewer", "# Reviewer\n")
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		intents, err := fn(agentsHome)
+		if err != nil {
+			t.Fatalf("builder returned error: %v", err)
+		}
+		if len(intents) != 1 || intents[0].LogicalName != "reviewer" {
+			t.Fatalf("expected one reviewer intent, got %+v", intents)
+		}
+
+	case "missing-bucket-is-empty":
+		_, agentsHome := setupRepoAgentsHome(t)
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		intents, err := fn(agentsHome)
+		if err != nil {
+			t.Fatalf("missing bucket should be a nil-error no-op, got %v", err)
+		}
+		if len(intents) != 0 {
+			t.Fatalf("missing bucket should yield no intents, got %+v", intents)
+		}
+
+	case "non-enoent-error-wrapped":
+		_, agentsHome := setupRepoAgentsHome(t)
+		makeAgentsBucketARegularFile(t, agentsHome, "proj")
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		_, err := fn(agentsHome)
+		if err == nil {
+			t.Fatal("expected wrapped error for non-listable bucket, got nil")
+		}
+		if !strings.Contains(err.Error(), "listing canonical agents for "+errFragment) {
+			t.Fatalf("error %q missing caller context %q", err, errFragment)
+		}
+	}
+}
+
+// TestSharedAgentIntentBuilders_CanonicalEntryPreamble exercises the
+// listCanonicalAgentEntries helper extracted from
+// BuildSharedAgentFileSymlinkIntents and BuildSharedCodexAgentTomlIntents.
+// Each builder must: (a) build intents when the bucket has entries,
+// (b) return an empty set when the bucket is absent (ENOENT), and
+// (c) propagate a wrapped error for a non-ENOENT failure with the
+// caller-specific error context preserved byte-for-byte.
+func TestSharedAgentIntentBuilders_CanonicalEntryPreamble(t *testing.T) {
+	build := map[string]func(agentsHome string) ([]ResourceIntent, error){
+		"file-symlink": func(string) ([]ResourceIntent, error) {
+			return BuildSharedAgentFileSymlinkIntents("proj", ".opencode/agent", ".md")
+		},
+		"codex-toml": func(string) ([]ResourceIntent, error) {
+			return BuildSharedCodexAgentTomlIntents("proj")
+		},
+	}
+	// Per-builder fragment that must appear verbatim in the wrapped error.
+	errFragment := map[string]string{
+		"file-symlink": `project "proj" under .opencode/agent:`,
+		"codex-toml":   `project "proj" (codex toml intents):`,
+	}
+
+	for name, fn := range build {
+		t.Run(name+"/has-entries", func(t *testing.T) {
+			testSharedAgentIntentBuilderCase(t, name, "has-entries", fn, "")
+		})
+
+		t.Run(name+"/missing-bucket-is-empty", func(t *testing.T) {
+			testSharedAgentIntentBuilderCase(t, name, "missing-bucket-is-empty", fn, "")
+		})
+
+		t.Run(name+"/non-enoent-error-wrapped", func(t *testing.T) {
+			testSharedAgentIntentBuilderCase(t, name, "non-enoent-error-wrapped", fn, errFragment[name])
+		})
+	}
+}
+
+// invalidSharedSkillIntent returns a skill intent that fails Validate
+// (empty Materializer), used to drive the BuildResourcePlan validate-error
+// branch that several plan entry points share.
+func invalidSharedSkillIntent() ResourceIntent {
+	intent := validSharedSkillIntent(".agents/skills/review", "claude")
+	intent.Materializer = ""
+	return intent
+}
+
+// TestSharedPlanEntryPointsPropagateBuildError covers the validate-error
+// branch in BuildResourcePlan as reached through each high-level entry point.
+func TestSharedPlanEntryPointsPropagateBuildError(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	platforms := []Platform{stubPlatform{id: "stub", intents: []ResourceIntent{invalidSharedSkillIntent()}}}
+
+	t.Run("CollectAndExecute", func(t *testing.T) {
+		if err := CollectAndExecuteSharedTargetPlan("proj", repo, platforms); err == nil {
+			t.Fatal("expected build error, got nil")
+		}
+	})
+	t.Run("RemoveSharedTargetPlan", func(t *testing.T) {
+		if err := RemoveSharedTargetPlan("proj", repo, platforms); err == nil {
+			t.Fatal("expected build error, got nil")
+		}
+	})
+	t.Run("ExecuteSharedSkillMirrorPlan", func(t *testing.T) {
+		// Seed a skill so intents exist; a real (non-".") target root drives
+		// the build → plan → Execute body to completion.
+		canonical := writeFixtureSkill(t, agentsHome, "proj", "review")
+		if err := ExecuteSharedSkillMirrorPlan("proj", repo, ".agents/skills"); err != nil {
+			t.Fatalf("ExecuteSharedSkillMirrorPlan: %v", err)
+		}
+		assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonical)
+	})
+}

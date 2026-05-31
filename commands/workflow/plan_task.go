@@ -615,15 +615,6 @@ func isValidPlanStatus(s string) bool {
 	}
 }
 
-func isValidTaskStatus(s string) bool {
-	switch s {
-	case "pending", "in_progress", "blocked", "completed", "cancelled":
-		return true
-	default:
-		return false
-	}
-}
-
 func runWorkflowPlanList() error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -1743,7 +1734,9 @@ func incompleteCanonicalDependencies(tasks []CanonicalTask, deps []string) []str
 
 	var incomplete []string
 	for _, dep := range deps {
-		if statusByID[dep] != "completed" {
+		// §3.4.6/§4: an upstream in {completed, awaiting_owner_review} satisfies
+		// the dep; in_progress / awaiting_agent_review do NOT.
+		if !depSatisfiesDownstream(statusByID[dep]) {
 			incomplete = append(incomplete, dep)
 		}
 	}
@@ -1796,7 +1789,8 @@ func crossPlanDepIncomplete(projectPath, dep string, cache map[string]*Canonical
 
 	for _, t := range tf.Tasks {
 		if t.ID == refTaskID {
-			return t.Status != "completed"
+			// §3.4.6/§4: completed OR awaiting_owner_review satisfies the dep.
+			return !depSatisfiesDownstream(t.Status)
 		}
 	}
 	if warnings != nil {
@@ -1819,7 +1813,8 @@ func incompleteCanonicalDependenciesCrossplan(projectPath string, localTasks []C
 	var incomplete []string
 	for _, dep := range deps {
 		if !strings.Contains(dep, "/") {
-			if statusByID[dep] != "completed" {
+			// §3.4.6/§4: completed OR awaiting_owner_review satisfies the dep.
+			if !depSatisfiesDownstream(statusByID[dep]) {
 				incomplete = append(incomplete, dep)
 			}
 			continue
@@ -1988,7 +1983,7 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if !isValidTaskStatus(newStatus) {
 		return deps.ErrorWithHints(
 			fmt.Sprintf("invalid task status %q", newStatus),
-			"Valid values: `pending`, `in_progress`, `blocked`, `completed`, `cancelled`.",
+			taskStatusVocabularyHint(),
 		)
 	}
 	project, err := currentWorkflowProject()
@@ -1999,18 +1994,9 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if err != nil {
 		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
-	found := false
-	var taskTitle string
-	for i, t := range tf.Tasks {
-		if t.ID == taskID {
-			tf.Tasks[i].Status = newStatus
-			taskTitle = t.Title
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
+	taskTitle, err := applyTaskStatusTransition(tf, planID, taskID, newStatus)
+	if err != nil {
+		return err
 	}
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err

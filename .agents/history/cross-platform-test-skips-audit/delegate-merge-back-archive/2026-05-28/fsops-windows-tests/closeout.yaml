@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: cross-platform-test-skips-audit
+task_id: fsops-windows-tests
+delegation_id: del-fsops-windows-tests-1779717271
+decision: accept
+closed_at: "2026-05-28T05:32:09Z"

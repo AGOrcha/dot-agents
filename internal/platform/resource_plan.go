@@ -401,6 +401,30 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 	return intents, nil
 }
 
+// listCanonicalAgentEntries lists the canonical agents-bucket entries for
+// project (each per-entry directory that owns AGENT.md), centralizing the
+// preamble shared by BuildSharedAgentFileSymlinkIntents and
+// BuildSharedCodexAgentTomlIntents.
+//
+// A missing canonical agents bucket (ENOENT) is reported via ok=false with a
+// nil error, so callers can return an empty intent set — projects without any
+// agents yet are legitimate and must not be a hard failure. Any other error
+// (permission denied, IO, bucket-is-a-file) is wrapped with the caller's
+// errContext fragment and surfaced so the fault is not silently swallowed.
+// errContext is interpolated as: listing canonical agents for project %q
+// <errContext>: %w (e.g. "under .opencode" or "(codex toml intents)").
+func listCanonicalAgentEntries(project, errContext string) (entries []resourceDir, ok bool, err error) {
+	agentsHome := config.AgentsHome()
+	entries, err = listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("listing canonical agents for project %q %s: %w", project, errContext, err)
+	}
+	return entries, true, nil
+}
+
 // BuildSharedAgentFileSymlinkIntents builds symlink intents from each canonical
 // AGENT.md file to a repo-local file path (OpenCode `.md`, Copilot `.agent.md`).
 //
@@ -409,13 +433,12 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 // intents, not a hard failure. Other errors (permission denied, IO) propagate
 // so callers can surface them instead of silently producing an empty plan.
 func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix string) ([]ResourceIntent, error) {
-	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
+	entries, ok, err := listCanonicalAgentEntries(project, fmt.Sprintf("under %s", targetRoot))
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("listing canonical agents for project %q under %s: %w", project, targetRoot, err)
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {
@@ -452,13 +475,12 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 // intents, not a hard failure. Other errors (permission denied, IO) propagate
 // so callers can surface them instead of silently producing an empty plan.
 func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) {
-	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
+	entries, ok, err := listCanonicalAgentEntries(project, "(codex toml intents)")
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("listing canonical agents for project %q (codex toml intents): %w", project, err)
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {

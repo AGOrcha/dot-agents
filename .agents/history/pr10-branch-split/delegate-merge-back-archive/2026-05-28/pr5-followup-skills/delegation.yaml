@@ -1,0 +1,19 @@
+schema_version: 1
+id: del-pr5-followup-skills-1779933992
+parent_plan_id: pr10-branch-split
+parent_task_id: pr5-followup-skills
+title: 'PR5-followup-A: promote 4 remaining orchestration skills to global (orchestrator-session-start, delegation-lifecycle, plan-wave-picker, provider-consumer-pair)'
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+    - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+    - internal/scaffold/home/starter/skills/global/plan-wave-picker/
+    - internal/scaffold/home/starter/skills/global/provider-consumer-pair/
+    - internal/scaffold/home/copy.go
+success_criteria: 'Subset of original pr5-followup §2. PR #109 promoted iteration-close + isp + loop-worker (3/7). This task promotes the remaining 4 via ''da skills promote''. Pre-flight: verify each skill''s live state at ~/.agents/skills/dot-agents/ matches the starter destination shape per [[starter-vs-project-overlay]] (template vs commands nuance). Skip skills that don''t apply outside dot-agents-dev.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: skill-promote-worker
+status: completed
+created_at: "2026-05-28T02:06:32Z"
+updated_at: "2026-05-28T02:28:28Z"

@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: config-v2-migration
+task_id: p0-schema-additive-extension
+delegation_id: del-p0-schema-additive-extension-1779897740
+decision: accept
+closed_at: "2026-05-27T23:09:07Z"

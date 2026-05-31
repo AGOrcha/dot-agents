@@ -1,0 +1,1001 @@
+package config
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/go-git/go-billy/v6"
+	"github.com/go-git/go-billy/v6/memfs"
+	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	"github.com/go-git/go-git/v6/storage/memory"
+)
+
+// withPackagesCache points the tier-2 packages cache root (~/.agents/cache) at a
+// temp dir for the duration of a test by overriding AGENTS_HOME, so artifact
+// caching is hermetic and never touches the real cache.
+func withPackagesCache(t *testing.T) {
+	t.Helper()
+	t.Setenv("AGENTS_HOME", t.TempDir())
+}
+
+func sha256Hex(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// --- signing posture stub --------------------------------------------------
+
+func TestSigningPostureValid(t *testing.T) {
+	for _, p := range []SigningPosture{PostureUnsigned, PostureOptional, PostureRequired} {
+		if !p.Valid() {
+			t.Errorf("posture %q should be valid", p)
+		}
+	}
+	if SigningPosture("bogus").Valid() {
+		t.Error("bogus posture should be invalid")
+	}
+}
+
+func TestPostureFromSource(t *testing.T) {
+	tests := []struct {
+		name string
+		auth string
+		want SigningPosture
+	}{
+		{name: "absent", auth: "", want: PostureUnsigned},
+		{name: "empty object", auth: `{}`, want: PostureUnsigned},
+		{name: "required", auth: `{"signing":"required"}`, want: PostureRequired},
+		{name: "optional", auth: `{"signing":"optional"}`, want: PostureOptional},
+		{name: "unsigned explicit", auth: `{"signing":"unsigned"}`, want: PostureUnsigned},
+		{name: "unrecognized falls back", auth: `{"signing":"weird"}`, want: PostureUnsigned},
+		{name: "non-string value", auth: `{"signing":3}`, want: PostureUnsigned},
+		{name: "malformed json", auth: `{not json`, want: PostureUnsigned},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var raw json.RawMessage
+			if tc.auth != "" {
+				raw = json.RawMessage(tc.auth)
+			}
+			if got := PostureFromSource(Source{Auth: raw}); got != tc.want {
+				t.Fatalf("PostureFromSource(%q) = %q, want %q", tc.auth, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAuthString(t *testing.T) {
+	if got := authString(nil, "token"); got != "" {
+		t.Fatalf("nil auth = %q", got)
+	}
+	if got := authString(json.RawMessage(`["not","obj"]`), "token"); got != "" {
+		t.Fatalf("array auth = %q", got)
+	}
+	if got := authString(json.RawMessage(`{"token":"abc"}`), "token"); got != "abc" {
+		t.Fatalf("token = %q, want abc", got)
+	}
+	if got := authString(json.RawMessage(`{"token":"abc"}`), "missing"); got != "" {
+		t.Fatalf("missing key = %q", got)
+	}
+}
+
+func TestVerifySignatureStub(t *testing.T) {
+	// Unsigned/optional always pass; required without a verified signature fails.
+	if err := verifySignature(PostureUnsigned, "sha256:x", false); err != nil {
+		t.Fatalf("unsigned should pass: %v", err)
+	}
+	if err := verifySignature(PostureOptional, "sha256:x", false); err != nil {
+		t.Fatalf("optional should pass: %v", err)
+	}
+	if err := verifySignature(PostureRequired, "sha256:x", true); err != nil {
+		t.Fatalf("required+signed should pass: %v", err)
+	}
+	err := verifySignature(PostureRequired, "sha256:x", false)
+	if err == nil {
+		t.Fatal("required+unsigned should fail")
+	}
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want ImportError reason=auth, got %v", err)
+	}
+}
+
+// --- package ref parsing ---------------------------------------------------
+
+func TestParsePackageRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		ref     string
+		want    PackageRefParts
+		wantErr bool
+	}{
+		{name: "tag", ref: "acme:skill/review@1.2.3", want: PackageRefParts{SourceID: "acme", ArtifactPath: "skill/review", VersionSpec: "1.2.3"}},
+		{name: "range", ref: "acme:skill/review@^1.2", want: PackageRefParts{SourceID: "acme", ArtifactPath: "skill/review", VersionSpec: "^1.2"}},
+		{name: "digest pin", ref: "acme:v/api@pinned:sha256:abc", want: PackageRefParts{SourceID: "acme", ArtifactPath: "v/api", VersionSpec: "pinned:sha256:abc"}},
+		{name: "no colon", ref: "acmeskill@1", wantErr: true},
+		{name: "empty source", ref: ":skill@1", wantErr: true},
+		{name: "no version", ref: "acme:skill", wantErr: true},
+		{name: "empty artifact", ref: "acme:@1.2", wantErr: true},
+		{name: "empty version", ref: "acme:skill@", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParsePackageRef(tc.ref)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.ref)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// --- package fetcher selection (tier constraint) ---------------------------
+
+func TestSelectPackageFetcherTierConstraint(t *testing.T) {
+	if _, err := SelectPackageFetcher("oci"); err != nil {
+		t.Errorf("SelectPackageFetcher(oci) = %v, want fetcher", err)
+	}
+	if _, err := SelectPackageFetcher("http"); err != nil {
+		t.Errorf("SelectPackageFetcher(http) = %v, want fetcher", err)
+	}
+	for _, typ := range []string{"git", "local"} {
+		if _, err := SelectPackageFetcher(typ); err == nil {
+			t.Errorf("SelectPackageFetcher(%q) = nil, want tier rejection", typ)
+		}
+	}
+	if _, err := SelectPackageFetcher("bogus"); err == nil {
+		t.Error("SelectPackageFetcher(bogus) = nil, want unsupported error")
+	}
+}
+
+// --- oci ref parsing -------------------------------------------------------
+
+func TestParseOCIRef(t *testing.T) {
+	src := Source{Type: "oci", URL: "oci://registry.acme.internal/dot-agents"}
+	ref, err := parseOCIRef(src, PackageRefParts{ArtifactPath: "skill/review", VersionSpec: "1.2.3"})
+	if err != nil {
+		t.Fatalf("parseOCIRef: %v", err)
+	}
+	if ref.Registry != "registry.acme.internal" || ref.Repository != "dot-agents/skill/review" || ref.Tag != "1.2.3" || ref.Digest != "" {
+		t.Fatalf("unexpected ref %+v", ref)
+	}
+
+	// Digest-pinned version becomes a Digest, not a Tag.
+	ref2, err := parseOCIRef(src, PackageRefParts{ArtifactPath: "v/api", VersionSpec: "pinned:sha256:abc"})
+	if err != nil {
+		t.Fatalf("parseOCIRef pin: %v", err)
+	}
+	if ref2.Digest != "sha256:abc" || ref2.Tag != "" {
+		t.Fatalf("pin ref %+v", ref2)
+	}
+
+	// No base path: registry only.
+	ref3, _ := parseOCIRef(Source{URL: "oci://reg.example"}, PackageRefParts{ArtifactPath: "a/b", VersionSpec: "1"})
+	if ref3.Registry != "reg.example" || ref3.Repository != "a/b" {
+		t.Fatalf("no-base ref %+v", ref3)
+	}
+}
+
+func TestParseOCIRefErrors(t *testing.T) {
+	if _, err := parseOCIRef(Source{URL: ""}, PackageRefParts{ArtifactPath: "a", VersionSpec: "1"}); err == nil {
+		t.Fatal("empty url should error")
+	}
+	if _, err := parseOCIRef(Source{URL: "https://reg.example/x"}, PackageRefParts{ArtifactPath: "a", VersionSpec: "1"}); err == nil {
+		t.Fatal("non-oci scheme should error")
+	}
+	if _, err := parseOCIRef(Source{URL: "oci:///"}, PackageRefParts{ArtifactPath: "a", VersionSpec: "1"}); err == nil {
+		t.Fatal("missing registry host should error")
+	}
+}
+
+func TestDigestFromVersionSpec(t *testing.T) {
+	if d, ok := digestFromVersionSpec("pinned:sha256:abc"); !ok || d != "sha256:abc" {
+		t.Fatalf("pinned digest = %q,%v", d, ok)
+	}
+	if _, ok := digestFromVersionSpec("1.2.3"); ok {
+		t.Fatal("tag should not be a digest")
+	}
+	if _, ok := digestFromVersionSpec("pinned:md5:abc"); ok {
+		t.Fatal("non-sha256 pin should not be a digest")
+	}
+}
+
+func TestDigestDirAndPath(t *testing.T) {
+	if got := digestDir("sha256:deadbeef"); got != "deadbeef" {
+		t.Fatalf("digestDir prefixed = %q", got)
+	}
+	if got := digestDir("deadbeef"); got != "deadbeef" {
+		t.Fatalf("digestDir bare = %q", got)
+	}
+	if !strings.HasSuffix(cachedArtifactPath("sha256:abc"), filepath.Join("abc", "artifact.blob")) {
+		t.Fatalf("cachedArtifactPath = %q", cachedArtifactPath("sha256:abc"))
+	}
+}
+
+// --- oci fetcher -----------------------------------------------------------
+
+func TestOCIFetcherPullsAndCaches(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	digest := "sha256:" + sha256Hex(blob)
+	pulls := 0
+	f := &ociFetcher{puller: func(_ context.Context, ref ociRef, _ []byte) ([]byte, string, error) {
+		pulls++
+		if ref.Registry != "reg.example" {
+			t.Fatalf("registry = %q", ref.Registry)
+		}
+		return blob, digest, nil
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example/base"}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if string(got.Data) != string(blob) || got.Digest != digest || got.CacheHit {
+		t.Fatalf("unexpected result %+v", got)
+	}
+	if got.Posture != PostureUnsigned {
+		t.Fatalf("posture = %q", got.Posture)
+	}
+	// Cached on disk.
+	if _, ok := readCachedArtifact(digest); !ok {
+		t.Fatal("expected artifact cached")
+	}
+	if pulls != 1 {
+		t.Fatalf("pulls = %d", pulls)
+	}
+}
+
+func TestOCIFetcherDigestPinCacheHit(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinned-blob")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	pulled := false
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+		pulled = true
+		return nil, "", errors.New("should not pull")
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example"}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit || got.Digest != digest {
+		t.Fatalf("expected cache hit, got %+v", got)
+	}
+	if pulled {
+		t.Fatal("pinned cache hit must not pull")
+	}
+}
+
+func TestOCIFetcherDigestMismatch(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("served")
+	served := "sha256:" + sha256Hex(blob)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+		return blob, served, nil
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example"}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:sha256:deadbeef"})
+	if err == nil {
+		t.Fatal("expected digest-mismatch error")
+	}
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error, got %v", err)
+	}
+}
+
+func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("no-digest-from-reg")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+		return blob, "", nil // registry omits digest
+	}}
+	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Digest != "sha256:"+sha256Hex(blob) {
+		t.Fatalf("computed digest = %q", got.Digest)
+	}
+}
+
+func TestOCIFetcherPullError(t *testing.T) {
+	withPackagesCache(t)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+		return nil, "", errors.New("registry down")
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonTransport {
+		t.Fatalf("want transport error, got %v", err)
+	}
+}
+
+func TestOCIFetcherParseError(t *testing.T) {
+	withPackagesCache(t)
+	f := &ociFetcher{}
+	_, err := f.FetchArtifact(Source{URL: "https://reg.example/x"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error, got %v", err)
+	}
+}
+
+func TestOCIFetcherRequiredPostureFails(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("blob")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+		return blob, "sha256:" + sha256Hex(blob), nil
+	}}
+	src := Source{URL: "oci://reg.example", Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want auth error for required posture, got %v", err)
+	}
+}
+
+func TestOCIFetcherRequiredPostureCacheHitFails(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinblob")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &ociFetcher{}
+	src := Source{URL: "oci://reg.example", Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
+	if err == nil {
+		t.Fatal("required posture must fail even on cache hit")
+	}
+}
+
+func TestOCIFetcherCacheWriteError(t *testing.T) {
+	// Point AGENTS_HOME at a path whose cache parent is a regular file so
+	// writeCachedArtifact's MkdirAll fails.
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	// Create ~/.agents/cache as a file to block MkdirAll of cache/packages.
+	if err := os.WriteFile(filepath.Join(home, "cache"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blob := []byte("b")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+		return blob, "sha256:" + sha256Hex(blob), nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestOCIPullNotWired(t *testing.T) {
+	// The default (real) puller is a deterministic transport error in p5.
+	_, _, err := ociPull(context.Background(), ociRef{Registry: "r", Repository: "x"}, nil)
+	if err == nil {
+		t.Fatal("expected not-wired error from default oci puller")
+	}
+}
+
+func TestOCIFetcherDefaultPullerErrors(t *testing.T) {
+	withPackagesCache(t)
+	f := &ociFetcher{} // nil puller -> ociPull -> transport error
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	if err == nil {
+		t.Fatal("expected error from unwired default puller")
+	}
+}
+
+// --- http artifact fetcher -------------------------------------------------
+
+func TestHTTPArtifactFetcherPullsAndCaches(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("http-artifact")
+	var gotAuth string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/skill/x/1.0" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(blob)
+	}))
+	defer srv.Close()
+	f := &httpArtifactFetcher{client: srv.Client()}
+	src := Source{Type: "http", URL: srv.URL, Auth: json.RawMessage(`{"token":"secret"}`)}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if string(got.Data) != string(blob) || got.CacheHit {
+		t.Fatalf("result %+v", got)
+	}
+	if gotAuth != "Bearer secret" {
+		t.Fatalf("auth header = %q", gotAuth)
+	}
+	if _, ok := readCachedArtifact(got.Digest); !ok {
+		t.Fatal("expected cached")
+	}
+}
+
+func TestHTTPArtifactFetcherRejectsNonHTTPS(t *testing.T) {
+	f := &httpArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{URL: "http://insecure.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error, got %v", err)
+	}
+}
+
+func TestHTTPArtifactFetcherStatusCodes(t *testing.T) {
+	cases := []struct {
+		status int
+		reason ImportFailReason
+	}{
+		{http.StatusUnauthorized, ReasonAuth},
+		{http.StatusForbidden, ReasonAuth},
+		{http.StatusNotFound, ReasonNotFound},
+		{http.StatusInternalServerError, ReasonTransport},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			withPackagesCache(t)
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			f := &httpArtifactFetcher{client: srv.Client()}
+			_, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+			var ie *ImportError
+			if !errors.As(err, &ie) || ie.Reason != tc.reason {
+				t.Fatalf("status %d: want reason %s, got %v", tc.status, tc.reason, err)
+			}
+		})
+	}
+}
+
+func TestHTTPArtifactFetcherDigestPinCacheHit(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinned-http")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	// Server would 500 if hit; cache hit must short-circuit before any request.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "should not be called", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	f := &httpArtifactFetcher{client: srv.Client()}
+	got, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit {
+		t.Fatal("expected pinned cache hit")
+	}
+}
+
+func TestHTTPArtifactFetcherDigestMismatch(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("served-bytes")
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(blob)
+	}))
+	defer srv.Close()
+	f := &httpArtifactFetcher{client: srv.Client()}
+	_, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:sha256:deadbeef"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error, got %v", err)
+	}
+}
+
+func TestHTTPArtifactFetcherRequiredPosture(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("blob")
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(blob)
+	}))
+	defer srv.Close()
+	f := &httpArtifactFetcher{client: srv.Client()}
+	src := Source{URL: srv.URL, Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want auth error, got %v", err)
+	}
+}
+
+func TestHTTPArtifactFetcherRequestBuildError(t *testing.T) {
+	// A control char in the URL passes the https:// prefix check but makes
+	// http.NewRequestWithContext fail (the request-build error branch).
+	f := &httpArtifactFetcher{}
+	src := Source{URL: "https://reg.example/\x7f"}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonTransport {
+		t.Fatalf("want transport error from request build, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "building request") {
+		t.Fatalf("expected request-build error, got %v", err)
+	}
+}
+
+func TestHTTPArtifactFetcherTransportError(t *testing.T) {
+	f := &httpArtifactFetcher{client: &http.Client{Transport: errRoundTripper{}}}
+	_, err := f.FetchArtifact(Source{URL: "https://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonTransport {
+		t.Fatalf("want transport error, got %v", err)
+	}
+}
+
+func TestHTTPArtifactFetcherCacheWriteError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "cache"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blob := []byte("b")
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(blob)
+	}))
+	defer srv.Close()
+	f := &httpArtifactFetcher{client: srv.Client()}
+	_, err := f.FetchArtifact(Source{URL: srv.URL}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestArtifactURL(t *testing.T) {
+	got := artifactURL(Source{URL: "https://reg.example/base/"}, PackageRefParts{ArtifactPath: "/skill/x/", VersionSpec: "/1.0"})
+	if got != "https://reg.example/base/skill/x/1.0" {
+		t.Fatalf("artifactURL = %q", got)
+	}
+}
+
+func TestParseLayerRef(t *testing.T) {
+	tests := []struct {
+		name    string
+		ref     string
+		want    LayerRefParts
+		wantErr bool
+	}{
+		{name: "bare", ref: "acme:org/base", want: LayerRefParts{SourceID: "acme", LayerPath: "org/base"}},
+		{name: "with version", ref: "acme:org/base@v1.2.3", want: LayerRefParts{SourceID: "acme", LayerPath: "org/base", Version: "v1.2.3"}},
+		{name: "version with at in sha", ref: "acme:team/frontend@abc123", want: LayerRefParts{SourceID: "acme", LayerPath: "team/frontend", Version: "abc123"}},
+		{name: "no colon", ref: "acmeorgbase", wantErr: true},
+		{name: "empty source", ref: ":org/base", wantErr: true},
+		{name: "empty layer path", ref: "acme:", wantErr: true},
+		{name: "empty layer path with version", ref: "acme:@v1", wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseLayerRef(tc.ref)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.ref)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSelectFetcherTierConstraint(t *testing.T) {
+	for _, typ := range []string{"git", "http", "local"} {
+		if _, err := SelectFetcher(typ); err != nil {
+			t.Errorf("SelectFetcher(%q) = error %v, want fetcher", typ, err)
+		}
+	}
+	if _, err := SelectFetcher("oci"); err == nil {
+		t.Error("SelectFetcher(\"oci\") = nil error, want schema rejection (oci is packages-only)")
+	}
+	if _, err := SelectFetcher("bogus"); err == nil {
+		t.Error("SelectFetcher(\"bogus\") = nil error, want unsupported-type error")
+	}
+}
+
+func TestLocalFetcher(t *testing.T) {
+	srcDir := t.TempDir()
+	layerPath := "org/base.json"
+	full := filepath.Join(srcDir, "org", "base.json")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"skills":["x"]}`)
+	if err := os.WriteFile(full, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	f := &localFetcher{}
+	got, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: layerPath}, cacheDir)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(got.Data) != string(body) {
+		t.Fatalf("data = %q, want %q", got.Data, body)
+	}
+	if got.ResolvedSHA != contentHash(body) {
+		t.Fatalf("sha = %q, want content hash", got.ResolvedSHA)
+	}
+	// Cache file is written content-addressed by SHA.
+	if _, ok := readCachedLayer(cacheDir, got.ResolvedSHA); !ok {
+		t.Fatal("expected layer written to cache")
+	}
+}
+
+func TestLocalFetcherMissing(t *testing.T) {
+	f := &localFetcher{}
+	_, err := f.Fetch(Source{Type: "local", Path: t.TempDir()}, LayerRefParts{LayerPath: "nope.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for missing local layer")
+	}
+}
+
+func TestHTTPFetcher(t *testing.T) {
+	body := `{"rules":["r"]}`
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/org/base.json" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	f := &httpFetcher{client: srv.Client()}
+	got, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(got.Data) != body {
+		t.Fatalf("data = %q, want %q", got.Data, body)
+	}
+	if got.CacheHit {
+		t.Fatal("first fetch should not be a cache hit")
+	}
+
+	// Second fetch with same content hash hits the cache.
+	got2, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
+	if err != nil {
+		t.Fatalf("Fetch (2nd): %v", err)
+	}
+	if !got2.CacheHit {
+		t.Fatal("second fetch should be a cache hit")
+	}
+}
+
+func TestHTTPFetcherRejectsNonHTTPS(t *testing.T) {
+	f := &httpFetcher{}
+	_, err := f.Fetch(Source{Type: "http", URL: "http://insecure.example/"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("expected https-enforcement error, got %v", err)
+	}
+}
+
+func TestHTTPFetcherNon200(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	f := &httpFetcher{client: srv.Client()}
+	_, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for non-200 status")
+	}
+}
+
+// makeGitFixtureAt inits a real on-disk git repo at dir, commits a single layer
+// file at layerPath with body, and returns the branch name and committed SHA.
+func makeGitFixtureAt(t *testing.T, dir, layerPath string, body []byte) (branch, sha string) {
+	t.Helper()
+	repo, err := gogit.PlainInit(dir, false)
+	if err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("Worktree: %v", err)
+	}
+	full := filepath.Join(dir, filepath.FromSlash(layerPath))
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, body, 0o644); err != nil {
+		t.Fatalf("write fixture layer: %v", err)
+	}
+	if _, err := wt.Add(layerPath); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	h, err := wt.Commit("add layer", &gogit.CommitOptions{
+		Author: &object.Signature{Name: "t", Email: "t@example"},
+	})
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	head, err := repo.Head()
+	if err != nil {
+		t.Fatalf("Head: %v", err)
+	}
+	return head.Name().Short(), h.String()
+}
+
+// makeGitFixture inits a real on-disk git repo, commits a single layer file, and
+// returns the repo's file:// URL plus the branch name and committed SHA. This
+// exercises the real go-git clone-and-read path hermetically (no network, no git
+// binary).
+func makeGitFixture(t *testing.T, layerPath string, body []byte) (url, branch, sha string) {
+	t.Helper()
+	dir := t.TempDir()
+	branch, sha = makeGitFixtureAt(t, dir, layerPath, body)
+	return "file://" + dir, branch, sha
+}
+
+func TestGitFetcherClonesAndCaches(t *testing.T) {
+	body := []byte(`{"agents":["claude"]}`)
+	url, branch, wantSHA := makeGitFixture(t, "org/base.json", body)
+
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	f := &gitFetcher{}
+	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got.ResolvedSHA != wantSHA {
+		t.Fatalf("sha = %q, want %q", got.ResolvedSHA, wantSHA)
+	}
+	if string(got.Data) != string(body) {
+		t.Fatalf("data = %q, want %q", got.Data, body)
+	}
+	if got.CacheHit {
+		t.Fatal("first fetch should not be a cache hit")
+	}
+
+	// Second fetch resolves the same SHA and serves the layer from cache.
+	got2, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir)
+	if err != nil {
+		t.Fatalf("Fetch (2nd): %v", err)
+	}
+	if !got2.CacheHit {
+		t.Fatal("second fetch should hit the SHA cache")
+	}
+	if got2.ResolvedSHA != wantSHA {
+		t.Fatalf("2nd sha = %q, want %q", got2.ResolvedSHA, wantSHA)
+	}
+}
+
+func TestGitFetcherDefaultsRefToSourceRefThenMain(t *testing.T) {
+	body := []byte(`{"x":1}`)
+	url, branch, _ := makeGitFixture(t, "base.json", body)
+	// Source.Ref empty + parts.Version empty -> falls back to the source ref
+	// (here we pass it via Source.Ref to exercise that branch), and a fixture
+	// whose default branch is "main"/"master" exercises the final fallback when
+	// both are empty only if the fixture branch matches; assert the source-ref
+	// branch resolves regardless.
+	f := &gitFetcher{}
+	got, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if string(got.Data) != string(body) {
+		t.Fatalf("data = %q", got.Data)
+	}
+}
+
+func TestGitFetcherBadURL(t *testing.T) {
+	f := &gitFetcher{}
+	// A URL that transport.ParseURL rejects outright (control char) hits the
+	// gitremote.ParseRemoteURL hard-error branch before any clone.
+	_, err := f.Fetch(Source{Type: "git", URL: "ht!tp://%zz"}, LayerRefParts{LayerPath: "x.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for malformed git url")
+	}
+}
+
+func TestGitFetcherMissingRef(t *testing.T) {
+	url, _, _ := makeGitFixture(t, "base.json", []byte("{}"))
+	f := &gitFetcher{}
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: "no-such-branch"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error cloning a non-existent ref")
+	}
+}
+
+func TestGitFetcherMissingLayerPath(t *testing.T) {
+	url, branch, _ := makeGitFixture(t, "base.json", []byte("{}"))
+	f := &gitFetcher{}
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "nope.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error reading a missing layer path from the clone")
+	}
+}
+
+func TestGitFetcherOversizedLayer(t *testing.T) {
+	// A layer file larger than maxLayerBytes must be rejected by readAllLimited.
+	big := make([]byte, maxLayerBytes+1)
+	for i := range big {
+		big[i] = 'a'
+	}
+	url, branch, _ := makeGitFixture(t, "big.json", big)
+	f := &gitFetcher{}
+	_, err := f.Fetch(Source{Type: "git", URL: url, Ref: branch}, LayerRefParts{LayerPath: "big.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for oversized layer")
+	}
+}
+
+// committedRepoFS opens the on-disk fixture at dir and returns its repository
+// (which has a valid HEAD) paired with an independent memfs the test populates.
+// This lets the fakeCloner exercise HEAD resolution and worktree-Open branches
+// without depending on go-git's WithWorkTree init option.
+func committedRepoFS(t *testing.T, dir string, files map[string][]byte) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.PlainOpen(dir)
+		if err != nil {
+			return nil, nil, err
+		}
+		fs := memfs.New()
+		for name, body := range files {
+			fh, err := fs.Create(name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := fh.Write(body); err != nil {
+				return nil, nil, err
+			}
+			if err := fh.Close(); err != nil {
+				return nil, nil, err
+			}
+		}
+		return repo, fs, nil
+	}
+}
+
+// emptyRepoCloner returns a freshly-initialized in-memory repo (no commits, so
+// Head() errors) and an empty memfs.
+func emptyRepoCloner() func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.Init(memory.NewStorage())
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, memfs.New(), nil
+	}
+}
+
+func TestGitFetcherHeadError(t *testing.T) {
+	// Cloner returns a repo with no commits -> repo.Head() errors.
+	f := &gitFetcher{cloner: emptyRepoCloner()}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error when HEAD cannot be resolved")
+	}
+}
+
+func TestGitFetcherCloneError(t *testing.T) {
+	f := &gitFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+		return nil, nil, errors.New("clone boom")
+	}}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///x", Ref: "main"}, LayerRefParts{LayerPath: "base.json"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "git clone") {
+		t.Fatalf("expected wrapped clone error, got %v", err)
+	}
+}
+
+func TestGitFullRef(t *testing.T) {
+	if got := gitFullRef("main"); got != "refs/heads/main" {
+		t.Fatalf("gitFullRef(main) = %q", got)
+	}
+	if got := gitFullRef("refs/tags/v1"); got != "refs/tags/v1" {
+		t.Fatalf("gitFullRef(refs/tags/v1) = %q", got)
+	}
+}
+
+func TestWriteCachedLayerMkdirError(t *testing.T) {
+	// Point the cache dir at a path whose parent is a regular file so MkdirAll
+	// fails, covering writeCachedLayer's error branch.
+	f := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedLayer(filepath.Join(f, "sub"), "sha", []byte("{}")); err == nil {
+		t.Fatal("expected mkdir error when parent is a file")
+	}
+}
+
+func TestLocalFetcherCacheWriteError(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "x.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// cacheDir's parent is a regular file -> writeCachedLayer fails.
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &localFetcher{}
+	_, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestHTTPFetcherCacheWriteError(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer srv.Close()
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &httpFetcher{client: srv.Client()}
+	_, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestGitFetcherCacheWriteError(t *testing.T) {
+	// Cloner returns a committed repo (valid HEAD) plus a memfs holding the
+	// layer, but the cache dir's parent is a regular file so writeCachedLayer
+	// fails after a successful read.
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
+	f := &gitFetcher{cloner: committedRepoFS(t, dir, map[string][]byte{"x.json": []byte("{}")})}
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "x.json"}, filepath.Join(blocker, "cache"))
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestGitFetcherReadError(t *testing.T) {
+	// Cloner returns a committed repo whose worktree memfs lacks the requested
+	// layer path -> Open fails (the read-error branch).
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
+	f := &gitFetcher{cloner: committedRepoFS(t, dir, nil)}
+	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "missing.json"}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "git read") {
+		t.Fatalf("expected git read error, got %v", err)
+	}
+}

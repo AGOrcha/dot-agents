@@ -1,0 +1,16 @@
+schema_version: 1
+task_id: t05-move-init
+parent_plan_id: root-command-decomposition
+verifier_type: merge-back
+status: pass
+summary: 'Two scope-expansion notes for the parent: (1) commands/lifecycle/deps.go was NOT touched; init''s Force/DryRun/Yes seams live as file-scoped vars in lifecycle/init.go and consolidate into deps.GlobalFlags during t03/t04/t06+ moves. (2) commands/lifecycle/init.go uses function-var seams (InitForceFn, InitUsageErrorFn, InitEnsureGlobalKGMCPConfigsFn) for the parent-package symbols it would otherwise need to import — the shim repoints them. globalflagcov compatibility: the cobra.Command literal is constructed inside the shim (not lifecycle), so the RunE closure resolves under commands.NewInitCmd.func1; folded out in t13 once globalflagcov picks up commands/lifecycle. seams_test.go forwarders live in commands/init_test.go and are removed in t11.'
+recorded_at: "2026-05-25T14:17:11Z"
+delegation_id: del-t05-move-init-1779717270
+artifact_paths:
+    - .agents/active/delegation/fsops-windows-tests.yaml
+    - .agents/active/delegation/t04-move-add-remove.yaml
+    - .agents/active/delegation/t06-move-import.yaml
+    - .agents/active/delegation/t07-move-refresh.yaml
+    - .agents/active/delegation/t10b-create-settings-subpackage.yaml
+    - .agents/workflow/plans/root-command-decomposition/TASKS.yaml
+    - docs/PLATFORM_DIRS_DOCS.md

@@ -532,3 +532,46 @@ tasks:
         test` plus a build check (`pnpm --filter dashboard build`).
         Playwright e2e behind the `e2e` tag, gated to manual/nightly.
       app_type: go-cli
+
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the observability-dashboard minor'
+      status: pending
+      depends_on:
+        - design-doc
+        - t01-api-contract-design
+        - t02-storage-read-layer
+        - t03-handlers-rest
+        - t04-sse-broker
+        - t05-sse-handler
+        - t06-recompute-on-miss-and-fswatch
+        - t07-standalone-service-bin
+        - t08-frontend-skeleton
+        - t09-feature-aggregate-view
+        - t10-feature-per-run-drilldown
+        - t11-frontend-sse-integration
+        - t12-e2e-smoke-live-iteration
+        - t13-r3-mount-integration
+        - t14-documentation
+        - t15-rubric-versioning-ui
+        - t16-coverage-gate-and-ci
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers a new user-visible surface — the real-time observability
+        dashboard (React/TS frontend + Go backend API over telemetry, loop
+        metrics, and R1 scores) plus its serving binary. New surface +
+        new capability, MINOR not MAJOR (no public surface removed or
+        incompatibly changed).
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
+        minor is 0.4.0, but resolve from VERSION when this task becomes
+        ready; serialize at the VERSION bump if another minor ships first.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the dashboard entries out
+        of Unreleased. Merge to master fires auto-release.yml.
+      app_type: release

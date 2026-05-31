@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: root-command-decomposition
+task_id: t14-import-graph-assertion
+delegation_id: del-t14-import-graph-assertion-1779841818
+decision: reject
+note: 'PR #107 closed not merged; superseded by PR #117 importguard narrowing'
+closed_at: "2026-05-28T02:06:06Z"

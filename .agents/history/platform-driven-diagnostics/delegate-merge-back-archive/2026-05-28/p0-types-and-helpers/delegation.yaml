@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-p0-types-and-helpers-1779883937
+parent_plan_id: platform-driven-diagnostics
+parent_task_id: p0-types-and-helpers
+title: Diagnostics types + helpers
+summary: Delegated from plan Platform-driven diagnostics (doctor + status delegate to internal/platform sister interfaces)
+write_scope:
+    - internal/platform/diagnostics.go
+    - internal/platform/diagnostics_helpers.go
+    - internal/platform/diagnostics_test.go
+success_criteria: 'Phase 0: introduce BrokenLink/PlatformBadge/OrphanCanonical/SingleFileLinkSpec types + six sister interfaces (BrokenLinkReporter, LinkCounter, StatusBadger, UserConfigReporter, OrphanCanonicalReporter, AuditPrinter) + ScanSingleFileLinks/ScanSymlinkDir package-level helpers. No consumer change yet. See .agents/proposals/platform-driven-diagnostics.md for design rationale.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-05-27T12:12:17Z"
+updated_at: "2026-05-27T12:48:27Z"

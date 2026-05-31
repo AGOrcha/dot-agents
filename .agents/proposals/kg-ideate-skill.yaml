@@ -1,0 +1,536 @@
+schema_version: 1
+id: kg-ideate-skill
+status: draft
+type: skill
+action: create
+# Destined for the starter scaffold (planned starter skill — ships via `da init` to all
+# projects). Until proposal-routing v2 lands, the artifact lives repo-local and is reviewed
+# here; on promotion it lands at the starter source below and is registered as a global skill.
+target:
+  # Starter source (where the skill is authored in this repo):
+  starter_source: internal/scaffold/home/starter/skills/global/kg-ideate/
+  # Where it lands after `da init` (per-project link target for the active platform):
+  installed_at: ~/.agents/skills/kg-ideate/
+  # NOTE: repo-local for now, pending the scoped proposal-routing rework. Routing may move
+  # this back to a starter-registration path once proposal-routing v2 lands.
+rationale: |
+  The workflow has a cold-start problem that spans the WHOLE artifact pipeline, not just
+  spec authoring: ideas are turned into specs, plans, and staged-execution handoffs from
+  scratch without querying accumulated KG knowledge (prior decisions, research findings,
+  contradictions, lessons). This produces repeated rediscovery of the same design space,
+  inconsistent terminology across specs and plans, decisions that ignore or contradict
+  prior work, and fanout bundles whose write-scopes were guessed rather than grounded.
+
+  kg-ideate is the KG-grounded FRONT-END to the entire artifact pipeline
+  (idea/proposal → spec → plan → concurrent staged execution), for work that is planned
+  solo by the orchestrator OR delegated to subagents. Phase 1 (KG/research/lessons
+  briefing) stays as the grounding step. The downstream now spans spec authoring AND plan
+  drafting AND the handoff into the concurrent staged-execution flow (fanout / ISP).
+
+  The phase ordering is deliberate. Scaffolding without a briefing produces generic
+  templates the author ignores. A briefing without scaffolding produces context that sits
+  unread. Sequencing them — automated grounding, then guided creation across spec/plan,
+  then a clean handoff to staged execution — ensures the KG actually shapes the output and
+  the work that follows it.
+
+  Designed to extend cleanly to the citation graph backend now defined in
+  `.agents/workflow/specs/graph-backend-adapter-contract/design.md` §13.4
+  (built-in adapter `dotagents-builtin:graph/citation@^1.0`). Once citation adapter notes
+  are populated, the Phase 1 contradiction-traversal step becomes structural not just
+  semantic, using the adapter's named queries (`claims_citing_source`,
+  `claims_supported_by_source`, `contradicting_claims`). Critically, the broader skill is
+  useful WITHOUT that adapter — semantic KG search, the research corpus, and lessons still
+  ground the briefing; only the structural-contradiction step is adapter-gated and degrades
+  gracefully (see the deferral note).
+created_at: "2026-05-10T00:00:00Z"
+created_by: claude-sonnet-4-6
+content: |
+  ## SKILL.md
+
+  ```markdown
+  ---
+  name: "kg-ideate"
+  description: |-
+    KG-grounded front-end to the whole artifact pipeline: idea/proposal → spec → plan →
+    concurrent staged execution, solo or with subagents. Phases: (1) Briefing Producer —
+    queries KG, research corpus, and lessons to produce a structured context block;
+    (2) Spec Scaffolding — uses the briefing to resolve contradictions, convert gaps to
+    open questions, write the spec; (3) Plan Scaffolding — turns the stabilized (or
+    concurrently-drafted) spec into a plan with write-scopes and dependency ordering;
+    (4) Execution Handoff — feeds the spec+plan into the fanout/ISP staged-execution flow.
+    Use when starting a new spec/plan, when the user asks what we know about a topic, or
+    when prepping work for delegation.
+  argument-hint: "<topic-or-task-id>"
+  tier: compound
+  calls:
+    - kg-brief
+    - spec-scaffold
+    - plan-scaffold
+    - staged-execution-handoff
+  verifier: batch
+  review_gate: default
+  ---
+
+  # KG-Ideate
+
+  KG-grounded front-end to the whole artifact pipeline. Phase 1 briefs; Phase 2 scaffolds
+  the spec; Phase 3 scaffolds the plan; Phase 4 hands off to concurrent staged execution.
+  Works whether the planner is the orchestrator solo or a delegated subagent.
+
+  The four-tier artifact model (spec → plan → tasks → history) governs all output —
+  cross-ref `.agents/rules/dot-agents/workflow-artifact-model.md`.
+
+  ## Tiered composition (per skill-tiering-contract)
+
+  kg-ideate is a **T2 compound orchestrator**. It does not inline the phase logic; it
+  **dispatches in order** to four **T1 molecule** skills, each independently invocable and
+  separately authored (the `calls:` list above). Composition is declared, not discovered at
+  runtime, and dispatch depth is compound → molecule → atom = **2 hops** — within the reliable
+  bound (skill-tiering-contract §1.2) and honoring "push composition into the skill" (§1.3).
+
+  | Phase | Molecule skill | Tier | Owns | `calls:` (atoms) | Verifier |
+  |-------|----------------|------|------|------------------|----------|
+  | 1 | `kg-brief` | molecule | KG/research/lessons traversal → the shared briefing block | kg-query, corpus-scan, context-scan, briefing-render | batch |
+  | 2 | `spec-scaffold` | molecule | briefing → decisions/open-questions → `design.md` | decision-review, gap-conversion, contradiction-framing, done-criteria, spec-write | batch |
+  | 3 | `plan-scaffold` | molecule | spec → tasks/write-scopes/dep-order → PLAN/TASKS | task-breakdown, write-scope-derive, plan-write | batch |
+  | 4 | `staged-execution-handoff` | molecule | spec+plan → fanout/ISP staged execution | fanout-decision, staged-handoff | batch |
+
+  Each molecule's body is the correspondingly-numbered **Phase section below** — those sections
+  are the per-molecule specifications, authored as separate `SKILL.md` files at implementation
+  time, not inline steps of this orchestrator. The orchestrator's own logic is only: brief →
+  (spec ⇄ plan, per the concurrency fork in Phase 3) → handoff, passing the shared
+  briefing/spec/plan artifacts between molecules. A molecule may be invoked on its own (e.g.
+  `spec-scaffold` when a briefing already exists, `plan-scaffold` when a spec is stable) — the
+  orchestrator is the convenience path over reusable primitives, not the only entry point.
+
+  Each molecule self-declares `tier: molecule` + its `calls:` + `verifier: batch` in its own
+  frontmatter; this orchestrator declares `tier: compound` and `calls:` the four (above). The
+  per-molecule atom breakdown is indicative — the implementing skills finalize their atom set.
+
+  ## Phase 1 — Briefing Producer (molecule: `kg-brief`)
+
+  1. **KG traversal**
+     Load → `instructions/kg-queries.md`
+     Run semantic_search_nodes_tool + query_graph_tool in parallel against the topic.
+     Pull decision-type nodes, entities, and contradiction nodes. If topic touches
+     existing code, run get_impact_radius_tool (this also seeds Phase 3 write-scopes).
+
+  2. **Research corpus scan**
+     Load → `instructions/corpus-scan.md`
+     Search research/articles-evaluation-kg-and-adjacent.md §C for applicable proposals.
+     Pull top-5 §A entries and §B themes by relevance. Note research gaps.
+
+  3. **Lessons and spec overlap**
+     Load → `instructions/context-scan.md`
+     Preflight: verify .agents/workflow/specs/ exists before scanning — note absence, do not error.
+     Read .agents/lessons/index.md; pull full lesson files that match the topic.
+     List .agents/workflow/specs/ — flag prior specs that share scope or terminology.
+
+  4. **Produce briefing**
+     Load → `templates/briefing-output.md`
+     Render the structured briefing block and present to user before proceeding.
+     Do not write any spec or plan file in this phase.
+     The briefing is the single shared artifact consumed by Phases 2–4 (and by a spawned
+     subagent planner — see "Subagent-planning path").
+
+  ## Phase 2 — Spec Scaffolding (molecule: `spec-scaffold`)
+
+  5. **Prior decision review**
+     Load → `instructions/decision-review.md`
+     For each prior_decision in briefing: present it and ask whether it still applies
+     or needs revisiting in the new spec. Record responses.
+
+  6. **Gap → open questions**
+     Load → `instructions/gap-conversion.md`
+     For each gap in briefing: propose it as a candidate open question.
+     Confirm which to include; discard the rest.
+
+  7. **Contradiction → decision points** (adapter-conditional — see kg-queries.md preflight)
+     Load → `instructions/contradiction-framing.md`
+     For each contradiction in briefing: frame it as a decision the spec must explicitly
+     resolve. Draft the decision statement; get user input before locking.
+     Degrades gracefully: if the adapter lacks `contradicting_claims`, fall back to the
+     competing-decisions treatment (two decision nodes with conflicting rationale). The
+     rest of the pipeline does not depend on this step.
+
+  8. **Done criteria draft**
+     Load → `instructions/done-criteria.md`
+     Propose 3-5 verifiable done criteria derived from briefing context. Revise with user.
+
+  9. **Write spec**
+     Load → `templates/spec-output.md`
+     Once scaffolding steps are confirmed, write .agents/workflow/specs/<id>/design.md.
+     Preflight: verify .agents/workflow/specs/ exists before writing — create the directory if absent.
+     Structure: problem statement, decisions with rationale, requirements (behavioral),
+     open questions, done criteria, deferred items.
+     Never include file paths, function names, or task breakdowns — those belong in the plan.
+
+  ## Phase 3 — Plan Scaffolding (molecule: `plan-scaffold`)
+
+  Spec↔plan concurrency is a deliberate fork, governed by the workflow-artifact-model rule
+  "Spec before plan… unless the work is purely mechanical." Decide the mode before drafting:
+
+  - **Sequential (default):** the plan waits on the spec stabilizing. Run Phase 3 only after
+    Phase 2's spec decisions and open questions are confirmed. Use when the spec still has
+    open behavioral questions whose answers change the task breakdown.
+  - **Concurrent / folded:** the plan can be drafted at the same time as (or folded into) the
+    spec when the work is purely mechanical or the decisions are already clear from the
+    briefing (no unresolved open questions that affect ordering or write-scopes). In this
+    mode, Phase 2 and Phase 3 run interleaved against the same briefing, and a thin spec may
+    be co-authored alongside the plan rather than fully stabilized first.
+
+  Load → `instructions/plan-scaffolding.md`
+
+  10. **Concurrency decision**
+      Apply the heuristic above. State the chosen mode and why (which open questions, if any,
+      block sequential→concurrent). This decision is itself recorded in the plan notes.
+
+  11. **Task breakdown + dependency ordering**
+      Turn spec requirements into concrete, bounded tasks. Order them with explicit
+      depends_on relationships. Cross-plan deps use `<plan-id>/<task-id>` form.
+
+  12. **Write-scopes per task**
+      Derive each task's write_scope. Where Phase 1 ran get_impact_radius_tool, use the
+      impact radius to ground write-scopes rather than guessing.
+
+  13. **Verification strategy per task**
+      Each task names how it will be verified; the plan's success criteria trace back to the
+      spec's done criteria (Phase 2 step 8). Do not invent contradicting criteria.
+
+  14. **Write plan**
+      Load → `templates/plan-output.md`
+      Author the plan via the canonical CLI surface (`da workflow plan create <id>`), then keep
+      PLAN.yaml / TASKS.yaml / <id>.plan.md in sync. Do not hand-edit task status.
+
+  ## Phase 4 — Execution Handoff (molecule: `staged-execution-handoff`)
+
+  The pipeline's tail is the concurrent staged-execution flow (fanout / ISP). kg-ideate
+  produces the spec+plan that feed it; it does NOT itself implement.
+
+  Load → `instructions/execution-handoff.md`
+
+  15. **Direct vs fanout decision**
+      Decide whether the work is implemented directly (solo) or fanned out to subagents.
+      For fanout, write per-task constraints into TASKS.yaml notes and produce delegation
+      bundles. Cross-ref `[[delegation-lifecycle]]`.
+
+  16. **Hand to staged runtime**
+      Pass the briefing + spec + plan as orientation context into the orchestrator/staged
+      runtime. Cross-ref `[[orchestrator-session-start]]` (pick task → KG readback → decide)
+      and `[[isp]]` (task selection → direct vs fanout → staged impl → verify → review →
+      parent gate). The layered-pr-fanout flow
+      (`.agents/workflow/specs/layered-pr-fanout/design.md`) is the staged-PR target this
+      handoff feeds.
+
+  ## Subagent-planning path
+
+  kg-ideate works whether the planner is the orchestrator solo or a delegated subagent:
+
+  - **Solo:** the orchestrator runs all four phases in one session.
+  - **Delegated:** the orchestrator runs Phase 1 (or hands a topic to a spawned planner that
+    runs Phase 1 itself), then delegates Phase 2/3 to a planning subagent. The briefing block
+    (Phase 1 output) is the cold-start context the subagent consumes — it is self-contained
+    by design, so a spawned planner needs only the briefing + topic to scaffold spec/plan.
+    The subagent returns the spec+plan; the orchestrator runs Phase 4 handoff.
+  ```
+
+  ---
+
+  ## Instruction files to create
+
+  ### instructions/kg-queries.md
+  Rules for Phase 1 KG traversal:
+  - **CLI-first**: prefer `da kg query "<topic>"` (deterministic, intent-aware) over MCP tools.
+    Fall back to MCP tools only when the da CLI is unavailable or returns no results.
+  - When using MCP: run semantic_search_nodes_tool and query_graph_tool in parallel.
+  - Filter query_graph_tool results to NoteType in [decision, entity] only.
+  - **Contradiction handling is adapter-conditional** (and gates ONLY Phase 2 step 7 — the
+    rest of the pipeline ships without it):
+    Before Phase 2 step 7, check whether the active profile's adapter ships a
+    `contradicting_claims` named query. Preflight: run
+    `da graph query --list-queries` (or inspect the adapter schema) — if
+    `contradicting_claims` is present, contradiction handling is enabled for this session.
+    If absent, fall through to competing-decisions treatment (two decision nodes with
+    conflicting rationale). The `dotagents-builtin:graph/citation@^1.0` adapter ships
+    `contradicting_claims` and can be used today for citation-backed projects.
+  - query_graph_tool degrades to generic search for unrecognized intents — if the intent
+    field is unsupported, treat the result as semantic search output, not as a structured
+    decision list. Label it accordingly in the briefing.
+  - If semantic results return > 10 nodes, narrow to top 5 by relevance score.
+  - get_impact_radius_tool: only call if topic explicitly names a file, function, or module.
+    Its output also seeds Phase 3 write-scopes (instructions/plan-scaffolding.md step 12).
+  - If no KG nodes match, note "KG has no prior decisions on this topic" — do not fabricate.
+  - When the active profile selects `dotagents-builtin:graph/citation@^1.0`, prefer
+    structural traversal via the adapter's named queries (`claims_citing_source`,
+    `claims_supported_by_source`, `contradicting_claims`) over semantic search for
+    citation-bearing topics. Per the v1 DSL, patterns the adapter doesn't ship as named
+    queries go through adapter escape hatches (spec §8.5): additional named queries,
+    materialized views, or an adapter-owned MCP server.
+
+  ### instructions/corpus-scan.md
+  Rules for Phase 1 research corpus scan:
+  - Primary target: research/articles-evaluation-kg-and-adjacent.md
+    - §C entries: scan for proposal IDs that overlap with topic keywords
+    - §B themes: pull theme titles; flag any that the topic touches
+    - §A entries: note the 3-5 most relevant article evaluations
+  - If no §C proposals match, note "no prior research proposals on this topic."
+  - **Flagged summary escalation**: if a §A evaluation entry will be used to justify a spec
+    decision (not just background), and that entry carries a citation-presence, freshness,
+    or rubric-check flag (per Part G of the corpus doc), you MUST read the underlying article
+    file at research/articles/<filename>.md before including the finding in the briefing.
+    Do not promote a flagged secondary summary as authoritative spec rationale.
+  - For non-decision background context, §A summaries are sufficient — escalation is only
+    required when the finding will directly shape a spec decision or done criterion.
+  - Record the doc line numbers for any §C proposals found (enables later cross-reference).
+
+  ### instructions/context-scan.md
+  Rules for Phase 1 lessons + spec overlap check:
+  - Read .agents/lessons/index.md in full; pull any lesson file whose title or tags
+    could apply to the topic (err on the side of inclusion).
+  - **Preflight**: check that .agents/workflow/specs/ exists before scanning.
+    If absent, note "no prior specs directory found" in the briefing — do not error or create it.
+  - Run: ls .agents/workflow/specs/ — for each spec directory, read the first 20 lines of
+    design.md to check for scope overlap. Flag if found; do not read full spec files.
+  - Also list .agents/workflow/plans/ — flag prior plans that share scope, so Phase 3 can
+    reuse task patterns and cross-plan deps rather than duplicating them.
+  - Canonical spec root is always .agents/workflow/specs/ — never workflow/specs/ (bare).
+
+  ### instructions/decision-review.md
+  Rules for Phase 2 prior decision review:
+  - Present each prior_decision with its source (KGNote ID or §C proposal ID) and rationale.
+  - Ask one of: "Does this still apply?", "Does this need to be revisited?", "Is this
+    out of scope for the new spec?"
+  - If user says revisit: add it to open_questions in the spec, not decisions.
+  - If user says out of scope: note it as a deferred item.
+  - If no prior decisions exist: skip this step and say so explicitly.
+
+  ### instructions/gap-conversion.md
+  Rules for Phase 2 gap → open question conversion:
+  - Each gap from the briefing becomes a candidate open question in the form:
+    "How should the new spec handle X, given that the KG has no prior decision on it?"
+  - Present all gaps at once (not one-by-one) to reduce interaction overhead.
+  - User selects which to include; unselected gaps are not added to the spec.
+  - Open questions in the spec must be phrased as questions the plan will answer, not
+    as design decisions. (Design decisions belong in the decisions section of the spec.)
+  - An open question that the briefing already answers mechanically is a signal the work may
+    qualify for concurrent/folded spec↔plan mode (Phase 3 step 10).
+
+  ### instructions/contradiction-framing.md
+  **Status: adapter-conditional** — execute Phase 2 step 7 only when the active profile's
+  adapter ships a `contradicting_claims` named query (preflight in kg-queries.md).
+  The built-in `dotagents-builtin:graph/citation@^1.0` adapter ships this query today
+  (contract §13.4); contradiction handling is available for citation-backed projects now.
+
+  This step degrades gracefully: when the adapter is absent, the skill skips structural
+  contradiction traversal and uses the competing-decisions fallback. No other phase depends
+  on it, so the spec/plan/execution pipeline ships and is useful regardless.
+
+  Contradictions are represented as `claim -[:contradicts]-> claim` edges, not as a
+  separate NoteType. The preflight check is adapter capability, not schema NoteType.
+
+  Rules when adapter-enabled:
+  - For each load-bearing decision in the briefing, run:
+    `da graph query contradicting_claims --param claim_id=<id>`
+    to retrieve claims that structurally contradict it.
+  - Each returned contradiction must become an explicit decision point in the spec.
+    Do not silently pick one side.
+  - Frame as: "The citation graph surfaces a contradiction on X: [claim A] vs [claim B].
+    The spec must resolve this. Which approach does this spec take and why?"
+  - Record the user's answer as a decision entry with rationale.
+  - If the user defers: add it as an open question, not a decision.
+
+  Fallback when adapter lacks `contradicting_claims`: present competing decisions surfaced
+  during Phase 1 (two decision nodes with conflicting rationale) in Phase 2 step 5
+  as "competing decisions — choose one" rather than as structured contradictions.
+
+  ### instructions/done-criteria.md
+  Rules for Phase 2 done criteria:
+  - Criteria must be verifiable (exit code, file exists, test passes, metric threshold).
+  - Criteria must not be vague ("works correctly", "is implemented") — flag and reject.
+  - Propose 3-5; let user add/remove/rephrase before locking.
+  - Reference relevant §C proposal success criteria from briefing when available.
+  - Phase 3 plan verification strategies (plan-scaffolding.md step 13) must trace back to
+    these criteria — do not let the plan invent contradicting done criteria.
+
+  ### instructions/plan-scaffolding.md
+  Rules for Phase 3 plan scaffolding:
+  - **Concurrency decision (step 10) is mandatory and recorded.** Apply the
+    workflow-artifact-model heuristic "Spec before plan… unless the work is purely
+    mechanical." Sequential is the default; choose concurrent/folded only when there are no
+    open questions whose answers change task ordering or write-scopes. State the mode and
+    rationale in the plan notes.
+  - Tasks are concrete and bounded, with explicit depends_on. Cross-plan deps use
+    `<plan-id>/<task-id>` form (a dep string is cross-plan iff it contains `/`).
+  - Write-scopes: prefer the Phase 1 impact radius (get_impact_radius_tool) over guessing.
+    A task with an unknowable write-scope is a signal the spec still has an open question.
+  - Verification strategy per task traces back to the spec's done criteria.
+  - Author via `da workflow plan create <id>`; keep PLAN.yaml / TASKS.yaml / <id>.plan.md in
+    sync. Never hand-edit task status — use `da workflow advance` / `workflow merge-back`.
+  - Free-text YAML fields (notes, summary, rationale, description) that may contain ": "
+    MUST use block scalar syntax (|-), per the YAML plain-scalar colon-space rule.
+
+  ### instructions/execution-handoff.md
+  Rules for Phase 4 execution handoff:
+  - kg-ideate does NOT implement. It produces spec+plan and hands them to staged execution.
+  - **Direct vs fanout (step 15):** small, single-write-scope work runs direct (solo);
+    multi-task work with independent write-scopes fans out to subagents. For fanout, write
+    per-task constraints into TASKS.yaml notes and produce delegation bundles per
+    `[[delegation-lifecycle]]`.
+  - **Handoff context (step 16):** pass briefing + spec + plan as orientation context into
+    `[[orchestrator-session-start]]` and `[[isp]]`. The layered-pr-fanout flow
+    (.agents/workflow/specs/layered-pr-fanout/design.md) is the staged-PR target.
+  - The orchestrator (not kg-ideate) owns the staged runtime: pick task → KG readback →
+    decide fanout/direct → staged impl → verify → review → parent gate.
+
+  ### templates/briefing-output.md
+  Briefing block template (single shared artifact consumed by Phases 2–4 and by a spawned
+  subagent planner):
+
+  ```
+  ## KG Briefing: <topic>
+  Generated: <date>
+
+  ### Prior Decisions (<N> found)
+  <For each: KGNote ID or §C proposal ID — decision summary — rationale source>
+  [none] if empty
+
+  ### Research Findings (<N> relevant)
+  <§A article title — key insight — §B theme it supports>
+  [none] if empty
+
+  ### Contradictions (<N> found)
+  <Contradiction description — competing positions — source refs>
+  [none] if empty  |  [adapter-absent] if contradicting_claims query unavailable
+
+  ### Applicable Lessons (<N> found)
+  <Lesson name — relevant pattern>
+  [none] if empty
+
+  ### Gaps (<N> identified)
+  <Gap description — why it matters for this spec/plan>
+  [none] if empty
+
+  ### Prior Spec / Plan Overlap
+  <Spec or plan ID — scope overlap description>
+  [none] if empty
+
+  ### Impact Radius (if topic named code)
+  <files/functions/modules — seeds Phase 3 write-scopes>
+  [none] if empty
+  ```
+
+  ### templates/spec-output.md
+  Spec file template (written to .agents/workflow/specs/<id>/design.md):
+
+  ```markdown
+  # <Spec Title>
+
+  **Spec ID**: <id>
+  **KG Briefing**: Generated <date> — <N> prior decisions, <N> research findings, <N> contradictions
+  **Status**: draft
+
+  ## Problem Statement
+  <What problem does this solve and why does it matter now>
+
+  ## Goals
+  <Bulleted, scoped outcomes — not implementation steps>
+
+  ## Decisions
+  <Each decision: what was chosen, why, what alternatives were rejected>
+
+  ## Requirements
+  <Behavioral requirements — no file paths, no function names>
+
+  ## Open Questions
+  <Questions this spec leaves open; the plan must resolve them>
+
+  ## Done Criteria
+  <Verifiable: exit code / file exists / test passes / metric threshold>
+
+  ## Deferred
+  <Explicitly out of scope for this spec/plan>
+
+  ## Related
+  <Cross-references to prior specs, §C proposals, KGNote IDs>
+  ```
+
+  ### templates/plan-output.md
+  Plan scaffolding template (authored via `da workflow plan create <id>`; PLAN.yaml +
+  TASKS.yaml + <id>.plan.md kept in sync). The plan references the spec but does not
+  duplicate it; its success criteria trace back to the spec's done criteria.
+
+  ```
+  # PLAN.yaml (canonical decisions + ordering)
+  - spec_ref: .agents/workflow/specs/<id>/design.md
+  - concurrency_mode: sequential | concurrent-folded   # Phase 3 step 10 decision
+  - concurrency_rationale: |-
+      <why this mode; which open questions, if any, block sequential>
+
+  # TASKS.yaml (work queue)
+  - id: <task-id>
+    write_scope: [<paths from impact radius>]
+    depends_on: [<local-task-id>, <plan-id>/<task-id>]   # "/" ⇒ cross-plan
+    verification: <how this task is verified; traces to spec done criterion>
+    notes: |-
+      <block scalar — safe for ": " free text>
+  ```
+
+  ---
+
+  ## Integration notes
+
+  - **agent-start**: kg-ideate runs after agent-start when the session goal is new work
+    (a spec, a plan, or both).
+  - **orchestrator-session-start / isp**: Phase 4 hands the briefing + spec + plan into the
+    staged-execution flow as orientation context. kg-ideate is the front-end; the
+    orchestrator owns the staged runtime. Cross-ref `[[orchestrator-session-start]]`,
+    `[[isp]]`, `[[layered-pr-fanout]]`, `[[delegation-lifecycle]]`.
+  - **workflow-artifact-model.md**: the four-tier model (spec → plan → tasks → history)
+    governs all output. Phase 2 respects the spec tier (no file paths, function names, task
+    lists). Phase 3 owns the plan tier. The spec↔plan concurrency fork (Phase 3 step 10) is
+    a direct application of the rule "Spec before plan… unless the work is purely mechanical."
+  - **Subagent-planning path**: the Phase 1 briefing is self-contained cold-start context, so
+    a spawned planner can run Phase 2/3 from briefing + topic alone.
+  - **Canonical spec path**: all spec reads and writes use .agents/workflow/specs/ — never
+    the bare workflow/specs/ path, which does not exist in this repo.
+  - **KG query surface**: Phase 1 is CLI-first (`da kg query`), MCP fallback. Contradiction
+    handling is adapter-conditional and degrades gracefully: enabled when the active adapter
+    ships `contradicting_claims` (e.g., `dotagents-builtin:graph/citation@^1.0`), falls back
+    to competing-decisions treatment otherwise. NOTE: `da kg query` CLI shape is not yet
+    normative in the adapter contract — if this skill drives strong opinions about that
+    surface, write them up as input to the contract work.
+  - **upcoming citation-graph backend**: Phase 1 traversals use `da kg query` + MCP today;
+    once the research profile graph backend is live, add structural traversal via citation
+    edges (finding → decision). The kg-queries.md instruction update is the only change needed.
+  - **graph_backend field in app-type-profiles**: when a project's profile sets
+    `graph_backend: dotagents-builtin:graph/citation@^1.0`, kg-ideate Phase 1 should prefer
+    the citation adapter's named queries (per contract §13.4) over semantic search for
+    research-type topics.
+  - **Planned starter skill**: this is a starter candidate destined for
+    internal/scaffold/home/starter/skills/global/kg-ideate/ (ships via `da init`, lands at
+    ~/.agents/skills/kg-ideate/). It lives repo-local for now, pending the scoped
+    proposal-routing rework; routing may move it back to a starter-registration path once
+    proposal-routing v2 lands.
+
+  ---
+
+  ## Open questions (need maintainer review — scope may be revisited)
+
+  This proposal's scope was broadened from "KG-grounded spec authoring" to the full
+  ideation→execution pipeline and may need to be reviewed/thought through again. Specifically:
+
+  1. **Spec↔plan concurrency heuristic.** Phase 3 step 10 codifies "sequential default,
+     concurrent/folded when purely mechanical or decisions already clear." Is the trigger
+     ("no open questions that change ordering or write-scopes") the right line, or should the
+     skill require an explicit maintainer/orchestrator opt-in for concurrent-folded mode?
+  2. **Subagent-planning handoff.** The briefing is asserted to be self-contained cold-start
+     context for a spawned planner. Does the delegated Phase 2/3 path need its own delegation
+     bundle schema, or does it reuse the existing `[[delegation-lifecycle]]` bundle shape?
+     Where does the subagent return its spec+plan for the orchestrator's Phase 4?
+  3. **Phase 4 boundary.** kg-ideate stops at "hand off to staged execution." Is the
+     direct-vs-fanout decision (step 15) in scope for kg-ideate, or should it belong entirely
+     to `[[orchestrator-session-start]]` / `[[isp]]`, with kg-ideate ending at "spec+plan ready"?
+  4. **Starter promotion timing.** Should this ship to the starter scaffold once the
+     non-citation phases are stable (Phase 1 degraded-mode + Phases 2–4), with the
+     adapter-gated contradiction step landing later — or wait for full citation-adapter
+     availability before promotion?

@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-t0-outcome-contract-1779795346
+parent_plan_id: r1-5-hook-enforcement-telemetry
+parent_task_id: t0-outcome-contract
+title: Define durable hook-outcome schema and archived-sentinel linkage
+summary: 'Delegated from plan R1.5: Hook enforcement telemetry'
+write_scope:
+    - schemas/workflow-hook-outcome.schema.json
+    - commands/workflow/static/workflow-hook-outcome.schema.json
+success_criteria: Start only after loop-discipline lifecycle-hook native output and sentinel archive contracts are stable; define allow/advise/remediate plus lifecycle/intervention classification without transcript content.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: t0-outcome-worker
+status: completed
+created_at: "2026-05-26T11:35:46Z"
+updated_at: "2026-05-26T11:39:16Z"

@@ -283,3 +283,38 @@ tasks:
         verification clauses are proven by test assertions, not
         just prose.
       app_type: go-cli
+
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the da service minor'
+      status: pending
+      depends_on:
+        - design-doc
+        - scheduler-core
+        - event-bus
+        - http-server
+        - tasks-iterlog-ingester
+        - tasks-rescore
+        - service-runtime
+        - cobra-surface
+        - docs-and-verification
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path). This plan
+        delivers a new user-visible surface — the long-running `da service`
+        subcommand hosting the scheduler, telemetry ingestion, and rescore
+        background tasks plus an HTTP surface (/healthz, /api/tasks). New
+        command + new surface, MINOR not MAJOR (no public surface removed
+        or incompatibly changed).
+        Target version = next minor computed from current VERSION at
+        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
+        minor is 0.4.0, but resolve from VERSION when this task becomes
+        ready; if another minor ships first, rebase recomputes (0.5.0, etc.).
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the da-service entries out
+        of Unreleased. Merge to master fires auto-release.yml (tag + publish).
+      app_type: release

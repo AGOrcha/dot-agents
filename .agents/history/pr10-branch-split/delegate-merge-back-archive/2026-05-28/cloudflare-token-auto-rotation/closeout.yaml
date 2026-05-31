@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: pr10-branch-split
+task_id: cloudflare-token-auto-rotation
+delegation_id: del-cloudflare-token-auto-rotation-1779951026
+decision: accept
+closed_at: "2026-05-28T14:52:10Z"

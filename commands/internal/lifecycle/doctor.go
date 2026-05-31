@@ -120,6 +120,7 @@ func runDoctor(cmd *cobra.Command, args []string, deps DoctorConfigLoader) error
 	reportProjectInventory(cfg, names)
 	totalFixed, anyBroken := reportLinkHealth(cfg, names, agentsHome)
 	reportManifestHealth(cfg, names)
+	reportLockHealth(cfg, names)
 	reportOrphanCanonicals(cfg, names, agentsHome)
 	reportPluginHealth(cfg, names, agentsHome)
 
@@ -319,6 +320,86 @@ func partitionManifestGitSources(rc *config.AgentsRC) (missing, present []string
 		}
 	}
 	return missing, present
+}
+
+// reportLockHealth prints the "Lockfile (.agentsrc.lock)" section: per-project
+// drift between the committed lockfile and the declared `extends`/`packages`
+// units. It is read-only — doctor never repairs the lock, it only surfaces
+// drift (config-v2 p2). Projects that declare no units are silent (lock drift
+// is not applicable to a local-only manifest).
+func reportLockHealth(cfg *config.Config, names []string) {
+	ui.Section("Lockfile (.agentsrc.lock)")
+	anyApplicable := false
+	anyIssue := false
+	for _, name := range names {
+		path := cfg.GetProjectPath(name)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		applicable, issue := reportOneProjectLockHealth(name, path)
+		anyApplicable = anyApplicable || applicable
+		anyIssue = anyIssue || issue
+	}
+	if !anyApplicable {
+		ui.Bullet("ok", "No projects declare config units — lockfile drift not applicable")
+		return
+	}
+	if !anyIssue {
+		ui.Bullet("ok", "All declared config units are locked")
+	}
+}
+
+// reportOneProjectLockHealth reports lock drift for a single project. The first
+// return is whether lock drift applies (the manifest declares extends); the
+// second is whether any drift was surfaced. A manifest load error is silent
+// here — reportManifestHealth already owns missing/corrupt manifest reporting.
+func reportOneProjectLockHealth(name, path string) (applicable, issue bool) {
+	drift, err := config.LockDrift(path)
+	if err != nil {
+		// Manifest missing/corrupt is reported by reportManifestHealth; do not
+		// double-report here.
+		return false, false
+	}
+	if !drift.HasDeclaredUnits {
+		return false, false
+	}
+	if !drift.LockPresent {
+		ui.Bullet("warn", fmt.Sprintf("%s — declares units but has no .agentsrc.lock  hint: da install", name))
+		return true, true
+	}
+	problems := drift.Problems()
+	if len(problems) == 0 {
+		ui.Bullet("ok", fmt.Sprintf("%s — %d unit(s) locked", name, len(drift.Units)))
+		return true, false
+	}
+	for _, p := range problems {
+		ui.Bullet("warn", fmt.Sprintf("%s — %s: %s%s", name, p.Ref, lockDriftMessage(p.Status), lockDriftHint(p.Status)))
+	}
+	return true, true
+}
+
+// lockDriftMessage maps a drift status to a short human-readable phrase.
+func lockDriftMessage(s config.LockDriftStatus) string {
+	switch s {
+	case config.LockStatusMissingFromLock:
+		return "declared in manifest but absent from lock"
+	case config.LockStatusExtraInLock:
+		return "in lock but no longer declared in manifest"
+	default:
+		return string(s)
+	}
+}
+
+// lockDriftHint maps a drift status to a remediation hint suffix.
+func lockDriftHint(s config.LockDriftStatus) string {
+	switch s {
+	case config.LockStatusMissingFromLock:
+		return "  hint: da config sync"
+	case config.LockStatusExtraInLock:
+		return "  hint: da config sync to prune"
+	default:
+		return ""
+	}
 }
 
 // reportOrphanCanonicals prints the "Canonical Resources" section: warns

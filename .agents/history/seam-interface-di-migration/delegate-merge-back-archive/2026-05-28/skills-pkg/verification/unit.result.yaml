@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: skills-pkg
+parent_plan_id: seam-interface-di-migration
+verifier_type: unit
+status: pass
+summary: 'skills-pkg interface-DI conversion: all skills tests green; build/vet/gofmt clean; PR #65 opened'
+recorded_at: "2026-05-24T23:10:37Z"
+delegation_id: del-skills-pkg-1779663650
+recorded_by: da workflow verify record
+commands:
+    - go test ./commands/skills -race -count=1

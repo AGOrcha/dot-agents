@@ -1,0 +1,8 @@
+schema_version: 1
+task_id: p0-sentinel-cli
+parent_plan_id: loop-discipline-stop-hooks
+verifier_type: merge-back
+status: pass
+summary: 'Cross-plan coordination: schemas.go registry does not exist in this codebase; each schema has its own _schema.go file with go:embed. Dual-write guard test added in hook_sentinel_test.go (TestWorkflowHookSentinelEmbeddedSchemaMatchesCanonical). If t0-outcome-contract worker assumed a central registry too, they will likely fold back same way.'
+recorded_at: "2026-05-26T11:47:13Z"
+delegation_id: del-p0-sentinel-cli-1779795346

@@ -7,11 +7,99 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"golang.org/x/sys/windows"
 )
+
+// makeDirUnreadable installs a deny-ACE for the current process's user SID on
+// the directory's DACL via SetNamedSecurityInfo, denying FILE_LIST_DIRECTORY so
+// that FindFirstFile / FindNextFile (the syscalls behind os.ReadDir) fail with
+// ERROR_ACCESS_DENIED until the original DACL is restored at t.Cleanup time.
+//
+// This is a local, inlined copy of internal/testutil.MakeDirUnreadable's
+// Windows implementation. fsops is the lowest filesystem layer and its test
+// package must not import internal/testutil, which depends on internal/config,
+// which in turn imports internal/fsops — that edge closes an import cycle that
+// only surfaces in the windows test build. Keeping the helper local breaks the
+// cycle without changing any production code. See internal/testutil/perms_dir.go
+// for the full rationale on the deny-ACE mechanism and elevated-context probe.
+func makeDirUnreadable(t *testing.T, dir string) {
+	t.Helper()
+
+	// Deny exactly this process's user SID; denying Everyone would also lock
+	// out the t.Cleanup restore path on some runners.
+	token := windows.GetCurrentProcessToken()
+	user, err := token.GetTokenUser()
+	if err != nil {
+		t.Fatalf("makeDirUnreadable: GetTokenUser: %v", err)
+	}
+	sid := user.User.Sid
+
+	// Snapshot the existing security descriptor so the original DACL can be
+	// restored during cleanup. origSD owns the memory backing origDACL; keep it
+	// referenced for the test lifetime via the closure capture below.
+	origSD, err := windows.GetNamedSecurityInfo(
+		dir,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION,
+	)
+	if err != nil {
+		t.Fatalf("makeDirUnreadable: GetNamedSecurityInfo %q: %v", dir, err)
+	}
+	origDACL, _, err := origSD.DACL()
+	if err != nil {
+		t.Fatalf("makeDirUnreadable: origSD.DACL %q: %v", dir, err)
+	}
+
+	const denyMask = windows.FILE_LIST_DIRECTORY |
+		windows.FILE_TRAVERSE |
+		windows.FILE_READ_ATTRIBUTES |
+		windows.FILE_READ_EA
+	explicit := []windows.EXPLICIT_ACCESS{{
+		AccessPermissions: windows.ACCESS_MASK(denyMask),
+		AccessMode:        windows.DENY_ACCESS,
+		Inheritance:       windows.NO_INHERITANCE,
+		Trustee: windows.TRUSTEE{
+			TrusteeForm:  windows.TRUSTEE_IS_SID,
+			TrusteeType:  windows.TRUSTEE_IS_USER,
+			TrusteeValue: windows.TrusteeValueFromSID(sid),
+		},
+	}}
+	newDACL, err := windows.ACLFromEntries(explicit, origDACL)
+	if err != nil {
+		t.Fatalf("makeDirUnreadable: ACLFromEntries %q: %v", dir, err)
+	}
+
+	if err := windows.SetNamedSecurityInfo(
+		dir,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION,
+		nil, nil,
+		newDACL,
+		nil,
+	); err != nil {
+		t.Fatalf("makeDirUnreadable: SetNamedSecurityInfo %q: %v", dir, err)
+	}
+
+	t.Cleanup(func() {
+		_ = windows.SetNamedSecurityInfo(
+			dir,
+			windows.SE_FILE_OBJECT,
+			windows.DACL_SECURITY_INFORMATION,
+			nil, nil,
+			origDACL,
+			nil,
+		)
+		runtime.KeepAlive(origSD)
+	})
+
+	if _, err := os.ReadDir(dir); err == nil {
+		t.Skip("DACL deny-ACE did not produce a denial (elevated SeBackup/SeRestore or non-NTFS volume?); cannot exercise the assertion")
+	}
+}
 
 // TestFsopsWindows_RoundTrip mirrors TestFsopsDefault_RoundTrip but exercises
 // the Windows-tagged implementations: MkdirAll → WriteFile → stat → Remove →
@@ -191,7 +279,7 @@ func TestWriteFile_CreatesMissingParent(t *testing.T) {
 	}
 }
 
-// TestMkdirAll_UnderUnreadableParent uses testutil.MakeDirUnreadable to deny
+// TestMkdirAll_UnderUnreadableParent uses makeDirUnreadable to deny
 // directory listing/traversal on a parent and asserts that MkdirAll cannot
 // silently succeed underneath the deny-ACE. The exact error varies (Win32
 // returns ERROR_ACCESS_DENIED, which the guard wraps), so we only assert that
@@ -203,7 +291,7 @@ func TestMkdirAll_UnderUnreadableParent(t *testing.T) {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		t.Fatalf("seed parent: %v", err)
 	}
-	testutil.MakeDirUnreadable(t, parent)
+	makeDirUnreadable(t, parent)
 
 	child := filepath.Join(parent, "child")
 	err := MkdirAll(child, 0o755)
@@ -237,7 +325,7 @@ func TestRemove_UnderUnreadableParent(t *testing.T) {
 	if err := os.WriteFile(victim, []byte("x"), 0o644); err != nil {
 		t.Fatalf("seed victim: %v", err)
 	}
-	testutil.MakeDirUnreadable(t, parent)
+	makeDirUnreadable(t, parent)
 
 	err := Remove(victim)
 	if err == nil {
@@ -273,7 +361,7 @@ func TestRemoveAll_UnderUnreadableParent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tree, "f.txt"), []byte("y"), 0o644); err != nil {
 		t.Fatalf("seed file: %v", err)
 	}
-	testutil.MakeDirUnreadable(t, parent)
+	makeDirUnreadable(t, parent)
 
 	err := RemoveAll(filepath.Join(parent, "sub"))
 	if err == nil {
@@ -298,7 +386,7 @@ func TestWriteFile_UnderUnreadableParent(t *testing.T) {
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		t.Fatalf("seed parent: %v", err)
 	}
-	testutil.MakeDirUnreadable(t, parent)
+	makeDirUnreadable(t, parent)
 
 	err := WriteFile(filepath.Join(parent, "f.txt"), []byte("z"), 0o644)
 	if err == nil {

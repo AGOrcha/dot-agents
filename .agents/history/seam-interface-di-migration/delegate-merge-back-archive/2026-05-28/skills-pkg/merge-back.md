@@ -1,0 +1,25 @@
+---
+schema_version: 1
+task_id: skills-pkg
+parent_plan_id: seam-interface-di-migration
+title: Convert commands/skills/seams.go to interface-DI
+summary: 'Converted commands/skills 4 func-var seams (osMkdirAll, osWriteFile, osSymlink, configLoad) to a single skillsIO interface-DI collaborator + fakeSkillsIO test fake. Each exported func is a thin wrapper over the lowercase IO-injected sibling passing stdSkillsIO{}. Behavior-preserving. Tests green under -race -count=1; build/vet/gofmt clean. PR #65 opened (feature/skills-pkg-interface-di -> master).'
+files_changed:
+    - .agents/active/delegation/agents-pkg.yaml
+    - .agents/active/delegation/t02-introduce-lifecycle-skeleton.yaml
+    - .agents/active/delegation/t10pre-extract-canonical-cmd-helpers.yaml
+    - .agents/active/delegation/t3-extract-platform-tests.yaml
+verification_result:
+    status: pass
+    summary: 'Parent should review PR #65 (https://github.com/NikashPrakash/dot-agents/pull/65) and advance the skills-pkg task. No production call-site signature changes; commands/skills.go and external callers untouched. Mirrors PR #59 platform-pkg shape. Worktree at .agents/worktrees/skills-pkg remains in place for any follow-up review iteration; remove on merge.'
+integration_notes: 'Parent should review PR #65 (https://github.com/NikashPrakash/dot-agents/pull/65) and advance the skills-pkg task. No production call-site signature changes; commands/skills.go and external callers untouched. Mirrors PR #59 platform-pkg shape. Worktree at .agents/worktrees/skills-pkg remains in place for any follow-up review iteration; remove on merge.'
+created_at: "2026-05-24T23:11:04Z"
+---
+
+## Summary
+
+Converted commands/skills 4 func-var seams (osMkdirAll, osWriteFile, osSymlink, configLoad) to a single skillsIO interface-DI collaborator + fakeSkillsIO test fake. Each exported func is a thin wrapper over the lowercase IO-injected sibling passing stdSkillsIO{}. Behavior-preserving. Tests green under -race -count=1; build/vet/gofmt clean. PR #65 opened (feature/skills-pkg-interface-di -> master).
+
+## Integration Notes
+
+Parent should review PR #65 (https://github.com/NikashPrakash/dot-agents/pull/65) and advance the skills-pkg task. No production call-site signature changes; commands/skills.go and external callers untouched. Mirrors PR #59 platform-pkg shape. Worktree at .agents/worktrees/skills-pkg remains in place for any follow-up review iteration; remove on merge.

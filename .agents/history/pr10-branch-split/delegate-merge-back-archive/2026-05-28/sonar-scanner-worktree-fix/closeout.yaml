@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: pr10-branch-split
+task_id: sonar-scanner-worktree-fix
+delegation_id: del-sonar-scanner-worktree-fix-1779948127
+decision: accept
+closed_at: "2026-05-28T06:57:50Z"

@@ -10,116 +10,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 _No entries yet. Feature PRs add their lines here; the next release task
 finalizes them into a version section._
 
-## [0.3.3] - 2026-05-28
+## [0.3.3] - 2026-05-31
 
-This patch release organizes by **theme** rather than the Keep-a-Changelog
-Added/Changed/Fixed split, because the 0.3.3 surface is dominated by
-coordinated infrastructure/distribution efforts (the agorcha.dev docs site,
-signing & release hardening, platform-driven diagnostics, reviewer
-infrastructure, and config-v2 groundwork) where a single theme cuts across
-all three categories. Per the release-gated-plans convention, distribution
-and infrastructure work rides the patch train; `0.4.0` is reserved for the
-next genuine feature land.
+A patch release. The user-facing CLI behaves exactly as it did in 0.3.2 —
+this train is dominated by internal foundation work, workflow-orchestration
+machinery, and CI/release hardening. It is organized by **theme** rather than
+the Keep-a-Changelog Added/Changed/Fixed split because most of the ~775
+commits since v0.3.2 cut across all three. Where a subsystem is merged but not
+yet wired to a command, that is stated explicitly; the next genuine
+feature land is reserved for `0.4.0`.
 
-### Docs site (agorcha.dev)
+### Configuration foundation (config-v2 — internal/dormant)
+
+- Landed the two-tier config-v2 substrate as internal packages only. It is
+  **foundation, not a user-facing feature**: none of the surfaces below are
+  reachable from the CLI yet, and existing `.agentsrc.json` loading is
+  unchanged. The user-facing config-v2 commands land in `0.4.0`.
+  - Units lockfile + content-hash staleness detection
+    (`internal/config/lock_units.go`, `resolve_locked.go`,
+    `lockstatus.go`, `staleness.go`).
+  - `EnsureResolved` auto-sync seam (`internal/config/ensure_resolved.go`) —
+    the single resolution entry point future commands will call.
+  - Layered resolver + layer schema (`resolver.go`, `layer_schema.go`).
+  - Source-type fetchers — local, HTTP, and OCI
+    (`local_source.go`, `fetcher_http.go`, `fetcher_oci.go`).
+
+### Workflow orchestration (layered-pr-fanout)
+
+- `awaiting_review` task status with its sub-status umbrella (verifier-pass,
+  lens-accepted, human-pending) so review-blocked work is tracked distinctly
+  from `in_progress` and `completed`.
+- Slot/dependency accounting for the eligible queue, plus `blocked-on:<ref>`
+  state with auto-resume when the referenced upstream clears.
+- PR base-branch resolution for stacked/layered fan-out.
+
+### Events
+
+- Unified internal event-contract core (`internal/events`): envelope schema,
+  dispatch, producer, registry, and JSONPath matching. Internal substrate
+  for upcoming event-driven workflow features; not yet wired to a command.
+
+### Security
+
+- Encrypted credential store (`internal/credstore`) with hybrid
+  post-quantum at-rest encryption: payloads are sealed with AES-256-GCM
+  under a key derived from a hybrid X25519 + ML-KEM-768 KEM, so stored
+  credentials stay confidential if **either** the classical or the
+  post-quantum half is broken. Private seed material is held in the OS
+  keyring. Internal substrate; not yet wired to a command.
+
+### CI, coverage & quality gates
+
+- Per-file coverage gate (`scripts/coverage-gate.sh`) replacing the single
+  aggregate threshold, with an explicit exceptions allowlist that is pruned
+  as files reach the bar.
+- Zero-new-issues Sonar gate (`scripts/sonar-new-issues-gate.sh`) blocking
+  net-new static-analysis findings on a PR.
+- Cross-platform (Windows) test fixes, including byte-range file locking and
+  path/cleanup handling, plus a multi-OS test matrix.
+- Deduplicated push + PR CI pipelines and Sonar worktree-path correctness.
+
+### Docs, site & release tooling
 
 - Interactive Astro + Cytoscape documentation site under `docs/web/`,
-  deployed to agorcha.dev (PR #143).
-- Cloudflare Worker deploy pipeline (`deploy-docs.yml`) plus a scheduled
-  deploy-token auto-rotation workflow (PRs #150, #151).
-- Demo → pitch reframing: a 5-section pitch deck with presenter notes
-  alongside the existing demo pages (PR #164).
-- Usability fixes: fluid graph canvas + persistent legend (PR #163),
-  mobile sidebar / heading / theming polish, and a demo-title prefix
-  fallback (PRs #159, #166).
-
-### Signing & release
-
-- Cosign keyless signing via sigstore + GitHub OIDC, wired into
-  goreleaser (PR #138). Every release artifact + checksum is signed;
-  verify with `cosign verify-blob` per `docs/RELEASE_VERIFICATION.md`.
-- Homebrew dual-cask emit: unversioned `dot-agents.rb` + versioned
-  `dot-agents@{version}.rb` (PR #144).
-- `VERSION` file + `auto-release.yml` continue to drive tag/sign/publish:
-  bumping `VERSION` on a merge to `master` is the release trigger.
-- Native macOS (Apple Developer ID) + Windows (Authenticode) code
-  signing remain **deferred** (secrets pending).
-
-### Configuration (config-v2)
-
-- Additive config-v2 schema extension: new fields layered onto
-  `.agentsrc.json` without breaking existing configs (PRs #124, #141).
-- `da explain` top-level command surfacing config/resolution detail.
-
-  Note: the codex-track "snapshot API + `da config explain` subtree"
-  (P4) has **not** shipped in 0.3.3 and is tracked for a later release.
-
-### Platform-driven diagnostics
-
-- `doctor` + `status` now dispatch over the
-  `internal/platform.Platform` interface instead of hand-rolled
-  per-platform branches (PRs #118, #128, #130, #133, #135). Adds
-  `BrokenLinkReporter`, `Badge`, and `CountLinks` across
-  cursor / claude / codex / copilot / opencode.
-- Multi-OS coverage (macOS + Linux + Windows test matrices).
-
-### Reviewer infrastructure & skills
-
-- 3 starter reviewer-lens agents
-  (architecture-standards, acceptance-invariants, adversarial)
-  + AGENT.md scaffolding + a lens-count assertion test (PRs #122, #134).
-- `da workflow review_gate` staged-dispatch machinery
-  (PR #119; codex follow-on split out as PR #120) and a `pr-ci`
-  `verifier_profile` default (PR #129).
-- `isp.prompt.md` ↔ `verifier_profile` cross-reference enforcement test
-  (PR #140) prevents scaffold drift from stranding `verifier_sequence`
-  refs.
-- Orchestration skills promoted to global starter via `da skills promote`
-  (PR #141): `orchestrator-session-start`, `delegation-lifecycle`,
-  `plan-wave-picker`, `provider-consumer-pair`, `iteration-close`,
-  `isp`, `loop-worker`. `da init` now scaffolds the full chain.
-
-### Workflow tooling
-
-- `da workflow archive-orphans` sweep to reconcile stranded delegation /
-  merge-back artifacts (PR #158).
-- Hook-sentinel companion ops: expanded `commands/workflow/hook_sentinel`
-  + schema (PR #157).
-- Evidence-policy schema cleanup on delegation/fanout types (PR #148).
-- History-archive location unified (PR #154).
-
-### Renames & refactors
-
-- `cmd/dot-agents/` → `cmd/da/` (PR #139) — Go convention; binary name
-  matches install path. Module path stays
-  `github.com/NikashPrakash/dot-agents` (project identity preserved).
-- `cmdutil` judo refactor: folded `canonical/` into `cmdutil/`; extracted
-  shared resource-cmd helpers (PR #115).
-- `internal/` package rename + importguard narrowing (PR #117).
-- Canonical `internal/gitremote` package: `ParseRemoteURL` +
-  `CanonicalRepoID` + `ReadOriginURL` (go-git in-process, no subprocess);
-  `repo_id` derivation from git remote (PR #127).
-- `internal/testutil.MakeDirWriteDenied` + 9-site migration (PR #128).
-- DRY `commands/workflow/contract_core.go`: fanout calls contract core
-  (PR #131).
-
-### CI & quality
-
-- Deduplicated push + PR CI pipelines (PR #146).
-- Sonar-scanner worktree-path fix (PR #147).
-- Coverage lift on global-flag handling (PR #137).
-
-### Design & research (proposals/specs — not shipped capability)
-
-These PRs landed **design artifacts only**: no runtime behavior shipped.
-They scope future work and are recorded here for traceability.
-
-- `layered-pr-fanout` spec (PR #149).
-- `lens-evidence-policy` spec (PR #152).
-- agorcha public/internal split + observability deploy architecture
-  proposal (PR #156).
-- Monitor PR review/comment routing proposal (PR #160).
-- Auto-dream + background-tasks research proposal (PR #161).
+  deployed to agorcha.dev via a Cloudflare Worker pipeline
+  (`deploy-docs.yml`) with scheduled deploy-token rotation.
+- Cosign keyless signing (sigstore + GitHub OIDC) wired into goreleaser;
+  every release artifact and checksum is signed — verify per
+  `docs/RELEASE_VERIFICATION.md`. Native macOS/Windows code signing remain
+  **deferred**.
+- `cmd/dot-agents/` → `cmd/da/` rename (binary name matches install path;
+  Go module path unchanged); docs-accuracy pass to match.
+- Orchestration starter skills promoted to global and scaffolded by
+  `da init`; reviewer-lens agents and `da workflow review_gate`
+  staged-dispatch machinery.
 
 ## [0.3.2] - 2026-05-17
 

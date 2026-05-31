@@ -168,8 +168,9 @@ a:hover { text-decoration: underline; }
   flex: 0 0 auto;
 }
 
-.sidebar h1 {
+.sidebar .brand-name {
   font-size: 1.05rem;
+  font-weight: 700;
   margin: 0;
   color: var(--accent);
   letter-spacing: 0.02em;

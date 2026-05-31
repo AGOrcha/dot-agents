@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-pr8a-stale-refs-sweep-1779944616
+parent_plan_id: pr10-branch-split
+parent_task_id: pr8a-stale-refs-sweep
+title: Sweep remaining stale 'cmd/dot-agents' refs left out of pr8a (lessons, proposals, plans, specs, ralph harnesses, docs, scaffold skill templates, scaffold agent templates)
+summary: Delegated from plan PR#10 branch split into reviewable feature PRs
+write_scope:
+    - .agents/lessons/
+    - .agents/workflow/plans/
+    - .agents/workflow/specs/
+    - bin/tests/
+    - internal/scaffold/home/starter/agents/
+    - internal/scaffold/home/starter/skills/
+    - internal/scaffold/home/starter/profiles/
+success_criteria: 'Follow-up from PR #139 (pr8a-cmd-da-rename) which intentionally scoped down. Stale refs reported by pr8a worker in PR #139 body: .agents/lessons/starter-vs-project-overlay/LESSON.md, .agents/proposals/hooks-wiring-and-opencode-fit.md, plans (graph-backend-adapter-contract, refresh-skill-relink, root-command-decomposition), specs (legacy-shell-prune-share-rehome), bin/tests/ralph-* harnesses, docs (GLOBAL_FLAG_CONTRACT.md, PROJECT_DIAGRAMS.md, adr/0006-da-rename-strategy.md), and internal/scaffold/home/starter/{agents,skills}/global/ templates. Most lessons/proposals/plans/specs/adr are historical and can stay; scaffold templates + ralph harnesses are the operational priority since they affect newly-scaffolded projects + local smoke tests respectively. Per [[no-lazy-allowlist-tech-debt]]: actual edits, not deferred via grep-exception.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: stale-refs-worker
+status: completed
+created_at: "2026-05-28T05:03:36Z"
+updated_at: "2026-05-28T05:22:35Z"

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p0-schema-additive-extension
+parent_plan_id: config-v2-migration
+verifier_type: unit
+status: pass
+summary: v1+v2 round-trip + schema validation + LayerRef/PackageRef unit tests all pass; CI green (sonar pass, multi-OS pass, coverage gate pass)
+recorded_at: "2026-05-27T16:26:02Z"
+delegation_id: del-p0-schema-additive-extension-1779897740
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/config/... -count=1

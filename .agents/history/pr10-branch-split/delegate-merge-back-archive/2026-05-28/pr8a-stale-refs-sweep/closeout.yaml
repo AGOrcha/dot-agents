@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: pr10-branch-split
+task_id: pr8a-stale-refs-sweep
+delegation_id: del-pr8a-stale-refs-sweep-1779944616
+decision: accept
+closed_at: "2026-05-28T05:22:35Z"

@@ -34,6 +34,49 @@ func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// --- shared cliprobe seam (cliprobe.go) ---
+
+func TestProbeInstalled(t *testing.T) {
+	dir := installFakeCLI(t, "probe-tool", "v1")
+	t.Setenv("PATH", dir)
+	if !probeInstalled("probe-tool") {
+		t.Error("probeInstalled = false, want true for binary on PATH")
+	}
+	if probeInstalled("probe-tool-absent") {
+		t.Error("probeInstalled = true, want false for missing binary")
+	}
+}
+
+func TestProbeVersion_ReturnsRawOutput(t *testing.T) {
+	dir := installFakeCLI(t, "probe-ver", "  raw 1.0\nsecond\n")
+	t.Setenv("PATH", dir)
+	out, err := probeVersion("probe-ver", "--version")
+	if err != nil {
+		t.Fatalf("probeVersion: %v", err)
+	}
+	// probeVersion returns the raw bytes; parsing is the caller's job.
+	if !strings.Contains(string(out), "second") {
+		t.Errorf("probeVersion dropped output lines: %q", out)
+	}
+	if firstLine(out) != "raw 1.0" {
+		t.Errorf("firstLine = %q, want %q", firstLine(out), "raw 1.0")
+	}
+}
+
+func TestProbeVersion_MissingBinaryErrors(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if _, err := probeVersion("definitely-absent-xyz", "--version"); err == nil {
+		t.Error("expected error for missing binary")
+	}
+}
+
+func TestProbeVersionLine_EmptyOnMissingBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	if got := probeVersionLine("definitely-absent-xyz"); got != "" {
+		t.Errorf("probeVersionLine = %q, want empty for missing binary", got)
+	}
+}
+
 func TestPeekCLIVersionLine_TrimsAndReturnsFirstLine(t *testing.T) {
 	dir := installFakeCLI(t, "fake-cli", "  v1.2.3 (build abc)\nextra-line\n")
 	got, err := peekCLIVersionLine(filepath.Join(dir, "fake-cli"))
