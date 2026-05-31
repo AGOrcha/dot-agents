@@ -31,6 +31,9 @@ type workflowAppTypesView struct {
 	Path     string                 `json:"path"`
 	Source   string                 `json:"source"`
 	AppTypes []workflowAppTypeEntry `json:"app_types"`
+	// Incomplete lists layers skipped during offline resolution whose absence may
+	// have shrunk the effective app_type_verifier_map. Empty when fully resolved.
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 type workflowAppTypeEntry struct {
@@ -53,6 +56,9 @@ func runWorkflowAppTypes(format string, verbose bool) error {
 	if deps.Flags.JSON() {
 		return renderWorkflowAppTypesJSON(view, format)
 	}
+	// Warn (to stderr) when offline resolution skipped a layer, since that may
+	// have shrunk the list. stderr keeps --format/JSON consumers uncorrupted.
+	renderWorkflowAppTypesIncomplete(view)
 	if strings.TrimSpace(format) != "" {
 		snippet, err := renderWorkflowAppTypeFormat(view, format)
 		if err != nil {
@@ -84,6 +90,15 @@ func renderWorkflowAppTypesJSON(view workflowAppTypesView, format string) error 
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	return enc.Encode(view)
+}
+
+// renderWorkflowAppTypesIncomplete prints (to stderr) a note for each layer that
+// offline resolution skipped, so a silently-shrunk app_type_verifier_map is never
+// passed off as the complete list. No-op when resolution was complete.
+func renderWorkflowAppTypesIncomplete(view workflowAppTypesView) {
+	for _, note := range view.Incomplete {
+		fmt.Fprintf(os.Stderr, "note: app-types may be incomplete — layer not resolved offline: %s (run `da install` / `da config sync`)\n", note)
+	}
 }
 
 func renderWorkflowAppTypesHeader(view workflowAppTypesView) {
@@ -141,10 +156,11 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 		Source:  config.DisplayPath(filepathAgentsRC(project.Path)),
 	}
 
-	appTypeMap, err := resolveEffectiveAppTypeMap(project.Path)
+	appTypeMap, incomplete, err := resolveEffectiveAppTypeMap(project.Path)
 	if err != nil {
 		return view, err
 	}
+	view.Incomplete = incomplete
 	if len(appTypeMap) == 0 {
 		return view, nil
 	}
@@ -177,19 +193,45 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 // A missing repo-local manifest is not an error here: it yields an empty map, so
 // `workflow app-types` prints the same "No app_types found" notice it did before
 // the snapshot refactor instead of failing.
-func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, error) {
+//
+// The second return value carries human-readable notes for any layer that was
+// SKIPPED during offline resolution (an optional `extends` entry whose lock/cache
+// is missing, or a protected-field drop). Such a skip can shrink the effective
+// app_type_verifier_map, so the notes let the caller warn the user rather than
+// silently print an incomplete list (PR #207 adversarial-lens fix).
+func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, []string, error) {
 	snap, err := appTypeSnapshot(projectPath)
 	if err != nil {
 		if isMissingManifestErr(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	raw, err := snap.EffectiveRaw()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return decodeAppTypeVerifierMap(raw["app_type_verifier_map"])
+	m, err := decodeAppTypeVerifierMap(raw["app_type_verifier_map"])
+	if err != nil {
+		return nil, nil, err
+	}
+	return m, incompleteResolutionNotes(snap.Warnings), nil
+}
+
+// incompleteResolutionNotes turns the snapshot's resolution warnings into
+// user-facing notes for the warnings that can SHRINK the effective config — a
+// skipped optional layer or a dropped (protected-field) value. A cache_hit_offline
+// warning means the layer WAS resolved (just from cache), so it never indicates an
+// incomplete map and is excluded. Returns nil when nothing was skipped.
+func incompleteResolutionNotes(warnings []config.ProvenanceWarning) []string {
+	var notes []string
+	for _, w := range warnings {
+		if !strings.HasPrefix(w.Outcome, "optional_skipped") && w.Outcome != "dropped" {
+			continue
+		}
+		notes = append(notes, fmt.Sprintf("%s (%s)", w.FieldPath, w.Outcome))
+	}
+	return notes
 }
 
 // decodeAppTypeVerifierMap coerces the generic app_type_verifier_map value from
@@ -222,6 +264,13 @@ func decodeAppTypeVerifierMap(v any) (map[string][]string, error) {
 // manifest" condition. The FlatResolver surfaces an absent .agentsrc.json as a
 // fatal error; app-type detection treats absence as "no app_types" instead, so
 // the pre-refactor no-file behavior is preserved.
+//
+// Follow-up (internal/config): the substring match below is a fragile
+// cross-package contract on the exact wording of FlatResolver.loadLayers' error
+// (resolver.go ~147). It should become errors.Is against a shared typed sentinel
+// (e.g. config.ErrNoManifest) once internal/config exports one — that is a config
+// change outside this PR's write scope. TestIsMissingManifestErr pins the current
+// string so a wording drift fails in CI until the sentinel lands.
 func isMissingManifestErr(err error) bool {
 	if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
 		return true
