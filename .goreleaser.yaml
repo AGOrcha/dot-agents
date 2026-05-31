@@ -65,20 +65,22 @@ checksum:
   name_template: "checksums.txt"
 
 # Cosign keyless signing via Sigstore + GitHub OIDC.
-# Signs the checksums.txt artifact once; consumers verify the checksum file with
-# cosign, then use `sha256sum -c checksums.txt` to verify any individual binary.
+# Emits a single Sigstore bundle (checksums.txt.bundle) carrying both the
+# signature and the Fulcio certificate. cosign v4 makes the new bundle format the
+# default and ignores the legacy --output-signature/--output-certificate flags
+# (they error out with an empty bundle path), so we sign with --bundle.
+# Consumers verify the checksum file with cosign, then use
+# `sha256sum -c checksums.txt` to verify any individual binary.
 # Verification recipe: docs/RELEASE_VERIFICATION.md.
 signs:
   - id: cosign-keyless
     cmd: cosign
     artifacts: checksum
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.bundle"
     args:
       - sign-blob
       - "--yes"
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--bundle=${signature}"
       - "${artifact}"
     output: true
 
@@ -98,6 +100,18 @@ homebrew_casks:
       - unix
     binaries: &cask_binaries
       - da
+    # INTERIM Gatekeeper workaround: the darwin binaries are not yet Apple
+    # Developer ID-signed/notarized, so Homebrew's quarantine attribute would make
+    # macOS block `da` on first run ("cannot be opened / developer cannot be
+    # verified"). Strip com.apple.quarantine on install until notarization lands.
+    # Remove this hook once `notarize:` signing is wired (tracked for the AGOrcha
+    # cutover; Homebrew drops support for Gatekeeper-failing casks 2026-09-01).
+    hooks: &cask_hooks
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/da"]
+          end
     commit_author: &cask_commit_author
       name: github-actions[bot]
       email: github-actions[bot]@users.noreply.github.com
@@ -122,6 +136,7 @@ homebrew_casks:
   - name: "dot-agents@{{ .Version }}"
     ids: *cask_ids
     binaries: *cask_binaries
+    hooks: *cask_hooks
     commit_author: *cask_commit_author
     url: *cask_url
     repository: *cask_repository

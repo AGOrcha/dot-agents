@@ -49,8 +49,7 @@ or via `gh`, download:
 - The binary archive for your platform, e.g.
   `dot-agents_VERSION_darwin_arm64.tar.gz`
 - `checksums.txt`
-- `checksums.txt.sig`
-- `checksums.txt.pem`
+- `checksums.txt.bundle`
 
 ```bash
 VERSION=0.3.3
@@ -65,8 +64,7 @@ gh release download "${TAG}" \
 
 ```bash
 cosign verify-blob \
-  --certificate checksums.txt.pem \
-  --signature checksums.txt.sig \
+  --bundle checksums.txt.bundle \
   --certificate-identity-regexp "^https://github.com/NikashPrakash/dot-agents/.github/workflows/auto-release.yml@refs/heads/master$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
@@ -129,8 +127,7 @@ was recorded:
 
 ```bash
 cosign verify-blob \
-  --certificate checksums.txt.pem \
-  --signature checksums.txt.sig \
+  --bundle checksums.txt.bundle \
   --certificate-identity-regexp "^https://github.com/NikashPrakash/dot-agents/.github/workflows/auto-release.yml@refs/heads/master$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --rekor-url "https://rekor.sigstore.dev" \
@@ -147,8 +144,11 @@ This signing approach (Cosign keyless on `checksums.txt`) provides
 project's official release workflow. It does **not** provide OS-level
 code-signing trust:
 
-- macOS Gatekeeper will still treat the binary as unsigned and require
-  the right-click → Open workaround on first launch.
+- macOS Gatekeeper still treats the binary as unsigned. The Homebrew
+  **cask** strips the quarantine attribute on install (an interim workaround) so
+  `brew install --cask` works today, but a binary downloaded **manually** from
+  the releases page still needs the right-click → Open workaround on first
+  launch until Apple Developer ID notarization lands.
 - Windows SmartScreen will warn about an unrecognized publisher.
 - Linux package managers will not pick up the cosign signature
   automatically.
@@ -160,14 +160,14 @@ seamless Gatekeeper / SmartScreen trust, open an issue.
 
 ## Troubleshooting
 
-**`Error: no matching signatures`** — the wrong `.sig` or `.pem` file
-was used, or the certificate identity does not match. Double-check
-that you downloaded the `.sig` and `.pem` files from the same release
-as the `checksums.txt`.
+**`Error: no matching signatures`** — the wrong `checksums.txt.bundle`
+file was used, or the certificate identity does not match. Double-check
+that you downloaded the `.bundle` file from the same release as the
+`checksums.txt`.
 
 **`Error: fetching certificate from Fulcio`** — transient network
 failure or Fulcio outage. Retry. Verification is fully offline once
-you have the `.sig`, `.pem`, and `checksums.txt`.
+you have the `checksums.txt.bundle` and `checksums.txt`.
 
 **`sha256sum: WARNING: N lines are improperly formatted`** — this is
 expected when using `--ignore-missing`; only the line(s) matching the
