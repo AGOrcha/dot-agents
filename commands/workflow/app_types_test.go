@@ -304,6 +304,32 @@ func TestWorkflowAppTypesNoManifestIsEmpty(t *testing.T) {
 	}
 }
 
+// TestAppTypeSnapshotConsumesLockedPath proves the production seam consumes the
+// read-only, units-lock-backed resolution path (LayeredResolver.ResolveLocked),
+// not an online fetch. A project that declares `extends` but has no lockfile must
+// surface the offline lock gap as an error — a fetcher would instead try to pull
+// the layer. The error is NOT a missing-manifest condition, so it propagates
+// rather than collapsing to an empty "No app_types found" view.
+func TestAppTypeSnapshotConsumesLockedPath(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(`{
+  "project":"svc","version":1,
+  "sources":[{"id":"org","type":"local","path":"/nonexistent"}],
+  "extends":[{"ref":"org:base.json@v1"}]
+}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	_, err := resolveEffectiveAppTypeMap(repo)
+	if err == nil {
+		t.Fatal("extends project with no lockfile must surface the offline lock gap, not fetch")
+	}
+	if isMissingManifestErr(err) {
+		t.Fatalf("lock-gap error must propagate, not be swallowed as missing-manifest: %v", err)
+	}
+}
+
 func TestDecodeAppTypeVerifierMap(t *testing.T) {
 	// Nil / wrong-typed / empty inputs all collapse to an empty map, no error.
 	for _, v := range []any{nil, "not-an-object", map[string]any{}, []any{"x"}} {
@@ -352,31 +378,24 @@ func TestIsMissingManifestErr(t *testing.T) {
 
 func TestResolveEffectiveAppTypeMap_ResolverError(t *testing.T) {
 	// A non-missing resolver error must propagate, not be swallowed.
-	orig := appTypeSnapshotResolver
-	t.Cleanup(func() { appTypeSnapshotResolver = orig })
-	appTypeSnapshotResolver = func() config.Resolver {
-		return stubResolver{err: fmt.Errorf("boom: layer fetch failed")}
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return nil, fmt.Errorf("boom: locked layer missing from cache")
 	}
 	if _, err := resolveEffectiveAppTypeMap(t.TempDir()); err == nil {
 		t.Fatal("expected resolver error to propagate")
 	}
 
 	// A missing-manifest resolver error is swallowed to an empty map.
-	appTypeSnapshotResolver = func() config.Resolver {
-		return stubResolver{err: fmt.Errorf("no %s found at /x", config.AgentsRCFile)}
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return nil, fmt.Errorf("no %s found at /x", config.AgentsRCFile)
 	}
 	got, err := resolveEffectiveAppTypeMap(t.TempDir())
 	if err != nil || len(got) != 0 {
 		t.Fatalf("missing-manifest err should yield empty map: got %#v, %v", got, err)
 	}
 }
-
-type stubResolver struct {
-	snap *config.Snapshot
-	err  error
-}
-
-func (s stubResolver) Resolve(string) (*config.Snapshot, error) { return s.snap, s.err }
 
 func TestRunWorkflowAppTypes_EmptyAndDocFormat(t *testing.T) {
 

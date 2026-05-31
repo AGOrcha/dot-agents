@@ -14,12 +14,16 @@ import (
 	"github.com/NikashPrakash/dot-agents/internal/ui"
 )
 
-// appTypeSnapshotResolver builds the effective-config Snapshot that app-type
-// detection reads. It is a package var so tests can isolate layers; production
-// uses the shared FLAT resolver so `workflow app-types` resolves the same
-// effective config as `da config explain` and the rest of internal/config.
-var appTypeSnapshotResolver func() config.Resolver = func() config.Resolver {
-	return config.NewFlatResolver()
+// appTypeSnapshot produces the effective-config Snapshot that app-type detection
+// reads. It is a package var so tests can stub the snapshot directly; production
+// consumes the read-only, lock-backed resolution path (LayeredResolver.
+// ResolveLocked) so `workflow app-types` reads the SAME units-lock-backed
+// effective config as `da config explain` — offline, no fetch, no lock mutation
+// (config-distribution-model §7A units model). For a flat project (no `extends`)
+// ResolveLocked degrades to the FLAT layer set, so a project with no lockfile
+// still resolves exactly as before.
+var appTypeSnapshot func(projectPath string) (*config.Snapshot, error) = func(projectPath string) (*config.Snapshot, error) {
+	return config.NewLayeredResolver().ResolveLocked(projectPath)
 }
 
 type workflowAppTypesView struct {
@@ -161,17 +165,20 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 }
 
 // resolveEffectiveAppTypeMap reads the effective app_type_verifier_map from the
-// shared config Snapshot so app-type detection sees the same merged config every
-// other surface does (config-v2 §4 layer model), rather than re-reading only the
-// repo-local .agentsrc.json. The map lives in ExtraFields, so it is read off the
-// snapshot's EffectiveRaw() projection (which round-trips through the AgentsRC
-// marshaler and therefore includes ExtraFields).
+// units-lock-backed config Snapshot so app-type detection sees the same merged
+// effective config every other surface does (config-distribution-model §7A units
+// model), rather than re-reading only the repo-local .agentsrc.json. Resolution
+// is read-only and offline: it reconstructs the imported layers from the units
+// lock at their locked digests without ever triggering a fetch (the same seam
+// `da config explain` parses through). The map lives in ExtraFields, so it is
+// read off the snapshot's EffectiveRaw() projection (which round-trips through
+// the AgentsRC marshaler and therefore includes ExtraFields).
 //
 // A missing repo-local manifest is not an error here: it yields an empty map, so
 // `workflow app-types` prints the same "No app_types found" notice it did before
 // the snapshot refactor instead of failing.
 func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, error) {
-	snap, err := appTypeSnapshotResolver().Resolve(projectPath)
+	snap, err := appTypeSnapshot(projectPath)
 	if err != nil {
 		if isMissingManifestErr(err) {
 			return nil, nil
