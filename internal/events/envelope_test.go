@@ -7,14 +7,38 @@ import (
 	"time"
 )
 
+type envelopeValidationCase struct {
+	name    string
+	typ     string
+	source  string
+	key     string
+	wantErr bool
+}
+
+// assertEnvelopeValidation holds the per-case checks so the table loop stays flat
+// (keeps TestNewEnvelopeValidation under the cognitive-complexity gate).
+func assertEnvelopeValidation(t *testing.T, tc envelopeValidationCase) {
+	t.Helper()
+	env, err := NewEnvelope(tc.typ, tc.source, tc.key, time.Time{}, nil)
+	if tc.wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got nil")
+		}
+		if !errors.Is(err, errEmpty) {
+			t.Fatalf("expected errEmpty, got %v", err)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if env.OccurredAt.IsZero() {
+		t.Fatalf("OccurredAt should default to now")
+	}
+}
+
 func TestNewEnvelopeValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		typ     string
-		source  string
-		key     string
-		wantErr bool
-	}{
+	tests := []envelopeValidationCase{
 		{"ok", "event.pr.merged", "github", "pr-1", false},
 		{"empty type", "", "github", "pr-1", true},
 		{"blank type", "   ", "github", "pr-1", true},
@@ -23,22 +47,7 @@ func TestNewEnvelopeValidation(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			env, err := NewEnvelope(tc.typ, tc.source, tc.key, time.Time{}, nil)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got nil")
-				}
-				if !errors.Is(err, errEmpty) {
-					t.Fatalf("expected errEmpty, got %v", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if env.OccurredAt.IsZero() {
-				t.Fatalf("OccurredAt should default to now")
-			}
+			assertEnvelopeValidation(t, tc)
 		})
 	}
 }
