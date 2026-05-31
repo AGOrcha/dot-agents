@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -106,8 +108,19 @@ func scopeSlot(i int) string {
 }
 
 // normalizedManifestBytes reads the manifest at path and re-encodes it through
-// canonical JSON so the digest is insensitive to key order and whitespace. A
-// missing file yields "" (absence is a stable state, not an error); an
+// canonical JSON so the digest is insensitive to key order and whitespace while
+// remaining LOSSLESS in two ways the standard unmarshal-into-`any` path is not:
+//
+//   - Number precision is preserved. Decoding into `any` coerces every JSON
+//     number to float64, so two manifests that differ only in an integer beyond
+//     2^53 (e.g. a large id or timestamp) would hash identically — a silent
+//     false-fresh that hides a real config change. We decode with UseNumber()
+//     and emit each number's exact source text.
+//   - Duplicate object keys are rejected, not silently last-wins-collapsed.
+//     `{"a":1,"a":2}` is a malformed-but-parseable manifest whose meaning is
+//     ambiguous; collapsing it is another false-fresh vector, so we error.
+//
+// A missing file yields "" (absence is a stable state, not an error); an
 // unreadable or malformed file surfaces the error so staleness fails loudly
 // rather than silently treating a broken manifest as empty.
 func normalizedManifestBytes(path string) (string, error) {
@@ -118,14 +131,133 @@ func normalizedManifestBytes(path string) (string, error) {
 		}
 		return "", err
 	}
-	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
-		return "", err
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var buf bytes.Buffer
+	if err := canonicalizeJSON(dec, &buf); err != nil {
+		return "", fmt.Errorf("normalizing %s: %w", path, err)
 	}
-	// A value just decoded from valid JSON always re-marshals; the only failure
-	// mode (a malformed manifest) is already caught by the Unmarshal above.
-	canonical, _ := json.Marshal(v)
-	return string(canonical), nil
+	// A single top-level value is expected; trailing tokens (e.g. two JSON
+	// documents concatenated) are a malformed manifest.
+	if dec.More() {
+		return "", fmt.Errorf("normalizing %s: trailing data after top-level value", path)
+	}
+	return buf.String(), nil
+}
+
+// canonicalizeJSON reads exactly one JSON value from dec and writes its
+// canonical form to out: object keys sorted, no insignificant whitespace, and
+// numbers emitted verbatim from their source text (lossless). It recurses for
+// nested objects/arrays. Duplicate keys within an object are an error.
+func canonicalizeJSON(dec *json.Decoder, out *bytes.Buffer) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	switch t := tok.(type) {
+	case json.Delim:
+		switch t {
+		case '{':
+			return canonicalizeObject(dec, out)
+		case '[':
+			return canonicalizeArray(dec, out)
+		default:
+			return fmt.Errorf("unexpected delimiter %q", t)
+		}
+	default:
+		return writeScalar(tok, out)
+	}
+}
+
+// canonicalizeObject canonicalizes the body of an object whose '{' was already
+// consumed: it collects every key/value as canonical bytes, errors on a
+// duplicate key, then emits the pairs sorted by key so the output is
+// order-independent.
+func canonicalizeObject(dec *json.Decoder, out *bytes.Buffer) error {
+	type pair struct{ key, val string }
+	pairs := []pair{}
+	seen := map[string]bool{}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key := keyTok.(string)
+		if seen[key] {
+			return fmt.Errorf("duplicate object key %q", key)
+		}
+		seen[key] = true
+
+		var valBuf bytes.Buffer
+		if err := canonicalizeJSON(dec, &valBuf); err != nil {
+			return err
+		}
+		pairs = append(pairs, pair{key: key, val: valBuf.String()})
+	}
+	if _, err := dec.Token(); err != nil { // consume closing '}'
+		return err
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].key < pairs[j].key })
+
+	out.WriteByte('{')
+	for i, p := range pairs {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		writeJSONString(p.key, out)
+		out.WriteByte(':')
+		out.WriteString(p.val)
+	}
+	out.WriteByte('}')
+	return nil
+}
+
+// canonicalizeArray canonicalizes the body of an array whose '[' was already
+// consumed, preserving element order (arrays are ordered, so position is
+// significant — unlike object keys).
+func canonicalizeArray(dec *json.Decoder, out *bytes.Buffer) error {
+	out.WriteByte('[')
+	first := true
+	for dec.More() {
+		if !first {
+			out.WriteByte(',')
+		}
+		first = false
+		if err := canonicalizeJSON(dec, out); err != nil {
+			return err
+		}
+	}
+	if _, err := dec.Token(); err != nil { // consume closing ']'
+		return err
+	}
+	out.WriteByte(']')
+	return nil
+}
+
+// writeScalar emits a non-delimiter token (string, json.Number, bool, or null)
+// in canonical form. json.Number is written verbatim so integer precision is
+// preserved exactly; everything else round-trips through json.Marshal.
+func writeScalar(tok json.Token, out *bytes.Buffer) error {
+	if num, ok := tok.(json.Number); ok {
+		out.WriteString(num.String())
+		return nil
+	}
+	if s, ok := tok.(string); ok {
+		writeJSONString(s, out)
+		return nil
+	}
+	// bool and nil: a fixed set of values that always marshal.
+	raw, _ := json.Marshal(tok)
+	out.Write(raw)
+	return nil
+}
+
+// writeJSONString writes s as a JSON string literal. The encoder cannot fail on
+// a Go string, so the error is discarded (mirrors the impossible-marshal
+// convention).
+func writeJSONString(s string, out *bytes.Buffer) {
+	raw, _ := json.Marshal(s)
+	out.Write(raw)
 }
 
 // StalenessReason classifies why a lock is considered stale. A fresh lock has

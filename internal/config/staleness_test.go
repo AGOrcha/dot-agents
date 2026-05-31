@@ -106,6 +106,115 @@ func TestComputeInputsDigest_MalformedManifestErrors(t *testing.T) {
 	}
 }
 
+// TestComputeInputsDigest_PreservesLargeIntegerPrecision is the regression for
+// the HIGH false-fresh defect: decoding into `any` coerces every number to
+// float64, so two integers beyond 2^53 that differ by 1 would collapse to the
+// same value and hash identically — a real config change going undetected. The
+// canonicalizer must distinguish them.
+func TestComputeInputsDigest_PreservesLargeIntegerPrecision(t *testing.T) {
+	// 9007199254740993 = 2^53 + 1; as float64 it rounds to 2^53 (…992), so a
+	// lossy normalizer would produce the same bytes for both manifests.
+	repoA, userA := stalenessSeed(t, `{"id":9007199254740993}`, "")
+	repoB, userB := stalenessSeed(t, `{"id":9007199254740992}`, "")
+
+	da, err := ComputeInputsDigest(repoA, userA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := ComputeInputsDigest(repoB, userB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if da == db {
+		t.Errorf("large integers differing by 1 must produce different digests (float64 precision loss), got %q for both", da)
+	}
+}
+
+// TestComputeInputsDigest_RejectsDuplicateKeys is the MEDIUM false-fresh
+// regression: `{"a":1,"a":2}` is parseable but ambiguous; silently collapsing
+// it (last-wins) hides a content change. The canonicalizer must error instead.
+func TestComputeInputsDigest_RejectsDuplicateKeys(t *testing.T) {
+	repo := t.TempDir()
+	writeManifest(t, repo, `{"a":1,"a":2}`)
+	if _, err := ComputeInputsDigest(repo, ""); err == nil {
+		t.Fatal("expected error for duplicate object key")
+	}
+}
+
+// TestComputeInputsDigest_RejectsDuplicateKeysNested ensures the duplicate-key
+// check recurses into nested objects, not just the top level.
+func TestComputeInputsDigest_RejectsDuplicateKeysNested(t *testing.T) {
+	repo := t.TempDir()
+	writeManifest(t, repo, `{"outer":{"k":1,"k":2}}`)
+	if _, err := ComputeInputsDigest(repo, ""); err == nil {
+		t.Fatal("expected error for duplicate key in nested object")
+	}
+}
+
+// TestComputeInputsDigest_RejectsTrailingData ensures two concatenated JSON
+// documents (a malformed manifest) are rejected rather than silently hashing
+// only the first.
+func TestComputeInputsDigest_RejectsTrailingData(t *testing.T) {
+	repo := t.TempDir()
+	writeManifest(t, repo, `{"a":1}{"b":2}`)
+	if _, err := ComputeInputsDigest(repo, ""); err == nil {
+		t.Fatal("expected error for trailing data after top-level value")
+	}
+}
+
+// TestComputeInputsDigest_MalformedVariantsError covers the canonicalizer's
+// error branches that are reachable with deliberately malformed manifests: a
+// bare close-delimiter at a value position, an unterminated object, and a
+// non-string object key are each rejected rather than silently normalized.
+func TestComputeInputsDigest_MalformedVariantsError(t *testing.T) {
+	cases := map[string]string{
+		"bare close delim":    `}`,
+		"unterminated object": `{"a":1`,
+		"unterminated array":  `[1,2`,
+		"truncated value":     `{"a":`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := t.TempDir()
+			writeManifest(t, repo, body)
+			if _, err := ComputeInputsDigest(repo, ""); err == nil {
+				t.Fatalf("expected error normalizing %q", body)
+			}
+		})
+	}
+}
+
+// TestComputeInputsDigest_NormalizesNestedArraysAndScalars exercises the
+// array/scalar canonicalization branches (order-preserving arrays, bool/null,
+// nested objects) so the recursive walk is fully covered.
+func TestComputeInputsDigest_NormalizesNestedArraysAndScalars(t *testing.T) {
+	// Same semantic content, differing only in key order and whitespace inside a
+	// nested object within an array, plus bool/null scalars.
+	repoA, userA := stalenessSeed(t, `{"list":[{"b":true,"a":null},2,"s"]}`, "")
+	repoB, userB := stalenessSeed(t, "{\n \"list\": [ {\"a\":null,\"b\":true}, 2, \"s\" ]\n}", "")
+
+	da, err := ComputeInputsDigest(repoA, userA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := ComputeInputsDigest(repoB, userB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if da != db {
+		t.Errorf("nested array/scalar normalization should be order/whitespace-insensitive, got %q vs %q", da, db)
+	}
+
+	// Array element order IS significant — reordering must change the digest.
+	repoC, userC := stalenessSeed(t, `{"list":["x","y"]}`, "")
+	repoD, userD := stalenessSeed(t, `{"list":["y","x"]}`, "")
+	dc, _ := ComputeInputsDigest(repoC, userC)
+	dd, _ := ComputeInputsDigest(repoD, userD)
+	if dc == dd {
+		t.Error("array element order must be significant (digests should differ)")
+	}
+}
+
 func TestStaleness_FreshWhenLockMatches(t *testing.T) {
 	repo, userPath := stalenessSeed(t, `{"extends":["acme:org/base.json"]}`, "")
 	digest, err := ComputeInputsDigest(repo, userPath)

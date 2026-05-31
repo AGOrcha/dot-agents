@@ -7,14 +7,10 @@ import (
 
 // writeManifest (shared with resolver_test.go) drops a .agentsrc.json into dir.
 
-// withReviewNudgeClock pins reviewNudgeClock to a fixed instant for the duration
-// of the test, so "last re-checked N ago" durations are deterministic.
-func withReviewNudgeClock(t *testing.T, now time.Time) {
-	t.Helper()
-	prev := reviewNudgeClock
-	reviewNudgeClock = func() time.Time { return now }
-	t.Cleanup(func() { reviewNudgeClock = prev })
-}
+// fixedNudgeInstant is the deterministic "now" tests inject into ReviewNudges so
+// "last re-checked N ago" durations are reproducible (DI replaces the former
+// package-level clock var).
+var fixedNudgeInstant = time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)
 
 // seedUnits writes a units-model lockfile for the project under test.
 func seedUnits(t *testing.T, repo string, digest string, units map[string]LockedUnit) {
@@ -55,6 +51,33 @@ func TestReadLockedUnits_MigratesLegacyLockfile(t *testing.T) {
 	entry, ok := got["acme:org/base.json"]
 	if !ok || entry.Digest != "abc123" || entry.Kind != UnitKindLayer {
 		t.Fatalf("expected migrated layer unit, got %+v", got)
+	}
+}
+
+// TestReadLockedUnits_LegacyCollisionIsDeterministic locks the legacy-migration
+// behavior the review flagged: when the same ref key appears in BOTH the legacy
+// `config` and `packages` sections, migration must resolve deterministically
+// (packages/artifact processed last, so it wins) — not vary run-to-run on map
+// iteration order. Hand-write a lockfile carrying both sections under one key.
+func TestReadLockedUnits_LegacyCollisionIsDeterministic(t *testing.T) {
+	repo := t.TempDir()
+	raw := `{
+  "lock_version": 1,
+  "config":   {"dup:ref": {"resolved_sha": "layerdigest", "fetched_at": "t"}},
+  "packages": {"dup:ref": {"resolved_sha": "artifactdigest", "fetched_at": "t"}}
+}`
+	writeFileContent(t, AgentsLockPath(repo), raw)
+
+	// Read repeatedly: the outcome must be stable and artifact-wins.
+	for i := 0; i < 8; i++ {
+		got, err := ReadLockedUnits(repo)
+		if err != nil {
+			t.Fatalf("ReadLockedUnits: %v", err)
+		}
+		entry := got["dup:ref"]
+		if entry.Kind != UnitKindArtifact || entry.Digest != "artifactdigest" {
+			t.Fatalf("expected deterministic artifact-wins on collision, got %+v", entry)
+		}
 	}
 }
 
@@ -188,7 +211,6 @@ func TestLockDriftResult_ProblemsEmptyWhenClean(t *testing.T) {
 
 func TestReviewNudges_UsesLastCheckedThenFetched(t *testing.T) {
 	repo := t.TempDir()
-	withReviewNudgeClock(t, time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC))
 	seedUnits(t, repo, "sha256:in", map[string]LockedUnit{
 		// Re-checked recently: last_checked_at wins over fetched_at.
 		"acme:a@v1": {Kind: UnitKindLayer, FetchedAt: "2026-04-01T00:00:00Z", LastCheckedAt: "2026-05-10T00:00:00Z"},
@@ -198,7 +220,7 @@ func TestReviewNudges_UsesLastCheckedThenFetched(t *testing.T) {
 		"acme:c@v1": {Kind: UnitKindArtifact},
 	})
 
-	nudges, err := ReviewNudges(repo)
+	nudges, err := ReviewNudges(repo, fixedNudgeInstant)
 	if err != nil {
 		t.Fatalf("ReviewNudges: %v", err)
 	}
@@ -225,12 +247,11 @@ func TestReviewNudges_UsesLastCheckedThenFetched(t *testing.T) {
 
 func TestReviewNudges_UnparseableBasisYieldsZero(t *testing.T) {
 	repo := t.TempDir()
-	withReviewNudgeClock(t, time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC))
 	seedUnits(t, repo, "sha256:in", map[string]LockedUnit{
 		"acme:a@v1": {Kind: UnitKindLayer, FetchedAt: "not-a-timestamp"},
 	})
 
-	nudges, err := ReviewNudges(repo)
+	nudges, err := ReviewNudges(repo, fixedNudgeInstant)
 	if err != nil {
 		t.Fatalf("ReviewNudges: %v", err)
 	}
@@ -241,7 +262,7 @@ func TestReviewNudges_UnparseableBasisYieldsZero(t *testing.T) {
 
 func TestReviewNudges_AbsentLockEmpty(t *testing.T) {
 	repo := t.TempDir()
-	nudges, err := ReviewNudges(repo)
+	nudges, err := ReviewNudges(repo, fixedNudgeInstant)
 	if err != nil {
 		t.Fatalf("ReviewNudges: %v", err)
 	}

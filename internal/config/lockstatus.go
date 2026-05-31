@@ -203,10 +203,6 @@ func indexLockedByRef(units map[string]LockedUnit) map[string]LockedUnit {
 	return out
 }
 
-// reviewNudgeClock is the time seam for the "last re-checked N ago" computation.
-// Tests override it for determinism; production uses time.Now.
-var reviewNudgeClock = time.Now
-
 // ReviewNudge is the demoted-TTL advisory for one unit (§7A.3): how long since
 // its last upstream re-check. It NEVER invalidates the lock — it only drives a
 // "last re-checked N ago — da config sync" reminder in doctor / config explain.
@@ -218,7 +214,7 @@ type ReviewNudge struct {
 	// the unit records neither.
 	LastCheckedAt string
 	// SinceLastCheck is how long ago the last re-check was, relative to the
-	// review-nudge clock. Zero when LastCheckedAt is empty or unparseable.
+	// injected `now`. Zero when LastCheckedAt is empty or unparseable.
 	SinceLastCheck time.Duration
 }
 
@@ -228,12 +224,15 @@ type ReviewNudge struct {
 // re-checked). This is the demoted-TTL surface: it is advisory only and never
 // affects staleness or the lock. Units with no timestamp basis are still
 // returned (with a zero duration) so the surface lists every locked unit.
-func ReviewNudges(projectPath string) ([]ReviewNudge, error) {
+//
+// The reference instant `now` is injected by the caller (production passes
+// time.Now(); tests pass a fixed instant) — the per-TEST_SEAMS.md DI shape that
+// parallels Staleness's injected UnitDigestFunc, not a package-level clock var.
+func ReviewNudges(projectPath string, now time.Time) ([]ReviewNudge, error) {
 	locked, err := ReadLockedUnits(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	now := reviewNudgeClock()
 	nudges := make([]ReviewNudge, 0, len(locked))
 	for _, ref := range sortedUnitKeys(locked) {
 		nudges = append(nudges, reviewNudgeFor(ref, locked[ref], now))
