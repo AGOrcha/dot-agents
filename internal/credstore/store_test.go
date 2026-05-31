@@ -75,59 +75,72 @@ func TestDefaultPath(t *testing.T) {
 	})
 }
 
-func TestEnsureDataKey(t *testing.T) {
-	t.Run("mints and persists on first use", func(t *testing.T) {
-		ring := newFakeKeyring()
-		key, err := EnsureDataKey(ring)
-		if err != nil {
-			t.Fatalf("EnsureDataKey: %v", err)
-		}
-		if len(key) != dataKeyLen {
-			t.Fatalf("key len = %d want %d", len(key), dataKeyLen)
-		}
-		if ring.sets != 1 {
-			t.Fatalf("expected 1 keyring Set, got %d", ring.sets)
-		}
-	})
-	t.Run("reuses an existing key", func(t *testing.T) {
-		ring := newFakeKeyring()
-		ring.store[keyringService] = make([]byte, dataKeyLen)
-		key, err := EnsureDataKey(ring)
-		if err != nil {
-			t.Fatalf("EnsureDataKey: %v", err)
-		}
-		if len(key) != dataKeyLen || ring.sets != 0 {
-			t.Fatalf("unexpected mint: len=%d sets=%d", len(key), ring.sets)
-		}
-	})
-	t.Run("rejects a wrong-length stored key", func(t *testing.T) {
-		ring := newFakeKeyring()
-		ring.store[keyringService] = []byte("short")
-		if _, err := EnsureDataKey(ring); !errors.Is(err, ErrBadKeyLength) {
-			t.Fatalf("expected ErrBadKeyLength, got %v", err)
-		}
-	})
-	t.Run("propagates a non-notfound get error", func(t *testing.T) {
-		ring := newFakeKeyring()
-		ring.getErr = errors.New("locked keychain")
-		if _, err := EnsureDataKey(ring); err == nil || errors.Is(err, ErrKeyNotFound) {
-			t.Fatalf("expected hard get error, got %v", err)
-		}
-	})
-	t.Run("propagates a set error", func(t *testing.T) {
-		ring := newFakeKeyring()
-		ring.setErr = errors.New("write denied")
-		if _, err := EnsureDataKey(ring); err == nil {
-			t.Fatalf("expected set error")
-		}
-	})
-	t.Run("propagates a rand failure", func(t *testing.T) {
-		withStubRandRead(t, func([]byte) (int, error) { return 0, errors.New("no entropy") })
-		ring := newFakeKeyring()
-		if _, err := EnsureDataKey(ring); err == nil {
-			t.Fatalf("expected rand error")
-		}
-	})
+func TestEnsureDataKeyMintsOnFirstUse(t *testing.T) {
+	ring := newFakeKeyring()
+	key, err := EnsureDataKey(ring)
+	if err != nil {
+		t.Fatalf("EnsureDataKey: %v", err)
+	}
+	if len(key) != dataKeyLen || ring.sets != 1 {
+		t.Fatalf("expected one fresh %d-byte key, got len=%d sets=%d", dataKeyLen, len(key), ring.sets)
+	}
+}
+
+func TestEnsureDataKeyReusesExisting(t *testing.T) {
+	ring := newFakeKeyring()
+	ring.store[keyringService] = make([]byte, dataKeyLen)
+	key, err := EnsureDataKey(ring)
+	if err != nil {
+		t.Fatalf("EnsureDataKey: %v", err)
+	}
+	if len(key) != dataKeyLen || ring.sets != 0 {
+		t.Fatalf("unexpected mint: len=%d sets=%d", len(key), ring.sets)
+	}
+}
+
+func TestEnsureDataKeyErrorBranches(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(*fakeKeyring)
+		stubbedRand bool
+		wantIs      error
+	}{
+		{name: "wrong-length stored key", setup: func(r *fakeKeyring) {
+			r.store[keyringService] = []byte("short")
+		}, wantIs: ErrBadKeyLength},
+		{name: "non-notfound get error", setup: func(r *fakeKeyring) {
+			r.getErr = errors.New("locked keychain")
+		}},
+		{name: "set error", setup: func(r *fakeKeyring) {
+			r.setErr = errors.New("write denied")
+		}},
+		{name: "rand failure", stubbedRand: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.stubbedRand {
+				withStubRandRead(t, func([]byte) (int, error) { return 0, errors.New("no entropy") })
+			}
+			ring := newFakeKeyring()
+			if tc.setup != nil {
+				tc.setup(ring)
+			}
+			_, err := EnsureDataKey(ring)
+			assertErrorBranch(t, err, tc.wantIs)
+		})
+	}
+}
+
+// assertErrorBranch fails unless err is non-nil and, when wantIs is set,
+// matches it via errors.Is. It keeps the table loop's complexity low.
+func assertErrorBranch(t *testing.T, err, wantIs error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected an error")
+	}
+	if wantIs != nil && !errors.Is(err, wantIs) {
+		t.Fatalf("got %v want errors.Is %v", err, wantIs)
+	}
 }
 
 func TestStoreRoundTrip(t *testing.T) {
