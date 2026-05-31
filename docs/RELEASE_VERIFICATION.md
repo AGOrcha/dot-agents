@@ -39,7 +39,7 @@ You will also need `sha256sum` (preinstalled on Linux; on macOS use
 
 ## Step-by-step verification
 
-Replace `VERSION` with the release tag you downloaded, e.g. `0.4.0`.
+Replace `VERSION` with the release tag you downloaded, e.g. `0.3.3`.
 
 ### 1. Download the release assets
 
@@ -53,7 +53,7 @@ or via `gh`, download:
 - `checksums.txt.pem`
 
 ```bash
-VERSION=0.4.0
+VERSION=0.3.3
 TAG="v${VERSION}"
 gh release download "${TAG}" \
   --repo NikashPrakash/dot-agents \
@@ -112,7 +112,7 @@ shasum -a 256 dot-agents_${VERSION}_darwin_arm64.tar.gz
 Expected output (Linux/coreutils form):
 
 ```
-dot-agents_0.4.0_darwin_arm64.tar.gz: OK
+dot-agents_0.3.3_darwin_arm64.tar.gz: OK
 ```
 
 ### 4. Install
