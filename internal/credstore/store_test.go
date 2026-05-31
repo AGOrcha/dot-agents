@@ -3,6 +3,7 @@ package credstore
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,12 +44,81 @@ func (f *fakeKeyring) Set(key string, secret []byte) error {
 	return nil
 }
 
-// withStubRandRead swaps randRead for the duration of the test.
-func withStubRandRead(t *testing.T, fn func([]byte) (int, error)) {
-	t.Helper()
-	orig := randRead
-	randRead = fn
-	t.Cleanup(func() { randRead = orig })
+// fakeSys is a sysShim whose nil func-fields delegate to the real call, so a
+// test overrides only the operation it wants to fault-inject (docs/TEST_SEAMS.md).
+type fakeSys struct {
+	randRead   func([]byte) (int, error)
+	mkdirAll   func(string, os.FileMode) error
+	createTemp func(string, string) (tempFile, error)
+	rename     func(string, string) error
+	remove     func(string) error
+	readFile   func(string) ([]byte, error)
+	stat       func(string) (fs.FileInfo, error)
+	homeDir    func() (string, error)
+	lookupEnv  func(string) (string, bool)
+}
+
+func (f fakeSys) RandRead(b []byte) (int, error) {
+	if f.randRead != nil {
+		return f.randRead(b)
+	}
+	return stdSys{}.RandRead(b)
+}
+
+func (f fakeSys) MkdirAll(path string, perm os.FileMode) error {
+	if f.mkdirAll != nil {
+		return f.mkdirAll(path, perm)
+	}
+	return stdSys{}.MkdirAll(path, perm)
+}
+
+func (f fakeSys) CreateTemp(dir, pattern string) (tempFile, error) {
+	if f.createTemp != nil {
+		return f.createTemp(dir, pattern)
+	}
+	return stdSys{}.CreateTemp(dir, pattern)
+}
+
+func (f fakeSys) Rename(oldpath, newpath string) error {
+	if f.rename != nil {
+		return f.rename(oldpath, newpath)
+	}
+	return stdSys{}.Rename(oldpath, newpath)
+}
+
+func (f fakeSys) Remove(name string) error {
+	if f.remove != nil {
+		return f.remove(name)
+	}
+	return stdSys{}.Remove(name)
+}
+
+func (f fakeSys) ReadFile(name string) ([]byte, error) {
+	if f.readFile != nil {
+		return f.readFile(name)
+	}
+	return stdSys{}.ReadFile(name)
+}
+
+func (f fakeSys) Stat(name string) (fs.FileInfo, error) {
+	if f.stat != nil {
+		return f.stat(name)
+	}
+	return stdSys{}.Stat(name)
+}
+
+func (f fakeSys) HomeDir() (string, error) {
+	if f.homeDir != nil {
+		return f.homeDir()
+	}
+	return stdSys{}.HomeDir()
+}
+
+func (f fakeSys) LookupEnv(key string) (string, bool) {
+	if f.lookupEnv != nil {
+		return f.lookupEnv(key)
+	}
+	return stdSys{}.LookupEnv(key)
 }
 
 func TestDefaultPath(t *testing.T) {
@@ -73,6 +143,14 @@ func TestDefaultPath(t *testing.T) {
 			t.Fatalf("got %q want %q", got, want)
 		}
 	})
+}
+
+func TestDefaultPathHomeError(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	sys := fakeSys{homeDir: func() (string, error) { return "", errors.New("no home") }}
+	if _, err := defaultPath(sys); err == nil {
+		t.Fatalf("expected home-resolution error")
+	}
 }
 
 func TestEnsureDataKeyMintsOnFirstUse(t *testing.T) {
@@ -118,14 +196,15 @@ func TestEnsureDataKeyErrorBranches(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			sys := fakeSys{}
 			if tc.stubbedRand {
-				withStubRandRead(t, func([]byte) (int, error) { return 0, errors.New("no entropy") })
+				sys.randRead = func([]byte) (int, error) { return 0, errors.New("no entropy") }
 			}
 			ring := newFakeKeyring()
 			if tc.setup != nil {
 				tc.setup(ring)
 			}
-			_, err := EnsureDataKey(ring)
+			_, err := ensureDataKey(ring, sys)
 			assertErrorBranch(t, err, tc.wantIs)
 		})
 	}
@@ -206,6 +285,15 @@ func TestOpenPropagatesKeyringError(t *testing.T) {
 	}
 }
 
+func TestReadCredentialsReadErrorPropagates(t *testing.T) {
+	// Point the store at a directory so os.ReadFile fails with a non-not-exist
+	// error (read of a directory), exercising the hard read branch.
+	dir := t.TempDir()
+	if _, err := Open(dir, newFakeKeyring()); err == nil {
+		t.Fatalf("expected read error when path is a directory")
+	}
+}
+
 func TestOpenRejectsMalformedJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credentials.json")
 	if err := os.WriteFile(path, []byte("{not json"), 0600); err != nil {
@@ -251,119 +339,37 @@ func TestDecryptEmptyIsNil(t *testing.T) {
 	}
 }
 
+func TestDecryptBadKeyLength(t *testing.T) {
+	// A non-empty sealed blob with a wrong-length key must fail at newGCM.
+	if _, err := decrypt([]byte("short"), []byte{0x01, 0x02, 0x03}); !errors.Is(err, ErrBadKeyLength) {
+		t.Fatalf("expected ErrBadKeyLength, got %v", err)
+	}
+}
+
 func TestEncryptBadKey(t *testing.T) {
-	if _, err := encrypt([]byte("short"), []byte("x")); !errors.Is(err, ErrBadKeyLength) {
+	if _, err := encrypt([]byte("short"), []byte("x"), stdSys{}); !errors.Is(err, ErrBadKeyLength) {
 		t.Fatalf("expected ErrBadKeyLength, got %v", err)
 	}
 }
 
 func TestEncryptNonceFailure(t *testing.T) {
-	withStubRandRead(t, func([]byte) (int, error) { return 0, errors.New("no entropy") })
-	if _, err := encrypt(make([]byte, dataKeyLen), []byte("x")); err == nil {
+	sys := fakeSys{randRead: func([]byte) (int, error) { return 0, errors.New("no entropy") }}
+	if _, err := encrypt(make([]byte, dataKeyLen), []byte("x"), sys); err == nil {
 		t.Fatalf("expected nonce generation error")
 	}
 }
 
-func TestSaveRejectsBadKey(t *testing.T) {
-	st := &Store{path: filepath.Join(t.TempDir(), "c.json"), key: []byte("short"), credentials: map[string]string{}}
-	if err := st.Save(); !errors.Is(err, ErrBadKeyLength) {
-		t.Fatalf("expected ErrBadKeyLength from Save, got %v", err)
-	}
-}
-
-// fakeTempFile drives the chmod/write/close error branches of finishTempWrite.
-type fakeTempFile struct {
-	name     string
-	chmodErr error
-	writeErr error
-	closeErr error
-}
-
-func (f *fakeTempFile) Name() string                { return f.name }
-func (f *fakeTempFile) Chmod(os.FileMode) error     { return f.chmodErr }
-func (f *fakeTempFile) Write(b []byte) (int, error) { return len(b), f.writeErr }
-func (f *fakeTempFile) Close() error                { return f.closeErr }
-
-// withFSStubs swaps the filesystem seams for the duration of the test.
-func withFSStubs(t *testing.T, mk func(string, os.FileMode) error, ct func(string, string) (tempFile, error), rn func(string, string) error) {
-	t.Helper()
-	origMk, origCt, origRn := mkdirAll, createTemp, rename
-	mkdirAll, createTemp, rename = mk, ct, rn
-	t.Cleanup(func() { mkdirAll, createTemp, rename = origMk, origCt, origRn })
-}
-
-func newSavableStore(t *testing.T) *Store {
-	t.Helper()
-	st, err := Open(filepath.Join(t.TempDir(), "credentials.json"), newFakeKeyring())
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	st.Set("id", "v")
-	return st
-}
-
-func TestSaveMkdirFailure(t *testing.T) {
-	st := newSavableStore(t)
-	withFSStubs(t,
-		func(string, os.FileMode) error { return errors.New("mkdir denied") },
-		func(string, string) (tempFile, error) { return nil, errors.New("unused") },
-		os.Rename,
-	)
-	if err := st.Save(); err == nil {
-		t.Fatalf("expected mkdir error")
-	}
-}
-
-func TestSaveCreateTempFailure(t *testing.T) {
-	st := newSavableStore(t)
-	withFSStubs(t,
-		func(string, os.FileMode) error { return nil },
-		func(string, string) (tempFile, error) { return nil, errors.New("no temp") },
-		os.Rename,
-	)
-	if err := st.Save(); err == nil {
-		t.Fatalf("expected create-temp error")
-	}
-}
-
-func TestSaveTempWriteFailures(t *testing.T) {
-	cases := map[string]*fakeTempFile{
-		"chmod": {name: filepath.Join(t.TempDir(), "t1"), chmodErr: errors.New("chmod")},
-		"write": {name: filepath.Join(t.TempDir(), "t2"), writeErr: errors.New("write")},
-		"close": {name: filepath.Join(t.TempDir(), "t3"), closeErr: errors.New("close")},
-	}
-	for name, ft := range cases {
-		t.Run(name, func(t *testing.T) {
-			st := newSavableStore(t)
-			withFSStubs(t,
-				func(string, os.FileMode) error { return nil },
-				func(string, string) (tempFile, error) { return ft, nil },
-				os.Rename,
-			)
-			if err := st.Save(); err == nil {
-				t.Fatalf("expected %s error", name)
-			}
-		})
-	}
-}
-
-func TestSaveRenameFailure(t *testing.T) {
-	st := newSavableStore(t)
-	ft := &fakeTempFile{name: filepath.Join(t.TempDir(), "tmp")}
-	withFSStubs(t,
-		func(string, os.FileMode) error { return nil },
-		func(string, string) (tempFile, error) { return ft, nil },
-		func(string, string) error { return errors.New("rename denied") },
-	)
-	if err := st.Save(); err == nil {
-		t.Fatalf("expected rename error")
+func TestUnmarshalCredentialsEmpty(t *testing.T) {
+	creds, err := unmarshalCredentials(nil)
+	if err != nil || len(creds) != 0 {
+		t.Fatalf("empty plaintext should yield empty map, got %v err=%v", creds, err)
 	}
 }
 
 func TestReadCredentialsRejectsCorruptDecryptedPayload(t *testing.T) {
 	// Seal a non-map JSON payload and confirm unmarshalCredentials rejects it.
 	key := make([]byte, dataKeyLen)
-	sealed, err := encrypt(key, []byte(`["not","a","map"]`))
+	sealed, err := encrypt(key, []byte(`["not","a","map"]`), stdSys{})
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -382,36 +388,113 @@ func TestReadCredentialsRejectsCorruptDecryptedPayload(t *testing.T) {
 	}
 }
 
-func TestDefaultPathHomeError(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", "")
-	orig := userHomeDir
-	userHomeDir = func() (string, error) { return "", errors.New("no home") }
-	t.Cleanup(func() { userHomeDir = orig })
-	if _, err := DefaultPath(); err == nil {
-		t.Fatalf("expected home-resolution error")
-	}
+// fakeTempFile drives the chmod/write/close error branches of finishTempWrite.
+type fakeTempFile struct {
+	name     string
+	chmodErr error
+	writeErr error
+	closeErr error
 }
 
-func TestReadCredentialsReadErrorPropagates(t *testing.T) {
-	// Point the store at a directory so os.ReadFile fails with a non-not-exist
-	// error (read of a directory), exercising the hard read branch.
+func (f *fakeTempFile) Name() string                { return f.name }
+func (f *fakeTempFile) Chmod(os.FileMode) error     { return f.chmodErr }
+func (f *fakeTempFile) Write(b []byte) (int, error) { return len(b), f.writeErr }
+func (f *fakeTempFile) Close() error                { return f.closeErr }
+
+// newSavableStore opens a real store and injects a fakeSys so a test can
+// fault-inject a single filesystem operation while the rest stay real.
+func newSavableStore(t *testing.T, sys fakeSys) *Store {
+	t.Helper()
+	st, err := openWith(filepath.Join(t.TempDir(), "credentials.json"), newFakeKeyring(), sys)
+	if err != nil {
+		t.Fatalf("openWith: %v", err)
+	}
+	st.Set("id", "v")
+	return st
+}
+
+// TestStdSysDelegatesToOS exercises the production sysShim so its thin
+// delegators (incl. Remove, used only on the real-cleanup path) are covered.
+func TestStdSysDelegatesToOS(t *testing.T) {
+	sys := stdSys{}
 	dir := t.TempDir()
-	if _, err := Open(dir, newFakeKeyring()); err == nil {
-		t.Fatalf("expected read error when path is a directory")
+	path := filepath.Join(dir, "f")
+	if err := os.WriteFile(path, []byte("x"), 0600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := sys.Stat(path); err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if err := sys.Remove(path); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if _, err := sys.Stat(path); err == nil {
+		t.Fatalf("expected file removed")
 	}
 }
 
-func TestDecryptBadKeyLength(t *testing.T) {
-	// A non-empty sealed blob with a wrong-length key must fail at newGCM.
-	if _, err := decrypt([]byte("short"), []byte{0x01, 0x02, 0x03}); !errors.Is(err, ErrBadKeyLength) {
-		t.Fatalf("expected ErrBadKeyLength, got %v", err)
+func TestSaveEncryptError(t *testing.T) {
+	// A store holding a wrong-length key fails in encrypt before any write.
+	st := &Store{path: filepath.Join(t.TempDir(), "c.json"), key: []byte("short"), credentials: map[string]string{}, sys: stdSys{}}
+	if err := st.Save(); !errors.Is(err, ErrBadKeyLength) {
+		t.Fatalf("expected ErrBadKeyLength from Save, got %v", err)
 	}
 }
 
-func TestUnmarshalCredentialsEmpty(t *testing.T) {
-	creds, err := unmarshalCredentials(nil)
-	if err != nil || len(creds) != 0 {
-		t.Fatalf("empty plaintext should yield empty map, got %v err=%v", creds, err)
+func TestSaveMkdirFailure(t *testing.T) {
+	st := newSavableStore(t, fakeSys{
+		mkdirAll: func(string, os.FileMode) error { return errors.New("mkdir denied") },
+	})
+	if err := st.Save(); err == nil {
+		t.Fatalf("expected mkdir error")
+	}
+}
+
+func TestSaveCreateTempFailure(t *testing.T) {
+	st := newSavableStore(t, fakeSys{
+		createTemp: func(string, string) (tempFile, error) { return nil, errors.New("no temp") },
+	})
+	if err := st.Save(); err == nil {
+		t.Fatalf("expected create-temp error")
+	}
+}
+
+func TestSaveTempWriteFailures(t *testing.T) {
+	cases := map[string]*fakeTempFile{
+		"chmod": {name: filepath.Join(t.TempDir(), "t1"), chmodErr: errors.New("chmod")},
+		"write": {name: filepath.Join(t.TempDir(), "t2"), writeErr: errors.New("write")},
+		"close": {name: filepath.Join(t.TempDir(), "t3"), closeErr: errors.New("close")},
+	}
+	for name, ft := range cases {
+		t.Run(name, func(t *testing.T) {
+			removed := false
+			st := newSavableStore(t, fakeSys{
+				createTemp: func(string, string) (tempFile, error) { return ft, nil },
+				remove:     func(string) error { removed = true; return nil },
+			})
+			if err := st.Save(); err == nil {
+				t.Fatalf("expected %s error", name)
+			}
+			if !removed {
+				t.Fatalf("expected temp cleanup after %s failure", name)
+			}
+		})
+	}
+}
+
+func TestSaveRenameFailure(t *testing.T) {
+	ft := &fakeTempFile{name: filepath.Join(t.TempDir(), "tmp")}
+	removed := false
+	st := newSavableStore(t, fakeSys{
+		createTemp: func(string, string) (tempFile, error) { return ft, nil },
+		rename:     func(string, string) error { return errors.New("rename denied") },
+		remove:     func(string) error { removed = true; return nil },
+	})
+	if err := st.Save(); err == nil {
+		t.Fatalf("expected rename error")
+	}
+	if !removed {
+		t.Fatalf("expected temp cleanup after rename failure")
 	}
 }
 

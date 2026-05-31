@@ -17,10 +17,31 @@ const envPrefix = "DA_CREDENTIAL_"
 // file a CI job writes from a secret and removes in always()/trap.
 const envFileVar = "DA_CREDENTIALS_FILE"
 
-// ErrNotImplemented is returned by the stub OIDC resolver until the
-// workload-identity resolver lands. It is also the marker the loader uses to
-// fall through a resolver that has nothing for a given id.
-var ErrNotImplemented = errors.New(errPrefix + ": resolver not implemented")
+// insecurePermMask flags any group/other permission bit. A plaintext secret
+// file readable beyond its owner is refused, mirroring the 0600 write discipline
+// the encrypted store enforces.
+const insecurePermMask os.FileMode = 0o077
+
+var (
+	// ErrNotImplemented is returned by the stub OIDC resolver until the
+	// workload-identity resolver lands. It is also the marker the loader uses to
+	// fall through a resolver that has nothing for a given id.
+	ErrNotImplemented = errors.New(errPrefix + ": resolver not implemented")
+	// ErrInsecurePlaintextFile is returned when DA_CREDENTIALS_FILE points at a
+	// file that is group- or world-accessible — a plaintext secret must not be
+	// trusted when other local users can read it.
+	ErrInsecurePlaintextFile = errors.New(errPrefix + ": plaintext credentials file is group/world-accessible")
+)
+
+// envLookup is the narrow environment collaborator the loader needs, injected
+// per the interface-DI convention in docs/TEST_SEAMS.md so the env-driven steps
+// are hermetic without mutating the real process environment.
+type envLookup interface {
+	// LookupEnv mirrors os.LookupEnv: value and whether the var is set.
+	LookupEnv(key string) (string, bool)
+}
+
+func (stdSys) LookupEnv(key string) (string, bool) { return os.LookupEnv(key) }
 
 // OIDCResolver is the pluggable last-resort resolution step: mint a short-lived
 // token from the runner's OIDC/workload-identity JWT, with no static secret.
@@ -52,17 +73,17 @@ func StubOIDCResolver() OIDCResolver { return stubOIDCResolver{} }
 //  3. the encrypted store (keychain-unwrapped, local dev)
 //  4. a pluggable OIDC/workload-identity resolver (stub for now)
 //
-// Raw secrets are never logged; only ids and the winning source appear in any
-// error or diagnostic.
+// An empty/blank credential value from any step is treated as a MISS so
+// resolution falls through to the next source rather than injecting an empty
+// secret. Raw secrets are never logged; only ids and the winning source appear
+// in any error or diagnostic.
 type Loader struct {
 	keyring   Keyring
 	storePath string
 	resolver  OIDCResolver
-	// lookupEnv / readFile are seams so the env and plaintext-file steps are
-	// hermetic in tests without touching the real process environment or disk.
-	lookupEnv func(string) (string, bool)
-	readFile  func(string) ([]byte, error)
-	openStore func(path string, ring Keyring) (*Store, error)
+	// sys is the interface-DI collaborator (docs/TEST_SEAMS.md): the real stdSys
+	// in production, a fake in tests, so every env/fs-driven step is hermetic.
+	sys sysShim
 }
 
 // LoaderOption customizes a Loader at construction.
@@ -83,16 +104,20 @@ func WithResolver(r OIDCResolver) LoaderOption {
 	return func(l *Loader) { l.resolver = r }
 }
 
-// NewLoader builds a Loader with production seams (real env and filesystem) and
-// the stub OIDC resolver, then applies opts. When no store path is supplied the
-// encrypted-store step is skipped unless a keyring is provided and DefaultPath
-// resolves; callers in CI typically rely on the env steps alone.
+// withSys injects the OS/env collaborator. Unexported: production always uses
+// stdSys; only in-package tests fault-inject a fake.
+func withSys(sys sysShim) LoaderOption {
+	return func(l *Loader) { l.sys = sys }
+}
+
+// NewLoader builds a Loader with the production collaborators (real env and
+// filesystem) and the stub OIDC resolver, then applies opts. When no store path
+// is supplied the encrypted-store step resolves DefaultPath(); CI callers
+// typically rely on the env steps alone.
 func NewLoader(opts ...LoaderOption) *Loader {
 	l := &Loader{
-		resolver:  StubOIDCResolver(),
-		lookupEnv: os.LookupEnv,
-		readFile:  os.ReadFile,
-		openStore: Open,
+		resolver: StubOIDCResolver(),
+		sys:      stdSys{},
 	}
 	for _, opt := range opts {
 		opt(l)
@@ -101,15 +126,15 @@ func NewLoader(opts ...LoaderOption) *Loader {
 }
 
 // Resolve returns the credential for id, walking the resolution chain in order
-// and returning the first hit. ErrCredentialNotFound is returned only when no
-// step yields a value.
+// and returning the first non-empty hit. ErrCredentialNotFound is returned only
+// when no step yields a value.
 func (l *Loader) Resolve(id string) (string, error) {
 	for _, step := range l.steps() {
 		secret, ok, err := step(id)
 		if err != nil {
 			return "", err
 		}
-		if ok {
+		if ok && secret != "" {
 			return secret, nil
 		}
 	}
@@ -117,7 +142,8 @@ func (l *Loader) Resolve(id string) (string, error) {
 }
 
 // resolveStep yields (secret, found, hardError). found=false with nil error
-// means "miss, try the next step"; a non-nil error aborts the chain.
+// means "miss, try the next step"; a non-nil error aborts the chain. A found
+// hit with an empty secret is downgraded to a miss by Resolve.
 type resolveStep func(id string) (string, bool, error)
 
 // steps returns the ordered resolution chain.
@@ -130,34 +156,37 @@ func (l *Loader) steps() []resolveStep {
 	}
 }
 
-// fromEnv reads DA_CREDENTIAL_<ID> from the environment (step 1).
+// fromEnv reads DA_CREDENTIAL_<ID> from the environment (step 1). A present but
+// empty value is reported as a miss so it does not shadow lower steps.
 func (l *Loader) fromEnv(id string) (string, bool, error) {
-	if v, ok := l.lookupEnv(envPrefix + envKey(id)); ok {
+	if v, ok := l.sys.LookupEnv(envPrefix + envKey(id)); ok && v != "" {
 		return v, true, nil
 	}
 	return "", false, nil
 }
 
 // fromPlaintextFile reads id out of the DA_CREDENTIALS_FILE plaintext map when
-// that var is set (step 2). A pointed-at file that cannot be read is a hard
-// error so a misconfigured CI job fails loudly instead of falling through.
+// that var is set (step 2). The file's permissions are checked first: a
+// group/world-accessible secret file is refused. A pointed-at file that cannot
+// be read is a hard error so a misconfigured CI job fails loudly instead of
+// falling through. An empty value for id is treated as a miss.
 func (l *Loader) fromPlaintextFile(id string) (string, bool, error) {
-	path, ok := l.lookupEnv(envFileVar)
+	path, ok := l.sys.LookupEnv(envFileVar)
 	if !ok || path == "" {
 		return "", false, nil
 	}
-	creds, err := readPlaintextFile(l.readFile, path)
+	creds, err := l.readPlaintextFile(path)
 	if err != nil {
 		return "", false, err
 	}
-	if v, found := creds[id]; found {
+	if v, found := creds[id]; found && v != "" {
 		return v, true, nil
 	}
 	return "", false, nil
 }
 
 // fromStore unwraps the encrypted store via the keychain seam (step 3). It is
-// skipped when neither a keyring nor a resolvable store path is configured.
+// skipped when no keyring is configured. An empty stored value is a miss.
 func (l *Loader) fromStore(id string) (string, bool, error) {
 	if l.keyring == nil {
 		return "", false, nil
@@ -166,21 +195,21 @@ func (l *Loader) fromStore(id string) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
-	store, err := l.openStore(path, l.keyring)
+	store, err := openWith(path, l.keyring, l.sys)
 	if err != nil {
 		return "", false, err
 	}
 	// Store.Get only ever reports ErrCredentialNotFound, so any error here is a
 	// clean miss that lets the chain advance to the resolver step.
 	secret, err := store.Get(id)
-	if err != nil {
+	if err != nil || secret == "" {
 		return "", false, nil
 	}
 	return secret, true, nil
 }
 
 // fromResolver delegates to the pluggable OIDC resolver (step 4). A
-// not-implemented or not-found result is treated as a clean miss.
+// not-implemented, not-found, or empty result is treated as a clean miss.
 func (l *Loader) fromResolver(id string) (string, bool, error) {
 	if l.resolver == nil {
 		return "", false, nil
@@ -192,6 +221,9 @@ func (l *Loader) fromResolver(id string) (string, bool, error) {
 		}
 		return "", false, err
 	}
+	if secret == "" {
+		return "", false, nil
+	}
 	return secret, true, nil
 }
 
@@ -200,16 +232,34 @@ func (l *Loader) resolveStorePath() (string, error) {
 	if l.storePath != "" {
 		return l.storePath, nil
 	}
-	return DefaultPath()
+	return defaultPath(l.sys)
 }
 
-// readPlaintextFile loads a JSON map of id->secret from a plaintext CI file.
-func readPlaintextFile(read func(string) ([]byte, error), path string) (map[string]string, error) {
-	data, err := read(filepath.Clean(path))
+// readPlaintextFile validates the file's permissions, then loads a JSON map of
+// id->secret from a plaintext CI file.
+func (l *Loader) readPlaintextFile(path string) (map[string]string, error) {
+	clean := filepath.Clean(path)
+	if err := l.assertSecurePerms(clean); err != nil {
+		return nil, err
+	}
+	data, err := l.sys.ReadFile(clean)
 	if err != nil {
 		return nil, fmt.Errorf("%s: read plaintext credentials file: %w", errPrefix, err)
 	}
 	return parsePlaintextCredentials(data)
+}
+
+// assertSecurePerms refuses a plaintext credentials file that is readable by
+// group or other (mode&0077 != 0), mirroring the encrypted store's 0600 writes.
+func (l *Loader) assertSecurePerms(path string) error {
+	info, err := l.sys.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%s: stat plaintext credentials file: %w", errPrefix, err)
+	}
+	if info.Mode().Perm()&insecurePermMask != 0 {
+		return fmt.Errorf("%w: %s has mode %#o (require 0600)", ErrInsecurePlaintextFile, path, info.Mode().Perm())
+	}
+	return nil
 }
 
 // parsePlaintextCredentials decodes a JSON id->secret map from a CI plaintext

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -60,6 +61,47 @@ type Keyring interface {
 	Set(key string, secret []byte) error
 }
 
+// tempFile is the subset of *os.File the atomic write relies on, narrowed so a
+// fake can force the chmod/write/close error branches in tests.
+type tempFile interface {
+	Name() string
+	Chmod(os.FileMode) error
+	Write([]byte) (int, error)
+	Close() error
+}
+
+// sysShim is the narrow OS collaborator the store and loader depend on, per the
+// interface-DI convention in docs/TEST_SEAMS.md. Production injects stdSys;
+// tests inject a fake whose nil func-fields delegate to the real call, so a
+// single otherwise-unreachable error branch (entropy/temp-file/rename failure)
+// is fault-injectable without package-level func-var seams.
+type sysShim interface {
+	envLookup
+	RandRead(b []byte) (int, error)
+	MkdirAll(path string, perm os.FileMode) error
+	CreateTemp(dir, pattern string) (tempFile, error)
+	Rename(oldpath, newpath string) error
+	Remove(name string) error
+	ReadFile(name string) ([]byte, error)
+	Stat(name string) (fs.FileInfo, error)
+	HomeDir() (string, error)
+}
+
+// stdSys is the production sysShim backed by the real os/crypto-rand/config
+// calls. It is the default everywhere a sysShim is not explicitly injected.
+type stdSys struct{}
+
+func (stdSys) RandRead(b []byte) (int, error)               { return rand.Read(b) }
+func (stdSys) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
+func (stdSys) Rename(oldpath, newpath string) error         { return os.Rename(oldpath, newpath) }
+func (stdSys) Remove(name string) error                     { return os.Remove(name) }
+func (stdSys) ReadFile(name string) ([]byte, error)         { return os.ReadFile(name) }
+func (stdSys) Stat(name string) (fs.FileInfo, error)        { return os.Stat(name) }
+func (stdSys) HomeDir() (string, error)                     { return config.UserHomeDir() }
+func (stdSys) CreateTemp(dir, pattern string) (tempFile, error) {
+	return os.CreateTemp(dir, pattern)
+}
+
 // storeFile is the on-disk shape of the encrypted credentials file. Only
 // Sealed (the GCM nonce + ciphertext) is ever written; the plaintext map of
 // credentials lives in memory after Open decrypts it.
@@ -74,39 +116,20 @@ type Store struct {
 	path        string
 	key         []byte
 	credentials map[string]string
+	sys         sysShim
 }
-
-// tempFile is the subset of *os.File the atomic write relies on, narrowed to a
-// seam so a fake can force the chmod/write/close error branches in tests.
-type tempFile interface {
-	Name() string
-	Chmod(os.FileMode) error
-	Write([]byte) (int, error)
-	Close() error
-}
-
-// Seams over crypto/rand and the filesystem so the otherwise-unreachable error
-// branches (entropy failure, temp-file create/IO/rename failure) are testable
-// without touching the real keychain or relying on OS-permission quirks.
-// Production code wires the real implementations.
-var (
-	randRead    = rand.Read
-	mkdirAll    = os.MkdirAll
-	rename      = os.Rename
-	userHomeDir = config.UserHomeDir
-	createTemp  = func(dir, pattern string) (tempFile, error) {
-		return os.CreateTemp(dir, pattern)
-	}
-)
 
 // DefaultPath returns ~/.config/da/credentials.json, honoring XDG_CONFIG_HOME
 // first so the store lands in the same local-secrets home as review auth state
 // (never in the git-synced AGENTS_HOME tree).
-func DefaultPath() (string, error) {
+func DefaultPath() (string, error) { return defaultPath(stdSys{}) }
+
+// defaultPath is DefaultPath with an injected sysShim for hermetic tests.
+func defaultPath(sys sysShim) (string, error) {
 	if cfg := os.Getenv("XDG_CONFIG_HOME"); cfg != "" {
 		return filepath.Join(cfg, "da", "credentials.json"), nil
 	}
-	home, err := userHomeDir()
+	home, err := sys.HomeDir()
 	if err != nil {
 		return "", fmt.Errorf("%s: resolve home dir: %w", errPrefix, err)
 	}
@@ -116,7 +139,10 @@ func DefaultPath() (string, error) {
 // EnsureDataKey returns the per-host AES-256 data key, minting and persisting a
 // fresh one in the keyring on first use. The key never leaves process memory
 // except sealed inside the keyring.
-func EnsureDataKey(ring Keyring) ([]byte, error) {
+func EnsureDataKey(ring Keyring) ([]byte, error) { return ensureDataKey(ring, stdSys{}) }
+
+// ensureDataKey is EnsureDataKey with an injected sysShim (for the rand seam).
+func ensureDataKey(ring Keyring, sys sysShim) ([]byte, error) {
 	key, err := ring.Get(keyringService)
 	if err == nil {
 		if len(key) != dataKeyLen {
@@ -127,13 +153,13 @@ func EnsureDataKey(ring Keyring) ([]byte, error) {
 	if !errors.Is(err, ErrKeyNotFound) {
 		return nil, fmt.Errorf("%s: read data key: %w", errPrefix, err)
 	}
-	return mintDataKey(ring)
+	return mintDataKey(ring, sys)
 }
 
 // mintDataKey generates a fresh data key and persists it in the keyring.
-func mintDataKey(ring Keyring) ([]byte, error) {
+func mintDataKey(ring Keyring, sys sysShim) ([]byte, error) {
 	fresh := make([]byte, dataKeyLen)
-	if _, err := randRead(fresh); err != nil {
+	if _, err := sys.RandRead(fresh); err != nil {
 		return nil, fmt.Errorf("%s: generate data key: %w", errPrefix, err)
 	}
 	if err := ring.Set(keyringService, fresh); err != nil {
@@ -145,22 +171,25 @@ func mintDataKey(ring Keyring) ([]byte, error) {
 // Open reads and decrypts the store at path, minting the data key via ring on
 // first use. A missing file yields an empty store so first-run callers can Set
 // without a separate init step.
-func Open(path string, ring Keyring) (*Store, error) {
-	key, err := EnsureDataKey(ring)
+func Open(path string, ring Keyring) (*Store, error) { return openWith(path, ring, stdSys{}) }
+
+// openWith is Open with an injected sysShim for hermetic tests.
+func openWith(path string, ring Keyring, sys sysShim) (*Store, error) {
+	key, err := ensureDataKey(ring, sys)
 	if err != nil {
 		return nil, err
 	}
-	creds, err := readCredentials(path, key)
+	creds, err := readCredentials(sys, path, key)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{path: path, key: key, credentials: creds}, nil
+	return &Store{path: path, key: key, credentials: creds, sys: sys}, nil
 }
 
 // readCredentials loads and decrypts the credential map, returning an empty map
 // when the file does not yet exist.
-func readCredentials(path string, key []byte) (map[string]string, error) {
-	data, err := os.ReadFile(path)
+func readCredentials(sys sysShim, path string, key []byte) (map[string]string, error) {
+	data, err := sys.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return map[string]string{}, nil
@@ -217,7 +246,7 @@ func (s *Store) Save() error {
 	if err != nil {
 		return fmt.Errorf("%s: marshal credentials: %w", errPrefix, err)
 	}
-	sealed, err := encrypt(s.key, plain)
+	sealed, err := encrypt(s.key, plain, s.sys)
 	if err != nil {
 		return err
 	}
@@ -225,27 +254,27 @@ func (s *Store) Save() error {
 	if err != nil {
 		return fmt.Errorf("%s: marshal store file: %w", errPrefix, err)
 	}
-	return writeFileAtomic(s.path, data)
+	return writeFileAtomic(s.sys, s.path, data)
 }
 
 // writeFileAtomic writes data to path via a temp file in the same directory
 // then renames, so concurrent readers never observe a partial file.
-func writeFileAtomic(path string, data []byte) error {
+func writeFileAtomic(sys sysShim, path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := mkdirAll(dir, 0700); err != nil {
+	if err := sys.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("%s: create store dir: %w", errPrefix, err)
 	}
-	tmp, err := createTemp(dir, ".credentials-*.json.tmp")
+	tmp, err := sys.CreateTemp(dir, ".credentials-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("%s: temp store file: %w", errPrefix, err)
 	}
 	tmpPath := tmp.Name()
 	if err := finishTempWrite(tmp, data); err != nil {
-		_ = os.Remove(tmpPath)
+		_ = sys.Remove(tmpPath)
 		return err
 	}
-	if err := rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
+	if err := sys.Rename(tmpPath, path); err != nil {
+		_ = sys.Remove(tmpPath)
 		return fmt.Errorf("%s: rename store file: %w", errPrefix, err)
 	}
 	return nil
@@ -284,13 +313,13 @@ func newGCM(key []byte) (cipher.AEAD, error) {
 }
 
 // encrypt seals plain with AES-256-GCM, returning nonce||ciphertext.
-func encrypt(key, plain []byte) ([]byte, error) {
+func encrypt(key, plain []byte, sys sysShim) ([]byte, error) {
 	gcm, err := newGCM(key)
 	if err != nil {
 		return nil, err
 	}
 	nonce := make([]byte, gcm.NonceSize())
-	if _, rerr := randRead(nonce); rerr != nil {
+	if _, rerr := sys.RandRead(nonce); rerr != nil {
 		return nil, fmt.Errorf("%s: generate nonce: %w", errPrefix, rerr)
 	}
 	return gcm.Seal(nonce, nonce, plain, nil), nil
