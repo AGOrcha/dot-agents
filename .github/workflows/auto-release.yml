@@ -5,7 +5,7 @@ on:
     branches: [master]
     paths:
       - 'VERSION'
-  workflow_dispatch: {}
+
 concurrency:
   group: release
   cancel-in-progress: false
