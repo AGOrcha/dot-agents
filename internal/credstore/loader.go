@@ -34,14 +34,6 @@ var (
 	ErrInsecurePlaintextFile = errors.New(errPrefix + ": plaintext credentials file is group/world-accessible")
 )
 
-// envLookup is the narrow environment collaborator the loader needs, injected
-// per the interface-DI convention in docs/TEST_SEAMS.md so the env-driven steps
-// are hermetic without mutating the real process environment.
-type envLookup interface {
-	// LookupEnv mirrors os.LookupEnv: value and whether the var is set.
-	LookupEnv(key string) (string, bool)
-}
-
 func (stdSys) LookupEnv(key string) (string, bool) { return os.LookupEnv(key) }
 
 // OIDCResolver is the pluggable last-resort resolution step: mint a short-lived

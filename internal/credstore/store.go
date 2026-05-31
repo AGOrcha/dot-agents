@@ -76,7 +76,6 @@ type tempFile interface {
 // single otherwise-unreachable error branch (entropy/temp-file/rename failure)
 // is fault-injectable without package-level func-var seams.
 type sysShim interface {
-	envLookup
 	RandRead(b []byte) (int, error)
 	MkdirAll(path string, perm os.FileMode) error
 	CreateTemp(dir, pattern string) (tempFile, error)
@@ -85,6 +84,8 @@ type sysShim interface {
 	ReadFile(name string) ([]byte, error)
 	Stat(name string) (fs.FileInfo, error)
 	HomeDir() (string, error)
+	// LookupEnv mirrors os.LookupEnv (value, set) for the loader's env steps.
+	LookupEnv(key string) (string, bool)
 }
 
 // stdSys is the production sysShim backed by the real os/crypto-rand/config
