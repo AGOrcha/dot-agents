@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -193,14 +195,12 @@ func TestFetchSpecMode(t *testing.T) {
 	}
 }
 
-// echoArgv builds a portable argv that prints s verbatim to stdout. On Windows
-// echo is a cmd.exe builtin (not an executable), so route through cmd /c; on
-// Unix printf avoids the trailing newline echo would add.
+// echoArgv builds a portable argv that prints s verbatim to stdout by re-execing
+// the test binary itself into TestHelperProcess (the os/exec stdlib pattern). This
+// avoids shell echo/printf quoting differences across OSes — notably cmd.exe
+// mangling JSON quotes on Windows. The caller must set GO_WANT_HELPER_PROCESS=1.
 func echoArgv(s string) []string {
-	if runtime.GOOS == "windows" {
-		return []string{"cmd", "/c", "echo", s}
-	}
-	return []string{"printf", "%s", s}
+	return []string{os.Args[0], "-test.run=TestHelperProcess", "--", s}
 }
 
 // failArgv is a non-zero-exit command on every supported OS.
@@ -212,12 +212,15 @@ func failArgv() []string {
 }
 
 func TestDefaultFetcherExec(t *testing.T) {
+	// The exec'd subprocess (this same test binary) inherits the env; the flag
+	// makes TestHelperProcess emit the payload verbatim and exit.
+	t.Setenv("GO_WANT_HELPER_PROCESS", "1")
 	f := DefaultFetcher{}
 	out, err := f.Fetch(context.Background(), FetchSpec{Argv: echoArgv(`{"ok":1}`)})
 	if err != nil {
 		t.Fatalf("exec fetch: %v", err)
 	}
-	// cmd.exe echo appends CRLF; trim trailing newline/CR for a portable assert.
+	// Trim any trailing newline/CR a runtime may append for a portable assert.
 	got := strings.TrimRight(string(out), "\r\n")
 	if got != `{"ok":1}` {
 		t.Fatalf("exec output = %q", got)
@@ -229,6 +232,27 @@ func TestDefaultFetcherExecError(t *testing.T) {
 	if _, err := f.Fetch(context.Background(), FetchSpec{Argv: failArgv()}); err == nil {
 		t.Fatalf("expected exec error")
 	}
+}
+
+// TestHelperProcess is not a real test — it is the subprocess echoArgv re-execs.
+// It runs only when GO_WANT_HELPER_PROCESS=1 (set by the calling test), writes the
+// argument after "--" verbatim to stdout, and exits — giving deterministic exec
+// output on every OS without relying on a shell builtin.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	args := os.Args
+	for i, a := range args {
+		if a == "--" {
+			args = args[i+1:]
+			break
+		}
+	}
+	if len(args) > 0 {
+		fmt.Fprint(os.Stdout, args[0])
+	}
+	os.Exit(0)
 }
 
 func TestDefaultFetcherHTTP(t *testing.T) {
