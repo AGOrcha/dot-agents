@@ -143,6 +143,80 @@ func TestSetSectionReservedKey(t *testing.T) {
 	if err := lf.SetSection(lockVersionKey, 3); err == nil {
 		t.Fatal("expected error setting reserved lock_version key")
 	}
+	if err := lf.SetSection(inputsDigestKey, "sha256:zz"); err == nil {
+		t.Fatal("expected error setting reserved inputs_digest key via SetSection")
+	}
+}
+
+func TestInputsDigestRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	lf, _ := Open(path)
+	if _, ok := lf.InputsDigest(); ok {
+		t.Fatal("fresh lockfile must have no inputs_digest")
+	}
+	lf.SetInputsDigest("sha256:abc")
+	if err := lf.SetSection("units", map[string]string{"git:a@1": "x"}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	reopened, _ := Open(path)
+	got, ok := reopened.InputsDigest()
+	if !ok || got != "sha256:abc" {
+		t.Fatalf("inputs_digest round-trip: got %q ok=%v", got, ok)
+	}
+	// inputs_digest is a top-level scalar, not nested under a section.
+	raw, _ := os.ReadFile(path)
+	var top map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &top)
+	if string(top[inputsDigestKey]) != `"sha256:abc"` {
+		t.Fatalf("inputs_digest on disk = %s", top[inputsDigestKey])
+	}
+}
+
+func TestSetInputsDigestEmptyClears(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	lf, _ := Open(path)
+	lf.SetInputsDigest("sha256:abc")
+	lf.SetInputsDigest("") // clear
+	if _, ok := lf.InputsDigest(); ok {
+		t.Fatal("empty SetInputsDigest must clear the field")
+	}
+	_ = lf.Flush()
+	raw, _ := os.ReadFile(path)
+	var top map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &top)
+	if _, ok := top[inputsDigestKey]; ok {
+		t.Fatalf("inputs_digest should be absent after clear: %s", raw)
+	}
+}
+
+func TestInputsDigestPreservedAcrossSectionWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	seed := `{"lock_version":1,"inputs_digest":"sha256:seed","adapters":{"kuzu":{}}}`
+	_ = os.WriteFile(path, []byte(seed), 0o600)
+	lf, _ := Open(path)
+	// A writer that only touches a section must not drop inputs_digest.
+	_ = lf.SetSection("units", map[string]string{"git:a@1": "x"})
+	_ = lf.Flush()
+
+	reopened, _ := Open(path)
+	got, ok := reopened.InputsDigest()
+	if !ok || got != "sha256:seed" {
+		t.Fatalf("inputs_digest dropped by section write: got %q ok=%v", got, ok)
+	}
+}
+
+func TestInputsDigestMalformedTreatedAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	// A non-string / empty inputs_digest must report absent, not error.
+	_ = os.WriteFile(path, []byte(`{"lock_version":1,"inputs_digest":123}`), 0o600)
+	lf, _ := Open(path)
+	if _, ok := lf.InputsDigest(); ok {
+		t.Fatal("non-string inputs_digest must report absent")
+	}
 }
 
 func TestSetSectionMarshalError(t *testing.T) {

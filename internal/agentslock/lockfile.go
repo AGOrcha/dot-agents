@@ -28,6 +28,20 @@ const LockVersion = 1
 // section and cannot be set via SetSection.
 const lockVersionKey = "lock_version"
 
+// inputsDigestKey is the reserved top-level key holding the resolver's
+// whole-normalized hash of all local config scopes (config-distribution-model
+// §7A.3). Like lockVersionKey it is a scalar top-level field, not a section, so
+// it cannot be staged via SetSection; use SetInputsDigest / InputsDigest.
+const inputsDigestKey = "inputs_digest"
+
+// reservedKeys are the top-level scalar keys the writer manages itself. They are
+// never valid section names — SetSection rejects them so a caller cannot
+// accidentally overwrite a reserved field with an opaque section value.
+var reservedKeys = map[string]bool{
+	lockVersionKey:  true,
+	inputsDigestKey: true,
+}
+
 // Lockfile is the in-memory view of a .agentsrc.lock document: open it, read or
 // stage sections, then Flush. Safe for concurrent use.
 type Lockfile struct {
@@ -79,11 +93,41 @@ func (lf *Lockfile) Section(name string, v any) (bool, error) {
 	return true, nil
 }
 
+// SetInputsDigest stages the top-level inputs_digest field (§7A.3): the
+// whole-normalized hash of all local config scopes that drives staleness. An
+// empty digest clears the field. Safe for concurrent use.
+func (lf *Lockfile) SetInputsDigest(digest string) {
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
+	if digest == "" {
+		delete(lf.doc, inputsDigestKey)
+		return
+	}
+	raw, _ := json.Marshal(digest) // a string never fails to marshal
+	lf.doc[inputsDigestKey] = raw
+}
+
+// InputsDigest returns the top-level inputs_digest and whether it was present.
+// An absent or empty field reports ("", false).
+func (lf *Lockfile) InputsDigest() (string, bool) {
+	lf.mu.Lock()
+	raw, ok := lf.doc[inputsDigestKey]
+	lf.mu.Unlock()
+	if !ok {
+		return "", false
+	}
+	var digest string
+	if err := json.Unmarshal(raw, &digest); err != nil || digest == "" {
+		return "", false
+	}
+	return digest, true
+}
+
 // SetSection marshals v and stages it as the named section, leaving every other
 // section untouched. Safe to call concurrently from multiple goroutines.
 func (lf *Lockfile) SetSection(name string, v any) error {
-	if name == lockVersionKey {
-		return fmt.Errorf("agentslock: %q is reserved, not a section", lockVersionKey)
+	if reservedKeys[name] {
+		return fmt.Errorf("agentslock: %q is reserved, not a section", name)
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {

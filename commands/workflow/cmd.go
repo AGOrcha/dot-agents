@@ -44,6 +44,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowTasksCmd(),
 		newWorkflowSlicesCmd(),
 		newWorkflowEligibleCmd(),
+		newWorkflowSlotsCmd(),
 		newWorkflowNextCmd(),
 		newWorkflowCompleteCmd(),
 		newWorkflowAdvanceCmd(),
@@ -477,6 +478,29 @@ func newWorkflowEligibleCmd() *cobra.Command {
 	eligibleCmd.Flags().StringVar(&eligiblePlanFilter, "plan", "", "Only consider tasks from these canonical plan ids (comma-separated)")
 	eligibleCmd.Flags().IntVar(&eligibleLimit, "limit", 0, "Override max_parallel_workers pref (0 = use pref, >0 = explicit limit)")
 	return eligibleCmd
+}
+
+func newWorkflowSlotsCmd() *cobra.Command {
+	var slotsPlanFilter string
+	slotsCmd := &cobra.Command{
+		Use:   "slots",
+		Short: "Show the slot ledger (occupied / awaiting-owner / blocked) across active plans",
+		Long: `Renders the layered-PR-fanout slot accounting (design.md §2.8, §3.4.3):
+in_progress and awaiting_agent_review occupy a slot against max_parallel_tasks;
+awaiting_owner_review and blocked-on:<ref> free the slot. The blocked bucket is
+tracked separately so an all-blocked DAG is not mistaken for idle capacity.`,
+		Example: deps.ExampleBlock(
+			"  da workflow slots",
+			"  da workflow slots --plan layered-pr-fanout",
+			"  da --json workflow slots",
+		),
+		Args: deps.NoArgsWithHints("`da workflow slots` works on the current repository."),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWorkflowSlots(slotsPlanFilter)
+		},
+	}
+	slotsCmd.Flags().StringVar(&slotsPlanFilter, "plan", "", "Only account tasks from these canonical plan ids (comma-separated)")
+	return slotsCmd
 }
 
 func newWorkflowNextCmd() *cobra.Command {
