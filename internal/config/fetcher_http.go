@@ -26,6 +26,9 @@ type httpArtifactFetcher struct {
 	client *http.Client
 }
 
+// httpStatusErrFmt is the shared format for HTTP status-code import errors.
+const httpStatusErrFmt = "http get %s: status %d"
+
 // artifactURL builds the absolute HTTPS URL for an http package artifact:
 // <source-url>/<artifact-path>/<version-spec>. The version spec is appended as
 // a path segment (a tag or a digest) so distinct versions are distinct URLs and
@@ -37,30 +40,53 @@ func artifactURL(src Source, parts PackageRefParts) string {
 	return base + "/" + path + "/" + ver
 }
 
-func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedArtifact, error) {
-	posture := PostureFromSource(src)
-	url := artifactURL(src, parts)
-	if !strings.HasPrefix(strings.ToLower(url), "https://") {
-		return FetchedArtifact{}, &ImportError{
-			Ref:      parts.SourceID + ":" + parts.ArtifactPath,
-			SourceID: parts.SourceID,
-			Reason:   ReasonSchema,
-			Err:      fmt.Errorf("http package source url must be https: %q", url),
-		}
+// newArtifactImportError builds an ImportError for an http artifact pull,
+// centralizing the repeated Ref/SourceID wiring.
+func newArtifactImportError(parts PackageRefParts, reason ImportFailReason, err error) *ImportError {
+	return &ImportError{
+		Ref:      parts.SourceID + ":" + parts.ArtifactPath,
+		SourceID: parts.SourceID,
+		Reason:   reason,
+		Err:      err,
 	}
+}
 
-	// A digest-pinned version is content-addressed, so the cache is checked
-	// before any request (offline fast path, spec §8).
-	pinned, isPinned := digestFromVersionSpec(parts.VersionSpec)
-	if isPinned {
-		if cached, ok := readCachedArtifact(pinned); ok {
-			if err := verifySignature(posture, pinned, false); err != nil {
-				return FetchedArtifact{}, err
-			}
-			return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture}, nil
-		}
+// reasonForStatus maps a non-OK HTTP status to its import-error reason, or ""
+// when the status is OK and the body should be read.
+func reasonForStatus(status int) ImportFailReason {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return ReasonAuth
+	case status == http.StatusNotFound:
+		return ReasonNotFound
+	case status != http.StatusOK:
+		return ReasonTransport
+	default:
+		return ""
 	}
+}
 
+// readCachedPinnedArtifact returns a cache-hit FetchedArtifact when the version
+// spec is digest-pinned and the blob is already cached. ok is false when the
+// caller must fall through to a network fetch.
+func (f *httpArtifactFetcher) readCachedPinnedArtifact(posture SigningPosture, pinned string, isPinned bool) (FetchedArtifact, bool, error) {
+	if !isPinned {
+		return FetchedArtifact{}, false, nil
+	}
+	cached, ok := readCachedArtifact(pinned)
+	if !ok {
+		return FetchedArtifact{}, false, nil
+	}
+	if err := verifySignature(posture, pinned, false); err != nil {
+		return FetchedArtifact{}, true, err
+	}
+	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture}, true, nil
+}
+
+// doRequest issues the authenticated GET and maps any transport or status-code
+// failure to an ImportError. On success it returns the open response; the caller
+// owns closing the body.
+func (f *httpArtifactFetcher) doRequest(src Source, parts PackageRefParts, url string) (*http.Response, error) {
 	client := f.client
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -69,32 +95,49 @@ func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("building request for %s: %w", url, err)}
+		return nil, newArtifactImportError(parts, ReasonTransport, fmt.Errorf("building request for %s: %w", url, err))
 	}
 	if tok := authString(src.Auth, "token"); tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("http get %s: %w", url, err)}
+		return nil, newArtifactImportError(parts, ReasonTransport, fmt.Errorf("http get %s: %w", url, err))
+	}
+	if reason := reasonForStatus(resp.StatusCode); reason != "" {
+		_ = resp.Body.Close()
+		return nil, newArtifactImportError(parts, reason, fmt.Errorf(httpStatusErrFmt, url, resp.StatusCode))
+	}
+	return resp, nil
+}
+
+func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedArtifact, error) {
+	posture := PostureFromSource(src)
+	url := artifactURL(src, parts)
+	if !strings.HasPrefix(strings.ToLower(url), "https://") {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonSchema, fmt.Errorf("http package source url must be https: %q", url))
+	}
+
+	// A digest-pinned version is content-addressed, so the cache is checked
+	// before any request (offline fast path, spec §8).
+	pinned, isPinned := digestFromVersionSpec(parts.VersionSpec)
+	if art, ok, err := f.readCachedPinnedArtifact(posture, pinned, isPinned); ok {
+		return art, err
+	}
+
+	resp, err := f.doRequest(src, parts, url)
+	if err != nil {
+		return FetchedArtifact{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonAuth, Err: fmt.Errorf("http get %s: status %d", url, resp.StatusCode)}
-	}
-	if resp.StatusCode == http.StatusNotFound {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonNotFound, Err: fmt.Errorf("http get %s: status %d", url, resp.StatusCode)}
-	}
-	if resp.StatusCode != http.StatusOK {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("http get %s: status %d", url, resp.StatusCode)}
-	}
+
 	data, err := readAllLimited(resp.Body)
 	if err != nil {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("reading %s: %w", url, err)}
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("reading %s: %w", url, err))
 	}
 	digest := artifactDigest(data)
 	if isPinned && digest != pinned {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but server served %s", pinned, digest)}
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("digest mismatch: pinned %s but server served %s", pinned, digest))
 	}
 	if err := verifySignature(posture, digest, false); err != nil {
 		return FetchedArtifact{}, err
