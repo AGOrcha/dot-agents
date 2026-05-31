@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -127,6 +128,51 @@ func captureWorkflowOutput(t *testing.T, repo string, run func() error) string {
 		t.Fatal(err)
 	}
 	return string(out)
+}
+
+// captureWorkflowStdoutStderr runs fn with both os.Stdout and os.Stderr piped,
+// returning (stdout, stderr). Used to assert the incomplete-resolution note lands
+// on stderr without polluting the machine-readable stdout stream.
+func captureWorkflowStdoutStderr(t *testing.T, repo string, run func() error) (string, string) {
+	t.Helper()
+	oldwd, _ := os.Getwd()
+	defer func() { _ = os.Chdir(oldwd) }()
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	outR, outW := mustPipe(t)
+	errR, errW := mustPipe(t)
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = outW, errW
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	runErr := run()
+	_ = outW.Close()
+	_ = errW.Close()
+	out := mustReadAll(t, outR)
+	errOut := mustReadAll(t, errR)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	return out, errOut
+}
+
+func mustPipe(t *testing.T) (*os.File, *os.File) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r, w
+}
+
+func mustReadAll(t *testing.T, r *os.File) string {
+	t.Helper()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = r.Close()
+	return string(b)
 }
 
 func TestWorkflowAppTypesVerboseShowsSourceAndReason(t *testing.T) {
@@ -304,6 +350,74 @@ func TestWorkflowAppTypesNoManifestIsEmpty(t *testing.T) {
 	}
 }
 
+// TestWorkflowAppTypesRealLockedExtendsLayer is the end-to-end happy path through
+// the REAL config.NewLayeredResolver().ResolveLocked (not the stub seam): a project
+// that `extends` a layer carrying app_type_verifier_map entries, with a populated
+// .agentsrc.lock + on-disk layer cache, must surface that imported layer's app-types
+// through `da workflow app-types`. This proves imported-layer ExtraFields flow
+// through EffectiveRaw into decodeAppTypeVerifierMap end-to-end — the wiring the
+// stub-seam tests cannot exercise.
+func TestWorkflowAppTypesRealLockedExtendsLayer(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	// A local source dir is a pure-disk extends source (no network): the online
+	// Resolve below reads it straight off disk while populating the cache + lock,
+	// after which ResolveLocked replays it offline.
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "org"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "org", "base.json"), []byte(`{
+  "app_type_verifier_map":{"org-shared-svc":["org-unit","org-api"]}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(`{
+  "project":"svc","version":2,
+  "sources":[{"id":"acme","type":"local","path":`+strconv.Quote(src)+`}],
+  "extends":["acme:org/base.json"],
+  "app_type_verifier_map":{"repo-local-svc":["unit"]}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Populate .agentsrc.lock + the layer cache via one online (local-disk) resolve.
+	if _, err := config.NewLayeredResolver().Resolve(repo); err != nil {
+		t.Fatalf("seed online resolve: %v", err)
+	}
+
+	// Now drive the command through the REAL default appTypeSnapshot (ResolveLocked).
+	out := captureWorkflowOutput(t, repo, func() error {
+		workflowTestJSON = true
+		defer func() { workflowTestJSON = false }()
+		return executeWorkflowCommand(t, repo, "app-types")
+	})
+
+	var parsed workflowAppTypesView
+	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("parse json output: %v\n%s", err, out)
+	}
+	got := map[string][]string{}
+	for _, e := range parsed.AppTypes {
+		got[e.Name] = e.VerifierSequence
+	}
+	if _, ok := got["repo-local-svc"]; !ok {
+		t.Fatalf("repo-local app_type missing: %#v", parsed.AppTypes)
+	}
+	seq, ok := got["org-shared-svc"]
+	if !ok {
+		t.Fatalf("imported (locked extends) app_type missing from effective view: %#v", parsed.AppTypes)
+	}
+	if strings.Join(seq, ",") != "org-unit,org-api" {
+		t.Fatalf("imported verifier sequence = %v, want [org-unit org-api]", seq)
+	}
+	if len(parsed.Incomplete) != 0 {
+		t.Fatalf("fully-resolved project must report no incomplete notes, got %v", parsed.Incomplete)
+	}
+}
+
 // TestAppTypeSnapshotConsumesLockedPath proves the production seam consumes the
 // read-only, units-lock-backed resolution path (LayeredResolver.ResolveLocked),
 // not an online fetch. A project that declares `extends` but has no lockfile must
@@ -321,7 +435,7 @@ func TestAppTypeSnapshotConsumesLockedPath(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", t.TempDir())
 
-	_, err := resolveEffectiveAppTypeMap(repo)
+	_, _, err := resolveEffectiveAppTypeMap(repo)
 	if err == nil {
 		t.Fatal("extends project with no lockfile must surface the offline lock gap, not fetch")
 	}
@@ -383,7 +497,7 @@ func TestResolveEffectiveAppTypeMap_ResolverError(t *testing.T) {
 	appTypeSnapshot = func(string) (*config.Snapshot, error) {
 		return nil, fmt.Errorf("boom: locked layer missing from cache")
 	}
-	if _, err := resolveEffectiveAppTypeMap(t.TempDir()); err == nil {
+	if _, _, err := resolveEffectiveAppTypeMap(t.TempDir()); err == nil {
 		t.Fatal("expected resolver error to propagate")
 	}
 
@@ -391,9 +505,85 @@ func TestResolveEffectiveAppTypeMap_ResolverError(t *testing.T) {
 	appTypeSnapshot = func(string) (*config.Snapshot, error) {
 		return nil, fmt.Errorf("no %s found at /x", config.AgentsRCFile)
 	}
-	got, err := resolveEffectiveAppTypeMap(t.TempDir())
+	got, _, err := resolveEffectiveAppTypeMap(t.TempDir())
 	if err != nil || len(got) != 0 {
 		t.Fatalf("missing-manifest err should yield empty map: got %#v, %v", got, err)
+	}
+}
+
+// TestIncompleteResolutionNotes proves only shrink-causing warnings (optional skip,
+// protected-field drop) become user notes; an informational cache_hit_offline (the
+// layer WAS resolved) is excluded so it never falsely flags an incomplete map.
+func TestIncompleteResolutionNotes(t *testing.T) {
+	notes := incompleteResolutionNotes([]config.ProvenanceWarning{
+		{FieldPath: "org:base.json@v1", Outcome: "optional_skipped: not in cache"},
+		{FieldPath: "org:trust.json@v2", Outcome: "cache_hit_offline"},
+		{FieldPath: "protected.field", Outcome: "dropped"},
+	})
+	if len(notes) != 2 {
+		t.Fatalf("want 2 shrink notes (optional_skipped + dropped), got %d: %v", len(notes), notes)
+	}
+	joined := strings.Join(notes, "|")
+	if !strings.Contains(joined, "org:base.json@v1 (optional_skipped") ||
+		!strings.Contains(joined, "protected.field (dropped)") {
+		t.Fatalf("notes missing expected entries: %v", notes)
+	}
+	if strings.Contains(joined, "cache_hit_offline") {
+		t.Fatalf("cache_hit_offline must not be reported as incomplete: %v", notes)
+	}
+	if incompleteResolutionNotes(nil) != nil {
+		t.Error("no warnings → nil notes")
+	}
+}
+
+// TestResolveEffectiveAppTypeMap_SurfacesIncompleteNotes proves a skipped optional
+// layer flows out as a note alongside the (possibly shrunk) map, so the caller can
+// warn instead of silently printing an incomplete app-types list.
+func TestResolveEffectiveAppTypeMap_SurfacesIncompleteNotes(t *testing.T) {
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return &config.Snapshot{
+			Warnings: []config.ProvenanceWarning{
+				{FieldPath: "org:opt.json@v1", Outcome: "optional_skipped: no resolved SHA"},
+			},
+		}, nil
+	}
+	_, notes, err := resolveEffectiveAppTypeMap(t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "org:opt.json@v1") {
+		t.Fatalf("skipped optional layer must surface as a note, got: %v", notes)
+	}
+}
+
+// TestRunWorkflowAppTypes_IncompleteWarningToStderr proves the silent-wrong-result
+// hole is closed end-to-end: a skipped optional layer produces a "may be
+// incomplete" note on STDERR (never on stdout, which must stay machine-clean for
+// --format/JSON consumers).
+func TestRunWorkflowAppTypes_IncompleteWarningToStderr(t *testing.T) {
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return &config.Snapshot{
+			Warnings: []config.ProvenanceWarning{
+				{FieldPath: "org:opt.json@v1", Outcome: "optional_skipped: not in cache"},
+			},
+		}, nil
+	}
+	repo := setupWorkflowAppTypesProject(t, `{
+  "project":"svc","version":1,"sources":[{"type":"local"}]
+}`)
+
+	stdout, stderr := captureWorkflowStdoutStderr(t, repo, func() error {
+		return executeWorkflowCommand(t, repo, "app-types")
+	})
+	if !strings.Contains(stderr, "may be incomplete") || !strings.Contains(stderr, "org:opt.json@v1") {
+		t.Fatalf("incomplete-resolution warning must go to stderr, got stderr:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "may be incomplete") {
+		t.Fatalf("warning must NOT pollute stdout, got stdout:\n%s", stdout)
 	}
 }
 
