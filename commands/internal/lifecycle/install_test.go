@@ -1255,7 +1255,7 @@ func TestResolveSourceRoot_GitSucceedsWithBareFixture(t *testing.T) {
 func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -1394,7 +1394,7 @@ func TestLinkInstallResourceList_NonStrictWarnings(t *testing.T) {
 func TestCreateInstallPlatformLink_DryRun(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
@@ -1938,9 +1938,11 @@ func TestCreateInstallPlatformLink_CreateLinksError(t *testing.T) {
 	}
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	// Mark claude installed.
+	// Mark claude installed (CLI on PATH).
+	seedClaudeInstalledSignalLifecycle(t, tmp)
+	// The dir itself is the CreateLinks write target: make it read-only so the
+	// .claude/rules MkdirAll inside CreateLinks fails.
 	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
-	// Block writes by chmod'ing ~/.claude read-only after marker exists.
 	if err := os.Chmod(filepath.Join(tmp, ".claude"), 0o500); err != nil {
 		t.Skipf("chmod readonly: %v", err)
 	}
@@ -1966,7 +1968,7 @@ func TestCreateInstallPlatformLink_CreateLinksError(t *testing.T) {
 func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
 

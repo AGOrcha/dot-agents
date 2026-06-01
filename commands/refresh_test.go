@@ -385,7 +385,7 @@ func TestRunRefresh_InstalledPlatformDoesCreateLinks(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	// Make claude installed
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignal(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -611,7 +611,7 @@ func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	// Make claude installed so there is an enabled+installed platform.
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignal(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -798,9 +798,7 @@ func TestRunRefresh_AllPlatformsDryRun(t *testing.T) {
 func TestRunRefresh_SeededClaudeDryRunExercisesDryRunBranches(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	seedClaudeInstalledSignal(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
 		t.Fatal(err)

@@ -204,17 +204,27 @@ func TestCopilotIsInstalled_ViaExtensionDir(t *testing.T) {
 	}
 }
 
-// TestClaudeIsInstalled_ViaClaudeDir covers the home-dir fallback (no `claude`
-// binary, but ~/.claude exists).
-func TestClaudeIsInstalled_ViaClaudeDir(t *testing.T) {
+// TestClaudeIsInstalled_ViaCLI: claude is detected installed via its CLI on PATH.
+func TestClaudeIsInstalled_ViaCLI(t *testing.T) {
+	t.Setenv("PATH", installFakeCLI(t, "claude", "v1"))
+	if !NewClaude().IsInstalled() {
+		t.Error("expected IsInstalled true with claude on PATH")
+	}
+}
+
+// TestClaudeIsInstalled_DirAloneNotInstalled guards the fix: a bare ~/.claude
+// config dir (which persists after uninstall and which `da` itself creates) must
+// NOT be read as "installed" — only the CLI on PATH counts.
+func TestClaudeIsInstalled_DirAloneNotInstalled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if !NewClaude().IsInstalled() {
-		t.Error("expected IsInstalled true via ~/.claude")
+	if NewClaude().IsInstalled() {
+		t.Error("~/.claude alone must not report claude installed")
 	}
 }
 

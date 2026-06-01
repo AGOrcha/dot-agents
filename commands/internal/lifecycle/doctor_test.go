@@ -790,7 +790,7 @@ func TestRunDoctor_OrphanCanonicalReported(t *testing.T) {
 func TestRunDoctor_RepairBrokenLinksDryRun(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
@@ -1118,7 +1118,7 @@ func TestCountProjectLinks_CursorProjectHardlinkHealthy(t *testing.T) {
 func TestRunDoctor_WithInstalledClaudePlatformAndPlugins(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -1262,7 +1262,7 @@ func TestPrintUserConfigStatus_LocalFiles(t *testing.T) {
 func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)

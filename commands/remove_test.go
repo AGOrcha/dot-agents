@@ -603,7 +603,7 @@ func TestRunRemove_WithGitSourceManifestWarns(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	// Make claude installed so platform RemoveLinks branches run
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignal(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -829,9 +829,7 @@ func TestRunRemove_AllPlatformsInstalledNonDryRun(t *testing.T) {
 func TestRunRemove_SeededClaudeExercisesInstalledPlatformBranch(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	seedClaudeInstalledSignal(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
 		t.Fatal(err)

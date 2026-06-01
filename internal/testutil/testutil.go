@@ -45,6 +45,14 @@ func NewTempProject(t *testing.T, projectName string) (agentsHome, projectPath s
 		t.Fatal(err)
 	}
 
+	// Isolate HOME too, not just AGENTS_HOME. Some resource flows (e.g. the skill
+	// platform mirror in commands/skills/promote.go) resolve a base via
+	// config.UserHomeDir() for HOME-relative targets like ~/.claude. Without this,
+	// those writes escape the sandbox into the developer's real ~/.agents and
+	// ~/.claude (leaving dangling symlinks + orphan dirs). USERPROFILE covers the
+	// Windows home resolution path.
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	WriteAgentsRC(t, projectPath, &config.AgentsRC{
@@ -250,6 +258,11 @@ func WritePreservationManifest(t *testing.T) (agentsHome, projectPath string) {
 	if err := os.MkdirAll(projectPath, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Isolate HOME as well as AGENTS_HOME — promote's skill platform mirror
+	// resolves HOME-relative targets (~/.claude) via config.UserHomeDir(); without
+	// this the mirror leaks into the real ~/.agents and ~/.claude. See NewTempProject.
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("AGENTS_HOME", agentsHome)
 	const manifest = `{
   "version": 1,
