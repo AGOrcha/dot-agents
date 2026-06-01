@@ -6,7 +6,7 @@ One CLI to manage configurations and workflow state across Cursor, Claude Code, 
 
 ```bash
 # Install
-brew tap AGOrcha/tap && brew install dot-agents
+brew tap AGOrcha/tap && brew install da
 
 # Set up
 da init
@@ -124,7 +124,7 @@ coordination is on the roadmap; see the Roadmap section below.
 
 ```bash
 brew tap AGOrcha/tap
-brew install dot-agents
+brew install da
 ```
 
 ### Install script

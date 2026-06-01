@@ -116,7 +116,7 @@ dot-agents_0.3.3_darwin_arm64.tar.gz: OK
 ### 4. Install
 
 Extract the archive and move `da` onto your `PATH`. Verifying after
-download is sufficient — `brew install dot-agents` and the install
+download is sufficient — `brew install da` and the install
 script do not currently invoke cosign automatically.
 
 ## Transparency log lookup
