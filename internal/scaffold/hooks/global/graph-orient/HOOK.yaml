@@ -5,7 +5,7 @@ match:
   tools: []
   expression: ""
 run:
-  command: da kg status
+  command: da kg health
   timeout_ms: 3000
 enabled_on:
   - claude

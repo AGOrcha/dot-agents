@@ -1284,6 +1284,9 @@ func TestRunKGBuild_NoCRGBinary(t *testing.T) {
 	}
 }
 
+// TestRunKGUpdate_NoCRGBinary: kg update degrades gracefully (exit 0, no error)
+// when code-review-graph is not installed — the graph-update post_tool_use hook
+// must not fail every edit for users without the optional tool.
 func TestRunKGUpdate_NoCRGBinary(t *testing.T) {
 	repo := t.TempDir()
 	t.Setenv("PATH", t.TempDir())
@@ -1293,8 +1296,8 @@ func TestRunKGUpdate_NoCRGBinary(t *testing.T) {
 	cmd.Flags().Bool("skip-flows", false, "")
 	cmd.Flags().Bool("skip-postprocess", false, "")
 	cmd.Flags().Bool("json", false, "")
-	if err := runKGUpdate(cmd, nil); err == nil {
-		t.Error("expected error when no CRG binary on PATH")
+	if err := runKGUpdate(cmd, nil); err != nil {
+		t.Fatalf("expected graceful degrade (nil) when CRG absent, got: %v", err)
 	}
 }
 
