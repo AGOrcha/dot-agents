@@ -227,12 +227,10 @@ func (c *claude) ScanSessionTokens(home, projectPath, sessionID, afterTimestamp 
 }
 
 func (c *claude) IsInstalled() bool {
-	if probeInstalled("claude") {
-		return true
-	}
-	home, _ := config.UserHomeDir()
-	_, err := os.Stat(filepath.Join(home, claudeDir))
-	return err == nil
+	// Detect by the actual CLI on PATH, not by the presence of ~/.claude: the
+	// config dir persists after uninstall (and `da` itself creates it), so it's a
+	// false-positive signal for "the tool is installed".
+	return probeInstalled("claude")
 }
 
 func (c *claude) Version() string {

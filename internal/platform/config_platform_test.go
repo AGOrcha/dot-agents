@@ -1,8 +1,6 @@
 package platform
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/NikashPrakash/dot-agents/internal/config"
@@ -70,34 +68,25 @@ func containsPlatform(ps []Platform, id string) bool {
 }
 
 // TestInstalledEnabledPlatforms_IncludesInstalled covers the enabled+installed
-// append branch hermetically: claude is made "installed" via its HOME-relative
-// marker (~/.claude) under an isolated HOME, so the branch no longer depends on a
-// CLI being on PATH or the developer's real HOME (which previously covered it
-// incidentally — and broke once test HOME isolation landed).
+// append branch: claude is made "installed" via a real `claude` binary on PATH —
+// the correct signal (probeInstalled/exec.LookPath), not the presence of a config
+// dir. installFakeCLI skips on Windows, so the branch is covered in the merged
+// multi-OS profile via the POSIX runners.
 func TestInstalledEnabledPlatforms_IncludesInstalled(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	t.Setenv("PATH", installFakeCLI(t, "claude", "v1"))
 	out := InstalledEnabledPlatforms(claudeOnly())
 	if !containsPlatform(out, "claude") {
-		t.Fatalf("expected claude (installed via ~/.claude) in result, got %v", platformIDs(out))
+		t.Fatalf("expected claude (binary on PATH) in result, got %v", platformIDs(out))
 	}
 }
 
 // TestInstalledEnabledPlatforms_ExcludesEnabledNotInstalled covers the
-// enabled-but-not-installed path deterministically: an isolated HOME with no
-// markers and an empty PATH means claude is enabled yet IsInstalled() is false,
-// so it is excluded.
+// enabled-but-not-installed path: an empty PATH means claude is enabled yet
+// IsInstalled() is false, so it is excluded.
 func TestInstalledEnabledPlatforms_ExcludesEnabledNotInstalled(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("PATH", tmp) // no platform CLIs reachable via probeInstalled
+	t.Setenv("PATH", t.TempDir())
 	out := InstalledEnabledPlatforms(claudeOnly())
 	if containsPlatform(out, "claude") {
-		t.Fatalf("claude has no install marker; expected exclusion, got %v", platformIDs(out))
+		t.Fatalf("claude not on PATH; expected exclusion, got %v", platformIDs(out))
 	}
 }
