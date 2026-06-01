@@ -1,8 +1,6 @@
 {
   "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
   "agents": [
-    "test-runner",
-    "verifier",
     "loop-worker"
   ],
   "app_type_verifier_map": {
@@ -29,32 +27,20 @@
     "agent-handoff",
     "agent-start",
     "build-graph",
-    "create-subagent",
-    "gh-fix-ci",
-    "playwright",
     "review-delta",
     "review-pr",
     "self-review",
-    "skill-architect",
-    "split-reviewable-commits",
     "delegation-lifecycle",
     "iteration-close",
     "loop-worker",
     "orchestrator-session-start",
     "plan-wave-picker",
-    "platform-docs-refresh",
     "provider-consumer-pair",
-    "isp",
-    "article-extract"
+    "isp"
   ],
   "sources": [
     {
       "type": "local"
-    },
-    {
-      "type": "git",
-      "url": "git@github.com:NikashPrakash/agents-config.git",
-      "ref": "main"
     }
   ],
   "verifier_profiles": {
