@@ -495,7 +495,7 @@ func importMissingCandidate(c importCandidate, dest, timestamp string) importRes
 }
 
 func replaceImportCandidate(c importCandidate, agentsHome, dest, timestamp string, srcInfo, destInfo os.FileInfo) importResult {
-	if !ui.Confirm(importReplaceMessage(c, srcInfo, destInfo), Flags.Yes) {
+	if !confirmImportReplace(importReplaceMessage(c, srcInfo, destInfo)) {
 		return importResult{skipped: 1}
 	}
 	if Flags.DryRun {
@@ -512,6 +512,16 @@ func replaceImportCandidate(c importCandidate, agentsHome, dest, timestamp strin
 
 	ui.Bullet("ok", fmt.Sprintf("Updated %s from %s", c.destRel, config.DisplayPath(c.sourcePath)))
 	return importResult{imported: 1}
+}
+
+// confirmImportReplace decides whether an existing managed file may be
+// overwritten by a newer source. Under --yes it auto-confirms; in a real
+// terminal it prompts. Otherwise (CI, `da refresh`, piped/redirected stdin)
+// it never blocks on a prompt and defaults to the safe, non-destructive
+// action: skip the replacement and preserve the existing file.
+func confirmImportReplace(message string) bool {
+	note := fmt.Sprintf("Non-interactive: skipped (preserved existing). %s", message)
+	return ui.ConfirmInteractive(message, note, Flags.Yes)
 }
 
 func importReplaceMessage(c importCandidate, srcInfo, destInfo os.FileInfo) string {
@@ -727,6 +737,14 @@ func processImportOutput(c importCandidate, output importOutput, agentsHome, tim
 	}
 
 	if output.Origin != "" {
+		// Idempotency: a prior import of this same source already preserved
+		// this exact canonical content under one of the origin-prefixed
+		// alternate slots. Re-importing must recognize that output and be a
+		// no-op rather than stacking another alternate (cursor-demo ->
+		// cursor-demo-2 -> ...), which bloats ~/.agents/hooks/ on every run.
+		if importConflictAlreadyPreserved(agentsHome, output) {
+			return importResult{}
+		}
 		if altRel, ok := importConflictFirstFreeAlternateDestRel(agentsHome, output.destRel, output.Origin); ok {
 			altDest := filepath.Join(agentsHome, altRel)
 			if _, err := os.Stat(altDest); os.IsNotExist(err) {
@@ -784,7 +802,7 @@ type replaceImportArgs struct {
 
 func replaceImportContentCandidate(args replaceImportArgs, deps importDeps) importResult {
 	c := args.candidate
-	if !ui.Confirm(importReplaceMessage(c, args.srcInfo, args.destInfo), Flags.Yes) {
+	if !confirmImportReplace(importReplaceMessage(c, args.srcInfo, args.destInfo)) {
 		return importResult{skipped: 1}
 	}
 	if Flags.DryRun {
@@ -827,8 +845,13 @@ func importPreservedConflictCandidate(c importCandidate, agentsHome string, outp
 	return importResult{imported: 1}
 }
 
-// importConflictStableBundleName picks the first free logical name using origin-prefixed base, then -2, -3, … suffixes.
-func importConflictStableBundleName(logical, origin string, taken func(name string) bool) string {
+// importConflictBaseName derives the origin-prefixed base bundle name
+// (sanitized origin + "-" + sanitized logical, with "import"/"hook"
+// fallbacks for empty parts) shared by the free-slot finder and the
+// already-preserved idempotency check. Centralizing it keeps the
+// "cannot disagree" invariant structural: both paths walk the same
+// base / base-2 / base-3 … sequence.
+func importConflictBaseName(origin, logical string) string {
 	o := sanitizeHookNamePart(origin)
 	if o == "" {
 		o = "import"
@@ -837,7 +860,12 @@ func importConflictStableBundleName(logical, origin string, taken func(name stri
 	if log == "" {
 		log = "hook"
 	}
-	base := o + "-" + log
+	return o + "-" + log
+}
+
+// importConflictStableBundleName picks the first free logical name using origin-prefixed base, then -2, -3, … suffixes.
+func importConflictStableBundleName(logical, origin string, taken func(name string) bool) string {
+	base := importConflictBaseName(origin, logical)
 	if !taken(base) {
 		return base
 	}
@@ -851,36 +879,96 @@ func importConflictStableBundleName(logical, origin string, taken func(name stri
 	}
 }
 
-// importConflictFirstFreeAlternateDestRel returns a hooks-relative path under agentsHome that does not yet exist.
-func importConflictFirstFreeAlternateDestRel(agentsHome, primaryDestRel, origin string) (string, bool) {
+// importConflictAlternateShape describes how an origin-prefixed alternate
+// path is built for a primary hooks dest, so the "next free slot" and the
+// idempotency "already preserved" checks share one naming scheme.
+type importConflictAlternateShape struct {
+	scope   string
+	logical string
+	// destRelFor turns a logical bundle name into its full hooks-relative path.
+	destRelFor func(name string) string
+}
+
+// importConflictAlternateShapeFor decodes a primary hooks dest into the
+// shared alternate-naming shape, or reports false if the path is not a
+// recognized hook bundle / json hook file.
+func importConflictAlternateShapeFor(primaryDestRel string) (importConflictAlternateShape, bool) {
 	primaryDestRel = filepath.ToSlash(primaryDestRel)
 	if !strings.HasPrefix(primaryDestRel, agentsHooksPrefix) {
-		return "", false
+		return importConflictAlternateShape{}, false
 	}
 	trim := strings.TrimPrefix(primaryDestRel, agentsHooksPrefix)
 	parts := strings.Split(trim, "/")
 	if len(parts) == 3 && parts[2] == relHookManifestYAML {
 		scope, logical := parts[0], parts[1]
-		taken := func(bundle string) bool {
-			p := filepath.Join(agentsHome, "hooks", scope, bundle, relHookManifestYAML)
-			_, err := os.Stat(p)
-			return err == nil
-		}
-		name := importConflictStableBundleName(logical, origin, taken)
-		return agentsHooksPrefix + scope + "/" + name + "/" + relHookManifestYAML, true
+		return importConflictAlternateShape{
+			scope:   scope,
+			logical: logical,
+			destRelFor: func(name string) string {
+				return agentsHooksPrefix + scope + "/" + name + "/" + relHookManifestYAML
+			},
+		}, true
 	}
 	if len(parts) == 2 && strings.HasSuffix(parts[1], ".json") {
 		scope := parts[0]
 		stem := strings.TrimSuffix(parts[1], ".json")
-		taken := func(stemCandidate string) bool {
-			p := filepath.Join(agentsHome, "hooks", scope, stemCandidate+".json")
-			_, err := os.Stat(p)
-			return err == nil
-		}
-		newStem := importConflictStableBundleName(stem, origin, taken)
-		return agentsHooksPrefix + scope + "/" + newStem + ".json", true
+		return importConflictAlternateShape{
+			scope:   scope,
+			logical: stem,
+			destRelFor: func(name string) string {
+				return agentsHooksPrefix + scope + "/" + name + ".json"
+			},
+		}, true
 	}
-	return "", false
+	return importConflictAlternateShape{}, false
+}
+
+// importConflictFirstFreeAlternateDestRel returns a hooks-relative path under agentsHome that does not yet exist.
+func importConflictFirstFreeAlternateDestRel(agentsHome, primaryDestRel, origin string) (string, bool) {
+	shape, ok := importConflictAlternateShapeFor(primaryDestRel)
+	if !ok {
+		return "", false
+	}
+	taken := func(name string) bool {
+		_, err := os.Stat(filepath.Join(agentsHome, shape.destRelFor(name)))
+		return err == nil
+	}
+	name := importConflictStableBundleName(shape.logical, origin, taken)
+	return shape.destRelFor(name), true
+}
+
+// importConflictAlreadyPreserved reports whether a prior import already wrote
+// this exact canonical content under one of the origin-prefixed alternate
+// slots for output's primary dest. It walks the same name sequence
+// importConflictStableBundleName generates (origin-logical, origin-logical-2,
+// …) over existing files only, so re-importing an unchanged source whose
+// canonical form conflicts with the primary is a no-op instead of minting
+// yet another -N alternate.
+func importConflictAlreadyPreserved(agentsHome string, output importOutput) bool {
+	shape, ok := importConflictAlternateShapeFor(output.destRel)
+	if !ok {
+		return false
+	}
+	base := importConflictBaseName(output.Origin, shape.logical)
+	for n := 1; ; n++ {
+		name := base
+		if n > 1 {
+			name = fmt.Sprintf("%s-%d", base, n)
+		}
+		altPath := filepath.Join(agentsHome, shape.destRelFor(name))
+		existing, err := os.ReadFile(altPath)
+		if os.IsNotExist(err) {
+			// First gap in the sequence ends the search: stable naming never
+			// skips a slot, so no later alternate can exist past this point.
+			return false
+		}
+		if err != nil {
+			return false
+		}
+		if string(existing) == string(output.content) {
+			return true
+		}
+	}
 }
 
 func logicalNameFromHooksDest(destRel string) string {
