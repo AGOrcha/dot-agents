@@ -1,9 +1,9 @@
 #!/bin/bash
 # da installer — downloads and installs the Go CLI release binary (`da`)
-# https://github.com/NikashPrakash/dot-agents
+# https://github.com/AGOrcha/dot-agents
 #
 # Usage:
-#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.sh | bash
 #
 # Environment:
 #   DOT_AGENTS_INSTALL_DIR  Binary install directory (default: ~/.local/bin)
@@ -19,7 +19,7 @@ BLUE='\033[0;34m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-REPO="NikashPrakash/dot-agents"
+REPO="AGOrcha/dot-agents"
 INSTALL_DIR="${DOT_AGENTS_INSTALL_DIR:-${INSTALL_DIR:-$HOME/.local/bin}}"
 VERSION="${DOT_AGENTS_VERSION:-}"
 LOCAL_SRC="${DOT_AGENTS_LOCAL_SRC:-}"

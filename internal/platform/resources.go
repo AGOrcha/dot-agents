@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
 type resourceDir struct {

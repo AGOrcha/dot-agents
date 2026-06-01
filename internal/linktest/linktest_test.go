@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
 // TestLink_RecognizedByContract asserts that a fixture created via Link is

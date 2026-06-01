@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // fakeAddDeps is a minimal AddDeps for fault injection in backup tests.

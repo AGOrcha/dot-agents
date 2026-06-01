@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/NikashPrakash/dot-agents/commands/sync"
+	"github.com/AGOrcha/dot-agents/commands/sync"
 	"github.com/spf13/cobra"
 )
 

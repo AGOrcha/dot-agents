@@ -1,6 +1,6 @@
 package kg
 
-import "github.com/NikashPrakash/dot-agents/internal/graphstore"
+import "github.com/AGOrcha/dot-agents/internal/graphstore"
 
 // GlobalFlags mirrors the subset of commands.Flags used by kg subcommands.
 type GlobalFlags struct {

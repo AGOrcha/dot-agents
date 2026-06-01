@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 )
 
 // Resolver produces an effective-config Snapshot from a set of layers. The FLAT

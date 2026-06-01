@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+import "github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 
 // RunRemove removes an MCP file from ~/.agents/mcp/<scope>/, with the
 // dry-run + confirm gates handled inside cmdutil.RunCanonicalRemove.

@@ -18,7 +18,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/NikashPrakash/dot-agents/internal/fsops"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
 // LockVersion is the current .agentsrc.lock schema version.

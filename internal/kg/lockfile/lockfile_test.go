@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 )
 
 var fixedTime = time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC)

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // snapshotEntry captures one path under a root with a hash of its contents

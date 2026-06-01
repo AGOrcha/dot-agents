@@ -1,7 +1,7 @@
 package skills
 
 import (
-	"github.com/NikashPrakash/dot-agents/internal/projectsync"
+	"github.com/AGOrcha/dot-agents/internal/projectsync"
 )
 
 // List prints skills under ~/.agents/skills/<scope>/.

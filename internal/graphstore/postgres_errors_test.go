@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
 // TestOpenPostgres_PingError exercises the ping-failure path: a syntactically

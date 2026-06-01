@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/adapters/builtin/none"
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/kg/lockfile"
-	"github.com/NikashPrakash/dot-agents/internal/kg/registry"
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
+	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 	"github.com/spf13/cobra"
 )
 

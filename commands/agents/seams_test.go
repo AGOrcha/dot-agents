@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // fakeReadlinker is the agents-package readlinker fake. Its nil readlink

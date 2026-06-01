@@ -27,7 +27,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/NikashPrakash/dot-agents/internal/scoring"
+	"github.com/AGOrcha/dot-agents/internal/scoring"
 	"github.com/spf13/cobra"
 )
 

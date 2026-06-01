@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"

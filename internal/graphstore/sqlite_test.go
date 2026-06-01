@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
-	"github.com/NikashPrakash/dot-agents/internal/graphstore/internal/storetest"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore/internal/storetest"
 )
 
 // openTestStoreInterface adapts openTestStore (returns *SQLiteStore) to

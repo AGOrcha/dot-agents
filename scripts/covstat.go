@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/scripts/internal/covprofile"
+	"github.com/AGOrcha/dot-agents/scripts/internal/covprofile"
 )
 
 // block / fileBlocks alias the shared covprofile types so the

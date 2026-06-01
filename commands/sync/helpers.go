@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/gitremote"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/gitremote"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	"golang.org/x/sys/execabs"
 )
 

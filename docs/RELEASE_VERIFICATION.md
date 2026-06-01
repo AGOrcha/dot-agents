@@ -43,7 +43,7 @@ Replace `VERSION` with the release tag you downloaded, e.g. `0.3.3`.
 
 ### 1. Download the release assets
 
-From the [releases page](https://github.com/NikashPrakash/dot-agents/releases)
+From the [releases page](https://github.com/AGOrcha/dot-agents/releases)
 or via `gh`, download:
 
 - The binary archive for your platform, e.g.
@@ -55,7 +55,7 @@ or via `gh`, download:
 VERSION=0.3.3
 TAG="v${VERSION}"
 gh release download "${TAG}" \
-  --repo NikashPrakash/dot-agents \
+  --repo AGOrcha/dot-agents \
   --pattern 'checksums.txt*' \
   --pattern "dot-agents_${VERSION}_$(uname -s | tr A-Z a-z)_$(uname -m).tar.gz"
 ```
@@ -65,7 +65,7 @@ gh release download "${TAG}" \
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.bundle \
-  --certificate-identity-regexp "^https://github.com/NikashPrakash/dot-agents/.github/workflows/auto-release.yml@refs/heads/master$" \
+  --certificate-identity-regexp "^https://github.com/AGOrcha/dot-agents/.github/workflows/auto-release.yml@refs/heads/master$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   checksums.txt
 ```
@@ -116,7 +116,7 @@ dot-agents_0.3.3_darwin_arm64.tar.gz: OK
 ### 4. Install
 
 Extract the archive and move `da` onto your `PATH`. Verifying after
-download is sufficient — `brew install dot-agents` and the install
+download is sufficient — `brew install da` and the install
 script do not currently invoke cosign automatically.
 
 ## Transparency log lookup
@@ -128,7 +128,7 @@ was recorded:
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.bundle \
-  --certificate-identity-regexp "^https://github.com/NikashPrakash/dot-agents/.github/workflows/auto-release.yml@refs/heads/master$" \
+  --certificate-identity-regexp "^https://github.com/AGOrcha/dot-agents/.github/workflows/auto-release.yml@refs/heads/master$" \
   --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
   --rekor-url "https://rekor.sigstore.dev" \
   checksums.txt

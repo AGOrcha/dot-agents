@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/NikashPrakash/dot-agents/commands/hooks"
+	"github.com/AGOrcha/dot-agents/commands/hooks"
 	"github.com/spf13/cobra"
 )
 

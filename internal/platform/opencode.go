@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 

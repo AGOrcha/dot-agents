@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
 func hookKindLabel(kind platform.HookSourceKind) string {

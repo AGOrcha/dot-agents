@@ -71,7 +71,7 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: |
           go build \
-            -ldflags "-X github.com/NikashPrakash/dot-agents/commands.Version=${{ steps.version.outputs.version }} -X github.com/NikashPrakash/dot-agents/commands.Commit=${GITHUB_SHA} -X github.com/NikashPrakash/dot-agents/commands.Describe=v${{ steps.version.outputs.version }}" \
+            -ldflags "-X github.com/AGOrcha/dot-agents/commands.Version=${{ steps.version.outputs.version }} -X github.com/AGOrcha/dot-agents/commands.Commit=${GITHUB_SHA} -X github.com/AGOrcha/dot-agents/commands.Describe=v${{ steps.version.outputs.version }}" \
             -o ./bin/da ./cmd/da
 
       - name: Verify CLI version matches

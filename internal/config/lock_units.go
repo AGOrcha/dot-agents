@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/NikashPrakash/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 )
 
 // LockSectionUnits is the agentslock section name for the unified units model

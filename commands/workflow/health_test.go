@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // TestComputeWorkflowHealth_CompletedPlansPendingArchive verifies the new field is

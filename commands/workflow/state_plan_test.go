@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 func seedWorkflowStateContext(t *testing.T, repo, agentsHome string) {

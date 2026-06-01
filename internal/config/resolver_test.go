@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 )
 
 // FlatResolver must satisfy the Resolver interface.

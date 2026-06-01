@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestRunList_ListsMCPConfigs, TestRunList_EmptyScope, TestRunList_MissingScope,

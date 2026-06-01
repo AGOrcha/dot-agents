@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/fsops"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
 // This file adds the tier-2 (packages) source-type plumbing: the OCI registry

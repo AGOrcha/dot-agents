@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 // RunShow renders metadata for a single canonical rule file. Exported so the

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
 	"github.com/spf13/cobra"
 	_ "modernc.org/sqlite"
 )

@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+import "github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 
 // RunShow prints metadata for one canonical MCP file. The resolve path
 // goes through findMCPSpec; deps is threaded in so the parent commands

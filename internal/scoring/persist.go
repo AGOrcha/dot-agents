@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/NikashPrakash/dot-agents/internal/fsops"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"go.yaml.in/yaml/v3"
 )
 

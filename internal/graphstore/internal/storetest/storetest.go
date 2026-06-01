@@ -18,7 +18,7 @@ package storetest
 import (
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
 // OpenStore returns a fresh, empty graphstore.Store for one test

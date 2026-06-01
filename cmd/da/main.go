@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/NikashPrakash/dot-agents/commands"
+	"github.com/AGOrcha/dot-agents/commands"
 )
 
 func main() {

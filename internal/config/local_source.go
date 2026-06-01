@@ -29,7 +29,7 @@ import (
 
 	git "github.com/go-git/go-git/v6"
 
-	"github.com/NikashPrakash/dot-agents/internal/fsops"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
 // localSourceID is the source id the local git-backed `~/.agents` repo resolves

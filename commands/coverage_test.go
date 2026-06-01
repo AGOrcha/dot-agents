@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/spf13/cobra"
 )
 

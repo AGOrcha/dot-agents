@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/globalflagcov"
+	"github.com/AGOrcha/dot-agents/internal/globalflagcov"
 )
 
 func main() {

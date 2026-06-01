@@ -13,7 +13,7 @@ const SITE_BASE = IS_CLOUDFLARE ? '' : '/dot-agents';
 const SITE_URL = IS_CLOUDFLARE
   ? 'https://agorcha.dev'
   : 'https://nikashprakash.github.io';
-const GITHUB_BLOB = 'https://github.com/NikashPrakash/dot-agents/blob/master';
+const GITHUB_BLOB = 'https://github.com/AGOrcha/dot-agents/blob/master';
 
 // Rewrite intra-doc markdown links so that:
 //   - ./DEMO_<NAME>.md       → /dot-agents/demos/demo_<name>/    (in-site page)

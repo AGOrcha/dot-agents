@@ -1,7 +1,7 @@
 package agents
 
 import (
-	"github.com/NikashPrakash/dot-agents/internal/projectsync"
+	"github.com/AGOrcha/dot-agents/internal/projectsync"
 )
 
 func listAgents(scope string) error {

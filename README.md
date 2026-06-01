@@ -6,7 +6,7 @@ One CLI to manage configurations and workflow state across Cursor, Claude Code, 
 
 ```bash
 # Install
-brew tap AGOrcha/tap && brew install dot-agents
+brew tap AGOrcha/tap && brew install da
 
 # Set up
 da init
@@ -124,7 +124,7 @@ coordination is on the roadmap; see the Roadmap section below.
 
 ```bash
 brew tap AGOrcha/tap
-brew install dot-agents
+brew install da
 ```
 
 ### Install script
@@ -133,23 +133,24 @@ Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.sh | bash
 ```
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.ps1 | iex
 ```
 
 ### Go toolchain (`go install`)
 
-If you already have Go, install the CLI straight from source with the Go
-toolchain:
+If you already have **Go 1.26.2+**, install the CLI straight from source with
+the Go toolchain (or set `GOTOOLCHAIN=auto` to let Go fetch the required
+toolchain automatically):
 
 ```bash
-go install github.com/NikashPrakash/dot-agents/cmd/da@latest
+go install github.com/AGOrcha/dot-agents/cmd/da@latest
 # or
-go install github.com/NikashPrakash/dot-agents/cmd/da@<release-version>
+go install github.com/AGOrcha/dot-agents/cmd/da@<release-version>
 ```
 
 The `da` binary is placed in `$(go env GOBIN)` (falling back to
@@ -157,8 +158,10 @@ The `da` binary is placed in `$(go env GOBIN)` (falling back to
 
 ### Manual (from source)
 
+Requires **Go 1.26.2+** (or set `GOTOOLCHAIN=auto`).
+
 ```bash
-git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
+git clone https://github.com/AGOrcha/dot-agents ~/.dot-agents
 cd ~/.dot-agents
 go build -ldflags "-s -w" -o ./bin/da ./cmd/da
 export PATH="$HOME/.dot-agents/bin:$PATH"
@@ -175,6 +178,7 @@ step-by-step `cosign verify-blob` recipe.
 
 ```bash
 # 1. Initialize ~/.agents/ with starter skills, agents, hooks, and config
+#    (prompts to confirm; pass -y to run non-interactively)
 da init
 
 # 2. Add a project
@@ -431,8 +435,9 @@ da add ~/Github/myproject  # Re-link your projects
 
 ## Requirements
 
-- **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
-- **Windows:** use `scripts/install.ps1` for the Go CLI.
+- **macOS** or **Linux** for the CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
+- **Windows:** use `scripts/install.ps1` for the CLI.
+- **Go 1.26.2+** — only for `go install` or building from source. The Homebrew and `scripts/install.sh` paths ship a prebuilt binary and need no Go toolchain. (Set `GOTOOLCHAIN=auto` to auto-fetch the toolchain.)
 - **git** (for sync features)
 
 ## Configuration

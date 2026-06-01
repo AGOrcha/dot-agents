@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // fakeReviewDeps is the interface-DI test double for reviewDeps (mirrors

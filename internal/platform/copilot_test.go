@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
 )
 
 // TestCopilotSharedTargetIntentsPopulated drives the skills+agents combination.

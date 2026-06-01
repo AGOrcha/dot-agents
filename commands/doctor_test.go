@@ -32,9 +32,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
 )
 
 // fakeDoctorConfigLoader is the interface-DI test double for

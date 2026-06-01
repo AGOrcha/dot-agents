@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
 const (

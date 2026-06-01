@@ -25,8 +25,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
-	"github.com/NikashPrakash/dot-agents/internal/graphstore/internal/storetest"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore/internal/storetest"
 )
 
 // newSmokeStore returns a fresh SQLite-backed graphstore.Store for one

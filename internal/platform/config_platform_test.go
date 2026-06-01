@@ -3,7 +3,7 @@ package platform
 import (
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 func TestInstalledEnabledPlatforms_AllDisabled(t *testing.T) {

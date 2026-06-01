@@ -12,7 +12,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const commandsPkgPath = "github.com/NikashPrakash/dot-agents/commands"
+const commandsPkgPath = "github.com/AGOrcha/dot-agents/commands"
 
 type staticAnalysis struct {
 	pkgs []*packages.Package

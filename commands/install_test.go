@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // fakeInstallDeps is the interface-DI test double for lifecycle.InstallDeps

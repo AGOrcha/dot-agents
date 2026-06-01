@@ -188,7 +188,7 @@ func initRepoWithOrigin(t *testing.T, originURL string) string {
 }
 
 func TestReadOriginURL_ReturnsConfiguredURL(t *testing.T) {
-	want := "git@github.com:NikashPrakash/dot-agents.git"
+	want := "git@github.com:AGOrcha/dot-agents.git"
 	dir := initRepoWithOrigin(t, want)
 	got, err := ReadOriginURL(dir)
 	if err != nil {

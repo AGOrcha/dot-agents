@@ -1,6 +1,6 @@
 package platform
 
-import "github.com/NikashPrakash/dot-agents/internal/config"
+import "github.com/AGOrcha/dot-agents/internal/config"
 
 // InstalledEnabledPlatforms returns platforms that are enabled in cfg and detected
 // as installed on this machine. Order matches All().

@@ -1,6 +1,6 @@
 package hooks
 
-import "github.com/NikashPrakash/dot-agents/internal/platform"
+import "github.com/AGOrcha/dot-agents/internal/platform"
 
 // hookSpecResolver is the dependency seam for the hook-bundle removal
 // pipeline: the three deeper operations runHooksRemove sequences before

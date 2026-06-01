@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // TestResolveReviewOverallDecision covers the consolidation rules used by

@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/links"
-	"github.com/NikashPrakash/dot-agents/internal/platform"
-	scaffoldhome "github.com/NikashPrakash/dot-agents/internal/scaffold/home"
-	scaffoldhooks "github.com/NikashPrakash/dot-agents/internal/scaffold/hooks"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/platform"
+	scaffoldhome "github.com/AGOrcha/dot-agents/internal/scaffold/home"
+	scaffoldhooks "github.com/AGOrcha/dot-agents/internal/scaffold/hooks"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 

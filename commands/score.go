@@ -17,8 +17,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	wf "github.com/NikashPrakash/dot-agents/commands/workflow"
-	"github.com/NikashPrakash/dot-agents/internal/scoring"
+	wf "github.com/AGOrcha/dot-agents/commands/workflow"
+	"github.com/AGOrcha/dot-agents/internal/scoring"
 	"github.com/spf13/cobra"
 )
 

@@ -11,7 +11,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	tcwait "github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
 // One Postgres container is shared by every test in this package: starting a
