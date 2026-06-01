@@ -1782,3 +1782,107 @@ func TestLockDriftMessageAndHint(t *testing.T) {
 		}
 	}
 }
+
+// ---------- D4: headline link count == real managed-link count ----------
+
+// countPlatformLinksOkSum is the independent oracle for the expected healthy
+// count: it sums every platform's LinkCounter.CountLinks ok return — the same
+// source of truth the badge row and per-platform verbose audit consume. The
+// headline "N links healthy" must equal this, not the partial cursor+claude-
+// rules+single-file subset doctor used to recount on its own (D4 bug #1).
+func countPlatformLinksOkSum(t *testing.T, name, path, agentsHome string) int {
+	t.Helper()
+	sum := 0
+	for _, p := range platform.All() {
+		c, ok := p.(platform.LinkCounter)
+		if !ok {
+			continue
+		}
+		platformOK, _ := c.CountLinks(name, path, agentsHome)
+		sum += platformOK
+	}
+	return sum
+}
+
+// TestCountProjectLinks_HeadlineMatchesPerPlatformAudit seeds managed links
+// spanning several platforms (claude rules + agents dir, codex AGENTS.md +
+// hooks.json, opencode.json, copilot instructions) and asserts the headline
+// ok tally returned by countProjectLinks equals the per-platform CountLinks
+// sum — proving the count can no longer undercount (the "1 links healthy"
+// while ~28 exist regression).
+func TestCountProjectLinks_HeadlineMatchesPerPlatformAudit(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	mkLink := func(src, dst string) {
+		t.Helper()
+		os.MkdirAll(filepath.Dir(src), 0755)
+		os.WriteFile(src, []byte("ok"), 0644)
+		os.MkdirAll(filepath.Dir(dst), 0755)
+		linktest.Link(t, src, dst)
+	}
+
+	// Claude rules symlink + a managed agent under .claude/agents/.
+	mkLink(filepath.Join(agentsHome, "rules", "proj", "agents.md"),
+		filepath.Join(projectPath, ".claude", "rules", "proj--agents.md"))
+	mkLink(filepath.Join(agentsHome, "agents", "proj", "helper.md"),
+		filepath.Join(projectPath, ".claude", "agents", "helper.md"))
+
+	// Codex AGENTS.md symlink + present-but-rendered .codex/hooks.json.
+	mkLink(filepath.Join(agentsHome, "rules", "proj", "AGENTS.md"),
+		filepath.Join(projectPath, "AGENTS.md"))
+	os.MkdirAll(filepath.Join(projectPath, ".codex"), 0755)
+	os.WriteFile(filepath.Join(projectPath, ".codex", "hooks.json"), []byte("{}"), 0644)
+
+	// OpenCode opencode.json symlink.
+	mkLink(filepath.Join(agentsHome, "settings", "proj", "opencode.json"),
+		filepath.Join(projectPath, "opencode.json"))
+
+	// Copilot instructions symlink.
+	mkLink(filepath.Join(agentsHome, "rules", "proj", "copilot-instructions.md"),
+		filepath.Join(projectPath, ".github", "copilot-instructions.md"))
+
+	wantOK := countPlatformLinksOkSum(t, "proj", projectPath, agentsHome)
+	gotOK, broken := countProjectLinks("proj", projectPath, agentsHome)
+	if broken != 0 {
+		t.Errorf("expected 0 broken, got %d", broken)
+	}
+	if gotOK != wantOK {
+		t.Errorf("headline ok=%d does not match per-platform CountLinks sum=%d", gotOK, wantOK)
+	}
+	// Guard against the silent-undercount regression: the seeded tree spans
+	// >=5 managed entries across platforms, so a partial recount would land
+	// well below this floor.
+	if gotOK < 5 {
+		t.Errorf("expected headline ok>=5 for multi-platform tree, got %d", gotOK)
+	}
+}
+
+// TestCountPlatformLinksOk_DelegatesToEveryCounter pins that the helper sums
+// across all platforms (not just one) by comparing against the oracle.
+func TestCountPlatformLinksOk_DelegatesToEveryCounter(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, "agents")
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	// One healthy link each for claude (rules) and codex (AGENTS.md).
+	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
+	os.MkdirAll(filepath.Dir(target), 0755)
+	os.WriteFile(target, []byte("ok"), 0644)
+	claudeRules := filepath.Join(projectPath, ".claude", "rules")
+	os.MkdirAll(claudeRules, 0755)
+	linktest.Link(t, target, filepath.Join(claudeRules, "proj--agents.md"))
+	linktest.Link(t, target, filepath.Join(projectPath, "AGENTS.md"))
+
+	got := countPlatformLinksOk("proj", projectPath, agentsHome)
+	want := countPlatformLinksOkSum(t, "proj", projectPath, agentsHome)
+	if got != want {
+		t.Errorf("countPlatformLinksOk=%d, oracle=%d", got, want)
+	}
+	if got < 2 {
+		t.Errorf("expected at least 2 (claude rule + codex AGENTS.md), got %d", got)
+	}
+}

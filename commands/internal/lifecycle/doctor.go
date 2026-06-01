@@ -20,15 +20,10 @@ const (
 	doctorClaudeDir   = ".claude"
 )
 
-// Owned repo-relative file/name constants shared across doctor's link
-// collectors. Centralized so the broken-link and OK-count paths cannot drift.
-const (
-	doctorAgentsMD     = "AGENTS.md"
-	doctorCopilotInstr = "copilot-instructions.md"
-	doctorMCPJSON      = "mcp.json"
-	doctorOpenCodeJSON = "opencode.json"
-	doctorGlobalPrefix = "global--"
-)
+// doctorGlobalPrefix is the canonical scope prefix for a global-scoped
+// managed rule entry (e.g. .claude/rules/global--<name>). Used by the
+// Windows hard-link classifier claudeRuleHardlinked.
+const doctorGlobalPrefix = "global--"
 
 // DoctorConfigLoader is the narrow collaborator doctor.go's
 // fault-injectable LoadConfig operation needs (interface-DI per
@@ -650,25 +645,13 @@ type brokenLink struct {
 
 // resolveLinkDest and managedLinkBroken live in status.go (intra-package;
 // were duplicated in commands/doctor.go before t09 collapsed the
-// duplicates per SHAPE.md OD-2). managedLinkHealthy is doctor-specific
-// (status.go has no caller) so it stays here.
-
-// managedLinkHealthy reports whether linkPath is a resolvable managed link
-// whose target exists. Used by OK-count paths for symlink/junction links.
-func managedLinkHealthy(linkPath string) bool {
-	raw, ok := links.ManagedLinkTarget(linkPath)
-	if !ok {
-		return false
-	}
-	_, err := os.Stat(resolveLinkDest(linkPath, raw))
-	return err == nil
-}
+// duplicates per SHAPE.md OD-2).
 
 // claudeRuleHardlinked reports whether a .claude/rules entry is a Windows
 // managed *file* hard link to its canonical rule source. The entry name is
 // "<scope>--<rest>" where scope is "global" or the project name; the source
 // lives at <agentsHome>/rules/<scope>/<rest> with a .mdc→.md fallback. On
-// POSIX these are symlinks (handled by managedLinkHealthy) so this is a
+// POSIX these are symlinks (resolved via managedLinkBroken) so this is a
 // no-op there.
 func claudeRuleHardlinked(linkPath, entryName, projectName, agentsHome string) bool {
 	scope, rest := "", ""
@@ -687,28 +670,6 @@ func claudeRuleHardlinked(linkPath, entryName, projectName, agentsHome string) b
 	src2 := filepath.Join(agentsHome, "rules", scope, strings.TrimSuffix(rest, ".mdc")+".md")
 	linked, _ := links.AreHardlinked(linkPath, src2)
 	return linked
-}
-
-// cursorRuleHardlinkedAny reports whether linkPath is a hardlink to the
-// canonical cursor source (with .mdc→.md fallback) and returns the primary
-// source path used (regardless of which one matched).
-//
-// Surviving caller after P1 broken-link migration: countCursorOk in this
-// file (P3 scope). The cursor broken-link enumeration moved to
-// internal/platform/cursor.go (BrokenLinkReporter), which carries its own
-// hard-link helpers; this lifecycle copy stays until the OK-count path also
-// migrates in P3.
-func cursorRuleHardlinkedAny(linkPath, scope, rest, agentsHome string) (src string, linked bool) {
-	src = filepath.Join(agentsHome, "rules", scope, rest)
-	if ok, _ := links.AreHardlinked(linkPath, src); ok {
-		return src, true
-	}
-	srcMD := strings.TrimSuffix(rest, ".mdc") + ".md"
-	src2 := filepath.Join(agentsHome, "rules", scope, srcMD)
-	if ok, _ := links.AreHardlinked(linkPath, src2); ok {
-		return src, true
-	}
-	return src, false
 }
 
 // collectBrokenLinks returns all broken managed links for a project.
@@ -792,87 +753,35 @@ func collectBrokenUserLinks(_ string) []brokenLink {
 	return broken
 }
 
-// countCursorOk returns the number of healthy cursor rule hardlinks for a
-// project. Note: this only counts entries scoped to "global" (matching the
-// original implementation, which silently skipped project-scope entries).
-func countCursorOk(name, path, agentsHome string) int {
-	cursorRulesDir := filepath.Join(path, ".cursor", "rules")
-	entries, err := os.ReadDir(cursorRulesDir)
-	if err != nil {
-		return 0
-	}
-	ok := 0
-	for _, e := range entries {
-		if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
-			continue
-		}
-		if !strings.HasPrefix(e.Name(), doctorGlobalPrefix) {
-			continue
-		}
-		_ = name // preserved signature; global-scope entries do not depend on project name
-		f := filepath.Join(cursorRulesDir, e.Name())
-		rest := strings.TrimPrefix(e.Name(), doctorGlobalPrefix)
-		if _, linked := cursorRuleHardlinkedAny(f, "global", rest, agentsHome); linked {
-			ok++
-		}
-	}
-	return ok
-}
-
-// countClaudeRulesOk returns the number of healthy claude rule references for
-// a project (symlink/junction with reachable target, OR Windows hardlink to
-// the canonical source).
-func countClaudeRulesOk(name, path, agentsHome string) int {
-	claudeRulesDir := filepath.Join(path, doctorClaudeDir, "rules")
-	entries, err := os.ReadDir(claudeRulesDir)
-	if err != nil {
-		return 0
-	}
-	ok := 0
-	for _, e := range entries {
-		linkPath := filepath.Join(claudeRulesDir, e.Name())
-		if managedLinkHealthy(linkPath) || claudeRuleHardlinked(linkPath, e.Name(), name, agentsHome) {
-			ok++
-		}
-	}
-	return ok
-}
-
-// projectSingleFileSources returns the canonical (dst, src) pairs for
-// single-file managed links checked by countProjectLinks.
-func projectSingleFileSources(name, path, agentsHome string) []struct{ dst, src string } {
-	return []struct{ dst, src string }{
-		{filepath.Join(path, doctorAgentsMD), filepath.Join(agentsHome, "rules", name, doctorAgentsMD)},
-		{filepath.Join(path, ".github", doctorCopilotInstr), filepath.Join(agentsHome, "rules", name, doctorCopilotInstr)},
-		{filepath.Join(path, doctorOpenCodeJSON), filepath.Join(agentsHome, "settings", name, doctorOpenCodeJSON)},
-		{filepath.Join(path, ".mcp.json"), filepath.Join(agentsHome, "mcp", name, doctorMCPJSON)},
-		{filepath.Join(path, ".vscode", doctorMCPJSON), filepath.Join(agentsHome, "mcp", name, "mcp.json.vscode")},
-	}
-}
-
-// countSingleFilesOk returns the number of healthy single-file managed links
-// (symlink/junction OR hardlink to canonical source).
-func countSingleFilesOk(name, path, agentsHome string) int {
-	ok := 0
-	for _, sf := range projectSingleFileSources(name, path, agentsHome) {
-		if managedLinkHealthy(sf.dst) {
-			ok++
-			continue
-		}
-		if linked, _ := links.AreHardlinked(sf.dst, sf.src); linked {
-			ok++
-		}
-	}
-	return ok
-}
-
-// countProjectLinks returns (ok, broken) counts for all managed links in a project.
+// countProjectLinks returns (ok, broken) counts for all managed links in a
+// project. The healthy tally is delegated to each platform's LinkCounter
+// (the same source of truth that drives the badge row and the per-platform
+// verbose audit), so the headline "N links healthy" matches the real managed
+// link count on disk rather than the partial cursor+claude-rules+single-file
+// subset the doctor used to recount on its own. Broken links continue to come
+// from the BrokenLinkReporter enumeration (collectBrokenLinks) because that
+// path also feeds the broken-link detail rendering and the repair trigger.
 func countProjectLinks(name, path, agentsHome string) (int, int) {
 	brokenCount := len(collectBrokenLinks(name, path, agentsHome))
-	ok := countCursorOk(name, path, agentsHome) +
-		countClaudeRulesOk(name, path, agentsHome) +
-		countSingleFilesOk(name, path, agentsHome)
+	ok := countPlatformLinksOk(name, path, agentsHome)
 	return ok, brokenCount
+}
+
+// countPlatformLinksOk sums the healthy managed-link tally reported by every
+// platform that implements platform.LinkCounter. Only the ok return is used;
+// the broken return is intentionally ignored here so it is not double-counted
+// against the BrokenLinkReporter enumeration that owns broken-link reporting.
+func countPlatformLinksOk(name, path, agentsHome string) int {
+	ok := 0
+	for _, p := range platform.All() {
+		c, isCounter := p.(platform.LinkCounter)
+		if !isCounter {
+			continue
+		}
+		platformOK, _ := c.CountLinks(name, path, agentsHome)
+		ok += platformOK
+	}
+	return ok
 }
 
 // printUserConfigStatus prints detailed user-level config status (healthy + broken).

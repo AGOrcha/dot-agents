@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -438,7 +439,7 @@ func TestCollectUserConfigPlatforms_FilterIsolation(t *testing.T) {
 func TestCollectProjectTextBadges_EmptyProject(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
-	got := collectProjectTextBadges("proj", tmp, agentsHome)
+	got := collectProjectTextBadges("proj", tmp, agentsHome, nil)
 	if len(got) != 5 {
 		t.Fatalf("expected 5 badges, got %d (%+v)", len(got), got)
 	}
@@ -486,7 +487,7 @@ func TestCollectProjectTextBadges_CursorGlobalHardlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := collectProjectTextBadges("proj", tmp, agentsHome)
+	got := collectProjectTextBadges("proj", tmp, agentsHome, nil)
 	cursor := findBadge(t, got, "Cursor")
 	if !cursor.present || cursor.broken {
 		t.Errorf("expected Cursor badge present+ok, got %+v", cursor)
@@ -523,7 +524,7 @@ func TestCollectProjectTextBadges_CursorMDFallbackAndWarn(t *testing.T) {
 	// Backup artifact (continue).
 	os.WriteFile(filepath.Join(rulesDir, "global--x.mdc.dot-agents-backup"), []byte("x"), 0644)
 
-	got := collectProjectTextBadges("proj", tmp, agentsHome)
+	got := collectProjectTextBadges("proj", tmp, agentsHome, nil)
 	cursor := findBadge(t, got, "Cursor")
 	if !cursor.present {
 		t.Errorf("expected Cursor.present=true (md fallback link), got %+v", cursor)
@@ -1138,7 +1139,7 @@ func TestCollectUserConfigPlatforms_Populated(t *testing.T) {
 // pre-P3 behavior: every badge reports not-present, not-broken.
 func TestPlatformTextBadges_Empty(t *testing.T) {
 	tmp := t.TempDir()
-	got := collectProjectTextBadges("proj", tmp, filepath.Join(tmp, ".agents"))
+	got := collectProjectTextBadges("proj", tmp, filepath.Join(tmp, ".agents"), nil)
 	for _, label := range []string{"Codex", "OpenCode", "Copilot"} {
 		badge := findBadge(t, got, label)
 		if badge.present {
@@ -1705,5 +1706,184 @@ func TestBuildStatusJSONLock_ReportsDrift(t *testing.T) {
 	}
 	if len(got.DriftedLayers) != 1 || got.DriftedLayers[0] != "acme:org/missing.json" {
 		t.Errorf("expected one drifted layer acme:org/missing.json, got %+v", got.DriftedLayers)
+	}
+}
+
+// ---------- D4: platform header gated on config-enabled ∧ installed ----------
+
+// TestCollectProjectTextBadges_GatedByEnabledAndInstalled proves the header
+// badges are driven by config.json enabled flags ∧ the real install probe,
+// not by stray managed artifacts on disk (D4 bug #2). The project tree seeds
+// managed links for opencode and copilot so their raw Badge would report
+// present=true; the cfg disables opencode and leaves copilot uninstalled, so
+// both must render not-present. cursor is enabled+installed with a healthy
+// rule, so it stays present.
+func TestCollectProjectTextBadges_GatedByEnabledAndInstalled(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// Hermetic PATH: only the seeded shims resolve, so copilot/codex are
+	// guaranteed not-installed regardless of the host machine's real PATH.
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH/shim seeding semantics differ on Windows; skip there")
+	}
+	binDir := filepath.Join(tmp, "fakebin")
+	os.MkdirAll(binDir, 0o755)
+	shim := "#!/bin/sh\necho \"$(basename \"$0\") 0.0.0\"\n"
+	for _, n := range []string{"cursor", "opencode"} {
+		if err := os.WriteFile(filepath.Join(binDir, n), []byte(shim), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "proj")
+	os.MkdirAll(projectPath, 0755)
+
+	// Cursor: healthy global hardlink → raw Badge present.
+	cursorSrc := filepath.Join(agentsHome, "rules", "global", "r.mdc")
+	os.MkdirAll(filepath.Dir(cursorSrc), 0755)
+	os.WriteFile(cursorSrc, []byte("rule"), 0644)
+	cursorRules := filepath.Join(projectPath, ".cursor", "rules")
+	os.MkdirAll(cursorRules, 0755)
+	if err := os.Link(cursorSrc, filepath.Join(cursorRules, "global--r.mdc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// OpenCode: opencode.json symlink → raw Badge present (but disabled in cfg).
+	ocTarget := filepath.Join(agentsHome, "settings", "proj", "opencode.json")
+	os.MkdirAll(filepath.Dir(ocTarget), 0755)
+	os.WriteFile(ocTarget, []byte("{}"), 0644)
+	linktest.Link(t, ocTarget, filepath.Join(projectPath, "opencode.json"))
+
+	// Copilot: instructions symlink → raw Badge present (but not installed).
+	cpTarget := filepath.Join(agentsHome, "rules", "proj", "copilot-instructions.md")
+	os.MkdirAll(filepath.Dir(cpTarget), 0755)
+	os.WriteFile(cpTarget, []byte("# c"), 0644)
+	linktest.Link(t, cpTarget, filepath.Join(projectPath, ".github", "copilot-instructions.md"))
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.SetPlatformState("cursor", true, "")
+	cfg.SetPlatformState("opencode", false, "") // disabled despite installed + present
+	cfg.SetPlatformState("copilot", true, "")   // enabled but not installed
+
+	badges := collectProjectTextBadges("proj", projectPath, agentsHome, cfg)
+
+	cases := []struct {
+		name        string
+		wantPresent bool
+	}{
+		{"Cursor", true},    // enabled ∧ installed ∧ present
+		{"OpenCode", false}, // disabled in cfg
+		{"Copilot", false},  // not installed
+	}
+	for _, c := range cases {
+		b := findBadge(t, badges, c.name)
+		if b.present != c.wantPresent {
+			t.Errorf("%s badge.present = %v, want %v (header must reflect enabled∧installed)", c.name, b.present, c.wantPresent)
+		}
+		if !c.wantPresent && b.broken {
+			t.Errorf("%s badge.broken = true; a gated-off platform must not surface broken", c.name)
+		}
+	}
+}
+
+// TestCollectProjectTextBadges_NilCfgPreservesRawBadges pins the legacy
+// behavior: with a nil cfg (no gating context) the raw per-platform Badge
+// values pass through unchanged.
+func TestCollectProjectTextBadges_NilCfgPreservesRawBadges(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	cursorSrc := filepath.Join(agentsHome, "rules", "global", "r.mdc")
+	os.MkdirAll(filepath.Dir(cursorSrc), 0755)
+	os.WriteFile(cursorSrc, []byte("rule"), 0644)
+	cursorRules := filepath.Join(tmp, ".cursor", "rules")
+	os.MkdirAll(cursorRules, 0755)
+	if err := os.Link(cursorSrc, filepath.Join(cursorRules, "global--r.mdc")); err != nil {
+		t.Fatal(err)
+	}
+	badges := collectProjectTextBadges("proj", tmp, agentsHome, nil)
+	if !findBadge(t, badges, "Cursor").present {
+		t.Error("nil cfg must preserve raw Cursor badge present=true")
+	}
+}
+
+// TestInstalledEnabledPlatformIDs covers both the nil-cfg (empty set) branch
+// and the populated branch via an enabled+installed claude.
+func TestInstalledEnabledPlatformIDs(t *testing.T) {
+	if got := installedEnabledPlatformIDs(nil); len(got) != 0 {
+		t.Errorf("nil cfg expected empty set, got %+v", got)
+	}
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.SetPlatformState("claude", true, "")
+	cfg.SetPlatformState("cursor", false, "")
+	got := installedEnabledPlatformIDs(cfg)
+	if !got["claude"] {
+		t.Errorf("expected claude in enabled+installed set, got %+v", got)
+	}
+	if got["cursor"] {
+		t.Error("disabled cursor must not appear in the set")
+	}
+}
+
+// ---------- D4: present rendered files are not labeled absent ----------
+
+// TestPrintCodexSymlinkAudit_PresentFileIsLocalNotAbsent proves a present-but-
+// not-a-symlink rendered file (e.g. .codex/hooks.json) renders "(local file)"
+// rather than "(not linked)" (D4 bug #3), while a truly absent path still
+// renders "(not linked)".
+func TestPrintCodexSymlinkAudit_PresentFileIsLocalNotAbsent(t *testing.T) {
+	tmp := t.TempDir()
+	present := filepath.Join(tmp, "hooks.json")
+	os.WriteFile(present, []byte("{}"), 0644)
+
+	out := captureStatusStdout(t, func() { printCodexSymlinkAudit(present, ".codex/hooks.json") })
+	if !strings.Contains(out, "(local file)") {
+		t.Errorf("present rendered file should be labeled (local file), got %q", out)
+	}
+	if strings.Contains(out, "(not linked)") {
+		t.Errorf("present rendered file must not be labeled (not linked), got %q", out)
+	}
+
+	absent := captureStatusStdout(t, func() { printCodexSymlinkAudit(filepath.Join(tmp, "gone.json"), ".codex/gone.json") })
+	if !strings.Contains(absent, "(not linked)") {
+		t.Errorf("absent path should be labeled (not linked), got %q", absent)
+	}
+}
+
+// TestPrintSymlinkAudit_PresentFileIsLocalNotAbsent covers the same
+// distinction for the shared single-symlink auditor used by Claude (.mcp.json)
+// and Copilot (.vscode/mcp.json).
+func TestPrintSymlinkAudit_PresentFileIsLocalNotAbsent(t *testing.T) {
+	tmp := t.TempDir()
+	present := filepath.Join(tmp, ".mcp.json")
+	os.WriteFile(present, []byte("{}"), 0644)
+
+	out := captureStatusStdout(t, func() { printSymlinkAudit(present, ".mcp.json") })
+	if !strings.Contains(out, "(local file)") {
+		t.Errorf("present file should be (local file), got %q", out)
+	}
+	if strings.Contains(out, "(not linked)") {
+		t.Errorf("present file must not be (not linked), got %q", out)
+	}
+
+	absent := captureStatusStdout(t, func() { printSymlinkAudit(filepath.Join(tmp, "missing.json"), ".vscode/mcp.json") })
+	if !strings.Contains(absent, "(not linked)") {
+		t.Errorf("absent path should be (not linked), got %q", absent)
+	}
+
+	// Healthy symlink still renders ✓ → dest.
+	target := filepath.Join(tmp, "target.json")
+	os.WriteFile(target, []byte("{}"), 0644)
+	link := filepath.Join(tmp, "link.json")
+	linktest.Link(t, target, link)
+	healthy := captureStatusStdout(t, func() { printSymlinkAudit(link, ".mcp.json") })
+	if !strings.Contains(healthy, "→") {
+		t.Errorf("healthy symlink should render target arrow, got %q", healthy)
 	}
 }

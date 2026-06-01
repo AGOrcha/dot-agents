@@ -300,7 +300,16 @@ func printAgentsHomeGitStatusLine(agentsHome string) {
 // Codex, OpenCode, Copilot — is the order returned by platform.All(); the
 // previous status.go inline implementations are preserved at the
 // internal/platform/<name>.go layer.
-func collectProjectTextBadges(name, path, agentsHome string) []platformBadge {
+//
+// The header truth source is config.json's enabled flags (AGENTS_HOME) ∧ the
+// real platform install probe (platform.IsInstalled): a platform that is
+// disabled in config or not installed on this machine renders as not-present
+// (a dim "-") even if stray managed artifacts remain on disk, so the header
+// can never contradict the per-section detail (e.g. "(no .opencode/)" /
+// "(not linked)"). cfg may be nil in legacy call sites, in which case the
+// raw badge value is preserved (no gating).
+func collectProjectTextBadges(name, path, agentsHome string, cfg *config.Config) []platformBadge {
+	enabledInstalled := installedEnabledPlatformIDs(cfg)
 	out := make([]platformBadge, 0, 5)
 	for _, p := range platform.All() {
 		b, ok := p.(platform.StatusBadger)
@@ -308,9 +317,29 @@ func collectProjectTextBadges(name, path, agentsHome string) []platformBadge {
 			continue
 		}
 		badge := b.Badge(name, path, agentsHome)
-		out = append(out, platformBadge{name: badge.Name, present: badge.Present, broken: badge.Broken})
+		entry := platformBadge{name: badge.Name, present: badge.Present, broken: badge.Broken}
+		if cfg != nil && !enabledInstalled[p.ID()] {
+			entry.present = false
+			entry.broken = false
+		}
+		out = append(out, entry)
 	}
 	return out
+}
+
+// installedEnabledPlatformIDs returns the set of platform IDs that are both
+// enabled in cfg (config.json AGENTS_HOME flags) and detected as installed on
+// this machine, using the same probe as install/refresh
+// (platform.InstalledEnabledPlatforms). A nil cfg yields an empty set.
+func installedEnabledPlatformIDs(cfg *config.Config) map[string]bool {
+	ids := make(map[string]bool)
+	if cfg == nil {
+		return ids
+	}
+	for _, p := range platform.InstalledEnabledPlatforms(cfg) {
+		ids[p.ID()] = true
+	}
+	return ids
 }
 
 // CountClaudeRules is the exported entry point used by
@@ -532,7 +561,7 @@ func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string,
 		return
 	}
 
-	printBadgeRow(collectProjectTextBadges(name, path, agentsHome))
+	printBadgeRow(collectProjectTextBadges(name, path, agentsHome, cfg))
 	printStatusProjectManifestSummary(path)
 	printStatusProjectLockSummary(path)
 
@@ -1187,8 +1216,11 @@ func printSymlinkDirAudit(dir, emptyLabel, nameFormat string) (int, int) {
 	return okCount, brokenCount
 }
 
-// printSymlinkAudit reads a single symlink and prints its ✓/✗/(not linked)
-// status with the supplied display label.
+// printSymlinkAudit reads a single symlink and prints its ✓/✗/(local file)/
+// (not linked) status with the supplied display label. A present path that is
+// not a managed link is a rendered/managed file on disk (e.g. .mcp.json,
+// .vscode/mcp.json), reported as "(local file)"; "(not linked)" is reserved
+// for a path that is truly absent.
 func printSymlinkAudit(linkPath, label string) {
 	if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink {
 		displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
@@ -1197,9 +1229,13 @@ func printSymlinkAudit(linkPath, label string) {
 		} else {
 			fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
 		}
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+		return
 	}
+	if _, err := os.Lstat(linkPath); err == nil {
+		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+		return
+	}
+	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
 }
 
 func printClaudeAudit(_, path, _ string) {
@@ -1241,6 +1277,13 @@ func printCodexAgentsMD(path string) {
 func printCodexSymlinkAudit(path, label string) {
 	if _, isLink, _ := managedLinkBroken(path); isLink {
 		printLinkedStatusLine(label, path)
+		return
+	}
+	// A present-but-not-a-symlink path is a rendered/managed file on disk
+	// (e.g. .codex/hooks.json, .codex/config.toml), not an absent link.
+	// Only "(not linked)" when the path is truly absent.
+	if _, err := os.Lstat(path); err == nil {
+		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
 		return
 	}
 	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
