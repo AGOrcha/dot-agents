@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
 )
 
 const codexAgentMarkdownFile = "AGENT.md"

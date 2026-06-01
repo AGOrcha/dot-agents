@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // stubPlatform implements Platform with fixed SharedTargetIntents for testing

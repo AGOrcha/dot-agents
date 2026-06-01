@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/links"
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"go.yaml.in/yaml/v3"
 )
 

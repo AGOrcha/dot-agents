@@ -3,8 +3,8 @@ package skills
 import (
 	"os"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
 // skillsIO is the narrow filesystem + config-loader collaborator the skills

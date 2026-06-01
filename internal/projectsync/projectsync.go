@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // CopyFile copies src to dst, creating parent directories as needed.

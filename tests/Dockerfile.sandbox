@@ -55,7 +55,7 @@ ARG DOT_AGENTS_INSTALL_CHECKSUM=sha256:8b6c90a42c7c5fc203f39b096024e8926228cf71f
 # readable so `bash` can execute it. Integrity-pinned by --checksum and consumed
 # once; the leftover in /tmp of this ephemeral test image is harmless.
 ADD --chmod=0644 --checksum=${DOT_AGENTS_INSTALL_CHECKSUM} \
-    "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" \
+    "https://raw.githubusercontent.com/AGOrcha/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" \
     /tmp/install-dot-agents.sh
 RUN bash /tmp/install-dot-agents.sh
 ENV PATH="/home/sandbox/.local/bin:$PATH"

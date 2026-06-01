@@ -11,7 +11,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/NikashPrakash/dot-agents/internal/scoring"
+	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
 // An empty iter-log dir produces a friendly "no iterations" message rather

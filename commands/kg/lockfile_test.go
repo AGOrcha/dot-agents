@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/kg/lockfile"
-	"github.com/NikashPrakash/dot-agents/internal/kg/registry"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
+	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
 // chdir switches the process working directory to dir for the duration of the

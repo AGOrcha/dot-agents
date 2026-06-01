@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
 )
 
 // TestIsManagedLink_SymlinkAndHardlink covers the two managed-reference

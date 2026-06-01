@@ -9,7 +9,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/gitremote"
+	"github.com/AGOrcha/dot-agents/internal/gitremote"
 )
 
 // gitRemoteOriginURL is the seam that returns the origin URL for repoPath.

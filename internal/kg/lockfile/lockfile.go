@@ -23,7 +23,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 )
 
 // lockSectionAdapters is the agentslock section name this package owns. It is

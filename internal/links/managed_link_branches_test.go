@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestSymlink_SameFileIsNoop covers the os.SameFile fast-path early return

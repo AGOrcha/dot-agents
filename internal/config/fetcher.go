@@ -19,8 +19,8 @@ import (
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/storage/memory"
 
-	"github.com/NikashPrakash/dot-agents/internal/fsops"
-	"github.com/NikashPrakash/dot-agents/internal/gitremote"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
+	"github.com/AGOrcha/dot-agents/internal/gitremote"
 )
 
 // maxLayerBytes caps a fetched layer.json so a hostile or runaway source cannot

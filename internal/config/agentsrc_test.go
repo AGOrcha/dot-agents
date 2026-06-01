@@ -1583,15 +1583,15 @@ func TestGenerateAgentsRC_PopulatesRepoIDFromGitRemote(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 	withGitRemoteOriginURL(t, func(string) (string, error) {
-		return "git@github.com:NikashPrakash/dot-agents.git", nil
+		return "git@github.com:AGOrcha/dot-agents.git", nil
 	})
 
 	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
-	if rc.RepoID != "github.com/NikashPrakash/dot-agents" {
-		t.Errorf("RepoID: got %q, want %q", rc.RepoID, "github.com/NikashPrakash/dot-agents")
+	if rc.RepoID != "github.com/AGOrcha/dot-agents" {
+		t.Errorf("RepoID: got %q, want %q", rc.RepoID, "github.com/AGOrcha/dot-agents")
 	}
 }
 
@@ -1624,7 +1624,7 @@ func TestMergeGenerateAgentsRC_PreservesExplicitRepoID(t *testing.T) {
 	generated := &AgentsRC{
 		Version: 1,
 		Project: "myproject",
-		RepoID:  "github.com/NikashPrakash/dot-agents", // would-be derived
+		RepoID:  "github.com/AGOrcha/dot-agents", // would-be derived
 		Sources: []Source{{Type: testSourceTypeLocal}},
 		Skills:  []string{"s"},
 	}
@@ -1646,11 +1646,11 @@ func TestMergeGenerateAgentsRC_FillsRepoIDWhenExistingEmpty(t *testing.T) {
 	generated := &AgentsRC{
 		Version: 1,
 		Project: "myproject",
-		RepoID:  "github.com/NikashPrakash/dot-agents",
+		RepoID:  "github.com/AGOrcha/dot-agents",
 		Sources: []Source{{Type: testSourceTypeLocal}},
 	}
 	out := MergeGenerateAgentsRC(existing, generated)
-	if out.RepoID != "github.com/NikashPrakash/dot-agents" {
+	if out.RepoID != "github.com/AGOrcha/dot-agents" {
 		t.Errorf("RepoID: got %q, want derived value to win", out.RepoID)
 	}
 }

@@ -13,7 +13,7 @@ import (
 	// blank import: enables the //go:embed directive on schemaYAML below.
 	_ "embed"
 
-	"github.com/NikashPrakash/dot-agents/internal/kg/registry"
+	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
 // Name is the adapter's short name.

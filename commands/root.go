@@ -5,12 +5,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/commands/config"
-	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
-	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
-	"github.com/NikashPrakash/dot-agents/commands/internal/mcp"
-	"github.com/NikashPrakash/dot-agents/commands/internal/rules"
-	"github.com/NikashPrakash/dot-agents/commands/internal/settings"
+	"github.com/AGOrcha/dot-agents/commands/config"
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
+	"github.com/AGOrcha/dot-agents/commands/internal/mcp"
+	"github.com/AGOrcha/dot-agents/commands/internal/rules"
+	"github.com/AGOrcha/dot-agents/commands/internal/settings"
 	"github.com/spf13/cobra"
 )
 

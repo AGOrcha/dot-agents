@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
-	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/spf13/cobra"
 )
 

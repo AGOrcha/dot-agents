@@ -1,7 +1,7 @@
 package rules
 
 import (
-	"github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/spf13/cobra"
 )
 

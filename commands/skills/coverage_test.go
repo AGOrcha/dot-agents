@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestRefreshSkillMirror_UserHomeDirErrorIsSwallowed covers the os.UserHomeDir

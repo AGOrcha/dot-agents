@@ -3,7 +3,7 @@ package rules
 import (
 	"os"
 
-	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
 // IO and downstream-library seams. Tests in this package swap these to

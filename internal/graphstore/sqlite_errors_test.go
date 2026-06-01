@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
 // openThenCloseStore opens a SQLiteStore and immediately closes its underlying

@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/projectsync"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/projectsync"
 )
 
 // AddDeps is the multi-method collaborator the lifecycle backup /

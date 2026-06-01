@@ -1,6 +1,6 @@
 package settings
 
-import "github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+import "github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 
 // RunRemove deletes a canonical settings file under ~/.agents/settings/<scope>/,
 // honoring the dry-run / yes / force flags carried in Deps.

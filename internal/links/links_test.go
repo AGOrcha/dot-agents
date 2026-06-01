@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/links"
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 func TestSymlink(t *testing.T) {

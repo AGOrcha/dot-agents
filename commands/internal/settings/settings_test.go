@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // hintError is the local stub for tests that need to assert hint payloads

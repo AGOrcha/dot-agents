@@ -13,8 +13,8 @@ cat > "$tmp/issues-2.json" <<'EOF'
 {
   "total": 2,
   "issues": [
-    {"rule": "go:S1234", "component": "NikashPrakash_dot-agents:commands/foo.go", "line": 42, "message": "Remove this unused variable."},
-    {"rule": "go:S5678", "component": "NikashPrakash_dot-agents:internal/bar.go", "line": 7, "message": "Reduce cognitive complexity."}
+    {"rule": "go:S1234", "component": "AGOrcha_dot-agents:commands/foo.go", "line": 42, "message": "Remove this unused variable."},
+    {"rule": "go:S5678", "component": "AGOrcha_dot-agents:internal/bar.go", "line": 7, "message": "Reduce cognitive complexity."}
   ]
 }
 EOF

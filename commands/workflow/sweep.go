@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
 

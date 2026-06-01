@@ -19,7 +19,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // fakeSkillsIO implements skillsIO with per-operation overrides. A nil

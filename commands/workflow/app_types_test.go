@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 func TestWorkflowAppTypesJSONSingleRecommended(t *testing.T) {

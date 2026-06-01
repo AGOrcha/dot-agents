@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 // appTypeSnapshot produces the effective-config Snapshot that app-type detection

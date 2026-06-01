@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
-	"github.com/NikashPrakash/dot-agents/internal/projectsync"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/projectsync"
 )
 
 // promoteEnv constructs a self-contained AGENTS_HOME + repo with a

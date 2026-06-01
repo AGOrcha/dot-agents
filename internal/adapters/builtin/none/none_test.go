@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/kg/registry"
+	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
 // compile-time proof: the none adapter satisfies the Adapter interface.

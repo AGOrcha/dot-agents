@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
 	_ "modernc.org/sqlite"
 )
 

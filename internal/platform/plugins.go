@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/schemas"
+	"github.com/AGOrcha/dot-agents/schemas"
 	"go.yaml.in/yaml/v3"
 )
 

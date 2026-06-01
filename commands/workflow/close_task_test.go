@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/scoring"
+	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
 // closeTaskTestRepo builds a tiny git repo with a single committed file plus

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/scoring"
+	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
 // newTestRepo creates a tiny throwaway git repo + iter-log dir, returning the

@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 // Slot accounting and downstream dependency-satisfaction predicates for the

@@ -1,6 +1,6 @@
 # ~/.agents/
 
-Managed by [dot-agents](https://github.com/NikashPrakash/dot-agents).
+Managed by [dot-agents](https://github.com/AGOrcha/dot-agents).
 
 ## Canonical Buckets
 

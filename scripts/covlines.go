@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/scripts/internal/covprofile"
+	"github.com/AGOrcha/dot-agents/scripts/internal/covprofile"
 )
 
 func main() {

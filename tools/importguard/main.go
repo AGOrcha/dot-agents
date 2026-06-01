@@ -38,7 +38,7 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-const modulePath = "github.com/NikashPrakash/dot-agents"
+const modulePath = "github.com/AGOrcha/dot-agents"
 
 // guardedSubpackages enumerates the four commands/internal/* leaves
 // whose cross-edges the guard polices. Each entry is the canonical

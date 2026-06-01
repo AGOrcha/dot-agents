@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/graphstore"
-	"github.com/NikashPrakash/dot-agents/internal/graphstore/internal/storetest"
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/graphstore/internal/storetest"
 )
 
 // openPGTestStoreInterface adapts openPGTestStore to storetest.OpenStore.

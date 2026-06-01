@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 	"go.yaml.in/yaml/v3"
 )
 

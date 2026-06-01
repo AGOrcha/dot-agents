@@ -1,8 +1,8 @@
 # da installer (PowerShell) — downloads and installs the Go CLI release binary (`da`)
-# https://github.com/NikashPrakash/dot-agents
+# https://github.com/AGOrcha/dot-agents
 #
 # Usage (run in PowerShell; Developer Mode or Administrator recommended for symlinks):
-#   irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/AGOrcha/dot-agents/main/scripts/install.ps1 | iex
 #
 # Options (environment variables):
 #   $env:DOT_AGENTS_INSTALL_DIR - Installation directory (default: $env:LOCALAPPDATA\Programs\dot-agents)
@@ -11,7 +11,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$REPO = "NikashPrakash/dot-agents"
+$REPO = "AGOrcha/dot-agents"
 $InstallDir = if ($env:DOT_AGENTS_INSTALL_DIR) { $env:DOT_AGENTS_INSTALL_DIR } elseif ($env:INSTALL_DIR) { $env:INSTALL_DIR } else { "$env:LOCALAPPDATA\Programs\dot-agents" }
 $Version = $env:DOT_AGENTS_VERSION
 $LocalSrc = $env:DOT_AGENTS_LOCAL_SRC

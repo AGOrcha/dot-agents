@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
 )
 
 // TestOpencodeCreateLinks_FullFixture drives ensureUserAgents + settings link.

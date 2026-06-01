@@ -27,7 +27,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 const (

@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
-	scaffoldtemplates "github.com/NikashPrakash/dot-agents/internal/scaffold/templates"
-	"github.com/NikashPrakash/dot-agents/internal/ui"
+	"github.com/AGOrcha/dot-agents/internal/config"
+	scaffoldtemplates "github.com/AGOrcha/dot-agents/internal/scaffold/templates"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 // CreateAgent creates a new agent directory under ~/.agents/agents/<scope>/<name>/.

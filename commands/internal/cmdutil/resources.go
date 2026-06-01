@@ -1,7 +1,7 @@
 package cmdutil
 
 import (
-	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
 // canonicalRemoveArgsHint is shared verbatim across MCPResource,

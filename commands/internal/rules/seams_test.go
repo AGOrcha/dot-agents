@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
 // withReadFileStub swaps osReadFile for the duration of the test.

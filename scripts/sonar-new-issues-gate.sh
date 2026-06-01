@@ -41,8 +41,8 @@
 
 set -euo pipefail
 
-PROJECT_KEY="NikashPrakash_dot-agents"
-ORGANIZATION="npk-aorcha"
+PROJECT_KEY="AGOrcha_dot-agents"
+ORGANIZATION="agorcha"
 SONAR_HOST="${SONAR_HOST_URL:-https://sonarcloud.io}"
 
 PR_NUM=""

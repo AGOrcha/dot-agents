@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // Render-provenance manifest.

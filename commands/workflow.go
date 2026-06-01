@@ -1,7 +1,7 @@
 package commands
 
 import (
-	wf "github.com/NikashPrakash/dot-agents/commands/workflow"
+	wf "github.com/AGOrcha/dot-agents/commands/workflow"
 	"github.com/spf13/cobra"
 )
 

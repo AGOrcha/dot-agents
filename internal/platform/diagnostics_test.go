@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestDiagnosticsTypes exercises the zero-value and populated forms of every

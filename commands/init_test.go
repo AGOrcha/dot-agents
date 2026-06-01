@@ -19,7 +19,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/commands/internal/lifecycle"
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 )
 
 // fakeInitDirMaker mirrors the lifecycle-package test double for

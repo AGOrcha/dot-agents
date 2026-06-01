@@ -1,6 +1,6 @@
 package settings
 
-import "github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+import "github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 
 // RunShow prints metadata for one canonical settings file under
 // ~/.agents/settings/<scope>/.

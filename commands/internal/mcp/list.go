@@ -1,6 +1,6 @@
 package mcp
 
-import "github.com/NikashPrakash/dot-agents/commands/internal/cmdutil"
+import "github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 
 // RunList prints canonical MCP files under ~/.agents/mcp/<scope>/.
 // Does not invoke the Resolve callback so a zero-value Deps is

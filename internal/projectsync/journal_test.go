@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // journalAgentsHome returns an isolated AGENTS_HOME tempdir for journal tests.

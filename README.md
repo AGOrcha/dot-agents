@@ -133,12 +133,12 @@ Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/main/scripts/install.sh | bash
 ```
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/NikashPrakash/dot-agents/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/AGOrcha/dot-agents/main/scripts/install.ps1 | iex
 ```
 
 ### Go toolchain (`go install`)
@@ -147,9 +147,9 @@ If you already have Go, install the CLI straight from source with the Go
 toolchain:
 
 ```bash
-go install github.com/NikashPrakash/dot-agents/cmd/da@latest
+go install github.com/AGOrcha/dot-agents/cmd/da@latest
 # or
-go install github.com/NikashPrakash/dot-agents/cmd/da@<release-version>
+go install github.com/AGOrcha/dot-agents/cmd/da@<release-version>
 ```
 
 The `da` binary is placed in `$(go env GOBIN)` (falling back to
@@ -158,7 +158,7 @@ The `da` binary is placed in `$(go env GOBIN)` (falling back to
 ### Manual (from source)
 
 ```bash
-git clone https://github.com/NikashPrakash/dot-agents ~/.dot-agents
+git clone https://github.com/AGOrcha/dot-agents ~/.dot-agents
 cd ~/.dot-agents
 go build -ldflags "-s -w" -o ./bin/da ./cmd/da
 export PATH="$HOME/.dot-agents/bin:$PATH"

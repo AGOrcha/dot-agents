@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/platform"
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // fakeHookSpecResolver embeds the real resolver so any method not

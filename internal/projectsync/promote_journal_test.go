@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
-	"github.com/NikashPrakash/dot-agents/internal/testutil"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestPromoteResource_JournalWriteFailureDegradesGracefully exercises the

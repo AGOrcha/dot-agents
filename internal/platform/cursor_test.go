@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/linktest"
 )
 
 // writeCursorAgentTool creates ~/.cursor/projects/<slug>/agent-tools/<name>.txt

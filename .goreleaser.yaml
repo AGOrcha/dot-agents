@@ -20,9 +20,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/NikashPrakash/dot-agents/commands.Version={{.Version}}
-      - -X github.com/NikashPrakash/dot-agents/commands.Commit={{.Commit}}
-      - -X github.com/NikashPrakash/dot-agents/commands.Describe={{.Tag}}
+      - -X github.com/AGOrcha/dot-agents/commands.Version={{.Version}}
+      - -X github.com/AGOrcha/dot-agents/commands.Commit={{.Commit}}
+      - -X github.com/AGOrcha/dot-agents/commands.Describe={{.Tag}}
 
   - id: dot-agents-windows
     main: ./cmd/da
@@ -36,9 +36,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/NikashPrakash/dot-agents/commands.Version={{.Version}}
-      - -X github.com/NikashPrakash/dot-agents/commands.Commit={{.Commit}}
-      - -X github.com/NikashPrakash/dot-agents/commands.Describe={{.Tag}}
+      - -X github.com/AGOrcha/dot-agents/commands.Version={{.Version}}
+      - -X github.com/AGOrcha/dot-agents/commands.Commit={{.Commit}}
+      - -X github.com/AGOrcha/dot-agents/commands.Describe={{.Tag}}
 
 archives:
   - id: unix
@@ -86,7 +86,7 @@ signs:
 
 release:
   github:
-    owner: NikashPrakash
+    owner: AGOrcha
     name: dot-agents
 
 # Dual-cask emit (cask name == binary name == `da`):
@@ -119,7 +119,7 @@ homebrew_casks:
         enabled: true
         key: "{{ .Env.HOMEBREW_TAP_GPG_KEY_ID }}"
     url: &cask_url
-      verified: "github.com/NikashPrakash/dot-agents/"
+      verified: "github.com/AGOrcha/dot-agents/"
     repository: &cask_repository
       owner: AGOrcha
       name: homebrew-tap
@@ -131,7 +131,7 @@ homebrew_casks:
         base:
           branch: main
     description: "Manage AI agent configurations across projects"
-    homepage: &cask_homepage "https://github.com/NikashPrakash/dot-agents"
+    homepage: &cask_homepage "https://github.com/AGOrcha/dot-agents"
 
   - name: "da@{{ .Version }}"
     ids: *cask_ids

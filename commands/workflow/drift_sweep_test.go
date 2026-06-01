@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/NikashPrakash/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
 func TestDetectRepoDrift_Unreachable(t *testing.T) {
