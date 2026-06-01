@@ -46,13 +46,15 @@ WORKDIR /home/sandbox
 # as the non-root user (install.sh writes only to ~/.local). Bumping the pin is
 # a deliberate sandbox rebuild action — keeping the SHA + checksum pinned makes
 # the sandbox reproducible and immune to a supply-chain compromise of master.
-ARG DOT_AGENTS_INSTALL_SHA=7be7111e5799bd370212fc51f4fc1977f617a9bd
-ARG DOT_AGENTS_INSTALL_CHECKSUM=sha256:5c919087d94f0322b75a8890c04700c44ff461bf6923848ce61b937fe3db3652
-# No --chown: the copied installer stays root-owned 0644 (the sandbox user can
-# read+execute it but not modify it — avoids docker:S6504 "write permissions on
-# the copied resource"). It is integrity-pinned by --checksum and consumed once;
-# the leftover in /tmp of this ephemeral test image is harmless.
-ADD --checksum=${DOT_AGENTS_INSTALL_CHECKSUM} \
+ARG DOT_AGENTS_INSTALL_SHA=2acb4feb480ef4df28423a8b7c5832f8360d7f86
+ARG DOT_AGENTS_INSTALL_CHECKSUM=sha256:8b6c90a42c7c5fc203f39b096024e8926228cf71fdc30c6ace958b32f8aa3505
+# --chmod=0644 is required: a remote-URL ADD defaults the destination to mode
+# 0600 (root-only), so the non-root sandbox user gets "Permission denied" running
+# it (exit 126). 0644 keeps it root-owned and read-only for the sandbox user (no
+# write bit → no docker:S6504 "write permissions on the copied resource"), just
+# readable so `bash` can execute it. Integrity-pinned by --checksum and consumed
+# once; the leftover in /tmp of this ephemeral test image is harmless.
+ADD --chmod=0644 --checksum=${DOT_AGENTS_INSTALL_CHECKSUM} \
     "https://raw.githubusercontent.com/NikashPrakash/dot-agents/${DOT_AGENTS_INSTALL_SHA}/scripts/install.sh" \
     /tmp/install-dot-agents.sh
 RUN bash /tmp/install-dot-agents.sh
