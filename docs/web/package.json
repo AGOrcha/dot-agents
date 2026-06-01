@@ -12,7 +12,7 @@
     "check": "astro check"
   },
   "dependencies": {
-    "astro": "^5.5.0",
+    "astro": "^6.1.10",
     "cytoscape": "^3.30.2",
     "mermaid": "^11.4.1"
   },
