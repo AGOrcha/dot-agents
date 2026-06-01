@@ -29,7 +29,7 @@ func ConfirmInteractive(prompt, note string, autoYes bool) bool {
 		return Confirm(prompt, true)
 	}
 	if !StdinIsInteractive() {
-		Bullet("info", note)
+		Bullet("skip", note)
 		return false
 	}
 	return Confirm(prompt, false)

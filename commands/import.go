@@ -846,7 +846,13 @@ func importPreservedConflictCandidate(c importCandidate, agentsHome string, outp
 }
 
 // importConflictStableBundleName picks the first free logical name using origin-prefixed base, then -2, -3, … suffixes.
-func importConflictStableBundleName(logical, origin string, taken func(name string) bool) string {
+// importConflictBaseName derives the origin-prefixed base bundle name
+// (sanitized origin + "-" + sanitized logical, with "import"/"hook"
+// fallbacks for empty parts) shared by the free-slot finder and the
+// already-preserved idempotency check. Centralizing it keeps the
+// "cannot disagree" invariant structural: both paths walk the same
+// base / base-2 / base-3 … sequence.
+func importConflictBaseName(origin, logical string) string {
 	o := sanitizeHookNamePart(origin)
 	if o == "" {
 		o = "import"
@@ -855,7 +861,11 @@ func importConflictStableBundleName(logical, origin string, taken func(name stri
 	if log == "" {
 		log = "hook"
 	}
-	base := o + "-" + log
+	return o + "-" + log
+}
+
+func importConflictStableBundleName(logical, origin string, taken func(name string) bool) string {
+	base := importConflictBaseName(origin, logical)
 	if !taken(base) {
 		return base
 	}
@@ -939,15 +949,7 @@ func importConflictAlreadyPreserved(agentsHome string, output importOutput) bool
 	if !ok {
 		return false
 	}
-	o := sanitizeHookNamePart(output.Origin)
-	if o == "" {
-		o = "import"
-	}
-	log := sanitizeHookNamePart(shape.logical)
-	if log == "" {
-		log = "hook"
-	}
-	base := o + "-" + log
+	base := importConflictBaseName(output.Origin, shape.logical)
 	for n := 1; ; n++ {
 		name := base
 		if n > 1 {
