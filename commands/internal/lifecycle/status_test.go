@@ -1156,7 +1156,7 @@ func TestPlatformTextBadges_Empty(t *testing.T) {
 func TestPrintSharedTargetRegistry_WithInstalledClaude(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -1521,7 +1521,7 @@ func TestRunStatus_DirectoryMissing(t *testing.T) {
 func TestRunStatus_AuditModeWithRegisteredProject(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
 	t.Setenv("AGENTS_HOME", agentsHome)

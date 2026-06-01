@@ -51,6 +51,9 @@ func seedAllPlatformInstallSignalsLifecycle(t *testing.T) string {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
+	// ~/.claude is no longer the claude install signal (that is the PATH shim
+	// seeded below), but managed-settings logic reads files under it, so keep
+	// the directory present.
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -60,22 +63,47 @@ func seedAllPlatformInstallSignalsLifecycle(t *testing.T) string {
 		t.Fatal(err)
 	}
 
-	binDir := filepath.Join(tmp, "fakebin")
+	seedCLIShimsOnPathLifecycle(t, tmp, "claude", "agent", "codex", "opencode")
+
+	return tmp
+}
+
+// seedCLIShimsOnPathLifecycle writes a POSIX shim for each named CLI into a
+// fakebin directory under root and prepends it to PATH so exec.LookPath(name)
+// resolves for the duration of the test. Each shim prints "<name> 0.0.0" so a
+// --version probe also succeeds. Skips on Windows, where the shim contract
+// differs.
+//
+// Package-local twin of commands.seedCLIShimsOnPath — the lifecycle tests
+// cannot import the parent package's test helper. It is the single place in
+// this package that fabricates a CLI on PATH so the shim-writing logic is never
+// duplicated across the init/install/doctor/status install-signal tests.
+func seedCLIShimsOnPathLifecycle(t *testing.T, root string, names ...string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH/shim seeding semantics differ on Windows; skip there")
+	}
+	binDir := filepath.Join(root, "fakebin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	shim := "#!/bin/sh\necho \"$(basename \"$0\") 0.0.0\"\n"
-	for _, name := range []string{"agent", "codex", "opencode"} {
+	for _, name := range names {
 		p := filepath.Join(binDir, name)
 		if err := os.WriteFile(p, []byte(shim), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
 
-	oldPath := os.Getenv("PATH")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+oldPath)
-
-	return tmp
+// seedClaudeInstalledSignalLifecycle makes claude.IsInstalled() report true by
+// placing a `claude` CLI shim on PATH (the detection seam since ~/.claude
+// stopped being an install signal). Tests that previously created ~/.claude
+// purely to be detected as installed call this instead.
+func seedClaudeInstalledSignalLifecycle(t *testing.T, root string) {
+	t.Helper()
+	seedCLIShimsOnPathLifecycle(t, root, "claude")
 }
 
 // resetInitSeams restores initForce/initDryRun/initYes to zero after a
@@ -338,7 +366,10 @@ func TestRunInit_ForcePreservesUnmanagedClaudeSettings(t *testing.T) {
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	// Make claude "installed" via the ~/.claude directory probe.
+	// Make claude "installed" via the claude CLI on PATH.
+	seedClaudeInstalledSignalLifecycle(t, tmp)
+	// The ~/.claude dir here is the managed-settings target, not the install
+	// signal: it holds the pre-existing unmanaged settings.json below.
 	claudeDir := filepath.Join(tmp, ".claude")
 	if err := os.MkdirAll(claudeDir, 0755); err != nil {
 		t.Fatal(err)
@@ -533,6 +564,9 @@ func TestRunInit_SeededClaudeExercisesClaudeSettingsBranch(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 
+	// claude installed via the CLI on PATH; init writes the global
+	// ~/.claude/settings.json symlink into the dir below.
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -565,6 +599,7 @@ func TestRunInit_SeededClaudeExercisesClaudeSettingsBranch(t *testing.T) {
 func TestRunInit_ForceWithSeededClaudeOverwritesSettings(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -589,6 +624,7 @@ func TestRunInit_ForceWithSeededClaudeOverwritesSettings(t *testing.T) {
 func TestRunInit_SeededClaudeAndExistingSettingsSkipsWithoutForce(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -622,6 +658,7 @@ func TestRunInit_SeededClaudeAndExistingSettingsSkipsWithoutForce(t *testing.T) 
 func TestRunInit_HooksSrcExistsRedirectsSettingsPath(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -656,6 +693,7 @@ func TestRunInit_HooksSrcExistsRedirectsSettingsPath(t *testing.T) {
 func TestRunInit_MkdirOnClaudeBranchSucceedsOnEmptyDir(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}

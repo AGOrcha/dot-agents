@@ -1152,7 +1152,7 @@ func TestRunAdd_FullHappyPathWithInstalledClaude(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	// Force claude.IsInstalled() = true
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
+	seedClaudeInstalledSignal(t, tmp)
 
 	agentsHome := filepath.Join(tmp, ".agents")
 	os.MkdirAll(agentsHome, 0755)
@@ -1473,16 +1473,14 @@ func TestRunAdd_BackupFailureAbortsWithoutRegistering(t *testing.T) {
 
 // ---------- FINDING 2: runAdd must not report success after link failures ----------
 
-// With Claude detected as installed (~/.claude) but the project's .claude
-// occupied by a regular file, claude.CreateLinks fails. runAdd must surface a
-// non-zero error and NOT register the project nor print success.
+// With Claude detected as installed (claude CLI on PATH) but the project's
+// .claude occupied by a regular file, claude.CreateLinks fails. runAdd must
+// surface a non-zero error and NOT register the project nor print success.
 func TestRunAdd_LinkFailureNotRegistered(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	// Detect Claude as installed.
-	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	seedClaudeInstalledSignal(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
 		t.Fatal(err)
@@ -1556,9 +1554,7 @@ func TestRunAdd_AllPlatformsInstalled(t *testing.T) {
 func TestRunAdd_SeededClaudeWithExistingFilesExercisesBackupAndLinks(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	if err := os.MkdirAll(filepath.Join(tmp, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	seedClaudeInstalledSignal(t, tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
 	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
 		t.Fatal(err)
