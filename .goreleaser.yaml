@@ -89,13 +89,13 @@ release:
     owner: NikashPrakash
     name: dot-agents
 
-# Dual-cask emit:
-#   - dot-agents.rb            — unversioned "latest" pointer (overwritten each release)
-#   - dot-agents@{version}.rb  — version-pinned (new file per release, never deleted)
+# Dual-cask emit (cask name == binary name == `da`):
+#   - da.rb            — unversioned "latest" pointer (overwritten each release)
+#   - da@{version}.rb  — version-pinned (new file per release, never deleted)
 # Both casks land in the same PR per release via the shared `goreleaser-cask-<v>`
-# branch. Binary name stays `da` either way; only the cask identifier differs.
+# branch. Install: `brew install agorcha/tap/da`.
 homebrew_casks:
-  - name: dot-agents
+  - name: da
     ids: &cask_ids
       - unix
     binaries: &cask_binaries
@@ -133,7 +133,7 @@ homebrew_casks:
     description: "Manage AI agent configurations across projects"
     homepage: &cask_homepage "https://github.com/NikashPrakash/dot-agents"
 
-  - name: "dot-agents@{{ .Version }}"
+  - name: "da@{{ .Version }}"
     ids: *cask_ids
     binaries: *cask_binaries
     hooks: *cask_hooks
