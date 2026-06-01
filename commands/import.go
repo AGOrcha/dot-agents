@@ -845,7 +845,6 @@ func importPreservedConflictCandidate(c importCandidate, agentsHome string, outp
 	return importResult{imported: 1}
 }
 
-// importConflictStableBundleName picks the first free logical name using origin-prefixed base, then -2, -3, … suffixes.
 // importConflictBaseName derives the origin-prefixed base bundle name
 // (sanitized origin + "-" + sanitized logical, with "import"/"hook"
 // fallbacks for empty parts) shared by the free-slot finder and the
@@ -864,6 +863,7 @@ func importConflictBaseName(origin, logical string) string {
 	return o + "-" + log
 }
 
+// importConflictStableBundleName picks the first free logical name using origin-prefixed base, then -2, -3, … suffixes.
 func importConflictStableBundleName(logical, origin string, taken func(name string) bool) string {
 	base := importConflictBaseName(origin, logical)
 	if !taken(base) {
