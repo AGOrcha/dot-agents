@@ -143,8 +143,9 @@ irm https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.
 
 ### Go toolchain (`go install`)
 
-If you already have Go, install the CLI straight from source with the Go
-toolchain:
+If you already have **Go 1.26.2+**, install the CLI straight from source with
+the Go toolchain (or set `GOTOOLCHAIN=auto` to let Go fetch the required
+toolchain automatically):
 
 ```bash
 go install github.com/AGOrcha/dot-agents/cmd/da@latest
@@ -156,6 +157,8 @@ The `da` binary is placed in `$(go env GOBIN)` (falling back to
 `$(go env GOPATH)/bin`); ensure that directory is on your `PATH`.
 
 ### Manual (from source)
+
+Requires **Go 1.26.2+** (or set `GOTOOLCHAIN=auto`).
 
 ```bash
 git clone https://github.com/AGOrcha/dot-agents ~/.dot-agents
@@ -175,6 +178,7 @@ step-by-step `cosign verify-blob` recipe.
 
 ```bash
 # 1. Initialize ~/.agents/ with starter skills, agents, hooks, and config
+#    (prompts to confirm; pass -y to run non-interactively)
 da init
 
 # 2. Add a project
@@ -431,8 +435,9 @@ da add ~/Github/myproject  # Re-link your projects
 
 ## Requirements
 
-- **macOS** or **Linux** for the **Go** CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
-- **Windows:** use `scripts/install.ps1` for the Go CLI.
+- **macOS** or **Linux** for the CLI via Homebrew, `scripts/install.sh`, or a local `go build`.
+- **Windows:** use `scripts/install.ps1` for the CLI.
+- **Go 1.26.2+** — only for `go install` or building from source. The Homebrew and `scripts/install.sh` paths ship a prebuilt binary and need no Go toolchain. (Set `GOTOOLCHAIN=auto` to auto-fetch the toolchain.)
 - **git** (for sync features)
 
 ## Configuration
