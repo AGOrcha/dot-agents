@@ -124,6 +124,13 @@ func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDe
 // version recorded back into cfg so the caller can persist via cfg.Save().
 func reportEnabledPlatforms(cfg *config.Config) []platform.Platform {
 	ui.Section("Enabled Platforms")
+	// Re-probe for platforms installed AFTER `da init` and enable them so a
+	// newly-installed editor becomes managed on the next refresh (rather than
+	// staying enabled:false forever). The mutation lands in cfg before the
+	// loop below, so each newly-enabled platform is also projected this run.
+	for _, name := range lifecycle.DetectAndEnableNewPlatforms(cfg) {
+		ui.Bullet("ok", "Detected and enabled: "+name)
+	}
 	enabled := []platform.Platform{}
 	for _, p := range platform.All() {
 		if !cfg.IsPlatformEnabled(p.ID()) {
