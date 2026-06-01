@@ -7,8 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No entries yet. Feature PRs add their lines here; the next release task
-finalizes them into a version section._
+### Added
+
+- `skill-architect` now ships as a starter skill, so `da init` includes it out of
+  the box for designing, auditing, and improving your own skills.
+
+### Changed
+
+- **AGOrcha org migration.** The project moved to the `AGOrcha` GitHub org: the Go
+  module path is now `github.com/AGOrcha/dot-agents`, releases and the `da`
+  Homebrew cask publish under AGOrcha (`brew install agorcha/tap/da`), and
+  SonarCloud/CI/docs point at AGOrcha. No CLI behavior change.
+- `da refresh` now re-detects installed editors and **auto-enables** newly
+  installed platforms (recording their versions), so installing an editor after
+  `da init` no longer leaves a "nothing to refresh" dead end.
+
+### Fixed
+
+- `da doctor` / `da status --audit` report accurate state: the link-health
+  headline count matches the real managed-link count, platform badges reflect
+  config-enabled ∧ installed platforms (no false ✓ for disabled ones), and
+  present non-symlink files read "(local file)" instead of "(not linked)".
+- The `graph-update` post-edit hook no longer errors on every edit when the
+  optional code-review-graph tool is absent (it degrades to a no-op), and
+  `graph-orient` calls a valid `da kg health` instead of a missing subcommand.
+- A fresh clone installs cleanly: the project manifest no longer references a
+  private external source, so `da install` doesn't error or silently drop skills.
+- Bumped `github.com/jackc/pgx/v5` (memory-safety advisory) and the docs-site
+  `astro` dependency to patched versions.
 
 ## [0.3.3] - 2026-05-31
 

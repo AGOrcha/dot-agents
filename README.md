@@ -207,7 +207,7 @@ da install
 | `init` | Initialize `~/.agents/` directory structure |
 | `add <path>` | Add a project to da management |
 | `remove <project>` | Remove a project from da management |
-| `refresh [project]` | Refresh managed setup in projects from `~/.agents/` |
+| `refresh [project]` | Refresh managed setup from `~/.agents/`; auto-enables newly-installed editors and updates their versions |
 | `import [project]` | Import configs from project/global scope into `~/.agents/` |
 | `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one) |
 | `status` | Show managed projects and link health (use `--audit` for details) |
