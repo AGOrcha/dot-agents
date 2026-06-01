@@ -3,7 +3,7 @@
 # https://github.com/AGOrcha/dot-agents
 #
 # Usage:
-#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/main/scripts/install.sh | bash
+#   curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.sh | bash
 #
 # Environment:
 #   DOT_AGENTS_INSTALL_DIR  Binary install directory (default: ~/.local/bin)

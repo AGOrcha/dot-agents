@@ -133,12 +133,12 @@ Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.sh | bash
 ```
 
 ```powershell
 # Windows PowerShell
-irm https://raw.githubusercontent.com/AGOrcha/dot-agents/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.ps1 | iex
 ```
 
 ### Go toolchain (`go install`)
