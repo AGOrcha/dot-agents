@@ -1440,6 +1440,160 @@ func TestProcessImportOutput_OriginConflictPreservesExisting(t *testing.T) {
 	}
 }
 
+// TestProcessImportOutput_ReimportConflictIsNoOp proves idempotency: once a
+// conflicting source has been preserved as an origin-prefixed alternate,
+// re-importing the SAME source is a no-op. It must not stack a second
+// alternate (cursor-demo -> cursor-demo-2), must not rewrite the existing
+// alternate, and must not emit a second review note.
+func TestProcessImportOutput_ReimportConflictIsNoOp(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "src.json")
+	writeFile(t, src, []byte("imported"))
+	srcInfo, _ := os.Stat(src)
+
+	// Primary dest holds genuinely different content (a real prior conflict).
+	dest := filepath.Join(agentsHome, "hooks/p/demo/HOOK.yaml")
+	writeFile(t, dest, []byte("existing"))
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("imported"), Origin: "cursor"}
+
+	// First import: alternate gets created.
+	first := processImportOutput(c, out, agentsHome, "ts1", srcInfo, stdImportDeps{})
+	if first.imported != 1 {
+		t.Fatalf("first import = %+v, want imported:1", first)
+	}
+
+	// Re-import the same source: must be a no-op.
+	second := processImportOutput(c, out, agentsHome, "ts2", srcInfo, stdImportDeps{})
+	if second.imported != 0 || second.skipped != 0 {
+		t.Errorf("re-import = %+v, want zero no-op", second)
+	}
+
+	// No -2 alternate stacked.
+	if _, err := os.Stat(filepath.Join(agentsHome, "hooks/p/cursor-demo-2/HOOK.yaml")); !os.IsNotExist(err) {
+		t.Errorf("re-import stacked a second alternate cursor-demo-2 (err=%v)", err)
+	}
+	// Exactly the original alternate plus the primary remain.
+	var hooks []string
+	_ = filepath.Walk(filepath.Join(agentsHome, "hooks", "p"), func(p string, fi os.FileInfo, _ error) error {
+		if fi != nil && !fi.IsDir() {
+			hooks = append(hooks, filepath.ToSlash(p))
+		}
+		return nil
+	})
+	if len(hooks) != 2 {
+		t.Errorf("expected exactly 2 hook files after re-import, got %d: %v", len(hooks), hooks)
+	}
+	// Only one review note (the first conflict), not two.
+	notes, _ := os.ReadDir(filepath.Join(agentsHome, "review-notes/import-conflicts"))
+	if len(notes) != 1 {
+		t.Errorf("expected exactly 1 review note, got %d", len(notes))
+	}
+}
+
+// TestImportConflictAlreadyPreserved covers the idempotency helper directly.
+func TestImportConflictAlreadyPreserved(t *testing.T) {
+	agentsHome := t.TempDir()
+
+	// Bundle (HOOK.yaml) shape: existing alternate holds the content.
+	bundleOut := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("payload"), Origin: "cursor"}
+	if importConflictAlreadyPreserved(agentsHome, bundleOut) {
+		t.Error("no alternate yet => not preserved")
+	}
+	writeFile(t, filepath.Join(agentsHome, "hooks/p/cursor-demo/HOOK.yaml"), []byte("payload"))
+	if !importConflictAlreadyPreserved(agentsHome, bundleOut) {
+		t.Error("matching alternate present => preserved")
+	}
+	// Different content in the alternate is not a match.
+	other := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("changed"), Origin: "cursor"}
+	if importConflictAlreadyPreserved(agentsHome, other) {
+		t.Error("content mismatch must not count as preserved")
+	}
+
+	// -N sequence: the match lives at the second slot.
+	writeFile(t, filepath.Join(agentsHome, "hooks/p/cursor-demo-2/HOOK.yaml"), []byte("changed"))
+	if !importConflictAlreadyPreserved(agentsHome, other) {
+		t.Error("matching -2 alternate present => preserved")
+	}
+
+	// .json shape.
+	jsonOut := importOutput{destRel: "hooks/p/legacy.json", content: []byte("{}"), Origin: "github"}
+	if importConflictAlreadyPreserved(agentsHome, jsonOut) {
+		t.Error("no json alternate yet => not preserved")
+	}
+	writeFile(t, filepath.Join(agentsHome, "hooks/p/github-legacy.json"), []byte("{}"))
+	if !importConflictAlreadyPreserved(agentsHome, jsonOut) {
+		t.Error("matching json alternate present => preserved")
+	}
+
+	// Non-hooks dest is never "preserved" via this path.
+	nonHook := importOutput{destRel: "rules/p/x.md", content: []byte("x"), Origin: "cursor"}
+	if importConflictAlreadyPreserved(agentsHome, nonHook) {
+		t.Error("non-hooks dest must return false")
+	}
+
+	// Empty origin/logical fall back to the import-/hook- defaults.
+	defOut := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("def"), Origin: ""}
+	writeFile(t, filepath.Join(agentsHome, "hooks/p/import-demo/HOOK.yaml"), []byte("def"))
+	if !importConflictAlreadyPreserved(agentsHome, defOut) {
+		t.Error("empty origin should map to import- prefix")
+	}
+}
+
+// TestImportConflictAlreadyPreserved_StopsAtFirstGap proves the search stops
+// at the first missing slot and does not jump past a gap to a later match.
+func TestImportConflictAlreadyPreserved_StopsAtFirstGap(t *testing.T) {
+	agentsHome := t.TempDir()
+	// cursor-demo missing, cursor-demo-2 present with the content: because the
+	// stable namer never skips a slot, the missing first slot ends the search
+	// and the later match is not reached.
+	writeFile(t, filepath.Join(agentsHome, "hooks/p/cursor-demo-2/HOOK.yaml"), []byte("payload"))
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("payload"), Origin: "cursor"}
+	if importConflictAlreadyPreserved(agentsHome, out) {
+		t.Error("a gap before the match must stop the search (return false)")
+	}
+}
+
+// TestImportConflictAlreadyPreserved_ReadErrorStops covers the read-error
+// branch: an alternate slot occupied by a directory (not a file) makes
+// ReadFile fail with a non-ENOENT error, which ends the search safely.
+func TestImportConflictAlreadyPreserved_ReadErrorStops(t *testing.T) {
+	agentsHome := t.TempDir()
+	// Put a directory exactly where the first alternate file would live.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "hooks/p/cursor-demo/HOOK.yaml"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	out := importOutput{destRel: "hooks/p/demo/HOOK.yaml", content: []byte("payload"), Origin: "cursor"}
+	if importConflictAlreadyPreserved(agentsHome, out) {
+		t.Error("read error on the alternate slot must stop the search (return false)")
+	}
+}
+
+// TestConfirmImportReplace_NonInteractiveSkips proves the conflict/replace
+// decision never blocks on a prompt under non-TTY stdin (CI / refresh /
+// redirected input) and defaults to the safe skip.
+func TestConfirmImportReplace_NonInteractiveSkips(t *testing.T) {
+	saved := Flags
+	defer func() { Flags = saved }()
+
+	// stdin is a redirected file in `go test`, so StdinIsInteractive is false.
+	Flags = GlobalFlags{Yes: false}
+	if confirmImportReplace("Replace foo?") {
+		t.Error("non-interactive replace must default to skip (false)")
+	}
+
+	// With --yes it auto-confirms regardless of TTY.
+	Flags = GlobalFlags{Yes: true}
+	if !confirmImportReplace("Replace foo?") {
+		t.Error("--yes must auto-confirm")
+	}
+}
+
 // ---------- importMissingContentCandidate ----------
 
 func TestImportMissingContentCandidate_DryRunSkips(t *testing.T) {

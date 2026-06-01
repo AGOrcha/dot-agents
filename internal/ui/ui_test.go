@@ -259,6 +259,71 @@ func TestConfirmReadsStdin(t *testing.T) {
 	}
 }
 
+func TestConfirmInteractive(t *testing.T) {
+	origIn := os.Stdin
+	defer func() { os.Stdin = origIn }()
+
+	// autoYes short-circuits to a confirmed result regardless of stdin.
+	out := captureStdout(t, func() {
+		if !ConfirmInteractive("proceed?", "skip-note", true) {
+			t.Error("autoYes must confirm")
+		}
+	})
+	if !strings.Contains(out, "auto-confirmed") {
+		t.Errorf("autoYes path missing marker; got %q", out)
+	}
+
+	// Non-interactive (pipe) stdin must skip without reading, logging the note.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer func() { _ = w.Close(); _ = r.Close() }()
+	os.Stdin = r
+	out = captureStdout(t, func() {
+		if ConfirmInteractive("proceed?", "preserved-existing-note", false) {
+			t.Error("non-interactive must default to false")
+		}
+	})
+	if !strings.Contains(out, "preserved-existing-note") {
+		t.Errorf("non-interactive path must log the note; got %q", out)
+	}
+}
+
+func TestStdinIsInteractive(t *testing.T) {
+	origIn := os.Stdin
+	defer func() { os.Stdin = origIn }()
+
+	// A pipe is not a character device => not interactive.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer func() { _ = w.Close(); _ = r.Close() }()
+	os.Stdin = r
+	if StdinIsInteractive() {
+		t.Error("pipe stdin must not be reported as interactive")
+	}
+
+	// A regular file is not a character device either.
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("temp: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	os.Stdin = f
+	if StdinIsInteractive() {
+		t.Error("regular-file stdin must not be reported as interactive")
+	}
+
+	// A closed descriptor makes Stat fail => not interactive.
+	os.Stdin = r
+	_ = r.Close()
+	if StdinIsInteractive() {
+		t.Error("stat failure must report non-interactive")
+	}
+}
+
 func TestConfirmEOFReturnsFalse(t *testing.T) {
 	origIn := os.Stdin
 	r, w, err := os.Pipe()
