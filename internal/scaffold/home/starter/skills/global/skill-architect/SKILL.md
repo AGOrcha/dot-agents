@@ -40,3 +40,13 @@ new / transform → audit → eval → improve → optimize → package
 ```
 
 You can enter at any stage. Each mode is independent.
+
+## Provider configuration
+
+The `eval`, `improve`, and `optimize` modes call an LLM under the hood. By
+default this is the local `claude` CLI (zero-config — it reuses the host
+session's auth, no API key). To run those modes against a different provider
+(Anthropic API, an OpenAI-compatible endpoint, or any CLI), set
+`SKILL_ARCHITECT_PROVIDER` and the matching credentials. See
+`references/providers.md` for the full matrix and caveats (trigger eval needs
+an agentic harness; description improvement works with any provider).

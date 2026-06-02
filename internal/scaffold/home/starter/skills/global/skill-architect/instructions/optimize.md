@@ -66,12 +66,17 @@ python -m scripts.run_loop \
 
 Use the model ID from your system prompt so the trigger test matches what the user actually experiences.
 
+By default the loop drives the local `claude` CLI (zero-config). To run the
+improvement step against a different provider, export `SKILL_ARCHITECT_PROVIDER`
+(and its credentials) before launching — see `references/providers.md`. Note
+the trigger-eval step still needs an agentic harness (the Claude CLI by default).
+
 While it runs, periodically tail the output to give the user progress updates.
 
 The loop automatically:
 - Splits the eval set into 60% train / 40% held-out test
 - Evaluates each description candidate (3 runs per query for reliability)
-- Calls Claude to propose improvements based on failures
+- Calls the configured provider to propose improvements based on failures
 - Selects the best description by test score (not train, to avoid overfitting)
 
 ---
