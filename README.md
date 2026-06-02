@@ -441,10 +441,10 @@ da add ~/Github/myproject  # Re-link your projects
 | Agent | Status | Config Files |
 |-------|--------|--------------|
 | **Cursor** | ✅ Full | `.cursor/rules/*.mdc` |
-| **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/` |
-| **Codex** | ✅ Full | `AGENTS.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
-| **OpenCode** | ⚠️ Basic | `opencode.json`, `.opencode/agent/*.md` |
-| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md`, `.github/agents/*.agent.md` |
+| **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `.claude/` |
+| **Codex** | ✅ Full | `AGENTS.md`, `AGENTS.override.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
+| **OpenCode** | ⚠️ Basic | `AGENTS.md`, `opencode.json`, `.opencode/agent/*.md` |
+| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md`, `.github/agents/*.agent.md` |
 
 ## Requirements
 
