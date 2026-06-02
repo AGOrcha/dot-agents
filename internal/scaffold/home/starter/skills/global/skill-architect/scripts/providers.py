@@ -26,10 +26,54 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+
+
+# Headless CLI invocation for each of the five dot-agents platforms. The
+# ``claude-cli`` provider (the default) auto-detects which of these is present
+# and drives it, so the skill works no matter which platform a user scaffolds
+# it into — not just Claude Code. Each entry is overridable: SKILL_ARCHITECT_CLI_BIN
+# replaces argv[0], and SKILL_ARCHITECT_CLI_CMD (provider ``cli``) bypasses this
+# table entirely. ``host_model_ok`` marks platforms where the host session's
+# model id is meaningful; for the others a model is passed only when
+# SKILL_ARCHITECT_MODEL is set explicitly (a claude model id won't map).
+PLATFORM_CLIS: dict[str, dict] = {
+    "claude":   {"argv": ["claude", "--print", "--output-format", "text"], "prompt_via": "stdin", "model_flag": "--model", "host_model_ok": True},
+    "cursor":   {"argv": ["cursor", "agent", "--print", "--output-format", "text"], "prompt_via": "stdin", "model_flag": "--model", "host_model_ok": True},
+    "codex":    {"argv": ["codex", "exec"], "prompt_via": "arg", "model_flag": "--model", "host_model_ok": False},
+    "opencode": {"argv": ["opencode", "run"], "prompt_via": "arg", "model_flag": "--model", "host_model_ok": False},
+    "copilot":  {"argv": ["copilot", "-p"], "prompt_via": "arg", "model_flag": None, "host_model_ok": False},
+}
+
+# Detection precedence when the platform is not pinned (claude first so an
+# existing Claude Code setup keeps its exact prior behavior).
+PLATFORM_ORDER = ["claude", "cursor", "codex", "opencode", "copilot"]
+
+
+def resolve_platform(provider: str | None = None) -> str:
+    """Pick which platform CLI to drive for the ``claude-cli`` family.
+
+    Precedence: an explicit ``<platform>-cli`` provider id (e.g. ``codex-cli``)
+    > SKILL_ARCHITECT_PLATFORM env > first platform whose binary is on PATH >
+    ``claude``. The bare ``claude-cli`` default auto-detects rather than forcing
+    Claude Code, so the skill runs on whichever platform it was scaffolded into.
+    """
+    name = provider_name(provider)
+    if name.endswith("-cli") and name != "claude-cli":
+        plat = name[: -len("-cli")]
+        if plat in PLATFORM_CLIS:
+            return plat
+    env_plat = os.environ.get("SKILL_ARCHITECT_PLATFORM", "").strip().lower()
+    if env_plat in PLATFORM_CLIS:
+        return env_plat
+    for plat in PLATFORM_ORDER:
+        if shutil.which(PLATFORM_CLIS[plat]["argv"][0]):
+            return plat
+    return "claude"
 
 
 def _split_env(name: str, default: str) -> list[str]:
@@ -109,8 +153,10 @@ def complete_text(
     failure and ValueError for an unknown provider id.
     """
     name = provider_name(provider)
-    if name in ("claude-cli", "claude", "claude_cli"):
-        return _claude_cli_complete(prompt, model, timeout)
+    if name in ("claude-cli", "claude", "claude_cli", "platform-cli") or (
+        name.endswith("-cli") and name[: -len("-cli")] in PLATFORM_CLIS
+    ):
+        return _platform_cli_complete(prompt, model, timeout, resolve_platform(name))
     if name == "anthropic":
         return _anthropic_complete(prompt, model, timeout)
     if name in ("openai", "openai-compatible"):
@@ -118,26 +164,41 @@ def complete_text(
     if name in ("cli", "generic-cli", "command"):
         return _generic_cli_complete(prompt, model, timeout)
     raise ValueError(
-        f"Unknown SKILL_ARCHITECT_PROVIDER '{name}'. "
-        "Supported: claude-cli (default), anthropic, openai, cli."
+        f"Unknown SKILL_ARCHITECT_PROVIDER '{name}'. Supported: claude-cli "
+        "(default; auto-detects claude/cursor/codex/opencode/copilot), "
+        "<platform>-cli, anthropic, openai, cli."
     )
 
 
-def _claude_cli_complete(prompt: str, model: str | None, timeout: int) -> str:
-    """Default backend: ``claude -p --output-format text`` on stdin.
+def _platform_cli_complete(prompt: str, model: str | None, timeout: int, platform: str) -> str:
+    """Default backend: drive the resolved platform's CLI in headless mode.
 
-    Prompt goes over stdin (not argv) because it can embed a full SKILL.md
-    body and exceed comfortable argv length. Uses the host session's auth — no
-    API key needed.
+    Prompt goes over stdin for the Claude-Code-derived CLIs (claude, cursor),
+    which read it in print mode and can take a full SKILL.md body without argv
+    limits; the others (codex/opencode/copilot) take it as a positional arg.
+    Uses the host session's auth — no API key needed.
     """
-    bin_ = os.environ.get("SKILL_ARCHITECT_CLI_BIN", "claude")
-    cmd = [bin_, "-p", "--output-format", "text"]
-    if model:
-        cmd.extend(["--model", model])
+    spec = PLATFORM_CLIS[platform]
+    argv = list(spec["argv"])
+    override_bin = os.environ.get("SKILL_ARCHITECT_CLI_BIN")
+    if override_bin:
+        argv[0] = override_bin
+
+    flag = spec["model_flag"]
+    if flag:
+        chosen = os.environ.get("SKILL_ARCHITECT_MODEL") or (model if spec["host_model_ok"] else None)
+        if chosen:
+            argv += [flag, chosen]
+
+    stdin_data: str | None = None
+    if spec["prompt_via"] == "stdin":
+        stdin_data = prompt
+    else:
+        argv.append(prompt)
 
     result = subprocess.run(
-        cmd,
-        input=prompt,
+        argv,
+        input=stdin_data,
         capture_output=True,
         text=True,
         env=clean_env(),
@@ -145,7 +206,7 @@ def _claude_cli_complete(prompt: str, model: str | None, timeout: int) -> str:
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"{bin_} -p exited {result.returncode}\nstderr: {result.stderr}"
+            f"{platform} cli ({argv[0]}) exited {result.returncode}\nstderr: {result.stderr}"
         )
     return result.stdout
 

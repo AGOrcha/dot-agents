@@ -9,9 +9,20 @@ round-trip. Exits non-zero on first failure.
 """
 
 import os
+import stat
 import sys
+import tempfile
 
 from scripts import providers as p
+
+
+def _fake_bin(dirpath: str, name: str, body: str) -> str:
+    """Write an executable shell stub into dirpath and return its path."""
+    path = os.path.join(dirpath, name)
+    with open(path, "w") as fh:
+        fh.write("#!/bin/sh\n" + body + "\n")
+    os.chmod(path, os.stat(path).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return path
 
 
 def _isolated_env(**overrides):
@@ -19,7 +30,7 @@ def _isolated_env(**overrides):
     keys = [
         "SKILL_ARCHITECT_PROVIDER", "SKILL_ARCHITECT_CLI_CMD", "SKILL_ARCHITECT_MODEL",
         "SKILL_ARCHITECT_TRIGGER_TOOLS", "SKILL_ARCHITECT_CLI_BIN", "CLAUDECODE",
-        "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "SKILL_ARCHITECT_PLATFORM", "PATH",
     ]
 
     class _Ctx:
@@ -98,6 +109,71 @@ def test_missing_api_keys_are_explicit():
                 assert var in str(e)
             else:
                 raise AssertionError(f"expected RuntimeError for {prov}")
+
+
+def test_platform_registry_covers_five_da_platforms():
+    assert set(p.PLATFORM_CLIS) == {"claude", "cursor", "codex", "opencode", "copilot"}
+    assert set(p.PLATFORM_ORDER) == set(p.PLATFORM_CLIS)
+
+
+def test_resolve_platform_explicit_and_env():
+    with _isolated_env(SKILL_ARCHITECT_PROVIDER=None, SKILL_ARCHITECT_PLATFORM=None):
+        # explicit <platform>-cli wins
+        assert p.resolve_platform("codex-cli") == "codex"
+        assert p.resolve_platform("opencode-cli") == "opencode"
+    with _isolated_env(SKILL_ARCHITECT_PLATFORM="cursor"):
+        assert p.resolve_platform("claude-cli") == "cursor"  # env honored under the default id
+
+
+def test_resolve_platform_autodetects_from_path():
+    with tempfile.TemporaryDirectory() as d:
+        _fake_bin(d, "codex", "exit 0")  # only codex on PATH, no claude/cursor
+        with _isolated_env(SKILL_ARCHITECT_PROVIDER=None, SKILL_ARCHITECT_PLATFORM=None, PATH=d):
+            assert p.resolve_platform("claude-cli") == "codex"
+    with _isolated_env(SKILL_ARCHITECT_PROVIDER=None, SKILL_ARCHITECT_PLATFORM=None, PATH=""):
+        assert p.resolve_platform() == "claude"  # nothing on PATH -> claude fallback
+
+
+def test_platform_cli_stdin_and_arg_delivery():
+    with tempfile.TemporaryDirectory() as d:
+        # stdin platform (claude): stub ignores flags, echoes stdin
+        echo_stdin = _fake_bin(d, "fakecli", "cat")
+        with _isolated_env(SKILL_ARCHITECT_PROVIDER="claude-cli", SKILL_ARCHITECT_PLATFORM="claude",
+                           SKILL_ARCHITECT_CLI_BIN=echo_stdin):
+            assert p.complete_text("hello-via-stdin").strip() == "hello-via-stdin"
+        # arg platform (codex): stub prints its last argv (the appended prompt)
+        echo_last = _fake_bin(d, "fakecli2", 'for a in "$@"; do last="$a"; done; printf "%s" "$last"')
+        with _isolated_env(SKILL_ARCHITECT_PROVIDER="codex-cli", SKILL_ARCHITECT_CLI_BIN=echo_last):
+            assert p.complete_text("hello-via-arg") == "hello-via-arg"
+
+
+def test_platform_cli_nonzero_raises():
+    with tempfile.TemporaryDirectory() as d:
+        boom = _fake_bin(d, "boom", "echo oops >&2; exit 3")
+        with _isolated_env(SKILL_ARCHITECT_PROVIDER="claude-cli", SKILL_ARCHITECT_PLATFORM="claude",
+                           SKILL_ARCHITECT_CLI_BIN=boom):
+            try:
+                p.complete_text("x")
+            except RuntimeError as e:
+                assert "exited 3" in str(e)
+            else:
+                raise AssertionError("expected RuntimeError on nonzero exit")
+
+
+def test_platform_cli_model_flag():
+    with tempfile.TemporaryDirectory() as d:
+        echo_args = _fake_bin(d, "args", 'printf "%s\\n" "$@"')
+        # claude: host_model_ok -> caller's model id is appended via --model
+        with _isolated_env(SKILL_ARCHITECT_PROVIDER="claude-cli", SKILL_ARCHITECT_PLATFORM="claude",
+                           SKILL_ARCHITECT_CLI_BIN=echo_args, SKILL_ARCHITECT_MODEL=None):
+            out = p.complete_text("stdin-ignored", model="claude-opus-4-8")
+            assert "--model" in out and "claude-opus-4-8" in out
+        # copilot: model_flag is None -> never appended, prompt delivered as arg
+        with _isolated_env(SKILL_ARCHITECT_PROVIDER="copilot-cli", SKILL_ARCHITECT_CLI_BIN=echo_args,
+                           SKILL_ARCHITECT_MODEL="gpt-x"):
+            out = p.complete_text("the-prompt")
+            assert "--model" not in out
+            assert "the-prompt" in out
 
 
 def main() -> int:

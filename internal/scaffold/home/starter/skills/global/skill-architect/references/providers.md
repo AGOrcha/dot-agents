@@ -22,13 +22,36 @@ is the Claude Code CLI; a drop-in compatible CLI can be swapped in via
 
 Set `SKILL_ARCHITECT_PROVIDER` (default `claude-cli`):
 
-### `claude-cli` (default)
-Local `claude` CLI. No API key — reuses the host session's auth. Supports both
-seams (description improvement **and** trigger eval).
+### `claude-cli` (default) — platform-aware
+Drives the local CLI of whichever of the **five dot-agents platforms** is
+present. No API key — reuses the host session's auth. It **auto-detects** the
+platform (so the skill works wherever `da init` scaffolded it, not just Claude
+Code), or you can pin one:
 
 ```bash
-# nothing to configure; this is the default
+# nothing to configure: auto-detects from PATH (claude > cursor > codex > opencode > copilot)
+export SKILL_ARCHITECT_PLATFORM=cursor    # pin a platform, or
+export SKILL_ARCHITECT_PROVIDER=codex-cli # equivalently, a <platform>-cli provider id
 ```
+
+| Platform | Headless invocation | Prompt | Model |
+|----------|---------------------|--------|-------|
+| `claude` | `claude --print --output-format text` | stdin | host id ok |
+| `cursor` | `cursor agent --print --output-format text` | stdin | host id ok |
+| `codex` | `codex exec <prompt>` | arg | `SKILL_ARCHITECT_MODEL` only |
+| `opencode` | `opencode run <prompt>` | arg | `SKILL_ARCHITECT_MODEL` only |
+| `copilot` | `copilot -p <prompt>` | arg | platform default |
+
+Override the binary with `SKILL_ARCHITECT_CLI_BIN`, or bypass the table entirely
+with the generic `cli` provider below. The host session's model id is only
+passed to `claude`/`cursor` (it won't map to the others) — set
+`SKILL_ARCHITECT_MODEL` to target a specific model on the rest.
+
+**Trigger eval** (the `eval` mode and the eval step inside `optimize`) needs an
+agentic harness that streams tool-use events — `claude` and `cursor agent`
+qualify; `codex`/`opencode`/`copilot` can still drive **description
+improvement**. Point trigger-eval at a non-Claude agentic harness via
+`HarnessConfig` (see bottom of this doc).
 
 ### `anthropic`
 Anthropic Messages API. Description improvement only.
