@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -152,15 +153,19 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 	return VerifyReport{OK: ok, Checks: checks}
 }
 
-// verifySources checks each declared source layer in the repo-local manifest.
-// Local layers with an explicit path must exist on disk; the implicit local
-// repo layer (no path) always passes; remote layers warn (deferred to sync).
+// verifySources checks each declared source in the repo-local manifest. Local
+// sources with an explicit path must exist on disk; the implicit local repo
+// layer (no path) always passes. Remote sources are reported by whether any
+// `extends` layer actually references them — referenced sources are verified in
+// detail by the locked-layers check; unreferenced ones are flagged as unused so
+// the output never promises a "below" section that isn't there.
 func verifySources(cwd string, snap *snapshot) []VerifyCheck {
 	repo := snap.layers[layerRepoLocal]
 	raw, ok := repo["sources"].([]any)
 	if !ok || len(raw) == 0 {
 		return []VerifyCheck{{"config-layers", verifyPass, "no external layers declared"}}
 	}
+	referenced := extendsRefSourceIDs(repo)
 
 	checks := make([]VerifyCheck, 0, len(raw))
 	for i, item := range raw {
@@ -188,7 +193,12 @@ func verifySources(cwd string, snap *snapshot) []VerifyCheck {
 				checks = append(checks, VerifyCheck{name, verifyFail, "local path missing: " + path})
 			}
 		case "git", "http", "oci":
-			checks = append(checks, VerifyCheck{name, verifyPass, "remote " + typ + " source; its layers are checked against the lockfile below"})
+			id, _ := src["id"].(string)
+			if _, used := referenced[id]; used && id != "" {
+				checks = append(checks, VerifyCheck{name, verifyPass, "remote " + typ + " source; its layers are verified in the locked-layers check below"})
+			} else {
+				checks = append(checks, VerifyCheck{name, verifyPass, "remote " + typ + " source declared but unused (no `extends` layer references it)"})
+			}
 		case "":
 			checks = append(checks, VerifyCheck{name, verifyFail, "source is missing a type"})
 		default:
@@ -235,6 +245,31 @@ func abbrevSHA(sha string) string {
 		return sha[:12]
 	}
 	return sha
+}
+
+// extendsRefSourceIDs returns the set of source ids referenced by the manifest's
+// `extends` layers. An extends ref is "source-id:layer-path[@version]", so the
+// source id is the segment before the first ':'. Used to tell a remote source
+// that is actually consumed from one that is merely declared.
+func extendsRefSourceIDs(repo map[string]any) map[string]struct{} {
+	ids := map[string]struct{}{}
+	raw, ok := repo["extends"].([]any)
+	if !ok {
+		return ids
+	}
+	for _, item := range raw {
+		var ref string
+		switch v := item.(type) {
+		case string:
+			ref = v
+		case map[string]any:
+			ref, _ = v["ref"].(string)
+		}
+		if i := strings.IndexByte(ref, ':'); i > 0 {
+			ids[ref[:i]] = struct{}{}
+		}
+	}
+	return ids
 }
 
 // sourceLabel names a source check using its stable id when declared, else a

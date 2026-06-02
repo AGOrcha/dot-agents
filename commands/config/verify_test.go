@@ -265,6 +265,61 @@ func TestDefaultCRGProbe_DoesNotPanic(t *testing.T) {
 	_ = defaultCRGProbe(t.TempDir())
 }
 
+func TestExtendsRefSourceIDs(t *testing.T) {
+	cases := []struct {
+		name    string
+		repo    map[string]any
+		wantHas []string
+		wantNot []string
+	}{
+		{"string + object refs", map[string]any{"extends": []any{
+			"acme:org/base", map[string]any{"ref": "acme:org/opt", "optional": true}, "beta:x/y",
+		}}, []string{"acme", "beta"}, []string{"missing"}},
+		{"no-colon ref ignored", map[string]any{"extends": []any{"bogus"}}, nil, []string{"bogus"}},
+		{"no extends key", map[string]any{}, nil, []string{"acme"}},
+		{"extends not array", map[string]any{"extends": "nope"}, nil, []string{"nope"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extendsRefSourceIDs(tc.repo)
+			for _, id := range tc.wantHas {
+				if _, ok := got[id]; !ok {
+					t.Fatalf("want id %q present in %v", id, got)
+				}
+			}
+			for _, id := range tc.wantNot {
+				if _, ok := got[id]; ok {
+					t.Fatalf("id %q should be absent in %v", id, got)
+				}
+			}
+		})
+	}
+}
+
+func TestVerifySources_RemoteReferencedVsUnused(t *testing.T) {
+	cwd := t.TempDir()
+	gitSrc := map[string]any{"type": "git", "id": "acme", "url": "u"}
+
+	// referenced: an extends ref uses the source id
+	used := &snapshot{layers: map[string]map[string]any{layerRepoLocal: {
+		"sources": []any{gitSrc},
+		"extends": []any{"acme:org/base"},
+	}}}
+	c, _ := findCheck(verifySources(cwd, used), "source:acme")
+	if c.Status != verifyPass || !strings.Contains(c.Detail, "verified in the locked-layers check") {
+		t.Fatalf("referenced remote should point to locked-layers, got %+v", c)
+	}
+
+	// unused: no extends references it
+	unused := &snapshot{layers: map[string]map[string]any{layerRepoLocal: {
+		"sources": []any{gitSrc},
+	}}}
+	c, _ = findCheck(verifySources(cwd, unused), "source:acme")
+	if c.Status != verifyPass || !strings.Contains(c.Detail, "unused") {
+		t.Fatalf("unreferenced remote should be flagged unused, got %+v", c)
+	}
+}
+
 func TestVerifyLayerLocks_RendersStatuses(t *testing.T) {
 	manifest := `{
 	  "sources": [
