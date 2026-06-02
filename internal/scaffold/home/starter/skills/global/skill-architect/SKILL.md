@@ -40,3 +40,15 @@ new / transform → audit → eval → improve → optimize → package
 ```
 
 You can enter at any stage. Each mode is independent.
+
+## Provider configuration
+
+The `eval`, `improve`, and `optimize` modes call an LLM under the hood. By
+default (`claude-cli`) this drives the local CLI of whichever of the five
+dot-agents platforms is present — auto-detecting claude / cursor / codex /
+opencode / copilot — zero-config, reusing the host session's auth with no API
+key. Pin one with `SKILL_ARCHITECT_PLATFORM`, or use a different provider
+entirely (Anthropic API, an OpenAI-compatible endpoint, or any CLI) via
+`SKILL_ARCHITECT_PROVIDER`. See `references/providers.md` for the full matrix
+and caveats (trigger eval needs an agentic harness — claude or cursor;
+description improvement works with any provider).

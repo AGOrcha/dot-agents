@@ -16,18 +16,21 @@ import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
+from scripts.providers import HarnessConfig, clean_env
 from scripts.utils import parse_skill_md
 
 
-def find_project_root() -> Path:
-    """Find the project root by walking up from cwd looking for .claude/.
+def find_project_root(harness: HarnessConfig | None = None) -> Path:
+    """Find the project root by walking up from cwd looking for the harness
+    marker dir (``.claude`` by default).
 
-    Mimics how Claude Code discovers its project root, so the command file
-    we create ends up where claude -p will look for it.
+    Mimics how the harness discovers its project root, so the command file we
+    create ends up where the agentic CLI will look for it.
     """
+    harness = harness or HarnessConfig.from_env()
     current = Path.cwd()
     for parent in [current, *current.parents]:
-        if (parent / ".claude").is_dir():
+        if (parent / harness.root_marker).is_dir():
             return parent
     return current
 
@@ -39,18 +42,21 @@ def run_single_query(
     timeout: int,
     project_root: str,
     model: str | None = None,
+    harness: HarnessConfig | None = None,
 ) -> bool:
     """Run a single query and return whether the skill was triggered.
 
-    Creates a command file in .claude/commands/ so it appears in Claude's
-    available_skills list, then runs `claude -p` with the raw query.
-    Uses --include-partial-messages to detect triggering early from
-    stream events (content_block_start) rather than waiting for the
-    full assistant message, which only arrives after tool execution.
+    Creates a command file in the harness command dir (``.claude/commands/`` by
+    default) so the skill appears in the agent's available_skills list, then
+    runs the harness CLI with the raw query. Uses --include-partial-messages to
+    detect triggering early from stream events (content_block_start) rather
+    than waiting for the full assistant message, which only arrives after tool
+    execution.
     """
+    harness = harness or HarnessConfig.from_env()
     unique_id = uuid.uuid4().hex[:8]
     clean_name = f"{skill_name}-skill-{unique_id}"
-    project_commands_dir = Path(project_root) / ".claude" / "commands"
+    project_commands_dir = Path(project_root) / harness.root_marker / harness.commands_subdir
     command_file = project_commands_dir / f"{clean_name}.md"
 
     try:
@@ -68,7 +74,7 @@ def run_single_query(
         command_file.write_text(command_content)
 
         cmd = [
-            "claude",
+            harness.cli_bin,
             "-p", query,
             "--output-format", "stream-json",
             "--verbose",
@@ -77,17 +83,12 @@ def run_single_query(
         if model:
             cmd.extend(["--model", model])
 
-        # Remove CLAUDECODE env var to allow nesting claude -p inside a
-        # Claude Code session. The guard is for interactive terminal conflicts;
-        # programmatic subprocess usage is safe.
-        env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
-
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             cwd=project_root,
-            env=env,
+            env=clean_env(harness),
         )
 
         triggered = False
@@ -134,7 +135,7 @@ def run_single_query(
                             cb = se.get("content_block", {})
                             if cb.get("type") == "tool_use":
                                 tool_name = cb.get("name", "")
-                                if tool_name in ("Skill", "Read"):
+                                if tool_name in harness.trigger_tool_names:
                                     pending_tool_name = tool_name
                                     accumulated_json = ""
                                 else:
@@ -161,10 +162,10 @@ def run_single_query(
                                 continue
                             tool_name = content_item.get("name", "")
                             tool_input = content_item.get("input", {})
-                            if tool_name == "Skill" and clean_name in tool_input.get("skill", ""):
-                                triggered = True
-                            elif tool_name == "Read" and clean_name in tool_input.get("file_path", ""):
-                                triggered = True
+                            if tool_name in harness.trigger_tool_names:
+                                ref = tool_input.get("skill", "") + tool_input.get("file_path", "")
+                                if clean_name in ref:
+                                    triggered = True
                             return triggered
 
                     elif event.get("type") == "result":
@@ -191,8 +192,10 @@ def run_eval(
     runs_per_query: int = 1,
     trigger_threshold: float = 0.5,
     model: str | None = None,
+    harness: HarnessConfig | None = None,
 ) -> dict:
     """Run the full eval set and return results."""
+    harness = harness or HarnessConfig.from_env()
     results = []
 
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
@@ -207,6 +210,7 @@ def run_eval(
                     timeout,
                     str(project_root),
                     model,
+                    harness,
                 )
                 future_to_info[future] = (item, run_idx)
 
@@ -265,7 +269,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=30, help="Timeout per query in seconds")
     parser.add_argument("--runs-per-query", type=int, default=3, help="Number of runs per query")
     parser.add_argument("--trigger-threshold", type=float, default=0.5, help="Trigger rate threshold")
-    parser.add_argument("--model", default=None, help="Model to use for claude -p (default: user's configured model)")
+    parser.add_argument("--model", default=None, help="Model to use for the harness CLI (default: the session's configured model)")
     parser.add_argument("--verbose", action="store_true", help="Print progress to stderr")
     args = parser.parse_args()
 
