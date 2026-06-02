@@ -1883,7 +1883,14 @@ func TestPrintSymlinkAudit_PresentFileIsLocalNotAbsent(t *testing.T) {
 	link := filepath.Join(tmp, "link.json")
 	linktest.Link(t, target, link)
 	healthy := captureStatusStdout(t, func() { printSymlinkAudit(link, ".mcp.json") })
-	if !strings.Contains(healthy, "→") {
+	if runtime.GOOS == "windows" {
+		// Windows managed file links are hard links (symlinks need privilege),
+		// indistinguishable from a local file via Lstat, so the audit renders
+		// "(local file)" rather than a target arrow.
+		if !strings.Contains(healthy, "(local file)") {
+			t.Errorf("windows hard link should render (local file), got %q", healthy)
+		}
+	} else if !strings.Contains(healthy, "→") {
 		t.Errorf("healthy symlink should render target arrow, got %q", healthy)
 	}
 }
