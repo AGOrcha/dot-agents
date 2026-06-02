@@ -1,6 +1,46 @@
 package lifecycle
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/spf13/cobra"
+)
+
+// DetectAndEnableNewPlatforms re-probes every known platform and reconciles
+// cfg with what is actually installed on this machine:
+//
+//   - A platform installed but currently disabled in cfg is flipped to enabled
+//     and its live version recorded. This is the refresh-driven fix for a
+//     platform installed AFTER `da init`: init writes enabled:false for tools
+//     that were not on PATH at init time, and a plain refresh would otherwise
+//     iterate only already-enabled platforms forever (the "Nothing to refresh"
+//     dead-end).
+//   - A platform already enabled and still installed has its recorded version
+//     refreshed from the live probe (stale version strings are updated).
+//
+// The probe is the same one init uses: platform.Platform.IsInstalled() (CLI on
+// PATH) and Version() for the recorded version string. Detection is
+// conservative — it never DISABLES anything. A platform that is enabled but no
+// longer installed is left enabled (callers simply skip projecting/refreshing
+// what is absent); refresh does not auto-disable.
+//
+// The caller is responsible for persisting cfg (cfg.Save()) after this returns.
+// Returns the display names of the platforms that were newly enabled, in All()
+// order, so the caller can announce each one.
+func DetectAndEnableNewPlatforms(cfg *config.Config) []string {
+	newlyEnabled := []string{}
+	for _, p := range platform.All() {
+		if !p.IsInstalled() {
+			continue
+		}
+		alreadyEnabled := cfg.IsPlatformEnabled(p.ID())
+		cfg.SetPlatformState(p.ID(), true, p.Version())
+		if !alreadyEnabled {
+			newlyEnabled = append(newlyEnabled, p.DisplayName())
+		}
+	}
+	return newlyEnabled
+}
 
 // NewRefreshCmd builds the `da refresh` cobra command. The cobra
 // metadata (Use/Short/Long/Example/Args) and the `--import` flag live

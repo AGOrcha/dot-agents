@@ -2,11 +2,147 @@ package lifecycle
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
+
+// seedIsolatedCLIShims writes shims for the named CLIs into a fakebin under a
+// fresh temp dir and sets PATH to ONLY that directory, so platforms whose CLI
+// was not seeded reliably probe IsInstalled()==false (no leakage from the real
+// host PATH). Each shim prints "<name> 0.0.0" so Version() resolves to 0.0.0.
+// Returns the temp root. Skips on Windows where the shim contract differs.
+func seedIsolatedCLIShims(t *testing.T, names ...string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH/shim seeding semantics differ on Windows; skip there")
+	}
+	tmp := t.TempDir()
+	binDir := filepath.Join(tmp, "fakebin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	shim := "#!/bin/sh\necho \"$(basename \"$0\") 0.0.0\"\n"
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte(shim), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+	return tmp
+}
+
+// TestDetectAndEnableNewPlatforms covers the refresh-driven auto-enable: a
+// platform installed after `da init` (probe true) but recorded enabled:false
+// gets enabled with its live version; versions for already-enabled installed
+// platforms are refreshed; an enabled-but-uninstalled platform is left enabled
+// and not flipped; and a present-but-new platform clears the "nothing to
+// refresh" dead-end by returning a non-empty newly-enabled set.
+func TestDetectAndEnableNewPlatforms(t *testing.T) {
+	tests := []struct {
+		name          string
+		shims         []string // CLIs to put on PATH (controls IsInstalled)
+		agents        map[string]config.Agent
+		wantEnabledID string // platform that must end enabled with version set
+		wantNewlyLen  int    // expected count of newly-enabled display names
+		wantLeftID    string // platform that must remain enabled:false untouched
+	}{
+		{
+			name:          "installed-but-disabled platform gets enabled and versioned",
+			shims:         []string{"codex"},
+			agents:        map[string]config.Agent{"codex": {Enabled: false}},
+			wantEnabledID: "codex",
+			wantNewlyLen:  1,
+		},
+		{
+			name:  "already-enabled installed platform refreshes version, no new enable",
+			shims: []string{"codex"},
+			// codex already enabled with a stale version string.
+			agents:        map[string]config.Agent{"codex": {Enabled: true, Version: "stale"}},
+			wantEnabledID: "codex",
+			wantNewlyLen:  0,
+		},
+		{
+			name:          "enabled-but-uninstalled platform is left enabled and not projected",
+			shims:         nil, // nothing installed
+			agents:        map[string]config.Agent{"codex": {Enabled: true, Version: "1.2.3"}},
+			wantNewlyLen:  0,
+			wantLeftID:    "",
+			wantEnabledID: "",
+		},
+		{
+			name:          "disabled-and-uninstalled platform stays disabled",
+			shims:         nil,
+			agents:        map[string]config.Agent{"opencode": {Enabled: false}},
+			wantNewlyLen:  0,
+			wantLeftID:    "opencode",
+			wantEnabledID: "",
+		},
+		{
+			name:          "newly-installed platform clears the nothing-to-refresh dead-end",
+			shims:         []string{"opencode"},
+			agents:        map[string]config.Agent{"opencode": {Enabled: false}},
+			wantEnabledID: "opencode",
+			wantNewlyLen:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			seedIsolatedCLIShims(t, tt.shims...)
+			cfg := &config.Config{Agents: map[string]config.Agent{}}
+			for id, a := range tt.agents {
+				cfg.Agents[id] = a
+			}
+
+			newly := DetectAndEnableNewPlatforms(cfg)
+
+			if len(newly) != tt.wantNewlyLen {
+				t.Fatalf("newly-enabled = %v (len %d), want len %d", newly, len(newly), tt.wantNewlyLen)
+			}
+
+			if tt.wantEnabledID != "" {
+				a, ok := cfg.Agents[tt.wantEnabledID]
+				if !ok || !a.Enabled {
+					t.Fatalf("%s should be enabled after detect, got %+v (present=%v)", tt.wantEnabledID, a, ok)
+				}
+				if a.Version != "0.0.0" {
+					t.Errorf("%s version = %q, want refreshed %q", tt.wantEnabledID, a.Version, "0.0.0")
+				}
+			}
+
+			if tt.wantLeftID != "" {
+				a := cfg.Agents[tt.wantLeftID]
+				if a.Enabled {
+					t.Errorf("%s should be left disabled (refresh never auto-enables an absent tool), got enabled", tt.wantLeftID)
+				}
+			}
+		})
+	}
+}
+
+// TestDetectAndEnableNewPlatforms_DefaultEnabledNotReEnabled pins that a
+// platform absent from the Agents map (IsPlatformEnabled defaults to true) is
+// treated as already-enabled and is never added to the newly-enabled set, even
+// when installed. Guards against re-announcing default-enabled platforms on
+// every refresh.
+func TestDetectAndEnableNewPlatforms_DefaultEnabledNotReEnabled(t *testing.T) {
+	seedIsolatedCLIShims(t, "codex")
+	cfg := &config.Config{Agents: map[string]config.Agent{}} // codex absent → default enabled
+
+	newly := DetectAndEnableNewPlatforms(cfg)
+
+	for _, n := range newly {
+		if strings.Contains(strings.ToLower(n), "codex") {
+			t.Fatalf("default-enabled codex must not be reported newly-enabled, got %v", newly)
+		}
+	}
+}
 
 // stubExampleBlock is the lifecycle-package mirror of commands.ExampleBlock
 // — joins lines with newlines. Sufficient for cobra Example metadata in

@@ -161,6 +161,16 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	if root == "" {
 		root = crgRepoRoot()
 	}
+	// code-review-graph is an optional dependency. When it isn't installed,
+	// degrade gracefully (exit 0) instead of erroring — the graph-update
+	// post_tool_use hook runs on every edit and must not fail the session for
+	// users without the tool.
+	if _, err := graphstore.DiscoverCRGBin(root); err != nil {
+		if !commandJSON(cmd) {
+			ui.Info("code-review-graph not installed; skipping code graph update")
+		}
+		return nil
+	}
 	base, _ := cmd.Flags().GetString("base")
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
