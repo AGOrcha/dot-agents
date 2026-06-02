@@ -11,7 +11,9 @@ func kgDeps() kg.Deps {
 			JSON:   Flags.JSON,
 			DryRun: Flags.DryRun,
 		},
-		ExampleBlock: ExampleBlock,
+		ExampleBlock:   ExampleBlock,
+		UsageError:     UsageError,
+		ErrorWithHints: ErrorWithHints,
 	}
 }
 

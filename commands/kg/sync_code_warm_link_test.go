@@ -320,10 +320,10 @@ func TestRunKGLinkAdd_DuplicateUpsert(t *testing.T) {
 		t.Fatalf("runKGWarm: %v", err)
 	}
 	addCmd := newKGLinkAddCmdForTest("mentions")
-	if err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "x::Y"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd, []string{"dec-use-cobra", "x::Y"}); err != nil {
 		t.Fatalf("first add: %v", err)
 	}
-	if err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "x::Y"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd, []string{"dec-use-cobra", "x::Y"}); err != nil {
 		t.Fatalf("second add: %v", err)
 	}
 	store, _ := openKGStore(home)
@@ -344,7 +344,7 @@ func TestRunKGLinkAdd_DefaultKind(t *testing.T) {
 
 	// Pass an empty kind flag and verify the stored link kind is "mentions".
 	addCmd := newKGLinkAddCmdForTest("")
-	if err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "ns::Foo"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd, []string{"dec-use-cobra", "ns::Foo"}); err != nil {
 		t.Fatalf("runKGLinkAdd: %v", err)
 	}
 	store, _ := openKGStore(home)
@@ -363,7 +363,7 @@ func TestRunKGLinkList_NoLinksMessage(t *testing.T) {
 	_ = runKGWarm(cmd, nil)
 
 	out := captureStdout(t, func() {
-		if err := runKGLinkList(nil, []string{"dec-use-cobra"}); err != nil {
+		if err := runKGLinkList(testDeps(), nil, []string{"dec-use-cobra"}); err != nil {
 			t.Fatalf("runKGLinkList: %v", err)
 		}
 	})
@@ -374,7 +374,7 @@ func TestRunKGLinkList_NoLinksMessage(t *testing.T) {
 
 // TestRunKGLinkList_MissingArg covers the usage-error branch.
 func TestRunKGLinkList_MissingArg(t *testing.T) {
-	err := runKGLinkList(nil, nil)
+	err := runKGLinkList(testDeps(), nil, nil)
 	if err == nil {
 		t.Fatal("expected usage error for missing note-id")
 	}
@@ -385,7 +385,7 @@ func TestRunKGLinkList_MissingArg(t *testing.T) {
 
 // TestRunKGLinkRemove_MissingArg covers the usage-error branch.
 func TestRunKGLinkRemove_MissingArg(t *testing.T) {
-	err := runKGLinkRemove(nil, nil)
+	err := runKGLinkRemove(testDeps(), nil, nil)
 	if err == nil {
 		t.Fatal("expected usage error for missing link id")
 	}
@@ -403,7 +403,7 @@ func TestRunKGLinkRemove_NonExistent(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	cmd := newKGLinkRemoveCmdForTest()
-	if err := runKGLinkRemove(cmd, []string{"999999"}); err != nil {
+	if err := runKGLinkRemove(testDeps(), cmd, []string{"999999"}); err != nil {
 		t.Fatalf("runKGLinkRemove unknown id: %v", err)
 	}
 }
@@ -696,7 +696,7 @@ func TestWarmCodeLane_CRGUnavailable(t *testing.T) {
 // TestRunKGLinkRemove_InvalidIDReturnsError covers the integer-parse error.
 func TestRunKGLinkRemove_InvalidIDReturnsError(t *testing.T) {
 	cmd := newKGLinkRemoveCmdForTest()
-	err := runKGLinkRemove(cmd, []string{"not-a-number"})
+	err := runKGLinkRemove(testDeps(), cmd, []string{"not-a-number"})
 	if err == nil {
 		t.Fatal("expected parse error for non-integer link id")
 	}
@@ -708,7 +708,7 @@ func TestRunKGLinkRemove_InvalidIDReturnsError(t *testing.T) {
 // TestRunKGLinkAdd_InvalidKindRejected exercises the kind-validation branch.
 func TestRunKGLinkAdd_InvalidKindRejected(t *testing.T) {
 	cmd := newKGLinkAddCmdForTest("not-real-kind")
-	err := runKGLinkAdd(cmd, []string{"some-id", "ns::F"})
+	err := runKGLinkAdd(testDeps(), cmd, []string{"some-id", "ns::F"})
 	if err == nil {
 		t.Fatal("expected error for invalid link kind")
 	}
@@ -720,7 +720,7 @@ func TestRunKGLinkAdd_InvalidKindRejected(t *testing.T) {
 // TestRunKGLinkAdd_MissingArgs covers the early usage-error branch.
 func TestRunKGLinkAdd_MissingArgs(t *testing.T) {
 	cmd := newKGLinkAddCmdForTest("mentions")
-	if err := runKGLinkAdd(cmd, nil); err == nil {
+	if err := runKGLinkAdd(testDeps(), cmd, nil); err == nil {
 		t.Error("expected usage error for missing args")
 	}
 }
@@ -744,7 +744,7 @@ func TestRunKGLinkAdd_OpenStoreError(t *testing.T) {
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
 	cmd.Flags().String("kind", "mentions", "")
-	err := runKGLinkAdd(cmd, []string{"note", "qn"})
+	err := runKGLinkAdd(testDeps(), cmd, []string{"note", "qn"})
 	if err == nil || !strings.Contains(err.Error(), "open warm store") {
 		t.Fatalf("expected open-warm-store error, got %v", err)
 	}
@@ -757,7 +757,7 @@ func TestRunKGLinkList_OpenStoreError(t *testing.T) {
 	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
-	err := runKGLinkList(cmd, []string{"note"})
+	err := runKGLinkList(testDeps(), cmd, []string{"note"})
 	if err == nil || !strings.Contains(err.Error(), "open warm store") {
 		t.Fatalf("expected open-warm-store error, got %v", err)
 	}
@@ -770,7 +770,7 @@ func TestRunKGLinkRemove_OpenStoreError(t *testing.T) {
 	}
 	t.Setenv("KG_HOME", "/dev/null/not-a-dir")
 	cmd := &cobra.Command{}
-	err := runKGLinkRemove(cmd, []string{"42"})
+	err := runKGLinkRemove(testDeps(), cmd, []string{"42"})
 	if err == nil || !strings.Contains(err.Error(), "open warm store") {
 		t.Fatalf("expected open-warm-store error, got %v", err)
 	}
@@ -2271,7 +2271,7 @@ func TestWarmNotesInDir_UpsertKGNoteError(t *testing.T) {
 func TestRunKGLinkAdd_UpsertError(t *testing.T) {
 	initWarmDBThenBreak(t, "note_symbol_links", "CREATE TABLE note_symbol_links (note_id TEXT NOT NULL, qualified_name TEXT NOT NULL)")
 	cmd := newKGLinkAddCmdForTest("mentions")
-	err := runKGLinkAdd(cmd, []string{"note-x", "pkg::Sym"})
+	err := runKGLinkAdd(testDeps(), cmd, []string{"note-x", "pkg::Sym"})
 	if err == nil || !strings.Contains(err.Error(), "create link") {
 		t.Fatalf("expected create-link error, got: %v", err)
 	}
@@ -2281,7 +2281,7 @@ func TestRunKGLinkAdd_UpsertError(t *testing.T) {
 // (lines 750-752).
 func TestRunKGLinkList_GetLinksError(t *testing.T) {
 	initWarmDBThenBreak(t, "note_symbol_links", "CREATE TABLE note_symbol_links (note_id TEXT NOT NULL, qualified_name TEXT NOT NULL)")
-	err := runKGLinkList(&cobra.Command{}, []string{"note-x"})
+	err := runKGLinkList(testDeps(), &cobra.Command{}, []string{"note-x"})
 	if err == nil || !strings.Contains(err.Error(), "get links") {
 		t.Fatalf("expected get-links error, got: %v", err)
 	}
@@ -2293,7 +2293,7 @@ func TestRunKGLinkRemove_DeleteError(t *testing.T) {
 	// DELETE ... WHERE id=? needs an `id` column; a stub without it errors.
 	initWarmDBThenBreak(t, "note_symbol_links", "CREATE TABLE note_symbol_links (note_id TEXT NOT NULL, qualified_name TEXT NOT NULL)")
 	cmd := newKGLinkRemoveCmdForTest()
-	err := runKGLinkRemove(cmd, []string{"42"})
+	err := runKGLinkRemove(testDeps(), cmd, []string{"42"})
 	if err == nil || !strings.Contains(err.Error(), "remove link") {
 		t.Fatalf("expected remove-link error, got: %v", err)
 	}

@@ -30,7 +30,7 @@ func TestImportAgentIn_CreatesSymlinksAndRegisters(t *testing.T) {
 	agentsHome, projectPath := testutil.NewTempProject(t, "importproj")
 	canonical := testutil.WriteCanonicalAgent(t, agentsHome, "importproj", "imported-agent")
 
-	if err := ImportAgentIn("imported-agent", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "imported-agent", projectPath); err != nil {
 		t.Fatalf("ImportAgentIn: %v", err)
 	}
 
@@ -67,10 +67,10 @@ func TestImportAgentIn_Idempotent(t *testing.T) {
 	agentsHome, projectPath := testutil.NewTempProject(t, "importproj2")
 	testutil.WriteCanonicalAgent(t, agentsHome, "importproj2", "idem-import")
 
-	if err := ImportAgentIn("idem-import", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "idem-import", projectPath); err != nil {
 		t.Fatalf("first import: %v", err)
 	}
-	if err := ImportAgentIn("idem-import", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "idem-import", projectPath); err != nil {
 		t.Fatalf("second import: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestImportAgentIn_Idempotent(t *testing.T) {
 func TestImportAgentIn_ErrorCanonicalMissing(t *testing.T) {
 	_, projectPath := testutil.NewTempProject(t, "missingcanon")
 
-	err := ImportAgentIn("nope", projectPath)
+	err := ImportAgentIn(Deps{}, "nope", projectPath)
 	if err == nil {
 		t.Fatal("expected error for missing canonical agent")
 	}
@@ -105,7 +105,7 @@ func TestImportAgentIn_ErrorNoProjectName(t *testing.T) {
 	agentsHome, projectPath := testutil.NewTempProject(t, "")
 	testutil.WriteCanonicalAgent(t, agentsHome, "global", "orphan")
 
-	err := ImportAgentIn("orphan", projectPath)
+	err := ImportAgentIn(Deps{}, "orphan", projectPath)
 	if err == nil {
 		t.Fatal("expected error for empty project name")
 	}
@@ -119,7 +119,7 @@ func TestImportAgentIn_ErrorRepoLocalRealDir(t *testing.T) {
 	testutil.WriteCanonicalAgent(t, agentsHome, "importproj3", "clash-import")
 	testutil.WriteAgentManifest(t, projectPath, "clash-import")
 
-	err := ImportAgentIn("clash-import", projectPath)
+	err := ImportAgentIn(Deps{}, "clash-import", projectPath)
 	if err == nil {
 		t.Fatal("expected error when repo has real directory")
 	}
@@ -143,7 +143,7 @@ func TestImportAgentIn_ErrorRepoLocalMispointedSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := ImportAgentIn("mis-import", projectPath)
+	err := ImportAgentIn(Deps{}, "mis-import", projectPath)
 	if err == nil {
 		t.Fatal("expected error for mispointed symlink")
 	}
@@ -404,7 +404,7 @@ func TestRemoveAgentIn_UnlinksSymlinksAndManifest(t *testing.T) {
 	agentsHome, projectPath := testutil.NewTempProject(t, "rmproj")
 	testutil.WriteCanonicalAgent(t, agentsHome, "rmproj", "gone-agent")
 
-	if err := ImportAgentIn("gone-agent", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "gone-agent", projectPath); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 	if err := RemoveAgentIn(d, "gone-agent", projectPath, false); err != nil {
@@ -498,7 +498,7 @@ func TestRemoveAgentIn_PurgeDeletesCanonical(t *testing.T) {
 	d := stubDeps(true)
 	agentsHome, projectPath := testutil.NewTempProject(t, "purgeproj")
 	testutil.WriteCanonicalAgent(t, agentsHome, "purgeproj", "purge-me")
-	if err := ImportAgentIn("purge-me", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "purge-me", projectPath); err != nil {
 		t.Fatalf("import: %v", err)
 	}
 

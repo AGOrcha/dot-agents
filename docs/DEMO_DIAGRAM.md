@@ -47,7 +47,7 @@ flowchart TB
         Claude["Claude Code"]
         Codex["Codex"]
         Copilot["GitHub Copilot"]
-        Other["OpenCode, ..."]
+        Other["OpenCode"]
     end
 
     Dev -->|edits once| Canonical

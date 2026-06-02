@@ -459,6 +459,48 @@ func TestNewWorkflowCommitCmdExecuteOutsideRepo(t *testing.T) {
 	}
 }
 
+// The global -n/--dry-run is OR-merged into the local --dry-run so
+// `da -n workflow commit` is honored without the subcommand flag. The test
+// deps leave Flags.DryRun nil, so pointing it at a true accessor here also
+// exercises the new non-nil branch in the RunE closure.
+func TestNewWorkflowCommitCmdHonorsGlobalDryRun(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH (needed to bootstrap the fixture)")
+	}
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
+
+	// Stage-eligible workflow-state change so a real commit *would* land
+	// absent dry-run.
+	planDir := filepath.Join(dir, ".agents", "workflow", "plans", "test-plan")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "PLAN.yaml"), []byte("id: test-plan\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := deps.Flags.DryRun
+	deps.Flags.DryRun = func() bool { return true }
+	t.Cleanup(func() { deps.Flags.DryRun = saved })
+
+	cmd := newWorkflowCommitCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetErr(&buf)
+	cmd.SetArgs([]string{}) // no local --dry-run; the global -n must carry it
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v\noutput: %s", err, buf.String())
+	}
+	if !strings.Contains(buf.String(), "dry-run") {
+		t.Errorf("global -n should force the dry-run preview; got: %s", buf.String())
+	}
+	logOut, _ := exec.Command("git", "-C", dir, "log", "--format=%s", "-5").CombinedOutput()
+	if strings.Contains(string(logOut), "workflow(state)") {
+		t.Errorf("global dry-run still committed:\n%s", logOut)
+	}
+}
+
 // End-to-end against a real throwaway repo: gogitImpl.Status + AddPaths +
 // Commit land a workflow(state) commit on disk, and a second invocation
 // is a clean no-op.

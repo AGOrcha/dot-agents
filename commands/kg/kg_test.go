@@ -2211,12 +2211,12 @@ func TestNoteSymbolLink_AddListRemove(t *testing.T) {
 
 	// Add a link
 	addCmd := newKGLinkAddCmdForTest("mentions")
-	if err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "commands::NewKGCmd"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd, []string{"dec-use-cobra", "commands::NewKGCmd"}); err != nil {
 		t.Fatalf("runKGLinkAdd: %v", err)
 	}
 
 	// List links
-	if err := runKGLinkList(nil, []string{"dec-use-cobra"}); err != nil {
+	if err := runKGLinkList(testDeps(), nil, []string{"dec-use-cobra"}); err != nil {
 		t.Fatalf("runKGLinkList: %v", err)
 	}
 
@@ -2237,7 +2237,7 @@ func TestNoteSymbolLink_AddListRemove(t *testing.T) {
 	// Remove the link
 	linkID := fmt.Sprintf("%d", links[0].ID)
 	removeCmd := newKGLinkRemoveCmdForTest()
-	if err := runKGLinkRemove(removeCmd, []string{linkID}); err != nil {
+	if err := runKGLinkRemove(testDeps(), removeCmd, []string{linkID}); err != nil {
 		t.Fatalf("runKGLinkRemove: %v", err)
 	}
 	links2, _ := store.GetLinksForNote("dec-use-cobra")
@@ -2251,7 +2251,7 @@ func TestNoteSymbolLink_InvalidKind(t *testing.T) {
 	_ = home
 
 	addCmd := newKGLinkAddCmdForTest("bad-kind")
-	err := runKGLinkAdd(addCmd, []string{"dec-use-cobra", "cmd::F"})
+	err := runKGLinkAdd(testDeps(), addCmd, []string{"dec-use-cobra", "cmd::F"})
 	if err == nil {
 		t.Error("expected error for invalid link kind")
 	}
@@ -2266,7 +2266,7 @@ func TestNoteSymbolLink_InvalidRemoveID(t *testing.T) {
 	_ = home
 
 	removeCmd := newKGLinkRemoveCmdForTest()
-	err := runKGLinkRemove(removeCmd, []string{"not-a-number"})
+	err := runKGLinkRemove(testDeps(), removeCmd, []string{"not-a-number"})
 	if err == nil {
 		t.Error("expected error for non-integer link ID")
 	}
@@ -2295,13 +2295,49 @@ func TestRunKGLinkAdd_UsageShape(t *testing.T) {
 		t.Fatalf("runKGSetup: %v", err)
 	}
 
-	err := runKGLinkAdd(newKGLinkAddCmdForTest("mentions"), nil)
+	err := runKGLinkAdd(testDeps(), newKGLinkAddCmdForTest("mentions"), nil)
 	if err == nil {
 		t.Fatal("expected error for missing link arguments")
 	}
-	want := "kg link add expects 2 arguments: <note-id> <qualified-name>"
+	want := "kg link add expects 2 arguments"
 	if err.Error() != want {
 		t.Fatalf("unexpected error:\n got: %q\nwant: %q", err.Error(), want)
+	}
+}
+
+// TestRunKGLink_UsageErrorWired exercises the kgUsageError non-nil branch: when
+// Deps.UsageError is wired (as the commands package does in production) the
+// primary message and hint flow through the shared writer rather than the
+// bare-message fallback.
+func TestRunKGLink_UsageErrorWired(t *testing.T) {
+	var gotMsg string
+	var gotHints []string
+	deps := Deps{
+		UsageError: func(message string, hints ...string) error {
+			gotMsg = message
+			gotHints = hints
+			return fmt.Errorf("%s", message)
+		},
+	}
+	if err := runKGLinkList(deps, nil, nil); err == nil {
+		t.Fatal("expected usage error for missing note-id")
+	}
+	if gotMsg != "kg link list expects 1 argument" {
+		t.Fatalf("unexpected primary message: %q", gotMsg)
+	}
+	if len(gotHints) != 1 || gotHints[0] != "Usage: da kg link list <note-id>." {
+		t.Fatalf("unexpected hints: %#v", gotHints)
+	}
+
+	gotHints = nil
+	if err := runKGLinkRemove(deps, &cobra.Command{}, []string{"not-a-number"}); err == nil {
+		t.Fatal("expected parse error for non-integer link id")
+	}
+	if gotMsg != `invalid link ID "not-a-number": expected an integer` {
+		t.Fatalf("unexpected primary message: %q", gotMsg)
+	}
+	if len(gotHints) != 1 || gotHints[0] != "Pass the numeric link ID shown by `da kg link list`." {
+		t.Fatalf("unexpected hints: %#v", gotHints)
 	}
 }
 
@@ -2609,7 +2645,7 @@ func TestRunKGLinkAdd_SuccessPath(t *testing.T) {
 
 	// Add a link with "implements" kind
 	addCmd := newKGLinkAddCmdForTest("implements")
-	if err := runKGLinkAdd(addCmd, []string{"ent-cobra", "commands::Execute"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd, []string{"ent-cobra", "commands::Execute"}); err != nil {
 		t.Fatalf("runKGLinkAdd: %v", err)
 	}
 
@@ -2647,17 +2683,17 @@ func TestRunKGLinkList_ShowsLinks(t *testing.T) {
 
 	// Create two links
 	addCmd1 := newKGLinkAddCmdForTest("mentions")
-	if err := runKGLinkAdd(addCmd1, []string{"dec-use-cobra", "cmd::Run"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd1, []string{"dec-use-cobra", "cmd::Run"}); err != nil {
 		t.Fatalf("runKGLinkAdd 1: %v", err)
 	}
 	addCmd2 := newKGLinkAddCmdForTest("documents")
-	if err := runKGLinkAdd(addCmd2, []string{"dec-use-cobra", "cmd::Execute"}); err != nil {
+	if err := runKGLinkAdd(testDeps(), addCmd2, []string{"dec-use-cobra", "cmd::Execute"}); err != nil {
 		t.Fatalf("runKGLinkAdd 2: %v", err)
 	}
 
 	// Capture output of link list
 	out := captureStdout(t, func() {
-		if err := runKGLinkList(nil, []string{"dec-use-cobra"}); err != nil {
+		if err := runKGLinkList(testDeps(), nil, []string{"dec-use-cobra"}); err != nil {
 			t.Errorf("runKGLinkList: %v", err)
 		}
 	})

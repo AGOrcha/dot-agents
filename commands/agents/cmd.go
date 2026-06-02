@@ -130,7 +130,7 @@ This is the reverse of promote: the canonical directory remains the source of tr
 			if err != nil {
 				return fmt.Errorf(resolveProjectPathFmt, err)
 			}
-			return ImportAgentIn(args[0], projectPath)
+			return ImportAgentIn(deps, args[0], projectPath)
 		},
 	}
 }

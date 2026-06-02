@@ -1,6 +1,10 @@
 package kg
 
-import "github.com/AGOrcha/dot-agents/internal/graphstore"
+import (
+	"fmt"
+
+	"github.com/AGOrcha/dot-agents/internal/graphstore"
+)
 
 // GlobalFlags mirrors the subset of commands.Flags used by kg subcommands.
 type GlobalFlags struct {
@@ -28,10 +32,22 @@ type GlobalFlags struct {
 // (e.g. legacy call sites that have not been updated), kgIOFrom(deps)
 // substitutes stdKGIO{} so the handlers never carry a nil collaborator.
 type Deps struct {
-	Flags        GlobalFlags
-	ExampleBlock func(lines ...string) string
-	Store        graphstore.Handle
-	IO           kgIO
+	Flags          GlobalFlags
+	ExampleBlock   func(lines ...string) string
+	Store          graphstore.Handle
+	IO             kgIO
+	UsageError     func(message string, hints ...string) error
+	ErrorWithHints func(message string, hints ...string) error
+}
+
+// kgUsageError emits deps.UsageError when wired (the commands package's shared
+// usage-class writer), otherwise falls back to a plain message so zero-Deps
+// tests still get the primary text. Mirrors agents' agentUserError.
+func kgUsageError(deps Deps, message string, hints ...string) error {
+	if deps.UsageError != nil {
+		return deps.UsageError(message, hints...)
+	}
+	return fmt.Errorf("%s", message)
 }
 
 // kgIOFrom returns deps.IO when set, otherwise the production stdKGIO{}.

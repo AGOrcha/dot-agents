@@ -18,9 +18,9 @@ flowchart LR
     Home -->|"da refresh"| Repo1["Repo A"]
     Home -->|"da refresh"| Repo2["Repo B"]
     Home -->|"da refresh"| RepoN["Repo N..."]
-    Repo1 --> Cursor & Claude & Codex
-    Repo2 --> Cursor & Claude & Codex
-    RepoN --> Copilot & OpenCode
+    Repo1 --> Cursor & Claude & Codex & Copilot & OpenCode
+    Repo2 --> Cursor & Claude & Codex & Copilot & OpenCode
+    RepoN --> Cursor & Claude & Codex & Copilot & OpenCode
 ```
 
 You edit **one** file in `~/.agents/`. Every project, every agent picks it up.
@@ -38,10 +38,11 @@ You edit **one** file in `~/.agents/`. Every project, every agent picks it up.
 
 ## What's in the box
 
-- **`da` CLI** — Go binary; `init`, `add`, `refresh`, `doctor`, `install`,
-  `status`, plus the workflow surface (`workflow orient`, `workflow next`,
+- **`da` CLI** — Go binary; `init`, `add`, `remove`, `import`, `refresh`,
+  `sync`, `status`, `doctor`, `install`, `config`, `review`, `session`, `kg`,
+  `score`, plus the workflow surface (`workflow orient`, `workflow next`,
   `workflow fanout`, `workflow merge-back`, `workflow delegation closeout`,
-  `workflow fold-back`).
+  `workflow fold-back`). See `da --help` for the full surface.
 - **Canonical resources** — `rules/`, `skills/`, `agents/`, `hooks/`, `mcp/`,
   `settings/` under `~/.agents/`, with per-resource subcommands following the
   contract in [`RESOURCE_COMMAND_CONTRACT.md`](./RESOURCE_COMMAND_CONTRACT.md).
@@ -76,6 +77,8 @@ da doctor
 da explain
 da explain manifest
 da explain structure
+da explain platforms
+da explain links
 ```
 
 ## Where to go next

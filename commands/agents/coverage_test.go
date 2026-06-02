@@ -106,7 +106,7 @@ func TestAgentsImportCmd_RunE(t *testing.T) {
 func TestAgentsRemoveCmd_RunE(t *testing.T) {
 	agentsHome, projectPath := testutil.NewTempProject(t, "remproj")
 	testutil.WriteCanonicalAgent(t, agentsHome, "remproj", "removable")
-	if err := ImportAgentIn("removable", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "removable", projectPath); err != nil {
 		t.Fatalf("setup import: %v", err)
 	}
 
@@ -183,7 +183,7 @@ func TestImportAgentIn_MissingAgentsRCReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	// No .agentsrc.json present
-	if err := ImportAgentIn("anything", projectPath); err == nil {
+	if err := ImportAgentIn(Deps{}, "anything", projectPath); err == nil {
 		t.Error("expected error for missing .agentsrc.json")
 	}
 }
@@ -203,7 +203,7 @@ func TestImportAgentIn_CanonicalPathNotDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(canonDir, "thing"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ImportAgentIn("thing", projectPath)
+	err := ImportAgentIn(Deps{}, "thing", projectPath)
 	if err == nil {
 		t.Error("expected error when canonical layout is invalid")
 	}
@@ -221,7 +221,7 @@ func TestEnsureImportRepoAgentsSlot_UnknownFileTypeReturnsError(t *testing.T) {
 	if err := os.WriteFile(repoLocal, []byte("plain"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ensureImportRepoAgentsSlot(stdReadlinker{}, "weird", filepath.Join("/tmp", "fake-canon"), projectPath)
+	err := ensureImportRepoAgentsSlot(Deps{}, stdReadlinker{}, "weird", filepath.Join("/tmp", "fake-canon"), projectPath)
 	if err == nil {
 		t.Fatal("expected error for unknown file type at repo-local slot")
 	}
@@ -246,7 +246,7 @@ func TestEnsureImportRepoAgentsSlot_AlreadyCorrectSymlink(t *testing.T) {
 	if err := os.Symlink(canonical, repoLocal); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureImportRepoAgentsSlot(stdReadlinker{}, "agent-correct", canonical, projectPath); err != nil {
+	if err := ensureImportRepoAgentsSlot(Deps{}, stdReadlinker{}, "agent-correct", canonical, projectPath); err != nil {
 		t.Fatalf("expected no-op for correct symlink, got: %v", err)
 	}
 }
@@ -452,7 +452,7 @@ func TestRemoveAgentIn_RCSaveErrorAfterCleanup(t *testing.T) {
 	d := stubDeps(false)
 	agentsHome, projectPath := testutil.NewTempProject(t, "saveerr")
 	testutil.WriteCanonicalAgent(t, agentsHome, "saveerr", "to-rm")
-	if err := ImportAgentIn("to-rm", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "to-rm", projectPath); err != nil {
 		t.Fatalf("setup import: %v", err)
 	}
 
@@ -585,7 +585,7 @@ func TestImportAgentIn_PlanExecuteError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectPath, ".claude"), []byte("file"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := ImportAgentIn("x", projectPath)
+	err := ImportAgentIn(Deps{}, "x", projectPath)
 	if err == nil {
 		t.Skip("filesystem allowed write through file; Execute error not exercised")
 	}
@@ -609,7 +609,7 @@ func TestEnsureImportRepoAgentsSlot_LstatPermissionError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
 
-	err := ensureImportRepoAgentsSlot(stdReadlinker{}, "perm", "/canon", filepath.Join(tmp, "parent"))
+	err := ensureImportRepoAgentsSlot(Deps{}, stdReadlinker{}, "perm", "/canon", filepath.Join(tmp, "parent"))
 	if err == nil {
 		t.Skip("filesystem ignored chmod; Lstat error path not exercised")
 	}
@@ -622,7 +622,7 @@ func TestRemoveAgentIn_SecondCleanupError(t *testing.T) {
 	d := stubDeps(false)
 	agentsHome, projectPath := testutil.NewTempProject(t, "secondcleanup")
 	testutil.WriteCanonicalAgent(t, agentsHome, "secondcleanup", "double")
-	if err := ImportAgentIn("double", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "double", projectPath); err != nil {
 		t.Fatalf("setup import: %v", err)
 	}
 	// Replace the .claude/agents/<name> symlink with a real directory so
@@ -650,7 +650,7 @@ func TestImportAgentIn_RCSaveError(t *testing.T) {
 	testutil.WriteCanonicalAgent(t, agentsHome, "rcsavefail", "save-fail")
 
 	// First import: succeeds, sets up symlinks.
-	if err := ImportAgentIn("save-fail", projectPath); err != nil {
+	if err := ImportAgentIn(Deps{}, "save-fail", projectPath); err != nil {
 		t.Fatalf("setup import: %v", err)
 	}
 
@@ -668,7 +668,7 @@ func TestImportAgentIn_RCSaveError(t *testing.T) {
 		_ = os.Chmod(rcPath, 0o644)
 	})
 
-	err := ImportAgentIn("save-fail", projectPath)
+	err := ImportAgentIn(Deps{}, "save-fail", projectPath)
 	if err == nil {
 		t.Skip("filesystem allowed write to read-only file; rc.Save error path not exercised")
 	}
@@ -736,7 +736,7 @@ func TestEnsureImportRepoAgentsSlot_DanglingSymlink(t *testing.T) {
 	if err := os.Symlink("/nonexistent/foo", repoLocal); err != nil {
 		t.Fatal(err)
 	}
-	err := ensureImportRepoAgentsSlot(stdReadlinker{}, "dangling", "/canon/path", projectPath)
+	err := ensureImportRepoAgentsSlot(Deps{}, stdReadlinker{}, "dangling", "/canon/path", projectPath)
 	if err == nil {
 		t.Error("expected mispointed-symlink error for dangling link")
 	}
