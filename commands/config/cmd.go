@@ -6,9 +6,9 @@
 // repository — what value won, which layer set it, and how to extract one
 // specific field for scripts.
 //
-// The first command in this subtree is `da config explain`. Future sibling
-// commands (`sync`, `lint`, `verify`) are scoped to other tasks
-// (config-v2-migration/p4c).
+// The first commands in this subtree are `da config explain` and
+// `da config verify`. The remaining siblings (`sync`, `lint`) are scoped to
+// other tasks (config-v2-migration/p4c).
 //
 // The subtree intentionally consumes a minimal snapshot view of the manifest.
 // Once the layered resolver from config-v2-migration/p1 / p1b lands in
@@ -50,9 +50,11 @@ which prints human concept documentation rather than live repo state.`,
 			"  da config explain skills --value-only",
 			"  da config explain --all --json",
 			"  da config explain --flags",
+			"  da config verify",
 		),
 	}
 	cmd.AddCommand(newExplainCmd(deps))
+	cmd.AddCommand(newVerifyCmd(deps))
 	return cmd
 }
 
