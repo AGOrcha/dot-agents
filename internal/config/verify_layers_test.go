@@ -124,6 +124,7 @@ func TestVerifyLayerLocks_NotLockedLocalAndUnknownSourceAndBadRef(t *testing.T) 
 		"loc:team/x": {ResolvedSHA: "11112222", FetchedAt: "2026-06-02T00:00:00Z"},
 	}
 	p := layerProject(t, manifest, locks)
+	seedCachedLayer(t, "loc", "team/x", "11112222") // local layers are cached like remote
 
 	got, err := VerifyLayerLocks(p)
 	if err != nil {

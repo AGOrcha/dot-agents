@@ -225,10 +225,8 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 	for _, s := range statuses {
 		name := "layer:" + s.Ref
 		switch {
-		case s.OK() && s.SourceType == "local":
-			checks = append(checks, VerifyCheck{name, verifyPass, "locked (local source)"})
 		case s.OK():
-			checks = append(checks, VerifyCheck{name, verifyPass, "cached at " + abbrevSHA(s.SHA)})
+			checks = append(checks, VerifyCheck{name, verifyPass, s.SourceType + " layer cached at " + abbrevSHA(s.SHA)})
 		case s.Optional:
 			checks = append(checks, VerifyCheck{name, verifyWarn, s.Problem + " [optional]"})
 		default:

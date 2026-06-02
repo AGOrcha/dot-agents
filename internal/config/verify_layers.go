@@ -8,11 +8,12 @@ import (
 )
 
 // LayerLockStatus is the offline verification result for one declared `extends`
-// layer: whether the lockfile pins a resolved SHA for it and, for remote
-// sources, whether the downloaded layer bytes are present in the on-disk cache
-// at that SHA. It is what `da config verify` (config-v2 p4c) cross-checks so a
-// remote layer can be confirmed offline — present and consistent with the
-// lockfile — without ever re-fetching.
+// layer: whether the lockfile pins a resolved SHA for it and whether the
+// downloaded layer bytes are present in the on-disk cache at that SHA. Every
+// source type (git/http/local) is content-hashed and cached identically, so the
+// same check applies to all. It is what `da config verify` (config-v2 p4c)
+// cross-checks so a layer can be confirmed offline — present and consistent with
+// the lockfile — without ever re-fetching.
 type LayerLockStatus struct {
 	Ref        string `json:"ref"`
 	SourceID   string `json:"source_id,omitempty"`
@@ -21,9 +22,9 @@ type LayerLockStatus struct {
 	// Locked is true when the lockfile has an entry for Ref with a non-empty SHA.
 	Locked bool   `json:"locked"`
 	SHA    string `json:"sha,omitempty"`
-	// Cached is true when the layer is satisfied offline: for remote sources the
-	// cached layer.json exists at the locked SHA; local-source layers resolve
-	// from disk (no SHA cache) and are reported satisfied when locked.
+	// Cached is true when the cached layer.json exists at the locked SHA. Applies
+	// to every source type — git/http/local layers are all content-hashed and
+	// written to the same content-addressed cache.
 	Cached    bool   `json:"cached"`
 	CachePath string `json:"cache_path,omitempty"`
 	// Problem is empty when the layer verifies; otherwise a short, actionable
@@ -37,9 +38,9 @@ func (s LayerLockStatus) OK() bool { return s.Problem == "" }
 // VerifyLayerLocks cross-checks every declared `extends` layer in the project's
 // manifest against the lockfile and the on-disk layer cache, WITHOUT any fetch
 // or lockfile mutation. For each layer it reports whether the lockfile pins a
-// SHA and — for remote (git/http/oci) sources — whether the downloaded bytes
-// for that SHA are present in the cache. Local-source layers resolve from disk,
-// so they are reported satisfied once locked.
+// SHA and whether the downloaded bytes for that SHA are present in the cache —
+// the same check for git, http, and local sources (all are content-hashed and
+// cached identically).
 //
 // Returns an empty slice (no error) when the project declares no `extends`, or
 // when the manifest is absent (the caller's manifest check owns that failure).
@@ -98,13 +99,10 @@ func verifyOneLayerLock(entry LayerRef, sources map[string]Source, locked map[st
 		return st
 	}
 
-	// Local-source layers come from disk, not the SHA-addressed cache; being
-	// locked is sufficient for the offline check.
-	if src.Type == "local" {
-		st.Cached = true
-		return st
-	}
-
+	// Every fetched source — git, http, AND local — is content-hashed and cached
+	// the same way (localFetcher hashes the bytes and writes the cache), and the
+	// offline resolver reads all of them from the cache at the locked SHA. So a
+	// locked layer of any source type must have its cached bytes present.
 	cacheDir := layerCacheDir(parts.SourceID, parts.LayerPath)
 	st.CachePath = cachedLayerPath(cacheDir, st.SHA)
 	if _, ok := readCachedLayer(cacheDir, st.SHA); ok {

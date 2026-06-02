@@ -342,6 +342,7 @@ func TestVerifyLayerLocks_RendersStatuses(t *testing.T) {
 		t.Fatalf("write lock: %v", err)
 	}
 	seedCachedLayerFile(t, "acme", "org/base", "abcdef0123456789") // base cached; gone is not
+	seedCachedLayerFile(t, "loc", "team/x", "11112222")            // local layers are cached like remote
 
 	checks := verifyLayerLocks(project)
 	want := map[string]string{
