@@ -59,9 +59,12 @@ re-fetching any config layers (spec config-distribution-model §13.1, §16).
 
 Checks performed:
   - manifest      .agentsrc.json is present and parses
-  - config-layers each declared source layer is resolvable offline (local
-                  paths must exist; remote git/http/oci layers are reported as
-                  deferred — run ` + "`da config sync`" + ` to fetch and confirm them)
+  - config-layers each declared source resolves offline (local source paths
+                  must exist)
+  - locked-layers each declared ` + "`extends`" + ` layer is pinned in .agentsrc.lock,
+                  and for remote (git/http/oci) sources its downloaded assets
+                  are present in the local cache at the locked SHA — so remote
+                  layers are confirmed offline without re-fetching
   - binary        optional integrations are ready (code-review-graph)
 
 Exits non-zero if any check fails. Warnings (optional integration absent, or a
@@ -128,6 +131,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 	checks = append(checks, VerifyCheck{"manifest", verifyPass, "parsed " + cfg.AgentsRCFile})
 
 	checks = append(checks, verifySources(opts.cwd, snap)...)
+	checks = append(checks, verifyLayerLocks(opts.cwd)...)
 
 	probe := opts.crgProbe
 	if probe == nil {
@@ -184,7 +188,7 @@ func verifySources(cwd string, snap *snapshot) []VerifyCheck {
 				checks = append(checks, VerifyCheck{name, verifyFail, "local path missing: " + path})
 			}
 		case "git", "http", "oci":
-			checks = append(checks, VerifyCheck{name, verifyWarn, "remote " + typ + " layer not verified offline; run `da config sync`"})
+			checks = append(checks, VerifyCheck{name, verifyPass, "remote " + typ + " source; its layers are checked against the lockfile below"})
 		case "":
 			checks = append(checks, VerifyCheck{name, verifyFail, "source is missing a type"})
 		default:
@@ -192,6 +196,45 @@ func verifySources(cwd string, snap *snapshot) []VerifyCheck {
 		}
 	}
 	return checks
+}
+
+// verifyLayerLocks cross-checks each declared `extends` layer against the
+// lockfile and the on-disk layer cache (no fetch). For remote (git/http/oci)
+// layers this confirms the downloaded assets are present at the SHA the
+// lockfile pins; local-source layers just need a lock entry. Returns nil when
+// the project declares no extends (nothing to add to the report).
+func verifyLayerLocks(cwd string) []VerifyCheck {
+	statuses, err := cfg.VerifyLayerLocks(cwd)
+	if err != nil {
+		return []VerifyCheck{{"locked-layers", verifyWarn, "could not read lockfile/cache: " + err.Error()}}
+	}
+	if len(statuses) == 0 {
+		return nil
+	}
+	checks := make([]VerifyCheck, 0, len(statuses))
+	for _, s := range statuses {
+		name := "layer:" + s.Ref
+		switch {
+		case s.OK() && s.SourceType == "local":
+			checks = append(checks, VerifyCheck{name, verifyPass, "locked (local source)"})
+		case s.OK():
+			checks = append(checks, VerifyCheck{name, verifyPass, "cached at " + abbrevSHA(s.SHA)})
+		case s.Optional:
+			checks = append(checks, VerifyCheck{name, verifyWarn, s.Problem + " [optional]"})
+		default:
+			checks = append(checks, VerifyCheck{name, verifyFail, s.Problem})
+		}
+	}
+	return checks
+}
+
+// abbrevSHA shortens a resolved SHA for the human render without assuming a
+// minimum length (git SHAs and content hashes both flow through here).
+func abbrevSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // sourceLabel names a source check using its stable id when declared, else a

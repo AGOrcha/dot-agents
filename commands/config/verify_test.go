@@ -7,7 +7,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	cfg "github.com/AGOrcha/dot-agents/internal/config"
 )
+
+// seedCachedLayerFile writes a fake cached layer.json under the resolved cache
+// root so verifyLayerLocks sees a remote layer's downloaded assets as present.
+func seedCachedLayerFile(t *testing.T, sourceID, layerPath, sha string) {
+	t.Helper()
+	dir := filepath.Join(cfg.AgentsHome(), "cache", "config", sourceID, filepath.FromSlash(layerPath), sha)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "layer.json"), []byte(`{"skills":[]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // okProbe / failProbe are injectable code-review-graph readiness stubs so the
 // binary check is deterministic regardless of what is installed on the host.
@@ -113,13 +128,13 @@ func TestVerifySources(t *testing.T) {
 		{"local rel present", []any{map[string]any{"type": "local", "path": "present"}}, "source[0](local)", verifyPass},
 		{"local abs present", []any{map[string]any{"type": "local", "path": absPresent}}, "source[0](local)", verifyPass},
 		{"local missing", []any{map[string]any{"type": "local", "path": "nope"}}, "source[0](local)", verifyFail},
-		{"git remote", []any{map[string]any{"type": "git", "url": "u"}}, "source[0](git)", verifyWarn},
-		{"http remote", []any{map[string]any{"type": "http", "url": "u"}}, "source[0](http)", verifyWarn},
-		{"oci remote", []any{map[string]any{"type": "oci", "url": "u"}}, "source[0](oci)", verifyWarn},
+		{"git remote", []any{map[string]any{"type": "git", "url": "u"}}, "source[0](git)", verifyPass},
+		{"http remote", []any{map[string]any{"type": "http", "url": "u"}}, "source[0](http)", verifyPass},
+		{"oci remote", []any{map[string]any{"type": "oci", "url": "u"}}, "source[0](oci)", verifyPass},
 		{"missing type", []any{map[string]any{"url": "u"}}, "source[0](?)", verifyFail},
 		{"unknown type", []any{map[string]any{"type": "ftp"}}, "source[0](ftp)", verifyWarn},
 		{"not an object", []any{"oops"}, "source[0]", verifyFail},
-		{"id label", []any{map[string]any{"type": "git", "id": "acme", "url": "u"}}, "source:acme", verifyWarn},
+		{"id label", []any{map[string]any{"type": "git", "id": "acme", "url": "u"}}, "source:acme", verifyPass},
 	}
 
 	for _, tc := range cases {
@@ -248,6 +263,79 @@ func TestDefaultCRGProbe_DoesNotPanic(t *testing.T) {
 	// Result depends on host PATH/.venv; we only exercise the line for coverage
 	// and require it to return (nil or error) without panicking.
 	_ = defaultCRGProbe(t.TempDir())
+}
+
+func TestVerifyLayerLocks_RendersStatuses(t *testing.T) {
+	manifest := `{
+	  "sources": [
+	    {"type":"git","id":"acme","url":"https://example.com/a.git"},
+	    {"type":"local","id":"loc","path":"./layers"}
+	  ],
+	  "extends": [
+	    "acme:org/base",
+	    "acme:org/gone",
+	    "loc:team/x",
+	    {"ref":"acme:org/opt","optional":true}
+	  ]
+	}`
+	project := withRepoLayer(t, manifest, "")
+	if err := cfg.WriteConfigLock(project, map[string]cfg.LockedLayer{
+		"acme:org/base": {ResolvedSHA: "abcdef0123456789", FetchedAt: "2026-06-02T00:00:00Z"},
+		"acme:org/gone": {ResolvedSHA: "deadbeefcafef00d", FetchedAt: "2026-06-02T00:00:00Z"},
+		"loc:team/x":    {ResolvedSHA: "11112222", FetchedAt: "2026-06-02T00:00:00Z"},
+	}); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	seedCachedLayerFile(t, "acme", "org/base", "abcdef0123456789") // base cached; gone is not
+
+	checks := verifyLayerLocks(project)
+	want := map[string]string{
+		"layer:acme:org/base": verifyPass, // remote, locked + cached
+		"layer:acme:org/gone": verifyFail, // remote, locked but cache missing
+		"layer:loc:team/x":    verifyPass, // local, locked
+		"layer:acme:org/opt":  verifyWarn, // optional, unlocked
+	}
+	for name, status := range want {
+		c, ok := findCheck(checks, name)
+		if !ok {
+			t.Fatalf("missing check %q in %+v", name, checks)
+		}
+		if c.Status != status {
+			t.Fatalf("check %q = %q, want %q (%+v)", name, c.Status, status, c)
+		}
+	}
+	// the cached remote layer's detail should carry the abbreviated SHA
+	c, _ := findCheck(checks, "layer:acme:org/base")
+	if !strings.Contains(c.Detail, "abcdef012345") {
+		t.Fatalf("base detail should show abbreviated sha, got %q", c.Detail)
+	}
+}
+
+func TestVerifyLayerLocks_NoExtendsReturnsNil(t *testing.T) {
+	project := withRepoLayer(t, `{"sources":[{"type":"local"}]}`, "")
+	if got := verifyLayerLocks(project); got != nil {
+		t.Fatalf("expected nil for no extends, got %+v", got)
+	}
+}
+
+func TestVerifyLayerLocks_CorruptLockfileWarns(t *testing.T) {
+	project := withRepoLayer(t, `{"sources":[{"type":"git","id":"a","url":"u"}],"extends":["a:org/b"]}`, "")
+	if err := os.WriteFile(cfg.AgentsLockPath(project), []byte("{nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, ok := findCheck(verifyLayerLocks(project), "locked-layers")
+	if !ok || c.Status != verifyWarn {
+		t.Fatalf("expected a locked-layers warn on corrupt lockfile, got %+v", verifyLayerLocks(project))
+	}
+}
+
+func TestAbbrevSHA(t *testing.T) {
+	if abbrevSHA("abcdef0123456789") != "abcdef012345" {
+		t.Fatalf("long sha not truncated: %q", abbrevSHA("abcdef0123456789"))
+	}
+	if abbrevSHA("short") != "short" {
+		t.Fatalf("short sha changed: %q", abbrevSHA("short"))
+	}
 }
 
 func TestVerifyMarkAndOutcome(t *testing.T) {
