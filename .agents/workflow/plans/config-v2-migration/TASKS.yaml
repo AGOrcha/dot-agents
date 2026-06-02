@@ -536,3 +536,20 @@ tasks:
         Caution: this plan has in-flight tasks (p1 + p4 in_progress) — the
         tail only becomes eligible once every dependency is completed.
       app_type: release
+    - id: p4f-units-lock-7a-wiring
+      title: 'Phase 4f: wire §7A units lock (inputs_digest + units) into resolve/sync; verify tracks local-scope drift'
+      status: pending
+      depends_on:
+        - p4e-config-explain-lockfile
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/staleness.go
+        - internal/config/lock_units.go
+        - internal/config/ensure_resolved.go
+        - internal/config/resolver.go
+        - commands/config/verify.go
+        - commands/config/explain.go
+      verification_required: true
+      notes: Wire the dormant §7A seam (EnsureResolved/ComputeInputsDigest/WriteUnitsLock) into da config sync and da install so every resolved project — including flat/local-only — gets a lockfile carrying inputs_digest plus the units section. Migrate verify/explain/doctor to read units and compare ComputeInputsDigest against the lock to report local-scope drift; deprecate the §7 config section. Makes local sources first-class (managed, often git-backed). Full design in .agents/proposals/section-7a-units-lock-wiring.md. Supersedes the §7 extends-only locked-layers check shipped in p4c verify.
+      app_type: go-cli
