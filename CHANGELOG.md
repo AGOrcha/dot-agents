@@ -7,10 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-02
+
 ### Added
 
 - `skill-architect` now ships as a starter skill, so `da init` includes it out of
   the box for designing, auditing, and improving your own skills.
+- `skill-architect` is **provider-pluggable**: its `eval`/`improve`/`optimize`
+  modes drive whichever of the five dot-agents platform CLIs is present —
+  auto-detecting claude / cursor / codex / opencode / copilot — and can target the
+  Anthropic API, any OpenAI-compatible endpoint, or an arbitrary CLI via
+  `SKILL_ARCHITECT_PROVIDER`. The default (local `claude`) is unchanged.
+- `da config verify` — a standalone, offline setup/release contract check: the
+  manifest parses, declared local source layers exist, optional integrations
+  (code-review-graph) are ready, and for declared remote `extends` layers the
+  downloaded assets are present in the cache at the SHA the lockfile pins — all
+  without re-fetching. Emits `--json` and exits non-zero on failure for CI.
 
 ### Changed
 
