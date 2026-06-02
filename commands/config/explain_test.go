@@ -627,10 +627,14 @@ func TestNewConfigCmd_RegistersExplain(t *testing.T) {
 	if explain == nil {
 		t.Fatal("explain subcommand missing")
 	}
-	for _, flag := range []string{"all", "flags", "value-only", "origin-only", "json"} {
+	for _, flag := range []string{"all", "flags", "value-only", "origin-only"} {
 		if explain.Flags().Lookup(flag) == nil {
 			t.Errorf("explain command missing --%s flag", flag)
 		}
+	}
+	// --json is the GLOBAL persistent flag now, not a local explain flag.
+	if explain.Flags().Lookup("json") != nil {
+		t.Error("explain should not define a local --json flag; it reads the global one")
 	}
 }
 

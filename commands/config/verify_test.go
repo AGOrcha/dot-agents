@@ -394,6 +394,42 @@ func TestAbbrevSHA(t *testing.T) {
 	}
 }
 
+func TestDepsJSONFlag(t *testing.T) {
+	if (Deps{}).jsonFlag() {
+		t.Error("nil JSON getter should resolve false")
+	}
+	if !(Deps{JSON: func() bool { return true }}).jsonFlag() {
+		t.Error("JSON getter true should resolve true")
+	}
+	if (Deps{JSON: func() bool { return false }}).jsonFlag() {
+		t.Error("JSON getter false should resolve false")
+	}
+}
+
+func TestNewVerifyCmd_HonorsGlobalJSON(t *testing.T) {
+	project := withRepoLayer(t, `{"sources":[{"type":"local"}]}`, "")
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	deps := testDeps()
+	deps.JSON = func() bool { return true } // simulate the global --json being set
+
+	cmd := newVerifyCmd(deps)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs([]string{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var report VerifyReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("expected JSON output when the global --json is set, got: %s", out.String())
+	}
+}
+
 func TestVerifyMarkAndOutcome(t *testing.T) {
 	for status, want := range map[string]string{
 		verifyPass: "ok ",

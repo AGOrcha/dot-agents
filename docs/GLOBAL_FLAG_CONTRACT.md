@@ -41,7 +41,7 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 |----------------|----------|-------------|---------|-----------|-------------|-------|
 | `init` | unsupported | supported | supported | supported | unsupported | |
 | `add` | unsupported | supported | supported | supported | unsupported | |
-| `config` | unsupported | unsupported | unsupported | unsupported | unsupported | Read-only inspect (`explain`/`verify`); a local `--json` flag, no global-flag reads |
+| `config` | supported | unsupported | unsupported | unsupported | unsupported | Read-only inspect (`explain`/`verify`); honors the global `--json` like every other command |
 | `remove` | unsupported | supported | partial | supported | unsupported | `--yes` / `--force` skip removal prompt |
 | `refresh` | unsupported | supported | unsupported | unsupported | unsupported | |
 | `import` | unsupported | supported | supported | unsupported | unsupported | |

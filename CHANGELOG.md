@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `da config explain` / `da config verify` now honor the **global** `--json` flag
+  like every other command, instead of defining a local one — so `--json` is
+  position-independent and consistent (`da --json config verify` and
+  `da config verify --json` are equivalent).
 - **AGOrcha org migration.** The project moved to the `AGOrcha` GitHub org: the Go
   module path is now `github.com/AGOrcha/dot-agents`, releases and the `da`
   Homebrew cask publish under AGOrcha (`brew install agorcha/tap/da`), and
