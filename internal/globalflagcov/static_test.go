@@ -132,7 +132,7 @@ var _ = func() {
 	}
 	outerSpan := fset.Position(lits[0].End()).Line - fset.Position(lits[0].Pos()).Line
 	innerSpan := fset.Position(lits[1].End()).Line - fset.Position(lits[1].Pos()).Line
-	if !(innerSpan < outerSpan) {
+	if innerSpan >= outerSpan {
 		t.Fatalf("test setup invariant: inner span (%d) must be < outer span (%d)", innerSpan, outerSpan)
 	}
 	best := tightestFuncLit(fset, lits)

@@ -26,6 +26,7 @@ const (
 	statusOpenCodeDir             = ".opencode"
 	statusGitHubDir               = ".github"
 	statusLocalFileFmt            = "    %s○%s %s %s(local file)%s\n"
+	statusLocalFileIndentedFmt    = "      %s○%s %s %s(local file)%s\n"
 	statusCursorDir               = ".cursor"
 	statusAgentsMarkdown          = "AGENTS.md"
 	statusCopilotInstructions     = "copilot-instructions.md"
@@ -1115,7 +1116,7 @@ func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo stri
 func printCursorRuleEntry(name, rulesDir, agentsHome string, entryName string) {
 	srcType, linkedTo := cursorRuleSourceInfo(entryName, name)
 	if srcType == "local" {
-		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
 		return
 	}
 	f := filepath.Join(rulesDir, entryName)
@@ -1232,7 +1233,7 @@ func printSymlinkAudit(linkPath, label string) {
 		return
 	}
 	if _, err := os.Lstat(linkPath); err == nil {
-		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
 		return
 	}
 	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
@@ -1268,7 +1269,7 @@ func printCodexAgentsMD(path string) {
 			printLinkedStatusLine(statusAgentsMarkdown, path)
 			return
 		}
-		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, statusAgentsMarkdown, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, statusAgentsMarkdown, ui.Dim, ui.Reset)
 		return
 	}
 	fmt.Fprintf(os.Stdout, "      %s(no %s)%s\n", ui.Dim, statusAgentsMarkdown, ui.Reset)
@@ -1283,7 +1284,7 @@ func printCodexSymlinkAudit(path, label string) {
 	// (e.g. .codex/hooks.json, .codex/config.toml), not an absent link.
 	// Only "(not linked)" when the path is truly absent.
 	if _, err := os.Lstat(path); err == nil {
-		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(local file)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
 		return
 	}
 	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)

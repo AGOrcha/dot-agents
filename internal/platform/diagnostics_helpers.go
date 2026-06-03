@@ -127,10 +127,10 @@ func ScanSymlinkDir(dir string) (ok, broken int, brokenLinks []BrokenLink) {
 // duplicate-token detector from flagging this implementation as a copy of
 // the lifecycle one.
 //
-// TODO(Phase 5): consolidate with commands/internal/lifecycle/status.go's
-// managedLinkBroken once the audit printers move into AuditPrinter
-// implementations. Until then this is the platform-package owner; the
-// lifecycle copy is intentionally untouched to keep this PR's write-scope
+// Deferred consolidation: this and commands/internal/lifecycle/status.go's
+// managedLinkBroken converge once the audit printers move into AuditPrinter
+// implementations (Phase 5). Until then this is the platform-package owner; the
+// lifecycle copy is intentionally untouched to keep this owner's write-scope
 // confined to internal/platform/.
 type linkState int
 
@@ -163,8 +163,8 @@ func classifyManagedLink(path string) (linkState, string) {
 // Sonar's duplicate-line detector from flagging the copy. The semantic
 // contract is identical.
 //
-// TODO(Phase 5): consolidate with the lifecycle copy when AuditPrinter
-// implementations move in.
+// Deferred consolidation: converges with the lifecycle copy when AuditPrinter
+// implementations move in (Phase 5).
 func absolutizeDest(linkPath, dest string) string {
 	switch {
 	case dest == "":

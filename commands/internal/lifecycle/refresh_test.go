@@ -43,15 +43,42 @@ func seedIsolatedCLIShims(t *testing.T, names ...string) string {
 // platforms are refreshed; an enabled-but-uninstalled platform is left enabled
 // and not flipped; and a present-but-new platform clears the "nothing to
 // refresh" dead-end by returning a non-empty newly-enabled set.
+// detectPlatformCase is one row of the TestDetectAndEnableNewPlatforms table.
+// Naming it (vs an anonymous struct) lets the per-case assertions live on a
+// method, keeping the test function's cognitive complexity low.
+type detectPlatformCase struct {
+	name          string
+	shims         []string // CLIs to put on PATH (controls IsInstalled)
+	agents        map[string]config.Agent
+	wantEnabledID string // platform that must end enabled with version set
+	wantNewlyLen  int    // expected count of newly-enabled display names
+	wantLeftID    string // platform that must remain enabled:false untouched
+}
+
+// check asserts the post-detect config + newly-enabled set match the case.
+func (tc detectPlatformCase) check(t *testing.T, cfg *config.Config, newly []string) {
+	t.Helper()
+	if len(newly) != tc.wantNewlyLen {
+		t.Fatalf("newly-enabled = %v (len %d), want len %d", newly, len(newly), tc.wantNewlyLen)
+	}
+	if tc.wantEnabledID != "" {
+		a, ok := cfg.Agents[tc.wantEnabledID]
+		if !ok || !a.Enabled {
+			t.Fatalf("%s should be enabled after detect, got %+v (present=%v)", tc.wantEnabledID, a, ok)
+		}
+		if a.Version != "0.0.0" {
+			t.Errorf("%s version = %q, want refreshed %q", tc.wantEnabledID, a.Version, "0.0.0")
+		}
+	}
+	if tc.wantLeftID != "" {
+		if a := cfg.Agents[tc.wantLeftID]; a.Enabled {
+			t.Errorf("%s should be left disabled (refresh never auto-enables an absent tool), got enabled", tc.wantLeftID)
+		}
+	}
+}
+
 func TestDetectAndEnableNewPlatforms(t *testing.T) {
-	tests := []struct {
-		name          string
-		shims         []string // CLIs to put on PATH (controls IsInstalled)
-		agents        map[string]config.Agent
-		wantEnabledID string // platform that must end enabled with version set
-		wantNewlyLen  int    // expected count of newly-enabled display names
-		wantLeftID    string // platform that must remain enabled:false untouched
-	}{
+	tests := []detectPlatformCase{
 		{
 			name:          "installed-but-disabled platform gets enabled and versioned",
 			shims:         []string{"codex"},
@@ -101,27 +128,7 @@ func TestDetectAndEnableNewPlatforms(t *testing.T) {
 			}
 
 			newly := DetectAndEnableNewPlatforms(cfg)
-
-			if len(newly) != tt.wantNewlyLen {
-				t.Fatalf("newly-enabled = %v (len %d), want len %d", newly, len(newly), tt.wantNewlyLen)
-			}
-
-			if tt.wantEnabledID != "" {
-				a, ok := cfg.Agents[tt.wantEnabledID]
-				if !ok || !a.Enabled {
-					t.Fatalf("%s should be enabled after detect, got %+v (present=%v)", tt.wantEnabledID, a, ok)
-				}
-				if a.Version != "0.0.0" {
-					t.Errorf("%s version = %q, want refreshed %q", tt.wantEnabledID, a.Version, "0.0.0")
-				}
-			}
-
-			if tt.wantLeftID != "" {
-				a := cfg.Agents[tt.wantLeftID]
-				if a.Enabled {
-					t.Errorf("%s should be left disabled (refresh never auto-enables an absent tool), got enabled", tt.wantLeftID)
-				}
-			}
+			tt.check(t, cfg, newly)
 		})
 	}
 }
