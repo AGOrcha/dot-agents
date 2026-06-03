@@ -1,0 +1,11 @@
+schema_version: 1
+id: external-agent-sources
+title: 'External agent sources: auth providers, credential store, registry transport'
+status: active
+summary: 'Implement the external-agent-sources spec: auth provider model (§4), the shared encrypted credential store + CI-aware loader (§4.1, consumed by sources/observability/PR-event producer), and the OCI registry transport/content model. First slice: the credstore leg that the PR-event producer and observability ingest depend on.'
+created_at: "2026-05-31T04:24:13Z"
+updated_at: "2026-05-31T04:24:52Z"
+owner: dot-agents
+success_criteria: (1) ~/.config/da/credentials.json encrypted at rest via an OS-keychain data key (credential helper); (2) loader resolution order env -> ephemeral file -> encrypted/keychain -> OIDC-stub, first-hit-wins; (3) credentials addressed by credential-ref id, raw secrets never exposed to call sites; (4) keychain access behind a hermetic test seam; (5) da-service proxy injector path with inline bootstrap-fallback.
+verification_strategy: Focused go test ./internal/credstore/...; encrypt/decrypt round-trip with a faked keychain seam; loader-order table test (env vs file vs encrypted); assert no plaintext persists after a simulated CI job; cross-plan eligibility check (lpf-pr-producer references credstore).
+current_focus_task: cred-store-loader (shared encrypted store + CI loader)

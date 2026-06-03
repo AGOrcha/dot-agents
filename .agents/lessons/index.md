@@ -4,6 +4,7 @@ One line per lesson. See each `LESSON.md` for the full pattern, root
 cause, rule, and how-to-apply.
 
 - [`hermetic-env-for-cli-probe-tests`](./hermetic-env-for-cli-probe-tests/LESSON.md): Unit tests that drive CLI-detection code must pin a hermetic base PATH in package `TestMain` (toolchain + system dirs, minus the agent-CLI dirs) — inheriting the real PATH leaks real `--version` subprocesses, a machine-dependent gate timeout invisible on CI.
+- [`worktree-sibling-path-buildvcs`](./worktree-sibling-path-buildvcs/LESSON.md): Worktrees at sibling paths outside the repo root break `go build` VCS stamping in the pre-push gate — keep worktrees under the repo (e.g. `.agents/worktrees/`) or pass `-buildvcs=false` deliberately.
 - [`tests-for-each-slice`](./tests-for-each-slice/LESSON.md): Each implementation slice should add automated coverage for the behavior it introduces before the slice is considered complete.
 - [`additive-state-fields`](./additive-state-fields/LESSON.md): When extending a central state struct, add a new field rather than reusing an existing one — keeps JSON contract stable and callers unbroken.
 - [`test-string-count-ids`](./test-string-count-ids/LESSON.md): When checking for duplicate entries in a markdown index, count `"- [id]"` (the entry prefix) not the raw ID string — the ID can appear multiple times in a single valid link entry.

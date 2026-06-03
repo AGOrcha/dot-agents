@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: external-agent-sources
+tasks:
+    - id: cred-store-loader
+      title: 'Encrypted credential store (keychain key) + CI-aware loader resolution order'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/credstore/store.go
+        - internal/credstore/store_test.go
+        - internal/credstore/loader.go
+        - internal/credstore/loader_test.go
+      verification_required: true
+      notes: |-
+        Per spec external-agent-sources/design.md §4.1 (the shared credstore leg). Moved here from
+        layered-pr-fanout because credentials are owned by external-agent-sources and reused by sources / observability /
+        the PR-event producer. (1) Encrypted ~/.config/da/credentials.json: da generates a data key, stores it in the OS
+        keychain via a credential helper (macOS Keychain / Windows Cred Manager / Secret Service), encrypts the file
+        with it; reads/writes unwrap via the helper. (2) Loader resolution order, first-hit-wins: DA_CREDENTIAL_<id> env
+        (CI default, in-memory, no disk/keychain) -> DA_CREDENTIALS_FILE (ephemeral plaintext, CI writes+removes) ->
+        encrypted ~/.config/da/credentials.json (keychain-unwrapped, local) -> pluggable OIDC resolver stub (advanced CI,
+        design now/impl later). (3) Credentials addressed by credential-ref id; raw secrets never exposed to call sites.
+        Keep keychain access behind an interface seam for hermetic tests. Consumed via the AuthRoundTripper seam in
+        layered-pr-fanout/lpf-pr-producer (cross-plan).
+      app_type: go-cli
