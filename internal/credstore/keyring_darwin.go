@@ -15,6 +15,12 @@ import (
 // requested keychain item does not exist (errSecItemNotFound = -25300 = 0x44).
 const securityErrItemNotFound = 44
 
+// securityBin is the absolute path to the macOS security(1) CLI tool.
+// Using a fixed path avoids PATH-lookup ambiguity (go:S4036). It is a
+// package-level variable so tests can substitute a fake binary without
+// PATH manipulation.
+var securityBin = "/usr/bin/security"
+
 // darwinKeyring implements Keyring using the macOS security(1) CLI tool.
 // The binary seed blob is hex-encoded for keychain storage. The write path
 // feeds the hex value through the command's stdin (not argv) so the seed
@@ -27,7 +33,7 @@ func NewOSKeyring() Keyring { return darwinKeyring{} }
 
 func (darwinKeyring) Get(key string) ([]byte, error) {
 	var stderr bytes.Buffer
-	cmd := exec.Command("security",
+	cmd := exec.Command(securityBin,
 		"find-generic-password",
 		"-s", key,
 		"-a", key,
@@ -58,7 +64,7 @@ func (darwinKeyring) Set(key string, secret []byte) error {
 	// seed never appears in the process argument list.
 	encoded := hex.EncodeToString(secret) + "\n"
 	var stderr bytes.Buffer
-	cmd := exec.Command("security",
+	cmd := exec.Command(securityBin,
 		"add-generic-password",
 		"-U",
 		"-s", key,

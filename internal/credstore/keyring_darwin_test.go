@@ -10,10 +10,9 @@ import (
 	"testing"
 )
 
-// writeFakeSecurity writes a minimal shell script named "security" to a fresh
-// temp dir and returns the dir so callers can prepend it to PATH. The script
-// receives the same arguments that darwinKeyring passes to the real binary; its
-// only job is to produce the exit code and output the test case demands.
+// writeFakeSecurity writes a shell script named "security" to a temp dir and
+// returns its full path. Tests point securityBin at this path for the duration
+// of the test, exercising darwinKeyring without touching the real Keychain.
 func writeFakeSecurity(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -21,13 +20,15 @@ func writeFakeSecurity(t *testing.T, script string) string {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+script+"\n"), 0755); err != nil {
 		t.Fatalf("write fake security: %v", err)
 	}
-	return dir
+	return bin
 }
 
-// injectSecurity prepends dir to PATH for the duration of the test.
-func injectSecurity(t *testing.T, dir string) {
+// useFakeSecurity swaps securityBin for the duration of the test.
+func useFakeSecurity(t *testing.T, bin string) {
 	t.Helper()
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	old := securityBin
+	securityBin = bin
+	t.Cleanup(func() { securityBin = old })
 }
 
 func TestNewOSKeyring_NonNil(t *testing.T) {
@@ -39,7 +40,7 @@ func TestNewOSKeyring_NonNil(t *testing.T) {
 func TestDarwinKeyring_Get_Success(t *testing.T) {
 	want := []byte{0xca, 0xfe, 0xba, 0xbe}
 	hexVal := hex.EncodeToString(want)
-	injectSecurity(t, writeFakeSecurity(t, "echo '"+hexVal+"'"))
+	useFakeSecurity(t, writeFakeSecurity(t, "echo '"+hexVal+"'"))
 
 	got, err := darwinKeyring{}.Get("svc")
 	if err != nil {
@@ -51,7 +52,7 @@ func TestDarwinKeyring_Get_Success(t *testing.T) {
 }
 
 func TestDarwinKeyring_Get_NotFound(t *testing.T) {
-	injectSecurity(t, writeFakeSecurity(t, "exit 44"))
+	useFakeSecurity(t, writeFakeSecurity(t, "exit 44"))
 
 	_, err := darwinKeyring{}.Get("svc")
 	if !errors.Is(err, ErrKeyNotFound) {
@@ -60,7 +61,7 @@ func TestDarwinKeyring_Get_NotFound(t *testing.T) {
 }
 
 func TestDarwinKeyring_Get_HardError(t *testing.T) {
-	injectSecurity(t, writeFakeSecurity(t, "echo 'keychain locked' >&2; exit 1"))
+	useFakeSecurity(t, writeFakeSecurity(t, "echo 'keychain locked' >&2; exit 1"))
 
 	_, err := darwinKeyring{}.Get("svc")
 	if err == nil {
@@ -72,7 +73,7 @@ func TestDarwinKeyring_Get_HardError(t *testing.T) {
 }
 
 func TestDarwinKeyring_Get_BadHex(t *testing.T) {
-	injectSecurity(t, writeFakeSecurity(t, "echo 'not-valid-hex'"))
+	useFakeSecurity(t, writeFakeSecurity(t, "echo 'not-valid-hex'"))
 
 	_, err := darwinKeyring{}.Get("svc")
 	if err == nil {
@@ -81,7 +82,7 @@ func TestDarwinKeyring_Get_BadHex(t *testing.T) {
 }
 
 func TestDarwinKeyring_Set_Success(t *testing.T) {
-	injectSecurity(t, writeFakeSecurity(t, "exit 0"))
+	useFakeSecurity(t, writeFakeSecurity(t, "exit 0"))
 
 	k := darwinKeyring{}
 	if err := k.Set("svc", []byte{0x01, 0x02}); err != nil {
@@ -90,7 +91,7 @@ func TestDarwinKeyring_Set_Success(t *testing.T) {
 }
 
 func TestDarwinKeyring_Set_Error(t *testing.T) {
-	injectSecurity(t, writeFakeSecurity(t, "echo 'write failed' >&2; exit 1"))
+	useFakeSecurity(t, writeFakeSecurity(t, "echo 'write failed' >&2; exit 1"))
 
 	k := darwinKeyring{}
 	if err := k.Set("svc", []byte{0x01, 0x02}); err == nil {
