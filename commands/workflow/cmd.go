@@ -120,12 +120,18 @@ func newWorkflowCheckpointCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if cmd.Flags().Changed("role") || cmd.Flags().Changed(workflowFlagVerifierType) {
 				if !cmd.Flags().Changed(workflowFlagLogToIter) {
-					return fmt.Errorf("--role and --verifier-type require --log-to-iter")
+					return deps.UsageError(
+						"--role and --verifier-type require --log-to-iter",
+						"Pass --log-to-iter N (N >= 1) alongside --role / --verifier-type.",
+					)
 				}
 			}
 			if cmd.Flags().Changed(workflowFlagLogToIter) {
 				if checkpointLogToIter < 1 {
-					return fmt.Errorf("checkpoint --log-to-iter requires N >= 1 (schema workflow-iter-log enforces iteration.minimum: 1)")
+					return deps.UsageError(
+						"checkpoint --log-to-iter requires N >= 1 (schema workflow-iter-log enforces iteration.minimum: 1)",
+						"Pass --log-to-iter with N >= 1, for example --log-to-iter 7.",
+					)
 				}
 				if err := runWorkflowCheckpointLogToIter(checkpointLogToIter, checkpointLogToIterRole, checkpointLogToIterVerifierType); err != nil {
 					return err
@@ -289,7 +295,10 @@ func newWorkflowPlanArchiveCmd() *cobra.Command {
 				}
 			}
 			if len(cleaned) == 0 {
-				return fmt.Errorf("--plan must specify at least one plan ID")
+				return deps.UsageError(
+					"--plan must specify at least one plan ID",
+					"Pass --plan with one or more comma-separated plan IDs, for example --plan my-plan.",
+				)
 			}
 			return runWorkflowPlanArchive(project.Path, cleaned, planArchiveForce, deps.Flags.DryRun())
 		},
@@ -683,16 +692,25 @@ type verifyRecordDispatchInputs struct {
 func runWorkflowVerifyRecordDispatch(in verifyRecordDispatchInputs) error {
 	k := strings.TrimSpace(strings.ToLower(in.Kind))
 	if k == "" {
-		return fmt.Errorf("--kind is required")
+		return deps.UsageError(
+			"--kind is required",
+			"Pass --kind with test, lint, build, format, custom, or review.",
+		)
 	}
 	if strings.TrimSpace(in.Summary) == "" {
-		return fmt.Errorf("--summary is required")
+		return deps.UsageError(
+			"--summary is required",
+			"Pass --summary with a short description of the verification outcome.",
+		)
 	}
 	if k == "review" {
 		return dispatchVerifyRecordReview(in)
 	}
 	if strings.TrimSpace(in.Status) == "" {
-		return fmt.Errorf("--status is required when --kind is not review")
+		return deps.UsageError(
+			"--status is required when --kind is not review",
+			"Pass --status with pass, fail, partial, or unknown.",
+		)
 	}
 	return runWorkflowVerifyRecord(verifyRecordInputs{
 		Kind:         in.Kind,
@@ -709,7 +727,10 @@ func runWorkflowVerifyRecordDispatch(in verifyRecordDispatchInputs) error {
 // forwards to runWorkflowVerifyRecordReview.
 func dispatchVerifyRecordReview(in verifyRecordDispatchInputs) error {
 	if strings.TrimSpace(in.Status) != "" {
-		return fmt.Errorf("--status must not be set when --kind review (status is derived from phase decisions)")
+		return deps.UsageError(
+			"--status must not be set when --kind review (status is derived from phase decisions)",
+			"Drop --status; for review pass --phase1-decision and --phase2-decision instead.",
+		)
 	}
 	if strings.TrimSpace(in.Phase1) == "" || strings.TrimSpace(in.Phase2) == "" {
 		return deps.ErrorWithHints(

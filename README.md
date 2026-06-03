@@ -2,7 +2,7 @@
 
 **The operational layer for AI coding agents**
 
-One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and more.
+One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and OpenCode.
 
 ```bash
 # Install
@@ -28,12 +28,18 @@ da refresh
 
 Every AI coding agent has its own config location and format:
 
-| Agent | Config Location | Format |
-|-------|-----------------|--------|
-| Cursor | `.cursor/rules/*.mdc` | MDC (Markdown) |
-| Claude Code | `CLAUDE.md`, `.claude/` | Markdown, JSON |
-| Codex | `AGENTS.md` | Markdown |
-| GitHub Copilot | `.github/copilot-instructions.md`, `.github/skills/`, `.github/agents/` | Markdown |
+| Agent | Instruction / rule files | Format |
+|-------|--------------------------|--------|
+| Cursor | `.cursor/rules/*.mdc` (also `AGENTS.md`) | MDC / Markdown |
+| Claude Code | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` | Markdown, JSON |
+| Codex | `AGENTS.md`, `AGENTS.override.md` | Markdown |
+| OpenCode | `AGENTS.md` (also `CLAUDE.md`) | Markdown |
+| GitHub Copilot | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md` | Markdown |
+
+Beyond the base instruction file, each agent supports more specific rule files —
+Cursor's per-rule `.mdc` files, Claude's nested `.claude/rules/*.md`, and Copilot's
+path-scoped `.github/instructions/**/*.instructions.md`; dot-agents projects all of
+them from one canonical source. See `docs/PLATFORM_DIRS_DOCS.md` for the full matrix.
 
 This leads to:
 - **Duplicated rules** across every repository
@@ -212,6 +218,13 @@ da install
 | `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one) |
 | `status` | Show managed projects and link health (use `--audit` for details) |
 | `doctor` | Check installations, validate links, detect issues |
+
+### Configuration
+
+| Command | Description |
+|---------|-------------|
+| `config explain [field]` | Show the effective `.agentsrc.json` value of a field and which layer set it (`--all`, `--flags`, `--json`) |
+| `config verify` | Offline setup contract check — manifest parses, declared local source layers exist, integrations ready, and remote `extends` layers are cached at the lockfile's SHA (`--json`; non-zero exit on failure) |
 
 ### Skills & Agents
 
@@ -428,10 +441,10 @@ da add ~/Github/myproject  # Re-link your projects
 | Agent | Status | Config Files |
 |-------|--------|--------------|
 | **Cursor** | ✅ Full | `.cursor/rules/*.mdc` |
-| **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/` |
-| **Codex** | ✅ Full | `AGENTS.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
-| **OpenCode** | ⚠️ Basic | `opencode.json`, `.opencode/agent/*.md` |
-| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/skills/*/SKILL.md`, `.github/agents/*.agent.md` |
+| **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `.claude/` |
+| **Codex** | ✅ Full | `AGENTS.md`, `AGENTS.override.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
+| **OpenCode** | ⚠️ Basic | `AGENTS.md`, `opencode.json`, `.opencode/agent/*.md` |
+| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md`, `.github/agents/*.agent.md` |
 
 ## Requirements
 

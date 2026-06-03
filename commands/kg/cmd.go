@@ -191,19 +191,25 @@ for structured project memory, bridge queries, and code-to-note context.`,
 	kgLinkAddCmd := &cobra.Command{
 		Use:   "add <note-id> <qualified-name>",
 		Short: "Link a knowledge note to a code symbol",
-		RunE:  runKGLinkAdd,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runKGLinkAdd(deps, cmd, args)
+		},
 	}
 	kgLinkAddCmd.Flags().String("kind", "mentions", "Link kind: mentions|implements|documents|decides|references")
 
 	kgLinkListCmd := &cobra.Command{
 		Use:   "list <note-id>",
 		Short: "List all symbol links for a note",
-		RunE:  runKGLinkList,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runKGLinkList(deps, cmd, args)
+		},
 	}
 	kgLinkRemoveCmd := &cobra.Command{
 		Use:   "remove <link-id>",
 		Short: "Remove a note→symbol link by ID",
-		RunE:  runKGLinkRemove,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runKGLinkRemove(deps, cmd, args)
+		},
 	}
 	kgLinkCmd.AddCommand(kgLinkAddCmd, kgLinkListCmd, kgLinkRemoveCmd)
 

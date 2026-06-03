@@ -739,9 +739,10 @@ func warmCodeLane(store graphstore.Store) string {
 }
 
 // runKGLinkAdd creates a note→symbol link.
-func runKGLinkAdd(cmd *cobra.Command, args []string) error {
+func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
-		return fmt.Errorf("kg link add expects 2 arguments: <note-id> <qualified-name>")
+		return kgUsageError(deps, "kg link add expects 2 arguments",
+			"Usage: da kg link add <note-id> <qualified-name>.")
 	}
 	kind, _ := cmd.Flags().GetString("kind")
 	if kind == "" {
@@ -752,7 +753,9 @@ func runKGLinkAdd(cmd *cobra.Command, args []string) error {
 		"decides": true, "references": true,
 	}
 	if !validLinkKinds[kind] {
-		return fmt.Errorf("invalid link kind %q: valid values are mentions, implements, documents, decides, references", kind)
+		return kgUsageError(deps,
+			fmt.Sprintf("invalid link kind %q: valid values are mentions, implements, documents, decides, references", kind),
+			"Pass one of: mentions, implements, documents, decides, references.")
 	}
 
 	store, err := openKGStore(kgHome())
@@ -775,9 +778,10 @@ func runKGLinkAdd(cmd *cobra.Command, args []string) error {
 }
 
 // runKGLinkList shows all symbol links for a note.
-func runKGLinkList(_ *cobra.Command, args []string) error {
+func runKGLinkList(deps Deps, _ *cobra.Command, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("kg link list expects 1 argument: <note-id>")
+		return kgUsageError(deps, "kg link list expects 1 argument",
+			"Usage: da kg link list <note-id>.")
 	}
 	store, err := openKGStore(kgHome())
 	if err != nil {
@@ -800,13 +804,16 @@ func runKGLinkList(_ *cobra.Command, args []string) error {
 }
 
 // runKGLinkRemove deletes a note→symbol link by ID.
-func runKGLinkRemove(_ *cobra.Command, args []string) error {
+func runKGLinkRemove(deps Deps, _ *cobra.Command, args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("kg link remove expects 1 argument: <link-id>")
+		return kgUsageError(deps, "kg link remove expects 1 argument",
+			"Usage: da kg link remove <link-id>.")
 	}
 	var id int64
 	if _, err := fmt.Sscanf(args[0], "%d", &id); err != nil {
-		return fmt.Errorf("invalid link ID %q: expected an integer", args[0])
+		return kgUsageError(deps,
+			fmt.Sprintf("invalid link ID %q: expected an integer", args[0]),
+			"Pass the numeric link ID shown by `da kg link list`.")
 	}
 	store, err := openKGStore(kgHome())
 	if err != nil {

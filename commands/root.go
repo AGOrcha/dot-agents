@@ -23,6 +23,7 @@ func rootConfigDeps() config.Deps {
 		UsageError:            UsageError,
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
 		ExactArgsWithHints:    ExactArgsWithHints,
+		JSON:                  func() bool { return Flags.JSON },
 	}
 }
 

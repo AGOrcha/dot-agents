@@ -15,7 +15,7 @@ The root command registers these **persistent** flags (bound to `commands.Flags`
 | `--yes` | `-y` | Non-interactive assent to prompts |
 | `--json` | | Machine-readable output where implemented |
 
-Nested subcommands may define **local** flags with the same long name. Locals **shadow** the root binding for that subcommand only—see [Workflow `status` JSON shadowing](#workflow-status-json-shadowing) and [`kg ingest` dry-run](#kg-ingest-dry-run-vs-global-dry-run).
+Nested subcommands may define **local** flags with the same long name. A local would **shadow** the root binding for that subcommand only; the project's direction is to avoid that (read the global instead — e.g. `da config`/`workflow status` now read `Flags.JSON`). See [`kg ingest` dry-run](#kg-ingest-dry-run-vs-global-dry-run) for the one remaining local that intentionally augments a global.
 
 ## Legend
 
@@ -41,31 +41,39 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 |----------------|----------|-------------|---------|-----------|-------------|-------|
 | `init` | unsupported | supported | supported | supported | unsupported | |
 | `add` | unsupported | supported | supported | supported | unsupported | |
+| `config` | supported | unsupported | unsupported | unsupported | unsupported | Read-only inspect (`explain`/`verify`); honors the global `--json` like every other command |
 | `remove` | unsupported | supported | partial | supported | unsupported | `--yes` / `--force` skip removal prompt |
 | `refresh` | unsupported | supported | unsupported | unsupported | unsupported | |
 | `import` | unsupported | supported | supported | unsupported | unsupported | |
 | `status` | **supported** | unsupported | unsupported | unsupported | unsupported | Structured JSON via `runStatus` |
 | `doctor` | unsupported | supported | unsupported | unsupported | supported | `--dry-run` suppresses link repair; verbose expands audits |
 | `skills` (all subcommands) | unsupported | unsupported | unsupported | unsupported | unsupported | No global flag reads |
-| `agents` | unsupported | unsupported | unsupported | unsupported | unsupported | |
-| `hooks` | unsupported | unsupported | unsupported | unsupported | unsupported | |
+| `agents` | unsupported | partial | partial | partial | unsupported | `agents remove` honors `--yes`/`--dry-run`/`--force`; other subcommands unsupported |
+| `hooks` | unsupported | partial | partial | partial | unsupported | `hooks remove` honors `--dry-run`/`--yes`/`--force`; other subcommands unsupported |
+| `mcp` | unsupported | partial | partial | partial | unsupported | `mcp remove` honors `--dry-run`/`--yes`/`--force` |
+| `rules` | unsupported | partial | partial | partial | unsupported | `rules remove` honors `--dry-run`/`--yes`/`--force` |
+| `settings` | unsupported | partial | partial | partial | unsupported | `settings remove` honors `--dry-run`/`--yes`/`--force` |
+| `score` | supported | unsupported | unsupported | unsupported | unsupported | Reads `Flags.JSON` (`commands/score.go`); locals `--no-write`/`--recompute` |
+| `session` | (not yet inventoried) | | | | | Registered (`root.go`); global-flag support not yet audited |
 | `workflow` | unsupported | unsupported | unsupported | unsupported | unsupported | Per-subcommand; see [Workflow](#workflow-subcommands) |
 | `review` | unsupported | unsupported | unsupported | unsupported | unsupported | |
-| `sync` | unsupported | partial | partial | unsupported | unsupported | `sync init` / `commit` / `push` honor `--dry-run`; `push` honors `--yes`; `pull`, `sync status`, `sync log` do not use these globals |
+| `sync` | unsupported | partial | partial | unsupported | unsupported | `init` / `commit` / `push` honor `--dry-run`; `pull` rejects `--dry-run` (errors); `push` + `pull` (refresh prompt) honor `--yes`; `status` / `log` do not use these globals |
 | `explain` | unsupported | unsupported | unsupported | unsupported | unsupported | |
 | `install` | unsupported | supported | unsupported | supported | supported | Large surface; `--dry-run` / `--verbose` used throughout `install.go` |
 | `kg` | partial | see [KG](#kg-command-family) | unsupported | unsupported | unsupported | Many handlers check `Flags.JSON`; not every leaf is JSON-first |
 
 ### Read-only / doc-style families
 
-For **`explain`**, **`review`**, **`skills`**, **`agents`**, and **`hooks`**, all five globals are effectively **unsupported** (no-op) today while still appearing in root help. Scripts must not rely on them for these families.
+For **`explain`**, **`review`**, and **`skills`**, all five globals are effectively
+**unsupported** (no-op) today while still appearing in root help. **`agents`**,
+**`hooks`**, **`mcp`**, **`rules`**, and **`settings`** are unsupported *except* their
+`remove` subcommands, which honor `--dry-run`/`--yes`/`--force`. Scripts must not rely
+on globals for the read-only paths.
 
 ### `sync` (partial)
 
-- **`--dry-run`:** **partial**—honored on `sync init`, `sync commit`, `sync push`; not honored on `sync pull`, `sync status`, `sync log`.
-- **`--yes`:** **partial**—used where documented for push; not a universal non-interactive switch across `sync`.
-
-**Contract note:** **`sync pull`** does not consult `Flags.DryRun`—global `--dry-run` does **not** prevent `git pull`.
+- **`--dry-run`:** **partial**—honored on `sync init`, `sync commit`, `sync push`; not honored on `sync status`, `sync log`. **`sync pull` now explicitly rejects `--dry-run`** with an error (`commands/sync/pull.go`) rather than silently pulling.
+- **`--yes`:** **partial**—honored for push, and `sync pull` consults `Flags.Yes` to auto-confirm its post-pull refresh prompt (`commands/sync/helpers.go`); not a universal non-interactive switch across `sync`.
 
 ---
 
@@ -75,7 +83,7 @@ Parent `workflow` does not read globals; behavior is per subcommand.
 
 | Subcommand | `--json` | `--dry-run` | `--yes` | Notes |
 |------------|----------|-------------|---------|-------|
-| `status` | **defect** | unsupported | unsupported | See [Workflow `status` JSON shadowing](#workflow-status-json-shadowing) |
+| `status` | supported | unsupported | unsupported | Reads the global `--json` via `deps.Flags.JSON()` (`commands/workflow/state.go`); the former local-`--json` shadow was fixed |
 | `orient` | supported | unsupported | unsupported | |
 | `checkpoint` | unsupported | unsupported | unsupported | Writes files; no JSON path |
 | `log` | unsupported | unsupported | unsupported | |
@@ -103,16 +111,13 @@ Parent `workflow` does not read globals; behavior is per subcommand.
 
 Root `--force` and `--verbose` are not shown in the workflow inventory table; treat as **unsupported** for workflow subcommands unless a future inventory row documents otherwise.
 
-### Workflow `status` JSON shadowing
+### Workflow `status` JSON shadowing — RESOLVED
 
-**Issue:** `workflow status` defines a **local** `--json`/`-j` that **shadows** the root persistent `--json`.
-
-- **`commands.Flags.JSON` (root `--json`):** not effective for this subcommand the way operators expect.
-- **Observed behavior:** `da --json workflow orient` emits JSON; `da --json workflow status` can still print human UI because the subcommand’s local flag wins the binding for `status`.
-
-**Contract for automation:** Do not assume root `--json` produces JSON for `workflow status`. Until fixed, use the **subcommand’s** `--json` if exposed, or treat output as human-only.
-
-**Classification:** **defect** (automation footgun; highest-impact issue called out in the 2026-04-13 inventory).
+The former defect (a local `--json`/`-j` on `workflow status` shadowing the root
+persistent `--json`) has been **fixed**: `workflow status` now reads the global
+`Flags.JSON` via `deps.Flags.JSON()` (`commands/workflow/state.go`), like `orient`.
+`da --json workflow status` emits JSON. This section is retained as the historical
+record of the 2026-04-13 inventory's highest-impact issue.
 
 ---
 
@@ -123,16 +128,16 @@ Root `--force` and `--verbose` are not shown in the workflow inventory table; tr
 
 ### `kg ingest` dry-run vs global dry-run
 
-**Issue:** `kg ingest` uses a **local** `--dry-run` tied to ingest behavior, **not** `Flags.DryRun` from the root persistent `-n` / `--dry-run`.
-
-**Contract for automation:**
+`kg ingest` keeps a **local** `--dry-run`, but it is now **OR-merged** with the root
+global `-n`/`--dry-run` (`dryRun: deps.Flags.DryRun || localDryRun`,
+`commands/kg/kg.go`), so either form drives ingest dry-run:
 
 | Invocation | Drives ingest dry-run? |
 |------------|-------------------------|
-| `da --dry-run kg ingest …` | **No** (global does not drive ingest dry-run) |
-| `da kg ingest --dry-run …` | **Yes** (use this for ingest preview) |
+| `da --dry-run kg ingest …` | **Yes** (global now honored) |
+| `da kg ingest --dry-run …` | **Yes** |
 
-Scripts must pass **`kg ingest --dry-run`** when they need ingest dry-run semantics.
+The local flag remains for explicitness; it no longer shadows the global.
 
 ---
 
@@ -146,10 +151,10 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 
 | Topic | Contract |
 |-------|----------|
-| Duplicate flag names | Prefer removing shadowing locals or documenting subcommand-specific flags; **`workflow status`** + root `--json` is the documented defect |
-| `kg ingest` dry-run | **Local** `--dry-run` only; global `-n` does not substitute |
-| Read-only families | `explain`, `review`, `skills`, `agents`, `hooks`: globals **unsupported** (no-op) today |
-| `sync pull` + `--dry-run` | **Unsupported**—does not block pull |
+| Duplicate flag names | Prefer reading the global over a shadowing local; the historical `workflow status` + `da config` shadows are both **fixed** (now read `Flags.JSON`) |
+| `kg ingest` dry-run | Local `--dry-run` **OR-merged** with global `-n`; either form drives ingest dry-run |
+| Read-only families | `explain`, `review`, `skills`: globals **unsupported** (no-op). `agents`/`hooks` are unsupported except their `remove` subcommands, which honor `--yes`/`--dry-run`/`--force` |
+| `sync pull` + `--dry-run` | **Rejected** (errors) — no longer a silent pull; `--yes` auto-confirms the post-pull refresh |
 | Workflow `sweep` | Plan/run semantics via **`--apply`**; globals `--dry-run` / `--yes` are not the primary contract |
 
 ---

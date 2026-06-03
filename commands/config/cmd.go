@@ -30,7 +30,15 @@ type Deps struct {
 	UsageError            func(message string, hints ...string) error
 	MaximumNArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
 	ExactArgsWithHints    func(n int, hints ...string) cobra.PositionalArgs
+	// JSON reports the resolved global `--json` flag, so `da config` honors the
+	// same persistent flag as every other command (status, workflow, kg) rather
+	// than defining its own local `--json`. Nil is treated as false.
+	JSON func() bool
 }
+
+// jsonFlag returns the resolved global --json value, tolerating a nil getter
+// (tests that build Deps directly, or callers that don't wire it).
+func (d Deps) jsonFlag() bool { return d.JSON != nil && d.JSON() }
 
 // NewConfigCmd builds the `da config` command tree.
 func NewConfigCmd(deps Deps) *cobra.Command {

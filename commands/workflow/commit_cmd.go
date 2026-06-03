@@ -205,7 +205,14 @@ func newWorkflowCommitCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf(commitErrFmt, err)
 			}
-			return runWorkflowCommit(cmd.OutOrStdout(), gg, dryRun, includes)
+			// OR-merge the global -n/--dry-run so `da -n workflow commit` is
+			// honored like every other mutating command (sibling of
+			// archive-orphans' deps.Flags.DryRun wiring; nil-safe for tests).
+			effectiveDryRun := dryRun
+			if deps.Flags.DryRun != nil {
+				effectiveDryRun = effectiveDryRun || deps.Flags.DryRun()
+			}
+			return runWorkflowCommit(cmd.OutOrStdout(), gg, effectiveDryRun, includes)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Print the path set + commit message; make no changes")

@@ -14,14 +14,14 @@ import (
 
 // ImportAgentIn links ~/.agents/agents/<project>/<name>/ into the repo as symlinks
 // and ensures .agentsrc.json lists the agent.
-func ImportAgentIn(name, projectPath string) error {
+func ImportAgentIn(deps Deps, name, projectPath string) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
 		return fmt.Errorf("loading .agentsrc.json for agent %q: %w", name, err)
 	}
 	projectName := rc.Project
 	if projectName == "" {
-		return fmt.Errorf(".agentsrc.json has no project name set: run `da install --generate` or `da add .` to repair the manifest")
+		return agentUserError(deps, ".agentsrc.json has no project name set", "Run `da install --generate` or `da add .` to repair the manifest.")
 	}
 
 	agentsHome := config.AgentsHome()
@@ -29,12 +29,12 @@ func ImportAgentIn(name, projectPath string) error {
 	agentMD := filepath.Join(canonicalPath, agentManifestName)
 	if _, err := os.Stat(agentMD); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("agent %q not found at canonical path %s (expected %s): create the canonical agent first or run `da agents list` to confirm the name", name, config.DisplayPath(canonicalPath), agentManifestName)
+			return agentUserError(deps, fmt.Sprintf("agent %q not found at canonical path %s (expected %s)", name, config.DisplayPath(canonicalPath), agentManifestName), "Create the canonical agent first, or run `da agents list` to confirm the name.")
 		}
 		return fmt.Errorf("agent %q: %w", name, err)
 	}
 
-	if err := ensureImportRepoAgentsSlot(stdReadlinker{}, name, canonicalPath, projectPath); err != nil {
+	if err := ensureImportRepoAgentsSlot(deps, stdReadlinker{}, name, canonicalPath, projectPath); err != nil {
 		return err
 	}
 
@@ -61,7 +61,7 @@ func ImportAgentIn(name, projectPath string) error {
 	return nil
 }
 
-func ensureImportRepoAgentsSlot(rl readlinker, name, canonicalPath, projectPath string) error {
+func ensureImportRepoAgentsSlot(deps Deps, rl readlinker, name, canonicalPath, projectPath string) error {
 	repoLocal := filepath.Join(projectPath, ".agents", "agents", name)
 	fi, err := os.Lstat(repoLocal)
 	if err != nil {
@@ -82,14 +82,14 @@ func ensureImportRepoAgentsSlot(rl readlinker, name, canonicalPath, projectPath 
 		if err != nil {
 			return fmt.Errorf("reading symlink for agent %q: %w", name, err)
 		}
-		return fmt.Errorf("agent %q: .agents/agents/%s is a symlink pointing to %q, not the canonical path %s; remove the stale link and retry", name, name, existing, canonicalPath)
+		return agentUserError(deps, fmt.Sprintf("agent %q: .agents/agents/%s is a symlink pointing to %q, not the canonical path %s", name, name, existing, canonicalPath), "Remove the stale link and retry.")
 	}
 	if fi.IsDir() {
 		if _, err := os.Stat(filepath.Join(repoLocal, agentManifestName)); err == nil {
-			return fmt.Errorf("agent %q already exists as a real directory at %s; remove it or use `da agents promote` first", name, repoLocal)
+			return agentUserError(deps, fmt.Sprintf("agent %q already exists as a real directory at %s", name, repoLocal), "Remove it, or use `da agents promote` first.")
 		}
 	}
-	return fmt.Errorf("agent %q: unexpected path at %s; remove it before importing", name, repoLocal)
+	return agentUserError(deps, fmt.Sprintf("agent %q: unexpected path at %s", name, repoLocal), "Remove it before importing.")
 }
 
 func buildSingleAgentMirrorIntent(project, name, targetRoot string) platform.ResourceIntent {

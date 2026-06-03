@@ -174,9 +174,18 @@ da workflow contract create --task <task-id>
 # Or fan out to a sub-agent with a bounded write scope
 da workflow fanout --task <task-id>
 
+# As you work: persist progress and verification state
+da workflow checkpoint
+da workflow verify record --kind test --status pass --summary "go test ./..."
+da workflow advance <plan-id> --task <task-id> --status completed
+
 # Sub-agent finishes, writes merge-back; parent closes out:
 da workflow delegation closeout --task <task-id> --decision accept
 ```
+
+For the start/end-of-iteration sequences these atoms compose into, see
+[`WORKFLOW_CLIENT_COMMANDS.md`](./WORKFLOW_CLIENT_COMMANDS.md)
+(`workflow start-task` / `workflow close-task`).
 
 For the full operating model, see
 [`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md) §"Command layer"

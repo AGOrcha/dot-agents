@@ -81,6 +81,7 @@ platform link projection; run that for a complete link/health audit.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.stdout = cmd.OutOrStdout()
 			opts.stderr = cmd.ErrOrStderr()
+			opts.jsonOut = deps.jsonFlag() // honor the global persistent --json
 			if opts.cwd == "" {
 				cwd, err := os.Getwd()
 				if err != nil {
@@ -91,7 +92,6 @@ platform link projection; run that for a complete link/health audit.`,
 			return runVerify(opts, deps)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.jsonOut, "json", false, "Emit machine-readable JSON output")
 	return cmd
 }
 

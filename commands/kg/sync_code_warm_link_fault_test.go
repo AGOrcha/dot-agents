@@ -204,7 +204,7 @@ func TestRunKGLinkAdd_InvalidLinkKind(t *testing.T) {
 	newTempKG(t)
 	cmd := &cobra.Command{}
 	cmd.Flags().String("kind", "no-such-kind", "")
-	err := runKGLinkAdd(cmd, []string{"note-id", "qn"})
+	err := runKGLinkAdd(testDeps(), cmd, []string{"note-id", "qn"})
 	if err == nil || !strings.Contains(err.Error(), "invalid link kind") {
 		t.Fatalf("expected invalid-link-kind error, got %v", err)
 	}
@@ -213,7 +213,7 @@ func TestRunKGLinkAdd_InvalidLinkKind(t *testing.T) {
 // TestRunKGLinkRemove_BadInt drives the integer-parse error path.
 func TestRunKGLinkRemove_BadInt(t *testing.T) {
 	newTempKG(t)
-	if err := runKGLinkRemove(&cobra.Command{}, []string{"not-an-int"}); err == nil {
+	if err := runKGLinkRemove(testDeps(), &cobra.Command{}, []string{"not-an-int"}); err == nil {
 		t.Fatal("expected parse error for non-integer link id")
 	}
 }

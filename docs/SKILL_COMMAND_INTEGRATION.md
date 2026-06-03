@@ -18,14 +18,14 @@ This document maps the bidirectional integration between shared skills (agent-fa
 ```
 Skills (agent-facing)                Commands (CLI)               Graph (data)
 ┌─────────────────┐              ┌──────────────────┐         ┌──────────────┐
-│  /review-delta  │──calls──────>│ da kg            │──reads──>│ nodes, edges │
-│  /review-pr     │              │   changes        │         │ flows, risk  │
+│  /review-delta  │──calls──────>│ da kg changes    │──reads──>│ nodes, edges │
+│  /review-pr     │              │ da kg impact     │         │ flows, risk  │
 │  /build-graph   │──calls──────>│ da kg            │──writes─>│ communities  │
 │  /agent-start   │              │   build/update   │         │ kg_notes     │
-│  /self-review   │              │                  │         │ note_symbol  │
-│  /agent-handoff │              │ da               │         │   _links     │
-│  /split-commits │              │   workflow orient│──reads──>│              │
-│  /gh-fix-ci     │              │   review approve │         └──────────────┘
+│  /self-review   │              │ da kg query      │         │ note_symbol  │
+│  /agent-handoff │              │   --intent <n>   │         │   _links     │
+│                 │              │ da workflow orient│──reads──>│              │
+│                 │              │ da review approve │         └──────────────┘
 └─────────────────┘              └──────────────────┘
         │                                │
         └──────── hooks ─────────────────┘
@@ -42,9 +42,9 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Current state**: Calls CRG MCP tools (`list_graph_stats_tool`, `build_or_update_graph_tool`) directly.
 
 **Integrated state**:
-- Step 1: `da kg status` — check if graph exists and is current
+- Step 1: `da kg code-status` — check if the code graph exists and is current
 - Step 2: `da kg build` (first time) or `da kg update` (incremental)
-- Step 3: `da kg status` — report results
+- Step 3: `da kg code-status` — report results
 
 **Graph tables touched**: `nodes`, `edges`, `metadata`, `communities`, `flows`, `flow_memberships`
 
@@ -59,7 +59,7 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 **Integrated state**:
 - Step 1: `da kg update` — ensure graph reflects current state
 - Step 2: `da kg changes` — get risk-scored change analysis (replaces `get_review_context_tool`)
-- Step 3: `da kg impact <high-risk-symbol>` — blast radius for flagged symbols
+- Step 3: `da kg impact <changed-file>` — blast radius for flagged files
 - Step 4: `da kg bridge query --intent tests_for <changed-fn>` — check test coverage
 - Step 5: `da kg bridge query --intent symbol_decisions <changed-fn>` — surface linked decisions (NEW: traceability)
 
@@ -75,7 +75,7 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Integrated state**: Same as review-delta, plus:
 - Step 2a: `da kg changes --base main` — scope to PR diff
-- Step 6: `da kg search <keyword>` — find related symbols (replaces `semantic_search_nodes_tool`)
+- Step 6: `da kg query --intent related_notes <keyword>` — find related notes/symbols (replaces `semantic_search_nodes_tool`)
 
 **Additional graph value**: PR reviews span more code than delta reviews, making community analysis more relevant. `da kg` communities can identify when a PR crosses module boundaries (higher risk).
 
@@ -100,7 +100,7 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Integrated state**:
 - Context gathering step: `da workflow orient` (already includes graph health via bridge when available)
-- New: `da kg status` — show code graph stats (files, nodes, edges, staleness)
+- New: `da kg code-status` — show code graph stats (files, nodes, edges, staleness)
 - New: `da kg bridge query --intent decision_lookup <current-task-topic>` — surface prior decisions relevant to the task
 
 **Why this matters**: agent-start sets the context window for the entire session. Getting graph context early means fewer grep fallbacks later.
@@ -118,28 +118,30 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 **Why this matters**: Handoffs lose structural context. Recording which symbols changed (not just files) helps the next agent understand scope faster.
 
-### split-reviewable-commits
+### split-reviewable-commits (not yet shipped)
 
 **Purpose**: Rewrite branch into semantic commit sequence.
 
-**Current state**: No graph integration. Splits are based on file-level heuristics.
+**Status**: Not yet shipped — not registered in `.agentsrc.json` and not part of
+the starter scaffold. The notes below are forward-looking.
 
-**Integrated state**:
-- New: `da kg` community analysis — suggest commit boundaries aligned with code communities
+**Potential graph integration** (future):
+- `da kg` community analysis — suggest commit boundaries aligned with code communities
 - When two files are in different communities, they are candidates for separate commits
 - When files are in the same community, they should stay in the same commit
 - Fallback: existing file-level heuristics when graph is unavailable
 
 **Why this matters**: Community-aware splits produce more reviewable commits because each commit touches one logical module.
 
-### gh-fix-ci
+### gh-fix-ci (not yet shipped)
 
 **Purpose**: Debug failing GitHub Actions checks.
 
-**Current state**: No graph integration. Inspects check logs, identifies failures, plans fix.
+**Status**: Not yet shipped — not registered in `.agentsrc.json` and not part of
+the starter scaffold. The notes below are forward-looking.
 
-**Integrated state**:
-- New: `da kg changes --base <failing-commit>` — scope investigation to symbols changed since the last green build
+**Potential graph integration** (future):
+- `da kg changes --base <failing-commit>` — scope investigation to symbols changed since the last green build
 - New: `da kg bridge query --intent impact_radius <changed-fn>` — understand what the change might have broken
 - New: `da kg bridge query --intent tests_for <changed-fn>` — which tests should have caught this
 
@@ -147,24 +149,35 @@ Skills (agent-facing)                Commands (CLI)               Graph (data)
 
 ### skill-architect
 
-**Purpose**: Design and evaluate skills.
+**Purpose**: Design, create, transform, audit, eval, improve, optimize, and package skills.
 
-**Current state**: No graph integration.
+**Current state**: Shipped. `skill-architect` is a starter skill
+(`internal/scaffold/home/starter/skills/global/skill-architect/`, registered in
+`.agentsrc.json`), so it lands in every initialized home. It runs seven modes —
+`new`, `transform`, `audit`, `eval`, `improve`, `optimize`, `package` — and is
+provider-pluggable: the `eval`/`improve`/`optimize` modes call an LLM under the
+hood. By default (`claude-cli`) it drives the local CLI of whichever of the five
+dot-agents platforms is present, auto-detecting `claude` / `cursor` / `codex` /
+`opencode` / `copilot` with zero config and no API key, reusing the host
+session's auth. Pin a platform with `SKILL_ARCHITECT_PLATFORM`, or swap in a
+different provider entirely (Anthropic API, an OpenAI-compatible endpoint, or any
+CLI) via `SKILL_ARCHITECT_PROVIDER`.
 
-**Integrated state** (future):
-- `audit` mode could query the graph to verify skill instructions reference valid commands and tool names
-- `eval` mode could measure skill effectiveness by tracking graph metrics before/after skill runs
-- `optimize` mode could use graph community data to suggest which modules a skill should focus on
+**Graph integration**: None today. Potential future additions: `audit` could
+query the graph to verify skill instructions reference valid commands and tool
+names; `eval` could track graph metrics before/after skill runs; `optimize`
+could use community data to suggest which modules a skill should focus on.
 
-### create-subagent
+### create-subagent (not yet shipped)
 
 **Purpose**: Create custom subagents for specialized tasks.
 
-**Current state**: No graph integration.
+**Status**: Not yet shipped — not registered in `.agentsrc.json` and not part of
+the starter scaffold. The notes below are forward-looking.
 
-**Integrated state** (future):
-- New: agent descriptions could reference graph communities for scope — e.g., "this agent owns the `auth` community"
-- New: `da kg` community list could suggest natural subagent boundaries
+**Potential graph integration** (future):
+- Agent descriptions could reference graph communities for scope — e.g., "this agent owns the `auth` community"
+- `da kg communities` could suggest natural subagent boundaries
 
 ## Command → Skill: Reverse Direction
 
@@ -210,7 +223,7 @@ Commands can reference, inject, or trigger skills:
 **Skill integration**:
 - Already renders plans, checkpoints, handoffs, proposals, git state
 - Should include graph bridge health
-- Should include `da kg status` (code graph stats)
+- Should include `da kg code-status` (code graph stats)
 - Feeds context to `agent-start` skill
 
 ### da doctor
@@ -220,6 +233,18 @@ Commands can reference, inject, or trigger skills:
 **Skill integration**:
 - Should include `da kg health` in diagnostics
 - Should verify graph hooks are installed if graph DB exists
+
+### da config explain / da config verify
+
+**What they do**: Read-only config introspection. `da config explain <field-path>`
+(`commands/config/explain.go`) prints the effective value of a single config
+field plus the full layer provenance — where each layer set it. `da config verify`
+(`commands/config/verify.go`) runs offline repo setup-contract checks without
+re-fetching layers.
+
+**Skill integration**: Not skill-invoked today. Both are operator-facing
+introspection commands; a future setup or doctor skill could call them to
+confirm the resolved config and contract state before acting.
 
 ## Hooks As The Glue
 
@@ -275,5 +300,5 @@ Track per session (via session-capture hook):
 5. **graph hooks** — automates graph freshness
 6. **agent-handoff** — preserves structural context across sessions
 7. **split-reviewable-commits** — community-aware splits are a clear upgrade
-8. **gh-fix-ci** — impact scoping is valuable but less frequent
-9. **skill-architect + create-subagent** — future, depends on graph maturity
+8. **gh-fix-ci** (not yet shipped) — impact scoping is valuable but less frequent
+9. **skill-architect** (shipped) **+ create-subagent** (not yet shipped) — graph integration is future, depends on graph maturity

@@ -339,6 +339,7 @@ tasks:
         - fakeHTTPFetcher + fakeOCIFetcher test seams (no live network)
         - digest-pin fixture: re-fetch with same digest produces zero-byte network call
         - oci-in-extends rejected at schema validation BEFORE network call
+        - (fb:consolidate-clone-on-gogit) Consolidate the legacy install clone onto go-git. commands/internal/lifecycle/install.go CloneGitSource still shells out to a real git binary (exec git clone --depth 1 [--branch ref] -- url cacheDir), unlike internal/config/fetcher.go gitCloneShallow which clones in-process via go-git (gogit.CloneContext). Migrate CloneGitSource to go-git (gogit.PlainCloneContext to cacheDir; reuse fetcher ref-normalization) and share one go-git shallow-clone primitive across both paths. Removes the git-binary/PATH dependency, the entire argv flag-injection class (CVE-2017-1000117; the -- mitigation becomes unnecessary with no argv), and the buildFakeGit (go build) test scaffolding. Drop the gitBin param + rewrite TestCloneGitSource_MaliciousURLNotParsedAsFlag as a go-git-safe assertion. Follow-on: lets commands/internal/lifecycle TestMain drop its Go-toolchain PATH whitelist.
       app_type: go-cli
     - id: p6-packages-pass2-cli
       title: 'Phase 6: Tier 2 packages resolution (pass 2) + da packages subtree'

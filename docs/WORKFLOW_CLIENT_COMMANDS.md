@@ -6,11 +6,18 @@
 
 The composition rules we want enforced are restatements of the tier invariants in `.agents/workflow/specs/skill-tiering-contract/design.md` §4. There is **no parallel "primitive vs client vs skill" axis** — every layer maps to a tier the contract already names.
 
-| Layer | Contract tier | Examples |
+| Layer | Contract tier | Examples (illustrative — not exhaustive) |
 |-------|---------------|----------|
 | Primitive | **T0 atom** | `workflow verify record`, `workflow advance`, `workflow plan update`, `workflow checkpoint --log-to-iter`, `workflow commit`, `workflow plan derive-scope`, `score iteration`, `score iteration --recompute` |
 | Client command | **T1 molecule** | `workflow close-task`, `workflow start-task` |
 | Skill | **T2 compound** | `iteration-close`, `orchestrator-session-start`, `isp` |
+
+The primitive examples above are a representative slice, not the full set. The
+`da workflow` surface has ~32 subcommands — beyond the atoms shown, it also
+includes `merge-back`, `fold-back`, `delegation` (closeout/gate), `contract`,
+`drift`, `sweep`, `bundle`, `hook-sentinel`, `hook-outcome`, `archive-orphans`,
+and `plan` verbs (`schedule`, `derive-scope`, `check-scope`), among others. Run
+`da workflow --help` for the full surface.
 
 `tier:` + `calls:` metadata lives in the package-doc comment of each T1 source file (see `commands/workflow/close_task.go` and `start_task.go`). A `TestTierDeclarationsPresent…` pin guards the markers so a refactor that strips them fails the suite immediately rather than silently breaking downstream lint.
 
@@ -53,6 +60,12 @@ da workflow commit
 
 `--no-commit` skips the final step; `--next-focus` overrides the auto-pick.
 
+The underlying `workflow commit` primitive takes `--dry-run` (print the staging
+path set + generated commit message; make no changes) and `--include <path>`
+(repeatable; declare additional session-touched state files to consider for
+staging). It is idempotent — a second run with no new mutations is a clean
+no-op.
+
 ### `workflow start-task`
 
 ```text
@@ -67,6 +80,9 @@ da workflow commit
 `--no-derive-scope` skips the sidecar derivation; `--no-commit` skips the final step. Fanout is intentionally **not** wired — the orchestrator typically decides direct-vs-delegated explicitly via `da workflow fanout` as a separate step.
 
 ## Iteration-close skill update (deferred)
+
+**Currently deferred / not yet implemented** — the rewrite described below is
+staged, not live. The `iteration-close` skill still uses its existing body.
 
 The `iteration-close` skill — the T2 compound that wraps `close-task` — lives outside this repo at `~/.agents/skills/dot-agents/iteration-close/SKILL.md`. The rewrite as a thin `da workflow close-task --json` caller is staged for the next cross-repo update of the dot-agents skill pack. The proposed frontmatter:
 

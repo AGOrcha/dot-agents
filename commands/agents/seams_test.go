@@ -60,7 +60,7 @@ func TestEnsureImportRepoAgentsSlot_ReadlinkErrorSeam(t *testing.T) {
 	sentinel := errors.New("synthetic readlink failure")
 	rl := newFakeReadlinkerError(sentinel)
 
-	err := ensureImportRepoAgentsSlot(rl, "seam-agent", canonical, projectPath)
+	err := ensureImportRepoAgentsSlot(Deps{}, rl, "seam-agent", canonical, projectPath)
 	if err == nil {
 		t.Fatal("expected error from injected readlinker")
 	}

@@ -279,6 +279,7 @@ user-local and repo-local with the same provenance surface.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.stdout = cmd.OutOrStdout()
 			opts.stderr = cmd.ErrOrStderr()
+			opts.jsonOut = deps.jsonFlag() // honor the global persistent --json
 			if opts.cwd == "" {
 				cwd, err := os.Getwd()
 				if err != nil {
@@ -293,7 +294,6 @@ user-local and repo-local with the same provenance surface.`,
 	cmd.Flags().BoolVar(&opts.flags, "flags", false, "Print resolved feature flags (features.*) across all layers")
 	cmd.Flags().BoolVar(&opts.valueOnly, "value-only", false, "Print only the effective value (JSON-encoded for non-scalars)")
 	cmd.Flags().BoolVar(&opts.originOnly, "origin-only", false, "Print only the winning layer identifier")
-	cmd.Flags().BoolVar(&opts.jsonOut, "json", false, "Emit machine-readable JSON output")
 	return cmd
 }
 
