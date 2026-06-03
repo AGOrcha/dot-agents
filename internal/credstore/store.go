@@ -67,6 +67,12 @@ var (
 	// ErrKeyNotFound is the sentinel a Keyring returns (directly or wrapped)
 	// when a key is absent, so the store mints a fresh one rather than fail.
 	ErrKeyNotFound = errors.New(errPrefix + ": keyring key not found")
+	// ErrKeyMissingExistingStore is returned when the OS keychain entry is absent
+	// but the encrypted credential file already exists on disk. Minting a new key
+	// would permanently strand the existing ciphertext. Recovery requires
+	// restoring the keychain entry or re-sealing with a new key after a deliberate
+	// export of the existing secrets.
+	ErrKeyMissingExistingStore = errors.New(errPrefix + ": keyring key missing but encrypted store file exists")
 )
 
 // Keyring is the seam over the OS credential helper. Production wires it to the
@@ -189,14 +195,29 @@ func defaultPath(sys sysShim) (string, error) {
 }
 
 // ensureHybridKey returns the recipient hybrid key, minting and persisting a
-// fresh seed blob in the keyring on first use.
-func ensureHybridKey(ring Keyring, sys sysShim) (*hybridKey, error) {
+// fresh seed blob in the keyring on first use. storePath is the encrypted store
+// file path: when the key is absent but the file exists the function fails
+// closed rather than silently minting a new key that would permanently strand
+// the existing ciphertext.
+func ensureHybridKey(ring Keyring, sys sysShim, storePath string) (*hybridKey, error) {
 	seed, err := ring.Get(keyringService)
 	if err == nil {
 		return hybridKeyFromSeed(seed)
 	}
 	if !errors.Is(err, ErrKeyNotFound) {
 		return nil, fmt.Errorf("%s: read key seed: %w", errPrefix, err)
+	}
+	// Key not found. Minting is only safe when the store file provably does not
+	// exist yet. Any other stat result — file exists, permission denied, or
+	// transient I/O error — must fail closed: minting on a transient failure
+	// could overwrite a valid keyring seed and permanently strand existing
+	// ciphertext when the error resolves.
+	_, statErr := sys.Stat(storePath)
+	if statErr == nil {
+		return nil, fmt.Errorf("%w: %s", ErrKeyMissingExistingStore, storePath)
+	}
+	if !errors.Is(statErr, os.ErrNotExist) {
+		return nil, fmt.Errorf("%s: check store file: %w", errPrefix, statErr)
 	}
 	return mintHybridKey(ring, sys)
 }
@@ -246,7 +267,7 @@ func Open(path string, ring Keyring) (*Store, error) { return openWith(path, rin
 
 // openWith is Open with an injected sysShim for hermetic tests.
 func openWith(path string, ring Keyring, sys sysShim) (*Store, error) {
-	hk, err := ensureHybridKey(ring, sys)
+	hk, err := ensureHybridKey(ring, sys, path)
 	if err != nil {
 		return nil, err
 	}

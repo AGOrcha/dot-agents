@@ -172,7 +172,7 @@ func TestDefaultPathHomeError(t *testing.T) {
 
 func TestEnsureHybridKeyMintsOnFirstUse(t *testing.T) {
 	ring := newFakeKeyring()
-	hk, err := ensureHybridKey(ring, stdSys{})
+	hk, err := ensureHybridKey(ring, stdSys{}, "")
 	if err != nil {
 		t.Fatalf("ensureHybridKey: %v", err)
 	}
@@ -189,11 +189,11 @@ func TestEnsureHybridKeyMintsOnFirstUse(t *testing.T) {
 
 func TestEnsureHybridKeyReusesExisting(t *testing.T) {
 	ring := newFakeKeyring()
-	if _, err := ensureHybridKey(ring, stdSys{}); err != nil {
+	if _, err := ensureHybridKey(ring, stdSys{}, ""); err != nil {
 		t.Fatalf("first ensureHybridKey: %v", err)
 	}
 	ring.sets = 0
-	if _, err := ensureHybridKey(ring, stdSys{}); err != nil {
+	if _, err := ensureHybridKey(ring, stdSys{}, ""); err != nil {
 		t.Fatalf("second ensureHybridKey: %v", err)
 	}
 	if ring.sets != 0 {
@@ -229,7 +229,7 @@ func TestEnsureHybridKeyErrorBranches(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(ring)
 			}
-			_, err := ensureHybridKey(ring, sys)
+			_, err := ensureHybridKey(ring, sys, "")
 			assertErrorBranch(t, err, tc.wantIs)
 		})
 	}
@@ -245,7 +245,7 @@ func TestMintHybridKeyMLKEMRandFailure(t *testing.T) {
 		}
 		return stdSys{}.RandRead(b)
 	}}
-	if _, err := ensureHybridKey(newFakeKeyring(), sys); err == nil {
+	if _, err := ensureHybridKey(newFakeKeyring(), sys, ""); err == nil {
 		t.Fatalf("expected ml-kem seed rand failure")
 	}
 }
@@ -492,7 +492,7 @@ func TestOpenRejectsCorruptEphemeralPub(t *testing.T) {
 
 func TestSealNonceFailure(t *testing.T) {
 	ring := newFakeKeyring()
-	hk, err := ensureHybridKey(ring, stdSys{})
+	hk, err := ensureHybridKey(ring, stdSys{}, "")
 	if err != nil {
 		t.Fatalf("ensureHybridKey: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestSealNonceFailure(t *testing.T) {
 
 func TestSealEphemeralRandFailure(t *testing.T) {
 	ring := newFakeKeyring()
-	hk, err := ensureHybridKey(ring, stdSys{})
+	hk, err := ensureHybridKey(ring, stdSys{}, "")
 	if err != nil {
 		t.Fatalf("ensureHybridKey: %v", err)
 	}
@@ -541,7 +541,7 @@ func TestX25519DecapsulateLowOrderPoint(t *testing.T) {
 	// An all-zero ephemeral public key is a low-order point: NewPublicKey accepts
 	// it (length-only check) but ECDH fails closed, covering that error branch.
 	ring := newFakeKeyring()
-	hk, err := ensureHybridKey(ring, stdSys{})
+	hk, err := ensureHybridKey(ring, stdSys{}, "")
 	if err != nil {
 		t.Fatalf("ensureHybridKey: %v", err)
 	}
@@ -746,6 +746,54 @@ func TestStdSysDelegatesToOS(t *testing.T) {
 	}
 	if _, err := sys.Stat(path); err == nil {
 		t.Fatalf("expected file removed")
+	}
+}
+
+func TestEnsureHybridKey_ExistingStore_MissingKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	if err := os.WriteFile(path, []byte(`{}`), 0600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	ring := newFakeKeyring() // empty → returns ErrKeyNotFound on Get
+	_, err := ensureHybridKey(ring, stdSys{}, path)
+	if !errors.Is(err, ErrKeyMissingExistingStore) {
+		t.Fatalf("expected ErrKeyMissingExistingStore when store exists but key missing, got %v", err)
+	}
+	if ring.sets != 0 {
+		t.Fatalf("must not mint a new key when encrypted store file exists: sets=%d", ring.sets)
+	}
+}
+
+func TestEnsureHybridKey_TransientStatError_FailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	ring := newFakeKeyring() // empty → ErrKeyNotFound
+	// Stat returns a non-ErrNotExist error (permission denied or I/O failure).
+	permErr := &os.PathError{Op: "stat", Path: path, Err: os.ErrPermission}
+	sys := fakeSys{stat: func(string) (fs.FileInfo, error) { return nil, permErr }}
+	_, err := ensureHybridKey(ring, sys, path)
+	if err == nil {
+		t.Fatalf("expected fail-closed error on transient stat failure, got nil")
+	}
+	if errors.Is(err, ErrKeyMissingExistingStore) {
+		t.Fatalf("transient stat error must not be reported as ErrKeyMissingExistingStore")
+	}
+	if ring.sets != 0 {
+		t.Fatalf("must not mint when stat fails transiently: sets=%d", ring.sets)
+	}
+}
+
+func TestEnsureHybridKey_MintsWhenFileAbsent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json") // file does not exist
+	ring := newFakeKeyring()
+	hk, err := ensureHybridKey(ring, stdSys{}, path)
+	if err != nil {
+		t.Fatalf("expected minting to succeed when no store file exists: %v", err)
+	}
+	if hk.x25519 == nil || hk.mlkem == nil {
+		t.Fatalf("expected fully reconstructed hybrid key")
+	}
+	if ring.sets != 1 {
+		t.Fatalf("expected one keyring Set on first use, got %d", ring.sets)
 	}
 }
 
