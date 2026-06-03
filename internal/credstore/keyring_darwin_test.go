@@ -3,9 +3,11 @@
 package credstore
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -96,5 +98,32 @@ func TestDarwinKeyring_Set_Error(t *testing.T) {
 	k := darwinKeyring{}
 	if err := k.Set("svc", []byte{0x01, 0x02}); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+// TestDarwinKeyringRoundTrip writes a real entry to the macOS Keychain via the
+// production security(1) binary, reads it back, and verifies the value. It
+// validates the full invocation — stdin-passing for Set, -w stdout for Get —
+// using the same binary and args the production code uses.
+func TestDarwinKeyringRoundTrip(t *testing.T) {
+	const svc = "da-credstore-roundtrip-test"
+	want := []byte{0xca, 0xfe, 0xba, 0xbe, 0x01, 0x02, 0x03, 0x04}
+	k := darwinKeyring{}
+	t.Cleanup(func() {
+		exec.Command(securityBin,
+			"delete-generic-password",
+			"-s", svc,
+			"-a", svc,
+		).Run() //nolint:errcheck — cleanup best-effort
+	})
+	if err := k.Set(svc, want); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	got, err := k.Get(svc)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("round-trip: got %x want %x", got, want)
 	}
 }

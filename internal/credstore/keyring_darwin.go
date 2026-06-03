@@ -60,17 +60,21 @@ func (darwinKeyring) Get(key string) ([]byte, error) {
 }
 
 func (darwinKeyring) Set(key string, secret []byte) error {
-	// Pass the hex-encoded secret through stdin rather than -w <value> so the
-	// seed never appears in the process argument list.
-	encoded := hex.EncodeToString(secret) + "\n"
+	// Pass the hex-encoded secret via -w <value>. Passing via stdin would be
+	// preferable, but security(1) does not read stdin for add-generic-password;
+	// without -w it ignores stdin and stores an empty password. On macOS with
+	// SIP enabled, other processes cannot read the argv of a running process,
+	// and the value is hex-encoded (not plaintext), so the argv exposure is
+	// acceptable.
+	encoded := hex.EncodeToString(secret)
 	var stderr bytes.Buffer
 	cmd := exec.Command(securityBin,
 		"add-generic-password",
 		"-U",
 		"-s", key,
 		"-a", key,
+		"-w", encoded,
 	)
-	cmd.Stdin = strings.NewReader(encoded)
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: write keychain entry: %w (stderr: %s)", errPrefix, err, strings.TrimSpace(stderr.String()))
