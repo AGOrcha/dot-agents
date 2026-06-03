@@ -797,6 +797,37 @@ func TestEnsureHybridKey_MintsWhenFileAbsent(t *testing.T) {
 	}
 }
 
+func TestReadCredentialsNonNotExistError(t *testing.T) {
+	ring := newFakeKeyring()
+	hk, err := ensureHybridKey(ring, stdSys{}, filepath.Join(t.TempDir(), "c.json"))
+	if err != nil {
+		t.Fatalf("ensureHybridKey: %v", err)
+	}
+	sys := fakeSys{readFile: func(string) ([]byte, error) { return nil, errors.New("io error") }}
+	if _, err := readCredentials(sys, "/any/path.json", hk); err == nil {
+		t.Fatalf("expected non-not-exist read error to propagate")
+	}
+}
+
+func TestReadCredentialsMalformedEnvelope(t *testing.T) {
+	ring := newFakeKeyring()
+	hk, err := ensureHybridKey(ring, stdSys{}, filepath.Join(t.TempDir(), "c.json"))
+	if err != nil {
+		t.Fatalf("ensureHybridKey: %v", err)
+	}
+	sys := fakeSys{readFile: func(string) ([]byte, error) { return []byte("{bad json"), nil }}
+	if _, err := readCredentials(sys, "/any/path.json", hk); err == nil {
+		t.Fatalf("expected json parse error to propagate")
+	}
+}
+
+func TestStdSysNewAEADBadKeyLength(t *testing.T) {
+	sys := stdSys{}
+	if _, err := sys.NewAEAD([]byte("short")); err == nil {
+		t.Fatalf("expected error for invalid AES key length")
+	}
+}
+
 func containsSubstring(haystack []byte, needle string) bool {
 	return len(needle) > 0 && len(haystack) >= len(needle) && indexOf(haystack, needle) >= 0
 }
