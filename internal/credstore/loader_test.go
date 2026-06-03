@@ -107,7 +107,7 @@ func TestResolveEmptyFileValueIsMiss(t *testing.T) {
 	// An empty value in the file map must be a miss, not a silent empty hit.
 	path := writeSecureFile(t, `{"okta-token":""}`)
 	sys := envSys(map[string]string{envFileVar: path})
-	if _, err := NewLoader(withSys(sys)).Resolve("okta-token"); !errors.Is(err, ErrCredentialNotFound) {
+	if _, err := NewLoader(withSys(sys), WithKeyring(nil)).Resolve("okta-token"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("empty file value should be a miss, got %v", err)
 	}
 }
@@ -115,7 +115,7 @@ func TestResolveEmptyFileValueIsMiss(t *testing.T) {
 func TestResolvePlaintextFileMissIsCleanFallthrough(t *testing.T) {
 	path := writeSecureFile(t, `{"other":"x"}`)
 	sys := envSys(map[string]string{envFileVar: path})
-	if _, err := NewLoader(withSys(sys)).Resolve("okta-token"); !errors.Is(err, ErrCredentialNotFound) {
+	if _, err := NewLoader(withSys(sys), WithKeyring(nil)).Resolve("okta-token"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("expected fallthrough to not-found, got %v", err)
 	}
 }
@@ -123,7 +123,7 @@ func TestResolvePlaintextFileMissIsCleanFallthrough(t *testing.T) {
 func TestResolvePlaintextFileEmptyIsMiss(t *testing.T) {
 	path := writeSecureFile(t, "   \n")
 	sys := envSys(map[string]string{envFileVar: path})
-	if _, err := NewLoader(withSys(sys)).Resolve("id"); !errors.Is(err, ErrCredentialNotFound) {
+	if _, err := NewLoader(withSys(sys), WithKeyring(nil)).Resolve("id"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("expected not-found, got %v", err)
 	}
 }
@@ -273,7 +273,7 @@ func TestResolveStoreOpenErrorIsHard(t *testing.T) {
 }
 
 func TestResolveStoreSkippedWithoutKeyring(t *testing.T) {
-	l := NewLoader(withSys(envSys(map[string]string{})), WithResolver(fakeResolver{secret: "resolved"}))
+	l := NewLoader(withSys(envSys(map[string]string{})), WithKeyring(nil), WithResolver(fakeResolver{secret: "resolved"}))
 	got, err := l.Resolve("id")
 	if err != nil || got != "resolved" {
 		t.Fatalf("store step should be skipped without keyring, got %q err=%v", got, err)
@@ -281,7 +281,7 @@ func TestResolveStoreSkippedWithoutKeyring(t *testing.T) {
 }
 
 func TestResolveResolverNotImplementedIsMiss(t *testing.T) {
-	l := NewLoader(withSys(envSys(map[string]string{}))) // stub resolver
+	l := NewLoader(withSys(envSys(map[string]string{})), WithKeyring(nil)) // stub resolver
 	if _, err := l.Resolve("id"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("stub resolver should yield not-found, got %v", err)
 	}
@@ -297,14 +297,14 @@ func TestResolveResolverHardErrorPropagates(t *testing.T) {
 
 func TestResolveResolverEmptyValueIsMiss(t *testing.T) {
 	// A resolver that returns ("", nil) must be a miss, not an empty hit.
-	l := NewLoader(withSys(envSys(map[string]string{})), WithResolver(fakeResolver{secret: ""}))
+	l := NewLoader(withSys(envSys(map[string]string{})), WithKeyring(nil), WithResolver(fakeResolver{secret: ""}))
 	if _, err := l.Resolve("id"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("empty resolver value should be a miss, got %v", err)
 	}
 }
 
 func TestResolveNilResolverIsMiss(t *testing.T) {
-	l := NewLoader(withSys(envSys(map[string]string{})))
+	l := NewLoader(withSys(envSys(map[string]string{})), WithKeyring(nil))
 	l.resolver = nil
 	if _, err := l.Resolve("id"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("nil resolver should yield not-found, got %v", err)
@@ -321,7 +321,7 @@ func TestResolveStorePathDefaultsToDefaultPath(t *testing.T) {
 }
 
 func TestResolveEnvFileVarBlankIsSkipped(t *testing.T) {
-	l := NewLoader(withSys(envSys(map[string]string{envFileVar: ""})))
+	l := NewLoader(withSys(envSys(map[string]string{envFileVar: ""})), WithKeyring(nil))
 	if _, err := l.Resolve("id"); !errors.Is(err, ErrCredentialNotFound) {
 		t.Fatalf("blank file var should be skipped, got %v", err)
 	}
