@@ -138,7 +138,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 	if probe == nil {
 		probe = defaultCRGProbe
 	}
-	if perr := probe(opts.cwd); perr != nil {
+	if probe(opts.cwd) != nil {
 		checks = append(checks, VerifyCheck{"binary:code-review-graph", verifyWarn, "not installed; graph features will degrade"})
 	} else {
 		checks = append(checks, VerifyCheck{"binary:code-review-graph", verifyPass, "available"})
@@ -169,43 +169,52 @@ func verifySources(cwd string, snap *snapshot) []VerifyCheck {
 
 	checks := make([]VerifyCheck, 0, len(raw))
 	for i, item := range raw {
-		src, ok := item.(map[string]any)
-		if !ok {
-			checks = append(checks, VerifyCheck{fmt.Sprintf("source[%d]", i), verifyFail, "source entry is not an object"})
-			continue
-		}
-		typ, _ := src["type"].(string)
-		name := sourceLabel(i, src)
-		switch typ {
-		case "local":
-			path, _ := src["path"].(string)
-			if path == "" {
-				checks = append(checks, VerifyCheck{name, verifyPass, "local repo layer"})
-				continue
-			}
-			abs := path
-			if !filepath.IsAbs(abs) {
-				abs = filepath.Join(cwd, path)
-			}
-			if fileExists(abs) {
-				checks = append(checks, VerifyCheck{name, verifyPass, "local path present: " + path})
-			} else {
-				checks = append(checks, VerifyCheck{name, verifyFail, "local path missing: " + path})
-			}
-		case "git", "http", "oci":
-			id, _ := src["id"].(string)
-			if _, used := referenced[id]; used && id != "" {
-				checks = append(checks, VerifyCheck{name, verifyPass, "remote " + typ + " source; its layers are verified in the locked-layers check below"})
-			} else {
-				checks = append(checks, VerifyCheck{name, verifyPass, "remote " + typ + " source declared but unused (no `extends` layer references it)"})
-			}
-		case "":
-			checks = append(checks, VerifyCheck{name, verifyFail, "source is missing a type"})
-		default:
-			checks = append(checks, VerifyCheck{name, verifyWarn, "unknown source type: " + typ})
-		}
+		checks = append(checks, verifyOneSource(i, item, cwd, referenced))
 	}
 	return checks
+}
+
+// verifyOneSource verifies a single declared source entry and returns its
+// check. Split out of verifySources' loop so the per-type switch does not
+// compound the loop's nesting (keeps each function's cognitive complexity low).
+func verifyOneSource(i int, item any, cwd string, referenced map[string]struct{}) VerifyCheck {
+	src, ok := item.(map[string]any)
+	if !ok {
+		return VerifyCheck{fmt.Sprintf("source[%d]", i), verifyFail, "source entry is not an object"}
+	}
+	typ, _ := src["type"].(string)
+	name := sourceLabel(i, src)
+	switch typ {
+	case "local":
+		return verifyLocalSource(name, cwd, src)
+	case "git", "http", "oci":
+		id, _ := src["id"].(string)
+		if _, used := referenced[id]; used && id != "" {
+			return VerifyCheck{name, verifyPass, "remote " + typ + " source; its layers are verified in the locked-layers check below"}
+		}
+		return VerifyCheck{name, verifyPass, "remote " + typ + " source declared but unused (no `extends` layer references it)"}
+	case "":
+		return VerifyCheck{name, verifyFail, "source is missing a type"}
+	default:
+		return VerifyCheck{name, verifyWarn, "unknown source type: " + typ}
+	}
+}
+
+// verifyLocalSource verifies a `local`-type source: the implicit repo layer
+// (no path) always passes; an explicit path must exist on disk.
+func verifyLocalSource(name, cwd string, src map[string]any) VerifyCheck {
+	path, _ := src["path"].(string)
+	if path == "" {
+		return VerifyCheck{name, verifyPass, "local repo layer"}
+	}
+	abs := path
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(cwd, path)
+	}
+	if fileExists(abs) {
+		return VerifyCheck{name, verifyPass, "local path present: " + path}
+	}
+	return VerifyCheck{name, verifyFail, "local path missing: " + path}
 }
 
 // verifyLayerLocks cross-checks each declared `extends` layer against the
