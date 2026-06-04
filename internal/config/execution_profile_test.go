@@ -146,6 +146,166 @@ func TestContains(t *testing.T) {
 	}
 }
 
+// TestExecutionProfile_SuppressNoise is the table-driven positive + negative
+// coverage for the noise-suppression view: noise-classed candidates are moved to
+// Suppressed, core + situational stay in Kept, and an unlisted candidate is kept
+// (default situational) so nothing is silently dropped. Order is preserved and
+// the input slice is never mutated (reversible view, not a delete).
+func TestExecutionProfile_SuppressNoise(t *testing.T) {
+	p := sampleProfile()
+	tests := []struct {
+		name           string
+		appType, stage string
+		candidates     []string
+		wantKept       []string
+		wantSuppressed []string
+	}{
+		{
+			name:           "noise split from core",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     []string{"loop-worker", "article-extract", "orchestrator-session-start", "playwright"},
+			wantKept:       []string{"loop-worker", "orchestrator-session-start"},
+			wantSuppressed: []string{"article-extract", "playwright"},
+		},
+		{
+			name:           "situational and core both kept",
+			appType:        "go-cli",
+			stage:          "review",
+			candidates:     []string{"review-pr", "self-review"},
+			wantKept:       []string{"review-pr", "self-review"},
+			wantSuppressed: nil,
+		},
+		{
+			name:           "unlisted candidate kept (default situational)",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     []string{"never-heard-of-it", "playwright"},
+			wantKept:       []string{"never-heard-of-it"},
+			wantSuppressed: []string{"playwright"},
+		},
+		{
+			name:           "unknown app_type keeps everything",
+			appType:        "rust-svc",
+			stage:          "orchestrate",
+			candidates:     []string{"playwright", "loop-worker"},
+			wantKept:       []string{"playwright", "loop-worker"},
+			wantSuppressed: nil,
+		},
+		{
+			name:           "unknown stage keeps everything",
+			appType:        "go-cli",
+			stage:          "deploy",
+			candidates:     []string{"playwright", "loop-worker"},
+			wantKept:       []string{"playwright", "loop-worker"},
+			wantSuppressed: nil,
+		},
+		{
+			name:           "empty candidate set yields empty view",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     nil,
+			wantKept:       nil,
+			wantSuppressed: nil,
+		},
+		{
+			name:           "order preserved and duplicates classified independently",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     []string{"playwright", "loop-worker", "playwright"},
+			wantKept:       []string{"loop-worker"},
+			wantSuppressed: []string{"playwright", "playwright"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			input := append([]string(nil), tc.candidates...)
+			got := p.SuppressNoise(tc.appType, tc.stage, tc.candidates)
+			if !equalStrings(got.Kept, tc.wantKept) {
+				t.Errorf("Kept=%v, want %v", got.Kept, tc.wantKept)
+			}
+			if !equalStrings(got.Suppressed, tc.wantSuppressed) {
+				t.Errorf("Suppressed=%v, want %v", got.Suppressed, tc.wantSuppressed)
+			}
+			// The view is reversible: Kept ∪ Suppressed (in input order) must
+			// reconstruct the full candidate set — nothing is deleted.
+			if total := len(got.Kept) + len(got.Suppressed); total != len(tc.candidates) {
+				t.Errorf("kept+suppressed=%d, want full candidate count %d", total, len(tc.candidates))
+			}
+			// Purity: the caller's input slice must be untouched.
+			if !equalStrings(input, tc.candidates) {
+				t.Errorf("SuppressNoise mutated the input slice: %v != %v", tc.candidates, input)
+			}
+		})
+	}
+}
+
+// TestExecutionProfile_SuppressNoise_NilReceiver proves a nil profile keeps every
+// candidate (classifies as the safe default) rather than panicking.
+func TestExecutionProfile_SuppressNoise_NilReceiver(t *testing.T) {
+	var p *ExecutionProfile
+	got := p.SuppressNoise("go-cli", "orchestrate", []string{"a", "b"})
+	if !equalStrings(got.Kept, []string{"a", "b"}) {
+		t.Errorf("nil profile must keep all candidates, got Kept=%v", got.Kept)
+	}
+	if len(got.Suppressed) != 0 {
+		t.Errorf("nil profile must suppress nothing, got Suppressed=%v", got.Suppressed)
+	}
+}
+
+// TestExecutionProfile_SuppressNoise_DefaultClassNoise proves the suppression view
+// honors a profile whose default_class is "noise": an unlisted candidate is then
+// suppressed, while explicit core/situational listings still survive.
+func TestExecutionProfile_SuppressNoise_DefaultClassNoise(t *testing.T) {
+	p := &ExecutionProfile{
+		DefaultClass: "noise",
+		ByAppType: map[string]AppTypeProfile{
+			"go-cli": {Relevance: map[string]RelevanceClasses{
+				"review": {Core: []string{"keep-me"}},
+			}},
+		},
+	}
+	got := p.SuppressNoise("go-cli", "review", []string{"keep-me", "drop-me"})
+	if !equalStrings(got.Kept, []string{"keep-me"}) {
+		t.Errorf("default_class=noise must keep explicit core only, got Kept=%v", got.Kept)
+	}
+	if !equalStrings(got.Suppressed, []string{"drop-me"}) {
+		t.Errorf("default_class=noise must suppress unlisted, got Suppressed=%v", got.Suppressed)
+	}
+}
+
+// TestWorkingSet_Restore proves the suppression view is reversible: Restore
+// rejoins Kept and Suppressed back into the original candidate ordering by index.
+func TestWorkingSet_Restore(t *testing.T) {
+	p := sampleProfile()
+	candidates := []string{"loop-worker", "article-extract", "orchestrator-session-start", "playwright"}
+	view := p.SuppressNoise("go-cli", "orchestrate", candidates)
+	restored := view.Restore()
+	if !equalStrings(restored, candidates) {
+		t.Errorf("Restore()=%v, want original %v (view must be reversible)", restored, candidates)
+	}
+
+	// An empty view restores to an empty (non-nil-sensitive) slice.
+	var empty WorkingSet
+	if len(empty.Restore()) != 0 {
+		t.Errorf("empty WorkingSet.Restore() must be empty, got %v", empty.Restore())
+	}
+}
+
+// equalStrings compares two string slices for element-wise equality, treating a
+// nil slice and an empty slice as equal so table cases can use nil for "empty".
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestExecutionProfile_JSONRoundTrip proves marshal/unmarshal preserves every
 // facet of the profile — the load-bearing guarantee that nothing is dropped on
 // disk round-trip.

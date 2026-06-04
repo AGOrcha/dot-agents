@@ -134,6 +134,75 @@ func (p *ExecutionProfile) ClassOf(appType, stage, unit string) string {
 	return def
 }
 
+// WorkingSet is the reversible result of suppressing noise-classed units from a
+// candidate set for one app_type × stage. Kept holds the effective working set
+// (core + situational, in input order); Suppressed holds the noise-classed units
+// (also in input order). The two together reconstruct the original candidate set
+// — suppression is a view, never a delete — so Restore can losslessly rejoin them.
+type WorkingSet struct {
+	// Kept is the effective working set: every candidate whose relevance class is
+	// core or situational (including the default for unlisted units), in the order
+	// it appeared in the candidate slice.
+	Kept []string `json:"kept,omitempty"`
+	// Suppressed is the noise-classed candidates removed from the working set for
+	// this stage, in input order. They are retained (not deleted) so the view is
+	// reversible.
+	Suppressed []string `json:"suppressed,omitempty"`
+	// order records, per element, which class slice it came from so Restore can
+	// re-interleave Kept and Suppressed back into the original candidate ordering.
+	// true == kept, false == suppressed.
+	order []bool
+}
+
+// SuppressNoise partitions candidates into a reversible WorkingSet for the given
+// app_type × stage: units classed "noise" are moved to Suppressed and everything
+// else (core, situational, and the default class for unlisted units) stays in
+// Kept. Input order is preserved within each list and the candidate slice is
+// never mutated, so this is a pure function safe to call on resolved working sets.
+//
+// Because classification routes through ClassOf, the default_class contract holds:
+// an unlisted unit is situational (kept) by default and is never silently dropped.
+// A profile with default_class=noise suppresses unlisted units instead — the same
+// reversible view, just a different default. A nil profile keeps every candidate.
+func (p *ExecutionProfile) SuppressNoise(appType, stage string, candidates []string) WorkingSet {
+	ws := WorkingSet{order: make([]bool, 0, len(candidates))}
+	for _, unit := range candidates {
+		if p.ClassOf(appType, stage, unit) == "noise" {
+			ws.Suppressed = append(ws.Suppressed, unit)
+			ws.order = append(ws.order, false)
+			continue
+		}
+		ws.Kept = append(ws.Kept, unit)
+		ws.order = append(ws.order, true)
+	}
+	return ws
+}
+
+// Restore rejoins Kept and Suppressed back into the original candidate ordering,
+// undoing the suppression view. A zero-value WorkingSet (no recorded order)
+// restores Kept followed by Suppressed, which is also the original order when the
+// view was produced by SuppressNoise on a fully-kept or fully-suppressed set.
+func (ws WorkingSet) Restore() []string {
+	if len(ws.order) == 0 {
+		out := make([]string, 0, len(ws.Kept)+len(ws.Suppressed))
+		out = append(out, ws.Kept...)
+		out = append(out, ws.Suppressed...)
+		return out
+	}
+	out := make([]string, 0, len(ws.order))
+	ki, si := 0, 0
+	for _, kept := range ws.order {
+		if kept {
+			out = append(out, ws.Kept[ki])
+			ki++
+			continue
+		}
+		out = append(out, ws.Suppressed[si])
+		si++
+	}
+	return out
+}
+
 // contains reports whether s is present in list.
 func contains(list []string, s string) bool {
 	for _, v := range list {
