@@ -914,7 +914,8 @@ gate), `--frozen` (use lock as-is; skip the staleness check), `--no-sync` (skip 
 A single `--scope`/`--source` flag routes a CRUD or sync op to a source; an **editability check**
 governs writes. This replaces both a `sync`→`config sync` rename and the package-shadow guard.
 `local` is always writable (personal); team/org are governed by their own external policies via a
-**policy-backend-agnostic interface** (D-open-1).
+**policy-backend-agnostic interface** — now **implemented and resolved** (was D-open-1; see
+"Resolved" under §15.6): `WriteAuthorizer` + `Checker` in `internal/config/editability.go`.
 
 #### D12 — Command intents (agent-DX-first)
 - `config explain` — **the** effective-policy truth surface (values, provenance, lock freshness,
@@ -991,21 +992,37 @@ managed/generated output ignored; the block is idempotent.
    `--locked` exits non-zero if the lock would change.
 8. `.gitignore` auto-fill converges on re-run with `.agentsrc.{json,lock}` committed (R8).
 
-### 15.6 Open questions
+### 15.6 Resolved & open questions
 
-- **D-open-1 — Governance interface shape (team/org editability).** `local` is always writable;
-  team/org are governed by highly-variable external policies, so writes go through a
-  **policy-backend-agnostic interface** ("can principal P write source S?") with pluggable
-  implementations (the `graph-backend-adapter-contract` pattern). *Where the policy plugs in, what it
-  returns, and how project editability is derived (team/org-owned → that governance; else personal →
-  local-writable) is unresolved.* Must be settled before D11's write path is built.
-- **Inherited from §14 that this section touches:** Q3 config-layer signing (p5 ships a warn-only
-  verifier; ERROR-by-default deferred) and Q5 workspace-level lockfile (ruled either-or like git; not
-  implemented here).
+**Resolved — D-open-1: Governance interface shape (team/org editability).** Settled and
+implemented as the `WriteAuthorizer` seam + `Checker` default in `internal/config/editability.go`
+(task `c0-governance-interface`, PR #210; interface + nil-safe default only, 100% per-file
+coverage). The three previously-open sub-questions are answered:
+
+- **Where the policy plugs in** — `WriteAuthorizer.Authorize(p Principal, s WriteTarget) (Verdict,
+  error)`, a policy-backend-agnostic seam (the `graph-backend-adapter-contract` pattern). The
+  `Checker` calls a backend **only** for governed scopes; `local` and personal-project writes never
+  reach a backend.
+- **What it returns** — a `Verdict{Decision, Reason, Scope}` where `Decision ∈ {DecisionAllow,
+  DecisionDeny, DecisionPrompt}`. A non-nil backend error is treated as a safe **fail-closed
+  `DecisionPrompt`** (deny-then-confirm), never a silent allow.
+- **How project editability is derived** (`Checker.CanWrite`): `local` → always allow (personal);
+  `project` with no `Owner` → allow (personal project, derives to local); `project` with an `Owner`
+  + `team`/`org` → governed, delegate to the backend; **no backend wired or backend error** →
+  `DecisionPrompt` (safe default); unknown scope → `DecisionDeny`.
+
+Still deferred (see §15.7): the concrete team/org policy backend implementation and its
+registration/selection — the contract and nil-safe default are in place; no production backend is
+wired yet.
+
+**Open — inherited from §14 that this section touches:** Q3 config-layer signing (p5 ships a
+warn-only verifier; ERROR-by-default deferred) and Q5 workspace-level lockfile (ruled either-or like
+git; not implemented here).
 
 ### 15.7 Deferred / out of scope
 
-- The governance **implementation** (this section fixes the *interface* requirement only).
+- The governance **backend implementation** — the interface + nil-safe default are done (D-open-1
+  resolved); a concrete team/org `WriteAuthorizer` and its registration/selection are deferred.
 - The graph `adapters` lock section (owned by `graph-backend-adapter-contract`; this section only
   guarantees it is preserved as a peer section).
 - OCI artifact transport/signing specifics (owned by `external-agent-sources`).
@@ -1016,6 +1033,7 @@ managed/generated output ignored; the block is idempotent.
 The §7A lock model — `inputs_digest` computation, the `units` lock structure, and the
 `EnsureResolved` auto-sync seam — is **already implemented and tested in-tree but unwired** (no
 production callers). The near-term work is therefore predominantly *wiring + reader migration +
-command reshape*, not greenfield. The `local`-source auto-setup (D6), the project-local overlay scope
-(D9), `--scope`/`--source` routing + the editability interface (D11/D-open-1), `.gitignore` auto-fill
-(D14), and the command reshape (D12) are the net-new surfaces. 
+command reshape*, not greenfield. The editability **interface** (D11/D-open-1) is also already built
+(`internal/config/editability.go`); what remains net-new is its **routing consumer**
+(`--scope`/`--source` write path), the `local`-source auto-setup (D6), the project-local overlay
+scope (D9), `.gitignore` auto-fill (D14), and the command reshape (D12). 
