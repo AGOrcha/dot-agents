@@ -146,24 +146,80 @@ func TestContains(t *testing.T) {
 	}
 }
 
+// suppressCase is one table row for the noise-suppression view: an app_type ×
+// stage and candidate set, paired with the kept/suppressed projections and the
+// per-unit classes the resolved view must carry. It is asserted by the small
+// sub-helpers below so the table test body stays flat (cognitive complexity well
+// under the gate) — each helper checks one invariant of the reversible view.
+type suppressCase struct {
+	name           string
+	appType, stage string
+	candidates     []string
+	wantKept       []string
+	wantSuppressed []string
+	// wantClasses asserts the per-unit class carried on the view, in input
+	// order — the classification the t2 resolver and wave engine consume.
+	wantClasses []ClassifiedUnit
+}
+
+// assertSuppressProjections checks the three primary projections of the view:
+// the kept working set, the suppressed (noise) set, and the per-unit classes.
+func assertSuppressProjections(t *testing.T, got WorkingSet, tc suppressCase) {
+	t.Helper()
+	if !equalStrings(got.Kept(), tc.wantKept) {
+		t.Errorf("Kept()=%v, want %v", got.Kept(), tc.wantKept)
+	}
+	if !equalStrings(got.Suppressed(), tc.wantSuppressed) {
+		t.Errorf("Suppressed()=%v, want %v", got.Suppressed(), tc.wantSuppressed)
+	}
+	if !equalClassified(got.Units, tc.wantClasses) {
+		t.Errorf("Units=%v, want %v", got.Units, tc.wantClasses)
+	}
+}
+
+// assertSuppressReversible checks the view is non-destructive: Candidates()
+// reconstructs the full ordered input, and kept ∪ suppressed accounts for every
+// candidate.
+func assertSuppressReversible(t *testing.T, got WorkingSet, tc suppressCase) {
+	t.Helper()
+	if !equalStrings(got.Candidates(), tc.candidates) {
+		t.Errorf("Candidates()=%v, want original %v (view must be reversible)", got.Candidates(), tc.candidates)
+	}
+	if total := len(got.Kept()) + len(got.Suppressed()); total != len(tc.candidates) {
+		t.Errorf("kept+suppressed=%d, want full candidate count %d", total, len(tc.candidates))
+	}
+}
+
+// assertInputUnmutated proves SuppressNoise treated the caller's slice as
+// read-only — purity is part of the "reversible view, not a delete" contract.
+func assertInputUnmutated(t *testing.T, original, candidates []string) {
+	t.Helper()
+	if !equalStrings(original, candidates) {
+		t.Errorf("SuppressNoise mutated the input slice: %v != %v", candidates, original)
+	}
+}
+
+// runSuppressCase exercises one table row end to end: it snapshots the input,
+// runs SuppressNoise, and delegates every invariant to a focused sub-helper.
+func runSuppressCase(t *testing.T, p *ExecutionProfile, tc suppressCase) {
+	t.Helper()
+	original := append([]string(nil), tc.candidates...)
+	got := p.SuppressNoise(tc.appType, tc.stage, tc.candidates)
+	assertSuppressProjections(t, got, tc)
+	assertSuppressReversible(t, got, tc)
+	assertInputUnmutated(t, original, tc.candidates)
+}
+
 // TestExecutionProfile_SuppressNoise is the table-driven positive + negative
 // coverage for the noise-suppression view: noise-classed candidates are dropped
 // from the working set, core + situational stay kept, and an unlisted candidate is
 // kept (default situational) so nothing is silently dropped. Order is preserved,
 // each unit retains its resolved class, and the input slice is never mutated
-// (reversible view, not a delete).
+// (reversible view, not a delete). Each row's invariants are asserted by the
+// focused sub-helpers above so this body stays flat.
 func TestExecutionProfile_SuppressNoise(t *testing.T) {
 	p := sampleProfile()
-	tests := []struct {
-		name           string
-		appType, stage string
-		candidates     []string
-		wantKept       []string
-		wantSuppressed []string
-		// wantClasses asserts the per-unit class carried on the view, in input
-		// order — the classification the t2 resolver and wave engine consume.
-		wantClasses []ClassifiedUnit
-	}{
+	tests := []suppressCase{
 		{
 			name:           "noise split from core",
 			appType:        "go-cli",
@@ -251,30 +307,7 @@ func TestExecutionProfile_SuppressNoise(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			input := append([]string(nil), tc.candidates...)
-			got := p.SuppressNoise(tc.appType, tc.stage, tc.candidates)
-			if !equalStrings(got.Kept(), tc.wantKept) {
-				t.Errorf("Kept()=%v, want %v", got.Kept(), tc.wantKept)
-			}
-			if !equalStrings(got.Suppressed(), tc.wantSuppressed) {
-				t.Errorf("Suppressed()=%v, want %v", got.Suppressed(), tc.wantSuppressed)
-			}
-			if !equalClassified(got.Units, tc.wantClasses) {
-				t.Errorf("Units=%v, want %v", got.Units, tc.wantClasses)
-			}
-			// The view is reversible: Candidates() must reconstruct the full input
-			// in order — nothing is deleted.
-			if !equalStrings(got.Candidates(), tc.candidates) {
-				t.Errorf("Candidates()=%v, want original %v (view must be reversible)", got.Candidates(), tc.candidates)
-			}
-			// Kept ∪ Suppressed must account for every candidate.
-			if total := len(got.Kept()) + len(got.Suppressed()); total != len(tc.candidates) {
-				t.Errorf("kept+suppressed=%d, want full candidate count %d", total, len(tc.candidates))
-			}
-			// Purity: the caller's input slice must be untouched.
-			if !equalStrings(input, tc.candidates) {
-				t.Errorf("SuppressNoise mutated the input slice: %v != %v", tc.candidates, input)
-			}
+			runSuppressCase(t, p, tc)
 		})
 	}
 }
