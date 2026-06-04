@@ -227,6 +227,19 @@ type baseResolutionInput struct {
 	// ExplicitBase, when non-empty, is the operator-supplied --base-branch that
 	// short-circuits resolution (§2.5 v1 manual sequencing escape hatch).
 	ExplicitBase string
+	// Resolver is the domain BaseResolver adapter (spec §4.4.2). When nil the git
+	// PR adapter is used, so existing callers and the fanout entry point keep
+	// today's git behavior; a non-VCS domain injects its own.
+	Resolver baseResolver
+}
+
+// resolver returns the domain BaseResolver adapter, defaulting to the git PR
+// adapter (v1) when the caller injects none.
+func (in baseResolutionInput) resolver() baseResolver {
+	if in.Resolver != nil {
+		return in.Resolver
+	}
+	return prBaseResolver{}
 }
 
 // qualifyDepID normalizes a dep id to "<plan>/<task>" form. Intra-plan deps
@@ -254,29 +267,37 @@ func (e *multiDepConflict) Error() string {
 	)
 }
 
-// awaitingDepRefs collects the qualified ids of deps currently in an
-// awaiting_review status, paired with their distinct PR branches.
-func awaitingDepRefs(in baseResolutionInput) (refs []string, branches map[string]inFlightTask) {
-	branches = make(map[string]inFlightTask)
+// awaitingDepRefs collects the qualified ids of deps whose in-flight output the
+// active resolver deems layerable, paired with each one's resolved outputRef. A
+// dep that is present but not layerable (not ready, or its output has no
+// addressable in-flight identity) is skipped, which the caller turns into a
+// completion-gate to the trunk (spec §4.4.1).
+func awaitingDepRefs(in baseResolutionInput) (refs []string, outs map[string]outputRef) {
+	r := in.resolver()
+	outs = make(map[string]outputRef)
 	for _, dep := range in.DependsOn {
 		qid := qualifyDepID(dep, in.PlanID)
 		f, ok := in.InFlight[qid]
-		if !ok || !awaitingReviewStatuses[f.Status] || strings.TrimSpace(f.PRBranch) == "" {
+		if !ok {
+			continue
+		}
+		ref, layerable := r.LayerableBase(f)
+		if !layerable {
 			continue
 		}
 		refs = append(refs, qid)
-		branches[qid] = f
+		outs[qid] = ref
 	}
 	sort.Strings(refs)
-	return refs, branches
+	return refs, outs
 }
 
-// distinctBranchCount returns how many distinct PR branches the given
-// awaiting deps occupy.
-func distinctBranchCount(refs []string, branches map[string]inFlightTask) int {
+// distinctBranchCount returns how many distinct output refs the given layerable
+// deps occupy.
+func distinctBranchCount(refs []string, outs map[string]outputRef) int {
 	seen := make(map[string]bool)
 	for _, r := range refs {
-		seen[branches[r].PRBranch] = true
+		seen[outs[r].Ref] = true
 	}
 	return len(seen)
 }
@@ -288,18 +309,19 @@ func resolveBase(in baseResolutionInput) (baseResolution, error) {
 		return explicitBaseResolution(in, b), nil
 	}
 
-	refs, branches := awaitingDepRefs(in)
+	refs, outs := awaitingDepRefs(in)
 	if len(refs) == 0 {
-		// No in-flight dep PRs: either all deps merged (step 2) or there are no
-		// deps at all. Either way, base off master.
-		return masterResolution(), nil
+		// No layerable in-flight dependency: deps merged (step 2), no deps at all,
+		// or the domain's outputs are not addressably layerable. Completion-gate to
+		// the domain trunk — master for the git adapter (spec §4.4.1).
+		return trunkResolution(in.resolver().Trunk()), nil
 	}
 	if len(refs) == 1 {
-		return singleDepResolution(refs[0], branches[refs[0]]), nil
+		return singleDepResolution(refs[0], outs[refs[0]]), nil
 	}
-	if distinctBranchCount(refs, branches) == 1 {
-		// All awaiting deps share one branch — unambiguous (step 3 degenerate).
-		return singleDepResolution(refs[0], branches[refs[0]]), nil
+	if distinctBranchCount(refs, outs) == 1 {
+		// All layerable deps share one output ref — unambiguous (step 3 degenerate).
+		return singleDepResolution(refs[0], outs[refs[0]]), nil
 	}
 	// Step 4b: v1 refuses on multiple distinct branches.
 	return baseResolution{}, &multiDepConflict{conflictTasks: refs}
@@ -326,21 +348,30 @@ func explicitBaseResolution(in baseResolutionInput, base string) baseResolution 
 	return res
 }
 
+// masterResolution is the git-adapter trunk resolution, retained for the
+// fanout entry point's gh-unavailable fallback path.
 func masterResolution() baseResolution {
-	return baseResolution{BaseBranch: baseRefMaster}
+	return trunkResolution(baseRefMaster)
 }
 
-func singleDepResolution(depID string, f inFlightTask) baseResolution {
+// trunkResolution is the completion-gating floor: base off the domain trunk with
+// no PR/lineage (spec §4.4.1). For the git adapter trunk is master — today's
+// default-base behavior.
+func trunkResolution(trunk string) baseResolution {
+	return baseResolution{BaseBranch: trunk}
+}
+
+func singleDepResolution(depID string, ref outputRef) baseResolution {
 	return baseResolution{
-		BaseBranch: f.PRBranch,
-		BasePR:     f.PRNumber,
+		BaseBranch: ref.Ref,
+		BasePR:     ref.PR,
 		BaseTask:   depID,
 		Lineage: &lineageCertificate{
 			SourceTasks:  []string{depID},
 			SelectedTask: depID,
 			Rationale: fmt.Sprintf(
 				"single in-flight dep %s in review; branch off its open PR #%d (spec §4.1 step 3)",
-				depID, f.PRNumber,
+				depID, ref.PR,
 			),
 		},
 	}
