@@ -417,7 +417,7 @@
         },
         "map": {
           "type": "object",
-          "description": "Canonical field -> JSONPath (relative to an item).",
+          "description": "Canonical field -> JSONPath (relative to an item). The reserved 'rollup' field should point at the platform's raw check array (gh: '.statusCheckRollup'); the producer derives the canonical Rollup.State (GREEN|FAILING|PENDING) from it on each cycle.",
           "additionalProperties": {
             "type": "string",
             "minLength": 1
