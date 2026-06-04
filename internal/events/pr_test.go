@@ -429,26 +429,35 @@ func TestDefaultGHSourceDerivesRollupEndToEnd(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			doc := `[{"number":7,"title":"t","headRefName":"f","baseRefName":"main","state":"OPEN","mergeable":"MERGEABLE","url":"u","statusCheckRollup":` + tc.rollup + `}]`
-			p, err := DefaultGHPRSource().NewListProducer("event.pr.ci_failed", "github", &fakeFetcher{out: []byte(doc)})
-			if err != nil {
-				t.Fatalf("NewListProducer: %v", err)
-			}
-			envs, err := p.Cycle(context.Background())
-			if err != nil {
-				t.Fatalf("Cycle: %v", err)
-			}
-			if len(envs) != 1 {
-				t.Fatalf("got %d envelopes, want 1", len(envs))
-			}
-			pr := decodePR(t, envs[0].Payload)
-			if pr.Rollup.State != tc.wantState {
-				t.Errorf("derived Rollup.State = %q, want %q", pr.Rollup.State, tc.wantState)
-			}
-			if len(pr.Rollup.Checks) != tc.wantLen {
-				t.Errorf("Rollup.Checks len = %d, want %d", len(pr.Rollup.Checks), tc.wantLen)
-			}
+			assertGHRollupCase(t, tc.rollup, tc.wantState, tc.wantLen)
 		})
+	}
+}
+
+// assertGHRollupCase runs one default-gh-source rollup case end-to-end: it builds
+// the gh list document, cycles the producer, and asserts the derived rollup state
+// and check count. Extracted from the table loop so the assertions stay flat
+// instead of nesting inside the t.Run closure.
+func assertGHRollupCase(t *testing.T, rollup, wantState string, wantLen int) {
+	t.Helper()
+	doc := `[{"number":7,"title":"t","headRefName":"f","baseRefName":"main","state":"OPEN","mergeable":"MERGEABLE","url":"u","statusCheckRollup":` + rollup + `}]`
+	p, err := DefaultGHPRSource().NewListProducer("event.pr.ci_failed", "github", &fakeFetcher{out: []byte(doc)})
+	if err != nil {
+		t.Fatalf("NewListProducer: %v", err)
+	}
+	envs, err := p.Cycle(context.Background())
+	if err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("got %d envelopes, want 1", len(envs))
+	}
+	pr := decodePR(t, envs[0].Payload)
+	if pr.Rollup.State != wantState {
+		t.Errorf("derived Rollup.State = %q, want %q", pr.Rollup.State, wantState)
+	}
+	if len(pr.Rollup.Checks) != wantLen {
+		t.Errorf("Rollup.Checks len = %d, want %d", len(pr.Rollup.Checks), wantLen)
 	}
 }
 

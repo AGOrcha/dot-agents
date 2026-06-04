@@ -1725,21 +1725,7 @@ func TestAgentsRCPRSourceRoundtrip(t *testing.T) {
 	if _, ok := rc.ExtraFields["pr_source"]; ok {
 		t.Fatal("pr_source leaked into ExtraFields; six-place sync incomplete")
 	}
-	if rc.PRSource == nil {
-		t.Fatal("PRSource is nil after load")
-	}
-	if rc.PRSource.Producer != "gh" {
-		t.Errorf("Producer = %q, want gh", rc.PRSource.Producer)
-	}
-	if rc.PRSource.PollIntervalS != 270 {
-		t.Errorf("PollIntervalS = %d, want 270", rc.PRSource.PollIntervalS)
-	}
-	if rc.PRSource.List == nil || rc.PRSource.List.Map["number"] != ".number" {
-		t.Errorf("List.Map[number] mismatch: %+v", rc.PRSource.List)
-	}
-	if rc.PRSource.Comments == nil || rc.PRSource.Comments.Each != ".comments" {
-		t.Errorf("Comments.Each mismatch: %+v", rc.PRSource.Comments)
-	}
+	assertRoundtripPRSource(t, "load", rc.PRSource)
 
 	// Round-trip: save and reload preserves the typed field.
 	if err := rc.Save(tmp); err != nil {
@@ -1749,11 +1735,54 @@ func TestAgentsRCPRSourceRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAgentsRC after save: %v", err)
 	}
-	if rc2.PRSource == nil || rc2.PRSource.Producer != "gh" {
-		t.Fatalf("PRSource not preserved across save: %+v", rc2.PRSource)
+	assertRoundtripPRSource(t, "reload", rc2.PRSource)
+}
+
+// assertRoundtripPRSource verifies the typed pr_source parsed from the roundtrip
+// fixture. It is shared by the initial load and the post-save reload so the
+// per-field assertion chains live in one flat helper (well under the cognitive
+// complexity gate) instead of being duplicated in the test body. phase names the
+// call site for clearer failure messages.
+func assertRoundtripPRSource(t *testing.T, phase string, src *AgentsRCPRSource) {
+	t.Helper()
+	if src == nil {
+		t.Fatalf("%s: PRSource is nil", phase)
+		return
 	}
-	if rc2.PRSource.List == nil || rc2.PRSource.List.Argv[0] != "gh" {
-		t.Errorf("List.Argv not preserved: %+v", rc2.PRSource.List)
+	if src.Producer != "gh" {
+		t.Errorf("%s: Producer = %q, want gh", phase, src.Producer)
+	}
+	if src.PollIntervalS != 270 {
+		t.Errorf("%s: PollIntervalS = %d, want 270", phase, src.PollIntervalS)
+	}
+	assertRoundtripList(t, phase, src.List)
+	assertRoundtripComments(t, phase, src.Comments)
+}
+
+// assertRoundtripList pins the List fetch block fields the fixture preserves.
+func assertRoundtripList(t *testing.T, phase string, list *AgentsRCPRFetch) {
+	t.Helper()
+	if list == nil {
+		t.Errorf("%s: List fetch block is nil", phase)
+		return
+	}
+	if list.Map["number"] != ".number" {
+		t.Errorf("%s: List.Map[number] mismatch: %+v", phase, list)
+	}
+	if len(list.Argv) == 0 || list.Argv[0] != "gh" {
+		t.Errorf("%s: List.Argv not preserved: %+v", phase, list)
+	}
+}
+
+// assertRoundtripComments pins the Comments fetch block field the fixture preserves.
+func assertRoundtripComments(t *testing.T, phase string, comments *AgentsRCPRFetch) {
+	t.Helper()
+	if comments == nil {
+		t.Errorf("%s: Comments fetch block is nil", phase)
+		return
+	}
+	if comments.Each != ".comments" {
+		t.Errorf("%s: Comments.Each mismatch: %+v", phase, comments)
 	}
 }
 
