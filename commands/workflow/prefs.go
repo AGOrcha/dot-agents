@@ -77,8 +77,14 @@ const (
 	preferenceKeyExecutionMaxParallelWorkers                = "execution.max_parallel_workers"
 	preferenceKeyCommitDisable                              = "commit.disable"
 
-	errExecutionMaxParallelWorkersRange = "execution.max_parallel_workers must be an integer between 1 and 8"
+	errExecutionMaxParallelWorkersRange = "execution.max_parallel_workers must be an integer between 1 and 32"
 )
+
+// maxConfigurableParallelTasks is the upper bound for an explicit
+// execution.max_parallel_workers override. It is a typo guard set well above the
+// auto-derived ceiling (maxMaxParallelTasks) so power users on large machines can
+// opt into more parallelism than the capacity-aware default chooses.
+const maxConfigurableParallelTasks = 32
 
 func defaultWorkflowPreferences() WorkflowPreferences {
 	trueVal := true
@@ -88,7 +94,7 @@ func defaultWorkflowPreferences() WorkflowPreferences {
 	reviewOrder := "findings-first"
 	pkgMgr := "go"
 	formatter := "gofmt"
-	maxParallelWorkers := 1
+	maxParallelWorkers := defaultMaxParallelTasks()
 	return WorkflowPreferences{
 		Verification: WorkflowVerificationPrefs{
 			TestCommand:                    &testCmd,
@@ -298,7 +304,7 @@ func applyBoolPref(get func(p *WorkflowPreferences) **bool) preferenceApplier {
 
 func applyMaxParallelWorkers(p *WorkflowPreferences, value string) error {
 	n, err := strconv.Atoi(value)
-	if err != nil || n < 1 || n > 8 {
+	if err != nil || n < 1 || n > maxConfigurableParallelTasks {
 		return fmt.Errorf(errExecutionMaxParallelWorkersRange)
 	}
 	p.Execution.MaxParallelWorkers = &n

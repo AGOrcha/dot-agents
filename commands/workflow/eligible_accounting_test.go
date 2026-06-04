@@ -167,14 +167,36 @@ func TestComputeSlotLedger_AvailableFloor(t *testing.T) {
 }
 
 // TestResolveMaxParallelTasks covers both the configured-preference path and
-// the §2.9 default-7 fall-through.
+// the capacity-aware default fall-through (design.md §2.9).
 func TestResolveMaxParallelTasks(t *testing.T) {
 	configured := 3
 	if got := resolveMaxParallelTasks(WorkflowPreferences{Execution: WorkflowExecutionPrefs{MaxParallelWorkers: &configured}}); got != 3 {
 		t.Fatalf("configured resolveMaxParallelTasks = %d, want 3", got)
 	}
-	if got := resolveMaxParallelTasks(WorkflowPreferences{}); got != defaultMaxParallelTasks {
-		t.Fatalf("default resolveMaxParallelTasks = %d, want %d", got, defaultMaxParallelTasks)
+	if got := resolveMaxParallelTasks(WorkflowPreferences{}); got != defaultMaxParallelTasks() {
+		t.Fatalf("default resolveMaxParallelTasks = %d, want %d", got, defaultMaxParallelTasks())
+	}
+}
+
+// TestClampParallelTasks pins the capacity-derivation clamp at its boundaries so
+// the slot budget stays in [minMaxParallelTasks, maxMaxParallelTasks] regardless
+// of host core count.
+func TestClampParallelTasks(t *testing.T) {
+	cases := []struct{ in, want int }{
+		{-4, minMaxParallelTasks},
+		{0, minMaxParallelTasks},
+		{minMaxParallelTasks, minMaxParallelTasks},
+		{minMaxParallelTasks + 1, minMaxParallelTasks + 1},
+		{maxMaxParallelTasks, maxMaxParallelTasks},
+		{maxMaxParallelTasks + 5, maxMaxParallelTasks},
+	}
+	for _, c := range cases {
+		if got := clampParallelTasks(c.in); got != c.want {
+			t.Errorf("clampParallelTasks(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+	if got := defaultMaxParallelTasks(); got < minMaxParallelTasks || got > maxMaxParallelTasks {
+		t.Errorf("defaultMaxParallelTasks() = %d, want within [%d,%d]", got, minMaxParallelTasks, maxMaxParallelTasks)
 	}
 }
 

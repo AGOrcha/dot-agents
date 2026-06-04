@@ -329,7 +329,7 @@ func TestPreferences_MaxParallelWorkers_ValidAndInvalid(t *testing.T) {
 	if p.Execution.MaxParallelWorkers == nil || *p.Execution.MaxParallelWorkers != 4 {
 		t.Fatalf("max_parallel_workers = %v, want 4", p.Execution.MaxParallelWorkers)
 	}
-	for _, bad := range []string{"0", "9", "-1", "abc"} {
+	for _, bad := range []string{"0", "33", "-1", "abc"} {
 		if err := applyMaxParallelWorkers(&p, bad); err == nil {
 			t.Fatalf("expected error for value %q", bad)
 		}

@@ -222,15 +222,19 @@ and re-enters `in_progress`.
 
 ### 2.9 `max_parallel_tasks` default
 
-`max_parallel_tasks` (renamed from `max_parallel_workers`; see §5)
-defaults to **7** when unset in `.agentsrc.json`. This matches the
-existing code default and must be documented in the `.agentsrc.json`
-schema.
+`max_parallel_tasks` (renamed from `max_parallel_workers`; see §5) is
+**capacity-derived** when unset: `clamp(NumCPU - 2, 2, 16)` — reserve two
+cores for the orchestrator + OS, floor at 2 so small machines still
+parallelize, ceiling at 16 so large machines do not oversubscribe. An
+explicit preference override may exceed the auto ceiling up to **32** (a
+typo guard, not a capacity policy). This supersedes the former fixed
+default of 7.
 
-- **Rationale:** matches today's behavior to keep the migration
-  silent for existing projects.
-- **Rejected:** higher default (would unblock more parallel work but
-  risk overrunning verifier/lens dispatch budgets on small machines).
+- **Rationale:** a fixed `7` is arbitrary — it under-uses large machines
+  and can overrun small ones. Each slot may run a worker that compiles and
+  tests (CPU + IO heavy), so the budget should scale with cores.
+- **Rejected:** a fixed default (does not adapt to the host); an unbounded
+  override (a typo like `999` would thrash — hence the 32 guard).
 
 ---
 
@@ -454,7 +458,7 @@ Two top-level knobs in `.agentsrc.json`:
 
 | Field                      | Meaning                                                     | Default |
 | ---                        | ---                                                         | ---     |
-| `max_parallel_tasks`       | maximum tasks holding a slot concurrently (see §2.8)        | 7       |
+| `max_parallel_tasks`       | maximum tasks holding a slot concurrently (see §2.8)        | `clamp(NumCPU-2, 2, 16)` (§2.9) |
 | `max_parallel_within_task` | maximum stages running concurrently inside one task         | unset → derive from `evidence_policy` |
 
 When `max_parallel_within_task` is unset, the dispatcher derives it
