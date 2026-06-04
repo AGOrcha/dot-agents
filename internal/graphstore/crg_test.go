@@ -98,7 +98,13 @@ func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
 		// (otherwise it breaks the coverage gate for unrelated work — the recurring
 		// worker --no-verify trigger). A genuine build failure with the module
 		// present still fails loudly.
-		combined := err.Error() + " " + report.Summary
+		// BuildReport returns (nil, err) on the build-error path, so guard the
+		// report pointer before reading Summary (the module-not-found message is
+		// in err itself; Summary only adds detail when present).
+		combined := err.Error()
+		if report != nil {
+			combined += " " + report.Summary
+		}
 		if strings.Contains(combined, "code_review_graph") &&
 			(strings.Contains(combined, "No module named") || strings.Contains(combined, "ModuleNotFoundError")) {
 			t.Skipf("real CRG binary discovered but its Python package is not importable here: %v", err)
