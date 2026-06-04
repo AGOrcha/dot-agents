@@ -199,10 +199,44 @@ type AgentsRC struct {
 	// internal/config/execution_profile.go and the
 	// skill-relevance-filter design.
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
+	// PRSource is the config-driven pull-request event producer config
+	// (pr-event-source design D4). It configures the generic internal/events
+	// producer engine — a fetch+field-map per platform — so PR state becomes
+	// event.pr.* events with no per-platform Go. `gh` is the zero-config default;
+	// an org layer can override the default via the config-v2 scope layers.
+	PRSource *AgentsRCPRSource `json:"pr_source,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// AgentsRCPRSource is the .agentsrc.json `pr_source` block (pr-event-source D4).
+// It is intentionally producer-agnostic and mirrors the internal/events engine's
+// config shape without importing it, so config stays decoupled from the engine.
+// A platform is added by writing this block — no Go change.
+type AgentsRCPRSource struct {
+	// Producer selects the named producer: "gh" (default), "exec", "http", or a
+	// registered code producer.
+	Producer string `json:"producer,omitempty"`
+	// List fetches the open PR list and maps it onto canonical PR fields.
+	List *AgentsRCPRFetch `json:"list,omitempty"`
+	// Comments fetches one PR's comments. Optional.
+	Comments *AgentsRCPRFetch `json:"comments,omitempty"`
+	// PollIntervalS is the producer poll cadence in seconds.
+	PollIntervalS int `json:"poll_interval_s,omitempty"`
+}
+
+// AgentsRCPRFetch is one named fetch block (the "list" or "comments" block) of a
+// pr_source config: how to fetch (exec argv or http url) and how to project each
+// item onto canonical fields (each + map).
+type AgentsRCPRFetch struct {
+	Argv    []string          `json:"argv,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Method  string            `json:"method,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Each    string            `json:"each,omitempty"`
+	Map     map[string]string `json:"map,omitempty"`
 }
 
 // LayerRef is a single entry in AgentsRC.Extends. It accepts either a bare
@@ -321,6 +355,8 @@ var agentsRCKnown = map[string]bool{
 	"repo_id": true, "extends": true, "packages": true, "features": true,
 	// execution-profile layer (config relevance / skill-relevance-filter)
 	"execution_profile": true,
+	// pr_source: config-driven PR event producer (pr-event-source design)
+	"pr_source": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -346,6 +382,7 @@ type agentsRCCore struct {
 	Packages         []PackageRef      `json:"packages,omitempty"`
 	Features         map[string]string `json:"features,omitempty"`
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
+	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -370,6 +407,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Packages = core.Packages
 	a.Features = core.Features
 	a.ExecutionProfile = core.ExecutionProfile
+	a.PRSource = core.PRSource
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -405,6 +443,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Packages:         a.Packages,
 		Features:         a.Features,
 		ExecutionProfile: a.ExecutionProfile,
+		PRSource:         a.PRSource,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {

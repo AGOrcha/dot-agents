@@ -1684,3 +1684,83 @@ func TestMergeGenerateAgentsRC_V1ManifestWithoutRepoIDRoundTripsByteForByte(t *t
 		t.Errorf("marshalled output should omit repo_id when empty: %s", data)
 	}
 }
+
+func TestAgentsRCPRSourceRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+	input := `{
+  "version": 2,
+  "project": "myproject",
+  "sources": [{"type":"local"}],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "pr_source": {
+    "producer": "gh",
+    "list": {
+      "argv": ["gh","pr","list","--json","number"],
+      "each": ".",
+      "map": {"number": ".number", "branch": ".headRefName"}
+    },
+    "comments": {
+      "argv": ["gh","pr","view","{number}","--json","comments"],
+      "each": ".comments",
+      "map": {"author": ".author.login"}
+    },
+    "poll_interval_s": 270
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+
+	// pr_source is a typed field, not captured as an unknown extra field.
+	if _, ok := rc.ExtraFields["pr_source"]; ok {
+		t.Fatal("pr_source leaked into ExtraFields; six-place sync incomplete")
+	}
+	if rc.PRSource == nil {
+		t.Fatal("PRSource is nil after load")
+	}
+	if rc.PRSource.Producer != "gh" {
+		t.Errorf("Producer = %q, want gh", rc.PRSource.Producer)
+	}
+	if rc.PRSource.PollIntervalS != 270 {
+		t.Errorf("PollIntervalS = %d, want 270", rc.PRSource.PollIntervalS)
+	}
+	if rc.PRSource.List == nil || rc.PRSource.List.Map["number"] != ".number" {
+		t.Errorf("List.Map[number] mismatch: %+v", rc.PRSource.List)
+	}
+	if rc.PRSource.Comments == nil || rc.PRSource.Comments.Each != ".comments" {
+		t.Errorf("Comments.Each mismatch: %+v", rc.PRSource.Comments)
+	}
+
+	// Round-trip: save and reload preserves the typed field.
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	rc2, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC after save: %v", err)
+	}
+	if rc2.PRSource == nil || rc2.PRSource.Producer != "gh" {
+		t.Fatalf("PRSource not preserved across save: %+v", rc2.PRSource)
+	}
+	if rc2.PRSource.List == nil || rc2.PRSource.List.Argv[0] != "gh" {
+		t.Errorf("List.Argv not preserved: %+v", rc2.PRSource.List)
+	}
+}
+
+func TestAgentsRCPRSourceMarshalOmittedWhenNil(t *testing.T) {
+	rc := AgentsRC{Version: 2, Project: "p", Sources: []Source{{Type: "local"}}}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "pr_source") {
+		t.Errorf("marshalled output should omit pr_source when nil: %s", data)
+	}
+}
