@@ -17,7 +17,10 @@ import (
 //
 // The set is intentionally a subset of the full AgentsRC surface: a layer
 // contributes policy (skills, rules, agents, verifier_profiles, features, kg,
-// sources, extends, packages overrides), never a full repo manifest.
+// sources, extends, packages, execution_profile overrides), never a full repo
+// manifest. execution_profile is deliberately absent here: it is the
+// config-v2 §15 execution-profile layer (kind=layer) and MUST merge by scope
+// precedence, so it is layer-settable and never a protected identity field.
 var layerForbiddenFields = map[string]struct{}{
 	"repo_id": {},
 	"project": {},
