@@ -956,12 +956,37 @@ func checkFanoutWriteScopeConflicts(projectPath string, writeScope []string, tas
 // this helper only handles the bundle write and cleans up the contract file
 // if the bundle write fails, preserving the original all-or-nothing semantics.
 func persistFanoutBundle(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML) error {
-	if err := saveDelegationBundle(projectPath, bundle); err != nil {
+	return persistFanoutBundleWithBase(projectPath, contract, bundle, nil)
+}
+
+// persistFanoutBundleWithBase is persistFanoutBundle with the §4.2
+// base-resolution fields injected under scope. persistFanoutBundle delegates
+// here with a nil resolution to preserve the legacy default-master shape.
+func persistFanoutBundleWithBase(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML, res *baseResolution) error {
+	if err := saveDelegationBundleWithBase(projectPath, bundle, res); err != nil {
 		contractPath := filepath.Join(delegationDir(projectPath), contract.ParentTaskID+".yaml")
 		_ = os.Remove(contractPath)
 		return fmt.Errorf("save delegation bundle: %w", err)
 	}
 	return nil
+}
+
+// saveDelegationBundleWithBase writes the fanout bundle with the §4.2
+// base-resolution fields injected under scope. It mirrors saveDelegationBundle
+// but uses marshalBundleWithBase so the canonical struct stays unchanged.
+func saveDelegationBundleWithBase(projectPath string, b *delegationBundleYAML, res *baseResolution) error {
+	if strings.TrimSpace(b.DelegationID) == "" {
+		return fmt.Errorf("delegation bundle: empty delegation_id")
+	}
+	dir := delegationBundlesDir(projectPath)
+	if err := osMkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	data, err := marshalBundleWithBase(b, res)
+	if err != nil {
+		return err
+	}
+	return osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
 }
 
 type fanoutInputs struct {
@@ -1050,44 +1075,21 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	now := time.Now().UTC()
-	createdAtRFC3339 := now.Format(time.RFC3339)
-	contract, err := materializeDelegationContract(materializeContractRequest{
-		ProjectPath:     project.Path,
-		Mode:            DelegationContractModeDelegated,
-		PlanID:          in.planID,
-		TaskID:          taskID,
-		Title:           targetTask.Title,
-		Summary:         fmt.Sprintf("Delegated from plan %s", plan.Title),
-		WriteScope:      writeScope,
-		SuccessCriteria: targetTask.Notes,
-		Owner:           in.owner,
-		Now:             now,
-	})
+	baseRes, err := fanoutResolveBase(cmd, project.Path, in.planID, taskID, targetTask.DependsOn)
 	if err != nil {
 		return err
 	}
-	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
-		ProjectPath:      project.Path,
-		Cmd:              cmd,
-		PlanID:           in.planID,
-		TaskID:           taskID,
-		SliceID:          in.sliceID,
-		Plan:             plan,
-		TargetTask:       targetTask,
-		Contract:         contract,
-		WriteScope:       writeScope,
-		CreatedAtRFC3339: createdAtRFC3339,
+
+	contract, err := materializeFanoutContractAndBundle(cmd, fanoutMaterializeRequest{
+		Project:    project,
+		In:         in,
+		Plan:       plan,
+		TargetTask: targetTask,
+		TaskID:     taskID,
+		WriteScope: writeScope,
+		BaseRes:    &baseRes,
 	})
 	if err != nil {
-		// Bundle build failed after contract was persisted; clean up the
-		// orphan contract so retries are not blocked by the duplicate-contract
-		// guard at the top of runWorkflowFanout.
-		contractPath := filepath.Join(delegationDir(project.Path), taskID+".yaml")
-		_ = os.Remove(contractPath)
-		return err
-	}
-	if err := persistFanoutBundle(project.Path, contract, bundle); err != nil {
 		return err
 	}
 
@@ -1103,8 +1105,17 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Contract: .agents/active/delegation/%s.yaml", taskID),
 		fmt.Sprintf("Bundle: .agents/active/delegation-bundles/%s.yaml", contract.ID),
 		fmt.Sprintf("Write scope: %s", strings.Join(writeScope, ", ")),
+		fmt.Sprintf("Base branch: %s", fanoutBaseSummary(baseRes)),
 	)
 	return nil
+}
+
+// fanoutBaseSummary renders the resolved base for the fanout success box.
+func fanoutBaseSummary(res baseResolution) string {
+	if res.BaseTask != "" && res.BasePR != 0 {
+		return fmt.Sprintf("%s (PR #%d, from %s)", res.BaseBranch, res.BasePR, res.BaseTask)
+	}
+	return res.BaseBranch
 }
 
 func gitDiffChangedFiles(projectPath string) []string {
@@ -1573,6 +1584,161 @@ func buildDelegationBundleForFanout(req fanoutBundleRequest) (*delegationBundleY
 	b.Closeout.ParentMust = []string{"workflow_delegation_closeout"}
 
 	return &b, nil
+}
+
+// defaultPRSourceLister is the open-PR source used by fanout base-resolution.
+// It runs the configured pr_source producer (event.pr.*); tests swap it for a
+// hermetic fake so no producer cycle, gh binary, or network is required.
+var defaultPRSourceLister prSourceLister = newProducerPRSourceLister()
+
+// depBranchForTask returns the open-PR head branch that backs a dep task, or ""
+// when no open PR matches. Matching is by branch name containing the bare task
+// id — the worktree/feature branch convention used across the workflow. This is
+// the §4.1 "resolve a dep's PR branch via task metadata (and the PR producer as
+// a seam)" step: the task status comes from TASKS.yaml; the branch+number come
+// from the producer's event.pr.* envelopes.
+func depBranchForTask(taskID string, openPRs []openPR) string {
+	for _, pr := range openPRs {
+		if pr.Branch != "" && strings.Contains(pr.Branch, taskID) {
+			return pr.Branch
+		}
+	}
+	return ""
+}
+
+// collectDepStatusAndBranch builds the per-dep status and branch maps the §4.1
+// in_flight_tasks join needs. Keys are qualified "<plan>/<task>" ids. Deps that
+// cannot be resolved (missing plan/task) are recorded with an empty status so
+// the algorithm treats them as not-in-flight (base off master).
+func collectDepStatusAndBranch(projectPath, planID string, deps []string, openPRs []openPR) (status, branch map[string]string) {
+	status = make(map[string]string, len(deps))
+	branch = make(map[string]string, len(deps))
+	cache := make(map[string]*CanonicalTaskFile)
+	for _, dep := range deps {
+		qid := qualifyDepID(dep, planID)
+		refPlanID, refTaskID := splitQualifiedDep(qid)
+		tf, err := loadCrossPlanTasksCached(projectPath, refPlanID, cache)
+		if err != nil || tf == nil {
+			continue
+		}
+		for _, t := range tf.Tasks {
+			if t.ID == refTaskID {
+				status[qid] = t.Status
+				branch[qid] = depBranchForTask(refTaskID, openPRs)
+				break
+			}
+		}
+	}
+	return status, branch
+}
+
+// splitQualifiedDep splits a "<plan>/<task>" id into its parts.
+func splitQualifiedDep(qid string) (planID, taskID string) {
+	idx := strings.Index(qid, "/")
+	if idx < 0 {
+		return "", qid
+	}
+	return qid[:idx], qid[idx+1:]
+}
+
+// fanoutMaterializeRequest carries the inputs to materializeFanoutContractAndBundle.
+type fanoutMaterializeRequest struct {
+	Project    workflowProjectRef
+	In         fanoutInputs
+	Plan       *CanonicalPlan
+	TargetTask *CanonicalTask
+	TaskID     string
+	WriteScope []string
+	BaseRes    *baseResolution
+}
+
+// materializeFanoutContractAndBundle creates the delegation contract, builds the
+// bundle, and persists the bundle with the §4.2 base-resolution fields. On
+// bundle-build failure it removes the orphan contract so retries are not blocked
+// by the duplicate-contract guard. Extracted from runWorkflowFanout to keep that
+// function's cognitive complexity under the project ceiling.
+func materializeFanoutContractAndBundle(cmd *cobra.Command, req fanoutMaterializeRequest) (*DelegationContract, error) {
+	now := time.Now().UTC()
+	createdAtRFC3339 := now.Format(time.RFC3339)
+	contract, err := materializeDelegationContract(materializeContractRequest{
+		ProjectPath:     req.Project.Path,
+		Mode:            DelegationContractModeDelegated,
+		PlanID:          req.In.planID,
+		TaskID:          req.TaskID,
+		Title:           req.TargetTask.Title,
+		Summary:         fmt.Sprintf("Delegated from plan %s", req.Plan.Title),
+		WriteScope:      req.WriteScope,
+		SuccessCriteria: req.TargetTask.Notes,
+		Owner:           req.In.owner,
+		Now:             now,
+	})
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := buildDelegationBundleForFanout(fanoutBundleRequest{
+		ProjectPath:      req.Project.Path,
+		Cmd:              cmd,
+		PlanID:           req.In.planID,
+		TaskID:           req.TaskID,
+		SliceID:          req.In.sliceID,
+		Plan:             req.Plan,
+		TargetTask:       req.TargetTask,
+		Contract:         contract,
+		WriteScope:       req.WriteScope,
+		CreatedAtRFC3339: createdAtRFC3339,
+	})
+	if err != nil {
+		contractPath := filepath.Join(delegationDir(req.Project.Path), req.TaskID+".yaml")
+		_ = os.Remove(contractPath)
+		return nil, err
+	}
+	if err := persistFanoutBundleWithBase(req.Project.Path, contract, bundle, req.BaseRes); err != nil {
+		return nil, err
+	}
+	return contract, nil
+}
+
+// fanoutResolveBase reads the optional --base-branch flag and computes the §4.1
+// base recommendation, translating a multi-dep conflict into a refusal error
+// with a non-zero exit (done-criterion 4). It keeps the conflict-handling
+// branches out of runWorkflowFanout to bound that function's complexity.
+func fanoutResolveBase(cmd *cobra.Command, projectPath, planID, taskID string, deps []string) (baseResolution, error) {
+	explicitBase, _ := cmd.Flags().GetString("base-branch")
+	baseRes, err := resolveFanoutBase(projectPath, planID, taskID, deps, explicitBase, defaultPRSourceLister)
+	if err != nil {
+		var conflict *multiDepConflict
+		if errors.As(err, &conflict) {
+			return baseResolution{}, fmt.Errorf("base-branch resolution refused: %w", err)
+		}
+		return baseResolution{}, err
+	}
+	return baseRes, nil
+}
+
+// resolveFanoutBase computes the §4.1 base recommendation for the target task.
+// It queries the PR producer once for open PRs, joins them with canonical dep
+// statuses, and runs resolveBase. A *multiDepConflict surfaces as a non-zero
+// exit at the call site (§4.1 step 4b / done-criterion 4).
+func resolveFanoutBase(projectPath, planID, taskID string, deps []string, explicitBase string, lister prSourceLister) (baseResolution, error) {
+	openPRs, err := lister.ListOpenPRs(projectPath)
+	if err != nil {
+		// PR source unavailable is non-fatal for the default-master path: if an
+		// explicit base was given, honor it; otherwise fall back to master.
+		if strings.TrimSpace(explicitBase) != "" {
+			return resolveBase(baseResolutionInput{
+				TaskID: taskID, PlanID: planID, DependsOn: deps, ExplicitBase: explicitBase,
+			})
+		}
+		return masterResolution(), nil
+	}
+	status, branch := collectDepStatusAndBranch(projectPath, planID, deps, openPRs)
+	return resolveBase(baseResolutionInput{
+		TaskID:       taskID,
+		PlanID:       planID,
+		DependsOn:    deps,
+		InFlight:     buildInFlightMap(status, branch, openPRs),
+		ExplicitBase: explicitBase,
+	})
 }
 
 func mustGetStringSlice(cmd *cobra.Command, name string) []string {
