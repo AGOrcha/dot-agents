@@ -14,7 +14,8 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-: "${RESOURCE_GROUP:?set RESOURCE_GROUP to the resource group holding the signing account}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-AGOrcha}"        # account lives in the AGOrcha RG (eastus)
+SUBSCRIPTION="${SUBSCRIPTION:-32ca3366-7dd6-4f19-aff9-fc43d2e017fd}"
 
 if ! command -v az >/dev/null 2>&1; then
   echo "error: azure cli (az) not found — https://learn.microsoft.com/cli/azure/install-azure-cli" >&2

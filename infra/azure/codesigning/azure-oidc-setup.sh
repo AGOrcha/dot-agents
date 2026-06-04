@@ -12,8 +12,8 @@
 #   SUBSCRIPTION=<sub-id> RESOURCE_GROUP=<rg> ./azure-oidc-setup.sh
 set -euo pipefail
 
-: "${SUBSCRIPTION:?set SUBSCRIPTION to the subscription id}"
-: "${RESOURCE_GROUP:?set RESOURCE_GROUP to the signing account resource group}"
+SUBSCRIPTION="${SUBSCRIPTION:-32ca3366-7dd6-4f19-aff9-fc43d2e017fd}"
+RESOURCE_GROUP="${RESOURCE_GROUP:-AGOrcha}"
 ACCOUNT="${ACCOUNT:-AGOrcha}"
 APP_NAME="${APP_NAME:-da-trusted-signing-ci}"
 GH_REPO="${GH_REPO:-AGOrcha/dot-agents}"
