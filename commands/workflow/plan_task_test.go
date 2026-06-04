@@ -916,7 +916,8 @@ func TestEligibleOutput_HasMaxBatchField(t *testing.T) {
 }
 
 // TestResolvePreferences_MaxParallelWorkersDefault verifies that the default
-// value for max_parallel_workers is 1 (safe/serialized).
+// value for max_parallel_workers is the capacity-aware computed budget (no
+// longer a fixed constant).
 func TestResolvePreferences_MaxParallelWorkersDefault(t *testing.T) {
 	proj := t.TempDir()
 	prefs, err := resolvePreferences(proj, "test-project")
@@ -926,15 +927,15 @@ func TestResolvePreferences_MaxParallelWorkersDefault(t *testing.T) {
 	if prefs.Execution.MaxParallelWorkers == nil {
 		t.Fatal("MaxParallelWorkers should not be nil (has a default)")
 	}
-	if *prefs.Execution.MaxParallelWorkers != 1 {
-		t.Errorf("default MaxParallelWorkers should be 1; got %d", *prefs.Execution.MaxParallelWorkers)
+	if got, want := *prefs.Execution.MaxParallelWorkers, defaultMaxParallelTasks(); got != want {
+		t.Errorf("default MaxParallelWorkers should be the computed budget %d; got %d", want, got)
 	}
 }
 
 // TestApplyPreferenceKey_MaxParallelWorkersValidation verifies that
-// max_parallel_workers rejects values outside 1-8.
+// max_parallel_workers rejects values outside 1..maxConfigurableParallelTasks.
 func TestApplyPreferenceKey_MaxParallelWorkersValidation(t *testing.T) {
-	invalid := []string{"0", "9", "-1", "abc", "100"}
+	invalid := []string{"0", "-1", "abc", "33", "100"}
 	for _, v := range invalid {
 		t.Run(v, func(t *testing.T) {
 			var p WorkflowPreferences
@@ -943,7 +944,7 @@ func TestApplyPreferenceKey_MaxParallelWorkersValidation(t *testing.T) {
 			}
 		})
 	}
-	valid := []string{"1", "4", "8"}
+	valid := []string{"1", "8", "16", "32"}
 	for _, v := range valid {
 		t.Run(v, func(t *testing.T) {
 			var p WorkflowPreferences

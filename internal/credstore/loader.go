@@ -104,13 +104,17 @@ func withSys(sys sysShim) LoaderOption {
 }
 
 // NewLoader builds a Loader with the production collaborators (real env and
-// filesystem) and the stub OIDC resolver, then applies opts. When no store path
-// is supplied the encrypted-store step resolves DefaultPath(); CI callers
-// typically rely on the env steps alone.
+// filesystem) and the stub OIDC resolver, then applies opts. On platforms with
+// a supported OS keyring (currently macOS), the encrypted-store step is enabled
+// by default via NewOSKeyring(). CI callers typically rely on the env steps
+// alone and are unaffected because NewOSKeyring() returns nil on non-Darwin.
 func NewLoader(opts ...LoaderOption) *Loader {
 	l := &Loader{
 		resolver: StubOIDCResolver(),
 		sys:      stdSys{},
+	}
+	if ring := NewOSKeyring(); ring != nil {
+		l.keyring = ring
 	}
 	for _, opt := range opts {
 		opt(l)

@@ -306,6 +306,12 @@ to normalize hand-edited config back into the managed store.`,
 	return cmd
 }
 
+// runImportFromRefresh runs the import pipeline as part of da refresh.
+// Policy: sources are the authoritative truth (uv-style auto-sync). Non-hook
+// managed files are auto-replaced when the source has newer content; the
+// idempotency fix (ii-import-idempotent) ensures unchanged sources are no-ops
+// so only genuine updates reach this path. Backup sidecars are written before
+// any replacement. This policy is locked by TestRunImportFromRefresh_Policy.
 func runImportFromRefresh(projectFilter, scope string, deps importDeps) error {
 	oldYes := Flags.Yes
 	Flags.Yes = true

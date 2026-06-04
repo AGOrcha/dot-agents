@@ -1240,6 +1240,43 @@ func TestRunImport_ProjectScopeNoCandidates(t *testing.T) {
 	}
 }
 
+// TestRunImportFromRefresh_Policy locks the auto-replace policy for the refresh
+// path. da refresh treats sources as truth and must replace non-hook managed
+// files when source content has changed, without prompting. The interactive
+// (da import) path must preserve existing files when not running under --yes.
+// If either behavior regresses this test fails.
+func TestRunImportFromRefresh_Policy(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, "rules", "my-rule.md")
+	writeFile(t, src, []byte("updated-source"))
+	srcInfo, _ := os.Stat(src)
+
+	dest := filepath.Join(agentsHome, "rules", "p", "my-rule.md")
+	writeFile(t, dest, []byte("old-managed"))
+	destInfo, _ := os.Stat(dest)
+
+	saved := Flags
+	defer func() { Flags = saved }()
+
+	// Without Yes: confirmImportReplace must preserve the existing file.
+	Flags = GlobalFlags{Yes: false}
+	if confirmImportReplace("replace?") {
+		t.Fatal("non-interactive path must default to preserve (not replace)")
+	}
+
+	// With Yes (what runImportFromRefresh enforces): must auto-replace.
+	Flags = GlobalFlags{Yes: true}
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src}
+	res := replaceImportCandidate(c, agentsHome, dest, "ts1", srcInfo, destInfo)
+	if res.imported != 1 {
+		t.Fatalf("refresh auto-replace policy: expected imported=1, got %+v", res)
+	}
+	got, _ := os.ReadFile(dest)
+	if string(got) != "updated-source" {
+		t.Fatalf("refresh must replace dest with source content; got %q", got)
+	}
+}
+
 // runImportFromRefresh forces Yes=true; verify no error on empty config.
 func TestRunImportFromRefresh_EmptyConfig(t *testing.T) {
 	tmp := t.TempDir()

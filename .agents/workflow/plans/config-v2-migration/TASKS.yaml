@@ -552,5 +552,25 @@ tasks:
         - commands/config/verify.go
         - commands/config/explain.go
       verification_required: true
-      notes: Wire the dormant §7A seam (EnsureResolved/ComputeInputsDigest/WriteUnitsLock) into da config sync and da install so every resolved project — including flat/local-only — gets a lockfile carrying inputs_digest plus the units section. Migrate verify/explain/doctor to read units and compare ComputeInputsDigest against the lock to report local-scope drift; deprecate the §7 config section. Makes local sources first-class (managed, often git-backed). Full design in .agents/proposals/section-7a-units-lock-wiring.md. Supersedes the §7 extends-only locked-layers check shipped in p4c verify.
+      notes: |-
+        Wire the dormant §7A seam (EnsureResolved/ComputeInputsDigest/WriteUnitsLock) into da config
+        sync and da install so every resolved project — including flat/local-only — gets a lockfile
+        carrying inputs_digest plus the units section. Migrate verify/explain/doctor to read units and
+        compare ComputeInputsDigest against the lock to report local-scope drift; deprecate the §7
+        config section. Makes local sources first-class (managed, often git-backed). Full design in
+        .agents/proposals/section-7a-units-lock-wiring.md.
+
+        Adversarial review (2026-06-03) surfaced three concrete split-brain failures that MUST be
+        resolved before wiring any production caller to EnsureResolved:
+        (1) Stale-repair split-brain: EnsureResolved detects staleness via Staleness()/ReadUnits but
+            the stale path dispatches into LayeredResolver.Resolve which only calls WriteConfigLock
+            (legacy config section) and never WriteUnitsLock or refreshes inputs_digest. Fix: make
+            the stale path write the 7A lock model or dual-write from one authoritative code path.
+        (2) Offline reader breakage: ResolveLocked and VerifyLayerLocks still unmarshal only
+            LockSectionConfig; a units-only lockfile will appear empty, causing offline resolution to
+            fail with 'no resolved SHA' and da config verify to report unpinned layers. Fix: dual-read
+            both legacy config section and 7A units during migration, then retire the legacy reader.
+        (3) verify invisibility: da config verify never calls Staleness() or compares inputs_digest,
+            so local-scope drift that 7A was designed to catch is invisible on the primary contract
+            check. Fix: add a first-class staleness check backed by Staleness()/ReadUnits to verify.
       app_type: go-cli

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/ui"
@@ -234,11 +235,42 @@ func resolveMaxParallelTasks(prefs WorkflowPreferences) int {
 	if prefs.Execution.MaxParallelWorkers != nil {
 		return *prefs.Execution.MaxParallelWorkers
 	}
-	return defaultMaxParallelTasks
+	return defaultMaxParallelTasks()
 }
 
-// defaultMaxParallelTasks is the §2.9 fallback when no preference is resolved.
-const defaultMaxParallelTasks = 7
+const (
+	// parallelTasksCoreReserve holds cores back for the orchestrator and OS so
+	// the slot budget never claims the whole machine.
+	parallelTasksCoreReserve = 2
+	// minMaxParallelTasks keeps even small machines modestly parallel rather
+	// than serialized.
+	minMaxParallelTasks = 2
+	// maxMaxParallelTasks caps the auto-derived budget so large machines do not
+	// oversubscribe; it mirrors the agent-fanout ceiling used elsewhere. Explicit
+	// preference overrides may exceed this up to maxConfigurableParallelTasks.
+	maxMaxParallelTasks = 16
+)
+
+// defaultMaxParallelTasks derives the slot budget from machine capacity instead
+// of a fixed constant: each slot may run a worker that compiles and tests Go
+// (CPU + IO heavy), so the budget should scale with cores while reserving
+// headroom. Supersedes the former fixed default of 7 (design.md §2.9).
+func defaultMaxParallelTasks() int {
+	return clampParallelTasks(runtime.NumCPU() - parallelTasksCoreReserve)
+}
+
+// clampParallelTasks bounds a candidate slot budget to [minMaxParallelTasks,
+// maxMaxParallelTasks]. Split out from defaultMaxParallelTasks so the clamp is
+// unit-testable without depending on the host core count.
+func clampParallelTasks(n int) int {
+	if n < minMaxParallelTasks {
+		return minMaxParallelTasks
+	}
+	if n > maxMaxParallelTasks {
+		return maxMaxParallelTasks
+	}
+	return n
+}
 
 // runWorkflowSlots implements `da workflow slots`: renders the §2.8 / §3.4.3
 // slot ledger across active plans so the orchestrator can see live occupancy,
