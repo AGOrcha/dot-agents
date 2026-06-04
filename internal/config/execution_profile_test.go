@@ -146,6 +146,282 @@ func TestContains(t *testing.T) {
 	}
 }
 
+// suppressCase is one table row for the noise-suppression view: an app_type ×
+// stage and candidate set, paired with the kept/suppressed projections and the
+// per-unit classes the resolved view must carry. It is asserted by the small
+// sub-helpers below so the table test body stays flat (cognitive complexity well
+// under the gate) — each helper checks one invariant of the reversible view.
+type suppressCase struct {
+	name           string
+	appType, stage string
+	candidates     []string
+	wantKept       []string
+	wantSuppressed []string
+	// wantClasses asserts the per-unit class carried on the view, in input
+	// order — the classification the t2 resolver and wave engine consume.
+	wantClasses []ClassifiedUnit
+}
+
+// assertSuppressProjections checks the three primary projections of the view:
+// the kept working set, the suppressed (noise) set, and the per-unit classes.
+func assertSuppressProjections(t *testing.T, got WorkingSet, tc suppressCase) {
+	t.Helper()
+	if !equalStrings(got.Kept(), tc.wantKept) {
+		t.Errorf("Kept()=%v, want %v", got.Kept(), tc.wantKept)
+	}
+	if !equalStrings(got.Suppressed(), tc.wantSuppressed) {
+		t.Errorf("Suppressed()=%v, want %v", got.Suppressed(), tc.wantSuppressed)
+	}
+	if !equalClassified(got.Units, tc.wantClasses) {
+		t.Errorf("Units=%v, want %v", got.Units, tc.wantClasses)
+	}
+}
+
+// assertSuppressReversible checks the view is non-destructive: Candidates()
+// reconstructs the full ordered input, and kept ∪ suppressed accounts for every
+// candidate.
+func assertSuppressReversible(t *testing.T, got WorkingSet, tc suppressCase) {
+	t.Helper()
+	if !equalStrings(got.Candidates(), tc.candidates) {
+		t.Errorf("Candidates()=%v, want original %v (view must be reversible)", got.Candidates(), tc.candidates)
+	}
+	if total := len(got.Kept()) + len(got.Suppressed()); total != len(tc.candidates) {
+		t.Errorf("kept+suppressed=%d, want full candidate count %d", total, len(tc.candidates))
+	}
+}
+
+// assertInputUnmutated proves SuppressNoise treated the caller's slice as
+// read-only — purity is part of the "reversible view, not a delete" contract.
+func assertInputUnmutated(t *testing.T, original, candidates []string) {
+	t.Helper()
+	if !equalStrings(original, candidates) {
+		t.Errorf("SuppressNoise mutated the input slice: %v != %v", candidates, original)
+	}
+}
+
+// runSuppressCase exercises one table row end to end: it snapshots the input,
+// runs SuppressNoise, and delegates every invariant to a focused sub-helper.
+func runSuppressCase(t *testing.T, p *ExecutionProfile, tc suppressCase) {
+	t.Helper()
+	original := append([]string(nil), tc.candidates...)
+	got := p.SuppressNoise(tc.appType, tc.stage, tc.candidates)
+	assertSuppressProjections(t, got, tc)
+	assertSuppressReversible(t, got, tc)
+	assertInputUnmutated(t, original, tc.candidates)
+}
+
+// TestExecutionProfile_SuppressNoise is the table-driven positive + negative
+// coverage for the noise-suppression view: noise-classed candidates are dropped
+// from the working set, core + situational stay kept, and an unlisted candidate is
+// kept (default situational) so nothing is silently dropped. Order is preserved,
+// each unit retains its resolved class, and the input slice is never mutated
+// (reversible view, not a delete). Each row's invariants are asserted by the
+// focused sub-helpers above so this body stays flat.
+func TestExecutionProfile_SuppressNoise(t *testing.T) {
+	p := sampleProfile()
+	tests := []suppressCase{
+		{
+			name:           "noise split from core",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     []string{"loop-worker", "article-extract", "orchestrator-session-start", "playwright"},
+			wantKept:       []string{"loop-worker", "orchestrator-session-start"},
+			wantSuppressed: []string{"article-extract", "playwright"},
+			wantClasses: []ClassifiedUnit{
+				{"loop-worker", "core"},
+				{"article-extract", "noise"},
+				{"orchestrator-session-start", "core"},
+				{"playwright", "noise"},
+			},
+		},
+		{
+			name:           "situational and core both kept and distinguishable",
+			appType:        "go-cli",
+			stage:          "review",
+			candidates:     []string{"review-pr", "self-review"},
+			wantKept:       []string{"review-pr", "self-review"},
+			wantSuppressed: nil,
+			wantClasses: []ClassifiedUnit{
+				{"review-pr", "core"},
+				{"self-review", "situational"},
+			},
+		},
+		{
+			name:           "unlisted candidate kept (default situational)",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     []string{"never-heard-of-it", "playwright"},
+			wantKept:       []string{"never-heard-of-it"},
+			wantSuppressed: []string{"playwright"},
+			wantClasses: []ClassifiedUnit{
+				{"never-heard-of-it", "situational"},
+				{"playwright", "noise"},
+			},
+		},
+		{
+			name:           "unknown app_type keeps everything",
+			appType:        "rust-svc",
+			stage:          "orchestrate",
+			candidates:     []string{"playwright", "loop-worker"},
+			wantKept:       []string{"playwright", "loop-worker"},
+			wantSuppressed: nil,
+			wantClasses: []ClassifiedUnit{
+				{"playwright", "situational"},
+				{"loop-worker", "situational"},
+			},
+		},
+		{
+			name:           "unknown stage keeps everything",
+			appType:        "go-cli",
+			stage:          "deploy",
+			candidates:     []string{"playwright", "loop-worker"},
+			wantKept:       []string{"playwright", "loop-worker"},
+			wantSuppressed: nil,
+			wantClasses: []ClassifiedUnit{
+				{"playwright", "situational"},
+				{"loop-worker", "situational"},
+			},
+		},
+		{
+			name:           "empty candidate set yields empty view",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     nil,
+			wantKept:       nil,
+			wantSuppressed: nil,
+			wantClasses:    nil,
+		},
+		{
+			name:           "order preserved and duplicates classified independently",
+			appType:        "go-cli",
+			stage:          "orchestrate",
+			candidates:     []string{"playwright", "loop-worker", "playwright"},
+			wantKept:       []string{"loop-worker"},
+			wantSuppressed: []string{"playwright", "playwright"},
+			wantClasses: []ClassifiedUnit{
+				{"playwright", "noise"},
+				{"loop-worker", "core"},
+				{"playwright", "noise"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			runSuppressCase(t, p, tc)
+		})
+	}
+}
+
+// TestExecutionProfile_SuppressNoise_NilReceiver proves a nil profile keeps every
+// candidate (classifies as the safe default) rather than panicking.
+func TestExecutionProfile_SuppressNoise_NilReceiver(t *testing.T) {
+	var p *ExecutionProfile
+	got := p.SuppressNoise("go-cli", "orchestrate", []string{"a", "b"})
+	if !equalStrings(got.Kept(), []string{"a", "b"}) {
+		t.Errorf("nil profile must keep all candidates, got Kept=%v", got.Kept())
+	}
+	if len(got.Suppressed()) != 0 {
+		t.Errorf("nil profile must suppress nothing, got Suppressed=%v", got.Suppressed())
+	}
+}
+
+// TestExecutionProfile_SuppressNoise_DefaultClassNoise proves the suppression view
+// honors a profile whose default_class is "noise": an unlisted candidate is then
+// suppressed, while explicit core/situational listings still survive.
+func TestExecutionProfile_SuppressNoise_DefaultClassNoise(t *testing.T) {
+	p := &ExecutionProfile{
+		DefaultClass: "noise",
+		ByAppType: map[string]AppTypeProfile{
+			"go-cli": {Relevance: map[string]RelevanceClasses{
+				"review": {Core: []string{"keep-me"}},
+			}},
+		},
+	}
+	got := p.SuppressNoise("go-cli", "review", []string{"keep-me", "drop-me"})
+	if !equalStrings(got.Kept(), []string{"keep-me"}) {
+		t.Errorf("default_class=noise must keep explicit core only, got Kept=%v", got.Kept())
+	}
+	if !equalStrings(got.Suppressed(), []string{"drop-me"}) {
+		t.Errorf("default_class=noise must suppress unlisted, got Suppressed=%v", got.Suppressed())
+	}
+}
+
+// TestWorkingSet_Reversible proves the suppression view is a non-destructive,
+// JSON-survivable view: Candidates() reconstructs the original ordered input, and
+// the reconstruction holds across a marshal/unmarshal round-trip (the t2/t4
+// resolvers render the view as --json). This is the defect the prior design
+// regressed — an unexported ordering channel that was lost on serialization.
+func TestWorkingSet_Reversible(t *testing.T) {
+	p := sampleProfile()
+	candidates := []string{"loop-worker", "article-extract", "orchestrator-session-start", "playwright"}
+	view := p.SuppressNoise("go-cli", "orchestrate", candidates)
+
+	if !equalStrings(view.Candidates(), candidates) {
+		t.Errorf("Candidates()=%v, want original %v (view must be reversible)", view.Candidates(), candidates)
+	}
+
+	// The view must survive a JSON round-trip with both ordering and per-unit
+	// class intact — the resolver serializes it.
+	data, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("marshal view: %v", err)
+	}
+	var rt WorkingSet
+	if err := json.Unmarshal(data, &rt); err != nil {
+		t.Fatalf("unmarshal view: %v", err)
+	}
+	if !equalStrings(rt.Candidates(), candidates) {
+		t.Errorf("post-JSON Candidates()=%v, want %v (ordering lost on serialization)", rt.Candidates(), candidates)
+	}
+	if !equalStrings(rt.Kept(), view.Kept()) {
+		t.Errorf("post-JSON Kept()=%v, want %v", rt.Kept(), view.Kept())
+	}
+	if !equalStrings(rt.Suppressed(), view.Suppressed()) {
+		t.Errorf("post-JSON Suppressed()=%v, want %v", rt.Suppressed(), view.Suppressed())
+	}
+
+	// Snake-case wire keys for the t2/t4 --json render.
+	for _, key := range []string{"units", "unit", "class"} {
+		if !contains(jsonKeys(t, data), key) {
+			t.Errorf("expected key %q in marshaled view: %s", key, data)
+		}
+	}
+
+	// An empty view yields empty projections without panicking.
+	var empty WorkingSet
+	if len(empty.Candidates()) != 0 || len(empty.Kept()) != 0 || len(empty.Suppressed()) != 0 {
+		t.Errorf("empty WorkingSet must yield empty projections, got %+v", empty)
+	}
+}
+
+// equalStrings compares two string slices for element-wise equality, treating a
+// nil slice and an empty slice as equal so table cases can use nil for "empty".
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// equalClassified compares two classified-unit slices element-wise (unit + class),
+// treating nil and empty as equal so table cases can use nil for "empty".
+func equalClassified(a, b []ClassifiedUnit) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestExecutionProfile_JSONRoundTrip proves marshal/unmarshal preserves every
 // facet of the profile — the load-bearing guarantee that nothing is dropped on
 // disk round-trip.

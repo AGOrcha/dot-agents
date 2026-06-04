@@ -134,6 +134,100 @@ func (p *ExecutionProfile) ClassOf(appType, stage, unit string) string {
 	return def
 }
 
+// ClassifiedUnit is one candidate paired with the relevance class it resolved to
+// for the active app_type × stage. It is the unit of a WorkingSet: the ordered
+// list of these entries is the single source of truth from which both the kept
+// working set and the suppressed/original candidate sets are derived, so the view
+// carries no parallel bookkeeping that could drift or be lost on serialization.
+type ClassifiedUnit struct {
+	// Unit is the candidate skill/agent/lens id.
+	Unit string `json:"unit"`
+	// Class is the resolved relevance class: "core", "situational", or "noise".
+	Class string `json:"class"`
+}
+
+// suppressed reports whether this entry was filtered out of the working set
+// (i.e. classed "noise"). It is the single predicate that defines suppression,
+// so Kept/Suppressed/Candidates all agree by construction.
+func (c ClassifiedUnit) suppressed() bool { return c.Class == "noise" }
+
+// WorkingSet is the reversible result of suppressing noise-classed units from a
+// candidate set for one app_type × stage. Units is the ordered, fully-classified
+// candidate list — the authoritative view. Because every candidate is retained
+// here with its class, suppression is a non-destructive view (never a delete):
+// Candidates losslessly reconstructs the original input, Kept yields the effective
+// working set (core + situational), and Suppressed yields the noise-classed units.
+//
+// Units carries a JSON tag and no unexported state, so the view survives a JSON
+// round-trip intact — the t2/t4 resolvers render it as --json without losing the
+// per-unit class or the ability to reverse the suppression.
+type WorkingSet struct {
+	// Units is every candidate in input order, each tagged with its resolved
+	// relevance class. This is the load-bearing field; the helper methods are
+	// pure projections of it.
+	Units []ClassifiedUnit `json:"units,omitempty"`
+}
+
+// SuppressNoise classifies candidates for the given app_type × stage and returns a
+// reversible WorkingSet: units classed "noise" are marked suppressed while
+// everything else (core, situational, and the default class for unlisted units)
+// stays in the effective working set. Input order is preserved and the candidate
+// slice is never mutated, so this is a pure function safe to call on resolved
+// working sets.
+//
+// Because classification routes through ClassOf, the default_class contract holds:
+// an unlisted unit is situational (kept) by default and is never silently dropped.
+// A profile with default_class=noise suppresses unlisted units instead — the same
+// reversible view, just a different default. A nil profile keeps every candidate.
+func (p *ExecutionProfile) SuppressNoise(appType, stage string, candidates []string) WorkingSet {
+	if len(candidates) == 0 {
+		return WorkingSet{}
+	}
+	units := make([]ClassifiedUnit, 0, len(candidates))
+	for _, unit := range candidates {
+		units = append(units, ClassifiedUnit{Unit: unit, Class: p.ClassOf(appType, stage, unit)})
+	}
+	return WorkingSet{Units: units}
+}
+
+// Kept returns the effective working set in input order: every candidate whose
+// class is not "noise" (core, situational, and the default for unlisted units).
+// Returns nil when nothing is kept so an empty view marshals cleanly.
+func (ws WorkingSet) Kept() []string {
+	var out []string
+	for _, u := range ws.Units {
+		if !u.suppressed() {
+			out = append(out, u.Unit)
+		}
+	}
+	return out
+}
+
+// Suppressed returns the noise-classed candidates removed from the working set,
+// in input order. They are retained in Units (not deleted), so the suppression is
+// a reversible view. Returns nil when nothing is suppressed.
+func (ws WorkingSet) Suppressed() []string {
+	var out []string
+	for _, u := range ws.Units {
+		if u.suppressed() {
+			out = append(out, u.Unit)
+		}
+	}
+	return out
+}
+
+// Candidates reconstructs the original candidate set in input order, undoing the
+// suppression view losslessly. Because Units retains every candidate with its
+// class, this round-trips the input regardless of how units interleave and
+// survives JSON serialization — the real "reversible view, no delete" guarantee.
+func (ws WorkingSet) Candidates() []string {
+	var out []string
+	for _, u := range ws.Units {
+		out = append(out, u.Unit)
+	}
+	return out
+}
+
 // contains reports whether s is present in list.
 func contains(list []string, s string) bool {
 	for _, v := range list {
