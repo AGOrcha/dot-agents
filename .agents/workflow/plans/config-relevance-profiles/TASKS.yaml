@@ -1,0 +1,82 @@
+schema_version: 1
+plan_id: config-relevance-profiles
+tasks:
+    - id: t1-profile-layer-schema
+      title: execution_profile layer schema + Go types + validation
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/execution_profile.go
+        - internal/config/execution_profile_test.go
+        - internal/config/layer_schema.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: 'Define ExecutionProfile types (additive, config-v2 §15-shaped). ByAppType map[string]AppTypeProfile; AppTypeProfile{Relevance map[stage]RelevanceClasses, Topology, Lenses}. RelevanceClasses{Core,Situational,Noise []string}; Topology{Executors int, VerifiersPerExecutor int, Reviewers string, VerifierSequence []string}; Lenses{LensSet []string, LensConcurrency string}. default_class=situational (unlisted never silently dropped). Add as a typed AgentsRC field per schema-usage 4-place rule (struct + core mirror + Unmarshal + Marshal + agentsRCKnown + schema). Validate as a kind=layer config layer. No CLI yet. Table-driven tests, per-file 95% coverage. STEALTH: no AI attribution.'
+      app_type: go-cli
+    - id: t2-config-relevance-resolver
+      title: da config relevance resolver + --filter inspector
+      status: pending
+      depends_on:
+        - t1-profile-layer-schema
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/relevance.go
+        - commands/config/relevance_test.go
+        - commands/config/cmd.go
+      verification_required: true
+      notes: 'Add ''da config relevance [--filter units|topology|lenses|all] [--app-type] [--stage] [--task]''. Resolve merged execution_profile; select by app_type (task app_type override -> PLAN default_app_type -> --app-type flag); render the requested facet; --json support. Reuse the config snapshot/resolver. Per-file 95% coverage. STEALTH: no AI attribution.'
+      app_type: go-cli
+    - id: t3-noise-suppression
+      title: suppress noise-classed units from the resolved working set
+      status: pending
+      depends_on:
+        - t2-config-relevance-resolver
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/execution_profile.go
+        - internal/config/execution_profile_test.go
+      verification_required: true
+      notes: 'When resolving the effective skills/agents for an app_type x stage, exclude units classed ''noise''; keep core+situational; default_class=situational. Reversible view (no delete). Pure function + tests. STEALTH: no AI attribution.'
+      app_type: go-cli
+    - id: t4-relevance-recompute
+      title: da config relevance --recompute from iter-log/score corpus
+      status: pending
+      depends_on:
+        - t2-config-relevance-resolver
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/relevance_recompute.go
+        - commands/config/relevance_recompute_test.go
+      verification_required: true
+      notes: '--recompute reads .agents/active/iteration-log/iter-N.yaml + iter-N.score.yaml; per-unit contribution signal (cited-in-passing vs low-scoring vs never-cited); print core/situational/noise + gaps; --write emits a PROPOSED profile-layer diff (never auto-apply); explicit-only, no clock (config-v2 D4). STEALTH: no AI attribution.'
+      app_type: go-cli
+    - id: t5-wave-engine-topology
+      title: wave engine consumes resolved topology per task
+      status: pending
+      depends_on:
+        - t2-config-relevance-resolver
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .claude/workflows/ultracode-wave-engine.mjs
+      verification_required: true
+      notes: 'Engine reads ''da config relevance --filter topology --task <t>'' for executors/verifiers/reviewers per task instead of a flat per-wave cap. Local-only script; no Go change. STEALTH: no AI attribution.'
+      app_type: go-cli
+    - id: t6-example-profiles-docs
+      title: go-cli + ideation example profiles + docs
+      status: pending
+      depends_on:
+        - t2-config-relevance-resolver
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agentsrc.json
+        - docs/CONFIG_RELEVANCE.md
+      verification_required: true
+      notes: 'Add go-cli and ideation execution_profile examples; document da config relevance + the three facets. STEALTH: no AI attribution.'
+      app_type: go-cli
