@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/credstore"
 	"github.com/AGOrcha/dot-agents/internal/events"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -303,8 +304,10 @@ func TestOpenPRsFromEnvelopesDecodeError(t *testing.T) {
 func TestProducerPRSourceListerProjectsGHShape(t *testing.T) {
 	// The default `gh` pr_source config interpreted by the generic engine: a gh
 	// `pr list --json` document maps onto canonical openPR entries with no
-	// gh-specific code in the resolver.
-	doc := `[{"number":205,"title":"t","headRefName":"feature/d1","baseRefName":"master","state":"OPEN","mergeable":"MERGEABLE","url":"https://x/205"}]`
+	// gh-specific code in the resolver. The default gh map projects
+	// statusCheckRollup (the producer's rollup derive consumes it), so the
+	// fixture carries that field exactly as real `gh pr list --json` emits it.
+	doc := `[{"number":205,"title":"t","headRefName":"feature/d1","baseRefName":"master","state":"OPEN","mergeable":"MERGEABLE","url":"https://x/205","statusCheckRollup":[]}]`
 	lister := producerPRSourceLister{
 		source:  events.DefaultGHPRSource(),
 		fetcher: fakeFetcher{out: []byte(doc)},
@@ -371,8 +374,128 @@ func TestNewProducerPRSourceListerUsesGHDefault(t *testing.T) {
 	if l.source.Producer != "gh" {
 		t.Fatalf("production lister should default to gh, got %q", l.source.Producer)
 	}
-	if l.fetcher != nil {
-		t.Fatalf("production lister fetcher should be nil (real engine I/O), got %T", l.fetcher)
+	// The fetcher must be the auth-aware DefaultFetcher (D5 seam wired into the
+	// live path), not a nil fetcher that would issue unauthenticated http
+	// requests. Exec (`gh`) fetches bypass the client; http fetches flow through
+	// the AuthRoundTripper.
+	df, ok := l.fetcher.(events.DefaultFetcher)
+	if !ok {
+		t.Fatalf("production lister fetcher should be events.DefaultFetcher, got %T", l.fetcher)
+	}
+	if df.Client == nil {
+		t.Fatal("production fetcher must carry an http.Client so the auth seam is reachable")
+	}
+	if _, ok := df.Client.Transport.(*events.AuthRoundTripper); !ok {
+		t.Fatalf("production fetcher client transport must be *events.AuthRoundTripper (D5 seam wired), got %T", df.Client.Transport)
+	}
+}
+
+// TestNewPRAuthRoundTripperWiresSeam proves the production AuthRoundTripper is
+// built from the DA_SERVICE_PROXY env (proxy path) with the direct-load fallback
+// loader attached — i.e. the seam is configured, not left empty.
+func TestNewPRAuthRoundTripperWiresSeam(t *testing.T) {
+	t.Setenv(daServiceProxyEnv, "http://localhost:8765")
+	rt := newPRAuthRoundTripper()
+	if rt.ProxyBase != "http://localhost:8765" {
+		t.Fatalf("proxy base from env = %q", rt.ProxyBase)
+	}
+	if rt.Loader == nil {
+		t.Fatal("direct-load fallback loader must be attached even on the proxy path")
+	}
+}
+
+func TestNewPRAuthRoundTripperFallsBackWhenNoProxy(t *testing.T) {
+	t.Setenv(daServiceProxyEnv, "")
+	rt := newPRAuthRoundTripper()
+	if rt.ProxyBase != "" {
+		t.Fatalf("absent proxy env must select direct-load fallback (empty ProxyBase), got %q", rt.ProxyBase)
+	}
+	if rt.Loader == nil {
+		t.Fatal("fallback path requires a credential loader")
+	}
+}
+
+// TestCredstoreHostLoaderMissIsUnauthenticated proves a not-found credential is a
+// clean miss (empty token, nil error) so the request proceeds unauthenticated
+// rather than failing the base-resolution cycle.
+func TestCredstoreHostLoaderMissIsUnauthenticated(t *testing.T) {
+	// Hermetic loader: no env credential, no plaintext file, no keyring → miss.
+	t.Setenv("DA_CREDENTIAL_EXAMPLE_COM", "")
+	loader := credstore.NewLoader(credstore.WithKeyring(nil), credstore.WithStorePath(filepath.Join(t.TempDir(), "absent.json")))
+	got := credstoreHostLoader(loader)
+	token, err := got("example.com")
+	if err != nil {
+		t.Fatalf("not-found credential must be a clean miss, got err %v", err)
+	}
+	if token != "" {
+		t.Fatalf("miss must yield empty token, got %q", token)
+	}
+	// Empty host short-circuits to no-auth.
+	if token, err := got(""); err != nil || token != "" {
+		t.Fatalf("empty host = (%q, %v)", token, err)
+	}
+}
+
+// hardErrResolver is a credstore.OIDCResolver that fails with a non-not-found
+// error, exercising the hard-error propagation path of credstoreHostLoader.
+type hardErrResolver struct{ err error }
+
+func (r hardErrResolver) Resolve(string) (string, error) { return "", r.err }
+
+// TestCredstoreHostLoaderPropagatesHardError proves a hard resolver error (not a
+// clean not-found miss) surfaces, so a real auth failure is not silently swallowed
+// into an unauthenticated request.
+func TestCredstoreHostLoaderPropagatesHardError(t *testing.T) {
+	boom := errors.New("vault unreachable")
+	loader := credstore.NewLoader(
+		credstore.WithKeyring(nil),
+		credstore.WithStorePath(filepath.Join(t.TempDir(), "absent.json")),
+		credstore.WithResolver(hardErrResolver{err: boom}),
+	)
+	got := credstoreHostLoader(loader)
+	if _, err := got("example.com"); !errors.Is(err, boom) {
+		t.Fatalf("hard resolver error must propagate, got %v", err)
+	}
+}
+
+// TestCredstoreHostLoaderResolvesToken proves the happy path: a host with a
+// configured credential yields a bearer token for the AuthRoundTripper to attach.
+func TestCredstoreHostLoaderResolvesToken(t *testing.T) {
+	t.Setenv("DA_CREDENTIAL_API_GITHUB_COM", "tok-123")
+	loader := credstore.NewLoader(credstore.WithKeyring(nil), credstore.WithStorePath(filepath.Join(t.TempDir(), "absent.json")))
+	got := credstoreHostLoader(loader)
+	token, err := got("api.github.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token != "tok-123" {
+		t.Fatalf("resolved token = %q", token)
+	}
+}
+
+// TestBranchMatchesTaskUppercaseBoundary covers an uppercase-alnum neighbour so
+// the bound rejects "T1" extended by an uppercase letter ("T1B"), and accepts it
+// when bounded — exercising the uppercase arm of isBranchWordByte.
+func TestBranchMatchesTaskUppercaseBoundary(t *testing.T) {
+	if branchMatchesTask("feature/T1B", "T1") {
+		t.Fatal("uppercase-extended token must not match")
+	}
+	if !branchMatchesTask("feature/T1", "T1") {
+		t.Fatal("uppercase id bounded at string end must match")
+	}
+}
+
+// TestAuthAwareFetcherExecBypassesTransport proves the wired seam does not break
+// the default `gh` exec path: an exec fetch returns its stdout unchanged, the
+// HTTP transport (and thus the auth seam) is never consulted.
+func TestAuthAwareFetcherExecBypassesTransport(t *testing.T) {
+	f := newAuthAwareFetcher()
+	out, err := f.Fetch(context.Background(), events.FetchSpec{Argv: []string{"printf", "[]"}})
+	if err != nil {
+		t.Fatalf("exec fetch via auth-aware fetcher: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "[]" {
+		t.Fatalf("exec fetch output = %q", out)
 	}
 }
 
@@ -558,6 +681,78 @@ func TestDepBranchForTask(t *testing.T) {
 	}
 }
 
+// TestDepBranchForTaskBoundedMatch locks in the fix for the unbounded-substring
+// hazard: a short task id must NOT resolve to a sibling's PR branch just because
+// the id appears as a substring (e.g. "t1" inside "feature/t10"). Matching is
+// bounded by token edges, so the wrong base can never be silently selected.
+func TestDepBranchForTaskBoundedMatch(t *testing.T) {
+	cases := []struct {
+		name   string
+		taskID string
+		prs    []openPR
+		want   string
+	}{
+		{
+			name:   "suffix segment matches",
+			taskID: "d1",
+			prs:    []openPR{{Number: 1, Branch: "feature/config-v2-d1"}},
+			want:   "feature/config-v2-d1",
+		},
+		{
+			name:   "exact branch equals id",
+			taskID: "feature/d1",
+			prs:    []openPR{{Number: 1, Branch: "feature/d1"}},
+			want:   "feature/d1",
+		},
+		{
+			name:   "hyphenated task id matches whole token",
+			taskID: "lpf-d-base-resolution",
+			prs:    []openPR{{Number: 1, Branch: "feature/lpf-d-base-resolution"}},
+			want:   "feature/lpf-d-base-resolution",
+		},
+		{
+			name:   "trailing digit must NOT match (t1 vs t10)",
+			taskID: "t1",
+			prs:    []openPR{{Number: 1, Branch: "feature/t10"}},
+			want:   "",
+		},
+		{
+			name:   "trailing alpha must NOT match (t1 vs t1b)",
+			taskID: "t1",
+			prs:    []openPR{{Number: 1, Branch: "feature/lpf-t1b"}},
+			want:   "",
+		},
+		{
+			name:   "leading alnum must NOT match (task-2 inside subtask-2)",
+			taskID: "task-2",
+			prs:    []openPR{{Number: 1, Branch: "feature/subtask-2"}},
+			want:   "",
+		},
+		{
+			name:   "prefers the correctly-bounded PR over a substring sibling",
+			taskID: "t1",
+			prs: []openPR{
+				{Number: 1, Branch: "feature/t10-other"},
+				{Number: 2, Branch: "feature/t1"},
+			},
+			want: "feature/t1",
+		},
+		{
+			name:   "empty task id never matches",
+			taskID: "",
+			prs:    []openPR{{Number: 1, Branch: "feature/anything"}},
+			want:   "",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := depBranchForTask(c.taskID, c.prs); got != c.want {
+				t.Fatalf("depBranchForTask(%q) = %q, want %q", c.taskID, got, c.want)
+			}
+		})
+	}
+}
+
 func TestCollectDepStatusAndBranch(t *testing.T) {
 	repo := setupTestProject(t)
 	// Mark task-002 awaiting_review so it is a candidate dep.
@@ -665,6 +860,60 @@ func newBaseFlagCmd(t *testing.T, base string) *cobra.Command {
 		}
 	}
 	return cmd
+}
+
+// TestFanoutCmdRegistersBaseBranchFlag locks in finding-3: the --base-branch flag
+// fanoutResolveBase reads MUST be registered on the real fanout command, else the
+// CLI override path is unreachable and GetString silently returns "". This drives
+// the flag off the actual command builder, not a synthetic test command.
+func TestFanoutCmdRegistersBaseBranchFlag(t *testing.T) {
+	cmd := newWorkflowFanoutCmd()
+	flag := cmd.Flags().Lookup("base-branch")
+	if flag == nil {
+		t.Fatal("fanout command must register --base-branch (fanoutResolveBase reads it)")
+	}
+	// The override must be readable through the same accessor fanoutResolveBase
+	// uses, proving the registration actually feeds the resolution path.
+	if err := cmd.Flags().Set("base-branch", "feature/manual"); err != nil {
+		t.Fatalf("set --base-branch: %v", err)
+	}
+	if got, _ := cmd.Flags().GetString("base-branch"); got != "feature/manual" {
+		t.Fatalf("registered flag must be readable as set, got %q", got)
+	}
+}
+
+// TestFanoutResolveBaseReadsRegisteredFlag exercises the real command's flag end
+// to end: a --base-branch override set on newWorkflowFanoutCmd() reaches
+// fanoutResolveBase and short-circuits resolution to that base. Before the flag
+// was registered this path was dead (the override was silently dropped).
+func TestFanoutResolveBaseReadsRegisteredFlag(t *testing.T) {
+	repo := setupTestProject(t)
+	tf, _ := loadCanonicalTasks(repo, "plan-001")
+	tf.Tasks[0].Status = "awaiting_review"
+	tf.Tasks[1].Status = "awaiting_review"
+	if err := saveCanonicalTasks(repo, tf); err != nil {
+		t.Fatal(err)
+	}
+	prev := defaultPRSourceLister
+	defaultPRSourceLister = fakePRSourceLister{prs: []openPR{
+		{Number: 205, Branch: "feature/task-001"},
+		{Number: 206, Branch: "feature/task-002"},
+	}}
+	t.Cleanup(func() { defaultPRSourceLister = prev })
+
+	cmd := newWorkflowFanoutCmd()
+	if err := cmd.Flags().Set("base-branch", "feature/task-001"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+	// Two distinct in-flight deps would otherwise conflict; the registered flag
+	// override sequences them.
+	res, err := fanoutResolveBase(cmd, repo, "plan-001", "task-new", []string{"task-001", "task-002"})
+	if err != nil {
+		t.Fatalf("registered --base-branch must override conflict: %v", err)
+	}
+	if res.BaseBranch != "feature/task-001" || res.BasePR != 205 {
+		t.Fatalf("flag-driven resolution = %+v", res)
+	}
 }
 
 func TestFanoutResolveBaseSingleDep(t *testing.T) {

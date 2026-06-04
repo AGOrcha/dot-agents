@@ -892,6 +892,7 @@ func newWorkflowFanoutCmd() *cobra.Command {
 	fanoutCmd.Flags().String("verifier-sequence", "", "Comma-separated verifier profile ids (overrides app_type resolution from .agentsrc.json)")
 	fanoutCmd.Flags().Bool("skip-tdd-gate", false, "Skip pre-verifier check that Go write_scope has *_test.go coverage")
 	fanoutCmd.Flags().Bool("skip-evidence-check", false, "Suppress scope-evidence sidecar warnings (missing sidecar or low confidence)")
+	fanoutCmd.Flags().String("base-branch", "", "Override layered base-resolution (§4): branch the new bundle off this base instead of the resolved/master default; required to sequence multiple in-flight dep PRs (read by fanoutResolveBase)")
 	_ = fanoutCmd.MarkFlagRequired("plan")
 	return fanoutCmd
 }

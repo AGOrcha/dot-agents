@@ -1592,18 +1592,82 @@ func buildDelegationBundleForFanout(req fanoutBundleRequest) (*delegationBundleY
 var defaultPRSourceLister prSourceLister = newProducerPRSourceLister()
 
 // depBranchForTask returns the open-PR head branch that backs a dep task, or ""
-// when no open PR matches. Matching is by branch name containing the bare task
-// id — the worktree/feature branch convention used across the workflow. This is
-// the §4.1 "resolve a dep's PR branch via task metadata (and the PR producer as
-// a seam)" step: the task status comes from TASKS.yaml; the branch+number come
-// from the producer's event.pr.* envelopes.
+// when no open PR matches. This is the §4.1 "resolve a dep's PR branch via task
+// metadata (and the PR producer as a seam)" step: the task status comes from
+// TASKS.yaml; the branch+number come from the producer's event.pr.* envelopes.
+//
+// Matching is BOUNDED, not an unbounded substring. A bare substring match would
+// silently resolve the wrong base — task id "t1" would match branch
+// "feature/t10-x" or "feature/lpf-t1b", so a downstream task could branch off a
+// sibling's PR. Instead the branch must equal the task id exactly OR carry it as
+// a whole token whose edges are a string boundary or a non-alphanumeric
+// separator. The task id itself may contain "-" (e.g. "lpf-d-base-resolution",
+// "task-002"), so only the token edges are bounded, not the interior:
+//   - "d1"      matches "feature/config-v2-d1"      (preceded by '-', ends string)
+//   - "task-002" matches "feature/task-002"          (preceded by '/', ends string)
+//   - "t1"      does NOT match "feature/t10"         ('0' extends the token)
+//   - "t1"      does NOT match "feature/lpf-t1b"     ('b' extends the token)
 func depBranchForTask(taskID string, openPRs []openPR) string {
+	if strings.TrimSpace(taskID) == "" {
+		return ""
+	}
 	for _, pr := range openPRs {
-		if pr.Branch != "" && strings.Contains(pr.Branch, taskID) {
+		if pr.Branch != "" && branchMatchesTask(pr.Branch, taskID) {
 			return pr.Branch
 		}
 	}
 	return ""
+}
+
+// branchMatchesTask reports whether branch carries taskID as a bounded token:
+// the whole branch, or an occurrence whose immediate neighbours are both
+// non-alphanumeric (or a string edge). This is the exact/bounded replacement for
+// the prior strings.Contains check, which silently resolved the wrong base.
+func branchMatchesTask(branch, taskID string) bool {
+	if branch == taskID {
+		return true
+	}
+	from := 0
+	for {
+		i := strings.Index(branch[from:], taskID)
+		if i < 0 {
+			return false
+		}
+		start := from + i
+		end := start + len(taskID)
+		if boundaryBefore(branch, start) && boundaryAfter(branch, end) {
+			return true
+		}
+		// Overlapping occurrences: advance one rune past this start.
+		from = start + 1
+	}
+}
+
+// boundaryBefore reports whether the character left of index idx is a token
+// boundary (string start or a non-alphanumeric separator).
+func boundaryBefore(s string, idx int) bool {
+	return idx == 0 || !isBranchWordByte(s[idx-1])
+}
+
+// boundaryAfter reports whether the character at index idx is a token boundary
+// (string end or a non-alphanumeric separator).
+func boundaryAfter(s string, idx int) bool {
+	return idx == len(s) || !isBranchWordByte(s[idx])
+}
+
+// isBranchWordByte reports whether b is an alphanumeric byte that, adjacent to a
+// match, would extend the token and so defeat a bounded match.
+func isBranchWordByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z':
+		return true
+	case b >= 'A' && b <= 'Z':
+		return true
+	case b >= '0' && b <= '9':
+		return true
+	default:
+		return false
+	}
 }
 
 // collectDepStatusAndBranch builds the per-dep status and branch maps the §4.1

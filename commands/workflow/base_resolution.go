@@ -3,10 +3,14 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"sort"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/credstore"
 	"github.com/AGOrcha/dot-agents/internal/events"
 	"go.yaml.in/yaml/v3"
 )
@@ -74,11 +78,72 @@ type producerPRSourceLister struct {
 	fetcher events.Fetcher
 }
 
+// daServiceProxyEnv names the env var carrying the `da service` credential
+// injector base (e.g. "http://localhost:8765"). When set, the auth seam routes
+// fetches through the proxy so the service owns credentials/refresh; when unset
+// the seam uses the direct-load fallback (pr-event-source D5; the proxy server
+// side is deferred in §5.1 — the fallback is the live path today).
+const daServiceProxyEnv = "DA_SERVICE_PROXY"
+
 // newProducerPRSourceLister builds the production lister from the default `gh`
-// pr_source config. The fetcher is left nil so the engine uses its real
-// exec/http fetcher in production.
+// pr_source config. The fetcher is an auth-aware DefaultFetcher whose HTTP client
+// carries the pr-event-source D5 AuthRoundTripper, so an http-based pr_source
+// (a non-gh platform) authenticates through the seam instead of issuing
+// unauthenticated requests. The default `gh` source is exec-driven and ignores
+// the HTTP client, but the seam is wired on the live path either way — so adding
+// an http pr_source block is config, not Go, and it is authenticated.
 func newProducerPRSourceLister() producerPRSourceLister {
-	return producerPRSourceLister{source: events.DefaultGHPRSource()}
+	return producerPRSourceLister{
+		source:  events.DefaultGHPRSource(),
+		fetcher: newAuthAwareFetcher(),
+	}
+}
+
+// newAuthAwareFetcher returns the production events.Fetcher with the D5 auth seam
+// wired into its HTTP transport. Exec fetches (the `gh` default) bypass the
+// transport; http fetches (any non-gh pr_source) flow through the
+// AuthRoundTripper, which either routes to the da service injector (proxy path,
+// when DA_SERVICE_PROXY is set) or attaches a credential inline via the
+// external-agent-sources credential loader (direct-load fallback).
+func newAuthAwareFetcher() events.Fetcher {
+	return events.DefaultFetcher{
+		Client: &http.Client{Transport: newPRAuthRoundTripper()},
+	}
+}
+
+// newPRAuthRoundTripper builds the D5 AuthRoundTripper for PR fetches. ProxyBase
+// comes from DA_SERVICE_PROXY (empty selects the direct-load fallback). The
+// fallback Loader resolves a per-host credential through the external-agent-
+// sources credstore chain; a missing credential is a clean miss (the request
+// proceeds unauthenticated), never a hard error, so an unauthenticated public
+// fetch still works.
+func newPRAuthRoundTripper() *events.AuthRoundTripper {
+	return &events.AuthRoundTripper{
+		ProxyBase: strings.TrimSpace(os.Getenv(daServiceProxyEnv)),
+		Loader:    credstoreHostLoader(credstore.NewLoader()),
+	}
+}
+
+// credstoreHostLoader adapts the credstore.Loader (keyed by credential id) to the
+// AuthRoundTripper's host-keyed CredentialLoader: the request host is the
+// credential id. A not-found credential is reported as an empty token with no
+// error, so the round tripper leaves the request unauthenticated rather than
+// failing the whole base-resolution cycle. Only a hard resolver error
+// (mis-permissioned secrets file, decrypt failure) surfaces.
+func credstoreHostLoader(loader *credstore.Loader) events.CredentialLoader {
+	return func(host string) (string, error) {
+		if strings.TrimSpace(host) == "" {
+			return "", nil
+		}
+		token, err := loader.Resolve(host)
+		if err != nil {
+			if errors.Is(err, credstore.ErrCredentialNotFound) {
+				return "", nil
+			}
+			return "", err
+		}
+		return token, nil
+	}
 }
 
 // ListOpenPRs runs one producer cycle and projects the emitted PR envelopes.
