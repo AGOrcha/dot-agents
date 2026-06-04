@@ -236,6 +236,44 @@ default of 7.
 - **Rejected:** a fixed default (does not adapt to the host); an unbounded
   override (a typo like `999` would thrash — hence the 32 guard).
 
+### 2.10 `base` and `ready` are domain-agnostic seams (git is adapter #1)
+
+The two predicates the layered model runs on — **"is this work's input
+available to branch from?"** (`base`) and **"can a downstream consumer
+start before the upstream fully merges?"** (`ready`) — are abstract
+seams, not git concepts. Git branches + PRs are the first *adapter* that
+satisfies them, not the model itself.
+
+- `ready` is already abstracted by the `internal/events` PR producer:
+  the `awaiting_review` transition is surfaced as an `event.pr.*` signal
+  (§6 emits on every edge), consumed by base-resolution through the
+  `prSourceLister` seam. A non-VCS domain plugs in a different producer
+  (`event.doc.section_approved`, `event.dataset.partition_ready`) and the
+  eligibility/fanout machinery is unchanged. The events producer is
+  "ready" adapter #1; PRs are not privileged.
+- `base` is an **addressable output reference** (`OutputRef`), not a
+  branch name. The git adapter resolves a ready dependency's `OutputRef`
+  to its PR head branch; other adapters resolve it to a content hash, an
+  artifact/object id, or a versioned blob handle. `--base-branch` is the
+  git adapter's concrete spelling of `--base-ref`; it is one adapter's
+  surface, not the contract.
+
+- **Rationale:** the §4 algorithm and §4.2 bundle schema are written in
+  git terms (`base_branch`, `pr_branch`, `master`) because git is the
+  only adapter v1 ships. Naming the seams explicitly keeps that from
+  ossifying into a git-only assumption: the algorithm depends on
+  `OutputRef` + a readiness signal, and git is injected as the default
+  adapter (`prBaseResolver`). The `config-distribution-model` content-hash
+  auto-sync already gives a VCS-free way to say "this input is at version
+  X" — exactly what a branch ref provides for code — so a
+  content-addressed adapter is a near-term, not hypothetical, second
+  adapter.
+- **Rejected:** keeping `base`/`ready` defined in terms of git PRs (locks
+  every non-code domain — spec graduation, dataset partitioning,
+  doc-section review — out of the layering machinery the rest of this
+  spec builds, contradicting the §2.1 generalization that named the
+  status `awaiting_review` rather than `pr_open` for exactly this reason).
+
 ---
 
 ## 3. Lifecycle State Machine
@@ -434,6 +472,75 @@ adapter query used to justify the chosen base. In v1 it is optional
 metadata for observability; in v2 the auto-sequencing path produces it
 as a hard precondition (the certificate IS the justification for
 selecting a layered base over `master`).
+
+### 4.4 Output-addressability precondition & resolver adapters
+
+Layering is an **optimization that requires composable, addressable
+outputs**, and the algorithm degrades safely when a domain lacks them.
+
+#### 4.4.1 The two requirements layering needs
+
+A downstream stage can branch off an upstream's *in-flight* (un-merged)
+output only when both hold:
+
+1. **Addressable** — the upstream output has a stable identifier a
+   consumer can name before it is finalized (git: the PR head branch;
+   content-addressed: the digest; artifact store: the object id).
+2. **Composable** — a consumer can build on that partial output and the
+   eventual finalize (merge) reconciles cleanly (git: branch off an
+   unmerged branch; the merge fast-forwards downstream per §7.1).
+
+When either fails — a single opaque binary doc whose edits are not
+mergeable, a proprietary blob with no partial identity — the output is
+**not layerable**. The honest behavior is to **completion-gate**: the
+downstream `base` resolves to the domain trunk (git: `master`) and the
+dependent task stays gated on the upstream reaching a terminal/merged
+state, exactly the pre-layering model (§1.1). This is not a degradation
+bug; it is the correct floor for non-composable outputs.
+
+#### 4.4.2 Resolver adapter seam
+
+`resolveBase` (§4.1) depends on a `baseResolver` adapter, not on git
+directly:
+
+```
+baseResolver:
+  Trunk() -> ref                             # the domain "no-layer" base (git: master)
+  LayerableBase(dep) -> (OutputRef, layerable bool)
+                                             # the ready dep's addressable output,
+                                             # or (_, false) -> completion-gate to Trunk()
+```
+
+- **git adapter (v1, default — `prBaseResolver`):** `Trunk()` =
+  `master`; `LayerableBase` returns the dep's PR head branch when its
+  status is an `awaiting_review` value (the `ready` signal, itself
+  produced by the events producer) and a PR branch exists; otherwise
+  `(_, false)`.
+- **content-addressed adapter (near-term):** `Trunk()` = the latest
+  published digest; `LayerableBase` returns the upstream output's content
+  hash when the producer has emitted a `ready` event for it. Demonstrated
+  end-to-end in the resolver tests (a digest `OutputRef`, no PR number).
+- **non-composable adapter (floor):** `LayerableBase` always returns
+  `(_, false)` → every dependent completion-gates. The domain still gets
+  the workflow's status model, slot accounting, and decay signals — it
+  just forgoes the parallel-velocity optimization.
+
+The §4.2 bundle fields (`base_branch`, `base_pr`, `base_task`) are the
+**git adapter's projection** of the generic `{ base_ref, base_output,
+base_task }`. They remain the canonical on-disk names in v1
+(backward-compatible); a future multi-adapter pass introduces neutral
+aliases without breaking existing bundles.
+
+#### 4.4.3 AI-driven non-code domains nudge toward addressable outputs
+
+For AI-generated non-code work (drafts, datasets, designs), the
+user-facing benefit runs the other way: putting outputs under **content
+addressing** — even when the domain has no native VCS — is what *unlocks*
+both layering and rollback/lineage. So the system's stance is to
+**encourage versioned/addressable outputs** rather than treat their
+absence as a hard blocker. Absence → completion-gate (§4.4.1), presence →
+full layered velocity. The choice stays the domain's; the model works
+either way.
 
 ---
 
@@ -704,6 +811,11 @@ them up without re-litigating the boundary:
   auto-mark `Ready for review`).
 - **Cross-repo layering** (e.g. a dot-agents PR that depends on a
   homebrew-tap PR). Single-repo layering only in v1.
+- **Multi-adapter base resolution.** v1 ships only the git `baseResolver`
+  adapter (§4.4.2). Content-addressed and non-composable adapters are
+  specified (§4.4) and exercised by the resolver tests, but no production
+  non-git adapter is wired, and the neutral `base_ref` / `base_output`
+  bundle aliases (§4.4.2) land with the first one, not before.
 
 ---
 
@@ -738,7 +850,15 @@ Go AST shim may be required before adapter-contract uniformity ships.
   Implementing v2 requires either adapter-contract graduating with the
   traversal queries, or an interim CRG / gopls shim.
 - **`config-distribution-model`** — hosts the `verifier_profiles`
-  registry that this spec's verifier-vs-lens split (§6) consumes.
+  registry that this spec's verifier-vs-lens split (§6) consumes; its
+  content-hash auto-sync is the VCS-free versioning a content-addressed
+  `baseResolver` adapter builds on (§2.10, §4.4.2).
+- **`internal/events` PR producer** — the `ready` signal adapter (§2.10,
+  §4.4.2). The producer emits the `awaiting_review` transition as
+  `event.pr.*`, consumed by base-resolution via the `prSourceLister`
+  seam; a non-VCS domain swaps in a different producer without touching
+  eligibility or fanout. This spec depends on the producer for the
+  readiness signal but does not own its contract.
 - **`agent-run-scoring-observability-platform`** — downstream
   consumer of the state-transition events this spec emits
   (entry/exit edges in §3.2). The event stream contract is owned by

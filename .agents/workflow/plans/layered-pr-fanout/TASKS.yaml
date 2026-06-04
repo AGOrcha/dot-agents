@@ -68,6 +68,7 @@ tasks:
         - commands/workflow/delegation.go
         - commands/workflow/base_resolution.go
         - commands/workflow/base_resolution_test.go
+        - commands/workflow/cmd.go
       verification_required: true
       notes: |-
         Per §4. da workflow fanout computes base_branch for a new bundle from the union of the task's depends_on PR
