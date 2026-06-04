@@ -164,6 +164,10 @@ cmd_sonar() {
   export SONAR_HOST_URL="${SONAR_HOST_URL:-https://sonarcloud.io}"
 
   # Prefer a NATIVE sonar-scanner when present (parallel-push safe — see helper).
+  # The pre-push hook can run with a minimal PATH, so add common user bin dirs
+  # before probing, otherwise a brew/manual sonar-scanner is missed and we fall
+  # back to the contended container.
+  export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
   if command -v sonar-scanner >/dev/null 2>&1; then
     say sonar "native sonar-scanner (no container)"
     _sonar_scan_native
