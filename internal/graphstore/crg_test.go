@@ -90,6 +90,19 @@ func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
 		SkipPostprocess: true,
 	})
 	if err != nil {
+		// A CRG *binary* can be discoverable (e.g. a sibling worktree's .venv shim
+		// is on PATH) while its Python package is NOT importable in this
+		// environment — the build then fails with "No module named
+		// code_review_graph". That is an environment limitation, not the
+		// nested-transaction defect this test targets, so skip rather than fail
+		// (otherwise it breaks the coverage gate for unrelated work — the recurring
+		// worker --no-verify trigger). A genuine build failure with the module
+		// present still fails loudly.
+		combined := err.Error() + " " + report.Summary
+		if strings.Contains(combined, "code_review_graph") &&
+			(strings.Contains(combined, "No module named") || strings.Contains(combined, "ModuleNotFoundError")) {
+			t.Skipf("real CRG binary discovered but its Python package is not importable here: %v", err)
+		}
 		t.Fatalf("BuildReport failed (possible nested-transaction defect): %v", err)
 	}
 	if report.Outcome != graphstore.CRGReadinessReady {
