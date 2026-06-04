@@ -144,6 +144,11 @@ documented on the relevanceResult type in this package.`,
 	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
+	// recompute is the explicit driver-event subcommand (t4): it reads the
+	// scored iteration corpus and proposes relevance-class changes. Kept as a
+	// subcommand so the inspector path above stays free of the heavier corpus
+	// read. See relevance_recompute.go.
+	cmd.AddCommand(newRelevanceRecomputeCmd(deps))
 	return cmd
 }
 
