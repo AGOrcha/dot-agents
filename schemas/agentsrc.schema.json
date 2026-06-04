@@ -188,6 +188,29 @@
           "description": "Relevance class for any unit not explicitly listed. Defaults to 'situational' — unlisted units are never silently dropped."
         }
       }
+    },
+    "pr_source": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "pr-event-source D4: config-driven pull-request event producer. Configures the generic internal/events producer engine (fetch + field map per platform) so PR state becomes event.pr.* events with no per-platform Go. 'gh' is the zero-config default; resolves through the config-v2 scope layers so an org layer can set the default. additionalProperties open for forward-compatible producer options.",
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Named producer: 'gh' (default), 'exec', 'http', or a registered code producer."
+        },
+        "list": {
+          "$ref": "#/$defs/prFetchBlock"
+        },
+        "comments": {
+          "$ref": "#/$defs/prFetchBlock"
+        },
+        "poll_interval_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Producer poll cadence in seconds."
+        }
+      }
     }
   },
   "$defs": {
@@ -360,6 +383,47 @@
           }
         }
       ]
+    },
+    "prFetchBlock": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "pr-event-source D4: one named fetch block of a pr_source config. exec sets 'argv'; http sets 'url'/'method'/'headers'. 'each' selects the item list and 'map' projects each item onto canonical PR fields (canonical-field -> jsonpath).",
+      "properties": {
+        "argv": {
+          "type": "array",
+          "description": "exec: command and arguments. '{number}' is substituted per PR in the comments block.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": "string",
+          "description": "http: request URL."
+        },
+        "method": {
+          "type": "string",
+          "description": "http: request method (defaults to GET)."
+        },
+        "headers": {
+          "type": "object",
+          "description": "http: request headers.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "each": {
+          "type": "string",
+          "description": "JSONPath to the list of items in the fetched document (e.g. '.' for the top-level array, '.comments')."
+        },
+        "map": {
+          "type": "object",
+          "description": "Canonical field -> JSONPath (relative to an item). The reserved 'rollup' field should point at the platform's raw check array (gh: '.statusCheckRollup'); the producer derives the canonical Rollup.State (GREEN|FAILING|PENDING) from it on each cycle.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     },
     "appTypeProfile": {
       "type": "object",

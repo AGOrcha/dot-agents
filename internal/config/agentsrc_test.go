@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AGOrcha/dot-agents/internal/events"
 )
 
 const (
@@ -1683,4 +1686,249 @@ func TestMergeGenerateAgentsRC_V1ManifestWithoutRepoIDRoundTripsByteForByte(t *t
 	if strings.Contains(string(data), "repo_id") {
 		t.Errorf("marshalled output should omit repo_id when empty: %s", data)
 	}
+}
+
+func TestAgentsRCPRSourceRoundtrip(t *testing.T) {
+	tmp := t.TempDir()
+	input := `{
+  "version": 2,
+  "project": "myproject",
+  "sources": [{"type":"local"}],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "pr_source": {
+    "producer": "gh",
+    "list": {
+      "argv": ["gh","pr","list","--json","number"],
+      "each": ".",
+      "map": {"number": ".number", "branch": ".headRefName"}
+    },
+    "comments": {
+      "argv": ["gh","pr","view","{number}","--json","comments"],
+      "each": ".comments",
+      "map": {"author": ".author.login"}
+    },
+    "poll_interval_s": 270
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+
+	// pr_source is a typed field, not captured as an unknown extra field.
+	if _, ok := rc.ExtraFields["pr_source"]; ok {
+		t.Fatal("pr_source leaked into ExtraFields; six-place sync incomplete")
+	}
+	assertRoundtripPRSource(t, "load", rc.PRSource)
+
+	// Round-trip: save and reload preserves the typed field.
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	rc2, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC after save: %v", err)
+	}
+	assertRoundtripPRSource(t, "reload", rc2.PRSource)
+}
+
+// assertRoundtripPRSource verifies the typed pr_source parsed from the roundtrip
+// fixture. It is shared by the initial load and the post-save reload so the
+// per-field assertion chains live in one flat helper (well under the cognitive
+// complexity gate) instead of being duplicated in the test body. phase names the
+// call site for clearer failure messages.
+func assertRoundtripPRSource(t *testing.T, phase string, src *AgentsRCPRSource) {
+	t.Helper()
+	if src == nil {
+		t.Fatalf("%s: PRSource is nil", phase)
+		return
+	}
+	if src.Producer != "gh" {
+		t.Errorf("%s: Producer = %q, want gh", phase, src.Producer)
+	}
+	if src.PollIntervalS != 270 {
+		t.Errorf("%s: PollIntervalS = %d, want 270", phase, src.PollIntervalS)
+	}
+	assertRoundtripList(t, phase, src.List)
+	assertRoundtripComments(t, phase, src.Comments)
+}
+
+// assertRoundtripList pins the List fetch block fields the fixture preserves.
+func assertRoundtripList(t *testing.T, phase string, list *AgentsRCPRFetch) {
+	t.Helper()
+	if list == nil {
+		t.Errorf("%s: List fetch block is nil", phase)
+		return
+	}
+	if list.Map["number"] != ".number" {
+		t.Errorf("%s: List.Map[number] mismatch: %+v", phase, list)
+	}
+	if len(list.Argv) == 0 || list.Argv[0] != "gh" {
+		t.Errorf("%s: List.Argv not preserved: %+v", phase, list)
+	}
+}
+
+// assertRoundtripComments pins the Comments fetch block field the fixture preserves.
+func assertRoundtripComments(t *testing.T, phase string, comments *AgentsRCPRFetch) {
+	t.Helper()
+	if comments == nil {
+		t.Errorf("%s: Comments fetch block is nil", phase)
+		return
+	}
+	if comments.Each != ".comments" {
+		t.Errorf("%s: Comments.Each mismatch: %+v", phase, comments)
+	}
+}
+
+func TestAgentsRCPRSourceMarshalOmittedWhenNil(t *testing.T) {
+	rc := AgentsRC{Version: 2, Project: "p", Sources: []Source{{Type: "local"}}}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "pr_source") {
+		t.Errorf("marshalled output should omit pr_source when nil: %s", data)
+	}
+}
+
+// TestPRSourceToEngineConfigPreservesAllFields is the finding-1 regression: the
+// config pr_source block must bridge to the engine type with every field carried
+// across (no round-trip loss), so the configured source actually drives the
+// producer instead of being inert.
+func TestPRSourceToEngineConfigPreservesAllFields(t *testing.T) {
+	src := &AgentsRCPRSource{
+		Producer: "exec",
+		List: &AgentsRCPRFetch{
+			Argv:    []string{"glab", "mr", "list"},
+			URL:     "https://api/mrs",
+			Method:  "GET",
+			Headers: map[string]string{"X-Token": "abc"},
+			Each:    ".items",
+			Map:     map[string]string{"number": ".iid", "branch": ".source_branch"},
+		},
+		Comments: &AgentsRCPRFetch{
+			Argv: []string{"glab", "mr", "note", "list"},
+			Each: ".notes",
+			Map:  map[string]string{"author": ".author.username"},
+		},
+		PollIntervalS: 90,
+	}
+	got := src.ToEngineConfig()
+	want := events.PRSourceConfig{
+		Producer: "exec",
+		List: events.FetchBlock{
+			Argv:    []string{"glab", "mr", "list"},
+			URL:     "https://api/mrs",
+			Method:  "GET",
+			Headers: map[string]string{"X-Token": "abc"},
+			Each:    ".items",
+			Map:     map[string]string{"number": ".iid", "branch": ".source_branch"},
+		},
+		Comments: events.FetchBlock{
+			Argv: []string{"glab", "mr", "note", "list"},
+			Each: ".notes",
+			Map:  map[string]string{"author": ".author.username"},
+		},
+		PollIntervalS: 90,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ToEngineConfig() round-trip lost fields:\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
+// TestPRSourceToEngineConfigNilDefaultsToGH proves a nil/absent pr_source falls
+// back to the gh default (silent-zero guard: an empty config must not yield an
+// inert engine config).
+func TestPRSourceToEngineConfigNilDefaultsToGH(t *testing.T) {
+	var src *AgentsRCPRSource
+	got := src.ToEngineConfig()
+	if got.Producer != "gh" {
+		t.Errorf("nil pr_source ToEngineConfig().Producer = %q, want gh default", got.Producer)
+	}
+	if len(got.List.Map) == 0 {
+		t.Error("nil pr_source default has empty list map; expected the gh default map")
+	}
+}
+
+// TestEffectivePRSourceFallsBackToGH covers the AgentsRC-level resolution: a
+// config without pr_source still resolves to a usable gh source.
+func TestEffectivePRSourceFallsBackToGH(t *testing.T) {
+	rc := &AgentsRC{Version: 2}
+	if got := rc.EffectivePRSource(); got.Producer != "gh" {
+		t.Errorf("EffectivePRSource() = %q, want gh", got.Producer)
+	}
+	var nilRC *AgentsRC
+	if got := nilRC.EffectivePRSource(); got.Producer != "gh" {
+		t.Errorf("nil AgentsRC EffectivePRSource() = %q, want gh", got.Producer)
+	}
+}
+
+// TestNewPRListProducerDrivesProducerFromConfig is the end-to-end finding-1+2
+// regression: the configured pr_source must drive a real producer that emits
+// event.pr.* envelopes with a derived rollup, and the registry must carry the
+// control-plane PR kinds. This is the reachable production path that exercises
+// ToEngineConfig + DeriveRollupState.
+func TestNewPRListProducerDrivesProducerFromConfig(t *testing.T) {
+	rc := &AgentsRC{
+		Version: 2,
+		PRSource: &AgentsRCPRSource{
+			Producer: "exec",
+			List: &AgentsRCPRFetch{
+				Argv: []string{"gh", "pr", "list"},
+				Each: ".",
+				Map: map[string]string{
+					"number": ".number",
+					"rollup": ".statusCheckRollup",
+				},
+			},
+		},
+	}
+	reg := events.NewRegistry()
+	doc := []byte(`[{"number":5,"statusCheckRollup":[{"name":"lint","status":"COMPLETED","conclusion":"FAILURE"}]}]`)
+	prod, err := rc.NewPRListProducer(reg, events.KindPRCIFailed, "github", &stubFetcher{out: doc})
+	if err != nil {
+		t.Fatalf("NewPRListProducer: %v", err)
+	}
+	// The PR kinds are registered control-plane on the supplied registry.
+	if _, ok := reg.Lookup(events.KindPRCIFailed); !ok {
+		t.Error("NewPRListProducer did not register PR kinds on the registry")
+	}
+	envs, err := prod.Cycle(context.Background())
+	if err != nil {
+		t.Fatalf("Cycle: %v", err)
+	}
+	if len(envs) != 1 {
+		t.Fatalf("got %d envelopes, want 1", len(envs))
+	}
+	var pr events.PR
+	if err := json.Unmarshal(envs[0].Payload, &pr); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if pr.Rollup.State != events.RollupFailing {
+		t.Errorf("config-driven producer derived Rollup.State = %q, want FAILING", pr.Rollup.State)
+	}
+}
+
+// TestNewPRListProducerNilRegistry guards the nil-registry path.
+func TestNewPRListProducerNilRegistry(t *testing.T) {
+	rc := &AgentsRC{Version: 2}
+	if _, err := rc.NewPRListProducer(nil, events.KindPROpened, "github", nil); err == nil {
+		t.Fatal("expected error for nil registry")
+	}
+}
+
+// stubFetcher is the hermetic fetch seam for the config-side producer test.
+type stubFetcher struct {
+	out []byte
+	err error
+}
+
+func (f *stubFetcher) Fetch(context.Context, events.FetchSpec) ([]byte, error) {
+	return f.out, f.err
 }

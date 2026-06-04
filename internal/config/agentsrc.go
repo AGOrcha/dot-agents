@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/events"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
 )
 
@@ -199,10 +200,128 @@ type AgentsRC struct {
 	// internal/config/execution_profile.go and the
 	// skill-relevance-filter design.
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
+	// PRSource is the config-driven pull-request event producer config
+	// (pr-event-source design D4). It configures the generic internal/events
+	// producer engine — a fetch+field-map per platform — so PR state becomes
+	// event.pr.* events with no per-platform Go. `gh` is the zero-config default;
+	// an org layer can override the default via the config-v2 scope layers.
+	PRSource *AgentsRCPRSource `json:"pr_source,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// AgentsRCPRSource is the .agentsrc.json `pr_source` block (pr-event-source D4).
+// It is the config-facing mirror of the internal/events engine's PRSourceConfig:
+// it owns JSON (de)serialization and config-v2 scope merging, while ToEngineConfig
+// bridges it to the engine that actually drives the producer. A platform is added
+// by writing this block — no Go change.
+type AgentsRCPRSource struct {
+	// Producer selects the named producer: "gh" (default), "exec", "http", or a
+	// registered code producer.
+	Producer string `json:"producer,omitempty"`
+	// List fetches the open PR list and maps it onto canonical PR fields.
+	List *AgentsRCPRFetch `json:"list,omitempty"`
+	// Comments fetches one PR's comments. Optional.
+	Comments *AgentsRCPRFetch `json:"comments,omitempty"`
+	// PollIntervalS is the producer poll cadence in seconds.
+	PollIntervalS int `json:"poll_interval_s,omitempty"`
+}
+
+// AgentsRCPRFetch is one named fetch block (the "list" or "comments" block) of a
+// pr_source config: how to fetch (exec argv or http url) and how to project each
+// item onto canonical fields (each + map).
+type AgentsRCPRFetch struct {
+	Argv    []string          `json:"argv,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Method  string            `json:"method,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Each    string            `json:"each,omitempty"`
+	Map     map[string]string `json:"map,omitempty"`
+}
+
+// ToEngineConfig bridges the config-facing pr_source block to the internal/events
+// engine type that actually drives the producer (pr-event-source D4). Without this
+// converter the configured pr_source would never reach the engine — the gh/exec/
+// http source the user configured would be inert. Every field is carried across so
+// the round-trip config -> engine -> producer preserves the configured fetch and
+// field map exactly (no round-trip loss).
+//
+// A nil receiver returns the built-in gh default, so an absent pr_source still
+// yields a working producer config rather than an empty (inert) one.
+func (s *AgentsRCPRSource) ToEngineConfig() events.PRSourceConfig {
+	if s == nil {
+		return events.DefaultGHPRSource()
+	}
+	return events.PRSourceConfig{
+		Producer:      s.Producer,
+		List:          s.List.toEngineFetch(),
+		Comments:      s.Comments.toEngineFetch(),
+		PollIntervalS: s.PollIntervalS,
+	}
+}
+
+// toEngineFetch converts one config fetch block to the engine FetchBlock,
+// preserving every field. A nil block (the "comments" block is optional) yields
+// the zero FetchBlock so the engine sees an empty, clearly-absent block rather
+// than a panic.
+func (b *AgentsRCPRFetch) toEngineFetch() events.FetchBlock {
+	if b == nil {
+		return events.FetchBlock{}
+	}
+	return events.FetchBlock{
+		Argv:    append([]string(nil), b.Argv...),
+		URL:     b.URL,
+		Method:  b.Method,
+		Headers: cloneStringStringMap(b.Headers),
+		Each:    b.Each,
+		Map:     cloneStringStringMap(b.Map),
+	}
+}
+
+// cloneStringStringMap returns a shallow copy of m, or nil when m is empty, so
+// the engine config does not alias the caller's config maps.
+func cloneStringStringMap(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// EffectivePRSource resolves the pr_source config that drives the producer: the
+// configured block when present, otherwise the built-in gh default. This is the
+// single resolution point so a missing pr_source field falls back to a working
+// gh source rather than an empty (inert) one (pr-event-source D4).
+func (a *AgentsRC) EffectivePRSource() events.PRSourceConfig {
+	if a == nil || a.PRSource == nil {
+		return events.DefaultGHPRSource()
+	}
+	return a.PRSource.ToEngineConfig()
+}
+
+// NewPRListProducer builds the live PR list producer from this config's resolved
+// pr_source (pr-event-source D4/R3). It is the production entry point consumers
+// (the layered-pr-fanout poll-detector, the pr-ci verifier) call to turn PR state
+// into event.pr.* events: it registers the control-plane PR kinds on reg and
+// returns a producer that derives each PR's Rollup.State on every cycle. This is
+// the reachable path that exercises the config -> engine bridge (ToEngineConfig)
+// and the DeriveRollupState rule — without it both would be dead code.
+//
+// typ is the event.pr.* kind to emit (e.g. events.KindPROpened); a nil fetcher
+// uses the real exec/http fetcher.
+func (a *AgentsRC) NewPRListProducer(reg *events.Registry, typ, source string, fetcher events.Fetcher) (*events.PRProducer, error) {
+	if reg == nil {
+		return nil, fmt.Errorf("config: NewPRListProducer: nil registry")
+	}
+	if err := events.RegisterPRKinds(reg); err != nil {
+		return nil, fmt.Errorf("config: NewPRListProducer: register kinds: %w", err)
+	}
+	return a.EffectivePRSource().NewListProducer(typ, source, fetcher)
 }
 
 // LayerRef is a single entry in AgentsRC.Extends. It accepts either a bare
@@ -321,6 +440,8 @@ var agentsRCKnown = map[string]bool{
 	"repo_id": true, "extends": true, "packages": true, "features": true,
 	// execution-profile layer (config relevance / skill-relevance-filter)
 	"execution_profile": true,
+	// pr_source: config-driven PR event producer (pr-event-source design)
+	"pr_source": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -346,6 +467,7 @@ type agentsRCCore struct {
 	Packages         []PackageRef      `json:"packages,omitempty"`
 	Features         map[string]string `json:"features,omitempty"`
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
+	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -370,6 +492,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Packages = core.Packages
 	a.Features = core.Features
 	a.ExecutionProfile = core.ExecutionProfile
+	a.PRSource = core.PRSource
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -405,6 +528,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Packages:         a.Packages,
 		Features:         a.Features,
 		ExecutionProfile: a.ExecutionProfile,
+		PRSource:         a.PRSource,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
