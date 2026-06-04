@@ -59,10 +59,12 @@ which prints human concept documentation rather than live repo state.`,
 			"  da config explain --all --json",
 			"  da config explain --flags",
 			"  da config verify",
+			"  da config relevance --filter topology --app-type go-cli",
 		),
 	}
 	cmd.AddCommand(newExplainCmd(deps))
 	cmd.AddCommand(newVerifyCmd(deps))
+	cmd.AddCommand(newRelevanceCmd(deps))
 	return cmd
 }
 
