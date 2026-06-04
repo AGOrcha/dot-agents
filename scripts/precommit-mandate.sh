@@ -92,13 +92,34 @@ cmd_coverage() {
     || fail "coverage gate: a package is below 95%"
 }
 
+# _sonar_scan_native runs the native sonar-scanner CLI (no container) from the
+# repo root, with the same SonarCloud-CE-flake retry as the containerized path.
+# A genuine QUALITY GATE FAILED is surfaced (not retried). Native scans are
+# independent JVM processes, so concurrent pre-push runs do not contend on one
+# Docker daemon/container — which is what wedged parallel branch pushes.
+_sonar_scan_native() {
+  local logf attempt=0 max=3 rc
+  logf="$(mktemp -t sonar-scan.XXXXXX)"
+  while :; do
+    attempt=$((attempt + 1))
+    ( cd "$repo_root" && sonar-scanner \
+        -Dsonar.token="$SONAR_TOKEN" \
+        -Dsonar.host.url="$SONAR_HOST_URL" \
+        -Dsonar.qualitygate.wait=true ) 2>&1 | tee "$logf"
+    rc=${PIPESTATUS[0]}
+    [[ "$rc" -eq 0 ]] && break
+    if grep -q 'CE Task finished abnormally' "$logf" && [[ "$attempt" -lt "$max" ]]; then
+      say sonar "SonarCloud CE processing flaked (attempt ${attempt}/${max}) — retrying"
+      continue
+    fi
+    rm -f "$logf"
+    sonar_gate_diagnostics
+    fail "sonar-scanner: SonarCloud quality gate failed (see conditions/hotspots above)"
+  done
+  rm -f "$logf"
+}
+
 cmd_sonar() {
-  say sonar "containerized sonar-scanner"
-  if ! command -v docker >/dev/null 2>&1; then
-    printf '\033[33m[mandate:sonar] SKIPPED: docker not found.\n'
-    printf '  Install Docker + set SONAR_TOKEN to enable the Sonar mandate.\033[0m\n'
-    return 0
-  fi
   # Token resolution: explicit $SONAR_TOKEN wins; otherwise reuse the
   # SonarQube MCP server credentials already configured in .mcp.json
   # (gitignored — never committed). Looked up in the current worktree
@@ -141,6 +162,22 @@ cmd_sonar() {
   # diagnostics can read it. Export so the child docker inherits it.
   export SONAR_TOKEN
   export SONAR_HOST_URL="${SONAR_HOST_URL:-https://sonarcloud.io}"
+
+  # Prefer a NATIVE sonar-scanner when present (parallel-push safe — see helper).
+  if command -v sonar-scanner >/dev/null 2>&1; then
+    say sonar "native sonar-scanner (no container)"
+    _sonar_scan_native
+    say sonar "enforcing zero new SonarCloud issues (new_violations=0)"
+    bash "$repo_root/scripts/sonar-new-issues-gate.sh" \
+      || fail "sonar: new SonarCloud issues introduced (new_violations>0)"
+    return 0
+  fi
+  if ! command -v docker >/dev/null 2>&1; then
+    printf '\033[33m[mandate:sonar] SKIPPED: no native sonar-scanner and no docker.\n'
+    printf '  brew install sonar-scanner (or install Docker) to enable the Sonar mandate.\033[0m\n'
+    return 0
+  fi
+  say sonar "containerized sonar-scanner"
 
   # Worktree handling: in a git worktree, $repo_root/.git is a FILE containing
   # `gitdir: <abs-path>/.git/worktrees/<name>` — a host-absolute path. When the
