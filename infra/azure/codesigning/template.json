@@ -1,0 +1,44 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2014-04-01-preview/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "name": {
+            "type": "string"
+        },
+        "location": {
+            "type": "string"
+        },
+        "skuName": {
+            "type": "string",
+            "defaultValue": "Basic",
+            "allowedValues": [
+                "Basic",
+                "Premium"
+            ],
+            "metadata": {
+                "description": "Specifies whether the artifact signing account is a basic or a premium account."
+            }
+        },
+        "tags": {
+            "type": "object",
+            "defaultValue": {},
+            "metadata": {
+                "description": "Tags to be assigned to the account."
+            }
+        }
+    },
+    "resources": [
+        {
+            "apiVersion": "2025-10-13",
+            "name": "[parameters('name')]",
+            "location": "[parameters('location')]",
+            "type": "Microsoft.CodeSigning/codesigningaccounts",
+            "properties": {
+                "sku": {
+                    "name": "[parameters('skuName')]"
+                }
+            },
+            "tags": "[if(contains(parameters('tags'), 'Microsoft.CodeSigning/codeSigningAccounts'), parameters('tags')['Microsoft.CodeSigning/codeSigningAccounts'], json('{}'))]"
+        }
+    ]
+}
