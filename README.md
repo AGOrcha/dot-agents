@@ -667,7 +667,11 @@ Contributions welcome! Please open an issue or pull request on GitHub.
 
 ## License
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE) — see also [NOTICE](NOTICE).
+
+Contributions are accepted under the Apache 2.0 terms (§5): unless you state
+otherwise, anything you intentionally submit for inclusion is licensed under
+Apache 2.0, with its patent grant.
 
 ---
 
