@@ -17,7 +17,7 @@ tasks:
       app_type: go-cli
     - id: t2-config-relevance-resolver
       title: da config relevance resolver + --filter inspector
-      status: pending
+      status: in_progress
       depends_on:
         - t1-profile-layer-schema
       blocks: []
