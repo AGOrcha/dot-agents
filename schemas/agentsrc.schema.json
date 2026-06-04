@@ -169,6 +169,25 @@
         "type": "string",
         "minLength": 1
       }
+    },
+    "execution_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "config-v2 §15 execution-profile layer (kind=layer). Routes a task's workflow execution shape — unit relevance + topology + lenses — by app_type. Scope-mergeable; unlisted units default to 'situational' (default_class) so nothing is silently dropped. See skill-relevance-filter design.",
+      "properties": {
+        "by_app_type": {
+          "type": "object",
+          "description": "Per-app_type execution shape, keyed by app_type string (e.g. 'go-cli', 'ideation').",
+          "additionalProperties": {
+            "$ref": "#/$defs/appTypeProfile"
+          }
+        },
+        "default_class": {
+          "type": "string",
+          "enum": ["core", "situational", "noise"],
+          "description": "Relevance class for any unit not explicitly listed. Defaults to 'situational' — unlisted units are never silently dropped."
+        }
+      }
     }
   },
   "$defs": {
@@ -341,6 +360,84 @@
           }
         }
       ]
+    },
+    "appTypeProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The three execution facets for one app_type: unit relevance, topology, and lenses. Each facet is independently scope-overridable.",
+      "properties": {
+        "relevance": {
+          "type": "object",
+          "description": "Facet 1 (the noise filter): per-stage core/situational/noise unit classification, keyed by stage name (e.g. 'orchestrate', 'verify', 'review').",
+          "additionalProperties": {
+            "$ref": "#/$defs/relevanceClasses"
+          }
+        },
+        "topology": {
+          "$ref": "#/$defs/topology"
+        },
+        "lenses": {
+          "$ref": "#/$defs/lenses"
+        }
+      }
+    },
+    "relevanceClasses": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Partitions the units relevant to one app_type × stage into reversible-view classes. Unlisted units default to default_class.",
+      "properties": {
+        "core": {
+          "$ref": "#/$defs/stringList"
+        },
+        "situational": {
+          "$ref": "#/$defs/stringList"
+        },
+        "noise": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Facet 2: the executor:verifier:reviewer fan-out shape. Supersedes the flat app_type_verifier_map (verifier_sequence moves here).",
+      "properties": {
+        "executors": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of parallel executor workers for the task."
+        },
+        "verifiers_per_executor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Verifier fan-out per executor (n exec → verifiers_per_executor·n verifiers)."
+        },
+        "reviewers": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reviewer fan-out: a keyword ('per_verifier', 'per_executor') or a stringified integer count."
+        },
+        "verifier_sequence": {
+          "$ref": "#/$defs/stringList",
+          "description": "Ordered verifier-profile ids for this app_type, superseding app_type_verifier_map."
+        }
+      }
+    },
+    "lenses": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Facet 3: the review-lens config folded in from lens-evidence-policy.",
+      "properties": {
+        "lens_set": {
+          "$ref": "#/$defs/stringList",
+          "description": "Ordered review lenses applied (e.g. 'architecture-standards', 'acceptance-invariants', 'adversarial')."
+        },
+        "lens_concurrency": {
+          "type": "string",
+          "enum": ["parallel", "gated", "tiered"],
+          "description": "How the lens set runs."
+        }
+      }
     }
   }
 }

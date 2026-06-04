@@ -193,6 +193,12 @@ type AgentsRC struct {
 	Packages []PackageRef `json:"packages,omitempty"`
 	// Features overrides feature-flag defaults (config-distribution-model §3.6).
 	Features map[string]string `json:"features,omitempty"`
+	// ExecutionProfile is the config-v2 §15-shaped, scope-mergeable layer that
+	// routes a task's workflow execution shape (unit relevance + topology +
+	// lenses) by app_type. It is a kind=layer policy fragment — see
+	// internal/config/execution_profile.go and the
+	// skill-relevance-filter design.
+	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
@@ -313,6 +319,8 @@ var agentsRCKnown = map[string]bool{
 	"kg": true, "refresh": true,
 	// v2 additive fields (config-distribution-model §3)
 	"repo_id": true, "extends": true, "packages": true, "features": true,
+	// execution-profile layer (config relevance / skill-relevance-filter)
+	"execution_profile": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -333,10 +341,11 @@ type agentsRCCore struct {
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
-	RepoID   string            `json:"repo_id,omitempty"`
-	Extends  []LayerRef        `json:"extends,omitempty"`
-	Packages []PackageRef      `json:"packages,omitempty"`
-	Features map[string]string `json:"features,omitempty"`
+	RepoID           string            `json:"repo_id,omitempty"`
+	Extends          []LayerRef        `json:"extends,omitempty"`
+	Packages         []PackageRef      `json:"packages,omitempty"`
+	Features         map[string]string `json:"features,omitempty"`
+	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -360,6 +369,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Extends = core.Extends
 	a.Packages = core.Packages
 	a.Features = core.Features
+	a.ExecutionProfile = core.ExecutionProfile
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -378,22 +388,23 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 
 func (a AgentsRC) MarshalJSON() ([]byte, error) {
 	core := agentsRCCore{
-		Schema:   a.Schema,
-		Version:  a.Version,
-		Project:  a.Project,
-		Skills:   a.Skills,
-		Rules:    a.Rules,
-		Agents:   a.Agents,
-		Hooks:    a.Hooks,
-		MCP:      a.MCP,
-		Settings: a.Settings,
-		Sources:  a.Sources,
-		KG:       a.KG,
-		Refresh:  a.Refresh,
-		RepoID:   a.RepoID,
-		Extends:  a.Extends,
-		Packages: a.Packages,
-		Features: a.Features,
+		Schema:           a.Schema,
+		Version:          a.Version,
+		Project:          a.Project,
+		Skills:           a.Skills,
+		Rules:            a.Rules,
+		Agents:           a.Agents,
+		Hooks:            a.Hooks,
+		MCP:              a.MCP,
+		Settings:         a.Settings,
+		Sources:          a.Sources,
+		KG:               a.KG,
+		Refresh:          a.Refresh,
+		RepoID:           a.RepoID,
+		Extends:          a.Extends,
+		Packages:         a.Packages,
+		Features:         a.Features,
+		ExecutionProfile: a.ExecutionProfile,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
