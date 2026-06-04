@@ -33,4 +33,4 @@ args=(
 
 echo "==> Deploying Microsoft.CodeSigning account into resource group '$RESOURCE_GROUP'"
 az deployment group create "${args[@]}" --query "properties.provisioningState" -o tsv
-echo "==> Done. Next: create a certificate profile + complete identity validation (see README.md §3)."
+echo "==> Done. Next: once identity validation is Completed, run ./create-cert-profile.sh (README.md §3)."

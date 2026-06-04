@@ -127,13 +127,15 @@ jobs:
           install-only: true
 
       # --- Windows Authenticode signing via Azure Trusted Signing (gated) ---
-      # These three steps are skipped until the repo variable AZURE_CLIENT_ID is
-      # set (after identity validation + Public Trust cert profile creation).
-      # Until then the GoReleaser sign-windows hook no-ops and releases ship
-      # unsigned Windows binaries, exactly as today. Only variable NAMES are
+      # The whole signing path is gated on TRUSTED_SIGNING_PROFILE — the LAST
+      # variable to be set (only after identity validation clears and the Public
+      # Trust cert profile exists). The other AZURE_*/TRUSTED_SIGNING_* vars can
+      # be populated ahead of time with zero effect: until a profile name is set
+      # these steps skip and the GoReleaser sign-windows hook no-ops, so releases
+      # ship unsigned Windows binaries exactly as today. Only variable NAMES are
       # referenced here — no credential values live in the workflow.
       - name: Azure login (OIDC, for Trusted Signing)
-        if: steps.check.outputs.exists == 'false' && vars.AZURE_CLIENT_ID != ''
+        if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
         uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -141,13 +143,13 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Set up .NET (for the dotnet sign tool)
-        if: steps.check.outputs.exists == 'false' && vars.AZURE_CLIENT_ID != ''
+        if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
           dotnet-version: '8.0.x'
 
       - name: Install Trusted Signing CLI (dotnet sign)
-        if: steps.check.outputs.exists == 'false' && vars.AZURE_CLIENT_ID != ''
+        if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
         # TODO: pin --version once a release is chosen (prerelease today; the
         # whole signing path is dormant until the repo variables are populated).
         run: dotnet tool install --global sign --prerelease

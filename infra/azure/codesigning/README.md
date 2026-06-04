@@ -9,7 +9,10 @@ the signing setup is automated rather than click-ops.
 |---|---|
 | `template.json` | ARM template for the `Microsoft.CodeSigning/codesigningaccounts` resource |
 | `parameters.json` | Account name (`AGOrcha`), region (`eastus`), SKU (`Basic`), tags |
-| `deploy.sh` | Idempotent `az deployment group create` wrapper |
+| `deploy.sh` | Idempotent `az deployment group create` wrapper for the account |
+| `cert-profile.json` | ARM template for the `certificateProfiles` child resource (Public Trust) |
+| `create-cert-profile.sh` | Creates the cert profile post-validation; prints the command to flip CI signing on |
+| `azure-oidc-setup.sh` | Scripts the GitHub→Azure OIDC federation (secretless CI auth) |
 
 ## 1. Deploy the account (idempotent)
 
@@ -32,14 +35,21 @@ ARM-automated today); the third is what we wire into CI:
 1. **Identity validation** — under the signing account, create an *Identity Validation*
    request for the **AGOrcha** organization (legal name, address, etc.). Microsoft
    verifies it; **this can take 1–7 business days** and gates everything below.
-2. **Certificate profile** — once validation is `Completed`, create a
-   `Microsoft.CodeSigning/codesigningaccounts/certificateProfiles` of type
-   **Public Trust** (required for distributing `.exe` to the public; Private Trust is
-   for internal-only). Note the **profile name** and the account's **regional endpoint**
-   (e.g. `https://eus.codesigning.azure.net/` for `eastus`).
+2. **Certificate profile** — once validation is `Completed`, create the
+   **Public Trust** profile. This is now code (`cert-profile.json` +
+   `create-cert-profile.sh`); run:
 
-   *(This can be added to `template.json` as a child resource once the identity is
-   validated — I'll fold it in then so the profile is code too.)*
+   ```bash
+   az login
+   ./create-cert-profile.sh           # discovers the Completed validation, deploys the profile
+   ```
+
+   The script auto-discovers the completed identity-validation id, deploys
+   `cert-profile.json` (type **Public Trust** — required for distributing `.exe`
+   to the public), and prints the exact `gh variable set TRUSTED_SIGNING_PROFILE`
+   command that turns CI signing on. For a no-validation dry run first, set
+   `PROFILE_TYPE=PublicTrustTest`. The account's regional endpoint is
+   `https://eus.codesigning.azure.net/` (`eastus`).
 
 ## 4. CI/CD integration plan (the "integrate into CI/CD?" — yes)
 
@@ -61,19 +71,31 @@ dlib so it runs on the existing `ubuntu` release runner). Inputs: the regional
 glob. GoReleaser then checksums + cosign-signs the *already-Authenticode-signed* exe, so
 downstream verification is unchanged.
 
-**Repo/CI variables** (non-secret → `vars`; identity → OIDC, no secret needed):
-`AZURE_TENANT_ID`, `AZURE_CLIENT_ID` (the federated app), `AZURE_SUBSCRIPTION_ID`,
-`TRUSTED_SIGNING_ENDPOINT`, `TRUSTED_SIGNING_ACCOUNT=AGOrcha`,
-`TRUSTED_SIGNING_PROFILE=<profile-name>`.
+**Repo/CI variables** (non-secret → `vars`; identity → OIDC, no secret needed).
+Five are pre-set so signing activates the instant the sixth is:
 
-## 5. Decisions to confirm before I wire CI
+| Variable | Value | Set? |
+|---|---|---|
+| `AZURE_TENANT_ID` | the AGOrcha tenant | ✅ set |
+| `AZURE_CLIENT_ID` | the `da-trusted-signing-ci` federated app | ✅ set |
+| `AZURE_SUBSCRIPTION_ID` | the signing subscription | ✅ set |
+| `TRUSTED_SIGNING_ENDPOINT` | `https://eus.codesigning.azure.net/` | ✅ set |
+| `TRUSTED_SIGNING_ACCOUNT` | `AGOrcha` | ✅ set |
+| `TRUSTED_SIGNING_PROFILE` | cert profile name | ⏳ **the activation gate** — set by `create-cert-profile.sh` after validation |
 
-- **Auth:** OIDC federation (recommended, secretless) vs a service-principal client
-  secret in repo secrets.
-- **Trust type:** Public Trust cert profile (for public `.exe`) — assumed.
-- **Resource group / subscription** for `deploy.sh`.
+The whole signing path in `auto-release.yml` is gated on `TRUSTED_SIGNING_PROFILE`
+being non-empty, so the five pre-set values are inert until the profile exists.
 
-Once identity validation clears and you confirm the above, I'll add the certificate-
-profile resource to the template and the OIDC sign step to `auto-release.yml`, gated so a
-missing profile **skips** signing (like the Cosign/Sonar skips) rather than breaking the
-release.
+## 5. Decisions (resolved)
+
+- **Auth:** OIDC federation (secretless), bound to the `release` GitHub Environment
+  (subject `repo:AGOrcha/dot-agents:environment:release`) — wired by `azure-oidc-setup.sh`.
+- **Trust type:** Public Trust cert profile (for public `.exe`).
+- **Resource group / subscription:** `AGOrcha` / `32ca3366-…` (defaults in the scripts).
+- **Sign tooling:** cross-platform `dotnet sign` so it runs on the existing `ubuntu`
+  release runner (the `azure/trusted-signing-action` is Windows-only).
+
+Everything is wired and dormant. The only remaining step is yours: once identity
+validation reads `Completed`, run `./create-cert-profile.sh` and set
+`TRUSTED_SIGNING_PROFILE` — the next release then signs `da.exe`. A missing profile
+**skips** signing (like the Cosign/Sonar skips) rather than breaking the release.
