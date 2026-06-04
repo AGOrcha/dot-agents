@@ -12,19 +12,20 @@ import (
 
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
-	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 )
 
-// `da config relevance recompute` is the explicit driver event from the design
-// (.agents/proposals/skill-relevance-filter.md §6): it reads the scored
+// `da config relevance --recompute` is the explicit driver event from the design
+// (.agents/proposals/skill-relevance-filter.md §5/§6): it reads the scored
 // iteration corpus (iter-N.yaml + iter-N.score.yaml) and, per skill/agent/lens
 // the resolved execution_profile already lists, computes a contribution signal
 // — cited-in-passing vs cited-in-low-scoring vs never-cited — then emits a
 // proposed class (core | situational | noise) plus a gaps list of corpus-cited
 // units the profile does not yet classify.
 //
-// It is explicit-only and has no clock: nothing recomputes on a timer, and even
+// It is a flag on `da config relevance` (not a subcommand) so the public surface
+// matches the design contract `da config relevance --recompute [--write]`. It is
+// explicit-only and has no clock: nothing recomputes on a timer, and even
 // --write only emits a PROPOSED profile-layer diff for a human to accept — it
 // never auto-applies (config-v2 D4/D5: content-hash, offline, explicit-only).
 
@@ -45,20 +46,8 @@ const minCitationsForCore = 2
 // iter-N.score.yaml.
 var recomputeIterationLogDirParts = []string{".agents", "active", "iteration-log"}
 
-// runRecomputeOptions captures one `recompute` invocation. stdout/stderr/cwd
-// are injected so the run path is table-drivable without going through cobra.
-type runRecomputeOptions struct {
-	appType string
-	stage   string
-	write   bool
-	jsonOut bool
-	stdout  io.Writer
-	stderr  io.Writer
-	cwd     string
-}
-
 // recomputeResult is the stable JSON shape emitted by
-// `da config relevance recompute --json`. It reports the resolution context,
+// `da config relevance --recompute --json`. It reports the resolution context,
 // the per-unit proposals, the gaps, and the corpus digest that anchors
 // freshness (the D4 nudge surface).
 type recomputeResult struct {
@@ -137,67 +126,18 @@ func (s unitSignal) label() string {
 	return signalCitedInPassing
 }
 
-// newRelevanceRecomputeCmd builds `da config relevance recompute`. It is a
-// subcommand of `relevance` rather than a flag so the inspector path
-// (`relevance --filter …`) stays free of the heavier corpus read and the
-// recompute path keeps its own --write/--stage/--app-type surface.
-func newRelevanceRecomputeCmd(deps Deps) *cobra.Command {
-	opts := &runRecomputeOptions{}
-	cmd := &cobra.Command{
-		Use:   "recompute",
-		Short: "Recompute unit relevance from the scored iteration corpus (explicit-only)",
-		Long: `Recompute the core/situational/noise classification of the units an app_type's
-execution_profile already lists, from the scored iteration corpus
-(.agents/active/iteration-log/iter-N.yaml + iter-N.score.yaml).
-
-For each unit a contribution signal is computed (design
-.agents/proposals/skill-relevance-filter.md §6):
-
-  cited-in-passing       cited mostly in good-scoring iterations -> keep/promote
-  cited-in-low-scoring   cited mostly in low-scoring iterations  -> noise candidate
-  never-cited            never cited in the corpus               -> noise candidate
-
-The recompute is explicit-only and has no clock: it runs only when invoked, and
---write emits a PROPOSED execution_profile layer diff for a human to accept — it
-never auto-applies. The corpus content digest is reported so freshness can be
-tracked (config-v2 D4).`,
-		Example: exampleBlock(
-			"  da config relevance recompute --app-type go-cli",
-			"  da config relevance recompute --app-type go-cli --stage review",
-			"  da config relevance recompute --app-type go-cli --write",
-			"  da config relevance recompute --app-type go-cli --json",
-		),
-		Args: deps.MaximumNArgsWithHints(0, "`da config relevance recompute` takes no positional args; use --app-type / --stage / --write."),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.stdout = cmd.OutOrStdout()
-			opts.stderr = cmd.ErrOrStderr()
-			opts.jsonOut = deps.jsonFlag()
-			if opts.cwd == "" {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return deps.ErrorWithHints("could not resolve current directory", err.Error())
-				}
-				opts.cwd = cwd
-			}
-			return runRecompute(opts, deps)
-		},
-	}
-	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type whose profile to recompute (required)")
-	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the recompute to one stage (default: every declared stage)")
-	cmd.Flags().BoolVar(&opts.write, "write", false, "Emit a PROPOSED execution_profile layer diff (never auto-applies)")
-	return cmd
-}
-
-// runRecompute is the test-friendly entry point — it receives an
-// already-prepared runRecomputeOptions so tests can stub cwd/stdout/stderr
-// without cobra.
-func runRecompute(opts *runRecomputeOptions, deps Deps) error {
+// runRecompute is the explicit driver-event path reached when
+// `da config relevance --recompute` is set. It shares the runRelevanceOptions
+// flag struct with the inspector path — recompute reads --app-type/--stage and
+// (with --write) emits a proposed layer diff — so the public surface is the
+// single `da config relevance` command the design (§5) specifies.
+func runRecompute(opts *runRelevanceOptions, deps Deps) error {
 	opts.appType = strings.TrimSpace(opts.appType)
 	opts.stage = strings.TrimSpace(opts.stage)
 	if opts.appType == "" {
 		return deps.UsageError(
-			"recompute requires --app-type",
-			"Name the app_type whose profile to recompute, e.g. --app-type go-cli.",
+			"--recompute requires --app-type",
+			"Name the app_type whose profile to recompute, e.g. --recompute --app-type go-cli.",
 		)
 	}
 
@@ -355,7 +295,7 @@ func structuredUnitTokens(rec scoring.IterationRecord) []string {
 // lists for the app_type (× stage) from the corpus signal, collects gaps, and
 // — when --write — assembles the proposed layer. No I/O happens here, so it is
 // fully table-drivable.
-func buildRecomputeResult(opts *runRecomputeOptions, profile *cfg.ExecutionProfile, corpus scoredCorpus) recomputeResult {
+func buildRecomputeResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfile, corpus scoredCorpus) recomputeResult {
 	result := recomputeResult{
 		AppType:           opts.appType,
 		Stage:             opts.stage,
@@ -578,7 +518,7 @@ func proposedLayer(appType string, proposals []unitProposal, defaultClass string
 
 // renderRecompute emits the result as JSON (stable envelope) or as the
 // human-readable proposal view.
-func renderRecompute(opts *runRecomputeOptions, result recomputeResult) error {
+func renderRecompute(opts *runRelevanceOptions, result recomputeResult) error {
 	if opts.jsonOut {
 		return writeJSON(opts.stdout, result)
 	}

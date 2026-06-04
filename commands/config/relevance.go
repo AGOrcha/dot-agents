@@ -91,6 +91,14 @@ type runRelevanceOptions struct {
 	appType string
 	stage   string
 	task    string
+	// recompute switches the command from the inspector path to the explicit
+	// driver-event path (design §5: `da config relevance --recompute [--write]`).
+	// It is a flag rather than a subcommand so the public surface matches the
+	// design contract exactly.
+	recompute bool
+	// write is honored only with --recompute: it emits a PROPOSED
+	// execution_profile layer diff (never auto-applied).
+	write   bool
 	jsonOut bool
 	stdout  io.Writer
 	stderr  io.Writer
@@ -118,14 +126,24 @@ evolvable as new facets land. The app_type is selected by, in precedence order:
   3. the --app-type flag.
 An app_type with no profile entry is not an error — defaults/empty facets are
 rendered (nothing unlisted is silently dropped). --json emits a stable envelope
-documented on the relevanceResult type in this package.`,
+documented on the relevanceResult type in this package.
+
+--recompute switches to the explicit driver-event path (design §5/§6): it reads
+the scored iteration corpus (.agents/active/iteration-log/iter-N.yaml +
+iter-N.score.yaml) and proposes core/situational/noise class changes per unit
+from a contribution signal, plus a gaps list of cited-but-unclassified units.
+With --write it emits a PROPOSED execution_profile layer diff for a human to
+accept — it never auto-applies, and it has no clock (explicit-only, config-v2
+D4). The recompute envelope is documented on the recomputeResult type.`,
 		Example: exampleBlock(
 			"  da config relevance --filter units --app-type go-cli --stage review",
 			"  da config relevance --filter topology --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --filter lenses --app-type ideation",
+			"  da config relevance --recompute --app-type go-cli",
+			"  da config relevance --recompute --app-type go-cli --write",
 			"  da config relevance --json",
 		),
-		Args: deps.MaximumNArgsWithHints(0, "`da config relevance` takes no positional args; use --app-type / --task / --stage / --filter."),
+		Args: deps.MaximumNArgsWithHints(0, "`da config relevance` takes no positional args; use --app-type / --task / --stage / --filter / --recompute."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.stdout = cmd.OutOrStdout()
 			opts.stderr = cmd.ErrOrStderr()
@@ -144,11 +162,13 @@ documented on the relevanceResult type in this package.`,
 	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
-	// recompute is the explicit driver-event subcommand (t4): it reads the
-	// scored iteration corpus and proposes relevance-class changes. Kept as a
-	// subcommand so the inspector path above stays free of the heavier corpus
-	// read. See relevance_recompute.go.
-	cmd.AddCommand(newRelevanceRecomputeCmd(deps))
+	// recompute is the explicit driver event (design §5): it reads the scored
+	// iteration corpus and proposes relevance-class changes. It is a flag on this
+	// command (not a subcommand) so the public surface matches the design
+	// contract `da config relevance --recompute [--write]`. See
+	// relevance_recompute.go.
+	cmd.Flags().BoolVar(&opts.recompute, "recompute", false, "Recompute unit relevance from the scored iteration corpus (explicit-only driver event)")
+	cmd.Flags().BoolVar(&opts.write, "write", false, "With --recompute: emit a PROPOSED execution_profile layer diff (never auto-applies)")
 	return cmd
 }
 
@@ -156,6 +176,21 @@ documented on the relevanceResult type in this package.`,
 // already-prepared runRelevanceOptions so tests can stub cwd/stdout/stderr
 // without cobra.
 func runRelevance(opts *runRelevanceOptions, deps Deps) error {
+	// --recompute switches to the explicit driver-event path before any
+	// inspector-only setup (--filter normalisation) runs: recompute slices by
+	// --app-type/--stage, not by --filter, so the two paths share flags but not
+	// resolution. See relevance_recompute.go.
+	if opts.recompute {
+		return runRecompute(opts, deps)
+	}
+	// --write is meaningful only for --recompute; flag it loudly rather than
+	// silently ignoring it on the inspector path.
+	if opts.write {
+		return deps.UsageError(
+			"--write only applies with --recompute",
+			"Add --recompute to emit a proposed execution_profile layer diff, or drop --write.",
+		)
+	}
 	if err := normalizeFilter(opts, deps); err != nil {
 		return err
 	}

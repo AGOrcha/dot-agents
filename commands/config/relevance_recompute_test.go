@@ -41,16 +41,20 @@ const recomputeRepoBody = `{
   }
 }`
 
-func mustRecomputeOptions(project string) *runRecomputeOptions {
-	return &runRecomputeOptions{
-		appType: "go-cli",
-		stdout:  &bytes.Buffer{},
-		stderr:  &bytes.Buffer{},
-		cwd:     project,
+// mustRecomputeOptions builds a runRelevanceOptions already switched to the
+// recompute path (--recompute) so the shared command struct exercises the
+// driver-event flow exactly as `da config relevance --recompute` does.
+func mustRecomputeOptions(project string) *runRelevanceOptions {
+	return &runRelevanceOptions{
+		recompute: true,
+		appType:   "go-cli",
+		stdout:    &bytes.Buffer{},
+		stderr:    &bytes.Buffer{},
+		cwd:       project,
 	}
 }
 
-func recomputeOut(opts *runRecomputeOptions) string {
+func recomputeOut(opts *runRelevanceOptions) string {
 	return opts.stdout.(*bytes.Buffer).String()
 }
 
@@ -158,7 +162,7 @@ func TestRunRecompute_RequiresAppType(t *testing.T) {
 	project := withRepoLayer(t, recomputeRepoBody, "")
 	opts := mustRecomputeOptions(project)
 	opts.appType = "  "
-	err := runRecompute(opts, testDeps())
+	err := runRelevance(opts, testDeps())
 	if err == nil {
 		t.Fatal("expected error when --app-type is empty")
 	}
@@ -179,7 +183,7 @@ func TestRunRecompute_NoManifest(t *testing.T) {
 	t.Setenv("AGENTS_HOME", filepath.Join(root, "home", ".agents"))
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "cache"))
 	opts := mustRecomputeOptions(filepath.Join(root, "no-project"))
-	if err := runRecompute(opts, testDeps()); err == nil {
+	if err := runRelevance(opts, testDeps()); err == nil {
 		t.Fatal("expected error when no .agentsrc.json exists")
 	}
 }
@@ -189,7 +193,7 @@ func TestRunRecompute_NoManifest(t *testing.T) {
 func TestRunRecompute_BadProfile(t *testing.T) {
 	project := withRepoLayer(t, `{"repo_id":"x","execution_profile":"not-an-object"}`, "")
 	opts := mustRecomputeOptions(project)
-	if err := runRecompute(opts, testDeps()); err == nil {
+	if err := runRelevance(opts, testDeps()); err == nil {
 		t.Fatal("expected error decoding a non-object execution_profile")
 	}
 }
@@ -206,7 +210,7 @@ func TestRunRecompute_BadScoreSidecar(t *testing.T) {
 		t.Fatalf("write bad score: %v", err)
 	}
 	opts := mustRecomputeOptions(project)
-	if err := runRecompute(opts, testDeps()); err == nil {
+	if err := runRelevance(opts, testDeps()); err == nil {
 		t.Fatal("expected error parsing a malformed score sidecar")
 	}
 }
@@ -217,7 +221,7 @@ func TestRunRecompute_BadIterLog(t *testing.T) {
 	project := withRepoLayer(t, recomputeRepoBody, "")
 	seedIter(t, project, 1, "schema_version: 2\niteration: 1\nimpl: [not, a, map]\n")
 	opts := mustRecomputeOptions(project)
-	if err := runRecompute(opts, testDeps()); err == nil {
+	if err := runRelevance(opts, testDeps()); err == nil {
 		t.Fatal("expected error parsing a malformed iteration log")
 	}
 }
@@ -237,7 +241,7 @@ func TestRunRecompute_HappyHuman(t *testing.T) {
 	seedScore(t, project, 3, true, 0.2)
 
 	opts := mustRecomputeOptions(project)
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute: %v", err)
 	}
 	out := recomputeOut(opts)
@@ -266,7 +270,7 @@ func TestRunRecompute_JSON(t *testing.T) {
 
 	opts := mustRecomputeOptions(project)
 	opts.jsonOut = true
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute: %v", err)
 	}
 	var got recomputeResult
@@ -296,7 +300,7 @@ func TestRunRecompute_WriteEmitsProposedLayer(t *testing.T) {
 
 	opts := mustRecomputeOptions(project)
 	opts.write = true
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute: %v", err)
 	}
 	out := recomputeOut(opts)
@@ -316,7 +320,7 @@ func TestRunRecompute_WriteJSONCarriesProposedLayer(t *testing.T) {
 	opts := mustRecomputeOptions(project)
 	opts.write = true
 	opts.jsonOut = true
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute: %v", err)
 	}
 	var got recomputeResult
@@ -336,7 +340,7 @@ func TestRunRecompute_WriteJSONCarriesProposedLayer(t *testing.T) {
 func TestRunRecompute_EmptyCorpus(t *testing.T) {
 	project := withRepoLayer(t, recomputeRepoBody, "")
 	opts := mustRecomputeOptions(project)
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute on empty corpus: %v", err)
 	}
 	out := recomputeOut(opts)
@@ -354,7 +358,7 @@ func TestRunRecompute_NoUnitsForAppType(t *testing.T) {
 	project := withRepoLayer(t, recomputeRepoBody, "")
 	opts := mustRecomputeOptions(project)
 	opts.appType = "ideation" // not listed in fixture
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute: %v", err)
 	}
 	out := recomputeOut(opts)
@@ -369,7 +373,7 @@ func TestRunRecompute_StageRestrict(t *testing.T) {
 	project := withRepoLayer(t, recomputeRepoBody, "")
 	opts := mustRecomputeOptions(project)
 	opts.stage = "verify"
-	if err := runRecompute(opts, testDeps()); err != nil {
+	if err := runRelevance(opts, testDeps()); err != nil {
 		t.Fatalf("runRecompute: %v", err)
 	}
 	out := recomputeOut(opts)
@@ -411,7 +415,7 @@ func TestBuildRecomputeResult_Classification(t *testing.T) {
 			{iteration: 4, haystack: "riser", scored: false, value: 0},
 		},
 	}
-	opts := &runRecomputeOptions{appType: "go-cli"}
+	opts := &runRelevanceOptions{recompute: true, appType: "go-cli"}
 	res := buildRecomputeResult(opts, profile, corpus)
 
 	byUnit := map[string]unitProposal{}
@@ -745,25 +749,29 @@ func TestProposedClassSuffix(t *testing.T) {
 
 // ---------- cobra command wiring ----------
 
-func TestNewRelevanceRecomputeCmd(t *testing.T) {
-	cmd := newRelevanceRecomputeCmd(testDeps())
-	if cmd.Use != "recompute" {
-		t.Fatalf("Use = %q", cmd.Use)
-	}
-	if cmd.Flags().Lookup("app-type") == nil {
-		t.Fatal("missing --app-type flag")
+// TestRelevanceCmd_RecomputeFlagRegistered asserts the recompute path is exposed
+// as a flag on `da config relevance` (design §5: `--recompute [--write]`), not a
+// subcommand — the surface that was reworked here.
+func TestRelevanceCmd_RecomputeFlagRegistered(t *testing.T) {
+	cmd := newRelevanceCmd(testDeps())
+	if cmd.Flags().Lookup("recompute") == nil {
+		t.Fatal("missing --recompute flag on `relevance`")
 	}
 	if cmd.Flags().Lookup("write") == nil {
-		t.Fatal("missing --write flag")
+		t.Fatal("missing --write flag on `relevance`")
 	}
-	if cmd.Flags().Lookup("stage") == nil {
-		t.Fatal("missing --stage flag")
+	// recompute must NOT have re-appeared as a subcommand.
+	for _, sub := range cmd.Commands() {
+		if sub.Name() == "recompute" {
+			t.Fatal("recompute should be a flag, not a subcommand")
+		}
 	}
 }
 
-// TestRelevanceRecomputeCmd_RunEEndToEnd drives the cobra RunE closure (cwd
-// resolution + dispatch) by executing the command in a real project dir.
-func TestRelevanceRecomputeCmd_RunEEndToEnd(t *testing.T) {
+// TestRelevanceCmd_RecomputeRunEEndToEnd drives the cobra RunE closure (cwd
+// resolution + dispatch into the recompute path) via `--recompute` in a real
+// project dir.
+func TestRelevanceCmd_RecomputeRunEEndToEnd(t *testing.T) {
 	project := withRepoLayer(t, recomputeRepoBody, "")
 	seedIter(t, project, 1, iterBody(1, "ran unit", "unit"))
 	seedScore(t, project, 1, true, 0.9)
@@ -771,16 +779,40 @@ func TestRelevanceRecomputeCmd_RunEEndToEnd(t *testing.T) {
 	// Run from inside the project so os.Getwd in the closure resolves there.
 	t.Chdir(project)
 
-	cmd := newRelevanceRecomputeCmd(testDeps())
+	cmd := newRelevanceCmd(testDeps())
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--app-type", "go-cli"})
+	cmd.SetArgs([]string{"--recompute", "--app-type", "go-cli"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute: %v\n%s", err, out.String())
 	}
 	if !strings.Contains(out.String(), "Relevance recompute (app_type: go-cli)") {
 		t.Fatalf("unexpected output:\n%s", out.String())
+	}
+}
+
+// TestRelevanceCmd_WriteWithoutRecomputeIsUsageError guards the inspector path
+// from a stray --write: it only applies with --recompute, so it must be flagged
+// rather than silently ignored.
+func TestRelevanceCmd_WriteWithoutRecomputeIsUsageError(t *testing.T) {
+	project := withRepoLayer(t, recomputeRepoBody, "")
+	opts := &runRelevanceOptions{
+		write:  true, // no --recompute
+		stdout: &bytes.Buffer{},
+		stderr: &bytes.Buffer{},
+		cwd:    project,
+	}
+	err := runRelevance(opts, testDeps())
+	if err == nil {
+		t.Fatal("expected a usage error for --write without --recompute")
+	}
+	he, ok := err.(*hintError)
+	if !ok {
+		t.Fatalf("expected hintError, got %T", err)
+	}
+	if !strings.Contains(he.message, "--write only applies with --recompute") {
+		t.Fatalf("unexpected message: %q", he.message)
 	}
 }
 
