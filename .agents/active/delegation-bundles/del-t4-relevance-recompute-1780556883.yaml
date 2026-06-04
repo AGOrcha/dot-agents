@@ -1,0 +1,28 @@
+schema_version: 1
+delegation_id: del-t4-relevance-recompute-1780556883
+plan_id: config-relevance-profiles
+task_id: t4-relevance-recompute
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-04T07:08:03Z"
+scope:
+    write_scope:
+        - commands/config/relevance_recompute.go
+        - commands/config/relevance_recompute_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

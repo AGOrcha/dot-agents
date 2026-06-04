@@ -1,0 +1,17 @@
+schema_version: 1
+id: del-t4-relevance-recompute-1780556883
+mode: delegated
+parent_plan_id: config-relevance-profiles
+parent_task_id: t4-relevance-recompute
+title: da config relevance --recompute from iter-log/score corpus
+summary: Delegated from plan config relevance — workflow execution profiles (R1)
+write_scope:
+    - commands/config/relevance_recompute.go
+    - commands/config/relevance_recompute_test.go
+success_criteria: '--recompute reads .agents/active/iteration-log/iter-N.yaml + iter-N.score.yaml; per-unit contribution signal (cited-in-passing vs low-scoring vs never-cited); print core/situational/noise + gaps; --write emits a PROPOSED profile-layer diff (never auto-apply); explicit-only, no clock (config-v2 D4). STEALTH: no AI attribution.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-06-04T07:08:03Z"
+updated_at: "2026-06-04T07:08:03Z"
