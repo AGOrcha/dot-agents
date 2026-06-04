@@ -235,9 +235,11 @@ func TestRunRecompute_HappyHuman(t *testing.T) {
 	seedScore(t, project, 1, true, 0.9)
 	seedIter(t, project, 2, iterBody(2, "more work", "unit"))
 	seedScore(t, project, 2, true, 0.8)
-	// "self-review" never cited -> proposed noise (changed from situational).
-	// "review-pr" cited once in a low-scoring iteration -> noise.
-	seedIter(t, project, 3, iterBody(3, "ran review-pr lens", "cli-runner"))
+	// "self-review" cited only in a low-scoring iteration -> actively suppressed
+	// to noise (changed from situational). This is the suppression path that
+	// requires real negative evidence, not silence (the silent-zero guard means
+	// a never-cited unit would simply hold its class).
+	seedIter(t, project, 3, iterBody(3, "ran self-review lens", "cli-runner"))
 	seedScore(t, project, 3, true, 0.2)
 
 	opts := mustRecomputeOptions(project)
@@ -252,7 +254,7 @@ func TestRunRecompute_HappyHuman(t *testing.T) {
 		"inputs_digest   :",
 		"proposals",
 		"self-review",
-		"never-cited",
+		"cited-in-low-scoring",
 		"-> noise",
 	} {
 		if !strings.Contains(out, want) {
@@ -449,7 +451,10 @@ func TestProposedClass(t *testing.T) {
 		sig     unitSignal
 		want    string
 	}{
-		{"never cited -> noise", "core", unitSignal{}, "noise"},
+		// Silent-zero guard: no evidence holds the current class (never demotes).
+		{"never cited holds core", "core", unitSignal{}, "core"},
+		{"never cited holds situational", "situational", unitSignal{}, "situational"},
+		{"never cited holds noise", "noise", unitSignal{}, "noise"},
 		{"low scoring -> noise", "situational", unitSignal{lowScoring: 3, passing: 1}, "noise"},
 		{"two passing -> core", "situational", unitSignal{passing: 2}, "core"},
 		{"one passing -> situational", "core", unitSignal{passing: 1}, "situational"},

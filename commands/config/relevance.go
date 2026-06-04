@@ -68,6 +68,24 @@ type unitsFacet struct {
 	// ByStage maps a stage name to its resolved classes. Stages are sorted in
 	// the human render for determinism; the JSON map carries them all.
 	ByStage map[string]cfg.RelevanceClasses `json:"by_stage"`
+	// WorkingSet maps a stage name to the resolved working set the profile
+	// actually yields once noise is suppressed: the kept (core + situational)
+	// units and the suppressed (noise) units, in input order. This is the live
+	// product of ExecutionProfile.SuppressNoise — the design's reversible-view
+	// filter (§2) made visible, so the command shows what the noise class does
+	// rather than just listing it.
+	WorkingSet map[string]workingSetView `json:"working_set"`
+}
+
+// workingSetView is the rendered form of a resolved cfg.WorkingSet for one
+// stage: the effective working set after suppression plus the suppressed units
+// it set aside. Suppression is a reversible view, so both lists are reported.
+type workingSetView struct {
+	// Kept is the effective working set (core + situational), in input order.
+	Kept []string `json:"kept"`
+	// Suppressed is the noise-classed units filtered out of the working set, in
+	// input order. Retained (not deleted) so the view is reversible.
+	Suppressed []string `json:"suppressed"`
 }
 
 // topologyFacet is the executor:verifier:reviewer fan-out for the app_type.
@@ -358,7 +376,7 @@ func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfi
 	prof := appTypeProfile(profile, appType)
 
 	if opts.filter == filterUnits || opts.filter == filterAll {
-		result.Units = buildUnitsFacet(profile, prof, opts.stage)
+		result.Units = buildUnitsFacet(profile, prof, appType, opts.stage)
 		result.Stage = opts.stage
 	}
 	if opts.filter == filterTopology || opts.filter == filterAll {
@@ -393,8 +411,10 @@ func appTypeProfile(profile *cfg.ExecutionProfile, appType string) cfg.AppTypePr
 // buildUnitsFacet renders facet 1. When stage is non-empty only that stage is
 // included; otherwise every stage declared for the app_type is included. The
 // DefaultClass is surfaced so the operator can see what unlisted units resolve
-// to.
-func buildUnitsFacet(profile *cfg.ExecutionProfile, prof cfg.AppTypeProfile, stage string) *unitsFacet {
+// to. For every included stage it also resolves the working set through
+// ExecutionProfile.SuppressNoise, so the noise filter is shown as the live
+// kept/suppressed view it produces rather than a static class list.
+func buildUnitsFacet(profile *cfg.ExecutionProfile, prof cfg.AppTypeProfile, appType, stage string) *unitsFacet {
 	byStage := map[string]cfg.RelevanceClasses{}
 	if prof.Relevance != nil {
 		if stage != "" {
@@ -407,10 +427,44 @@ func buildUnitsFacet(profile *cfg.ExecutionProfile, prof cfg.AppTypeProfile, sta
 			}
 		}
 	}
+	working := map[string]workingSetView{}
+	for s, classes := range byStage {
+		working[s] = resolveWorkingSet(profile, appType, s, classes)
+	}
 	return &unitsFacet{
 		DefaultClass: profile.EffectiveDefaultClass(),
 		ByStage:      byStage,
+		WorkingSet:   working,
 	}
+}
+
+// resolveWorkingSet runs the live noise filter for one stage: it feeds the
+// stage's listed candidates through ExecutionProfile.SuppressNoise and projects
+// the resulting reversible WorkingSet into the kept/suppressed view. This is the
+// production caller for the suppression API — the resolved working set the
+// design (§2) promises, computed rather than merely described.
+func resolveWorkingSet(profile *cfg.ExecutionProfile, appType, stage string, classes cfg.RelevanceClasses) workingSetView {
+	ws := profile.SuppressNoise(appType, stage, stageCandidates(classes))
+	return workingSetView{Kept: ws.Kept(), Suppressed: ws.Suppressed()}
+}
+
+// stageCandidates returns every unit a stage lists across its three classes, in
+// a stable order (core, then situational, then noise) with duplicates removed,
+// so a unit (mis)listed in two classes is offered to the filter once. This is
+// the candidate set the noise filter classifies.
+func stageCandidates(classes cfg.RelevanceClasses) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{classes.Core, classes.Situational, classes.Noise} {
+		for _, u := range list {
+			if u == "" || seen[u] {
+				continue
+			}
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // buildTopologyFacet renders facet 2 from the resolved profile's topology.
@@ -489,6 +543,10 @@ func printUnitsHuman(w io.Writer, units *unitsFacet, stage string) {
 		fmt.Fprintf(w, "    core        : %s\n", joinUnits(classes.Core))
 		fmt.Fprintf(w, "    situational : %s\n", joinUnits(classes.Situational))
 		fmt.Fprintf(w, "    noise       : %s\n", joinUnits(classes.Noise))
+		if ws, ok := units.WorkingSet[s]; ok {
+			fmt.Fprintf(w, "    working_set : %s\n", joinUnits(ws.Kept))
+			fmt.Fprintf(w, "    suppressed  : %s\n", joinUnits(ws.Suppressed))
+		}
 	}
 	fmt.Fprintln(w)
 }

@@ -443,7 +443,11 @@ func isUnitByte(b byte) bool {
 
 // proposedClass maps the current class plus the corpus signal to a proposed
 // class, conservatively:
-//   - never-cited or cited-in-low-scoring -> noise candidate (suppress)
+//   - never-cited (NO evidence at all) -> KEEP the current class. Absence of
+//     evidence is not evidence of irrelevance: an empty or zero-signal corpus
+//     must never mass-demote a unit to noise. Only an active low-scoring signal
+//     suppresses; silence holds the status quo.
+//   - cited-in-low-scoring (active negative evidence) -> noise candidate (suppress)
 //   - cited-in-passing with enough citations -> core (promote)
 //   - cited-in-passing but thin evidence -> situational (hold)
 //
@@ -452,7 +456,14 @@ func isUnitByte(b byte) bool {
 // suppression is not casually overturned by a single new mention.
 func proposedClass(current string, sig unitSignal) string {
 	switch sig.label() {
-	case signalNeverCited, signalCitedInLowScoring:
+	case signalNeverCited:
+		// No corpus evidence for this unit. Hold the current class so a corpus
+		// that says nothing about a unit (an empty/unscored corpus says nothing
+		// about every unit) never demotes it. This is the silent-zero guard.
+		return current
+	case signalCitedInLowScoring:
+		// Active negative evidence: the unit was cited but predominantly in
+		// low-scoring iterations -> propose suppression.
 		return "noise"
 	default: // cited-in-passing
 		if sig.passing >= minCitationsForCore {

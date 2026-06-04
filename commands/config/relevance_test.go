@@ -367,7 +367,7 @@ func TestBuildUnitsFacet_AllStages(t *testing.T) {
 	snap, _, _ := loadFlatSnapshot(project)
 	profile, _ := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "go-cli")
-	units := buildUnitsFacet(profile, prof, "")
+	units := buildUnitsFacet(profile, prof, "go-cli", "")
 	if units.DefaultClass != "situational" {
 		t.Fatalf("default class %q", units.DefaultClass)
 	}
@@ -385,7 +385,7 @@ func TestBuildUnitsFacet_OneStage(t *testing.T) {
 	profile, _ := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "go-cli")
 
-	units := buildUnitsFacet(profile, prof, "review")
+	units := buildUnitsFacet(profile, prof, "go-cli", "review")
 	if len(units.ByStage) != 1 {
 		t.Fatalf("expected single stage, got %d", len(units.ByStage))
 	}
@@ -394,7 +394,7 @@ func TestBuildUnitsFacet_OneStage(t *testing.T) {
 	}
 
 	// A stage with no declared classes yields an empty ByStage.
-	missing := buildUnitsFacet(profile, prof, "verify")
+	missing := buildUnitsFacet(profile, prof, "go-cli", "verify")
 	if len(missing.ByStage) != 0 {
 		t.Fatalf("expected no stages for undeclared stage, got %d", len(missing.ByStage))
 	}
@@ -405,7 +405,7 @@ func TestBuildUnitsFacet_NoRelevance(t *testing.T) {
 	snap, _, _ := loadFlatSnapshot(project)
 	profile, _ := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "ideation") // ideation has no relevance map
-	units := buildUnitsFacet(profile, prof, "")
+	units := buildUnitsFacet(profile, prof, "ideation", "")
 	if len(units.ByStage) != 0 {
 		t.Fatalf("expected empty by_stage for app_type without relevance")
 	}
