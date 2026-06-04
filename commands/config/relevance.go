@@ -68,6 +68,24 @@ type unitsFacet struct {
 	// ByStage maps a stage name to its resolved classes. Stages are sorted in
 	// the human render for determinism; the JSON map carries them all.
 	ByStage map[string]cfg.RelevanceClasses `json:"by_stage"`
+	// WorkingSet maps a stage name to the resolved working set the profile
+	// actually yields once noise is suppressed: the kept (core + situational)
+	// units and the suppressed (noise) units, in input order. This is the live
+	// product of ExecutionProfile.SuppressNoise — the design's reversible-view
+	// filter (§2) made visible, so the command shows what the noise class does
+	// rather than just listing it.
+	WorkingSet map[string]workingSetView `json:"working_set"`
+}
+
+// workingSetView is the rendered form of a resolved cfg.WorkingSet for one
+// stage: the effective working set after suppression plus the suppressed units
+// it set aside. Suppression is a reversible view, so both lists are reported.
+type workingSetView struct {
+	// Kept is the effective working set (core + situational), in input order.
+	Kept []string `json:"kept"`
+	// Suppressed is the noise-classed units filtered out of the working set, in
+	// input order. Retained (not deleted) so the view is reversible.
+	Suppressed []string `json:"suppressed"`
 }
 
 // topologyFacet is the executor:verifier:reviewer fan-out for the app_type.
@@ -91,6 +109,14 @@ type runRelevanceOptions struct {
 	appType string
 	stage   string
 	task    string
+	// recompute switches the command from the inspector path to the explicit
+	// driver-event path (design §5: `da config relevance --recompute [--write]`).
+	// It is a flag rather than a subcommand so the public surface matches the
+	// design contract exactly.
+	recompute bool
+	// write is honored only with --recompute: it emits a PROPOSED
+	// execution_profile layer diff (never auto-applied).
+	write   bool
 	jsonOut bool
 	stdout  io.Writer
 	stderr  io.Writer
@@ -118,14 +144,24 @@ evolvable as new facets land. The app_type is selected by, in precedence order:
   3. the --app-type flag.
 An app_type with no profile entry is not an error — defaults/empty facets are
 rendered (nothing unlisted is silently dropped). --json emits a stable envelope
-documented on the relevanceResult type in this package.`,
+documented on the relevanceResult type in this package.
+
+--recompute switches to the explicit driver-event path (design §5/§6): it reads
+the scored iteration corpus (.agents/active/iteration-log/iter-N.yaml +
+iter-N.score.yaml) and proposes core/situational/noise class changes per unit
+from a contribution signal, plus a gaps list of cited-but-unclassified units.
+With --write it emits a PROPOSED execution_profile layer diff for a human to
+accept — it never auto-applies, and it has no clock (explicit-only, config-v2
+D4). The recompute envelope is documented on the recomputeResult type.`,
 		Example: exampleBlock(
 			"  da config relevance --filter units --app-type go-cli --stage review",
 			"  da config relevance --filter topology --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --filter lenses --app-type ideation",
+			"  da config relevance --recompute --app-type go-cli",
+			"  da config relevance --recompute --app-type go-cli --write",
 			"  da config relevance --json",
 		),
-		Args: deps.MaximumNArgsWithHints(0, "`da config relevance` takes no positional args; use --app-type / --task / --stage / --filter."),
+		Args: deps.MaximumNArgsWithHints(0, "`da config relevance` takes no positional args; use --app-type / --task / --stage / --filter / --recompute."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			opts.stdout = cmd.OutOrStdout()
 			opts.stderr = cmd.ErrOrStderr()
@@ -144,6 +180,13 @@ documented on the relevanceResult type in this package.`,
 	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
+	// recompute is the explicit driver event (design §5): it reads the scored
+	// iteration corpus and proposes relevance-class changes. It is a flag on this
+	// command (not a subcommand) so the public surface matches the design
+	// contract `da config relevance --recompute [--write]`. See
+	// relevance_recompute.go.
+	cmd.Flags().BoolVar(&opts.recompute, "recompute", false, "Recompute unit relevance from the scored iteration corpus (explicit-only driver event)")
+	cmd.Flags().BoolVar(&opts.write, "write", false, "With --recompute: emit a PROPOSED execution_profile layer diff (never auto-applies)")
 	return cmd
 }
 
@@ -151,6 +194,21 @@ documented on the relevanceResult type in this package.`,
 // already-prepared runRelevanceOptions so tests can stub cwd/stdout/stderr
 // without cobra.
 func runRelevance(opts *runRelevanceOptions, deps Deps) error {
+	// --recompute switches to the explicit driver-event path before any
+	// inspector-only setup (--filter normalisation) runs: recompute slices by
+	// --app-type/--stage, not by --filter, so the two paths share flags but not
+	// resolution. See relevance_recompute.go.
+	if opts.recompute {
+		return runRecompute(opts, deps)
+	}
+	// --write is meaningful only for --recompute; flag it loudly rather than
+	// silently ignoring it on the inspector path.
+	if opts.write {
+		return deps.UsageError(
+			"--write only applies with --recompute",
+			"Add --recompute to emit a proposed execution_profile layer diff, or drop --write.",
+		)
+	}
 	if err := normalizeFilter(opts, deps); err != nil {
 		return err
 	}
@@ -318,7 +376,7 @@ func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfi
 	prof := appTypeProfile(profile, appType)
 
 	if opts.filter == filterUnits || opts.filter == filterAll {
-		result.Units = buildUnitsFacet(profile, prof, opts.stage)
+		result.Units = buildUnitsFacet(profile, prof, appType, opts.stage)
 		result.Stage = opts.stage
 	}
 	if opts.filter == filterTopology || opts.filter == filterAll {
@@ -353,8 +411,10 @@ func appTypeProfile(profile *cfg.ExecutionProfile, appType string) cfg.AppTypePr
 // buildUnitsFacet renders facet 1. When stage is non-empty only that stage is
 // included; otherwise every stage declared for the app_type is included. The
 // DefaultClass is surfaced so the operator can see what unlisted units resolve
-// to.
-func buildUnitsFacet(profile *cfg.ExecutionProfile, prof cfg.AppTypeProfile, stage string) *unitsFacet {
+// to. For every included stage it also resolves the working set through
+// ExecutionProfile.SuppressNoise, so the noise filter is shown as the live
+// kept/suppressed view it produces rather than a static class list.
+func buildUnitsFacet(profile *cfg.ExecutionProfile, prof cfg.AppTypeProfile, appType, stage string) *unitsFacet {
 	byStage := map[string]cfg.RelevanceClasses{}
 	if prof.Relevance != nil {
 		if stage != "" {
@@ -367,10 +427,44 @@ func buildUnitsFacet(profile *cfg.ExecutionProfile, prof cfg.AppTypeProfile, sta
 			}
 		}
 	}
+	working := map[string]workingSetView{}
+	for s, classes := range byStage {
+		working[s] = resolveWorkingSet(profile, appType, s, classes)
+	}
 	return &unitsFacet{
 		DefaultClass: profile.EffectiveDefaultClass(),
 		ByStage:      byStage,
+		WorkingSet:   working,
 	}
+}
+
+// resolveWorkingSet runs the live noise filter for one stage: it feeds the
+// stage's listed candidates through ExecutionProfile.SuppressNoise and projects
+// the resulting reversible WorkingSet into the kept/suppressed view. This is the
+// production caller for the suppression API — the resolved working set the
+// design (§2) promises, computed rather than merely described.
+func resolveWorkingSet(profile *cfg.ExecutionProfile, appType, stage string, classes cfg.RelevanceClasses) workingSetView {
+	ws := profile.SuppressNoise(appType, stage, stageCandidates(classes))
+	return workingSetView{Kept: ws.Kept(), Suppressed: ws.Suppressed()}
+}
+
+// stageCandidates returns every unit a stage lists across its three classes, in
+// a stable order (core, then situational, then noise) with duplicates removed,
+// so a unit (mis)listed in two classes is offered to the filter once. This is
+// the candidate set the noise filter classifies.
+func stageCandidates(classes cfg.RelevanceClasses) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{classes.Core, classes.Situational, classes.Noise} {
+		for _, u := range list {
+			if u == "" || seen[u] {
+				continue
+			}
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // buildTopologyFacet renders facet 2 from the resolved profile's topology.
@@ -449,6 +543,10 @@ func printUnitsHuman(w io.Writer, units *unitsFacet, stage string) {
 		fmt.Fprintf(w, "    core        : %s\n", joinUnits(classes.Core))
 		fmt.Fprintf(w, "    situational : %s\n", joinUnits(classes.Situational))
 		fmt.Fprintf(w, "    noise       : %s\n", joinUnits(classes.Noise))
+		if ws, ok := units.WorkingSet[s]; ok {
+			fmt.Fprintf(w, "    working_set : %s\n", joinUnits(ws.Kept))
+			fmt.Fprintf(w, "    suppressed  : %s\n", joinUnits(ws.Suppressed))
+		}
 	}
 	fmt.Fprintln(w)
 }

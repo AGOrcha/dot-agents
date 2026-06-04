@@ -39,7 +39,11 @@ const (
 	CategorySetUnion
 	// CategoryMapMerge: object maps — merge by key, recursing into nested maps;
 	// per-key value uses CategoryScalar semantics. Applies to verifier_profiles,
-	// features, kg.
+	// execution_profile, features, kg. For execution_profile this is what makes a
+	// scope override (or a recompute-proposed relevance diff) facet-independent:
+	// a higher layer that sets only one facet (e.g. relevance) deep-merges over
+	// the base, so the untouched topology/lenses facets are preserved instead of
+	// being wiped by a wholesale last-writer replace.
 	CategoryMapMerge
 	// CategoryOrderedReplace: arrays representing ordered execution — replaced
 	// wholesale by the highest-precedence writer (never merged). Applies to
@@ -58,6 +62,7 @@ var fieldCategories = map[string]MergeCategory{
 	"rules":                 CategorySetUnion,
 	"verifier_profiles":     CategoryMapMerge,
 	"app_type_verifier_map": CategoryMapMerge,
+	"execution_profile":     CategoryMapMerge,
 	"features":              CategoryMapMerge,
 	"kg":                    CategoryMapMerge,
 	"sources":               CategoryOrderedReplace,

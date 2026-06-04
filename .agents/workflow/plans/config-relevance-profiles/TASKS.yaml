@@ -44,7 +44,7 @@ tasks:
       app_type: go-cli
     - id: t4-relevance-recompute
       title: da config relevance --recompute from iter-log/score corpus
-      status: pending
+      status: in_progress
       depends_on:
         - t2-config-relevance-resolver
       blocks: []
