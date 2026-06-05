@@ -458,6 +458,15 @@ jobs:
           # (no scan-arg override needed).
           "$(go env GOPATH)/bin/gocovmerge" "${profiles[@]}" > coverage.out
 
+      # Provide the scanner's JRE on the runner so it does NOT download one from
+      # Sonar's CDN mid-run (that download intermittently 403s and failed this
+      # gate). Paired with sonar.scanner.skipJreProvisioning below.
+      - name: Set up Java (Sonar scanner JRE)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: SonarQube Scan (merged coverage)
         uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         env:
@@ -466,7 +475,11 @@ jobs:
           # qualitygate.wait blocks until SonarCloud finishes ingesting the
           # analysis, so the new-issues gate below can query issues/search and
           # get the just-uploaded results (not a stale prior analysis).
-          args: -Dsonar.qualitygate.wait=true
+          # skipJreProvisioning uses the runner's JAVA_HOME JRE instead of
+          # provisioning one from the Sonar CDN (avoids the transient HTTP 403).
+          args: >-
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.scanner.skipJreProvisioning=true
 
       # Free-tier replacement for the unassignable `dot-agents-strict` quality
       # gate: SonarCloud custom gates require a paid plan, so we enforce

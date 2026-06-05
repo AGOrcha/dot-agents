@@ -108,10 +108,23 @@ jobs:
           ./bin/da status
           ./bin/da doctor
 
+      # Provide the scanner's JRE on the runner so it does NOT download one from
+      # Sonar's CDN mid-run (that download intermittently 403s and fails the
+      # scan). Paired with sonar.scanner.skipJreProvisioning below.
+      - name: Set up Java (Sonar scanner JRE)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # Use the runner's JAVA_HOME JRE instead of provisioning one from the
+          # Sonar CDN (avoids the transient HTTP 403 on the JRE download).
+          args: -Dsonar.scanner.skipJreProvisioning=true
 
       - name: Install Cosign
         if: steps.check.outputs.exists == 'false'
