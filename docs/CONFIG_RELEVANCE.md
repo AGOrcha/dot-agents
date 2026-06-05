@@ -124,11 +124,14 @@ lenses
 `lens_concurrency` is `parallel`, `gated`, or `tiered`. `go-cli` gates three lenses; `ideation`
 runs a single `acceptance-invariants` lens in `parallel`.
 
-## JSON envelope
+## JSON envelope (the structure contract)
 
-`--json` wraps the requested facet(s) in a stable envelope. The resolution context
-(`app_type`, `app_type_source`, `matched`) is always at the **top level**; the facet payloads are
-nested:
+`--json` wraps the requested facet(s) in a stable envelope with **one consistent rule**:
+
+- **Resolution context** — `app_type`, `app_type_source`, `stage`, `filter`, and `matched` — is
+  always at the **top level**. It is *cross-facet*: with `--filter all` one resolution either
+  matched a profile or it did not, regardless of which facet you sliced.
+- **Facet payloads** — `topology`, `units`, `lenses` — nest under their own key.
 
 ```json
 {
@@ -145,8 +148,11 @@ nested:
 }
 ```
 
-`matched: false` means the resolved `app_type` had no profile entry — defaults render
-(`executors: 0`, empty facets). It is never an error.
+`matched` is therefore **not** a field of any facet — folding it into `topology` (or `units`/
+`lenses`) would duplicate it across facets and split one piece of state into three.
+**Consumers read the envelope (context + facet), never a bare facet object**, to recover whether
+the resolution matched. `matched: false` means the resolved `app_type` had no profile entry —
+defaults render (`executors: 0`, empty facets) — and is never an error.
 
 ## How the wave engine consumes topology
 
@@ -156,9 +162,10 @@ own shape — admitting tasks by summed executor **demand** against the slot bud
 `verifiers_per_executor` / `reviewers` / `verifier_sequence` into each worker prompt instead of
 slicing a flat per-wave count.
 
-Note the envelope shape above: `matched` is on the envelope, the fan-out fields are under
-`topology`. A task whose `app_type` has no profile (`matched: false`, `executors: 0`) falls back to
-a single-executor flat run, so an unmatched `app_type` degrades gracefully rather than failing.
+The engine **mirrors the envelope structure exactly** (per the contract above): each scouted task
+carries `matched` as a sibling of `topology`, never folded inside it. A task whose `app_type` has
+no profile (`matched: false`, `executors: 0`) falls back to a single-executor flat run, so an
+unmatched `app_type` degrades gracefully rather than failing.
 
 ## Recompute (the data-driven half)
 

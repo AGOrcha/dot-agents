@@ -33,6 +33,17 @@ var validFilters = []string{filterAll, filterLenses, filterTopology, filterUnits
 // `da config relevance --json`. It reports the resolution context (resolved
 // app_type, stage, the selector that won) alongside only the requested facet,
 // so scripts can pin the envelope while the facet payload varies by --filter.
+//
+// STRUCTURE CONTRACT (one consistent shape for every consumer): the resolution
+// context — AppType, AppTypeSource, Stage, Filter, and Matched — lives at the
+// ENVELOPE top level because it is cross-facet (with --filter all, one
+// resolution either matched a profile or did not, regardless of which of the
+// three facets is sliced). The facet payloads — Units, Topology, Lenses — nest
+// under their own key. Matched is therefore deliberately NOT a field of any
+// facet: folding it into Topology/Units/Lenses would duplicate it across facets
+// and split one piece of state into three. Consumers must read the ENVELOPE
+// (matched + the facet), never a bare facet object, to recover whether the
+// resolution matched. The ultracode-wave-engine mirrors this nesting exactly.
 type relevanceResult struct {
 	// AppType is the app_type the profile was resolved for, after the
 	// task -> plan-default -> --app-type precedence in resolveAppType.
