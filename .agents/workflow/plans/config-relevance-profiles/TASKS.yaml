@@ -3,7 +3,7 @@ plan_id: config-relevance-profiles
 tasks:
     - id: t1-profile-layer-schema
       title: execution_profile layer schema + Go types + validation
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -17,7 +17,7 @@ tasks:
       app_type: go-cli
     - id: t2-config-relevance-resolver
       title: da config relevance resolver + --filter inspector
-      status: in_progress
+      status: completed
       depends_on:
         - t1-profile-layer-schema
       blocks: []
@@ -31,7 +31,7 @@ tasks:
       app_type: go-cli
     - id: t3-noise-suppression
       title: suppress noise-classed units from the resolved working set
-      status: pending
+      status: completed
       depends_on:
         - t2-config-relevance-resolver
       blocks: []
@@ -44,7 +44,7 @@ tasks:
       app_type: go-cli
     - id: t4-relevance-recompute
       title: da config relevance --recompute from iter-log/score corpus
-      status: in_progress
+      status: completed
       depends_on:
         - t2-config-relevance-resolver
       blocks: []
@@ -57,7 +57,7 @@ tasks:
       app_type: go-cli
     - id: t5-wave-engine-topology
       title: wave engine consumes resolved topology per task
-      status: pending
+      status: completed
       depends_on:
         - t2-config-relevance-resolver
       blocks: []
@@ -69,7 +69,7 @@ tasks:
       app_type: go-cli
     - id: t6-example-profiles-docs
       title: go-cli + ideation example profiles + docs
-      status: pending
+      status: in_progress
       depends_on:
         - t2-config-relevance-resolver
       blocks: []

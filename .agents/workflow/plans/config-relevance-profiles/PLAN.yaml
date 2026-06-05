@@ -4,8 +4,8 @@ title: config relevance — workflow execution profiles (R1)
 status: active
 summary: ""
 created_at: "2026-06-04T03:02:57Z"
-updated_at: "2026-06-04T03:03:17Z"
+updated_at: "2026-06-05T18:06:57Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: ""
+current_focus_task: go-cli + ideation example profiles + docs
