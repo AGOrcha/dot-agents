@@ -80,3 +80,18 @@ tasks:
       verification_required: true
       notes: 'Add go-cli and ideation execution_profile examples; document da config relevance + the three facets. STEALTH: no AI attribution.'
       app_type: go-cli
+    - id: t7-cli-runner-verifier
+      title: cli-runner verifier profile + go-cli verifier_sequence wiring
+      status: in_progress
+      depends_on:
+        - t6-example-profiles-docs
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/prompts/verifiers/cli-runner.project.md
+        - .agentsrc.json
+        - docs/CONFIG_RELEVANCE.md
+        - .agents/workflow/specs/cli-runner-verifier/design.md
+      verification_required: true
+      notes: Create the cli-runner verifier-class profile (built-binary CLI smoke) as a sibling of unit. Prompt mirrors unit.project.md; builds da fresh, runs scripts/verify.sh floor plus task-scoped invocations, writes cli-runner.result.yaml. Add verifier_profiles.cli-runner; dual-write app_type_verifier_map.go-cli and topology.verifier_sequence to unit then cli-runner so the flat map and profile agree. Spec at .agents/workflow/specs/cli-runner-verifier/design.md. STEALTH mandate no AI attribution.
+      app_type: go-cli
