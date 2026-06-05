@@ -5,7 +5,8 @@
   ],
   "app_type_verifier_map": {
     "go-cli": [
-      "unit"
+      "unit",
+      "cli-runner"
     ]
   },
   "execution_profile": {
@@ -45,7 +46,8 @@
           "verifiers_per_executor": 2,
           "reviewers": "per_verifier",
           "verifier_sequence": [
-            "unit"
+            "unit",
+            "cli-runner"
           ]
         },
         "lenses": {
@@ -123,6 +125,12 @@
     }
   ],
   "verifier_profiles": {
+    "cli-runner": {
+      "label": "CLI runner (built-binary smoke)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/cli-runner.project.md"
+      ]
+    },
     "unit": {
       "label": "Unit (Go)",
       "prompt_files": [

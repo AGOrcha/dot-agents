@@ -89,18 +89,19 @@ topology
   executors              : 1
   verifiers_per_executor : 2
   reviewers              : per_verifier
-  verifier_sequence      : unit
+  verifier_sequence      : unit, cli-runner
 ```
 
 - **`executors`** — parallel executor workers for the task.
 - **`verifiers_per_executor`** — verifier passes per executor (`n` executors → `verifiers_per_executor·n`
-  verifier passes). `go-cli` runs **two independent verification passes** per executor for
-  higher confidence.
+  verifier passes). `go-cli` runs **two verifier passes** per executor — one per named profile in
+  the sequence below.
 - **`reviewers`** — reviewer fan-out as a keyword (`per_verifier`, `per_executor`) or a stringified
   integer count (`"0"` = no review gate, as in `ideation`).
 - **`verifier_sequence`** — the ordered verifier-profile ids (supersedes `app_type_verifier_map`).
-  When `verifiers_per_executor` exceeds the sequence length, the extra passes re-run the
-  app_type-default profile; here both passes run `unit`.
+  `go-cli` runs `unit` (Go tests — proves the code is correct) then `cli-runner` (builds the `da`
+  binary and exercises real CLI invocations — proves the wired-up command actually runs). The two
+  entries match `verifiers_per_executor: 2`, one pass per profile.
 
 `ideation` inverts the shape — wide divergence, no verification:
 
@@ -143,7 +144,7 @@ runs a single `acceptance-invariants` lens in `parallel`.
     "executors": 1,
     "verifiers_per_executor": 2,
     "reviewers": "per_verifier",
-    "verifier_sequence": ["unit"]
+    "verifier_sequence": ["unit", "cli-runner"]
   }
 }
 ```
