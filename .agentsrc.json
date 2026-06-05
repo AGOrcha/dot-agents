@@ -8,6 +8,84 @@
       "unit"
     ]
   },
+  "execution_profile": {
+    "by_app_type": {
+      "go-cli": {
+        "relevance": {
+          "orchestrate": {
+            "core": [
+              "orchestrator-session-start",
+              "plan-wave-picker",
+              "loop-worker"
+            ],
+            "noise": [
+              "article-extract",
+              "playwright"
+            ]
+          },
+          "verify": {
+            "core": [
+              "verifier",
+              "test-runner"
+            ]
+          },
+          "review": {
+            "core": [
+              "thermo-nuclear-code-quality-review",
+              "review-pr"
+            ],
+            "situational": [
+              "self-review",
+              "review-delta"
+            ]
+          }
+        },
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 2,
+          "reviewers": "per_verifier",
+          "verifier_sequence": [
+            "unit"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants",
+            "adversarial"
+          ],
+          "lens_concurrency": "gated"
+        }
+      },
+      "ideation": {
+        "relevance": {
+          "orchestrate": {
+            "core": [
+              "plan-wave-picker",
+              "deep-research",
+              "article-extract"
+            ],
+            "noise": [
+              "test-runner",
+              "loop-worker"
+            ]
+          }
+        },
+        "topology": {
+          "executors": 3,
+          "verifiers_per_executor": 0,
+          "reviewers": "0"
+        },
+        "lenses": {
+          "lens_set": [
+            "acceptance-invariants"
+          ],
+          "lens_concurrency": "parallel"
+        }
+      }
+    },
+    "default_class": "situational"
+  },
   "hooks": true,
   "mcp": [
     "code-review-graph",
