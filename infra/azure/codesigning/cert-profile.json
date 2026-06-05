@@ -1,0 +1,58 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2014-04-01-preview/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "accountName": {
+            "type": "string",
+            "defaultValue": "AGOrcha",
+            "metadata": {
+                "description": "Name of the existing Microsoft.CodeSigning account."
+            }
+        },
+        "profileName": {
+            "type": "string",
+            "defaultValue": "agorcha-public-trust",
+            "metadata": {
+                "description": "Certificate profile name. This is the value to set as the TRUSTED_SIGNING_PROFILE repo variable."
+            }
+        },
+        "profileType": {
+            "type": "string",
+            "defaultValue": "PublicTrust",
+            "allowedValues": [
+                "PublicTrust",
+                "PublicTrustTest",
+                "PrivateTrust",
+                "PrivateTrustCIPolicy",
+                "VBSEnclave"
+            ],
+            "metadata": {
+                "description": "Public Trust is required to distribute .exe to the public; PublicTrustTest needs no identity validation and is useful for a dry run."
+            }
+        },
+        "identityValidationId": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Id of the COMPLETED identity validation. Required for PublicTrust/PrivateTrust; leave empty for PublicTrustTest."
+            }
+        }
+    },
+    "resources": [
+        {
+            "apiVersion": "2025-10-13",
+            "type": "Microsoft.CodeSigning/codesigningaccounts/certificateProfiles",
+            "name": "[concat(parameters('accountName'), '/', parameters('profileName'))]",
+            "properties": {
+                "profileType": "[parameters('profileType')]",
+                "identityValidationId": "[parameters('identityValidationId')]"
+            }
+        }
+    ],
+    "outputs": {
+        "profileName": {
+            "type": "string",
+            "value": "[parameters('profileName')]"
+        }
+    }
+}

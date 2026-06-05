@@ -34,6 +34,14 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      # Authenticode-sign each built da.exe before it is archived, so the zipped
+      # binary carries the Trusted Signing signature. Gated: sign-windows.sh is a
+      # no-op until TRUSTED_SIGNING_PROFILE is set, so releases keep shipping
+      # (unsigned Windows binaries) until the Public Trust cert profile exists.
+      post:
+        - cmd: ./scripts/sign-windows.sh "{{ .Path }}"
+          output: true
     ldflags:
       - -s -w
       - -X github.com/AGOrcha/dot-agents/commands.Version={{.Version}}
