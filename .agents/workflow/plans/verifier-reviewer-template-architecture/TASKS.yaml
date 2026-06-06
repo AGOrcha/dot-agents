@@ -1,0 +1,88 @@
+schema_version: 1
+plan_id: verifier-reviewer-template-architecture
+tasks:
+    - id: p1a-reviewer-profiles-field
+      title: Add reviewer_profiles AgentsRC field (symmetric to verifier_profiles)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - internal/config/resolver.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: Add reviewer_profiles map[string]struct{label, prompt_files []} mirroring verifier_profiles. Follow schema-usage 6-place lifecycle (struct plus agentsRCCore mirror plus UnmarshalJSON plus MarshalJSON plus agentsRCKnown plus schema). Register CategoryMapMerge in resolver.go so it scope-merges like verifier_profiles. Keyed by lens architecture-standards, acceptance-invariants, adversarial. Table-driven tests, per-file 95 percent coverage. STEALTH mandate no AI attribution.
+      app_type: go-cli
+    - id: p1b-product-bases
+      title: Author product-scope bases + Phase-1 per-type/per-lens templates in starter
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/prompts/verifiers
+        - internal/scaffold/home/starter/prompts/reviewers
+      verification_required: true
+      notes: New starter dirs prompts/verifiers (verifier.base.md plus unit.md, cli-runner.md) and prompts/reviewers (reviewer.base.md plus architecture-standards.md). verifier.base.md teaches the da workflow verify record surface, the result/decision schemas, cold-start from impl-handoff, role boundary no product edits, evidence taxonomy. reviewer.base.md teaches the review-decision contract, bundle read, da workflow tasks, target verify, findings format, one-lens discipline (extracted from the duplicated content in the three starter reviewer AGENT.md files). Per-type files carry only the kind-specific guidance. STEALTH mandate no AI attribution.
+      app_type: go-cli
+    - id: p1c-compose-wiring
+      title: Wire profile prompt_files into bundle prompt (base-first concat), verifiers + reviewers
+      status: pending
+      depends_on:
+        - p1a-reviewer-profiles-field
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/delegation.go
+        - commands/workflow/delegation_test.go
+      verification_required: true
+      notes: Today verifier_profiles prompt_files is only validated (validateVerifierProfileRefs); the only path to bundle.Prompt.PromptFiles is the manual prompt-file flag. Add expansion so a fanned-out verifier or reviewer dispatched for a profile id reads that profile resolved prompt_files and sets bundle.Prompt.PromptFiles to the base-first composition. Explicit prompt-file flag still overrides. Add reviewer dispatch path reading reviewer_profiles by lens. Tests for compose order and override. STEALTH mandate no AI attribution.
+      app_type: go-cli
+    - id: p1d-wire-slim-prove
+      title: Wire .agentsrc.json profiles to [base, per-type], slim repo overlays, prove override + docs
+      status: pending
+      depends_on:
+        - p1a-reviewer-profiles-field
+        - p1b-product-bases
+        - p1c-compose-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agentsrc.json
+        - .agents/prompts/verifiers/unit.project.md
+        - .agents/prompts/verifiers/cli-runner.project.md
+        - .agents/prompts/reviewers
+        - docs/CONFIG_RELEVANCE.md
+      verification_required: true
+      notes: Set verifier_profiles unit and cli-runner prompt_files to [verifier base, per-type]; add reviewer_profiles architecture-standards prompt_files to [reviewer base, lens]. Slim the repo-local committed unit.project.md and cli-runner.project.md to repo-specifics only (generic content now in the product base, not deleted). Demonstrate a higher-scope override changing the effective composed prompt. Docs update. Verify with da config verify, go suites, scripts/verify.sh, a fanout dry-run showing composed prompt_files. STEALTH mandate no AI attribution.
+      app_type: go-cli
+    - id: p2a-migrate-verifiers
+      title: 'PR-2: migrate remaining 7 verifiers to base + per-type'
+      status: pending
+      depends_on:
+        - p1d-wire-slim-prove
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/prompts/verifiers
+        - .agents/prompts/verifiers
+        - .agentsrc.json
+      verification_required: true
+      notes: Phase-2. Author product-scope per-type templates for api, ui-e2e, batch, streaming, schema-check, citation-check, task-schedule; wire each verifier_profiles entry prompt_files to [base, per-type]; slim each repo-local committed .project.md to repo-specifics with no guidance lost. Lands in PR-2 stacked on PR-1. STEALTH mandate no AI attribution.
+      app_type: go-cli
+    - id: p2b-migrate-lenses
+      title: 'PR-2: migrate remaining 2 reviewer lenses to base + per-lens'
+      status: pending
+      depends_on:
+        - p1d-wire-slim-prove
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/prompts/reviewers
+        - internal/scaffold/home/starter/agents/global
+        - .agentsrc.json
+      verification_required: true
+      notes: Phase-2. Author product-scope per-lens templates for acceptance-invariants and adversarial; wire reviewer_profiles entries prompt_files to [reviewer base, lens]; update the three starter reviewer AGENT.md agents to compose from base plus per-lens with no guidance lost. Lands in PR-2 stacked on PR-1. STEALTH mandate no AI attribution.
+      app_type: go-cli
