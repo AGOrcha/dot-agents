@@ -297,6 +297,44 @@
               "description": "v2 (p5 stub): package signing posture. 'required' fails resolution for an unverifiable artifact once cosign/sigstore verification lands; defaults to 'unsigned'."
             }
           }
+        },
+        "cache_keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "v2: per-source content cache-key override (config-distribution-model §7A.4, the uv 'cache-keys' analog). Absent ⇒ the source uses its kind default (git→resolved commit; local→commit + working-tree; http→ETag/Last-Modified else digest; oci→manifest digest). Any selector below pins the key on those inputs instead; always_revalidate is the config-declared force escape.",
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/stringList",
+              "description": "File paths or globs whose tracked content pins the key — a change to any matched file is a new key."
+            },
+            "git": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Selects which git facts pin the key.",
+              "properties": {
+                "commit": {
+                  "type": "boolean",
+                  "description": "Pin the key on the resolved commit hash."
+                },
+                "tags": {
+                  "type": "boolean",
+                  "description": "Pin the key on the tags pointing at the resolved commit (a re-tag is a new key)."
+                }
+              }
+            },
+            "env": {
+              "$ref": "#/$defs/stringList",
+              "description": "Environment variable names whose values pin the key."
+            },
+            "dir": {
+              "$ref": "#/$defs/stringList",
+              "description": "Directory paths whose presence/absence pins the key."
+            },
+            "always_revalidate": {
+              "type": "boolean",
+              "description": "Config-declared force escape: always re-check upstream on resolve, regardless of the recorded digest (config-distribution-model §7A.4 / R6)."
+            }
+          }
         }
       },
       "allOf": [

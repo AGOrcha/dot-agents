@@ -572,6 +572,13 @@ type Source struct {
 	// external-agent-sources spec. The config layer treats it as an arbitrary
 	// JSON object and does not introspect it.
 	Auth json.RawMessage `json:"auth,omitempty"`
+	// CacheKeys overrides the kind-default content cache key for this source
+	// (config-distribution-model §7A.4, the uv `cache-keys` analog). Absent ⇒
+	// the source uses its kind default (git→commit, local→commit+worktree,
+	// http→ETag/Last-Modified else digest, oci→digest). See cache_keys.go for
+	// the derivation; a *CacheKeys pointer keeps a defaulting source byte-stable
+	// (no cache_keys object emitted). Omitted on a v1 source.
+	CacheKeys *CacheKeys `json:"cache_keys,omitempty"`
 }
 
 const AgentsRCFile = ".agentsrc.json"
