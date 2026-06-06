@@ -100,6 +100,22 @@
         }
       }
     },
+    "reviewer_profiles": {
+      "type": "object",
+      "description": "Named reviewer profiles keyed by review lens (architecture-standards, acceptance-invariants, adversarial); symmetric to verifier_profiles. prompt_files compose base-first into the reviewer bundle.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt_files": {
+            "$ref": "#/$defs/stringList"
+          }
+        }
+      }
+    },
     "app_type_verifier_map": {
       "type": "object",
       "description": "Maps app_type strings to ordered verifier profile ids for fanout bundle resolution",
