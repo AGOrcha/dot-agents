@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/events"
@@ -209,6 +210,12 @@ type AgentsRC struct {
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
+	//
+	// verifier_profiles rides here as raw JSON rather than a typed field: the
+	// resolver merges it via the marshaled top-level map (resolver.go
+	// fieldCategories) and consumers decode it into the typed VerifierProfile
+	// shape on demand (see ParseVerifierProfiles). Keeping it in ExtraFields
+	// preserves the byte-for-byte round-trip the resolver and Save() rely on.
 	ExtraFields map[string]json.RawMessage `json:"-"`
 }
 
@@ -404,6 +411,142 @@ func (p *PackageRef) UnmarshalJSON(data []byte) error {
 	}
 	p.Ref = w.Ref
 	return nil
+}
+
+// PromptFile is one entry in a VerifierProfile's prompt_files list. It is the
+// source-aware successor to the legacy flat string form: a prompt file may now
+// declare which config source it is fetched from and at what version, mirroring
+// the "source-id:path@version" reference model used by extends/packages
+// (config-distribution-model §5).
+//
+// Migration (Q1 ruling Option B — typed objects everywhere): a legacy bare
+// string entry decodes to a repo-local PromptFile (Source=="local", Path==the
+// string). The typed object form is:
+//
+//	{"source": "acme", "path": "verifiers/unit.project.md", "version": "1.2.0"}
+type PromptFile struct {
+	// Source is the source-id the prompt file is resolved from. Empty or
+	// "local" means the repo-local working tree (the legacy behaviour).
+	Source string `json:"source,omitempty"`
+	// Path is the prompt file path, repo-relative for local sources or
+	// layer-relative for remote sources.
+	Path string `json:"path"`
+	// Version is the optional version spec applied to remote sources.
+	Version string `json:"version,omitempty"`
+}
+
+// localPromptSource is the well-known source id for repo-local prompt files.
+// A legacy bare-string prompt_files entry migrates to this source.
+const localPromptSource = "local"
+
+// IsLocal reports whether the prompt file resolves from the repo-local working
+// tree (the default when Source is empty or the well-known "local" id).
+func (p PromptFile) IsLocal() bool {
+	return p.Source == "" || p.Source == localPromptSource
+}
+
+// Ref renders the canonical "source-id:path@version" reference string. Local
+// prompt files render as the bare path so they round-trip to the legacy form
+// that existing consumers (prompt_files in the delegation bundle) expect.
+func (p PromptFile) Ref() string {
+	if p.IsLocal() {
+		return p.Path
+	}
+	ref := p.Source + ":" + p.Path
+	if p.Version != "" {
+		ref += "@" + p.Version
+	}
+	return ref
+}
+
+// MarshalJSON emits the compact string form for repo-local entries with no
+// version (preserving the legacy on-disk shape byte-for-byte) and the typed
+// object form otherwise. Round-trip is stable under repeated marshal/unmarshal.
+func (p PromptFile) MarshalJSON() ([]byte, error) {
+	if p.IsLocal() && p.Version == "" {
+		return json.Marshal(p.Path)
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	return json.Marshal(wire{Source: p.Source, Path: p.Path, Version: p.Version})
+}
+
+// UnmarshalJSON accepts either a legacy bare string (migrated to a local
+// PromptFile) or the typed object form {source, path, version}.
+func (p *PromptFile) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		p.Source = localPromptSource
+		p.Path = s
+		p.Version = ""
+		return nil
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("prompt_files entry must be a string or {source?,path,version?}: %w", err)
+	}
+	if strings.TrimSpace(w.Path) == "" {
+		return fmt.Errorf("prompt_files entry object form requires non-empty path")
+	}
+	p.Source = w.Source
+	p.Path = w.Path
+	p.Version = w.Version
+	return nil
+}
+
+// VerifierProfile is a named verifier profile referenced by
+// app_type_verifier_map and workflow fanout. PromptFiles is source-aware per
+// the Q1 ruling (typed objects everywhere); legacy flat string lists migrate
+// transparently via PromptFile.UnmarshalJSON.
+type VerifierProfile struct {
+	// Label is the human-readable profile name surfaced in fanout output.
+	Label string `json:"label,omitempty"`
+	// PromptFiles lists the prompt files appended to the verifier's brief.
+	PromptFiles []PromptFile `json:"prompt_files,omitempty"`
+}
+
+// VerifierProfilesKey is the manifest key under which verifier profiles are
+// stored. It lives in ExtraFields (raw JSON) so the resolver's top-level merge
+// and Save() round-trip are untouched; ParseVerifierProfiles decodes it into
+// the typed shape on demand.
+const VerifierProfilesKey = "verifier_profiles"
+
+// VerifierProfiles decodes the raw verifier_profiles entry into the typed,
+// source-aware shape. Legacy flat prompt_files (bare strings) migrate
+// transparently to local PromptFile objects via PromptFile.UnmarshalJSON.
+// Returns (nil, nil) when no verifier_profiles key is present.
+func (a *AgentsRC) VerifierProfiles() (map[string]VerifierProfile, error) {
+	if a == nil || len(a.ExtraFields) == 0 {
+		return nil, nil
+	}
+	raw, ok := a.ExtraFields[VerifierProfilesKey]
+	if !ok {
+		return nil, nil
+	}
+	return ParseVerifierProfiles(raw)
+}
+
+// ParseVerifierProfiles decodes a raw verifier_profiles JSON object into the
+// typed map. It is the single migration seam from the on-disk shape (which may
+// carry legacy flat prompt_files) to the typed VerifierProfile shape consumers
+// (workflow fanout) operate on. A JSON null decodes to a nil map.
+func ParseVerifierProfiles(raw json.RawMessage) (map[string]VerifierProfile, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var out map[string]VerifierProfile
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", VerifierProfilesKey, err)
+	}
+	return out, nil
 }
 
 // RefreshMetadata records the latest da install/refresh that updated a project.

@@ -95,7 +95,11 @@
             "type": "string"
           },
           "prompt_files": {
-            "$ref": "#/$defs/stringList"
+            "type": "array",
+            "description": "Source-aware prompt files (Q1 ruling: typed objects). Each entry is a legacy bare path string or {source?,path,version?}.",
+            "items": {
+              "$ref": "#/$defs/promptFile"
+            }
           }
         }
       }
@@ -518,6 +522,37 @@
           "description": "How the lens set runs."
         }
       }
+    },
+    "promptFile": {
+      "description": "Source-aware verifier prompt file. A legacy bare path string (repo-local) or a typed object {source?,path,version?}.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Source id the prompt file resolves from. Omit (or 'local') for repo-local files."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Prompt file path: repo-relative for local sources, layer-relative for remote sources."
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional version spec applied to remote sources."
+            }
+          }
+        }
+      ]
     }
   }
 }
