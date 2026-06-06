@@ -1,0 +1,22 @@
+schema_version: 1
+id: del-cg-project-local-overlay-1780786530
+mode: delegated
+parent_plan_id: config-v2-coherence
+parent_task_id: cg-project-local-overlay
+title: Project-local overlay scope (.agentsrc.local.json, gitignored)
+summary: 'Delegated from plan Config-v2 coherence: unified units, content-hash auto-sync, scope/source model'
+write_scope:
+    - internal/config/resolver.go
+    - internal/config/overlay.go
+    - internal/config/overlay_test.go
+success_criteria: |-
+    Per §7A.1 (Axis A). Add an 8th scope between repo-local committed and runtime: a da-managed, gitignored
+    .agentsrc.local.json in the repo (the .git/config analog — personal, machine-local, per-project, not committed).
+    It merges above repo-local committed and is a local input hashed into inputs_digest (coordinate with
+    cb-content-hash-staleness). Honor protected-field rules.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-06-06T22:55:30Z"
+updated_at: "2026-06-06T22:55:30Z"

@@ -141,7 +141,7 @@ tasks:
       app_type: go-cli
     - id: cg-project-local-overlay
       title: Project-local overlay scope (.agentsrc.local.json, gitignored)
-      status: pending
+      status: in_progress
       depends_on:
         - cb-content-hash-staleness
       blocks: []

@@ -151,6 +151,18 @@ func (r *FlatResolver) loadLayers(projectPath string) ([]ResolvedLayer, error) {
 		return nil, fmt.Errorf("no %s found at %s", AgentsRCFile, projectPath)
 	}
 	layers = append(layers, ResolvedLayer{ID: LayerRepoLocal, Present: true, Raw: repoRaw})
+
+	// Project-local overlay (§7A.1 / D9): slotted ABOVE repo-local committed so a
+	// personal, gitignored .agentsrc.local.json gets the last word among the local
+	// manifests. Optional (absent is not an error, and the layer is omitted when
+	// no overlay file exists); unparseable is fatal.
+	overlay, ok, err := loadProjectLocalOverlayLayer(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		layers = append(layers, overlay)
+	}
 	return layers, nil
 }
 
@@ -524,6 +536,19 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	}
 	stack = append(stack, imported...)
 	stack = append(stack, repoLayer)
+
+	// Project-local overlay (§7A.1 / D9): the highest-precedence local manifest,
+	// merged ABOVE repo-local committed and the imported extends layers. It is a
+	// local-only scope — never fetched, never locked — so it slots into the stack
+	// after the resolved imports without touching the extends/lock path. Omitted
+	// when no overlay file exists, so a project without one is unaffected.
+	overlay, ok, err := loadProjectLocalOverlayLayer(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		stack = append(stack, overlay)
+	}
 
 	snap, err := resolveSnapshot(stack)
 	if err != nil {
