@@ -5,8 +5,115 @@
   ],
   "app_type_verifier_map": {
     "go-cli": [
-      "unit"
+      "unit",
+      "cli-runner"
+    ],
+    "ideation": [
+      "schema-check",
+      "citation-check",
+      "task-schedule"
     ]
+  },
+  "execution_profile": {
+    "by_app_type": {
+      "go-cli": {
+        "relevance": {
+          "orchestrate": {
+            "core": [
+              "orchestrator-session-start",
+              "plan-wave-picker",
+              "loop-worker"
+            ],
+            "noise": [
+              "article-extract",
+              "playwright"
+            ]
+          },
+          "verify": {
+            "core": [
+              "verifier",
+              "test-runner"
+            ]
+          },
+          "review": {
+            "core": [
+              "thermo-nuclear-code-quality-review",
+              "review-pr"
+            ],
+            "situational": [
+              "self-review",
+              "review-delta"
+            ]
+          }
+        },
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 2,
+          "reviewers": "per_verifier",
+          "verifier_sequence": [
+            "unit",
+            "cli-runner"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants",
+            "adversarial"
+          ],
+          "lens_concurrency": "gated"
+        }
+      },
+      "ideation": {
+        "relevance": {
+          "orchestrate": {
+            "core": [
+              "kg-ideate",
+              "deep-research",
+              "plan-wave-picker"
+            ],
+            "situational": [
+              "article-extract"
+            ],
+            "noise": [
+              "test-runner",
+              "loop-worker"
+            ]
+          },
+          "verify": {
+            "core": [
+              "verifier"
+            ]
+          },
+          "review": {
+            "core": [
+              "architecture-standards",
+              "acceptance-invariants",
+              "adversarial"
+            ]
+          }
+        },
+        "topology": {
+          "executors": 3,
+          "verifiers_per_executor": 3,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "citation-check",
+            "task-schedule"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants",
+            "adversarial"
+          ],
+          "lens_concurrency": "parallel"
+        }
+      }
+    },
+    "default_class": "situational"
   },
   "hooks": true,
   "mcp": [
@@ -45,6 +152,30 @@
     }
   ],
   "verifier_profiles": {
+    "citation-check": {
+      "label": "Citation check (references resolve)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/citation-check.project.md"
+      ]
+    },
+    "cli-runner": {
+      "label": "CLI runner (built-binary smoke)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/cli-runner.project.md"
+      ]
+    },
+    "schema-check": {
+      "label": "Schema check (artifacts validate)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/schema-check.project.md"
+      ]
+    },
+    "task-schedule": {
+      "label": "Task schedule (DAG sound)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/task-schedule.project.md"
+      ]
+    },
     "unit": {
       "label": "Unit (Go)",
       "prompt_files": [
