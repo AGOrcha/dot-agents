@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -183,6 +184,110 @@ func TestWorkflowBundleStages_MalformedYAML(t *testing.T) {
 	err := runWorkflowBundleStages(p)
 	if err == nil || !strings.Contains(err.Error(), "parse bundle") {
 		t.Fatalf("expected parse error, got %v", err)
+	}
+}
+
+// TestVerifierProfilePromptRefs_LegacyAndTyped covers the positive path: a
+// profile mixing a legacy repo-local string entry, a source entry, and a
+// versioned source entry yields the canonical source-aware refs in order.
+func TestVerifierProfilePromptRefs_LegacyAndTyped(t *testing.T) {
+	p := config.VerifierProfile{
+		Label: "Unit",
+		PromptFiles: []config.VerifierPromptFile{
+			{Path: ".agents/prompts/verifiers/unit.project.md"},
+			{Source: "acme", Path: "verifiers/shared.md"},
+			{Source: "acme", Path: "verifiers/pinned.md", Version: "^1.2"},
+		},
+	}
+	got := verifierProfilePromptRefs(p)
+	want := []string{
+		".agents/prompts/verifiers/unit.project.md",
+		"acme:verifiers/shared.md",
+		"acme:verifiers/pinned.md@^1.2",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d refs, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ref[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestVerifierProfilePromptRefs_SkipsBlankPath covers the negative-input path:
+// entries with an empty path are dropped rather than emitting an empty ref.
+func TestVerifierProfilePromptRefs_SkipsBlankPath(t *testing.T) {
+	p := config.VerifierProfile{
+		PromptFiles: []config.VerifierPromptFile{
+			{Path: "  "},
+			{Path: "verifiers/real.md"},
+			{Path: ""},
+		},
+	}
+	got := verifierProfilePromptRefs(p)
+	if len(got) != 1 || got[0] != "verifiers/real.md" {
+		t.Fatalf("expected only the non-blank ref, got %v", got)
+	}
+}
+
+// TestVerifierProfilePromptRefs_Empty covers a profile with no prompt files.
+func TestVerifierProfilePromptRefs_Empty(t *testing.T) {
+	got := verifierProfilePromptRefs(config.VerifierProfile{})
+	if len(got) != 0 {
+		t.Fatalf("expected no refs, got %v", got)
+	}
+}
+
+// TestResolveVerifierStagePromptRefs_Found resolves a declared verifier profile
+// and returns its source-aware refs.
+func TestResolveVerifierStagePromptRefs_Found(t *testing.T) {
+	rc := &config.AgentsRC{
+		VerifierProfiles: map[string]config.VerifierProfile{
+			"unit": {
+				Label: "Unit",
+				PromptFiles: []config.VerifierPromptFile{
+					{Source: "acme", Path: "verifiers/unit.md", Version: "1.0.0"},
+				},
+			},
+		},
+	}
+	got, err := resolveVerifierStagePromptRefs(rc, " unit ")
+	if err != nil {
+		t.Fatalf("resolveVerifierStagePromptRefs: %v", err)
+	}
+	if len(got) != 1 || got[0] != "acme:verifiers/unit.md@1.0.0" {
+		t.Fatalf("unexpected refs: %v", got)
+	}
+}
+
+// TestResolveVerifierStagePromptRefs_Undefined covers the negative path: an
+// unknown verifier_type errors, mirroring fanout-time validation.
+func TestResolveVerifierStagePromptRefs_Undefined(t *testing.T) {
+	rc := &config.AgentsRC{
+		VerifierProfiles: map[string]config.VerifierProfile{
+			"unit": {Label: "Unit"},
+		},
+	}
+	_, err := resolveVerifierStagePromptRefs(rc, "cli-runner")
+	if err == nil || !strings.Contains(err.Error(), "not defined under verifier_profiles") {
+		t.Fatalf("expected undefined-profile error, got %v", err)
+	}
+}
+
+// TestResolveVerifierStagePromptRefs_EmptyType rejects a blank verifier_type.
+func TestResolveVerifierStagePromptRefs_EmptyType(t *testing.T) {
+	if _, err := resolveVerifierStagePromptRefs(&config.AgentsRC{}, "   "); err == nil ||
+		!strings.Contains(err.Error(), "empty verifier_type") {
+		t.Fatalf("expected empty verifier_type error, got %v", err)
+	}
+}
+
+// TestResolveVerifierStagePromptRefs_NilConfig errors when no manifest is loaded.
+func TestResolveVerifierStagePromptRefs_NilConfig(t *testing.T) {
+	if _, err := resolveVerifierStagePromptRefs(nil, "unit"); err == nil ||
+		!strings.Contains(err.Error(), "not defined under verifier_profiles") {
+		t.Fatalf("expected not-defined error for nil config, got %v", err)
 	}
 }
 

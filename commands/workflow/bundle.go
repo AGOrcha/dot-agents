@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -28,6 +29,41 @@ func expandBundleStages(b *delegationBundleYAML) []bundleStageEntry {
 	}
 	out = append(out, bundleStageEntry{Stage: "review"})
 	return out
+}
+
+// verifierProfilePromptRefs returns the ordered, source-aware reference strings
+// for a verifier profile's prompt files. Each ref is the canonical
+// "source-id:path[@version]" form (config-distribution-model §5); a repo-local
+// entry collapses to its bare path. Blank-path entries are skipped so a partially
+// migrated profile still yields a clean list for the verifier worker.
+func verifierProfilePromptRefs(p config.VerifierProfile) []string {
+	out := make([]string, 0, len(p.PromptFiles))
+	for _, pf := range p.PromptFiles {
+		if strings.TrimSpace(pf.Path) == "" {
+			continue
+		}
+		out = append(out, pf.Ref())
+	}
+	return out
+}
+
+// resolveVerifierStagePromptRefs looks up the verifier profile named by a stage's
+// verifier_type and returns its source-aware prompt refs. It errors when the
+// profile is not declared under verifier_profiles, mirroring the fanout-time
+// validation so a bundle stage cannot reference an undefined verifier.
+func resolveVerifierStagePromptRefs(rc *config.AgentsRC, verifierType string) ([]string, error) {
+	verifierType = strings.TrimSpace(verifierType)
+	if verifierType == "" {
+		return nil, fmt.Errorf("empty verifier_type")
+	}
+	if rc == nil {
+		return nil, fmt.Errorf("verifier profile %q is not defined under verifier_profiles", verifierType)
+	}
+	profile, ok := rc.VerifierProfiles[verifierType]
+	if !ok {
+		return nil, fmt.Errorf("verifier profile %q is not defined under verifier_profiles", verifierType)
+	}
+	return verifierProfilePromptRefs(profile), nil
 }
 
 // runWorkflowBundleStages reads a bundle YAML and prints or encodes the ordered stage list.

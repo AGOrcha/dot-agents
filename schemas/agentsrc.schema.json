@@ -95,7 +95,7 @@
             "type": "string"
           },
           "prompt_files": {
-            "$ref": "#/$defs/stringList"
+            "$ref": "#/$defs/verifierPromptFiles"
           }
         }
       }
@@ -341,6 +341,43 @@
           }
         }
       ]
+    },
+    "verifierPromptFile": {
+      "description": "Source-aware verifier prompt artifact. Either a legacy flat repo-local path string, or a typed object {source, path, version} resolving from a config-layer source (config-distribution-model §5).",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path"],
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "description": "source-id the artifact resolves from; omit for repo-local"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "artifact path within the source (or repo-local path)"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1,
+              "description": "optional source ref/version-spec pin; only meaningful with a source"
+            }
+          }
+        }
+      ]
+    },
+    "verifierPromptFiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/verifierPromptFile"
+      }
     }
   }
 }

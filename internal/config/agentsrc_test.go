@@ -1684,3 +1684,218 @@ func TestMergeGenerateAgentsRC_V1ManifestWithoutRepoIDRoundTripsByteForByte(t *t
 		t.Errorf("marshalled output should omit repo_id when empty: %s", data)
 	}
 }
+
+// ── VerifierPromptFile (source-aware prompt_files migration) ──────────────────
+
+func TestVerifierPromptFileUnmarshalStringForm(t *testing.T) {
+	var pf VerifierPromptFile
+	if err := json.Unmarshal([]byte(`".agents/prompts/verifiers/unit.project.md"`), &pf); err != nil {
+		t.Fatalf("Unmarshal string form: %v", err)
+	}
+	if pf.Source != "" || pf.Version != "" {
+		t.Fatalf("string form should leave source/version empty: %+v", pf)
+	}
+	if pf.Path != ".agents/prompts/verifiers/unit.project.md" {
+		t.Fatalf("Path = %q", pf.Path)
+	}
+}
+
+func TestVerifierPromptFileUnmarshalObjectForm(t *testing.T) {
+	var pf VerifierPromptFile
+	raw := `{"source":"acme","path":"verifiers/unit.md","version":"^1.2"}`
+	if err := json.Unmarshal([]byte(raw), &pf); err != nil {
+		t.Fatalf("Unmarshal object form: %v", err)
+	}
+	if pf.Source != "acme" || pf.Path != "verifiers/unit.md" || pf.Version != "^1.2" {
+		t.Fatalf("object form mis-parsed: %+v", pf)
+	}
+}
+
+func TestVerifierPromptFileUnmarshalErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty string", `""`, "must be non-empty"},
+		{"object missing path", `{"source":"acme"}`, "requires non-empty path"},
+		{"wrong type", `123`, "must be string or"},
+		{"array form", `["x"]`, "must be string or"},
+		{"path wrong type", `{"path":123}`, "must be string or"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var pf VerifierPromptFile
+			err := json.Unmarshal([]byte(tc.raw), &pf)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestVerifierPromptFileMarshal(t *testing.T) {
+	cases := []struct {
+		name string
+		pf   VerifierPromptFile
+		want string
+	}{
+		{"repo-local collapses to string", VerifierPromptFile{Path: "verifiers/unit.md"}, `"verifiers/unit.md"`},
+		{"source emits object", VerifierPromptFile{Source: "acme", Path: "verifiers/unit.md"}, `{"source":"acme","path":"verifiers/unit.md"}`},
+		{"version emits object", VerifierPromptFile{Path: "verifiers/unit.md", Version: "1.0.0"}, `{"path":"verifiers/unit.md","version":"1.0.0"}`},
+		{"source+version", VerifierPromptFile{Source: "acme", Path: "verifiers/unit.md", Version: "1.0.0"}, `{"source":"acme","path":"verifiers/unit.md","version":"1.0.0"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(tc.pf)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if string(data) != tc.want {
+				t.Fatalf("Marshal = %s, want %s", data, tc.want)
+			}
+		})
+	}
+}
+
+func TestVerifierPromptFileRoundtrip(t *testing.T) {
+	cases := []VerifierPromptFile{
+		{Path: "verifiers/unit.md"},
+		{Source: "acme", Path: "verifiers/unit.md"},
+		{Source: "acme", Path: "verifiers/unit.md", Version: "^1.2"},
+		{Path: "verifiers/unit.md", Version: "2.0.0"},
+	}
+	for _, orig := range cases {
+		data, err := json.Marshal(orig)
+		if err != nil {
+			t.Fatalf("Marshal %+v: %v", orig, err)
+		}
+		var got VerifierPromptFile
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("Unmarshal %s: %v", data, err)
+		}
+		if !reflect.DeepEqual(orig, got) {
+			t.Fatalf("roundtrip mismatch: orig %+v got %+v (wire %s)", orig, got, data)
+		}
+	}
+}
+
+func TestVerifierPromptFileRef(t *testing.T) {
+	cases := []struct {
+		pf   VerifierPromptFile
+		want string
+	}{
+		{VerifierPromptFile{Path: "verifiers/unit.md"}, "verifiers/unit.md"},
+		{VerifierPromptFile{Source: "acme", Path: "verifiers/unit.md"}, "acme:verifiers/unit.md"},
+		{VerifierPromptFile{Path: "verifiers/unit.md", Version: "2.0"}, "verifiers/unit.md@2.0"},
+		{VerifierPromptFile{Source: "acme", Path: "verifiers/unit.md", Version: "^1.2"}, "acme:verifiers/unit.md@^1.2"},
+	}
+	for _, tc := range cases {
+		if got := tc.pf.Ref(); got != tc.want {
+			t.Fatalf("Ref() = %q, want %q", got, tc.want)
+		}
+	}
+}
+
+// TestAgentsRCVerifierProfilesLegacyUpgrade verifies a v1 manifest whose
+// prompt_files are flat strings loads into the typed field and re-marshals
+// back to the flat string form (non-breaking migration).
+func TestAgentsRCVerifierProfilesLegacyUpgrade(t *testing.T) {
+	raw := `{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "verifier_profiles": {
+    "unit": {"label": "Unit (Go)", "prompt_files": [".agents/prompts/verifiers/unit.project.md"]}
+  }
+}`
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if _, ok := rc.ExtraFields["verifier_profiles"]; ok {
+		t.Fatalf("verifier_profiles should route to the typed field, not ExtraFields")
+	}
+	prof, ok := rc.VerifierProfiles["unit"]
+	if !ok {
+		t.Fatalf("unit profile not parsed: %+v", rc.VerifierProfiles)
+	}
+	if prof.Label != "Unit (Go)" || len(prof.PromptFiles) != 1 {
+		t.Fatalf("unit profile mis-parsed: %+v", prof)
+	}
+	if prof.PromptFiles[0].Source != "" || prof.PromptFiles[0].Path != ".agents/prompts/verifiers/unit.project.md" {
+		t.Fatalf("legacy prompt file not normalized: %+v", prof.PromptFiles[0])
+	}
+	data, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `".agents/prompts/verifiers/unit.project.md"`) {
+		t.Fatalf("legacy prompt file should re-marshal as a string: %s", data)
+	}
+}
+
+// TestAgentsRCVerifierProfilesTypedRoundtrip verifies the typed object form
+// survives a full marshal/unmarshal cycle on the AgentsRC envelope.
+func TestAgentsRCVerifierProfilesTypedRoundtrip(t *testing.T) {
+	orig := AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		VerifierProfiles: map[string]VerifierProfile{
+			"cli-runner": {
+				Label: "CLI runner",
+				PromptFiles: []VerifierPromptFile{
+					{Source: "acme", Path: "verifiers/cli-runner.md", Version: "^1.0"},
+				},
+			},
+		},
+	}
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	var got AgentsRC
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(orig.VerifierProfiles, got.VerifierProfiles) {
+		t.Fatalf("verifier_profiles roundtrip mismatch:\norig %+v\ngot  %+v\nwire %s", orig.VerifierProfiles, got.VerifierProfiles, data)
+	}
+}
+
+// TestMergeGenerateAgentsRCPreservesVerifierProfiles guards the ExtraFields→typed
+// promotion: GenerateAgentsRC does not scan verifier_profiles, so a committed map
+// must survive regeneration (the schema-usage "ExtraFields guard breakage" trap).
+func TestMergeGenerateAgentsRCPreservesVerifierProfiles(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		VerifierProfiles: map[string]VerifierProfile{
+			"unit": {
+				Label:       "Unit (Go)",
+				PromptFiles: []VerifierPromptFile{{Path: ".agents/prompts/verifiers/unit.project.md"}},
+			},
+		},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		Skills:  []string{"s"},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	prof, ok := out.VerifierProfiles["unit"]
+	if !ok || prof.Label != "Unit (Go)" || len(prof.PromptFiles) != 1 {
+		t.Fatalf("verifier_profiles not preserved through regeneration: %+v", out.VerifierProfiles)
+	}
+	// Clone must not alias the source slice.
+	out.VerifierProfiles["unit"].PromptFiles[0].Path = "mutated"
+	if existing.VerifierProfiles["unit"].PromptFiles[0].Path != ".agents/prompts/verifiers/unit.project.md" {
+		t.Fatalf("cloneVerifierProfiles aliased the existing slice")
+	}
+}
+
+func TestCloneVerifierProfilesEmpty(t *testing.T) {
+	out := cloneVerifierProfiles(map[string]VerifierProfile{})
+	if out == nil || len(out) != 0 {
+		t.Fatalf("expected empty non-nil map, got %#v", out)
+	}
+}

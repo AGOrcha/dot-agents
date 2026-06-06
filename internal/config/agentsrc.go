@@ -178,6 +178,11 @@ type AgentsRC struct {
 	KG       *AgentsRCKG      `json:"kg,omitempty"`
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 
+	// VerifierProfiles are named verifier profiles referenced by
+	// app_type_verifier_map and workflow fanout. prompt_files are source-aware
+	// per config-distribution-model §5 — see VerifierPromptFile.
+	VerifierProfiles map[string]VerifierProfile `json:"verifier_profiles,omitempty"`
+
 	// --- v2 additive fields (config-distribution-model §3) ---
 
 	// RepoID is the canonical repository identity (e.g. "github.com/acme/manager-ui").
@@ -281,6 +286,105 @@ func (p *PackageRef) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// VerifierProfile is a named verifier profile referenced by app_type_verifier_map
+// and workflow fanout. Its prompt_files are source-aware: each entry may resolve
+// from the repo-local tree or from an inherited config layer source.
+type VerifierProfile struct {
+	// Label is the human-readable profile name shown in fanout output.
+	Label string `json:"label,omitempty"`
+	// PromptFiles is the ordered set of verifier prompt artifacts. Each entry is
+	// a source-aware reference (see VerifierPromptFile). Legacy flat string paths
+	// are accepted on read and normalized to {path} form.
+	PromptFiles []VerifierPromptFile `json:"prompt_files,omitempty"`
+}
+
+// VerifierPromptFile is a single source-aware verifier prompt artifact reference.
+//
+// Two wire forms are accepted, mirroring the LayerRef/PackageRef pattern:
+//
+//   - Legacy flat string: ".agents/prompts/verifiers/unit.project.md" — the path
+//     resolves against the repo-local tree (Source == "").
+//   - Typed object: {"source":"acme","path":"verifiers/unit.md","version":"^1.0"}
+//     — the artifact resolves from the named config-layer source, optionally
+//     pinned to a version per config-distribution-model §5.
+//
+// A bare string round-trips byte-for-byte (it re-marshals as a string), so the
+// migration is non-breaking for v1 manifests that have not adopted typed objects.
+type VerifierPromptFile struct {
+	// Source is the source-id the artifact resolves from. Empty means repo-local.
+	Source string `json:"source,omitempty"`
+	// Path is the artifact path within the source (or the repo-local path when
+	// Source is empty). Always required.
+	Path string `json:"path"`
+	// Version optionally pins the artifact to a source ref/version spec. Only
+	// meaningful when Source is non-empty.
+	Version string `json:"version,omitempty"`
+}
+
+// MarshalJSON emits the compact string form for a repo-local, unversioned entry
+// (Source == "" && Version == "") and the object form otherwise. Round-trip is
+// stable under repeated marshal/unmarshal.
+func (v VerifierPromptFile) MarshalJSON() ([]byte, error) {
+	if v.Source == "" && v.Version == "" {
+		return json.Marshal(v.Path)
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	return json.Marshal(wire{Source: v.Source, Path: v.Path, Version: v.Version})
+}
+
+// UnmarshalJSON accepts either a plain string (legacy flat path) or the typed
+// object form {source, path, version}.
+func (v *VerifierPromptFile) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			return fmt.Errorf("verifier prompt_files entry string form must be non-empty")
+		}
+		v.Source = ""
+		v.Path = s
+		v.Version = ""
+		return nil
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("verifier prompt_files entry must be string or {source?,path,version?}: %w", err)
+	}
+	if w.Path == "" {
+		return fmt.Errorf("verifier prompt_files entry object form requires non-empty path")
+	}
+	v.Source = w.Source
+	v.Path = w.Path
+	v.Version = w.Version
+	return nil
+}
+
+// Ref returns the canonical source-aware reference string for an entry:
+//
+//	repo-local, unversioned -> "verifiers/unit.md"
+//	source, no version      -> "acme:verifiers/unit.md"
+//	source + version        -> "acme:verifiers/unit.md@^1.0"
+//
+// Per config-distribution-model §5 (source-id : path @ version-spec).
+func (v VerifierPromptFile) Ref() string {
+	ref := v.Path
+	if v.Source != "" {
+		ref = v.Source + ":" + v.Path
+	}
+	if v.Version != "" {
+		ref += "@" + v.Version
+	}
+	return ref
+}
+
 // RefreshMetadata records the latest da install/refresh that updated a project.
 type RefreshMetadata struct {
 	Version     string `json:"version,omitempty"`
@@ -310,7 +414,7 @@ var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
-	"kg": true, "refresh": true,
+	"kg": true, "refresh": true, "verifier_profiles": true,
 	// v2 additive fields (config-distribution-model §3)
 	"repo_id": true, "extends": true, "packages": true, "features": true,
 }
@@ -331,6 +435,8 @@ type agentsRCCore struct {
 	Sources  []Source         `json:"sources"`
 	KG       *AgentsRCKG      `json:"kg,omitempty"`
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+
+	VerifierProfiles map[string]VerifierProfile `json:"verifier_profiles,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
 	RepoID   string            `json:"repo_id,omitempty"`
@@ -356,6 +462,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Sources = core.Sources
 	a.KG = core.KG
 	a.Refresh = core.Refresh
+	a.VerifierProfiles = core.VerifierProfiles
 	a.RepoID = core.RepoID
 	a.Extends = core.Extends
 	a.Packages = core.Packages
@@ -378,22 +485,23 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 
 func (a AgentsRC) MarshalJSON() ([]byte, error) {
 	core := agentsRCCore{
-		Schema:   a.Schema,
-		Version:  a.Version,
-		Project:  a.Project,
-		Skills:   a.Skills,
-		Rules:    a.Rules,
-		Agents:   a.Agents,
-		Hooks:    a.Hooks,
-		MCP:      a.MCP,
-		Settings: a.Settings,
-		Sources:  a.Sources,
-		KG:       a.KG,
-		Refresh:  a.Refresh,
-		RepoID:   a.RepoID,
-		Extends:  a.Extends,
-		Packages: a.Packages,
-		Features: a.Features,
+		Schema:           a.Schema,
+		Version:          a.Version,
+		Project:          a.Project,
+		Skills:           a.Skills,
+		Rules:            a.Rules,
+		Agents:           a.Agents,
+		Hooks:            a.Hooks,
+		MCP:              a.MCP,
+		Settings:         a.Settings,
+		Sources:          a.Sources,
+		KG:               a.KG,
+		Refresh:          a.Refresh,
+		VerifierProfiles: a.VerifierProfiles,
+		RepoID:           a.RepoID,
+		Extends:          a.Extends,
+		Packages:         a.Packages,
+		Features:         a.Features,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -552,6 +660,12 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
 	}
+	// verifier_profiles is a typed field as of the source-aware migration;
+	// GenerateAgentsRC does not scan it, so a committed map must survive
+	// regeneration just as it did when it lived in ExtraFields.
+	if len(existing.VerifierProfiles) > 0 {
+		out.VerifierProfiles = cloneVerifierProfiles(existing.VerifierProfiles)
+	}
 	if existing.Refresh != nil {
 		out.Refresh = existing.Refresh
 	}
@@ -562,6 +676,20 @@ func cloneExtraFieldsMap(m map[string]json.RawMessage) map[string]json.RawMessag
 	out := make(map[string]json.RawMessage, len(m))
 	for k, v := range m {
 		out[k] = v
+	}
+	return out
+}
+
+// cloneVerifierProfiles deep-copies a verifier_profiles map so a regenerated
+// manifest does not alias the slices of the existing one.
+func cloneVerifierProfiles(m map[string]VerifierProfile) map[string]VerifierProfile {
+	out := make(map[string]VerifierProfile, len(m))
+	for k, v := range m {
+		clone := VerifierProfile{Label: v.Label}
+		if len(v.PromptFiles) > 0 {
+			clone.PromptFiles = append([]VerifierPromptFile(nil), v.PromptFiles...)
+		}
+		out[k] = clone
 	}
 	return out
 }
