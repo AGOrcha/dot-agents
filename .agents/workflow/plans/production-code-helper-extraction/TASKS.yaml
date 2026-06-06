@@ -113,7 +113,7 @@ tasks:
       app_type: code-fix
     - id: t3-resource-plan-helper
       title: Extract internal/platform/resource_plan.go bucket-listing helper (Group RP)
-      status: pending
+      status: completed
       depends_on:
         - t1-triage-and-classify
       blocks: []
@@ -150,7 +150,7 @@ tasks:
       app_type: code-fix
     - id: t4-commands-cli-family
       title: Extract commands/{settings,mcp,rules,...} CLI helpers (Group CMDS)
-      status: pending
+      status: completed
       depends_on:
         - t1-triage-and-classify
       blocks: []
@@ -201,7 +201,7 @@ tasks:
       app_type: code-fix
     - id: t5-platform-mcp-settings
       title: Extract internal/platform/mcp_settings + plugins helper (Group MCP)
-      status: pending
+      status: completed
       depends_on:
         - t1-triage-and-classify
       blocks: []
@@ -235,11 +235,6 @@ tasks:
                                        analysis
           output contract: ~50 dup lines removed from Group MCP
       app_type: code-fix
-    # t6-typescript-port-mirrors DROPPED 2026-05-19: obsolete.
-    # `ports/typescript/` no longer exists on master and pr6-typescript-port
-    # is parked (carve-out branch only, frozen — see memory
-    # pr6-typescript-port-parked). The Group TS ~40-line duplication target
-    # cannot apply to a tree that isn't there.
     - id: t7-archive
       title: Open follow-up PR; verify gate; archive plan
       status: pending

@@ -82,7 +82,7 @@ tasks:
         graphstore-contract.
     - id: stp3-regression-parity
       title: 'Regression: import-relink + doctor + refresh-skill-mirror produce projection; dry-run/idempotent'
-      status: pending
+      status: completed
       depends_on:
         - stp-import-relink
         - stp-doctor-repair

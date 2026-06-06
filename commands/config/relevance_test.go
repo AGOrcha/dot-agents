@@ -98,28 +98,41 @@ func TestNormalizeFilter(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := &runRelevanceOptions{filter: tc.in}
-			err := normalizeFilter(opts, testDeps())
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error for %q", tc.in)
-				}
-				he, ok := err.(*hintError)
-				if !ok {
-					t.Fatalf("expected hintError, got %T", err)
-				}
-				if !strings.Contains(he.message, "unknown --filter") {
-					t.Fatalf("unexpected message: %q", he.message)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if opts.filter != tc.want {
-				t.Fatalf("got filter %q want %q", opts.filter, tc.want)
-			}
+			assertNormalizeFilterCase(t, tc.in, tc.want, tc.wantErr)
 		})
+	}
+}
+
+// assertNormalizeFilterCase runs one normalizeFilter case and asserts the
+// outcome. Extracted from the table loop so the per-case branching does not
+// inflate TestNormalizeFilter's cognitive complexity (SonarCloud go:S3776).
+func assertNormalizeFilterCase(t *testing.T, in, want string, wantErr bool) {
+	t.Helper()
+	opts := &runRelevanceOptions{filter: in}
+	err := normalizeFilter(opts, testDeps())
+	if wantErr {
+		assertUnknownFilterError(t, in, err)
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if opts.filter != want {
+		t.Fatalf("got filter %q want %q", opts.filter, want)
+	}
+}
+
+func assertUnknownFilterError(t *testing.T, in string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error for %q", in)
+	}
+	he, ok := err.(*hintError)
+	if !ok {
+		t.Fatalf("expected hintError, got %T", err)
+	}
+	if !strings.Contains(he.message, "unknown --filter") {
+		t.Fatalf("unexpected message: %q", he.message)
 	}
 }
 
@@ -238,42 +251,40 @@ func TestLookupTaskAppType(t *testing.T) {
 	)
 
 	t.Run("task app_type wins", func(t *testing.T) {
-		ta, def, err := lookupTaskAppType(project, "p1/t-cli")
-		if err != nil {
-			t.Fatalf("lookup: %v", err)
-		}
-		if ta != "go-cli" || def != "ideation" {
-			t.Fatalf("got (%q,%q)", ta, def)
-		}
+		assertLookupAppType(t, project, "p1/t-cli", "go-cli", "ideation")
 	})
-
 	t.Run("bare task falls to plan default", func(t *testing.T) {
-		ta, def, err := lookupTaskAppType(project, "p1/t-bare")
-		if err != nil {
-			t.Fatalf("lookup: %v", err)
-		}
-		if ta != "" || def != "ideation" {
-			t.Fatalf("got (%q,%q)", ta, def)
-		}
+		assertLookupAppType(t, project, "p1/t-bare", "", "ideation")
 	})
-
 	t.Run("missing task errors", func(t *testing.T) {
-		if _, _, err := lookupTaskAppType(project, "p1/nope"); err == nil {
-			t.Fatalf("expected not-found error")
-		}
+		assertLookupAppTypeErr(t, project, "p1/nope")
 	})
-
 	t.Run("missing plan errors", func(t *testing.T) {
-		if _, _, err := lookupTaskAppType(project, "ghost/t"); err == nil {
-			t.Fatalf("expected plan-read error")
-		}
+		assertLookupAppTypeErr(t, project, "ghost/t")
 	})
-
 	t.Run("bad selector errors", func(t *testing.T) {
-		if _, _, err := lookupTaskAppType(project, "noselector"); err == nil {
-			t.Fatalf("expected selector error")
-		}
+		assertLookupAppTypeErr(t, project, "noselector")
 	})
+}
+
+// assertLookupAppType / assertLookupAppTypeErr keep the per-case branching out of
+// TestLookupTaskAppType so it stays under the cognitive-complexity gate (go:S3776).
+func assertLookupAppType(t *testing.T, project, sel, wantTA, wantDef string) {
+	t.Helper()
+	ta, def, err := lookupTaskAppType(project, sel)
+	if err != nil {
+		t.Fatalf("lookup %q: %v", sel, err)
+	}
+	if ta != wantTA || def != wantDef {
+		t.Fatalf("%q: got (%q,%q) want (%q,%q)", sel, ta, def, wantTA, wantDef)
+	}
+}
+
+func assertLookupAppTypeErr(t *testing.T, project, sel string) {
+	t.Helper()
+	if _, _, err := lookupTaskAppType(project, sel); err == nil {
+		t.Fatalf("%q: expected error", sel)
+	}
 }
 
 func TestLookupTaskAppType_BadTasksYAML(t *testing.T) {

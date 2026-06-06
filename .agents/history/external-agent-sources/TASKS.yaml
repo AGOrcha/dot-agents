@@ -2,8 +2,8 @@ schema_version: 1
 plan_id: external-agent-sources
 tasks:
     - id: cred-store-loader
-      title: 'Encrypted credential store (keychain key) + CI-aware loader resolution order'
-      status: pending
+      title: Encrypted credential store (keychain key) + CI-aware loader resolution order
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents

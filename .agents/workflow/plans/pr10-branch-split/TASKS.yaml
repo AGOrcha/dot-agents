@@ -287,7 +287,7 @@ tasks:
         merges, else the salvaged artifacts are lost with the branch.
     - id: pr8-org-migration
       title: 'PR 8: Migrate project to AGOrcha org remote + cmd/da rename'
-      status: pending
+      status: completed
       depends_on:
         - retire-old-branches
       blocks: []

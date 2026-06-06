@@ -97,7 +97,7 @@ tasks:
       app_type: go-cli
     - id: t8-ideation-verifiers
       title: ideation execution_profile enrichment + 3 artifact-integrity verifiers
-      status: in_progress
+      status: completed
       depends_on:
         - t7-cli-runner-verifier
       blocks: []

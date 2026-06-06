@@ -58,7 +58,7 @@ tasks:
       app_type: go-cli
     - id: lpf-d-base-resolution
       title: Layered base-resolution algorithm in fanout (§4)
-      status: in_progress
+      status: completed
       depends_on:
         - lpf-a-status-enum
         - lpf-pr-producer
@@ -103,7 +103,7 @@ tasks:
       app_type: go-cli
     - id: lpf-event-foundation
       title: 'Unified event contract core: envelope + kind registry + dispatch + producer engine'
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -133,7 +133,7 @@ tasks:
       app_type: go-cli
     - id: lpf-pr-producer
       title: 'PR as first event: gh pr_source config + event.pr.* registrations + AuthRoundTripper seam'
-      status: pending
+      status: completed
       depends_on:
         - lpf-event-foundation
       blocks: []

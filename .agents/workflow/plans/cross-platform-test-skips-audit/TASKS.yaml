@@ -126,7 +126,7 @@ tasks:
       app_type: go-cli
     - id: migrate-sites
       title: Migrate every shortcut-class skip to the new helpers
-      status: pending
+      status: completed
       depends_on:
         - perms-dir
         - perms-readonly
