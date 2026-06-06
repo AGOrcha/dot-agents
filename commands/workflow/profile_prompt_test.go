@@ -269,6 +269,42 @@ func TestRunWorkflowResolvePrompt(t *testing.T) {
 	}
 }
 
+func TestResolvePromptCmd_Execute(t *testing.T) {
+	// Drives the cobra command (constructor + RunE wrapper) end-to-end.
+	repo := setupWorkflowAppTypesProject(t, `{
+  "project":"t","version":1,"sources":[{"type":"local"}],
+  "verifier_profiles":{"cli-runner":{"prompt_files":["verifiers/verifier.base.md","verifiers/cli-runner.project.md"]}}
+}`)
+	out := captureWorkflowOutput(t, repo, func() error {
+		cmd := newWorkflowResolvePromptCmd()
+		cmd.SetArgs([]string{"--kind", "verifier", "--slug", "cli-runner"})
+		return cmd.Execute()
+	})
+	if !strings.Contains(out, "matched : true") || !strings.Contains(out, "cli-runner") {
+		t.Fatalf("resolve-prompt cmd output missing expected content:\n%s", out)
+	}
+}
+
+func TestRunWorkflowResolvePrompt_JSON(t *testing.T) {
+	prior := deps.Flags.JSON
+	deps.Flags.JSON = func() bool { return true }
+	t.Cleanup(func() { deps.Flags.JSON = prior })
+	repo := setupWorkflowAppTypesProject(t, `{
+  "project":"t","version":1,"sources":[{"type":"local"}],
+  "reviewer_profiles":{"architecture-standards":{"prompt_files":["reviewers/reviewer.base.md"]}}
+}`)
+	out := captureWorkflowOutput(t, repo, func() error {
+		return runWorkflowResolvePrompt(profileKindReviewer, "architecture-standards")
+	})
+	var v composedPromptView
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatalf("json branch should emit a valid composedPromptView: %v\n%s", err, out)
+	}
+	if !v.Matched || v.Kind != profileKindReviewer || v.Slug != "architecture-standards" {
+		t.Fatalf("json view = %#v", v)
+	}
+}
+
 func TestRenderComposedPrompt_EdgeCases(t *testing.T) {
 	// unmatched
 	out := captureWorkflowStdout(t, func() {
