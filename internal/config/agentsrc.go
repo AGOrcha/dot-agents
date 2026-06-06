@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
@@ -193,10 +194,151 @@ type AgentsRC struct {
 	Packages []PackageRef `json:"packages,omitempty"`
 	// Features overrides feature-flag defaults (config-distribution-model §3.6).
 	Features map[string]string `json:"features,omitempty"`
+	// VerifierProfiles is the named verifier-profile registry referenced by
+	// app_type_verifier_map and `workflow fanout`. Promoted to a first-class
+	// typed field (org-config-resolution §15.2) so each profile's prompt_files
+	// can be source-aware (config-distribution-model p1c). Map-merge by profile
+	// id under the layered resolver (resolver.go fieldCategories).
+	VerifierProfiles map[string]VerifierProfile `json:"verifier_profiles,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// VerifierProfile is a single named entry in AgentsRC.VerifierProfiles. It
+// carries the human label and the ordered prompt files a verifier worker loads.
+// Per org-config-resolution §8.2 the profile vocabulary may grow (verifier kind,
+// prerequisite commands, evidence policy defaults); unknown keys land in Extra
+// so future fields round-trip without dropping local customisation.
+type VerifierProfile struct {
+	// Label is the human-readable profile name shown in `workflow app-types`.
+	Label string `json:"label,omitempty"`
+	// PromptFiles is the ordered set of prompt files the verifier loads. Each
+	// entry is source-aware: a legacy bare string ("path") or a typed object
+	// {source, path, version} addressing a layer/package-hosted prompt.
+	PromptFiles []VerifierPromptFile `json:"prompt_files,omitempty"`
+	// Extra captures forward-compatible profile keys (verifier kind, evidence
+	// policy, …) so a profile authored against a newer schema round-trips.
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+// verifierProfileKnown lists the JSON keys owned by VerifierProfile's typed
+// fields. Unknown keys route into Extra for round-trip preservation.
+var verifierProfileKnown = map[string]bool{
+	"label": true, "prompt_files": true,
+}
+
+type verifierProfileCore struct {
+	Label       string               `json:"label,omitempty"`
+	PromptFiles []VerifierPromptFile `json:"prompt_files,omitempty"`
+}
+
+func (p *VerifierProfile) UnmarshalJSON(data []byte) error {
+	var core verifierProfileCore
+	if err := json.Unmarshal(data, &core); err != nil {
+		return fmt.Errorf("verifier profile: %w", err)
+	}
+	p.Label = core.Label
+	p.PromptFiles = core.PromptFiles
+
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err != nil {
+		return fmt.Errorf("verifier profile: %w", err)
+	}
+	for k, v := range all {
+		if !verifierProfileKnown[k] {
+			if p.Extra == nil {
+				p.Extra = make(map[string]json.RawMessage)
+			}
+			p.Extra[k] = v
+		}
+	}
+	return nil
+}
+
+func (p VerifierProfile) MarshalJSON() ([]byte, error) {
+	data, err := json.Marshal(verifierProfileCore{
+		Label:       p.Label,
+		PromptFiles: p.PromptFiles,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(p.Extra) == 0 {
+		return data, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, err
+	}
+	for k, v := range p.Extra {
+		if _, exists := m[k]; !exists {
+			m[k] = v
+		}
+	}
+	return json.Marshal(m)
+}
+
+// VerifierPromptFile is one source-aware prompt-file reference inside a
+// VerifierProfile. It accepts two wire forms (config-distribution-model p1c):
+//
+//	"path/to/prompt.md"                      → legacy bare string (Source="" )
+//	{"source":"acme","path":"...","version":"^1"} → typed, layer/package-hosted
+//
+// The bare-string form marshals back to a bare string so existing v1 manifests
+// round-trip byte-for-byte. A typed entry with only `path` set also collapses
+// back to a bare string on marshal, keeping the wire minimal.
+type VerifierPromptFile struct {
+	// Source is the source-id (matching a sources[].id / package id) that hosts
+	// the prompt file. Empty means the repo-local path (legacy behaviour).
+	Source string `json:"source,omitempty"`
+	// Path is the prompt file path, relative to the source root (or repo root
+	// when Source is empty). Required.
+	Path string `json:"path"`
+	// Version pins the source revision (tag / semver range / digest). Optional;
+	// only meaningful when Source is set.
+	Version string `json:"version,omitempty"`
+}
+
+// IsLocal reports whether the prompt file resolves against the repo (no source).
+func (f VerifierPromptFile) IsLocal() bool { return f.Source == "" }
+
+type verifierPromptFileWire struct {
+	Source  string `json:"source,omitempty"`
+	Path    string `json:"path"`
+	Version string `json:"version,omitempty"`
+}
+
+// MarshalJSON emits the bare-string form when only Path is set, otherwise the
+// typed object. This keeps legacy manifests stable and the wire minimal.
+func (f VerifierPromptFile) MarshalJSON() ([]byte, error) {
+	if f.Source == "" && f.Version == "" {
+		return json.Marshal(f.Path)
+	}
+	return json.Marshal(verifierPromptFileWire{Source: f.Source, Path: f.Path, Version: f.Version})
+}
+
+// UnmarshalJSON accepts either a bare string path or the typed object form.
+func (f *VerifierPromptFile) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		f.Source = ""
+		f.Path = s
+		f.Version = ""
+		return nil
+	}
+	var w verifierPromptFileWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("prompt_files entry must be a string or {source,path,version}: %w", err)
+	}
+	if strings.TrimSpace(w.Path) == "" {
+		return fmt.Errorf("prompt_files entry object form requires non-empty path")
+	}
+	f.Source = w.Source
+	f.Path = w.Path
+	f.Version = w.Version
+	return nil
 }
 
 // LayerRef is a single entry in AgentsRC.Extends. It accepts either a bare
@@ -313,6 +455,7 @@ var agentsRCKnown = map[string]bool{
 	"kg": true, "refresh": true,
 	// v2 additive fields (config-distribution-model §3)
 	"repo_id": true, "extends": true, "packages": true, "features": true,
+	"verifier_profiles": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -333,10 +476,11 @@ type agentsRCCore struct {
 	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
-	RepoID   string            `json:"repo_id,omitempty"`
-	Extends  []LayerRef        `json:"extends,omitempty"`
-	Packages []PackageRef      `json:"packages,omitempty"`
-	Features map[string]string `json:"features,omitempty"`
+	RepoID           string                     `json:"repo_id,omitempty"`
+	Extends          []LayerRef                 `json:"extends,omitempty"`
+	Packages         []PackageRef               `json:"packages,omitempty"`
+	Features         map[string]string          `json:"features,omitempty"`
+	VerifierProfiles map[string]VerifierProfile `json:"verifier_profiles,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -360,6 +504,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Extends = core.Extends
 	a.Packages = core.Packages
 	a.Features = core.Features
+	a.VerifierProfiles = core.VerifierProfiles
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -378,22 +523,23 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 
 func (a AgentsRC) MarshalJSON() ([]byte, error) {
 	core := agentsRCCore{
-		Schema:   a.Schema,
-		Version:  a.Version,
-		Project:  a.Project,
-		Skills:   a.Skills,
-		Rules:    a.Rules,
-		Agents:   a.Agents,
-		Hooks:    a.Hooks,
-		MCP:      a.MCP,
-		Settings: a.Settings,
-		Sources:  a.Sources,
-		KG:       a.KG,
-		Refresh:  a.Refresh,
-		RepoID:   a.RepoID,
-		Extends:  a.Extends,
-		Packages: a.Packages,
-		Features: a.Features,
+		Schema:           a.Schema,
+		Version:          a.Version,
+		Project:          a.Project,
+		Skills:           a.Skills,
+		Rules:            a.Rules,
+		Agents:           a.Agents,
+		Hooks:            a.Hooks,
+		MCP:              a.MCP,
+		Settings:         a.Settings,
+		Sources:          a.Sources,
+		KG:               a.KG,
+		Refresh:          a.Refresh,
+		RepoID:           a.RepoID,
+		Extends:          a.Extends,
+		Packages:         a.Packages,
+		Features:         a.Features,
+		VerifierProfiles: a.VerifierProfiles,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {

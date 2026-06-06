@@ -95,7 +95,11 @@
             "type": "string"
           },
           "prompt_files": {
-            "$ref": "#/$defs/stringList"
+            "type": "array",
+            "description": "Ordered, source-aware prompt files the verifier loads. Each entry is either a legacy repo-relative path string or a typed {source,path,version} object addressing a layer/package-hosted prompt.",
+            "items": {
+              "$ref": "#/$defs/verifierPromptFile"
+            }
           }
         }
       }
@@ -187,6 +191,37 @@
         },
         {
           "$ref": "#/$defs/stringList"
+        }
+      ]
+    },
+    "verifierPromptFile": {
+      "description": "A source-aware verifier prompt file: a bare repo-relative path string (legacy) or a typed {source,path,version} object hosted by a layer/package source.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "source-id (sources[].id / package id) hosting the prompt file; omit for repo-local"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "prompt file path relative to the source root (or repo root when source is omitted)"
+            },
+            "version": {
+              "type": "string",
+              "description": "source revision pin (tag / semver range / digest); only meaningful with source"
+            }
+          }
         }
       ]
     },

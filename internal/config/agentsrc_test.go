@@ -1684,3 +1684,150 @@ func TestMergeGenerateAgentsRC_V1ManifestWithoutRepoIDRoundTripsByteForByte(t *t
 		t.Errorf("marshalled output should omit repo_id when empty: %s", data)
 	}
 }
+
+// ── Source-aware verifier_profiles (config-distribution-model p1c) ────────────
+
+func TestVerifierPromptFileMarshalForms(t *testing.T) {
+	cases := []struct {
+		name string
+		in   VerifierPromptFile
+		want string
+	}{
+		{"bare-path", VerifierPromptFile{Path: "a/b.md"}, `"a/b.md"`},
+		{"with-source", VerifierPromptFile{Source: "acme", Path: "v/cli.md"}, `{"source":"acme","path":"v/cli.md"}`},
+		{"with-version-only", VerifierPromptFile{Path: "v/cli.md", Version: "^1"}, `{"path":"v/cli.md","version":"^1"}`},
+		{"full", VerifierPromptFile{Source: "acme", Path: "v/cli.md", Version: "^1.2"}, `{"source":"acme","path":"v/cli.md","version":"^1.2"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data, err := json.Marshal(tc.in)
+			if err != nil {
+				t.Fatalf("Marshal: %v", err)
+			}
+			if string(data) != tc.want {
+				t.Fatalf("Marshal: got %s, want %s", data, tc.want)
+			}
+		})
+	}
+}
+
+func TestVerifierPromptFileUnmarshalForms(t *testing.T) {
+	var bare VerifierPromptFile
+	if err := json.Unmarshal([]byte(`"a/b.md"`), &bare); err != nil {
+		t.Fatalf("bare unmarshal: %v", err)
+	}
+	if !bare.IsLocal() || bare.Path != "a/b.md" || bare.Version != "" {
+		t.Fatalf("bare form wrong: %+v", bare)
+	}
+
+	var typed VerifierPromptFile
+	if err := json.Unmarshal([]byte(`{"source":"acme","path":"v/cli.md","version":"^1"}`), &typed); err != nil {
+		t.Fatalf("typed unmarshal: %v", err)
+	}
+	if typed.IsLocal() || typed.Source != "acme" || typed.Path != "v/cli.md" || typed.Version != "^1" {
+		t.Fatalf("typed form wrong: %+v", typed)
+	}
+}
+
+func TestVerifierPromptFileUnmarshalErrors(t *testing.T) {
+	var f VerifierPromptFile
+	if err := json.Unmarshal([]byte(`42`), &f); err == nil || !strings.Contains(err.Error(), "must be a string or") {
+		t.Fatalf("scalar: got %v", err)
+	}
+	if err := json.Unmarshal([]byte(`{"source":"acme"}`), &f); err == nil || !strings.Contains(err.Error(), "non-empty path") {
+		t.Fatalf("missing path: got %v", err)
+	}
+	if err := json.Unmarshal([]byte(`{"path":"   "}`), &f); err == nil || !strings.Contains(err.Error(), "non-empty path") {
+		t.Fatalf("blank path: got %v", err)
+	}
+}
+
+func TestVerifierProfileExtraRoundTrip(t *testing.T) {
+	in := VerifierProfile{
+		Label:       "CLI",
+		PromptFiles: []VerifierPromptFile{{Source: "acme", Path: "v/cli.md", Version: "^1"}, {Path: "local.md"}},
+		Extra:       map[string]json.RawMessage{"kind": json.RawMessage(`"go-cli"`)},
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"kind":"go-cli"`) {
+		t.Fatalf("Extra dropped on marshal: %s", data)
+	}
+	var out VerifierProfile
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if out.Label != "CLI" || len(out.PromptFiles) != 2 {
+		t.Fatalf("profile core lost: %+v", out)
+	}
+	if string(out.Extra["kind"]) != `"go-cli"` {
+		t.Fatalf("Extra not preserved: %v", out.Extra)
+	}
+	// A profile with no Extra marshals to just the core (no extra keys leak).
+	plain, _ := json.Marshal(VerifierProfile{Label: "X"})
+	if strings.Contains(string(plain), "prompt_files") {
+		t.Fatalf("empty prompt_files should be omitted: %s", plain)
+	}
+}
+
+func TestVerifierProfileUnmarshalError(t *testing.T) {
+	var p VerifierProfile
+	if err := json.Unmarshal([]byte(`["x"]`), &p); err == nil || !strings.Contains(err.Error(), "verifier profile") {
+		t.Fatalf("expected verifier profile error, got %v", err)
+	}
+	// A nested prompt_files entry error must surface through the core decode.
+	if err := json.Unmarshal([]byte(`{"prompt_files":[42]}`), &p); err == nil || !strings.Contains(err.Error(), "verifier profile") {
+		t.Fatalf("expected nested prompt_files error, got %v", err)
+	}
+}
+
+func TestAgentsRCVerifierProfilesPromotedRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	input := `{
+  "version": 1,
+  "project": "myproject",
+  "sources": [{"type":"local"}],
+  "hooks": false,
+  "mcp": false,
+  "settings": false,
+  "app_type_verifier_map": {"go-cli": ["unit"]},
+  "verifier_profiles": {
+    "unit": {"label": "Unit", "prompt_files": [".agents/prompts/unit.md"]},
+    "cli-runner": {"label": "CLI", "prompt_files": [{"source": "acme", "path": "v/cli.md", "version": "^1"}]}
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(input), 0644); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	// verifier_profiles is now typed (not in ExtraFields); app_type_verifier_map stays extra.
+	if _, ok := rc.ExtraFields["verifier_profiles"]; ok {
+		t.Fatalf("verifier_profiles should be a typed field, not ExtraFields")
+	}
+	if len(rc.VerifierProfiles) != 2 {
+		t.Fatalf("got %d verifier profiles, want 2", len(rc.VerifierProfiles))
+	}
+	if !rc.VerifierProfiles["unit"].PromptFiles[0].IsLocal() {
+		t.Fatalf("unit prompt file not local: %+v", rc.VerifierProfiles["unit"])
+	}
+
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	rc2, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	cli := rc2.VerifierProfiles["cli-runner"].PromptFiles[0]
+	if cli.Source != "acme" || cli.Path != "v/cli.md" || cli.Version != "^1" {
+		t.Fatalf("cli prompt file lost source-awareness on round-trip: %+v", cli)
+	}
+	if _, ok := rc2.ExtraFields["app_type_verifier_map"]; !ok {
+		t.Fatalf("app_type_verifier_map dropped on round-trip")
+	}
+}
