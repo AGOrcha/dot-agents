@@ -151,6 +151,16 @@ func (r *FlatResolver) loadLayers(projectPath string) ([]ResolvedLayer, error) {
 		return nil, fmt.Errorf("no %s found at %s", AgentsRCFile, projectPath)
 	}
 	layers = append(layers, ResolvedLayer{ID: LayerRepoLocal, Present: true, Raw: repoRaw})
+
+	// Project-local overlay (§7A.1, Axis A): the gitignored .agentsrc.local.json
+	// merges ABOVE repo-local committed (highest local precedence below runtime),
+	// so it is the last layer appended. Optional — an absent overlay is the common
+	// case; a present-but-corrupt overlay is fatal.
+	if overlay, ok, err := loadProjectLocalOverlay(projectPath); err != nil {
+		return nil, err
+	} else if ok {
+		layers = append(layers, overlay)
+	}
 	return layers, nil
 }
 
@@ -524,6 +534,15 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	}
 	stack = append(stack, imported...)
 	stack = append(stack, repoLayer)
+
+	// Project-local overlay (§7A.1, Axis A): merges above repo-local committed and
+	// the imported extends layers — the highest local precedence below runtime —
+	// so it is appended last.
+	if overlay, ok, err := loadProjectLocalOverlay(projectPath); err != nil {
+		return nil, err
+	} else if ok {
+		stack = append(stack, overlay)
+	}
 
 	snap, err := resolveSnapshot(stack)
 	if err != nil {
