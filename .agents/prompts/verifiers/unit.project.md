@@ -1,59 +1,22 @@
-# Unit verifier — repo project overlay (Go test slice)
+# Unit verifier — dot-agents repo overlay
 
-Use this file as **`--prompt-file`** when the delegated role is **unit verification only**: read **`impl-handoff.yaml`**, run **scoped** Go tests tied to `write_scope_touched`, then the **full configured Go suite** (D12), and emit **`.agents/active/verification/<task_id>/unit.result.yaml`** validated against **`schemas/verification-result.schema.json`**.
+Repo-local committed layer. Composes **after** `verifiers/verifier.base.md` (the contract: role,
+`da workflow verify record`, result schema, evidence taxonomy, cold-start) and `verifiers/unit.md`
+(the kind: scoped tests then full suite, positive + negative). This file adds **only** the dot-agents
+command matrix.
 
-## Role boundary
+## Commands
 
-| Surface | Responsibility |
-|--------|----------------|
-| Shared stage instruction base (parent-resolved; not an `app_type` profile) | Stable evidence, scope, and sandbox discipline; no merge-back or parent closeout |
-| Stage-safe repo project overlay (to materialize) | Paths, matrices, guardrails; do not inject legacy `active.loop.md` unchanged |
-| **This file (`verifiers/unit.project.md`)** | Repo wording for **unit** turns: map touched paths → packages, positive + negative cases, record **`unit.result.yaml`** |
-| Delegation bundle | Canonical `plan_id`, `task_id`, `feedback_goal`; impl scope is **not** yours unless the bundle says so |
-
-Do **not** implement product code in this role unless the bundle explicitly widens `write_scope`. Prefer failing the verification run with a clear `summary` and `status: fail` when the tree is broken.
-
-## Preconditions
-
-1. **Cold-start from** `.agents/active/verification/<task_id>/impl-handoff.yaml` (see Phase 8 impl-handoff in `docs/LOOP_ORCHESTRATION_SPEC.md`).
-2. Confirm `ready_for_verification: true` before treating a green scoped run as meaningful; if `false`, record `status: partial` or `unknown` with explanation.
-3. Use **`write_scope_touched`** to choose **scoped** packages (D12 — parallel verifier isolation): only `go test` packages that **cover** those paths (directory of each touched file → `./that/package/...`). If mapping is ambiguous, include the smallest superset that obviously contains the edits.
-
-## Commands (D12 + discipline)
-
-**Order:**
-
-1. **Scoped (required):** `go test -race -count=1 -timeout=120s <packages-from-write_scope_touched>`  
-   - **Positive:** default / happy-path packages build and pass.  
-   - **Negative:** where the change introduces failure modes, run targeted `-run` subtests or packages that assert errors (table-driven / parallel subtests preferred).
-2. **Full suite (required for final pass):**  
-
+1. **Scoped (required) — map touched paths to Go packages.** For each path in `write_scope_touched`,
+   the package is the directory of the file → `./that/package/...`. Run:
+   `go test -race -count=1 -timeout=120s <packages-from-write_scope_touched>`
+   - Positive: the happy-path packages build and pass.
+   - Negative: targeted `-run` subtests / packages that assert the error path (table-driven /
+     parallel subtests preferred).
+2. **Full suite (required for the final pass):**
    `go test ./... -race -count=1 -timeout=300s`
+   `-count=1` disables the test cache; `-timeout=300s` caps wall time.
 
-   `-count=1` disables test cache; **`-timeout=300s`** caps wall time for the full tree.
-
-If scoped tests fail, you may skip the full suite in the recorded `commands` list but must set `status: fail` and explain in `summary`.
-
-## Result artifact
-
-**Path:** `.agents/active/verification/<task_id>/unit.result.yaml`
-
-Minimal shape (schema-enforced):
-
-| Field | Value |
-|-------|--------|
-| `schema_version` | `1` |
-| `task_id` | Same as bundle / impl-handoff |
-| `parent_plan_id` | Canonical plan id |
-| `verifier_type` | `unit` |
-| `status` | `pass` \| `fail` \| `partial` \| `unknown` |
-| `summary` | What ran, key failures, link to `commands` |
-| `recorded_at` | RFC3339 timestamp |
-| `commands` | Include scoped line(s) and the full `./...` line when run |
-| `artifact_paths` | Optional: test log paths, coverage outputs, if captured |
-
-Optional: `delegation_id`, `recorded_by` when tied to fanout or automation.
-
-## Evidence classification
-
-Classify the verification story in prose (and optionally in `summary`): `ok`, `ok-warning`, `impl-bug`, `tool-bug`, `missing-feature`, `blocked` — align with Phase 8 taxonomy in `docs/LOOP_ORCHESTRATION_SPEC.md`.
+Per-file 95% coverage gate applies (D12 — parallel verifier isolation). `--kind test`,
+`--verifier-type unit`. If the scoped run fails you may skip the full suite but record
+`--status fail`.

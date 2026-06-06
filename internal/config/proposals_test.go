@@ -421,3 +421,71 @@ func TestProposalDirHelpers(t *testing.T) {
 		t.Errorf("ArchivedProposalPath: %q, want %q", ArchivedProposalPath("foo"), want)
 	}
 }
+
+// proposalFixture returns a minimal valid pending proposal.
+func proposalFixture(id string) *Proposal {
+	return &Proposal{
+		SchemaVersion: 1, ID: id, Status: "pending", Type: "rule",
+		Action: "add", Target: "rules/global/go.mdc", Rationale: "r",
+		Content: "x\n", CreatedAt: "2026-04-10T00:00:00Z", CreatedBy: "t",
+	}
+}
+
+// TestLoadProposal_HappyPath covers the success return that no other test exercised.
+func TestLoadProposal_HappyPath(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	if err := SaveProposal(proposalFixture("ok"), ProposalPath("ok")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadProposal("ok")
+	if err != nil || got == nil || got.ID != "ok" {
+		t.Fatalf("LoadProposal happy path: %+v, %v", got, err)
+	}
+}
+
+// TestListPendingProposals_DirIsFile covers the non-NotExist ReadDir error branch
+// (POSIX ENOTDIR when the proposals path is a regular file).
+func TestListPendingProposals_DirIsFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	if err := os.MkdirAll(filepath.Dir(ProposalsDir()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ProposalsDir(), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ListPendingProposals(); err == nil {
+		t.Fatal("expected ReadDir error when proposals dir is a file")
+	}
+}
+
+// TestApplyProposal_RemoveError covers the remove-action non-NotExist error branch
+// (os.Remove of a non-empty directory).
+func TestApplyProposal_RemoveError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	target := filepath.Join(home, "rules", "global", "go.mdc")
+	if err := os.MkdirAll(filepath.Join(target, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := proposalFixture("rm")
+	p.Action = "remove"
+	if err := ApplyProposal(p); err == nil {
+		t.Fatal("expected remove error on a non-empty directory target")
+	}
+}
+
+// TestArchiveProposal_RemoveSrcError covers ArchiveProposal's os.Remove(src) error
+// branch: dst archives fine, but the source path is a non-empty dir that can't be
+// removed.
+func TestArchiveProposal_RemoveSrcError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	src := ProposalPath("arc")
+	if err := os.MkdirAll(filepath.Join(src, "child"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ArchiveProposal(proposalFixture("arc")); err == nil {
+		t.Fatal("expected os.Remove(src) error when src is a non-empty dir")
+	}
+}

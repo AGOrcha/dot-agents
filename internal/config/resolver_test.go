@@ -89,6 +89,13 @@ func TestMergeFieldCategories(t *testing.T) {
 			want: map[string]any{"unit": map[string]any{"label": "Unit", "kind": "go-race"}},
 		},
 		{
+			name: "reviewer_profiles merges by lens like verifier_profiles",
+			key:  "reviewer_profiles",
+			prev: map[string]any{"architecture-standards": map[string]any{"label": "Arch", "prompt_files": []any{"base.md"}}},
+			next: map[string]any{"architecture-standards": map[string]any{"prompt_files": []any{"base.md", "arch.md"}}, "adversarial": map[string]any{"label": "Adv"}},
+			want: map[string]any{"architecture-standards": map[string]any{"label": "Arch", "prompt_files": []any{"base.md", "arch.md"}}, "adversarial": map[string]any{"label": "Adv"}},
+		},
+		{
 			name: "app_type_verifier_map merges by app type, replaces sequence",
 			key:  "app_type_verifier_map",
 			prev: map[string]any{"go-cli": []any{"unit"}, "api": []any{"unit"}},
