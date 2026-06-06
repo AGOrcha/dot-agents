@@ -17,7 +17,7 @@ tasks:
       notes: 'Introduce sentinel JSON schema v1 and `da workflow hook-sentinel {write,read,clear}`; archive successful sentinels under durable plan history rather than active state. Contract and exact schema/CLI behavior: tasks/p0-sentinel-cli.contract.md.'
     - id: p1a-mapper-extensions
       title: 'Platform mapper extensions: Codex SubagentStop, Copilot agentStop, Cursor subagentStop'
-      status: pending
+      status: completed
       depends_on:
         - p0-sentinel-cli
       blocks: []
@@ -70,7 +70,7 @@ tasks:
       notes: 'Bring the officially documented Claude wider lifecycle event surface into canonical HookSpec coverage without attaching new gates by implication. Contract: tasks/p1d-claude-lifecycle-parity.contract.md.'
     - id: p2-hook-scripts
       title: Three HOOK.yaml + gate.sh bundles under internal/scaffold/hooks/global/
-      status: pending
+      status: completed
       depends_on:
         - p0-sentinel-cli
         - p1a-mapper-extensions
@@ -87,7 +87,7 @@ tasks:
       notes: 'Add three canonical hook bundles and scaffold-copy assertions. Ship terminal validation, deterministic PreToolUse prevention, loop-worker SubagentStart bootstrap, and PreCompact continuity advice; hard outcomes require observable evidence and native remediation output. Contract: tasks/p2-hook-scripts.contract.md.'
     - id: p3-starter-promotion
       title: Promote iteration-close, isp, loop-worker skills + AGENT.md + loop-worker profile into starter
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -169,7 +169,7 @@ tasks:
       notes: 'Final plan task; inventory managed downstream legacy overrides, migrate compatible copies to starter inheritance, and record retained intentional project variants. Contract: tasks/p7-legacy-override-migration.contract.md.'
     - id: p1e-docs-hooks-consistency
       title: docs/HOOKS.md consistency pass after P1b/P1c/P1d additions
-      status: pending
+      status: completed
       depends_on:
         - p1b-canonical-when-values
         - p1c-matcher-verification
@@ -247,7 +247,6 @@ tasks:
         in P2's gate.sh so r1-5 can wrap the decision point with a
         single outcome-emit call without restructuring gate logic.
       app_type: research
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the loop-discipline-hooks minor'
       status: pending

@@ -16,7 +16,7 @@ tasks:
       notes: Start only after loop-discipline lifecycle-hook native output and sentinel archive contracts are stable; define allow/advise/remediate plus lifecycle/intervention classification without transcript content.
     - id: t1-capture-outcomes
       title: Persist hook gate outcomes alongside archived sentinel history
-      status: pending
+      status: completed
       depends_on:
         - t0-outcome-contract
       blocks: []
@@ -55,7 +55,7 @@ tasks:
       notes: Extend the shipped rubric deliberately with a version bump and explainable per-rule contributions; score post-tool observation only if T1b explicitly approves an objective, deduplicated signal.
     - id: t3-cli-readback
       title: Render hook outcome contribution in score queries
-      status: pending
+      status: completed
       depends_on:
         - t2-scoring-signal
       blocks: []
@@ -86,7 +86,7 @@ tasks:
       app_type: go-cli
     - id: t2c-rubric-version-coordination
       title: Resolve RubricVersion ordering with r5-review-labeling-access
-      status: pending
+      status: completed
       depends_on:
         - t2-scoring-signal
       blocks: []
@@ -147,7 +147,7 @@ tasks:
       app_type: research
     - id: t-e2e-integration-test
       title: End-to-end test exercising sentinel → gate → sidecar → score
-      status: pending
+      status: completed
       depends_on:
         - t2-scoring-signal
         - t3-cli-readback
@@ -185,7 +185,6 @@ tasks:
         the outcome schema. Separating docs from code keeps the
         rubric-bump task's diff focused on weight changes only.
       app_type: research
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the hook-telemetry minor'
       status: pending

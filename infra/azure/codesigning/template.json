@@ -29,16 +29,16 @@
     },
     "resources": [
         {
+            "type": "Microsoft.CodeSigning/codesigningaccounts",
             "apiVersion": "2025-10-13",
             "name": "[parameters('name')]",
             "location": "[parameters('location')]",
-            "type": "Microsoft.CodeSigning/codesigningaccounts",
+            "tags": "[if(contains(parameters('tags'), 'Microsoft.CodeSigning/codeSigningAccounts'), parameters('tags')['Microsoft.CodeSigning/codeSigningAccounts'], json('{}'))]",
             "properties": {
                 "sku": {
                     "name": "[parameters('skuName')]"
                 }
-            },
-            "tags": "[if(contains(parameters('tags'), 'Microsoft.CodeSigning/codeSigningAccounts'), parameters('tags')['Microsoft.CodeSigning/codeSigningAccounts'], json('{}'))]"
+            }
         }
     ]
 }

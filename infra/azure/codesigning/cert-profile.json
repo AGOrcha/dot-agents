@@ -40,8 +40,8 @@
     },
     "resources": [
         {
-            "apiVersion": "2025-10-13",
             "type": "Microsoft.CodeSigning/codesigningaccounts/certificateProfiles",
+            "apiVersion": "2025-10-13",
             "name": "[concat(parameters('accountName'), '/', parameters('profileName'))]",
             "properties": {
                 "profileType": "[parameters('profileType')]",

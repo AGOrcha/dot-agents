@@ -1311,10 +1311,20 @@ func TestSaveTestDelegationContract_StableID(t *testing.T) {
 	}
 }
 
-// TestVerifierDispatchResolution covers the verifier-sequence dispatch helpers'
-// uncovered branches (validation, empty sequences, malformed/missing manifest).
-func TestVerifierDispatchResolution(t *testing.T) {
-	// validateVerifierProfileRefs: empty profiles or sequence is a no-op
+// writeFanoutTestAgentsrc writes a raw .agentsrc.json body into a fresh temp repo
+// and returns the repo path. Raw body (not testutil.WriteAgentsRC) because these
+// cases exercise ExtraFields keys (verifier_profiles / app_type_verifier_map).
+func writeFanoutTestAgentsrc(t *testing.T, body string) string {
+	t.Helper()
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo
+}
+
+func TestValidateVerifierProfileRefs(t *testing.T) {
+	// empty profiles or sequence is a no-op
 	if err := validateVerifierProfileRefs(nil, nil); err != nil {
 		t.Fatalf("empty inputs: %v", err)
 	}
@@ -1325,49 +1335,44 @@ func TestVerifierDispatchResolution(t *testing.T) {
 	if err := validateVerifierProfileRefs([]string{"ghost"}, profs); err == nil {
 		t.Fatal("expected undefined-profile error")
 	}
+}
 
-	writeRC := func(t *testing.T, body string) string {
-		t.Helper()
-		repo := t.TempDir()
-		if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return repo
-	}
-
-	t.Run("explicit empty after split", func(t *testing.T) {
+func TestExplicitVerifierSequence(t *testing.T) {
+	t.Run("empty after split", func(t *testing.T) {
 		if _, err := explicitVerifierSequence(t.TempDir(), " , , "); err == nil {
 			t.Fatal("expected empty-sequence error")
 		}
 	})
-	t.Run("explicit undefined profile", func(t *testing.T) {
-		repo := writeRC(t, `{"project":"t","version":1,"verifier_profiles":{"unit":{}}}`)
+	t.Run("undefined profile", func(t *testing.T) {
+		repo := writeFanoutTestAgentsrc(t, `{"project":"t","version":1,"verifier_profiles":{"unit":{}}}`)
 		if _, err := explicitVerifierSequence(repo, "ghost"); err == nil {
 			t.Fatal("expected undefined-profile error")
 		}
 	})
-	t.Run("explicit valid", func(t *testing.T) {
-		repo := writeRC(t, `{"project":"t","version":1,"verifier_profiles":{"unit":{}}}`)
+	t.Run("valid", func(t *testing.T) {
+		repo := writeFanoutTestAgentsrc(t, `{"project":"t","version":1,"verifier_profiles":{"unit":{}}}`)
 		seq, err := explicitVerifierSequence(repo, "unit")
 		if err != nil || len(seq) != 1 || seq[0] != "unit" {
 			t.Fatalf("valid explicit seq: %v %v", seq, err)
 		}
 	})
+}
 
-	t.Run("mapped empty sequence for app type", func(t *testing.T) {
-		repo := writeRC(t, `{"project":"t","version":1,"app_type_verifier_map":{"go-cli":[]},"verifier_profiles":{"unit":{}}}`)
+func TestMappedVerifierSequence(t *testing.T) {
+	t.Run("empty sequence for app type", func(t *testing.T) {
+		repo := writeFanoutTestAgentsrc(t, `{"project":"t","version":1,"app_type_verifier_map":{"go-cli":[]},"verifier_profiles":{"unit":{}}}`)
 		seq, err := mappedVerifierSequence(repo, "go-cli")
 		if err != nil || seq != nil {
 			t.Fatalf("empty mapped seq should be nil,nil: %v %v", seq, err)
 		}
 	})
-	t.Run("mapped undefined profile", func(t *testing.T) {
-		repo := writeRC(t, `{"project":"t","version":1,"app_type_verifier_map":{"go-cli":["ghost"]},"verifier_profiles":{"unit":{}}}`)
+	t.Run("undefined profile", func(t *testing.T) {
+		repo := writeFanoutTestAgentsrc(t, `{"project":"t","version":1,"app_type_verifier_map":{"go-cli":["ghost"]},"verifier_profiles":{"unit":{}}}`)
 		if _, err := mappedVerifierSequence(repo, "go-cli"); err == nil {
 			t.Fatal("expected undefined-profile error from mapped sequence")
 		}
 	})
-	t.Run("mapped missing manifest is nil", func(t *testing.T) {
+	t.Run("missing manifest is nil", func(t *testing.T) {
 		seq, err := mappedVerifierSequence(t.TempDir(), "go-cli")
 		if err != nil || seq != nil {
 			t.Fatalf("missing manifest should be nil,nil: %v %v", seq, err)

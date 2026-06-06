@@ -67,6 +67,50 @@ func TestParseCRGStatusOutput_noInfoLines(t *testing.T) {
 // implicit transaction management.
 //
 // Skipped when the real CRG binary is not discoverable (e.g. CI without a venv).
+// skipOrFailCRGBuildErr skips when the CRG binary was discoverable but its Python
+// package is not importable here (an environment limitation — e.g. a sibling
+// worktree's .venv shim on PATH without code_review_graph installed), and fails
+// loudly otherwise. Extracted from the test so the compound module-not-found
+// condition does not inflate its cognitive complexity (SonarCloud go:S3776).
+// BuildReport returns (nil, err) on the build-error path, so the report pointer
+// is guarded before reading Summary.
+func skipOrFailCRGBuildErr(t *testing.T, report *graphstore.CRGOperationReport, err error) {
+	t.Helper()
+	combined := err.Error()
+	if report != nil {
+		combined += " " + report.Summary
+	}
+	if strings.Contains(combined, "code_review_graph") &&
+		(strings.Contains(combined, "No module named") || strings.Contains(combined, "ModuleNotFoundError")) {
+		t.Skipf("real CRG binary discovered but its Python package is not importable here: %v", err)
+	}
+	t.Fatalf("BuildReport failed (possible nested-transaction defect): %v", err)
+}
+
+// assertGraphDBNonEmpty opens the CRG graph.db under repoRoot and asserts the
+// nodes table is non-empty, returning the row count. Extracted to keep the
+// caller under the cognitive-complexity gate (SonarCloud go:S3776).
+func assertGraphDBNonEmpty(t *testing.T, repoRoot string) int {
+	t.Helper()
+	dbPath := graphstore.CRGDBPath(repoRoot)
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("graph.db not found at %s: %v", dbPath, err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open graph.db: %v", err)
+	}
+	defer db.Close()
+	var nodeCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM nodes").Scan(&nodeCount); err != nil {
+		t.Fatalf("SELECT COUNT(*) FROM nodes: %v", err)
+	}
+	if nodeCount == 0 {
+		t.Fatal("graph.db has zero rows in nodes table after fresh build")
+	}
+	return nodeCount
+}
+
 func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
 	_, testFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Join(filepath.Dir(testFile), "..", "..")
@@ -90,26 +134,7 @@ func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
 		SkipPostprocess: true,
 	})
 	if err != nil {
-		// A CRG *binary* can be discoverable (e.g. a sibling worktree's .venv shim
-		// is on PATH) while its Python package is NOT importable in this
-		// environment — the build then fails with "No module named
-		// code_review_graph". That is an environment limitation, not the
-		// nested-transaction defect this test targets, so skip rather than fail
-		// (otherwise it breaks the coverage gate for unrelated work — the recurring
-		// worker --no-verify trigger). A genuine build failure with the module
-		// present still fails loudly.
-		// BuildReport returns (nil, err) on the build-error path, so guard the
-		// report pointer before reading Summary (the module-not-found message is
-		// in err itself; Summary only adds detail when present).
-		combined := err.Error()
-		if report != nil {
-			combined += " " + report.Summary
-		}
-		if strings.Contains(combined, "code_review_graph") &&
-			(strings.Contains(combined, "No module named") || strings.Contains(combined, "ModuleNotFoundError")) {
-			t.Skipf("real CRG binary discovered but its Python package is not importable here: %v", err)
-		}
-		t.Fatalf("BuildReport failed (possible nested-transaction defect): %v", err)
+		skipOrFailCRGBuildErr(t, report, err)
 	}
 	if report.Outcome != graphstore.CRGReadinessReady {
 		t.Fatalf("expected outcome=%q, got %q; summary: %s", graphstore.CRGReadinessReady, report.Outcome, report.Summary)
@@ -119,22 +144,7 @@ func TestCRGBridgeFreshBuildRealCRG(t *testing.T) {
 	}
 
 	// Direct SQLite assertion: the produced graph.db must have rows in nodes.
-	dbPath := graphstore.CRGDBPath(tmpDir)
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Fatalf("graph.db not found at %s: %v", dbPath, err)
-	}
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open graph.db: %v", err)
-	}
-	defer db.Close()
-	var nodeCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM nodes").Scan(&nodeCount); err != nil {
-		t.Fatalf("SELECT COUNT(*) FROM nodes: %v", err)
-	}
-	if nodeCount == 0 {
-		t.Fatal("graph.db has zero rows in nodes table after fresh build")
-	}
+	nodeCount := assertGraphDBNonEmpty(t, tmpDir)
 
 	// Status() must agree with what CRG wrote into graph.db.
 	status, err := bridge.Status()

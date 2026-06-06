@@ -3,7 +3,7 @@ plan_id: config-v2-coherence
 tasks:
     - id: c0-governance-interface
       title: Governance/editability interface (policy-backend-agnostic)
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -20,7 +20,7 @@ tasks:
       app_type: go-cli
     - id: ca-units-lock-schema
       title: 'Lock schema: collapse config/packages into one units section + inputs_digest'
-      status: pending
+      status: completed
       depends_on:
         - config-v2-migration/p1b-resolver-extends-tier1
         - config-v2-migration/p1d-resolver-offline-read-seam
@@ -43,7 +43,7 @@ tasks:
       app_type: go-cli
     - id: cb-content-hash-staleness
       title: Content-hash driver-event staleness + TTL demotion to review-nudge
-      status: pending
+      status: completed
       depends_on:
         - ca-units-lock-schema
         - config-v2-migration/p2-lockfile-doctor-status
@@ -85,7 +85,7 @@ tasks:
       app_type: go-cli
     - id: cd-ensure-resolved-seam
       title: EnsureResolved auto-sync seam + --locked/--frozen/--no-sync/--offline
-      status: pending
+      status: completed
       depends_on:
         - cb-content-hash-staleness
         - config-v2-migration/p1d-resolver-offline-read-seam
@@ -124,7 +124,7 @@ tasks:
       app_type: go-cli
     - id: cf-local-source-autosetup
       title: 'Git-backed local source: auto-bootstrap so local units version by ref'
-      status: pending
+      status: completed
       depends_on:
         - ca-units-lock-schema
       blocks: []
@@ -159,7 +159,7 @@ tasks:
       app_type: go-cli
     - id: ch-scope-source-routing
       title: CRUD/sync --scope/--source routing (consumes the governance interface)
-      status: pending
+      status: completed
       depends_on:
         - cf-local-source-autosetup
         - c0-governance-interface

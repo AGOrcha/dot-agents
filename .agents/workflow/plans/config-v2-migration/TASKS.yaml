@@ -64,7 +64,7 @@ tasks:
       app_type: go-cli
     - id: p1-resolver-core-flat
       title: 'Phase 1: effective-config snapshot API (flat scope first)'
-      status: in_progress
+      status: completed
       depends_on:
         - p0-schema-additive-extension
       blocks: []
@@ -105,7 +105,7 @@ tasks:
       app_type: go-cli
     - id: p1b-resolver-extends-tier1
       title: 'Phase 1b: resolver tier-1 extends (git+http+local layer fetch)'
-      status: pending
+      status: completed
       depends_on:
         - p1-resolver-core-flat
       blocks: []
@@ -145,7 +145,7 @@ tasks:
       app_type: go-cli
     - id: p2-lockfile-doctor-status
       title: 'Phase 2: lockfile drift surfaces (da doctor + da status)'
-      status: pending
+      status: completed
       depends_on:
         - p1b-resolver-extends-tier1
       blocks: []
@@ -177,7 +177,7 @@ tasks:
       app_type: go-cli
     - id: p3-audit-events
       title: 'Phase 3: audit event taxonomy (config.* events)'
-      status: pending
+      status: completed
       depends_on:
         - p1b-resolver-extends-tier1
       blocks: []
@@ -251,7 +251,7 @@ tasks:
       app_type: go-cli
     - id: p4b-app-types-snapshot-refactor
       title: 'Phase 4b: refactor workflow app-types to consume snapshot API'
-      status: pending
+      status: completed
       depends_on:
         - p4-config-explain-cli
       blocks: []
@@ -276,7 +276,7 @@ tasks:
       app_type: go-cli
     - id: p4c-config-sync-lint
       title: 'Phase 4c: da config sync + da config lint + da config verify commands'
-      status: pending
+      status: in_progress
       depends_on:
         - p4-config-explain-cli
         - p1b-resolver-extends-tier1
@@ -307,7 +307,7 @@ tasks:
       app_type: go-cli
     - id: p5-source-types-http-oci
       title: 'Phase 5: source-type expansion (http+oci) + signing posture stub'
-      status: pending
+      status: completed
       depends_on:
         - p1b-resolver-extends-tier1
       blocks: []

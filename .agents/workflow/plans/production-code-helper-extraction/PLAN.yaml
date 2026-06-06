@@ -35,7 +35,7 @@ summary: |-
     Source classification: .agents/workflow/plans/sonarqube-pr10/findings.md (Cluster E)
     Companion plan: go-test-fixture-extraction (Cluster D)
 created_at: "2026-05-04T00:00:00Z"
-updated_at: "2026-05-19T00:00:00Z"
+updated_at: "2026-06-06T20:47:41Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate snapshot for the follow-up PR
@@ -68,4 +68,4 @@ verification_strategy: |-
     Plan archives when the follow-up PR merges. Order of merges
     relative to go-test-fixture-extraction is not constrained — the
     gate-flip moment is whichever PR is second.
-current_focus_task: Extract internal/platform/resource_plan.go bucket-listing helper (Group RP)
+current_focus_task: Open follow-up PR; verify gate; archive plan

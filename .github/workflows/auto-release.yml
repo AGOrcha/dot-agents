@@ -163,8 +163,9 @@ jobs:
 
       - name: Install Trusted Signing CLI (dotnet sign)
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        # TODO: pin --version once a release is chosen (prerelease today; the
-        # whole signing path is dormant until the repo variables are populated).
+        # NOTE: --version is intentionally unpinned (only a prerelease exists
+        # today); pin it when a stable release is chosen. The whole signing path
+        # is dormant until the repo variables are populated.
         run: dotnet tool install --global sign --prerelease
 
       - name: Import Homebrew tap signing key
