@@ -56,8 +56,8 @@ the JSON envelope reports which selector won):
 ## The three facets, by example
 
 The repo ships two real profiles in `.agentsrc.json` — `go-cli` (execution/throughput: verify and
-review heavily) and `ideation` (divergence: wide executor fan-out, no verification gate). They are
-the worked examples below.
+review heavily) and `ideation` (divergence: wide executor fan-out, with the verify and review gates
+applied to the *design artifact* rather than to code). They are the worked examples below.
 
 ### Facet 1 — units (the noise filter)
 
@@ -97,21 +97,29 @@ topology
   verifier passes). `go-cli` runs **two verifier passes** per executor — one per named profile in
   the sequence below.
 - **`reviewers`** — reviewer fan-out as a keyword (`per_verifier`, `per_executor`) or a stringified
-  integer count (`"0"` = no review gate, as in `ideation`).
+  integer count (`"0"` = no review gate). `ideation` uses `per_executor` — the full lens panel runs
+  against each executor's divergent artifact.
 - **`verifier_sequence`** — the ordered verifier-profile ids (supersedes `app_type_verifier_map`).
   `go-cli` runs `unit` (Go tests — proves the code is correct) then `cli-runner` (builds the `da`
   binary and exercises real CLI invocations — proves the wired-up command actually runs). The two
   entries match `verifiers_per_executor: 2`, one pass per profile.
 
-`ideation` inverts the shape — wide divergence, no verification:
+`ideation` keeps the wide divergence but gates it — three executors, each artifact verified for
+integrity and reviewed by the full lens panel:
 
 ```
 $ da config relevance --filter topology --app-type ideation
 topology
   executors              : 3
-  verifiers_per_executor : 0
-  reviewers              : 0
+  verifiers_per_executor : 3
+  reviewers              : per_executor
+  verifier_sequence      : schema-check, citation-check, task-schedule
 ```
+
+The ideation `verifier_sequence` checks the **artifact**, not code: `schema-check` (generated
+`PLAN.yaml`/`TASKS.yaml`/schemas validate) runs first so structural validity gates the rest, then
+`citation-check` (every `[[wikilink]]`, file path, and KGNote reference resolves) and `task-schedule`
+(the task DAG's deps resolve and are acyclic — cross-checked against `da workflow eligible`).
 
 ### Facet 3 — lenses (the review lenses)
 
@@ -122,8 +130,9 @@ lenses
   lens_concurrency : gated
 ```
 
-`lens_concurrency` is `parallel`, `gated`, or `tiered`. `go-cli` gates three lenses; `ideation`
-runs a single `acceptance-invariants` lens in `parallel`.
+`lens_concurrency` is `parallel`, `gated`, or `tiered`. `go-cli` gates the three lenses; `ideation`
+runs the same three (`architecture-standards`, `acceptance-invariants`, `adversarial`) in `parallel`,
+applied to the design artifact.
 
 ## JSON envelope (the structure contract)
 

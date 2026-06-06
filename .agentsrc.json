@@ -7,6 +7,11 @@
     "go-cli": [
       "unit",
       "cli-runner"
+    ],
+    "ideation": [
+      "schema-check",
+      "citation-check",
+      "task-schedule"
     ]
   },
   "execution_profile": {
@@ -63,24 +68,46 @@
         "relevance": {
           "orchestrate": {
             "core": [
-              "plan-wave-picker",
+              "kg-ideate",
               "deep-research",
+              "plan-wave-picker"
+            ],
+            "situational": [
               "article-extract"
             ],
             "noise": [
               "test-runner",
               "loop-worker"
             ]
+          },
+          "verify": {
+            "core": [
+              "verifier"
+            ]
+          },
+          "review": {
+            "core": [
+              "architecture-standards",
+              "acceptance-invariants",
+              "adversarial"
+            ]
           }
         },
         "topology": {
           "executors": 3,
-          "verifiers_per_executor": 0,
-          "reviewers": "0"
+          "verifiers_per_executor": 3,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "citation-check",
+            "task-schedule"
+          ]
         },
         "lenses": {
           "lens_set": [
-            "acceptance-invariants"
+            "architecture-standards",
+            "acceptance-invariants",
+            "adversarial"
           ],
           "lens_concurrency": "parallel"
         }
@@ -125,10 +152,28 @@
     }
   ],
   "verifier_profiles": {
+    "citation-check": {
+      "label": "Citation check (references resolve)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/citation-check.project.md"
+      ]
+    },
     "cli-runner": {
       "label": "CLI runner (built-binary smoke)",
       "prompt_files": [
         ".agents/prompts/verifiers/cli-runner.project.md"
+      ]
+    },
+    "schema-check": {
+      "label": "Schema check (artifacts validate)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/schema-check.project.md"
+      ]
+    },
+    "task-schedule": {
+      "label": "Task schedule (DAG sound)",
+      "prompt_files": [
+        ".agents/prompts/verifiers/task-schedule.project.md"
       ]
     },
     "unit": {

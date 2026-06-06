@@ -69,7 +69,7 @@ tasks:
       app_type: go-cli
     - id: t6-example-profiles-docs
       title: go-cli + ideation example profiles + docs
-      status: in_progress
+      status: completed
       depends_on:
         - t2-config-relevance-resolver
       blocks: []
@@ -82,7 +82,7 @@ tasks:
       app_type: go-cli
     - id: t7-cli-runner-verifier
       title: cli-runner verifier profile + go-cli verifier_sequence wiring
-      status: in_progress
+      status: completed
       depends_on:
         - t6-example-profiles-docs
       blocks: []
@@ -94,4 +94,21 @@ tasks:
         - .agents/workflow/specs/cli-runner-verifier/design.md
       verification_required: true
       notes: Create the cli-runner verifier-class profile (built-binary CLI smoke) as a sibling of unit. Prompt mirrors unit.project.md; builds da fresh, runs scripts/verify.sh floor plus task-scoped invocations, writes cli-runner.result.yaml. Add verifier_profiles.cli-runner; dual-write app_type_verifier_map.go-cli and topology.verifier_sequence to unit then cli-runner so the flat map and profile agree. Spec at .agents/workflow/specs/cli-runner-verifier/design.md. STEALTH mandate no AI attribution.
+      app_type: go-cli
+    - id: t8-ideation-verifiers
+      title: ideation execution_profile enrichment + 3 artifact-integrity verifiers
+      status: in_progress
+      depends_on:
+        - t7-cli-runner-verifier
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agentsrc.json
+        - docs/CONFIG_RELEVANCE.md
+        - .agents/prompts/verifiers/schema-check.project.md
+        - .agents/prompts/verifiers/citation-check.project.md
+        - .agents/prompts/verifiers/task-schedule.project.md
+        - .agents/workflow/specs/ideation-execution-profile/design.md
+      verification_required: true
+      notes: Enrich the ideation profile per spec ideation-execution-profile. relevance orchestrate core kg-ideate, deep-research, plan-wave-picker (article-extract situational; test-runner, loop-worker noise); add verify and review stages (review core is the 3 lenses). topology executors 3, verifiers_per_executor 3, reviewers per_executor, verifier_sequence schema-check then citation-check then task-schedule. lenses the 3 lenses parallel. Three new verifier-class prompts plus verifier_profiles entries plus app_type_verifier_map.ideation. Each leans on existing tooling (schema-check uses da config verify plus schemas; citation-check uses da kg query plus citation adapter; task-schedule uses da workflow eligible DAG). Docs updated. Folds into PR 29. STEALTH mandate no AI attribution.
       app_type: go-cli
