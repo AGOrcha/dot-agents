@@ -1820,3 +1820,409 @@ func TestSharedPlanEntryPointsPropagateBuildError(t *testing.T) {
 		assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonical)
 	})
 }
+
+// --- config-v2-coherence §7A.5: EXACT/PRUNE outputs projection ---
+
+// planWithSkillTarget builds a one-intent ResourcePlan whose single target is
+// repo/<relDir>/review, a ResourcePruneTarget skill intent — the canonical
+// "wanted" set the prune scan keeps. The parent dir (repo/<relDir>) is the only
+// directory the prune will scan.
+func planWithSkillTarget(t *testing.T, relDir string) ResourcePlan {
+	t.Helper()
+	intent := validSharedSkillIntent(filepath.Join(relDir, "review"), "claude")
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	return plan
+}
+
+// seedManagedLink creates a managed symlink at linkPath pointing into agentsHome
+// (so links.IsManagedLinkUnder reports it managed). The canonical target dir is
+// created first so the link resolves.
+func seedManagedLink(t *testing.T, agentsHome, name, linkPath string) {
+	t.Helper()
+	testutil.SymlinkOrSkip(t)
+	canonical := filepath.Join(agentsHome, "skills", "proj", name)
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := links.Symlink(canonical, linkPath); err != nil {
+		t.Fatalf("seed managed link: %v", err)
+	}
+	if !links.IsManagedLinkUnder(linkPath, agentsHome) {
+		t.Fatalf("seeded link %s is not detected as managed under %s", linkPath, agentsHome)
+	}
+}
+
+// PruneStaleSharedTargets must delete a managed output that is no longer in the
+// resolved set while preserving the wanted target — the core exact/prune
+// contract.
+func TestPruneStaleSharedTargets_RemovesStaleKeepsWanted(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	relDir := filepath.Join(".agents", "skills")
+	dir := filepath.Join(repo, relDir)
+
+	wanted := filepath.Join(dir, "review")
+	stale := filepath.Join(dir, "obsolete")
+	seedManagedLink(t, agentsHome, "review", wanted)
+	seedManagedLink(t, agentsHome, "obsolete", stale)
+
+	plan := planWithSkillTarget(t, relDir)
+	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
+	if err != nil {
+		t.Fatalf("PruneStaleSharedTargets: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != stale {
+		t.Fatalf("pruned = %v, want [%s]", pruned, stale)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale managed link must be removed, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(wanted); err != nil {
+		t.Fatalf("wanted target must be preserved, lstat err = %v", err)
+	}
+}
+
+// The prune must NEVER touch a user-authored file or a link that does not point
+// into agentsHome — only managed outputs under agentsHome are eligible.
+func TestPruneStaleSharedTargets_PreservesUserContent(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	relDir := filepath.Join(".agents", "skills")
+	dir := filepath.Join(repo, relDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A plain user file living next to managed outputs.
+	userFile := filepath.Join(dir, "user-notes.md")
+	if err := os.WriteFile(userFile, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink the user owns, pointing OUTSIDE agentsHome — not managed.
+	outside := filepath.Join(repo, "elsewhere")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userLink := filepath.Join(dir, "user-link")
+	testutil.SymlinkOrSkip(t)
+	if err := links.Symlink(outside, userLink); err != nil {
+		t.Fatalf("user link: %v", err)
+	}
+
+	plan := planWithSkillTarget(t, relDir)
+	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
+	if err != nil {
+		t.Fatalf("PruneStaleSharedTargets: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want none (user content must be preserved)", pruned)
+	}
+	if _, err := os.Lstat(userFile); err != nil {
+		t.Fatalf("user file must survive, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(userLink); err != nil {
+		t.Fatalf("user-owned non-managed link must survive, lstat err = %v", err)
+	}
+}
+
+// An intent with PrunePolicy=none must NOT make its parent dir a prune scope —
+// the exact projection only sibling-prunes directories da actively projects
+// ResourcePruneTarget intents into.
+func TestPruneStaleSharedTargets_PruneNoneIntentDoesNotScanDir(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	relDir := filepath.Join(".codex", "agents")
+	dir := filepath.Join(repo, relDir)
+
+	stale := filepath.Join(dir, "obsolete")
+	seedManagedLink(t, agentsHome, "obsolete", stale)
+
+	// A render intent with PrunePolicy=none in that same dir.
+	intent := ResourceIntent{
+		IntentID:      "agents.codex-toml.proj.keep",
+		Project:       "proj",
+		Bucket:        "agents",
+		LogicalName:   "keep",
+		TargetPath:    filepath.Join(relDir, "keep.toml"),
+		Ownership:     ResourceOwnershipSharedRepo,
+		SourceRef:     ResourceSourceRef{Scope: "proj", Bucket: "agents", RelativePath: "keep/AGENT.md", Kind: ResourceSourceCanonicalFile, Origin: "shared-codex-agent-toml"},
+		Shape:         ResourceShapeRenderSingle,
+		Transport:     ResourceTransportWrite,
+		Materializer:  codexAgentTomlMaterializer,
+		ReplacePolicy: ResourceReplaceIfManaged,
+		PrunePolicy:   ResourcePruneNone,
+	}
+	plan, err := BuildResourcePlan([]ResourceIntent{intent})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+
+	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
+	if err != nil {
+		t.Fatalf("PruneStaleSharedTargets: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want none (prune_none dir must not be scanned)", pruned)
+	}
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatalf("link in a prune_none dir must survive, lstat err = %v", err)
+	}
+}
+
+// A non-listable directory (a file where a managed dir is expected) must surface
+// as an aggregated error rather than a silent clean-prune.
+func TestPruneStaleSharedTargets_ReadDirErrorPropagates(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	relDir := filepath.Join(".agents", "skills")
+	dir := filepath.Join(repo, relDir)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Put a regular FILE where the managed dir is expected: os.ReadDir fails
+	// with a non-IsNotExist error.
+	if err := os.WriteFile(dir, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan := planWithSkillTarget(t, relDir)
+	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
+	if err == nil {
+		t.Fatal("expected a ReadDir error to propagate, got nil")
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want none on error", pruned)
+	}
+	if !strings.Contains(err.Error(), "listing managed dir") {
+		t.Fatalf("error = %q, want listing-managed-dir context", err)
+	}
+}
+
+// RunSharedTargetProjectionExact apply path: write the wanted set AND prune a
+// pre-existing stale managed output in one call.
+func TestRunSharedTargetProjectionExact_ApplyWritesAndPrunes(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	testutil.SymlinkOrSkip(t)
+
+	// Canonical wanted skill + its imported pair so Claude emits the intent.
+	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
+
+	// A pre-existing stale managed link in the same target dir.
+	stale := filepath.Join(repo, ".agents", "skills", "gone")
+	seedManagedLink(t, agentsHome, "gone", stale)
+
+	platforms := []Platform{NewClaude()}
+	lines, err := RunSharedTargetProjectionExact("proj", repo, platforms, false, true)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjectionExact apply: %v", err)
+	}
+	if lines != nil {
+		t.Fatalf("apply lines = %v, want nil", lines)
+	}
+	wanted := filepath.Join(repo, ".agents", "skills", "review")
+	if !links.IsManagedLink(wanted, filepath.Join(agentsHome, "skills", "proj", "review")) {
+		t.Fatalf("wanted target %s not projected as managed link", wanted)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale managed link must be pruned, lstat err = %v", err)
+	}
+}
+
+// exact=false (`--inexact`) must keep the additive RunSharedTargetProjection
+// behavior: the stale managed output is left in place.
+func TestRunSharedTargetProjectionExact_InexactKeepsStale(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	testutil.SymlinkOrSkip(t)
+
+	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
+	stale := filepath.Join(repo, ".agents", "skills", "gone")
+	seedManagedLink(t, agentsHome, "gone", stale)
+
+	platforms := []Platform{NewClaude()}
+	if _, err := RunSharedTargetProjectionExact("proj", repo, platforms, false, false); err != nil {
+		t.Fatalf("RunSharedTargetProjectionExact inexact: %v", err)
+	}
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatalf("inexact must keep stale managed output, lstat err = %v", err)
+	}
+}
+
+// Dry-run exact preview lists the additive write lines AND a "prune managed"
+// line for every stale managed output, without mutating the filesystem.
+func TestRunSharedTargetProjectionExact_DryRunPreviewsPrune(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	testutil.SymlinkOrSkip(t)
+
+	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
+	stale := filepath.Join(repo, ".agents", "skills", "gone")
+	seedManagedLink(t, agentsHome, "gone", stale)
+
+	platforms := []Platform{NewClaude()}
+	lines, err := RunSharedTargetProjectionExact("proj", repo, platforms, true, true)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjectionExact dry-run: %v", err)
+	}
+	var sawWrite, sawPrune bool
+	for _, l := range lines {
+		if strings.Contains(l, "symlink") && strings.Contains(l, "review") {
+			sawWrite = true
+		}
+		if strings.Contains(l, "prune managed") && strings.Contains(l, "gone") {
+			sawPrune = true
+		}
+	}
+	if !sawWrite {
+		t.Fatalf("dry-run lines missing the write preview: %v", lines)
+	}
+	if !sawPrune {
+		t.Fatalf("dry-run lines missing the prune preview: %v", lines)
+	}
+	// Dry-run must not mutate: the stale link is still present.
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatalf("dry-run must not prune, lstat err = %v", err)
+	}
+}
+
+// exact=false delegates to RunSharedTargetProjection's dry-run, so the preview
+// carries NO prune line even when a stale managed output exists.
+func TestRunSharedTargetProjectionExact_InexactDryRunNoPruneLine(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	testutil.SymlinkOrSkip(t)
+
+	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
+	stale := filepath.Join(repo, ".agents", "skills", "gone")
+	seedManagedLink(t, agentsHome, "gone", stale)
+
+	platforms := []Platform{NewClaude()}
+	lines, err := RunSharedTargetProjectionExact("proj", repo, platforms, true, false)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjectionExact inexact dry-run: %v", err)
+	}
+	for _, l := range lines {
+		if strings.Contains(l, "prune managed") {
+			t.Fatalf("inexact dry-run must not preview prune, got %q", l)
+		}
+	}
+}
+
+// An empty resolved set in dry-run exact mode reports the "(none)" sentinel,
+// matching RunSharedTargetProjection's empty-plan behavior.
+func TestRunSharedTargetProjectionExact_DryRunEmptyPlanSentinel(t *testing.T) {
+	repo, _ := setupRepoAgentsHome(t)
+	lines, err := RunSharedTargetProjectionExact("proj", repo, []Platform{}, true, true)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjectionExact empty dry-run: %v", err)
+	}
+	if len(lines) != 1 || lines[0] != "shared targets: (none)" {
+		t.Fatalf("empty dry-run lines = %v, want [shared targets: (none)]", lines)
+	}
+}
+
+// A BuildSharedTargetPlan failure (a platform that errors on intent collection)
+// must propagate out of RunSharedTargetProjectionExact rather than being
+// swallowed by the prune step.
+func TestRunSharedTargetProjectionExact_PropagatesBuildError(t *testing.T) {
+	repo, _ := setupRepoAgentsHome(t)
+	boom := stubPlatform{id: "boom", err: errors.New("collect failed")}
+	if _, err := RunSharedTargetProjectionExact("proj", repo, []Platform{boom}, false, true); err == nil {
+		t.Fatal("expected build error to propagate, got nil")
+	}
+}
+
+// PruneStaleSharedTargets on a plan whose prune dir does not exist on disk is a
+// clean no-op (the ENOENT-continue branch) — a freshly-resolved project that
+// has never been projected has nothing to prune.
+func TestPruneStaleSharedTargets_MissingDirIsNoop(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	plan := planWithSkillTarget(t, filepath.Join(".agents", "skills"))
+	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
+	if err != nil {
+		t.Fatalf("PruneStaleSharedTargets on missing dir: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want none for a never-projected tree", pruned)
+	}
+}
+
+// RunSharedTargetProjectionExact apply path with an empty resolved plan writes
+// nothing and prunes nothing — the no-resources guard.
+func TestRunSharedTargetProjectionExact_ApplyEmptyPlanNoop(t *testing.T) {
+	repo, _ := setupRepoAgentsHome(t)
+	lines, err := RunSharedTargetProjectionExact("proj", repo, []Platform{}, false, true)
+	if err != nil {
+		t.Fatalf("RunSharedTargetProjectionExact empty apply: %v", err)
+	}
+	if lines != nil {
+		t.Fatalf("empty apply lines = %v, want nil", lines)
+	}
+}
+
+// PruneStaleSharedTargets must aggregate a removal failure rather than report a
+// clean prune: when RemoveIfSymlinkUnder cannot delete a managed link, the
+// error surfaces and the link is NOT counted as pruned. We force the failure by
+// making the link's parent directory read-only after seeding, so the unlink is
+// denied.
+func TestPruneStaleSharedTargets_RemovalFailureAggregates(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory write permissions")
+	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	relDir := filepath.Join(".agents", "skills")
+	dir := filepath.Join(repo, relDir)
+	stale := filepath.Join(dir, "obsolete")
+	seedManagedLink(t, agentsHome, "obsolete", stale)
+
+	// Make the parent dir read+exec but not writable: removing an entry needs
+	// write permission on the directory, so RemoveIfSymlinkUnder fails.
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	plan := planWithSkillTarget(t, relDir)
+	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
+	if err == nil {
+		t.Fatal("expected a removal failure to aggregate, got nil")
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want none when removal failed", pruned)
+	}
+	if !strings.Contains(err.Error(), "prune managed target") {
+		t.Fatalf("error = %q, want prune-managed-target context", err)
+	}
+}
+
+// RunSharedTargetProjectionExact apply must propagate an Execute failure (line
+// 591-593) rather than proceeding to prune. We make the repo target parent
+// read-only so the managed-link write is denied.
+func TestRunSharedTargetProjectionExact_ApplyExecuteErrorPropagates(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory write permissions")
+	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	testutil.SymlinkOrSkip(t)
+
+	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
+	// Pre-create the .agents/skills dir, then make .agents read-only so the
+	// executor cannot write the managed link under it.
+	skillsDir := filepath.Join(repo, ".agents", "skills")
+	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(skillsDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(skillsDir, 0o755) })
+
+	platforms := []Platform{NewClaude()}
+	if _, err := RunSharedTargetProjectionExact("proj", repo, platforms, false, true); err == nil {
+		t.Fatal("expected Execute failure to propagate, got nil")
+	}
+}
