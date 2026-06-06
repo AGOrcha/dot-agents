@@ -155,7 +155,9 @@
     "citation-check": {
       "label": "Citation check (references resolve)",
       "prompt_files": [
-        ".agents/prompts/verifiers/citation-check.project.md"
+        "verifiers/verifier.base.md",
+        "verifiers/citation-check.md",
+        "verifiers/citation-check.project.md"
       ]
     },
     "cli-runner": {
@@ -169,13 +171,17 @@
     "schema-check": {
       "label": "Schema check (artifacts validate)",
       "prompt_files": [
-        ".agents/prompts/verifiers/schema-check.project.md"
+        "verifiers/verifier.base.md",
+        "verifiers/schema-check.md",
+        "verifiers/schema-check.project.md"
       ]
     },
     "task-schedule": {
       "label": "Task schedule (DAG sound)",
       "prompt_files": [
-        ".agents/prompts/verifiers/task-schedule.project.md"
+        "verifiers/verifier.base.md",
+        "verifiers/task-schedule.md",
+        "verifiers/task-schedule.project.md"
       ]
     },
     "unit": {
@@ -188,6 +194,22 @@
     }
   },
   "reviewer_profiles": {
+    "acceptance-invariants": {
+      "label": "Acceptance-invariants lens",
+      "prompt_files": [
+        "reviewers/reviewer.base.md",
+        "reviewers/acceptance-invariants.md",
+        "reviewers/acceptance-invariants.project.md"
+      ]
+    },
+    "adversarial": {
+      "label": "Adversarial lens",
+      "prompt_files": [
+        "reviewers/reviewer.base.md",
+        "reviewers/adversarial.md",
+        "reviewers/adversarial.project.md"
+      ]
+    },
     "architecture-standards": {
       "label": "Architecture-standards lens",
       "prompt_files": [
