@@ -207,6 +207,17 @@ type AgentsRC struct {
 	// an org layer can override the default via the config-v2 scope layers.
 	PRSource *AgentsRCPRSource `json:"pr_source,omitempty"`
 
+	// VerifierProfiles are named verifier profiles referenced by
+	// app_type_verifier_map and workflow fanout. Each profile's prompt_files is
+	// source-aware (config-v2 Q1 ruling, Option B): an entry is a typed
+	// {source, path, version} object, with the bare-string legacy form still
+	// accepted on read. See PromptFileRef.
+	VerifierProfiles map[string]VerifierProfile `json:"verifier_profiles,omitempty"`
+	// ReviewerProfiles are named reviewer profiles keyed by review lens; they are
+	// structurally symmetric to VerifierProfiles and share the same source-aware
+	// prompt_files shape.
+	ReviewerProfiles map[string]VerifierProfile `json:"reviewer_profiles,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -406,6 +417,88 @@ func (p *PackageRef) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// PromptFileRef is a single entry in a verifier/reviewer profile's prompt_files
+// list. Per the config-v2 Q1 ruling (Option B — force typed objects everywhere),
+// an entry resolves to a typed object {source, path, version}. The bare-string
+// legacy form ("verifiers/unit.md") is still accepted on read and is equivalent
+// to {path: "<string>"} with an empty source/version; this is the same dual-form
+// pattern as LayerRef/PackageRef so legacy .agentsrc.json files round-trip
+// byte-for-byte while new source-aware entries gain the object form.
+//
+// Source names the config source the prompt file is fetched from (e.g. a
+// source `id` declared under `sources`); an empty source means the prompt is
+// resolved relative to the local repo/home search path (the historical
+// behavior). Version pins a source-relative revision; empty means "as resolved".
+type PromptFileRef struct {
+	// Source is the source id the prompt file is fetched from. Empty means
+	// local resolution across the repo/home search path.
+	Source string `json:"source,omitempty"`
+	// Path is the prompt file path, relative to the source (or to the local
+	// prompt search path when Source is empty). Required.
+	Path string `json:"path"`
+	// Version pins a source-relative revision. Empty means "as resolved".
+	Version string `json:"version,omitempty"`
+}
+
+// MarshalJSON emits the compact string form when only Path is set (legacy
+// compatibility, so existing string-list profiles round-trip unchanged) and the
+// typed-object form once Source or Version is populated. Round-trip is stable
+// under repeated marshal/unmarshal.
+func (r PromptFileRef) MarshalJSON() ([]byte, error) {
+	if r.Source == "" && r.Version == "" {
+		return json.Marshal(r.Path)
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	return json.Marshal(wire{Source: r.Source, Path: r.Path, Version: r.Version})
+}
+
+// UnmarshalJSON accepts either a bare string (legacy form) or the typed-object
+// {source, path, version} form.
+func (r *PromptFileRef) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			return fmt.Errorf("prompt_files entry string form must be non-empty")
+		}
+		r.Source = ""
+		r.Path = s
+		r.Version = ""
+		return nil
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("prompt_files entry must be string or {source?,path,version?}: %w", err)
+	}
+	if w.Path == "" {
+		return fmt.Errorf("prompt_files entry object form requires non-empty path")
+	}
+	r.Source = w.Source
+	r.Path = w.Path
+	r.Version = w.Version
+	return nil
+}
+
+// VerifierProfile is one named entry in AgentsRC.VerifierProfiles /
+// AgentsRC.ReviewerProfiles. The two maps are structurally symmetric: a label
+// for display and a base-first ordered prompt_files composition. PromptFiles is
+// source-aware (see PromptFileRef) so an org layer can pin a prompt to a remote
+// config source while a repo keeps the legacy local string form.
+type VerifierProfile struct {
+	// Label is the human-readable profile name shown in fanout/explain output.
+	Label string `json:"label,omitempty"`
+	// PromptFiles is the base-first ordered prompt composition for the profile.
+	PromptFiles []PromptFileRef `json:"prompt_files,omitempty"`
+}
+
 // RefreshMetadata records the latest da install/refresh that updated a project.
 type RefreshMetadata struct {
 	Version     string `json:"version,omitempty"`
@@ -442,6 +535,9 @@ var agentsRCKnown = map[string]bool{
 	"execution_profile": true,
 	// pr_source: config-driven PR event producer (pr-event-source design)
 	"pr_source": true,
+	// verifier/reviewer profiles with source-aware prompt_files (config-v2 Q1)
+	"verifier_profiles": true,
+	"reviewer_profiles": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -468,6 +564,9 @@ type agentsRCCore struct {
 	Features         map[string]string `json:"features,omitempty"`
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
+
+	VerifierProfiles map[string]VerifierProfile `json:"verifier_profiles,omitempty"`
+	ReviewerProfiles map[string]VerifierProfile `json:"reviewer_profiles,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -493,6 +592,8 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Features = core.Features
 	a.ExecutionProfile = core.ExecutionProfile
 	a.PRSource = core.PRSource
+	a.VerifierProfiles = core.VerifierProfiles
+	a.ReviewerProfiles = core.ReviewerProfiles
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -529,6 +630,8 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Features:         a.Features,
 		ExecutionProfile: a.ExecutionProfile,
 		PRSource:         a.PRSource,
+		VerifierProfiles: a.VerifierProfiles,
+		ReviewerProfiles: a.ReviewerProfiles,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -687,10 +790,38 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
 	}
+	// verifier/reviewer profiles are author-owned config, not scan-derived, so a
+	// committed set must survive regeneration. Before these were typed fields
+	// they rode along in ExtraFields and were preserved by the clause above;
+	// now they are first-class and must be carried over explicitly or `da
+	// install`/refresh would silently drop a project's registered profiles.
+	if len(existing.VerifierProfiles) > 0 {
+		out.VerifierProfiles = cloneVerifierProfiles(existing.VerifierProfiles)
+	}
+	if len(existing.ReviewerProfiles) > 0 {
+		out.ReviewerProfiles = cloneVerifierProfiles(existing.ReviewerProfiles)
+	}
 	if existing.Refresh != nil {
 		out.Refresh = existing.Refresh
 	}
 	return &out
+}
+
+// cloneVerifierProfiles deep-copies a verifier/reviewer profile map (including
+// each profile's prompt_files slice) so the merged manifest does not alias the
+// existing manifest's profile data.
+func cloneVerifierProfiles(m map[string]VerifierProfile) map[string]VerifierProfile {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]VerifierProfile, len(m))
+	for k, v := range m {
+		out[k] = VerifierProfile{
+			Label:       v.Label,
+			PromptFiles: append([]PromptFileRef(nil), v.PromptFiles...),
+		}
+	}
+	return out
 }
 
 func cloneExtraFieldsMap(m map[string]json.RawMessage) map[string]json.RawMessage {

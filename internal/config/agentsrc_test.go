@@ -1395,6 +1395,170 @@ func TestPackageRef_MarshalAlwaysString(t *testing.T) {
 	}
 }
 
+// ── PromptFileRef: source-aware prompt_files (config-v2 Q1, Option B) ─────────
+
+func TestPromptFileRef_UnmarshalLegacyString(t *testing.T) {
+	var r PromptFileRef
+	if err := json.Unmarshal([]byte(`"verifiers/unit.md"`), &r); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if r.Path != "verifiers/unit.md" || r.Source != "" || r.Version != "" {
+		t.Errorf("legacy string decode wrong: %+v", r)
+	}
+}
+
+func TestPromptFileRef_UnmarshalTypedObject(t *testing.T) {
+	var r PromptFileRef
+	if err := json.Unmarshal([]byte(`{"source":"acme","path":"verifiers/cli-runner.md","version":"v3"}`), &r); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if r.Source != "acme" || r.Path != "verifiers/cli-runner.md" || r.Version != "v3" {
+		t.Errorf("typed decode wrong: %+v", r)
+	}
+}
+
+func TestPromptFileRef_UnmarshalRejectsBadShape(t *testing.T) {
+	var r PromptFileRef
+	if err := json.Unmarshal([]byte(`42`), &r); err == nil {
+		t.Error("expected error for numeric prompt_files entry")
+	}
+	if err := json.Unmarshal([]byte(`""`), &r); err == nil {
+		t.Error("expected error for empty-string entry")
+	}
+	if err := json.Unmarshal([]byte(`{"source":"acme"}`), &r); err == nil {
+		t.Error("expected error for object form missing path")
+	}
+	if err := json.Unmarshal([]byte(`{`), &r); err == nil {
+		t.Error("expected error for malformed JSON entry")
+	}
+}
+
+func TestPromptFileRef_MarshalCompactWhenPathOnly(t *testing.T) {
+	r := PromptFileRef{Path: "verifiers/unit.md"}
+	out, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `"verifiers/unit.md"` {
+		t.Errorf("path-only ref should marshal to bare string, got %s", out)
+	}
+}
+
+func TestPromptFileRef_MarshalObjectWhenSourceOrVersion(t *testing.T) {
+	for _, r := range []PromptFileRef{
+		{Source: "acme", Path: "p.md"},
+		{Path: "p.md", Version: "v2"},
+		{Source: "acme", Path: "p.md", Version: "v2"},
+	} {
+		out, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("marshal %+v: %v", r, err)
+		}
+		var back PromptFileRef
+		if err := json.Unmarshal(out, &back); err != nil {
+			t.Fatalf("round-trip unmarshal %s: %v", out, err)
+		}
+		if back != r {
+			t.Errorf("round-trip drift: got %+v want %+v (wire %s)", back, r, out)
+		}
+	}
+}
+
+// TestVerifierProfiles_TypedFieldRoundTrip proves verifier_profiles and
+// reviewer_profiles route to the typed AgentsRC fields (not ExtraFields) and
+// preserve a mixed legacy/typed prompt_files list across a marshal/unmarshal
+// cycle.
+func TestVerifierProfiles_TypedFieldRoundTrip(t *testing.T) {
+	in := []byte(`{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "verifier_profiles": {
+    "cli-runner": {
+      "label": "CLI runner",
+      "prompt_files": [
+        "verifiers/verifier.base.md",
+        {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
+      ]
+    }
+  },
+  "reviewer_profiles": {
+    "adversarial": {"label": "Adversarial", "prompt_files": ["reviewers/adversarial.md"]}
+  }
+}`)
+	var rc AgentsRC
+	if err := json.Unmarshal(in, &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.ExtraFields["verifier_profiles"] != nil || rc.ExtraFields["reviewer_profiles"] != nil {
+		t.Fatalf("profiles leaked into ExtraFields instead of typed fields")
+	}
+	prof := rc.VerifierProfiles["cli-runner"]
+	if prof.Label != "CLI runner" || len(prof.PromptFiles) != 2 {
+		t.Fatalf("verifier profile decode wrong: %+v", prof)
+	}
+	if prof.PromptFiles[0].Source != "" || prof.PromptFiles[0].Path != "verifiers/verifier.base.md" {
+		t.Errorf("legacy entry wrong: %+v", prof.PromptFiles[0])
+	}
+	if prof.PromptFiles[1].Source != "acme" || prof.PromptFiles[1].Version != "v2" {
+		t.Errorf("typed entry wrong: %+v", prof.PromptFiles[1])
+	}
+	if rc.ReviewerProfiles["adversarial"].PromptFiles[0].Path != "reviewers/adversarial.md" {
+		t.Errorf("reviewer profile decode wrong: %+v", rc.ReviewerProfiles)
+	}
+
+	out, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var rc2 AgentsRC
+	if err := json.Unmarshal(out, &rc2); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if rc2.VerifierProfiles["cli-runner"].PromptFiles[1].Source != "acme" {
+		t.Fatalf("round-trip lost typed prompt provenance: %+v", rc2.VerifierProfiles)
+	}
+}
+
+// TestMergeGenerateAgentsRCPreservesVerifierProfiles guards the ExtraFields-guard
+// breakage: now that verifier/reviewer profiles are typed fields, regeneration
+// must carry a committed set over (it no longer rides along in ExtraFields).
+func TestMergeGenerateAgentsRCPreservesVerifierProfiles(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		VerifierProfiles: map[string]VerifierProfile{
+			"unit": {Label: "Unit", PromptFiles: []PromptFileRef{{Path: "verifiers/unit.md"}}},
+		},
+		ReviewerProfiles: map[string]VerifierProfile{
+			"adversarial": {Label: "Adversarial", PromptFiles: []PromptFileRef{{Source: "acme", Path: "reviewers/adversarial.md", Version: "v1"}}},
+		},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		Skills:  []string{"s"},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if len(out.VerifierProfiles) != 1 || out.VerifierProfiles["unit"].PromptFiles[0].Path != "verifiers/unit.md" {
+		t.Errorf("verifier_profiles not preserved: %+v", out.VerifierProfiles)
+	}
+	if len(out.ReviewerProfiles) != 1 || out.ReviewerProfiles["adversarial"].PromptFiles[0].Source != "acme" {
+		t.Errorf("reviewer_profiles not preserved: %+v", out.ReviewerProfiles)
+	}
+	// Deep copy: mutating the source must not bleed into the merged result.
+	existing.VerifierProfiles["unit"].PromptFiles[0].Path = "MUTATED"
+	if out.VerifierProfiles["unit"].PromptFiles[0].Path == "MUTATED" {
+		t.Error("cloneVerifierProfiles aliased the source slice")
+	}
+}
+
+// TestCloneVerifierProfilesEmpty covers the empty/nil short-circuit.
+func TestCloneVerifierProfilesEmpty(t *testing.T) {
+	if got := cloneVerifierProfiles(nil); got != nil {
+		t.Errorf("expected nil for empty map, got %+v", got)
+	}
+}
+
 // TestV2_AgentsRCMarshalUnmarshalRoundTrip ensures Marshal then Unmarshal
 // of a fully-populated v2 AgentsRC preserves every additive field.
 func TestV2_AgentsRCMarshalUnmarshalRoundTrip(t *testing.T) {

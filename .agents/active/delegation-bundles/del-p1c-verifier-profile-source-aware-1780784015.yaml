@@ -1,0 +1,30 @@
+schema_version: 1
+delegation_id: del-p1c-verifier-profile-source-aware-1780784015
+plan_id: config-v2-migration
+task_id: p1c-verifier-profile-source-aware
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-06T22:13:35Z"
+scope:
+    write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/workflow/bundle.go
+        - commands/workflow/bundle_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -27,6 +28,53 @@ func expandBundleStages(b *delegationBundleYAML) []bundleStageEntry {
 		}
 	}
 	out = append(out, bundleStageEntry{Stage: "review"})
+	return out
+}
+
+// bundlePromptFile is one source-aware prompt_files entry carried into a worker
+// bundle. It preserves the typed-object provenance (config-v2 Q1, Option B): a
+// legacy bare-string entry resolves to {Path:<string>} with an empty Source and
+// Version, while a typed entry keeps the source it is pinned to and any version.
+type bundlePromptFile struct {
+	Source  string `json:"source,omitempty" yaml:"source,omitempty"`
+	Path    string `json:"path" yaml:"path"`
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+}
+
+// bundlePromptFilesFromRefs converts a verifier/reviewer profile's source-aware
+// prompt_files (config.PromptFileRef) into the bundle's prompt-file carrier,
+// dropping entries with an empty path so a malformed profile never injects a
+// blank prompt into the worker bundle. Order is preserved (profiles compose
+// base-first).
+func bundlePromptFilesFromRefs(refs []config.PromptFileRef) []bundlePromptFile {
+	out := make([]bundlePromptFile, 0, len(refs))
+	for _, r := range refs {
+		path := strings.TrimSpace(r.Path)
+		if path == "" {
+			continue
+		}
+		out = append(out, bundlePromptFile{
+			Source:  strings.TrimSpace(r.Source),
+			Path:    path,
+			Version: strings.TrimSpace(r.Version),
+		})
+	}
+	return out
+}
+
+// flattenBundlePromptPaths reduces source-aware prompt files to the flat path
+// list the bundle's prompt.prompt_files field accepts. This is the bridge from
+// the typed source-aware model to the existing []string bundle surface: the
+// source/version provenance is retained on bundlePromptFile for callers that
+// fetch from a config source, while consumers that only resolve a local prompt
+// path (the legacy resolver) see the plain path list they already expect.
+func flattenBundlePromptPaths(files []bundlePromptFile) []string {
+	out := make([]string, 0, len(files))
+	for _, f := range files {
+		if p := strings.TrimSpace(f.Path); p != "" {
+			out = append(out, p)
+		}
+	}
 	return out
 }
 

@@ -95,7 +95,7 @@
             "type": "string"
           },
           "prompt_files": {
-            "$ref": "#/$defs/stringList"
+            "$ref": "#/$defs/promptFileList"
           }
         }
       }
@@ -111,7 +111,7 @@
             "type": "string"
           },
           "prompt_files": {
-            "$ref": "#/$defs/stringList"
+            "$ref": "#/$defs/promptFileList"
           }
         }
       }
@@ -236,6 +236,43 @@
       "items": {
         "type": "string",
         "minLength": 1
+      }
+    },
+    "promptFileRef": {
+      "description": "A verifier/reviewer prompt_files entry. Source-aware (config-v2 Q1, Option B): the typed-object form {source,path,version} pins a prompt to a config source; the bare-string legacy form is equivalent to {path:<string>} resolved on the local prompt search path.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Config source id the prompt is fetched from (matches a sources[].id). Empty/absent means local resolution."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Prompt file path, relative to the source (or the local prompt search path when source is absent)."
+            },
+            "version": {
+              "type": "string",
+              "description": "Source-relative revision to pin. Absent means 'as resolved'."
+            }
+          }
+        }
+      ]
+    },
+    "promptFileList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/promptFileRef"
       }
     },
     "stringsOrBool": {
