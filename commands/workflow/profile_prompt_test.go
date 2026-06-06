@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -208,5 +210,78 @@ func TestComposeProfilePrompt_Unmatched(t *testing.T) {
 func TestComposeProfilePrompt_BadKind(t *testing.T) {
 	if _, err := composeProfilePrompt(t.TempDir(), t.TempDir(), "bogus", "x"); err == nil {
 		t.Fatal("expected error for bad kind")
+	}
+}
+
+func TestComposeProfilePrompt_SnapshotErrors(t *testing.T) {
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	// non-missing error propagates
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return nil, fmt.Errorf("boom: locked layer missing from cache")
+	}
+	if _, err := composeProfilePrompt(t.TempDir(), t.TempDir(), profileKindVerifier, "unit"); err == nil {
+		t.Fatal("expected snapshot error to propagate")
+	}
+	// missing-manifest error is swallowed to an unmatched view
+	appTypeSnapshot = func(string) (*config.Snapshot, error) {
+		return nil, fmt.Errorf("no %s found at /x", config.AgentsRCFile)
+	}
+	view, err := composeProfilePrompt(t.TempDir(), t.TempDir(), profileKindVerifier, "unit")
+	if err != nil || view.Matched {
+		t.Fatalf("missing-manifest should yield unmatched view: matched=%t err=%v", view.Matched, err)
+	}
+}
+
+func TestResolvePromptRef_AbsoluteLiteral(t *testing.T) {
+	dir := t.TempDir()
+	abs := filepath.Join(dir, "abs.md")
+	if err := os.WriteFile(abs, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := resolvePromptRef(t.TempDir(), "", abs)
+	if e.Scope != "literal" || !e.Exists {
+		t.Fatalf("absolute existing path should be literal+exists, got scope=%q exists=%t", e.Scope, e.Exists)
+	}
+}
+
+func TestRunWorkflowResolvePrompt(t *testing.T) {
+	// missing slug + bad kind error early, no project needed
+	if err := runWorkflowResolvePrompt("verifier", ""); err == nil {
+		t.Fatal("empty slug must error")
+	}
+	if err := runWorkflowResolvePrompt("bogus", "x"); err == nil {
+		t.Fatal("bad kind must error")
+	}
+	// end-to-end render against a real repo .agentsrc.json
+	repo := setupWorkflowAppTypesProject(t, `{
+  "project":"t","version":1,"sources":[{"type":"local"}],
+  "verifier_profiles":{"cli-runner":{"prompt_files":["verifiers/verifier.base.md","verifiers/cli-runner.project.md"]}}
+}`)
+	out := captureWorkflowOutput(t, repo, func() error {
+		return runWorkflowResolvePrompt(profileKindVerifier, "cli-runner")
+	})
+	if !strings.Contains(out, "matched : true") || !strings.Contains(out, "cli-runner") {
+		t.Fatalf("resolve-prompt output missing expected content:\n%s", out)
+	}
+	if !strings.Contains(out, "composition (base-first)") {
+		t.Fatalf("expected composition listing:\n%s", out)
+	}
+}
+
+func TestRenderComposedPrompt_EdgeCases(t *testing.T) {
+	// unmatched
+	out := captureWorkflowStdout(t, func() {
+		renderComposedPrompt(composedPromptView{Kind: "verifier", Slug: "ghost", Matched: false})
+	})
+	if !strings.Contains(out, "no verifier_profiles entry") {
+		t.Fatalf("unmatched render missing notice:\n%s", out)
+	}
+	// matched, no prompt_files
+	out = captureWorkflowStdout(t, func() {
+		renderComposedPrompt(composedPromptView{Kind: "verifier", Slug: "x", Matched: true})
+	})
+	if !strings.Contains(out, "no prompt_files") {
+		t.Fatalf("empty render missing notice:\n%s", out)
 	}
 }
