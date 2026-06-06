@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1482,8 +1483,9 @@ func TestLoadPriorFoldBackArtifact_DirAndMalformed(t *testing.T) {
 	if _, _, err := loadPriorFoldBackArtifact(repo, "bad"); err == nil {
 		t.Fatal("expected load error for malformed fold-back artifact")
 	}
-	// non-NotExist stat error: the fold-back dir is a regular file, so Stat of a
-	// child path returns ENOTDIR (not IsNotExist).
+	// fold-back dir is a regular file. POSIX Stat of a child path yields ENOTDIR
+	// (a non-NotExist error); Windows maps the same path to a NotExist-class error,
+	// so the artifact reads as simply absent. Assert the real per-OS contract.
 	repo2 := t.TempDir()
 	notDir := foldBackArtifactFile(repo2, "x")
 	if err := os.MkdirAll(filepath.Dir(filepath.Dir(notDir)), 0o755); err != nil {
@@ -1492,8 +1494,13 @@ func TestLoadPriorFoldBackArtifact_DirAndMalformed(t *testing.T) {
 	if err := os.WriteFile(filepath.Dir(notDir), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loadPriorFoldBackArtifact(repo2, "x"); err == nil {
-		t.Fatal("expected non-NotExist stat error when fold-back dir is a file")
+	_, ok, err := loadPriorFoldBackArtifact(repo2, "x")
+	if runtime.GOOS == "windows" {
+		if ok || err != nil {
+			t.Fatalf("windows: path under a file should read as absent, got ok=%v err=%v", ok, err)
+		}
+	} else if err == nil {
+		t.Fatal("expected non-NotExist stat error when the fold-back dir is a file")
 	}
 }
 
