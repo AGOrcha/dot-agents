@@ -29,7 +29,7 @@ tasks:
       app_type: go-cli
     - id: p1c-compose-wiring
       title: Wire profile prompt_files into bundle prompt (base-first concat), verifiers + reviewers
-      status: pending
+      status: completed
       depends_on:
         - p1a-reviewer-profiles-field
       blocks: []
@@ -42,7 +42,7 @@ tasks:
       app_type: go-cli
     - id: p1d-wire-slim-prove
       title: Wire .agentsrc.json profiles to [base, per-type], slim repo overlays, prove override + docs
-      status: pending
+      status: completed
       depends_on:
         - p1a-reviewer-profiles-field
         - p1b-product-bases

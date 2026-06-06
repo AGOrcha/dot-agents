@@ -102,7 +102,9 @@ topology
 - **`verifier_sequence`** — the ordered verifier-profile ids (supersedes `app_type_verifier_map`).
   `go-cli` runs `unit` (Go tests — proves the code is correct) then `cli-runner` (builds the `da`
   binary and exercises real CLI invocations — proves the wired-up command actually runs). The two
-  entries match `verifiers_per_executor: 2`, one pass per profile.
+  entries match `verifiers_per_executor: 2`, one pass per profile. Each id resolves to a layered,
+  scope-composed prompt via `verifier_profiles` — see
+  [VERIFIER_REVIEWER_TEMPLATES.md](VERIFIER_REVIEWER_TEMPLATES.md).
 
 `ideation` keeps the wide divergence but gates it — three executors, each artifact verified for
 integrity and reviewed by the full lens panel:
