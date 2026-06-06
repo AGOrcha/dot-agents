@@ -251,3 +251,31 @@ func TestAddProject_NilMap(t *testing.T) {
 		t.Errorf("path: got %q want %q", cfg.Projects["a"].Path, want)
 	}
 }
+
+// TestConfigLoad_ReadErrorNotNotExist covers the non-NotExist read-error branch:
+// a config.json that is a directory yields a read error that is not IsNotExist.
+func TestConfigLoad_ReadErrorNotNotExist(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", tmp)
+	if err := os.Mkdir(filepath.Join(tmp, "config.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err == nil {
+		t.Fatal("expected read error when config.json is a directory")
+	}
+}
+
+// TestConfigSave_MkdirError covers Save's MkdirAll-failure branch: AGENTS_HOME
+// nested under a regular file makes the config dir uncreatable.
+func TestConfigSave_MkdirError(t *testing.T) {
+	tmp := t.TempDir()
+	blocker := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", filepath.Join(blocker, "sub"))
+	c := &Config{Version: 1}
+	if err := c.Save(); err == nil {
+		t.Fatal("expected MkdirAll error when AGENTS_HOME is under a regular file")
+	}
+}

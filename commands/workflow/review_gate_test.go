@@ -585,3 +585,63 @@ func TestLoadReviewDecisionYAML_MalformedYAML(t *testing.T) {
 		t.Fatalf("expected parse error, got %v", err)
 	}
 }
+
+// TestEvaluateDelegationGate_ReviewDecisionInvalidSchema covers loadReviewDecisionYAML's
+// schema-validation error branch and evaluateDelegationGate's non-NotExist load-error
+// propagation: a review-decision.yaml that parses but fails verification-decision.schema.json.
+func TestEvaluateDelegationGate_ReviewDecisionInvalidSchema(t *testing.T) {
+	t.Parallel()
+	repo := initWorkflowTestRepo(t)
+	saveTestDelegationContract(t, repo, "t1", "p1", "del-t1")
+	writeMergeBackFixture(t, repo, "t1", "p1")
+	dir := filepath.Join(repo, ".agents", "active", "verification", "t1")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "schema_version: 1\n" +
+		"task_id: t1\n" +
+		"parent_plan_id: p1\n" +
+		"phase_1_decision: accept\n" +
+		"phase_2_decision: accept\n" +
+		"overall_decision: not-a-valid-decision\n" +
+		"failed_gates: []\n" +
+		"recorded_at: \"2026-04-19T12:00:00Z\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "review-decision.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := evaluateDelegationGate(repo, "t1", "p1"); err == nil {
+		t.Fatal("expected schema-validation error to propagate")
+	}
+}
+
+// TestEvaluateDelegationGate_ReviewDecisionPlanMismatch covers the review-decision
+// parent_plan_id vs delegation plan mismatch branch.
+func TestEvaluateDelegationGate_ReviewDecisionPlanMismatch(t *testing.T) {
+	t.Parallel()
+	repo := initWorkflowTestRepo(t)
+	saveTestDelegationContract(t, repo, "t1", "p1", "del-t1")
+	writeMergeBackFixture(t, repo, "t1", "p1")
+	writeReviewDecisionFixture(t, repo, "t1", &ReviewDecisionDoc{
+		SchemaVersion:   1,
+		TaskID:          "t1",
+		ParentPlanID:    "wrong-plan",
+		Phase1Decision:  "accept",
+		Phase2Decision:  "accept",
+		OverallDecision: "accept",
+		FailedGates:     []string{},
+		RecordedAt:      "2026-04-19T12:00:00Z",
+	})
+	if _, err := evaluateDelegationGate(repo, "t1", "p1"); err == nil || !strings.Contains(err.Error(), "plan") {
+		t.Fatalf("expected plan_id mismatch error, got %v", err)
+	}
+}
+
+// TestWorkflowDelegationGateCommand_EvaluateError covers the cobra wrapper's
+// error-return path when evaluateDelegationGate fails (no merge-back present).
+func TestWorkflowDelegationGateCommand_EvaluateError(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	saveTestDelegationContract(t, repo, "t1", "p1", "del-t1")
+	if err := executeWorkflowCommand(t, repo, "delegation", "gate", "--plan", "p1", "--task", "t1"); err == nil {
+		t.Fatal("expected delegation gate command to return the evaluate error")
+	}
+}

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -1306,5 +1307,201 @@ func TestSaveTestDelegationContract_StableID(t *testing.T) {
 	}
 	if time.Since(mustParseRFC3339(t, c.UpdatedAt)) > time.Minute {
 		t.Fatalf("UpdatedAt should be recent, got %q", c.UpdatedAt)
+	}
+}
+
+// TestVerifierDispatchResolution covers the verifier-sequence dispatch helpers'
+// uncovered branches (validation, empty sequences, malformed/missing manifest).
+func TestVerifierDispatchResolution(t *testing.T) {
+	// validateVerifierProfileRefs: empty profiles or sequence is a no-op
+	if err := validateVerifierProfileRefs(nil, nil); err != nil {
+		t.Fatalf("empty inputs: %v", err)
+	}
+	if err := validateVerifierProfileRefs([]string{"x"}, nil); err != nil {
+		t.Fatalf("empty profiles: %v", err)
+	}
+	profs := map[string]json.RawMessage{"unit": json.RawMessage(`{}`)}
+	if err := validateVerifierProfileRefs([]string{"ghost"}, profs); err == nil {
+		t.Fatal("expected undefined-profile error")
+	}
+
+	writeRC := func(t *testing.T, body string) string {
+		t.Helper()
+		repo := t.TempDir()
+		if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return repo
+	}
+
+	t.Run("explicit empty after split", func(t *testing.T) {
+		if _, err := explicitVerifierSequence(t.TempDir(), " , , "); err == nil {
+			t.Fatal("expected empty-sequence error")
+		}
+	})
+	t.Run("explicit undefined profile", func(t *testing.T) {
+		repo := writeRC(t, `{"project":"t","version":1,"verifier_profiles":{"unit":{}}}`)
+		if _, err := explicitVerifierSequence(repo, "ghost"); err == nil {
+			t.Fatal("expected undefined-profile error")
+		}
+	})
+	t.Run("explicit valid", func(t *testing.T) {
+		repo := writeRC(t, `{"project":"t","version":1,"verifier_profiles":{"unit":{}}}`)
+		seq, err := explicitVerifierSequence(repo, "unit")
+		if err != nil || len(seq) != 1 || seq[0] != "unit" {
+			t.Fatalf("valid explicit seq: %v %v", seq, err)
+		}
+	})
+
+	t.Run("mapped empty sequence for app type", func(t *testing.T) {
+		repo := writeRC(t, `{"project":"t","version":1,"app_type_verifier_map":{"go-cli":[]},"verifier_profiles":{"unit":{}}}`)
+		seq, err := mappedVerifierSequence(repo, "go-cli")
+		if err != nil || seq != nil {
+			t.Fatalf("empty mapped seq should be nil,nil: %v %v", seq, err)
+		}
+	})
+	t.Run("mapped undefined profile", func(t *testing.T) {
+		repo := writeRC(t, `{"project":"t","version":1,"app_type_verifier_map":{"go-cli":["ghost"]},"verifier_profiles":{"unit":{}}}`)
+		if _, err := mappedVerifierSequence(repo, "go-cli"); err == nil {
+			t.Fatal("expected undefined-profile error from mapped sequence")
+		}
+	})
+	t.Run("mapped missing manifest is nil", func(t *testing.T) {
+		seq, err := mappedVerifierSequence(t.TempDir(), "go-cli")
+		if err != nil || seq != nil {
+			t.Fatalf("missing manifest should be nil,nil: %v %v", seq, err)
+		}
+	})
+}
+
+// TestLoadAgentsrcFanoutDispatch_Errors covers the read- and parse-error branches.
+func TestLoadAgentsrcFanoutDispatch_Errors(t *testing.T) {
+	t.Run("malformed json", func(t *testing.T) {
+		repo := t.TempDir()
+		if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(`{bad`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadAgentsrcFanoutDispatch(repo); err == nil {
+			t.Fatal("expected parse error")
+		}
+	})
+	t.Run("read error not-not-exist", func(t *testing.T) {
+		repo := t.TempDir()
+		if err := os.Mkdir(filepath.Join(repo, ".agentsrc.json"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := loadAgentsrcFanoutDispatch(repo); err == nil {
+			t.Fatal("expected read error when .agentsrc.json is a directory")
+		}
+	})
+}
+
+// TestValidatePathHelpers covers the path-validation error branches:
+// parent-escape, stat failure (missing file), and directory-not-regular-file.
+func TestValidatePathHelpers(t *testing.T) {
+	repo := t.TempDir()
+	if _, err := validateInsideProjectPath(repo, "../escape"); err == nil {
+		t.Fatal("expected parent-escape error")
+	}
+	if _, err := validateProjectFileRef(repo, "nope.txt"); err == nil {
+		t.Fatal("expected cannot-access error for missing file")
+	}
+	if err := os.Mkdir(filepath.Join(repo, "d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateProjectFileRef(repo, "d"); err == nil {
+		t.Fatal("expected not-a-regular-file error for a directory")
+	}
+}
+
+// TestValidatePriorFoldBack covers the inline/propose conflict branch and the
+// prior-agreement (plan mismatch) passthrough.
+func TestValidatePriorFoldBack_ProposeOnSmall(t *testing.T) {
+	prior := &foldBackArtifact{ID: "fb1", PlanID: "p1", Classification: "small"}
+	if err := validatePriorFoldBack(prior, &foldBackUpsertInputs{slug: "fb1", planID: "p1", propose: true}); err == nil || !strings.Contains(err.Error(), "propose") {
+		t.Fatalf("expected propose-on-small error, got %v", err)
+	}
+	// plan mismatch flows through validateFoldBackPriorAgreement
+	if err := validatePriorFoldBack(prior, &foldBackUpsertInputs{slug: "fb1", planID: "p2"}); err == nil || !strings.Contains(err.Error(), "plan") {
+		t.Fatalf("expected plan-mismatch passthrough error, got %v", err)
+	}
+}
+
+// TestReadFoldBackArtifacts_ReadDirError covers the missing-dir ReadDir error branch.
+func TestReadFoldBackArtifacts_ReadDirError(t *testing.T) {
+	if _, err := readFoldBackArtifacts(filepath.Join(t.TempDir(), "nope"), ""); err == nil {
+		t.Fatal("expected ReadDir error for a missing directory")
+	}
+}
+
+// TestReadFoldBackArtifacts_SkipsNonYAML covers the dir/non-yaml skip branch:
+// a directory and a non-.yaml file are both skipped, yielding no artifacts.
+func TestReadFoldBackArtifacts_SkipsNonYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "note.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readFoldBackArtifacts(dir, "")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("expected zero artifacts (non-yaml + dir skipped): %v %v", got, err)
+	}
+}
+
+// TestReadFoldBackArtifacts_ParseError covers the malformed-yaml parse-error branch.
+func TestReadFoldBackArtifacts_ParseError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(":\n  -x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readFoldBackArtifacts(dir, ""); err == nil {
+		t.Fatal("expected parse error from malformed fold-back yaml")
+	}
+}
+
+// TestLoadPriorFoldBackArtifact_DirAndMalformed covers the is-directory and
+// load-error branches of loadPriorFoldBackArtifact.
+func TestLoadPriorFoldBackArtifact_DirAndMalformed(t *testing.T) {
+	repo := t.TempDir()
+	dirPath := foldBackArtifactFile(repo, "isdir")
+	if err := os.MkdirAll(dirPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if a, ok, err := loadPriorFoldBackArtifact(repo, "isdir"); a != nil || ok || err != nil {
+		t.Fatalf("dir path should be (nil,false,nil): %v %v %v", a, ok, err)
+	}
+	badPath := foldBackArtifactFile(repo, "bad")
+	if err := os.MkdirAll(filepath.Dir(badPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(badPath, []byte(":\n  -x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadPriorFoldBackArtifact(repo, "bad"); err == nil {
+		t.Fatal("expected load error for malformed fold-back artifact")
+	}
+	// non-NotExist stat error: the fold-back dir is a regular file, so Stat of a
+	// child path returns ENOTDIR (not IsNotExist).
+	repo2 := t.TempDir()
+	notDir := foldBackArtifactFile(repo2, "x")
+	if err := os.MkdirAll(filepath.Dir(filepath.Dir(notDir)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Dir(notDir), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadPriorFoldBackArtifact(repo2, "x"); err == nil {
+		t.Fatal("expected non-NotExist stat error when fold-back dir is a file")
+	}
+}
+
+// TestUpdatePlanFoldBackSummary_PlanNotFound covers the loadCanonicalPlan error branch.
+func TestUpdatePlanFoldBackSummary_PlanNotFound(t *testing.T) {
+	repo := t.TempDir()
+	err := updatePlanFoldBackSummary(repo, "ghost-plan", "2026-04-10T00:00:00Z", func(s string) string { return s })
+	if err == nil {
+		t.Fatal("expected load error for missing plan")
 	}
 }
