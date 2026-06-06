@@ -178,6 +178,262 @@ func TestNewRefreshCmd_FlagsAndArgs(t *testing.T) {
 	}
 }
 
+// ---------- --inexact flag + EXACT/PRUNE projection (§7A.5 outputs half) ----------
+
+// TestNewRefreshCmd_InexactFlag asserts --inexact is registered and defaults to
+// false (prune-by-default).
+func TestNewRefreshCmd_InexactFlag(t *testing.T) {
+	saved := refreshInexact
+	defer func() { refreshInexact = saved }()
+
+	cmd := NewRefreshCmd()
+	f := cmd.Flags().Lookup("inexact")
+	if f == nil {
+		t.Fatal("missing --inexact flag")
+	}
+	if f.DefValue != "false" {
+		t.Errorf("--inexact default = %q, want false (prune by default)", f.DefValue)
+	}
+	if err := cmd.Flags().Set("inexact", "true"); err != nil {
+		t.Fatalf("set --inexact: %v", err)
+	}
+	if !refreshInexact {
+		t.Error("setting --inexact should toggle refreshInexact")
+	}
+}
+
+// TestEnsureLockForRefresh_DryRunPreviews asserts the dry-run path previews the
+// lock-freshness check without invoking the seam.
+func TestEnsureLockForRefresh_DryRunPreviews(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = saved }()
+
+	called := false
+	savedSeam := ensureLockFresh
+	ensureLockFresh = func(string) (bool, bool, error) { called = true; return true, false, nil }
+	defer func() { ensureLockFresh = savedSeam }()
+
+	ok, noSync := ensureLockForRefresh("p", "/tmp/p")
+	if !ok || noSync {
+		t.Fatalf("dry-run ensureLockForRefresh = (%v,%v), want (true,false)", ok, noSync)
+	}
+	if called {
+		t.Error("dry-run must not invoke the lock seam")
+	}
+}
+
+// TestEnsureLockForRefresh_SuccessNoSync asserts a clean seam result carries
+// NoSync through so the caller can skip the outputs step.
+func TestEnsureLockForRefresh_SuccessNoSync(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	savedSeam := ensureLockFresh
+	ensureLockFresh = func(string) (bool, bool, error) { return true, true, nil }
+	defer func() { ensureLockFresh = savedSeam }()
+
+	ok, noSync := ensureLockForRefresh("p", "/tmp/p")
+	if !ok || !noSync {
+		t.Fatalf("ensureLockForRefresh = (%v,%v), want (true,true)", ok, noSync)
+	}
+}
+
+// TestEnsureLockForRefresh_ErrorIsPartial asserts a seam error marks the refresh
+// partial (ok=false) without aborting.
+func TestEnsureLockForRefresh_ErrorIsPartial(t *testing.T) {
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	savedSeam := ensureLockFresh
+	ensureLockFresh = func(string) (bool, bool, error) { return false, false, errors.New("boom") }
+	defer func() { ensureLockFresh = savedSeam }()
+
+	ok, _ := ensureLockForRefresh("p", "/tmp/p")
+	if ok {
+		t.Fatal("seam error must yield ok=false (partial refresh)")
+	}
+}
+
+// TestEnsureLockFreshProd_NoManifestSkips asserts a project without a readable
+// .agentsrc.json is reported as "nothing to resolve" (ok, no error, no NoSync) —
+// refresh stays well-defined for manifest-less projects.
+func TestEnsureLockFreshProd_NoManifestSkips(t *testing.T) {
+	dir := t.TempDir() // no .agentsrc.json
+	ok, noSync, err := ensureLockFreshProd(dir)
+	if !ok || noSync || err != nil {
+		t.Fatalf("ensureLockFreshProd(no manifest) = (%v,%v,%v), want (true,false,nil)", ok, noSync, err)
+	}
+}
+
+// TestEnsureLockFreshProd_ResolverError asserts a manifest-present project whose
+// resolution fails is surfaced as a partial (ok=false, err) without panicking.
+func TestEnsureLockFreshProd_ResolverError(t *testing.T) {
+	dir := t.TempDir()
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	savedFn := ensureResolvedFn
+	ensureResolvedFn = func(string, config.EnsureOpts) (*config.EnsureResult, error) {
+		return nil, errors.New("resolve failed")
+	}
+	defer func() { ensureResolvedFn = savedFn }()
+
+	ok, _, err := ensureLockFreshProd(dir)
+	if ok || err == nil {
+		t.Fatalf("ensureLockFreshProd(resolver error) = (%v,err=%v), want (false, non-nil)", ok, err)
+	}
+}
+
+// TestEnsureLockFreshProd_ResolverNoSync asserts a clean resolution carries
+// EnsureResult.NoSync back to the caller.
+func TestEnsureLockFreshProd_ResolverNoSync(t *testing.T) {
+	dir := t.TempDir()
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	savedFn := ensureResolvedFn
+	ensureResolvedFn = func(string, config.EnsureOpts) (*config.EnsureResult, error) {
+		return &config.EnsureResult{NoSync: true}, nil
+	}
+	defer func() { ensureResolvedFn = savedFn }()
+
+	ok, noSync, err := ensureLockFreshProd(dir)
+	if !ok || !noSync || err != nil {
+		t.Fatalf("ensureLockFreshProd(noSync) = (%v,%v,%v), want (true,true,nil)", ok, noSync, err)
+	}
+}
+
+// TestEnsureLockFreshProd_DefaultSeamIsRealEnsureResolved pins that the
+// resolver seam defaults to the production config.EnsureResolved entry point.
+func TestEnsureLockFreshProd_DefaultSeamIsRealEnsureResolved(t *testing.T) {
+	if ensureResolvedFn == nil {
+		t.Fatal("ensureResolvedFn must default to config.EnsureResolved, got nil")
+	}
+}
+
+// TestRunSharedTargetsForRefresh_DryRunInexactNote asserts the dry-run path
+// emits the prune-skipped note when --inexact is set and does not fail.
+func TestRunSharedTargetsForRefresh_DryRunInexactNote(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	savedFlags, savedInexact := Flags, refreshInexact
+	Flags = GlobalFlags{DryRun: true}
+	refreshInexact = true
+	defer func() { Flags, refreshInexact = savedFlags, savedInexact }()
+
+	if failed := runSharedTargetsForRefresh("proj", filepath.Join(tmp, "repo"), []platform.Platform{platform.NewCodex()}); failed {
+		t.Fatal("dry-run shared targets must not report failure")
+	}
+}
+
+// TestRunSharedTargetsForRefresh_ApplyPrunesStale drives the apply path: a stale
+// managed Claude skill mirror is pruned (prune-by-default) while the resolved
+// one is applied. Negative variant: --inexact leaves the stale output in place.
+func TestRunSharedTargetsForRefresh_ApplyPrunesStale(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		inexact     bool
+		wantStaleOK bool // true => stale link must still exist after apply
+	}{
+		{name: "prune-by-default", inexact: false, wantStaleOK: false},
+		{name: "inexact-keeps-stale", inexact: true, wantStaleOK: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			repo := filepath.Join(tmp, "repo")
+			t.Setenv("AGENTS_HOME", agentsHome)
+
+			testutil.WriteScopeFilePath(t, agentsHome, "skills", "proj",
+				filepath.Join("review", "SKILL.md"), []byte("---\nname: review\n---\n"))
+			// Stale managed link "gone": canonical dir exists (link resolves under
+			// agentsHome) but its SKILL.md is removed so it is not in the resolved set.
+			goneDir := filepath.Join(agentsHome, "skills", "proj", "gone")
+			if err := os.MkdirAll(goneDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			claudeRoot := filepath.Join(repo, ".claude", "skills")
+			if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(goneDir, filepath.Join(claudeRoot, "gone")); err != nil {
+				t.Fatal(err)
+			}
+
+			savedFlags, savedInexact := Flags, refreshInexact
+			Flags = GlobalFlags{}
+			refreshInexact = tc.inexact
+			defer func() { Flags, refreshInexact = savedFlags, savedInexact }()
+
+			if failed := runSharedTargetsForRefresh("proj", repo, []platform.Platform{platform.NewClaude()}); failed {
+				t.Fatal("apply shared targets must not report failure")
+			}
+			_, statErr := os.Lstat(filepath.Join(claudeRoot, "gone"))
+			staleExists := statErr == nil
+			if staleExists != tc.wantStaleOK {
+				t.Fatalf("stale link exists=%v, want %v (inexact=%v)", staleExists, tc.wantStaleOK, tc.inexact)
+			}
+		})
+	}
+}
+
+// TestRunSharedTargetsForRefresh_ApplyBuildErrorWarns asserts an apply-path plan
+// failure is reported as a partial (returns true) rather than aborting.
+func TestRunSharedTargetsForRefresh_ApplyBuildErrorWarns(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Make the canonical skills bucket a regular FILE so the mirror builder errors.
+	scope := filepath.Join(agentsHome, "skills", "proj")
+	if err := os.MkdirAll(filepath.Dir(scope), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scope, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	savedFlags := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = savedFlags }()
+
+	if failed := runSharedTargetsForRefresh("proj", filepath.Join(tmp, "repo"), []platform.Platform{platform.NewClaude()}); !failed {
+		t.Fatal("apply build error must report partial (true)")
+	}
+}
+
+// TestRunSharedTargetsForRefresh_DryRunBuildErrorWarns asserts a dry-run plan
+// failure warns but does not propagate (returns false).
+func TestRunSharedTargetsForRefresh_DryRunBuildErrorWarns(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	scope := filepath.Join(agentsHome, "skills", "proj")
+	if err := os.MkdirAll(filepath.Dir(scope), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scope, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	savedFlags := Flags
+	Flags = GlobalFlags{DryRun: true}
+	defer func() { Flags = savedFlags }()
+
+	if failed := runSharedTargetsForRefresh("proj", filepath.Join(tmp, "repo"), []platform.Platform{platform.NewClaude()}); failed {
+		t.Fatal("dry-run build error must not propagate (false)")
+	}
+}
+
 // ---------- refreshImportScope ----------
 
 func TestRefreshImportScope_DefaultsToProject(t *testing.T) {

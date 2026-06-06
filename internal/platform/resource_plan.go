@@ -556,6 +556,23 @@ func RunSharedTargetProjection(project, repoPath string, platforms []Platform, d
 	return nil, CollectAndExecuteSharedTargetPlan(project, repoPath, platforms)
 }
 
+// CollectAndProjectExactSharedTargetPlan builds the merged shared-target plan
+// and projects it EXACT/PRUNE: apply every resolved intent, then (unless
+// inexact) delete managed outputs under the plan's target roots that are no
+// longer in the resolved set. This is the outputs (sync) half of §7A.5 that
+// refresh/install drive after the lock is fresh. Returns the repo-relative
+// paths pruned (nil when inexact or nothing was stale).
+//
+// Callers must set config.SetWindowsMirrorContext(repoPath) before calling when
+// the repo needs Windows-specific path behavior for intent resolution.
+func CollectAndProjectExactSharedTargetPlan(project, repoPath string, platforms []Platform, inexact bool) ([]string, error) {
+	plan, err := BuildSharedTargetPlan(project, platforms)
+	if err != nil {
+		return nil, err
+	}
+	return plan.ProjectExact(repoPath, config.AgentsHome(), inexact)
+}
+
 // CollectAndExecuteSharedTargetPlan runs BuildSharedTargetPlan then executes it against
 // the repo and agents home. This is the command-layer entry point for centralized
 // shared-target writes.
@@ -692,6 +709,112 @@ func formatSharedTargetPlanForDryRun(plan ResourcePlan, repoPath string) []strin
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// ProjectExact applies the resolved plan and, unless inexact is set, prunes
+// managed outputs under the plan's target roots that are no longer in the
+// resolved set. This is the EXACT/PRUNE projection (config-distribution-model
+// §7A.5, outputs half): the repo's managed shared-target outputs are made to
+// match the resolved intent set exactly. Stale managed symlinks (pointing into
+// agentsHome) and stale rendered outputs (e.g. codex agent toml) for entries
+// that dropped out of the resolved set are deleted; user-authored files and
+// links outside agentsHome are never touched.
+//
+// Pruning is scoped to the parent target roots the plan actually projects into
+// (e.g. .agents/skills, .claude/agents, .codex/agents). A root the plan does
+// not touch is left entirely alone, so ProjectExact never deletes outputs for a
+// bucket the current resolution did not consider.
+//
+// Returns the repo-relative paths of the outputs it pruned (nil when inexact or
+// nothing was stale), so callers can report the prune to the user.
+func (p ResourcePlan) ProjectExact(repoPath, agentsHome string, inexact bool) ([]string, error) {
+	if err := p.Execute(repoPath, agentsHome); err != nil {
+		return nil, err
+	}
+	if inexact {
+		return nil, nil
+	}
+	return p.pruneStaleManagedOutputs(repoPath, agentsHome)
+}
+
+// resolvedTargetPaths returns the set of repo-relative (forward-slash) target
+// paths the plan projects, used as the keep-set for pruning.
+func (p ResourcePlan) resolvedTargetPaths() map[string]bool {
+	keep := make(map[string]bool, len(p.Resources))
+	for _, res := range p.Resources {
+		keep[filepath.ToSlash(res.Intent.TargetPath)] = true
+	}
+	return keep
+}
+
+// pruneRoots returns the distinct parent directories (repo-relative,
+// forward-slash) the plan projects managed outputs into. Only prunable intents
+// (those whose PrunePolicy is not "none") contribute a root, so a render intent
+// the contract marks unprunable (codex toml uses ResourcePruneNone) never
+// causes its sibling user files to be scanned for deletion.
+func (p ResourcePlan) pruneRoots() []string {
+	seen := map[string]bool{}
+	var roots []string
+	for _, res := range p.Resources {
+		if res.Intent.PrunePolicy == ResourcePruneNone {
+			continue
+		}
+		root := filepath.ToSlash(filepath.Dir(res.Intent.TargetPath))
+		if root == "" || root == "." {
+			continue
+		}
+		if !isAllowlistedSharedMirrorTarget(res.Intent.TargetPath) {
+			continue
+		}
+		if !seen[root] {
+			seen[root] = true
+			roots = append(roots, root)
+		}
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+// pruneStaleManagedOutputs scans every prune root the plan touches and deletes
+// managed outputs (symlinks into agentsHome) whose repo-relative path is not in
+// the resolved keep-set. Per-entry removal failures are aggregated so one stuck
+// output cannot hide the rest; the returned slice lists what was pruned.
+func (p ResourcePlan) pruneStaleManagedOutputs(repoPath, agentsHome string) ([]string, error) {
+	keep := p.resolvedTargetPaths()
+	var pruned []string
+	var errs []error
+	for _, root := range p.pruneRoots() {
+		rootAbs := resolveIntentTargetPath(root, repoPath)
+		entries, err := os.ReadDir(rootAbs)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("scan prune root %s: %w", root, err))
+			continue
+		}
+		for _, entry := range entries {
+			rel := root + "/" + entry.Name()
+			if keep[rel] {
+				continue
+			}
+			target := filepath.Join(rootAbs, entry.Name())
+			if !links.IsManagedLinkUnder(target, agentsHome) {
+				// Not a managed symlink into the asset store — a user file,
+				// an import, or a render output we do not own. Leave it.
+				continue
+			}
+			if err := links.RemoveIfSymlinkUnder(target, agentsHome); err != nil {
+				errs = append(errs, fmt.Errorf("prune stale managed output %s: %w", rel, err))
+				continue
+			}
+			pruned = append(pruned, rel)
+		}
+	}
+	if len(errs) > 0 {
+		return pruned, errors.Join(errs...)
+	}
+	return pruned, nil
 }
 
 func ExecuteSharedSkillMirrorPlan(project, repoPath string, targetRoots ...string) error {

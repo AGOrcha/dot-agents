@@ -19,6 +19,47 @@ var Commit = ""
 var Describe = ""
 var refreshImport bool
 
+// refreshInexact mirrors refreshImport: it is set from the --inexact flag in
+// NewRefreshCmd and read in the per-project outputs step. When false (the
+// default), refresh projects the resolved shared-target set EXACT/PRUNE —
+// managed outputs no longer in the resolved set are deleted. --inexact opts out
+// of the prune, leaving stale managed outputs in place (apply-only).
+var refreshInexact bool
+
+// ensureLockFresh is the per-project lock-freshness seam refresh runs before the
+// outputs projection (config-distribution-model §7A.5: the lock half precedes
+// the outputs/sync half). It is a package-var seam (the runRefresh signature is
+// shared with sync/review and out-of-scope callers, so it cannot grow a
+// parameter) defaulting to the guarded production wrapper. Tests override it to
+// stay hermetic — no network, no resolver.
+var ensureLockFresh = ensureLockFreshProd
+
+// ensureLockFreshProd ensures the project's lock is fresh before projecting
+// outputs. It is best-effort by design: refresh has always been well-defined for
+// manifest-less projects (see noteManifestGitSources), so a project with no
+// .agentsrc.json is reported as "nothing to resolve" (ok=true, noSync=false) and
+// the caller proceeds to project. A genuine resolver/lock failure is surfaced as
+// ok=false so the caller can warn and withhold the success stamp without
+// aborting the whole refresh. The returned noSync echoes EnsureResult.NoSync so
+// the caller can skip the outputs step when the lock half requested it.
+func ensureLockFreshProd(projectPath string) (ok, noSync bool, err error) {
+	if _, statErr := config.LoadAgentsRC(projectPath); statErr != nil {
+		// No (readable) manifest: not a config-v2-managed project. Nothing to
+		// resolve; refresh's link/output projection still applies.
+		return true, false, nil
+	}
+	res, err := ensureResolvedFn(projectPath, config.EnsureOpts{})
+	if err != nil {
+		return false, false, err
+	}
+	return true, res.NoSync, nil
+}
+
+// ensureResolvedFn is the resolver-touching call ensureLockFreshProd delegates
+// to, isolated as its own seam so a test can exercise the guarded wrapper's
+// branches without standing up a real LayeredResolver.
+var ensureResolvedFn = config.EnsureResolved
+
 // refreshConfigLoader is the narrow collaborator refresh.go's
 // fault-injectable LoadConfig operation needs (interface-DI per
 // docs/TEST_SEAMS.md). Single-method, file-prefixed -er form; file-scoped
@@ -41,7 +82,7 @@ func (stdRefreshConfigLoader) LoadConfig() (*config.Config, error) { return conf
 // for why the run body cannot move atomically with this PR (t04/t06 still
 // own addDeps / importDeps in the root package).
 func NewRefreshCmd() *cobra.Command {
-	return lifecycle.NewRefreshCmd(lifecycle.Deps{
+	cmd := lifecycle.NewRefreshCmd(lifecycle.Deps{
 		ExampleBlock:          ExampleBlock,
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
 		RunRefresh: func(projectFilter string, importAlso bool) error {
@@ -49,6 +90,12 @@ func NewRefreshCmd() *cobra.Command {
 			return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
 	})
+	// --inexact is wired here (not in the lifecycle Deps) so the still-shared
+	// runRefresh body can read it via the refreshInexact package var without
+	// changing the lifecycle constructor or the runRefresh signature.
+	cmd.Flags().BoolVar(&refreshInexact, "inexact", false,
+		"Skip pruning: leave managed outputs no longer in the resolved set in place")
+	return cmd
 }
 
 func runRefresh(projectFilter string, deps refreshConfigLoader, importD importDeps, addD addDeps) error {
@@ -221,7 +268,16 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 
 	config.SetWindowsMirrorContext(path)
 
-	if runSharedTargetsForRefresh(name, path, installedEnabled) {
+	// §7A.5: ensure the lock is fresh before projecting outputs. A lock-half
+	// failure is surfaced as a partial refresh (warn + withhold stamp); a
+	// requested --no-sync skips the outputs projection entirely but still lets
+	// links be recreated.
+	lockOK, noSync := ensureLockForRefresh(name, path)
+	if !lockOK {
+		projectFailed = true
+	}
+
+	if !noSync && runSharedTargetsForRefresh(name, path, installedEnabled) {
 		projectFailed = true
 	}
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
@@ -230,22 +286,54 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 	return projectFailed
 }
 
-// runSharedTargetsForRefresh runs the shared-target projection and prints any
-// dry-run plan lines. Returns true when a non-dry-run projection failed
-// (caller withholds the success stamp); dry-run failures are surfaced as
-// warnings but do not propagate.
-func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform) bool {
-	lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
+// ensureLockForRefresh runs the §7A.5 lock-freshness seam for one project and
+// reports (ok, noSync). On dry-run it previews the check without touching the
+// lock. A seam error is surfaced as a warning and ok=false so the caller treats
+// the refresh as partial; noSync echoes the lock half's request to skip the
+// outputs projection.
+func ensureLockForRefresh(name, path string) (ok, noSync bool) {
+	if Flags.DryRun {
+		ui.DryRun("Ensure " + name + " lock is fresh before projecting outputs")
+		return true, false
+	}
+	ok, noSync, err := ensureLockFresh(path)
 	if err != nil {
-		if Flags.DryRun {
+		ui.Bullet("warn", fmt.Sprintf("ensure lock fresh: %v", err))
+		return false, noSync
+	}
+	if noSync {
+		ui.Bullet("ok", "lock fresh (outputs sync skipped: --no-sync)")
+	}
+	return true, noSync
+}
+
+// runSharedTargetsForRefresh runs the shared-target projection and prints any
+// dry-run plan lines. On apply it projects EXACT/PRUNE by default (managed
+// outputs no longer in the resolved set are deleted); --inexact opts out of the
+// prune. Returns true when a non-dry-run projection failed (caller withholds the
+// success stamp); dry-run failures are surfaced as warnings but do not propagate.
+func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform) bool {
+	if Flags.DryRun {
+		lines, err := platform.DryRunSharedTargetPlanLines(name, path, installedEnabled)
+		if err != nil {
 			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
 			return false
 		}
+		for _, line := range lines {
+			ui.DryRun(line)
+		}
+		if refreshInexact {
+			ui.DryRun("shared targets: prune skipped (--inexact)")
+		}
+		return false
+	}
+	pruned, err := platform.CollectAndProjectExactSharedTargetPlan(name, path, installedEnabled, refreshInexact)
+	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
 		return true
 	}
-	for _, line := range lines {
-		ui.DryRun(line)
+	for _, p := range pruned {
+		ui.Bullet("ok", "pruned stale managed output: "+p)
 	}
 	return false
 }

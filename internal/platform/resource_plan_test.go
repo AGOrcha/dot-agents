@@ -1820,3 +1820,301 @@ func TestSharedPlanEntryPointsPropagateBuildError(t *testing.T) {
 		assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonical)
 	})
 }
+
+// ---------- ProjectExact / EXACT-PRUNE projection (§7A.5 outputs half) ----------
+
+// seedStaleManagedSkillLink creates a canonical agentsHome skill dir and a
+// managed symlink to it under the repo's .agents/skills root, simulating an
+// output left over from a previous resolution that has since dropped out of the
+// resolved set. Returns the repo-relative link path.
+func seedStaleManagedSkillLink(t *testing.T, repo, agentsHome, name string) string {
+	t.Helper()
+	canonical := writeFixtureSkill(t, agentsHome, "proj", name)
+	linkDir := filepath.Join(repo, ".agents", "skills")
+	if err := os.MkdirAll(linkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(linkDir, name)
+	if err := links.Symlink(canonical, link); err != nil {
+		t.Fatalf("seed stale managed link: %v", err)
+	}
+	return filepath.ToSlash(filepath.Join(".agents/skills", name))
+}
+
+// TestProjectExactPrunesStaleManagedOutput is the positive prune case: a managed
+// symlink under a target root the plan projects into, but absent from the
+// resolved set, is deleted.
+func TestProjectExactPrunesStaleManagedOutput(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	stale := seedStaleManagedSkillLink(t, repo, agentsHome, "old")
+	canonical := writeFixtureSkill(t, agentsHome, "proj", "review")
+
+	plan, err := BuildResourcePlan([]ResourceIntent{validSharedSkillIntent(".agents/skills/review", "claude")})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	pruned, err := plan.ProjectExact(repo, agentsHome, false)
+	if err != nil {
+		t.Fatalf("ProjectExact: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != stale {
+		t.Fatalf("pruned = %v, want [%s]", pruned, stale)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".agents", "skills", "old")); !os.IsNotExist(err) {
+		t.Fatalf("stale managed output should be pruned, lstat err = %v", err)
+	}
+	// The resolved entry is applied and kept.
+	assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), canonical)
+}
+
+// TestProjectExactInexactSkipsPrune is the negative case: --inexact applies the
+// resolved set but leaves the stale managed output in place.
+func TestProjectExactInexactSkipsPrune(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	seedStaleManagedSkillLink(t, repo, agentsHome, "old")
+	writeFixtureSkill(t, agentsHome, "proj", "review")
+
+	plan, err := BuildResourcePlan([]ResourceIntent{validSharedSkillIntent(".agents/skills/review", "claude")})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	pruned, err := plan.ProjectExact(repo, agentsHome, true)
+	if err != nil {
+		t.Fatalf("ProjectExact inexact: %v", err)
+	}
+	if pruned != nil {
+		t.Fatalf("inexact must prune nothing, got %v", pruned)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, ".agents", "skills", "old")); err != nil {
+		t.Fatalf("inexact must leave stale managed output in place, lstat err = %v", err)
+	}
+}
+
+// TestProjectExactPreservesUserFile asserts a non-managed entry (a plain user
+// file/dir, not a symlink into agentsHome) under a prune root is never deleted.
+func TestProjectExactPreservesUserFile(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	writeFixtureSkill(t, agentsHome, "proj", "review")
+	// A user-authored directory sitting beside the managed outputs.
+	userDir := filepath.Join(repo, ".agents", "skills", "hand-written")
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "SKILL.md"), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := BuildResourcePlan([]ResourceIntent{validSharedSkillIntent(".agents/skills/review", "claude")})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	pruned, err := plan.ProjectExact(repo, agentsHome, false)
+	if err != nil {
+		t.Fatalf("ProjectExact: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("user file must not be pruned, got %v", pruned)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "SKILL.md")); err != nil {
+		t.Fatalf("user file must be preserved: %v", err)
+	}
+}
+
+// TestProjectExactExecuteErrorPropagates asserts ProjectExact surfaces a failed
+// apply before any prune runs.
+func TestProjectExactExecuteErrorPropagates(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	intent := validSharedSkillIntent(".agents/skills/review", "claude")
+	intent.SourceRef = ResourceSourceRef{} // empty source → executeResourceIntent errors
+	plan := ResourcePlan{Resources: []plannedResource{{Intent: intent}}}
+	if _, err := plan.ProjectExact(repo, agentsHome, false); err == nil {
+		t.Fatal("expected execute error to propagate, got nil")
+	}
+}
+
+// TestResolvedTargetPathsKeepSet asserts every projected target is in the keep
+// set (forward-slash normalized).
+func TestResolvedTargetPathsKeepSet(t *testing.T) {
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: ResourceIntent{TargetPath: filepath.Join(".agents", "skills", "a")}},
+		{Intent: ResourceIntent{TargetPath: ".claude/agents/b"}},
+	}}
+	keep := plan.resolvedTargetPaths()
+	for _, want := range []string{".agents/skills/a", ".claude/agents/b"} {
+		if !keep[want] {
+			t.Errorf("keep set missing %q (have %v)", want, keep)
+		}
+	}
+	if len(keep) != 2 {
+		t.Errorf("keep set size = %d, want 2", len(keep))
+	}
+}
+
+// TestPruneRootsFiltersUnprunableAndNonAllowlisted asserts pruneRoots skips
+// ResourcePruneNone intents, non-allowlisted targets, and root-level targets,
+// and dedupes the remaining parent roots.
+func TestPruneRootsFiltersUnprunableAndNonAllowlisted(t *testing.T) {
+	prunableA := validSharedSkillIntent(".agents/skills/a", "claude")
+	prunableB := validSharedSkillIntent(".claude/skills/b", "claude")
+	prunableDup := validSharedSkillIntent(".agents/skills/c", "cursor")
+	unprunable := validSharedSkillIntent(".agents/skills/keep", "codex")
+	unprunable.PrunePolicy = ResourcePruneNone
+	nonAllowlisted := validSharedSkillIntent("docs/notes/d", "claude")
+	rootLevel := validSharedSkillIntent("top", "claude")
+
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: prunableA}, {Intent: prunableB}, {Intent: prunableDup},
+		{Intent: unprunable}, {Intent: nonAllowlisted}, {Intent: rootLevel},
+	}}
+	roots := plan.pruneRoots()
+	want := []string{".agents/skills", ".claude/skills"}
+	if len(roots) != len(want) {
+		t.Fatalf("pruneRoots = %v, want %v", roots, want)
+	}
+	for i := range want {
+		if roots[i] != want[i] {
+			t.Fatalf("pruneRoots[%d] = %q, want %q (full %v)", i, roots[i], want[i], roots)
+		}
+	}
+}
+
+// TestPruneStaleManagedOutputsMissingRootSkipped asserts a target root that does
+// not exist on disk is silently skipped (no error, nothing pruned).
+func TestPruneStaleManagedOutputsMissingRootSkipped(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: validSharedSkillIntent(".agents/skills/review", "claude")},
+	}}
+	pruned, err := plan.pruneStaleManagedOutputs(repo, agentsHome)
+	if err != nil {
+		t.Fatalf("missing root must not error: %v", err)
+	}
+	if pruned != nil {
+		t.Fatalf("missing root must prune nothing, got %v", pruned)
+	}
+}
+
+// TestPruneStaleManagedOutputsScanErrorAggregated asserts a non-ENOENT scan
+// failure (the prune root is a regular file, not a directory) is surfaced.
+func TestPruneStaleManagedOutputsScanErrorAggregated(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	// Make .agents/skills a FILE so os.ReadDir on it fails with a non-ENOENT error.
+	skillsRoot := filepath.Join(repo, ".agents", "skills")
+	if err := os.MkdirAll(filepath.Dir(skillsRoot), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(skillsRoot, []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: validSharedSkillIntent(".agents/skills/review", "claude")},
+	}}
+	if _, err := plan.pruneStaleManagedOutputs(repo, agentsHome); err == nil {
+		t.Fatal("expected scan error for non-directory prune root, got nil")
+	}
+}
+
+// TestPruneStaleManagedOutputsKeepsResolvedEntry asserts a managed link that IS
+// in the resolved keep-set is left untouched while a stale sibling is pruned —
+// exercising the keep[rel] skip branch.
+func TestPruneStaleManagedOutputsKeepsResolvedEntry(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	reviewCanonical := writeFixtureSkill(t, agentsHome, "proj", "review")
+	stale := seedStaleManagedSkillLink(t, repo, agentsHome, "old")
+	// Pre-seed the RESOLVED entry's managed link so the scan encounters it.
+	if err := links.Symlink(reviewCanonical, filepath.Join(repo, ".agents", "skills", "review")); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := BuildResourcePlan([]ResourceIntent{validSharedSkillIntent(".agents/skills/review", "claude")})
+	if err != nil {
+		t.Fatalf("BuildResourcePlan: %v", err)
+	}
+	pruned, err := plan.pruneStaleManagedOutputs(repo, agentsHome)
+	if err != nil {
+		t.Fatalf("pruneStaleManagedOutputs: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != stale {
+		t.Fatalf("pruned = %v, want [%s]", pruned, stale)
+	}
+	// The resolved entry's link survives.
+	assertSymlinkTarget(t, filepath.Join(repo, ".agents", "skills", "review"), reviewCanonical)
+}
+
+// TestPruneStaleManagedOutputsRemoveErrorAggregated forces RemoveIfSymlinkUnder
+// to fail by making the stale managed link's parent unwritable, asserting the
+// removal error is surfaced (not swallowed) while still being attempted.
+func TestPruneStaleManagedOutputsRemoveErrorAggregated(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root bypasses directory permission bits")
+	}
+	repo, agentsHome := setupRepoAgentsHome(t)
+	seedStaleManagedSkillLink(t, repo, agentsHome, "old")
+	skillsRoot := filepath.Join(repo, ".agents", "skills")
+	// Make the parent dir read+exec but not writable so unlinking the child fails.
+	if err := os.Chmod(skillsRoot, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(skillsRoot, 0o755) })
+
+	plan := ResourcePlan{Resources: []plannedResource{
+		{Intent: validSharedSkillIntent(".agents/skills/review", "claude")},
+	}}
+	_, err := plan.pruneStaleManagedOutputs(repo, agentsHome)
+	if err == nil {
+		t.Fatal("expected removal error to be surfaced, got nil")
+	}
+}
+
+// TestCollectAndProjectExactSharedTargetPlanEndToEnd drives the command-layer
+// entry point: a stale managed Claude skill mirror is pruned while the resolved
+// one is applied.
+func TestCollectAndProjectExactSharedTargetPlanEndToEnd(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	// Resolved skill "review" + a stale managed link "gone" under the Claude root.
+	// "gone" was canonical in a prior resolution: its on-disk managed link still
+	// points into agentsHome, but its SKILL.md no longer exists so the current
+	// resolution does not list it — exactly the drop-out the prune must catch.
+	writeFixtureSkill(t, agentsHome, "proj", "review")
+	goneCanonical := writeFixtureSkill(t, agentsHome, "proj", "gone")
+	claudeRoot := filepath.Join(repo, ".claude", "skills")
+	if err := os.MkdirAll(claudeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := links.Symlink(goneCanonical, filepath.Join(claudeRoot, "gone")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(goneCanonical, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	platforms := []Platform{NewClaude()}
+	pruned, err := CollectAndProjectExactSharedTargetPlan("proj", repo, platforms, false)
+	if err != nil {
+		t.Fatalf("CollectAndProjectExactSharedTargetPlan: %v", err)
+	}
+	found := false
+	for _, p := range pruned {
+		if p == ".claude/skills/gone" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected .claude/skills/gone pruned, got %v", pruned)
+	}
+	if _, err := os.Lstat(filepath.Join(claudeRoot, "gone")); !os.IsNotExist(err) {
+		t.Fatalf("stale managed link should be gone, lstat err = %v", err)
+	}
+}
+
+// TestCollectAndProjectExactSharedTargetPlanBuildError asserts the entry point
+// surfaces a plan-build failure.
+func TestCollectAndProjectExactSharedTargetPlanBuildError(t *testing.T) {
+	repo, agentsHome := setupRepoAgentsHome(t)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	platforms := []Platform{stubPlatform{id: "stub", intents: []ResourceIntent{invalidSharedSkillIntent()}}}
+	if _, err := CollectAndProjectExactSharedTargetPlan("proj", repo, platforms, false); err == nil {
+		t.Fatal("expected build error, got nil")
+	}
+}
