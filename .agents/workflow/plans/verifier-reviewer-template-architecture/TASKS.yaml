@@ -60,7 +60,7 @@ tasks:
       app_type: go-cli
     - id: p2a-migrate-verifiers
       title: 'PR-2: migrate remaining 7 verifiers to base + per-type'
-      status: pending
+      status: completed
       depends_on:
         - p1d-wire-slim-prove
       blocks: []
@@ -74,7 +74,7 @@ tasks:
       app_type: go-cli
     - id: p2b-migrate-lenses
       title: 'PR-2: migrate remaining 2 reviewer lenses to base + per-lens'
-      status: pending
+      status: completed
       depends_on:
         - p1d-wire-slim-prove
       blocks: []

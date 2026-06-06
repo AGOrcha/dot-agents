@@ -81,8 +81,11 @@ is the seam the orchestrator/ISP calls when dispatching a verifier or reviewer.
 
 ## Status
 
-Phase 1 (proof) ships both bases and the composition mechanism, wired for `unit`, `cli-runner`, and
-the `architecture-standards` lens. Phase 2 migrates the remaining verifiers (api, ui-e2e, batch,
-streaming, schema-check, citation-check, task-schedule) and lenses (acceptance-invariants,
-adversarial) onto the same base + per-type model. See
-`.agents/workflow/specs/verifier-reviewer-template-architecture/design.md`.
+Complete. Every verifier kind ships a product-scope per-type template on `verifier.base.md` — `unit`,
+`cli-runner`, `api`, `batch`, `streaming`, `ui-e2e`, `schema-check`, `citation-check`,
+`task-schedule` — and all three reviewer lenses (`architecture-standards`, `acceptance-invariants`,
+`adversarial`) ship a per-lens template on `reviewer.base.md`. The dot-agents project wires the kinds
+it runs (`go-cli` → unit/cli-runner; `ideation` → schema-check/citation-check/task-schedule; the three
+lenses) through `verifier_profiles` / `reviewer_profiles` with a slim repo-local overlay; the generic
+kinds dot-agents doesn't run (api/batch/streaming/ui-e2e) ship in the starter for consumer projects to
+wire. See `.agents/workflow/specs/verifier-reviewer-template-architecture/design.md`.
