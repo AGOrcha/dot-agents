@@ -84,41 +84,31 @@
         }
       }
     },
-    "verifier_profiles": {
+    "stage_profiles": {
       "type": "object",
-      "description": "Named verifier profiles referenced by app_type_verifier_map and workflow fanout",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "prompt_files": {
-            "$ref": "#/$defs/promptFileList"
-          }
-        }
+      "additionalProperties": false,
+      "description": "Named per-stage prompt-composition profiles keyed by stage then by slug. The verifier/reviewer stages supersede verifier_profiles/reviewer_profiles; execution_profile.topology.verifier_sequence supersedes app_type_verifier_map. Each profile's prompt_files compose base-first.",
+      "properties": {
+        "executor": { "$ref": "#/$defs/stageProfileMap" },
+        "verifier": { "$ref": "#/$defs/stageProfileMap" },
+        "reviewer": { "$ref": "#/$defs/stageProfileMap" },
+        "orchestrator": { "$ref": "#/$defs/stageProfileMap" }
       }
     },
+    "verifier_profiles": {
+      "$ref": "#/$defs/stageProfileMap",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into stage_profiles.verifier on load and never re-emitted. Use stage_profiles.verifier."
+    },
     "reviewer_profiles": {
-      "type": "object",
-      "description": "Named reviewer profiles keyed by review lens (architecture-standards, acceptance-invariants, adversarial); symmetric to verifier_profiles. prompt_files compose base-first into the reviewer bundle.",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "prompt_files": {
-            "$ref": "#/$defs/promptFileList"
-          }
-        }
-      }
+      "$ref": "#/$defs/stageProfileMap",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into stage_profiles.reviewer on load and never re-emitted. Use stage_profiles.reviewer."
     },
     "app_type_verifier_map": {
       "type": "object",
-      "description": "Maps app_type strings to ordered verifier profile ids for fanout bundle resolution",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into execution_profile.by_app_type.<type>.topology.verifier_sequence on load and never re-emitted. Use execution_profile.",
       "additionalProperties": {
         "type": "array",
         "items": {
@@ -273,6 +263,22 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/promptFileRef"
+      }
+    },
+    "stageProfileMap": {
+      "type": "object",
+      "description": "A map of profile slug -> stage profile (label + base-first prompt_files composition).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt_files": {
+            "$ref": "#/$defs/promptFileList"
+          }
+        }
       }
     },
     "stringsOrBool": {

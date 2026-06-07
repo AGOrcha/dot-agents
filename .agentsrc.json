@@ -3,17 +3,6 @@
   "agents": [
     "loop-worker"
   ],
-  "app_type_verifier_map": {
-    "go-cli": [
-      "unit",
-      "cli-runner"
-    ],
-    "ideation": [
-      "schema-check",
-      "citation-check",
-      "task-schedule"
-    ]
-  },
   "execution_profile": {
     "by_app_type": {
       "go-cli": {
@@ -151,72 +140,74 @@
       "type": "local"
     }
   ],
-  "verifier_profiles": {
-    "citation-check": {
-      "label": "Citation check (references resolve)",
-      "prompt_files": [
-        "verifiers/verifier.base.md",
-        "verifiers/citation-check.md",
-        "verifiers/citation-check.project.md"
-      ]
+  "stage_profiles": {
+    "verifier": {
+      "citation-check": {
+        "label": "Citation check (references resolve)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/citation-check.md",
+          "verifiers/citation-check.project.md"
+        ]
+      },
+      "cli-runner": {
+        "label": "CLI runner (built-binary smoke)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/cli-runner.md",
+          "verifiers/cli-runner.project.md"
+        ]
+      },
+      "schema-check": {
+        "label": "Schema check (artifacts validate)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/schema-check.md",
+          "verifiers/schema-check.project.md"
+        ]
+      },
+      "task-schedule": {
+        "label": "Task schedule (DAG sound)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/task-schedule.md",
+          "verifiers/task-schedule.project.md"
+        ]
+      },
+      "unit": {
+        "label": "Unit (Go)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/unit.md",
+          "verifiers/unit.project.md"
+        ]
+      }
     },
-    "cli-runner": {
-      "label": "CLI runner (built-binary smoke)",
-      "prompt_files": [
-        "verifiers/verifier.base.md",
-        "verifiers/cli-runner.md",
-        "verifiers/cli-runner.project.md"
-      ]
-    },
-    "schema-check": {
-      "label": "Schema check (artifacts validate)",
-      "prompt_files": [
-        "verifiers/verifier.base.md",
-        "verifiers/schema-check.md",
-        "verifiers/schema-check.project.md"
-      ]
-    },
-    "task-schedule": {
-      "label": "Task schedule (DAG sound)",
-      "prompt_files": [
-        "verifiers/verifier.base.md",
-        "verifiers/task-schedule.md",
-        "verifiers/task-schedule.project.md"
-      ]
-    },
-    "unit": {
-      "label": "Unit (Go)",
-      "prompt_files": [
-        "verifiers/verifier.base.md",
-        "verifiers/unit.md",
-        "verifiers/unit.project.md"
-      ]
-    }
-  },
-  "reviewer_profiles": {
-    "acceptance-invariants": {
-      "label": "Acceptance-invariants lens",
-      "prompt_files": [
-        "reviewers/reviewer.base.md",
-        "reviewers/acceptance-invariants.md",
-        "reviewers/acceptance-invariants.project.md"
-      ]
-    },
-    "adversarial": {
-      "label": "Adversarial lens",
-      "prompt_files": [
-        "reviewers/reviewer.base.md",
-        "reviewers/adversarial.md",
-        "reviewers/adversarial.project.md"
-      ]
-    },
-    "architecture-standards": {
-      "label": "Architecture-standards lens",
-      "prompt_files": [
-        "reviewers/reviewer.base.md",
-        "reviewers/architecture-standards.md",
-        "reviewers/architecture-standards.project.md"
-      ]
+    "reviewer": {
+      "acceptance-invariants": {
+        "label": "Acceptance-invariants lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/acceptance-invariants.md",
+          "reviewers/acceptance-invariants.project.md"
+        ]
+      },
+      "adversarial": {
+        "label": "Adversarial lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/adversarial.md",
+          "reviewers/adversarial.project.md"
+        ]
+      },
+      "architecture-standards": {
+        "label": "Architecture-standards lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/architecture-standards.md",
+          "reviewers/architecture-standards.project.md"
+        ]
+      }
     }
   },
   "version": 1

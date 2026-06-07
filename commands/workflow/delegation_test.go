@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 )
@@ -1311,15 +1312,38 @@ func TestSaveTestDelegationContract_StableID(t *testing.T) {
 	}
 }
 
-// writeFanoutTestAgentsrc writes a raw .agentsrc.json body into a fresh temp repo
-// and returns the repo path. Raw body (not testutil.WriteAgentsRC) because these
-// cases exercise ExtraFields keys (verifier_profiles / app_type_verifier_map).
+// stubFanoutSnapshot installs an appTypeSnapshot seam that reads the repo-local
+// .agentsrc.json and folds the legacy keys via UnmarshalJSON (no user-local /
+// scope merge), keeping the fanout-dispatch tests hermetic on a dev machine while
+// still exercising the legacy → stage_profiles / execution_profile fold.
+func stubFanoutSnapshot(t *testing.T) {
+	t.Helper()
+	orig := appTypeSnapshot
+	t.Cleanup(func() { appTypeSnapshot = orig })
+	appTypeSnapshot = func(p string) (*config.Snapshot, error) {
+		data, err := os.ReadFile(filepath.Join(p, config.AgentsRCFile))
+		if err != nil {
+			return nil, err
+		}
+		var rc config.AgentsRC
+		if err := json.Unmarshal(data, &rc); err != nil {
+			return nil, err
+		}
+		return &config.Snapshot{Effective: rc}, nil
+	}
+}
+
+// writeFanoutTestAgentsrc writes a raw .agentsrc.json body into a fresh temp repo,
+// installs the hermetic snapshot seam, and returns the repo path. Raw body (not
+// testutil.WriteAgentsRC) because these cases exercise the deprecated
+// verifier_profiles / app_type_verifier_map keys and their fold.
 func writeFanoutTestAgentsrc(t *testing.T, body string) string {
 	t.Helper()
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stubFanoutSnapshot(t)
 	return repo
 }
 
@@ -1331,7 +1355,7 @@ func TestValidateVerifierProfileRefs(t *testing.T) {
 	if err := validateVerifierProfileRefs([]string{"x"}, nil); err != nil {
 		t.Fatalf("empty profiles: %v", err)
 	}
-	profs := map[string]json.RawMessage{"unit": json.RawMessage(`{}`)}
+	profs := map[string]config.StageProfile{"unit": {}}
 	if err := validateVerifierProfileRefs([]string{"ghost"}, profs); err == nil {
 		t.Fatal("expected undefined-profile error")
 	}
@@ -1373,6 +1397,7 @@ func TestMappedVerifierSequence(t *testing.T) {
 		}
 	})
 	t.Run("missing manifest is nil", func(t *testing.T) {
+		stubFanoutSnapshot(t)
 		seq, err := mappedVerifierSequence(t.TempDir(), "go-cli")
 		if err != nil || seq != nil {
 			t.Fatalf("missing manifest should be nil,nil: %v %v", seq, err)
@@ -1380,23 +1405,25 @@ func TestMappedVerifierSequence(t *testing.T) {
 	})
 }
 
-// TestLoadAgentsrcFanoutDispatch_Errors covers the read- and parse-error branches.
-func TestLoadAgentsrcFanoutDispatch_Errors(t *testing.T) {
+// TestLoadFanoutDispatch_Errors covers the read- and parse-error branches.
+func TestLoadFanoutDispatch_Errors(t *testing.T) {
 	t.Run("malformed json", func(t *testing.T) {
+		stubFanoutSnapshot(t)
 		repo := t.TempDir()
 		if err := os.WriteFile(filepath.Join(repo, ".agentsrc.json"), []byte(`{bad`), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadAgentsrcFanoutDispatch(repo); err == nil {
+		if _, err := loadFanoutDispatch(repo); err == nil {
 			t.Fatal("expected parse error")
 		}
 	})
 	t.Run("read error not-not-exist", func(t *testing.T) {
+		stubFanoutSnapshot(t)
 		repo := t.TempDir()
 		if err := os.Mkdir(filepath.Join(repo, ".agentsrc.json"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := loadAgentsrcFanoutDispatch(repo); err == nil {
+		if _, err := loadFanoutDispatch(repo); err == nil {
 			t.Fatal("expected read error when .agentsrc.json is a directory")
 		}
 	})

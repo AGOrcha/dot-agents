@@ -12,12 +12,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Profile kinds for resolve-prompt: the scope-mergeable map a composed prompt is
-// resolved from.
+// Profile kinds for resolve-prompt: each is a stage in the scope-mergeable
+// stage_profiles map a composed prompt is resolved from.
 const (
-	profileKindVerifier = "verifier"
-	profileKindReviewer = "reviewer"
+	profileKindExecutor     = "executor"
+	profileKindVerifier     = "verifier"
+	profileKindReviewer     = "reviewer"
+	profileKindOrchestrator = "orchestrator"
 )
+
+// profileStages is the ordered set of valid --kind values; each names a stage
+// key under stage_profiles.
+var profileStages = []string{profileKindExecutor, profileKindVerifier, profileKindReviewer, profileKindOrchestrator}
 
 // composedPromptView is the base-first, scope-resolved composition of a
 // verifier/reviewer profile's prompt_files. The compose order is the profile's
@@ -26,8 +32,8 @@ const (
 // orchestrator/ISP calls when dispatching a verifier or reviewer so the worker
 // gets the same merged prompt every other surface resolves.
 type composedPromptView struct {
-	Kind    string                `json:"kind"`    // verifier | reviewer
-	Slug    string                `json:"slug"`    // verifier_type or reviewer lens
+	Kind    string                `json:"kind"`    // stage: executor | verifier | reviewer | orchestrator
+	Slug    string                `json:"slug"`    // profile slug (verifier_type, reviewer lens, …)
 	Matched bool                  `json:"matched"` // a profile entry exists in the merged config
 	Entries []composedPromptEntry `json:"entries"`
 }
@@ -41,23 +47,28 @@ type composedPromptEntry struct {
 	Exists   bool   `json:"exists"`
 }
 
-func profileMapKey(kind string) (string, error) {
-	switch kind {
-	case profileKindVerifier:
-		return "verifier_profiles", nil
-	case profileKindReviewer:
-		return "reviewer_profiles", nil
-	default:
-		return "", fmt.Errorf("--kind must be %q or %q, got %q", profileKindVerifier, profileKindReviewer, kind)
+func validateProfileKind(kind string) error {
+	for _, s := range profileStages {
+		if kind == s {
+			return nil
+		}
 	}
+	return fmt.Errorf("--kind must be one of %s, got %q", strings.Join(profileStages, ", "), kind)
 }
 
-// decodeProfilePromptFiles reads <mapKey>.<slug>.prompt_files from the effective
-// (scope-merged) config. The second return reports whether a profile entry for
-// slug exists at all (so an empty prompt_files on a real profile is
-// distinguishable from a missing profile).
-func decodeProfilePromptFiles(raw map[string]any, mapKey, slug string) ([]string, bool) {
-	profiles, ok := raw[mapKey].(map[string]any)
+// decodeProfilePromptFiles reads stage_profiles.<stage>.<slug>.prompt_files from
+// the effective (scope-merged) config. The second return reports whether a
+// profile entry for slug exists at all (so an empty prompt_files on a real
+// profile is distinguishable from a missing profile). Each prompt_files entry is
+// either a bare string (legacy local path) or a source-aware object
+// {source, path, version}; both forms contribute their path here (source
+// resolution is a separate concern from local composition).
+func decodeProfilePromptFiles(raw map[string]any, stage, slug string) ([]string, bool) {
+	stages, ok := raw["stage_profiles"].(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	profiles, ok := stages[stage].(map[string]any)
 	if !ok {
 		return nil, false
 	}
@@ -71,11 +82,26 @@ func decodeProfilePromptFiles(raw map[string]any, mapKey, slug string) ([]string
 	}
 	out := make([]string, 0, len(pf))
 	for _, e := range pf {
-		if s, ok := e.(string); ok && strings.TrimSpace(s) != "" {
-			out = append(out, strings.TrimSpace(s))
+		if p := strings.TrimSpace(promptRefPath(e)); p != "" {
+			out = append(out, p)
 		}
 	}
 	return out, true
+}
+
+// promptRefPath extracts the path from a prompt_files entry in either form: a
+// bare string, or a {source, path, version} object (object form contributes its
+// "path"). Anything else yields "".
+func promptRefPath(e any) string {
+	switch v := e.(type) {
+	case string:
+		return v
+	case map[string]any:
+		if p, ok := v["path"].(string); ok {
+			return p
+		}
+	}
+	return ""
 }
 
 // resolvePromptRef resolves a single prompt_files entry across the scope search
@@ -124,8 +150,7 @@ func resolvePromptRef(projectPath, agentsHome, entry string) composedPromptEntry
 // composeProfilePrompt resolves the base-first composition for a verifier/reviewer
 // profile from the effective (scope-merged) config.
 func composeProfilePrompt(projectPath, agentsHome, kind, slug string) (composedPromptView, error) {
-	mapKey, err := profileMapKey(kind)
-	if err != nil {
+	if err := validateProfileKind(kind); err != nil {
 		return composedPromptView{}, err
 	}
 	snap, err := appTypeSnapshot(projectPath)
@@ -139,7 +164,7 @@ func composeProfilePrompt(projectPath, agentsHome, kind, slug string) (composedP
 	if err != nil {
 		return composedPromptView{}, err
 	}
-	entries, matched := decodeProfilePromptFiles(raw, mapKey, slug)
+	entries, matched := decodeProfilePromptFiles(raw, kind, slug)
 	view := composedPromptView{Kind: kind, Slug: slug, Matched: matched}
 	for _, entry := range entries {
 		view.Entries = append(view.Entries, resolvePromptRef(projectPath, agentsHome, entry))
@@ -151,10 +176,11 @@ func newWorkflowResolvePromptCmd() *cobra.Command {
 	var kind, slug string
 	cmd := &cobra.Command{
 		Use:   "resolve-prompt",
-		Short: "Resolve a verifier/reviewer profile's composed (base-first, scope-resolved) prompt_files",
+		Short: "Resolve a stage profile's composed (base-first, scope-resolved) prompt_files",
 		Example: deps.ExampleBlock(
 			"  da workflow resolve-prompt --kind verifier --slug cli-runner",
 			"  da workflow resolve-prompt --kind reviewer --slug architecture-standards",
+			"  da workflow resolve-prompt --kind executor --slug default",
 			"  da --json workflow resolve-prompt --kind verifier --slug unit",
 		),
 		Args: deps.NoArgsWithHints("Run workflow resolve-prompt from inside the project repository."),
@@ -162,8 +188,8 @@ func newWorkflowResolvePromptCmd() *cobra.Command {
 			return runWorkflowResolvePrompt(kind, slug)
 		},
 	}
-	cmd.Flags().StringVar(&kind, "kind", "", "verifier or reviewer (required)")
-	cmd.Flags().StringVar(&slug, "slug", "", "verifier_type or reviewer lens (required)")
+	cmd.Flags().StringVar(&kind, "kind", "", "stage: executor, verifier, reviewer, or orchestrator (required)")
+	cmd.Flags().StringVar(&slug, "slug", "", "profile slug (verifier_type, reviewer lens, …) (required)")
 	return cmd
 }
 
@@ -173,7 +199,7 @@ func runWorkflowResolvePrompt(kind, slug string) error {
 	if slug == "" {
 		return fmt.Errorf("--slug is required")
 	}
-	if _, err := profileMapKey(kind); err != nil {
+	if err := validateProfileKind(kind); err != nil {
 		return err
 	}
 	project, err := currentWorkflowProject()
@@ -200,7 +226,7 @@ func renderComposedPrompt(view composedPromptView) {
 	fmt.Fprintf(os.Stdout, "  matched : %t\n", view.Matched)
 	fmt.Fprintln(os.Stdout)
 	if !view.Matched {
-		fmt.Fprintf(os.Stdout, "  no %s_profiles entry for %q in the effective config.\n", view.Kind, view.Slug)
+		fmt.Fprintf(os.Stdout, "  no stage_profiles.%s entry for %q in the effective config.\n", view.Kind, view.Slug)
 		return
 	}
 	if len(view.Entries) == 0 {

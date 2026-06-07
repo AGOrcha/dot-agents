@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1464,35 +1465,37 @@ func TestPromptFileRef_MarshalObjectWhenSourceOrVersion(t *testing.T) {
 	}
 }
 
-// TestVerifierProfiles_TypedFieldRoundTrip proves verifier_profiles and
-// reviewer_profiles route to the typed AgentsRC fields (not ExtraFields) and
-// preserve a mixed legacy/typed prompt_files list across a marshal/unmarshal
+// TestStageProfiles_NewKeyRoundTrip proves the unified stage_profiles map routes
+// to the typed AgentsRC field (not ExtraFields) across all four stages and
+// preserves a mixed legacy/typed prompt_files list across a marshal/unmarshal
 // cycle.
-func TestVerifierProfiles_TypedFieldRoundTrip(t *testing.T) {
+func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
 	in := []byte(`{
   "version": 1,
   "sources": [{"type": "local"}],
-  "verifier_profiles": {
-    "cli-runner": {
-      "label": "CLI runner",
-      "prompt_files": [
-        "verifiers/verifier.base.md",
-        {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
-      ]
-    }
-  },
-  "reviewer_profiles": {
-    "adversarial": {"label": "Adversarial", "prompt_files": ["reviewers/adversarial.md"]}
+  "stage_profiles": {
+    "executor": {"default": {"label": "Executor", "prompt_files": ["executors/base.md"]}},
+    "verifier": {
+      "cli-runner": {
+        "label": "CLI runner",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
+        ]
+      }
+    },
+    "reviewer": {"adversarial": {"label": "Adversarial", "prompt_files": ["reviewers/adversarial.md"]}},
+    "orchestrator": {"default": {"label": "Orchestrator", "prompt_files": ["orchestrators/base.md"]}}
   }
 }`)
 	var rc AgentsRC
 	if err := json.Unmarshal(in, &rc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if rc.ExtraFields["verifier_profiles"] != nil || rc.ExtraFields["reviewer_profiles"] != nil {
-		t.Fatalf("profiles leaked into ExtraFields instead of typed fields")
+	if rc.ExtraFields["stage_profiles"] != nil {
+		t.Fatalf("stage_profiles leaked into ExtraFields instead of the typed field")
 	}
-	prof := rc.VerifierProfiles["cli-runner"]
+	prof := rc.StageProfiles["verifier"]["cli-runner"]
 	if prof.Label != "CLI runner" || len(prof.PromptFiles) != 2 {
 		t.Fatalf("verifier profile decode wrong: %+v", prof)
 	}
@@ -1502,8 +1505,10 @@ func TestVerifierProfiles_TypedFieldRoundTrip(t *testing.T) {
 	if prof.PromptFiles[1].Source != "acme" || prof.PromptFiles[1].Version != "v2" {
 		t.Errorf("typed entry wrong: %+v", prof.PromptFiles[1])
 	}
-	if rc.ReviewerProfiles["adversarial"].PromptFiles[0].Path != "reviewers/adversarial.md" {
-		t.Errorf("reviewer profile decode wrong: %+v", rc.ReviewerProfiles)
+	for _, stage := range []string{"executor", "reviewer", "orchestrator"} {
+		if len(rc.StageProfiles[stage]) != 1 {
+			t.Errorf("stage %q not decoded: %+v", stage, rc.StageProfiles[stage])
+		}
 	}
 
 	out, err := json.Marshal(rc)
@@ -1514,23 +1519,72 @@ func TestVerifierProfiles_TypedFieldRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(out, &rc2); err != nil {
 		t.Fatalf("re-unmarshal: %v", err)
 	}
-	if rc2.VerifierProfiles["cli-runner"].PromptFiles[1].Source != "acme" {
-		t.Fatalf("round-trip lost typed prompt provenance: %+v", rc2.VerifierProfiles)
+	if rc2.StageProfiles["verifier"]["cli-runner"].PromptFiles[1].Source != "acme" {
+		t.Fatalf("round-trip lost typed prompt provenance: %+v", rc2.StageProfiles)
 	}
 }
 
-// TestMergeGenerateAgentsRCPreservesVerifierProfiles guards the ExtraFields-guard
-// breakage: now that verifier/reviewer profiles are typed fields, regeneration
-// must carry a committed set over (it no longer rides along in ExtraFields).
-func TestMergeGenerateAgentsRCPreservesVerifierProfiles(t *testing.T) {
+// TestStageProfiles_LegacyFold proves the three deprecated keys fold into the
+// unified model on read, are never re-emitted, and that an explicit new-key value
+// wins over a colliding legacy one.
+func TestStageProfiles_LegacyFold(t *testing.T) {
+	in := []byte(`{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "verifier_profiles": {
+    "unit": {"label": "legacy-unit", "prompt_files": ["verifiers/unit.md"]},
+    "cli-runner": {"label": "CLI runner", "prompt_files": ["verifiers/cli-runner.md"]}
+  },
+  "reviewer_profiles": {
+    "adversarial": {"label": "Adversarial", "prompt_files": ["reviewers/adversarial.md"]}
+  },
+  "app_type_verifier_map": {"go-cli": ["unit", "cli-runner"], "skip-me": []},
+  "stage_profiles": {"verifier": {"unit": {"label": "new-unit", "prompt_files": ["verifiers/unit.new.md"]}}}
+}`)
+	var rc AgentsRC
+	if err := json.Unmarshal(in, &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// New key wins on collision; legacy fills the gap.
+	if rc.StageProfiles["verifier"]["unit"].Label != "new-unit" {
+		t.Errorf("new-key value should win on collision: %+v", rc.StageProfiles["verifier"]["unit"])
+	}
+	if rc.StageProfiles["verifier"]["cli-runner"].Label != "CLI runner" {
+		t.Errorf("legacy verifier profile not folded: %+v", rc.StageProfiles["verifier"])
+	}
+	if rc.StageProfiles["reviewer"]["adversarial"].PromptFiles[0].Path != "reviewers/adversarial.md" {
+		t.Errorf("legacy reviewer profile not folded: %+v", rc.StageProfiles["reviewer"])
+	}
+	// app_type_verifier_map folds into execution_profile topology; empty seq is skipped.
+	seq := rc.ExecutionProfile.ByAppType["go-cli"].Topology.VerifierSequence
+	if len(seq) != 2 || seq[0] != "unit" || seq[1] != "cli-runner" {
+		t.Errorf("app_type_verifier_map not folded into topology: %+v", seq)
+	}
+	if _, ok := rc.ExecutionProfile.ByAppType["skip-me"]; ok {
+		t.Errorf("empty legacy verifier sequence should not create a by_app_type entry")
+	}
+	// Legacy keys are never re-emitted.
+	out, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, k := range []string{"verifier_profiles", "reviewer_profiles", "app_type_verifier_map"} {
+		if bytes.Contains(out, []byte(`"`+k+`"`)) {
+			t.Errorf("deprecated key %q re-emitted on marshal: %s", k, out)
+		}
+	}
+}
+
+// TestMergeGenerateAgentsRCPreservesStageProfiles guards the ExtraFields-guard
+// breakage: now that stage profiles are a typed field, regeneration must carry a
+// committed set over (it no longer rides along in ExtraFields).
+func TestMergeGenerateAgentsRCPreservesStageProfiles(t *testing.T) {
 	existing := &AgentsRC{
 		Version: 1,
 		Sources: []Source{{Type: testSourceTypeLocal}},
-		VerifierProfiles: map[string]VerifierProfile{
-			"unit": {Label: "Unit", PromptFiles: []PromptFileRef{{Path: "verifiers/unit.md"}}},
-		},
-		ReviewerProfiles: map[string]VerifierProfile{
-			"adversarial": {Label: "Adversarial", PromptFiles: []PromptFileRef{{Source: "acme", Path: "reviewers/adversarial.md", Version: "v1"}}},
+		StageProfiles: map[string]map[string]StageProfile{
+			"verifier": {"unit": {Label: "Unit", PromptFiles: []PromptFileRef{{Path: "verifiers/unit.md"}}}},
+			"reviewer": {"adversarial": {Label: "Adversarial", PromptFiles: []PromptFileRef{{Source: "acme", Path: "reviewers/adversarial.md", Version: "v1"}}}},
 		},
 	}
 	generated := &AgentsRC{
@@ -1539,22 +1593,22 @@ func TestMergeGenerateAgentsRCPreservesVerifierProfiles(t *testing.T) {
 		Skills:  []string{"s"},
 	}
 	out := MergeGenerateAgentsRC(existing, generated)
-	if len(out.VerifierProfiles) != 1 || out.VerifierProfiles["unit"].PromptFiles[0].Path != "verifiers/unit.md" {
-		t.Errorf("verifier_profiles not preserved: %+v", out.VerifierProfiles)
+	if out.StageProfiles["verifier"]["unit"].PromptFiles[0].Path != "verifiers/unit.md" {
+		t.Errorf("verifier stage profiles not preserved: %+v", out.StageProfiles)
 	}
-	if len(out.ReviewerProfiles) != 1 || out.ReviewerProfiles["adversarial"].PromptFiles[0].Source != "acme" {
-		t.Errorf("reviewer_profiles not preserved: %+v", out.ReviewerProfiles)
+	if out.StageProfiles["reviewer"]["adversarial"].PromptFiles[0].Source != "acme" {
+		t.Errorf("reviewer stage profiles not preserved: %+v", out.StageProfiles)
 	}
 	// Deep copy: mutating the source must not bleed into the merged result.
-	existing.VerifierProfiles["unit"].PromptFiles[0].Path = "MUTATED"
-	if out.VerifierProfiles["unit"].PromptFiles[0].Path == "MUTATED" {
-		t.Error("cloneVerifierProfiles aliased the source slice")
+	existing.StageProfiles["verifier"]["unit"].PromptFiles[0].Path = "MUTATED"
+	if out.StageProfiles["verifier"]["unit"].PromptFiles[0].Path == "MUTATED" {
+		t.Error("cloneStageProfiles aliased the source slice")
 	}
 }
 
-// TestCloneVerifierProfilesEmpty covers the empty/nil short-circuit.
-func TestCloneVerifierProfilesEmpty(t *testing.T) {
-	if got := cloneVerifierProfiles(nil); got != nil {
+// TestCloneStageProfilesEmpty covers the empty/nil short-circuit.
+func TestCloneStageProfilesEmpty(t *testing.T) {
+	if got := cloneStageProfiles(nil); got != nil {
 		t.Errorf("expected nil for empty map, got %+v", got)
 	}
 }

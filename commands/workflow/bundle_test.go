@@ -357,10 +357,11 @@ func TestPromptFileRef_MarshalCompactAndObject(t *testing.T) {
 	}
 }
 
-// TestVerifierProfile_AgentsRCRoundTrip proves verifier_profiles survive a full
-// AgentsRC marshal/unmarshal cycle as a typed field (not ExtraFields), mixing a
-// legacy string entry and a source-pinned typed entry in one profile.
-func TestVerifierProfile_AgentsRCRoundTrip(t *testing.T) {
+// TestStageProfile_AgentsRCRoundTrip proves a legacy verifier_profiles block
+// folds into stage_profiles.verifier on read and survives a full AgentsRC
+// marshal/unmarshal cycle (re-emitted under stage_profiles, not the legacy key),
+// mixing a legacy string entry and a source-pinned typed entry in one profile.
+func TestStageProfile_AgentsRCRoundTrip(t *testing.T) {
 	in := []byte(`{
   "version": 1,
   "sources": [{"type": "local"}],
@@ -378,9 +379,9 @@ func TestVerifierProfile_AgentsRCRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(in, &rc); err != nil {
 		t.Fatalf("unmarshal agentsrc: %v", err)
 	}
-	prof, ok := rc.VerifierProfiles["cli-runner"]
+	prof, ok := rc.StageProfiles["verifier"]["cli-runner"]
 	if !ok {
-		t.Fatalf("verifier_profiles did not route to the typed field: %+v", rc.VerifierProfiles)
+		t.Fatalf("legacy verifier_profiles did not fold into stage_profiles.verifier: %+v", rc.StageProfiles)
 	}
 	if rc.ExtraFields["verifier_profiles"] != nil {
 		t.Errorf("verifier_profiles leaked into ExtraFields: %s", rc.ExtraFields["verifier_profiles"])
@@ -403,7 +404,7 @@ func TestVerifierProfile_AgentsRCRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(out, &rc2); err != nil {
 		t.Fatalf("re-unmarshal agentsrc: %v", err)
 	}
-	prof2 := rc2.VerifierProfiles["cli-runner"]
+	prof2 := rc2.StageProfiles["verifier"]["cli-runner"]
 	if len(prof2.PromptFiles) != 2 || prof2.PromptFiles[1].Source != "acme" {
 		t.Fatalf("round-trip lost typed prompt provenance: %+v", prof2.PromptFiles)
 	}

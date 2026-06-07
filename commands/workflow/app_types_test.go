@@ -444,37 +444,33 @@ func TestAppTypeSnapshotConsumesLockedPath(t *testing.T) {
 	}
 }
 
-func TestDecodeAppTypeVerifierMap(t *testing.T) {
-	// Nil / wrong-typed / empty inputs all collapse to an empty map, no error.
-	for _, v := range []any{nil, "not-an-object", map[string]any{}, []any{"x"}} {
-		got, err := decodeAppTypeVerifierMap(v)
-		if err != nil {
-			t.Fatalf("decode(%#v) err = %v", v, err)
-		}
-		if len(got) != 0 {
-			t.Fatalf("decode(%#v) = %#v, want empty", v, got)
-		}
+func TestAppTypeVerifierSequencesFromExecution(t *testing.T) {
+	// Nil profile and empty by_app_type both collapse to nil.
+	if got := appTypeVerifierSequencesFromExecution(nil); got != nil {
+		t.Fatalf("nil profile = %#v, want nil", got)
+	}
+	if got := appTypeVerifierSequencesFromExecution(&config.ExecutionProfile{}); got != nil {
+		t.Fatalf("empty by_app_type = %#v, want nil", got)
 	}
 
-	// Well-formed entries preserve order; non-array and non-string members are
-	// skipped without aborting the whole map.
-	in := map[string]any{
-		"go-cli":  []any{"unit", "lint"},
-		"bad-seq": "scalar-not-array",
-		"mixed":   []any{"unit", 42, "api"},
+	// Each app_type's topology.verifier_sequence is projected in declared order;
+	// an app_type with an empty sequence is skipped (not included as an empty key).
+	ep := &config.ExecutionProfile{
+		ByAppType: map[string]config.AppTypeProfile{
+			"go-cli":   {Topology: config.Topology{VerifierSequence: []string{"unit", "cli-runner"}}},
+			"ideation": {Topology: config.Topology{VerifierSequence: []string{"schema-check"}}},
+			"empty":    {Topology: config.Topology{}},
+		},
 	}
-	got, err := decodeAppTypeVerifierMap(in)
-	if err != nil {
-		t.Fatalf("decode err = %v", err)
+	got := appTypeVerifierSequencesFromExecution(ep)
+	if strings.Join(got["go-cli"], ",") != "unit,cli-runner" {
+		t.Errorf("go-cli = %v, want [unit cli-runner]", got["go-cli"])
 	}
-	if strings.Join(got["go-cli"], ",") != "unit,lint" {
-		t.Errorf("go-cli = %v, want [unit lint]", got["go-cli"])
+	if strings.Join(got["ideation"], ",") != "schema-check" {
+		t.Errorf("ideation = %v, want [schema-check]", got["ideation"])
 	}
-	if _, ok := got["bad-seq"]; ok {
-		t.Errorf("non-array entry should be skipped: %v", got["bad-seq"])
-	}
-	if strings.Join(got["mixed"], ",") != "unit,api" {
-		t.Errorf("mixed = %v, want [unit api] (non-string dropped)", got["mixed"])
+	if _, ok := got["empty"]; ok {
+		t.Errorf("app_type with empty verifier_sequence should be skipped: %v", got["empty"])
 	}
 }
 

@@ -16,7 +16,7 @@ import (
 //     not a full manifest, so these carry no meaning and are dropped silently.
 //
 // The set is intentionally a subset of the full AgentsRC surface: a layer
-// contributes policy (skills, rules, agents, verifier_profiles, features, kg,
+// contributes policy (skills, rules, agents, stage_profiles, features, kg,
 // sources, extends, packages, execution_profile overrides), never a full repo
 // manifest. execution_profile is deliberately absent here: it is the
 // config-v2 §15 execution-profile layer (kind=layer) and MUST merge by scope
