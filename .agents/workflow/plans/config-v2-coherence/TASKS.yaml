@@ -64,7 +64,7 @@ tasks:
       app_type: go-cli
     - id: cc-cache-keys-per-source
       title: Per-source cache_keys (uv model) + per-kind staleness defaults
-      status: pending
+      status: completed
       depends_on:
         - cb-content-hash-staleness
         - config-v2-migration/p5-source-types-http-oci
@@ -141,7 +141,7 @@ tasks:
       app_type: go-cli
     - id: cg-project-local-overlay
       title: Project-local overlay scope (.agentsrc.local.json, gitignored)
-      status: pending
+      status: completed
       depends_on:
         - cb-content-hash-staleness
       blocks: []
@@ -178,7 +178,7 @@ tasks:
       app_type: go-cli
     - id: ci-gitignore-autofill
       title: Managed .gitignore auto-fill in consuming projects
-      status: pending
+      status: completed
       depends_on:
         - cd-ensure-resolved-seam
       blocks: []
@@ -194,7 +194,7 @@ tasks:
       app_type: go-cli
     - id: cj-outputs-exact-prune
       title: 'Outputs (sync) half: exact/prune projection in refresh/install'
-      status: pending
+      status: in_progress
       depends_on:
         - cd-ensure-resolved-seam
       blocks: []
