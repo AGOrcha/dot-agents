@@ -1,6 +1,6 @@
 # Unified pluggable event-contract
 
-**Status:** draft design proposal, project-local (`.agents/proposals/`) per `[[proposal-routing]]`.
+**Status:** SUPERSEDED 2026-06-08 — graduated to `workflow/specs/unified-event-contract/design.md` and implemented in `internal/events/` (dispatch.go + envelope + kind registry). Was: draft design proposal, project-local (`.agents/proposals/`) per `[[proposal-routing]]`.
 **Created:** 2026-05-28
 **Routing rationale:** alters dot-agents-local surfaces — the service event schema (from r3-background-worker-service), the hook-sentinel
 schema, and the registry-driven dispatch in `commands/` / `internal/` — so it is project-scope, not a

@@ -1,7 +1,7 @@
 # Proposal: Staged Profile Dispatch And Return-Gate Contract
 
 - type: project-local scoping and design input
-- status: draft / ready for canonical spec-and-plan authoring
+- status: PARTIALLY REALIZED 2026-06-08 — the StageProfile primitive (executor/verifier/reviewer/orchestrator) shipped via #45 (`stage_profiles`); native-stage dispatch + return-gate is now the `multi-provider-wave-dispatch` spec (draft). Was: draft / ready for canonical spec-and-plan authoring
 - date: 2026-05-26
 - prompted by: PA-cursor salvage, starter agent-config consistency review,
   and the named-stage profile discussion
