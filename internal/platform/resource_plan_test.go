@@ -1827,6 +1827,29 @@ func TestSharedPlanEntryPointsPropagateBuildError(t *testing.T) {
 // repo/<relDir>/review, a ResourcePruneTarget skill intent — the canonical
 // "wanted" set the prune scan keeps. The parent dir (repo/<relDir>) is the only
 // directory the prune will scan.
+// swapOSReadDir replaces the osReadDir seam with fn and returns a restore func.
+func swapOSReadDir(fn func(string) ([]os.DirEntry, error)) func() {
+	prev := osReadDir
+	osReadDir = fn
+	return func() { osReadDir = prev }
+}
+
+// swapRemoveIfSymlinkUnder replaces the removeIfSymlinkUnder seam with fn and
+// returns a restore func.
+func swapRemoveIfSymlinkUnder(fn func(string, string) error) func() {
+	prev := removeIfSymlinkUnder
+	removeIfSymlinkUnder = fn
+	return func() { removeIfSymlinkUnder = prev }
+}
+
+// swapExecuteResourcePlan replaces the executeResourcePlan seam with fn and
+// returns a restore func.
+func swapExecuteResourcePlan(fn func(ResourcePlan, string, string) error) func() {
+	prev := executeResourcePlan
+	executeResourcePlan = fn
+	return func() { executeResourcePlan = prev }
+}
+
 func planWithSkillTarget(t *testing.T, relDir string) ResourcePlan {
 	t.Helper()
 	intent := validSharedSkillIntent(filepath.Join(relDir, "review"), "claude")
@@ -1972,20 +1995,16 @@ func TestPruneStaleSharedTargets_PruneNoneIntentDoesNotScanDir(t *testing.T) {
 	}
 }
 
-// A non-listable directory (a file where a managed dir is expected) must surface
-// as an aggregated error rather than a silent clean-prune.
+// A non-listable managed dir must surface as an aggregated error rather than a
+// silent clean-prune. The ReadDir failure is injected through the osReadDir seam
+// so the branch is exercised deterministically on every OS (a file-where-a-dir
+// is-expected trick does not fail ReadDir uniformly on Windows).
 func TestPruneStaleSharedTargets_ReadDirErrorPropagates(t *testing.T) {
 	repo, agentsHome := setupRepoAgentsHome(t)
 	relDir := filepath.Join(".agents", "skills")
-	dir := filepath.Join(repo, relDir)
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Put a regular FILE where the managed dir is expected: os.ReadDir fails
-	// with a non-IsNotExist error.
-	if err := os.WriteFile(dir, []byte("not a dir"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	sentinel := errors.New("injected readdir failure")
+	defer swapOSReadDir(func(string) ([]os.DirEntry, error) { return nil, sentinel })()
 
 	plan := planWithSkillTarget(t, relDir)
 	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
@@ -1997,6 +2016,9 @@ func TestPruneStaleSharedTargets_ReadDirErrorPropagates(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "listing managed dir") {
 		t.Fatalf("error = %q, want listing-managed-dir context", err)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want wrapped injected failure", err)
 	}
 }
 
@@ -2164,26 +2186,19 @@ func TestRunSharedTargetProjectionExact_ApplyEmptyPlanNoop(t *testing.T) {
 }
 
 // PruneStaleSharedTargets must aggregate a removal failure rather than report a
-// clean prune: when RemoveIfSymlinkUnder cannot delete a managed link, the
-// error surfaces and the link is NOT counted as pruned. We force the failure by
-// making the link's parent directory read-only after seeding, so the unlink is
-// denied.
+// clean prune: when RemoveIfSymlinkUnder cannot delete a managed link, the error
+// surfaces and the link is NOT counted as pruned. The unlink failure is injected
+// through the removeIfSymlinkUnder seam so the branch runs deterministically on
+// every OS (a chmod-denied directory does not block the owner's unlink on
+// Windows).
 func TestPruneStaleSharedTargets_RemovalFailureAggregates(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root bypasses directory write permissions")
-	}
 	repo, agentsHome := setupRepoAgentsHome(t)
 	relDir := filepath.Join(".agents", "skills")
-	dir := filepath.Join(repo, relDir)
-	stale := filepath.Join(dir, "obsolete")
+	stale := filepath.Join(repo, relDir, "obsolete")
 	seedManagedLink(t, agentsHome, "obsolete", stale)
 
-	// Make the parent dir read+exec but not writable: removing an entry needs
-	// write permission on the directory, so RemoveIfSymlinkUnder fails.
-	if err := os.Chmod(dir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	sentinel := errors.New("injected unlink failure")
+	defer swapRemoveIfSymlinkUnder(func(string, string) error { return sentinel })()
 
 	plan := planWithSkillTarget(t, relDir)
 	pruned, err := plan.PruneStaleSharedTargets(repo, agentsHome)
@@ -2196,33 +2211,34 @@ func TestPruneStaleSharedTargets_RemovalFailureAggregates(t *testing.T) {
 	if !strings.Contains(err.Error(), "prune managed target") {
 		t.Fatalf("error = %q, want prune-managed-target context", err)
 	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want wrapped injected failure", err)
+	}
 }
 
-// RunSharedTargetProjectionExact apply must propagate an Execute failure (line
-// 591-593) rather than proceeding to prune. We make the repo target parent
-// read-only so the managed-link write is denied.
+// RunSharedTargetProjectionExact apply must propagate an Execute failure (the
+// plan.Execute call) rather than proceeding to prune. The failure is injected
+// through the executeResourcePlan seam so the branch runs deterministically on
+// every OS (a chmod read-only repo dir does not deny the owner's write on
+// Windows).
 func TestRunSharedTargetProjectionExact_ApplyExecuteErrorPropagates(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("root bypasses directory write permissions")
-	}
 	repo, agentsHome := setupRepoAgentsHome(t)
 	t.Setenv("AGENTS_HOME", agentsHome)
 	testutil.SymlinkOrSkip(t)
 
+	// Resolve a non-empty plan so the len(plan.Resources) > 0 guard passes and
+	// Execute is actually reached.
 	writeFixtureImportedSkillPair(t, repo, agentsHome, "proj", "review")
-	// Pre-create the .agents/skills dir, then make .agents read-only so the
-	// executor cannot write the managed link under it.
-	skillsDir := filepath.Join(repo, ".agents", "skills")
-	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(skillsDir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(skillsDir, 0o755) })
+
+	sentinel := errors.New("injected execute failure")
+	defer swapExecuteResourcePlan(func(ResourcePlan, string, string) error { return sentinel })()
 
 	platforms := []Platform{NewClaude()}
-	if _, err := RunSharedTargetProjectionExact("proj", repo, platforms, false, true); err == nil {
+	_, err := RunSharedTargetProjectionExact("proj", repo, platforms, false, true)
+	if err == nil {
 		t.Fatal("expected Execute failure to propagate, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want injected execute failure", err)
 	}
 }

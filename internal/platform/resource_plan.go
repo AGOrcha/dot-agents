@@ -29,6 +29,20 @@ const (
 	skillManifestName          = "SKILL.md"
 )
 
+// Filesystem seams for the prune/projection paths. They default to the real
+// operations and exist so the error-propagation branches can be forced
+// deterministically on every OS in tests, without relying on OS-specific tricks
+// (a file-where-a-dir-is-expected ReadDir failure, or chmod-denied unlinks) that
+// are no-ops on Windows. Production behavior is identical to calling the wrapped
+// functions directly.
+var (
+	osReadDir            = os.ReadDir
+	removeIfSymlinkUnder = links.RemoveIfSymlinkUnder
+	executeResourcePlan  = func(p ResourcePlan, repoPath, agentsHome string) error {
+		return p.Execute(repoPath, agentsHome)
+	}
+)
+
 func BuildResourcePlan(intents []ResourceIntent) (ResourcePlan, error) {
 	byConflict := map[string][]ResourceIntent{}
 	for _, intent := range intents {
@@ -588,7 +602,7 @@ func RunSharedTargetProjectionExact(project, repoPath string, platforms []Platfo
 		return lines, nil
 	}
 	if len(plan.Resources) > 0 {
-		if err := plan.Execute(repoPath, config.AgentsHome()); err != nil {
+		if err := executeResourcePlan(plan, repoPath, config.AgentsHome()); err != nil {
 			return nil, err
 		}
 	}
@@ -630,7 +644,7 @@ func (p ResourcePlan) PruneStaleSharedTargets(repoPath, agentsHome string) ([]st
 	var pruned []string
 	var errs []error
 	for _, dir := range dirs {
-		entries, err := os.ReadDir(dir)
+		entries, err := osReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -646,7 +660,7 @@ func (p ResourcePlan) PruneStaleSharedTargets(repoPath, agentsHome string) ([]st
 			if !links.IsManagedLinkUnder(candidate, agentsHome) {
 				continue
 			}
-			if err := links.RemoveIfSymlinkUnder(candidate, agentsHome); err != nil {
+			if err := removeIfSymlinkUnder(candidate, agentsHome); err != nil {
 				errs = append(errs, fmt.Errorf("prune managed target %s: %w", candidate, err))
 				continue
 			}
