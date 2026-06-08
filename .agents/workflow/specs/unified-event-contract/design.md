@@ -1,5 +1,8 @@
 # Unified pluggable event contract — spec
 
+
+> **Consolidation update (2026-06-07) — `stage-profile-and-routing-consolidation`:** `verifier_profiles` + `reviewer_profiles` are now unified into one **typed** `stage_profiles` map (stage `executor`/`verifier`/`reviewer`/`orchestrator` → slug → `{label, prompt_files}`), and `app_type_verifier_map` is **retired** into `execution_profile.by_app_type.<type>.topology.verifier_sequence`. Legacy keys still load (folded, deprecated). Mentions of those keys below describe the pre-consolidation surface — read them as the new model.
+
 Status: spec (promoted from `.agents/proposals/unified-pluggable-event-contract.md` +
 the PR-event refinements, 2026-05-31).
 Owns: the common envelope, the kind registry, and table-driven dispatch shared by daemon

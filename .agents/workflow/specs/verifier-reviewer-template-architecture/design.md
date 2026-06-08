@@ -15,6 +15,9 @@ boundary" tables.
 
 ---
 
+> **Consolidation update (2026-06-07) — `stage-profile-and-routing-consolidation`:** `verifier_profiles` + `reviewer_profiles` are now unified into one **typed** `stage_profiles` map (stage `executor`/`verifier`/`reviewer`/`orchestrator` → slug → `{label, prompt_files}`), and `app_type_verifier_map` is **retired** into `execution_profile.by_app_type.<type>.topology.verifier_sequence`. Legacy keys still load (folded, deprecated). Mentions of those keys below describe the pre-consolidation surface — read them as the new model.
+
+
 ## 1. Problem & goal
 
 Today every verifier-profile prompt is a **single project-local file**
@@ -103,12 +106,14 @@ base + per-type composition, each resolved across the scope ladder.
 - **D6 — Reviewers get a symmetric `reviewer_profiles` field (review decision 2026-06-06).** Add a
   `reviewer_profiles` map mirroring `verifier_profiles` (`{label, prompt_files []}`), keyed by lens
   (architecture-standards / acceptance-invariants / adversarial), composed **base-first by ordered
-  concatenation** — so verifiers and reviewers are one model. *Implementation note (verified
-  in-tree):* `verifier_profiles` is **not** a typed `AgentsRC` field — it round-trips via
-  `ExtraFields` and scope-merges purely through `resolver.go`'s `fieldCategories`
-  (`CategoryMapMerge`). `reviewer_profiles` follows the *same* pattern: add it to `fieldCategories`
-  (`CategoryMapMerge`) + `schemas/agentsrc.schema.json`. No struct / `agentsRCKnown` / Marshal change
-  (the 6-place lifecycle applies only to typed fields).
+  concatenation** — so verifiers and reviewers are one model. *Implementation note (UPDATED by
+  `stage-profile-and-routing-consolidation`):* this originally shipped with `verifier_profiles` /
+  `reviewer_profiles` as **untyped** `ExtraFields` maps scope-merged purely via `resolver.go`'s
+  `fieldCategories` (`CategoryMapMerge`). The consolidation then promoted BOTH into one **typed**
+  `stage_profiles` field — so the full typed-field lifecycle (struct + `agentsRCCore` +
+  `MarshalJSON`/`UnmarshalJSON` + `agentsRCKnown` + `schemas/agentsrc.schema.json`) now DOES apply;
+  scope-merge stays `CategoryMapMerge` (deep, per `(stage, slug)`). The symmetric verifier↔reviewer,
+  base-first-concat model is intact — only the carrier became typed.
 - **D7 — Phase-1 wires the missing composition (review decision 2026-06-06).** Finding: today
   `verifier_profiles.<id>.prompt_files` is only *validated* (the id must exist —
   `delegation.go:validateVerifierProfileRefs`); the sole path that puts `prompt_files` into a bundle

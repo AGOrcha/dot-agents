@@ -235,7 +235,7 @@ tasks:
           - --value-only: just the value
           - --origin-only: just the winning layer id
           - --json: machine-readable {field, value, active_layer, layers[]}
-          - field-path syntax: dot-separated (e.g. app_type_verifier_map.go-cli)
+          - field-path syntax: dot-separated (e.g. stage_profiles.verifier.unit, execution_profile.by_app_type.go-cli)
 
         Exit codes per spec §10: 0 success, 1 layer fetch failure, 2 schema validation, 3 auth failure.
 
@@ -423,7 +423,7 @@ tasks:
       app_type: go-cli
     - id: p1c-verifier-profile-source-aware
       title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
-      status: in_progress
+      status: completed
       depends_on:
         - p1b-resolver-extends-tier1
       blocks: []
@@ -435,6 +435,11 @@ tasks:
         - commands/workflow/bundle_test.go
       verification_required: true
       notes: |-
+        DELIVERED + SUPERSEDED by stage-profile-and-routing-consolidation (PR #45, merged): PR #40
+        carried PromptFileRef; #45 absorbed it and unified verifier_profiles+reviewer_profiles into the
+        typed stage_profiles map, retiring app_type_verifier_map into execution_profile.topology. The
+        source-aware prompt_files goal below is shipped under stage_profiles.verifier.* (legacy keys fold).
+        --- original scope (historical) ---
         Q1 ruling: Option B — force typed objects everywhere. p1c is CRITICAL-PATH (not optional). Scope expands to:
         - Migrate ALL existing verifier_profiles entries across dot-agents .agentsrc.json + the embedded starter
         - Bulk migration of prompt_files [string] → [{source, path, version}] for unit/api/batch/streaming/ui-e2e
