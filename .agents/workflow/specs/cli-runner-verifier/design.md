@@ -1,6 +1,6 @@
 # Spec: `cli-runner` verifier profile
 
-**Status:** draft (for review) — feeds the `config-relevance-profiles` plan (new task t7), folds into PR #29.
+**Status:** active (for review) — feeds the `config-relevance-profiles` plan (new task t7), folds into PR #29.
 **Depends on:** the execution-profile layer (`skill-relevance-filter.md`, shipped t1–t6) and the
 verifier-profile taxonomy in [`app-type-profiles/design.md`](../app-type-profiles/design.md) §11.
 **Grounds in:** the existing CLI smoke harness `scripts/verify.sh`, the `unit` verifier prompt

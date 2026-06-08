@@ -1,6 +1,6 @@
 # Spec: ideation execution profile — verifiers + reviewers + kg-ideate
 
-**Status:** draft (for review) — feeds the `config-relevance-profiles` plan (new task t8), folds into PR #29.
+**Status:** active (for review) — feeds the `config-relevance-profiles` plan (new task t8), folds into PR #29.
 **Depends on:** the execution-profile layer (shipped t1–t6) and the `cli-runner` verifier pattern
 (t7) this mirrors. **Forward-references:** the proposed `kg-ideate` skill
 (`.agents/proposals/kg-ideate-skill.yaml`, draft/deferred).

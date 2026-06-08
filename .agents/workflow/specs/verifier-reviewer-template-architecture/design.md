@@ -1,6 +1,6 @@
 # Spec: verifier & reviewer prompt template architecture (base + per-type, scope-resolved)
 
-**Status:** draft (for review) — feeds the `config-relevance-profiles` plan (new task t9); lands as
+**Status:** implemented (PRs #30/#31 merged; plan archived)
 its own PR stacked on #29.
 **Depends on:** the verifier profiles shipped/added in #29 (unit, api, ui-e2e, batch, streaming,
 `cli-runner`, and the ideation trio `schema-check`/`citation-check`/`task-schedule`) and the
