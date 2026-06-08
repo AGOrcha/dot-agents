@@ -3,7 +3,7 @@ plan_id: stage-profile-and-routing-consolidation
 tasks:
     - id: t1-stage-profile-type
       title: StageProfile type + stage_profiles map + merge wiring
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -15,7 +15,7 @@ tasks:
       app_type: go-cli
     - id: t2-legacy-fold
       title: Back-compat fold of 3 legacy keys into the new model
-      status: pending
+      status: completed
       depends_on:
         - t1-stage-profile-type
       blocks: []
@@ -28,7 +28,7 @@ tasks:
       app_type: go-cli
     - id: t3-consumers
       title: Migrate consumers to stage_profiles + execution_profile.topology
-      status: pending
+      status: completed
       depends_on:
         - t1-stage-profile-type
         - t2-legacy-fold
@@ -46,7 +46,7 @@ tasks:
       app_type: go-cli
     - id: t4-schema-and-migrate
       title: Schema + migrate live manifest and fixtures
-      status: pending
+      status: completed
       depends_on:
         - t1-stage-profile-type
         - t2-legacy-fold
@@ -60,7 +60,7 @@ tasks:
       app_type: go-cli
     - id: t5-tests
       title: Update + add tests across config/workflow/scaffold/relevance
-      status: pending
+      status: completed
       depends_on:
         - t1-stage-profile-type
         - t2-legacy-fold
@@ -78,7 +78,7 @@ tasks:
       app_type: go-cli
     - id: t6-supersede-pr40
       title: 'Branch off PR #40 HEAD, open new PR, close #40'
-      status: pending
+      status: completed
       depends_on:
         - t1-stage-profile-type
         - t2-legacy-fold
