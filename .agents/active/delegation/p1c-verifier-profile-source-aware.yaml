@@ -1,0 +1,25 @@
+schema_version: 1
+id: del-p1c-verifier-profile-source-aware-1780784015
+mode: delegated
+parent_plan_id: config-v2-migration
+parent_task_id: p1c-verifier-profile-source-aware
+title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
+summary: Delegated from plan v1->v2 config-distribution-model migration
+write_scope:
+    - internal/config/agentsrc.go
+    - schemas/agentsrc.schema.json
+    - commands/workflow/bundle.go
+    - commands/workflow/bundle_test.go
+success_criteria: |-
+    Q1 ruling: Option B — force typed objects everywhere. p1c is CRITICAL-PATH (not optional). Scope expands to:
+    - Migrate ALL existing verifier_profiles entries across dot-agents .agentsrc.json + the embedded starter
+    - Bulk migration of prompt_files [string] → [{source, path, version}] for unit/api/batch/streaming/ui-e2e
+    - Update unit.project.md / api.project.md / etc. references in resolver to use typed-object lookup
+    - Add migration test fixtures (legacy flat → expected typed)
+    - Cross-link in lesson `[[verifier-owns-ci-watch-shift-left]]`
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: active
+created_at: "2026-06-06T22:13:35Z"
+updated_at: "2026-06-06T22:13:35Z"

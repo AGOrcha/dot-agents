@@ -173,7 +173,7 @@ func mergeLayers(layers map[string]map[string]any) map[string]any {
 
 // explainField builds the FieldExplanation for a single field path
 // against the snapshot. Path syntax is dot-separated keys
-// (e.g. "kg.bridge.enabled", "app_type_verifier_map.pa-angular-ui").
+// (e.g. "kg.bridge.enabled", "stage_profiles.verifier.unit").
 //
 // A field that is unset in every layer returns a FieldExplanation with
 // Value=nil and ActiveLayer="" — the caller decides whether to treat that as

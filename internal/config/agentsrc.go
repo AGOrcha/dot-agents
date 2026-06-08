@@ -207,6 +207,17 @@ type AgentsRC struct {
 	// an org layer can override the default via the config-v2 scope layers.
 	PRSource *AgentsRCPRSource `json:"pr_source,omitempty"`
 
+	// StageProfiles are named per-stage prompt-composition profiles, keyed by
+	// stage (executor | verifier | reviewer | orchestrator) then by slug. Each
+	// profile's prompt_files is source-aware (config-v2 Q1 ruling, Option B): an
+	// entry is a typed {source, path, version} object, with the bare-string legacy
+	// form still accepted on read (see PromptFileRef). The verifier and reviewer
+	// stages supersede the deprecated verifier_profiles / reviewer_profiles maps,
+	// and topology.verifier_sequence supersedes app_type_verifier_map; all three
+	// legacy keys are still read and folded in here for back-compat (see
+	// UnmarshalJSON / foldLegacyProfiles) and are never re-emitted.
+	StageProfiles map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -406,6 +417,90 @@ func (p *PackageRef) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// PromptFileRef is a single entry in a verifier/reviewer profile's prompt_files
+// list. Per the config-v2 Q1 ruling (Option B — force typed objects everywhere),
+// an entry resolves to a typed object {source, path, version}. The bare-string
+// legacy form ("verifiers/unit.md") is still accepted on read and is equivalent
+// to {path: "<string>"} with an empty source/version; this is the same dual-form
+// pattern as LayerRef/PackageRef so legacy .agentsrc.json files round-trip
+// byte-for-byte while new source-aware entries gain the object form.
+//
+// Source names the config source the prompt file is fetched from (e.g. a
+// source `id` declared under `sources`); an empty source means the prompt is
+// resolved relative to the local repo/home search path (the historical
+// behavior). Version pins a source-relative revision; empty means "as resolved".
+type PromptFileRef struct {
+	// Source is the source id the prompt file is fetched from. Empty means
+	// local resolution across the repo/home search path.
+	Source string `json:"source,omitempty"`
+	// Path is the prompt file path, relative to the source (or to the local
+	// prompt search path when Source is empty). Required.
+	Path string `json:"path"`
+	// Version pins a source-relative revision. Empty means "as resolved".
+	Version string `json:"version,omitempty"`
+}
+
+// MarshalJSON emits the compact string form when only Path is set (legacy
+// compatibility, so existing string-list profiles round-trip unchanged) and the
+// typed-object form once Source or Version is populated. Round-trip is stable
+// under repeated marshal/unmarshal.
+func (r PromptFileRef) MarshalJSON() ([]byte, error) {
+	if r.Source == "" && r.Version == "" {
+		return json.Marshal(r.Path)
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	return json.Marshal(wire{Source: r.Source, Path: r.Path, Version: r.Version})
+}
+
+// UnmarshalJSON accepts either a bare string (legacy form) or the typed-object
+// {source, path, version} form.
+func (r *PromptFileRef) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			return fmt.Errorf("prompt_files entry string form must be non-empty")
+		}
+		r.Source = ""
+		r.Path = s
+		r.Version = ""
+		return nil
+	}
+	type wire struct {
+		Source  string `json:"source,omitempty"`
+		Path    string `json:"path"`
+		Version string `json:"version,omitempty"`
+	}
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return fmt.Errorf("prompt_files entry must be string or {source?,path,version?}: %w", err)
+	}
+	if w.Path == "" {
+		return fmt.Errorf("prompt_files entry object form requires non-empty path")
+	}
+	r.Source = w.Source
+	r.Path = w.Path
+	r.Version = w.Version
+	return nil
+}
+
+// StageProfile is one named entry in an AgentsRC.StageProfiles stage map
+// (executor | verifier | reviewer | orchestrator). A profile is a label for
+// display plus a base-first ordered prompt_files composition. The same type
+// serves every stage — the stage is the outer map key — so the four agentic
+// stages are uniform, composable primitives. PromptFiles is source-aware (see
+// PromptFileRef) so an org layer can pin a prompt to a remote config source
+// while a repo keeps the legacy local string form.
+type StageProfile struct {
+	// Label is the human-readable profile name shown in fanout/explain output.
+	Label string `json:"label,omitempty"`
+	// PromptFiles is the base-first ordered prompt composition for the profile.
+	PromptFiles []PromptFileRef `json:"prompt_files,omitempty"`
+}
+
 // RefreshMetadata records the latest da install/refresh that updated a project.
 type RefreshMetadata struct {
 	Version     string `json:"version,omitempty"`
@@ -442,6 +537,16 @@ var agentsRCKnown = map[string]bool{
 	"execution_profile": true,
 	// pr_source: config-driven PR event producer (pr-event-source design)
 	"pr_source": true,
+	// stage_profiles: unified per-stage named prompt-composition primitive
+	// (config-v2 Q1; supersedes verifier_profiles/reviewer_profiles)
+	"stage_profiles": true,
+	// deprecated legacy keys — read and folded into stage_profiles /
+	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
+	// Listed as "known" so they are not captured into ExtraFields (which would
+	// re-emit them); they are decoded explicitly in UnmarshalJSON instead.
+	"verifier_profiles":     true,
+	"reviewer_profiles":     true,
+	"app_type_verifier_map": true,
 }
 
 // agentsRCCore is an alias used in custom marshal/unmarshal to avoid
@@ -468,6 +573,8 @@ type agentsRCCore struct {
 	Features         map[string]string `json:"features,omitempty"`
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
+
+	StageProfiles map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -493,6 +600,21 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Features = core.Features
 	a.ExecutionProfile = core.ExecutionProfile
 	a.PRSource = core.PRSource
+	a.StageProfiles = core.StageProfiles
+
+	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
+	// app_type_verifier_map keys and fold them into the unified stage_profiles +
+	// execution_profile model. New-key values always win; legacy only fills gaps.
+	// The legacy keys are never re-emitted (agentsRCCore has no legacy fields).
+	var legacy struct {
+		VerifierProfiles   map[string]StageProfile `json:"verifier_profiles"`
+		ReviewerProfiles   map[string]StageProfile `json:"reviewer_profiles"`
+		AppTypeVerifierMap map[string][]string     `json:"app_type_verifier_map"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	a.foldLegacyProfiles(legacy.VerifierProfiles, legacy.ReviewerProfiles, legacy.AppTypeVerifierMap)
 
 	var all map[string]json.RawMessage
 	if err := json.Unmarshal(data, &all); err != nil {
@@ -529,6 +651,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Features:         a.Features,
 		ExecutionProfile: a.ExecutionProfile,
 		PRSource:         a.PRSource,
+		StageProfiles:    a.StageProfiles,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -572,6 +695,13 @@ type Source struct {
 	// external-agent-sources spec. The config layer treats it as an arbitrary
 	// JSON object and does not introspect it.
 	Auth json.RawMessage `json:"auth,omitempty"`
+	// CacheKeys overrides the kind-default content cache key for this source
+	// (config-distribution-model §7A.4, the uv `cache-keys` analog). Absent ⇒
+	// the source uses its kind default (git→commit, local→commit+worktree,
+	// http→ETag/Last-Modified else digest, oci→digest). See cache_keys.go for
+	// the derivation; a *CacheKeys pointer keeps a defaulting source byte-stable
+	// (no cache_keys object emitted). Omitted on a v1 source.
+	CacheKeys *CacheKeys `json:"cache_keys,omitempty"`
 }
 
 const AgentsRCFile = ".agentsrc.json"
@@ -687,10 +817,91 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.ExtraFields) > 0 {
 		out.ExtraFields = cloneExtraFieldsMap(existing.ExtraFields)
 	}
+	// stage_profiles are author-owned config, not scan-derived, so a committed set
+	// must survive regeneration. Before these were typed fields the profiles rode
+	// along in ExtraFields and were preserved by the clause above; now they are
+	// first-class and must be carried over explicitly or `da install`/refresh
+	// would silently drop a project's registered profiles.
+	if len(existing.StageProfiles) > 0 {
+		out.StageProfiles = cloneStageProfiles(existing.StageProfiles)
+	}
 	if existing.Refresh != nil {
 		out.Refresh = existing.Refresh
 	}
 	return &out
+}
+
+// cloneStageProfiles deep-copies a stage_profiles map (stage → slug → profile,
+// including each profile's prompt_files slice) so the merged manifest does not
+// alias the existing manifest's profile data.
+func cloneStageProfiles(m map[string]map[string]StageProfile) map[string]map[string]StageProfile {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]StageProfile, len(m))
+	for stage, profiles := range m {
+		inner := make(map[string]StageProfile, len(profiles))
+		for slug, p := range profiles {
+			inner[slug] = StageProfile{
+				Label:       p.Label,
+				PromptFiles: append([]PromptFileRef(nil), p.PromptFiles...),
+			}
+		}
+		out[stage] = inner
+	}
+	return out
+}
+
+// foldLegacyProfiles folds the deprecated verifier_profiles / reviewer_profiles /
+// app_type_verifier_map keys into the unified stage_profiles + execution_profile
+// model so legacy manifests keep loading. New-key values always win — legacy only
+// fills gaps — and the folded keys are never re-emitted (agentsRCCore carries no
+// legacy fields). See the stage-profile-and-routing-consolidation spec.
+func (a *AgentsRC) foldLegacyProfiles(verifier, reviewer map[string]StageProfile, appTypeVerifierMap map[string][]string) {
+	a.foldStageProfiles("verifier", verifier)
+	a.foldStageProfiles("reviewer", reviewer)
+	for appType, seq := range appTypeVerifierMap {
+		a.foldAppTypeVerifierSequence(appType, seq)
+	}
+}
+
+// foldStageProfiles fills stage_profiles[stage] with legacy profiles, leaving any
+// slug already set by the new key untouched (new key wins).
+func (a *AgentsRC) foldStageProfiles(stage string, profiles map[string]StageProfile) {
+	if len(profiles) == 0 {
+		return
+	}
+	if a.StageProfiles == nil {
+		a.StageProfiles = map[string]map[string]StageProfile{}
+	}
+	if a.StageProfiles[stage] == nil {
+		a.StageProfiles[stage] = map[string]StageProfile{}
+	}
+	for slug, p := range profiles {
+		if _, exists := a.StageProfiles[stage][slug]; !exists {
+			a.StageProfiles[stage][slug] = p
+		}
+	}
+}
+
+// foldAppTypeVerifierSequence folds one legacy app_type_verifier_map entry into
+// execution_profile.by_app_type[appType].topology.verifier_sequence, creating the
+// entry when absent and only when the new field is unset (new value wins).
+func (a *AgentsRC) foldAppTypeVerifierSequence(appType string, seq []string) {
+	if appType == "" || len(seq) == 0 {
+		return
+	}
+	if a.ExecutionProfile == nil {
+		a.ExecutionProfile = &ExecutionProfile{}
+	}
+	if a.ExecutionProfile.ByAppType == nil {
+		a.ExecutionProfile.ByAppType = map[string]AppTypeProfile{}
+	}
+	prof := a.ExecutionProfile.ByAppType[appType]
+	if len(prof.Topology.VerifierSequence) == 0 {
+		prof.Topology.VerifierSequence = append([]string(nil), seq...)
+		a.ExecutionProfile.ByAppType[appType] = prof
+	}
 }
 
 func cloneExtraFieldsMap(m map[string]json.RawMessage) map[string]json.RawMessage {

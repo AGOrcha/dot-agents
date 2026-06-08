@@ -18,7 +18,7 @@ func TestSplitFieldPath(t *testing.T) {
 		{"", nil},
 		{"repo_id", []string{"repo_id"}},
 		{"kg.backend", []string{"kg", "backend"}},
-		{"app_type_verifier_map.go-cli", []string{"app_type_verifier_map", "go-cli"}},
+		{"stage_profiles.verifier.unit", []string{"stage_profiles", "verifier", "unit"}},
 		{"a.b.c.d", []string{"a", "b", "c", "d"}},
 	}
 	for _, tc := range cases {

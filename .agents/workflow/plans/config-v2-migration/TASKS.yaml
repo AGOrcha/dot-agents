@@ -423,7 +423,7 @@ tasks:
       app_type: go-cli
     - id: p1c-verifier-profile-source-aware
       title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
-      status: pending
+      status: in_progress
       depends_on:
         - p1b-resolver-extends-tier1
       blocks: []

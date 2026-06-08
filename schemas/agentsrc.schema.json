@@ -84,41 +84,31 @@
         }
       }
     },
-    "verifier_profiles": {
+    "stage_profiles": {
       "type": "object",
-      "description": "Named verifier profiles referenced by app_type_verifier_map and workflow fanout",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "prompt_files": {
-            "$ref": "#/$defs/stringList"
-          }
-        }
+      "additionalProperties": false,
+      "description": "Named per-stage prompt-composition profiles keyed by stage then by slug. The verifier/reviewer stages supersede verifier_profiles/reviewer_profiles; execution_profile.topology.verifier_sequence supersedes app_type_verifier_map. Each profile's prompt_files compose base-first.",
+      "properties": {
+        "executor": { "$ref": "#/$defs/stageProfileMap" },
+        "verifier": { "$ref": "#/$defs/stageProfileMap" },
+        "reviewer": { "$ref": "#/$defs/stageProfileMap" },
+        "orchestrator": { "$ref": "#/$defs/stageProfileMap" }
       }
     },
+    "verifier_profiles": {
+      "$ref": "#/$defs/stageProfileMap",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into stage_profiles.verifier on load and never re-emitted. Use stage_profiles.verifier."
+    },
     "reviewer_profiles": {
-      "type": "object",
-      "description": "Named reviewer profiles keyed by review lens (architecture-standards, acceptance-invariants, adversarial); symmetric to verifier_profiles. prompt_files compose base-first into the reviewer bundle.",
-      "additionalProperties": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "label": {
-            "type": "string"
-          },
-          "prompt_files": {
-            "$ref": "#/$defs/stringList"
-          }
-        }
-      }
+      "$ref": "#/$defs/stageProfileMap",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into stage_profiles.reviewer on load and never re-emitted. Use stage_profiles.reviewer."
     },
     "app_type_verifier_map": {
       "type": "object",
-      "description": "Maps app_type strings to ordered verifier profile ids for fanout bundle resolution",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into execution_profile.by_app_type.<type>.topology.verifier_sequence on load and never re-emitted. Use execution_profile.",
       "additionalProperties": {
         "type": "array",
         "items": {
@@ -238,6 +228,59 @@
         "minLength": 1
       }
     },
+    "promptFileRef": {
+      "description": "A verifier/reviewer prompt_files entry. Source-aware (config-v2 Q1, Option B): the typed-object form {source,path,version} pins a prompt to a config source; the bare-string legacy form is equivalent to {path:<string>} resolved on the local prompt search path.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Config source id the prompt is fetched from (matches a sources[].id). Empty/absent means local resolution."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Prompt file path, relative to the source (or the local prompt search path when source is absent)."
+            },
+            "version": {
+              "type": "string",
+              "description": "Source-relative revision to pin. Absent means 'as resolved'."
+            }
+          }
+        }
+      ]
+    },
+    "promptFileList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/promptFileRef"
+      }
+    },
+    "stageProfileMap": {
+      "type": "object",
+      "description": "A map of profile slug -> stage profile (label + base-first prompt_files composition).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt_files": {
+            "$ref": "#/$defs/promptFileList"
+          }
+        }
+      }
+    },
     "stringsOrBool": {
       "oneOf": [
         {
@@ -295,6 +338,44 @@
               "type": "string",
               "enum": ["unsigned", "optional", "required"],
               "description": "v2 (p5 stub): package signing posture. 'required' fails resolution for an unverifiable artifact once cosign/sigstore verification lands; defaults to 'unsigned'."
+            }
+          }
+        },
+        "cache_keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "v2: per-source content cache-key override (config-distribution-model §7A.4, the uv 'cache-keys' analog). Absent ⇒ the source uses its kind default (git→resolved commit; local→commit + working-tree; http→ETag/Last-Modified else digest; oci→manifest digest). Any selector below pins the key on those inputs instead; always_revalidate is the config-declared force escape.",
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/stringList",
+              "description": "File paths or globs whose tracked content pins the key — a change to any matched file is a new key."
+            },
+            "git": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Selects which git facts pin the key.",
+              "properties": {
+                "commit": {
+                  "type": "boolean",
+                  "description": "Pin the key on the resolved commit hash."
+                },
+                "tags": {
+                  "type": "boolean",
+                  "description": "Pin the key on the tags pointing at the resolved commit (a re-tag is a new key)."
+                }
+              }
+            },
+            "env": {
+              "$ref": "#/$defs/stringList",
+              "description": "Environment variable names whose values pin the key."
+            },
+            "dir": {
+              "$ref": "#/$defs/stringList",
+              "description": "Directory paths whose presence/absence pins the key."
+            },
+            "always_revalidate": {
+              "type": "boolean",
+              "description": "Config-declared force escape: always re-check upstream on resolve, regardless of the recorded digest (config-distribution-model §7A.4 / R6)."
             }
           }
         }

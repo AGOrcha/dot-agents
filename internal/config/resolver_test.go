@@ -96,6 +96,27 @@ func TestMergeFieldCategories(t *testing.T) {
 			want: map[string]any{"architecture-standards": map[string]any{"label": "Arch", "prompt_files": []any{"base.md", "arch.md"}}, "adversarial": map[string]any{"label": "Adv"}},
 		},
 		{
+			name: "stage_profiles deep-merges per (stage, slug), leaf prompt_files replaced",
+			key:  "stage_profiles",
+			prev: map[string]any{
+				"verifier": map[string]any{"unit": map[string]any{"label": "Unit", "prompt_files": []any{"base.md"}}},
+			},
+			next: map[string]any{
+				"verifier": map[string]any{
+					"unit":       map[string]any{"prompt_files": []any{"base.md", "unit.md"}},
+					"cli-runner": map[string]any{"label": "CLI"},
+				},
+				"reviewer": map[string]any{"adversarial": map[string]any{"label": "Adv"}},
+			},
+			want: map[string]any{
+				"verifier": map[string]any{
+					"unit":       map[string]any{"label": "Unit", "prompt_files": []any{"base.md", "unit.md"}},
+					"cli-runner": map[string]any{"label": "CLI"},
+				},
+				"reviewer": map[string]any{"adversarial": map[string]any{"label": "Adv"}},
+			},
+		},
+		{
 			name: "app_type_verifier_map merges by app type, replaces sequence",
 			key:  "app_type_verifier_map",
 			prev: map[string]any{"go-cli": []any{"unit"}, "api": []any{"unit"}},

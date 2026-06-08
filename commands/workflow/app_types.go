@@ -32,7 +32,8 @@ type workflowAppTypesView struct {
 	Source   string                 `json:"source"`
 	AppTypes []workflowAppTypeEntry `json:"app_types"`
 	// Incomplete lists layers skipped during offline resolution whose absence may
-	// have shrunk the effective app_type_verifier_map. Empty when fully resolved.
+	// have shrunk the effective execution_profile (and thus the app_type list).
+	// Empty when fully resolved.
 	Incomplete []string `json:"incomplete,omitempty"`
 }
 
@@ -69,7 +70,7 @@ func runWorkflowAppTypes(format string, verbose bool) error {
 	}
 	if len(view.AppTypes) == 0 {
 		fmt.Fprintln(os.Stdout, "No app_types found for this repo.")
-		fmt.Fprintf(os.Stdout, "  Add app_type_verifier_map entries to: %s\n", config.DisplayPath(view.Source))
+		fmt.Fprintf(os.Stdout, "  Add execution_profile.by_app_type entries (topology.verifier_sequence) to: %s\n", config.DisplayPath(view.Source))
 		return nil
 	}
 
@@ -93,7 +94,7 @@ func renderWorkflowAppTypesJSON(view workflowAppTypesView, format string) error 
 }
 
 // renderWorkflowAppTypesIncomplete prints (to stderr) a note for each layer that
-// offline resolution skipped, so a silently-shrunk app_type_verifier_map is never
+// offline resolution skipped, so a silently-shrunk execution_profile is never
 // passed off as the complete list. No-op when resolution was complete.
 func renderWorkflowAppTypesIncomplete(view workflowAppTypesView) {
 	for _, note := range view.Incomplete {
@@ -180,15 +181,15 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 	return view, nil
 }
 
-// resolveEffectiveAppTypeMap reads the effective app_type_verifier_map from the
-// units-lock-backed config Snapshot so app-type detection sees the same merged
-// effective config every other surface does (config-distribution-model §7A units
-// model), rather than re-reading only the repo-local .agentsrc.json. Resolution
-// is read-only and offline: it reconstructs the imported layers from the units
-// lock at their locked digests without ever triggering a fetch (the same seam
-// `da config explain` parses through). The map lives in ExtraFields, so it is
-// read off the snapshot's EffectiveRaw() projection (which round-trips through
-// the AgentsRC marshaler and therefore includes ExtraFields).
+// resolveEffectiveAppTypeMap reads the effective per-app_type verifier sequences
+// from the units-lock-backed config Snapshot so app-type detection sees the same
+// merged effective config every other surface does (config-distribution-model
+// §7A units model), rather than re-reading only the repo-local .agentsrc.json.
+// Resolution is read-only and offline: it reconstructs the imported layers from
+// the units lock at their locked digests without ever triggering a fetch (the
+// same seam `da config explain` parses through). The sequences live in the typed
+// execution_profile.by_app_type topology (the deprecated app_type_verifier_map is
+// folded into it on load), read directly off snap.Effective.
 //
 // A missing repo-local manifest is not an error here: it yields an empty map, so
 // `workflow app-types` prints the same "No app_types found" notice it did before
@@ -197,7 +198,7 @@ func collectWorkflowAppTypes(project workflowProjectRef) (workflowAppTypesView, 
 // The second return value carries human-readable notes for any layer that was
 // SKIPPED during offline resolution (an optional `extends` entry whose lock/cache
 // is missing, or a protected-field drop). Such a skip can shrink the effective
-// app_type_verifier_map, so the notes let the caller warn the user rather than
+// execution_profile, so the notes let the caller warn the user rather than
 // silently print an incomplete list (PR #207 adversarial-lens fix).
 func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, []string, error) {
 	snap, err := appTypeSnapshot(projectPath)
@@ -207,15 +208,30 @@ func resolveEffectiveAppTypeMap(projectPath string) (map[string][]string, []stri
 		}
 		return nil, nil, err
 	}
-	raw, err := snap.EffectiveRaw()
-	if err != nil {
-		return nil, nil, err
-	}
-	m, err := decodeAppTypeVerifierMap(raw["app_type_verifier_map"])
-	if err != nil {
-		return nil, nil, err
-	}
+	m := appTypeVerifierSequencesFromExecution(snap.Effective.ExecutionProfile)
 	return m, incompleteResolutionNotes(snap.Warnings), nil
+}
+
+// appTypeVerifierSequencesFromExecution projects the execution_profile topology
+// into the app_type -> verifier sequence map app-type detection renders. This is
+// the successor to the retired app_type_verifier_map (legacy entries are folded
+// into execution_profile.topology.verifier_sequence on load); only app_types
+// whose topology declares a non-empty verifier_sequence are included.
+func appTypeVerifierSequencesFromExecution(ep *config.ExecutionProfile) map[string][]string {
+	if ep == nil || len(ep.ByAppType) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(ep.ByAppType))
+	for appType, prof := range ep.ByAppType {
+		if len(prof.Topology.VerifierSequence) == 0 {
+			continue
+		}
+		out[appType] = append([]string(nil), prof.Topology.VerifierSequence...)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // incompleteResolutionNotes turns the snapshot's resolution warnings into
@@ -232,32 +248,6 @@ func incompleteResolutionNotes(warnings []config.ProvenanceWarning) []string {
 		notes = append(notes, fmt.Sprintf("%s (%s)", w.FieldPath, w.Outcome))
 	}
 	return notes
-}
-
-// decodeAppTypeVerifierMap coerces the generic app_type_verifier_map value from
-// the effective config into name → ordered verifier sequence. Non-string/array
-// shapes are tolerated (skipped) so a malformed entry never panics the command;
-// each sequence preserves declared order (CategoryOrderedReplace).
-func decodeAppTypeVerifierMap(v any) (map[string][]string, error) {
-	obj, ok := v.(map[string]any)
-	if !ok || len(obj) == 0 {
-		return nil, nil
-	}
-	out := make(map[string][]string, len(obj))
-	for name, rawSeq := range obj {
-		arr, ok := rawSeq.([]any)
-		if !ok {
-			continue
-		}
-		seq := make([]string, 0, len(arr))
-		for _, item := range arr {
-			if s, ok := item.(string); ok {
-				seq = append(seq, s)
-			}
-		}
-		out[name] = seq
-	}
-	return out, nil
 }
 
 // isMissingManifestErr reports whether err is the resolver's "no repo-local

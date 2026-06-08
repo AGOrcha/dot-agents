@@ -11,29 +11,38 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 )
 
-func TestProfileMapKey(t *testing.T) {
-	if k, err := profileMapKey(profileKindVerifier); err != nil || k != "verifier_profiles" {
-		t.Fatalf("verifier: got %q, %v", k, err)
+func TestValidateProfileKind(t *testing.T) {
+	for _, k := range []string{profileKindExecutor, profileKindVerifier, profileKindReviewer, profileKindOrchestrator} {
+		if err := validateProfileKind(k); err != nil {
+			t.Fatalf("stage %q should be valid: %v", k, err)
+		}
 	}
-	if k, err := profileMapKey(profileKindReviewer); err != nil || k != "reviewer_profiles" {
-		t.Fatalf("reviewer: got %q, %v", k, err)
-	}
-	if _, err := profileMapKey("nonsense"); err == nil {
+	if err := validateProfileKind("nonsense"); err == nil {
 		t.Fatal("expected error for unknown kind")
 	}
 }
 
 func TestDecodeProfilePromptFiles(t *testing.T) {
 	raw := map[string]any{
-		"verifier_profiles": map[string]any{
-			"cli-runner": map[string]any{
-				"prompt_files": []any{"verifiers/verifier.base.md", "verifiers/cli-runner.md", " "},
+		"stage_profiles": map[string]any{
+			"verifier": map[string]any{
+				"cli-runner": map[string]any{
+					// mixed legacy string + source-aware object form; blank, pathless
+					// object, and non-string/non-object entries are dropped
+					"prompt_files": []any{
+						"verifiers/verifier.base.md",
+						map[string]any{"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"},
+						" ",
+						map[string]any{"source": "no-path"},
+						42,
+					},
+				},
+				"no-files": map[string]any{"label": "x"},
 			},
-			"no-files": map[string]any{"label": "x"},
 		},
 	}
-	// matched + entries (blank dropped, order preserved)
-	got, matched := decodeProfilePromptFiles(raw, "verifier_profiles", "cli-runner")
+	// matched + entries (blank dropped, order preserved, object path extracted)
+	got, matched := decodeProfilePromptFiles(raw, "verifier", "cli-runner")
 	if !matched {
 		t.Fatal("cli-runner should be matched")
 	}
@@ -47,16 +56,20 @@ func TestDecodeProfilePromptFiles(t *testing.T) {
 		}
 	}
 	// profile exists, no prompt_files
-	if g, matched := decodeProfilePromptFiles(raw, "verifier_profiles", "no-files"); !matched || len(g) != 0 {
+	if g, matched := decodeProfilePromptFiles(raw, "verifier", "no-files"); !matched || len(g) != 0 {
 		t.Fatalf("no-files: got %#v matched=%t, want matched empty", g, matched)
 	}
 	// missing slug
-	if _, matched := decodeProfilePromptFiles(raw, "verifier_profiles", "ghost"); matched {
+	if _, matched := decodeProfilePromptFiles(raw, "verifier", "ghost"); matched {
 		t.Fatal("ghost slug must be unmatched")
 	}
-	// missing map
-	if _, matched := decodeProfilePromptFiles(raw, "reviewer_profiles", "x"); matched {
-		t.Fatal("absent reviewer_profiles map must be unmatched")
+	// missing stage map
+	if _, matched := decodeProfilePromptFiles(raw, "reviewer", "x"); matched {
+		t.Fatal("absent reviewer stage map must be unmatched")
+	}
+	// no stage_profiles key at all
+	if _, matched := decodeProfilePromptFiles(map[string]any{}, "verifier", "x"); matched {
+		t.Fatal("absent stage_profiles must be unmatched")
 	}
 }
 
@@ -107,20 +120,31 @@ func TestResolvePromptRef(t *testing.T) {
 }
 
 // snapshotWithProfiles installs an appTypeSnapshot seam returning a Snapshot whose
-// effective config carries the given verifier_profiles / reviewer_profiles JSON.
+// effective config carries the given verifier / reviewer profiles (a slug->profile
+// JSON object) under the unified stage_profiles map.
 func snapshotWithProfiles(t *testing.T, verifierProfiles, reviewerProfiles string) {
 	t.Helper()
 	orig := appTypeSnapshot
 	t.Cleanup(func() { appTypeSnapshot = orig })
-	extra := map[string]json.RawMessage{}
-	if verifierProfiles != "" {
-		extra["verifier_profiles"] = json.RawMessage(verifierProfiles)
+	sp := map[string]map[string]config.StageProfile{}
+	parse := func(stage, raw string) {
+		if raw == "" {
+			return
+		}
+		var m map[string]config.StageProfile
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			t.Fatalf("parse %s profiles: %v", stage, err)
+		}
+		sp[stage] = m
 	}
-	if reviewerProfiles != "" {
-		extra["reviewer_profiles"] = json.RawMessage(reviewerProfiles)
+	parse(profileKindVerifier, verifierProfiles)
+	parse(profileKindReviewer, reviewerProfiles)
+	eff := config.AgentsRC{Version: 1}
+	if len(sp) > 0 {
+		eff.StageProfiles = sp
 	}
 	appTypeSnapshot = func(string) (*config.Snapshot, error) {
-		return &config.Snapshot{Effective: config.AgentsRC{Version: 1, ExtraFields: extra}}, nil
+		return &config.Snapshot{Effective: eff}, nil
 	}
 }
 
@@ -310,7 +334,7 @@ func TestRenderComposedPrompt_EdgeCases(t *testing.T) {
 	out := captureWorkflowStdout(t, func() {
 		renderComposedPrompt(composedPromptView{Kind: "verifier", Slug: "ghost", Matched: false})
 	})
-	if !strings.Contains(out, "no verifier_profiles entry") {
+	if !strings.Contains(out, "no stage_profiles.verifier entry") {
 		t.Fatalf("unmatched render missing notice:\n%s", out)
 	}
 	// matched, no prompt_files

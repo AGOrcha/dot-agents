@@ -34,8 +34,9 @@ type AppTypeProfile struct {
 	// classification of skills/agents/lenses. The map key is the stage name
 	// (e.g. "orchestrate", "verify", "review").
 	Relevance map[string]RelevanceClasses `json:"relevance,omitempty"`
-	// Topology is facet 2: the executor:verifier:reviewer fan-out shape. It
-	// supersedes the flat app_type_verifier_map (verifier_sequence moves here).
+	// Topology is facet 2: the executor:verifier:reviewer fan-out shape. It is the
+	// successor to the retired flat app_type_verifier_map — verifier_sequence lives
+	// here, and legacy app_type_verifier_map entries are folded in on load.
 	Topology Topology `json:"topology,omitempty"`
 	// Lenses is facet 3: the review-lens config folded in from
 	// lens-evidence-policy (lens_set + lens_concurrency).
@@ -69,8 +70,9 @@ type Topology struct {
 	// "per_executor") or a stringified integer count. Kept as a string so the
 	// keyword and fixed-count forms share one field.
 	Reviewers string `json:"reviewers,omitempty"`
-	// VerifierSequence is the ordered verifier-profile ids for this app_type,
-	// superseding the flat app_type_verifier_map.
+	// VerifierSequence is the ordered verifier-profile ids for this app_type; each
+	// id references a stage_profiles.verifier slug. It is the successor to the
+	// retired flat app_type_verifier_map (legacy entries fold in on load).
 	VerifierSequence []string `json:"verifier_sequence,omitempty"`
 }
 

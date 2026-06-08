@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1392,6 +1393,223 @@ func TestPackageRef_MarshalAlwaysString(t *testing.T) {
 	}
 	if string(out) != `"acme-pkgs:skill/review-pr@pinned:sha256:abc"` {
 		t.Errorf("expected string form, got %s", out)
+	}
+}
+
+// ── PromptFileRef: source-aware prompt_files (config-v2 Q1, Option B) ─────────
+
+func TestPromptFileRef_UnmarshalLegacyString(t *testing.T) {
+	var r PromptFileRef
+	if err := json.Unmarshal([]byte(`"verifiers/unit.md"`), &r); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if r.Path != "verifiers/unit.md" || r.Source != "" || r.Version != "" {
+		t.Errorf("legacy string decode wrong: %+v", r)
+	}
+}
+
+func TestPromptFileRef_UnmarshalTypedObject(t *testing.T) {
+	var r PromptFileRef
+	if err := json.Unmarshal([]byte(`{"source":"acme","path":"verifiers/cli-runner.md","version":"v3"}`), &r); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if r.Source != "acme" || r.Path != "verifiers/cli-runner.md" || r.Version != "v3" {
+		t.Errorf("typed decode wrong: %+v", r)
+	}
+}
+
+func TestPromptFileRef_UnmarshalRejectsBadShape(t *testing.T) {
+	var r PromptFileRef
+	if err := json.Unmarshal([]byte(`42`), &r); err == nil {
+		t.Error("expected error for numeric prompt_files entry")
+	}
+	if err := json.Unmarshal([]byte(`""`), &r); err == nil {
+		t.Error("expected error for empty-string entry")
+	}
+	if err := json.Unmarshal([]byte(`{"source":"acme"}`), &r); err == nil {
+		t.Error("expected error for object form missing path")
+	}
+	if err := json.Unmarshal([]byte(`{`), &r); err == nil {
+		t.Error("expected error for malformed JSON entry")
+	}
+}
+
+func TestPromptFileRef_MarshalCompactWhenPathOnly(t *testing.T) {
+	r := PromptFileRef{Path: "verifiers/unit.md"}
+	out, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) != `"verifiers/unit.md"` {
+		t.Errorf("path-only ref should marshal to bare string, got %s", out)
+	}
+}
+
+func TestPromptFileRef_MarshalObjectWhenSourceOrVersion(t *testing.T) {
+	for _, r := range []PromptFileRef{
+		{Source: "acme", Path: "p.md"},
+		{Path: "p.md", Version: "v2"},
+		{Source: "acme", Path: "p.md", Version: "v2"},
+	} {
+		out, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("marshal %+v: %v", r, err)
+		}
+		var back PromptFileRef
+		if err := json.Unmarshal(out, &back); err != nil {
+			t.Fatalf("round-trip unmarshal %s: %v", out, err)
+		}
+		if back != r {
+			t.Errorf("round-trip drift: got %+v want %+v (wire %s)", back, r, out)
+		}
+	}
+}
+
+// TestStageProfiles_NewKeyRoundTrip proves the unified stage_profiles map routes
+// to the typed AgentsRC field (not ExtraFields) across all four stages and
+// preserves a mixed legacy/typed prompt_files list across a marshal/unmarshal
+// cycle.
+func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
+	in := []byte(`{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "stage_profiles": {
+    "executor": {"default": {"label": "Executor", "prompt_files": ["executors/base.md"]}},
+    "verifier": {
+      "cli-runner": {
+        "label": "CLI runner",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
+        ]
+      }
+    },
+    "reviewer": {"adversarial": {"label": "Adversarial", "prompt_files": ["reviewers/adversarial.md"]}},
+    "orchestrator": {"default": {"label": "Orchestrator", "prompt_files": ["orchestrators/base.md"]}}
+  }
+}`)
+	var rc AgentsRC
+	if err := json.Unmarshal(in, &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.ExtraFields["stage_profiles"] != nil {
+		t.Fatalf("stage_profiles leaked into ExtraFields instead of the typed field")
+	}
+	prof := rc.StageProfiles["verifier"]["cli-runner"]
+	if prof.Label != "CLI runner" || len(prof.PromptFiles) != 2 {
+		t.Fatalf("verifier profile decode wrong: %+v", prof)
+	}
+	if prof.PromptFiles[0].Source != "" || prof.PromptFiles[0].Path != "verifiers/verifier.base.md" {
+		t.Errorf("legacy entry wrong: %+v", prof.PromptFiles[0])
+	}
+	if prof.PromptFiles[1].Source != "acme" || prof.PromptFiles[1].Version != "v2" {
+		t.Errorf("typed entry wrong: %+v", prof.PromptFiles[1])
+	}
+	for _, stage := range []string{"executor", "reviewer", "orchestrator"} {
+		if len(rc.StageProfiles[stage]) != 1 {
+			t.Errorf("stage %q not decoded: %+v", stage, rc.StageProfiles[stage])
+		}
+	}
+
+	out, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var rc2 AgentsRC
+	if err := json.Unmarshal(out, &rc2); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if rc2.StageProfiles["verifier"]["cli-runner"].PromptFiles[1].Source != "acme" {
+		t.Fatalf("round-trip lost typed prompt provenance: %+v", rc2.StageProfiles)
+	}
+}
+
+// TestStageProfiles_LegacyFold proves the three deprecated keys fold into the
+// unified model on read, are never re-emitted, and that an explicit new-key value
+// wins over a colliding legacy one.
+func TestStageProfiles_LegacyFold(t *testing.T) {
+	in := []byte(`{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "verifier_profiles": {
+    "unit": {"label": "legacy-unit", "prompt_files": ["verifiers/unit.md"]},
+    "cli-runner": {"label": "CLI runner", "prompt_files": ["verifiers/cli-runner.md"]}
+  },
+  "reviewer_profiles": {
+    "adversarial": {"label": "Adversarial", "prompt_files": ["reviewers/adversarial.md"]}
+  },
+  "app_type_verifier_map": {"go-cli": ["unit", "cli-runner"], "skip-me": []},
+  "stage_profiles": {"verifier": {"unit": {"label": "new-unit", "prompt_files": ["verifiers/unit.new.md"]}}}
+}`)
+	var rc AgentsRC
+	if err := json.Unmarshal(in, &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// New key wins on collision; legacy fills the gap.
+	if rc.StageProfiles["verifier"]["unit"].Label != "new-unit" {
+		t.Errorf("new-key value should win on collision: %+v", rc.StageProfiles["verifier"]["unit"])
+	}
+	if rc.StageProfiles["verifier"]["cli-runner"].Label != "CLI runner" {
+		t.Errorf("legacy verifier profile not folded: %+v", rc.StageProfiles["verifier"])
+	}
+	if rc.StageProfiles["reviewer"]["adversarial"].PromptFiles[0].Path != "reviewers/adversarial.md" {
+		t.Errorf("legacy reviewer profile not folded: %+v", rc.StageProfiles["reviewer"])
+	}
+	// app_type_verifier_map folds into execution_profile topology; empty seq is skipped.
+	seq := rc.ExecutionProfile.ByAppType["go-cli"].Topology.VerifierSequence
+	if len(seq) != 2 || seq[0] != "unit" || seq[1] != "cli-runner" {
+		t.Errorf("app_type_verifier_map not folded into topology: %+v", seq)
+	}
+	if _, ok := rc.ExecutionProfile.ByAppType["skip-me"]; ok {
+		t.Errorf("empty legacy verifier sequence should not create a by_app_type entry")
+	}
+	// Legacy keys are never re-emitted.
+	out, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, k := range []string{"verifier_profiles", "reviewer_profiles", "app_type_verifier_map"} {
+		if bytes.Contains(out, []byte(`"`+k+`"`)) {
+			t.Errorf("deprecated key %q re-emitted on marshal: %s", k, out)
+		}
+	}
+}
+
+// TestMergeGenerateAgentsRCPreservesStageProfiles guards the ExtraFields-guard
+// breakage: now that stage profiles are a typed field, regeneration must carry a
+// committed set over (it no longer rides along in ExtraFields).
+func TestMergeGenerateAgentsRCPreservesStageProfiles(t *testing.T) {
+	existing := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		StageProfiles: map[string]map[string]StageProfile{
+			"verifier": {"unit": {Label: "Unit", PromptFiles: []PromptFileRef{{Path: "verifiers/unit.md"}}}},
+			"reviewer": {"adversarial": {Label: "Adversarial", PromptFiles: []PromptFileRef{{Source: "acme", Path: "reviewers/adversarial.md", Version: "v1"}}}},
+		},
+	}
+	generated := &AgentsRC{
+		Version: 1,
+		Sources: []Source{{Type: testSourceTypeLocal}},
+		Skills:  []string{"s"},
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+	if out.StageProfiles["verifier"]["unit"].PromptFiles[0].Path != "verifiers/unit.md" {
+		t.Errorf("verifier stage profiles not preserved: %+v", out.StageProfiles)
+	}
+	if out.StageProfiles["reviewer"]["adversarial"].PromptFiles[0].Source != "acme" {
+		t.Errorf("reviewer stage profiles not preserved: %+v", out.StageProfiles)
+	}
+	// Deep copy: mutating the source must not bleed into the merged result.
+	existing.StageProfiles["verifier"]["unit"].PromptFiles[0].Path = "MUTATED"
+	if out.StageProfiles["verifier"]["unit"].PromptFiles[0].Path == "MUTATED" {
+		t.Error("cloneStageProfiles aliased the source slice")
+	}
+}
+
+// TestCloneStageProfilesEmpty covers the empty/nil short-circuit.
+func TestCloneStageProfilesEmpty(t *testing.T) {
+	if got := cloneStageProfiles(nil); got != nil {
+		t.Errorf("expected nil for empty map, got %+v", got)
 	}
 }
 

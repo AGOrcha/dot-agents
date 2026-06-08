@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -1281,25 +1280,32 @@ func saveDelegationBundle(projectPath string, b *delegationBundleYAML) error {
 	return osWriteFile(filepath.Join(dir, b.DelegationID+".yaml"), data, 0644)
 }
 
-type agentsrcFanoutDispatch struct {
-	VerifierProfiles   map[string]json.RawMessage `json:"verifier_profiles"`
-	AppTypeVerifierMap map[string][]string        `json:"app_type_verifier_map"`
+// fanoutDispatch is the scope-merged, fold-normalized config the fanout verifier
+// dispatch reads: the verifier-stage profiles (for ref validation) and the
+// execution_profile topology (the per-app_type verifier sequence). It resolves
+// through the same lock-backed effective config as `workflow app-types`, so
+// scope layers apply and the deprecated verifier_profiles / app_type_verifier_map
+// keys are folded into stage_profiles / execution_profile (see the
+// stage-profile-and-routing-consolidation spec) — the flat map's last live
+// consumer now reads execution_profile.topology.verifier_sequence.
+type fanoutDispatch struct {
+	verifierProfiles map[string]config.StageProfile
+	execution        *config.ExecutionProfile
 }
 
-func loadAgentsrcFanoutDispatch(projectPath string) (*agentsrcFanoutDispatch, error) {
-	path := filepath.Join(projectPath, config.AgentsRCFile)
-	data, err := os.ReadFile(path)
+func loadFanoutDispatch(projectPath string) (*fanoutDispatch, error) {
+	snap, err := appTypeSnapshot(projectPath)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) || os.IsNotExist(err) {
+		if isMissingManifestErr(err) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	var d agentsrcFanoutDispatch
-	if err := json.Unmarshal(data, &d); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", config.AgentsRCFile, err)
+	d := &fanoutDispatch{execution: snap.Effective.ExecutionProfile}
+	if snap.Effective.StageProfiles != nil {
+		d.verifierProfiles = snap.Effective.StageProfiles[profileKindVerifier]
 	}
-	return &d, nil
+	return d, nil
 }
 
 func splitCommaVerifierList(s string) []string {
@@ -1313,13 +1319,13 @@ func splitCommaVerifierList(s string) []string {
 	return out
 }
 
-func validateVerifierProfileRefs(sequence []string, profiles map[string]json.RawMessage) error {
+func validateVerifierProfileRefs(sequence []string, profiles map[string]config.StageProfile) error {
 	if len(profiles) == 0 || len(sequence) == 0 {
 		return nil
 	}
 	for _, id := range sequence {
 		if _, ok := profiles[id]; !ok {
-			return fmt.Errorf("verifier profile %q is not defined under verifier_profiles in .agentsrc.json", id)
+			return fmt.Errorf("verifier profile %q is not defined under stage_profiles.verifier in .agentsrc.json", id)
 		}
 	}
 	return nil
@@ -1330,13 +1336,13 @@ func explicitVerifierSequence(projectPath, verifierSeqFlag string) ([]string, er
 	if len(sequence) == 0 {
 		return nil, fmt.Errorf("--verifier-sequence is non-empty but yielded no verifier profile ids")
 	}
-	d, err := loadAgentsrcFanoutDispatch(projectPath)
+	d, err := loadFanoutDispatch(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	var profiles map[string]json.RawMessage
+	var profiles map[string]config.StageProfile
 	if d != nil {
-		profiles = d.VerifierProfiles
+		profiles = d.verifierProfiles
 	}
 	if err := validateVerifierProfileRefs(sequence, profiles); err != nil {
 		return nil, err
@@ -1345,21 +1351,35 @@ func explicitVerifierSequence(projectPath, verifierSeqFlag string) ([]string, er
 }
 
 func mappedVerifierSequence(projectPath, appType string) ([]string, error) {
-	d, err := loadAgentsrcFanoutDispatch(projectPath)
+	d, err := loadFanoutDispatch(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	if d == nil || len(d.AppTypeVerifierMap) == 0 || appType == "" {
+	if d == nil || appType == "" {
 		return nil, nil
 	}
-	sequence := append([]string(nil), d.AppTypeVerifierMap[appType]...)
+	sequence := executionVerifierSequence(d.execution, appType)
 	if len(sequence) == 0 {
 		return nil, nil
 	}
-	if err := validateVerifierProfileRefs(sequence, d.VerifierProfiles); err != nil {
+	if err := validateVerifierProfileRefs(sequence, d.verifierProfiles); err != nil {
 		return nil, err
 	}
 	return sequence, nil
+}
+
+// executionVerifierSequence returns the per-app_type verifier sequence from the
+// execution_profile topology (the successor to the retired app_type_verifier_map).
+// Returns nil when the profile, app_type, or sequence is absent.
+func executionVerifierSequence(ep *config.ExecutionProfile, appType string) []string {
+	if ep == nil || ep.ByAppType == nil {
+		return nil
+	}
+	prof, ok := ep.ByAppType[appType]
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), prof.Topology.VerifierSequence...)
 }
 
 func resolveFanoutVerifierDispatch(projectPath string, cmd *cobra.Command, plan *CanonicalPlan, task *CanonicalTask) (appType string, sequence []string, err error) {
