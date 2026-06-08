@@ -1,6 +1,6 @@
 # Spec: stage-profile & routing consolidation — one `StageProfile` primitive + retire `app_type_verifier_map`
 
-**Status:** draft (for review). Supersedes PR #40 (`config-v2-p1c-verifier-source-aware`), whose
+**Status:** implemented (merged via PR #45; supersedes PR #40) (`config-v2-p1c-verifier-source-aware`), whose
 source-aware `PromptFileRef` work is **absorbed** here as the prompt-composition shape inside
 `StageProfile` (nothing from #40 is discarded).
 **Date:** 2026-06-07.

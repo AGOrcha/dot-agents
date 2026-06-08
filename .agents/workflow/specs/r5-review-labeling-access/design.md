@@ -1,6 +1,6 @@
 # R5 — Human-in-the-loop review, labeling, and access layer — spec
 
-**Status:** draft (2026-05-27)
+**Status:** active (2026-05-27)
 **Scope:** project (dot-agents)
 **Parent spec:** [`agent-run-scoring-observability-platform`](../agent-run-scoring-observability-platform/design.md)
 **Plan:** `.agents/workflow/plans/r5-review-labeling-access/` (PLAN.yaml + plan-level design.md)

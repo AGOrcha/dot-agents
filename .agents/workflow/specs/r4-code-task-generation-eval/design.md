@@ -1,6 +1,6 @@
 # R4 — Code-task generation and evaluation harness — spec
 
-**Status:** draft (2026-05-27)
+**Status:** active (2026-05-27)
 **Scope:** project (dot-agents)
 **Parent spec:** [`agent-run-scoring-observability-platform`](../agent-run-scoring-observability-platform/design.md)
 **Plan:** `.agents/workflow/plans/r4-code-task-generation-eval/` (PLAN.yaml + plan-level design.md)

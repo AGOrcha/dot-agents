@@ -1,6 +1,6 @@
 # Spec: managed worktree platform for delegation/branch isolation
 
-Status: draft / git-layer decision VERIFIED (wt0 spike, 2026-05-28).
+Status: active / git-layer decision VERIFIED (wt0 spike, 2026-05-28).
 Decision A (pure go-git v6) confirmed feasible incl. all 4 residuals —
 see "wt0 spike findings" below. Ready to graduate to wt1 implementation.
 

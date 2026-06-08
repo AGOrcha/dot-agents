@@ -1,6 +1,6 @@
 # Spec: graphstore public API contract + concurrent-invocation strategy
 
-Status: draft / open-decision (maintainer-directed analysis 2026-05-17,
+Status: active (decision C locked) (maintainer-directed analysis 2026-05-17,
 from PR #16 review threads: maxNodes Low-1, deps-singleton Low-2)
 
 ## Problem

@@ -1,0 +1,65 @@
+schema_version: 1
+plan_id: graphstore-concurrency-contract
+tasks:
+    - id: t1-store-contract
+      title: Define the backend/strategy-agnostic Store contract (hard bounds + timeout)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore
+      verification_required: true
+      notes: 'Publish a stable Store interface: ops are backend- and process-model-agnostic; maxNodes/maxDepth/result-limit are HARD caller-visible guarantees and a request timeout is part of the contract. Document read/write + single-goroutine-handle semantics; cross-process serialization is the provider''s job. This is the prerequisite that makes the later Path-A->Path-B swap invisible (spec Core decision + DECISION C).'
+      app_type: go-cli
+    - id: t2-path-a-provider
+      title: Implement Path-A ephemeral provider behind Store (uniform bound/timeout enforcement)
+      status: pending
+      depends_on:
+        - t1-store-contract
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore
+      verification_required: true
+      notes: 'Path A behind Store: lazy/cheap ephemeral open, short-lived read-mostly conns, no daemon. Enforce bounds + timeout uniformly across native BFS and the CRG bridge. Provider seam must not assume ephemeral (Path B swaps in later).'
+      app_type: go-cli
+    - id: t3-bind-callers-deps
+      title: Bind callers + Deps singleton to the Store contract (close di-refactor OD-1)
+      status: pending
+      depends_on:
+        - t1-store-contract
+        - t2-path-a-provider
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore
+        - commands
+      verification_required: true
+      notes: All callers + the package deps singleton bind to Store; singleton holds a contract-typed handle whose provider owns pooling/serialization. Closes di-refactor OD-1.
+      app_type: go-cli
+    - id: t4-bounds-parity-tests
+      title: 'Regression tests: hard cap, native/CRG parity, request timeout'
+      status: pending
+      depends_on:
+        - t2-path-a-provider
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore
+      verification_required: true
+      notes: 'Prove the contract guarantees: hard cap (no frontier overshoot), native<->CRG cross-path parity, request timeout honored.'
+      app_type: go-cli
+    - id: t5-doc-concurrency
+      title: Document concurrency model + close maxNodes Low-1 via the contract
+      status: pending
+      depends_on:
+        - t1-store-contract
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs
+        - internal/graphstore
+      verification_required: true
+      notes: Document read/write guarantees, single-goroutine handle, cross-process=provider; SQLite low-write-concurrency + Postgres/pgbouncer recommendation. Close maxNodes Low-1 via the contract.
+      app_type: go-cli
