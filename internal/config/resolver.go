@@ -60,6 +60,7 @@ var fieldCategories = map[string]MergeCategory{
 	"skills":                CategorySetUnion,
 	"agents":                CategorySetUnion,
 	"rules":                 CategorySetUnion,
+	"stage_profiles":        CategoryMapMerge,
 	"verifier_profiles":     CategoryMapMerge,
 	"reviewer_profiles":     CategoryMapMerge,
 	"app_type_verifier_map": CategoryMapMerge,

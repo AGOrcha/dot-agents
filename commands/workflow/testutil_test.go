@@ -604,8 +604,8 @@ func setupVerifierDispatchProject(t *testing.T, taskAppType, planDefaultAppType 
   "mcp": false,
   "settings": false,
   "sources": [{"type":"local"}],
-  "verifier_profiles": {"unit":{"label":"U"},"api":{"label":"A"}},
-  "app_type_verifier_map": {"api":["unit","api"]}
+  "stage_profiles": {"verifier": {"unit":{"label":"U"},"api":{"label":"A"}}},
+  "execution_profile": {"by_app_type": {"api": {"topology": {"verifier_sequence": ["unit","api"]}}}}
 }`
 	if err := os.WriteFile(filepath.Join(dir, ".agentsrc.json"), []byte(rc), 0644); err != nil {
 		t.Fatalf("write .agentsrc.json: %v", err)

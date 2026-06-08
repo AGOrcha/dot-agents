@@ -2,11 +2,13 @@ package workflow
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -225,5 +227,185 @@ func TestWorkflowBundleStages_JSONOutput(t *testing.T) {
 	}
 	if !strings.Contains(got, `"stage": "impl"`) || !strings.Contains(got, `"verifier_type": "unit"`) || !strings.Contains(got, `"stage": "review"`) {
 		t.Fatalf("missing expected stage entries in JSON: %s", got)
+	}
+}
+
+// ── source-aware prompt_files (config-v2 Q1, Option B) ───────────────────────
+
+// TestBundlePromptFilesFromRefs_TypedAndLegacy proves the bundle preserves the
+// source/version provenance of a typed prompt_files entry while flattening a
+// legacy bare-string entry to a plain path with empty source/version. This is
+// the positive case for the source-aware bundle bridge.
+func TestBundlePromptFilesFromRefs_TypedAndLegacy(t *testing.T) {
+	refs := []config.PromptFileRef{
+		{Path: "verifiers/verifier.base.md"},                             // legacy local
+		{Source: "acme", Path: "verifiers/cli-runner.md", Version: "v2"}, // typed, pinned
+		{Source: "acme", Path: "verifiers/cli-runner.project.md"},        // typed, no version
+	}
+	got := bundlePromptFilesFromRefs(refs)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 prompt files, got %d: %+v", len(got), got)
+	}
+	if got[0].Source != "" || got[0].Path != "verifiers/verifier.base.md" || got[0].Version != "" {
+		t.Errorf("legacy entry not flattened to local path: %+v", got[0])
+	}
+	if got[1].Source != "acme" || got[1].Path != "verifiers/cli-runner.md" || got[1].Version != "v2" {
+		t.Errorf("typed pinned entry lost provenance: %+v", got[1])
+	}
+	if got[2].Source != "acme" || got[2].Version != "" {
+		t.Errorf("typed entry without version mishandled: %+v", got[2])
+	}
+}
+
+// TestBundlePromptFilesFromRefs_DropsBlankPath is the negative case: an entry
+// whose path is empty or whitespace must never enter the bundle.
+func TestBundlePromptFilesFromRefs_DropsBlankPath(t *testing.T) {
+	refs := []config.PromptFileRef{
+		{Path: "  "},                // whitespace-only -> dropped
+		{Source: "acme", Path: ""},  // empty path -> dropped
+		{Path: "verifiers/unit.md"}, // kept
+	}
+	got := bundlePromptFilesFromRefs(refs)
+	if len(got) != 1 || got[0].Path != "verifiers/unit.md" {
+		t.Fatalf("expected only the non-blank entry to survive, got %+v", got)
+	}
+}
+
+// TestFlattenBundlePromptPaths reduces source-aware files to the flat []string
+// surface the existing bundle prompt_files field accepts, skipping blanks.
+func TestFlattenBundlePromptPaths(t *testing.T) {
+	files := []bundlePromptFile{
+		{Path: "a.md"},
+		{Source: "acme", Path: "b.md", Version: "v1"},
+		{Path: "   "}, // blank -> skipped
+	}
+	got := flattenBundlePromptPaths(files)
+	want := []string{"a.md", "b.md"}
+	if len(got) != len(want) {
+		t.Fatalf("flatten: got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("flatten[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestPromptFileRef_UnmarshalLegacyString covers the bare-string read path: a
+// legacy prompt_files entry decodes to {path:<string>} with empty source/version.
+func TestPromptFileRef_UnmarshalLegacyString(t *testing.T) {
+	var r config.PromptFileRef
+	if err := json.Unmarshal([]byte(`"verifiers/unit.md"`), &r); err != nil {
+		t.Fatalf("unmarshal legacy string: %v", err)
+	}
+	if r.Path != "verifiers/unit.md" || r.Source != "" || r.Version != "" {
+		t.Fatalf("legacy decode wrong: %+v", r)
+	}
+}
+
+// TestPromptFileRef_UnmarshalTypedObject covers the typed-object read path.
+func TestPromptFileRef_UnmarshalTypedObject(t *testing.T) {
+	var r config.PromptFileRef
+	in := `{"source":"acme","path":"verifiers/cli-runner.md","version":"v3"}`
+	if err := json.Unmarshal([]byte(in), &r); err != nil {
+		t.Fatalf("unmarshal typed object: %v", err)
+	}
+	if r.Source != "acme" || r.Path != "verifiers/cli-runner.md" || r.Version != "v3" {
+		t.Fatalf("typed decode wrong: %+v", r)
+	}
+}
+
+// TestPromptFileRef_UnmarshalRejectsBadShape is the negative case: a non
+// string/object entry (and an object missing path) must error.
+func TestPromptFileRef_UnmarshalRejectsBadShape(t *testing.T) {
+	var r config.PromptFileRef
+	if err := json.Unmarshal([]byte(`42`), &r); err == nil {
+		t.Error("expected error for numeric prompt_files entry")
+	}
+	if err := json.Unmarshal([]byte(`{"source":"acme"}`), &r); err == nil {
+		t.Error("expected error for object entry missing path")
+	}
+	if err := json.Unmarshal([]byte(`""`), &r); err == nil {
+		t.Error("expected error for empty-string entry")
+	}
+}
+
+// TestPromptFileRef_MarshalCompactAndObject proves the round-trip shape: a
+// path-only ref marshals to the compact string form (legacy byte-for-byte
+// stability) while a source/version ref marshals to the typed object.
+func TestPromptFileRef_MarshalCompactAndObject(t *testing.T) {
+	legacy := config.PromptFileRef{Path: "verifiers/unit.md"}
+	data, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy: %v", err)
+	}
+	if string(data) != `"verifiers/unit.md"` {
+		t.Fatalf("legacy ref should marshal to a bare string, got %s", data)
+	}
+
+	typed := config.PromptFileRef{Source: "acme", Path: "verifiers/cli-runner.md", Version: "v2"}
+	data, err = json.Marshal(typed)
+	if err != nil {
+		t.Fatalf("marshal typed: %v", err)
+	}
+	var back config.PromptFileRef
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatalf("round-trip unmarshal: %v", err)
+	}
+	if back != typed {
+		t.Fatalf("round-trip mismatch: got %+v want %+v", back, typed)
+	}
+}
+
+// TestStageProfile_AgentsRCRoundTrip proves a legacy verifier_profiles block
+// folds into stage_profiles.verifier on read and survives a full AgentsRC
+// marshal/unmarshal cycle (re-emitted under stage_profiles, not the legacy key),
+// mixing a legacy string entry and a source-pinned typed entry in one profile.
+func TestStageProfile_AgentsRCRoundTrip(t *testing.T) {
+	in := []byte(`{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "verifier_profiles": {
+    "cli-runner": {
+      "label": "CLI runner",
+      "prompt_files": [
+        "verifiers/verifier.base.md",
+        {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
+      ]
+    }
+  }
+}`)
+	var rc config.AgentsRC
+	if err := json.Unmarshal(in, &rc); err != nil {
+		t.Fatalf("unmarshal agentsrc: %v", err)
+	}
+	prof, ok := rc.StageProfiles["verifier"]["cli-runner"]
+	if !ok {
+		t.Fatalf("legacy verifier_profiles did not fold into stage_profiles.verifier: %+v", rc.StageProfiles)
+	}
+	if rc.ExtraFields["verifier_profiles"] != nil {
+		t.Errorf("verifier_profiles leaked into ExtraFields: %s", rc.ExtraFields["verifier_profiles"])
+	}
+	if len(prof.PromptFiles) != 2 {
+		t.Fatalf("expected 2 prompt files, got %d", len(prof.PromptFiles))
+	}
+	if prof.PromptFiles[0].Path != "verifiers/verifier.base.md" || prof.PromptFiles[0].Source != "" {
+		t.Errorf("legacy entry decoded wrong: %+v", prof.PromptFiles[0])
+	}
+	if prof.PromptFiles[1].Source != "acme" || prof.PromptFiles[1].Version != "v2" {
+		t.Errorf("typed entry decoded wrong: %+v", prof.PromptFiles[1])
+	}
+
+	out, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal agentsrc: %v", err)
+	}
+	var rc2 config.AgentsRC
+	if err := json.Unmarshal(out, &rc2); err != nil {
+		t.Fatalf("re-unmarshal agentsrc: %v", err)
+	}
+	prof2 := rc2.StageProfiles["verifier"]["cli-runner"]
+	if len(prof2.PromptFiles) != 2 || prof2.PromptFiles[1].Source != "acme" {
+		t.Fatalf("round-trip lost typed prompt provenance: %+v", prof2.PromptFiles)
 	}
 }

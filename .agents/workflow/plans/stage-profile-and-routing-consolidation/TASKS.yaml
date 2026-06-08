@@ -1,0 +1,93 @@
+schema_version: 1
+plan_id: stage-profile-and-routing-consolidation
+tasks:
+    - id: t1-stage-profile-type
+      title: StageProfile type + stage_profiles map + merge wiring
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/resolver.go
+      verification_required: true
+      notes: 'Rename VerifierProfile->StageProfile (keep PromptFileRef from #40 verbatim). Replace verifier_profiles/reviewer_profiles fields with StageProfiles map[string]map[string]StageProfile json:stage_profiles. Update agentsRCCore, MarshalJSON, UnmarshalJSON, agentsRCKnown (stage_profiles true; keep 3 legacy keys true), MergeGenerateAgentsRC; rename cloneVerifierProfiles->cloneStageProfiles (deep-copy nested map). resolver.go: add stage_profiles CategoryMapMerge; keep legacy keys mapped.'
+      app_type: go-cli
+    - id: t2-legacy-fold
+      title: Back-compat fold of 3 legacy keys into the new model
+      status: pending
+      depends_on:
+        - t1-stage-profile-type
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/snapshot.go
+      verification_required: true
+      notes: 'Effective-layer normalization: verifier_profiles->stage_profiles.verifier, reviewer_profiles->stage_profiles.reviewer, app_type_verifier_map[type]->execution_profile.by_app_type[type].topology.verifier_sequence (create entry when absent; only when new field unset). Canonical marshal emits only new keys. Settle placement (UnmarshalJSON vs effective-layer; effective-layer preferred per spec D5).'
+      app_type: go-cli
+    - id: t3-consumers
+      title: Migrate consumers to stage_profiles + execution_profile.topology
+      status: pending
+      depends_on:
+        - t1-stage-profile-type
+        - t2-legacy-fold
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/profile_prompt.go
+        - commands/workflow/delegation.go
+        - commands/workflow/app_types.go
+        - commands/config/explain.go
+        - internal/config/execution_profile.go
+        - internal/config/layer_schema.go
+      verification_required: true
+      notes: 'profile_prompt.go: resolve stage_profiles[stage][slug]; widen --kind to executor/orchestrator. delegation.go: agentsrcFanoutDispatch reads stage_profiles+execution_profile; mappedVerifierSequence resolves topology.verifier_sequence (fallback folded map); validateVerifierProfileRefs validates vs stage_profiles.{verifier,reviewer}. app_types.go: resolveEffectiveAppTypeMap reads execution_profile.by_app_type.*.topology.verifier_sequence; update authoring hint. explain/execution_profile/layer_schema: update key strings/comments.'
+      app_type: go-cli
+    - id: t4-schema-and-migrate
+      title: Schema + migrate live manifest and fixtures
+      status: pending
+      depends_on:
+        - t1-stage-profile-type
+        - t2-legacy-fold
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - schemas/agentsrc.schema.json
+        - .agentsrc.json
+      verification_required: true
+      notes: 'schema: add stage_profiles (object->stage->slug->{label,prompt_files}) reusing $defs/promptFileList; mark 3 legacy props deprecated in description. Migrate live .agentsrc.json (5 verifier + 3 reviewer profiles + any app_type_verifier_map) to new keys. Migrate Go testdata fixtures in the same diff.'
+      app_type: go-cli
+    - id: t5-tests
+      title: Update + add tests across config/workflow/scaffold/relevance
+      status: pending
+      depends_on:
+        - t1-stage-profile-type
+        - t2-legacy-fold
+        - t3-consumers
+        - t4-schema-and-migrate
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc_test.go
+        - commands/workflow
+        - internal/scaffold/home/copy_test.go
+        - commands/config
+      verification_required: true
+      notes: 'agentsrc_test: rename to StageProfile/stage_profiles; add legacy-fold round-trip (all 3 old keys in -> new keys out) + cloneStageProfiles nil/alias. workflow {delegation,bundle,app_types,profile_prompt}_test: new-shape fixtures; add executor/orchestrator resolve-prompt + ''delegation sequence via execution_profile, no app_type_verifier_map'' case. scaffold copy_test + relevance tests updated.'
+      app_type: go-cli
+    - id: t6-supersede-pr40
+      title: 'Branch off PR #40 HEAD, open new PR, close #40'
+      status: pending
+      depends_on:
+        - t1-stage-profile-type
+        - t2-legacy-fold
+        - t3-consumers
+        - t4-schema-and-migrate
+        - t5-tests
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: false
+      notes: 'Base consolidation branch on org/config-v2-p1c-verifier-source-aware to inherit PromptFileRef + schema defs + tests. Open new PR (consolidation title). Close PR #40 as superseded with pointer. Commits authored as the user (stealth mode).'
+      app_type: go-cli

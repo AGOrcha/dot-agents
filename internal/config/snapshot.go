@@ -102,8 +102,8 @@ type Snapshot struct {
 
 // EffectiveRaw returns the effective config as a decoded top-level JSON object.
 // This is the shape explain surfaces walk for arbitrary dot-paths; it round-trips
-// through the AgentsRC marshaler so ExtraFields (verifier_profiles,
-// app_type_verifier_map, …) are included.
+// through the AgentsRC marshaler so typed fields (stage_profiles, execution_profile,
+// …) and any remaining ExtraFields are included.
 func (s *Snapshot) EffectiveRaw() (map[string]any, error) {
 	data, err := json.Marshal(s.Effective)
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *Snapshot) EffectiveRaw() (map[string]any, error) {
 }
 
 // FieldAt returns the FieldProvenance for an arbitrary dot-separated path
-// (e.g. "kg.backend", "app_type_verifier_map.go-cli"), computing it on demand by
+// (e.g. "kg.backend", "execution_profile.by_app_type.go-cli"), computing it on demand by
 // walking each layer's raw object. Top-level paths are also available directly
 // in s.Provenance; FieldAt is the general accessor that also handles nested keys.
 func (s *Snapshot) FieldAt(path string) FieldProvenance {
