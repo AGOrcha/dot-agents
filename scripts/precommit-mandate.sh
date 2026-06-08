@@ -100,6 +100,18 @@ cmd_coverage() {
 _sonar_scan_native() {
   local logf attempt=0 max=3 rc
   logf="$(mktemp -t sonar-scan.XXXXXX)"
+  # Keep the working tree pristine so prek does not abort the push with "files
+  # were modified by this hook" even on a PASSED gate. Two sources of in-tree
+  # churn the containerized path already guards against, but the native path did
+  # not:
+  #   1. A live git fsmonitor daemon (e.g. an editor's git integration keeps one
+  #      alive) reports phantom tracked-file changes when the scanner walks the
+  #      tree. Stop it and drop its socket first. fsmonitor is a perf cache (off
+  #      by default here) and won't auto-restart mid-scan; .git SCM data is
+  #      untouched.
+  #   2. The scanner writes .scannerwork/ into repo_root; remove it afterwards.
+  git fsmonitor--daemon stop >/dev/null 2>&1 || true
+  rm -f "$repo_root/.git/fsmonitor--daemon.ipc" 2>/dev/null || true
   while :; do
     attempt=$((attempt + 1))
     ( cd "$repo_root" && sonar-scanner \
@@ -113,10 +125,12 @@ _sonar_scan_native() {
       continue
     fi
     rm -f "$logf"
+    rm -rf "$repo_root/.scannerwork" 2>/dev/null || true
     sonar_gate_diagnostics
     fail "sonar-scanner: SonarCloud quality gate failed (see conditions/hotspots above)"
   done
   rm -f "$logf"
+  rm -rf "$repo_root/.scannerwork" 2>/dev/null || true
 }
 
 cmd_sonar() {

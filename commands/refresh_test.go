@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
@@ -953,5 +954,190 @@ func TestRunRefresh_SharedTargetProjectionIdempotent(t *testing.T) {
 	if msg, ok := snapshotsEqual(first, second); !ok {
 		t.Fatalf("refresh not idempotent under .codex/: %s\nfirst=%d second=%d",
 			msg, len(first), len(second))
+	}
+}
+
+// --- config-v2-coherence §7A.5: refresh lock-fresh pre-step + exact/prune ---
+
+// ensureLockFreshForRefresh is a no-op in dry-run: it must never write a lock.
+func TestEnsureLockFreshForRefresh_DryRunSkips(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	projectPath := filepath.Join(tmp, "p")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	ensureLockFreshForRefresh(projectPath)
+
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run must not write a lock, stat err = %v", err)
+	}
+}
+
+// A manifest-less project is a well-defined manifest-less refresh: the lock-
+// fresh pre-step is a silent no-op (no panic, no lock written).
+func TestEnsureLockFreshForRefresh_ManifestlessIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	projectPath := filepath.Join(tmp, "p")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	ensureLockFreshForRefresh(projectPath) // must not panic
+
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(err) {
+		t.Fatalf("manifest-less project must not get a lock, stat err = %v", err)
+	}
+}
+
+// A project WITH a manifest gets its lock ensured fresh: EnsureResolved
+// re-resolves the local-only stack and writes the lock before projection.
+func TestEnsureLockFreshForRefresh_ManifestPresentWritesLock(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(tmp, "p")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rc := &config.AgentsRC{Version: 1, Project: "p"}
+	if err := rc.Save(projectPath); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	ensureLockFreshForRefresh(projectPath)
+
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); err != nil {
+		t.Fatalf("manifest project must get a fresh lock written, stat err = %v", err)
+	}
+}
+
+// refreshInexact defaults to false so refresh projects EXACT/PRUNE by default
+// (the spec's exact-by-default contract). This pins the default; flipping it
+// would silently regress the projection to additive-only.
+func TestRefreshInexact_DefaultsToExact(t *testing.T) {
+	if refreshInexact {
+		t.Fatal("refreshInexact must default to false (exact/prune by default)")
+	}
+}
+
+// End-to-end: runRefresh on an installed project projects the wanted skill AND
+// prunes a pre-existing stale managed output (exact projection), proving the
+// command wires RunSharedTargetProjectionExact with exact=true by default.
+func TestRunRefresh_ExactProjectionPrunesStaleManagedOutput(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignal(t, tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(tmp, "p")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical wanted skill + its imported pair so the shared-target plan
+	// emits a managed skill intent for the Claude platform.
+	testutil.WriteScopeFilePath(t, projectPath, ".agents", "skills",
+		filepath.Join("review", "SKILL.md"), []byte("---\nname: review\n---\n"))
+	testutil.WriteScopeFilePath(t, agentsHome, "skills", "p",
+		filepath.Join("review", "SKILL.md"), []byte("---\nname: review\n---\n"))
+
+	// Pre-existing stale managed link in the same target dir.
+	stale := filepath.Join(projectPath, ".agents", "skills", "obsolete")
+	canonicalStale := filepath.Join(agentsHome, "skills", "p", "obsolete")
+	if err := os.MkdirAll(canonicalStale, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := links.Symlink(canonicalStale, stale); err != nil {
+		t.Fatalf("seed stale link: %v", err)
+	}
+	if !links.IsManagedLinkUnder(stale, agentsHome) {
+		t.Fatalf("seeded stale link is not managed under %s", agentsHome)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("p", projectPath)
+	cfg.SetPlatformState("claude", true, "")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("p", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	wanted := filepath.Join(projectPath, ".agents", "skills", "review")
+	if _, err := os.Lstat(wanted); err != nil {
+		t.Fatalf("wanted skill must be projected, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale managed output must be pruned by exact refresh, lstat err = %v", err)
+	}
+}
+
+// When EnsureResolved fails for a project that HAS a manifest, refresh surfaces
+// the failure as a warning but does NOT abort: the projection step still runs
+// against the existing lock. We force the failure with an extends ref to an
+// undefined source.
+func TestEnsureLockFreshForRefresh_ResolveErrorWarnsNotFatal(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	if err := os.MkdirAll(filepath.Join(tmp, ".agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(tmp, "p")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Manifest whose extends references an undefined source ⇒ Resolve errors.
+	manifest := `{"version":2,"project":"p","extends":["nosuchsource:org/base.json"]}`
+	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	// Must not panic and must not write a lock (the resolve never completed).
+	ensureLockFreshForRefresh(projectPath)
+	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(err) {
+		t.Fatalf("a failed resolve must not leave a lock, stat err = %v", err)
 	}
 }
