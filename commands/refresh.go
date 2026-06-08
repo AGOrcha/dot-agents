@@ -19,6 +19,17 @@ var Commit = ""
 var Describe = ""
 var refreshImport bool
 
+// refreshInexact opts out of the EXACT/PRUNE outputs projection
+// (config-v2-coherence §7A.5 / D10). Default false ⇒ refresh projects the
+// resolved asset-store union AND prunes managed outputs no longer in the
+// resolved set, so the repo tree converges to exactly what the lock declares.
+// True (`--inexact`) keeps the additive behavior: write the wanted set, leave
+// stale managed outputs in place. The cobra flag that toggles this lives in
+// commands/internal/lifecycle/refresh.go (out of this task's write scope); see
+// .agents/active/fold-back for the deferred flag wiring. The default already
+// satisfies the spec's exact-by-default contract.
+var refreshInexact bool
+
 // refreshConfigLoader is the narrow collaborator refresh.go's
 // fault-injectable LoadConfig operation needs (interface-DI per
 // docs/TEST_SEAMS.md). Single-method, file-prefixed -er form; file-scoped
@@ -226,6 +237,8 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 		}
 	}
 
+	ensureLockFreshForRefresh(path)
+
 	config.SetWindowsMirrorContext(path)
 
 	if runSharedTargetsForRefresh(name, path, installedEnabled) {
@@ -237,12 +250,41 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 	return projectFailed
 }
 
+// ensureLockFreshForRefresh runs the §7A.5 lock half (config.EnsureResolved)
+// before refresh projects outputs, so the asset-store union being projected
+// reflects a current lock (D12: "refresh — ensures lock fresh first"). It is
+// manifest-gated and best-effort: a project with no .agentsrc.json is a
+// well-defined manifest-less refresh (skip silently, matching
+// noteManifestGitSources); a resolution error is surfaced as a warning but
+// does not fail refresh — the projection step still runs against the existing
+// lock. Refresh re-resolves LOCAL scopes only (default EnsureResolved); the
+// explicit upstream re-check is `da config sync`, never refresh (D10/D12).
+// Dry-run skips the (lock-writing) re-resolve entirely.
+func ensureLockFreshForRefresh(path string) {
+	if Flags.DryRun {
+		return
+	}
+	if _, err := config.LoadAgentsRC(path); err != nil {
+		return
+	}
+	if _, err := config.EnsureResolved(path, config.EnsureOpts{}); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("ensure lock fresh: %v", err))
+	}
+}
+
 // runSharedTargetsForRefresh runs the shared-target projection and prints any
 // dry-run plan lines. Returns true when a non-dry-run projection failed
 // (caller withholds the success stamp); dry-run failures are surfaced as
 // warnings but do not propagate.
+//
+// The projection is EXACT/PRUNE by default (config-v2-coherence §7A.5): it
+// projects the resolved set AND prunes managed outputs no longer in it, so the
+// repo converges to exactly what the lock declares. `--inexact` (refreshInexact)
+// opts out, keeping the additive write-only behavior. A prune failure is folded
+// into the same warn-and-fail path as a write failure so a partial application
+// withholds the success stamp.
 func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform) bool {
-	lines, err := platform.RunSharedTargetProjection(name, path, installedEnabled, Flags.DryRun)
+	lines, err := platform.RunSharedTargetProjectionExact(name, path, installedEnabled, Flags.DryRun, !refreshInexact)
 	if err != nil {
 		if Flags.DryRun {
 			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))

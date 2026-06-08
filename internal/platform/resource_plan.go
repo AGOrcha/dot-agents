@@ -29,6 +29,20 @@ const (
 	skillManifestName          = "SKILL.md"
 )
 
+// Filesystem seams for the prune/projection paths. They default to the real
+// operations and exist so the error-propagation branches can be forced
+// deterministically on every OS in tests, without relying on OS-specific tricks
+// (a file-where-a-dir-is-expected ReadDir failure, or chmod-denied unlinks) that
+// are no-ops on Windows. Production behavior is identical to calling the wrapped
+// functions directly.
+var (
+	osReadDir            = os.ReadDir
+	removeIfSymlinkUnder = links.RemoveIfSymlinkUnder
+	executeResourcePlan  = func(p ResourcePlan, repoPath, agentsHome string) error {
+		return p.Execute(repoPath, agentsHome)
+	}
+)
+
 func BuildResourcePlan(intents []ResourceIntent) (ResourcePlan, error) {
 	byConflict := map[string][]ResourceIntent{}
 	for _, intent := range intents {
@@ -554,6 +568,155 @@ func RunSharedTargetProjection(project, repoPath string, platforms []Platform, d
 		return DryRunSharedTargetPlanLines(project, repoPath, platforms)
 	}
 	return nil, CollectAndExecuteSharedTargetPlan(project, repoPath, platforms)
+}
+
+// RunSharedTargetProjectionExact is the EXACT/PRUNE command-layer entry point
+// (config-v2-coherence §7A.5 / D10 "outputs half"): it projects the resolved
+// asset-store union AND prunes managed outputs that are no longer in the
+// resolved set, so the repo tree converges to exactly what the plan declares.
+// It is the projection refresh/install drive by default; pass exact=false
+// (`--inexact`) to keep the additive RunSharedTargetProjection behavior (write
+// the wanted set, leave stale managed outputs in place).
+//
+// Dry-run returns the same preview lines as RunSharedTargetProjection plus a
+// "prune" line for every managed output the apply path would delete, so the
+// preview is a faithful diff of the exact projection. Apply executes the plan
+// then prunes; prune is best-effort relative to the write — a prune failure is
+// returned so the caller can withhold a clean-success stamp.
+//
+// Callers must set config.SetWindowsMirrorContext(repoPath) before calling when
+// the repo needs Windows-specific path behavior for intent resolution.
+func RunSharedTargetProjectionExact(project, repoPath string, platforms []Platform, dryRun, exact bool) ([]string, error) {
+	if !exact {
+		return RunSharedTargetProjection(project, repoPath, platforms, dryRun)
+	}
+	plan, err := BuildSharedTargetPlan(project, platforms)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		lines := dryRunExactProjectionLines(plan, repoPath)
+		if len(lines) == 0 {
+			return []string{"shared targets: (none)"}, nil
+		}
+		return lines, nil
+	}
+	if len(plan.Resources) > 0 {
+		if err := executeResourcePlan(plan, repoPath, config.AgentsHome()); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := plan.PruneStaleSharedTargets(repoPath, config.AgentsHome()); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// dryRunExactProjectionLines is the dry-run preview for the exact projection:
+// the additive write lines (formatSharedTargetPlanForDryRun) followed by a
+// "prune managed" line for every managed output PruneStaleSharedTargets would
+// delete. It never mutates the filesystem — the prune scan only reads.
+func dryRunExactProjectionLines(plan ResourcePlan, repoPath string) []string {
+	var lines []string
+	if len(plan.Resources) > 0 {
+		lines = append(lines, formatSharedTargetPlanForDryRun(plan, repoPath)...)
+	}
+	for _, target := range plan.staleManagedTargets(repoPath, config.AgentsHome()) {
+		lines = append(lines, fmt.Sprintf("shared target: prune managed %s", filepath.ToSlash(config.DisplayPath(target))))
+	}
+	return lines
+}
+
+// PruneStaleSharedTargets deletes managed outputs that are no longer in the
+// resolved plan (the EXACT/PRUNE projection, config-v2-coherence §7A.5). It
+// scans only the parent directories that own at least one ResourcePruneTarget
+// intent — the directories da actively projects into — and removes any entry
+// there that (a) is not a wanted plan target and (b) is a managed link under
+// agentsHome. User-authored files and links pointing outside agentsHome are
+// never touched, so the prune cannot delete content da does not own.
+//
+// Returns the list of pruned absolute paths and an aggregated error: a single
+// stuck removal is reported (errors.Join) rather than short-circuiting, so one
+// failure cannot hide the prune status of the rest and the caller never reports
+// a converged tree while a stale managed output is still live.
+func (p ResourcePlan) PruneStaleSharedTargets(repoPath, agentsHome string) ([]string, error) {
+	wanted, dirs := p.prunableTargets(repoPath)
+	var pruned []string
+	var errs []error
+	for _, dir := range dirs {
+		entries, err := osReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			errs = append(errs, fmt.Errorf("listing managed dir %s: %w", dir, err))
+			continue
+		}
+		for _, entry := range entries {
+			candidate := filepath.Join(dir, entry.Name())
+			if wanted[candidate] {
+				continue
+			}
+			if !links.IsManagedLinkUnder(candidate, agentsHome) {
+				continue
+			}
+			if err := removeIfSymlinkUnder(candidate, agentsHome); err != nil {
+				errs = append(errs, fmt.Errorf("prune managed target %s: %w", candidate, err))
+				continue
+			}
+			pruned = append(pruned, candidate)
+		}
+	}
+	sort.Strings(pruned)
+	return pruned, errors.Join(errs...)
+}
+
+// staleManagedTargets is the read-only scan PruneStaleSharedTargets and the
+// dry-run preview share: it returns the managed outputs the prune would delete,
+// without removing anything.
+func (p ResourcePlan) staleManagedTargets(repoPath, agentsHome string) []string {
+	wanted, dirs := p.prunableTargets(repoPath)
+	var stale []string
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			candidate := filepath.Join(dir, entry.Name())
+			if wanted[candidate] {
+				continue
+			}
+			if links.IsManagedLinkUnder(candidate, agentsHome) {
+				stale = append(stale, candidate)
+			}
+		}
+	}
+	sort.Strings(stale)
+	return stale
+}
+
+// prunableTargets returns (wanted, dirs): the set of absolute target paths the
+// plan declares, and the sorted, de-duplicated set of parent directories that
+// own at least one ResourcePruneTarget intent (the only directories eligible
+// for sibling-pruning). Intents with ResourcePruneNone never contribute a
+// scan directory — their siblings are out of scope for the exact projection.
+func (p ResourcePlan) prunableTargets(repoPath string) (wanted map[string]bool, dirs []string) {
+	wanted = map[string]bool{}
+	dirSet := map[string]bool{}
+	for _, res := range p.Resources {
+		target := resolveIntentTargetPath(res.Intent.TargetPath, repoPath)
+		wanted[target] = true
+		if res.Intent.PrunePolicy == ResourcePruneTarget {
+			dirSet[filepath.Dir(target)] = true
+		}
+	}
+	dirs = make([]string, 0, len(dirSet))
+	for dir := range dirSet {
+		dirs = append(dirs, dir)
+	}
+	sort.Strings(dirs)
+	return wanted, dirs
 }
 
 // CollectAndExecuteSharedTargetPlan runs BuildSharedTargetPlan then executes it against
