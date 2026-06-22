@@ -21,6 +21,17 @@ func TestPluginAndBundleSchemasEmbedded(t *testing.T) {
 	}
 }
 
+func TestAgentsRCSchemaJSONEmbeddedAndParses(t *testing.T) {
+	data := AgentsRCSchemaJSON()
+	if len(data) == 0 {
+		t.Fatal("AgentsRC schema not embedded")
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("AgentsRC schema does not parse as JSON: %v", err)
+	}
+}
+
 func TestValidateSwitchesOnSchemaName(t *testing.T) {
 	// Unknown schema -> nil (default branch).
 	if err := Validate(Schema{name: "unknown"}, []byte(`{}`)); err != nil {

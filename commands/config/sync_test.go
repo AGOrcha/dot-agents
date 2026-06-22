@@ -3,8 +3,10 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,4 +223,124 @@ func syncReportAfterRun(t *testing.T, project, layer string) (SyncReport, error)
 		return SyncReport{}, err
 	}
 	return buildSyncReport(project, layer)
+}
+
+// failingResolver is a resolverSeam that always returns a transport-style error,
+// driving runSync's re-resolve failure branch without any network.
+type failingResolver struct{ err error }
+
+func (f failingResolver) Resolve(string) (*cfg.Snapshot, error) { return nil, f.err }
+
+// TestRunSync_ResolveFailureIsHinted injects a resolver whose Resolve errors and
+// asserts runSync surfaces a non-nil, hinted error (non-zero exit) rather than
+// proceeding to read back a never-written lock.
+func TestRunSync_ResolveFailureIsHinted(t *testing.T) {
+	project := withTwoLocalLayers(t)
+	opts := syncOptions(project, "", false, time.Now().UTC())
+	opts.newResolver = func() resolverSeam {
+		return failingResolver{err: errors.New("boom: remote unreachable")}
+	}
+	err := runSync(opts, testDeps())
+	if err == nil {
+		t.Fatal("expected error when the resolver fails")
+	}
+	if !strings.Contains(err.Error(), "could not re-resolve") {
+		t.Errorf("error = %q, want it to mention the re-resolve failure", err.Error())
+	}
+}
+
+// TestValidateLayerScope_BranchMatrix drives validateLayerScope through its three
+// failure paths and the happy path: an unparseable ref, a manifest that cannot be
+// loaded, a well-formed-but-undeclared ref, and a declared ref.
+func TestValidateLayerScope_BranchMatrix(t *testing.T) {
+	declared := withTwoLocalLayers(t)
+	noManifest := t.TempDir() // no .agentsrc.json under here
+
+	tests := []struct {
+		name    string
+		project string
+		layer   string
+		wantErr string
+	}{
+		{"unparseable ref", declared, "no-colon", "must be"},
+		{"missing manifest", noManifest, "acme:org/base.json", "reading"},
+		{"undeclared ref", declared, "acme:not/declared.json", "not declared"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateLayerScope(tt.project, tt.layer)
+			if err == nil {
+				t.Fatalf("expected error for %s", tt.name)
+			}
+			if tt.wantErr != "" && !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+
+	if err := validateLayerScope(declared, "acme:org/base.json"); err != nil {
+		t.Errorf("declared ref should validate, got %v", err)
+	}
+}
+
+// TestPrintSyncHuman_NoLayers exercises the empty-Layers branch of
+// printSyncHuman: a project with no declared external layers prints the
+// "local stack re-resolved" line and the lockfile path, with no per-layer rows.
+func TestPrintSyncHuman_NoLayers(t *testing.T) {
+	report := SyncReport{OK: true, Lockfile: "/tmp/.agentsrc.lock", Layers: []SyncedLayer{}}
+	buf := &bytes.Buffer{}
+	printSyncHuman(buf, report)
+	out := buf.String()
+	if !strings.Contains(out, "no external layers declared") {
+		t.Errorf("missing empty-layers line:\n%s", out)
+	}
+	if !strings.Contains(out, "/tmp/.agentsrc.lock") {
+		t.Errorf("missing lockfile path:\n%s", out)
+	}
+	if strings.Contains(out, "Summary:") {
+		t.Errorf("empty report should not print a per-layer summary:\n%s", out)
+	}
+}
+
+// TestPrintSyncHuman_ScopedAndUntargeted covers the layer-scoped header plus the
+// targeted/untargeted row marks and the note suffix in printSyncHuman.
+func TestPrintSyncHuman_ScopedAndUntargeted(t *testing.T) {
+	report := SyncReport{
+		OK:       true,
+		Lockfile: "/tmp/.agentsrc.lock",
+		Layer:    "acme:org/base.json",
+		Layers: []SyncedLayer{
+			{Ref: "acme:org/base.json", SHA: "abc1234567", FetchedAt: "2024-01-01T00:00:00Z", Targeted: true},
+			{Ref: "acme:team/frontend.json", Targeted: false, Note: "not targeted by --layer acme:org/base.json"},
+		},
+	}
+	buf := &bytes.Buffer{}
+	printSyncHuman(buf, report)
+	out := buf.String()
+	if !strings.Contains(out, "Config sync (layer acme:org/base.json):") {
+		t.Errorf("missing scoped header:\n%s", out)
+	}
+	if !strings.Contains(out, "1 of 2 layer(s) targeted") {
+		t.Errorf("missing targeted summary:\n%s", out)
+	}
+	if !strings.Contains(out, "not targeted by --layer") {
+		t.Errorf("missing untargeted note:\n%s", out)
+	}
+}
+
+// TestBuildSyncReport_ReadBackErrorOnBadLock covers buildSyncReport's read-back
+// error branch: a malformed .agentsrc.lock makes readLockedConfigSection fail,
+// which buildSyncReport must propagate.
+func TestBuildSyncReport_ReadBackErrorOnBadLock(t *testing.T) {
+	project := withTwoLocalLayers(t)
+	lockPath := cfg.AgentsLockPath(project)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lockPath, []byte("{ this is not valid lock json"), 0o644); err != nil {
+		t.Fatalf("write bad lock: %v", err)
+	}
+	if _, err := buildSyncReport(project, ""); err == nil {
+		t.Fatal("expected buildSyncReport to error on a malformed lockfile")
+	}
 }

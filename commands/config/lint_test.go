@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	cfg "github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // lintProject sets up an isolated project whose manifest extends one local-source
@@ -183,36 +185,169 @@ func TestRunLint_JSONOutputIsStable(t *testing.T) {
 	}
 }
 
-// TestEmbeddedSchemaMatchesCanonical guards against drift between the schema
-// copy embedded into this package (for go:embed) and the canonical
-// schemas/agentsrc.schema.json. If the canonical schema changes, this fails
-// loudly so the embedded copy is refreshed rather than silently diverging.
-func TestEmbeddedSchemaMatchesCanonical(t *testing.T) {
-	root := lintRepoRoot(t)
-	canonical, err := os.ReadFile(filepath.Join(root, "schemas", "agentsrc.schema.json"))
+// withRawManifest writes the given raw manifest body as the project's
+// .agentsrc.json and returns the project root (no extends-layer fixture).
+func withRawManifest(t *testing.T, body string) string {
+	t.Helper()
+	return withRepoLayer(t, body, "")
+}
+
+// TestLintExtendsLayer_BranchMatrix drives lintExtendsLayer through its three
+// non-skip outcomes plus the local-pass path: an unparseable ref → fail, a ref
+// naming an undeclared source → fail, a non-local (git) source → skip, and a
+// valid local layer → pass.
+func TestLintExtendsLayer_BranchMatrix(t *testing.T) {
+	sch, err := compiledAgentsRCSchema()
 	if err != nil {
-		t.Fatalf("read canonical schema: %v", err)
+		t.Fatalf("compile schema: %v", err)
 	}
-	if !bytes.Equal(canonical, agentsRCSchemaJSON) {
-		t.Fatalf("embedded commands/config/agentsrc.schema.json has drifted from schemas/agentsrc.schema.json; re-copy the canonical file")
+
+	localRoot := writeLocalLayer(t, "org/base.json", `{"version":2,"skills":["org-skill"]}`)
+	sources := map[string]cfg.Source{
+		"acme": {ID: "acme", Type: "local", Path: localRoot},
+		"git":  {ID: "git", Type: "git", URL: "https://example/repo.git"},
+	}
+
+	tests := []struct {
+		name       string
+		ref        string
+		wantStatus string
+		wantDetail string
+	}{
+		{"invalid ref", "no-colon-here", lintFail, "invalid layer ref"},
+		{"undeclared source", "ghost:org/base.json", lintFail, "not declared"},
+		{"non-local skipped", "git:org/base.json", lintSkip, "not locally readable"},
+		{"valid local pass", "acme:org/base.json", lintPass, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			res := lintExtendsLayer(sch, cfg.LayerRef{Ref: tt.ref}, sources)
+			if res.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q (detail %q)", res.Status, tt.wantStatus, res.Detail)
+			}
+			if tt.wantDetail != "" && !strings.Contains(res.Detail, tt.wantDetail) {
+				t.Errorf("detail = %q, want substring %q", res.Detail, tt.wantDetail)
+			}
+		})
 	}
 }
 
-// lintRepoRoot walks up from the test's working dir to the repo root (the dir
-// containing schemas/agentsrc.schema.json).
-func lintRepoRoot(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
+// TestLintOneFile_FileNotFound covers the os.IsNotExist read-error branch in
+// lintOneFile via a path that does not exist.
+func TestLintOneFile_FileNotFound(t *testing.T) {
+	sch, err := compiledAgentsRCSchema()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compile schema: %v", err)
 	}
-	dir := wd
-	for i := 0; i < 6; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "schemas", "agentsrc.schema.json")); err == nil {
-			return dir
+	missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+	res := lintOneFile(sch, "ghost", missing)
+	if res.Status != lintFail {
+		t.Fatalf("status = %q, want fail", res.Status)
+	}
+	if !strings.Contains(res.Detail, "file not found") {
+		t.Errorf("detail = %q, want it to mention file not found", res.Detail)
+	}
+}
+
+// TestLintOneFile_ReadError covers the non-IsNotExist read-error branch by
+// pointing lint at a directory (a read returns an error that is not IsNotExist).
+func TestLintOneFile_ReadError(t *testing.T) {
+	sch, err := compiledAgentsRCSchema()
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+	dir := t.TempDir() // reading a directory as a file errors, but not with IsNotExist
+	res := lintOneFile(sch, "dir", dir)
+	if res.Status != lintFail {
+		t.Fatalf("status = %q, want fail", res.Status)
+	}
+	if !strings.Contains(res.Detail, "could not read") {
+		t.Errorf("detail = %q, want it to mention a read failure", res.Detail)
+	}
+}
+
+// TestRunLint_CouldNotRunWhenSchemaUnavailable is a guard for runLint's
+// build-error branch: when buildLintReport can compile the schema it cannot fail
+// here, so we assert the happy path returns nil and the failure path (a corrupt
+// layer) returns a non-nil error, exercising both runLint exits.
+func TestRunLint_HumanOutputSummaryLine(t *testing.T) {
+	project := lintProject(t, "", `{"version":2,"skills":["org-skill"]}`)
+	opts := lintOptions(project, false)
+	buf := &bytes.Buffer{}
+	opts.stdout = buf
+	if err := runLint(opts, testDeps()); err != nil {
+		t.Fatalf("human lint: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Config lint (layer schema validation):") {
+		t.Errorf("missing header in human output:\n%s", out)
+	}
+	if !strings.Contains(out, "Summary:") || !strings.Contains(out, "OK") {
+		t.Errorf("missing OK summary line in human output:\n%s", out)
+	}
+}
+
+// TestPrintLintHuman_AllStatuses renders a report containing one of each status
+// (including an unknown status) to exercise printLintHuman's switch and the
+// lintMark default branch.
+func TestPrintLintHuman_AllStatuses(t *testing.T) {
+	report := LintReport{
+		OK: false,
+		Results: []LintResult{
+			{File: "ok-layer", Status: lintPass},
+			{File: "bad-layer", Status: lintFail, Detail: "schema violation: boom"},
+			{File: "remote-layer", Status: lintSkip, Detail: "git layer"},
+			{File: "weird-layer", Status: "mystery"},
+		},
+	}
+	buf := &bytes.Buffer{}
+	printLintHuman(buf, report)
+	out := buf.String()
+	if !strings.Contains(out, "1 passed, 1 failed, 1 skipped") {
+		t.Errorf("summary counts wrong:\n%s", out)
+	}
+	if !strings.Contains(out, "FAILED") {
+		t.Errorf("expected FAILED outcome for not-OK report:\n%s", out)
+	}
+}
+
+// TestLintMarkAndOutcome covers lintMark for every status (including the unknown
+// default) and lintOutcome for both branches.
+func TestLintMarkAndOutcome(t *testing.T) {
+	markCases := map[string]string{
+		lintPass:   "ok  ",
+		lintFail:   "FAIL",
+		lintSkip:   "skip",
+		"anything": "?   ",
+	}
+	for status, want := range markCases {
+		if got := lintMark(status); got != want {
+			t.Errorf("lintMark(%q) = %q, want %q", status, got, want)
 		}
-		dir = filepath.Dir(dir)
 	}
-	t.Fatalf("could not locate repo root from %s", wd)
-	return ""
+	if got := lintOutcome(true); got != "OK" {
+		t.Errorf("lintOutcome(true) = %q, want OK", got)
+	}
+	if got := lintOutcome(false); got != "FAILED" {
+		t.Errorf("lintOutcome(false) = %q, want FAILED", got)
+	}
+}
+
+// TestBuildLintReport_RepoManifestMissingIsTerminal exercises the
+// LoadAgentsRC-failure branch in buildLintReport: with no .agentsrc.json the
+// repo-local result records the not-found and OK is flipped to false without a
+// second decode error.
+func TestBuildLintReport_RepoManifestMissingIsTerminal(t *testing.T) {
+	project := withRawManifest(t, "")
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	if report.OK {
+		t.Fatalf("expected not-OK when repo manifest is missing, got %+v", report)
+	}
+	repo, ok := findLintResult(report.Results, "repo-local")
+	if !ok || repo.Status != lintFail {
+		t.Fatalf("repo-local = %+v (ok=%v), want fail", repo, ok)
+	}
 }

@@ -1,8 +1,6 @@
 package config
 
 import (
-	// _ "embed": pull in the canonical AgentsRC layer schema via go:embed.
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,18 +10,10 @@ import (
 	"sync"
 
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/schemas"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/spf13/cobra"
 )
-
-// agentsRCSchemaJSON is the canonical AgentsRC layer schema, embedded so lint
-// validates every declared layer against the same contract used elsewhere in the
-// repo (schemas/agentsrc.schema.json). It is embedded INTO this command (rather
-// than reached through the schemas package, which only wires plugin.schema.json
-// through schemas.Validate) so the validation stays self-contained and in-scope.
-//
-//go:embed agentsrc.schema.json
-var agentsRCSchemaJSON []byte
 
 var (
 	agentsRCSchemaCompiled    *jsonschema.Schema
@@ -37,7 +27,7 @@ var (
 func compiledAgentsRCSchema() (*jsonschema.Schema, error) {
 	agentsRCSchemaCompileOnce.Do(func() {
 		var doc any
-		if err := json.Unmarshal(agentsRCSchemaJSON, &doc); err != nil {
+		if err := json.Unmarshal(schemas.AgentsRCSchemaJSON(), &doc); err != nil {
 			agentsRCSchemaCompileErr = fmt.Errorf("parsing embedded agentsrc.schema.json: %w", err)
 			return
 		}
