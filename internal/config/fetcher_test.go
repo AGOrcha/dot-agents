@@ -1072,7 +1072,7 @@ func TestLocalFetcherCapturesWorktreeCacheKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Fetch (2nd): %v", err)
 	}
-	if keyB := DefaultCacheKey(SourceKindLocal, got2.KeyInputs); keyA == keyB {
+	if keyA == DefaultCacheKey(SourceKindLocal, got2.KeyInputs) {
 		t.Errorf("local key did not change after worktree edit: both %q", keyA)
 	}
 }
