@@ -93,7 +93,7 @@ re-checks upstream.
 			return runSync(opts, deps)
 		},
 	}
-	cmd.Flags().StringVar(&opts.layer, "layer", "", "scope the sync report to one declared layer (source-id:path)")
+	cmd.Flags().StringVar(&opts.layer, "layer", "", "filter the sync report to one declared layer (source-id:path); the full stack is still re-resolved")
 	return cmd
 }
 
