@@ -410,27 +410,274 @@ func TestCopilotBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*copilot)(nil)
 }
 
-// TestCopilotUserConfig_EmptyUntilWired pins copilot's UserConfigReporter
-// behavior: copilot's documented user-config layer (~/.copilot/*) is not yet
-// wired by dot-agents, so it reports no managed user-home links and an
-// absent/clean badge — which appendPlatformIfPresent filters out of the status
-// list. This is intentional, not "no user-config layer": the interface is
-// implemented so copilot opts into the diagnostics path the moment user-scope
-// wiring lands.
-func TestCopilotUserConfig_EmptyUntilWired(t *testing.T) {
+// ---------- UserConfigReporter implementation (P4b) ----------
+
+// writeCopilotUserHook writes a plausible rendered copilot hook file under
+// ~/.copilot/hooks/, mirroring the bytes createUserHomeHookFiles emits. Keeps
+// the table-driven setup closures terse (low cognitive complexity).
+func writeCopilotUserHook(t *testing.T, home, name string) {
+	t.Helper()
+	dir := copilotUserHooksDir(home)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"x"}]}}`)
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCopilotUserBrokenLinks is the table-driven cover for copilot's
+// UserConfigReporter broken-link surface (~/.copilot/hooks/*). Every reported
+// link carries PlatformID="copilot"; a rendered file is silently skipped.
+func TestCopilotUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken hook dir entry",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(copilotUserHooksDir(home), "ghost.json"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "rendered hook file ignored",
+			setup: func(t *testing.T, home string) {
+				writeCopilotUserHook(t, home, "prompt-log.json")
+			},
+			wantCount: 0,
+		},
+		{
+			name: "healthy hook symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "hooks", "global", "prompt-log.json")
+				mkdirAllT(t, filepath.Dir(target))
+				if err := os.WriteFile(target, []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(copilotUserHooksDir(home), "prompt-log.json"))
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &copilot{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "copilot", got, tc.wantCount)
+		})
+	}
+}
+
+// TestCopilotUserBadge covers the copilot user-config badge over
+// ~/.copilot/hooks/: Present reflects any managed rendered hook and Broken
+// reflects any dangling managed link.
+func TestCopilotUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present rendered hook",
+			setup: func(t *testing.T, home string) {
+				writeCopilotUserHook(t, home, "prompt-log.json")
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken hook surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(copilotUserHooksDir(home), "ghost.json"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &copilot{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Copilot" {
+				t.Errorf("UserBadge.Name = %q, want Copilot", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestCopilotUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the copilot platform.
+func TestCopilotUserConfig_InterfaceConformance(t *testing.T) {
 	var _ UserConfigReporter = (*copilot)(nil)
+}
 
-	home := t.TempDir()
-	c := &copilot{io: stdPlatformIO{}}
-
-	if got := c.UserBrokenLinks(home); got != nil {
-		t.Errorf("UserBrokenLinks = %+v, want nil (no copilot user-scope wiring yet)", got)
+// TestCopilotCreateUserHomeHookFiles proves CreateLinks wires a global-scope
+// canonical hook into ~/.copilot/hooks/ (the user-home fanout), and that the
+// freshly rendered file is reported present/clean by the badge.
+func TestCopilotCreateUserHomeHookFiles(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
 	}
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createUserHomeHookFiles("proj", agentsHome); err != nil {
+		t.Fatalf("createUserHomeHookFiles: %v", err)
+	}
+	out := filepath.Join(copilotUserHooksDir(home), "prompt-log.json")
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("expected user-home hook at %s: %v", out, err)
+	}
+
 	badge := c.UserBadge(home)
-	if badge.Name != "Copilot" {
-		t.Errorf("UserBadge.Name = %q, want Copilot", badge.Name)
+	if !badge.Present || badge.Broken {
+		t.Errorf("UserBadge = %+v, want Present=true Broken=false", badge)
 	}
-	if badge.Present || badge.Broken {
-		t.Errorf("UserBadge = %+v, want absent/clean (Present=false Broken=false)", badge)
+}
+
+// seedCopilotGlobalHook writes a global-scope canonical HOOK.yaml that renders
+// to a single ~/.copilot/hooks/<name>.json file, mirroring the fixture used by
+// TestCopilotCreateUserHomeHookFiles. Keeps the user-home wiring tests terse.
+func seedCopilotGlobalHook(t *testing.T, agentsHome string) {
+	t.Helper()
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	mkdirAllT(t, filepath.Dir(manifest))
+	if err := os.WriteFile(manifest, []byte("name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCopilotCreateUserHomeHookFiles_Errors drives the two error returns of
+// createUserHomeHookFiles: a malformed global HOOK.yaml fails the canonical
+// collect, and a MkdirAll fault on the ~/.copilot/hooks/ target fails the
+// per-home-root emit (a seeded valid hook makes that fanout non-empty).
+func TestCopilotCreateUserHomeHookFiles_Errors(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  func(t *testing.T, agentsHome string)
+		ioErr string
+	}{
+		{
+			name: "collect error: malformed manifest",
+			seed: func(t *testing.T, agentsHome string) {
+				manifest := filepath.Join(agentsHome, "hooks", "global", "bad", "HOOK.yaml")
+				mkdirAllT(t, filepath.Dir(manifest))
+				if err := os.WriteFile(manifest, []byte("name: [unterminated\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:  "emit error: mkdir fault on user hooks dir",
+			seed:  seedCopilotGlobalHook,
+			ioErr: ".copilot",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			t.Setenv("AGENTS_HOME", agentsHome)
+			t.Setenv("HOME", filepath.Join(tmp, "home"))
+			mkdirAllT(t, filepath.Join(tmp, "home"))
+			tc.seed(t, agentsHome)
+
+			c := &copilot{io: stdPlatformIO{}}
+			if tc.ioErr != "" {
+				c.io = withMkdirAllError(t, tc.ioErr)
+			}
+			if err := c.createUserHomeHookFiles("proj", agentsHome); err == nil {
+				t.Fatal("expected createUserHomeHookFiles to return an error")
+			}
+		})
+	}
+}
+
+// TestCopilotCreateLinks_WiresUserHomeHooks drives CreateLinks end to end with a
+// seeded global hook and a real HOME, proving the user-home fanout call wires
+// ~/.copilot/hooks/<name>.json alongside the repo-scope links.
+func TestCopilotCreateLinks_WiresUserHomeHooks(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+	for _, expect := range []string{
+		filepath.Join(repo, ".github", "hooks", "prompt-log.json"),
+		filepath.Join(copilotUserHooksDir(home), "prompt-log.json"),
+	} {
+		if _, err := os.Stat(expect); err != nil {
+			t.Errorf("expected %s: %v", expect, err)
+		}
+	}
+}
+
+// TestCopilotCreateLinks_UserHomeHookError covers CreateLinks' user-home error
+// return: a MkdirAll fault scoped to the ~/.copilot/hooks/ path lets every
+// earlier repo-scope link succeed, then fails the trailing createUserHomeHookFiles
+// call so CreateLinks propagates the error.
+func TestCopilotCreateLinks_UserHomeHookError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	c := &copilot{io: withMkdirAllError(t, filepath.Join(".copilot", "hooks"))}
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to surface the user-home MkdirAll fault")
 	}
 }
