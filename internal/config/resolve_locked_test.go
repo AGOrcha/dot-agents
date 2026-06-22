@@ -285,7 +285,7 @@ func TestResolveLockedLayerProtectedFieldDropped(t *testing.T) {
 		t.Fatalf("online Resolve: %v", err)
 	}
 	// Rewrite the cached layer bytes to attempt a protected field.
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestResolveLockedInvalidLayerCacheIsSchemaError(t *testing.T) {
 		t.Fatalf("online Resolve: %v", err)
 	}
 	// Corrupt the cached layer bytes at the locked SHA in place.
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}

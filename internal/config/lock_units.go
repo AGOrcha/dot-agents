@@ -35,6 +35,15 @@ type LockedUnit struct {
 	// re-check; it powers a doctor/explain review-nudge and never drives
 	// auto-invalidation (§7A.3). Empty when never re-checked since fetch.
 	LastCheckedAt string `json:"last_checked_at,omitempty"`
+	// CacheKey is the effective content cache key the unit resolved at
+	// (config-distribution-model §7A.4). It is the cache-key staleness axis —
+	// orthogonal to the content-hash driver events — that CacheKeyStaleForLayer
+	// compares on a later resolve. Carried on the units model (not just the
+	// retired legacy "config" section) so the §7A units-lock cutover does NOT
+	// drop the §7A.4 cache-key gate: a `--refresh`/always_revalidate force escape
+	// and a cache_keys override edit both still register. Omitted for a unit
+	// resolved without a cache key (e.g. a legacy lock migrated on read).
+	CacheKey string `json:"cache_key,omitempty"`
 }
 
 // UnitsLock is the config-owned view of the lockfile under the §7A model: the
@@ -132,6 +141,7 @@ func mergeLegacySection(lf *agentslock.Lockfile, section, kind string, units map
 			Digest:        l.ResolvedSHA,
 			FetchedAt:     l.FetchedAt,
 			LastCheckedAt: l.FetchedAt,
+			CacheKey:      l.CacheKey,
 		}
 	}
 	return nil

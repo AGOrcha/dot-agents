@@ -435,19 +435,46 @@ func WriteConfigLock(projectPath string, layers map[string]LockedLayer) error {
 	return lf.Flush()
 }
 
-// readLockedLayers loads the "config" section of an existing lockfile, or an
-// empty map when the file or section is absent. It is the offline / TTL source
-// of last-resolved SHAs.
-func readLockedLayers(projectPath string) (map[string]LockedLayer, error) {
-	lf, err := agentslock.Open(AgentsLockPath(projectPath))
+// readLockedLayersFromUnits is the single offline read of last-resolved layer
+// SHAs after the §7A cutover (section-7a-units-lock-wiring). It reads through
+// ReadUnits — the one-time on-read migration entry point: a lockfile that
+// already carries the authoritative "units" section is read directly; a legacy
+// "config"-only lock is transparently upgraded to the units model on this first
+// read (migrateLegacyUnits) and then read from units. There is NO permanent
+// dual-read of the legacy section — units is the steady state, and the legacy
+// section's only remaining reader is the migration step inside ReadUnits.
+//
+// It is the offline / cache source of last-resolved SHAs for ResolveLocked,
+// VerifyLayerLocks, and the offline branch of resolveExtends.
+func readLockedLayersFromUnits(projectPath string) (map[string]LockedLayer, error) {
+	units, err := ReadUnits(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	locked := map[string]LockedLayer{}
-	if _, err := lf.Section(LockSectionConfig, &locked); err != nil {
-		return nil, err
+	return layersFromUnits(units.Units), nil
+}
+
+// layersFromUnits projects the §7A units map into the LockedLayer shape the
+// offline resolver/verify reader consumes, keeping only UnitKindLayer entries
+// (artifacts are not extends layers). The unit's content digest is the resolved
+// SHA the offline cache is keyed by, and FetchedAt + CacheKey carry through — so
+// the §7A.4 cache-key gate (CacheKeyStaleForLayer) keeps working on a units-only
+// lock. The clock-based TTLExpiresAt is intentionally NOT carried: §7A staleness
+// is content-hash driven (the §7A redesign retired the cache-TTL clock), so a
+// units-sourced layer has no TTL.
+func layersFromUnits(units map[string]LockedUnit) map[string]LockedLayer {
+	layers := make(map[string]LockedLayer, len(units))
+	for ref, u := range units {
+		if u.Kind != UnitKindLayer {
+			continue
+		}
+		layers[ref] = LockedLayer{
+			ResolvedSHA: u.Digest,
+			FetchedAt:   u.FetchedAt,
+			CacheKey:    u.CacheKey,
+		}
 	}
-	return locked, nil
+	return layers
 }
 
 // --- LayeredResolver --------------------------------------------------------
@@ -595,10 +622,56 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	emitFieldEvents(trace, snap)
 	trace.emit(effectiveProducedEvent(repoLayerID(snap), len(snap.Layers)))
 
-	if err := WriteConfigLock(projectPath, locked); err != nil {
-		return nil, fmt.Errorf("writing %s: %w", AgentsLockFile, err)
+	// §7A units-lock cutover (section-7a-units-lock-wiring): the units section +
+	// inputs_digest is now the AUTHORITATIVE lock. A single resolve writes it
+	// from one path here in Resolve — not split across EnsureResolved — so EVERY
+	// resolve caller (`da config sync`, `da install`, and the EnsureResolved
+	// stale-repair path that drives this same Resolve) emits the §7A lock model
+	// uniformly. Writing it here is what removes the stale-repair split-brain:
+	// staleness reads the units section + inputs_digest, so the resolve that
+	// repairs a stale lock must write exactly those. The legacy §7 `config`
+	// section is no longer written — units-only is the steady state; a legacy
+	// config-only lock is upgraded once on read (see ReadUnits).
+	if err := r.writeUnitsLock(projectPath, locked); err != nil {
+		return nil, fmt.Errorf("writing %s units: %w", AgentsLockFile, err)
 	}
 	return snap, nil
+}
+
+// writeUnitsLock writes the authoritative §7A lock — the units section +
+// inputs_digest — from the resolved-layer set Resolve just produced. The units
+// map mirrors every resolved `extends` layer as a UnitKindLayer (its resolved
+// SHA → digest, its fetch timestamps carried verbatim); inputs_digest is the
+// whole-normalized hash of the local config scopes computed against the
+// resolver's own user-local seam, so a later staleness check compares
+// like-for-like. A flat/local-only project (no extends) still gets a lockfile
+// carrying a non-empty inputs_digest and an empty units map — the property §7A
+// wires in.
+func (r *LayeredResolver) writeUnitsLock(projectPath string, locked map[string]LockedLayer) error {
+	digest, err := ComputeInputsDigest(projectPath, r.effectiveUserLocalPath())
+	if err != nil {
+		return err
+	}
+	units := make(map[string]LockedUnit, len(locked))
+	for ref, l := range locked {
+		units[ref] = LockedUnit{
+			Kind:          UnitKindLayer,
+			Digest:        l.ResolvedSHA,
+			FetchedAt:     l.FetchedAt,
+			LastCheckedAt: l.FetchedAt,
+			CacheKey:      l.CacheKey,
+		}
+	}
+	return WriteUnitsLock(projectPath, UnitsLock{Units: units, InputsDigest: digest})
+}
+
+// effectiveUserLocalPath returns the user-local manifest path the resolver
+// resolves against (the test seam when set, else the default
+// <AgentsHome>/.agentsrc.json), so inputs_digest is computed over the exact
+// same user-local scope the layer stack merged — staleness and resolution can
+// never disagree on which user-local file is authoritative.
+func (r *LayeredResolver) effectiveUserLocalPath() string {
+	return r.flat.userLocalPath
 }
 
 // emitFieldEvents emits config.field.overridden for every effective field that
@@ -708,7 +781,8 @@ func (r *LayeredResolver) resolveExtends(trace auditTrace, projectPath string, r
 	sources := indexSources(rc.Sources)
 	var prevLocked map[string]LockedLayer
 	if r.offline {
-		if prevLocked, err = readLockedLayers(projectPath); err != nil {
+		// Read through the §7A units model (one-time-migrates a legacy lock).
+		if prevLocked, err = readLockedLayersFromUnits(projectPath); err != nil {
 			return nil, nil, nil, err
 		}
 	}

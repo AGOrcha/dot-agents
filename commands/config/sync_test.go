@@ -48,11 +48,12 @@ func syncOptions(project, layer string, jsonOut bool, clock time.Time) *runSyncO
 	}
 }
 
-// readLockFetchedAt returns the fetched_at + resolved_sha recorded for ref in the
-// project's lockfile config section, failing the test if the entry is absent.
+// readLockFetchedAt returns the fetched_at + resolved SHA recorded for ref in the
+// project's authoritative §7A units section, failing the test if the entry is
+// absent. (Post-cutover the SHA is the unit's content Digest.)
 func readLockFetchedAt(t *testing.T, project, ref string) (string, string) {
 	t.Helper()
-	locked, err := readLockedConfigSection(project)
+	locked, err := readResolvedUnits(project)
 	if err != nil {
 		t.Fatalf("read lock: %v", err)
 	}
@@ -60,7 +61,7 @@ func readLockFetchedAt(t *testing.T, project, ref string) (string, string) {
 	if !ok {
 		t.Fatalf("lock has no entry for %q (entries: %v)", ref, locked)
 	}
-	return entry.FetchedAt, entry.ResolvedSHA
+	return entry.FetchedAt, entry.Digest
 }
 
 const syncManifestTwoLayers = `{
@@ -135,6 +136,49 @@ func TestRunSync_ReResolvesAndUpdatesLockTimestamps(t *testing.T) {
 	}
 	if sha2 != sha1 {
 		t.Errorf("resolved sha changed for identical content: %q -> %q", sha1, sha2)
+	}
+}
+
+// TestRunSync_ProducesCoherentUnitsLock proves the §7A units-lock wiring reaches
+// `da config sync` for free: because Fix #1 lives in LayeredResolver.Resolve (the
+// path sync already drives via WithRefresh(true)), sync needs NO change to emit a
+// coherent units+inputs_digest lock. After a sync the lockfile carries a units
+// section for every extends ref AND a non-empty inputs_digest, and a staleness
+// check over the project reports Fresh (no split-brain between what sync wrote
+// and what staleness reads).
+func TestRunSync_ProducesCoherentUnitsLock(t *testing.T) {
+	project := withTwoLocalLayers(t)
+
+	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runSync(syncOptions(project, "", false, t1), testDeps()); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	units, err := cfg.ReadUnits(project)
+	if err != nil {
+		t.Fatalf("ReadUnits: %v", err)
+	}
+	if units.InputsDigest == "" {
+		t.Errorf("sync must write a non-empty inputs_digest, got empty")
+	}
+	for _, ref := range []string{"acme:org/base.json", "acme:team/frontend.json"} {
+		u, ok := units.Units[ref]
+		if !ok {
+			t.Errorf("sync did not write a units entry for %q (config/units split-brain)", ref)
+			continue
+		}
+		if u.Kind != cfg.UnitKindLayer || u.Digest == "" {
+			t.Errorf("units entry for %q malformed: %+v", ref, u)
+		}
+	}
+
+	// Staleness over what sync wrote must be Fresh — sync and staleness agree.
+	stale, err := cfg.Staleness(project, "", nil)
+	if err != nil {
+		t.Fatalf("Staleness: %v", err)
+	}
+	if !stale.Fresh {
+		t.Errorf("post-sync lock must be Fresh, got reasons %v", stale.Reasons)
 	}
 }
 
@@ -367,23 +411,23 @@ func TestBuildSyncReport_ReadBackErrorOnBadLock(t *testing.T) {
 	}
 }
 
-// TestReadLockedConfigSection_BadConfigSection covers the Section-decode error
-// branch of readLockedConfigSection: a lockfile that is valid top-level JSON but
-// whose "config" section is the wrong shape (a string, not a map) makes Section
-// fail after Open succeeds.
-func TestReadLockedConfigSection_BadConfigSection(t *testing.T) {
+// TestReadResolvedUnits_BadUnitsSection covers the Section-decode error branch of
+// readResolvedUnits: a lockfile that is valid top-level JSON but whose "units"
+// section is the wrong shape (a string, not a map) makes ReadUnits fail after
+// Open succeeds.
+func TestReadResolvedUnits_BadUnitsSection(t *testing.T) {
 	project := withTwoLocalLayers(t)
 	lockPath := cfg.AgentsLockPath(project)
 	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Top-level JSON parses, but "config" is a string so decoding it into
-	// map[string]LockedLayer errors inside Section (not in Open).
-	if err := os.WriteFile(lockPath, []byte(`{"version":1,"config":"not-a-map"}`), 0o644); err != nil {
+	// Top-level JSON parses, but "units" is a string so decoding it into
+	// map[string]LockedUnit errors inside Section (not in Open).
+	if err := os.WriteFile(lockPath, []byte(`{"version":1,"units":"not-a-map"}`), 0o644); err != nil {
 		t.Fatalf("write lock: %v", err)
 	}
-	if _, err := readLockedConfigSection(project); err == nil {
-		t.Fatal("expected readLockedConfigSection to error on a wrong-shaped config section")
+	if _, err := readResolvedUnits(project); err == nil {
+		t.Fatal("expected readResolvedUnits to error on a wrong-shaped units section")
 	}
 }
 

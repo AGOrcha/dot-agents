@@ -5,7 +5,6 @@ import (
 	"io"
 	"sort"
 
-	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -161,10 +160,11 @@ func validateLayerScope(projectPath, layer string) error {
 }
 
 // buildSyncReport reads the post-resolve lock and the declared layer set into a
-// stable report. The lock's config section carries the freshly-written SHA and
-// fetch timestamp per ref; VerifyLayerLocks supplies the per-ref source id/type
-// for the human render. When layerScope is set, only that ref is marked Targeted
-// and the rest carry an explanatory note.
+// stable report. After the §7A units-lock cutover the authoritative lock is the
+// "units" section, which carries the freshly-written SHA (digest) and fetch
+// timestamp per ref; VerifyLayerLocks supplies the per-ref source id/type for the
+// human render. When layerScope is set, only that ref is marked Targeted and the
+// rest carry an explanatory note.
 func buildSyncReport(projectPath, layerScope string) (SyncReport, error) {
 	report := SyncReport{
 		OK:       true,
@@ -173,7 +173,7 @@ func buildSyncReport(projectPath, layerScope string) (SyncReport, error) {
 		Layers:   []SyncedLayer{},
 	}
 
-	locked, err := readLockedConfigSection(projectPath)
+	locked, err := readResolvedUnits(projectPath)
 	if err != nil {
 		return SyncReport{}, err
 	}
@@ -191,9 +191,9 @@ func buildSyncReport(projectPath, layerScope string) (SyncReport, error) {
 			SourceID:   st.SourceID,
 			SourceType: st.SourceType,
 		}
-		if lock, ok := locked[st.Ref]; ok {
-			line.SHA = lock.ResolvedSHA
-			line.FetchedAt = lock.FetchedAt
+		if unit, ok := locked[st.Ref]; ok {
+			line.SHA = unit.Digest
+			line.FetchedAt = unit.FetchedAt
 		}
 		if layerScope == "" || layerScope == st.Ref {
 			line.Targeted = true
@@ -209,19 +209,17 @@ func buildSyncReport(projectPath, layerScope string) (SyncReport, error) {
 	return report, nil
 }
 
-// readLockedConfigSection reads the "config" section of .agentsrc.lock through
-// the public agentslock surface, returning an empty map when the file or section
-// is absent. This is the report's source of freshly-written SHAs + timestamps.
-func readLockedConfigSection(projectPath string) (map[string]cfg.LockedLayer, error) {
-	lf, err := agentslock.Open(cfg.AgentsLockPath(projectPath))
+// readResolvedUnits reads the authoritative §7A units map of .agentsrc.lock via
+// the public config surface, returning an empty map when the file is absent. It
+// one-time-migrates a legacy config-only lock on read (cfg.ReadUnits), so the
+// sync report sources its freshly-written SHAs + timestamps from the units model
+// — the section the post-cutover resolve writes.
+func readResolvedUnits(projectPath string) (map[string]cfg.LockedUnit, error) {
+	lock, err := cfg.ReadUnits(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	locked := map[string]cfg.LockedLayer{}
-	if _, err := lf.Section(cfg.LockSectionConfig, &locked); err != nil {
-		return nil, err
-	}
-	return locked, nil
+	return lock.Units, nil
 }
 
 // printSyncHuman renders the sync outcome as a scannable per-layer list with a

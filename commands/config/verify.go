@@ -126,6 +126,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 
 	checks = append(checks, verifySources(opts.cwd, snap)...)
 	checks = append(checks, verifyLayerLocks(opts.cwd)...)
+	checks = append(checks, verifyStaleness(opts.cwd)...)
 	checks = append(checks, verifyPreconditionPolicies(snap)...)
 
 	probe := opts.crgProbe
@@ -237,6 +238,60 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 		}
 	}
 	return checks
+}
+
+// verifyStaleness is the §7A local-scope drift check — the first-class
+// inputs_digest contract verify gained when the units-lock model was wired
+// (section-7a-units-lock-wiring). It is the whole point of §7A on the primary
+// verify path: a flat/local-only project that now carries a lockfile reports its
+// tracked inputs_digest instead of "nothing to verify", and a project whose
+// local config scopes changed since the last resolve surfaces the drift.
+//
+// The check is purely content-hash driven (cfg.Staleness compares the recomputed
+// inputs_digest, the declared unit set, and recorded unit digests against the
+// lock — never a clock), matching the §7A done-criterion "no clock-driven
+// staleness anywhere".
+//
+// Status policy (deliberate):
+//   - pass  — the lock is fresh: inputs_digest matches and the declared set is
+//     unchanged. Detail shows the tracked inputs_digest so a local-only project
+//     proves it is pinned.
+//   - warn  — local-scope drift (inputs_digest mismatch or a changed declared
+//     set), OR no lockfile/inputs_digest recorded yet. Drift is recoverable by
+//     re-resolving, so it is advisory ("run `da config sync`") rather than a
+//     hard failure that would block CI on an editable local overlay; it does not
+//     flip the report's OK.
+//   - warn  — the lock/manifest could not be read (the manifest check above owns
+//     the hard failure; a lock read error here is reported but not fatal).
+func verifyStaleness(cwd string) []VerifyCheck {
+	const name = "config-staleness"
+	res, err := cfg.Staleness(cwd, "", nil)
+	if err != nil {
+		return []VerifyCheck{{name, verifyWarn, "could not compute staleness: " + err.Error()}}
+	}
+	if res.Fresh {
+		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevSHA(res.ExpectedInputsDigest) + ")"}}
+	}
+
+	recorded := recordedInputsDigest(cwd)
+	if recorded == "" {
+		return []VerifyCheck{{name, verifyWarn, "no inputs_digest recorded in " + cfg.AgentsLockFile + " — run `da config sync` to create the lock"}}
+	}
+	return []VerifyCheck{{name, verifyWarn, fmt.Sprintf(
+		"local config changed since last resolve (lock %s, now %s) — run `da config sync`",
+		abbrevSHA(recorded), abbrevSHA(res.ExpectedInputsDigest))}}
+}
+
+// recordedInputsDigest reads the inputs_digest the lockfile currently pins, or
+// "" when no lock/digest exists, so verifyStaleness can tell "drifted from a
+// recorded digest" apart from "never resolved". A read error degrades to "" —
+// the staleness check has already reported the actionable warning.
+func recordedInputsDigest(cwd string) string {
+	lock, err := cfg.ReadUnits(cwd)
+	if err != nil {
+		return ""
+	}
+	return lock.InputsDigest
 }
 
 // verifyPreconditionPolicies fail-closed-validates the verifier precondition
