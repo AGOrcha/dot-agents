@@ -19,10 +19,6 @@ concurrency:
   group: deploy-docs-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
-  deployments: write
-
 jobs:
   docs-e2e:
     # Headless-browser guard for the custom interactive routes (/graphs/* +
@@ -32,6 +28,9 @@ jobs:
     # browser flakiness, while a regression still surfaces as a failing check.
     name: UI e2e (graphs + diagrams)
     runs-on: ubuntu-latest
+    # Job-scoped permissions (Sonar S8233): this job only reads the repo.
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -52,7 +51,10 @@ jobs:
 
       - name: Install Playwright browser
         working-directory: docs/web
-        run: npx playwright install --with-deps chromium
+        # Use the playwright binary already pinned in package-lock.json and
+        # installed by `npm ci` above (`npm exec --no` refuses any on-demand
+        # fetch), per Sonar S6505/S8543 — no unpinned `npx` package install.
+        run: npm exec --no -- playwright install --with-deps chromium
 
       - name: Run e2e suite
         working-directory: docs/web
@@ -63,6 +65,10 @@ jobs:
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest
+    # Job-scoped permissions (Sonar S8233): deploy needs deployment write.
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
