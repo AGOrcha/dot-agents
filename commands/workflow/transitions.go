@@ -96,6 +96,29 @@ func verifierTransition(taskID, from string, policy PreconditionPolicy, snap Sig
 	}, nil
 }
 
+// dispatchVerifierTransition is the seam that wires the §6.1 verifier dispatch:
+// it resolves the task's app_type precondition policy from the LOCKED config
+// (Slice B3/B4) and evaluates it against the producer's observed SignalSnapshot,
+// then delegates to verifierTransition. The policy resolution is lockfile-backed
+// (never raw .agentsrc.json), so the verifier gate observes the same merged,
+// locked effective config as `da config explain`.
+//
+// TODO(lpf-pr-producer): there is no LIVE caller of this seam yet — lpf-e landed
+// the verifier transition + policy evaluation pure, and the producer that fills
+// `snap` (the unified SignalSnapshot from event.pr.* / poll-detector signals) is
+// owned by the lpf PR-producer / poll-detector work, NOT this plan. When that
+// producer lands, the dispatch loop must call dispatchVerifierTransition with the
+// task id, its current status, the resolved projectPath+appType, and the
+// producer-built snapshot. Until then this seam is exercised only by unit tests,
+// and the resolver (resolvePreconditionPolicy) is covered independently.
+func dispatchVerifierTransition(projectPath, appType, taskID, from string, snap SignalSnapshot) (transitionDecision, error) {
+	policy, err := resolvePreconditionPolicy(projectPath, appType)
+	if err != nil {
+		return transitionDecision{}, fmt.Errorf("resolving precondition policy for app_type %q: %w", appType, err)
+	}
+	return verifierTransition(taskID, from, policy, snap)
+}
+
 // ── §6.2 Lens-gate: awaiting_agent_review → awaiting_owner_review | in_progress ─
 
 // lensVerdict is one lens reviewer's terminal outcome on a task in
