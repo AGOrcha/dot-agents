@@ -1613,6 +1613,102 @@ func TestCloneStageProfilesEmpty(t *testing.T) {
 	}
 }
 
+// preconditionPoliciesFixture is a sample manifest exercising the top-level
+// precondition_policies registry plus a stage profile that references one by
+// name (verifier-precondition-policy plan, Slice B).
+const preconditionPoliciesFixture = `{
+  "version": 1,
+  "sources": [{"type": "local"}],
+  "precondition_policies": {
+    "default": {
+      "predicates": [
+        {"signal": "event.pr.open"},
+        {"signal": "signal.ci.rollup", "args": {"equals": "green"}}
+      ]
+    }
+  },
+  "stage_profiles": {
+    "verifier": {
+      "cli-runner": {
+        "label": "CLI runner",
+        "prompt_files": ["verifiers/verifier.base.md"],
+        "precondition_policy": "default"
+      }
+    }
+  }
+}`
+
+// TestPreconditionPolicies_RoundTrip proves the registry + the stage-profile
+// reference route to the typed fields and survive a marshal/unmarshal cycle.
+func TestPreconditionPolicies_RoundTrip(t *testing.T) {
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(preconditionPoliciesFixture), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	pol := rc.PreconditionPolicies["default"]
+	if len(pol.Predicates) != 2 {
+		t.Fatalf("predicates decode wrong: %+v", pol)
+	}
+	if pol.Predicates[0].Signal != "event.pr.open" {
+		t.Errorf("predicate[0] signal wrong: %+v", pol.Predicates[0])
+	}
+	if pol.Predicates[1].Args["equals"] != "green" {
+		t.Errorf("predicate[1] args wrong: %+v", pol.Predicates[1])
+	}
+	if got := rc.StageProfiles["verifier"]["cli-runner"].PreconditionPolicy; got != "default" {
+		t.Errorf("stage-profile precondition_policy ref lost: %q", got)
+	}
+
+	out, err := json.Marshal(rc)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var rc2 AgentsRC
+	if err := json.Unmarshal(out, &rc2); err != nil {
+		t.Fatalf("re-unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(rc.PreconditionPolicies, rc2.PreconditionPolicies) {
+		t.Errorf("registry round-trip drift: %+v vs %+v", rc.PreconditionPolicies, rc2.PreconditionPolicies)
+	}
+	if rc2.StageProfiles["verifier"]["cli-runner"].PreconditionPolicy != "default" {
+		t.Errorf("round-trip lost stage-profile precondition_policy ref: %+v", rc2.StageProfiles)
+	}
+}
+
+// TestPreconditionPolicies_ExtraFieldsGuard confirms the registry key routes to
+// the typed field, never ExtraFields ([[schema-usage]] guard).
+func TestPreconditionPolicies_ExtraFieldsGuard(t *testing.T) {
+	var rc AgentsRC
+	if err := json.Unmarshal([]byte(preconditionPoliciesFixture), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, leaked := rc.ExtraFields["precondition_policies"]; leaked {
+		t.Errorf("precondition_policies leaked into ExtraFields instead of the typed field")
+	}
+	// An unknown sibling key still lands in ExtraFields (guard not over-broad).
+	var rc2 AgentsRC
+	withUnknown := `{"version":1,"sources":[{"type":"local"}],"made_up_key":{"x":1}}`
+	if err := json.Unmarshal([]byte(withUnknown), &rc2); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc2.ExtraFields["made_up_key"] == nil {
+		t.Errorf("unknown-key guard regressed: made_up_key not captured")
+	}
+}
+
+// TestPreconditionPolicies_SchemaValidates confirms the sample manifest passes
+// the compiled agentsrc.schema.json (the new property + $defs are well-formed).
+func TestPreconditionPolicies_SchemaValidates(t *testing.T) {
+	sch := compileAgentsRCSchema(t)
+	var doc any
+	if err := json.Unmarshal([]byte(preconditionPoliciesFixture), &doc); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	if err := sch.Validate(doc); err != nil {
+		t.Fatalf("precondition_policies sample must validate: %v", err)
+	}
+}
+
 // TestV2_AgentsRCMarshalUnmarshalRoundTrip ensures Marshal then Unmarshal
 // of a fully-populated v2 AgentsRC preserves every additive field.
 func TestV2_AgentsRCMarshalUnmarshalRoundTrip(t *testing.T) {
