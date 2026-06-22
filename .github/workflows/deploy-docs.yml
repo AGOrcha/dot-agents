@@ -51,10 +51,12 @@ jobs:
 
       - name: Install Playwright browser
         working-directory: docs/web
-        # Use the playwright binary already pinned in package-lock.json and
-        # installed by `npm ci` above (`npm exec --no` refuses any on-demand
-        # fetch), per Sonar S6505/S8543 — no unpinned `npx` package install.
-        run: npm exec --no -- playwright install --with-deps chromium
+        # Run the already-installed, version-pinned Playwright binary directly
+        # from node_modules/.bin (installed by `npm ci` above). This is NOT an
+        # npm/npx package install — it neither resolves nor fetches a package and
+        # runs no install-time lifecycle scripts — so S6505/S8543 do not apply;
+        # it only downloads the browser binaries Playwright needs.
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Run e2e suite
         working-directory: docs/web
