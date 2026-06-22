@@ -497,23 +497,32 @@ func TestVerifyPreconditionPolicies(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			checks := verifyPreconditionPolicies(snapForEffective(tc.effective))
-			if tc.wantStatus == "" {
-				if len(checks) != 0 {
-					t.Fatalf("expected no checks, got %+v", checks)
-				}
-				return
-			}
-			c, ok := findCheck(checks, tc.wantCheck)
-			if !ok {
-				t.Fatalf("missing check %q in %+v", tc.wantCheck, checks)
-			}
-			if c.Status != tc.wantStatus {
-				t.Fatalf("check %q status = %q, want %q (%+v)", tc.wantCheck, c.Status, tc.wantStatus, c)
-			}
-			if tc.wantDetail != "" && !strings.Contains(c.Detail, tc.wantDetail) {
-				t.Fatalf("check %q detail = %q, want substring %q", tc.wantCheck, c.Detail, tc.wantDetail)
-			}
+			assertPolicyCheck(t, checks, tc.wantStatus, tc.wantCheck, tc.wantDetail)
 		})
+	}
+}
+
+// assertPolicyCheck validates a verifyPreconditionPolicies result against a
+// case's expectations: an empty wantStatus means no checks should be produced;
+// otherwise the named check must exist with the expected status and (when
+// wantDetail is set) a detail containing that substring.
+func assertPolicyCheck(t *testing.T, checks []VerifyCheck, wantStatus, wantCheck, wantDetail string) {
+	t.Helper()
+	if wantStatus == "" {
+		if len(checks) != 0 {
+			t.Fatalf("expected no checks, got %+v", checks)
+		}
+		return
+	}
+	c, ok := findCheck(checks, wantCheck)
+	if !ok {
+		t.Fatalf("missing check %q in %+v", wantCheck, checks)
+	}
+	if c.Status != wantStatus {
+		t.Fatalf("check %q status = %q, want %q (%+v)", wantCheck, c.Status, wantStatus, c)
+	}
+	if wantDetail != "" && !strings.Contains(c.Detail, wantDetail) {
+		t.Fatalf("check %q detail = %q, want substring %q", wantCheck, c.Detail, wantDetail)
 	}
 }
 
