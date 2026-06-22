@@ -1,3 +1,10 @@
+---
+title: Platform Resource Locations
+description: Where each AI coding platform reads its config, and how dot-agents maps to those paths.
+sidebar:
+  order: 1
+---
+
 # Platform Resource Locations
 
 This document separates two things that were previously mixed together:

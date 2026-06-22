@@ -1,3 +1,10 @@
+---
+title: Demo Diagrams
+description: Two diagrams plus talk tracks for a short leadership walkthrough of dot-agents.
+sidebar:
+  order: 6
+---
+
 # dot-agents — Leadership Demo Diagrams
 
 **Audience:** Leadership / tech leads evaluating an agent-platform investment.

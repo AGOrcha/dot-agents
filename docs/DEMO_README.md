@@ -1,3 +1,10 @@
+---
+title: Overview
+description: A one-minute overview of what dot-agents is and the problem it solves.
+sidebar:
+  order: 3
+---
+
 # dot-agents — One-Minute Overview
 
 > **Audience:** anyone seeing dot-agents for the first time.

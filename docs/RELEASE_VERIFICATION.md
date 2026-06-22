@@ -1,3 +1,10 @@
+---
+title: Release Verification
+description: How to verify a dot-agents release with Cosign keyless signing before installing it.
+sidebar:
+  order: 7
+---
+
 # Release Verification
 
 Every `dot-agents` release is signed with [Cosign](https://github.com/sigstore/cosign)

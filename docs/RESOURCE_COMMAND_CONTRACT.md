@@ -1,3 +1,10 @@
+---
+title: Resource Command Contract
+description: The lifecycle contract for managed resources: hooks, rules, MCP servers, and settings.
+sidebar:
+  order: 4
+---
+
 # Resource command contract (hooks, rules, MCP, settings)
 
 This document is the **canonical contract** for the

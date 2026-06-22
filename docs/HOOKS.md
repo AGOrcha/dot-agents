@@ -1,3 +1,10 @@
+---
+title: Hooks
+description: Store agent lifecycle hooks once and wire them into every platform that supports them.
+sidebar:
+  order: 1
+---
+
 # Hooks
 
 Hooks let your AI agents run a command automatically at a point in their

@@ -1,3 +1,10 @@
+---
+title: Demo Materials Index
+description: A skim-friendly index of demo materials, decks, and walkthroughs for dot-agents.
+sidebar:
+  order: 4
+---
+
 # dot-agents — Demo Materials Index
 
 A skim-friendly index of materials prepared (and proposed) for leadership /

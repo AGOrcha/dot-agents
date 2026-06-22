@@ -1,3 +1,10 @@
+---
+title: Plugin Contract
+description: The canonical plugin bundle contract for dot-agents: storage and ownership, not runtime.
+sidebar:
+  order: 5
+---
+
 # Canonical Plugin Contract
 
 Status: Directional

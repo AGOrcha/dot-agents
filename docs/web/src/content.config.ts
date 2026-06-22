@@ -1,195 +1,177 @@
-import { defineCollection, z } from 'astro:content';
-import { glob } from 'astro/loaders';
+import { defineCollection } from 'astro:content';
+import { docsSchema } from '@astrojs/starlight/schema';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Glob `base` is resolved relative to the Astro project root (docs/web/),
-// not this file. So `../` reaches `docs/` and `../../` reaches the repo root.
-
-// Demo markdown collection: source-of-truth lives in ../docs/DEMO_*.md
-// (i.e. docs/DEMO_*.md relative to repo root). We ingest by glob loader from
-// the parent directory so the canonical files are NOT duplicated under web/.
-const demos = defineCollection({
-  loader: glob({
-    pattern: 'DEMO_*.md',
-    base: '../',
-  }),
-  schema: z.object({
-    title: z.string().optional(),
-  }),
-});
-
-// Canonical (non-demo) content surfaces the rest of the repo's authoritative
-// markdown in the same way /demos/* surfaces DEMO_*.md. Four source buckets:
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC docs collection — sourced live from the repo's canonical markdown.
 //
-//   1. docs (`docs/*.md` minus DEMO_*.md)
-//   2. lessons (`.agents/lessons/<slug>/LESSON.md`)
-//   3. specs (`.agents/workflow/specs/<slug>/design.md`)
-//   4. proposals (`.agents/proposals/*.md`)
+// Content stays canonical in `docs/**` (D2): we do NOT copy or fork the source
+// docs into this site. A custom glob-style loader reads the PUBLIC allowlist
+// straight from the repo, derives a Starlight `title` from each file's first
+// H1 when frontmatter has none (the raw repo docs carry no frontmatter), and
+// assigns each entry a section-prefixed id so Starlight's `autogenerate`
+// sidebar groups (guides/ reference/ concepts/) pick them up. The README maps
+// to the collection root (`index`) so it is both `/` and Getting Started.
+//
+// This is the production replacement for the spike's copy-prebuild
+// (scripts/sync-content.mjs): no copy, no drift, no mass frontmatter edits.
+//
+// Internal artifacts (.agents/** lessons/specs/proposals, ADRs, internal design
+// specs) are deliberately absent from the allowlist — visibility gating /
+// internal sections are handled in a later slice (dm3), not here.
+// ─────────────────────────────────────────────────────────────────────────────
 
-const docsCanonical = defineCollection({
-  loader: glob({
-    pattern: ['*.md', '!DEMO_*.md'],
-    base: '../',
-  }),
-  schema: z.object({
-    title: z.string().optional(),
-  }),
-});
-
-// Repo-root resolver — this file lives at docs/web/src/content.config.ts,
-// so the repo root is three levels up.
+// This file lives at docs/web/src/content.config.ts → repo root is three up.
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..');
 
-/**
- * Tolerant markdown loader used for lesson/spec/proposal content.
- *
- * The built-in `glob` loader parses YAML frontmatter strictly. Several files
- * in `.agents/lessons/` have description strings that contain `: ` outside
- * quotes (a documented anti-pattern but historically present) which causes
- * js-yaml to fail and aborts the whole build. This loader extracts a few
- * known frontmatter keys with a single-line regex, drops the rest, and never
- * throws — bad frontmatter just yields a missing-title entry instead of a
- * dead site.
- *
- * The body (everything after the closing `---`, or the whole file if no
- * frontmatter) is passed through unchanged so MDX/Markdown rendering works
- * the same as the strict loader.
- */
-function tolerantMarkdownLoader(opts: {
-  rootRelative: string;       // e.g. ".agents/lessons"
-  pattern: RegExp;            // matches against paths relative to rootRelative
-  idFromPath: (relPath: string) => string;
-}) {
-  return {
-    name: `tolerant-markdown:${opts.rootRelative}`,
-    async load({ store, parseData, generateDigest, renderMarkdown, config, logger }: any) {
-      const baseDir = path.join(REPO_ROOT, opts.rootRelative);
-      // Astro requires entry filePath to be relative to the site (Astro
-      // project) root. Resolve once per load.
-      const siteRoot = config?.root ? fileURLToPath(config.root) : path.join(REPO_ROOT, 'docs/web');
-      logger?.info?.(`tolerant-markdown: scanning ${baseDir}`);
-      store.clear();
-      let foundAny = false;
-      try {
-        await walk(baseDir, async (absPath) => {
-          const rel = path.relative(baseDir, absPath).split(path.sep).join('/');
-          if (!opts.pattern.test(rel)) return;
-          const raw = await fs.readFile(absPath, 'utf8');
-          const { frontmatter, body } = splitFrontmatter(raw);
-          const id = opts.idFromPath(rel);
-          const filePath = path.relative(siteRoot, absPath).split(path.sep).join('/');
-          const data = await parseData({ id, data: frontmatter, filePath });
-          const rendered = await renderMarkdown(body);
-          store.set({
-            id,
-            data,
-            body,
-            filePath,
-            digest: generateDigest(raw),
-            rendered,
-          });
-          foundAny = true;
-        });
-      } catch (err: any) {
-        logger?.warn?.(`tolerant-markdown loader failed for ${opts.rootRelative}: ${err?.message ?? err}`);
-      }
-      if (!foundAny) {
-        logger?.warn?.(`tolerant-markdown loader matched no entries under ${opts.rootRelative} (baseDir=${baseDir})`);
-      }
-    },
-  };
-}
+// PUBLIC allowlist: { src (repo-relative), id (section-prefixed slug), order }.
+// `id` doubles as the route slug and the sidebar-group bucket. The empty/`index`
+// id is the site root + Getting Started entry.
+const PUBLIC_PAGES: { src: string; id: string; order: number }[] = [
+  // Getting Started ← README (install → init → first project).
+  { src: 'README.md', id: 'index', order: 1 },
 
-async function walk(dir: string, visit: (absPath: string) => Promise<void>) {
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const ent of entries) {
-    const abs = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      await walk(abs, visit);
-    } else if (ent.isFile()) {
-      await visit(abs);
-    }
-  }
-}
+  // Guides
+  { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 1 },
+  { src: 'docs/CONFIG_RELEVANCE.md', id: 'guides/config-relevance', order: 2 },
+  { src: 'docs/DEMO_README.md', id: 'guides/demo-overview', order: 3 },
+  { src: 'docs/DEMO_INDEX.md', id: 'guides/demo-index', order: 4 },
+  { src: 'docs/DEMO_WORKFLOW_WALKTHROUGH.md', id: 'guides/demo-workflow-walkthrough', order: 5 },
+  { src: 'docs/DEMO_DIAGRAM.md', id: 'guides/demo-diagram', order: 6 },
+  { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 7 },
+
+  // Reference
+  { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },
+  { src: 'docs/GLOBAL_FLAG_CONTRACT.md', id: 'reference/global-flag-contract', order: 2 },
+  { src: 'docs/ERROR_MESSAGE_CONTRACT.md', id: 'reference/error-message-contract', order: 3 },
+  { src: 'docs/RESOURCE_COMMAND_CONTRACT.md', id: 'reference/resource-command-contract', order: 4 },
+  { src: 'docs/PLUGIN_CONTRACT.md', id: 'reference/plugin-contract', order: 5 },
+  { src: 'docs/WORKFLOW_CLIENT_COMMANDS.md', id: 'reference/workflow-client-commands', order: 6 },
+  { src: 'docs/RELEASE_VERIFICATION.md', id: 'reference/release-verification', order: 7 },
+
+  // Concepts
+  { src: 'docs/PROJECT_DIAGRAMS.md', id: 'concepts/project-diagrams', order: 1 },
+];
 
 /**
- * Pull a small set of known string keys from YAML-style frontmatter without
- * invoking js-yaml. Only handles plain `key: value` and `key: "value"` lines;
- * anything else is ignored. Designed to be permissive — when the value spans
- * suspicious characters we just drop it rather than fail the build.
+ * Split a leading YAML frontmatter block off a markdown string. The raw repo
+ * docs have none, but we tolerate one if present and never re-emit it (we only
+ * scrape `title`/`description` for precedence). A shallow `key: value` scrape is
+ * enough — we deliberately avoid js-yaml so a malformed block can't fail the
+ * build (some repo markdown uses `: ` in plain scalars).
  */
-function splitFrontmatter(raw: string): { frontmatter: Record<string, unknown>; body: string } {
-  if (!raw.startsWith('---\n')) {
-    return { frontmatter: {}, body: raw };
-  }
+function splitFrontmatter(raw: string): {
+  frontmatter: Record<string, string>;
+  body: string;
+} {
+  if (!raw.startsWith('---\n')) return { frontmatter: {}, body: raw };
   const end = raw.indexOf('\n---', 4);
-  if (end < 0) {
-    return { frontmatter: {}, body: raw };
-  }
+  if (end < 0) return { frontmatter: {}, body: raw };
   const block = raw.slice(4, end);
-  // Body starts after the closing `---` line; skip the newline that follows it.
   let body = raw.slice(end + 4);
   if (body.startsWith('\n')) body = body.slice(1);
-  const fm: Record<string, unknown> = {};
+  const fm: Record<string, string> = {};
+  // One-level-deep mapping key currently open (e.g. `sidebar:`), so indented
+  // child lines are captured as dotted keys (`sidebar.order`). The repo docs
+  // only nest `sidebar`, so a single level of nesting is enough; deeper or
+  // sequence nesting is intentionally ignored to keep this scrape malformation-proof.
+  let parentKey = '';
   for (const rawLine of block.split('\n')) {
     const line = rawLine.trimEnd();
-    if (!line.trim() || line.startsWith('#')) continue;
-    const m = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const indented = /^\s/.test(rawLine);
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
     if (!m) continue;
-    const key = m[1];
     let val = m[2];
-    // Strip surrounding quotes
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
-    // Skip obviously list/object/block-scalar values — we don't need them.
-    if (val.startsWith('[') || val.startsWith('{') || val === '|' || val === '>') continue;
-    fm[key] = val;
+    if (!indented) {
+      // Top-level key. A bare `key:` (empty value) opens a nested mapping.
+      parentKey = val === '' ? m[1].toLowerCase() : '';
+      if (val === '' || val.startsWith('[') || val.startsWith('{') || val === '|' || val === '>') continue;
+      fm[m[1].toLowerCase()] = val;
+    } else if (parentKey) {
+      // Child of the open mapping → store as `parent.child`.
+      if (val.startsWith('[') || val.startsWith('{') || val === '|' || val === '>') continue;
+      fm[`${parentKey}.${m[1].toLowerCase()}`] = val;
+    }
   }
   return { frontmatter: fm, body };
 }
 
-const lessons = defineCollection({
-  loader: tolerantMarkdownLoader({
-    rootRelative: '.agents/lessons',
-    pattern: /^[^/]+\/LESSON\.md$/,
-    idFromPath: (rel) => rel.replace(/\.md$/, ''),
-  }),
-  schema: z.object({
-    name: z.string().optional(),
-    description: z.string().optional(),
-    type: z.string().optional(),
-    title: z.string().optional(),
-  }),
-});
+/** Derive a title from the first H1 of the body; fall back to the slug. */
+function deriveTitle(body: string, fallback: string): string {
+  const m = body.match(/^#\s+(.+)$/m);
+  if (!m) return fallback;
+  // Strip inline code backticks / emphasis markers for a clean nav title.
+  return m[1].replace(/[`*_]/g, '').trim();
+}
 
-const specs = defineCollection({
-  loader: tolerantMarkdownLoader({
-    rootRelative: '.agents/workflow/specs',
-    pattern: /^[^/]+\/design\.md$/,
-    idFromPath: (rel) => rel.replace(/\.md$/, ''),
-  }),
-  schema: z.object({
-    title: z.string().optional(),
-  }),
-});
+/**
+ * Custom loader: read each PUBLIC allowlist file straight from the repo, derive
+ * a Starlight-valid `title` (frontmatter title → first H1 → slug), and store a
+ * fully-rendered entry under its section-prefixed id. Modeled on Astro's own
+ * glob loader contract (parseData + renderMarkdown + store.set) so entries are
+ * indistinguishable from `docsLoader()` ones — Starlight's nav, search and
+ * sidebar `autogenerate` all work unchanged.
+ */
+function repoDocsLoader() {
+  return {
+    name: 'repo-public-docs-glob',
+    async load({ store, parseData, generateDigest, renderMarkdown, config, logger }: any) {
+      const siteRoot = config?.root
+        ? fileURLToPath(config.root)
+        : path.join(REPO_ROOT, 'docs/web');
+      store.clear();
+      let count = 0;
+      for (const page of PUBLIC_PAGES) {
+        const absPath = path.join(REPO_ROOT, page.src);
+        let raw: string;
+        try {
+          raw = await fs.readFile(absPath, 'utf8');
+        } catch {
+          logger?.warn?.(`repo-public-docs: SKIP missing source ${page.src}`);
+          continue;
+        }
+        const { frontmatter, body } = splitFrontmatter(raw);
+        const slugFallback = page.id === 'index' ? 'index' : page.id.split('/').pop()!;
+        const title = frontmatter.title || deriveTitle(body, slugFallback);
+        const filePath = path.relative(siteRoot, absPath).split(path.sep).join('/');
 
-const proposals = defineCollection({
-  loader: tolerantMarkdownLoader({
-    rootRelative: '.agents/proposals',
-    pattern: /^[^/]+\.md$/,
-    idFromPath: (rel) => rel.replace(/\.md$/, ''),
-  }),
-  schema: z.object({
-    title: z.string().optional(),
-  }),
-});
+        // Sidebar order: prefer the doc's own frontmatter (`sidebar.order`),
+        // fall back to the allowlist `order` (README carries no frontmatter).
+        const fmOrder = Number(frontmatter['sidebar.order']);
+        const order = Number.isFinite(fmOrder) ? fmOrder : page.order;
+        const sidebarLabel = frontmatter['sidebar.label'];
 
-export const collections = { demos, docsCanonical, lessons, specs, proposals };
+        const data = await parseData({
+          id: page.id,
+          data: {
+            title,
+            ...(frontmatter.description ? { description: frontmatter.description } : {}),
+            sidebar: { order, ...(sidebarLabel ? { label: sidebarLabel } : {}) },
+          },
+          filePath,
+        });
+        const rendered = await renderMarkdown(body);
+        store.set({
+          id: page.id,
+          data,
+          body,
+          filePath,
+          digest: generateDigest(raw),
+          rendered,
+        });
+        count++;
+      }
+      logger?.info?.(`repo-public-docs: loaded ${count}/${PUBLIC_PAGES.length} public page(s) from ${REPO_ROOT}`);
+    },
+  };
+}
+
+export const collections = {
+  docs: defineCollection({ loader: repoDocsLoader(), schema: docsSchema() }),
+};

@@ -1,3 +1,10 @@
+---
+title: Workflow Walkthrough
+description: An end-to-end walkthrough of one real wave: plan, fanout, workers, merge-back, closeout.
+sidebar:
+  order: 5
+---
+
 # dot-agents — Workflow Walkthrough: One Real Wave
 
 > **Audience:** engineers and tech leads who want to see what a real wave looks
