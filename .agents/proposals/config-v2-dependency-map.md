@@ -1,7 +1,21 @@
 # Config v2 Migration — Dependency Map and Consumer Sequencing
 
-**Status:** project-local planning artifact
-**Date:** 2026-05-27
+> **⚠️ SUPERSEDED (2026-06-22) by `config-distribution-model` §15.** This map (2026-05-27)
+> predates the §15 redesign that collapsed the Tier-1 `config` / Tier-2 `packages` wall into
+> one `units` model (D3): one lock `units` section + `inputs_digest`, one CRUD surface via
+> `--scope`/`--source` (**no parallel `da packages` command tree**), OCI as one source among
+> many (D8), and two-pass resolution surviving only as dependency *order*, not a tier wall.
+> The "decided" rows below that assert the two-tier model, the `da packages` subtree, a
+> config+packages two-section lock, and pass-2-as-tier-wall are **no longer accurate** — see
+> §15 (D1–D14) for the canonical contract. The plan was reconciled accordingly: migration
+> task `p6-packages-pass2-cli` is **cancelled** (its surviving artifact-resolution mechanic
+> folded into `config-v2-coherence/ce-unified-artifact-sourcing`), `p4d-da-install-repurpose`
+> is **deferred** to a separate plan, and `p7`/`release-minor`/`ce` were re-pointed off the
+> ghost `p6` onto `p4f` (units-lock wiring). Read this doc only for the consumer-sequencing
+> history; do not treat its decision tables as current.
+
+**Status:** SUPERSEDED by config-distribution-model §15 (was: project-local planning artifact)
+**Date:** 2026-05-27 (superseded 2026-06-22)
 **Author:** drafted to accompany canonical plan `config-v2-migration`
 **Pairs with:**
 - Spec: `.agents/workflow/specs/config-distribution-model/design.md`
