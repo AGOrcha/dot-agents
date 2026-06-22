@@ -1,13 +1,33 @@
 # Cloudflare Access — agorcha.dev internal docs (Terraform)
 
 Declarative IaC for the Cloudflare Access application that gates
-`agorcha.dev/internal/*`, plus the service token agents/CLI use for non-browser
-(Service Auth) access.
+`agorcha.dev/internal/*`. Service-token (non-browser / Service Auth) access uses a
+**per-user model**: Terraform declares the app and its policies — the Service-Auth
+policy accepts **any valid Access service token** — while individual tokens are
+minted at runtime, one per developer, by the dm6 provision endpoint.
 
 Contract source: `.agents/proposals/agorcha-public-vs-internal-and-obs-deploy.md`
 §3.4 (App 1: `agorcha-internal-docs`) and the `docs-starlight-migration` design
 (D5/D8). This module is dm0 of that migration; dm5's Worker verifies the CF Access
 JWT `aud` claim against the `audTag` output here.
+
+## Per-user service-token model
+
+Terraform owns the **shape** of access, not individual credentials:
+
+- The Service-Auth policy (`agents_service_token`) admits **any valid Access service
+  token** (`include = [{ any_valid_service_token = {} }]`, `decision = non_identity`).
+  No specific token is referenced, so no token secret ever lands in Terraform state.
+- The **dm6 provision endpoint** mints one CF Access service token **per developer**
+  at provision time, named `agorcha-agents-<github-login>`, via the CF API
+  (`POST /accounts/{account_id}/access/service_tokens`). It hands the developer their
+  own `Cf-Access-Client-Id` / `Cf-Access-Client-Secret`.
+- **Revoking a developer** is a per-token operation: delete their service token via
+  the CF API or dashboard. No Terraform change, plan, or apply is required.
+
+The minting endpoint needs its **own** scoped Cloudflare API token, separate from the
+maintainer's apply token, carrying **Account → Access: Service Tokens → Edit** (so it
+can create/delete per-developer tokens at runtime).
 
 ## What this declares
 
@@ -15,8 +35,7 @@ JWT `aud` claim against the `audTag` output here.
 |---|---|
 | `cloudflare_zero_trust_access_application.agorcha_internal_docs` | Self-hosted Access app on `agorcha.dev/internal`, 24h session, GitHub + One-time PIN IdPs. |
 | `cloudflare_zero_trust_access_policy.maintainers` | `allow` by email (`maintainer_email`) for browser logins. |
-| `cloudflare_zero_trust_access_policy.agents_service_token` | `non_identity` (Service Auth) — admits clients presenting the service token. |
-| `cloudflare_zero_trust_access_service_token.agorcha_agents` | The machine account for agents/CLI. |
+| `cloudflare_zero_trust_access_policy.agents_service_token` | `non_identity` (Service Auth) — admits clients presenting **any valid** Access service token. Individual tokens are minted per developer at runtime (see below), not declared here. |
 
 All resources use the **Cloudflare provider v5** `cloudflare_zero_trust_access_*`
 family. The deprecated v4 `cloudflare_access_*` names are not used. The provider is
@@ -29,7 +48,10 @@ credentials and none are needed to `validate`. To apply you need:
 
 1. **`CLOUDFLARE_API_TOKEN`** — a Cloudflare API token with, at minimum:
    - **Account → Access: Apps and Policies → Edit** (creates/updates the app + policies)
-   - **Account → Access: Service Tokens → Edit** (creates the service token)
+
+   This apply token no longer needs **Access: Service Tokens → Edit** — Terraform mints
+   no tokens. That permission belongs to the **dm6 provision endpoint's own** API token,
+   which mints per-developer tokens at runtime (see the per-user model above).
 
    Export it before running Terraform:
 
@@ -79,16 +101,20 @@ After apply:
 | Output | Notes |
 |---|---|
 | `audTag` | The app's audience tag. Hand this to dm5's Worker (it verifies the JWT `aud` against it). |
-| `service_token_client_id` | `Cf-Access-Client-Id` value for agents/CLI. |
-| `service_token_client_secret` | `Cf-Access-Client-Secret` value. Marked `sensitive`; read with `terraform output -raw service_token_client_secret`. |
+| `account_id` | Echoes `var.account_id`. The dm6 provision endpoint uses it to mint per-developer service tokens (`POST /accounts/{account_id}/access/service_tokens`). |
+| `zone_id` | Echoes `var.zone_id`. Identifies the Access app's zone for the dm6 provision endpoint. |
 
-Store the client secret in `~/.config/da/credentials.json` (mode 0600), not in the
+There are **no** `service_token_client_id` / `service_token_client_secret` outputs:
+service-token credentials are per-developer and minted at runtime by dm6, not by
+Terraform. Each developer receives their own client ID/secret from the provision
+endpoint and stores it in `~/.config/da/credentials.json` (mode 0600), not in the
 repo (see proposal §5.4).
 
 ## State
 
-For v1, **state is local and gitignored** (`*.tfstate*` in `.gitignore`). Local state
-holds the service-token secret in plaintext, so it must never be committed. When this
-graduates beyond a single operator, move to a remote backend (e.g. an R2-backed `s3`
-backend or Terraform Cloud) and add a `backend` block to `versions.tf`; until then,
-keep the local state file out of version control and back it up out-of-band.
+For v1, **state is local and gitignored** (`*.tfstate*` in `.gitignore`). With the
+per-user model no service-token secrets live in state — those are minted at runtime by
+dm6 — but the state should still never be committed. When this graduates beyond a
+single operator, move to a remote backend (e.g. an R2-backed `s3` backend or Terraform
+Cloud) and add a `backend` block to `versions.tf`; until then, keep the local state
+file out of version control and back it up out-of-band.

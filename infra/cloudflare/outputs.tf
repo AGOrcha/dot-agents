@@ -6,13 +6,19 @@ output "audTag" {
   value       = cloudflare_zero_trust_access_application.agorcha_internal_docs.aud
 }
 
-output "service_token_client_id" {
-  description = "Client ID for the agorcha-agents service token (sent as Cf-Access-Client-Id)."
-  value       = cloudflare_zero_trust_access_service_token.agorcha_agents.client_id
+output "account_id" {
+  description = <<-EOT
+    Cloudflare account ID owning the Zero Trust org. Echoed for the dm6 provision
+    endpoint, which mints per-developer service tokens at this account scope via the
+    CF API (POST /accounts/{account_id}/access/service_tokens).
+  EOT
+  value       = var.account_id
 }
 
-output "service_token_client_secret" {
-  description = "Client Secret for the agorcha-agents service token (sent as Cf-Access-Client-Secret)."
-  value       = cloudflare_zero_trust_access_service_token.agorcha_agents.client_secret
-  sensitive   = true
+output "zone_id" {
+  description = <<-EOT
+    Cloudflare zone ID for agorcha.dev. Echoed for the dm6 provision endpoint so it
+    can target the Access app's zone when minting per-developer service tokens.
+  EOT
+  value       = var.zone_id
 }

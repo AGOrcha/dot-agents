@@ -5,13 +5,12 @@
 #
 # Uses the Cloudflare provider v5 resource family (cloudflare_zero_trust_access_*).
 # The deprecated v4 cloudflare_access_* resources are intentionally NOT used.
-
-# Machine account the agents/CLI authenticate with on non-browser requests.
-# Created before the policy that references it so token_id resolves at plan time.
-resource "cloudflare_zero_trust_access_service_token" "agorcha_agents" {
-  account_id = var.account_id
-  name       = "agorcha-agents"
-}
+#
+# Service-token model: PER-USER, runtime-minted. Terraform declares only the app
+# and its policies; the Service-Auth policy accepts ANY valid Access service token.
+# The dm6 provision endpoint mints one CF Access service token per developer (named
+# agorcha-agents-<github-login>) via the CF API at provision time. No service token
+# is declared here, so none of their secrets live in Terraform state.
 
 # The Access application gating agorcha.dev/internal/*.
 resource "cloudflare_zero_trust_access_application" "agorcha_internal_docs" {
@@ -55,9 +54,11 @@ resource "cloudflare_zero_trust_access_policy" "maintainers" {
   ]
 }
 
-# Service Auth path: non-browser clients presenting the service token's
-# Cf-Access-Client-Id / Cf-Access-Client-Secret headers are admitted without
-# an identity (decision = non_identity).
+# Service Auth path: non-browser clients presenting ANY valid Access service
+# token's Cf-Access-Client-Id / Cf-Access-Client-Secret headers are admitted
+# without an identity (decision = non_identity). Individual per-developer tokens
+# (agorcha-agents-<github-login>) are minted at runtime by the dm6 provision
+# endpoint; revoke a developer by deleting their token, no Terraform change needed.
 resource "cloudflare_zero_trust_access_policy" "agents_service_token" {
   account_id = var.account_id
   name       = "agents-service-token"
@@ -65,9 +66,7 @@ resource "cloudflare_zero_trust_access_policy" "agents_service_token" {
 
   include = [
     {
-      service_token = {
-        token_id = cloudflare_zero_trust_access_service_token.agorcha_agents.id
-      }
+      any_valid_service_token = {}
     },
   ]
 }
