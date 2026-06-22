@@ -184,7 +184,7 @@ jobs:
           QUILL_SHA256: e58c6f86378a22507c1123e24412afd4ee2d3bb32ebd94d6059827dc0c1b3fbf
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -sSL -o /tmp/quill.tar.gz "https://github.com/anchore/quill/releases/download/v${QUILL_VERSION}/quill_${QUILL_VERSION}_linux_amd64.tar.gz"
+          curl -sSL --proto '=https' --proto-redir '=https' -o /tmp/quill.tar.gz "https://github.com/anchore/quill/releases/download/v${QUILL_VERSION}/quill_${QUILL_VERSION}_linux_amd64.tar.gz"
           echo "${QUILL_SHA256}  /tmp/quill.tar.gz" | sha256sum -c -
           tar -C "$HOME/.local/bin" -xzf /tmp/quill.tar.gz quill
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
