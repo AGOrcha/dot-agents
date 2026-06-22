@@ -18,6 +18,16 @@ builds:
     goarch:
       - amd64
       - arm64
+    hooks:
+      # Developer ID-sign (+ notarize) each darwin `da` binary before it is
+      # archived, so the tarball carries the signature. Gated: sign-macos.sh is a
+      # no-op until QUILL_SIGN_P12 is set, and it skips non-darwin binaries — so
+      # linux and (for now) unsigned darwin keep shipping exactly as today until
+      # the Developer ID cert + secrets exist. quill signs Mach-O from Linux, so
+      # this runs on the same ubuntu runner as the Windows/dotnet-sign path.
+      post:
+        - cmd: ./scripts/sign-macos.sh "{{ .Path }}" "{{ .Os }}"
+          output: true
     ldflags:
       - -s -w
       - -X github.com/AGOrcha/dot-agents/commands.Version={{.Version}}

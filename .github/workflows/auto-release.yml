@@ -168,6 +168,28 @@ jobs:
         # is dormant until the repo variables are populated.
         run: dotnet tool install --global sign --prerelease
 
+      # --- macOS Developer ID signing via quill (gated) ---
+      # quill (https://github.com/anchore/quill) signs/notarizes Mach-O binaries
+      # from Linux, so darwin binaries are Developer ID-signed on this ubuntu
+      # runner — the macOS counterpart to the dotnet-sign path above. Gated on
+      # MACOS_SIGNING_ENABLED so it stays dormant (and scripts/sign-macos.sh
+      # no-ops on empty QUILL_SIGN_P12) until the cert + secrets are configured.
+      - name: Install quill (macOS Developer ID signing)
+        if: steps.check.outputs.exists == 'false' && vars.MACOS_SIGNING_ENABLED == 'true'
+        # Pinned, checksum-verified release binary — reproducible (no @version
+        # dependency resolution, no remote script piped to a shell). Bump both
+        # QUILL_VERSION and QUILL_SHA256 together to adopt a newer quill.
+        env:
+          QUILL_VERSION: 0.7.1
+          QUILL_SHA256: e58c6f86378a22507c1123e24412afd4ee2d3bb32ebd94d6059827dc0c1b3fbf
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL --proto '=https' --proto-redir '=https' -o /tmp/quill.tar.gz "https://github.com/anchore/quill/releases/download/v${QUILL_VERSION}/quill_${QUILL_VERSION}_linux_amd64.tar.gz"
+          echo "${QUILL_SHA256}  /tmp/quill.tar.gz" | sha256sum -c -
+          tar -C "$HOME/.local/bin" -xzf /tmp/quill.tar.gz quill
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/quill" version
+
       - name: Import Homebrew tap signing key
         if: steps.check.outputs.exists == 'false'
         env:
@@ -197,6 +219,14 @@ jobs:
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          # macOS Developer ID signing/notarization via quill (gated): these are
+          # empty until the QUILL_* secrets are set, which makes
+          # scripts/sign-macos.sh a no-op. quill reads them from the environment.
+          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
+          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
+          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
+          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
+          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
         run: |
           # Ensure an annotated tag for this version exists
           git config user.name "github-actions[bot]"
