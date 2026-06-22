@@ -52,6 +52,10 @@ type runContext struct {
 	cwd     string
 }
 
+// getwd resolves the working directory; a package var so tests can exercise the
+// resolution-failure branch of bind without manipulating the real process cwd.
+var getwd = os.Getwd
+
 // bind fills the run context from the live command and Deps: stdout/stderr from
 // the command's streams, jsonOut from the global --json, and cwd from os.Getwd
 // when not already set (tests inject cwd directly). It returns a hinted error
@@ -61,7 +65,7 @@ func (rc *runContext) bind(cmd *cobra.Command, deps Deps) error {
 	rc.stderr = cmd.ErrOrStderr()
 	rc.jsonOut = deps.jsonFlag()
 	if rc.cwd == "" {
-		cwd, err := os.Getwd()
+		cwd, err := getwd()
 		if err != nil {
 			return deps.ErrorWithHints("could not resolve current directory", err.Error())
 		}
