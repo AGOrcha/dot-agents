@@ -475,9 +475,10 @@ tasks:
         - p4c-config-sync-lint
         - p5-source-types-http-oci
         - p4f-units-lock-7a-wiring
-        - p7-v1-deprecation-warnings
         - p1c-verifier-profile-source-aware
-        - p7b-v1-auto-migrator
+        - p4g-da-install-units-sync
+        - config-v2-coherence/ce-unified-artifact-sourcing
+        - config-v2-coherence/ck-command-reshape
       blocks: []
       owner: dot-agents
       write_scope:
@@ -485,28 +486,21 @@ tasks:
         - CHANGELOG.md
       verification_required: true
       notes: |-
-        Release-gated tail task (hybrid convention, MINOR path). Added per
-        maintainer ruling 2026-05-28 (plan now committed on this branch).
-        This plan delivers a new user-visible capability — the v2
-        config-distribution model: the `da config explain` command plus the
-        effective-config resolver, the unified §15 units lockfile
-        (one units section + inputs_digest), and layered sources/extends.
-        That is additive, no public surface removed, so a MINOR.
-        Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). Maintainer ruling 2026-05-28 revised the
-        release lineup: the accumulated infra/docs/distribution work (#145)
-        ships as PATCH 0.3.3, NOT 0.4.0 — 0.4.0 is reserved for the next
-        genuine feature land. config-v2 (da config explain + resolver) IS that
-        feature, so this tail is expected to claim 0.4.0 (next minor after
-        0.3.3). config-explain/#162 holds for THIS tail -> 0.4.0, NOT 0.3.3.
-        Resolve the exact number from VERSION when this task becomes ready
-        (expected 0.4.0); serialize at the VERSION bump if another feature
-        plan's minor tail ships first (then this becomes 0.5.0).
-        Action: bump VERSION to the resolved next minor and finalize the
-        CHANGELOG "## [<target>]" section, documenting the v2 config model
-        and `da config explain`. Merge to master fires auto-release.yml.
-        Caution: this plan has in-flight tasks (p1 + p4 in_progress) — the
-        tail only becomes eligible once every dependency is completed.
+        Release-gated tail task (hybrid convention, MINOR path).
+        0.4.0 SCOPE (decided 2026-06-22) = the COMPLETE config-v2 §15 surface:
+        the effective-config resolver + unified units lockfile (one units
+        section + inputs_digest, clean cutover), da config explain/sync/lint/
+        verify, unified artifact sourcing (ce), the --scope/--source command
+        reshape (ck), and the re-scoped da install (p4g). Additive, no public
+        surface removed -> MINOR. v1 deprecation (p7/p7b) is DEFERRED to 0.5.0
+        (ships with that release's other work) and is NOT a 0.4.0 gate; da
+        install repurpose is IN 0.4.0 (p4g), not deferred.
+        Target version = next minor computed from VERSION at ready-time (do NOT
+        hardcode; expected 0.4.0) — serialize at the VERSION bump if another
+        feature minor lands first (then this claims the next number).
+        Action: bump VERSION + finalize the CHANGELOG "## [<target>]" section
+        documenting the v2 config model. Merge to master fires auto-release.yml.
+        Becomes eligible only once every dependency is completed.
       app_type: release
     - id: p4f-units-lock-7a-wiring
       title: 'Phase 4f: wire §7A units lock (inputs_digest + units) into resolve/sync; verify tracks local-scope drift'
@@ -529,21 +523,59 @@ tasks:
         Wire the dormant §7A seam (EnsureResolved/ComputeInputsDigest/WriteUnitsLock) into da config
         sync and da install so every resolved project — including flat/local-only — gets a lockfile
         carrying inputs_digest plus the units section. Migrate verify/explain/doctor to read units and
-        compare ComputeInputsDigest against the lock to report local-scope drift; deprecate the §7
-        config section. Makes local sources first-class (managed, often git-backed). Full design in
+        compare ComputeInputsDigest against the lock to report local-scope drift. Full design in
         .agents/proposals/section-7a-units-lock-wiring.md.
 
-        Adversarial review (2026-06-03) surfaced three concrete split-brain failures that MUST be
-        resolved before wiring any production caller to EnsureResolved:
-        (1) Stale-repair split-brain: EnsureResolved detects staleness via Staleness()/ReadUnits but
-            the stale path dispatches into LayeredResolver.Resolve which only calls WriteConfigLock
-            (legacy config section) and never WriteUnitsLock or refreshes inputs_digest. Fix: make
-            the stale path write the 7A lock model or dual-write from one authoritative code path.
-        (2) Offline reader breakage: ResolveLocked and VerifyLayerLocks still unmarshal only
-            LockSectionConfig; a units-only lockfile will appear empty, causing offline resolution to
-            fail with 'no resolved SHA' and da config verify to report unpinned layers. Fix: dual-read
-            both legacy config section and 7A units during migration, then retire the legacy reader.
-        (3) verify invisibility: da config verify never calls Staleness() or compares inputs_digest,
-            so local-scope drift that 7A was designed to catch is invisible on the primary contract
-            check. Fix: add a first-class staleness check backed by Staleness()/ReadUnits to verify.
+        MIGRATION = CLEAN CUTOVER (decided 2026-06-22). Pre-1.0 and the lock is regenerable, so do
+        NOT build a dual-write/dual-read window. The lock is units-only; a one-time on-read migration
+        converts any legacy `config`-section lock into `units` on first read, then the legacy reader is
+        REMOVED in this task. The §7 config lock section is retired here (ships in 0.4.0), not deferred.
+
+        Three correctness fixes the cutover MUST honor (adversarial review 2026-06-03):
+        (1) Stale-repair: the stale path (LayeredResolver.Resolve) currently calls only
+            WriteConfigLock. Route ALL writes through one authoritative path that calls WriteUnitsLock
+            + refreshes inputs_digest — leave no legacy WriteConfigLock behind.
+        (2) Offline reader: ResolveLocked and VerifyLayerLocks currently unmarshal only
+            LockSectionConfig. Switch them to read the `units` section; the one-time on-read migration
+            upgrades any old config-section lock so offline resolve never sees an 'empty' lock.
+        (3) verify invisibility: da config verify never calls Staleness()/compares inputs_digest. Add
+            a first-class staleness check backed by Staleness()/ReadUnits so local-scope drift shows
+            on the primary contract check.
+      app_type: go-cli
+    - id: p4g-da-install-units-sync
+      title: 'Phase 4g: re-scope da install onto EnsureResolved + exact/prune projection (§15)'
+      status: pending
+      depends_on:
+        - p4f-units-lock-7a-wiring
+        - p4c-config-sync-lint
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/install.go
+        - commands/internal/lifecycle/install.go
+        - commands/internal/lifecycle/install_test.go
+      verification_required: true
+      notes: |-
+        Replaces the CANCELLED p4d, whose 'da install == da config sync && da packages install'
+        framing died with §15 (there is no da packages install; artifacts are kind:artifact units
+        resolved by the same resolver). Re-scope da install onto the unified seam.
+
+        Target flow: load manifest -> EnsureResolved(project) (staleness check; if stale, re-resolve
+        local scopes + write the units lock) -> create ~/.agents project dirs -> register project in
+        ~/.agents/config.json -> shared-target projection EXACT/PRUNE (reuse
+        RunSharedTargetProjectionExact, same path as refresh) -> platform links (Claude/Cursor/Codex/
+        Copilot) -> stamp .agentsrc.json refresh metadata. da install stays the canonical 'make
+        everything current'; the only step required on a fresh clone.
+
+        Simplifications the units model enables (analyzed 2026-06-22; size S, ~10-20 lines of wiring):
+        - Collapse bespoke resolveInstallSources + linkInstallResources into ONE EnsureResolved call
+          (the resolver owns all unit resolution + the units lock write).
+        - Reuse RunSharedTargetProjectionExact (one exact/prune projection path; drop the additive-only
+          install projection).
+        - Dedupe vs da config sync: both call EnsureResolved, differing by intent/flags — install adds
+          ~/.agents projection + platform links + project registration; config sync does not.
+        - First-resolve is hermetic (fresh machine, no lock -> deterministic create-on-first-resolve).
+        Boundary: upstream re-check is explicit-only (da config sync --refresh); install resolves
+        local scopes only (D10). Depends on p4f so EnsureResolved writes the UNITS lock (clean
+        cutover), not the legacy config section.
       app_type: go-cli
