@@ -343,36 +343,7 @@ func runPollDetector(envs []events.Envelope, bindings []taskPRBinding) (PollDete
 	var decisions []transitionDecision
 
 	for _, env := range envs {
-		if env.Namespace() != events.PRNamespace {
-			continue
-		}
-		var p pollEnvelopePR
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return PollDetectorResult{}, fmt.Errorf(
-				"poll detector: decode pr envelope %q: %w", env.IdempotencyKey, err)
-		}
-		binding, ok := byPR[p.Number]
-		if !ok {
-			// An event for a PR no task is bound to: not ours to transition.
-			continue
-		}
-		if len(p.Commits) > 0 {
-			result.ObservedSHAs[binding.TaskID] = normalizeSHAs(p.Commits)
-		}
-
-		// §2.7: a force-rebase observed by SHA1 set diff overrides the
-		// envelope's own kind — the base moved, which is a rebase-only
-		// regression regardless of what kind the producer emitted this cycle.
-		if detectForceRebase(binding.LastSHAs, p.Commits) {
-			dec, err := synthesizeForceRebase(binding)
-			if err != nil {
-				return PollDetectorResult{}, err
-			}
-			decisions = append(decisions, dec)
-			continue
-		}
-
-		dec, triggered, err := pollEventTransition(binding.TaskID, binding.Status, env)
+		dec, triggered, err := pollDetectEnvelope(env, byPR, result.ObservedSHAs)
 		if err != nil {
 			return PollDetectorResult{}, err
 		}
@@ -386,6 +357,45 @@ func runPollDetector(envs []events.Envelope, bindings []taskPRBinding) (PollDete
 	})
 	result.Decisions = decisions
 	return result, nil
+}
+
+// pollDetectEnvelope resolves a single envelope to its (optional) transition
+// decision within one poll cycle, recording the observed SHA set into observed
+// as a side effect. It returns triggered=false (no error) for envelopes that do
+// not transition a task — a non-PR namespace, an unbound PR, or a recognized
+// non-trigger kind — so runPollDetector's loop body stays flat. Force-rebase
+// (§2.7) is detected here because it overrides the envelope's own kind.
+func pollDetectEnvelope(
+	env events.Envelope,
+	byPR map[int]taskPRBinding,
+	observed map[string][]string,
+) (transitionDecision, bool, error) {
+	if env.Namespace() != events.PRNamespace {
+		return transitionDecision{}, false, nil
+	}
+	var p pollEnvelopePR
+	if err := json.Unmarshal(env.Payload, &p); err != nil {
+		return transitionDecision{}, false, fmt.Errorf(
+			"poll detector: decode pr envelope %q: %w", env.IdempotencyKey, err)
+	}
+	binding, ok := byPR[p.Number]
+	if !ok {
+		// An event for a PR no task is bound to: not ours to transition.
+		return transitionDecision{}, false, nil
+	}
+	if len(p.Commits) > 0 {
+		observed[binding.TaskID] = normalizeSHAs(p.Commits)
+	}
+
+	// §2.7: a force-rebase observed by SHA1 set diff overrides the envelope's
+	// own kind — the base moved, which is a rebase-only regression regardless of
+	// what kind the producer emitted this cycle.
+	if detectForceRebase(binding.LastSHAs, p.Commits) {
+		dec, err := synthesizeForceRebase(binding)
+		return dec, err == nil, err
+	}
+
+	return pollEventTransition(binding.TaskID, binding.Status, env)
 }
 
 // synthesizeForceRebase builds the in_progress + RebaseOnly decision for a task

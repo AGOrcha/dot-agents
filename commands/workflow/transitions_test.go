@@ -9,6 +9,37 @@ import (
 
 // ── §6.1 Verifier: in_progress → awaiting_agent_review ─────────────────────────
 
+type verifierTransitionCase struct {
+	name    string
+	from    string
+	pre     verifierPreconditions
+	wantErr bool
+	wantTo  string
+}
+
+// assertVerifierTransition runs one verifier case and checks the outcome. It is
+// extracted from the table loop so neither function carries the combined
+// branching of error-path and happy-path assertions.
+func assertVerifierTransition(t *testing.T, tc verifierTransitionCase) {
+	t.Helper()
+	dec, err := verifierTransition("t-verify", tc.from, tc.pre)
+	if tc.wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got decision %+v", dec)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dec.Owner != ownerVerifier {
+		t.Fatalf("owner = %q, want %q", dec.Owner, ownerVerifier)
+	}
+	if dec.From != tc.from || dec.To != tc.wantTo {
+		t.Fatalf("edge = %q→%q, want %q→%q", dec.From, dec.To, tc.from, tc.wantTo)
+	}
+}
+
 func TestVerifierTransition(t *testing.T) {
 	greenAndClean := verifierPreconditions{
 		PROpen:         true,
@@ -17,13 +48,7 @@ func TestVerifierTransition(t *testing.T) {
 		OpenIssueCount: 0,
 	}
 
-	tests := []struct {
-		name    string
-		from    string
-		pre     verifierPreconditions
-		wantErr bool
-		wantTo  string
-	}{
+	tests := []verifierTransitionCase{
 		{
 			name:   "all §2.3 preconditions met opens agent-review gate",
 			from:   TaskStatusInProgress,
@@ -76,27 +101,42 @@ func TestVerifierTransition(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dec, err := verifierTransition("t-verify", tc.from, tc.pre)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got decision %+v", dec)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if dec.Owner != ownerVerifier {
-				t.Fatalf("owner = %q, want %q", dec.Owner, ownerVerifier)
-			}
-			if dec.From != tc.from || dec.To != tc.wantTo {
-				t.Fatalf("edge = %q→%q, want %q→%q", dec.From, dec.To, tc.from, tc.wantTo)
-			}
+			assertVerifierTransition(t, tc)
 		})
 	}
 }
 
 // ── §6.2 Lens-gate: awaiting_agent_review → owner-review | in_progress ──────────
+
+type lensGateTransitionCase struct {
+	name     string
+	from     string
+	verdicts []lensVerdict
+	wantErr  bool
+	wantTo   string
+}
+
+// assertLensGateTransition runs one lens-gate case and checks the outcome,
+// keeping the error-path and happy-path branching out of the table loop.
+func assertLensGateTransition(t *testing.T, tc lensGateTransitionCase) {
+	t.Helper()
+	dec, err := lensGateTransition("t-lens", tc.from, tc.verdicts)
+	if tc.wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got decision %+v", dec)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dec.Owner != ownerLensGate {
+		t.Fatalf("owner = %q, want %q", dec.Owner, ownerLensGate)
+	}
+	if dec.To != tc.wantTo {
+		t.Fatalf("to = %q, want %q", dec.To, tc.wantTo)
+	}
+}
 
 func TestLensGateTransition(t *testing.T) {
 	accept := func(names ...string) []lensVerdict {
@@ -107,13 +147,7 @@ func TestLensGateTransition(t *testing.T) {
 		return out
 	}
 
-	tests := []struct {
-		name     string
-		from     string
-		verdicts []lensVerdict
-		wantErr  bool
-		wantTo   string
-	}{
+	tests := []lensGateTransitionCase{
 		{
 			name:     "all lenses accept promotes to owner review",
 			from:     TaskStatusAwaitingAgentReview,
@@ -157,22 +191,7 @@ func TestLensGateTransition(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dec, err := lensGateTransition("t-lens", tc.from, tc.verdicts)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got decision %+v", dec)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if dec.Owner != ownerLensGate {
-				t.Fatalf("owner = %q, want %q", dec.Owner, ownerLensGate)
-			}
-			if dec.To != tc.wantTo {
-				t.Fatalf("to = %q, want %q", dec.To, tc.wantTo)
-			}
+			assertLensGateTransition(t, tc)
 		})
 	}
 }
@@ -240,26 +259,69 @@ func TestDetectForceRebase(t *testing.T) {
 
 // ── §3.2 single-envelope kind→edge mapping ─────────────────────────────────────
 
-func TestPollEventTransition(t *testing.T) {
-	mkEnv := func(t *testing.T, kind string) events.Envelope {
-		t.Helper()
-		env, err := events.NewEnvelope(kind, "github", "k-"+kind, time.Now(), []byte(`{"number":7}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return env
-	}
+type pollEventTransitionCase struct {
+	name        string
+	from        string
+	kind        string
+	wantTrigger bool
+	wantErr     bool
+	wantTo      string
+	wantRebase  bool
+	wantCascade bool
+}
 
-	tests := []struct {
-		name        string
-		from        string
-		kind        string
-		wantTrigger bool
-		wantErr     bool
-		wantTo      string
-		wantRebase  bool
-		wantCascade bool
-	}{
+// mkPollEnv builds a minimal PR envelope of the given kind for the single-edge
+// mapping tests.
+func mkPollEnv(t *testing.T, kind string) events.Envelope {
+	t.Helper()
+	env, err := events.NewEnvelope(kind, "github", "k-"+kind, time.Now(), []byte(`{"number":7}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+// assertPollDecision checks the decision fields of a triggered poll transition.
+func assertPollDecision(t *testing.T, tc pollEventTransitionCase, dec transitionDecision) {
+	t.Helper()
+	if dec.Owner != ownerPollDetector {
+		t.Fatalf("owner = %q, want %q", dec.Owner, ownerPollDetector)
+	}
+	if dec.To != tc.wantTo {
+		t.Fatalf("to = %q, want %q", dec.To, tc.wantTo)
+	}
+	if dec.RebaseOnly != tc.wantRebase {
+		t.Fatalf("rebaseOnly = %v, want %v", dec.RebaseOnly, tc.wantRebase)
+	}
+	if dec.Cascade != tc.wantCascade {
+		t.Fatalf("cascade = %v, want %v", dec.Cascade, tc.wantCascade)
+	}
+}
+
+// assertPollEventTransition runs one single-envelope mapping case end to end.
+func assertPollEventTransition(t *testing.T, tc pollEventTransitionCase) {
+	t.Helper()
+	dec, triggered, err := pollEventTransition("t-poll", tc.from, mkPollEnv(t, tc.kind))
+	if tc.wantErr {
+		if err == nil {
+			t.Fatalf("expected error, got triggered=%v dec=%+v", triggered, dec)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if triggered != tc.wantTrigger {
+		t.Fatalf("triggered = %v, want %v", triggered, tc.wantTrigger)
+	}
+	if !tc.wantTrigger {
+		return
+	}
+	assertPollDecision(t, tc, dec)
+}
+
+func TestPollEventTransition(t *testing.T) {
+	tests := []pollEventTransitionCase{
 		{
 			name:        "merged → completed",
 			from:        TaskStatusAwaitingOwnerReview,
@@ -318,34 +380,7 @@ func TestPollEventTransition(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			dec, triggered, err := pollEventTransition("t-poll", tc.from, mkEnv(t, tc.kind))
-			if tc.wantErr {
-				if err == nil {
-					t.Fatalf("expected error, got triggered=%v dec=%+v", triggered, dec)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if triggered != tc.wantTrigger {
-				t.Fatalf("triggered = %v, want %v", triggered, tc.wantTrigger)
-			}
-			if !tc.wantTrigger {
-				return
-			}
-			if dec.Owner != ownerPollDetector {
-				t.Fatalf("owner = %q, want %q", dec.Owner, ownerPollDetector)
-			}
-			if dec.To != tc.wantTo {
-				t.Fatalf("to = %q, want %q", dec.To, tc.wantTo)
-			}
-			if dec.RebaseOnly != tc.wantRebase {
-				t.Fatalf("rebaseOnly = %v, want %v", dec.RebaseOnly, tc.wantRebase)
-			}
-			if dec.Cascade != tc.wantCascade {
-				t.Fatalf("cascade = %v, want %v", dec.Cascade, tc.wantCascade)
-			}
+			assertPollEventTransition(t, tc)
 		})
 	}
 }
@@ -380,106 +415,114 @@ func TestPollEventTransitionUnknownPRKindErrors(t *testing.T) {
 
 // ── §3.2 full poll-detector cycle ──────────────────────────────────────────────
 
-func TestRunPollDetector(t *testing.T) {
-	env := func(t *testing.T, kind string, number int, commits string) events.Envelope {
-		t.Helper()
-		payload := []byte(`{"number":` + itoa(number) + `,"commits":` + commits + `}`)
-		e, err := events.NewEnvelope(kind, "github", kind+"-"+itoa(number), time.Now(), payload)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return e
+// mkRunPollEnv builds a PR envelope with an embedded commit list for the
+// full-cycle poll-detector tests.
+func mkRunPollEnv(t *testing.T, kind string, number int, commits string) events.Envelope {
+	t.Helper()
+	payload := []byte(`{"number":` + itoa(number) + `,"commits":` + commits + `}`)
+	e, err := events.NewEnvelope(kind, "github", kind+"-"+itoa(number), time.Now(), payload)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return e
+}
 
-	t.Run("maps merged + closed across bound tasks, ordered by task id", func(t *testing.T) {
-		bindings := []taskPRBinding{
-			{TaskID: "t-merge", PRNumber: 10, Status: TaskStatusAwaitingOwnerReview, LastSHAs: []string{"a"}},
-			{TaskID: "t-close", PRNumber: 20, Status: TaskStatusAwaitingOwnerReview, LastSHAs: []string{"b"}},
-		}
-		envs := []events.Envelope{
-			env(t, events.KindPRClosed, 20, `["b"]`),
-			env(t, events.KindPRMerged, 10, `["a"]`),
-		}
-		res, err := runPollDetector(envs, bindings)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(res.Decisions) != 2 {
-			t.Fatalf("decisions = %+v, want 2", res.Decisions)
-		}
-		// Deterministic task-id order: t-close before t-merge.
-		if res.Decisions[0].TaskID != "t-close" || res.Decisions[0].To != TaskStatusBlocked || !res.Decisions[0].Cascade {
-			t.Fatalf("decision[0] = %+v", res.Decisions[0])
-		}
-		if res.Decisions[1].TaskID != "t-merge" || res.Decisions[1].To != TaskStatusCompleted {
-			t.Fatalf("decision[1] = %+v", res.Decisions[1])
-		}
-	})
+func TestRunPollDetector(t *testing.T) {
+	t.Run("maps merged + closed across bound tasks, ordered by task id", testRunPollDetectorOrdered)
+	t.Run("SHA1 set diff synthesizes a rebase-only regression overriding the kind", testRunPollDetectorRebase)
+	t.Run("envelope for an unbound PR is ignored", testRunPollDetectorUnbound)
+	t.Run("malformed payload fails loud", testRunPollDetectorMalformed)
+	t.Run("non-PR namespace envelopes are skipped", testRunPollDetectorNonPR)
+}
 
-	t.Run("SHA1 set diff synthesizes a rebase-only regression overriding the kind", func(t *testing.T) {
-		bindings := []taskPRBinding{
-			{TaskID: "t-rb", PRNumber: 30, Status: TaskStatusAwaitingAgentReview, LastSHAs: []string{"old1", "old2"}},
-		}
-		// The producer only emitted a benign ci_green this cycle, but the commit
-		// set was rewritten — the detector must synthesize the §2.7 rebase.
-		envs := []events.Envelope{env(t, events.KindPRCIGreen, 30, `["new1","new2"]`)}
-		res, err := runPollDetector(envs, bindings)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(res.Decisions) != 1 {
-			t.Fatalf("decisions = %+v, want 1", res.Decisions)
-		}
-		d := res.Decisions[0]
-		if d.To != TaskStatusInProgress || !d.RebaseOnly || d.Owner != ownerPollDetector {
-			t.Fatalf("rebase decision = %+v", d)
-		}
-		if got := res.ObservedSHAs["t-rb"]; len(got) != 2 || got[0] != "new1" || got[1] != "new2" {
-			t.Fatalf("observed SHAs = %v", got)
-		}
-	})
+func testRunPollDetectorOrdered(t *testing.T) {
+	bindings := []taskPRBinding{
+		{TaskID: "t-merge", PRNumber: 10, Status: TaskStatusAwaitingOwnerReview, LastSHAs: []string{"a"}},
+		{TaskID: "t-close", PRNumber: 20, Status: TaskStatusAwaitingOwnerReview, LastSHAs: []string{"b"}},
+	}
+	envs := []events.Envelope{
+		mkRunPollEnv(t, events.KindPRClosed, 20, `["b"]`),
+		mkRunPollEnv(t, events.KindPRMerged, 10, `["a"]`),
+	}
+	res, err := runPollDetector(envs, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Decisions) != 2 {
+		t.Fatalf("decisions = %+v, want 2", res.Decisions)
+	}
+	// Deterministic task-id order: t-close before t-merge.
+	if res.Decisions[0].TaskID != "t-close" || res.Decisions[0].To != TaskStatusBlocked || !res.Decisions[0].Cascade {
+		t.Fatalf("decision[0] = %+v", res.Decisions[0])
+	}
+	if res.Decisions[1].TaskID != "t-merge" || res.Decisions[1].To != TaskStatusCompleted {
+		t.Fatalf("decision[1] = %+v", res.Decisions[1])
+	}
+}
 
-	t.Run("envelope for an unbound PR is ignored", func(t *testing.T) {
-		bindings := []taskPRBinding{
-			{TaskID: "t", PRNumber: 99, Status: TaskStatusAwaitingOwnerReview},
-		}
-		envs := []events.Envelope{env(t, events.KindPRMerged, 1234, `[]`)}
-		res, err := runPollDetector(envs, bindings)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(res.Decisions) != 0 {
-			t.Fatalf("unbound PR must not transition, got %+v", res.Decisions)
-		}
-	})
+func testRunPollDetectorRebase(t *testing.T) {
+	bindings := []taskPRBinding{
+		{TaskID: "t-rb", PRNumber: 30, Status: TaskStatusAwaitingAgentReview, LastSHAs: []string{"old1", "old2"}},
+	}
+	// The producer only emitted a benign ci_green this cycle, but the commit
+	// set was rewritten — the detector must synthesize the §2.7 rebase.
+	envs := []events.Envelope{mkRunPollEnv(t, events.KindPRCIGreen, 30, `["new1","new2"]`)}
+	res, err := runPollDetector(envs, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Decisions) != 1 {
+		t.Fatalf("decisions = %+v, want 1", res.Decisions)
+	}
+	d := res.Decisions[0]
+	if d.To != TaskStatusInProgress || !d.RebaseOnly || d.Owner != ownerPollDetector {
+		t.Fatalf("rebase decision = %+v", d)
+	}
+	if got := res.ObservedSHAs["t-rb"]; len(got) != 2 || got[0] != "new1" || got[1] != "new2" {
+		t.Fatalf("observed SHAs = %v", got)
+	}
+}
 
-	t.Run("malformed payload fails loud", func(t *testing.T) {
-		bindings := []taskPRBinding{{TaskID: "t", PRNumber: 7, Status: TaskStatusAwaitingOwnerReview}}
-		bad := events.Envelope{
-			Type:           events.KindPRMerged,
-			Source:         "github",
-			IdempotencyKey: "bad",
-			Payload:        []byte(`{"number":"not-a-number"}`),
-		}
-		if _, err := runPollDetector([]events.Envelope{bad}, bindings); err == nil {
-			t.Fatal("expected decode error on malformed PR payload")
-		}
-	})
+func testRunPollDetectorUnbound(t *testing.T) {
+	bindings := []taskPRBinding{
+		{TaskID: "t", PRNumber: 99, Status: TaskStatusAwaitingOwnerReview},
+	}
+	envs := []events.Envelope{mkRunPollEnv(t, events.KindPRMerged, 1234, `[]`)}
+	res, err := runPollDetector(envs, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Decisions) != 0 {
+		t.Fatalf("unbound PR must not transition, got %+v", res.Decisions)
+	}
+}
 
-	t.Run("non-PR namespace envelopes are skipped", func(t *testing.T) {
-		bindings := []taskPRBinding{{TaskID: "t", PRNumber: 7, Status: TaskStatusAwaitingOwnerReview}}
-		other, err := events.NewEnvelope("event.metric.cpu", "src", "k", time.Now(), []byte(`{"number":7}`))
-		if err != nil {
-			t.Fatal(err)
-		}
-		res, err := runPollDetector([]events.Envelope{other}, bindings)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(res.Decisions) != 0 {
-			t.Fatalf("non-PR envelope must not transition, got %+v", res.Decisions)
-		}
-	})
+func testRunPollDetectorMalformed(t *testing.T) {
+	bindings := []taskPRBinding{{TaskID: "t", PRNumber: 7, Status: TaskStatusAwaitingOwnerReview}}
+	bad := events.Envelope{
+		Type:           events.KindPRMerged,
+		Source:         "github",
+		IdempotencyKey: "bad",
+		Payload:        []byte(`{"number":"not-a-number"}`),
+	}
+	if _, err := runPollDetector([]events.Envelope{bad}, bindings); err == nil {
+		t.Fatal("expected decode error on malformed PR payload")
+	}
+}
+
+func testRunPollDetectorNonPR(t *testing.T) {
+	bindings := []taskPRBinding{{TaskID: "t", PRNumber: 7, Status: TaskStatusAwaitingOwnerReview}}
+	other, err := events.NewEnvelope("event.metric.cpu", "src", "k", time.Now(), []byte(`{"number":7}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := runPollDetector([]events.Envelope{other}, bindings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Decisions) != 0 {
+		t.Fatalf("non-PR envelope must not transition, got %+v", res.Decisions)
+	}
 }
 
 // itoa is a tiny dependency-free int formatter for building test JSON payloads
