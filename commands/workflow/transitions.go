@@ -66,59 +66,23 @@ type transitionDecision struct {
 
 // ── §6.1 Verifier: in_progress → awaiting_agent_review ─────────────────────────
 
-// verifierPreconditions are the §2.3 objective signals the verifier dispatcher
-// requires before it may open the awaiting_agent_review gate. All must hold;
-// there is no partial-green shortcut (§2.3 rejected `pr-mark-open` before all
-// CI complete). These are objective (CI / Sonar / issue counts), which is why
-// the verifier — not the lens-gate — owns this edge (§2.4).
-type verifierPreconditions struct {
-	// PROpen reports whether the branch is pushed and a PR is open on GitHub.
-	PROpen bool
-	// RollupState is the derived CI rollup (events.RollupGreen / FAILING /
-	// PENDING). Only RollupGreen satisfies §2.3.
-	RollupState string
-	// SonarOK reports whether the SonarCloud quality gate passed.
-	SonarOK bool
-	// OpenIssueCount is the number of OPEN new-code issues. §2.3 requires zero.
-	OpenIssueCount int
-}
-
-// met reports whether every §2.3 precondition holds, returning the first unmet
-// reason for the operator hint when it does not.
-func (p verifierPreconditions) met() (bool, string) {
-	if !p.PROpen {
-		return false, "PR is not open (branch pushed + PR opened required, §2.3)"
-	}
-	if p.RollupState != events.RollupGreen {
-		state := p.RollupState
-		if strings.TrimSpace(state) == "" {
-			state = "unknown"
-		}
-		return false, fmt.Sprintf("primary verifier chain not terminal green (rollup=%s, §2.3)", state)
-	}
-	if !p.SonarOK {
-		return false, "SonarCloud quality gate not OK (§2.3)"
-	}
-	if p.OpenIssueCount != 0 {
-		return false, fmt.Sprintf("%d OPEN new-code issue(s) remain; §2.3 requires zero", p.OpenIssueCount)
-	}
-	return true, ""
-}
-
 // verifierTransition is the §6.1 dispatcher: the sole code path that performs
 // in_progress → awaiting_agent_review. It refuses any source status other than
-// in_progress (ownership guard for Done Criterion #8) and enforces the §2.3
-// preconditions before emitting the decision. A failed precondition returns an
-// error so the caller leaves the task untouched (the verifier may retry until
-// its retry budget is exhausted, at which point the caller routes to blocked
-// per §6.1).
-func verifierTransition(taskID, from string, pre verifierPreconditions) (transitionDecision, error) {
+// in_progress (ownership guard for Done Criterion #8) and evaluates the resolved
+// §2.3 precondition policy against the observed signal snapshot before emitting
+// the decision. The policy is a configurable, table-driven set of predicates
+// (see preconditions.go) — not a hardcoded VCS/quality-tool struct — and an
+// empty policy falls back to the built-in default (the gate is never open by
+// omission). A failed predicate returns an error so the caller leaves the task
+// untouched (the verifier may retry until its retry budget is exhausted, at
+// which point the caller routes to blocked per §6.1).
+func verifierTransition(taskID, from string, policy PreconditionPolicy, snap SignalSnapshot) (transitionDecision, error) {
 	if from != TaskStatusInProgress {
 		return transitionDecision{}, fmt.Errorf(
 			"verifier owns only %s → %s; refusing to act on source status %q (§6.1)",
 			TaskStatusInProgress, TaskStatusAwaitingAgentReview, from)
 	}
-	if ok, reason := pre.met(); !ok {
+	if ok, reason := evaluatePolicy(policy, snap); !ok {
 		return transitionDecision{}, fmt.Errorf("verifier gate not open for task %q: %s", taskID, reason)
 	}
 	if err := validateTaskStatusTransition(taskID, from, TaskStatusAwaitingAgentReview); err != nil {

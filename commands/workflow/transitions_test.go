@@ -12,17 +12,17 @@ import (
 type verifierTransitionCase struct {
 	name    string
 	from    string
-	pre     verifierPreconditions
+	snap    SignalSnapshot
 	wantErr bool
 	wantTo  string
 }
 
-// assertVerifierTransition runs one verifier case and checks the outcome. It is
-// extracted from the table loop so neither function carries the combined
-// branching of error-path and happy-path assertions.
+// assertVerifierTransition runs one verifier case (default policy) and checks the
+// outcome. It is extracted from the table loop so neither function carries the
+// combined branching of error-path and happy-path assertions.
 func assertVerifierTransition(t *testing.T, tc verifierTransitionCase) {
 	t.Helper()
-	dec, err := verifierTransition("t-verify", tc.from, tc.pre)
+	dec, err := verifierTransition("t-verify", tc.from, defaultPreconditionPolicy, tc.snap)
 	if tc.wantErr {
 		if err == nil {
 			t.Fatalf("expected error, got decision %+v", dec)
@@ -41,60 +41,47 @@ func assertVerifierTransition(t *testing.T, tc verifierTransitionCase) {
 }
 
 func TestVerifierTransition(t *testing.T) {
-	greenAndClean := verifierPreconditions{
-		PROpen:         true,
-		RollupState:    events.RollupGreen,
-		SonarOK:        true,
-		OpenIssueCount: 0,
-	}
-
 	tests := []verifierTransitionCase{
 		{
 			name:   "all §2.3 preconditions met opens agent-review gate",
 			from:   TaskStatusInProgress,
-			pre:    greenAndClean,
+			snap:   greenAndCleanSnapshot(),
 			wantTo: TaskStatusAwaitingAgentReview,
 		},
 		{
 			name:    "PR not open is refused (no partial-green shortcut)",
 			from:    TaskStatusInProgress,
-			pre:     verifierPreconditions{PROpen: false, RollupState: events.RollupGreen, SonarOK: true},
+			snap:    snapWithout(greenAndCleanSnapshot(), "event.pr.open"),
 			wantErr: true,
 		},
 		{
 			name:    "rollup not green is refused",
 			from:    TaskStatusInProgress,
-			pre:     verifierPreconditions{PROpen: true, RollupState: events.RollupFailing, SonarOK: true},
+			snap:    snapWith(greenAndCleanSnapshot(), "signal.ci.rollup", events.RollupFailing),
 			wantErr: true,
 		},
 		{
-			name:    "rollup pending is refused",
+			name:    "sonar gate not pass is refused",
 			from:    TaskStatusInProgress,
-			pre:     verifierPreconditions{PROpen: true, RollupState: events.RollupPending, SonarOK: true},
-			wantErr: true,
-		},
-		{
-			name:    "sonar gate not OK is refused",
-			from:    TaskStatusInProgress,
-			pre:     verifierPreconditions{PROpen: true, RollupState: events.RollupGreen, SonarOK: false},
+			snap:    snapWithout(greenAndCleanSnapshot(), "gate.quality.sonar"),
 			wantErr: true,
 		},
 		{
 			name:    "open new-code issues remaining is refused",
 			from:    TaskStatusInProgress,
-			pre:     verifierPreconditions{PROpen: true, RollupState: events.RollupGreen, SonarOK: true, OpenIssueCount: 3},
+			snap:    snapWith(greenAndCleanSnapshot(), "metric.new_code_issues", "3"),
 			wantErr: true,
 		},
 		{
 			name:    "ownership guard: refuses a non-in_progress source (§6.1/DC#8)",
 			from:    TaskStatusAwaitingAgentReview,
-			pre:     greenAndClean,
+			snap:    greenAndCleanSnapshot(),
 			wantErr: true,
 		},
 		{
 			name:    "ownership guard: refuses an awaiting_owner_review source",
 			from:    TaskStatusAwaitingOwnerReview,
-			pre:     greenAndClean,
+			snap:    greenAndCleanSnapshot(),
 			wantErr: true,
 		},
 	}
