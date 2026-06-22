@@ -43,7 +43,7 @@ fi
 # runs honest.
 command -v quill >/dev/null 2>&1 || {
   echo "sign-macos: 'quill' is not on PATH; install from https://github.com/anchore/quill" >&2
-  echo "  curl -sSfL https://raw.githubusercontent.com/anchore/quill/main/install.sh | sh -s -- -b /usr/local/bin" >&2
+  echo "  go install github.com/anchore/quill/cmd/quill@v0.7.1" >&2
   exit 1
 }
 

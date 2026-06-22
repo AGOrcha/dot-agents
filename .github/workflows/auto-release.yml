@@ -176,8 +176,12 @@ jobs:
       # no-ops on empty QUILL_SIGN_P12) until the cert + secrets are configured.
       - name: Install quill (macOS Developer ID signing)
         if: steps.check.outputs.exists == 'false' && vars.MACOS_SIGNING_ENABLED == 'true'
-        # NOTE: install is unpinned (latest); pin to a tag once chosen.
-        run: curl -sSfL https://raw.githubusercontent.com/anchore/quill/main/install.sh | sh -s -- -b /usr/local/bin
+        # quill is a Go tool; install a pinned version via `go install` (Go is set
+        # up above). Avoids piping a remote install script to a shell. Bump the
+        # pin to adopt a newer quill.
+        run: |
+          go install github.com/anchore/quill/cmd/quill@v0.7.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Import Homebrew tap signing key
         if: steps.check.outputs.exists == 'false'
