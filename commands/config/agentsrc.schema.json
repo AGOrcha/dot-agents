@@ -1,0 +1,651 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/agentsrc.schema.json",
+  "title": "dot-agents project manifest",
+  "description": "Repo-local schema for .agentsrc.json. Accepts both v1 and v2 of the manifest surface. v1 omits the v2 additive fields (repo_id, extends, packages, features, and the Source.id/cache_ttl/auth + http/oci source types). All v2 fields are optional so a v1 file continues to validate against this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "Schema version. 1 = legacy surface; 2 = surface that activates the v2 additive fields."
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1
+    },
+    "skills": {
+      "$ref": "#/$defs/stringList"
+    },
+    "rules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "global",
+          "project"
+        ]
+      }
+    },
+    "agents": {
+      "$ref": "#/$defs/stringList"
+    },
+    "hooks": {
+      "$ref": "#/$defs/stringsOrBool"
+    },
+    "mcp": {
+      "$ref": "#/$defs/stringsOrBool"
+    },
+    "settings": {
+      "type": "boolean"
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/source"
+      }
+    },
+    "kg": {
+      "type": "object",
+      "description": "Knowledge-graph configuration for this project",
+      "additionalProperties": false,
+      "properties": {
+        "graph_home": {
+          "type": "string",
+          "description": "Path to KG_HOME. Overrides KG_HOME env var."
+        },
+        "backend": {
+          "type": "string",
+          "enum": ["sqlite", "postgres"],
+          "description": "Storage backend. 'postgres' requires KG_POSTGRES_URL."
+        },
+        "bridge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether bridge queries are active for this project"
+            },
+            "allowed_intents": {
+              "$ref": "#/$defs/stringList",
+              "description": "If non-empty, restricts bridge to this intent set"
+            }
+          }
+        }
+      }
+    },
+    "stage_profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Named per-stage prompt-composition profiles keyed by stage then by slug. The verifier/reviewer stages supersede verifier_profiles/reviewer_profiles; execution_profile.topology.verifier_sequence supersedes app_type_verifier_map. Each profile's prompt_files compose base-first.",
+      "properties": {
+        "executor": { "$ref": "#/$defs/stageProfileMap" },
+        "verifier": { "$ref": "#/$defs/stageProfileMap" },
+        "reviewer": { "$ref": "#/$defs/stageProfileMap" },
+        "orchestrator": { "$ref": "#/$defs/stageProfileMap" }
+      }
+    },
+    "precondition_policies": {
+      "type": "object",
+      "description": "Top-level named registry of verifier precondition policies (verifier-precondition-policy plan, Slice B). Each entry is a named policy: an ordered list of predicates over the unified event/signal contract that all must hold for the in_progress -> awaiting_agent_review gate to open. A stage profile references a policy by name via precondition_policy; the verifier reads the resolved policy from the lockfile. Absent => the built-in 'default' gate applies.",
+      "additionalProperties": {
+        "$ref": "#/$defs/preconditionPolicy"
+      }
+    },
+    "verifier_profiles": {
+      "$ref": "#/$defs/stageProfileMap",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into stage_profiles.verifier on load and never re-emitted. Use stage_profiles.verifier."
+    },
+    "reviewer_profiles": {
+      "$ref": "#/$defs/stageProfileMap",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into stage_profiles.reviewer on load and never re-emitted. Use stage_profiles.reviewer."
+    },
+    "app_type_verifier_map": {
+      "type": "object",
+      "deprecated": true,
+      "description": "DEPRECATED: folded into execution_profile.by_app_type.<type>.topology.verifier_sequence on load and never re-emitted. Use execution_profile.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "refresh": {
+      "type": "object",
+      "description": "Latest da install/refresh metadata recorded on the project.",
+      "additionalProperties": false,
+      "required": ["version", "commit", "describe", "refreshedAt"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "examples": ["v1.0.0"]
+        },
+        "commit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8,
+          "examples": ["ad213s5e"]
+        },
+        "describe": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "examples": ["Refreshed dot-agents project from ~/.agents/ into project directories."]
+        },
+        "refreshedAt": {
+          "type": "string",
+          "minLength": 1,
+          "format": "date-time",
+          "examples": ["2026-04-13T12:59:35Z"]
+        }
+      }
+    },
+    "repo_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "v2: canonical repository identity (e.g. 'github.com/acme/manager-ui'). Protected: imported layers cannot override it."
+    },
+    "extends": {
+      "type": "array",
+      "description": "v2: ordered list of config layer references. Each entry is either a string 'source-id:layer-path[@version]' or an object with optional flag.",
+      "items": {
+        "$ref": "#/$defs/layerRef"
+      }
+    },
+    "packages": {
+      "type": "array",
+      "description": "v2: ordered list of executable package references 'source-id:artifact-path@version-spec'.",
+      "items": {
+        "$ref": "#/$defs/packageRef"
+      }
+    },
+    "features": {
+      "type": "object",
+      "description": "v2: feature-flag overrides keyed by feature name.",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "execution_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "config-v2 §15 execution-profile layer (kind=layer). Routes a task's workflow execution shape — unit relevance + topology + lenses — by app_type. Scope-mergeable; unlisted units default to 'situational' (default_class) so nothing is silently dropped. See skill-relevance-filter design.",
+      "properties": {
+        "by_app_type": {
+          "type": "object",
+          "description": "Per-app_type execution shape, keyed by app_type string (e.g. 'go-cli', 'ideation').",
+          "additionalProperties": {
+            "$ref": "#/$defs/appTypeProfile"
+          }
+        },
+        "default_class": {
+          "type": "string",
+          "enum": ["core", "situational", "noise"],
+          "description": "Relevance class for any unit not explicitly listed. Defaults to 'situational' — unlisted units are never silently dropped."
+        }
+      }
+    },
+    "pr_source": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "pr-event-source D4: config-driven pull-request event producer. Configures the generic internal/events producer engine (fetch + field map per platform) so PR state becomes event.pr.* events with no per-platform Go. 'gh' is the zero-config default; resolves through the config-v2 scope layers so an org layer can set the default. additionalProperties open for forward-compatible producer options.",
+      "properties": {
+        "producer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Named producer: 'gh' (default), 'exec', 'http', or a registered code producer."
+        },
+        "list": {
+          "$ref": "#/$defs/prFetchBlock"
+        },
+        "comments": {
+          "$ref": "#/$defs/prFetchBlock"
+        },
+        "poll_interval_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Producer poll cadence in seconds."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "promptFileRef": {
+      "description": "A verifier/reviewer prompt_files entry. Source-aware (config-v2 Q1, Option B): the typed-object form {source,path,version} pins a prompt to a config source; the bare-string legacy form is equivalent to {path:<string>} resolved on the local prompt search path.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "Config source id the prompt is fetched from (matches a sources[].id). Empty/absent means local resolution."
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Prompt file path, relative to the source (or the local prompt search path when source is absent)."
+            },
+            "version": {
+              "type": "string",
+              "description": "Source-relative revision to pin. Absent means 'as resolved'."
+            }
+          }
+        }
+      ]
+    },
+    "promptFileList": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/promptFileRef"
+      }
+    },
+    "stageProfileMap": {
+      "type": "object",
+      "description": "A map of profile slug -> stage profile (label + base-first prompt_files composition).",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "prompt_files": {
+            "$ref": "#/$defs/promptFileList"
+          },
+          "precondition_policy": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of a verifier precondition policy in the top-level precondition_policies registry that gates this profile's in_progress -> awaiting_agent_review transition. Unset => built-in 'default' gate (verifier-precondition-policy plan, Slice B)."
+          }
+        }
+      }
+    },
+    "preconditionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One named verifier precondition policy: an ordered list of predicates all of which must hold for the gate to open.",
+      "required": ["predicates"],
+      "properties": {
+        "predicates": {
+          "type": "array",
+          "description": "Ordered predicates over the unified event/signal contract. All must hold; the first failing predicate's reason is surfaced.",
+          "items": {
+            "$ref": "#/$defs/predicateSpec"
+          }
+        }
+      }
+    },
+    "predicateSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A predicate over one registered event/signal kind.",
+      "required": ["signal"],
+      "properties": {
+        "signal": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The registered event/signal kind, e.g. 'event.pr.open', 'signal.ci.rollup', 'gate.quality.sonar'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Kind-specific predicate arguments, e.g. {\"equals\":\"green\"}.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "stringsOrBool": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/stringList"
+        }
+      ]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "local",
+            "git",
+            "http",
+            "oci"
+          ],
+          "description": "v2: http and oci added per config-distribution-model §4. v1 files declaring only local/git remain valid."
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v2: stable local identifier used in extends/packages refs."
+        },
+        "cache_ttl": {
+          "type": "string",
+          "minLength": 1,
+          "description": "v2: tier-1 cache TTL duration (e.g. '4h'). Ignored for oci sources."
+        },
+        "auth": {
+          "type": "object",
+          "description": "v2: opaque auth block. Schema owned by external-agent-sources spec; treated as pass-through here. Well-known pass-through keys read by the config layer: 'signing' (unsigned|optional|required — package signing-posture stub, config-distribution-model §12) and 'token' (bearer token for http package pulls).",
+          "properties": {
+            "signing": {
+              "type": "string",
+              "enum": ["unsigned", "optional", "required"],
+              "description": "v2 (p5 stub): package signing posture. 'required' fails resolution for an unverifiable artifact once cosign/sigstore verification lands; defaults to 'unsigned'."
+            }
+          }
+        },
+        "cache_keys": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "v2: per-source content cache-key override (config-distribution-model §7A.4, the uv 'cache-keys' analog). Absent ⇒ the source uses its kind default (git→resolved commit; local→commit + working-tree; http→ETag/Last-Modified else digest; oci→manifest digest). Any selector below pins the key on those inputs instead; always_revalidate is the config-declared force escape.",
+          "properties": {
+            "file": {
+              "$ref": "#/$defs/stringList",
+              "description": "File paths or globs whose tracked content pins the key — a change to any matched file is a new key."
+            },
+            "git": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Selects which git facts pin the key.",
+              "properties": {
+                "commit": {
+                  "type": "boolean",
+                  "description": "Pin the key on the resolved commit hash."
+                },
+                "tags": {
+                  "type": "boolean",
+                  "description": "Pin the key on the tags pointing at the resolved commit (a re-tag is a new key)."
+                }
+              }
+            },
+            "env": {
+              "$ref": "#/$defs/stringList",
+              "description": "Environment variable names whose values pin the key."
+            },
+            "dir": {
+              "$ref": "#/$defs/stringList",
+              "description": "Directory paths whose presence/absence pins the key."
+            },
+            "always_revalidate": {
+              "type": "boolean",
+              "description": "Config-declared force escape: always re-check upstream on resolve, regardless of the recorded digest (config-distribution-model §7A.4 / R6)."
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "git"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "oci"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
+        }
+      ]
+    },
+    "layerRef": {
+      "description": "v2: extends entry. Either a plain reference string 'source-id:layer-path[@version]' or an object with optional flag.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+(@[^\\s]+)?$"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+(@[^\\s]+)?$"
+            },
+            "optional": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "packageRef": {
+      "description": "v2: packages entry. Reference string 'source-id:artifact-path@version-spec' or object form.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+@[^\\s]+$"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[a-zA-Z0-9_.-]+:[^@\\s]+@[^\\s]+$"
+            }
+          }
+        }
+      ]
+    },
+    "prFetchBlock": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "pr-event-source D4: one named fetch block of a pr_source config. exec sets 'argv'; http sets 'url'/'method'/'headers'. 'each' selects the item list and 'map' projects each item onto canonical PR fields (canonical-field -> jsonpath).",
+      "properties": {
+        "argv": {
+          "type": "array",
+          "description": "exec: command and arguments. '{number}' is substituted per PR in the comments block.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "url": {
+          "type": "string",
+          "description": "http: request URL."
+        },
+        "method": {
+          "type": "string",
+          "description": "http: request method (defaults to GET)."
+        },
+        "headers": {
+          "type": "object",
+          "description": "http: request headers.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "each": {
+          "type": "string",
+          "description": "JSONPath to the list of items in the fetched document (e.g. '.' for the top-level array, '.comments')."
+        },
+        "map": {
+          "type": "object",
+          "description": "Canonical field -> JSONPath (relative to an item). The reserved 'rollup' field should point at the platform's raw check array (gh: '.statusCheckRollup'); the producer derives the canonical Rollup.State (GREEN|FAILING|PENDING) from it on each cycle.",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "appTypeProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The three execution facets for one app_type: unit relevance, topology, and lenses. Each facet is independently scope-overridable.",
+      "properties": {
+        "relevance": {
+          "type": "object",
+          "description": "Facet 1 (the noise filter): per-stage core/situational/noise unit classification, keyed by stage name (e.g. 'orchestrate', 'verify', 'review').",
+          "additionalProperties": {
+            "$ref": "#/$defs/relevanceClasses"
+          }
+        },
+        "topology": {
+          "$ref": "#/$defs/topology"
+        },
+        "lenses": {
+          "$ref": "#/$defs/lenses"
+        }
+      }
+    },
+    "relevanceClasses": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Partitions the units relevant to one app_type × stage into reversible-view classes. Unlisted units default to default_class.",
+      "properties": {
+        "core": {
+          "$ref": "#/$defs/stringList"
+        },
+        "situational": {
+          "$ref": "#/$defs/stringList"
+        },
+        "noise": {
+          "$ref": "#/$defs/stringList"
+        }
+      }
+    },
+    "topology": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Facet 2: the executor:verifier:reviewer fan-out shape. Supersedes the flat app_type_verifier_map (verifier_sequence moves here).",
+      "properties": {
+        "executors": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of parallel executor workers for the task."
+        },
+        "verifiers_per_executor": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Verifier fan-out per executor (n exec → verifiers_per_executor·n verifiers)."
+        },
+        "reviewers": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reviewer fan-out: a keyword ('per_verifier', 'per_executor') or a stringified integer count."
+        },
+        "verifier_sequence": {
+          "$ref": "#/$defs/stringList",
+          "description": "Ordered verifier-profile ids for this app_type, superseding app_type_verifier_map."
+        }
+      }
+    },
+    "lenses": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Facet 3: the review-lens config folded in from lens-evidence-policy.",
+      "properties": {
+        "lens_set": {
+          "$ref": "#/$defs/stringList",
+          "description": "Ordered review lenses applied (e.g. 'architecture-standards', 'acceptance-invariants', 'adversarial')."
+        },
+        "lens_concurrency": {
+          "type": "string",
+          "enum": ["parallel", "gated", "tiered"],
+          "description": "How the lens set runs."
+        }
+      }
+    }
+  }
+}
