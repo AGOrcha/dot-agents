@@ -117,7 +117,7 @@ tasks:
       notes: 'Ensure both companion skills ship complete starter assets and evaluate whether any evidence-backed lifecycle hook or bounded continuity advice is justified; route post-tool observation questions to R1.5 and do not add prose-only enforcement. Contract: tasks/p3b-companion-discipline-skills.contract.md.'
     - id: p4-sentinel-wiring
       title: Wire 'da workflow hook-sentinel write' call into the three starter skills
-      status: pending
+      status: completed
       depends_on:
         - p0-sentinel-cli
         - p3-starter-promotion

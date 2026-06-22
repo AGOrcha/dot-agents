@@ -77,7 +77,7 @@ tasks:
       app_type: go-cli
     - id: p4-orphan-canonicals-and-userconfig
       title: 'P4: OrphanCanonicalReporter + UserConfigReporter'
-      status: pending
+      status: completed
       depends_on:
         - p3-badge-and-countlinks
       blocks: []
