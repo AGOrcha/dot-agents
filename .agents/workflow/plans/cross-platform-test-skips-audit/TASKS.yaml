@@ -141,7 +141,7 @@ tasks:
       app_type: go-cli
     - id: cg6-prune
       title: Prune stale allowlist entries the migration unblocks
-      status: pending
+      status: in_progress
       depends_on:
         - migrate-sites
       blocks: []
