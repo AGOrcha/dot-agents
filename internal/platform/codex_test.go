@@ -810,6 +810,52 @@ func TestCodexBrokenLinks_InterfaceConformance(t *testing.T) {
 
 // ---------- OrphanCanonicalReporter implementation (P4) ----------
 
+// Named setup helpers for TestCodexOrphanCanonicals — kept as top-level funcs
+// (not inline table closures) so their branching is not counted into the test
+// function's cognitive complexity (go:S3776).
+func setupCodexPlainOrphan(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "alpha"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return "alpha", false
+}
+
+func setupCodexLinkedBackLink(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	canonical := filepath.Join(agentsHome, "agents", "proj", "beta")
+	if err := os.MkdirAll(canonical, 0755); err != nil {
+		t.Fatal(err)
+	}
+	repoLocal := filepath.Join(projectPath, ".agents", "agents")
+	if err := os.MkdirAll(repoLocal, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, canonical, filepath.Join(repoLocal, "beta"))
+	return "", false
+}
+
+func setupCodexMispointedBackLink(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "gamma"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(agentsHome, "agents", "otherproj", "delta")
+	if err := os.MkdirAll(other, 0755); err != nil {
+		t.Fatal(err)
+	}
+	repoLocal := filepath.Join(projectPath, ".agents", "agents")
+	if err := os.MkdirAll(repoLocal, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, other, filepath.Join(repoLocal, "gamma"))
+	return "gamma", true
+}
+
+func setupCodexUnownedSkillsBucket(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "orphan-skill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return "", false
+}
+
 // TestCodexOrphanCanonicals is the table-driven cover for codex's
 // OrphanCanonicalReporter: it owns only the "agents" bucket (claude owns
 // "skills"), reporting plain + mis-pointed orphans and skipping non-owned
@@ -821,65 +867,10 @@ func TestCodexOrphanCanonicals(t *testing.T) {
 		setup     func(t *testing.T, agentsHome, projectPath string) (wantName string, wantNote bool)
 		wantCount int
 	}{
-		{
-			name:   "plain orphan in owned agents bucket",
-			bucket: "agents",
-			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
-				if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "alpha"), 0755); err != nil {
-					t.Fatal(err)
-				}
-				return "alpha", false
-			},
-			wantCount: 1,
-		},
-		{
-			name:   "correctly-linked back-link not orphaned",
-			bucket: "agents",
-			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
-				canonical := filepath.Join(agentsHome, "agents", "proj", "beta")
-				if err := os.MkdirAll(canonical, 0755); err != nil {
-					t.Fatal(err)
-				}
-				repoLocal := filepath.Join(projectPath, ".agents", "agents")
-				if err := os.MkdirAll(repoLocal, 0755); err != nil {
-					t.Fatal(err)
-				}
-				linktest.Link(t, canonical, filepath.Join(repoLocal, "beta"))
-				return "", false
-			},
-			wantCount: 0,
-		},
-		{
-			name:   "mis-pointed back-link is orphan with note",
-			bucket: "agents",
-			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
-				if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "gamma"), 0755); err != nil {
-					t.Fatal(err)
-				}
-				other := filepath.Join(agentsHome, "agents", "otherproj", "delta")
-				if err := os.MkdirAll(other, 0755); err != nil {
-					t.Fatal(err)
-				}
-				repoLocal := filepath.Join(projectPath, ".agents", "agents")
-				if err := os.MkdirAll(repoLocal, 0755); err != nil {
-					t.Fatal(err)
-				}
-				linktest.Link(t, other, filepath.Join(repoLocal, "gamma"))
-				return "gamma", true
-			},
-			wantCount: 1,
-		},
-		{
-			name:   "skills bucket not owned by codex",
-			bucket: "skills",
-			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
-				if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "orphan-skill"), 0755); err != nil {
-					t.Fatal(err)
-				}
-				return "", false
-			},
-			wantCount: 0,
-		},
+		{name: "plain orphan in owned agents bucket", bucket: "agents", setup: setupCodexPlainOrphan, wantCount: 1},
+		{name: "correctly-linked back-link not orphaned", bucket: "agents", setup: setupCodexLinkedBackLink, wantCount: 0},
+		{name: "mis-pointed back-link is orphan with note", bucket: "agents", setup: setupCodexMispointedBackLink, wantCount: 1},
+		{name: "skills bucket not owned by codex", bucket: "skills", setup: setupCodexUnownedSkillsBucket, wantCount: 0},
 	}
 
 	for _, tc := range tests {
