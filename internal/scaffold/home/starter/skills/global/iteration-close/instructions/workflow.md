@@ -22,6 +22,51 @@ Confirm the binary resolves before running any commands. A missing binary silent
 
 ---
 
+## Write Stop-Gate Sentinel
+
+Write the sentinel **once**, immediately after you know the project, the
+`<task_id>`, and whether this is a delegated or direct closeout — and **before**
+any verify-record, checkpoint, advance, or merge-back action. The Stop /
+SubagentStop gate reads the latest `iteration-close` sentinel and validates the
+declared `--expect` artifacts before allowing the agent to stop. No sentinel
+means the gate has nothing to enforce this turn.
+
+Pick a filename-safe `--run-id` (a UTC timestamp such as
+`$(date -u +%Y%m%dT%H%M%SZ)` works) and set `--agent-type loop-worker` when the
+closeout runs inside a delegated subagent, or `main` for direct work. Declare the
+artifacts this iteration is contracted to produce as repeatable `--expect`
+flags:
+
+```bash
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+
+# Delegated closeout (subagent) — expects the merge-back artifact
+da workflow hook-sentinel write iteration-close \
+  --run-id "$RUN_ID" \
+  --plan <plan-id> \
+  --task <task_id> \
+  --agent-type loop-worker \
+  --expect ".agents/active/iteration-log/iter-<N>.yaml" \
+  --expect ".agents/active/merge-back/<task_id>.md"
+
+# Direct closeout — no merge-back; the iter-log is the closeout artifact
+da workflow hook-sentinel write iteration-close \
+  --run-id "$RUN_ID" \
+  --plan <plan-id> \
+  --task <task_id> \
+  --agent-type main \
+  --expect ".agents/active/iteration-log/iter-<N>.yaml"
+```
+
+Only declare `--expect` artifacts this iteration actually owns. If the review
+trio is being skipped for a non-code iteration (see § Invoke Self-Review), do
+not list `review-decision.yaml` — the sentinel must describe the real closeout
+contract, not an aspirational one. The gate validates artifact presence and
+declared sentinel data; it does not require hard remediation on transcript-only
+facts unless the hook is given a verified trace.
+
+---
+
 ## Record Verification (test)
 
 Run `workflow verify record --kind test` once after all tests pass (or fail) for this iteration:

@@ -32,10 +32,17 @@ stage agents.
    (worker subset), and safety guardrails. Typed ISP stages must use a
    separately resolved stage-safe overlay instead.
 
-4. **Implement write_scope task**
+4. **Write the stop-gate sentinel** *(required — after reading the bundle, before any scoped edit or closeout command)*
+   Load -> `instructions/startup.md` § Write Stop-Gate Sentinel
+   Run `da workflow hook-sentinel write loop-worker` once, recording the
+   bundle's plan, task, a run ID, `--agent-type loop-worker`, and every
+   delegated `write_scope` path. The SubagentStop gate diffs your edits against
+   the sentinel's `write_scope` — no sentinel means no scope enforcement.
+
+5. **Implement write_scope task**
    Implement the single task within write_scope. One item per iteration. Run tests (positive + negative). Commit.
 
-5. **Close out**
+6. **Close out**
    Load -> `iteration-close` skill
    verify record → checkpoint → merge-back (delegated path). Accepted
    parent-run delegation closeout completes the delegated task. Do NOT run

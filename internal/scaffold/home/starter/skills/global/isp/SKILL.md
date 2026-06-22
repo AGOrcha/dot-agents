@@ -14,17 +14,21 @@ Counterpart to the scripted `ralph-pipeline`. Assumes **`orchestrator-session-st
    Load -> `instructions/orientation.md`
    Read the pre-gathered eligible output from orchestrator-session-start. If it is absent or stale, re-run `workflow eligible --json --plan <scope>`.
 
-2. **Select work**
+2. **Write the stop-gate sentinel** *(required — after consuming the eligible/orientation input, before selecting or dispatching work)*
+   Load -> `instructions/orientation.md` § Write Stop-Gate Sentinel
+   Run `da workflow hook-sentinel write isp` once, recording the plan, task/run ID, whether the eligible snapshot was loaded from orchestrator-session-start (`--eligible-snapshot-loaded`), and the declared `--max-batch`. The isp gate reads this sentinel to confirm fanout discipline held — no sentinel means no enforcement.
+
+3. **Select work**
    Load -> `instructions/task-selection.md`
    Use `max_batch` from eligible output as the fanout set. Parallel mode trigger: `max_batch > 1` AND no active delegations.
 
-3. **Decide direct work vs fanout**
+4. **Decide direct work vs fanout**
    Load -> `instructions/direct-vs-fanout.md`
 
-4. **Fanout the delegated task(s)**
+5. **Fanout the delegated task(s)**
    Load -> `instructions/fanout.md`
    Parallel mode: one bundle per task in `max_batch`. Load evidence sidecar context for tasks with `evidence_confidence: medium|high`.
 
-5. **Drive the staged runtime**
+6. **Drive the staged runtime**
    Load -> `instructions/staged-runtime.md`
    Chain: `impl → verifier(s) → review → parent gate`.
