@@ -10,7 +10,7 @@ the signing setup is automated rather than click-ops.
 | `template.json` | ARM template for the `Microsoft.CodeSigning/codesigningaccounts` resource |
 | `parameters.json` | Account name (`AGOrcha`), region (`eastus`), SKU (`Basic`), tags |
 | `deploy.sh` | Idempotent `az deployment group create` wrapper for the account |
-| `cert-profile.json` | ARM template for the `certificateProfiles` child resource (Public Trust) |
+| `cert-profile.json` | ARM template for the `certificateProfiles` child resource — declarative alternative only; `create-cert-profile.sh` now creates the profile directly via `az trustedsigning` |
 | `create-cert-profile.sh` | Creates the cert profile post-validation; prints the command to flip CI signing on |
 | `azure-oidc-setup.sh` | Scripts the GitHub→Azure OIDC federation (secretless CI auth) |
 
@@ -39,16 +39,23 @@ ARM-automated today); the third is what we wire into CI:
    **Public Trust** profile. This is now code (`cert-profile.json` +
    `create-cert-profile.sh`); run:
 
+   Identity validations are **portal-only** — there is no CLI/ARM API to list or
+   read them, so the id can't be auto-discovered. Copy it from the portal
+   (Trusted Signing → AGOrcha → Identity validations → **Identity validation Id**)
+   and pass it in:
+
    ```bash
    az login
-   ./create-cert-profile.sh           # discovers the Completed validation, deploys the profile
+   IDENTITY_VALIDATION_ID=<id> ./create-cert-profile.sh    # deploys the profile
    ```
 
-   The script auto-discovers the completed identity-validation id, deploys
-   `cert-profile.json` (type **Public Trust** — required for distributing `.exe`
-   to the public), and prints the exact `gh variable set TRUSTED_SIGNING_PROFILE`
-   command that turns CI signing on. For a no-validation dry run first, set
-   `PROFILE_TYPE=PublicTrustTest`. The account's regional endpoint is
+   The script creates the **Public Trust** profile directly via
+   `az trustedsigning certificate-profile create` (no ARM-deployment wrapper, so no
+   `deployments/da-cert-profile-*` clutter in the resource group) and prints the exact
+   `gh variable set TRUSTED_SIGNING_PROFILE` command that turns CI signing on.
+   `PROFILE_TYPE=PublicTrustTest` chains to a Microsoft **test** root (don't ship
+   those binaries publicly) but still binds an identity-validation id — it is *not*
+   a no-validation path. The account's regional endpoint is
    `https://eus.codesigning.azure.net/` (`eastus`).
 
 ## 4. CI/CD integration plan (the "integrate into CI/CD?" — yes)
