@@ -103,7 +103,7 @@ func verifierTransition(taskID, from string, policy PreconditionPolicy, snap Sig
 // (never raw .agentsrc.json), so the verifier gate observes the same merged,
 // locked effective config as `da config explain`.
 //
-// TODO(lpf-pr-producer): there is no LIVE caller of this seam yet — lpf-e landed
+// Deferred wiring (owned by lpf-pr-producer): there is no LIVE caller of this seam yet — lpf-e landed
 // the verifier transition + policy evaluation pure, and the producer that fills
 // `snap` (the unified SignalSnapshot from event.pr.* / poll-detector signals) is
 // owned by the lpf PR-producer / poll-detector work, NOT this plan. When that
