@@ -211,7 +211,7 @@ tasks:
       app_type: go-cli
     - id: p4-config-explain-cli
       title: 'Phase 4: da config explain command + da config subtree'
-      status: in_progress
+      status: completed
       depends_on:
         - p1-resolver-core-flat
       blocks: []
