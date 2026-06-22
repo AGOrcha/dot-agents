@@ -15,3 +15,21 @@ updates:
       - dependency-name: "astro"
         update-types:
           - "version-update:semver-major"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      go:
+        applies-to: version-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns:
+          - "*"
