@@ -564,8 +564,16 @@ tasks:
         local scopes + write the units lock) -> create ~/.agents project dirs -> register project in
         ~/.agents/config.json -> shared-target projection EXACT/PRUNE (reuse
         RunSharedTargetProjectionExact, same path as refresh) -> platform links (Claude/Cursor/Codex/
-        Copilot) -> stamp .agentsrc.json refresh metadata. da install stays the canonical 'make
-        everything current'; the only step required on a fresh clone.
+        Copilot) -> record the resolution stamp (version/commit/describe) in the LOCK, NOT
+        .agentsrc.json. da install stays the canonical 'make everything current'; the only step
+        required on a fresh clone.
+
+        INPUT/OUTPUT rule (decided 2026-06-22): .agentsrc.json is the hand-authored INPUT manifest and
+        must never be machine-stamped; all resolution OUTPUT (per-unit digests AND the version/commit/
+        describe stamp) lives in the lock. So REMOVE the current finalizeInstall .agentsrc.json write
+        and record the stamp in the units lock instead (coordinate the lock-header stamp field with
+        p4f's units-lock schema). This also makes installs reproducible: the lock fully describes what
+        was resolved.
 
         Simplifications the units model enables (analyzed 2026-06-22; size S, ~10-20 lines of wiring):
         - Collapse bespoke resolveInstallSources + linkInstallResources into ONE EnsureResolved call
