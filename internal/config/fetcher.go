@@ -132,6 +132,12 @@ type FetchedLayer struct {
 	ResolvedSHA string
 	// CacheHit reports whether Data came from the local cache.
 	CacheHit bool
+	// KeyInputs carries the resolved facts the fetcher observed for this source
+	// (git commit, http ETag/Last-Modified/digest, local commit + worktree
+	// state), so the resolver can derive the source's effective content cache key
+	// (config-distribution-model §7A.4) via EffectiveCacheKey without re-running
+	// the fetch. A zero value falls back to the kind default keyed on ResolvedSHA.
+	KeyInputs CacheKeyInputs
 }
 
 // Fetcher fetches a config layer's bytes from a resolved source. One impl per
@@ -278,7 +284,7 @@ func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (Fe
 		return FetchedLayer{}, fmt.Errorf("git ref %q not found at %s", ref, src.URL)
 	}
 	if cached, ok := readCachedLayer(cacheDir, sha); ok {
-		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true}, nil
+		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
 	}
 
 	fh, err := wfs.Open(filepath.FromSlash(parts.LayerPath))
@@ -294,7 +300,7 @@ func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (Fe
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
-	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
+	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
 }
 
 // gitFullRef expands a bare branch/tag name to a full refs/heads/<name> so
@@ -346,13 +352,22 @@ func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (F
 		return FetchedLayer{}, fmt.Errorf("reading %s: %w", url, err)
 	}
 	sha := contentHash(data)
+	// Capture the upstream validators (ETag / Last-Modified) the http cache-key
+	// default prefers over a content digest (config-distribution-model §7A.4), so
+	// the resolver can derive an effective key that re-checks on a validator
+	// change even when the SHA-addressed bytes are still cached.
+	keyInputs := CacheKeyInputs{
+		ETag:          resp.Header.Get("ETag"),
+		LastModified:  resp.Header.Get("Last-Modified"),
+		ContentDigest: sha,
+	}
 	if cached, ok := readCachedLayer(cacheDir, sha); ok {
-		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true}, nil
+		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: keyInputs}, nil
 	}
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
-	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
+	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: keyInputs}, nil
 }
 
 // --- local fetcher ---------------------------------------------------------
@@ -376,8 +391,13 @@ func (f *localFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (
 		return FetchedLayer{}, fmt.Errorf("reading local layer %s: %w", path, err)
 	}
 	sha := contentHash(data)
+	// A local source has no committed SHA to pin against, so its working-tree
+	// content IS the content (config-distribution-model §7A.4 / D6): mark the tree
+	// dirty and supply the content hash as the precise worktree key, so authoring
+	// before a commit still derives a distinct effective cache key.
+	keyInputs := CacheKeyInputs{WorktreeDirty: true, WorktreeContentHash: sha}
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
-	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
+	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: keyInputs}, nil
 }

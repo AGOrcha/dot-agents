@@ -1031,6 +1031,271 @@ func TestLayeredResolverSnapshotAPIConsumer(t *testing.T) {
 	}
 }
 
+// --- cache-key consumption tests --------------------------------------------
+
+// TestLayeredResolverRefreshForcesRevalidationOffline covers the --refresh force
+// escape threaded through WithRefresh -> effectiveCacheKey -> EffectiveCacheKey:
+// offline cannot revalidate, so the offline serve fails loudly when the effective
+// key is the AlwaysRevalidate sentinel (fetchLayer §7A.4 gate). The control case
+// (offline, no --refresh) still serves the cached SHA.
+func TestLayeredResolverRefreshForcesRevalidationOffline(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_ttl": "1h"}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000001",
+	}
+	// Online resolve to populate lock + cache.
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+
+	// Offline WITHOUT --refresh: cache key is the kind default, not stale, so the
+	// cached SHA is served.
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	if _, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo); err != nil {
+		t.Fatalf("offline (no refresh) Resolve: %v", err)
+	}
+
+	// Offline WITH --refresh: effective key becomes AlwaysRevalidate, so the
+	// offline serve must fail rather than serve possibly-stale content.
+	refreshFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	_, err := NewLayeredResolver().
+		WithFetcher("git", refreshFake).
+		WithOffline(true).
+		WithRefresh(true).
+		Resolve(repo)
+	if err == nil {
+		t.Fatal("offline + --refresh should fail: revalidation required but offline")
+	}
+	if refreshFake.calls != 0 {
+		t.Errorf("offline must not contact fetcher, got %d calls", refreshFake.calls)
+	}
+	if !strings.Contains(err.Error(), "revalidation required") {
+		t.Errorf("error = %q, want revalidation-required message", err)
+	}
+}
+
+// TestLayeredResolverAlwaysRevalidateSourceForcesRevalidationOffline covers the
+// config-declared always_revalidate force escape (the CacheKeys.AlwaysRevalidate
+// half of R6) reaching the same offline gate as --refresh.
+func TestLayeredResolverAlwaysRevalidateSourceForcesRevalidationOffline(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{
+			"id": "acme",
+			"type": "git",
+			"url": "https://example/repo.git",
+			"ref": "main",
+			"cache_ttl": "1h",
+			"cache_keys": {"always_revalidate": true}
+		}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000002",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	_, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo)
+	if err == nil {
+		t.Fatal("offline + always_revalidate source should fail: revalidation required")
+	}
+	if !strings.Contains(err.Error(), "revalidation required") {
+		t.Errorf("error = %q, want revalidation-required message", err)
+	}
+}
+
+// TestLayeredResolverOfflineCacheMissFails covers the offline serve path where
+// the lock records a SHA whose cached bytes are gone (fetchLayer readCachedLayer
+// miss): a non-force-escape effective key passes the staleness gate, but the
+// content is no longer on disk, so the resolve fails.
+func TestLayeredResolverOfflineCacheMissFails(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_ttl": "1h"}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000003",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+
+	// Evict the cached bytes while keeping the lock entry, so offline finds a
+	// recorded SHA but no cache file.
+	cacheDir := layerCacheDir("acme", "org/base.json")
+	if err := os.RemoveAll(filepath.Join(cacheDir, fake.sha)); err != nil {
+		t.Fatal(err)
+	}
+
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	_, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo)
+	if err == nil {
+		t.Fatal("offline with evicted cache should fail")
+	}
+	if !strings.Contains(err.Error(), "not in cache") {
+		t.Errorf("error = %q, want not-in-cache message", err)
+	}
+}
+
+// TestLayeredResolverGathersDirSelectorFacts covers gatherOverrideFacts' {dir}
+// branch: a source whose cache_keys declares a dir selector must have the dir's
+// presence folded into the effective key, so the lock records a composite
+// override key (not the bare kind default).
+func TestLayeredResolverGathersDirSelectorFacts(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	markerDir := filepath.Join(t.TempDir(), "marker")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{
+			"id": "acme",
+			"type": "git",
+			"url": "https://example/repo.git",
+			"ref": "main",
+			"cache_ttl": "1h",
+			"cache_keys": {"dir": ["`+jsonPath(markerDir)+`"]}
+		}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000004",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	locked, err := readLockedLayers(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotKey := locked["acme:org/base.json"].CacheKey
+	if gotKey == "" {
+		t.Fatal("expected a recorded cache key")
+	}
+	// With a dir selector present, the key is the composite override, which must
+	// differ from the bare git kind default over the same resolved SHA.
+	defaultKey := DefaultCacheKey(SourceKindGit, CacheKeyInputs{ResolvedCommit: fake.sha})
+	if gotKey == defaultKey {
+		t.Errorf("dir selector ignored: cache key %q equals kind default", gotKey)
+	}
+}
+
+// TestLayeredResolverGathersEnvSelectorFacts covers the {env} branch of
+// gatherOverrideFacts and confirms a changed env value yields a different
+// recorded cache key (the consumption point that makes a cache_keys override
+// stop being a silent no-op).
+func TestLayeredResolverGathersEnvSelectorFacts(t *testing.T) {
+	manifest := `{
+		"version": 2,
+		"sources": [{
+			"id": "acme",
+			"type": "git",
+			"url": "https://example/repo.git",
+			"ref": "main",
+			"cache_ttl": "1h",
+			"cache_keys": {"env": ["DA_CACHE_TEST_TOKEN"]}
+		}],
+		"extends": ["acme:org/base.json"]
+	}`
+	resolveKey := func(t *testing.T, envVal string) string {
+		t.Helper()
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		t.Setenv("DA_CACHE_TEST_TOKEN", envVal)
+		repo := t.TempDir()
+		writeManifest(t, repo, manifest)
+		fake := &fakeFetcher{
+			files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+			sha:   "abc0000000000000000000000000000000000005",
+		}
+		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		locked, err := readLockedLayers(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return locked["acme:org/base.json"].CacheKey
+	}
+	keyA := resolveKey(t, "tokenA")
+	keyB := resolveKey(t, "tokenB")
+	if keyA == "" || keyB == "" {
+		t.Fatal("expected recorded cache keys for both env values")
+	}
+	if keyA == keyB {
+		t.Errorf("env selector ignored: same key %q for differing env values", keyA)
+	}
+}
+
+// TestWithResolvedSHA covers withResolvedSHA: an empty SHA returns inputs
+// unchanged (early return), and a non-empty SHA backfills only the empty
+// kind-primary facts while preserving already-populated ones.
+func TestWithResolvedSHA(t *testing.T) {
+	// Empty SHA: inputs unchanged, primary facts stay empty.
+	got := withResolvedSHA(CacheKeyInputs{}, "")
+	if got.ResolvedCommit != "" || got.ContentDigest != "" || got.OCIDigest != "" {
+		t.Errorf("empty SHA must not backfill, got %+v", got)
+	}
+
+	// Non-empty SHA backfills empties but preserves a populated fact.
+	in := CacheKeyInputs{ContentDigest: "precise-etag-hash"}
+	got = withResolvedSHA(in, "sha-xyz")
+	if got.ResolvedCommit != "sha-xyz" || got.OCIDigest != "sha-xyz" {
+		t.Errorf("expected empty primary facts backfilled from SHA, got %+v", got)
+	}
+	if got.ContentDigest != "precise-etag-hash" {
+		t.Errorf("populated fact must be preserved, got %q", got.ContentDigest)
+	}
+}
+
+// TestCacheKeyStaleForLayer covers the resolver-side staleness consumer: a
+// matching recorded key is not stale, a force escape (--refresh) is always stale,
+// and a cache_keys override edit that reshapes the key is detected as stale from
+// the same recorded SHA facts.
+func TestCacheKeyStaleForLayer(t *testing.T) {
+	src := Source{ID: "acme", Type: "git"}
+	locked := LockedLayer{ResolvedSHA: "sha-abc"}
+	locked.CacheKey = NewLayeredResolver().effectiveCacheKey(src, locked.cacheKeyInputs())
+
+	// Same source + recorded key: not stale.
+	if NewLayeredResolver().CacheKeyStaleForLayer(src, locked) {
+		t.Error("matching recorded key should not be stale")
+	}
+
+	// --refresh force escape: AlwaysRevalidate never matches the recorded key.
+	refreshed := NewLayeredResolver().WithRefresh(true)
+	if !refreshed.CacheKeyStaleForLayer(src, locked) {
+		t.Error("--refresh should always report stale")
+	}
+
+	// cache_keys override edit (adds an env selector): reshapes the key from the
+	// same SHA facts, so the recorded default key no longer matches.
+	edited := Source{ID: "acme", Type: "git", CacheKeys: &CacheKeys{Env: []string{"SOME_TOKEN"}}}
+	if !NewLayeredResolver().CacheKeyStaleForLayer(edited, locked) {
+		t.Error("a cache_keys override edit should be detected as stale")
+	}
+}
+
 // --- test helpers -----------------------------------------------------------
 
 func layerIDs(layers []ResolvedLayer) []string {

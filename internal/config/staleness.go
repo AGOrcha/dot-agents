@@ -294,6 +294,35 @@ type StalenessResult struct {
 // IsStale reports whether any driver event fired (the inverse of Fresh).
 func (r StalenessResult) IsStale() bool { return !r.Fresh }
 
+// CacheKeyStale reports whether a unit's recorded content cache key is stale
+// relative to its freshly-derived effective key (config-distribution-model
+// §7A.4). It is the cache-key axis of staleness — orthogonal to the
+// inputs_digest / declared-set / unit-digest driver events in Staleness above —
+// and the single point the resolver consults to decide whether the SHA-addressed
+// cache may be served or the upstream must be re-checked.
+//
+// A unit is cache-key-stale when:
+//
+//   - the effective key is the AlwaysRevalidate sentinel — a force escape
+//     (`--refresh` or the source's always_revalidate marker) is in play, so the
+//     cache is bypassed unconditionally regardless of what was recorded; or
+//   - the recorded key differs from the effective key — the per-source
+//     cache_keys override or the kind default now pins the content on a different
+//     fact than the lock captured (e.g. a changed {env} value, a re-tag, or a
+//     switched selector), so the cached content can no longer be trusted as
+//     current.
+//
+// An empty recorded key (a pre-cache-key lock, or a unit resolved before this
+// axis existed) is treated as stale against any concrete effective key so the
+// first resolve under the new model re-checks and records a key. Two empty keys
+// are fresh (nothing to compare yet).
+func CacheKeyStale(recorded, effective string) bool {
+	if effective == AlwaysRevalidate {
+		return true
+	}
+	return recorded != effective
+}
+
 // UnitDigestFunc recomputes the current content digest for a resolved unit ref
 // ("source:path@version"), reporting whether the unit's content is locally
 // available to hash. It is the seam through which staleness checks the third
