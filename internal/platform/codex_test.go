@@ -895,21 +895,7 @@ func TestCodexOrphanCanonicals(t *testing.T) {
 
 			c := &codex{io: stdPlatformIO{}}
 			got := c.OrphanCanonicals("proj", projectPath, agentsHome, tc.bucket)
-			if len(got) != tc.wantCount {
-				t.Fatalf("OrphanCanonicals(%q) = %d %+v, want %d", tc.bucket, len(got), got, tc.wantCount)
-			}
-			if tc.wantCount == 0 {
-				return
-			}
-			if got[0].Name != wantName {
-				t.Errorf("orphan Name = %q, want %q", got[0].Name, wantName)
-			}
-			if wantNote && !strings.Contains(got[0].DisplayNote, "mis-pointed") {
-				t.Errorf("expected mis-pointed DisplayNote, got %q", got[0].DisplayNote)
-			}
-			if !wantNote && got[0].DisplayNote != "" {
-				t.Errorf("expected empty DisplayNote, got %q", got[0].DisplayNote)
-			}
+			assertOrphanCanonicals(t, tc.bucket, got, tc.wantCount, wantName, wantNote)
 		})
 	}
 }
@@ -964,17 +950,7 @@ func TestCodexUserBrokenLinks(t *testing.T) {
 
 			c := &codex{io: stdPlatformIO{}}
 			got := c.UserBrokenLinks(home)
-			if len(got) != tc.wantCount {
-				t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, tc.wantCount)
-			}
-			for _, bl := range got {
-				if bl.PlatformID != "codex" {
-					t.Errorf("PlatformID = %q, want codex", bl.PlatformID)
-				}
-				if bl.LinkPath == "" || bl.DisplayDest == "" {
-					t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
-				}
-			}
+			assertUserBrokenLinks(t, "codex", got, tc.wantCount)
 		})
 	}
 }

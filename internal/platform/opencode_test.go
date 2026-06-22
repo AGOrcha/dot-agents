@@ -310,17 +310,7 @@ func TestOpenCodeUserBrokenLinks(t *testing.T) {
 
 			o := &opencode{io: stdPlatformIO{}}
 			got := o.UserBrokenLinks(home)
-			if len(got) != tc.wantCount {
-				t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, tc.wantCount)
-			}
-			for _, bl := range got {
-				if bl.PlatformID != "opencode" {
-					t.Errorf("PlatformID = %q, want opencode", bl.PlatformID)
-				}
-				if bl.LinkPath == "" || bl.DisplayDest == "" {
-					t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
-				}
-			}
+			assertUserBrokenLinks(t, "opencode", got, tc.wantCount)
 		})
 	}
 }

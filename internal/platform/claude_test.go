@@ -1228,22 +1228,31 @@ func TestClaudeOrphanCanonicals(t *testing.T) {
 
 			c := &claude{io: stdPlatformIO{}}
 			got := c.OrphanCanonicals("proj", projectPath, agentsHome, tc.bucket)
-			if len(got) != tc.wantCount {
-				t.Fatalf("OrphanCanonicals(%q) = %d entries %+v, want %d", tc.bucket, len(got), got, tc.wantCount)
-			}
-			if tc.wantCount == 0 {
-				return
-			}
-			if got[0].Name != wantName {
-				t.Errorf("orphan Name = %q, want %q", got[0].Name, wantName)
-			}
-			if wantNote && !strings.Contains(got[0].DisplayNote, "mis-pointed") {
-				t.Errorf("expected mis-pointed DisplayNote, got %q", got[0].DisplayNote)
-			}
-			if !wantNote && got[0].DisplayNote != "" {
-				t.Errorf("expected empty DisplayNote for plain orphan, got %q", got[0].DisplayNote)
-			}
+			assertOrphanCanonicals(t, tc.bucket, got, tc.wantCount, wantName, wantNote)
 		})
+	}
+}
+
+// assertOrphanCanonicals verifies an OrphanCanonicals result against the
+// expected count, name, and mis-pointed note. Extracted from the table loops in
+// TestClaudeOrphanCanonicals / TestCodexOrphanCanonicals to keep each test body
+// flat (low cognitive complexity).
+func assertOrphanCanonicals(t *testing.T, bucket string, got []OrphanCanonical, wantCount int, wantName string, wantNote bool) {
+	t.Helper()
+	if len(got) != wantCount {
+		t.Fatalf("OrphanCanonicals(%q) = %d entries %+v, want %d", bucket, len(got), got, wantCount)
+	}
+	if wantCount == 0 {
+		return
+	}
+	if got[0].Name != wantName {
+		t.Errorf("orphan Name = %q, want %q", got[0].Name, wantName)
+	}
+	if wantNote && !strings.Contains(got[0].DisplayNote, "mis-pointed") {
+		t.Errorf("expected mis-pointed DisplayNote, got %q", got[0].DisplayNote)
+	}
+	if !wantNote && got[0].DisplayNote != "" {
+		t.Errorf("expected empty DisplayNote for plain orphan, got %q", got[0].DisplayNote)
 	}
 }
 
@@ -1331,18 +1340,27 @@ func TestClaudeUserBrokenLinks(t *testing.T) {
 
 			c := &claude{io: stdPlatformIO{}}
 			got := c.UserBrokenLinks(home)
-			if len(got) != tc.wantCount {
-				t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, tc.wantCount)
-			}
-			for _, bl := range got {
-				if bl.PlatformID != "claude" {
-					t.Errorf("PlatformID = %q, want claude", bl.PlatformID)
-				}
-				if bl.LinkPath == "" || bl.DisplayDest == "" {
-					t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
-				}
-			}
+			assertUserBrokenLinks(t, "claude", got, tc.wantCount)
 		})
+	}
+}
+
+// assertUserBrokenLinks verifies a UserBrokenLinks result: the expected count
+// plus, for every reported link, the platform tag and non-empty path fields.
+// Shared by the claude/codex/opencode UserBrokenLinks table tests to keep each
+// test body flat (low cognitive complexity).
+func assertUserBrokenLinks(t *testing.T, platformID string, got []BrokenLink, wantCount int) {
+	t.Helper()
+	if len(got) != wantCount {
+		t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, wantCount)
+	}
+	for _, bl := range got {
+		if bl.PlatformID != platformID {
+			t.Errorf("PlatformID = %q, want %s", bl.PlatformID, platformID)
+		}
+		if bl.LinkPath == "" || bl.DisplayDest == "" {
+			t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
+		}
 	}
 }
 
