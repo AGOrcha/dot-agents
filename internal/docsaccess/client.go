@@ -55,6 +55,13 @@ const internalPrefix = "/internal"
 // request would silently fail at the edge, so the client fails loudly instead.
 var ErrMissingCredential = errors.New("docsaccess: missing CF Access service-token credential")
 
+// ErrInsecureScheme signals that a gated /internal/* request used a non-HTTPS
+// scheme. The CF Access service-token headers are bearer-equivalent secrets;
+// attaching them to a plaintext (http://) request would expose the token to any
+// on-path observer. The client refuses to attach over a non-TLS transport and
+// fails loudly rather than leaking the credential.
+var ErrInsecureScheme = errors.New("docsaccess: refusing to attach CF Access credential over non-HTTPS transport")
+
 // CredResolver is the narrow token source the client depends on (interface-DI,
 // docs/TEST_SEAMS.md). *credstore.Loader satisfies it directly; tests inject a
 // fake to drive the present / missing / partial-credential branches.
@@ -136,6 +143,16 @@ func (c *Client) Decorate(req *http.Request) error {
 	}
 	if !c.gates(req.URL.Hostname(), req.URL.Path) {
 		return nil
+	}
+
+	// HTTPS-only: the CF Access headers are bearer-equivalent secrets. Refuse to
+	// resolve or attach them over a plaintext transport (http://, ws://, empty
+	// scheme) — doing so would expose the token to any on-path observer. This
+	// check runs BEFORE credential resolution so a misconfigured http docs host
+	// never even reads the secret. Compared case-insensitively per URL scheme
+	// normalization rules.
+	if !strings.EqualFold(req.URL.Scheme, "https") {
+		return fmt.Errorf("%w: scheme %q", ErrInsecureScheme, req.URL.Scheme)
 	}
 
 	id, err := c.resolveRequired(CredClientID)

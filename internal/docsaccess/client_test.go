@@ -130,6 +130,26 @@ func TestDecorateAttachMatrix(t *testing.T) {
 			wantHeaders: false,
 			wantErr:     ErrMissingCredential,
 		},
+		{
+			name:        "internal path over http (plaintext) refuses to attach, no leak",
+			url:         "http://agorcha.dev/internal/x",
+			canned:      bothCreds(),
+			wantHeaders: false,
+			wantErr:     ErrInsecureScheme,
+		},
+		{
+			name:        "internal root over http refuses to attach",
+			url:         "http://agorcha.dev/internal",
+			canned:      bothCreds(),
+			wantHeaders: false,
+			wantErr:     ErrInsecureScheme,
+		},
+		{
+			name:        "public path over http is untouched (no scheme error for non-gated)",
+			url:         "http://agorcha.dev/guides/x",
+			canned:      bothCreds(),
+			wantHeaders: false,
+		},
 	}
 
 	for _, tc := range tests {
@@ -156,6 +176,40 @@ func TestDecorateAttachMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// recordingResolver counts Resolve calls so a test can prove the credential is
+// never even READ when a gate refuses earlier (e.g. an insecure scheme).
+type recordingResolver struct {
+	canned map[string]string
+	calls  int
+}
+
+func (r *recordingResolver) Resolve(id string) (string, error) {
+	r.calls++
+	if v, ok := r.canned[id]; ok {
+		return v, nil
+	}
+	return "", credstore.ErrCredentialNotFound
+}
+
+// TestDecorateHTTPNeverResolvesCredential proves the HTTPS guard short-circuits
+// BEFORE credential resolution: a plaintext gated request must never even read
+// the secret from the resolver (defense against leaking it into logs/memory on a
+// transport that would expose it anyway).
+func TestDecorateHTTPNeverResolvesCredential(t *testing.T) {
+	rec := &recordingResolver{canned: bothCreds()}
+	c := New(WithResolver(rec))
+	req := newRequest(t, "http://agorcha.dev/internal/x")
+
+	err := c.Decorate(req)
+	if !errors.Is(err, ErrInsecureScheme) {
+		t.Fatalf("Decorate err = %v, want errors.Is ErrInsecureScheme", err)
+	}
+	if rec.calls != 0 {
+		t.Fatalf("resolver was called %d time(s) on an http gated request; the scheme guard must short-circuit before resolution", rec.calls)
+	}
+	assertNoHeaders(t, req)
 }
 
 // TestDecoratePropagatesHardResolverError proves a non-miss resolver failure is
@@ -256,12 +310,72 @@ func TestDecorateWithRealLoaderMissingCreds(t *testing.T) {
 	assertNoHeaders(t, req)
 }
 
+// recordingTransport is a base RoundTripper that records whether it was invoked,
+// so a test can prove the decorating transport aborts before delegating.
+type recordingTransport struct{ called bool }
+
+func (rt *recordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	rt.called = true
+	return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Header: http.Header{}}, nil
+}
+
+// TestTransportRoundTripInsecureSchemeAborts proves a gated http:// request
+// aborts the round trip with ErrInsecureScheme and never reaches the base
+// transport — the token is neither resolved nor sent over plaintext.
+func TestTransportRoundTripInsecureSchemeAborts(t *testing.T) {
+	base := &recordingTransport{}
+	c := New(WithResolver(fakeResolver{canned: bothCreds()}), WithDocsHost("agorcha.dev"))
+	client := c.HTTPClient(base)
+
+	req := newRequest(t, "http://agorcha.dev/internal/ping")
+	_, err := client.Do(req)
+	if !errors.Is(err, ErrInsecureScheme) {
+		t.Fatalf("expected ErrInsecureScheme from gated http round trip, got %v", err)
+	}
+	if base.called {
+		t.Fatal("base transport was invoked for an insecure gated request; the round trip must abort first")
+	}
+}
+
+// TestTransportRoundTripNilBaseUsesDefault proves HTTPClient(nil) falls back to
+// http.DefaultTransport. A PUBLIC (non-gated) request is used so Decorate is a
+// no-op and no credential/scheme gate interferes; DefaultTransport serves the
+// plain-http test server.
+func TestTransportRoundTripNilBaseUsesDefault(t *testing.T) {
+	var reached bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		// A public request must carry NO CF Access headers.
+		if r.Header.Get(headerClientID) != "" || r.Header.Get(headerClientSecret) != "" {
+			t.Error("public request unexpectedly carried CF Access headers")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	srvHost := newRequest(t, srv.URL).URL.Hostname()
+	c := New(WithResolver(fakeResolver{canned: bothCreds()}), WithDocsHost(srvHost))
+
+	client := c.HTTPClient(nil) // nil base -> http.DefaultTransport
+	req := newRequest(t, srv.URL+"/guides/public-page")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	_ = resp.Body.Close()
+	if !reached {
+		t.Fatal("public request did not reach the server via the default transport")
+	}
+}
+
 // TestTransportRoundTrip proves the RoundTripper wrapper attaches the headers to
 // the request actually sent to the server (and leaves the caller's request
 // unmutated, honoring the RoundTripper contract).
 func TestTransportRoundTrip(t *testing.T) {
 	var gotID, gotSecret string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// TLS server: the client only attaches CF Access headers over https, so the
+	// round-trip test must serve over TLS to exercise the decorate-then-send path.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotID = r.Header.Get(headerClientID)
 		gotSecret = r.Header.Get(headerClientSecret)
 		w.WriteHeader(http.StatusOK)
@@ -272,7 +386,9 @@ func TestTransportRoundTrip(t *testing.T) {
 	srvHost := newRequest(t, srv.URL).URL.Hostname()
 	c := New(WithResolver(fakeResolver{canned: bothCreds()}), WithDocsHost(srvHost))
 
-	client := c.HTTPClient(nil)
+	// Trust the httptest TLS cert via the server's own client transport as the
+	// RoundTripper base, so the decorating transport delegates to a trusting one.
+	client := c.HTTPClient(srv.Client().Transport)
 	req := newRequest(t, srv.URL+"/internal/ping")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -293,7 +409,9 @@ func TestTransportRoundTrip(t *testing.T) {
 // credential fails loudly instead of sending an unauthenticated request.
 func TestTransportRoundTripMissingCredAborts(t *testing.T) {
 	var reached bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// TLS server so the round trip clears the https guard and actually exercises
+	// the missing-credential abort (not the insecure-scheme abort).
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reached = true
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -302,10 +420,14 @@ func TestTransportRoundTripMissingCredAborts(t *testing.T) {
 	srvHost := newRequest(t, srv.URL).URL.Hostname()
 	c := New(WithResolver(fakeResolver{canned: map[string]string{}}), WithDocsHost(srvHost))
 
-	client := c.HTTPClient(nil)
+	client := c.HTTPClient(srv.Client().Transport)
 	req := newRequest(t, srv.URL+"/internal/ping")
-	if _, err := client.Do(req); err == nil {
+	_, err := client.Do(req)
+	if err == nil {
 		t.Fatal("expected error from gated round trip with missing credential, got nil")
+	}
+	if !errors.Is(err, ErrMissingCredential) {
+		t.Fatalf("expected ErrMissingCredential from the gated round trip, got %v", err)
 	}
 	if reached {
 		t.Fatal("unauthenticated request reached the server; client must fail loudly instead")
