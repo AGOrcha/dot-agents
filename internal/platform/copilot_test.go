@@ -574,3 +574,110 @@ func TestCopilotCreateUserHomeHookFiles(t *testing.T) {
 		t.Errorf("UserBadge = %+v, want Present=true Broken=false", badge)
 	}
 }
+
+// seedCopilotGlobalHook writes a global-scope canonical HOOK.yaml that renders
+// to a single ~/.copilot/hooks/<name>.json file, mirroring the fixture used by
+// TestCopilotCreateUserHomeHookFiles. Keeps the user-home wiring tests terse.
+func seedCopilotGlobalHook(t *testing.T, agentsHome string) {
+	t.Helper()
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	mkdirAllT(t, filepath.Dir(manifest))
+	if err := os.WriteFile(manifest, []byte("name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCopilotCreateUserHomeHookFiles_Errors drives the two error returns of
+// createUserHomeHookFiles: a malformed global HOOK.yaml fails the canonical
+// collect, and a MkdirAll fault on the ~/.copilot/hooks/ target fails the
+// per-home-root emit (a seeded valid hook makes that fanout non-empty).
+func TestCopilotCreateUserHomeHookFiles_Errors(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  func(t *testing.T, agentsHome string)
+		ioErr string
+	}{
+		{
+			name: "collect error: malformed manifest",
+			seed: func(t *testing.T, agentsHome string) {
+				manifest := filepath.Join(agentsHome, "hooks", "global", "bad", "HOOK.yaml")
+				mkdirAllT(t, filepath.Dir(manifest))
+				if err := os.WriteFile(manifest, []byte("name: [unterminated\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:  "emit error: mkdir fault on user hooks dir",
+			seed:  seedCopilotGlobalHook,
+			ioErr: ".copilot",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			t.Setenv("AGENTS_HOME", agentsHome)
+			t.Setenv("HOME", filepath.Join(tmp, "home"))
+			mkdirAllT(t, filepath.Join(tmp, "home"))
+			tc.seed(t, agentsHome)
+
+			c := &copilot{io: stdPlatformIO{}}
+			if tc.ioErr != "" {
+				c.io = withMkdirAllError(t, tc.ioErr)
+			}
+			if err := c.createUserHomeHookFiles("proj", agentsHome); err == nil {
+				t.Fatal("expected createUserHomeHookFiles to return an error")
+			}
+		})
+	}
+}
+
+// TestCopilotCreateLinks_WiresUserHomeHooks drives CreateLinks end to end with a
+// seeded global hook and a real HOME, proving the user-home fanout call wires
+// ~/.copilot/hooks/<name>.json alongside the repo-scope links.
+func TestCopilotCreateLinks_WiresUserHomeHooks(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+	for _, expect := range []string{
+		filepath.Join(repo, ".github", "hooks", "prompt-log.json"),
+		filepath.Join(copilotUserHooksDir(home), "prompt-log.json"),
+	} {
+		if _, err := os.Stat(expect); err != nil {
+			t.Errorf("expected %s: %v", expect, err)
+		}
+	}
+}
+
+// TestCopilotCreateLinks_UserHomeHookError covers CreateLinks' user-home error
+// return: a MkdirAll fault scoped to the ~/.copilot/hooks/ path lets every
+// earlier repo-scope link succeed, then fails the trailing createUserHomeHookFiles
+// call so CreateLinks propagates the error.
+func TestCopilotCreateLinks_UserHomeHookError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	c := &copilot{io: withMkdirAllError(t, filepath.Join(".copilot", "hooks"))}
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to surface the user-home MkdirAll fault")
+	}
+}
