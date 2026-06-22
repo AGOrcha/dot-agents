@@ -680,12 +680,13 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 //
 // Per platform-driven-diagnostics P4, the per-platform user-home enumeration
 // now lives in internal/platform behind the UserConfigReporter sister
-// interface (claude/codex/opencode implement UserBrokenLinks). doctor resolves
-// the home directory once, delegates by type-assertion, and flattens each
-// platform's []platform.BrokenLink into the lifecycle brokenLink shape. The
-// link path is rendered home-relative and the dest via DisplayPath, identical
-// to the prior inline implementation. cursor and copilot have no user-config
-// layer, so they do not implement UserConfigReporter and are skipped.
+// interface. doctor resolves the home directory once, delegates by
+// type-assertion, and flattens each platform's []platform.BrokenLink into the
+// lifecycle brokenLink shape. The link path is rendered home-relative and the
+// dest via DisplayPath, identical to the prior inline implementation.
+// claude/codex/opencode/cursor report real managed user-home links; copilot
+// implements UserConfigReporter but reports nothing because dot-agents does not
+// yet wire its (documented) user-config layer (tracked in PLATFORM_DIRS_DOCS).
 func collectBrokenUserLinks(_ string) []brokenLink {
 	var broken []brokenLink
 

@@ -4,9 +4,9 @@
 // status will iterate over once consumers migrate (Phases 1+). Per the
 // proposal at .agents/proposals/platform-driven-diagnostics.md (D1), these are
 // sister interfaces — not extensions to the core Platform interface — so a
-// platform may implement only the readers that apply to it (e.g. cursor and
-// copilot have no user-config layer; only claude and codex expose orphan
-// canonicals). Doctor/status type-assert at the use site:
+// platform may implement only the readers that apply to it (e.g. only claude
+// and codex expose orphan canonicals). Doctor/status type-assert at the use
+// site:
 //
 //	if r, ok := p.(BrokenLinkReporter); ok {
 //	    broken = append(broken, r.BrokenLinks(name, repo, agentsHome)...)
@@ -102,9 +102,12 @@ type StatusBadger interface {
 	Badge(project, repoPath, agentsHome string) PlatformBadge
 }
 
-// UserConfigReporter is implemented by platforms that maintain a user-home
-// configuration layer (e.g. claude/codex/opencode). cursor and copilot do
-// not implement this.
+// UserConfigReporter is implemented by every platform that participates in the
+// user-home diagnostics path. claude/codex/opencode/cursor report real managed
+// user-home links; copilot implements it too but reports an empty/clean surface
+// because its documented user-config layer is not yet wired by dot-agents (the
+// user-scope wiring gap is tracked in PLATFORM_DIRS_DOCS). No platform lacks a
+// user-config layer — the distinction is whether dot-agents wires it yet.
 type UserConfigReporter interface {
 	// UserBrokenLinks returns broken managed links under the user's home
 	// directory for this platform. Consumer: doctor.collectBrokenUserLinks.

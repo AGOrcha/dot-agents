@@ -409,3 +409,28 @@ func TestCopilotBrokenLinks_PlainFilesIgnored(t *testing.T) {
 func TestCopilotBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*copilot)(nil)
 }
+
+// TestCopilotUserConfig_EmptyUntilWired pins copilot's UserConfigReporter
+// behavior: copilot's documented user-config layer (~/.copilot/*) is not yet
+// wired by dot-agents, so it reports no managed user-home links and an
+// absent/clean badge — which appendPlatformIfPresent filters out of the status
+// list. This is intentional, not "no user-config layer": the interface is
+// implemented so copilot opts into the diagnostics path the moment user-scope
+// wiring lands.
+func TestCopilotUserConfig_EmptyUntilWired(t *testing.T) {
+	var _ UserConfigReporter = (*copilot)(nil)
+
+	home := t.TempDir()
+	c := &copilot{io: stdPlatformIO{}}
+
+	if got := c.UserBrokenLinks(home); got != nil {
+		t.Errorf("UserBrokenLinks = %+v, want nil (no copilot user-scope wiring yet)", got)
+	}
+	badge := c.UserBadge(home)
+	if badge.Name != "Copilot" {
+		t.Errorf("UserBadge.Name = %q, want Copilot", badge.Name)
+	}
+	if badge.Present || badge.Broken {
+		t.Errorf("UserBadge = %+v, want absent/clean (Present=false Broken=false)", badge)
+	}
+}

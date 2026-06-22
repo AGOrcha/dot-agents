@@ -494,6 +494,38 @@ func cursorRuleSources(agentsHome, scope, name string) []string {
 	}
 }
 
+// cursorUserConfigFiles returns the managed single-file references cursor
+// maintains under the user's home directory: ~/.cursor/hooks.json. dot-agents
+// wires this file from ~/.agents/hooks/{scope}/cursor.json via
+// writeUserHomeHooks (see PLATFORM_DIRS_DOCS "User-home wiring" — cursor IS
+// wired at user scope, parallel to codex's ~/.codex/hooks.json). Cursor's
+// broader documented user-config layer (~/.cursor/agents/, ~/.cursor/mcp.json,
+// ~/.cursor/rules, ~/.cursor/plugins/local/) is NOT yet wired by dot-agents, so
+// only the hooks file is reported as a managed link today.
+func cursorUserConfigFiles(home string) []string {
+	return []string{filepath.Join(home, cursorDir, cursorHooksFile)}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the cursor platform. The
+// managed user-home surface is ~/.cursor/hooks.json (the only user-scope target
+// writeUserHomeHooks emits); every reported entry carries PlatformID="cursor".
+// A rendered managed file or healthy hard link is silently skipped — only a
+// resolvable managed link whose target is missing is reported broken, matching
+// the shared scanUserBrokenLinks contract used by claude/codex/opencode.
+func (c *cursor) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("cursor", cursorUserConfigFiles(home), nil)
+}
+
+// UserBadge implements UserConfigReporter for the cursor platform: the
+// user-config badge over ~/.cursor/hooks.json. Present is true when the managed
+// hooks file exists (rendered file or hard link), Broken when it is a dangling
+// managed link — mirroring the codex UserBadge badge math over its own
+// ~/.codex/hooks.json.
+func (c *cursor) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(cursorUserConfigFiles(home), nil)
+	return PlatformBadge{Name: c.DisplayName(), Present: ok > 0, Broken: broken > 0}
+}
+
 func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	// Same repo-relative targets as Claude so duplicate intents merge in the shared plan.
 	return BuildSharedAgentMirrorIntents(project, filepath.Join(".claude", "agents"))
