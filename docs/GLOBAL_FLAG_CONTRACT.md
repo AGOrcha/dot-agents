@@ -1,3 +1,10 @@
+---
+title: Global Flag Contract
+description: Observed semantics of the dot-agents CLI's persistent root flags and their footguns.
+sidebar:
+  order: 2
+---
+
 # Global flag contract (dot-agents CLI)
 
 **Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md).  

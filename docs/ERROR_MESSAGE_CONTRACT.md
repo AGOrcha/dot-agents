@@ -1,3 +1,10 @@
+---
+title: Error Message Contract
+description: The supported contract for human-facing CLI failures: message shape, hints, and usage.
+sidebar:
+  order: 3
+---
+
 # Error message contract (dot-agents CLI)
 
 **Status:** Contract draft updated from the 2026-04-19 inventory in [`docs/research/error-message-inventory.md`](./research/error-message-inventory.md).  

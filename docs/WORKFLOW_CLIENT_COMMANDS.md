@@ -1,3 +1,10 @@
+---
+title: Workflow Client Commands
+description: The start-task and close-task client commands that compose workflow primitives.
+sidebar:
+  order: 6
+---
+
 # Workflow client commands
 
 `da workflow close-task` and `da workflow start-task` are the two **client commands** in the workflow surface — T1 molecules under the skill-tiering-contract that compose existing T0-atom primitives into the start-of-iteration and end-of-iteration sequences operators (and skills) repeat every cycle.

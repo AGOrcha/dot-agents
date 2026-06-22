@@ -1,3 +1,10 @@
+---
+title: Config Relevance
+description: Canonical reference for execution profiles and the da config relevance command family.
+sidebar:
+  order: 2
+---
+
 # `da config relevance` — workflow execution profiles
 
 This document is the **canonical reference** for the execution-profile layer and the

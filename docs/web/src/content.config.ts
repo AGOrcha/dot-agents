@@ -73,17 +73,31 @@ function splitFrontmatter(raw: string): {
   let body = raw.slice(end + 4);
   if (body.startsWith('\n')) body = body.slice(1);
   const fm: Record<string, string> = {};
+  // One-level-deep mapping key currently open (e.g. `sidebar:`), so indented
+  // child lines are captured as dotted keys (`sidebar.order`). The repo docs
+  // only nest `sidebar`, so a single level of nesting is enough; deeper or
+  // sequence nesting is intentionally ignored to keep this scrape malformation-proof.
+  let parentKey = '';
   for (const rawLine of block.split('\n')) {
     const line = rawLine.trimEnd();
-    if (!line.trim() || line.startsWith('#')) continue;
-    const m = /^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
+    if (!line.trim() || line.trimStart().startsWith('#')) continue;
+    const indented = /^\s/.test(rawLine);
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/.exec(line);
     if (!m) continue;
     let val = m[2];
     if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
       val = val.slice(1, -1);
     }
-    if (val.startsWith('[') || val.startsWith('{') || val === '|' || val === '>') continue;
-    fm[m[1].toLowerCase()] = val;
+    if (!indented) {
+      // Top-level key. A bare `key:` (empty value) opens a nested mapping.
+      parentKey = val === '' ? m[1].toLowerCase() : '';
+      if (val === '' || val.startsWith('[') || val.startsWith('{') || val === '|' || val === '>') continue;
+      fm[m[1].toLowerCase()] = val;
+    } else if (parentKey) {
+      // Child of the open mapping → store as `parent.child`.
+      if (val.startsWith('[') || val.startsWith('{') || val === '|' || val === '>') continue;
+      fm[`${parentKey}.${m[1].toLowerCase()}`] = val;
+    }
   }
   return { frontmatter: fm, body };
 }
@@ -127,12 +141,18 @@ function repoDocsLoader() {
         const title = frontmatter.title || deriveTitle(body, slugFallback);
         const filePath = path.relative(siteRoot, absPath).split(path.sep).join('/');
 
+        // Sidebar order: prefer the doc's own frontmatter (`sidebar.order`),
+        // fall back to the allowlist `order` (README carries no frontmatter).
+        const fmOrder = Number(frontmatter['sidebar.order']);
+        const order = Number.isFinite(fmOrder) ? fmOrder : page.order;
+        const sidebarLabel = frontmatter['sidebar.label'];
+
         const data = await parseData({
           id: page.id,
           data: {
             title,
             ...(frontmatter.description ? { description: frontmatter.description } : {}),
-            sidebar: { order: page.order },
+            sidebar: { order, ...(sidebarLabel ? { label: sidebarLabel } : {}) },
           },
           filePath,
         });

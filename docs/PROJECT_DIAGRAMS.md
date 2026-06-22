@@ -1,3 +1,10 @@
+---
+title: Project Diagrams
+description: Architecture and flow diagrams derived from the current dot-agents docs and code.
+sidebar:
+  order: 1
+---
+
 # Project Diagrams
 
 These diagrams are derived from the current repo docs and code structure, primarily:

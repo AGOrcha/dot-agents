@@ -1,3 +1,10 @@
+---
+title: Lessons Learned
+description: Seven instructive lessons from the dot-agents corpus, told as short cautionary stories.
+sidebar:
+  order: 7
+---
+
 # dot-agents — Lessons Learned the Hard Way
 
 > **Audience:** anyone asking *"but does this actually work in practice?"*
