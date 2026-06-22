@@ -37,12 +37,12 @@ type SyncReport struct {
 	Layers   []SyncedLayer `json:"layers"`
 }
 
-// resolverSeam is the minimal force-re-resolve surface `da config sync` drives.
+// forceResolver is the minimal force-re-resolve surface `da config sync` drives.
 // *cfg.LayeredResolver (built with WithRefresh(true)) satisfies it; tests inject
 // a resolver pointed at a temp user-local manifest with a fixed clock so no run
 // touches the network. Resolve rewrites the lock — that is the whole point of
 // sync.
-type resolverSeam interface {
+type forceResolver interface {
 	Resolve(projectPath string) (*cfg.Snapshot, error)
 }
 
@@ -58,7 +58,7 @@ type runSyncOptions struct {
 	// newResolver builds the force-refresh resolver. Nil falls back to a default
 	// cfg.NewLayeredResolver().WithRefresh(true); tests inject a resolver wired to
 	// a temp user-local path and a fixed clock.
-	newResolver func() resolverSeam
+	newResolver func() forceResolver
 }
 
 func newSyncCmd(deps Deps) *cobra.Command {
@@ -145,7 +145,7 @@ func runSync(opts *runSyncOptions, deps Deps) error {
 // resolver returns the configured force-refresh resolver, defaulting to a real
 // LayeredResolver with WithRefresh(true) — the seam the spec mandates for the
 // explicit upstream re-check — when the test factory is unset.
-func (o runSyncOptions) resolver() resolverSeam {
+func (o runSyncOptions) resolver() forceResolver {
 	if o.newResolver != nil {
 		return o.newResolver()
 	}

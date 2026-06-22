@@ -38,7 +38,7 @@ func syncOptions(project, layer string, jsonOut bool, clock time.Time) *runSyncO
 		stdout:  &bytes.Buffer{},
 		stderr:  &bytes.Buffer{},
 		cwd:     project,
-		newResolver: func() resolverSeam {
+		newResolver: func() forceResolver {
 			return cfg.NewLayeredResolver().
 				WithRefresh(true).
 				WithClock(func() time.Time { return clock })
@@ -170,22 +170,35 @@ func TestRunSync_LayerScopesToOneLayer(t *testing.T) {
 	var targeted, untargeted int
 	for _, l := range report.Layers {
 		if l.Ref == "acme:org/base.json" {
-			if !l.Targeted {
-				t.Errorf("targeted layer not marked Targeted: %+v", l)
-			}
+			assertTargetedLayer(t, l)
 			targeted++
 		} else {
-			if l.Targeted {
-				t.Errorf("non-targeted layer %q marked Targeted", l.Ref)
-			}
-			if l.Note == "" {
-				t.Errorf("non-targeted layer %q should carry a note", l.Ref)
-			}
+			assertUntargetedLayer(t, l)
 			untargeted++
 		}
 	}
 	if targeted != 1 || untargeted != 1 {
 		t.Errorf("scoping: targeted=%d untargeted=%d, want 1/1", targeted, untargeted)
+	}
+}
+
+// assertTargetedLayer checks the single --layer-scoped layer is flagged Targeted.
+func assertTargetedLayer(t *testing.T, l SyncedLayer) {
+	t.Helper()
+	if !l.Targeted {
+		t.Errorf("targeted layer not marked Targeted: %+v", l)
+	}
+}
+
+// assertUntargetedLayer checks an out-of-scope layer is not Targeted and carries
+// the skip note.
+func assertUntargetedLayer(t *testing.T, l SyncedLayer) {
+	t.Helper()
+	if l.Targeted {
+		t.Errorf("non-targeted layer %q marked Targeted", l.Ref)
+	}
+	if l.Note == "" {
+		t.Errorf("non-targeted layer %q should carry a note", l.Ref)
 	}
 }
 
@@ -225,7 +238,7 @@ func syncReportAfterRun(t *testing.T, project, layer string) (SyncReport, error)
 	return buildSyncReport(project, layer)
 }
 
-// failingResolver is a resolverSeam that always returns a transport-style error,
+// failingResolver is a forceResolver that always returns a transport-style error,
 // driving runSync's re-resolve failure branch without any network.
 type failingResolver struct{ err error }
 
@@ -237,7 +250,7 @@ func (f failingResolver) Resolve(string) (*cfg.Snapshot, error) { return nil, f.
 func TestRunSync_ResolveFailureIsHinted(t *testing.T) {
 	project := withTwoLocalLayers(t)
 	opts := syncOptions(project, "", false, time.Now().UTC())
-	opts.newResolver = func() resolverSeam {
+	opts.newResolver = func() forceResolver {
 		return failingResolver{err: errors.New("boom: remote unreachable")}
 	}
 	err := runSync(opts, testDeps())
