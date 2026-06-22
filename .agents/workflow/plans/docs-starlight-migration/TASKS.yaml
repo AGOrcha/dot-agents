@@ -1,0 +1,99 @@
+schema_version: 1
+plan_id: docs-starlight-migration
+tasks:
+    - id: dm0-cf-access-bootstrap
+      title: CF Access app + agent service token as Terraform IaC
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - infra/cloudflare/
+        - docs/cf-access-bootstrap.md
+      verification_required: true
+      notes: 'PER-USER (decided). Terraform under infra/cloudflare/ (cloudflare ~>5, v5 zero_trust_access_*): agorcha-internal-docs app + maintainer email-allow policy + a Service Auth policy accepting ANY valid service token. Do NOT declare a static service token — tokens are minted per-developer at runtime by dm6. Outputs: audTag (dm5 verifies JWT aud) + account_id/zone_id (dm6 minting needs them). Maintainer runs terraform apply with CLOUDFLARE_API_TOKEN. See plan.md dm0 + spec D8.'
+      app_type: docs
+    - id: dm1-starlight-foundation
+      title: 'Starlight foundation: replace custom site, public IA from docs/** via glob loader + astro-mermaid'
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/package.json
+        - docs/web/astro.config.mjs
+        - docs/web/src/content.config.ts
+        - docs/web/src/
+      verification_required: true
+      notes: Convert docs/web to Starlight. Public docs via Astro glob() loader from ../../docs (schema derives title from first H1 when frontmatter lacks one — D2, no content fork). Sidebar = the 4 public sections (D3). Add astro-mermaid (D7). Preserve the Cloudflare base logic (base '/' when DEPLOY_TARGET=cloudflare). Remove the old custom canonical/demos content routes (Starlight collections replace them; internal handled in dm3). Leverage the validated spike at /tmp/starlight-spike/docs/web-starlight as the basis. See plan.md dm1.
+      app_type: docs
+    - id: dm2-port-interactive-pages
+      title: Port interactive pages (Cytoscape graphs + JSON diagrams) into the Starlight project
+      status: pending
+      depends_on:
+        - dm1-starlight-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/src/pages/graphs/
+        - docs/web/src/pages/diagrams/
+        - docs/web/src/components/
+        - docs/web/src/data/
+      verification_required: true
+      notes: Port the bespoke /graphs/* (Cytoscape ResourceGraph) and /diagrams/* (JSON-driven tier-model/lens-dispatch/verifier-registry) from the old custom site into the Starlight project as custom Astro routes + components + data; link them from the Concepts section. Hybrid per D1 — nothing interactive is lost. See plan.md dm2.
+      app_type: docs
+    - id: dm3-visibility-gating
+      title: visibility frontmatter (default internal) + dist/ vs dist-internal/ partition
+      status: pending
+      depends_on:
+        - dm1-starlight-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/src/content.config.ts
+        - docs/web/astro.config.mjs
+        - docs/web/package.json
+      verification_required: true
+      notes: 'Add visibility: enum(public|internal).default(internal) to every content collection (D4 / proposal 1.3). Two-output build: dist/ (public only — internal entries dropped from collections + route gen) and dist-internal/ (everything, incl. Lessons/Specs/Proposals from .agents/**). Classify the public set (the 4 sections); .agents/** + ADRs + internal specs default internal. See plan.md dm3.'
+      app_type: docs
+    - id: dm4-md-llms-endpoints
+      title: 'Agent-readable: [...slug].md raw-markdown endpoints + llms.txt (public only)'
+      status: pending
+      depends_on:
+        - dm1-starlight-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/src/pages/
+      verification_required: true
+      notes: Add src/pages/[...slug].md.ts static endpoints emitting each PUBLIC page's raw markdown (reuse the collection raw body) with text/markdown; plus src/pages/llms.txt.ts index enumerating the public pages (title — <url>.md). Honor the base path. Exclude internal (respects dm3's public filter). D6. See plan.md dm4.
+      app_type: docs
+    - id: dm5-worker-cf-access
+      title: 'Worker: gate /internal/* behind CF Access (2nd asset binding) + deploy both outputs'
+      status: pending
+      depends_on:
+        - dm3-visibility-gating
+        - dm0-cf-access-bootstrap
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/src/worker.js
+        - docs/web/wrangler.jsonc
+        - .github/workflows/deploy-docs.yml
+      verification_required: true
+      notes: Worker serves ASSETS (dist) at /*, ASSETS_INTERNAL (dist-internal) at /internal/* ONLY after CF Access JWT verify (aud == audTag from dm0); /schemas/* stays unauth (carve-out before the check). wrangler.jsonc gains ASSETS_INTERNAL binding; deploy-docs.yml builds dist + dist-internal and deploys both. D5 / proposal 1.3+2.3+section7 task3. See plan.md dm5.
+      app_type: docs
+    - id: dm6-agent-internal-access
+      title: Agent internal-docs access via service token (da CLI, auth-proxy-ready, auto-wired)
+      status: pending
+      depends_on:
+        - dm0-cf-access-bootstrap
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/
+        - commands/
+        - docs/
+      verification_required: true
+      notes: 'PER-USER (decided). (1) da attaches CF-Access-Client-Id/Secret headers directly on /internal/* fetches now (auth-proxy refactor later). (2) Gated self-provision: a CF-Access-gated endpoint (dm5 worker or sibling) MINTS a per-user CF Access service token via the CF API after the dev authenticates (GitHub via CF Access), named agorcha-agents-<github-login>, returns client_id/secret to da which stores + auto-wires it (da init/refresh). Revoke a dev = delete their token (policy accepts any valid service token, so no policy churn). Minting endpoint needs a scoped CF API token (service-token create) + account_id from dm0. Depends dm0 + dm5. See plan.md dm6 + spec D8.'
+      app_type: go-cli
