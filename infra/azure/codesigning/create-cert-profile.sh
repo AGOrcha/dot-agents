@@ -49,9 +49,9 @@ if [[ -z "$validationId" ]]; then
   exit 1
 fi
 echo "==> Using identity validation: $validationId"
-echo "    (Verify it reads 'Completed' in the portal. A not-Completed or otherwise"
-echo "     unhealthy validation is masked by the backend as an opaque 'UnknownError'"
-echo "     at profile-creation time — the error gives no hint that the validation is the cause.)"
+echo "    (Verify it reads 'Completed' in the portal. A not-Completed or otherwise" >&2
+echo "     unhealthy validation is masked by the backend as an opaque 'UnknownError'" >&2
+echo "     at profile-creation time — the error gives no hint that the validation is the cause.)" >&2
 
 echo "==> Creating $PROFILE_TYPE certificate profile '$PROFILE_NAME' on account '$ACCOUNT'"
 # Create the certificateProfiles resource DIRECTLY under the signing account via the

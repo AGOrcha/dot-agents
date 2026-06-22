@@ -176,12 +176,19 @@ jobs:
       # no-ops on empty QUILL_SIGN_P12) until the cert + secrets are configured.
       - name: Install quill (macOS Developer ID signing)
         if: steps.check.outputs.exists == 'false' && vars.MACOS_SIGNING_ENABLED == 'true'
-        # quill is a Go tool; install a pinned version via `go install` (Go is set
-        # up above). Avoids piping a remote install script to a shell. Bump the
-        # pin to adopt a newer quill.
+        # Pinned, checksum-verified release binary — reproducible (no @version
+        # dependency resolution, no remote script piped to a shell). Bump both
+        # QUILL_VERSION and QUILL_SHA256 together to adopt a newer quill.
+        env:
+          QUILL_VERSION: 0.7.1
+          QUILL_SHA256: e58c6f86378a22507c1123e24412afd4ee2d3bb32ebd94d6059827dc0c1b3fbf
         run: |
-          go install github.com/anchore/quill/cmd/quill@v0.7.1
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL -o /tmp/quill.tar.gz "https://github.com/anchore/quill/releases/download/v${QUILL_VERSION}/quill_${QUILL_VERSION}_linux_amd64.tar.gz"
+          echo "${QUILL_SHA256}  /tmp/quill.tar.gz" | sha256sum -c -
+          tar -C "$HOME/.local/bin" -xzf /tmp/quill.tar.gz quill
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/quill" version
 
       - name: Import Homebrew tap signing key
         if: steps.check.outputs.exists == 'false'
