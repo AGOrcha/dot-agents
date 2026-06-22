@@ -29,7 +29,7 @@ tasks:
       app_type: docs
     - id: dm2-port-interactive-pages
       title: Port interactive pages (Cytoscape graphs + JSON diagrams) into the Starlight project
-      status: pending
+      status: in_progress
       depends_on:
         - dm1-starlight-foundation
       blocks: []
