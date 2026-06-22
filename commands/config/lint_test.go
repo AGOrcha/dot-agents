@@ -39,10 +39,12 @@ func lintProject(t *testing.T, repoExtra, layerBody string) string {
 
 func lintOptions(project string, jsonOut bool) *runLintOptions {
 	return &runLintOptions{
-		jsonOut: jsonOut,
-		stdout:  &bytes.Buffer{},
-		stderr:  &bytes.Buffer{},
-		cwd:     project,
+		runContext: runContext{
+			jsonOut: jsonOut,
+			stdout:  &bytes.Buffer{},
+			stderr:  &bytes.Buffer{},
+			cwd:     project,
+		},
 	}
 }
 

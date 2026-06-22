@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"io"
-	"os"
 	"sort"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
@@ -46,15 +45,13 @@ type forceResolver interface {
 	Resolve(projectPath string) (*cfg.Snapshot, error)
 }
 
-// runSyncOptions captures one invocation's state. stdout/stderr/cwd and the
+// runSyncOptions captures one invocation's state. The shared stdout/stderr/
+// cwd/json surface comes from the embedded runContext; the layer scope and the
 // resolver factory are injected so the run path is table-drivable without cobra
 // or the network.
 type runSyncOptions struct {
-	jsonOut bool
-	layer   string // optional source-id:path scope; empty syncs all
-	stdout  io.Writer
-	stderr  io.Writer
-	cwd     string
+	runContext
+	layer string // optional source-id:path scope; empty syncs all
 	// newResolver builds the force-refresh resolver. Nil falls back to a default
 	// cfg.NewLayeredResolver().WithRefresh(true); tests inject a resolver wired to
 	// a temp user-local path and a fixed clock.
@@ -90,15 +87,8 @@ re-checks upstream.
 		),
 		Args: deps.ExactArgsWithHints(0, "`da config sync` takes no arguments; use --layer to scope and --json for machine-readable output."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.stdout = cmd.OutOrStdout()
-			opts.stderr = cmd.ErrOrStderr()
-			opts.jsonOut = deps.jsonFlag() // honor the global persistent --json
-			if opts.cwd == "" {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return deps.ErrorWithHints("could not resolve current directory", err.Error())
-				}
-				opts.cwd = cwd
+			if err := opts.bind(cmd, deps); err != nil {
+				return err
 			}
 			return runSync(opts, deps)
 		},

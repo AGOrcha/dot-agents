@@ -33,11 +33,13 @@ func writeLocalLayer(t *testing.T, layerPath, body string) string {
 // lock's fetched_at timestamp is deterministic.
 func syncOptions(project, layer string, jsonOut bool, clock time.Time) *runSyncOptions {
 	return &runSyncOptions{
-		jsonOut: jsonOut,
-		layer:   layer,
-		stdout:  &bytes.Buffer{},
-		stderr:  &bytes.Buffer{},
-		cwd:     project,
+		runContext: runContext{
+			jsonOut: jsonOut,
+			stdout:  &bytes.Buffer{},
+			stderr:  &bytes.Buffer{},
+			cwd:     project,
+		},
+		layer: layer,
 		newResolver: func() forceResolver {
 			return cfg.NewLayeredResolver().
 				WithRefresh(true).
@@ -402,9 +404,11 @@ func TestBuildSyncReport_VerifyLayerLocksError(t *testing.T) {
 func TestRunSync_ReportBuildFailureAfterResolve(t *testing.T) {
 	project := withRepoLayer(t, `{"version":2,"extends":[ this is not valid json`, "")
 	opts := &runSyncOptions{
-		stdout:      &bytes.Buffer{},
-		stderr:      &bytes.Buffer{},
-		cwd:         project,
+		runContext: runContext{
+			stdout: &bytes.Buffer{},
+			stderr: &bytes.Buffer{},
+			cwd:    project,
+		},
 		newResolver: func() forceResolver { return passingResolver{} },
 	}
 	err := runSync(opts, testDeps())

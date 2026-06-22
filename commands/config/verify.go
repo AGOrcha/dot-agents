@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -39,14 +38,12 @@ type VerifyReport struct {
 	Checks []VerifyCheck `json:"checks"`
 }
 
-// runVerifyOptions captures one invocation's state. stdout/stderr/cwd and the
-// binary probe are injected so the run path is table-drivable without cobra or
-// a real code-review-graph install.
+// runVerifyOptions captures one invocation's state. The shared stdout/stderr/
+// cwd/json surface comes from the embedded runContext; the binary probe is
+// injected so the run path is table-drivable without cobra or a real
+// code-review-graph install.
 type runVerifyOptions struct {
-	jsonOut bool
-	stdout  io.Writer
-	stderr  io.Writer
-	cwd     string
+	runContext
 	// crgProbe reports code-review-graph binary readiness for the project at
 	// root; nil err means available. Injected for tests; nil falls back to the
 	// real discovery probe.
@@ -82,15 +79,8 @@ platform link projection; run that for a complete link/health audit.`,
 		),
 		Args: deps.ExactArgsWithHints(0, "`da config verify` takes no arguments; use --json for machine-readable output."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.stdout = cmd.OutOrStdout()
-			opts.stderr = cmd.ErrOrStderr()
-			opts.jsonOut = deps.jsonFlag() // honor the global persistent --json
-			if opts.cwd == "" {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return deps.ErrorWithHints("could not resolve current directory", err.Error())
-				}
-				opts.cwd = cwd
+			if err := opts.bind(cmd, deps); err != nil {
+				return err
 			}
 			return runVerify(opts, deps)
 		},

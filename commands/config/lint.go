@@ -71,13 +71,11 @@ type LintReport struct {
 	Results []LintResult `json:"results"`
 }
 
-// runLintOptions captures one invocation's state. stdout/stderr/cwd are injected
-// so the run path is table-drivable without cobra.
+// runLintOptions captures one invocation's state. The shared stdout/stderr/
+// cwd/json surface comes from the embedded runContext, so the run path stays
+// table-drivable without cobra.
 type runLintOptions struct {
-	jsonOut bool
-	stdout  io.Writer
-	stderr  io.Writer
-	cwd     string
+	runContext
 }
 
 func newLintCmd(deps Deps) *cobra.Command {
@@ -101,15 +99,8 @@ Exits non-zero if any layer is invalid. Skipped layers do not fail the command.`
 		),
 		Args: deps.ExactArgsWithHints(0, "`da config lint` takes no arguments; use --json for machine-readable output."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			opts.stdout = cmd.OutOrStdout()
-			opts.stderr = cmd.ErrOrStderr()
-			opts.jsonOut = deps.jsonFlag() // honor the global persistent --json
-			if opts.cwd == "" {
-				cwd, err := os.Getwd()
-				if err != nil {
-					return deps.ErrorWithHints("could not resolve current directory", err.Error())
-				}
-				opts.cwd = cwd
+			if err := opts.bind(cmd, deps); err != nil {
+				return err
 			}
 			return runLint(opts, deps)
 		},
