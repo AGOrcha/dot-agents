@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -763,6 +764,179 @@ func (c *claude) CountLinks(_, repoPath, _ string) (ok, broken int) {
 func (c *claude) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	ok, broken := c.CountLinks(project, repoPath, agentsHome)
 	return PlatformBadge{Name: "Claude", Present: ok > 0, Broken: broken > 0}
+}
+
+// claudeOrphanBucket is the single canonical bucket claude owns for orphan
+// reporting. Each OrphanCanonicalReporter owns a disjoint bucket so the
+// doctor-side iterator (reportOrphanCanonicals) never double-counts a
+// canonical entry: claude reports the skills bucket, codex reports agents.
+const claudeOrphanBucket = "skills"
+
+// OrphanCanonicals implements OrphanCanonicalReporter for the claude platform.
+//
+// claude owns the "skills" canonical bucket: it enumerates entries under
+// <agentsHome>/skills/<project>/ that have no live back-link at
+// <projectPath>/.agents/skills/<name>. A non-matching bucket returns nil so
+// the doctor iterator can fan out over every (reporter, bucket) pair without
+// any single canonical entry being reported twice (codex owns "agents").
+//
+// The detection logic is shared with codex via scanOrphanCanonicals — the
+// only platform-specific input is which bucket each owns.
+func (c *claude) OrphanCanonicals(project, projectPath, agentsHome, bucket string) []OrphanCanonical {
+	if bucket != claudeOrphanBucket {
+		return nil
+	}
+	return scanOrphanCanonicals(project, projectPath, agentsHome, bucket)
+}
+
+// scanOrphanCanonicals enumerates the entries under
+// <agentsHome>/<bucket>/<project>/ that have no live back-link at
+// <projectPath>/.agents/<bucket>/<name>. Shared by the claude + codex
+// OrphanCanonicalReporter implementations (each owns a disjoint bucket).
+//
+// An absent canonical bucket dir yields nil (not present, not orphaned). A
+// missing back-link is a plain orphan (DisplayNote == ""); a back-link that
+// is a resolvable managed link pointing at a different canonical is a
+// mis-pointed orphan whose DisplayNote carries the formatted suffix; any
+// other present back-link (real dir, or a hard link with no reparse point) is
+// a live reference and not reported.
+func scanOrphanCanonicals(project, projectPath, agentsHome, bucket string) []OrphanCanonical {
+	canonicalDir := filepath.Join(agentsHome, bucket, project)
+	entries, err := os.ReadDir(canonicalDir)
+	if err != nil {
+		return nil
+	}
+	var orphans []OrphanCanonical
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if oc, ok := classifyOrphanCanonical(projectPath, canonicalDir, bucket, e.Name()); ok {
+			orphans = append(orphans, oc)
+		}
+	}
+	return orphans
+}
+
+// classifyOrphanCanonical decides whether a single canonical entry is an
+// orphan and returns the OrphanCanonical to record plus true when it is.
+// Extracted from scanOrphanCanonicals to keep the loop flat for cognitive
+// complexity. The branch semantics mirror the legacy lifecycle
+// classifyCanonicalOrphan exactly (plain orphan / mis-pointed orphan / live
+// reference) — only the return shape differs (typed OrphanCanonical instead
+// of an annotated string).
+func classifyOrphanCanonical(projectPath, canonicalDir, bucket, name string) (OrphanCanonical, bool) {
+	backLink := filepath.Join(projectPath, ".agents", bucket, name)
+	if _, err := os.Lstat(backLink); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return OrphanCanonical{Name: name}, true
+		}
+		return OrphanCanonical{}, false
+	}
+	raw, ok := links.ManagedLinkTarget(backLink)
+	if !ok {
+		// A non-resolvable back-link (real dir, or a hard-linked entry with no
+		// reparse point) is a live reference, not an orphan.
+		return OrphanCanonical{}, false
+	}
+	target := raw
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(backLink), target)
+	}
+	expected := filepath.Join(canonicalDir, name)
+	if filepath.Clean(target) != filepath.Clean(expected) {
+		return OrphanCanonical{Name: name, DisplayNote: "  (mis-pointed: " + target + ")"}, true
+	}
+	return OrphanCanonical{}, false
+}
+
+// claudeUserConfigFiles returns the managed single-file references claude
+// maintains under the user's home directory: ~/.claude/CLAUDE.md and
+// ~/.claude/settings.json.
+func claudeUserConfigFiles(home string) []string {
+	claudeHome := filepath.Join(home, claudeDir)
+	return []string{
+		filepath.Join(claudeHome, "CLAUDE.md"),
+		filepath.Join(claudeHome, claudeSettingsJSON),
+	}
+}
+
+// claudeUserConfigDirs returns the managed directories claude maintains under
+// the user's home directory: ~/.claude/agents/ and ~/.claude/skills/.
+func claudeUserConfigDirs(home string) []string {
+	claudeHome := filepath.Join(home, claudeDir)
+	return []string{
+		filepath.Join(claudeHome, "agents"),
+		filepath.Join(claudeHome, "skills"),
+	}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the claude platform: it
+// reports the broken managed links under the user's home directory. The
+// surface mirrors the legacy lifecycle collectBrokenUserLinks claude block
+// (CLAUDE.md, settings.json, agents/*, skills/*) and every entry carries
+// PlatformID="claude" so doctor's JSON/text consumers self-describe.
+func (c *claude) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("claude", claudeUserConfigFiles(home), claudeUserConfigDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the claude platform: it returns
+// the user-config badge summarizing whether claude has any managed user-level
+// state and whether any of it is broken. Mirrors the legacy lifecycle
+// countPlatformHealth("Claude", ...) badge math.
+func (c *claude) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(claudeUserConfigFiles(home), claudeUserConfigDirs(home))
+	return PlatformBadge{Name: "Claude", Present: ok > 0, Broken: broken > 0}
+}
+
+// scanUserBrokenLinks classifies each managed file path and each entry under
+// every managed dir, returning the resolvable-but-broken links tagged with
+// platformID. Shared by the claude/codex/opencode UserConfigReporter
+// implementations. DisplayDest is rendered via config.DisplayPath so the
+// home-relative display matches the legacy lifecycle collectBrokenUserLinks
+// output.
+func scanUserBrokenLinks(platformID string, files, dirs []string) []BrokenLink {
+	var broken []BrokenLink
+	for _, path := range files {
+		broken = appendUserBrokenLink(broken, platformID, path)
+	}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			broken = appendUserBrokenLink(broken, platformID, filepath.Join(dir, e.Name()))
+		}
+	}
+	return broken
+}
+
+// appendUserBrokenLink appends a BrokenLink for path when it is a resolvable
+// managed link whose target is missing. A plain file, absent path, or healthy
+// link is silently skipped — matching the legacy managedLinkBroken contract
+// the user-config audit enforced.
+func appendUserBrokenLink(broken []BrokenLink, platformID, path string) []BrokenLink {
+	state, raw := classifyManagedLink(path)
+	if state != linkStateBroken {
+		return broken
+	}
+	return append(broken, BrokenLink{
+		PlatformID:  platformID,
+		LinkPath:    path,
+		Dest:        raw,
+		DisplayDest: config.DisplayPath(absolutizeDest(path, raw)),
+	})
+}
+
+// scanUserConfigCounts tallies (ok, broken) for the managed user-config files
+// and dirs of one platform, reusing the project-scope managed-count helpers so
+// the present/broken semantics stay identical to Badge/CountLinks. Shared by
+// the claude/codex/opencode UserBadge implementations.
+func scanUserConfigCounts(files, dirs []string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, files)
+	addManagedDirCounts(&ok, &broken, dirs)
+	return ok, broken
 }
 
 // claudeCountRules walks the .claude/rules directory and reports ok/broken

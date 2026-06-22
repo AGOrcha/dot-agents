@@ -807,3 +807,237 @@ func TestCodexBrokenLinks_HealthyAGENTSMDIgnored(t *testing.T) {
 func TestCodexBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*codex)(nil)
 }
+
+// ---------- OrphanCanonicalReporter implementation (P4) ----------
+
+// TestCodexOrphanCanonicals is the table-driven cover for codex's
+// OrphanCanonicalReporter: it owns only the "agents" bucket (claude owns
+// "skills"), reporting plain + mis-pointed orphans and skipping non-owned
+// buckets so the doctor fan-out never double-counts.
+func TestCodexOrphanCanonicals(t *testing.T) {
+	tests := []struct {
+		name      string
+		bucket    string
+		setup     func(t *testing.T, agentsHome, projectPath string) (wantName string, wantNote bool)
+		wantCount int
+	}{
+		{
+			name:   "plain orphan in owned agents bucket",
+			bucket: "agents",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "alpha"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				return "alpha", false
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "correctly-linked back-link not orphaned",
+			bucket: "agents",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				canonical := filepath.Join(agentsHome, "agents", "proj", "beta")
+				if err := os.MkdirAll(canonical, 0755); err != nil {
+					t.Fatal(err)
+				}
+				repoLocal := filepath.Join(projectPath, ".agents", "agents")
+				if err := os.MkdirAll(repoLocal, 0755); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, canonical, filepath.Join(repoLocal, "beta"))
+				return "", false
+			},
+			wantCount: 0,
+		},
+		{
+			name:   "mis-pointed back-link is orphan with note",
+			bucket: "agents",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "gamma"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				other := filepath.Join(agentsHome, "agents", "otherproj", "delta")
+				if err := os.MkdirAll(other, 0755); err != nil {
+					t.Fatal(err)
+				}
+				repoLocal := filepath.Join(projectPath, ".agents", "agents")
+				if err := os.MkdirAll(repoLocal, 0755); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, other, filepath.Join(repoLocal, "gamma"))
+				return "gamma", true
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "skills bucket not owned by codex",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "orphan-skill"), 0755); err != nil {
+					t.Fatal(err)
+				}
+				return "", false
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			projectPath := filepath.Join(tmp, "proj")
+			if err := os.MkdirAll(projectPath, 0755); err != nil {
+				t.Fatal(err)
+			}
+			wantName, wantNote := tc.setup(t, agentsHome, projectPath)
+
+			c := &codex{io: stdPlatformIO{}}
+			got := c.OrphanCanonicals("proj", projectPath, agentsHome, tc.bucket)
+			if len(got) != tc.wantCount {
+				t.Fatalf("OrphanCanonicals(%q) = %d %+v, want %d", tc.bucket, len(got), got, tc.wantCount)
+			}
+			if tc.wantCount == 0 {
+				return
+			}
+			if got[0].Name != wantName {
+				t.Errorf("orphan Name = %q, want %q", got[0].Name, wantName)
+			}
+			if wantNote && !strings.Contains(got[0].DisplayNote, "mis-pointed") {
+				t.Errorf("expected mis-pointed DisplayNote, got %q", got[0].DisplayNote)
+			}
+			if !wantNote && got[0].DisplayNote != "" {
+				t.Errorf("expected empty DisplayNote, got %q", got[0].DisplayNote)
+			}
+		})
+	}
+}
+
+// TestCodexOrphanCanonicals_InterfaceConformance pins compile-time conformance
+// with OrphanCanonicalReporter for the codex platform.
+func TestCodexOrphanCanonicals_InterfaceConformance(t *testing.T) {
+	var _ OrphanCanonicalReporter = (*codex)(nil)
+}
+
+// ---------- UserConfigReporter implementation (P4) ----------
+
+// TestCodexUserBrokenLinks is the table-driven cover for codex's
+// UserConfigReporter broken-link surface (~/.codex/agents/*). Every reported
+// link carries PlatformID="codex".
+func TestCodexUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken codex agent",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".codex", "agents", "missing"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "healthy codex agent symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "agents", "global", "a")
+				if err := os.MkdirAll(target, 0755); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".codex", "agents", "a"))
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &codex{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			if len(got) != tc.wantCount {
+				t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, tc.wantCount)
+			}
+			for _, bl := range got {
+				if bl.PlatformID != "codex" {
+					t.Errorf("PlatformID = %q, want codex", bl.PlatformID)
+				}
+				if bl.LinkPath == "" || bl.DisplayDest == "" {
+					t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
+				}
+			}
+		})
+	}
+}
+
+// TestCodexUserBadge covers the codex user-config badge over ~/.codex/hooks.json,
+// ~/.codex/agents/, and ~/.agents/skills/.
+func TestCodexUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present healthy hooks.json",
+			setup: func(t *testing.T, home string) {
+				codexHome := filepath.Join(home, ".codex")
+				if err := os.MkdirAll(codexHome, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(codexHome, "hooks.json"), []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken agent surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".codex", "agents", "missing"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &codex{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Codex" {
+				t.Errorf("UserBadge.Name = %q, want Codex", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestCodexUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the codex platform.
+func TestCodexUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*codex)(nil)
+}

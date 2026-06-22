@@ -244,3 +244,26 @@ func (o *opencode) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	ok, broken := o.CountLinks(project, repoPath, agentsHome)
 	return PlatformBadge{Name: "OpenCode", Present: ok > 0, Broken: broken > 0}
 }
+
+// opencodeUserConfigDirs returns the managed directories opencode maintains
+// under the user's home directory: ~/.opencode/agent/. opencode has no
+// user-home single-file config layer (no orphan-canonical bucket either),
+// matching the legacy lifecycle opencode user-config block.
+func opencodeUserConfigDirs(home string) []string {
+	return []string{filepath.Join(home, opencodeDir, "agent")}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the opencode platform: it
+// reports the broken managed links under ~/.opencode/agent/ (the only managed
+// user-home surface opencode owns). Every entry carries PlatformID="opencode".
+func (o *opencode) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("opencode", nil, opencodeUserConfigDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the opencode platform: the
+// user-config badge over ~/.opencode/agent/. Mirrors the legacy lifecycle
+// countPlatformHealth("OpenCode", ...) badge math.
+func (o *opencode) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(nil, opencodeUserConfigDirs(home))
+	return PlatformBadge{Name: "OpenCode", Present: ok > 0, Broken: broken > 0}
+}

@@ -1,9 +1,7 @@
 package lifecycle
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -575,56 +573,28 @@ func repairManagedProject(name, path string) int {
 // (symlink or real dir) at <projectPath>/.agents/<bucket>/<name>.
 // These are leftovers when a user manually deleted the repo-local source
 // after a promote, leaving the canonical copy orphaned.
+//
+// Per platform-driven-diagnostics P4, the orphan-detection logic now lives in
+// internal/platform behind the OrphanCanonicalReporter sister interface
+// (claude owns the "skills" bucket, codex owns "agents"). doctor delegates by
+// type-assertion and does no orphan classification of its own — each canonical
+// bucket is owned by exactly one platform, so iterating every reporter is
+// double-count free. The returned []OrphanCanonical is flattened back to the
+// annotated-string shape callers (and the orphan-warning printer) already
+// expect: "<name>" for a plain orphan, "<name>  (mis-pointed: <target>)" for
+// a mis-pointed back-link.
 func collectOrphanCanonicals(projectName, projectPath, agentsHome, bucket string) []string {
-	canonicalDir := filepath.Join(agentsHome, bucket, projectName)
-	entries, err := os.ReadDir(canonicalDir)
-	if err != nil {
-		return nil
-	}
 	var orphans []string
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, p := range platform.All() {
+		r, ok := p.(platform.OrphanCanonicalReporter)
+		if !ok {
 			continue
 		}
-		if entry, ok := classifyCanonicalOrphan(projectPath, canonicalDir, bucket, e.Name()); ok {
-			orphans = append(orphans, entry)
+		for _, oc := range r.OrphanCanonicals(projectName, projectPath, agentsHome, bucket) {
+			orphans = append(orphans, oc.Name+oc.DisplayNote)
 		}
 	}
 	return orphans
-}
-
-// classifyCanonicalOrphan decides whether a single canonical entry is an
-// orphan. It returns the display string to record and true when it is. A
-// missing back-link is a plain orphan; a back-link that is a resolvable
-// managed link pointing elsewhere is a mis-pointed orphan; any other present
-// back-link is a live reference (not an orphan).
-func classifyCanonicalOrphan(projectPath, canonicalDir, bucket, name string) (string, bool) {
-	backLink := filepath.Join(projectPath, ".agents", bucket, name)
-	if _, err := os.Lstat(backLink); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return name, true
-		}
-		return "", false
-	}
-	// If the back-link is a resolvable managed link (POSIX symlink /
-	// Windows junction), verify it points at THIS canonical. A link that
-	// resolves to a different canonical (or anywhere else) is still an
-	// orphan — the canonical here has no live reference. A non-resolvable
-	// entry (real dir, or a hard-linked file with no reparse point) is a
-	// live back-reference and not an orphan.
-	raw, ok := links.ManagedLinkTarget(backLink)
-	if !ok {
-		return "", false
-	}
-	target := raw
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(backLink), target)
-	}
-	expected := filepath.Join(canonicalDir, name)
-	if filepath.Clean(target) != filepath.Clean(expected) {
-		return name + "  (mis-pointed: " + target + ")", true
-	}
-	return "", false
 }
 
 func hasPluginPlatform(platforms []string, want string) bool {
@@ -705,7 +675,17 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 	return broken
 }
 
-// collectBrokenUserLinks returns all broken managed user-level links in the home directory.
+// collectBrokenUserLinks returns all broken managed user-level links in the
+// home directory.
+//
+// Per platform-driven-diagnostics P4, the per-platform user-home enumeration
+// now lives in internal/platform behind the UserConfigReporter sister
+// interface (claude/codex/opencode implement UserBrokenLinks). doctor resolves
+// the home directory once, delegates by type-assertion, and flattens each
+// platform's []platform.BrokenLink into the lifecycle brokenLink shape. The
+// link path is rendered home-relative and the dest via DisplayPath, identical
+// to the prior inline implementation. cursor and copilot have no user-config
+// layer, so they do not implement UserConfigReporter and are skipped.
 func collectBrokenUserLinks(_ string) []brokenLink {
 	var broken []brokenLink
 
@@ -718,37 +698,19 @@ func collectBrokenUserLinks(_ string) []brokenLink {
 		return strings.TrimPrefix(p, displayBase)
 	}
 
-	addBrokenSingle := func(platformID, linkPath string) {
-		if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink && isBroken {
+	for _, p := range platform.All() {
+		r, ok := p.(platform.UserConfigReporter)
+		if !ok {
+			continue
+		}
+		for _, bl := range r.UserBrokenLinks(homeDir) {
 			broken = append(broken, brokenLink{
-				platformID: platformID,
-				linkPath:   rel(linkPath),
-				dest:       config.DisplayPath(dest),
+				platformID: bl.PlatformID,
+				linkPath:   rel(bl.LinkPath),
+				dest:       bl.DisplayDest,
 			})
 		}
 	}
-	addBrokenDir := func(platformID, dir string) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, e := range entries {
-			addBrokenSingle(platformID, filepath.Join(dir, e.Name()))
-		}
-	}
-
-	// Claude: ~/.claude/CLAUDE.md, settings.json, agents/*, skills/*
-	claudeHome := filepath.Join(homeDir, doctorClaudeDir)
-	addBrokenSingle("claude", filepath.Join(claudeHome, "CLAUDE.md"))
-	addBrokenSingle("claude", filepath.Join(claudeHome, "settings.json"))
-	addBrokenDir("claude", filepath.Join(claudeHome, "agents"))
-	addBrokenDir("claude", filepath.Join(claudeHome, "skills"))
-
-	// Codex: ~/.codex/agents/*
-	addBrokenDir("codex", filepath.Join(homeDir, ".codex", "agents"))
-
-	// OpenCode: ~/.opencode/agent/*
-	addBrokenDir("opencode", filepath.Join(homeDir, doctorOpenCodeDir, "agent"))
 
 	return broken
 }

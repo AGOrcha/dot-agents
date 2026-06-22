@@ -627,6 +627,14 @@ func statusGitInfo(agentsHome string) statusJSONGit {
 	return statusJSONGit{Initialized: true, Branch: g.Branch, Remote: g.Remote}
 }
 
+// collectUserConfigPlatforms builds the JSON-mode user-config platform list by
+// delegating to each platform's UserBadge implementation (P4 platform-driven
+// diagnostics). The badge order — Claude, Codex, OpenCode — is the order
+// returned by platform.All() filtered to the UserConfigReporter implementors
+// (cursor and copilot have no user-config layer). agentFilter scopes the
+// result by p.ID() the same way the prior per-platform if-guards did, and
+// appendPlatformIfPresent preserves the present-or-broken admission rule so the
+// JSON snapshot is byte-identical to the pre-P4 inline implementation.
 func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
 	homeDir, err := config.UserHomeDir()
 	if err != nil {
@@ -634,33 +642,20 @@ func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
 	}
 
 	var out []statusJSONPlatform
-	if agentFilter == "" || agentFilter == "claude" {
-		out = appendPlatformIfPresent(out, "Claude", countPlatformHealth(
-			[]string{
-				filepath.Join(homeDir, statusClaudeDir, "CLAUDE.md"),
-				filepath.Join(homeDir, statusClaudeDir, statusClaudeSettingsJSON),
-			},
-			[]string{
-				filepath.Join(homeDir, statusClaudeDir, "agents"),
-				filepath.Join(homeDir, statusClaudeDir, "skills"),
-			},
-		))
-	}
-	if agentFilter == "" || agentFilter == "codex" {
-		out = appendPlatformIfPresent(out, "Codex", countPlatformHealth(
-			[]string{
-				filepath.Join(homeDir, statusCodexDir, statusHooksJSON),
-			},
-			[]string{
-				filepath.Join(homeDir, statusCodexDir, "agents"),
-				filepath.Join(homeDir, statusAgentsDir, "skills"),
-			},
-		))
-	}
-	if agentFilter == "" || agentFilter == "opencode" {
-		out = appendPlatformIfPresent(out, "OpenCode", countPlatformHealth(nil, []string{
-			filepath.Join(homeDir, statusOpenCodeDir, "agent"),
-		}))
+	for _, p := range platform.All() {
+		if agentFilter != "" && agentFilter != p.ID() {
+			continue
+		}
+		r, ok := p.(platform.UserConfigReporter)
+		if !ok {
+			continue
+		}
+		badge := r.UserBadge(homeDir)
+		out = appendPlatformIfPresent(out, badge.Name, platformBadge{
+			name:    badge.Name,
+			present: badge.Present,
+			broken:  badge.Broken,
+		})
 	}
 	return out
 }

@@ -547,3 +547,62 @@ func (c *codex) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	ok, broken := c.CountLinks(project, repoPath, agentsHome)
 	return PlatformBadge{Name: "Codex", Present: ok > 0, Broken: broken > 0}
 }
+
+// codexOrphanBucket is the single canonical bucket codex owns for orphan
+// reporting. claude owns "skills", codex owns "agents" — disjoint buckets so
+// the doctor-side iterator never double-counts a canonical entry.
+const codexOrphanBucket = "agents"
+
+// OrphanCanonicals implements OrphanCanonicalReporter for the codex platform.
+//
+// codex owns the "agents" canonical bucket: entries under
+// <agentsHome>/agents/<project>/ with no live back-link at
+// <projectPath>/.agents/agents/<name>. A non-matching bucket returns nil so
+// the (reporter, bucket) fan-out in doctor stays double-count free (claude
+// owns "skills"). Detection is shared with claude via scanOrphanCanonicals.
+func (c *codex) OrphanCanonicals(project, projectPath, agentsHome, bucket string) []OrphanCanonical {
+	if bucket != codexOrphanBucket {
+		return nil
+	}
+	return scanOrphanCanonicals(project, projectPath, agentsHome, bucket)
+}
+
+// codexUserBrokenDirs returns the managed directories codex scans for broken
+// user-home links: ~/.codex/agents/. Mirrors the legacy lifecycle
+// collectBrokenUserLinks codex block (a single managed agents dir).
+func codexUserBrokenDirs(home string) []string {
+	return []string{filepath.Join(home, codexDir, "agents")}
+}
+
+// codexUserConfigFiles returns the managed single-file user-config references
+// codex maintains: ~/.codex/hooks.json. Used by the badge math (the
+// broken-link surface is narrower — see codexUserBrokenDirs).
+func codexUserConfigFiles(home string) []string {
+	return []string{filepath.Join(home, codexDir, codexHooksJSON)}
+}
+
+// codexUserConfigDirs returns the managed directories codex counts for its
+// user-config badge: ~/.codex/agents/ and ~/.agents/skills/. Mirrors the
+// legacy lifecycle collectUserConfigPlatforms codex block.
+func codexUserConfigDirs(home string) []string {
+	return []string{
+		filepath.Join(home, codexDir, "agents"),
+		filepath.Join(home, codexAgentsDir, "skills"),
+	}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the codex platform. The
+// broken-link surface is ~/.codex/agents/* (matching the legacy lifecycle
+// collectBrokenUserLinks codex block); every entry carries PlatformID="codex".
+func (c *codex) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("codex", nil, codexUserBrokenDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the codex platform: the
+// user-config badge over ~/.codex/hooks.json, ~/.codex/agents/, and
+// ~/.agents/skills/. Mirrors the legacy lifecycle countPlatformHealth("Codex",
+// ...) badge math.
+func (c *codex) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(codexUserConfigFiles(home), codexUserConfigDirs(home))
+	return PlatformBadge{Name: "Codex", Present: ok > 0, Broken: broken > 0}
+}
