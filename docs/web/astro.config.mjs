@@ -120,6 +120,9 @@ export default defineConfig({
     starlight({
       title: 'dot-agents',
       tagline: 'The operational layer for AI coding agents',
+      // Brand favicon (agorcha ouroboros) — overrides Astro's default mark.
+      // Derived from .agents/branding/agorcha-ouroboros into public/favicon.png.
+      favicon: '/favicon.png',
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/AGOrcha/dot-agents' },
       ],
