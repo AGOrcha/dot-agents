@@ -1,0 +1,18 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/workspace-state.json';
+
+// Base-aware home link (the site builds at '/' on Cloudflare and '/dot-agents/'
+// on GitHub Pages); preserve the BASE_URL pattern the old page used.
+const home = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/`;
+---
+<StarlightPage frontmatter={{ title: graph.title, description: graph.description }}>
+  <p>{graph.description}</p>
+  <p class="snapshot-note">
+    Snapshot captured: <code>{graph.captured_at}</code>.
+    Live JSON ingestion is a follow-up task — see the
+    <a href={home}>docs home</a>.
+  </p>
+  <ResourceGraph graph={graph} graphId="workspace-state" layoutName={graph.layout} />
+</StarlightPage>

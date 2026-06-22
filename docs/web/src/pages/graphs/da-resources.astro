@@ -1,0 +1,9 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/da-resources.json';
+---
+<StarlightPage frontmatter={{ title: graph.title, description: graph.description }}>
+  <p>{graph.description}</p>
+  <ResourceGraph graph={graph} graphId="da-resources" layoutName={graph.layout} />
+</StarlightPage>
