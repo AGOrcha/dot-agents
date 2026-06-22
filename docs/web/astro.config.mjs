@@ -11,6 +11,13 @@ import { visit } from 'unist-util-visit';
 // assets reference root-relative URLs instead of /dot-agents/...
 const DEPLOY_TARGET = process.env.DEPLOY_TARGET ?? 'github-pages';
 const IS_CLOUDFLARE = DEPLOY_TARGET === 'cloudflare';
+
+// Visibility partition (dm3 / D4). The two-pass `npm run build` sets this flag
+// only on the second (internal) pass:
+//   * off → outDir dist/          : PUBLIC only (internal entries aren't loaded)
+//   * on  → outDir dist-internal/ : EVERYTHING (public + internal sections)
+// src/content.config.ts reads the same env flag independently to gate the loader.
+const INTERNAL_BUILD = process.env.INTERNAL_BUILD === '1';
 const SITE_URL = IS_CLOUDFLARE
   ? 'https://agorcha.dev'
   : 'https://nikashprakash.github.io';
@@ -64,11 +71,48 @@ function rewriteRelativeLinks() {
   };
 }
 
+// Public information architecture — four curated sections (D3). Entries are
+// sourced live from docs/** by src/content.config.ts; their section-prefixed
+// ids feed these autogenerate groups. Internal artifacts (.agents/**) are
+// absent from the public loader pass and so never appear here.
+const sidebar = [
+  {
+    label: 'Getting Started',
+    items: [{ label: 'Getting Started', slug: '' }],
+  },
+  { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
+  { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
+  {
+    label: 'Concepts',
+    items: [
+      { autogenerate: { directory: 'concepts' } },
+      // Bespoke interactive routes (custom Astro pages, base-aware via link:).
+      { label: 'Resource graph: da', link: '/graphs/da-resources' },
+      { label: 'Resource graph: workflow', link: '/graphs/workflow-resources' },
+      { label: 'Resource graph: workspace state', link: '/graphs/workspace-state' },
+      { label: 'Diagram: tier model', link: '/diagrams/tier-model' },
+      { label: 'Diagram: lens dispatch', link: '/diagrams/lens-dispatch' },
+      { label: 'Diagram: verifier registry', link: '/diagrams/verifier-registry' },
+    ],
+  },
+  // Internal-only sections (dm3 / D4): appended ONLY in the INTERNAL_BUILD pass,
+  // so they exist in dist-internal/ but never in the public dist/.
+  ...(INTERNAL_BUILD
+    ? [
+        { label: 'Lessons', items: [{ autogenerate: { directory: 'internal/lessons' } }] },
+        { label: 'Specs', items: [{ autogenerate: { directory: 'internal/specs' } }] },
+        { label: 'Proposals', items: [{ autogenerate: { directory: 'internal/proposals' } }] },
+      ]
+    : []),
+];
+
 // https://docs.astro.build/en/reference/configuration-reference/
 export default defineConfig({
   site: SITE_URL,
   base: IS_CLOUDFLARE ? '/' : '/dot-agents/',
   trailingSlash: 'ignore',
+  // Two-output visibility partition (dm3 / D4).
+  outDir: INTERNAL_BUILD ? './dist-internal' : './dist',
   // astro-mermaid must run before Starlight so its ```mermaid → <pre class="mermaid">
   // transform happens ahead of Starlight's expressive-code / shiki pass.
   integrations: [
@@ -76,34 +120,13 @@ export default defineConfig({
     starlight({
       title: 'dot-agents',
       tagline: 'The operational layer for AI coding agents',
+      // Brand favicon (agorcha ouroboros) — overrides Astro's default mark.
+      // Derived from .agents/branding/agorcha-ouroboros into public/favicon.png.
+      favicon: '/favicon.png',
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/AGOrcha/dot-agents' },
       ],
-      // Public information architecture — four curated sections (D3). Entries are
-      // sourced live from docs/** by src/content.config.ts; their section-prefixed
-      // ids feed these autogenerate groups. Internal artifacts (.agents/**) are
-      // absent from the loader's allowlist and so never appear here.
-      sidebar: [
-        {
-          label: 'Getting Started',
-          items: [{ label: 'Getting Started', slug: '' }],
-        },
-        { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
-        { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
-        {
-          label: 'Concepts',
-          items: [
-            { autogenerate: { directory: 'concepts' } },
-            // Bespoke interactive routes (custom Astro pages, base-aware via link:).
-            { label: 'Resource graph: da', link: '/graphs/da-resources' },
-            { label: 'Resource graph: workflow', link: '/graphs/workflow-resources' },
-            { label: 'Resource graph: workspace state', link: '/graphs/workspace-state' },
-            { label: 'Diagram: tier model', link: '/diagrams/tier-model' },
-            { label: 'Diagram: lens dispatch', link: '/diagrams/lens-dispatch' },
-            { label: 'Diagram: verifier registry', link: '/diagrams/verifier-registry' },
-          ],
-        },
-      ],
+      sidebar,
     }),
   ],
   markdown: {

@@ -7,7 +7,9 @@
   "scripts": {
     "dev": "astro dev",
     "prebuild": "bash scripts/copy-schemas.sh",
-    "build": "astro build",
+    "build": "npm run build:public && npm run build:internal",
+    "build:public": "astro build",
+    "build:internal": "INTERNAL_BUILD=1 astro build",
     "preview": "astro preview",
     "check": "astro check"
   },
