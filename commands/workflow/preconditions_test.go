@@ -165,6 +165,31 @@ func TestEvaluatorFor(t *testing.T) {
 	}
 }
 
+// TestValidSignalKind asserts the exported config-verify helper agrees with the
+// internal registry: a registered exact/prefix kind is valid, an unregistered
+// kind is not. This is the single source of truth `da config verify` consults so
+// validity never drifts from what the gate actually evaluates.
+func TestValidSignalKind(t *testing.T) {
+	tests := []struct {
+		signal string
+		want   bool
+	}{
+		{"event.pr.open", true},
+		{"signal.ci.rollup", true},
+		{"gate.quality.sonar", true},  // prefix match
+		{"gate.quality.codeql", true}, // prefix match, different provider
+		{"metric.new_code_issues", true},
+		{"bogus.signal.kind", false},
+		{"gate.quality", false}, // prefix without trailing dot is not registered
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := ValidSignalKind(tc.signal); got != tc.want {
+			t.Errorf("ValidSignalKind(%q) = %v, want %v", tc.signal, got, tc.want)
+		}
+	}
+}
+
 // ── evaluatePolicy: unknown-kind fail-closed, empty→default, default met/unmet ─
 
 func TestEvaluatePolicyUnknownKindFailsClosed(t *testing.T) {

@@ -1,12 +1,15 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/workflow"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 	"github.com/spf13/cobra"
@@ -133,6 +136,7 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 
 	checks = append(checks, verifySources(opts.cwd, snap)...)
 	checks = append(checks, verifyLayerLocks(opts.cwd)...)
+	checks = append(checks, verifyPreconditionPolicies(snap)...)
 
 	probe := opts.crgProbe
 	if probe == nil {
@@ -243,6 +247,137 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 		}
 	}
 	return checks
+}
+
+// verifyPreconditionPolicies fail-closed-validates the verifier precondition
+// policy config (verifier-precondition-policy plan, Slice B5) against the merged
+// effective snapshot:
+//
+//   - a StageProfile.precondition_policy naming a key absent from the top-level
+//     precondition_policies registry → fail (the resolver degrades such a profile
+//     to the built-in default, so a typo silently weakens the gate unless caught
+//     here);
+//   - a PredicateSpec.signal whose kind no evaluator handles → fail (it would be
+//     fail-closed at verify-transition time, but the operator should learn at
+//     config time, not when a task is stuck at the gate).
+//
+// Returns nil when the project declares no precondition policies and no profile
+// references one — there is nothing to add to the report.
+func verifyPreconditionPolicies(snap *snapshot) []VerifyCheck {
+	rc, err := decodeEffectivePolicyConfig(snap)
+	if err != nil {
+		return []VerifyCheck{{"precondition-policies", verifyWarn, "could not decode policy config: " + err.Error()}}
+	}
+	if len(rc.PreconditionPolicies) == 0 && !anyProfileNamesPolicy(rc.StageProfiles) {
+		return nil
+	}
+	checks := verifyPolicyReferences(rc)
+	checks = append(checks, verifyPolicySignalKinds(rc)...)
+	if len(checks) == 0 {
+		return []VerifyCheck{{"precondition-policies", verifyPass, "all policy references and signal kinds resolve"}}
+	}
+	return checks
+}
+
+// decodeEffectivePolicyConfig projects the merged snapshot's precondition_policies
+// and stage_profiles into the typed cfg.AgentsRC via a JSON round-trip, so the
+// struct's json tags (the canonical layer shape) drive the mapping — the same
+// pattern resolveExecutionProfile uses. A nil snapshot or absent keys yield an
+// empty (non-nil) AgentsRC so callers need no nil checks.
+func decodeEffectivePolicyConfig(snap *snapshot) (*cfg.AgentsRC, error) {
+	rc := &cfg.AgentsRC{}
+	if snap == nil {
+		return rc, nil
+	}
+	subset := map[string]any{}
+	for _, key := range []string{"precondition_policies", "stage_profiles"} {
+		if v, ok := snap.effective[key]; ok && v != nil {
+			subset[key] = v
+		}
+	}
+	if len(subset) == 0 {
+		return rc, nil
+	}
+	data, err := json.Marshal(subset)
+	if err != nil {
+		return nil, fmt.Errorf("re-encoding precondition policy config: %w", err)
+	}
+	if err := json.Unmarshal(data, rc); err != nil {
+		return nil, fmt.Errorf("decoding precondition policy config: %w", err)
+	}
+	return rc, nil
+}
+
+// anyProfileNamesPolicy reports whether any stage profile references a
+// precondition policy by name, so verifyPreconditionPolicies still validates a
+// dangling reference even when the registry itself is empty.
+func anyProfileNamesPolicy(stages map[string]map[string]cfg.StageProfile) bool {
+	for _, profiles := range stages {
+		for _, p := range profiles {
+			if p.PreconditionPolicy != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// verifyPolicyReferences checks that every StageProfile.precondition_policy
+// names a declared key in precondition_policies. Each dangling reference is one
+// failed check naming the stage, profile slug, and missing policy. Profiles are
+// visited in a stable (stage, slug) order so the report is deterministic.
+func verifyPolicyReferences(rc *cfg.AgentsRC) []VerifyCheck {
+	var checks []VerifyCheck
+	for _, stage := range sortedMapKeys(rc.StageProfiles) {
+		profiles := rc.StageProfiles[stage]
+		for _, slug := range sortedMapKeys(profiles) {
+			name := profiles[slug].PreconditionPolicy
+			if name == "" {
+				continue
+			}
+			if _, ok := rc.PreconditionPolicies[name]; !ok {
+				checks = append(checks, VerifyCheck{
+					fmt.Sprintf("precondition-policy:%s/%s", stage, slug),
+					verifyFail,
+					fmt.Sprintf("stage profile %q references undeclared precondition policy %q (add it to precondition_policies or fix the name)", stage+"/"+slug, name),
+				})
+			}
+		}
+	}
+	return checks
+}
+
+// verifyPolicySignalKinds checks that every predicate signal across all declared
+// policies resolves to a registered evaluator kind (workflow.ValidSignalKind).
+// Each unregistered kind is one failed check naming the policy and signal.
+// Policies and predicates are visited in a stable order for a deterministic
+// report.
+func verifyPolicySignalKinds(rc *cfg.AgentsRC) []VerifyCheck {
+	var checks []VerifyCheck
+	for _, name := range sortedMapKeys(rc.PreconditionPolicies) {
+		for _, pred := range rc.PreconditionPolicies[name].Predicates {
+			if workflow.ValidSignalKind(pred.Signal) {
+				continue
+			}
+			checks = append(checks, VerifyCheck{
+				fmt.Sprintf("precondition-signal:%s", name),
+				verifyFail,
+				fmt.Sprintf("policy %q predicate names unregistered signal kind %q (no evaluator handles it)", name, pred.Signal),
+			})
+		}
+	}
+	return checks
+}
+
+// sortedMapKeys returns the keys of any string-keyed map in lexical order, so a
+// policy/profile report is deterministic regardless of Go map iteration order.
+func sortedMapKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // abbrevSHA shortens a resolved SHA for the human render without assuming a
