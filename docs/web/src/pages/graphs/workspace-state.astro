@@ -1,0 +1,122 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/workspace-state.json';
+
+// Base-aware home link (the site builds at '/' on Cloudflare and '/dot-agents/'
+// on GitHub Pages); preserve the BASE_URL pattern the old page used.
+const home = `${import.meta.env.BASE_URL.replace(/\/$/, '')}/`;
+---
+<StarlightPage frontmatter={{ title: graph.title, description: graph.description }}>
+  <p>{graph.description}</p>
+  <p class="snapshot-note">
+    Snapshot captured: <code>{graph.captured_at}</code>.
+    Live JSON ingestion is a follow-up task — see the
+    <a href={home}>docs home</a>.
+  </p>
+  <ResourceGraph graph={graph} graphId="workspace-state" layoutName={graph.layout} />
+</StarlightPage>
+
+<style>
+  /* --graph-* are read by ResourceGraph's client script at init and on theme
+     change; map them onto Starlight's --sl-color-* tokens so the cytoscape
+     palette tracks light/dark with the rest of the site. */
+  :global(:root) {
+    --graph-label: var(--sl-color-white);
+    --graph-label-outline: var(--sl-color-black);
+    --graph-node-border: var(--sl-color-gray-5);
+    --graph-node-selected: var(--sl-color-orange-high, #f59e0b);
+    --graph-edge: var(--sl-color-gray-4);
+    --graph-edge-label: var(--sl-color-gray-3);
+    --graph-edge-label-bg: var(--sl-color-black);
+  }
+
+  .snapshot-note {
+    color: var(--sl-color-gray-3);
+    font-size: 0.9rem;
+  }
+
+  .graph-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 20rem);
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .graph-canvas {
+    width: 100%;
+    height: clamp(28rem, 70vh, 44rem);
+    min-height: 28rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    background: var(--sl-color-gray-7, var(--sl-color-black));
+  }
+
+  .graph-inspector {
+    position: sticky;
+    top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    font-size: 0.9rem;
+  }
+
+  .graph-legend h3,
+  .graph-detail h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+  }
+
+  .legend-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .legend-desc {
+    color: var(--sl-color-gray-3);
+  }
+
+  .graph-detail .hint {
+    color: var(--sl-color-gray-3);
+    font-style: italic;
+  }
+
+  .graph-detail :global(dl) {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 0.75rem;
+    margin: 0;
+  }
+
+  .graph-detail :global(dt) {
+    font-weight: 600;
+    color: var(--sl-color-gray-2);
+  }
+
+  .graph-detail :global(dd) {
+    margin: 0;
+    word-break: break-word;
+  }
+
+  :global(.badge) {
+    display: inline-block;
+    padding: 0.05rem 0.4rem;
+    border-radius: 0.3rem;
+    font-size: 0.75rem;
+    color: #fff;
+    background: var(--sl-color-gray-4);
+  }
+
+  @media (max-width: 50rem) {
+    .graph-page {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .graph-inspector {
+      position: static;
+    }
+  }
+</style>

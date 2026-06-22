@@ -90,7 +90,19 @@ export default defineConfig({
         },
         { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
         { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
-        { label: 'Concepts', items: [{ autogenerate: { directory: 'concepts' } }] },
+        {
+          label: 'Concepts',
+          items: [
+            { autogenerate: { directory: 'concepts' } },
+            // Bespoke interactive routes (custom Astro pages, base-aware via link:).
+            { label: 'Resource graph: da', link: '/graphs/da-resources' },
+            { label: 'Resource graph: workflow', link: '/graphs/workflow-resources' },
+            { label: 'Resource graph: workspace state', link: '/graphs/workspace-state' },
+            { label: 'Diagram: tier model', link: '/diagrams/tier-model' },
+            { label: 'Diagram: lens dispatch', link: '/diagrams/lens-dispatch' },
+            { label: 'Diagram: verifier registry', link: '/diagrams/verifier-registry' },
+          ],
+        },
       ],
     }),
   ],

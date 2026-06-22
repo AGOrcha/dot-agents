@@ -1,0 +1,208 @@
+{
+  "title": "da resources",
+  "description": "Skills, agents, rules, hooks, MCP servers, and plugins that ship under ~/.agents/ and are projected into managed repos by the da CLI. Click any node to inspect.",
+  "layout": "cose",
+  "legend": [
+    { "kind": "cli", "color": "#0ea5e9", "description": "the da binary" },
+    { "kind": "skill", "color": "#22c55e", "description": "procedure invoked on demand" },
+    { "kind": "agent", "color": "#a855f7", "description": "subagent profile" },
+    { "kind": "rule", "color": "#f59e0b", "description": "always-on guideline" },
+    { "kind": "hook", "color": "#ef4444", "description": "lifecycle automation" },
+    { "kind": "mcp", "color": "#14b8a6", "description": "MCP server" },
+    { "kind": "scaffold", "color": "#64748b", "description": "templated layout" }
+  ],
+  "nodes": [
+    {
+      "id": "cli:da",
+      "label": "da CLI",
+      "kind": "cli",
+      "data": {
+        "purpose": "Cobra entrypoint; init, add, refresh, doctor, install, status, workflow, kg, review, skills, rules, agents, hooks, mcp, settings, ux",
+        "lives_in": "cmd/da/main.go + commands/",
+        "platforms_managed": ["Cursor", "Claude Code", "Codex", "GitHub Copilot", "OpenCode"]
+      }
+    },
+    {
+      "id": "scaffold:home",
+      "label": "~/.agents/ home",
+      "kind": "scaffold",
+      "data": {
+        "purpose": "Canonical home for rules, skills, agents, hooks, mcp, settings",
+        "subdirs": ["rules/", "skills/", "agents/", "hooks/", "mcp/", "settings/", "proposals/", "history/"]
+      }
+    },
+    {
+      "id": "agent:loop-worker", "label": "loop-worker", "kind": "agent",
+      "data": { "purpose": "Bounded implementation worker for delegated tasks", "lives_in": "~/.agents/agents/global/loop-worker/" }
+    },
+    {
+      "id": "agent:verifier", "label": "verifier", "kind": "agent",
+      "data": { "purpose": "Profile-driven verification + PR-readiness loop (unit, api, batch, pr-ci, docs)", "lives_in": "~/.agents/agents/global/verifier/" }
+    },
+    {
+      "id": "agent:test-runner", "label": "test-runner", "kind": "agent",
+      "data": { "purpose": "Runs tests under bounded scope and reports results", "lives_in": "~/.agents/agents/global/test-runner/" }
+    },
+    {
+      "id": "skill:orchestrator-session-start", "label": "orchestrator-session-start", "kind": "skill",
+      "data": { "purpose": "Pre-flight + orient + pick next task + fanout decision", "lives_in": "~/.agents/skills/global/orchestrator-session-start/" }
+    },
+    {
+      "id": "skill:isp", "label": "isp", "kind": "skill",
+      "data": { "purpose": "Interactive staged pipeline: impl → verifier → review → parent gate", "lives_in": "~/.agents/skills/global/isp/" }
+    },
+    {
+      "id": "skill:iteration-close", "label": "iteration-close", "kind": "skill",
+      "data": { "purpose": "Persist iteration evidence: verify → checkpoint → advance/merge-back", "lives_in": "~/.agents/skills/global/iteration-close/" }
+    },
+    {
+      "id": "skill:delegation-lifecycle", "label": "delegation-lifecycle", "kind": "skill",
+      "data": { "purpose": "Manage delegated write-scope tasks end-to-end", "lives_in": "~/.agents/skills/global/delegation-lifecycle/" }
+    },
+    {
+      "id": "skill:loop-worker", "label": "loop-worker (skill)", "kind": "skill",
+      "data": { "purpose": "Cold-start capable worker procedure consumed by the loop-worker agent", "lives_in": "~/.agents/skills/global/loop-worker/" }
+    },
+    {
+      "id": "skill:plan-wave-picker", "label": "plan-wave-picker", "kind": "skill",
+      "data": { "purpose": "Pick the next eligible wave when multiple plans are active", "lives_in": "~/.agents/skills/global/plan-wave-picker/" }
+    },
+    {
+      "id": "skill:provider-consumer-pair", "label": "provider-consumer-pair", "kind": "skill",
+      "data": { "purpose": "Sequence contract producer + consumer waves together", "lives_in": "~/.agents/skills/global/provider-consumer-pair/" }
+    },
+    {
+      "id": "skill:self-review", "label": "self-review", "kind": "skill",
+      "data": { "purpose": "Reviewer-mode pass before commit / PR", "lives_in": "~/.agents/skills/global/self-review/" }
+    },
+    {
+      "id": "skill:review-pr", "label": "review-pr", "kind": "skill",
+      "data": { "purpose": "PR review with KG-backed structural context", "lives_in": "~/.agents/skills/global/review-pr/" }
+    },
+    {
+      "id": "skill:review-delta", "label": "review-delta", "kind": "skill",
+      "data": { "purpose": "Token-efficient review of diff since last commit", "lives_in": "~/.agents/skills/global/review-delta/" }
+    },
+    {
+      "id": "skill:build-graph", "label": "build-graph", "kind": "skill",
+      "data": { "purpose": "Build/update code-review knowledge graph", "lives_in": "~/.agents/skills/global/build-graph/" }
+    },
+    {
+      "id": "skill:split-reviewable-commits", "label": "split-reviewable-commits", "kind": "skill",
+      "data": { "purpose": "Rewrite branch into small semantic commits", "lives_in": "~/.agents/skills/global/split-reviewable-commits/" }
+    },
+    {
+      "id": "skill:gh-fix-ci", "label": "gh-fix-ci", "kind": "skill",
+      "data": { "purpose": "Inspect failing CI checks and propose fixes", "lives_in": "~/.agents/skills/global/gh-fix-ci/" }
+    },
+    {
+      "id": "skill:skill-architect", "label": "skill-architect", "kind": "skill",
+      "data": { "purpose": "Design/transform/audit/improve other skills", "lives_in": "~/.agents/skills/global/skill-architect/" }
+    },
+    {
+      "id": "skill:agent-handoff", "label": "agent-handoff", "kind": "skill",
+      "data": { "purpose": "Package session context into a handoff doc", "lives_in": "~/.agents/skills/global/agent-handoff/" }
+    },
+    {
+      "id": "skill:agent-start", "label": "agent-start", "kind": "skill",
+      "data": { "purpose": "Session bootstrap: load active state + relevant lessons", "lives_in": "~/.agents/skills/global/agent-start/" }
+    },
+    {
+      "id": "skill:platform-docs-refresh", "label": "platform-docs-refresh", "kind": "skill",
+      "data": { "purpose": "Refresh docs/PLATFORM_DIRS_DOCS.md against vendor docs", "lives_in": "~/.agents/skills/global/platform-docs-refresh/" }
+    },
+    {
+      "id": "rule:agents.md", "label": "agents.md (project)", "kind": "rule",
+      "data": { "purpose": "Repository guidelines: project structure, build/test, style, commits", "lives_in": "~/.agents/rules/dot-agents/agents.md" }
+    },
+    {
+      "id": "rule:workflow-artifact-model", "label": "workflow-artifact-model", "kind": "rule",
+      "data": { "purpose": "Tier model: spec → plan → tasks → history; do not collapse tiers", "lives_in": "~/.agents/rules/dot-agents/workflow-artifact-model.md" }
+    },
+    {
+      "id": "rule:schema-usage", "label": "schema-usage", "kind": "rule",
+      "data": { "purpose": "AgentsRC + KGNote + TASKS.yaml schema invariants", "lives_in": "~/.agents/rules/dot-agents/schema-usage.md" }
+    },
+    {
+      "id": "rule:proposal-routing", "label": "proposal-routing", "kind": "rule",
+      "data": { "purpose": "Where global vs project-local proposals live", "lives_in": "~/.agents/rules/dot-agents/proposal-routing.md" }
+    },
+    {
+      "id": "rule:global", "label": "global rules (CLAUDE.md)", "kind": "rule",
+      "data": { "purpose": "Always-on agent rules: plan mode, subagent strategy, self-improvement loop, verification, demand-elegance, autonomous bug-fixing, token efficiency", "lives_in": "~/.claude/CLAUDE.md (linked into ~/.agents/rules/global/)" }
+    },
+    {
+      "id": "hook:ResumeAgent", "label": "ResumeAgent hook", "kind": "hook",
+      "data": { "purpose": "On agent start, load resume context from .agents/active/", "lives_in": "~/.agents/hooks/ResumeAgent/" }
+    },
+    {
+      "id": "hook:dot-agents-project", "label": "dot-agents project hooks", "kind": "hook",
+      "data": { "purpose": "Pre-commit + post-commit: code-review-graph rebuild, lint, sonar-scanner gate", "lives_in": "~/.agents/hooks/dot-agents/" }
+    },
+    {
+      "id": "mcp:code-review-graph", "label": "code-review-graph", "kind": "mcp",
+      "data": { "purpose": "Tree-sitter dependency graph + semantic search for code review", "tools_exposed": ["build_or_update_graph_tool", "query_graph_tool", "get_impact_radius_tool", "semantic_search_nodes_tool"] }
+    },
+    {
+      "id": "mcp:sonarqube", "label": "sonarqube", "kind": "mcp",
+      "data": { "purpose": "SonarCloud integration for issue lookup, coverage, duplications, quality gate", "tools_exposed": ["search_sonar_issues_in_projects", "get_file_coverage_details", "get_duplications"] }
+    },
+    {
+      "id": "mcp:atlassian", "label": "Atlassian", "kind": "mcp",
+      "data": { "purpose": "Jira + Confluence integration (issues, pages, transitions)" }
+    },
+    {
+      "id": "mcp:ide", "label": "ide", "kind": "mcp",
+      "data": { "purpose": "IDE diagnostics + code execution bridge" }
+    }
+  ],
+  "edges": [
+    { "source": "cli:da", "target": "scaffold:home", "label": "manages" },
+    { "source": "scaffold:home", "target": "agent:loop-worker", "label": "hosts" },
+    { "source": "scaffold:home", "target": "agent:verifier", "label": "hosts" },
+    { "source": "scaffold:home", "target": "agent:test-runner", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:orchestrator-session-start", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:isp", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:iteration-close", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:delegation-lifecycle", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:loop-worker", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:plan-wave-picker", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:provider-consumer-pair", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:self-review", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:review-pr", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:review-delta", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:build-graph", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:split-reviewable-commits", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:gh-fix-ci", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:skill-architect", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:agent-handoff", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:agent-start", "label": "hosts" },
+    { "source": "scaffold:home", "target": "skill:platform-docs-refresh", "label": "hosts" },
+    { "source": "scaffold:home", "target": "rule:agents.md", "label": "hosts" },
+    { "source": "scaffold:home", "target": "rule:workflow-artifact-model", "label": "hosts" },
+    { "source": "scaffold:home", "target": "rule:schema-usage", "label": "hosts" },
+    { "source": "scaffold:home", "target": "rule:proposal-routing", "label": "hosts" },
+    { "source": "scaffold:home", "target": "rule:global", "label": "hosts" },
+    { "source": "scaffold:home", "target": "hook:ResumeAgent", "label": "hosts" },
+    { "source": "scaffold:home", "target": "hook:dot-agents-project", "label": "hosts" },
+    { "source": "scaffold:home", "target": "mcp:code-review-graph", "label": "registers" },
+    { "source": "scaffold:home", "target": "mcp:sonarqube", "label": "registers" },
+    { "source": "scaffold:home", "target": "mcp:atlassian", "label": "registers" },
+    { "source": "scaffold:home", "target": "mcp:ide", "label": "registers" },
+
+    { "source": "agent:loop-worker", "target": "skill:loop-worker", "label": "uses" },
+    { "source": "agent:loop-worker", "target": "skill:iteration-close", "label": "uses" },
+    { "source": "agent:verifier", "target": "skill:gh-fix-ci", "label": "uses" },
+    { "source": "skill:orchestrator-session-start", "target": "skill:plan-wave-picker", "label": "may chain" },
+    { "source": "skill:orchestrator-session-start", "target": "skill:isp", "label": "may chain" },
+    { "source": "skill:isp", "target": "agent:loop-worker", "label": "fans out to" },
+    { "source": "skill:isp", "target": "agent:verifier", "label": "dispatches" },
+    { "source": "skill:delegation-lifecycle", "target": "agent:loop-worker", "label": "delegates to" },
+    { "source": "skill:loop-worker", "target": "skill:iteration-close", "label": "calls" },
+    { "source": "skill:iteration-close", "target": "cli:da", "label": "invokes (workflow verify/checkpoint/advance)" },
+    { "source": "skill:review-pr", "target": "mcp:code-review-graph", "label": "queries" },
+    { "source": "skill:review-delta", "target": "mcp:code-review-graph", "label": "queries" },
+    { "source": "skill:build-graph", "target": "mcp:code-review-graph", "label": "drives" },
+    { "source": "skill:gh-fix-ci", "target": "mcp:sonarqube", "label": "queries" }
+  ]
+}

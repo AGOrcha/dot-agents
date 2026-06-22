@@ -1,0 +1,285 @@
+---
+// Interactive node-link graph rendered with Cytoscape.js. Graph data is
+// serialized into a data attribute on the canvas and consumed by a
+// bundled client-side script (no define:vars — that prevented Astro
+// from processing the script as a module, so the bare `import` of
+// `cytoscape` failed to resolve at runtime).
+//
+// Theme colors for node labels / edges / outlines are read from CSS
+// custom properties (--graph-*) at init time and re-applied when the
+// theme changes. Starlight flips data-theme="light|dark" on <html> via
+// its own toggle, so we watch that attribute with a MutationObserver
+// instead of the old custom 'theme-changed' event.
+interface GraphNode {
+  id: string;
+  label: string;
+  kind: string;
+  // Free-form metadata shown in inspector
+  data?: Record<string, unknown>;
+}
+interface GraphEdge {
+  source: string;
+  target: string;
+  label?: string;
+}
+interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  legend?: { kind: string; color: string; description?: string }[];
+}
+interface Props {
+  graph: GraphData;
+  graphId: string;
+  layoutName?: string;
+}
+
+const { graph, graphId, layoutName = 'cose' } = Astro.props;
+const serialized = JSON.stringify({ graph, layoutName });
+---
+<div class="graph-page">
+  <div
+    id={`canvas-${graphId}`}
+    class="graph-canvas"
+    data-resource-graph
+    data-graph-id={graphId}
+    data-graph={serialized}
+  ></div>
+  <aside class="graph-inspector" id={`inspector-${graphId}`}>
+    {graph.legend && (
+      <section class="graph-legend" aria-label="Legend">
+        <h3>Legend</h3>
+        <ul class="legend-list">
+          {graph.legend.map((l) => (
+            <li>
+              <span class="badge" style={`background:${l.color}`}>{l.kind}</span>
+              {l.description && <span class="legend-desc"> {l.description}</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
+    <section class="graph-detail" id={`detail-${graphId}`} aria-label="Selected node">
+      <h3>Selected node</h3>
+      <p class="hint">Click a node to view its details.</p>
+    </section>
+  </aside>
+</div>
+
+<script>
+  import cytoscape from 'cytoscape';
+
+  type CyInstance = ReturnType<typeof cytoscape>;
+  type MountedGraph = {
+    el: HTMLElement;
+    detail: HTMLElement | null;
+    graphId: string;
+    graph: any;
+    layoutName: string;
+    cy?: CyInstance;
+  };
+
+  const mounted: MountedGraph[] = [];
+
+  function readThemeColors(): Record<string, string> {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name: string, fallback: string) => {
+      const raw = cs.getPropertyValue(name).trim();
+      return raw || fallback;
+    };
+    return {
+      label: v('--graph-label', '#e5edf7'),
+      labelOutline: v('--graph-label-outline', '#0b1220'),
+      nodeBorder: v('--graph-node-border', '#0b1220'),
+      nodeSelected: v('--graph-node-selected', '#f59e0b'),
+      edge: v('--graph-edge', '#3b4d77'),
+      edgeLabel: v('--graph-edge-label', '#8aa0c0'),
+      edgeLabelBg: v('--graph-edge-label-bg', '#0b1220'),
+    };
+  }
+
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderDetail(detail: HTMLElement, node: any, kindColors: Record<string, string>, defaultColor: string) {
+    const d = node.data();
+    const payload = d.payload ?? {};
+    const rows = Object.entries(payload)
+      .map(([k, v]) => {
+        let value;
+        if (Array.isArray(v)) {
+          value = v.map((x) => `<span class="badge">${escapeHtml(String(x))}</span>`).join(' ');
+        } else if (typeof v === 'object' && v !== null) {
+          value = `<pre style="white-space:pre-wrap; font-size:0.78rem; margin:0;">${escapeHtml(JSON.stringify(v, null, 2))}</pre>`;
+        } else {
+          value = escapeHtml(String(v));
+        }
+        return `<dt>${escapeHtml(k)}</dt><dd>${value}</dd>`;
+      })
+      .join('');
+    detail.innerHTML = `
+      <h3>${escapeHtml(d.label)}</h3>
+      <dl>
+        <dt>Kind</dt><dd><span class="badge" style="background:${kindColors[d.kind] ?? defaultColor}">${escapeHtml(d.kind)}</span></dd>
+        <dt>ID</dt><dd><code>${escapeHtml(d.id)}</code></dd>
+        ${rows}
+      </dl>
+    `;
+  }
+
+  function resetDetail(detail: HTMLElement) {
+    detail.innerHTML = '<h3>Selected node</h3><p class="hint">Click a node to view its details.</p>';
+  }
+
+  function buildStyle(kindColors: Record<string, string>, defaultColor: string): any[] {
+    const t = readThemeColors();
+    return [
+      {
+        selector: 'node',
+        style: {
+          'background-color': (ele: any) => kindColors[ele.data('kind')] ?? defaultColor,
+          label: 'data(label)',
+          color: t.label,
+          'font-size': 11,
+          'text-outline-color': t.labelOutline,
+          'text-outline-width': 2,
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'text-wrap': 'wrap',
+          'text-max-width': 90,
+          width: 'label',
+          height: 'label',
+          padding: '10px',
+          shape: 'round-rectangle',
+          'border-width': 1,
+          'border-color': t.nodeBorder,
+        },
+      },
+      {
+        selector: 'node:selected',
+        style: {
+          'border-color': t.nodeSelected,
+          'border-width': 3,
+        },
+      },
+      {
+        selector: 'edge',
+        style: {
+          width: 1.4,
+          'line-color': t.edge,
+          'target-arrow-color': t.edge,
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          label: 'data(label)',
+          'font-size': 9,
+          color: t.edgeLabel,
+          'text-rotation': 'autorotate',
+          'text-background-color': t.edgeLabelBg,
+          'text-background-opacity': 0.8,
+          'text-background-padding': 2,
+        },
+      },
+    ];
+  }
+
+  function mountGraph(canvas: HTMLElement) {
+    const graphId = canvas.getAttribute('data-graph-id') ?? '';
+    const raw = canvas.getAttribute('data-graph');
+    if (!raw) return;
+    const detail = document.getElementById(`detail-${graphId}`);
+    const { graph, layoutName } = JSON.parse(raw);
+
+    const kindColors: Record<string, string> = Object.fromEntries(
+      (graph.legend ?? []).map((l: any) => [l.kind, l.color]),
+    );
+    const defaultColor = '#64748b';
+
+    const elements = [
+      ...graph.nodes.map((n: any) => ({
+        data: { id: n.id, label: n.label, kind: n.kind, payload: n.data ?? {} },
+      })),
+      ...graph.edges.map((e: any, i: number) => ({
+        data: {
+          id: `e${i}`,
+          source: e.source,
+          target: e.target,
+          label: e.label ?? '',
+        },
+      })),
+    ];
+
+    const cy = cytoscape({
+      container: canvas,
+      elements,
+      style: buildStyle(kindColors, defaultColor),
+      layout: layoutName === 'breadthfirst'
+        ? { name: 'breadthfirst', directed: true, padding: 24, spacingFactor: 1.25 }
+        : { name: 'cose', padding: 24, animate: false, nodeRepulsion: 8000, idealEdgeLength: 110 },
+      wheelSensitivity: 0.2,
+    });
+
+    if (detail) {
+      cy.on('tap', 'node', (evt: any) => renderDetail(detail, evt.target, kindColors, defaultColor));
+      cy.on('tap', (evt: any) => {
+        if (evt.target === cy) {
+          resetDetail(detail);
+        }
+      });
+    }
+
+    mounted.push({ el: canvas, detail, graphId, graph, layoutName, cy });
+  }
+
+  function initAll() {
+    const canvases = Array.from(document.querySelectorAll<HTMLElement>('[data-resource-graph]'));
+    for (const canvas of canvases) {
+      // Defer one animation frame so the container has measured size; Cytoscape
+      // refuses to render into a 0×0 container and a layout-engine-during-init
+      // race can leave the canvas blank if the parent grid hasn't resolved.
+      requestAnimationFrame(() => mountGraph(canvas));
+    }
+  }
+
+  // Re-init all mounted graphs against the new theme palette. We rebuild the
+  // style array (function-based color resolvers are baked in at .style() time).
+  function onThemeChange() {
+    for (const m of mounted) {
+      if (!m.cy) continue;
+      const kindColors: Record<string, string> = Object.fromEntries(
+        (m.graph.legend ?? []).map((l: any) => [l.kind, l.color]),
+      );
+      m.cy.style(buildStyle(kindColors, '#64748b'));
+    }
+  }
+
+  // Starlight's theme toggle flips the `data-theme` attribute on <html>; watch
+  // it and re-apply the cytoscape palette whenever the theme changes. (The old
+  // custom 'theme-changed' event from the bespoke ThemeToggle is gone.)
+  function watchTheme() {
+    const observer = new MutationObserver((records) => {
+      for (const r of records) {
+        if (r.attributeName === 'data-theme') {
+          onThemeChange();
+          break;
+        }
+      }
+    });
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+  }
+
+  watchTheme();
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll);
+  } else {
+    initAll();
+  }
+</script>
