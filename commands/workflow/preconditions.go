@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/events"
 )
 
@@ -188,4 +189,47 @@ func evaluatePolicy(policy PreconditionPolicy, snap SignalSnapshot) (ok bool, re
 		}
 	}
 	return true, ""
+}
+
+// ── Lockfile policy resolution (Slice B3/B4) ───────────────────────────────────
+
+// resolvePreconditionPolicy is the thin accessor the verifier dispatch call site
+// uses to obtain the resolved §2.3 policy for a task's app_type. It reads the
+// LOCKED effective config (internal/config.ResolvePreconditionPolicy →
+// ResolveLocked, never raw .agentsrc.json) and converts the config-side
+// ResolvedPreconditionPolicy into this package's PreconditionPolicy.
+//
+// The conversion crosses the package boundary deliberately: internal/config must
+// not import commands/workflow (which would be an import cycle), so config returns
+// its own mirror shape and the call site — here — converts it. An unset policy or
+// an absent registry entry resolves to the built-in default on the config side,
+// which arrives as an empty-predicate policy; evaluatePolicy then applies
+// defaultPreconditionPolicy, so the gate is never open by omission (§2.3).
+//
+// resolvePreconditionPolicy is overridable as a package var so the future
+// dispatch call site (and its tests) can inject a fixed policy without touching
+// the on-disk lock/cache.
+var resolvePreconditionPolicy = func(projectPath, appType string) (PreconditionPolicy, error) {
+	resolved, err := config.ResolvePreconditionPolicy(projectPath, appType)
+	if err != nil {
+		return PreconditionPolicy{}, err
+	}
+	return preconditionPolicyFromConfig(resolved), nil
+}
+
+// preconditionPolicyFromConfig converts the config-side ResolvedPreconditionPolicy
+// into this package's PreconditionPolicy (field-for-field). It is the sole
+// boundary translation that lets internal/config stay free of a commands/workflow
+// import. A policy with no predicates is preserved as-is (empty Predicates) so
+// evaluatePolicy applies the built-in default.
+func preconditionPolicyFromConfig(rp config.ResolvedPreconditionPolicy) PreconditionPolicy {
+	out := PreconditionPolicy{Name: rp.Name}
+	if len(rp.Predicates) == 0 {
+		return out
+	}
+	out.Predicates = make([]Predicate, 0, len(rp.Predicates))
+	for _, p := range rp.Predicates {
+		out.Predicates = append(out.Predicates, Predicate{Signal: p.Signal, Args: p.Args})
+	}
+	return out
 }
