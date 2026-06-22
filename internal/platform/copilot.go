@@ -26,6 +26,8 @@ const (
 	copilotGitHubDir         = ".github"
 	copilotVSCodeDir         = ".vscode"
 	copilotAgentsDir         = ".agents"
+	copilotHomeDir           = ".copilot"
+	copilotHooksDir          = "hooks"
 )
 
 func NewCopilot() Platform { return &copilot{io: stdPlatformIO{}} }
@@ -208,6 +210,11 @@ func (c *copilot) CreateLinks(project, repoPath string) error {
 		return err
 	}
 
+	// ~/.copilot/hooks/{name}.json
+	if err := c.createUserHomeHookFiles(project, agentsHome); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -358,6 +365,33 @@ func legacyCopilotHookNames(specs []HookSpec) map[string]bool {
 		wanted[spec.Name+".json"] = true
 	}
 	return wanted
+}
+
+// copilotUserHooksDir is the user-scope hook directory copilot loads
+// (~/.copilot/hooks/, the user equivalent of the repo .github/hooks/ fanout —
+// see PLATFORM_DIRS_DOCS GitHub Copilot "Hooks"; $COPILOT_HOME is the documented
+// override but, like cursor's ~/.cursor and codex's ~/.codex user-home targets,
+// dot-agents wires the default ~/.copilot location).
+func copilotUserHooksDir(home string) string {
+	return filepath.Join(home, copilotHomeDir, copilotHooksDir)
+}
+
+// createUserHomeHookFiles emits the global-scope canonical hooks as a rendered
+// fanout under ~/.copilot/hooks/ for every applicable user home root, mirroring
+// the repo-scope createProjectHookFiles fanout (and cursor/codex's
+// writeUserHomeHooks, which wire a single user-home hooks file). Only global
+// hooks are user-scope: project-scoped hooks stay in the repo's .github/hooks/.
+func (c *copilot) createUserHomeHookFiles(project, agentsHome string) error {
+	canonicalSpecs, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	for _, homeRoot := range config.UserHomeRoots() {
+		if err := c.emitCanonicalProjectHookFiles(canonicalSpecs, copilotUserHooksDir(homeRoot)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *copilot) RemoveLinks(project, repoPath string) error {
@@ -566,25 +600,34 @@ func (c *copilot) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	return PlatformBadge{Name: "Copilot", Present: ok > 0, Broken: broken > 0}
 }
 
-// Copilot DOES have a documented user-config layer —
-// $HOME/.copilot/copilot-instructions.md, ~/.copilot/skills/,
-// ~/.copilot/agents/, ~/.copilot/hooks/ (or $COPILOT_HOME/hooks/), and
-// ~/.copilot/mcp-config.json (see PLATFORM_DIRS_DOCS). dot-agents does NOT yet
-// wire any copilot user-scope target, so there are no managed user-home links
-// to report today (the user-scope ~/.copilot/hooks/ gap is tracked in
-// PLATFORM_DIRS_DOCS "User-home wiring"). We still implement UserConfigReporter
-// so copilot opts into the user-config diagnostics path cleanly the moment
-// user-scope wiring lands — until then both methods report an empty/clean
-// surface, which appendPlatformIfPresent filters out so JSON/text output is
-// unchanged.
-func (c *copilot) UserBrokenLinks(_ string) []BrokenLink {
-	return nil
+// copilotUserConfigDirs returns the managed user-home directories copilot
+// maintains: ~/.copilot/hooks/, a rendered fanout of the global-scope hooks
+// wired by createUserHomeHookFiles (the user equivalent of the repo
+// .github/hooks/ fanout — see PLATFORM_DIRS_DOCS GitHub Copilot "Hooks").
+// Copilot's broader documented user-config layer (~/.copilot/copilot-
+// instructions.md, ~/.copilot/skills/, ~/.copilot/agents/,
+// ~/.copilot/mcp-config.json) is NOT yet wired by dot-agents, so only the hooks
+// directory is reported today.
+func copilotUserConfigDirs(home string) []string {
+	return []string{copilotUserHooksDir(home)}
 }
 
-// UserBadge implements UserConfigReporter for the copilot platform. See
-// UserBrokenLinks: copilot's user-config layer exists but is not yet wired by
-// dot-agents, so the badge reports no managed user-home state. Present stays
-// false (filtered out of the status badge list) until user-scope wiring lands.
-func (c *copilot) UserBadge(_ string) PlatformBadge {
-	return PlatformBadge{Name: "Copilot"}
+// UserBrokenLinks implements UserConfigReporter for the copilot platform. The
+// managed user-home surface is the ~/.copilot/hooks/ fanout (the only user-scope
+// target createUserHomeHookFiles emits); every reported entry carries
+// PlatformID="copilot". A rendered managed file is silently skipped — only a
+// resolvable managed link whose target is missing is reported broken, matching
+// the shared scanUserBrokenLinks contract used by claude/codex/cursor/opencode.
+func (c *copilot) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("copilot", nil, copilotUserConfigDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the copilot platform: the
+// user-config badge over ~/.copilot/hooks/. Present is true when any managed
+// rendered hook file is present, Broken when one is a dangling managed link —
+// mirroring the cursor/codex UserBadge badge math over their own user-home
+// hook surfaces.
+func (c *copilot) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(nil, copilotUserConfigDirs(home))
+	return PlatformBadge{Name: "Copilot", Present: ok > 0, Broken: broken > 0}
 }
