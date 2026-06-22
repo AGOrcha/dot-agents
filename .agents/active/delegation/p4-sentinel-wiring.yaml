@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-p4-sentinel-wiring-1782133737
+mode: delegated
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p4-sentinel-wiring
+title: Wire 'da workflow hook-sentinel write' call into the three starter skills
+summary: Delegated from plan Loop-Discipline Stop Hooks
+write_scope:
+    - internal/scaffold/home/starter/skills/global/iteration-close/
+    - internal/scaffold/home/starter/skills/global/isp/
+    - internal/scaffold/home/starter/skills/global/loop-worker/
+success_criteria: 'Add sentinel-write at skill entry after prerequisites needed to construct its arguments, before governed work begins; update gotchas. Contract: tasks/p4-sentinel-wiring.contract.md.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: active
+created_at: "2026-06-22T13:08:57Z"
+updated_at: "2026-06-22T13:08:57Z"

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: ci-gitignore-autofill
+parent_plan_id: config-v2-coherence
+verifier_type: cli-runner
+status: pass
+summary: da binary builds and runs; go build ./... clean; go vet clean; pre-push gates (build+vet POSIX+windows, coverage>=95, sonar-scanner) all passed
+recorded_at: "2026-06-06T21:36:22Z"
+delegation_id: del-ci-gitignore-autofill-1780781063
+recorded_by: da workflow verify record
+commands:
+    - go build -o /tmp/da ./cmd/da && da --help

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: cl-cache-keys-consume
+parent_plan_id: config-v2-coherence
+verifier_type: unit
+status: pass
+summary: 'cache_keys consumption wired: fetchers surface KeyInputs, resolver records EffectiveCacheKey in lock and force-escapes block offline serve; focused config suite + full suite green'
+recorded_at: "2026-06-22T13:25:22Z"
+delegation_id: del-cl-cache-keys-consume-1782133736
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/config/...
