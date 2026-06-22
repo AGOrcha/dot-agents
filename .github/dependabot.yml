@@ -4,6 +4,11 @@ updates:
     directory: "/docs/web"
     schedule:
       interval: "weekly"
+    groups:
+      docs:
+        applies-to: version-updates
+        patterns:
+          - "*"
     ignore:
       # Starlight pins a specific Astro major; let the Starlight bump drive
       # the Astro major so the two stay compatible. Allow minor/patch only.
