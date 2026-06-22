@@ -244,6 +244,13 @@ type failingResolver struct{ err error }
 
 func (f failingResolver) Resolve(string) (*cfg.Snapshot, error) { return nil, f.err }
 
+// passingResolver is a no-op forceResolver that reports success without writing
+// the lock, so a test can drive the post-resolve report-build failure branch in
+// runSync (the resolve succeeds but reading back the project then errors).
+type passingResolver struct{}
+
+func (passingResolver) Resolve(string) (*cfg.Snapshot, error) { return nil, nil }
+
 // TestRunSync_ResolveFailureIsHinted injects a resolver whose Resolve errors and
 // asserts runSync surfaces a non-nil, hinted error (non-zero exit) rather than
 // proceeding to read back a never-written lock.
@@ -355,5 +362,90 @@ func TestBuildSyncReport_ReadBackErrorOnBadLock(t *testing.T) {
 	}
 	if _, err := buildSyncReport(project, ""); err == nil {
 		t.Fatal("expected buildSyncReport to error on a malformed lockfile")
+	}
+}
+
+// TestReadLockedConfigSection_BadConfigSection covers the Section-decode error
+// branch of readLockedConfigSection: a lockfile that is valid top-level JSON but
+// whose "config" section is the wrong shape (a string, not a map) makes Section
+// fail after Open succeeds.
+func TestReadLockedConfigSection_BadConfigSection(t *testing.T) {
+	project := withTwoLocalLayers(t)
+	lockPath := cfg.AgentsLockPath(project)
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Top-level JSON parses, but "config" is a string so decoding it into
+	// map[string]LockedLayer errors inside Section (not in Open).
+	if err := os.WriteFile(lockPath, []byte(`{"version":1,"config":"not-a-map"}`), 0o644); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	if _, err := readLockedConfigSection(project); err == nil {
+		t.Fatal("expected readLockedConfigSection to error on a wrong-shaped config section")
+	}
+}
+
+// TestBuildSyncReport_VerifyLayerLocksError covers buildSyncReport's
+// VerifyLayerLocks failure branch: the lock read-back succeeds (no lock present →
+// empty config section), but the manifest is malformed JSON so VerifyLayerLocks
+// cannot parse it and buildSyncReport propagates the error.
+func TestBuildSyncReport_VerifyLayerLocksError(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2,"extends":[ this is not valid json`, "")
+	if _, err := buildSyncReport(project, ""); err == nil {
+		t.Fatal("expected buildSyncReport to error when the manifest cannot be parsed")
+	}
+}
+
+// TestRunSync_ReportBuildFailureAfterResolve covers runSync's post-resolve
+// report-build error branch: the resolver reports success but the manifest is
+// unparseable, so buildSyncReport fails and runSync returns the hinted error.
+func TestRunSync_ReportBuildFailureAfterResolve(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2,"extends":[ this is not valid json`, "")
+	opts := &runSyncOptions{
+		stdout:      &bytes.Buffer{},
+		stderr:      &bytes.Buffer{},
+		cwd:         project,
+		newResolver: func() forceResolver { return passingResolver{} },
+	}
+	err := runSync(opts, testDeps())
+	if err == nil {
+		t.Fatal("expected runSync to error when the post-resolve report build fails")
+	}
+	if !strings.Contains(err.Error(), "could not read back the lock") {
+		t.Errorf("error = %q, want it to mention the read-back failure", err.Error())
+	}
+}
+
+// TestSyncCmd_RunE_RoutesThroughCwd drives newSyncCmd end-to-end through cobra so
+// the RunE wrapper (which resolves cwd via os.Getwd and falls back to the default
+// real resolver) is exercised against a real two-layer project. Both a plain
+// `sync` and a `--layer`-scoped `sync` are executed.
+func TestSyncCmd_RunE_RoutesThroughCwd(t *testing.T) {
+	project := withTwoLocalLayers(t)
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	cases := [][]string{
+		{"sync"},
+		{"sync", "--layer", "acme:org/base.json"},
+	}
+	for _, args := range cases {
+		cmd := newSyncCmd(testDeps())
+		cmd.SetArgs(args[1:]) // newSyncCmd is already the `sync` command
+		out := &bytes.Buffer{}
+		cmd.SetOut(out)
+		cmd.SetErr(&bytes.Buffer{})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute %v: %v", args, err)
+		}
+		if out.Len() == 0 {
+			t.Errorf("Execute %v produced no output", args)
+		}
 	}
 }

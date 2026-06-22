@@ -3,9 +3,11 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
@@ -349,5 +351,125 @@ func TestBuildLintReport_RepoManifestMissingIsTerminal(t *testing.T) {
 	repo, ok := findLintResult(report.Results, "repo-local")
 	if !ok || repo.Status != lintFail {
 		t.Fatalf("repo-local = %+v (ok=%v), want fail", repo, ok)
+	}
+}
+
+// failWriter is an io.Writer that always errors, driving the JSON-write failure
+// branch in runLint without depending on a closed pipe.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed: disk gone") }
+
+// TestRunLint_JSONWriteError covers runLint's JSON-output write-error branch: with
+// jsonOut set and a writer that always errors, writeJSON fails and runLint
+// returns that error directly (before the OK/non-OK exit logic).
+func TestRunLint_JSONWriteError(t *testing.T) {
+	project := lintProject(t, "", `{"version":2,"skills":["org-skill"]}`)
+	opts := lintOptions(project, true)
+	opts.stdout = failWriter{}
+	if err := runLint(opts, testDeps()); err == nil {
+		t.Fatal("expected runLint to error when the JSON output writer fails")
+	}
+}
+
+// TestLintExtendsLayer_LocalSourceURLFallback covers the base=="" branch in
+// lintExtendsLayer: a local source declared with an empty Path but a URL falls
+// back to the URL as the read base.
+func TestLintExtendsLayer_LocalSourceURLFallback(t *testing.T) {
+	sch, err := compiledAgentsRCSchema()
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+	localRoot := writeLocalLayer(t, "org/base.json", `{"version":2,"skills":["org-skill"]}`)
+	// A local source with an empty Path but a URL: lintExtendsLayer must fall back
+	// to URL as the base directory and still read+validate the layer.
+	sources := map[string]cfg.Source{
+		"acme": {ID: "acme", Type: "local", URL: localRoot},
+	}
+	res := lintExtendsLayer(sch, cfg.LayerRef{Ref: "acme:org/base.json"}, sources)
+	if res.Status != lintPass {
+		t.Fatalf("status = %q (detail %q), want pass via URL fallback", res.Status, res.Detail)
+	}
+}
+
+// TestLintCmd_RunE_RoutesThroughCwd drives newLintCmd end-to-end through cobra so
+// the RunE wrapper (which resolves cwd via os.Getwd) is exercised against a real
+// project: once on a valid project (success, nil error) and once on a project
+// with a corrupt layer (lint fails → non-zero-exit error).
+func TestLintCmd_RunE_RoutesThroughCwd(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		project := lintProject(t, "", `{"version":2,"skills":["org-skill"]}`)
+		runLintCmdInDir(t, project, false)
+	})
+	t.Run("corrupt layer exits non-zero", func(t *testing.T) {
+		project := lintProject(t, "", `{"version":99,"skills":["org-skill"]}`)
+		runLintCmdInDir(t, project, true)
+	})
+}
+
+// runLintCmdInDir chdirs into project, executes a freshly-built lint command, and
+// asserts whether Execute returned an error (wantErr) — the cobra path that runs
+// the RunE wrapper's cwd resolution end to end.
+func runLintCmdInDir(t *testing.T, project string, wantErr bool) {
+	t.Helper()
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	cmd := newLintCmd(testDeps())
+	cmd.SetArgs([]string{})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+	err = cmd.Execute()
+	if wantErr && err == nil {
+		t.Fatalf("expected a non-zero-exit error, got nil; output:\n%s", out.String())
+	}
+	if !wantErr && err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+}
+
+// TestBuildLintReport_SchemaCompileFailurePropagates covers the schema-compile
+// error branch in buildLintReport and the corresponding build-error branch in
+// runLint. The embedded schema always compiles, so we inject a compile error into
+// the package-level memoized result for the duration of the test and restore it.
+func TestBuildLintReport_SchemaCompileFailurePropagates(t *testing.T) {
+	restore := injectSchemaCompileErr(errors.New("injected: schema compile failed"))
+	t.Cleanup(restore)
+
+	if _, err := buildLintReport(t.TempDir()); err == nil {
+		t.Fatal("expected buildLintReport to propagate the schema-compile error")
+	}
+	if err := runLint(lintOptions(t.TempDir(), false), testDeps()); err == nil {
+		t.Fatal("expected runLint to surface the schema-compile error as a could-not-run error")
+	}
+}
+
+// injectSchemaCompileErr overrides the memoized AgentsRC-schema compile result
+// with a forced error, marking the once as already-fired so compiledAgentsRCSchema
+// returns the injected error without recompiling. It returns a restore func that
+// re-arms a fresh once so a subsequent call recompiles the real embedded schema.
+func injectSchemaCompileErr(injected error) func() {
+	prevCompiled := agentsRCSchemaCompiled
+	prevErr := agentsRCSchemaCompileErr
+
+	agentsRCSchemaCompiled = nil
+	agentsRCSchemaCompileErr = injected
+	agentsRCSchemaCompileOnce = sync.Once{}
+	agentsRCSchemaCompileOnce.Do(func() {}) // mark fired; keeps the injected state
+
+	return func() {
+		agentsRCSchemaCompiled = prevCompiled
+		agentsRCSchemaCompileErr = prevErr
+		agentsRCSchemaCompileOnce = sync.Once{}
+		if prevCompiled != nil || prevErr != nil {
+			agentsRCSchemaCompileOnce.Do(func() {}) // restore the prior memoized state
+		}
+		// Otherwise leave the once un-fired so the next caller compiles for real.
 	}
 }
