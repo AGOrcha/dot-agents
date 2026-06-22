@@ -218,9 +218,33 @@ type AgentsRC struct {
 	// UnmarshalJSON / foldLegacyProfiles) and are never re-emitted.
 	StageProfiles map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
 
+	// PreconditionPolicies is the top-level named registry of verifier
+	// precondition policies (verifier-precondition-policy plan, Slice B). Each
+	// entry is a named policy = an ordered list of predicates over the unified
+	// event/signal contract. A stage profile references a policy by name via
+	// StageProfile.PreconditionPolicy; the verifier reads the resolved policy
+	// from the lockfile. Absent ⇒ the built-in `default` gate applies.
+	PreconditionPolicies map[string]PreconditionPolicySpec `json:"precondition_policies,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+}
+
+// PredicateSpec is the config-facing mirror of the commands/workflow Predicate:
+// one predicate over a single registered event/signal kind. Signal is the
+// registered kind (e.g. "event.pr.open", "gate.quality.sonar"); Args are
+// kind-specific (e.g. {"equals":"green"}).
+type PredicateSpec struct {
+	Signal string            `json:"signal"`
+	Args   map[string]string `json:"args,omitempty"`
+}
+
+// PreconditionPolicySpec is one named entry in the precondition_policies
+// registry: an ordered list of predicates all of which must hold for the
+// in_progress → awaiting_agent_review gate to open.
+type PreconditionPolicySpec struct {
+	Predicates []PredicateSpec `json:"predicates"`
 }
 
 // AgentsRCPRSource is the .agentsrc.json `pr_source` block (pr-event-source D4).
@@ -499,6 +523,11 @@ type StageProfile struct {
 	Label string `json:"label,omitempty"`
 	// PromptFiles is the base-first ordered prompt composition for the profile.
 	PromptFiles []PromptFileRef `json:"prompt_files,omitempty"`
+	// PreconditionPolicy names the verifier precondition policy (a key in the
+	// top-level precondition_policies registry) that gates this profile's
+	// in_progress → awaiting_agent_review transition. Unset ⇒ the built-in
+	// `default` gate (verifier-precondition-policy plan, Slice B).
+	PreconditionPolicy string `json:"precondition_policy,omitempty"`
 }
 
 // RefreshMetadata records the latest da install/refresh that updated a project.
@@ -540,6 +569,9 @@ var agentsRCKnown = map[string]bool{
 	// stage_profiles: unified per-stage named prompt-composition primitive
 	// (config-v2 Q1; supersedes verifier_profiles/reviewer_profiles)
 	"stage_profiles": true,
+	// precondition_policies: top-level named registry of verifier precondition
+	// policies (verifier-precondition-policy plan, Slice B)
+	"precondition_policies": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
 	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
 	// Listed as "known" so they are not captured into ExtraFields (which would
@@ -574,7 +606,8 @@ type agentsRCCore struct {
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
 
-	StageProfiles map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
+	StageProfiles        map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
+	PreconditionPolicies map[string]PreconditionPolicySpec  `json:"precondition_policies,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -601,6 +634,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.ExecutionProfile = core.ExecutionProfile
 	a.PRSource = core.PRSource
 	a.StageProfiles = core.StageProfiles
+	a.PreconditionPolicies = core.PreconditionPolicies
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -633,25 +667,26 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 
 func (a AgentsRC) MarshalJSON() ([]byte, error) {
 	core := agentsRCCore{
-		Schema:           a.Schema,
-		Version:          a.Version,
-		Project:          a.Project,
-		Skills:           a.Skills,
-		Rules:            a.Rules,
-		Agents:           a.Agents,
-		Hooks:            a.Hooks,
-		MCP:              a.MCP,
-		Settings:         a.Settings,
-		Sources:          a.Sources,
-		KG:               a.KG,
-		Refresh:          a.Refresh,
-		RepoID:           a.RepoID,
-		Extends:          a.Extends,
-		Packages:         a.Packages,
-		Features:         a.Features,
-		ExecutionProfile: a.ExecutionProfile,
-		PRSource:         a.PRSource,
-		StageProfiles:    a.StageProfiles,
+		Schema:               a.Schema,
+		Version:              a.Version,
+		Project:              a.Project,
+		Skills:               a.Skills,
+		Rules:                a.Rules,
+		Agents:               a.Agents,
+		Hooks:                a.Hooks,
+		MCP:                  a.MCP,
+		Settings:             a.Settings,
+		Sources:              a.Sources,
+		KG:                   a.KG,
+		Refresh:              a.Refresh,
+		RepoID:               a.RepoID,
+		Extends:              a.Extends,
+		Packages:             a.Packages,
+		Features:             a.Features,
+		ExecutionProfile:     a.ExecutionProfile,
+		PRSource:             a.PRSource,
+		StageProfiles:        a.StageProfiles,
+		PreconditionPolicies: a.PreconditionPolicies,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -843,8 +878,9 @@ func cloneStageProfiles(m map[string]map[string]StageProfile) map[string]map[str
 		inner := make(map[string]StageProfile, len(profiles))
 		for slug, p := range profiles {
 			inner[slug] = StageProfile{
-				Label:       p.Label,
-				PromptFiles: append([]PromptFileRef(nil), p.PromptFiles...),
+				Label:              p.Label,
+				PromptFiles:        append([]PromptFileRef(nil), p.PromptFiles...),
+				PreconditionPolicy: p.PreconditionPolicy,
 			}
 		}
 		out[stage] = inner

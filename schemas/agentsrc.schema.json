@@ -95,6 +95,13 @@
         "orchestrator": { "$ref": "#/$defs/stageProfileMap" }
       }
     },
+    "precondition_policies": {
+      "type": "object",
+      "description": "Top-level named registry of verifier precondition policies (verifier-precondition-policy plan, Slice B). Each entry is a named policy: an ordered list of predicates over the unified event/signal contract that all must hold for the in_progress -> awaiting_agent_review gate to open. A stage profile references a policy by name via precondition_policy; the verifier reads the resolved policy from the lockfile. Absent => the built-in 'default' gate applies.",
+      "additionalProperties": {
+        "$ref": "#/$defs/preconditionPolicy"
+      }
+    },
     "verifier_profiles": {
       "$ref": "#/$defs/stageProfileMap",
       "deprecated": true,
@@ -277,6 +284,46 @@
           },
           "prompt_files": {
             "$ref": "#/$defs/promptFileList"
+          },
+          "precondition_policy": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Name of a verifier precondition policy in the top-level precondition_policies registry that gates this profile's in_progress -> awaiting_agent_review transition. Unset => built-in 'default' gate (verifier-precondition-policy plan, Slice B)."
+          }
+        }
+      }
+    },
+    "preconditionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One named verifier precondition policy: an ordered list of predicates all of which must hold for the gate to open.",
+      "required": ["predicates"],
+      "properties": {
+        "predicates": {
+          "type": "array",
+          "description": "Ordered predicates over the unified event/signal contract. All must hold; the first failing predicate's reason is surfaced.",
+          "items": {
+            "$ref": "#/$defs/predicateSpec"
+          }
+        }
+      }
+    },
+    "predicateSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A predicate over one registered event/signal kind.",
+      "required": ["signal"],
+      "properties": {
+        "signal": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The registered event/signal kind, e.g. 'event.pr.open', 'signal.ci.rollup', 'gate.quality.sonar'."
+        },
+        "args": {
+          "type": "object",
+          "description": "Kind-specific predicate arguments, e.g. {\"equals\":\"green\"}.",
+          "additionalProperties": {
+            "type": "string"
           }
         }
       }
