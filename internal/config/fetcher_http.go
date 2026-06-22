@@ -80,7 +80,10 @@ func (f *httpArtifactFetcher) readCachedPinnedArtifact(posture SigningPosture, p
 	if err := verifySignature(posture, pinned, false); err != nil {
 		return FetchedArtifact{}, true, err
 	}
-	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture}, true, nil
+	// A digest-pinned cache hit served without contacting the registry has no
+	// fresh validators; the pinned digest is the content key (§7A.4 http default
+	// falls back to the content digest when no ETag/Last-Modified is observed).
+	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{ContentDigest: pinned}}, true, nil
 }
 
 // doRequest issues the authenticated GET and maps any transport or status-code
@@ -145,5 +148,14 @@ func (f *httpArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (
 	if err := writeCachedArtifact(digest, data); err != nil {
 		return FetchedArtifact{}, err
 	}
-	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture}, nil
+	// Capture the upstream validators the http cache-key default prefers
+	// (config-distribution-model §7A.4: ETag, else Last-Modified, else digest), so
+	// the package resolver can derive an effective key that re-checks on a
+	// validator change even when the digest-addressed blob is still cached.
+	keyInputs := CacheKeyInputs{
+		ETag:          resp.Header.Get("ETag"),
+		LastModified:  resp.Header.Get("Last-Modified"),
+		ContentDigest: digest,
+	}
+	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: keyInputs}, nil
 }

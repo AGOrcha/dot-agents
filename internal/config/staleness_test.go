@@ -396,3 +396,65 @@ func hasReason(r StalenessResult, want StalenessReason) bool {
 	}
 	return false
 }
+
+// --- cache-key staleness axis (cl-cache-keys-consume) ----------------------
+
+// TestCacheKeyStale covers the pure cache-key staleness classifier: the
+// AlwaysRevalidate sentinel is always stale, a matching key is fresh, a changed
+// key is stale, and an empty recorded key is stale against any concrete key.
+func TestCacheKeyStale(t *testing.T) {
+	const key = cacheKeyPrefix + "git:abc"
+	cases := []struct {
+		name              string
+		recorded, derived string
+		wantStale         bool
+	}{
+		{"matching key is fresh", key, key, false},
+		{"changed key is stale", key, cacheKeyPrefix + "git:def", true},
+		{"always-revalidate is always stale", key, AlwaysRevalidate, true},
+		{"empty recorded vs concrete is stale", "", key, true},
+		{"both empty is fresh", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CacheKeyStale(tc.recorded, tc.derived); got != tc.wantStale {
+				t.Errorf("CacheKeyStale(%q,%q) = %v, want %v", tc.recorded, tc.derived, got, tc.wantStale)
+			}
+		})
+	}
+}
+
+// TestCacheKeyStaleForLayerEnvSelector proves the resolver-side consumer detects
+// a cache_keys override edit that changes the key shape from the same SHA facts:
+// adding an {env} selector switches the source from the kind default to a
+// composite override key, so a lock recorded under the default reads back stale,
+// while a lock recorded under the same override reads back fresh.
+func TestCacheKeyStaleForLayerEnvSelector(t *testing.T) {
+	t.Setenv("DA_CACHE_TOKEN", "v1")
+	const sha = "deadbeef00000000000000000000000000000000"
+	r := NewLayeredResolver()
+
+	defaultSrc := Source{ID: "acme", Type: "git"}
+	overrideSrc := Source{ID: "acme", Type: "git", CacheKeys: &CacheKeys{Env: []string{"DA_CACHE_TOKEN"}}}
+
+	// A lock recorded under the kind default, then the source declares an env
+	// selector: the recomputed key no longer matches -> stale (negative path: the
+	// override was a silent no-op before, now it flips the decision).
+	defaultLock := r.lockEntry(defaultSrc, FetchedLayer{ResolvedSHA: sha, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}})
+	if !r.CacheKeyStaleForLayer(overrideSrc, defaultLock) {
+		t.Error("adding an env selector should make a default-keyed lock stale")
+	}
+
+	// A lock recorded under the override with the env value unchanged reads fresh
+	// (positive path: identical override + value -> not stale).
+	overrideLock := r.lockEntry(overrideSrc, FetchedLayer{ResolvedSHA: sha, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}})
+	if r.CacheKeyStaleForLayer(overrideSrc, overrideLock) {
+		t.Error("unchanged override + env value should be fresh")
+	}
+
+	// Changing the env value makes the override-keyed lock stale.
+	t.Setenv("DA_CACHE_TOKEN", "v2")
+	if !r.CacheKeyStaleForLayer(overrideSrc, overrideLock) {
+		t.Error("changed env value should make the override-keyed lock stale")
+	}
+}

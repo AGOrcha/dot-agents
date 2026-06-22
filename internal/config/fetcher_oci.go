@@ -94,6 +94,12 @@ type FetchedArtifact struct {
 	CacheHit bool
 	// Posture is the signing posture applied to this pull.
 	Posture SigningPosture
+	// KeyInputs carries the resolved facts for the source's effective content
+	// cache key (config-distribution-model §7A.4): the manifest digest for oci,
+	// the digest (plus any ETag/Last-Modified validator) for http-as-packages, so
+	// the package resolver can derive an effective key via EffectiveCacheKey. A
+	// zero value falls back to the kind default keyed on Digest.
+	KeyInputs CacheKeyInputs
 }
 
 // PackageRefParts is the parsed form of a "source-id:artifact-path@version-spec"
@@ -315,7 +321,7 @@ func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedAr
 			if err := verifySignature(posture, ref.Digest, false); err != nil {
 				return FetchedArtifact{}, err
 			}
-			return FetchedArtifact{Data: cached, Digest: ref.Digest, CacheHit: true, Posture: posture}, nil
+			return FetchedArtifact{Data: cached, Digest: ref.Digest, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: ref.Digest}}, nil
 		}
 	}
 
@@ -343,7 +349,7 @@ func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedAr
 	if err := writeCachedArtifact(digest, data); err != nil {
 		return FetchedArtifact{}, err
 	}
-	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture}, nil
+	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: digest}}, nil
 }
 
 // ociPull is the real OCI Distribution pull, not yet wired in p5. The live wire

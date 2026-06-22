@@ -999,3 +999,227 @@ func TestGitFetcherReadError(t *testing.T) {
 		t.Fatalf("expected git read error, got %v", err)
 	}
 }
+
+// --- cache_keys consumption (cl-cache-keys-consume) ------------------------
+//
+// These tests prove cache_keys / the per-kind cache-key default is no longer a
+// silent no-op: the fetchers now surface the facts the key derives from, and the
+// resolver records EffectiveCacheKey in the lock and lets a force escape change
+// the offline-serve decision.
+
+// TestHTTPFetcherCapturesCacheKeyValidators proves the http layer fetcher now
+// surfaces the upstream ETag / Last-Modified validators (and the content digest)
+// that the §7A.4 http cache-key default keys on — previously dropped on the floor.
+func TestHTTPFetcherCapturesCacheKeyValidators(t *testing.T) {
+	body := `{"rules":["r"]}`
+	const etag = `"abc123"`
+	const lastMod = "Wed, 21 Oct 2026 07:28:00 GMT"
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Last-Modified", lastMod)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	f := &httpFetcher{client: srv.Client()}
+	got, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got.KeyInputs.ETag != etag {
+		t.Errorf("KeyInputs.ETag = %q, want %q", got.KeyInputs.ETag, etag)
+	}
+	if got.KeyInputs.LastModified != lastMod {
+		t.Errorf("KeyInputs.LastModified = %q, want %q", got.KeyInputs.LastModified, lastMod)
+	}
+	if got.KeyInputs.ContentDigest != contentHash([]byte(body)) {
+		t.Errorf("KeyInputs.ContentDigest = %q, want content hash", got.KeyInputs.ContentDigest)
+	}
+	// The default http key prefers the ETag validator (strong validator wins).
+	if k := DefaultCacheKey(SourceKindHTTP, got.KeyInputs); k != cacheKeyPrefix+"http:etag="+etag {
+		t.Errorf("DefaultCacheKey = %q, want etag-keyed", k)
+	}
+}
+
+// TestLocalFetcherCapturesWorktreeCacheKey proves the local fetcher marks the
+// worktree dirty and supplies its content hash, so a local source's effective
+// key tracks uncommitted authoring (§7A.4 / D6) instead of the kind default
+// collapsing to nothing.
+func TestLocalFetcherCapturesWorktreeCacheKey(t *testing.T) {
+	srcDir := t.TempDir()
+	full := filepath.Join(srcDir, "base.json")
+	body := []byte(`{"skills":["x"]}`)
+	if err := os.WriteFile(full, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &localFetcher{}
+	got, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !got.KeyInputs.WorktreeDirty {
+		t.Error("local fetch should mark worktree dirty")
+	}
+	if got.KeyInputs.WorktreeContentHash != contentHash(body) {
+		t.Errorf("WorktreeContentHash = %q, want content hash", got.KeyInputs.WorktreeContentHash)
+	}
+	// Editing the working tree changes the local default key (negative -> positive).
+	keyA := DefaultCacheKey(SourceKindLocal, got.KeyInputs)
+	if err := os.WriteFile(full, []byte(`{"skills":["x","y"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache2"))
+	if err != nil {
+		t.Fatalf("Fetch (2nd): %v", err)
+	}
+	if keyB := DefaultCacheKey(SourceKindLocal, got2.KeyInputs); keyA == keyB {
+		t.Errorf("local key did not change after worktree edit: both %q", keyA)
+	}
+}
+
+// TestOCIFetcherCapturesDigestCacheKey proves the oci fetcher surfaces the
+// manifest digest as the cache-key fact, so the content-addressed oci default
+// keys on it.
+func TestOCIFetcherCapturesDigestCacheKey(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	digest := artifactDigest(blob)
+	f := &ociFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) ([]byte, string, error) {
+		return blob, digest, nil
+	}}
+	got, err := f.FetchArtifact(Source{Type: "oci", URL: "oci://reg.test/base"}, PackageRefParts{SourceID: "acme", ArtifactPath: "skill/x", VersionSpec: "1.0.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.KeyInputs.OCIDigest != digest {
+		t.Errorf("KeyInputs.OCIDigest = %q, want %q", got.KeyInputs.OCIDigest, digest)
+	}
+	if k := DefaultCacheKey(SourceKindOCI, got.KeyInputs); k != cacheKeyPrefix+"oci:"+digest {
+		t.Errorf("DefaultCacheKey = %q, want digest-keyed", k)
+	}
+}
+
+// TestLayeredResolverRecordsCacheKeyInLock proves the resolver derives and
+// records EffectiveCacheKey in the lock — the primitive is consumed, not inert.
+func TestLayeredResolverRecordsCacheKeyInLock(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["from-git"]}`},
+		sha:   "deadbeefcafe0000000000000000000000000000",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	locked, err := readLockedLayers(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := locked["acme:org/base.json"].CacheKey
+	// The git default keys on the resolved commit the fake reported.
+	want := cacheKeyPrefix + "git:" + fake.sha
+	if got != want {
+		t.Errorf("recorded cache_key = %q, want %q", got, want)
+	}
+}
+
+// TestLayeredResolverAlwaysRevalidateRecordsSentinel proves a source declaring
+// cache_keys.always_revalidate records the AlwaysRevalidate sentinel instead of
+// the kind default — a non-default cache_keys demonstrably changes the lock.
+func TestLayeredResolverAlwaysRevalidateRecordsSentinel(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"always_revalidate": true}}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["from-git"]}`},
+		sha:   "deadbeefcafe0000000000000000000000000000",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	locked, err := readLockedLayers(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := locked["acme:org/base.json"].CacheKey; got != AlwaysRevalidate {
+		t.Errorf("recorded cache_key = %q, want AlwaysRevalidate sentinel %q", got, AlwaysRevalidate)
+	}
+}
+
+// TestLayeredResolverCacheKeyOffline drives the headline behavior change: with
+// the same lock + cache, a default source serves offline (negative: cache_keys
+// inert path) while always_revalidate / --refresh force a revalidation failure
+// offline (positive: cache_keys now changes behavior).
+func TestLayeredResolverCacheKeyOffline(t *testing.T) {
+	seed := func(t *testing.T, manifest string) (repo string, sha string) {
+		t.Helper()
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		repo = t.TempDir()
+		writeManifest(t, repo, manifest)
+		fake := &fakeFetcher{
+			files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+			sha:   "feedface000000000000000000000000000000aa",
+		}
+		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+			t.Fatalf("online seed Resolve: %v", err)
+		}
+		return repo, fake.sha
+	}
+
+	const defaultManifest = `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"}],
+		"extends": ["acme:org/base.json"]
+	}`
+	const revalManifest = `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"always_revalidate": true}}],
+		"extends": ["acme:org/base.json"]
+	}`
+
+	// Negative: default cache_keys -> offline serves the cached layer.
+	t.Run("default serves offline", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		offline := &fakeFetcher{fetchErr: errors.New("network down")}
+		snap, err := NewLayeredResolver().WithFetcher("git", offline).WithOffline(true).Resolve(repo)
+		if err != nil {
+			t.Fatalf("offline Resolve: %v", err)
+		}
+		if offline.calls != 0 {
+			t.Errorf("offline called fetcher %d times, want 0", offline.calls)
+		}
+		if !hasWarning(snap.Warnings, "acme:org/base.json", "cache_hit_offline") {
+			t.Errorf("expected cache_hit_offline warning, got %+v", snap.Warnings)
+		}
+	})
+
+	// Positive: always_revalidate -> offline refuses to serve and fails loudly.
+	t.Run("always_revalidate blocks offline serve", func(t *testing.T) {
+		repo, _ := seed(t, revalManifest)
+		offline := &fakeFetcher{fetchErr: errors.New("network down")}
+		_, err := NewLayeredResolver().WithFetcher("git", offline).WithOffline(true).Resolve(repo)
+		if err == nil || !strings.Contains(err.Error(), "revalidation required") {
+			t.Fatalf("expected offline revalidation-required error, got %v", err)
+		}
+	})
+
+	// Positive: --refresh force escape blocks offline serve even with a default
+	// source (the runtime half of the R6 force escape).
+	t.Run("refresh blocks offline serve", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		offline := &fakeFetcher{fetchErr: errors.New("network down")}
+		_, err := NewLayeredResolver().WithFetcher("git", offline).WithOffline(true).WithRefresh(true).Resolve(repo)
+		if err == nil || !strings.Contains(err.Error(), "revalidation required") {
+			t.Fatalf("expected --refresh offline revalidation error, got %v", err)
+		}
+	})
+}

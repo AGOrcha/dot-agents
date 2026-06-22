@@ -57,6 +57,26 @@ const (
 	SourceKindOCI SourceKind = "oci"
 )
 
+// SourceKindOf maps a Source.Type string to its SourceKind so the resolver and
+// fetchers can derive the cache-key default without re-spelling the switch. An
+// unrecognized type is returned verbatim as a SourceKind; DefaultCacheKey's
+// default branch then keys it on the content digest, so a future source type
+// still gets a usable (if coarse) key rather than a panic.
+func SourceKindOf(sourceType string) SourceKind {
+	switch sourceType {
+	case "git":
+		return SourceKindGit
+	case "local":
+		return SourceKindLocal
+	case "http":
+		return SourceKindHTTP
+	case "oci":
+		return SourceKindOCI
+	default:
+		return SourceKind(sourceType)
+	}
+}
+
 // cacheKeyPrefix tags a normalized cache key with the kind that produced it, so
 // two kinds can never alias on the same underlying value (e.g. a git commit and
 // a local commit with identical hex). It mirrors staleness.go's scopeSlot
