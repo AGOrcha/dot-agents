@@ -1,5 +1,11 @@
 # Gotchas: Iteration Close
 
+## Stop-Gate Sentinel
+
+- **Skipping the sentinel-write step** — `da workflow hook-sentinel write iteration-close` is a required first action (after task identity is known), not optional advice. If it is skipped, the Stop/SubagentStop gate finds no sentinel and exits 0 silently: the whole closeout contract goes unenforced for that turn. Write it before any verify/checkpoint/advance/merge-back action.
+- **Declaring artifacts you will not produce** — only pass `--expect` for artifacts this iteration actually owns. Listing a merge-back on a direct closeout, or a `review-decision.yaml` on a review-skipped non-code iteration, makes the gate hard-remediate on a missing file that was never contracted. Match the sentinel to the path you are actually on.
+- **Changing the governed closeout sequence without updating the gate** — if you alter which workflow actions iteration-close performs (e.g. add/remove a checkpoint role, change the merge-back vs advance split), you MUST update the matching `iteration-close-gate` HOOK.yaml/gate.sh contract and its tests in the same change. A skill edit that drifts from the gate silently breaks enforcement. No instruction here permits hard remediation on transcript-only facts without verified trace input.
+
 ## Binary Resolution
 
 - **Payout: missing dev binary** — `/tmp/dot-agents-dev` doesn't exist or is stale (binary from a prior session, not current `../dot-agents` HEAD). Always check `ls -la /tmp/dot-agents-dev` and compare mtime to `../dot-agents` last commit. Rebuild if uncertain.
