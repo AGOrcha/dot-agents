@@ -24,10 +24,9 @@ var refreshImport bool
 // resolved asset-store union AND prunes managed outputs no longer in the
 // resolved set, so the repo tree converges to exactly what the lock declares.
 // True (`--inexact`) keeps the additive behavior: write the wanted set, leave
-// stale managed outputs in place. The cobra flag that toggles this lives in
-// commands/internal/lifecycle/refresh.go (out of this task's write scope); see
-// .agents/active/fold-back for the deferred flag wiring. The default already
-// satisfies the spec's exact-by-default contract.
+// stale managed outputs in place. The cobra `--inexact` flag is registered in
+// commands/internal/lifecycle/refresh.go and threaded here via the RunRefresh
+// closure in NewRefreshCmd.
 var refreshInexact bool
 
 // refreshConfigLoader is the narrow collaborator refresh.go's
@@ -55,8 +54,9 @@ func NewRefreshCmd() *cobra.Command {
 	return lifecycle.NewRefreshCmd(lifecycle.Deps{
 		ExampleBlock:          ExampleBlock,
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
-		RunRefresh: func(projectFilter string, importAlso bool) error {
+		RunRefresh: func(projectFilter string, importAlso, inexact bool) error {
 			refreshImport = importAlso
+			refreshInexact = inexact
 			return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
 	})

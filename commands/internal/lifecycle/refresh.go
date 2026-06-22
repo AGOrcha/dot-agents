@@ -43,14 +43,15 @@ func DetectAndEnableNewPlatforms(cfg *config.Config) []string {
 }
 
 // NewRefreshCmd builds the `da refresh` cobra command. The cobra
-// metadata (Use/Short/Long/Example/Args) and the `--import` flag live
-// here in lifecycle; the RunE delegates to deps.RunRefresh which still
-// holds the legacy runRefresh body in commands/ until t04 (add) and
+// metadata (Use/Short/Long/Example/Args) and the `--import` / `--inexact`
+// flags live here in lifecycle; the RunE delegates to deps.RunRefresh which
+// still holds the legacy runRefresh body in commands/ until t04 (add) and
 // t06 (import) merge. See SHAPE.md §4a (refresh row) and the fold-back
 // at .agents/active/fold-back/t07-refresh-body-deferred.md for the
 // rationale.
 func NewRefreshCmd(deps Deps) *cobra.Command {
 	var importAlso bool
+	var inexact bool
 	cmd := &cobra.Command{
 		Use:   "refresh [project]",
 		Short: "Refresh managed setup in projects from ~/.agents/",
@@ -67,9 +68,10 @@ Use after pulling changes to ~/.agents/ or when a project's agent config is out 
 			if len(args) > 0 {
 				filter = args[0]
 			}
-			return deps.RunRefresh(filter, importAlso)
+			return deps.RunRefresh(filter, importAlso, inexact)
 		},
 	}
 	cmd.Flags().BoolVar(&importAlso, "import", false, "Also import global user configs into ~/.agents before relinking")
+	cmd.Flags().BoolVar(&inexact, "inexact", false, "Keep additive behavior: write the resolved set but do NOT prune managed outputs no longer in it (refresh otherwise converges the tree to exactly what the lock declares)")
 	return cmd
 }
