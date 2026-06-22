@@ -44,7 +44,7 @@ tasks:
       app_type: docs
     - id: dm3-visibility-gating
       title: visibility frontmatter (default internal) + dist/ vs dist-internal/ partition
-      status: awaiting_agent_review
+      status: completed
       depends_on:
         - dm1-starlight-foundation
       blocks: []
@@ -58,7 +58,7 @@ tasks:
       app_type: docs
     - id: dm4-md-llms-endpoints
       title: 'Agent-readable: [...slug].md raw-markdown endpoints + llms.txt (public only)'
-      status: in_progress
+      status: completed
       depends_on:
         - dm1-starlight-foundation
       blocks: []
@@ -70,7 +70,7 @@ tasks:
       app_type: docs
     - id: dm5-worker-cf-access
       title: 'Worker: gate /internal/* behind CF Access (2nd asset binding) + deploy both outputs'
-      status: pending
+      status: awaiting_agent_review
       depends_on:
         - dm3-visibility-gating
         - dm0-cf-access-bootstrap
