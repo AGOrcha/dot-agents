@@ -99,6 +99,23 @@ func evaluatorFor(signal string) (PredicateEvaluator, bool) {
 	return nil, false
 }
 
+// ValidSignalKind reports whether a signal kind resolves to a registered
+// predicate evaluator (exact match or longest registered prefix, per
+// evaluatorFor). It is the single source of truth the config-verify layer
+// consults to reject a precondition_policies predicate that names a kind no
+// evaluator handles — so a misregistration surfaces at `da config verify` time
+// instead of only as a fail-closed gate at verify-transition time.
+//
+// Exposing this small predicate (rather than having the verify command reach
+// into the unexported registry) keeps the dependency edge one-directional:
+// commands/config consults commands/workflow, and internal/config never imports
+// any commands/* package. The checker reuses evaluatorFor so the set of valid
+// kinds can never drift from the set the gate actually evaluates.
+func ValidSignalKind(signal string) bool {
+	_, ok := evaluatorFor(signal)
+	return ok
+}
+
 // blankUnknown renders a value placeholder for reason strings when the observed
 // value is empty, so an absent signal reads "unknown" rather than "".
 func blankUnknown(v string) string {
