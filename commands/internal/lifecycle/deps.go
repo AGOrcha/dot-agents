@@ -128,14 +128,15 @@ type Deps struct {
 	ExampleBlock func(lines ...string) string
 
 	// RunRefresh is the back-edge into commands.runRefresh used by
-	// NewRefreshCmd's RunE. The actual run body, package-var seams
-	// (stdRefreshConfigLoader, stdImportDeps, stdAddDeps), and the helper
-	// fan-out (mapResourceRelToDest, restoreFromResources) remain in
-	// commands/ until t04 (add) and t06 (import) merge and the
+	// NewRefreshCmd's RunE. importAlso/inexact carry the parsed --import and
+	// --inexact flags through to the legacy body. The actual run body,
+	// package-var seams (stdRefreshConfigLoader, stdImportDeps, stdAddDeps),
+	// and the helper fan-out (mapResourceRelToDest, restoreFromResources)
+	// remain in commands/ until t04 (add) and t06 (import) merge and the
 	// cross-cluster constants / interfaces (addDeps, importDeps,
 	// importScope*, rel*Dir) can be re-homed into lifecycle. See
 	// .agents/active/fold-back/t07-refresh-body-deferred.md.
-	RunRefresh func(projectFilter string, importAlso bool) error
+	RunRefresh func(projectFilter string, importAlso, inexact bool) error
 
 	// FlagsFn is an optional closure over the caller's live flag state.
 	// When non-nil it is invoked by NewInstallCmd / NewDoctorCmd /

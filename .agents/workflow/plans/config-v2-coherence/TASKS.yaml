@@ -82,6 +82,7 @@ tasks:
         Add Source.cache_keys ({file}/glob, {git:{commit,tags}}, {env}, {dir}) per [[schema-usage]] four-place
         AgentsRC rule + schema. Force escapes: per-unit --refresh and an always-revalidate marker. Land-it-once:
         fold onto PR #209 (p5).
+        - (fb:cache-keys-unconsumed) cc was marked completed but cache_keys is inert — EffectiveCacheKey and DefaultCacheKey have zero non-test callers, and the fetcher (http/oci) plus resolver never consult cache keys or per-kind staleness, so setting cache_keys in .agentsrc.json is a silent no-op. Completed is terminal so cc stays completed and the gap is carried forward via follow-up task cl-cache-keys-consume.
       app_type: go-cli
     - id: cd-ensure-resolved-seam
       title: EnsureResolved auto-sync seam + --locked/--frozen/--no-sync/--offline
@@ -194,7 +195,7 @@ tasks:
       app_type: go-cli
     - id: cj-outputs-exact-prune
       title: 'Outputs (sync) half: exact/prune projection in refresh/install'
-      status: in_progress
+      status: completed
       depends_on:
         - cd-ensure-resolved-seam
       blocks: []
@@ -231,4 +232,23 @@ tasks:
         effective-config truth surface, ABSORBING status's config inspection; status becomes fleet/link-health only;
         doctor is read-only health + driver-event + TTL review-nudges (never repairs). Build on p4e (explain consumes
         ResolveLocked) + p2 (drift/nudge). Land-it-once: coordinate edits with PR #206 (p2) and the p4e branch.
+      app_type: go-cli
+    - id: cl-cache-keys-consume
+      title: Consume cache_keys + per-kind staleness in fetcher/resolver (cc was inert)
+      status: pending
+      depends_on:
+        - cc-cache-keys-per-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/cache_keys.go
+        - internal/config/staleness.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_http.go
+        - internal/config/fetcher_oci.go
+        - internal/config/resolver.go
+        - internal/config/fetcher_test.go
+        - internal/config/staleness_test.go
+      verification_required: true
+      notes: Wire the parsed cache_keys primitive into behavior. EffectiveCacheKey and DefaultCacheKey have no non-test callers today; the http/oci fetchers and resolver must consult per-source cache keys and per-kind staleness defaults when computing cache paths and staleness, so cache_keys in .agentsrc.json stops being a silent no-op. See fold-back cache-keys-unconsumed. Depends on cc (the parser, completed).
       app_type: go-cli

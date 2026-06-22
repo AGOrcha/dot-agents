@@ -165,7 +165,7 @@ func stubMaximumNArgsWithHints(n int, _ ...string) cobra.PositionalArgs {
 	return cobra.MaximumNArgs(n)
 }
 
-func depsWithRunRefresh(run func(string, bool) error) Deps {
+func depsWithRunRefresh(run func(string, bool, bool) error) Deps {
 	return Deps{
 		ExampleBlock:          stubExampleBlock,
 		MaximumNArgsWithHints: stubMaximumNArgsWithHints,
@@ -177,7 +177,7 @@ func depsWithRunRefresh(run func(string, bool) error) Deps {
 // presence of the --import flag. Positive: a known-good Deps wires
 // everything cleanly.
 func TestNewRefreshCmd_MetadataAndFlag(t *testing.T) {
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool) error { return nil }))
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool) error { return nil }))
 
 	if cmd.Use != "refresh [project]" {
 		t.Errorf("Use = %q, want %q", cmd.Use, "refresh [project]")
@@ -187,6 +187,9 @@ func TestNewRefreshCmd_MetadataAndFlag(t *testing.T) {
 	}
 	if cmd.Flags().Lookup("import") == nil {
 		t.Error("expected --import flag wired on lifecycle refresh cmd")
+	}
+	if cmd.Flags().Lookup("inexact") == nil {
+		t.Error("expected --inexact flag wired on lifecycle refresh cmd")
 	}
 	if cmd.Args == nil {
 		t.Error("expected Args validator wired on lifecycle refresh cmd")
@@ -207,7 +210,7 @@ func TestNewRefreshCmd_RunEPassesFilterAndImportFlag(t *testing.T) {
 	var gotImport bool
 	called := false
 
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, importAlso bool) error {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, importAlso, _ bool) error {
 		called = true
 		gotFilter = filter
 		gotImport = importAlso
@@ -231,12 +234,46 @@ func TestNewRefreshCmd_RunEPassesFilterAndImportFlag(t *testing.T) {
 	}
 }
 
+// TestNewRefreshCmd_RunEPassesInexactFlag pins that the parsed --inexact
+// boolean reaches deps.RunRefresh, and that its default (flag absent) is
+// false so refresh stays exact/prune-by-default.
+func TestNewRefreshCmd_RunEPassesInexactFlag(t *testing.T) {
+	t.Run("flag set", func(t *testing.T) {
+		var gotInexact bool
+		cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, inexact bool) error {
+			gotInexact = inexact
+			return nil
+		}))
+		cmd.SetArgs([]string{"--inexact"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if !gotInexact {
+			t.Error("inexact = false, want true (set via --inexact)")
+		}
+	})
+	t.Run("flag absent defaults false", func(t *testing.T) {
+		gotInexact := true
+		cmd := NewRefreshCmd(depsWithRunRefresh(func(_ string, _, inexact bool) error {
+			gotInexact = inexact
+			return nil
+		}))
+		cmd.SetArgs(nil)
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("Execute: %v", err)
+		}
+		if gotInexact {
+			t.Error("inexact = true, want false (exact/prune is the default)")
+		}
+	})
+}
+
 // TestNewRefreshCmd_RunEPropagatesError is the negative path: an error
 // returned by deps.RunRefresh surfaces from cmd.Execute unchanged. Pins
 // the no-swallowed-error contract for the lifecycle dispatch boundary.
 func TestNewRefreshCmd_RunEPropagatesError(t *testing.T) {
 	sentinel := errors.New("refresh deliberately failed")
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool) error {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(string, bool, bool) error {
 		return sentinel
 	}))
 	cmd.SetArgs(nil)
@@ -249,7 +286,7 @@ func TestNewRefreshCmd_RunEPropagatesError(t *testing.T) {
 // "no positional arg → empty filter string" contract.
 func TestNewRefreshCmd_RunEEmptyArgsPassesEmptyFilter(t *testing.T) {
 	var seenFilter = "sentinel-not-overwritten"
-	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, _ bool) error {
+	cmd := NewRefreshCmd(depsWithRunRefresh(func(filter string, _, _ bool) error {
 		seenFilter = filter
 		return nil
 	}))
