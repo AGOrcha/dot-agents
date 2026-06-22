@@ -108,7 +108,7 @@ tasks:
       status: pending
       depends_on:
         - config-v2-migration/p5-source-types-http-oci
-        - config-v2-migration/p6-packages-pass2-cli
+        - config-v2-migration/p4f-units-lock-7a-wiring
       blocks: []
       owner: dot-agents
       write_scope:
@@ -120,8 +120,9 @@ tasks:
       notes: |-
         Per §4 (relaxed) + §7A.1/§7A.2. Relax the tier-constraint: packages/artifacts may reference git/local/http/oci
         via source:path@version; only extends still rejects oci. Kind (layer|artifact) governs merge/trust, not which
-        source is permitted. Update schema validation + the resolve-time tier check. Land-it-once: coordinate with
-        PR #209 (p5 source types) and the p6 packages pass.
+        source is permitted. Update schema validation + the resolve-time tier check. Absorbs the artifact-resolution
+        mechanic of the retired p6 (§15 D3/D8: one units model, any source serves any kind, OCI is one source not the
+        definition; no parallel `da packages` command tree). Build on p5 (source types) + p4f (units-lock wiring).
       app_type: go-cli
     - id: cf-local-source-autosetup
       title: 'Git-backed local source: auto-bootstrap so local units version by ref'
@@ -217,7 +218,7 @@ tasks:
       status: pending
       depends_on:
         - cd-ensure-resolved-seam
-        - config-v2-migration/p4e-config-explain-consume-resolver
+        - config-v2-migration/p4f-units-lock-7a-wiring
         - config-v2-migration/p2-lockfile-doctor-status
       blocks: []
       owner: dot-agents
@@ -230,12 +231,13 @@ tasks:
       notes: |-
         Per §7A.6 (supersedes §13.4). config explain auto-locks (like uv tree) and becomes the single
         effective-config truth surface, ABSORBING status's config inspection; status becomes fleet/link-health only;
-        doctor is read-only health + driver-event + TTL review-nudges (never repairs). Build on p4e (explain consumes
-        ResolveLocked) + p2 (drift/nudge). Land-it-once: coordinate edits with PR #206 (p2) and the p4e branch.
+        doctor is read-only health + driver-event + TTL review-nudges (never repairs). Build on p4f (explain consumes
+        the units lock / ResolveLocked; auto-lock) + p2 (drift/nudge). Land-it-once: coordinate edits with PR #206 (p2)
+        and the p4f branch.
       app_type: go-cli
     - id: cl-cache-keys-consume
       title: Consume cache_keys + per-kind staleness in fetcher/resolver (cc was inert)
-      status: pending
+      status: completed
       depends_on:
         - cc-cache-keys-per-source
       blocks: []
