@@ -9,7 +9,9 @@
     "prebuild": "bash scripts/copy-schemas.sh",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "test:e2e": "playwright test",
+    "test:e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.40.0",
@@ -22,6 +24,8 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@playwright/test": "^1.49.1",
+    "serve": "^14.2.4",
     "typescript": "^6.0.3"
   }
 }

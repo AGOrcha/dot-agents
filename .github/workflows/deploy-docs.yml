@@ -24,6 +24,42 @@ permissions:
   deployments: write
 
 jobs:
+  docs-e2e:
+    # Headless-browser guard for the custom interactive routes (/graphs/* +
+    # /diagrams/*). Catches the blank-graph bug class (0-height canvas / no
+    # rendered nodes) and asset 404s that the build and a plain curl both pass.
+    # Independent of `deploy` (does not gate it) so a deploy is never blocked on
+    # browser flakiness, while a regression still surfaces as a failing check.
+    name: UI e2e (graphs + diagrams)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: docs/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs/web
+        # --ignore-scripts: per Sonar S6505; the Playwright browser binaries are
+        # installed explicitly in the next step, so install-time scripts are not
+        # needed here.
+        run: npm ci --ignore-scripts
+
+      - name: Install Playwright browser
+        working-directory: docs/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        working-directory: docs/web
+        # playwright.config.ts builds (DEPLOY_TARGET=cloudflare) and static-serves
+        # dist itself, so this step is fully hermetic.
+        run: npm run test:e2e
+
   deploy:
     name: Build and deploy
     runs-on: ubuntu-latest

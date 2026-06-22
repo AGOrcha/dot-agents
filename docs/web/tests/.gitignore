@@ -1,0 +1,2 @@
+# Playwright run artifacts (traces, screenshots, error context).
+.artifacts/
