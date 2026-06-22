@@ -262,3 +262,131 @@ func TestOpenCodeBrokenLinks_HealthySymlinkIgnored(t *testing.T) {
 func TestOpenCodeBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*opencode)(nil)
 }
+
+// ---------- UserConfigReporter implementation (P4) ----------
+
+// TestOpenCodeUserBrokenLinks is the table-driven cover for opencode's
+// UserConfigReporter broken-link surface (~/.opencode/agent/*). Every reported
+// link carries PlatformID="opencode".
+func TestOpenCodeUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken opencode agent",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".opencode", "agent", "missing.md"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "healthy opencode agent symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "agents", "global", "a.md")
+				if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".opencode", "agent", "a.md"))
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			o := &opencode{io: stdPlatformIO{}}
+			got := o.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "opencode", got, tc.wantCount)
+		})
+	}
+}
+
+// TestOpenCodeUserBadge covers the opencode user-config badge over
+// ~/.opencode/agent/.
+func TestOpenCodeUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present healthy agent",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "agents", "global", "a.md")
+				if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".opencode", "agent", "a.md"))
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken agent surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".opencode", "agent", "missing.md"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			o := &opencode{io: stdPlatformIO{}}
+			got := o.UserBadge(home)
+			if got.Name != "OpenCode" {
+				t.Errorf("UserBadge.Name = %q, want OpenCode", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestOpenCodeUserConfig_InterfaceConformance pins compile-time conformance
+// with UserConfigReporter for the opencode platform.
+func TestOpenCodeUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*opencode)(nil)
+}
+
+// TestOpenCodeDoesNotReportOrphanCanonicals pins the negative half of the P4
+// ownership split: opencode maintains no canonical skills/agents store of its
+// own, so it must NOT implement OrphanCanonicalReporter (claude owns "skills",
+// codex owns "agents"). A regression that wired opencode in would double-count
+// orphans in doctor's reporter fan-out.
+func TestOpenCodeDoesNotReportOrphanCanonicals(t *testing.T) {
+	var p Platform = NewOpenCode()
+	if _, ok := p.(OrphanCanonicalReporter); ok {
+		t.Error("opencode must not implement OrphanCanonicalReporter")
+	}
+}

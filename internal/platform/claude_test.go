@@ -1148,3 +1148,289 @@ func TestClaudeBrokenLinks_HealthyRuleNotLink(t *testing.T) {
 func TestClaudeBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*claude)(nil)
 }
+
+// ---------- OrphanCanonicalReporter implementation (P4) ----------
+
+// TestClaudeOrphanCanonicals is the table-driven cover for claude's
+// OrphanCanonicalReporter: it owns only the "skills" bucket and reports plain
+// orphans (no back-link), mis-pointed orphans (back-link resolves elsewhere),
+// while skipping correctly-linked entries and any non-owned bucket.
+func TestClaudeOrphanCanonicals(t *testing.T) {
+	tests := []struct {
+		name      string
+		bucket    string
+		setup     func(t *testing.T, agentsHome, projectPath string) (wantName string, wantNote bool)
+		wantCount int
+	}{
+		{
+			name:   "plain orphan in owned skills bucket",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				mkdirAllT(t, filepath.Join(agentsHome, "skills", "proj", "alpha"))
+				return "alpha", false
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "correctly-linked back-link not orphaned",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				canonical := filepath.Join(agentsHome, "skills", "proj", "beta")
+				mkdirAllT(t, canonical)
+				repoLocal := filepath.Join(projectPath, ".agents", "skills")
+				mkdirAllT(t, repoLocal)
+				linktest.Link(t, canonical, filepath.Join(repoLocal, "beta"))
+				return "", false
+			},
+			wantCount: 0,
+		},
+		{
+			name:   "mis-pointed back-link is orphan with note",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				mkdirAllT(t, filepath.Join(agentsHome, "skills", "proj", "gamma"))
+				other := filepath.Join(agentsHome, "skills", "otherproj", "delta")
+				mkdirAllT(t, other)
+				repoLocal := filepath.Join(projectPath, ".agents", "skills")
+				mkdirAllT(t, repoLocal)
+				linktest.Link(t, other, filepath.Join(repoLocal, "gamma"))
+				return "gamma", true
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "agents bucket not owned by claude",
+			bucket: "agents",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				mkdirAllT(t, filepath.Join(agentsHome, "agents", "proj", "orphan-agent"))
+				return "", false
+			},
+			wantCount: 0,
+		},
+		{
+			name:   "absent canonical bucket yields nothing",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				return "", false
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			projectPath := filepath.Join(tmp, "proj")
+			mkdirAllT(t, projectPath)
+			wantName, wantNote := tc.setup(t, agentsHome, projectPath)
+
+			c := &claude{io: stdPlatformIO{}}
+			got := c.OrphanCanonicals("proj", projectPath, agentsHome, tc.bucket)
+			assertOrphanCanonicals(t, tc.bucket, got, tc.wantCount, wantName, wantNote)
+		})
+	}
+}
+
+// assertOrphanCanonicals verifies an OrphanCanonicals result against the
+// expected count, name, and mis-pointed note. Extracted from the table loops in
+// TestClaudeOrphanCanonicals / TestCodexOrphanCanonicals to keep each test body
+// flat (low cognitive complexity).
+func assertOrphanCanonicals(t *testing.T, bucket string, got []OrphanCanonical, wantCount int, wantName string, wantNote bool) {
+	t.Helper()
+	if len(got) != wantCount {
+		t.Fatalf("OrphanCanonicals(%q) = %d entries %+v, want %d", bucket, len(got), got, wantCount)
+	}
+	if wantCount == 0 {
+		return
+	}
+	if got[0].Name != wantName {
+		t.Errorf("orphan Name = %q, want %q", got[0].Name, wantName)
+	}
+	if wantNote && !strings.Contains(got[0].DisplayNote, "mis-pointed") {
+		t.Errorf("expected mis-pointed DisplayNote, got %q", got[0].DisplayNote)
+	}
+	if !wantNote && got[0].DisplayNote != "" {
+		t.Errorf("expected empty DisplayNote for plain orphan, got %q", got[0].DisplayNote)
+	}
+}
+
+// TestClaudeOrphanCanonicals_InterfaceConformance pins compile-time
+// conformance with OrphanCanonicalReporter so doctor.collectOrphanCanonicals's
+// type assertion cannot silently regress.
+func TestClaudeOrphanCanonicals_InterfaceConformance(t *testing.T) {
+	var _ OrphanCanonicalReporter = (*claude)(nil)
+}
+
+// ---------- UserConfigReporter implementation (P4) ----------
+
+// TestClaudeUserBrokenLinks is the table-driven cover for claude's
+// UserConfigReporter broken-link surface (CLAUDE.md, settings.json, agents/*,
+// skills/*). Every reported link must carry PlatformID="claude".
+func TestClaudeUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken CLAUDE.md",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "CLAUDE.md"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "broken settings.json",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "settings.json"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "broken agents dir entry",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "agents", "ghost.md"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "broken skills dir entry",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "skills", "ghost"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "healthy CLAUDE.md symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "rules", "global", "claude-code.md")
+				mkdirAllT(t, filepath.Dir(target))
+				if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".claude", "CLAUDE.md"))
+			},
+			wantCount: 0,
+		},
+		{
+			name: "plain CLAUDE.md ignored",
+			setup: func(t *testing.T, home string) {
+				claudeHome := filepath.Join(home, ".claude")
+				mkdirAllT(t, claudeHome)
+				if err := os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &claude{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "claude", got, tc.wantCount)
+		})
+	}
+}
+
+// assertUserBrokenLinks verifies a UserBrokenLinks result: the expected count
+// plus, for every reported link, the platform tag and non-empty path fields.
+// Shared by the claude/codex/opencode UserBrokenLinks table tests to keep each
+// test body flat (low cognitive complexity).
+func assertUserBrokenLinks(t *testing.T, platformID string, got []BrokenLink, wantCount int) {
+	t.Helper()
+	if len(got) != wantCount {
+		t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, wantCount)
+	}
+	for _, bl := range got {
+		if bl.PlatformID != platformID {
+			t.Errorf("PlatformID = %q, want %s", bl.PlatformID, platformID)
+		}
+		if bl.LinkPath == "" || bl.DisplayDest == "" {
+			t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
+		}
+	}
+}
+
+// TestClaudeUserBadge is the table-driven cover for claude's UserBadge:
+// Present reflects any managed user-config presence and Broken reflects any
+// dangling managed link.
+func TestClaudeUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present healthy CLAUDE.md",
+			setup: func(t *testing.T, home string) {
+				claudeHome := filepath.Join(home, ".claude")
+				mkdirAllT(t, claudeHome)
+				if err := os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken settings surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "settings.json"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &claude{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Claude" {
+				t.Errorf("UserBadge.Name = %q, want Claude", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestClaudeUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the claude platform.
+func TestClaudeUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*claude)(nil)
+}
+
+// mkdirAllT is a small test helper that os.MkdirAll's path and fails the test
+// on error, keeping the table-driven setup closures terse.
+func mkdirAllT(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+}

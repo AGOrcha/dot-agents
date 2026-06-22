@@ -627,6 +627,16 @@ func statusGitInfo(agentsHome string) statusJSONGit {
 	return statusJSONGit{Initialized: true, Branch: g.Branch, Remote: g.Remote}
 }
 
+// collectUserConfigPlatforms builds the JSON-mode user-config platform list by
+// delegating to each platform's UserBadge implementation (P4 platform-driven
+// diagnostics). The order is platform.All() filtered to the UserConfigReporter
+// implementors; copilot implements the interface but reports an empty/clean
+// badge (its documented user-config layer is not yet wired by dot-agents — see
+// PLATFORM_DIRS_DOCS), so appendPlatformIfPresent filters it out and the JSON
+// snapshot stays byte-identical to the pre-P4 inline implementation. cursor,
+// like claude/codex/opencode, reports its real managed ~/.cursor/hooks.json
+// user-home surface. agentFilter scopes the result by p.ID() the same way the
+// prior per-platform if-guards did.
 func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
 	homeDir, err := config.UserHomeDir()
 	if err != nil {
@@ -634,33 +644,20 @@ func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
 	}
 
 	var out []statusJSONPlatform
-	if agentFilter == "" || agentFilter == "claude" {
-		out = appendPlatformIfPresent(out, "Claude", countPlatformHealth(
-			[]string{
-				filepath.Join(homeDir, statusClaudeDir, "CLAUDE.md"),
-				filepath.Join(homeDir, statusClaudeDir, statusClaudeSettingsJSON),
-			},
-			[]string{
-				filepath.Join(homeDir, statusClaudeDir, "agents"),
-				filepath.Join(homeDir, statusClaudeDir, "skills"),
-			},
-		))
-	}
-	if agentFilter == "" || agentFilter == "codex" {
-		out = appendPlatformIfPresent(out, "Codex", countPlatformHealth(
-			[]string{
-				filepath.Join(homeDir, statusCodexDir, statusHooksJSON),
-			},
-			[]string{
-				filepath.Join(homeDir, statusCodexDir, "agents"),
-				filepath.Join(homeDir, statusAgentsDir, "skills"),
-			},
-		))
-	}
-	if agentFilter == "" || agentFilter == "opencode" {
-		out = appendPlatformIfPresent(out, "OpenCode", countPlatformHealth(nil, []string{
-			filepath.Join(homeDir, statusOpenCodeDir, "agent"),
-		}))
+	for _, p := range platform.All() {
+		if agentFilter != "" && agentFilter != p.ID() {
+			continue
+		}
+		r, ok := p.(platform.UserConfigReporter)
+		if !ok {
+			continue
+		}
+		badge := r.UserBadge(homeDir)
+		out = appendPlatformIfPresent(out, badge.Name, platformBadge{
+			name:    badge.Name,
+			present: badge.Present,
+			broken:  badge.Broken,
+		})
 	}
 	return out
 }
@@ -684,14 +681,13 @@ func collectProjectPlatforms(name, path, agentsHome string) []statusJSONPlatform
 	return out
 }
 
-// countPlatformHealth and platformStatus remain in place as collaborators of
-// collectUserConfigPlatforms and appendUserConfigPlatformBadge. The
-// user-config layer is still inlined here; P4 (orphan canonicals +
-// userconfig) is the next phase that moves those helpers into per-platform
-// UserBadge / UserBrokenLinks implementations. Both helpers are exercised
-// directly by status_test.go's countPlatformHealth/platformStatus block, so
-// they stay package-private but live in this file rather than being
-// re-derived ad hoc.
+// platformStatus remains in place as a collaborator of
+// appendPlatformIfPresent. The user-config badge math now lives in each
+// platform's UserBadge implementation (P4), so collectUserConfigPlatforms no
+// longer calls countPlatformHealth — it is kept only because status_test.go's
+// countPlatformHealth/platformStatus block exercises both helpers directly.
+// Both stay package-private but live in this file rather than being re-derived
+// ad hoc.
 func countPlatformHealth(files, dirs []string) platformBadge {
 	okCount, warnCount := 0, 0
 	addManagedCounts(&okCount, &warnCount, files, dirs)
