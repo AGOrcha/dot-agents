@@ -16,21 +16,98 @@
 // assets.run_worker_first for /internal/* so this fetch handler ALWAYS runs
 // before an internal asset can be served — without that, /internal/* leaks.
 
+// PUBLIC schema allowlist: ONLY these /schemas/<name> files are served
+// unauthenticated. Every other schema (dashboard-*, workflow-*, verification-*)
+// describes internal operational DTOs — auth/config keys, delegation-bundle and
+// run/rubric shapes — and must NOT be exposed on the public tree. An explicit
+// allowlist fails closed: a newly added schema is internal until listed here.
+const PUBLIC_SCHEMAS = new Set([
+  'agentsrc.schema.json', // the user-authored .agentsrc.json config contract
+  'hook.schema.json', // documented publicly in HOOKS.md
+  'plugin.schema.json', // documented publicly in PLUGIN_CONTRACT.md
+]);
+
+/**
+ * Whether a normalized /schemas path is on the PUBLIC allowlist. The bare
+ * "/schemas" or "/schemas/" listing is NOT public (it would enumerate internal
+ * schema filenames); only an explicit allowlisted file is.
+ *
+ * @param {string} norm  normalized lower-case pathname (from normalizePathForGate)
+ * @returns {boolean}
+ */
+export function isPublicSchemaPath(norm) {
+  const prefix = '/schemas/';
+  if (!norm.startsWith(prefix)) return false;
+  const rest = norm.slice(prefix.length);
+  // Exactly one segment (a file directly under /schemas/), on the allowlist.
+  if (rest === '' || rest.includes('/')) return false;
+  return PUBLIC_SCHEMAS.has(rest);
+}
+
+/**
+ * Normalize a raw URL pathname for security classification, FAIL-CLOSED.
+ *
+ * Returns the canonical lower-segment path to classify, or `null` when the path
+ * is non-canonical / hostile in a way we will not try to interpret (it must then
+ * be treated as gated, never public). We refuse to serve, rather than guess, any
+ * path that:
+ *   - still contains a percent-encoding after URL's one decode pass (double
+ *     encoding, e.g. %252f) — an attacker layering encodings to dodge a prefix;
+ *   - contains a literal NUL;
+ *   - contains a backslash (a separator on some stacks);
+ *   - contains an empty segment ("//", embedded empty) other than a single
+ *     trailing slash;
+ *   - contains a "." or ".." dot-segment (traversal).
+ * A decoded '/' or '\' that an attacker hid as %2f / %5c is, after URL's decode
+ * pass, a literal separator here and is caught by the segment scan (it splits
+ * "/internal%2fsecret" into ["", "internal", "secret"] -> gated).
+ *
+ * @param {string} rawPath  URL().pathname (already one-pass %-decoded by URL)
+ * @returns {string | null}  canonical "/lower/case/path" or null if hostile
+ */
+export function normalizePathForGate(rawPath) {
+  if (typeof rawPath !== 'string' || rawPath === '') return null;
+  if (rawPath.includes('\0')) return null;
+  if (rawPath.includes('\\')) return null;
+  // Residual percent sign after URL's decode pass => double-encoded => refuse.
+  if (rawPath.includes('%')) return null;
+
+  const segments = rawPath.split('/');
+  // rawPath begins with '/', so segments[0] === ''. Inspect the rest.
+  for (let i = 1; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg === '') {
+      // Permit only a single trailing empty segment (path ended in '/').
+      if (i === segments.length - 1) continue;
+      return null;
+    }
+    if (seg === '.' || seg === '..') return null;
+  }
+  return rawPath.toLowerCase();
+}
+
 /**
  * Classify a request path into a routing decision. Pure + synchronous so it can
- * be unit-tested without spinning a Worker.
+ * be unit-tested without spinning a Worker. FAIL-CLOSED: a hostile/non-canonical
+ * path (normalizePathForGate -> null) is classified 'internal' so it hits the
+ * JWT gate (and is rejected) rather than being served by ASSETS as 'public'.
  *
  * @param {string} pathname  URL().pathname of the request
  * @returns {'schemas' | 'internal' | 'public'}
  */
 export function classifyPath(pathname) {
-  // Schemas carve-out FIRST: always public, even though it is a sub-path.
-  if (pathname === '/schemas' || pathname.startsWith('/schemas/')) {
-    return 'schemas';
+  const norm = normalizePathForGate(pathname);
+  if (norm === null) {
+    return 'internal'; // could not canonicalize -> never public; gate it
   }
-  // Gate ONLY '/internal' exactly or '/internal/...' — '/internalfoo' is public.
-  if (pathname === '/internal' || pathname.startsWith('/internal/')) {
+  // Internal check BEFORE the public branches (defense in depth).
+  if (norm === '/internal' || norm.startsWith('/internal/')) {
     return 'internal';
+  }
+  // Schemas: only the explicit public allowlist is public; the bare listing and
+  // all internal schemas are gated.
+  if (norm === '/schemas' || norm.startsWith('/schemas/')) {
+    return isPublicSchemaPath(norm) ? 'schemas' : 'internal';
   }
   return 'public';
 }
@@ -130,7 +207,24 @@ export async function verifyAccessJwt(request, env) {
     return { ok: false, reason: 'undecodable-token' };
   }
 
+  // Pin the algorithm to RS256 — reject "none", HS* (HMAC key-confusion where an
+  // attacker signs with the public key as an HMAC secret), and any other alg.
   if (header.alg !== 'RS256') return { ok: false, reason: 'unexpected-alg' };
+  // kid must be a present, non-empty string so the JWK lookup is an explicit
+  // match — never let an absent kid match an absent-kid JWK (undefined===undefined).
+  if (typeof header.kid !== 'string' || header.kid === '') {
+    return { ok: false, reason: 'missing-kid' };
+  }
+
+  // Config must be set. If the maintainer placeholder is still in place (or the
+  // vars are empty), fail closed rather than build a bogus issuer/JWKS URL.
+  if (
+    !env.CF_ACCESS_AUD ||
+    !env.CF_ACCESS_TEAM_DOMAIN ||
+    env.CF_ACCESS_TEAM_DOMAIN.startsWith('REPLACE-ME')
+  ) {
+    return { ok: false, reason: 'gate-unconfigured' };
+  }
 
   // Claim checks (cheap; do before the crypto where possible, but signature is
   // still required below — a forged unsigned token must never pass).
@@ -159,8 +253,14 @@ export async function verifyAccessJwt(request, env) {
   } catch {
     return { ok: false, reason: 'jwks-unavailable' };
   }
-  const jwk = keys.find((k) => k.kid === header.kid);
+  const jwk = keys.find((k) => typeof k.kid === 'string' && k.kid === header.kid);
   if (!jwk) return { ok: false, reason: 'unknown-kid' };
+  // The matched key must be an RSA key; if it advertises an alg, it must be
+  // RS256. Defends against a JWKS entry of the wrong type/alg being coerced.
+  if (jwk.kty !== 'RSA') return { ok: false, reason: 'bad-jwk-kty' };
+  if (jwk.alg !== undefined && jwk.alg !== 'RS256') {
+    return { ok: false, reason: 'bad-jwk-alg' };
+  }
 
   let cryptoKey;
   try {

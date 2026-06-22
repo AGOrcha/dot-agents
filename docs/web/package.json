@@ -31,6 +31,7 @@
     "@astrojs/check": "^0.9.9",
     "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.49.1",
+    "miniflare": "^4.20260617.1",
     "serve": "^14.2.4",
     "typescript": "^6.0.3"
   }

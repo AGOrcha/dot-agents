@@ -17,12 +17,15 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    // SECURITY: static assets bypass the Worker by default, which would serve
-    // /internal/* WITHOUT the JWT check (silent leak). run_worker_first forces
-    // the fetch handler to run before assets for /internal/* so the gate always
-    // applies. The array form keeps public + /schemas on the fast asset path;
-    // it is supported by the pinned wrangler v4 schema (anyOf string[]|bool).
-    "run_worker_first": ["/internal/*"]
+    // SECURITY: static assets bypass the Worker by default, which would serve an
+    // internal page WITHOUT the JWT check (silent leak). We FAIL CLOSED: the
+    // fetch handler runs before assets for EVERY request, so the gate always
+    // applies and there is no per-route pattern that an encoded/non-canonical
+    // path could slip past (a per-route array like ["/internal/*"] does not match
+    // the bare "/internal" nor "/internal%2f..." reliably). The handler still
+    // fast-paths public + allowlisted /schemas straight to ASSETS, so the only
+    // cost is one cheap classification per request.
+    "run_worker_first": true
   },
   "vars": {
     "ENVIRONMENT": "development",
