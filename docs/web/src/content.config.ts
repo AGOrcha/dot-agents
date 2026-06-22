@@ -1,8 +1,16 @@
-import { defineCollection } from 'astro:content';
+import { defineCollection, z } from 'astro:content';
 import { docsSchema } from '@astrojs/starlight/schema';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Visibility partition (dm3 / D4): every content entry is `public` or `internal`,
+// defaulting to `internal` (fail-safe — anything we forget to classify stays
+// hidden from the public build). INTERNAL_BUILD=1 (set by `astro build` in the
+// build:internal pass) additionally loads the .agents/** lessons/specs/proposals
+// into the same docs collection so they get routes + sidebar groups; with the
+// flag off those entries are never loaded, which is what keeps them out of dist/.
+const INTERNAL_BUILD = process.env.INTERNAL_BUILD === '1';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PUBLIC docs collection — sourced live from the repo's canonical markdown.
@@ -151,6 +159,8 @@ function repoDocsLoader() {
           id: page.id,
           data: {
             title,
+            // PUBLIC allowlist entries are the curated 4 sections (dm3 / D4).
+            visibility: 'public',
             ...(frontmatter.description ? { description: frontmatter.description } : {}),
             sidebar: { order, ...(sidebarLabel ? { label: sidebarLabel } : {}) },
           },
@@ -168,10 +178,113 @@ function repoDocsLoader() {
         count++;
       }
       logger?.info?.(`repo-public-docs: loaded ${count}/${PUBLIC_PAGES.length} public page(s) from ${REPO_ROOT}`);
+
+      // ── INTERNAL pass (dm3 / D4) ───────────────────────────────────────────
+      // Only when INTERNAL_BUILD: ALSO load the .agents/** artifacts into THIS
+      // same docs collection under section-prefixed ids (internal/lessons/*,
+      // internal/specs/*, internal/proposals/*) so Starlight's autogenerate
+      // sidebar + [...slug] route pick them up. With the flag off none of this
+      // runs, so internal pages never reach the public dist/.
+      if (!INTERNAL_BUILD) return;
+
+      // (dir, fileGlob, idFor) for each internal section. Each yields a list of
+      // { abs, id } the loader renders exactly like a public page.
+      type InternalSource = { abs: string; id: string };
+      async function collectInternal(): Promise<InternalSource[]> {
+        const out: InternalSource[] = [];
+
+        // Lessons: .agents/lessons/<name>/LESSON.md → internal/lessons/<name>
+        const lessonsDir = path.join(REPO_ROOT, '.agents/lessons');
+        try {
+          for (const name of (await fs.readdir(lessonsDir, { withFileTypes: true }))) {
+            if (!name.isDirectory()) continue;
+            out.push({
+              abs: path.join(lessonsDir, name.name, 'LESSON.md'),
+              id: `internal/lessons/${name.name}`,
+            });
+          }
+        } catch {
+          logger?.warn?.('repo-internal-docs: SKIP missing .agents/lessons');
+        }
+
+        // Specs: .agents/workflow/specs/<id>/design.md → internal/specs/<id>
+        const specsDir = path.join(REPO_ROOT, '.agents/workflow/specs');
+        try {
+          for (const name of (await fs.readdir(specsDir, { withFileTypes: true }))) {
+            if (!name.isDirectory()) continue;
+            out.push({
+              abs: path.join(specsDir, name.name, 'design.md'),
+              id: `internal/specs/${name.name}`,
+            });
+          }
+        } catch {
+          logger?.warn?.('repo-internal-docs: SKIP missing .agents/workflow/specs');
+        }
+
+        // Proposals: .agents/proposals/<name>.md → internal/proposals/<name>
+        const proposalsDir = path.join(REPO_ROOT, '.agents/proposals');
+        try {
+          for (const ent of (await fs.readdir(proposalsDir, { withFileTypes: true }))) {
+            if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+            out.push({
+              abs: path.join(proposalsDir, ent.name),
+              id: `internal/proposals/${ent.name.replace(/\.md$/, '')}`,
+            });
+          }
+        } catch {
+          logger?.warn?.('repo-internal-docs: SKIP missing .agents/proposals');
+        }
+
+        return out;
+      }
+
+      let internalCount = 0;
+      for (const src of await collectInternal()) {
+        let raw: string;
+        try {
+          raw = await fs.readFile(src.abs, 'utf8');
+        } catch {
+          logger?.warn?.(`repo-internal-docs: SKIP missing source ${path.relative(REPO_ROOT, src.abs)}`);
+          continue;
+        }
+        const { frontmatter, body } = splitFrontmatter(raw);
+        const slugFallback = src.id.split('/').pop()!;
+        const title = frontmatter.title || deriveTitle(body, slugFallback);
+        const filePath = path.relative(siteRoot, src.abs).split(path.sep).join('/');
+        const data = await parseData({
+          id: src.id,
+          data: {
+            title,
+            visibility: 'internal',
+            ...(frontmatter.description ? { description: frontmatter.description } : {}),
+          },
+          filePath,
+        });
+        const rendered = await renderMarkdown(body);
+        store.set({
+          id: src.id,
+          data,
+          body,
+          filePath,
+          digest: generateDigest(raw),
+          rendered,
+        });
+        internalCount++;
+      }
+      logger?.info?.(`repo-internal-docs: loaded ${internalCount} internal page(s) from ${REPO_ROOT}/.agents`);
     },
   };
 }
 
 export const collections = {
-  docs: defineCollection({ loader: repoDocsLoader(), schema: docsSchema() }),
+  docs: defineCollection({
+    loader: repoDocsLoader(),
+    // Visibility partition (dm3 / D4): default `internal` is fail-safe — any
+    // entry not explicitly marked public stays out of the public dist/.
+    schema: docsSchema({
+      extend: z.object({
+        visibility: z.enum(['public', 'internal']).default('internal'),
+      }),
+    }),
+  }),
 };
