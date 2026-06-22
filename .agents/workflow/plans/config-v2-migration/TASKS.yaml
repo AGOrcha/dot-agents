@@ -276,7 +276,7 @@ tasks:
       app_type: go-cli
     - id: p4c-config-sync-lint
       title: 'Phase 4c: da config sync + da config lint + da config verify commands'
-      status: in_progress
+      status: awaiting_owner_review
       depends_on:
         - p4-config-explain-cli
         - p1b-resolver-extends-tier1
