@@ -35,6 +35,22 @@ interface Props {
 
 const { graph, graphId, layoutName = 'cose' } = Astro.props;
 const serialized = JSON.stringify({ graph, layoutName });
+
+// Server-rendered accessible + machine-parseable equivalents of the canvas.
+// The Cytoscape canvas is opaque to screen readers AND to web-crawling agents
+// (the graph lives only inside a <canvas> bitmap + the data-graph attribute),
+// so we emit a real text-alternative in the DOM/accessibility tree and a
+// compact JSON twin. graphTitle/labelById drive both. (These graph pages are
+// custom .astro routes, NOT in the docs collection, so dm4's .md/llms.txt does
+// not cover them — the equivalent has to live on the page itself.)
+const graphTitle: string = (graph as { title?: string }).title ?? graphId;
+const labelById = new Map<string, string>(graph.nodes.map((n) => [n.id, n.label]));
+// Minimal structured twin an agent can parse without rendering the canvas. Same
+// node/edge data the client script feeds Cytoscape (kept in id/label/kind shape).
+const graphJson = JSON.stringify({
+  nodes: graph.nodes.map((n) => ({ id: n.id, label: n.label, kind: n.kind })),
+  edges: graph.edges.map((e) => ({ source: e.source, target: e.target, label: e.label ?? '' })),
+});
 ---
 <div class="graph-page">
   <div
@@ -43,16 +59,55 @@ const serialized = JSON.stringify({ graph, layoutName });
     data-resource-graph
     data-graph-id={graphId}
     data-graph={serialized}
+    aria-hidden="true"
   ></div>
+
+  {/* Always-present text alternative: in the DOM + accessibility tree (NOT
+      display:none — that would strip it from both SR and rendered-DOM agents).
+      Visually de-emphasized via <details> but fully readable when expanded. */}
+  <section class="graph-a11y" aria-label={`${graphTitle} — graph data (text)`}>
+    <details class="graph-a11y-details">
+      <summary>Graph data (text alternative)</summary>
+      <p class="graph-a11y-count">
+        {graph.nodes.length} nodes, {graph.edges.length} edges.
+      </p>
+      <h3 id={`a11y-nodes-${graphId}`}>Nodes</h3>
+      <ul class="graph-a11y-nodes" aria-labelledby={`a11y-nodes-${graphId}`}>
+        {graph.nodes.map((n) => (
+          <li data-a11y-node-id={n.id}>
+            <strong>{n.label}</strong> <code>{n.id}</code>
+            <span class="graph-a11y-kind"> — {n.kind}</span>
+          </li>
+        ))}
+      </ul>
+      <h3 id={`a11y-edges-${graphId}`}>Edges</h3>
+      <ul class="graph-a11y-edges" aria-labelledby={`a11y-edges-${graphId}`}>
+        {graph.edges.map((e) => (
+          <li>
+            <code>{labelById.get(e.source) ?? e.source}</code> →
+            <code>{labelById.get(e.target) ?? e.target}</code>
+            {e.label && <span class="graph-a11y-edge-label"> ({e.label})</span>}
+          </li>
+        ))}
+      </ul>
+    </details>
+    {/* Machine-parseable twin: an agent reads this without the canvas. */}
+    <script type="application/json" data-graph-json set:html={graphJson} />
+  </section>
   <aside class="graph-inspector" id={`inspector-${graphId}`}>
     {graph.legend && (
       <section class="graph-legend" aria-label="Legend">
         <h3>Legend</h3>
         <ul class="legend-list">
           {graph.legend.map((l) => (
-            <li>
-              <span class="badge" style={`background:${l.color}`}>{l.kind}</span>
-              {l.description && <span class="legend-desc"> {l.description}</span>}
+            <li class="legend-item">
+              {/* Colored swatch is decorative (the kind name carries the meaning
+                  as real text), so it's hidden from a11y and exempt from text
+                  contrast — the prior colored-fill pill failed WCAG AA contrast
+                  for mid-tone kinds (white-on-#f59e0b ≈ 2.1:1). */}
+              <span class="legend-swatch" style={`background:${l.color}`} aria-hidden="true"></span>
+              <span class="legend-kind">{l.kind}</span>
+              {l.description && <span class="legend-desc"> — {l.description}</span>}
             </li>
           ))}
         </ul>
@@ -232,6 +287,14 @@ const serialized = JSON.stringify({ graph, layoutName });
       });
     }
 
+    // Expose the rendered node-id set so the e2e parity test can assert the
+    // machine-parseable JSON twin (data-graph-json) matches what Cytoscape
+    // actually rendered — guarding against the visual and the agent-readable
+    // form drifting apart.
+    const w = window as unknown as { __cyNodes?: Record<string, string[]> };
+    w.__cyNodes = w.__cyNodes || {};
+    w.__cyNodes[graphId] = cy.nodes().map((n: any) => n.id());
+
     mounted.push({ el: canvas, detail, graphId, graph, layoutName, cy });
   }
 
@@ -326,6 +389,40 @@ const serialized = JSON.stringify({ graph, layoutName });
     font-size: 0.9rem;
   }
 
+  /* Text alternative / agent-readable region. Spans the full grid so it sits
+     below the canvas + inspector. Stays in the DOM and the accessibility tree
+     (never display:none); <details> keeps it visually compact by default. */
+  .graph-a11y {
+    grid-column: 1 / -1;
+    font-size: 0.9rem;
+  }
+
+  .graph-a11y-details > summary {
+    cursor: pointer;
+    font-weight: 600;
+    /* gray-2 on the page background clears WCAG AA contrast (axe checks this). */
+    color: var(--sl-color-gray-2);
+  }
+
+  .graph-a11y-count {
+    margin: 0.5rem 0;
+    color: var(--sl-color-gray-2);
+  }
+
+  .graph-a11y-nodes,
+  .graph-a11y-edges {
+    margin: 0 0 0.75rem;
+    padding-left: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .graph-a11y-kind,
+  .graph-a11y-edge-label {
+    color: var(--sl-color-gray-2);
+  }
+
   .graph-legend h3,
   .graph-detail h3 {
     margin: 0 0 0.5rem;
@@ -341,8 +438,31 @@ const serialized = JSON.stringify({ graph, layoutName });
     gap: 0.4rem;
   }
 
+  .legend-item {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+  }
+
+  /* Decorative color chip (aria-hidden); meaning is in the adjacent text. */
+  .legend-swatch {
+    flex: 0 0 auto;
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 0.25rem;
+    /* outline keeps low-luminance chips visible on the dark canvas-side panel */
+    border: 1px solid var(--sl-color-gray-5);
+    align-self: center;
+  }
+
+  .legend-kind {
+    font-weight: 600;
+    /* gray-1 body text on the page bg clears WCAG AA (axe-verified). */
+    color: var(--sl-color-gray-1);
+  }
+
   .legend-desc {
-    color: var(--sl-color-gray-3);
+    color: var(--sl-color-gray-2);
   }
 
   .graph-detail .hint {
