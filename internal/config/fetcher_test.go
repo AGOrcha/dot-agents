@@ -1261,96 +1261,98 @@ func (f *refreshFakeFetcher) FetchRefresh(_ Source, parts LayerRefParts, cacheDi
 	return FetchedLayer{Data: []byte(body), ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
 }
 
+// cacheKeyManifest is a git source manifest with the given cache_keys JSON
+// fragment spliced into the source ("" for none), used to drive the online
+// re-resolve cases below from a table without repeating the JSON literal.
+func cacheKeyManifest(cacheKeys string) string {
+	src := `{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"`
+	if cacheKeys != "" {
+		src += `, "cache_keys": ` + cacheKeys
+	}
+	src += `}`
+	return `{"version": 2, "sources": [` + src + `], "extends": ["acme:org/base.json"]}`
+}
+
+// newCacheKeyFetcher returns a refresh-aware fake whose resolved SHA is fixed, so
+// a re-resolve derives the same kind-default key and only a force escape / an
+// override edit can make the recorded cache key stale.
+func newCacheKeyFetcher() *refreshFakeFetcher {
+	return &refreshFakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "feedface000000000000000000000000000000aa",
+	}
+}
+
+// resolveOnce writes the manifest, resolves once with a fresh fake fetcher, and
+// returns the forceRefresh flag the fetcher observed on its single call.
+func resolveOnce(t *testing.T, repo, manifest string, refresh bool) bool {
+	t.Helper()
+	writeManifest(t, repo, manifest)
+	fake := newCacheKeyFetcher()
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).WithRefresh(refresh).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(fake.refreshSeen) != 1 {
+		t.Fatalf("fetcher calls = %d, want 1 (refreshSeen=%v)", len(fake.refreshSeen), fake.refreshSeen)
+	}
+	return fake.refreshSeen[0]
+}
+
 // TestLayeredResolverCacheKeyForcesOnlineRefetch is the headline online behavior
 // change: with a prior lock + cache, a default source serves the cache on the
 // second online resolve (negative: cache_keys inert path), while a force escape
-// (always_revalidate or --refresh) forces the fetcher to bypass its cache and
-// re-validate upstream (positive: cache_keys now changes the online resolve).
-// Reverting the fetchLayer wiring makes the positive cases fail.
+// (always_revalidate or --refresh) or a cache_keys override edit forces the
+// fetcher to bypass its cache and re-validate upstream (positive: cache_keys now
+// changes the online resolve). Reverting the fetchLayer wiring flips every
+// positive case's observed forceRefresh to false, so the test fails.
 func TestLayeredResolverCacheKeyForcesOnlineRefetch(t *testing.T) {
-	seed := func(t *testing.T, manifest string) (repo string, fake *refreshFakeFetcher) {
-		t.Helper()
-		t.Setenv("AGENTS_HOME", t.TempDir())
-		repo = t.TempDir()
-		writeManifest(t, repo, manifest)
-		fake = &refreshFakeFetcher{
-			files: map[string]string{"org/base.json": `{"skills":["online"]}`},
-			sha:   "feedface000000000000000000000000000000aa",
-		}
-		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
-			t.Fatalf("online seed Resolve: %v", err)
-		}
-		return repo, fake
+	cases := []struct {
+		name      string
+		seed      string // manifest the first (lock-recording) resolve uses
+		reresolve string // manifest the second resolve uses (== seed unless an edit)
+		refresh   bool   // --refresh force escape on the second resolve
+		want      bool   // forceRefresh the fetcher must observe on the second resolve
+	}{
+		{
+			name: "default serves cache on re-resolve",
+			seed: cacheKeyManifest(""),
+			want: false, // kind-default key still matches the recorded key
+		},
+		{
+			name: "always_revalidate forces refresh",
+			seed: cacheKeyManifest(`{"always_revalidate": true}`),
+			want: true, // sentinel never matches the recorded key
+		},
+		{
+			name:      "override edit forces refresh",
+			seed:      cacheKeyManifest(""),
+			reresolve: cacheKeyManifest(`{"env": ["MY_TOKEN"]}`),
+			want:      true, // adding an {env} selector changes the key shape
+		},
+		{
+			name:    "refresh flag forces refresh",
+			seed:    cacheKeyManifest(""),
+			refresh: true, // runtime half of the R6 force escape
+			want:    true,
+		},
 	}
 
-	const defaultManifest = `{
-		"version": 2,
-		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"}],
-		"extends": ["acme:org/base.json"]
-	}`
-	const revalManifest = `{
-		"version": 2,
-		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"always_revalidate": true}}],
-		"extends": ["acme:org/base.json"]
-	}`
-
-	// Negative: default cache_keys -> the second online resolve serves the cache
-	// (forceRefresh must be false; the recorded kind-default key still matches).
-	t.Run("default serves cache on re-resolve", func(t *testing.T) {
-		repo, _ := seed(t, defaultManifest)
-		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
-		if _, err := NewLayeredResolver().WithFetcher("git", second).Resolve(repo); err != nil {
-			t.Fatalf("second Resolve: %v", err)
-		}
-		if len(second.refreshSeen) != 1 || second.refreshSeen[0] {
-			t.Fatalf("default re-resolve forceRefresh = %v, want [false]", second.refreshSeen)
-		}
-	})
-
-	// Positive: always_revalidate -> the second online resolve forces a refresh
-	// (the AlwaysRevalidate sentinel never matches the recorded key).
-	t.Run("always_revalidate forces refresh on re-resolve", func(t *testing.T) {
-		repo, _ := seed(t, revalManifest)
-		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
-		if _, err := NewLayeredResolver().WithFetcher("git", second).Resolve(repo); err != nil {
-			t.Fatalf("second Resolve: %v", err)
-		}
-		if len(second.refreshSeen) != 1 || !second.refreshSeen[0] {
-			t.Fatalf("always_revalidate re-resolve forceRefresh = %v, want [true]", second.refreshSeen)
-		}
-	})
-
-	// Positive: a cache_keys override EDIT (adding an {env} selector) changes the
-	// key shape from the kind default, so the recorded key is stale and the next
-	// online resolve forces a refresh even though nothing else changed.
-	t.Run("override edit forces refresh on re-resolve", func(t *testing.T) {
-		repo, _ := seed(t, defaultManifest)
-		writeManifest(t, repo, `{
-			"version": 2,
-			"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"env": ["MY_TOKEN"]}}],
-			"extends": ["acme:org/base.json"]
-		}`)
-		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
-		if _, err := NewLayeredResolver().WithFetcher("git", second).Resolve(repo); err != nil {
-			t.Fatalf("second Resolve: %v", err)
-		}
-		if len(second.refreshSeen) != 1 || !second.refreshSeen[0] {
-			t.Fatalf("override-edit re-resolve forceRefresh = %v, want [true]", second.refreshSeen)
-		}
-	})
-
-	// Positive: --refresh force escape forces a refresh on re-resolve even for a
-	// default source (the runtime half of the R6 force escape).
-	t.Run("refresh flag forces refresh on re-resolve", func(t *testing.T) {
-		repo, _ := seed(t, defaultManifest)
-		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
-		if _, err := NewLayeredResolver().WithFetcher("git", second).WithRefresh(true).Resolve(repo); err != nil {
-			t.Fatalf("second Resolve: %v", err)
-		}
-		if len(second.refreshSeen) != 1 || !second.refreshSeen[0] {
-			t.Fatalf("--refresh re-resolve forceRefresh = %v, want [true]", second.refreshSeen)
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AGENTS_HOME", t.TempDir())
+			repo := t.TempDir()
+			// First resolve records the lock + cache (forceRefresh always false:
+			// no prior lock to compare against).
+			resolveOnce(t, repo, tc.seed, false)
+			reresolve := tc.reresolve
+			if reresolve == "" {
+				reresolve = tc.seed
+			}
+			if got := resolveOnce(t, repo, reresolve, tc.refresh); got != tc.want {
+				t.Fatalf("re-resolve forceRefresh = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 // TestGitFetcherRefreshBypassesCache proves the real git fetcher's FetchRefresh
