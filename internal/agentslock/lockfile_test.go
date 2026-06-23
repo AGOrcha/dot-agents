@@ -2,11 +2,39 @@ package agentslock
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// seedLockDir pre-creates the sidecar lock dir for path. When writeHolder is
+// true it writes a holder file whose acquisition timestamp is age in the past
+// (age 0 = a brand-new, live holder). When writeHolder is false it simulates a
+// crash mid-acquire (dir exists, no holder) and back-dates the dir's mtime by
+// age so the mtime fallback in lockIsStale can judge it.
+func seedLockDir(t *testing.T, path string, age time.Duration, writeHolder bool) {
+	t.Helper()
+	lockDir := path + ".lock"
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatalf("seed lock dir: %v", err)
+	}
+	if !writeHolder {
+		old := time.Now().Add(-age)
+		if err := os.Chtimes(lockDir, old, old); err != nil {
+			t.Fatalf("seed dir mtime: %v", err)
+		}
+		return
+	}
+	acquired := time.Now().Add(-age).UnixNano()
+	contents := fmt.Sprintf("%d\n%d\n", os.Getpid(), acquired)
+	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte(contents), 0o600); err != nil {
+		t.Fatalf("seed holder: %v", err)
+	}
+}
 
 type configSection struct {
 	Layers map[string]string `json:"layers,omitempty"`
@@ -263,8 +291,336 @@ func TestFlushMarshalError(t *testing.T) {
 	// White-box: inject an invalid RawMessage so MarshalIndent fails.
 	lf, _ := Open(filepath.Join(t.TempDir(), "x.lock"))
 	lf.doc["broken"] = json.RawMessage(`{invalid`)
+	lf.dirty["broken"] = true
 	if err := lf.Flush(); err == nil {
 		t.Fatal("expected marshal error with an invalid raw section")
+	}
+}
+
+func TestConcurrentFlushPreservesSiblingSectionsAndInputsDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open first: %v", err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open second: %v", err)
+	}
+	if err := first.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection units: %v", err)
+	}
+	first.SetInputsDigest("sha256:aaa")
+	if err := second.SetSection("adapters", map[string]string{"none": "ready"}); err != nil {
+		t.Fatalf("SetSection adapters: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, lf := range []*Lockfile{first, second} {
+		wg.Add(1)
+		go func(lock *Lockfile) {
+			defer wg.Done()
+			<-start
+			errs <- lock.Flush()
+		}(lf)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Flush: %v", err)
+		}
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	var units map[string]string
+	if ok, err := reopened.Section("units", &units); err != nil || !ok || units["git:a@1"] != "sha1" {
+		t.Fatalf("units lost after concurrent flush: ok=%v units=%+v err=%v", ok, units, err)
+	}
+	var adapters map[string]string
+	if ok, err := reopened.Section("adapters", &adapters); err != nil || !ok || adapters["none"] != "ready" {
+		t.Fatalf("adapters lost after concurrent flush: ok=%v adapters=%+v err=%v", ok, adapters, err)
+	}
+	if got, ok := reopened.InputsDigest(); !ok || got != "sha256:aaa" {
+		t.Fatalf("inputs_digest lost after concurrent flush: got=%q ok=%v", got, ok)
+	}
+}
+
+func TestFlushMergesForeignSectionWrittenAfterOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"config":{"layers":{"old":"sha0"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := lf.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"config":{"layers":{"old":"sha0"}},"future_thing":{"x":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := top["future_thing"]; !ok {
+		t.Fatalf("foreign section dropped: %s", raw)
+	}
+	var units map[string]string
+	reopened, _ := Open(path)
+	if ok, _ := reopened.Section("units", &units); !ok || units["git:a@1"] != "sha1" {
+		t.Fatalf("dirty section not written: %+v", units)
+	}
+}
+
+func TestFlushErrorsWhenDiskBecomesMalformedAfterOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	if err := os.WriteFile(path, []byte(`{"lock_version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := lf.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{not-json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lf.Flush(); err == nil {
+		t.Fatal("expected Flush to fail on malformed latest lockfile")
+	}
+}
+
+func TestFlushMergesDirtyInputsDigestDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	seed := `{"lock_version":1,"inputs_digest":"sha256:old","config":{"layers":{"old":"sha0"}}}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	lf.SetInputsDigest("")
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"inputs_digest":"sha256:old","config":{"layers":{"old":"sha0"}},"future_thing":{"x":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := top[inputsDigestKey]; ok {
+		t.Fatalf("inputs_digest should be deleted: %s", raw)
+	}
+	if _, ok := top["future_thing"]; !ok {
+		t.Fatalf("foreign section dropped during delete merge: %s", raw)
+	}
+}
+
+func TestFlushTimesOutWhenLockHeldFresh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	// A fresh holder (just acquired) is NOT stale, so Flush must block then
+	// return the timeout error rather than reclaiming the lock.
+	seedLockDir(t, path, 0, true)
+
+	lf, _ := Open(path)
+	if err := lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+
+	start := time.Now()
+	err := lf.Flush()
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error while a fresh lock is held")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got: %v", err)
+	}
+	if elapsed < lockAcquireTimeout {
+		t.Fatalf("Flush returned before the acquire timeout: %v < %v", elapsed, lockAcquireTimeout)
+	}
+}
+
+func TestFlushReclaimsStaleLockByTTL(t *testing.T) {
+	cases := []struct {
+		name        string
+		age         time.Duration
+		writeHolder bool
+	}{
+		{name: "older than TTL", age: lockStaleTTL + time.Second, writeHolder: true},
+		{name: "missing holder file with old dir", age: lockStaleTTL + time.Second, writeHolder: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+			seedLockDir(t, path, tc.age, tc.writeHolder)
+
+			lf, _ := Open(path)
+			if err := lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}}); err != nil {
+				t.Fatalf("SetSection: %v", err)
+			}
+			start := time.Now()
+			if err := lf.Flush(); err != nil {
+				t.Fatalf("expected stale lock to be reclaimed, got: %v", err)
+			}
+			// Reclaim happens before the first retry sleep, so it must be quick —
+			// well under the acquire timeout.
+			if elapsed := time.Since(start); elapsed >= lockAcquireTimeout {
+				t.Fatalf("reclaim took too long (%v); did it wait out the timeout?", elapsed)
+			}
+			reopened, _ := Open(path)
+			var got configSection
+			if ok, _ := reopened.Section("config", &got); !ok || got.Layers["x"] != "y" {
+				t.Fatalf("flush did not persist after reclaim: %+v", got)
+			}
+		})
+	}
+}
+
+func TestFlushGarbageHolderTreatedStale(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	lockDir := path + ".lock"
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte("not-a-pid\nnot-a-time\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// An unparseable holder falls back to the dir mtime, so back-date the dir
+	// past the TTL to make it eligible for reclaim.
+	old := time.Now().Add(-(lockStaleTTL + time.Second))
+	if err := os.Chtimes(lockDir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	lf, _ := Open(path)
+	_ = lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}})
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("expected garbage holder to be reclaimed, got: %v", err)
+	}
+}
+
+func TestFlushSucceedsAfterContendingReleaseMidWait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	// Hold a FRESH lock so the waiter does not reclaim it as stale; release it
+	// from a goroutine partway through the waiter's retry loop. The waiter must
+	// then acquire and succeed (not time out).
+	seedLockDir(t, path, 0, true)
+
+	lf, _ := Open(path)
+	_ = lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}})
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = os.RemoveAll(path + ".lock")
+	}()
+
+	start := time.Now()
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("expected Flush to succeed after the holder released: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed >= lockAcquireTimeout {
+		t.Fatalf("Flush waited out the timeout instead of acquiring after release: %v", elapsed)
+	}
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("Flush returned implausibly fast (%v); lock may not have been contended", elapsed)
+	}
+}
+
+func TestLockIsStaleShortHolderUsesDirMtime(t *testing.T) {
+	// A holder file with fewer than two lines is unparseable, so lockIsStale must
+	// fall back to the dir mtime. Back-date the dir past the TTL → stale.
+	dir := t.TempDir()
+	lockDir := filepath.Join(dir, "x.lock")
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte("only-one-line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-(lockStaleTTL + time.Second))
+	if err := os.Chtimes(lockDir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if !lockIsStale(lockDir) {
+		t.Fatal("short holder + old dir mtime must be stale")
+	}
+	// Fresh dir mtime with the same short holder must NOT be stale.
+	now := time.Now()
+	if err := os.Chtimes(lockDir, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if lockIsStale(lockDir) {
+		t.Fatal("short holder + fresh dir mtime must not be stale")
+	}
+}
+
+func TestDirOlderThanTTLMissingDirIsStale(t *testing.T) {
+	// A dir that cannot be stat'd (does not exist) is treated as stale.
+	if !dirOlderThanTTL(filepath.Join(t.TempDir(), "no-such-lock")) {
+		t.Fatal("missing lock dir must be reported stale")
+	}
+}
+
+func TestDebugfGatedOnEnv(t *testing.T) {
+	// debugf prints only when DA_DEBUG is set; otherwise it returns early.
+	// Exercise both branches for coverage. Output goes to stderr and is not
+	// asserted — we only need both branches taken.
+	t.Setenv("DA_DEBUG", "")
+	debugf("should be suppressed %d", 1)
+	t.Setenv("DA_DEBUG", "1")
+	debugf("should be emitted %d", 2)
+}
+
+func TestUnlockFileLockSurfacesRemoveError(t *testing.T) {
+	// Force RemoveAll of the lock dir to fail by stripping write permission from
+	// its parent so the child cannot be unlinked. unlockFileLock must take the
+	// debugf error branch without panicking. Skipped where the FS does not
+	// enforce the perm bit (e.g. running as root).
+	parent := filepath.Join(t.TempDir(), "ro-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := filepath.Join(parent, "x.lock")
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) }) // let TempDir cleanup proceed
+
+	t.Setenv("DA_DEBUG", "1")
+	unlockFileLock(lockDir) // must not panic; exercises the RemoveAll-error + debugf branch
+
+	if _, err := os.Stat(lockDir); os.IsNotExist(err) {
+		t.Skip("filesystem removed the lock dir despite a read-only parent; cannot force RemoveAll error here")
 	}
 }
 
