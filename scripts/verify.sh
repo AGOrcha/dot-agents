@@ -64,6 +64,8 @@ test_command() {
       failed=$((failed + 1))
     fi
   fi
+
+  return 0
 }
 
 echo -e "${BOLD}Basic Commands${NC}"
