@@ -402,6 +402,55 @@ jobs:
         run: |
           ./bin/da kg --help
 
+      # ── Config-v2 surface (config-distribution-model) ────────────────────
+      # The full config-v2 + mutation + kg note-lane surface (with CONTENT
+      # assertions, not just exit 0) is exercised by scripts/verify.sh against
+      # the built ${DA_BIN}. verify.sh builds its OWN isolated HOME/AGENTS_HOME/
+      # KG_HOME under a temp dir, so it is hermetic regardless of the runner
+      # env. It discovers ./bin/da; on Windows DA_BIN is ./bin/da.exe, so a
+      # ./bin/da copy is provided for the discovery probe (the underlying exe
+      # is the same binary built above). Cross-OS: bash via the workflow shell.
+      - name: Test config-v2 + kg surface (verify.sh, content assertions)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/.kg
+        run: |
+          if [ ! -x ./bin/da ] && [ -x "${DA_BIN}" ]; then
+            cp "${DA_BIN}" ./bin/da
+          fi
+          bash scripts/verify.sh
+
+      # ── KG CODE lane (requires code-review-graph) ────────────────────────
+      # The note lane (warm/query/bridge) above needs no crg. The CODE lane
+      # (build → code-status → impact) needs the real code-review-graph CLI,
+      # which the "Set up code-review-graph (.venv)" step installed earlier on
+      # non-Windows runners (Windows venv layout is .venv/Scripts and is not
+      # probed by DiscoverCRGBin, so the code lane is skipped there — same
+      # condition as that setup step). Assertions are on CONTENT: a built graph
+      # reports nodes>0 and `kg impact` returns real changed symbols.
+      - name: Test kg CODE lane (crg build + content assertions)
+        if: runner.os != 'Windows'
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/code-kg
+        run: |
+          "${DA_BIN}" init --yes
+          "${DA_BIN}" kg setup
+          "${DA_BIN}" kg build
+          # code-status JSON must report a non-empty, ready graph.
+          "${DA_BIN}" kg code-status --json > "${SMOKE_HOME}/code-status.json"
+          cat "${SMOKE_HOME}/code-status.json"
+          nodes="$(jq -r '.nodes' "${SMOKE_HOME}/code-status.json")"
+          ready="$(jq -r '.ready' "${SMOKE_HOME}/code-status.json")"
+          test "${ready}" = "true"
+          test "${nodes}" -gt 0
+          # kg impact on a real source file must return changed symbols.
+          "${DA_BIN}" kg impact commands/config/sync.go --json > "${SMOKE_HOME}/impact.json"
+          symbols="$(jq -r '.changed_nodes | length' "${SMOKE_HOME}/impact.json")"
+          test "${symbols}" -gt 0
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}

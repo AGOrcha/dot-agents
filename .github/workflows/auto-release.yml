@@ -100,13 +100,26 @@ jobs:
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/.kg
         run: |
           ./bin/da --version
           ./bin/da --help
           ./bin/da init --yes
           test -d "${HOME}/.agents"
+          # Reshaped read-only status/doctor surface.
           ./bin/da status
+          ./bin/da status --json
+          ./bin/da status --audit
           ./bin/da doctor
+          ./bin/da doctor --json
+          # Full config-v2 (layering/lock/dry-run/install) + kg NOTE-lane
+          # surface with content assertions, against the built ./bin/da.
+          # scripts/verify.sh builds its own isolated HOME/AGENTS_HOME/KG_HOME,
+          # so a broken config-v2 or kg release binary is caught here. The
+          # release path deliberately uses the NOTE lane only — it does NOT
+          # install code-review-graph, so no flaky crg dependency is added to
+          # releases (the crg CODE lane is exercised in test.yml).
+          bash scripts/verify.sh
 
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and fails the
