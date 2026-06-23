@@ -642,7 +642,7 @@ func TestSelectFetcherTierConstraint(t *testing.T) {
 		}
 	}
 	if _, err := SelectFetcher("oci"); err == nil {
-		t.Error("SelectFetcher(\"oci\") = nil error, want schema rejection (oci is packages-only)")
+		t.Error("SelectFetcher(\"oci\") = nil error, want schema rejection (oci cannot supply a config layer)")
 	}
 	if _, err := SelectFetcher("bogus"); err == nil {
 		t.Error("SelectFetcher(\"bogus\") = nil error, want unsupported-type error")
