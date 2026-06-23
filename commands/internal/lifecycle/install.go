@@ -40,6 +40,16 @@ func (StdInstallDeps) LoadConfig() (*config.Config, error)          { return con
 
 const installLockSection = "install"
 
+// installInexact opts out of the EXACT/PRUNE shared-target projection
+// (config-v2-coherence §7A.5 / D10), mirroring refreshInexact in
+// commands/refresh.go. Default false ⇒ install projects the resolved set AND
+// prunes managed outputs no longer in it, so the repo tree converges to exactly
+// what the lock declares. True (`--inexact`) keeps the additive behavior: write
+// the wanted set, leave stale managed outputs in place. Set from the cobra
+// `--inexact` flag in NewInstallCmd's RunE so the helpers in this file read it
+// the same way they read Flags / Version / Commit (the t01 package-var seam).
+var installInexact bool
+
 type installLockStamp struct {
 	Project  string `json:"project"`
 	Version  string `json:"version,omitempty"`
@@ -65,6 +75,7 @@ type installLockStamp struct {
 func NewInstallCmd(deps Deps) *cobra.Command {
 	var generate bool
 	var strict bool
+	var inexact bool
 
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -73,6 +84,11 @@ func NewInstallCmd(deps Deps) *cobra.Command {
 agents into ~/.agents/ from configured sources, then applies the manifest to each
 installed platform (rules, hooks, MCP configs, settings) with the same link pass
 as da refresh.
+
+By default the platform link pass is EXACT: it prunes managed shared-target links
+that are no longer in the resolved set, so the tree converges to exactly what the
+lock declares. Pass --inexact to keep the additive behavior and leave stale
+managed links in place.
 
 Commit .agentsrc.json to git so any contributor can run 'da install'
 after cloning — no manual init or sync required.
@@ -90,6 +106,7 @@ unknown JSON keys are preserved.`,
 		Args: deps.NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			applyDepsToGlobals(deps)
+			installInexact = inexact
 			if generate {
 				return RunInstallGenerate(StdInstallDeps{})
 			}
@@ -98,6 +115,7 @@ unknown JSON keys are preserved.`,
 	}
 	cmd.Flags().BoolVar(&generate, "generate", false, "Create .agentsrc.json from current ~/.agents/ state")
 	cmd.Flags().BoolVar(&strict, "strict", false, "Fail if any declared resource is not found")
+	cmd.Flags().BoolVar(&inexact, "inexact", false, "Keep additive behavior: write the resolved set but do NOT prune managed outputs no longer in it (install otherwise converges the tree to exactly what the lock declares)")
 	return cmd
 }
 
@@ -304,7 +322,7 @@ func runInstallSharedTargetsFor(projectName, projectPath string, platforms []pla
 			installed = append(installed, p)
 		}
 	}
-	lines, err := platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, true)
+	lines, err := platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, !installInexact)
 	if err != nil {
 		return fmt.Errorf("shared targets: %w", err)
 	}

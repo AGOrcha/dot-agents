@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `da install` now prunes stale managed shared-target links by default (exact
+  projection, converging the tree to exactly what the lock declares), matching
+  `da refresh`. Pass `--inexact` to keep the additive behavior and leave stale
+  managed links in place.
+
 ## [0.3.4] - 2026-06-02
 
 ### Added

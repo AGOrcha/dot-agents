@@ -15,6 +15,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/spf13/cobra"
 )
@@ -63,6 +64,7 @@ type fakeInstallPlatform struct {
 	installed bool
 	linkErr   error
 	intentErr error
+	intents   []platform.ResourceIntent
 }
 
 func (f fakeInstallPlatform) ID() string                       { return f.id }
@@ -77,7 +79,7 @@ func (f fakeInstallPlatform) SharedTargetIntents(string) ([]platform.ResourceInt
 	if f.intentErr != nil {
 		return nil, f.intentErr
 	}
-	return nil, nil
+	return f.intents, nil
 }
 
 // ---------- installProjectName ----------
@@ -1022,6 +1024,191 @@ func TestRunInstallSharedTargets_NoEnabledPlatforms(t *testing.T) {
 	defer func() { Flags = saved }()
 	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
 		t.Fatalf("runInstallSharedTargets: %v", err)
+	}
+}
+
+// ---------- install exact/prune (--inexact) ----------
+
+// sharedSkillIntentForInstall builds a valid ResourcePruneTarget skill intent
+// whose target lives at <relDir>/review, so the install projection projects a
+// managed link there and sibling-prunes the rest of <relDir>. Mirrors the
+// platform-package validSharedSkillIntent fixture (kept local because that
+// helper is unexported in the platform test package).
+func sharedSkillIntentForInstall(relDir string) platform.ResourceIntent {
+	return platform.ResourceIntent{
+		IntentID:    "skills.proj.review.fake",
+		Project:     "proj",
+		Bucket:      "skills",
+		LogicalName: "review",
+		TargetPath:  filepath.Join(relDir, "review"),
+		Ownership:   platform.ResourceOwnershipSharedRepo,
+		SourceRef: platform.ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "skills",
+			RelativePath: "review",
+			Kind:         platform.ResourceSourceCanonicalDir,
+			Origin:       "shared-skill-mirror",
+		},
+		Shape:         platform.ResourceShapeDirectDir,
+		Transport:     platform.ResourceTransportSymlink,
+		Materializer:  "shared-skill-dir-symlink",
+		ReplacePolicy: platform.ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   platform.ResourcePruneTarget,
+		MarkerFiles:   []string{"SKILL.md"},
+		Provenance:    platform.ResourceProvenance{Emitter: "fake"},
+	}
+}
+
+// seedManagedSkillLink creates a managed symlink at linkPath pointing into
+// <agentsHome>/skills/proj/<name> (so links.IsManagedLinkUnder reports it
+// managed). The canonical target dir is created first so the link resolves.
+func seedManagedSkillLink(t *testing.T, agentsHome, name, linkPath string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink seeding not exercised on windows")
+	}
+	canonical := filepath.Join(agentsHome, "skills", "proj", name)
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := links.Symlink(canonical, linkPath); err != nil {
+		t.Fatalf("seed managed link: %v", err)
+	}
+	if !links.IsManagedLinkUnder(linkPath, agentsHome) {
+		t.Fatalf("seeded link %s not detected as managed under %s", linkPath, agentsHome)
+	}
+}
+
+// setupInstallPruneFixture builds repo + agentsHome with a canonical "review"
+// skill, a stale managed link sibling, and an unmanaged user file sibling in
+// the prune scope directory. Returns the three sibling paths.
+func setupInstallPruneFixture(t *testing.T) (repo, agentsHome, relDir, wanted, stale, userFile string) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome = filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	repo = filepath.Join(tmp, "repo")
+	relDir = filepath.Join(".agents", "skills")
+	dir := filepath.Join(repo, relDir)
+
+	// Canonical skill the projection links into the wanted target.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "skills", "proj", "review", "SKILL.md"),
+		[]byte("---\nname: review\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wanted = filepath.Join(dir, "review")
+	stale = filepath.Join(dir, "obsolete")
+	seedManagedSkillLink(t, agentsHome, "obsolete", stale)
+
+	// A plain user file living next to managed outputs must never be pruned.
+	userFile = filepath.Join(dir, "user-notes.md")
+	if err := os.WriteFile(userFile, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo, agentsHome, relDir, wanted, stale, userFile
+}
+
+// Default (exact) install prunes a stale managed link while preserving the
+// wanted target and an unmanaged user sibling.
+func TestRunInstallSharedTargets_ExactPrunesStaleKeepsUser(t *testing.T) {
+	repo, _, relDir, wanted, stale, userFile := setupInstallPruneFixture(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	savedInexact := installInexact
+	installInexact = false
+	defer func() { installInexact = savedInexact }()
+
+	platforms := []platform.Platform{fakeInstallPlatform{
+		id:        "fake",
+		installed: true,
+		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
+	}}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("runInstallSharedTargetsFor exact: %v", err)
+	}
+
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale managed link must be pruned, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(wanted); err != nil {
+		t.Fatalf("wanted target must be present, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(userFile); err != nil {
+		t.Fatalf("unmanaged user file must be preserved, lstat err = %v", err)
+	}
+}
+
+// --inexact install keeps the stale managed link in place (additive behavior).
+func TestRunInstallSharedTargets_InexactKeepsStale(t *testing.T) {
+	repo, _, relDir, _, stale, userFile := setupInstallPruneFixture(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	savedInexact := installInexact
+	installInexact = true
+	defer func() { installInexact = savedInexact }()
+
+	platforms := []platform.Platform{fakeInstallPlatform{
+		id:        "fake",
+		installed: true,
+		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
+	}}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("runInstallSharedTargetsFor inexact: %v", err)
+	}
+
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatalf("--inexact must keep the stale managed link, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(userFile); err != nil {
+		t.Fatalf("unmanaged user file must be preserved, lstat err = %v", err)
+	}
+}
+
+// Two back-to-back exact projections on an already-converged tree are a no-op:
+// the second run must not error and must not remove the wanted target.
+func TestRunInstallSharedTargets_ExactIdempotent(t *testing.T) {
+	repo, _, relDir, wanted, _, _ := setupInstallPruneFixture(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	savedInexact := installInexact
+	installInexact = false
+	defer func() { installInexact = savedInexact }()
+
+	platforms := []platform.Platform{fakeInstallPlatform{
+		id:        "fake",
+		installed: true,
+		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
+	}}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("first projection: %v", err)
+	}
+	fi1, err := os.Lstat(wanted)
+	if err != nil {
+		t.Fatalf("wanted target missing after first run: %v", err)
+	}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("second projection (must be a no-op): %v", err)
+	}
+	fi2, err := os.Lstat(wanted)
+	if err != nil {
+		t.Fatalf("wanted target missing after second run: %v", err)
+	}
+	if fi1.Mode() != fi2.Mode() {
+		t.Fatalf("converged target changed between runs: %v -> %v", fi1.Mode(), fi2.Mode())
 	}
 }
 
