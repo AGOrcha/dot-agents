@@ -147,17 +147,22 @@ type PackageFetcher interface {
 }
 
 // SelectPackageFetcher returns the PackageFetcher for a source type, or an error
-// for a source type that is not valid for packages. This is the pass-2 (p6)
-// counterpart to SelectFetcher: packages accept oci and http; git and local are
-// rejected as a tier/schema violation (spec §4).
+// for an unsupported source type. This is the pass-2 (p6) counterpart to
+// SelectFetcher: per config-distribution-model §4 (relaxed) / §7A.1-2 / §15
+// D3+D8, any source type may serve any artifact kind — the KIND governs
+// merge/trust, not which source is permitted. Packages/artifacts therefore
+// accept all four source types (git, local, http, oci). The tier asymmetry that
+// remains lives in SelectFetcher (extends still rejects oci), not here.
 func SelectPackageFetcher(sourceType string) (PackageFetcher, error) {
 	switch sourceType {
 	case "oci":
 		return &ociFetcher{}, nil
 	case "http":
 		return &httpArtifactFetcher{}, nil
-	case "git", "local":
-		return nil, fmt.Errorf("source type %q is not valid for packages (use oci or http)", sourceType)
+	case "git":
+		return &gitArtifactFetcher{}, nil
+	case "local":
+		return &localArtifactFetcher{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}
