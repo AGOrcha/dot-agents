@@ -91,14 +91,14 @@ A **source** names *where* layers and packages come from. The `type` determines 
 
 | `type` | Transport | Valid for `extends`? | Valid for `packages`? |
 |---|---|---|---|
-| `local` | A path on disk | Yes | No |
-| `git` | A git repository (`url` + `ref`) | Yes | No |
+| `local` | A path on disk | Yes | Yes |
+| `git` | A git repository (`url` + `ref`) | Yes | Yes |
 | `http` | An HTTP(S) endpoint | Yes | Yes |
 | `oci` | An OCI registry (content-addressed) | **No** | Yes |
 
-> **Only `extends` rejects `oci`.** OCI is a packages-only transport for installable artifacts;
-> config layers cannot be fetched from OCI. Declaring an `oci` source in `extends` is rejected at
-> resolution as a schema error (`source type "oci" is not valid for extends (oci is packages-only)`).
+> **Only `extends` rejects `oci`** — oci cannot supply a config layer. Every other source×kind
+> combination is valid: packages/artifacts may be fetched from git, local, http, or oci. Declaring
+> an `oci` source in `extends` is rejected at resolution.
 
 Each source carries an `id` (required for v2 refs), an optional `cache_ttl` (a *review nudge*, not a
 hard expiry — see [Caching](#caching-and-staleness)), an optional opaque `auth` block, and an
@@ -503,7 +503,7 @@ $ echo $?
 | `repo_id` | string | Protected; imported layers cannot override. |
 | `sources` | array of `{ id, type, url?, path?, ref?, cache_ttl?, auth?, cache_keys? }` | `type` ∈ `local`/`git`/`http`/`oci`. |
 | `extends` | array of `string` or `{ ref, optional? }` | Ref form `source-id:path[@version]`; resolves to `layer` units; rejects `oci`. |
-| `packages` | array of `string` | Ref form `source-id:path@version`; resolves to `artifact` units; OCI allowed. |
+| `packages` | array of `string` | Ref form `source-id:path@version`; resolves to `artifact` units; valid from any source (git/local/http/oci). |
 | `features` | object (map-merge) | Feature-flag overrides. |
 | `execution_profile` | object (map-merge) | Execution shape by `app_type` — see [Config Relevance](./CONFIG_RELEVANCE.md). |
 
