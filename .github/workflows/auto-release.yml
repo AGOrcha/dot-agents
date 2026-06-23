@@ -112,31 +112,14 @@ jobs:
           ./bin/da status --audit
           ./bin/da doctor
           ./bin/da doctor --json
-          # Config-v2 surface (config-distribution-model). Help paths run
-          # anywhere; live paths run against a minimal valid fixture manifest
-          # so a broken config-v2 release binary is caught.
-          ./bin/da config --help
-          ./bin/da config explain --help
-          ./bin/da config sync --help
-          ./bin/da config lint --help
-          ./bin/da config verify --help
-          da_abs="${PWD}/bin/da"
-          fixture="${SMOKE_HOME}/config-fixture"
-          mkdir -p "${fixture}"
-          printf '{\n  "version": 1\n}\n' > "${fixture}/.agentsrc.json"
-          ( cd "${fixture}" \
-            && "${da_abs}" config lint \
-            && "${da_abs}" config explain \
-            && "${da_abs}" config explain --all --json \
-            && "${da_abs}" config sync \
-            && "${da_abs}" config verify )
-          rm -rf "${fixture}"
-          # KG surface — help + read-only status paths (no code graph needed).
-          ./bin/da kg --help
-          ./bin/da kg health --help
-          ./bin/da kg code-status --help
-          ./bin/da kg code-status
-          ./bin/da kg bridge health
+          # Full config-v2 (layering/lock/dry-run/install) + kg NOTE-lane
+          # surface with content assertions, against the built ./bin/da.
+          # scripts/verify.sh builds its own isolated HOME/AGENTS_HOME/KG_HOME,
+          # so a broken config-v2 or kg release binary is caught here. The
+          # release path deliberately uses the NOTE lane only — it does NOT
+          # install code-review-graph, so no flaky crg dependency is added to
+          # releases (the crg CODE lane is exercised in test.yml).
+          bash scripts/verify.sh
 
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and fails the

@@ -403,58 +403,53 @@ jobs:
           ./bin/da kg --help
 
       # ── Config-v2 surface (config-distribution-model) ────────────────────
-      # config explain/sync/lint/verify read the effective .agentsrc.json from
-      # the working directory. Run them inside a throwaway fixture dir under
-      # SMOKE_HOME holding a minimal valid manifest ({"version": 1}) so the
-      # real code path is exercised and exits cleanly — no dependency on the
-      # repo's own (possibly drifted) manifest. ${DA_BIN} is resolved to an
-      # absolute path first so the invocation survives the `cd` into the
-      # fixture. Cross-OS: pushd/popd + the bash-normalized SMOKE_HOME.
-      - name: Test config-v2 surface
-        env:
-          HOME: ${{ env.SMOKE_HOME }}
-          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
-        run: |
-          # Help paths run anywhere and prove the subtree is wired in.
-          "${DA_BIN}" config --help
-          "${DA_BIN}" config explain --help
-          "${DA_BIN}" config sync --help
-          "${DA_BIN}" config lint --help
-          "${DA_BIN}" config verify --help
-          # Live paths against a minimal valid fixture manifest.
-          da_abs="$(cd "$(dirname "${DA_BIN}")" && pwd)/$(basename "${DA_BIN}")"
-          fixture="${SMOKE_HOME}/config-fixture"
-          mkdir -p "${fixture}"
-          printf '{\n  "version": 1\n}\n' > "${fixture}/.agentsrc.json"
-          pushd "${fixture}" >/dev/null
-          "${da_abs}" config lint
-          "${da_abs}" config explain
-          "${da_abs}" config explain --all
-          "${da_abs}" config explain --json
-          "${da_abs}" config explain repo_id
-          "${da_abs}" config explain --all --json
-          "${da_abs}" config sync
-          "${da_abs}" config verify
-          popd >/dev/null
-          rm -rf "${fixture}"
-
-      # ── KG surface (knowledge graph) ─────────────────────────────────────
-      # Help + read-only status paths prove the kg subtree executes on the
-      # live binary without a built code graph. code-status reports UNBUILT
-      # and bridge health reports empty cleanly (no .venv code-review-graph
-      # tooling required), so this stays hermetic and cross-OS. Heavier paths
-      # (kg build/update/query) need real graph infra and are NOT smoked here.
-      - name: Test kg surface
+      # The full config-v2 + mutation + kg note-lane surface (with CONTENT
+      # assertions, not just exit 0) is exercised by scripts/verify.sh against
+      # the built ${DA_BIN}. verify.sh builds its OWN isolated HOME/AGENTS_HOME/
+      # KG_HOME under a temp dir, so it is hermetic regardless of the runner
+      # env. It discovers ./bin/da; on Windows DA_BIN is ./bin/da.exe, so a
+      # ./bin/da copy is provided for the discovery probe (the underlying exe
+      # is the same binary built above). Cross-OS: bash via the workflow shell.
+      - name: Test config-v2 + kg surface (verify.sh, content assertions)
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
           KG_HOME: ${{ env.SMOKE_HOME }}/.kg
         run: |
-          "${DA_BIN}" kg health --help
-          "${DA_BIN}" kg code-status --help
-          "${DA_BIN}" kg bridge --help
-          "${DA_BIN}" kg code-status
-          "${DA_BIN}" kg bridge health
+          if [ ! -x ./bin/da ] && [ -x "${DA_BIN}" ]; then
+            cp "${DA_BIN}" ./bin/da
+          fi
+          bash scripts/verify.sh
+
+      # ── KG CODE lane (requires code-review-graph) ────────────────────────
+      # The note lane (warm/query/bridge) above needs no crg. The CODE lane
+      # (build → code-status → impact) needs the real code-review-graph CLI,
+      # which the "Set up code-review-graph (.venv)" step installed earlier on
+      # non-Windows runners (Windows venv layout is .venv/Scripts and is not
+      # probed by DiscoverCRGBin, so the code lane is skipped there — same
+      # condition as that setup step). Assertions are on CONTENT: a built graph
+      # reports nodes>0 and `kg impact` returns real changed symbols.
+      - name: Test kg CODE lane (crg build + content assertions)
+        if: runner.os != 'Windows'
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/code-kg
+        run: |
+          "${DA_BIN}" init --yes
+          "${DA_BIN}" kg setup
+          "${DA_BIN}" kg build
+          # code-status JSON must report a non-empty, ready graph.
+          "${DA_BIN}" kg code-status --json > "${SMOKE_HOME}/code-status.json"
+          cat "${SMOKE_HOME}/code-status.json"
+          nodes="$(jq -r '.nodes' "${SMOKE_HOME}/code-status.json")"
+          ready="$(jq -r '.ready' "${SMOKE_HOME}/code-status.json")"
+          test "${ready}" = "true"
+          test "${nodes}" -gt 0
+          # kg impact on a real source file must return changed symbols.
+          "${DA_BIN}" kg impact commands/config/sync.go --json > "${SMOKE_HOME}/impact.json"
+          symbols="$(jq -r '.changed_nodes | length' "${SMOKE_HOME}/impact.json")"
+          test "${symbols}" -gt 0
 
       - name: Cleanup
         env:
