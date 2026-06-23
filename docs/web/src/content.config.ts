@@ -42,13 +42,14 @@ const PUBLIC_PAGES: { src: string; id: string; order: number }[] = [
   { src: 'README.md', id: 'index', order: 1 },
 
   // Guides
-  { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 1 },
-  { src: 'docs/CONFIG_RELEVANCE.md', id: 'guides/config-relevance', order: 2 },
-  { src: 'docs/DEMO_README.md', id: 'guides/demo-overview', order: 3 },
-  { src: 'docs/DEMO_INDEX.md', id: 'guides/demo-index', order: 4 },
-  { src: 'docs/DEMO_WORKFLOW_WALKTHROUGH.md', id: 'guides/demo-workflow-walkthrough', order: 5 },
-  { src: 'docs/DEMO_DIAGRAM.md', id: 'guides/demo-diagram', order: 6 },
-  { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 7 },
+  { src: 'docs/LAYERED_CONFIG_GUIDE.md', id: 'guides/layered-config', order: 1 },
+  { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 2 },
+  { src: 'docs/CONFIG_RELEVANCE.md', id: 'guides/config-relevance', order: 3 },
+  { src: 'docs/DEMO_README.md', id: 'guides/demo-overview', order: 4 },
+  { src: 'docs/DEMO_INDEX.md', id: 'guides/demo-index', order: 5 },
+  { src: 'docs/DEMO_WORKFLOW_WALKTHROUGH.md', id: 'guides/demo-workflow-walkthrough', order: 6 },
+  { src: 'docs/DEMO_DIAGRAM.md', id: 'guides/demo-diagram', order: 7 },
+  { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 8 },
 
   // Reference
   { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },

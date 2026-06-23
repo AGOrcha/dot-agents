@@ -2,7 +2,7 @@
 title: Config Relevance
 description: Canonical reference for execution profiles and the da config relevance command family.
 sidebar:
-  order: 2
+  order: 3
 ---
 
 # `da config relevance` — workflow execution profiles

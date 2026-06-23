@@ -236,6 +236,10 @@ git, local paths, HTTP, or OCI registries, declared as `source:path@version`.
 When the layers are resolved, the resolved layer SHAs are pinned in
 `.agentsrc.lock` so every machine projects the same effective config.
 
+See the [**Layered Configuration guide**](docs/LAYERED_CONFIG_GUIDE.md) for the full
+model — the manifest, `extends` layers, resolution and precedence, the lockfile, and a
+worked walkthrough of `da config sync` / `explain` / `lint`.
+
 - `da config sync` re-checks every declared layer upstream (ignoring TTL),
   re-resolves the stack, and rewrites the config section of `.agentsrc.lock`.
   This is the explicit upstream re-check — the uv `--upgrade` analog.
