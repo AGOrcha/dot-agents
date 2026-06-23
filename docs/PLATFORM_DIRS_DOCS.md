@@ -31,6 +31,8 @@ Partial refresh on 2026-05-25 (hooks topic only — Claude Code, Codex, Cursor, 
 - Hook **file locations** unchanged for Claude, Codex, Cursor. Copilot adds `.github/copilot/settings.json` / `.github/copilot/settings.local.json` as a repo-scope settings target and `~/.copilot/hooks/` (or `$COPILOT_HOME/hooks/`) as a user-scope hook directory in addition to `~/.copilot/hooks/*.json`.
 - OpenCode and other (non-hooks) topics were NOT re-checked this pass — leave per-topic checked-on dates untouched.
 
+Release-docs re-verification 2026-06-23 (all five platforms): locations confirmed current; added Claude `MessageDisplay` to the documented event surface; Cursor compatibility skill/subagent paths are now directly vendor-verified.
+
 ### Cursor
 
 - [Rules](https://cursor.com/docs/rules): project rules live in `.cursor/rules/`. Cursor also documents `AGENTS.md` as a markdown instructions alternative. User rules and team rules exist, but those are settings or dashboard scopes rather than shared repo files.
@@ -46,7 +48,7 @@ Partial refresh on 2026-05-25 (hooks topic only — Claude Code, Codex, Cursor, 
 - [Skills](https://code.claude.com/docs/en/skills): project skills live in `.claude/skills/<name>/SKILL.md`; user-level skills live in `~/.claude/skills/<name>/SKILL.md`. Claude also documents nested `.claude/skills/` discovery for monorepos.
 - [Sub-agents](https://code.claude.com/docs/en/sub-agents): project subagents live in `.claude/agents/`; user-level subagents live in `~/.claude/agents/`.
 - [MCP](https://code.claude.com/docs/en/mcp): project MCP config can live in `.mcp.json`; user-level config lives in `~/.claude.json`.
-- [Hooks](https://code.claude.com/docs/en/hooks): hooks are configured in `.claude/settings.json`, `.claude/settings.local.json`, and `~/.claude/settings.json`. Plugins ship hooks via `hooks/hooks.json` inside the plugin package; skills and agents can also declare hooks in frontmatter. The documented event surface (PascalCase) includes `SessionStart`, `SessionEnd`, `Setup`, `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `PermissionRequest`, `PermissionDenied`, `Notification`, `PreCompact`, `PostCompact`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle`, `InstructionsLoaded`, `ConfigChange`, `CwdChanged`, `FileChanged`, `WorktreeCreate`, `WorktreeRemove`, `Elicitation`, and `ElicitationResult`. Stop and SubagentStop accept JSON `{"decision":"block","reason":"..."}` on stdout (or exit 2 + stderr) to refuse stop.
+- [Hooks](https://code.claude.com/docs/en/hooks): hooks are configured in `.claude/settings.json`, `.claude/settings.local.json`, and `~/.claude/settings.json`. Plugins ship hooks via `hooks/hooks.json` inside the plugin package; skills and agents can also declare hooks in frontmatter. The documented event surface (PascalCase) includes `SessionStart`, `SessionEnd`, `Setup`, `UserPromptSubmit`, `UserPromptExpansion`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `PermissionRequest`, `PermissionDenied`, `Notification`, `MessageDisplay`, `PreCompact`, `PostCompact`, `Stop`, `StopFailure`, `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle`, `InstructionsLoaded`, `ConfigChange`, `CwdChanged`, `FileChanged`, `WorktreeCreate`, `WorktreeRemove`, `Elicitation`, and `ElicitationResult`. Stop and SubagentStop accept JSON `{"decision":"block","reason":"..."}` on stdout (or exit 2 + stderr) to refuse stop.
 - [Plugins](https://code.claude.com/docs/en/plugins.md): Claude Code now has a first-party plugin system. Plugins can bundle custom commands, agents, hooks, Skills, and MCP servers. A plugin package uses a `.claude-plugin/plugin.json` manifest and can include component directories such as `commands/`, `agents/`, `skills/`, and hooks or MCP configuration.
 - [Plugin marketplaces](https://code.claude.com/docs/en/plugin-marketplaces.md): Claude Code supports plugin marketplaces. Marketplaces are defined by `.claude-plugin/marketplace.json`, can be added from GitHub, arbitrary git URLs, local paths, direct JSON URLs, and can be configured in `.claude/settings.json` through `extraKnownMarketplaces` and `enabledPlugins` for team rollout.
 
@@ -246,30 +248,32 @@ Validated from the current Go implementation.
 | GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Links project `.github/hooks/*.json` and also wires Claude-compatible settings. Repo-scope `.github/copilot/settings*.json` (documented 2026-05-25) and user-scope `~/.copilot/hooks/` directory are NOT yet wired. |
 | OpenCode | No dedicated hook file documented | No | No OpenCode-specific hook handling is implemented here. |
 
-#### Event coverage (2026-05-25)
+#### Event coverage (re-verified 2026-06-23 against current code)
 
-Comparison of documented vendor events vs. `internal/platform/hooks.go` event-name mappers. A `dot-agents` `HookSpec.When:` value is "wired" for a platform if `<platform>EventName` maps it to the platform's documented event name today.
+Comparison of documented vendor events vs. the per-platform event tables in `internal/platform/hooks.go` (`claudeEventTable`, `codexEventTable`, `cursorEventTable`, `copilotEventTable`). A `dot-agents` `HookSpec.When:` value is "wired" for a platform if that platform's table maps it to the platform's documented event name today. The earlier 2026-05-25 audit's ❌ cells for Codex, Cursor, and Copilot are now **stale** — the current tables map most of those events (Copilot now maps 13 of the canonical events, not 3).
 
-| `HookSpec.When` | Claude (`claudeEventName`) | Codex (`codexEventName`) | Cursor (`cursorEventName`) | Copilot (`copilotEventName`) |
+| `HookSpec.When` | Claude (`claudeEventTable`) | Codex (`codexEventTable`) | Cursor (`cursorEventTable`) | Copilot (`copilotEventTable`) |
 |------------------|---------------------------|--------------------------|----------------------------|-------------------------------|
 | `session_start` | `SessionStart` ✅ | `SessionStart` ✅ | `sessionStart` ✅ | `sessionStart` ✅ |
-| `session_end` | `SessionEnd` ✅ | — (vendor event missing) | `sessionEnd` ❌ (vendor docs it; we don't map) | `sessionEnd` ❌ |
+| `session_end` | `SessionEnd` ✅ | — (vendor event missing) | `sessionEnd` ✅ | `sessionEnd` ✅ |
 | `user_prompt_submit` | `UserPromptSubmit` ✅ | `UserPromptSubmit` ✅ | `beforeSubmitPrompt` ✅ | `userPromptSubmitted` ✅ |
 | `pre_tool_use` | `PreToolUse` ✅ | `PreToolUse` ✅ | `preToolUse` ✅ | `preToolUse` ✅ |
-| `post_tool_use` | `PostToolUse` ✅ | `PostToolUse` ✅ | `postToolUse` ❌ | `postToolUse` ❌ |
-| `post_tool_use_failure` | `PostToolUseFailure` ✅ | — (vendor event missing) | `postToolUseFailure` ❌ | `postToolUseFailure` ❌ |
-| `notification` | `Notification` ✅ | — | — | `notification` ❌ |
-| `permission_request` | `PermissionRequest` ✅ | `PermissionRequest` ❌ | — | `permissionRequest` ❌ |
-| `pre_compact` | `PreCompact` ✅ | `PreCompact` ❌ | `preCompact` ❌ | `preCompact` ❌ |
-| `stop` | `Stop` ✅ | `Stop` ✅ | `stop` ✅ | **`agentStop`** ❌ (camelCase, not `stop`) |
-| `subagent_start` | `SubagentStart` ✅ | `SubagentStart` ❌ | `subagentStart` ❌ | `subagentStart` ❌ |
-| `subagent_stop` | `SubagentStop` ✅ | `SubagentStop` ❌ (vendor added it; we don't map) | `subagentStop` ❌ | `subagentStop` ❌ |
+| `post_tool_use` | `PostToolUse` ✅ | `PostToolUse` ✅ | `postToolUse` ✅ | `postToolUse` ✅ |
+| `post_tool_use_failure` | `PostToolUseFailure` ✅ | — (vendor event missing) | `postToolUseFailure` ✅ | `postToolUseFailure` ✅ |
+| `notification` | `Notification` ✅ | — | — | `notification` ✅ |
+| `permission_request` | `PermissionRequest` ✅ | `PermissionRequest` ✅ | — | `permissionRequest` ✅ |
+| `pre_compact` | `PreCompact` ✅ | `PreCompact` ✅ | `preCompact` ✅ | `preCompact` ✅ |
+| `stop` | `Stop` ✅ | `Stop` ✅ | `stop` ✅ | `agentStop` ✅ (camelCase, not `stop`) |
+| `subagent_start` | `SubagentStart` ✅ | `SubagentStart` ✅ | `subagentStart` ✅ | `subagentStart` ✅ |
+| `subagent_stop` | `SubagentStop` ✅ | `SubagentStop` ✅ | `subagentStop` ✅ | `subagentStop` ✅ |
+| `message_display` | ❌ (not in `claudeEventTable`) | — | — | — |
 
-Cells: ✅ = mapped today; ❌ = vendor documents the event but `<platform>EventName` does not yet map it; — = vendor does not document the event for that platform.
+Cells: ✅ = mapped today; ❌ = vendor documents the event but the platform's table does not yet map it; — = vendor does not document the event for that platform.
 
-Key gaps surfaced 2026-05-25:
+Remaining gaps as of 2026-06-23:
 
-- **Codex**: `SubagentStart`, `SubagentStop`, `PreCompact`, `PostCompact`, `PermissionRequest` are all documented by Codex but not mapped by `codexEventName`. The `renderCodexHookConfig` matcher whitelist (`internal/platform/hooks.go:728`) also needs extending for any of these that accept matchers.
-- **Cursor**: `subagentStart`, `subagentStop`, `postToolUse`, `postToolUseFailure`, `sessionEnd`, `preCompact` are all unmapped; Cursor also exposes a much wider event surface (shell/MCP/file-edit hooks) not represented in `HookSpec.When`.
-- **Copilot**: `copilotEventName` covers only 3 of the 13 documented events. Most critically, the stop equivalent is named **`agentStop`** (camelCase) — the mapper would currently fail to render any `stop` hook on Copilot. `subagentStart`/`subagentStop` are also unmapped.
-- **OpenCode**: still no `opencodeEventName`; OpenCode's hook surface is not addressed by `internal/platform/hooks.go` at all.
+- **Claude `message_display`**: Claude now documents `MessageDisplay`, but it is **not** present in `claudeEventTable` — the only genuine event-mapping gap in this table today. (Wiring it is a separately-routed code change.)
+- **Codex** documents the narrowest set; it has no `session_end`, `post_tool_use_failure`, `notification`, or any of the Cursor fine-grained shell/MCP/file events, so those fall through.
+- **Cursor** has the widest surface (shell/MCP/file-edit/tab events in `cursorEventTable`) but does not document `notification` or `permission_request`.
+- **Copilot** uniquely exposes `error_occurred` → `errorOccurred`. Its terminal event is `agentStop` (camelCase), correctly mapped today.
+- **OpenCode**: still has no event table; OpenCode's hook surface is not addressed by `internal/platform/hooks.go` at all.

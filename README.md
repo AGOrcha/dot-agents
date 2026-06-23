@@ -33,7 +33,7 @@ Every AI coding agent has its own config location and format:
 | Cursor | `.cursor/rules/*.mdc` (also `AGENTS.md`) | MDC / Markdown |
 | Claude Code | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` | Markdown, JSON |
 | Codex | `AGENTS.md`, `AGENTS.override.md` | Markdown |
-| OpenCode | `AGENTS.md` (also `CLAUDE.md`) | Markdown |
+| OpenCode | `AGENTS.md` (also `CLAUDE.md`), `.opencode/agent/*.md` | Markdown |
 | GitHub Copilot | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md` | Markdown |
 
 Beyond the base instruction file, each agent supports more specific rule files —
@@ -204,7 +204,7 @@ da install
 
 ## Commands
 
-`da` exposes 20 top-level commands.
+`da` exposes 22 top-level commands (excluding `help` and `completion`).
 
 ### Project Management
 
@@ -213,18 +213,35 @@ da install
 | `init` | Initialize `~/.agents/` directory structure |
 | `add <path>` | Add a project to da management |
 | `remove <project>` | Remove a project from da management |
-| `refresh [project]` | Refresh managed setup from `~/.agents/`; auto-enables newly-installed editors and updates their versions |
+| `refresh [project]` | Refresh managed setup from `~/.agents/`; auto-enables newly-installed editors and updates their versions. EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep the additive behavior |
 | `import [project]` | Import configs from project/global scope into `~/.agents/` |
-| `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one) |
-| `status` | Show managed projects and link health (use `--audit` for details) |
-| `doctor` | Check installations, validate links, detect issues |
+| `install` | Set up project from `.agentsrc.json` manifest (`--generate` to create one). EXACT by default — prunes managed shared-target links no longer in the resolved set; pass `--inexact` to keep additive behavior, `--strict` to fail on a missing declared resource |
+| `status` | Show managed projects and link health; for effective-config detail run `da config explain` (use `--audit` for details) |
+| `doctor` | Check installations, validate links, detect issues (read-only — reports problems and the command to fix them; never repairs) |
 
 ### Configuration
 
 | Command | Description |
 |---------|-------------|
 | `config explain [field]` | Show the effective `.agentsrc.json` value of a field and which layer set it (`--all`, `--flags`, `--json`) |
+| `config sync` | Re-fetch every declared layer regardless of TTL, re-resolve, and rewrite the config section of `.agentsrc.lock` — the uv `--upgrade` analog (`--layer source-id:path`, `--json`) |
+| `config lint` | Validate the repo-local `.agentsrc.json` and each `extends` layer against the AgentsRC layer schema; non-zero exit if invalid (`--json`) |
 | `config verify` | Offline setup contract check — manifest parses, declared local source layers exist, integrations ready, and remote `extends` layers are cached at the lockfile's SHA (`--json`; non-zero exit on failure) |
+| `config relevance` | Resolve a task's execution profile (units, topology, lenses) by `app_type` (`--filter`, `--app-type`, `--task`, `--stage`, `--recompute`, `--json`; see [docs/CONFIG_RELEVANCE.md](docs/CONFIG_RELEVANCE.md)) |
+
+#### Layered config & the lockfile (`.agentsrc.lock`)
+
+A `.agentsrc.json` manifest may `extends` one or more config layers sourced from
+git, local paths, HTTP, or OCI registries, declared as `source:path@version`.
+When the layers are resolved, the resolved layer SHAs are pinned in
+`.agentsrc.lock` so every machine projects the same effective config.
+
+- `da config sync` re-checks every declared layer upstream (ignoring TTL),
+  re-resolves the stack, and rewrites the config section of `.agentsrc.lock`.
+  This is the explicit upstream re-check — the uv `--upgrade` analog.
+- `da refresh` and `da install` re-project the locked config locally and only
+  re-resolve when the lock is stale, so routine relinking never reaches the
+  network for an unchanged stack.
 
 ### Skills & Agents
 
@@ -386,6 +403,7 @@ structured project memory, bridge queries, and code-to-note context.
 | Command | Description |
 |---------|-------------|
 | `explain [topic]` | Explain da concepts |
+| `score run` | Compute and query agent-run outcome scores (`iteration <N>`, `session <id>` subcommands) |
 | `session stats` | Show usage statistics from each installed AI platform |
 | `--help` | Show help for any command |
 | `--version` | Show version |
@@ -540,6 +558,13 @@ da install --generate
 da install
 ```
 
+`da install` is **EXACT** by default: the platform link pass prunes managed
+shared-target links that are no longer in the resolved set, so the tree
+converges to exactly what the lock declares. Pass `--inexact` to keep the
+additive behavior and leave stale managed links in place, or `--strict` to
+fail if any declared resource is missing. `da refresh` follows the same
+EXACT/prune-by-default convention with the same `--inexact` opt-out.
+
 ### Importing Existing Configs
 
 Already have agent configs scattered across your projects? Import them into `~/.agents/`:
@@ -650,7 +675,7 @@ That's fine! dot-agents only creates config files for agents it detects or that 
 
 **Q: What is `da refresh` for?**
 
-After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links and configs to all your projects. This ensures your projects stay in sync with your central config.
+After pulling changes to `~/.agents/` from git, run `refresh` to re-apply links and configs to all your projects. This ensures your projects stay in sync with your central config. `refresh` is **EXACT** by default — it prunes managed shared-target links that are no longer in the resolved set; pass `--inexact` to keep the additive behavior and leave stale managed links in place.
 
 **Q: How do skills differ from rules?**
 

@@ -1,7 +1,7 @@
 # Skill ↔ Command Integration Map
 
 Status: Active
-Last updated: 2026-04-10
+Last updated: 2026-06-23
 Related:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
@@ -168,6 +168,39 @@ query the graph to verify skill instructions reference valid commands and tool
 names; `eval` could track graph metrics before/after skill runs; `optimize`
 could use community data to suggest which modules a skill should focus on.
 
+### Workflow-orchestration skills (shipped)
+
+The following seven skills are shipped — each is a starter skill under
+`internal/scaffold/home/starter/skills/global/` and registered in `.agentsrc.json`,
+so they land in every initialized home. They drive the `da workflow` /
+`da kg` command surface rather than the code-review-graph review surface.
+
+- **delegation-lifecycle** — delegate a bounded write-scope task to a sub-agent,
+  track its lifecycle, and merge the result back. Commands: `da workflow fanout`,
+  `da workflow merge-back`, `da workflow delegation closeout`, `da workflow delegation gate`.
+- **iteration-close** — persist a loop iteration's workflow state. Commands:
+  `da workflow verify record`, `da workflow checkpoint`, then `da workflow advance`
+  (direct work) or `da workflow merge-back` (delegated work).
+- **loop-worker** — bounded implementation worker that reads a delegation bundle,
+  implements its write scope, and runs `iteration-close`. Commands:
+  `da workflow bundle stages`, plus the `iteration-close` chain.
+- **orchestrator-session-start** — orchestrator turn: pre-flight, eligibility,
+  task pick, fanout-or-direct decision. Commands: `da workflow eligible`,
+  `da workflow orient`, `da workflow next`, `da workflow task update`, `da workflow fanout`.
+- **plan-wave-picker** — choose the next wave/phase across active plans without
+  re-reading every plan. Commands: `da workflow plan`, `da workflow eligible`,
+  `da workflow next`.
+- **provider-consumer-pair** — sequence two waves that must ship together (one
+  defines a contract, the other consumes it) without circular blocking. Commands:
+  `da workflow plan`, `da workflow tasks`, `da workflow fanout`.
+- **isp** — interactive staged pipeline orchestrator (impl → verifier → review →
+  parent gate) over pre-gathered orchestrator output. Commands:
+  `da workflow fanout`, `da workflow bundle stages`, `da workflow delegation gate`.
+
+**Graph integration**: these consume `da workflow` state and the `da kg` readback
+at orient time; deeper graph integration (scope derivation, impact-aware fanout)
+is tracked separately.
+
 ### create-subagent (not yet shipped)
 
 **Purpose**: Create custom subagents for specialized tasks.
@@ -234,15 +267,21 @@ Commands can reference, inject, or trigger skills:
 - Should include `da kg health` in diagnostics
 - Should verify graph hooks are installed if graph DB exists
 
-### da config explain / da config verify
+### da config explain / sync / lint / verify / relevance
 
-**What they do**: Read-only config introspection. `da config explain <field-path>`
-(`commands/config/explain.go`) prints the effective value of a single config
-field plus the full layer provenance — where each layer set it. `da config verify`
+**What they do**: The `da config` subtree introspects and resolves the layered
+config. `da config explain <field-path>` (`commands/config/explain.go`) prints
+the effective value of a single field plus full layer provenance.
+`da config sync` (`commands/config/sync.go`) re-fetches every declared layer
+regardless of TTL, re-resolves, and rewrites the config section of
+`.agentsrc.lock` (the one mutating subcommand). `da config lint`
+(`commands/config/lint.go`) validates the repo-local manifest and each
+`extends` layer against the AgentsRC layer schema. `da config verify`
 (`commands/config/verify.go`) runs offline repo setup-contract checks without
-re-fetching layers.
+re-fetching layers. `da config relevance` (`commands/config/relevance.go`)
+resolves a task's execution profile (units, topology, lenses) by `app_type`.
 
-**Skill integration**: Not skill-invoked today. Both are operator-facing
+**Skill integration**: Not skill-invoked today. These are operator-facing
 introspection commands; a future setup or doctor skill could call them to
 confirm the resolved config and contract state before acting.
 
