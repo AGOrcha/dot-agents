@@ -218,3 +218,27 @@ kg sync:            input {push}; observed {pull_status,push_status,head_sha?}
 
 Build **after the config-v2 0.4.0 cut** (it depends on `p4h` and benefits from the settled lock model).
 A plan (`workflow/plans/session-handoff-journal/`) follows this spec when scheduled.
+
+## Refinements from manual validation (2026-06-22)
+
+Manually dogfooded the read side against a live coach-death recovery (a Codex session hit
+its limit mid-finish-line; its p4g/p4h work was stranded in worktrees; the `~/Documents`
+checkout was TCC-locked). The snapshot + overlay + verified-recovery-view worked and would
+have eliminated the re-grounding storm. Three refinements fall out:
+
+- **R7 — Re-verify commands MUST be environment-robust (prefer remote/API over local git).**
+  Refines D7. The recovery itself must work when the working tree is locked or missing — in
+  the validation the TCC lock blocked *all* local `git`/`da`, so any git-based recovery would
+  itself fail. Snapshot re-verify cmds default to `gh`/remote/API queries (e.g.
+  `gh pr list`, `gh api .../commits/master`, `gh api .../contents/<TASKS.yaml>`) and treat
+  local `git`/`da` as a fallback, not the primary.
+- **R8 — Snapshot/journal MUST distinguish canonical state from in-flight-PR state.** Refines
+  D1/D3. A task can be "done in an open PR, not yet merged" (the validation had p4g/p4h
+  `pending` on master but reconciled in unmerged PR #90). Each tracked item carries its locus —
+  `{canonical: master@sha}` vs `{in_open_pr: #N, status}` — so recovery doesn't treat
+  in-PR work as either done-on-master or fresh-eligible.
+- **R9 — The per-command journal (write side) is the non-optional, must-build piece.** The
+  manual replica covered only the READ side (snapshot + overlay + recovery-view, point-in-time).
+  The continuous, crash-survivable per-command append cannot be faked by hand; it is precisely
+  what survives a mid-turn kill. Manual handoffs validate the recovery UX; they do not deliver
+  the crash-survivability — that requires building the journal.
