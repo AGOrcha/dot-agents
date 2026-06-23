@@ -1809,3 +1809,21 @@ func TestGitArtifactFetcherPinnedCacheHitRequiredPostureFails(t *testing.T) {
 		t.Fatalf("want auth error on pinned cache hit, got %v", err)
 	}
 }
+
+func TestValidateGitSourceURL(t *testing.T) {
+	parts := PackageRefParts{SourceID: "s", ArtifactPath: "a.json"}
+	// A well-formed remote URL parses cleanly (the err==nil branch).
+	if err := validateGitSourceURL("https://github.com/acme/repo.git", parts); err != nil {
+		t.Fatalf("remote url: %v", err)
+	}
+	// A file:// path classifies as ErrNotRemote, which is allowed (local fixture).
+	if err := validateGitSourceURL("file:///tmp/repo", parts); err != nil {
+		t.Fatalf("file url: %v", err)
+	}
+	// A malformed URL is a hard parse failure -> schema ImportError.
+	err := validateGitSourceURL("ht!tp://%zz", parts)
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for malformed url, got %v", err)
+	}
+}

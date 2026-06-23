@@ -109,16 +109,44 @@ func readCachedPinnedGitArtifact(posture SigningPosture, pinned string) (Fetched
 	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: pinned}}, true, nil
 }
 
+// validateGitSourceURL classifies the source URL so a malformed remote fails
+// before any network work. file:// (local fixture / on-disk repo) is a
+// legitimate clone source, so an ErrNotRemote "file" classification is not
+// itself an error — only a hard parse failure is. Splitting the parse and the
+// not-remote check into separate guards keeps each condition flat.
+func validateGitSourceURL(url string, parts PackageRefParts) error {
+	_, err := gitremote.ParseRemoteURL(url)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, gitremote.ErrNotRemote) {
+		return nil
+	}
+	return newArtifactImportError(parts, ReasonSchema, fmt.Errorf("git source url %q: %w", url, err))
+}
+
+// readArtifactFile opens parts.ArtifactPath in the cloned worktree and returns
+// its bytes, kept separate so the defer-bound file handle does not nest inside
+// cloneAndRead's control flow.
+func readArtifactFile(wfs billy.Filesystem, parts PackageRefParts, commit string) ([]byte, error) {
+	fh, err := wfs.Open(filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/")))
+	if err != nil {
+		return nil, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
+	defer func() { _ = fh.Close() }()
+	data, err := readAllLimited(fh)
+	if err != nil {
+		return nil, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
+	return data, nil
+}
+
 // cloneAndRead validates the source URL, shallow-clones at the resolved ref, and
 // reads the artifact bytes at the cloned HEAD. It returns the artifact bytes and
 // the resolved commit SHA, mapping each failure to its ImportError reason.
 func (f *gitArtifactFetcher) cloneAndRead(src Source, parts PackageRefParts) ([]byte, string, error) {
-	// Validate/classify the source URL up front so a malformed remote fails
-	// before any network work. file:// (local fixture / on-disk repo) is a
-	// legitimate clone source, so an ErrNotRemote "file" classification is not
-	// itself an error — only a hard parse failure is.
-	if _, err := gitremote.ParseRemoteURL(src.URL); err != nil && !errors.Is(err, gitremote.ErrNotRemote) {
-		return nil, "", newArtifactImportError(parts, ReasonSchema, fmt.Errorf("git source url %q: %w", src.URL, err))
+	if err := validateGitSourceURL(src.URL, parts); err != nil {
+		return nil, "", err
 	}
 
 	ref := gitArtifactRef(src, parts)
@@ -135,14 +163,9 @@ func (f *gitArtifactFetcher) cloneAndRead(src Source, parts PackageRefParts) ([]
 	}
 	commit := head.Hash().String()
 
-	fh, err := wfs.Open(filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/")))
+	data, err := readArtifactFile(wfs, parts, commit)
 	if err != nil {
-		return nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
-	}
-	defer func() { _ = fh.Close() }()
-	data, err := readAllLimited(fh)
-	if err != nil {
-		return nil, "", newArtifactImportError(parts, ReasonContent, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+		return nil, "", err
 	}
 	return data, commit, nil
 }
