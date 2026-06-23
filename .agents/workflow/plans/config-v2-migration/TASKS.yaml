@@ -605,7 +605,7 @@ tasks:
       app_type: go-cli
     - id: p4h-agentslock-interprocess-lock
       title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
-      status: awaiting_agent_review
+      status: completed
       depends_on:
         - p4f-units-lock-7a-wiring
       blocks: []
