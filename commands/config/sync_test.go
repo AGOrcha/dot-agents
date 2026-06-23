@@ -105,6 +105,232 @@ func replacePath(template, path string) string {
 	return string(out)
 }
 
+// dryRunSyncOptions builds a dry-run runSyncOptions. It deliberately wires a
+// resolver factory that panics if invoked, proving the dry-run path NEVER reaches
+// the mutating force re-resolve.
+func dryRunSyncOptions(project, layer string, jsonOut bool) *runSyncOptions {
+	return &runSyncOptions{
+		runContext: runContext{
+			jsonOut: jsonOut,
+			dryRun:  true,
+			stdout:  &bytes.Buffer{},
+			stderr:  &bytes.Buffer{},
+			cwd:     project,
+		},
+		layer: layer,
+		newResolver: func() forceResolver {
+			panic("dry-run must not build or invoke the force-refresh resolver")
+		},
+	}
+}
+
+// lockSnapshot returns the raw bytes of the project's .agentsrc.lock plus a bool
+// for whether it exists, so a test can assert the dry-run path leaves the lock
+// byte-for-byte unchanged (or absent).
+func lockSnapshot(t *testing.T, project string) ([]byte, bool) {
+	t.Helper()
+	b, err := os.ReadFile(cfg.AgentsLockPath(project))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false
+	}
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	return b, true
+}
+
+// TestRunSync_DryRun_DoesNotRewriteLock is the regression guard for the safety
+// bug: `da config sync` under --dry-run must NOT re-fetch layers or rewrite
+// .agentsrc.lock. It first seeds a lock via a real sync (t1), snapshots it, then
+// runs a dry-run sync with a LATER clock and asserts the lock is byte-for-byte
+// unchanged and the resolver was never invoked (the factory panics otherwise).
+func TestRunSync_DryRun_DoesNotRewriteLock(t *testing.T) {
+	project := withTwoLocalLayers(t)
+
+	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runSync(syncOptions(project, "", false, t1), testDeps()); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	before, ok := lockSnapshot(t, project)
+	if !ok {
+		t.Fatal("expected a lock after the seed sync")
+	}
+
+	// Dry-run with a much later clock: a real sync here WOULD advance fetched_at.
+	opts := dryRunSyncOptions(project, "", false)
+	if err := runSync(opts, testDeps()); err != nil {
+		t.Fatalf("dry-run sync: %v", err)
+	}
+
+	after, ok := lockSnapshot(t, project)
+	if !ok {
+		t.Fatal("dry-run must not delete the lock")
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("dry-run rewrote .agentsrc.lock:\nbefore=%s\nafter =%s", before, after)
+	}
+
+	out := opts.stdout.(*bytes.Buffer).String()
+	if !strings.Contains(out, "--dry-run") {
+		t.Errorf("dry-run preview did not announce itself:\n%s", out)
+	}
+	if !strings.Contains(out, "lock NOT rewritten") {
+		t.Errorf("dry-run preview missing the 'lock NOT rewritten' summary:\n%s", out)
+	}
+}
+
+// TestRunSync_DryRun_NoPriorLockStaysAbsent proves dry-run does not create a lock
+// where none existed: with no prior sync, a dry-run must preview (no external lock
+// entries) and leave .agentsrc.lock absent.
+func TestRunSync_DryRun_NoPriorLockStaysAbsent(t *testing.T) {
+	project := withTwoLocalLayers(t)
+
+	if _, ok := lockSnapshot(t, project); ok {
+		t.Fatal("precondition: no lock should exist before any sync")
+	}
+	opts := dryRunSyncOptions(project, "", false)
+	if err := runSync(opts, testDeps()); err != nil {
+		t.Fatalf("dry-run sync: %v", err)
+	}
+	if _, ok := lockSnapshot(t, project); ok {
+		t.Error("dry-run created .agentsrc.lock where none existed")
+	}
+}
+
+// TestRunSync_DryRun_JSONMarksDryRun covers the --json dry-run path: the emitted
+// report decodes, carries dry_run=true, and the lock is untouched.
+func TestRunSync_DryRun_JSONMarksDryRun(t *testing.T) {
+	project := withTwoLocalLayers(t)
+
+	t1 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := runSync(syncOptions(project, "", false, t1), testDeps()); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	before, _ := lockSnapshot(t, project)
+
+	opts := dryRunSyncOptions(project, "", true)
+	buf := &bytes.Buffer{}
+	opts.stdout = buf
+	if err := runSync(opts, testDeps()); err != nil {
+		t.Fatalf("dry-run json sync: %v", err)
+	}
+
+	var decoded SyncReport
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("dry-run --json did not emit valid JSON: %v\n%s", err, buf.String())
+	}
+	if !decoded.DryRun {
+		t.Errorf("dry-run --json report must set dry_run=true, got %+v", decoded)
+	}
+	if !decoded.OK || len(decoded.Layers) != 2 {
+		t.Errorf("decoded dry-run report unexpected: %+v", decoded)
+	}
+
+	after, _ := lockSnapshot(t, project)
+	if !bytes.Equal(before, after) {
+		t.Error("dry-run --json rewrote the lock")
+	}
+}
+
+// TestRunSync_DryRun_ReadBackErrorIsHinted covers the dry-run read-back error
+// branch: a malformed manifest makes buildSyncReport fail, and runSync must
+// surface the hinted "--dry-run could not read the current lock" error.
+func TestRunSync_DryRun_ReadBackErrorIsHinted(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2,"extends":[ this is not valid json`, "")
+	opts := dryRunSyncOptions(project, "", false)
+	err := runSync(opts, testDeps())
+	if err == nil {
+		t.Fatal("expected dry-run to error when the manifest cannot be parsed")
+	}
+	if !strings.Contains(err.Error(), "--dry-run could not read the current lock") {
+		t.Errorf("error = %q, want it to mention the dry-run read-back failure", err.Error())
+	}
+}
+
+// TestDeps_DryRunFlag covers the dryRunFlag getter: nil getter is false, and a
+// wired getter is honored — mirroring the existing jsonFlag contract.
+func TestDeps_DryRunFlag(t *testing.T) {
+	if (Deps{}).dryRunFlag() {
+		t.Error("nil DryRun getter must read as false")
+	}
+	on := Deps{DryRun: func() bool { return true }}
+	if !on.dryRunFlag() {
+		t.Error("wired DryRun getter returning true must read as true")
+	}
+}
+
+// TestPrintSyncHuman_DryRunBranches covers the DryRun render paths of
+// printSyncHuman: the dry-run header, the dry-run empty-layers line, and the
+// dry-run "lock NOT rewritten" summary.
+func TestPrintSyncHuman_DryRunBranches(t *testing.T) {
+	// Empty-layers dry-run branch.
+	empty := SyncReport{OK: true, Lockfile: "/tmp/.agentsrc.lock", Layers: []SyncedLayer{}, DryRun: true}
+	buf := &bytes.Buffer{}
+	printSyncHuman(buf, empty)
+	if out := buf.String(); !strings.Contains(out, "lock not written") {
+		t.Errorf("dry-run empty-layers branch missing note:\n%s", out)
+	}
+
+	// Populated dry-run branch (default header + summary).
+	full := SyncReport{
+		OK:       true,
+		Lockfile: "/tmp/.agentsrc.lock",
+		DryRun:   true,
+		Layers: []SyncedLayer{
+			{Ref: "acme:org/base.json", SHA: "abc1234567", FetchedAt: "2024-01-01T00:00:00Z", Targeted: true},
+		},
+	}
+	buf.Reset()
+	printSyncHuman(buf, full)
+	out := buf.String()
+	if !strings.Contains(out, "Config sync --dry-run (all layers)") {
+		t.Errorf("missing dry-run all-layers header:\n%s", out)
+	}
+	if !strings.Contains(out, "lock NOT rewritten (dry run)") {
+		t.Errorf("missing dry-run summary:\n%s", out)
+	}
+
+	// Scoped dry-run branch (layer header).
+	full.Layer = "acme:org/base.json"
+	buf.Reset()
+	printSyncHuman(buf, full)
+	if out := buf.String(); !strings.Contains(out, "Config sync --dry-run (layer acme:org/base.json)") {
+		t.Errorf("missing scoped dry-run header:\n%s", out)
+	}
+}
+
+// TestSyncCmd_RunE_DryRunThreadsThroughDeps drives newSyncCmd through cobra with
+// a Deps whose DryRun getter returns true, proving bind() copies the global
+// --dry-run into the run context and the lock is left untouched end-to-end.
+func TestSyncCmd_RunE_DryRunThreadsThroughDeps(t *testing.T) {
+	project := withTwoLocalLayers(t)
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(prev) })
+	if err := os.Chdir(project); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	deps := testDeps()
+	deps.DryRun = func() bool { return true }
+	cmd := newSyncCmd(deps)
+	cmd.SetArgs(nil)
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(&bytes.Buffer{})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out.String(), "lock NOT rewritten") {
+		t.Errorf("cobra dry-run path did not produce the preview summary:\n%s", out.String())
+	}
+	if _, ok := lockSnapshot(t, project); ok {
+		t.Error("cobra dry-run path created/rewrote the lock")
+	}
+}
+
 func TestRunSync_ReResolvesAndUpdatesLockTimestamps(t *testing.T) {
 	project := withTwoLocalLayers(t)
 

@@ -36,11 +36,21 @@ type Deps struct {
 	// same persistent flag as every other command (status, workflow, kg) rather
 	// than defining its own local `--json`. Nil is treated as false.
 	JSON func() bool
+	// DryRun reports the resolved global `--dry-run` flag. Only the mutating
+	// `da config sync` consumes it (explain/verify/lint are read-only); sync
+	// short-circuits before the force re-resolve + lock rewrite when it is set,
+	// honoring the documented "preview mutations without applying" contract.
+	// Nil is treated as false, matching the mcp/settings DryRun wiring.
+	DryRun func() bool
 }
 
 // jsonFlag returns the resolved global --json value, tolerating a nil getter
 // (tests that build Deps directly, or callers that don't wire it).
 func (d Deps) jsonFlag() bool { return d.JSON != nil && d.JSON() }
+
+// dryRunFlag returns the resolved global --dry-run value, tolerating a nil
+// getter (tests that build Deps directly, or callers that don't wire it).
+func (d Deps) dryRunFlag() bool { return d.DryRun != nil && d.DryRun() }
 
 // runContext is the common stdout/stderr/json/cwd surface every `da config`
 // subcommand's RunE fills from the cobra command + Deps. Embedding it keeps the
@@ -49,6 +59,7 @@ type runContext struct {
 	stdout  io.Writer
 	stderr  io.Writer
 	jsonOut bool
+	dryRun  bool
 	cwd     string
 }
 
@@ -64,6 +75,7 @@ func (rc *runContext) bind(cmd *cobra.Command, deps Deps) error {
 	rc.stdout = cmd.OutOrStdout()
 	rc.stderr = cmd.ErrOrStderr()
 	rc.jsonOut = deps.jsonFlag()
+	rc.dryRun = deps.dryRunFlag()
 	if rc.cwd == "" {
 		cwd, err := getwd()
 		if err != nil {
