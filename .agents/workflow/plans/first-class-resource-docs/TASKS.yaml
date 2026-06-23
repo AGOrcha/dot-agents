@@ -3,7 +3,7 @@ plan_id: first-class-resource-docs
 tasks:
     - id: rd-config-guide
       title: 'Layered config guide (config-v2) — the exemplar template'
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -11,12 +11,12 @@ tasks:
         - docs/
       verification_required: true
       notes: |-
-        The 0.4.0 layered-config guide (Overview/Model/Commands/Worked-example/Reference). Being built in PR
-        docs/layered-config-guide. Sets the shared first-class resource-family guide template the other families
-        follow. Reference target: the config schema + CONFIG_RELEVANCE.md. Public.
+        DONE — shipped as PR #110 (docs/LAYERED_CONFIG_GUIDE.md, surfaced via PUBLIC_PAGES under Guides,
+        README-linked, build:public passes). Sets the shared first-class template
+        (Overview/Model/Commands/Worked-example/Reference) the other gap tasks follow. config is GOOD.
       app_type: docs
-    - id: rd-hooks-guide
-      title: 'Hooks user guide (events -> platforms, authoring)'
+    - id: rd-resource-trio-guides
+      title: 'Task-oriented guides for rules / mcp / settings (contract-only today)'
       status: pending
       depends_on:
         - rd-config-guide
@@ -26,12 +26,16 @@ tasks:
         - docs/
       verification_required: true
       notes: |-
-        First-class user guide for the hooks family: what hooks are, the event->platform mapping (verify against the
-        *EventTable maps in internal/platform/hooks.go), how to author/declare them, `da hooks` surface. Reference
-        target: HOOKS.md (the contract). Public.
+        The clearest user-facing gap (audit §3). rules (commands/internal/rules/), mcp (commands/internal/mcp/),
+        settings (commands/internal/settings/) each have ONLY RESOURCE_COMMAND_CONTRACT.md (implementer contract) +
+        one generic README row under "Canonical Resource Inspection" — no task-oriented guide, unlike hooks (full
+        HOOKS.md). Write a guide per family (or one combined resource-management guide) following the #110 template:
+        what each resource is, declaring it, the per-platform emit (cross-link PLATFORM_DIRS_DOCS for rules/mcp
+        locations), the list/show/remove surface. Reference target: RESOURCE_COMMAND_CONTRACT.md. Surface in
+        PUBLIC_PAGES + README. Verify against da rules|mcp|settings --help.
       app_type: docs
-    - id: rd-skills-guide
-      title: 'Skills user guide (authoring, promote, graph)'
+    - id: rd-score-guide
+      title: 'Score guide: run and read agent-run outcome scores'
       status: pending
       depends_on:
         - rd-config-guide
@@ -41,11 +45,29 @@ tasks:
         - docs/
       verification_required: true
       notes: |-
-        First-class user guide for skills: authoring a skill, `da skills` surface (incl. promote), the
-        skill<->command<->graph integration. Reference target: SKILL_COMMAND_INTEGRATION.md. Public.
+        score (commands/score.go: run/iteration/session) is backed only by OUTCOME_SCORING_RUBRIC.md (a rubric/spec
+        that is NOT in PUBLIC_PAGES) + one README row — effectively undocumented for site visitors. Write a
+        task-oriented guide (compute a run score, query iteration/session scores, read the output) following the #110
+        template; Reference target: OUTCOME_SCORING_RUBRIC.md. Surface in PUBLIC_PAGES + README. Verify vs da score --help.
       app_type: docs
-    - id: rd-agents-guide
-      title: 'Agents user guide (no doc today)'
+    - id: rd-config-help-dangling-ref
+      title: 'Fix dangling docs/CONFIG_DISTRIBUTION_MODEL.md reference in config help'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/
+      verification_required: true
+      notes: |-
+        `da config ... --help` cites docs/CONFIG_DISTRIBUTION_MODEL.md, which does NOT exist in docs/ (audit §3). Fix
+        the dead pointer: re-point the help text to the shipped docs/LAYERED_CONFIG_GUIDE.md (PR #110). Small code
+        change in commands/config (help strings). Grep the package for the dead path; update any test asserting the
+        old string. Verify go build + the config command tests; coverage gate on touched files.
+      app_type: go-cli
+    - id: rd-workflow-catalog-gaps
+      title: 'Workflow catalog: add absent commands to README + internal-commands reference'
       status: pending
       depends_on:
         - rd-config-guide
@@ -53,50 +75,13 @@ tasks:
       owner: dot-agents
       write_scope:
         - docs/
-      verification_required: true
+        - README.md
+      verification_required: false
       notes: |-
-        First-class guide for the agents family (currently UNDOCUMENTED). Cover the `da agents` surface (incl.
-        promote --force) + how agents are declared/managed. Verify against commands/agents/ + da agents --help. Public.
-      app_type: docs
-    - id: rd-mcp-guide
-      title: 'MCP user guide (no doc today)'
-      status: pending
-      depends_on:
-        - rd-config-guide
-      blocks: []
-      owner: dot-agents
-      write_scope:
-        - docs/
-      verification_required: true
-      notes: |-
-        First-class guide for the MCP family (currently UNDOCUMENTED). Cover declaring MCP servers, the per-platform
-        emit (.mcp.json / ~/.claude.json etc per PLATFORM_DIRS_DOCS), and the `da mcp` surface. Public.
-      app_type: docs
-    - id: rd-rules-guide
-      title: 'Rules user guide (no doc today)'
-      status: pending
-      depends_on:
-        - rd-config-guide
-      blocks: []
-      owner: dot-agents
-      write_scope:
-        - docs/
-      verification_required: true
-      notes: |-
-        First-class guide for the rules family (currently UNDOCUMENTED). Cover rule files, the per-platform rule-file
-        locations (cross-link PLATFORM_DIRS_DOCS — the authoritative matrix), and the `da rules` surface. Public.
-      app_type: docs
-    - id: rd-plugins-guide
-      title: 'Plugins user guide (PLUGIN.yaml, emit)'
-      status: pending
-      depends_on:
-        - rd-config-guide
-      blocks: []
-      owner: dot-agents
-      write_scope:
-        - docs/
-      verification_required: true
-      notes: |-
-        First-class user guide for plugins: PLUGIN.yaml shape, per-platform emitter status, `da` plugin surface.
-        Reference target: PLUGIN_CONTRACT.md (the contract). Public.
+        Audit §3: several workflow commands are missing from the README command catalog — `contract`
+        (contract.go), `resolve-prompt` (profile_prompt.go), `slots` (eligible_accounting.go), `blocked-on`
+        (blocked_on.go). Add them to the README workflow tables. Separately, the maintainer-internal/automation
+        commands (workflow hook-sentinel/hook-outcome/commit/archive-orphans, kg serve, kg lockfile) get a short
+        "automation / internal commands" REFERENCE entry (these are skill/hook-driven, not run by hand) — NOT
+        end-user guides. Verify each command exists via da workflow|kg --help.
       app_type: docs
