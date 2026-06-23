@@ -1,0 +1,11 @@
+schema_version: 1
+id: first-class-resource-docs
+title: First-class resource-family docs
+status: draft
+summary: One first-class user-facing guide per resource family (config, hooks, skills, agents, mcp, rules, plugins), following the layered-config guide as the template, surfaced in the Starlight Guides section
+created_at: "2026-06-23T21:46:48Z"
+updated_at: "2026-06-23T21:46:48Z"
+owner: dot-agents
+success_criteria: Each resource family has a first-class guide (Overview/Model/Commands/Worked-example/Reference) surfaced in the docs site sidebar and linked from README; a reader can use each family without reading code; coverage gaps (agents/mcp/rules have no doc today) are closed
+verification_strategy: Docs site builds; each guide's command/claim citations verified against code + da <family> --help; internal links resolve; README links each guide
+current_focus_task: rd-resource-trio-guides

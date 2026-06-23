@@ -1,0 +1,87 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+tasks:
+    - id: rd-config-guide
+      title: 'Layered config guide (config-v2) — the exemplar template'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        DONE pending #110 merge (PR #110, open + green) (docs/LAYERED_CONFIG_GUIDE.md, surfaced via PUBLIC_PAGES under Guides,
+        README-linked, build:public passes). Sets the shared first-class template
+        (Overview/Model/Commands/Worked-example/Reference) the other gap tasks follow. config is GOOD.
+      app_type: docs
+    - id: rd-resource-trio-guides
+      title: 'Task-oriented guides for rules / mcp / settings (contract-only today)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        The clearest user-facing gap (audit §3). rules (commands/internal/rules/), mcp (commands/internal/mcp/),
+        settings (commands/internal/settings/) each have ONLY RESOURCE_COMMAND_CONTRACT.md (implementer contract) +
+        one generic README row under "Canonical Resource Inspection" — no task-oriented guide, unlike hooks (full
+        HOOKS.md). Write a guide per family (or one combined resource-management guide) following the #110 template:
+        what each resource is, declaring it, the per-platform emit (cross-link PLATFORM_DIRS_DOCS for rules/mcp
+        locations), the list/show/remove surface. Reference target: RESOURCE_COMMAND_CONTRACT.md. Surface in
+        PUBLIC_PAGES + README. Verify against da rules|mcp|settings --help.
+      app_type: docs
+    - id: rd-score-guide
+      title: 'Score guide: run and read agent-run outcome scores'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        score (commands/score.go: run/iteration/session) is backed only by OUTCOME_SCORING_RUBRIC.md (a rubric/spec
+        that is NOT in PUBLIC_PAGES) + one README row — effectively undocumented for site visitors. Write a
+        task-oriented guide (compute a run score, query iteration/session scores, read the output) following the #110
+        template; Reference target: OUTCOME_SCORING_RUBRIC.md. Surface in PUBLIC_PAGES + README. Verify vs da score --help.
+      app_type: docs
+    - id: rd-config-help-dangling-ref
+      title: 'Fix dangling docs/CONFIG_DISTRIBUTION_MODEL.md reference in config help'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/
+      verification_required: true
+      notes: |-
+        `da config ... --help` cites docs/CONFIG_DISTRIBUTION_MODEL.md, which does NOT exist in docs/ (audit §3). Fix
+        the dead pointer: re-point the help text to the shipped docs/LAYERED_CONFIG_GUIDE.md (PR #110). Small code
+        change in commands/config (help strings). Grep the package for the dead path; update any test asserting the
+        old string. Verify go build + the config command tests; coverage gate on touched files.
+      app_type: go-cli
+    - id: rd-workflow-catalog-gaps
+      title: 'Workflow catalog: add absent commands to README + internal-commands reference'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+        - README.md
+      verification_required: false
+      notes: |-
+        Audit §3: several workflow commands are missing from the README command catalog — `contract`
+        (contract.go), `resolve-prompt` (profile_prompt.go), `slots` (eligible_accounting.go), `blocked-on`
+        (blocked_on.go). Add them to the README workflow tables. Separately, the maintainer-internal/automation
+        commands (workflow hook-sentinel/hook-outcome/commit/archive-orphans, kg serve, kg lockfile) get a short
+        "automation / internal commands" REFERENCE entry (these are skill/hook-driven, not run by hand) — NOT
+        end-user guides. Verify each command exists via da workflow|kg --help.
+      app_type: docs
