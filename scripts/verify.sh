@@ -11,13 +11,24 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# Find da binary
+# Repo root (this script lives in scripts/). Used to anchor relative binary
+# invocations so they still resolve after a subshell `cd` into a fixture dir.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Find da binary.
+# DOT_AGENTS         — invocation used from the repo root (back-compat).
+# DOT_AGENTS_ABS     — location-independent invocation, safe to run after a
+#                      `cd` into a temp fixture directory (config-v2 live
+#                      commands read .agentsrc.json from the working dir).
 if [[ -x "./bin/da" ]]; then
   DOT_AGENTS="./bin/da"
+  DOT_AGENTS_ABS="${REPO_ROOT}/bin/da"
 elif command -v da >/dev/null 2>&1; then
   DOT_AGENTS="da"
+  DOT_AGENTS_ABS="da"
 elif command -v go >/dev/null 2>&1; then
   DOT_AGENTS="go run ./cmd/da"
+  DOT_AGENTS_ABS="go run ${REPO_ROOT}/cmd/da"
 else
   echo -e "${RED}Error: da not found${NC}" >&2
   exit 1
@@ -78,6 +89,49 @@ test_command "explain --help" "$DOT_AGENTS explain --help"
 test_command "workflow --help" "$DOT_AGENTS workflow --help"
 test_command "review --help" "$DOT_AGENTS review --help"
 test_command "kg --help" "$DOT_AGENTS kg --help"
+
+echo ""
+echo -e "${BOLD}Config-v2 Help Commands${NC}"
+# Help paths run anywhere (no .agentsrc.json required) and prove the
+# config-v2 subtree is wired into the built binary's command surface.
+test_command "config --help" "$DOT_AGENTS config --help"
+test_command "config explain --help" "$DOT_AGENTS config explain --help"
+test_command "config sync --help" "$DOT_AGENTS config sync --help"
+test_command "config lint --help" "$DOT_AGENTS config lint --help"
+test_command "config verify --help" "$DOT_AGENTS config verify --help"
+
+echo ""
+echo -e "${BOLD}Config-v2 Live Commands${NC}"
+# config explain/sync/lint/verify read the effective .agentsrc.json from the
+# current directory. Run them inside a throwaway fixture dir holding a minimal
+# valid manifest ({"version": 1}) so they exercise the real code path and exit
+# cleanly without depending on the repo's own (possibly drifted) manifest.
+# The fixture dir is created under $TMPDIR (cross-OS; Git Bash maps it) and
+# removed afterward, so nothing is written outside a temp location.
+CONFIG_FIXTURE="$(mktemp -d 2>/dev/null || mktemp -d -t da-smoke)"
+printf '{\n  "version": 1\n}\n' > "${CONFIG_FIXTURE}/.agentsrc.json"
+test_command "config lint (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config lint)"
+test_command "config explain (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config explain)"
+test_command "config explain --all (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config explain --all)"
+test_command "config explain --json (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config explain --json)"
+test_command "config explain repo_id (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config explain repo_id)"
+test_command "config explain --all --json (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config explain --all --json)"
+test_command "config sync (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config sync)"
+test_command "config verify (fixture)" "(cd '${CONFIG_FIXTURE}' && $DOT_AGENTS_ABS config verify)"
+rm -rf "${CONFIG_FIXTURE}"
+
+echo ""
+echo -e "${BOLD}KG Commands${NC}"
+# Help paths and read-only status paths prove the kg subtree executes on the
+# live binary. code-status and bridge health report UNBUILT/empty cleanly
+# without a built code graph (no .venv crg tooling required), so they stay
+# hermetic and cross-OS. Heavier paths (build/update/query) need real graph
+# infra and are intentionally NOT smoked here.
+test_command "kg health --help" "$DOT_AGENTS kg health --help"
+test_command "kg code-status --help" "$DOT_AGENTS kg code-status --help"
+test_command "kg bridge --help" "$DOT_AGENTS kg bridge --help"
+test_command "kg code-status" "$DOT_AGENTS kg code-status"
+test_command "kg bridge health" "$DOT_AGENTS kg bridge health"
 
 echo ""
 echo -e "${BOLD}Feature Commands${NC}"

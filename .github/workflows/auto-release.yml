@@ -100,13 +100,43 @@ jobs:
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/.kg
         run: |
           ./bin/da --version
           ./bin/da --help
           ./bin/da init --yes
           test -d "${HOME}/.agents"
+          # Reshaped read-only status/doctor surface.
           ./bin/da status
+          ./bin/da status --json
+          ./bin/da status --audit
           ./bin/da doctor
+          ./bin/da doctor --json
+          # Config-v2 surface (config-distribution-model). Help paths run
+          # anywhere; live paths run against a minimal valid fixture manifest
+          # so a broken config-v2 release binary is caught.
+          ./bin/da config --help
+          ./bin/da config explain --help
+          ./bin/da config sync --help
+          ./bin/da config lint --help
+          ./bin/da config verify --help
+          da_abs="${PWD}/bin/da"
+          fixture="${SMOKE_HOME}/config-fixture"
+          mkdir -p "${fixture}"
+          printf '{\n  "version": 1\n}\n' > "${fixture}/.agentsrc.json"
+          ( cd "${fixture}" \
+            && "${da_abs}" config lint \
+            && "${da_abs}" config explain \
+            && "${da_abs}" config explain --all --json \
+            && "${da_abs}" config sync \
+            && "${da_abs}" config verify )
+          rm -rf "${fixture}"
+          # KG surface — help + read-only status paths (no code graph needed).
+          ./bin/da kg --help
+          ./bin/da kg health --help
+          ./bin/da kg code-status --help
+          ./bin/da kg code-status
+          ./bin/da kg bridge health
 
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and fails the

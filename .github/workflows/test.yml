@@ -402,6 +402,60 @@ jobs:
         run: |
           ./bin/da kg --help
 
+      # ── Config-v2 surface (config-distribution-model) ────────────────────
+      # config explain/sync/lint/verify read the effective .agentsrc.json from
+      # the working directory. Run them inside a throwaway fixture dir under
+      # SMOKE_HOME holding a minimal valid manifest ({"version": 1}) so the
+      # real code path is exercised and exits cleanly — no dependency on the
+      # repo's own (possibly drifted) manifest. ${DA_BIN} is resolved to an
+      # absolute path first so the invocation survives the `cd` into the
+      # fixture. Cross-OS: pushd/popd + the bash-normalized SMOKE_HOME.
+      - name: Test config-v2 surface
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+        run: |
+          # Help paths run anywhere and prove the subtree is wired in.
+          "${DA_BIN}" config --help
+          "${DA_BIN}" config explain --help
+          "${DA_BIN}" config sync --help
+          "${DA_BIN}" config lint --help
+          "${DA_BIN}" config verify --help
+          # Live paths against a minimal valid fixture manifest.
+          da_abs="$(cd "$(dirname "${DA_BIN}")" && pwd)/$(basename "${DA_BIN}")"
+          fixture="${SMOKE_HOME}/config-fixture"
+          mkdir -p "${fixture}"
+          printf '{\n  "version": 1\n}\n' > "${fixture}/.agentsrc.json"
+          pushd "${fixture}" >/dev/null
+          "${da_abs}" config lint
+          "${da_abs}" config explain
+          "${da_abs}" config explain --all
+          "${da_abs}" config explain --json
+          "${da_abs}" config explain repo_id
+          "${da_abs}" config explain --all --json
+          "${da_abs}" config sync
+          "${da_abs}" config verify
+          popd >/dev/null
+          rm -rf "${fixture}"
+
+      # ── KG surface (knowledge graph) ─────────────────────────────────────
+      # Help + read-only status paths prove the kg subtree executes on the
+      # live binary without a built code graph. code-status reports UNBUILT
+      # and bridge health reports empty cleanly (no .venv code-review-graph
+      # tooling required), so this stays hermetic and cross-OS. Heavier paths
+      # (kg build/update/query) need real graph infra and are NOT smoked here.
+      - name: Test kg surface
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/.kg
+        run: |
+          "${DA_BIN}" kg health --help
+          "${DA_BIN}" kg code-status --help
+          "${DA_BIN}" kg bridge --help
+          "${DA_BIN}" kg code-status
+          "${DA_BIN}" kg bridge health
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}
