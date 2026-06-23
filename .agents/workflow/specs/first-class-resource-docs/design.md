@@ -54,7 +54,7 @@ present) a dedicated `docs/*.md`". Each row carries a code location + doc citati
 `status`, `doctor`, `install` (lifecycle, `commands/internal/lifecycle/` + `commands/*.go`;
 README:213-220,561); `skills` (`commands/skills/`; README:250-252); `agents`
 (`commands/agents/`; README:253-257); `hooks` (`commands/hooks/`; **full HOOKS.md** +
-README:270); `config` (`commands/config/`; README:222-242 + lockfile section + the new
+README:267); `config` (`commands/config/`; README:222-242 + lockfile section + the new
 LAYERED_CONFIG_GUIDE.md / PR #110); `review` (`commands/review.go`; README:276-278);
 `sync` (`commands/sync/`; README:390-405); `explain` (`commands/explain.go`; README:411);
 `workflow` core + plan/task/verify/fanout/merge-back/drift/start-close-task
@@ -65,14 +65,14 @@ maintain/sync/warm/bridge + build/impact/flows (`commands/kg/`; README:343-388).
 
 | Tree | code | today | gap |
 |------|------|-------|-----|
-| `rules` | `commands/internal/rules/` | RESOURCE_COMMAND_CONTRACT.md + 1 README row (270) | contract-only; no task-oriented guide |
-| `mcp` | `commands/internal/mcp/` | RESOURCE_COMMAND_CONTRACT.md + 1 README row (271) | contract-only; no MCP setup guide |
-| `settings` | `commands/internal/settings/` | RESOURCE_COMMAND_CONTRACT.md + 1 README row (272) | contract-only; no guide |
+| `rules` | `commands/internal/rules/` | RESOURCE_COMMAND_CONTRACT.md + 1 README row (266) | contract-only; no task-oriented guide |
+| `mcp` | `commands/internal/mcp/` | RESOURCE_COMMAND_CONTRACT.md + 1 README row (268) | contract-only; no MCP setup guide |
+| `settings` | `commands/internal/settings/` | RESOURCE_COMMAND_CONTRACT.md + 1 README row (269) | contract-only; no guide |
 | `config` ref | `commands/config/` help text | cites `docs/CONFIG_DISTRIBUTION_MODEL.md` | that file does NOT exist — dangling ref (point to LAYERED_CONFIG_GUIDE) |
-| `score` | `commands/score.go` | OUTCOME_SCORING_RUBRIC.md (unsurfaced) + 1 README row (413) | rubric/spec only; no "run/read scores" guide |
+| `score` | `commands/score.go` | OUTCOME_SCORING_RUBRIC.md (unsurfaced) + 1 README row (406) | rubric/spec only; no "run/read scores" guide |
 | `workflow contract` | `commands/workflow/contract.go` | DEMO mention only | absent from README catalog |
 | `workflow resolve-prompt` | `commands/workflow/profile_prompt.go` | VERIFIER_REVIEWER_TEMPLATES.md (unsurfaced) | absent from README catalog |
-| `session stats` | `commands/session_stats.go` | 1 README row (414) | thin; low value |
+| `session stats` | `commands/session_stats.go` | 1 README row (407) | thin; low value |
 
 **MISSING (no user-facing doc anywhere):** `kg lockfile` (`commands/kg/lockfile.go`),
 `workflow slots` (`eligible_accounting.go`), `workflow blocked-on` (`blocked_on.go`),
@@ -91,7 +91,7 @@ undocumented for site visitors despite a repo file existing.
 
 So the substantive user-facing work is: the resource trio (`rules`/`mcp`/`settings`),
 `score`, the dangling `config` ref, and folding the absent-from-catalog workflow commands
-in — NOT new guides for hooks/skills/agents (already GOOD). config is DONE (the exemplar, #110).
+in — NOT new guides for hooks/skills/agents (already GOOD). config is DONE pending #110 merge (the exemplar).
 
 ## 4. Done criteria
 

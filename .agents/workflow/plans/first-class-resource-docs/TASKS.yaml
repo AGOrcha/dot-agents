@@ -11,7 +11,7 @@ tasks:
         - docs/
       verification_required: true
       notes: |-
-        DONE — shipped as PR #110 (docs/LAYERED_CONFIG_GUIDE.md, surfaced via PUBLIC_PAGES under Guides,
+        DONE pending #110 merge (PR #110, open + green) (docs/LAYERED_CONFIG_GUIDE.md, surfaced via PUBLIC_PAGES under Guides,
         README-linked, build:public passes). Sets the shared first-class template
         (Overview/Model/Commands/Worked-example/Reference) the other gap tasks follow. config is GOOD.
       app_type: docs
