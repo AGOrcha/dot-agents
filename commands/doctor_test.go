@@ -16,15 +16,14 @@ package commands
 //    pin the root.go production wiring (regression guard on the deps
 //    factory + constructor call).
 //
-//  - The stp3 cross-cutting regression sweep for doctor's SharedTargetPlan
-//    wiring (repairManagedProject → RunSharedTargetProjection): asserts
-//    that doctor's repair pass materializes the projected codex toml when a
-//    project has at least one broken managed link, that the dry-run
-//    variant does NOT, and that a second doctor pass on a repaired project
-//    is byte-identical (idempotent). The deeper unit-level e2e tests live
-//    in commands/internal/lifecycle/doctor_repair_e2e_test.go; the tests
-//    here pin the cross-cutting projection contract from the root commands
-//    package per the stp3-regression-parity bundle write scope.
+//  - A read-only regression guard for doctor (§7A.6): asserts that, run
+//    through the root production wiring with a broken managed link present,
+//    doctor reports the breakage but does NOT materialize the projected
+//    codex toml and does NOT mutate the project tree. This replaces the
+//    pre-§7A.6 stp3 repair sweep (doctor used to re-run the shared-target
+//    projection + CreateLinks); repair was removed from doctor, so the
+//    contract is now "detect, never fix". The deeper unit-level read-only
+//    e2e tests live in commands/internal/lifecycle/doctor_repair_e2e_test.go.
 
 import (
 	"os"
@@ -71,22 +70,23 @@ func TestLifecycleDoctorCmd_BuildsCobraCommand(t *testing.T) {
 	}
 }
 
-// ─── stp3 regression: doctor SharedTargetProjection wiring ────────────────
+// ─── §7A.6 regression: doctor is read-only (no repair) ────────────────────
 //
-// These tests pin the stp-doctor-repair wiring (doctor.go:479
-// repairManagedProject → RunSharedTargetProjection). doctor only fires
-// repairManagedProject when the link-health audit observes a broken
-// managed link, so we seed a managed claude rules symlink, break it, then
-// run doctor through the root-package wiring and assert the projected
-// codex toml materializes — that artifact is the projection's exclusive
-// output, not CreateLinks's.
+// Before §7A.6 doctor would, on observing a broken managed link, fire a
+// repair pass (RunSharedTargetProjection + per-platform CreateLinks) that
+// materialized the projected codex toml. That repair was removed: doctor now
+// only detects. This guard seeds a managed claude rules symlink + a canonical
+// codex agent (so the projection WOULD have something to materialize), breaks
+// the link, runs doctor through the root production wiring, and asserts the
+// projected toml is NOT created and the project tree is left untouched.
 
-// seedManagedDoctorRepairProject seeds a project with (a) a working
-// managed claude rules symlink, (b) a canonical codex agent under
-// agentsHome so the projection has something to materialize. Returns
+// seedDoctorReadOnlyProject seeds a project with (a) a working managed claude
+// rules symlink and (b) a canonical codex agent under agentsHome — the same
+// fixture the old repair sweep used, so the read-only assertion is meaningful
+// (a repair regression would re-materialize the toml here). Returns
 // (tmp, agentsHome, projectPath, targetPath) where targetPath is the rules
-// file that callers should remove to trip the audit into broken state.
-func seedManagedDoctorRepairProject(t *testing.T, projectName, agentName string) (string, string, string, string) {
+// file callers remove to trip the audit into broken state.
+func seedDoctorReadOnlyProject(t *testing.T, projectName, agentName string) (string, string, string, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("PATH/shim seeding semantics differ on Windows; skip there")
@@ -115,7 +115,7 @@ func seedManagedDoctorRepairProject(t *testing.T, projectName, agentName string)
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "---\nname: " + agentName + "\ndescription: doctor stp3 fixture\n---\n\n# Body\nShip it.\n"
+	body := "---\nname: " + agentName + "\ndescription: doctor read-only fixture\n---\n\n# Body\nShip it.\n"
 	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -128,19 +128,21 @@ func seedManagedDoctorRepairProject(t *testing.T, projectName, agentName string)
 	return tmp, agentsHome, projectPath, target
 }
 
-// TestDoctorRepair_RunsSharedTargetProjection asserts that when doctor's
-// audit flags at least one broken managed link, the repair pass runs the
-// shared-target projection and materializes the projected codex toml.
-// The projection is the ONLY producer of .codex/agents/<n>.toml; the per-
-// platform CreateLinks loop cannot create it. A regression that removes
-// the projection call from repairManagedProject (or swallows its error
-// path) will leave the file absent and fail this test.
-func TestDoctorRepair_RunsSharedTargetProjection(t *testing.T) {
-	_, _, projectPath, target := seedManagedDoctorRepairProject(t, "docrepairproj", "implementer")
+// TestDoctor_ReadOnly_NoProjectionOnBrokenLink asserts that, with a broken
+// managed link present and a platform installed (the exact condition that used
+// to trigger doctor's repair pass), doctor through the root production wiring
+// does NOT materialize the projected codex toml and does NOT mutate the
+// project tree. This is the positive guard for §7A.6's "detect, never fix"
+// contract at the root-package level; the old TestDoctorRepair_* sweep that
+// asserted the toml WAS materialized was removed with doctor's repair pass.
+func TestDoctor_ReadOnly_NoProjectionOnBrokenLink(t *testing.T) {
+	_, _, projectPath, target := seedDoctorReadOnlyProject(t, "docreadonlyproj", "implementer")
 
 	if err := os.Remove(target); err != nil {
 		t.Fatalf("break managed rule target: %v", err)
 	}
+
+	before := snapshotTree(t, projectPath)
 
 	saved := lifecycle.Flags
 	lifecycle.Flags = lifecycle.GlobalFlags{Yes: true}
@@ -152,75 +154,14 @@ func TestDoctorRepair_RunsSharedTargetProjection(t *testing.T) {
 	}
 
 	tomlPath := filepath.Join(projectPath, ".codex", "agents", "implementer.toml")
-	if _, err := os.Stat(tomlPath); err != nil {
-		t.Fatalf("doctor repair must materialize %s via SharedTargetProjection: %v", tomlPath, err)
-	}
-}
-
-// TestDoctorRepair_DryRunNoProjectionMutation asserts that doctor in
-// dry-run mode does NOT materialize the projected codex toml even when
-// the audit observes a broken managed link. repairManagedProject's
-// Flags.DryRun branch only prints "would" lines and must skip the
-// RunSharedTargetProjection apply call.
-func TestDoctorRepair_DryRunNoProjectionMutation(t *testing.T) {
-	_, _, projectPath, target := seedManagedDoctorRepairProject(t, "docdrproj", "implementer")
-
-	if err := os.Remove(target); err != nil {
-		t.Fatalf("break managed rule target: %v", err)
-	}
-
-	saved := lifecycle.Flags
-	lifecycle.Flags = lifecycle.GlobalFlags{Yes: true, DryRun: true}
-	defer func() { lifecycle.Flags = saved }()
-
-	cmd := lifecycle.NewDoctorCmd(buildLifecycleDeps())
-	if err := lifecycle.RunDoctor(cmd, nil, lifecycle.StdDoctorConfigLoader{}); err != nil {
-		t.Fatalf("RunDoctor dry-run: %v", err)
-	}
-
-	tomlPath := filepath.Join(projectPath, ".codex", "agents", "implementer.toml")
 	if _, err := os.Stat(tomlPath); err == nil {
-		t.Fatalf("dry-run doctor must NOT materialize %s; repair is ignoring Flags.DryRun", tomlPath)
+		t.Fatalf("read-only doctor must NOT materialize %s; repair was not removed", tomlPath)
 	} else if !os.IsNotExist(err) {
 		t.Fatalf("unexpected stat error for %s: %v", tomlPath, err)
 	}
-}
 
-// TestDoctorRepair_IdempotentAfterRepair asserts that once doctor has
-// repaired a project (audit fires, projection runs, links re-created), a
-// second doctor pass on the now-healthy state leaves the projected .codex/
-// tree byte-identical. The projection's Execute must be a no-op on already
-// correct state and the per-platform CreateLinks pass must not churn the
-// rendered file's content/mtime.
-func TestDoctorRepair_IdempotentAfterRepair(t *testing.T) {
-	_, _, projectPath, target := seedManagedDoctorRepairProject(t, "docidemproj", "implementer")
-
-	if err := os.Remove(target); err != nil {
-		t.Fatalf("break managed rule target: %v", err)
-	}
-
-	saved := lifecycle.Flags
-	lifecycle.Flags = lifecycle.GlobalFlags{Yes: true}
-	defer func() { lifecycle.Flags = saved }()
-
-	cmd := lifecycle.NewDoctorCmd(buildLifecycleDeps())
-	if err := lifecycle.RunDoctor(cmd, nil, lifecycle.StdDoctorConfigLoader{}); err != nil {
-		t.Fatalf("first RunDoctor: %v", err)
-	}
-
-	codexDir := filepath.Join(projectPath, ".codex")
-	first := snapshotTree(t, codexDir)
-	if len(first) == 0 {
-		t.Fatalf("first doctor pass produced no .codex/ artifacts; repair projection did not run")
-	}
-
-	if err := lifecycle.RunDoctor(cmd, nil, lifecycle.StdDoctorConfigLoader{}); err != nil {
-		t.Fatalf("second RunDoctor: %v", err)
-	}
-	second := snapshotTree(t, codexDir)
-
-	if msg, ok := snapshotsEqual(first, second); !ok {
-		t.Fatalf("doctor repair not idempotent under .codex/: %s\nfirst=%d second=%d",
-			msg, len(first), len(second))
+	after := snapshotTree(t, projectPath)
+	if msg, ok := snapshotsEqual(before, after); !ok {
+		t.Fatalf("read-only doctor mutated the project tree: %s", msg)
 	}
 }

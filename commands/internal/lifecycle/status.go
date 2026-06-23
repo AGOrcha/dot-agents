@@ -1,7 +1,6 @@
 package lifecycle
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -84,26 +83,16 @@ type statusJSONPlatform struct {
 	Broken  bool   `json:"broken"`
 }
 
+// statusJSONProject is the fleet/link-health view of a managed project. Per
+// §7A.6, status sheds all config inspection (manifest presence, lockfile drift,
+// last-refresh metadata) — `da config explain` is the single effective-config
+// truth surface. This struct therefore carries only project identity and
+// per-platform link health.
 type statusJSONProject struct {
-	Name          string               `json:"name"`
-	Path          string               `json:"path"`
-	PathExists    bool                 `json:"path_exists"`
-	Platforms     []statusJSONPlatform `json:"platforms"`
-	ManifestFound bool                 `json:"manifest_found"`
-	LastRefreshed string               `json:"last_refreshed,omitempty"`
-	Lock          *statusJSONLock      `json:"lock,omitempty"`
-}
-
-// statusJSONLock summarizes a project's .agentsrc.lock state for the JSON
-// report (config-v2 p2). It is omitted entirely when the manifest declares no
-// `extends`/`packages` units (lock drift is not applicable). The total_layers/
-// drifted_layers JSON keys are retained for output-contract stability; they now
-// count units. DriftedLayers lists the non-OK unit refs so an AI agent can
-// reason about exactly which units need a re-sync.
-type statusJSONLock struct {
-	Present       bool     `json:"present"`
-	TotalLayers   int      `json:"total_layers"`
-	DriftedLayers []string `json:"drifted_layers,omitempty"`
+	Name       string               `json:"name"`
+	Path       string               `json:"path"`
+	PathExists bool                 `json:"path_exists"`
+	Platforms  []statusJSONPlatform `json:"platforms"`
 }
 
 // StatusConfigLoader is the narrow collaborator status.go's fault-injectable
@@ -228,11 +217,10 @@ func NewStatusCmd(deps Deps, jsonOutput func() bool) *cobra.Command {
 		Use:   "status",
 		Short: "Show managed projects and link health",
 		Long: `Summarizes the shared ~/.agents/ store, managed projects, and per-platform
-link health so you can quickly see whether configuration is present, stale, or broken.
+link health so you can quickly see whether the managed links are present or broken.
 
-The manifest line reflects declared skills, agents, hooks, MCP, and settings in
-.agentsrc.json; canonical hook bundle inventory on disk is da hooks list
-(or hooks show).
+Status is fleet/link-health only. For effective-config detail (manifest sources,
+declared skills/agents/hooks/MCP, lockfile state) run da config explain.
 
 Use --audit when you need file-level detail suitable for debugging or for an AI
 agent that must reason about the exact managed outputs.`,
@@ -388,91 +376,6 @@ func countClaudeRulesDir(rulesDir string) (int, int) {
 	return ok, warn
 }
 
-func printStatusProjectManifestSummary(path string) {
-	rc, rcErr := config.LoadAgentsRC(path)
-	if rcErr != nil {
-		fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: da install --generate%s\n",
-			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	sourceDesc := "local"
-	for _, src := range rc.Sources {
-		if src.Type == "git" && src.URL != "" {
-			u := src.URL
-			for _, prefix := range []string{"https://", "http://", "git@"} {
-				u = strings.TrimPrefix(u, prefix)
-			}
-			u = strings.TrimSuffix(u, ".git")
-			sourceDesc = "git: " + u
-			break
-		}
-	}
-	parts := []string{}
-	if len(rc.Skills) > 0 {
-		parts = append(parts, fmt.Sprintf("%d skill(s)", len(rc.Skills)))
-	}
-	if len(rc.Agents) > 0 {
-		parts = append(parts, fmt.Sprintf("%d agent(s)", len(rc.Agents)))
-	}
-	if rc.Hooks.IsEnabled() {
-		parts = append(parts, "hooks")
-	}
-	if rc.MCP.IsEnabled() {
-		parts = append(parts, "mcp")
-	}
-	detail := sourceDesc
-	if len(parts) > 0 {
-		detail += "  •  " + strings.Join(parts, "  ")
-	}
-	fmt.Fprintf(os.Stdout, "  %s✓%s manifest  %s%s%s\n",
-		ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
-}
-
-// printStatusProjectLockSummary renders the per-project .agentsrc.lock state:
-// a single line summarizing how many declared `extends`/`packages` units are
-// locked and whether any drift (missing/extra) exists (config-v2 p2). Projects
-// that declare no units, or whose manifest cannot be read, print nothing —
-// the manifest summary line already owns the missing/corrupt-manifest case and
-// a local-only manifest has no lock to report.
-func printStatusProjectLockSummary(path string) {
-	drift, err := config.LockDrift(path)
-	if err != nil || !drift.HasDeclaredUnits {
-		return
-	}
-	if !drift.LockPresent {
-		fmt.Fprintf(os.Stdout, "  %s!%s lock  %sno .agentsrc.lock — run: da install%s\n",
-			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	problems := drift.Problems()
-	if len(problems) == 0 {
-		fmt.Fprintf(os.Stdout, "  %s✓%s lock  %s%d unit(s) locked%s\n",
-			ui.Green, ui.Reset, ui.Dim, len(drift.Units), ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "  %s!%s lock  %s%d/%d unit(s) drifted — run: da config sync%s\n",
-		ui.Yellow, ui.Reset, ui.Dim, len(problems), len(drift.Units), ui.Reset)
-}
-
-// buildStatusJSONLock returns the JSON lock summary for one project, or nil
-// when the manifest declares no `extends`/`packages` units / cannot be read (lock drift
-// is not applicable). Read-only — it inspects the lock via config.LockDrift and
-// never writes.
-func buildStatusJSONLock(path string) *statusJSONLock {
-	drift, err := config.LockDrift(path)
-	if err != nil || !drift.HasDeclaredUnits {
-		return nil
-	}
-	out := &statusJSONLock{
-		Present:     drift.LockPresent,
-		TotalLayers: len(drift.Units),
-	}
-	for _, p := range drift.Problems() {
-		out.DriftedLayers = append(out.DriftedLayers, p.Ref)
-	}
-	return out
-}
-
 // RunStatus is the exported entry point used by the root commands/status.go
 // shim during the t08→t11 window. After t11 splits seams_test.go into
 // commands/lifecycle/seams_test.go, the only remaining caller is the shim
@@ -542,8 +445,10 @@ func runStatus(audit bool, agentFilter string, deps StatusConfigLoader, jsonOut 
 
 // printStatusProjectBlock prints one managed project's status entry:
 // header, optional path line (suppressed when path matches ~/name),
-// missing-directory bullet, badge row, manifest summary, last-refreshed
-// timestamp, and the audit block when requested.
+// missing-directory bullet, the per-platform link-health badge row, and the
+// audit block when requested. Per §7A.6 status is fleet/link-health only — it
+// no longer renders manifest, lockfile, or last-refreshed config inspection
+// (use `da config explain` for effective-config detail).
 func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string, audit bool, agentFilter string) {
 	path := cfg.GetProjectPath(name)
 	displayPath := config.DisplayPath(path)
@@ -563,12 +468,6 @@ func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string,
 	}
 
 	printBadgeRow(collectProjectTextBadges(name, path, agentsHome, cfg))
-	printStatusProjectManifestSummary(path)
-	printStatusProjectLockSummary(path)
-
-	if ts := readRefreshTimestamp(path); ts != "" {
-		fmt.Fprintf(os.Stdout, "  %slast refreshed: %s%s\n", ui.Dim, ts, ui.Reset)
-	}
 
 	if audit {
 		printAudit(name, path, agentsHome, agentFilter, cfg)
@@ -605,13 +504,10 @@ func buildStatusJSONReport(cfg *config.Config, agentsHome, agentFilter string) (
 	for _, name := range names {
 		path := cfg.GetProjectPath(name)
 		project := statusJSONProject{
-			Name:          name,
-			Path:          path,
-			PathExists:    pathExists(path),
-			Platforms:     collectProjectPlatforms(name, path, agentsHome),
-			ManifestFound: pathExists(filepath.Join(path, config.AgentsRCFile)),
-			LastRefreshed: readRefreshTimestamp(path),
-			Lock:          buildStatusJSONLock(path),
+			Name:       name,
+			Path:       path,
+			PathExists: pathExists(path),
+			Platforms:  collectProjectPlatforms(name, path, agentsHome),
 		}
 		report.Projects = append(report.Projects, project)
 	}
@@ -890,42 +786,6 @@ func printBadgeRow(badges []platformBadge) {
 		}
 	}
 	fmt.Fprintln(os.Stdout)
-}
-
-// readRefreshTimestamp prefers refresh metadata in .agentsrc.json and falls back to
-// the legacy .agents-refresh marker.
-func readRefreshTimestamp(projectPath string) string {
-	if rc, err := config.LoadAgentsRC(projectPath); err == nil && rc.Refresh != nil && rc.Refresh.RefreshedAt != "" {
-		return formatRefreshDisplay(rc.Refresh.RefreshedAt)
-	}
-	return readLegacyRefreshTimestamp(projectPath)
-}
-
-func formatRefreshDisplay(ts string) string {
-	// Simplify ISO timestamp: 2026-03-12T05:18:11Z → 2026-03-12 05:18 UTC
-	ts = strings.Replace(ts, "T", " ", 1)
-	ts = strings.TrimSuffix(ts, "Z")
-	if len(ts) >= 16 {
-		ts = ts[:16] + " UTC"
-	}
-	return ts
-}
-
-func readLegacyRefreshTimestamp(projectPath string) string {
-	markerPath := filepath.Join(projectPath, ".agents-refresh")
-	f, err := os.Open(markerPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "refreshed_at=") {
-			return formatRefreshDisplay(strings.TrimPrefix(line, "refreshed_at="))
-		}
-	}
-	return ""
 }
 
 // PrintAudit is the exported entry point used by commands/doctor.go (still in

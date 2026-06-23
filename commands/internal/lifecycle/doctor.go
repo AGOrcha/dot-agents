@@ -65,11 +65,14 @@ func NewDoctorCmd(deps Deps) *cobra.Command {
 		Long: `Audits the local da installation, installed platforms, manifest health,
 and managed project links using the same managed paths as da install and
 refresh. Doctor is the fastest way to detect drift after manual edits, moved
-repositories, or partial setup on a new machine.`,
+repositories, or partial setup on a new machine.
+
+Doctor is read-only: it reports problems but never repairs them. When it finds
+broken links or drift it tells you which command to run (for example da refresh
+to relink, or da config sync to reconcile the lockfile).`,
 		Example: deps.ExampleBlock(
 			"  da doctor",
 			"  da doctor --verbose",
-			"  da doctor --dry-run",
 		),
 		Args: deps.NoArgsWithHints("`da doctor` audits the current installation and does not take a project argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -111,13 +114,13 @@ func runDoctor(cmd *cobra.Command, args []string, deps DoctorConfigLoader) error
 	}
 
 	reportProjectInventory(cfg, names)
-	totalFixed, anyBroken := reportLinkHealth(cfg, names, agentsHome)
+	anyBroken := reportLinkHealth(cfg, names, agentsHome)
 	reportManifestHealth(cfg, names)
 	reportLockHealth(cfg, names)
 	reportOrphanCanonicals(cfg, names, agentsHome)
 	reportPluginHealth(cfg, names, agentsHome)
 
-	finalizeDoctorRun(anyBroken, totalFixed)
+	finalizeDoctorRun(anyBroken)
 	return nil
 }
 
@@ -195,30 +198,27 @@ func reportProjectInventory(cfg *config.Config, names []string) {
 }
 
 // reportLinkHealth prints the "Link Health" section: per-project broken/OK
-// counts, broken-link detail (or full audit in verbose mode), and triggers
-// repair when needed. Returns the cumulative platform-repair count and
-// whether any broken links were observed (drives finalizeDoctorRun).
-func reportLinkHealth(cfg *config.Config, names []string, agentsHome string) (int, bool) {
+// counts and broken-link detail (or full audit in verbose mode). It is
+// read-only — doctor never repairs (§7A.6); it returns whether any broken
+// links were observed so finalizeDoctorRun can point the user at da refresh.
+func reportLinkHealth(cfg *config.Config, names []string, agentsHome string) bool {
 	ui.Section("Link Health")
-	totalFixed := 0
 	anyBroken := false
 	for _, name := range names {
 		path := cfg.GetProjectPath(name)
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		broken := reportOneProjectLinkHealth(name, path, agentsHome, cfg)
-		if broken {
+		if reportOneProjectLinkHealth(name, path, agentsHome, cfg) {
 			anyBroken = true
-			totalFixed += repairManagedProject(name, path)
 		}
 	}
-	return totalFixed, anyBroken
+	return anyBroken
 }
 
 // reportOneProjectLinkHealth handles the link-health audit for a single
-// project. Returns true when broken links were observed (caller triggers
-// repair); false for empty or fully-healthy projects.
+// project. Returns true when broken links were observed; false for empty or
+// fully-healthy projects.
 func reportOneProjectLinkHealth(name, path, agentsHome string, cfg *config.Config) bool {
 	brokenLinks := collectBrokenLinks(name, path, agentsHome)
 	ok, _ := countProjectLinks(name, path, agentsHome)
@@ -483,9 +483,10 @@ func reportOnePluginSpec(spec platform.PluginSpec, cfg *config.Config, names []s
 }
 
 // finalizeDoctorRun prints the closing tip/summary line based on the
-// link-health audit. Healthy run: optional verbose tip. Broken run:
-// dry-run hint or repair summary.
-func finalizeDoctorRun(anyBroken bool, totalFixed int) {
+// link-health audit. Doctor is read-only (§7A.6): a healthy run prints an
+// optional verbose tip; a broken run points the user at da refresh rather than
+// repairing anything itself.
+func finalizeDoctorRun(anyBroken bool) {
 	fmt.Fprintln(os.Stdout)
 	if !anyBroken {
 		if !Flags.Verbose {
@@ -493,79 +494,8 @@ func finalizeDoctorRun(anyBroken bool, totalFixed int) {
 		}
 		return
 	}
-	if Flags.DryRun {
-		ui.Info("Run without --dry-run to apply repairs.")
-	} else if totalFixed > 0 {
-		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'da status --audit' to verify.", totalFixed))
-		fmt.Fprintln(os.Stdout)
-	}
-}
-
-// doctorInstalledPlatforms returns every installed platform, matching the
-// installed-only scoping used by add/install/import when they drive a full
-// CreateLinks pass. Exposed as a package var so doctor_test can substitute a
-// deterministic platform set for the new repair branch.
-var doctorInstalledPlatforms = func() []platform.Platform {
-	var installed []platform.Platform
-	for _, p := range platform.All() {
-		if p.IsInstalled() {
-			installed = append(installed, p)
-		}
-	}
-	return installed
-}
-
-// repairManagedProject runs the full repair pass for one managed project whose
-// link health audit found at least one broken link. It is NOT a symlink-only
-// repair: for the project it (a) runs the shared-target projection to fix
-// broken/missing projected artifacts (repo .codex/agents/*.toml, Claude
-// shared-skills projection) and (b) re-runs CreateLinks for every installed
-// platform — not merely the platforms whose links were already detected
-// broken — so that every managed da entity is (re)linked. This mirrors the
-// established call shape on master (refresh.go, add.go, install.go,
-// import.go relink) with warn-and-continue error handling.
-//
-// Idempotence: this only runs for projects the audit already flagged as
-// broken, so a healthy managed project produces no spurious changes and no
-// noisy output (doctor's diagnostic UX is preserved). Within a repaired
-// project, RunSharedTargetProjection.Execute and Platform.CreateLinks are
-// themselves idempotent — they re-establish managed state and are no-ops when
-// that state is already correct — so re-running doctor on an
-// already-repaired project is also a no-op. It returns the number of platforms
-// successfully (re)linked, for the run-summary counter.
-func repairManagedProject(name, path string) int {
-	installed := doctorInstalledPlatforms()
-
-	if Flags.DryRun {
-		ui.DryRun("re-run shared-target projection to repair projected artifacts")
-		for _, p := range installed {
-			ui.DryRun(fmt.Sprintf("re-run %s CreateLinks to repair", p.DisplayName()))
-		}
-		return 0
-	}
-
-	config.SetWindowsMirrorContext(path)
-
-	// (a) Shared-target projection: fixes broken/missing projected
-	// shared-target artifacts (repo .codex/agents/*.toml, Claude
-	// shared-skills projection). Warn-and-continue so a projection failure
-	// does not block the link repair below.
-	if _, err := platform.RunSharedTargetProjection(name, path, installed, false); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("repair shared targets: %v", err))
-	}
-
-	// (b) Full installed-platform CreateLinks pass: relinks ALL managed da
-	// entities, not only the links detected as broken.
-	fixed := 0
-	for _, p := range installed {
-		if err := p.CreateLinks(name, path); err != nil {
-			ui.Bullet("warn", fmt.Sprintf("repair %s: %v", p.DisplayName(), err))
-			continue
-		}
-		ui.Bullet("ok", fmt.Sprintf("repaired %s links", p.DisplayName()))
-		fixed++
-	}
-	return fixed
+	ui.Info("Broken links detected. Run 'da refresh' to relink managed entities, then 'da status --audit' to verify.")
+	fmt.Fprintln(os.Stdout)
 }
 
 // collectOrphanCanonicals returns the resource names under

@@ -198,52 +198,6 @@ func TestPathExists(t *testing.T) {
 	}
 }
 
-// ---------- formatRefreshDisplay / readRefreshTimestamp ----------
-
-func TestFormatRefreshDisplay(t *testing.T) {
-	cases := []struct {
-		input string
-		want  string
-	}{
-		{"2026-03-12T05:18:11Z", "2026-03-12 05:18 UTC"},
-		{"short", "short"},
-	}
-	for _, c := range cases {
-		if got := formatRefreshDisplay(c.input); got != c.want {
-			t.Errorf("formatRefreshDisplay(%q) = %q, want %q", c.input, got, c.want)
-		}
-	}
-}
-
-func TestReadLegacyRefreshTimestamp(t *testing.T) {
-	tmp := t.TempDir()
-	marker := filepath.Join(tmp, ".agents-refresh")
-	os.WriteFile(marker, []byte("refreshed_at=2026-03-12T05:18:11Z\n"), 0644)
-	got := readLegacyRefreshTimestamp(tmp)
-	if got != "2026-03-12 05:18 UTC" {
-		t.Errorf("got %q, want 2026-03-12 05:18 UTC", got)
-	}
-}
-
-func TestReadLegacyRefreshTimestamp_NoFile(t *testing.T) {
-	tmp := t.TempDir()
-	if got := readLegacyRefreshTimestamp(tmp); got != "" {
-		t.Errorf("expected empty for missing marker, got %q", got)
-	}
-}
-
-// TestReadLegacyRefreshTimestamp_NoRefreshedAtLine covers the case where the
-// marker file exists but contains no `refreshed_at=` prefix — the scanner
-// loop falls through and returns "".
-func TestReadLegacyRefreshTimestamp_NoRefreshedAtLine(t *testing.T) {
-	tmp := t.TempDir()
-	marker := filepath.Join(tmp, ".agents-refresh")
-	os.WriteFile(marker, []byte("# unrelated\nother=value\n"), 0644)
-	if got := readLegacyRefreshTimestamp(tmp); got != "" {
-		t.Errorf("expected empty when no refreshed_at line, got %q", got)
-	}
-}
-
 // ---------- summarizeCanonicalBucket ----------
 
 func TestSummarizeCanonicalBucket_Empty(t *testing.T) {
@@ -635,45 +589,6 @@ func TestCountManagedFileOK_BrokenSymlink(t *testing.T) {
 	}
 }
 
-// formatRefreshDisplay edge cases.
-func TestFormatRefreshDisplay_ShortAndExact(t *testing.T) {
-	if got := formatRefreshDisplay(""); got != "" {
-		t.Errorf("empty: got %q", got)
-	}
-	// Exactly long enough boundary
-	in := "2026-01-02T03:04"
-	want := "2026-01-02 03:04 UTC"
-	if got := formatRefreshDisplay(in); got != want {
-		t.Errorf("len16: got %q want %q", got, want)
-	}
-}
-
-// readRefreshTimestamp uses rc.Refresh if present.
-func TestReadRefreshTimestamp_PrefersAgentsRC(t *testing.T) {
-	tmp := t.TempDir()
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: "p",
-		Refresh: &config.RefreshMetadata{RefreshedAt: "2027-05-01T10:11:12Z"},
-	}
-	if err := rc.Save(tmp); err != nil {
-		t.Fatal(err)
-	}
-	got := readRefreshTimestamp(tmp)
-	if got != "2027-05-01 10:11 UTC" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestReadRefreshTimestamp_FallsBackToLegacy(t *testing.T) {
-	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, ".agents-refresh"), []byte("refreshed_at=2024-12-31T23:59:00Z"), 0644)
-	got := readRefreshTimestamp(tmp)
-	if got != "2024-12-31 23:59 UTC" {
-		t.Errorf("got %q", got)
-	}
-}
-
 // printBadgeRow / printAgentsHomeGitStatusLine smoke tests (just exercise without panic).
 func TestPrintBadgeRow_VariousStates(t *testing.T) {
 	printBadgeRow([]platformBadge{
@@ -761,41 +676,12 @@ func TestPrintPluginsSection_WithPlugins(t *testing.T) {
 }
 
 // printStatusProjectManifestSummary: covers manifest missing + manifest present.
-func TestPrintStatusProjectManifestSummary_NoManifest(t *testing.T) {
-	tmp := t.TempDir()
-	printStatusProjectManifestSummary(tmp)
-}
-
-func TestPrintStatusProjectManifestSummary_PresentWithSkills(t *testing.T) {
-	tmp := t.TempDir()
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: "demo",
-		Skills:  []string{"s1", "s2"},
-		Agents:  []string{"a1"},
-		Sources: []config.Source{{Type: "git", URL: "https://example.com/foo.git"}},
-	}
-	if err := rc.Save(tmp); err != nil {
-		t.Fatal(err)
-	}
-	printStatusProjectManifestSummary(tmp)
-}
-
-// TestPrintStatusProjectManifestSummary_HooksAndMCPEnabled covers the
-// rc.Hooks.IsEnabled() + rc.MCP.IsEnabled() append branches.
-func TestPrintStatusProjectManifestSummary_HooksAndMCPEnabled(t *testing.T) {
-	tmp := t.TempDir()
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: "demo",
-		Hooks:   config.StringsOrBool{All: true},
-		MCP:     config.StringsOrBool{All: true},
-	}
-	if err := rc.Save(tmp); err != nil {
-		t.Fatal(err)
-	}
-	printStatusProjectManifestSummary(tmp)
-}
+// Per §7A.6 status no longer renders any manifest summary line — that config
+// inspection moved to `da config explain`. The former
+// TestPrintStatusProjectManifestSummary_* cases were removed with the
+// printStatusProjectManifestSummary helper they exercised. A text-mode
+// assertion that status emits NO manifest/lock/last-refreshed output lives in
+// TestRunStatus_TextOmitsConfigInspection below.
 
 // printUserConfigSection: empty home → exercises the "no managed user-level config" branch.
 func TestPrintUserConfigSection_NoConfig(t *testing.T) {
@@ -1209,6 +1095,19 @@ func TestBuildStatusJSONReport_WithPluginAndProjects(t *testing.T) {
 	if len(report.Projects) == 0 {
 		t.Error("expected at least one project entry")
 	}
+
+	// §7A.6: status JSON sheds all config inspection. The manifest_found,
+	// last_refreshed, and lock keys must no longer appear in the marshaled
+	// project entry — `da config explain` owns effective-config detail now.
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, gone := range []string{"manifest_found", "last_refreshed", `"lock"`} {
+		if strings.Contains(string(data), gone) {
+			t.Errorf("status JSON must not contain %s after §7A.6 reshape; got: %s", gone, string(data))
+		}
+	}
 }
 
 // TestPrintCursorAudit_BrokenSymlinkAndLocalFile exercises the .cursor/mcp.json
@@ -1463,10 +1362,12 @@ func TestRunStatus_JSONMode(t *testing.T) {
 	}
 }
 
-// TestRunStatus_LastRefreshedRender covers the "last refreshed" print branch
-// (389-391) by registering a project whose .agentsrc.json has a refresh
-// timestamp.
-func TestRunStatus_LastRefreshedRender(t *testing.T) {
+// TestRunStatus_TextOmitsConfigInspection is the positive coverage for §7A.6:
+// even when a project's manifest carries a refresh timestamp and declared
+// skills, text-mode status renders fleet/link-health only — it must NOT emit
+// any "last refreshed", "manifest", or "lock" config-inspection line (that
+// detail now belongs to `da config explain`).
+func TestRunStatus_TextOmitsConfigInspection(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -1478,6 +1379,7 @@ func TestRunStatus_LastRefreshedRender(t *testing.T) {
 	rc := &config.AgentsRC{
 		Version: 1,
 		Project: "p",
+		Skills:  []string{"s1"},
 		Refresh: &config.RefreshMetadata{RefreshedAt: "2026-05-01T12:30:00Z"},
 	}
 	if err := rc.Save(projPath); err != nil {
@@ -1490,9 +1392,15 @@ func TestRunStatus_LastRefreshedRender(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := NewStatusCmd(testStatusDeps(), jsonOff)
-	if err := cmd.Execute(); err != nil {
-		t.Errorf("runStatus with refresh ts: %v", err)
+	out := captureStatusStdout(t, func() {
+		if err := runStatus(false, "", stdStatusConfigLoader{}, false); err != nil {
+			t.Errorf("runStatus: %v", err)
+		}
+	})
+	for _, gone := range []string{"last refreshed", "manifest", "lock"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("status text must not contain %q after §7A.6 reshape; output:\n%s", gone, out)
+		}
 	}
 }
 
@@ -1622,92 +1530,12 @@ func captureStatusStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// seedLockProject creates a project dir with a manifest and (optionally) a
-// committed .agentsrc.lock holding the given locked layers.
-func seedLockProject(t *testing.T, manifest string, layers map[string]config.LockedLayer) string {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, config.AgentsRCFile), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if layers != nil {
-		if err := config.WriteConfigLock(dir, layers); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
-func TestPrintStatusProjectLockSummary_NoExtendsSilent(t *testing.T) {
-	dir := seedLockProject(t, `{"version":2}`, nil)
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if out != "" {
-		t.Errorf("expected no output for manifest without extends, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_MissingManifestSilent(t *testing.T) {
-	dir := t.TempDir() // no manifest at all
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if out != "" {
-		t.Errorf("expected no output for missing manifest, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_NoLock(t *testing.T) {
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json"]}`, nil)
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "no .agentsrc.lock") {
-		t.Errorf("expected missing-lock notice, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_Locked(t *testing.T) {
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json"]}`, map[string]config.LockedLayer{
-		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
-	})
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "lock") || !strings.Contains(out, "1 unit(s) locked") {
-		t.Errorf("expected locked summary, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_Drifted(t *testing.T) {
-	// Declared but not in lock → drift.
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
-		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
-	})
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "drifted") || !strings.Contains(out, "da config sync") {
-		t.Errorf("expected drift summary with sync hint, got %q", out)
-	}
-}
-
-func TestBuildStatusJSONLock_NotApplicable(t *testing.T) {
-	dir := seedLockProject(t, `{"version":2}`, nil)
-	if got := buildStatusJSONLock(dir); got != nil {
-		t.Errorf("expected nil lock JSON for no-extends manifest, got %+v", got)
-	}
-}
-
-func TestBuildStatusJSONLock_ReportsDrift(t *testing.T) {
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
-		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
-	})
-	got := buildStatusJSONLock(dir)
-	if got == nil {
-		t.Fatal("expected lock JSON, got nil")
-	}
-	if !got.Present {
-		t.Error("expected Present=true")
-	}
-	if got.TotalLayers != 2 {
-		t.Errorf("expected 2 total layers, got %d", got.TotalLayers)
-	}
-	if len(got.DriftedLayers) != 1 || got.DriftedLayers[0] != "acme:org/missing.json" {
-		t.Errorf("expected one drifted layer acme:org/missing.json, got %+v", got.DriftedLayers)
-	}
-}
+// Per §7A.6 status sheds lockfile inspection (printStatusProjectLockSummary /
+// buildStatusJSONLock removed). Lockfile drift is now surfaced by `da doctor`
+// (read-only) and reconciled by `da config sync`; the underlying drift logic is
+// covered by internal/config's LockDrift tests. The former
+// TestPrintStatusProjectLockSummary_* / TestBuildStatusJSONLock_* cases and
+// their seedLockProject helper were removed with the helpers they exercised.
 
 // ---------- D4: platform header gated on config-enabled ∧ installed ----------
 
