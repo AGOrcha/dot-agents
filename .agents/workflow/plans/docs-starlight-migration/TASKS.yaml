@@ -85,7 +85,7 @@ tasks:
       app_type: docs
     - id: dm6-agent-internal-access
       title: Agent internal-docs access via service token (da CLI, auth-proxy-ready, auto-wired)
-      status: pending
+      status: in_progress
       depends_on:
         - dm0-cf-access-bootstrap
       blocks: []
@@ -95,7 +95,7 @@ tasks:
         - commands/
         - docs/
       verification_required: true
-      notes: 'PER-USER. (1) da attaches CF-Access-Client-Id/Secret on /internal/* fetches now (auth-proxy later). (2) Gated self-provision endpoint mints a per-user CF Access service token via CF API (POST /accounts/bfabaf5bb310ba98e4b95c74e88dd271/access/service_tokens; account_id APPLIED 2026-06-22, zone_id=086edf43b7e900d97ac7fb78a1128779) after the dev authenticates (GitHub via CF Access), named agorcha-agents-<github-login>, returns client_id/secret to da which stores + auto-wires (da init/refresh). The minting endpoint needs its OWN scoped CF API token (Access: Service Tokens Edit) as a server secret. Revoke a dev = delete their token (policy = any_valid_service_token). Depends dm0(applied) + dm5(hosts endpoint). See plan.md dm6 + spec D8.'
+      notes: 'SPLIT: (1) CLIENT HALF — DONE (PR #83): internal/docsaccess attaches CF-Access-Client-Id/Secret on /internal/* docs-host requests, sourced from credstore; fail-loud on missing creds; 18 tests green. (2) MINTING ENDPOINT — STILL BLOCKED on a maintainer-provided scoped CF API token (Access: Service Tokens Edit) for the gated per-user CF Access service-token self-provision (POST /accounts/bfabaf5bb310ba98e4b95c74e88dd271/access/service_tokens) + auto-wire into da init/refresh. PER-USER model; revoke = delete the dev''s token (policy = any_valid_service_token). Depends dm0(applied) + dm5(hosts endpoint, PR #81). See plan.md dm6 + spec D8. DESIGN (decided 2026-06-22): minting = a /provision ROUTE on the dm5 Worker (one deploy, shares the JWT plumbing) — not a separate Worker; the scoped CF API token is the WORKER server secret, NEVER shipped in the binary (a mint-anything key is plaintext to a decompiler); bootstrap auth = CF Access SSO (da runs the CLI device-flow yielding the user''s CF Access identity) which the /provision route turns into a minted per-user service token (idempotent per login; revoke = delete it). Headless auth DEFERRED — CI could use GitHub OIDC (no shared secret), but a prod headless agent may need a different mechanism (TBD); do not build speculatively.'
       app_type: go-cli
     - id: dm1b-astro6-starlight040
       title: Upgrade docs/web to Starlight 0.40 + Astro 6.4 (+ dependabot ignore astro majors)
@@ -129,4 +129,19 @@ tasks:
         - .agents/proposals/ui-verifier-taxonomy.md
       verification_required: true
       notes: 'Hermetic Playwright (headless Chromium) suite gating the custom interactive routes so the blank-graph bug class cannot pass CI silently. Build with IS_CLOUDFLARE/DEPLOY_TARGET=cloudflare (base /), static-serve dist, run Playwright. Per /graphs/* + /diagrams/* assert: HTTP 200; no response >=400 (asset 404s); no console/pageerror; graph RENDERS (cytoscape canvas non-zero size + <canvas> present, or window-exposed cy.nodes().length>0); diagrams have rendered content. Wire a docs-e2e CI job. Static Starlight markdown stays on build+curl. Spawned from the dm2 blank-graph fix (root cause: Astro scoped-style boundary — .graph-canvas height in page style not component, canvas 0 height). See dm2 fix commit.'
+      app_type: docs
+    - id: dm8-playwright-through-worker-e2e
+      title: Browser-through-Worker e2e for the docs site (Playwright over Miniflare)
+      status: pending
+      depends_on:
+        - dm5-worker-cf-access
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/tests/
+        - docs/web/playwright.config.ts
+        - docs/web/package.json
+        - .github/workflows/deploy-docs.yml
+      verification_required: true
+      notes: 'FAST-FOLLOW (deferred, non-blocking — from the dm5/dm6 security review). The dm5 Miniflare smoke (worker.smoke.test.js) already gives the security-critical real-Worker 401 assertion on unauth /internal. This task adds a BROWSER-through-Worker layer: drive Playwright against the docs site served through the REAL Worker (Miniflare/wrangler dev with run_worker_first), so a CF-Access misconfig (login redirect / empty body on /internal) is caught at the UI layer too. Build via build:merged, serve through the Worker (not npx serve which bypasses it), assert unauth /internal/<page> -> 401 (treat 302/empty as failure) + a public page renders. Completeness/quality, not a leak risk (smoke covers the leak). Target master.'
       app_type: docs

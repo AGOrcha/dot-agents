@@ -90,13 +90,22 @@ jobs:
         # the real build (the only script we need).
         run: npm ci --ignore-scripts
 
-      - name: Build site
+      - name: Build site (both passes) + merge internal into dist
         working-directory: docs/web
         env:
           # Switches astro.config.mjs to root-base URLs for agorcha.dev
           # (GitHub Pages would use /dot-agents/ instead).
           DEPLOY_TARGET: cloudflare
-        run: npm run build
+        # build:merged runs both Astro passes then copies dist-internal/internal/
+        # -> dist/internal/ (Option A single asset dir) while leaving dist's
+        # clean public pagefind index untouched. The Worker gates /internal/*.
+        run: npm run build:merged
+
+      - name: Gate test (Cloudflare Access leak guard)
+        working-directory: docs/web
+        # Proves unauthenticated /internal/* is blocked (401) while public +
+        # /schemas/* serve unauth. Fails the deploy if the gate ever regresses.
+        run: npm test
 
       - name: Deploy to Cloudflare Workers
         # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.

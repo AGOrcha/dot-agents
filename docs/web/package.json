@@ -10,8 +10,11 @@
     "build": "npm run build:public && npm run build:internal",
     "build:public": "astro build",
     "build:internal": "INTERNAL_BUILD=1 astro build",
+    "merge:internal": "bash scripts/merge-internal.sh",
+    "build:merged": "npm run build && npm run merge:internal",
     "preview": "astro preview",
     "check": "astro check",
+    "test": "node --test \"tests/**/*.test.js\"",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install --with-deps chromium"
   },
@@ -28,6 +31,7 @@
     "@astrojs/check": "^0.9.9",
     "@axe-core/playwright": "^4.11.3",
     "@playwright/test": "^1.49.1",
+    "miniflare": "^4.20260617.1",
     "serve": "^14.2.4",
     "typescript": "^6.0.3"
   }

@@ -31,10 +31,12 @@ func failProbe(string) error { return os.ErrNotExist }
 
 func mustVerifyOptions(project string, json bool, probe func(string) error) *runVerifyOptions {
 	return &runVerifyOptions{
-		jsonOut:  json,
-		stdout:   &bytes.Buffer{},
-		stderr:   &bytes.Buffer{},
-		cwd:      project,
+		runContext: runContext{
+			jsonOut: json,
+			stdout:  &bytes.Buffer{},
+			stderr:  &bytes.Buffer{},
+			cwd:     project,
+		},
 		crgProbe: probe,
 	}
 }

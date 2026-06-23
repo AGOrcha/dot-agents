@@ -17,6 +17,8 @@
 package config
 
 import (
+	"io"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -40,6 +42,38 @@ type Deps struct {
 // (tests that build Deps directly, or callers that don't wire it).
 func (d Deps) jsonFlag() bool { return d.JSON != nil && d.JSON() }
 
+// runContext is the common stdout/stderr/json/cwd surface every `da config`
+// subcommand's RunE fills from the cobra command + Deps. Embedding it keeps the
+// per-command option structs and their RunE wiring identical-free.
+type runContext struct {
+	stdout  io.Writer
+	stderr  io.Writer
+	jsonOut bool
+	cwd     string
+}
+
+// getwd resolves the working directory; a package var so tests can exercise the
+// resolution-failure branch of bind without manipulating the real process cwd.
+var getwd = os.Getwd
+
+// bind fills the run context from the live command and Deps: stdout/stderr from
+// the command's streams, jsonOut from the global --json, and cwd from os.Getwd
+// when not already set (tests inject cwd directly). It returns a hinted error
+// only when the working directory cannot be resolved.
+func (rc *runContext) bind(cmd *cobra.Command, deps Deps) error {
+	rc.stdout = cmd.OutOrStdout()
+	rc.stderr = cmd.ErrOrStderr()
+	rc.jsonOut = deps.jsonFlag()
+	if rc.cwd == "" {
+		cwd, err := getwd()
+		if err != nil {
+			return deps.ErrorWithHints("could not resolve current directory", err.Error())
+		}
+		rc.cwd = cwd
+	}
+	return nil
+}
+
 // NewConfigCmd builds the `da config` command tree.
 func NewConfigCmd(deps Deps) *cobra.Command {
 	cmd := &cobra.Command{
@@ -58,11 +92,17 @@ which prints human concept documentation rather than live repo state.`,
 			"  da config explain skills --value-only",
 			"  da config explain --all --json",
 			"  da config explain --flags",
+			"  da config sync",
+			"  da config sync --layer acme:org/base.json",
+			"  da config lint",
+			"  da config lint --json",
 			"  da config verify",
 			"  da config relevance --filter topology --app-type go-cli",
 		),
 	}
 	cmd.AddCommand(newExplainCmd(deps))
+	cmd.AddCommand(newSyncCmd(deps))
+	cmd.AddCommand(newLintCmd(deps))
 	cmd.AddCommand(newVerifyCmd(deps))
 	cmd.AddCommand(newRelevanceCmd(deps))
 	return cmd

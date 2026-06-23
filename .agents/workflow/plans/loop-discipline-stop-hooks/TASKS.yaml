@@ -102,7 +102,7 @@ tasks:
       notes: 'Copy the existing assets into the starter and extend `TestCopyMissingStarterAssetsCopiesStarterBundle`. `CopyMissingStarterAssets` already walks arbitrary nested tiers, including new `agents/` and `profiles/` content; no loader code is expected. Contract: tasks/p3-starter-promotion.contract.md.'
     - id: p3b-companion-discipline-skills
       title: Scaffold and assess agent-handoff and delegation-lifecycle discipline companions
-      status: pending
+      status: completed
       depends_on:
         - p2-hook-scripts
         - p3-starter-promotion
