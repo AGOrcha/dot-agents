@@ -545,7 +545,7 @@ tasks:
       app_type: go-cli
     - id: p4g-da-install-units-sync
       title: 'Phase 4g: re-scope da install onto EnsureResolved + exact/prune projection (§15)'
-      status: pending
+      status: awaiting_owner_review
       depends_on:
         - p4f-units-lock-7a-wiring
         - p4c-config-sync-lint
@@ -605,7 +605,7 @@ tasks:
       app_type: go-cli
     - id: p4h-agentslock-interprocess-lock
       title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
-      status: pending
+      status: awaiting_owner_review
       depends_on:
         - p4f-units-lock-7a-wiring
       blocks: []
