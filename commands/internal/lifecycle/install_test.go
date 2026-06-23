@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/spf13/cobra"
 )
@@ -54,6 +57,29 @@ func (f fakeInstallDeps) LoadConfig() (*config.Config, error) {
 		return f.loadConfig()
 	}
 	return config.Load()
+}
+
+type fakeInstallPlatform struct {
+	id        string
+	installed bool
+	linkErr   error
+	intentErr error
+	intents   []platform.ResourceIntent
+}
+
+func (f fakeInstallPlatform) ID() string                       { return f.id }
+func (f fakeInstallPlatform) DisplayName() string              { return f.id }
+func (f fakeInstallPlatform) IsInstalled() bool                { return f.installed }
+func (f fakeInstallPlatform) Version() string                  { return "" }
+func (f fakeInstallPlatform) RemoveLinks(string, string) error { return nil }
+func (f fakeInstallPlatform) HasDeprecatedFormat(string) bool  { return false }
+func (f fakeInstallPlatform) DeprecatedDetails(string) string  { return "" }
+func (f fakeInstallPlatform) CreateLinks(string, string) error { return f.linkErr }
+func (f fakeInstallPlatform) SharedTargetIntents(string) ([]platform.ResourceIntent, error) {
+	if f.intentErr != nil {
+		return nil, f.intentErr
+	}
+	return f.intents, nil
 }
 
 // ---------- installProjectName ----------
@@ -832,10 +858,12 @@ func TestFinalizeInstall_DryRunIsNoop(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	finalizeInstall("p", tmp)
+	if err := finalizeInstall("p", tmp); err != nil {
+		t.Fatalf("finalizeInstall dry-run: %v", err)
+	}
 }
 
-func TestFinalizeInstall_WritesRefreshMetadata(t *testing.T) {
+func TestFinalizeInstall_WritesLockStampNotManifest(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -853,14 +881,27 @@ func TestFinalizeInstall_WritesRefreshMetadata(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	finalizeInstall("p", projectPath)
+	if err := finalizeInstall("p", projectPath); err != nil {
+		t.Fatalf("finalizeInstall: %v", err)
+	}
 
 	loaded, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Refresh == nil || loaded.Refresh.RefreshedAt == "" {
-		t.Error("expected refresh metadata to be set")
+	if loaded.Refresh != nil {
+		t.Fatalf("install must not stamp .agentsrc.json refresh metadata: %+v", loaded.Refresh)
+	}
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var stamp installLockStamp
+	if ok, err := lf.Section(installLockSection, &stamp); err != nil || !ok {
+		t.Fatalf("install lock stamp missing: ok=%v err=%v", ok, err)
+	}
+	if stamp.Project != "p" || stamp.Stamped == "" {
+		t.Fatalf("install lock stamp = %+v", stamp)
 	}
 }
 
@@ -981,7 +1022,194 @@ func TestRunInstallSharedTargets_NoEnabledPlatforms(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
+		t.Fatalf("runInstallSharedTargets: %v", err)
+	}
+}
+
+// ---------- install exact/prune (--inexact) ----------
+
+// sharedSkillIntentForInstall builds a valid ResourcePruneTarget skill intent
+// whose target lives at <relDir>/review, so the install projection projects a
+// managed link there and sibling-prunes the rest of <relDir>. Mirrors the
+// platform-package validSharedSkillIntent fixture (kept local because that
+// helper is unexported in the platform test package).
+func sharedSkillIntentForInstall(relDir string) platform.ResourceIntent {
+	return platform.ResourceIntent{
+		IntentID:    "skills.proj.review.fake",
+		Project:     "proj",
+		Bucket:      "skills",
+		LogicalName: "review",
+		TargetPath:  filepath.Join(relDir, "review"),
+		Ownership:   platform.ResourceOwnershipSharedRepo,
+		SourceRef: platform.ResourceSourceRef{
+			Scope:        "proj",
+			Bucket:       "skills",
+			RelativePath: "review",
+			Kind:         platform.ResourceSourceCanonicalDir,
+			Origin:       "shared-skill-mirror",
+		},
+		Shape:         platform.ResourceShapeDirectDir,
+		Transport:     platform.ResourceTransportSymlink,
+		Materializer:  "shared-skill-dir-symlink",
+		ReplacePolicy: platform.ResourceReplaceAllowlistedImportedDirOnly,
+		PrunePolicy:   platform.ResourcePruneTarget,
+		MarkerFiles:   []string{"SKILL.md"},
+		Provenance:    platform.ResourceProvenance{Emitter: "fake"},
+	}
+}
+
+// seedManagedSkillLink creates a managed symlink at linkPath pointing into
+// <agentsHome>/skills/proj/<name> (so links.IsManagedLinkUnder reports it
+// managed). The canonical target dir is created first so the link resolves.
+func seedManagedSkillLink(t *testing.T, agentsHome, name, linkPath string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink seeding not exercised on windows")
+	}
+	canonical := filepath.Join(agentsHome, "skills", "proj", name)
+	if err := os.MkdirAll(canonical, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := links.Symlink(canonical, linkPath); err != nil {
+		t.Fatalf("seed managed link: %v", err)
+	}
+	if !links.IsManagedLinkUnder(linkPath, agentsHome) {
+		t.Fatalf("seeded link %s not detected as managed under %s", linkPath, agentsHome)
+	}
+}
+
+// setupInstallPruneFixture builds repo + agentsHome with a canonical "review"
+// skill, a stale managed link sibling, and an unmanaged user file sibling in
+// the prune scope directory. Returns the three sibling paths.
+func setupInstallPruneFixture(t *testing.T) (repo, agentsHome, relDir, wanted, stale, userFile string) {
+	t.Helper()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome = filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	repo = filepath.Join(tmp, "repo")
+	relDir = filepath.Join(".agents", "skills")
+	dir := filepath.Join(repo, relDir)
+
+	// Canonical skill the projection links into the wanted target.
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "review"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsHome, "skills", "proj", "review", "SKILL.md"),
+		[]byte("---\nname: review\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wanted = filepath.Join(dir, "review")
+	stale = filepath.Join(dir, "obsolete")
+	seedManagedSkillLink(t, agentsHome, "obsolete", stale)
+
+	// A plain user file living next to managed outputs must never be pruned.
+	userFile = filepath.Join(dir, "user-notes.md")
+	if err := os.WriteFile(userFile, []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo, agentsHome, relDir, wanted, stale, userFile
+}
+
+// Default (exact) install prunes a stale managed link while preserving the
+// wanted target and an unmanaged user sibling.
+func TestRunInstallSharedTargets_ExactPrunesStaleKeepsUser(t *testing.T) {
+	repo, _, relDir, wanted, stale, userFile := setupInstallPruneFixture(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	savedInexact := installInexact
+	installInexact = false
+	defer func() { installInexact = savedInexact }()
+
+	platforms := []platform.Platform{fakeInstallPlatform{
+		id:        "fake",
+		installed: true,
+		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
+	}}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("runInstallSharedTargetsFor exact: %v", err)
+	}
+
+	if _, err := os.Lstat(stale); !os.IsNotExist(err) {
+		t.Fatalf("stale managed link must be pruned, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(wanted); err != nil {
+		t.Fatalf("wanted target must be present, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(userFile); err != nil {
+		t.Fatalf("unmanaged user file must be preserved, lstat err = %v", err)
+	}
+}
+
+// --inexact install keeps the stale managed link in place (additive behavior).
+func TestRunInstallSharedTargets_InexactKeepsStale(t *testing.T) {
+	repo, _, relDir, _, stale, userFile := setupInstallPruneFixture(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	savedInexact := installInexact
+	installInexact = true
+	defer func() { installInexact = savedInexact }()
+
+	platforms := []platform.Platform{fakeInstallPlatform{
+		id:        "fake",
+		installed: true,
+		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
+	}}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("runInstallSharedTargetsFor inexact: %v", err)
+	}
+
+	if _, err := os.Lstat(stale); err != nil {
+		t.Fatalf("--inexact must keep the stale managed link, lstat err = %v", err)
+	}
+	if _, err := os.Lstat(userFile); err != nil {
+		t.Fatalf("unmanaged user file must be preserved, lstat err = %v", err)
+	}
+}
+
+// Two back-to-back exact projections on an already-converged tree are a no-op:
+// the second run must not error and must not remove the wanted target.
+func TestRunInstallSharedTargets_ExactIdempotent(t *testing.T) {
+	repo, _, relDir, wanted, _, _ := setupInstallPruneFixture(t)
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+	savedInexact := installInexact
+	installInexact = false
+	defer func() { installInexact = savedInexact }()
+
+	platforms := []platform.Platform{fakeInstallPlatform{
+		id:        "fake",
+		installed: true,
+		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
+	}}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("first projection: %v", err)
+	}
+	fi1, err := os.Lstat(wanted)
+	if err != nil {
+		t.Fatalf("wanted target missing after first run: %v", err)
+	}
+	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+		t.Fatalf("second projection (must be a no-op): %v", err)
+	}
+	fi2, err := os.Lstat(wanted)
+	if err != nil {
+		t.Fatalf("wanted target missing after second run: %v", err)
+	}
+	if fi1.Mode() != fi2.Mode() {
+		t.Fatalf("converged target changed between runs: %v -> %v", fi1.Mode(), fi2.Mode())
+	}
 }
 
 // ---------- git source helpers (fetch / clone / update) ----------
@@ -1288,6 +1516,31 @@ func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(projDir, ".agentsrc.json")); err != nil {
 		t.Errorf("expected manifest to remain: %v", err)
 	}
+	loaded, err := config.LoadAgentsRC(projDir)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if loaded.Refresh != nil {
+		t.Fatalf("install must not stamp .agentsrc.json refresh metadata: %+v", loaded.Refresh)
+	}
+	lock, err := config.ReadUnits(projDir)
+	if err != nil {
+		t.Fatalf("ReadUnits: %v", err)
+	}
+	if lock.InputsDigest == "" {
+		t.Fatal("install must ensure the units lock carries inputs_digest")
+	}
+	lf, err := agentslock.Open(config.AgentsLockPath(projDir))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var stamp installLockStamp
+	if ok, err := lf.Section(installLockSection, &stamp); err != nil || !ok {
+		t.Fatalf("install stamp missing: ok=%v err=%v", ok, err)
+	}
+	if stamp.Project != "proj" || stamp.Stamped == "" {
+		t.Fatalf("install stamp = %+v", stamp)
+	}
 }
 
 func TestResolveInstallSources_StrictErrorPropagates(t *testing.T) {
@@ -1401,7 +1654,9 @@ func TestCreateInstallPlatformLink_DryRun(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	for _, p := range platform.All() {
-		createInstallPlatformLink(p, "p", filepath.Join(tmp, "p"))
+		if err := createInstallPlatformLink(p, "p", filepath.Join(tmp, "p")); err != nil {
+			t.Fatalf("createInstallPlatformLink dry-run: %v", err)
+		}
 	}
 }
 
@@ -1409,10 +1664,12 @@ func TestFinalizeInstall_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	finalizeInstall("p", t.TempDir())
+	if err := finalizeInstall("p", t.TempDir()); err != nil {
+		t.Fatalf("finalizeInstall dry-run: %v", err)
+	}
 }
 
-func TestFinalizeInstall_WriteFailWarns(t *testing.T) {
+func TestFinalizeInstall_WriteFailReturnsError(t *testing.T) {
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "not-a-dir"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)
@@ -1420,7 +1677,9 @@ func TestFinalizeInstall_WriteFailWarns(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	finalizeInstall("p", filepath.Join(tmp, "not-a-dir"))
+	if err := finalizeInstall("p", filepath.Join(tmp, "not-a-dir")); err == nil {
+		t.Fatal("expected finalizeInstall to return lock write error")
+	}
 }
 
 func TestRunInstallSharedTargets_DryRun(t *testing.T) {
@@ -1430,7 +1689,9 @@ func TestRunInstallSharedTargets_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
+		t.Fatalf("runInstallSharedTargets dry-run: %v", err)
+	}
 }
 
 func TestShouldSkipLinkDestination_ForceDeletes(t *testing.T) {
@@ -1928,47 +2189,24 @@ func TestFetchGitSource_GitNotInstalled(t *testing.T) {
 	}
 }
 
-// TestCreateInstallPlatformLink_CreateLinksError covers the failure branch
-// when p.CreateLinks errors. Achieve by ensuring a platform reports as
-// installed but its CreateLinks fails (point HOME at a regular file so
-// CreateLinks cannot materialize children).
 func TestCreateInstallPlatformLink_CreateLinksError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("CreateLinks success/failure shape diverges on Windows")
-	}
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	// Mark claude installed (CLI on PATH).
-	seedClaudeInstalledSignalLifecycle(t, tmp)
-	// The dir itself is the CreateLinks write target: make it read-only so the
-	// .claude/rules MkdirAll inside CreateLinks fails.
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
-	if err := os.Chmod(filepath.Join(tmp, ".claude"), 0o500); err != nil {
-		t.Skipf("chmod readonly: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(tmp, ".claude"), 0o755) })
-	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
-	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
-
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	for _, p := range platform.All() {
-		if p.IsInstalled() {
-			createInstallPlatformLink(p, "p", filepath.Join(tmp, "p"))
-		}
+	p := fakeInstallPlatform{id: "boom", installed: true, linkErr: errors.New("link failed")}
+	if err := createInstallPlatformLink(p, "p", t.TempDir()); err == nil {
+		t.Fatal("expected installed platform link failure to be returned")
 	}
 }
 
 // TestRunInstallSharedTargets_ProjectionError exercises the err branch of
 // platform.RunSharedTargetProjection by passing a project path whose
-// parent is unwritable. The function should swallow and warn rather than
-// return; here we just exercise the path so coverage lights up.
+// parent is unwritable. Install treats projection errors as fatal so it never
+// stamps success over partial outputs.
 func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	seedClaudeInstalledSignalLifecycle(t, tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
 
@@ -1977,7 +2215,11 @@ func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	// Empty project name + path under a non-existent parent → projection
-	// returns an error if any platform reports an issue. This call exercises
-	// both the error and the empty-lines branches.
-	runInstallSharedTargets("", filepath.Join(tmp, "no-such-parent", "p"))
+	// returns an error if any platform reports an issue.
+	platforms := []platform.Platform{
+		fakeInstallPlatform{id: "boom", installed: true, intentErr: errors.New("collect failed")},
+	}
+	if err := runInstallSharedTargetsFor("", filepath.Join(tmp, "no-such-parent", "p"), platforms); err == nil {
+		t.Fatal("expected shared target projection error")
+	}
 }
