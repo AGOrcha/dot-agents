@@ -477,6 +477,7 @@ tasks:
         - p4f-units-lock-7a-wiring
         - p1c-verifier-profile-source-aware
         - p4g-da-install-units-sync
+        - p4h-agentslock-interprocess-lock
         - config-v2-coherence/ce-unified-artifact-sourcing
         - config-v2-coherence/ck-command-reshape
       blocks: []
@@ -585,5 +586,96 @@ tasks:
         - First-resolve is hermetic (fresh machine, no lock -> deterministic create-on-first-resolve).
         Boundary: upstream re-check is explicit-only (da config sync --refresh); install resolves
         local scopes only (D10). Depends on p4f so EnsureResolved writes the UNITS lock (clean
-        cutover), not the legacy config section.
+        cutover), not the legacy config section. SEE the Codex constraints below.
+
+        Codex adversarial-review constraints (2026-06-22) that MUST be honored in this collapse:
+        (F-007) Before collapsing resolveInstallSources + linkInstallResources into EnsureResolved,
+            PROVE the units resolver materializes EVERY resource type linkInstallResources handles
+            (agents/skills/commands/hooks/mcp). If EnsureResolved does not materialize all of them, a
+            fresh clone with manifest-only sources would project nothing — so keep resource
+            materialization as an EXPLICIT post-EnsureResolved step rather than assuming the resolver
+            covers it. Verify with a fresh-clone test that asserts every resource type lands.
+        (F-008) EnsureResolved updates the lock BEFORE projection/platform-link runs, so a failed
+            projection would otherwise leave the lock 'current' while outputs are stale/partial. Make
+            projection AND platform-link failures HARD errors in the install path (non-zero exit), or
+            write an explicit incomplete-stamp to the lock instead of a success stamp. Do NOT keep the
+            legacy behavior of treating link/projection failures as warnings that still finalize
+            success. Test: a forced projection failure must fail the install (or stamp incomplete),
+            never report success with a current lock.
+      app_type: go-cli
+    - id: p4h-agentslock-interprocess-lock
+      title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
+      status: pending
+      depends_on:
+        - p4f-units-lock-7a-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/agentslock/lockfile.go
+        - internal/agentslock/lockfile_test.go
+      verification_required: true
+      notes: |-
+        Codex adversarial review F-006 (2026-06-22), GATED INTO 0.4.0. internal/agentslock/lockfile.go
+        has only an in-process sync.Mutex; there is NO interprocess protection. Two concurrent `da`
+        processes each Open a snapshot of the whole document, mutate their own section, and Flush via
+        temp-file + atomic rename (fsops.WriteFileAtomic) — the later rename silently DISCARDS the
+        earlier process's writes to sibling sections (a whole section + inputs_digest can vanish).
+
+        This is a data-integrity defect, NOT a p4f blocker (p4f's on-read migration is idempotent, so a
+        racing read yields a recoverable stale-read). But 0.4.0 GROWS the concurrency surface:
+        EnsureResolved auto-syncs on more commands, and the handoff PreCompact hook will run `da`
+        concurrently with the agent's own `da` against the SAME per-project lock — so ship the fix in
+        0.4.0.
+
+        Fix (choose one, document the choice): either (a) an interprocess advisory lock (e.g. flock on a
+        sidecar) held across Open..Flush, or (b) a compare-and-merge-retry: immediately before the
+        atomic rename, re-read the on-disk file; if it changed since Open, re-merge this process's
+        section deltas onto the latest on-disk sibling sections and retry (bounded). Preserve the atomic
+        temp+rename. The agentslock package is shared (KG lockfile, units lock, config lock) so keep the
+        public API stable.
+
+        Acceptance: a concurrent-writer test that launches two writers racing on the same .agentsrc.lock
+        (each setting a DIFFERENT section, e.g. one writes units + inputs_digest, the other writes a KG
+        or adapters section) and asserts BOTH sections AND inputs_digest survive after both Flush — i.e.
+        no lost update. Must be deterministic (no sleeps; use real goroutine/process contention with a
+        barrier).
+      app_type: go-cli
+    - id: lint-validate-locked-remote-layers
+      title: 'Fast-follow: da config lint validates locked+cached remote layers (not blanket-skip)'
+      status: pending
+      depends_on:
+        - p4c-config-sync-lint
+        - p4f-units-lock-7a-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher.go
+        - internal/config/cache_keys.go
+        - commands/config/lint.go
+        - commands/config/lint_test.go
+        - internal/config/fetcher_test.go
+      verification_required: true
+      notes: |-
+        Codex adversarial review F-005 (2026-06-22), fast-follow (NOT a 0.4.0 release gate). Today
+        `da config lint` skips ALL non-local (git/http/oci) layers by source type
+        (commands/config/lint.go: `if src.Type != "local"` -> lintSkip), so a CORRUPT remote layer's
+        JSON stays unvalidated while lint still exits OK — lint claims a clean bill it did not check.
+
+        Fix: for a LOCKED remote layer (a units-lock entry with a recorded digest whose bytes are in the
+        local cache), read the cached bytes AT THE LOCKED DIGEST and validate them against the AgentsRC
+        schema, exactly like a local layer. Skip ONLY when the layer is unlocked OR its bytes are not
+        cached (then keep the 'run da config sync then lint' skip note). This requires EXPORTING a
+        cache-read-by-digest helper from internal/config (the cache helpers — cachedLayerPath /
+        readCachedLayer / layerCacheDir — are currently unexported); lint then resolves each locked
+        remote layer's digest via the units lock (cfg.ReadUnits / ReadLockedUnits) and reads the cached
+        layer.json at that digest.
+
+        Target 0.4.0 IF it lands without churn, else 0.4.1. It is lint-completeness ('lint must not
+        report OK on layers it never validated'), not a correctness/security blocker, so it is NOT in
+        release-minor depends_on. Depends on p4f for the units-lock digest surface and p4c for the lint
+        command.
+
+        Acceptance: a fixture with a locked remote (git) layer whose CACHED bytes are corrupt JSON makes
+        lint FAIL (not skip); an unlocked/uncached remote layer still SKIPs with the sync hint; a valid
+        cached remote layer PASSes.
       app_type: go-cli
