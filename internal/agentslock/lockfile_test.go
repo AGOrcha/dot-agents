@@ -263,8 +263,154 @@ func TestFlushMarshalError(t *testing.T) {
 	// White-box: inject an invalid RawMessage so MarshalIndent fails.
 	lf, _ := Open(filepath.Join(t.TempDir(), "x.lock"))
 	lf.doc["broken"] = json.RawMessage(`{invalid`)
+	lf.dirty["broken"] = true
 	if err := lf.Flush(); err == nil {
 		t.Fatal("expected marshal error with an invalid raw section")
+	}
+}
+
+func TestConcurrentFlushPreservesSiblingSectionsAndInputsDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open first: %v", err)
+	}
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open second: %v", err)
+	}
+	if err := first.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection units: %v", err)
+	}
+	first.SetInputsDigest("sha256:aaa")
+	if err := second.SetSection("adapters", map[string]string{"none": "ready"}); err != nil {
+		t.Fatalf("SetSection adapters: %v", err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, lf := range []*Lockfile{first, second} {
+		wg.Add(1)
+		go func(lock *Lockfile) {
+			defer wg.Done()
+			<-start
+			errs <- lock.Flush()
+		}(lf)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("Flush: %v", err)
+		}
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	var units map[string]string
+	if ok, err := reopened.Section("units", &units); err != nil || !ok || units["git:a@1"] != "sha1" {
+		t.Fatalf("units lost after concurrent flush: ok=%v units=%+v err=%v", ok, units, err)
+	}
+	var adapters map[string]string
+	if ok, err := reopened.Section("adapters", &adapters); err != nil || !ok || adapters["none"] != "ready" {
+		t.Fatalf("adapters lost after concurrent flush: ok=%v adapters=%+v err=%v", ok, adapters, err)
+	}
+	if got, ok := reopened.InputsDigest(); !ok || got != "sha256:aaa" {
+		t.Fatalf("inputs_digest lost after concurrent flush: got=%q ok=%v", got, ok)
+	}
+}
+
+func TestFlushMergesForeignSectionWrittenAfterOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"config":{"layers":{"old":"sha0"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := lf.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"config":{"layers":{"old":"sha0"}},"future_thing":{"x":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := top["future_thing"]; !ok {
+		t.Fatalf("foreign section dropped: %s", raw)
+	}
+	var units map[string]string
+	reopened, _ := Open(path)
+	if ok, _ := reopened.Section("units", &units); !ok || units["git:a@1"] != "sha1" {
+		t.Fatalf("dirty section not written: %+v", units)
+	}
+}
+
+func TestFlushErrorsWhenDiskBecomesMalformedAfterOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	if err := os.WriteFile(path, []byte(`{"lock_version":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := lf.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(`{not-json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lf.Flush(); err == nil {
+		t.Fatal("expected Flush to fail on malformed latest lockfile")
+	}
+}
+
+func TestFlushMergesDirtyInputsDigestDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	seed := `{"lock_version":1,"inputs_digest":"sha256:old","config":{"layers":{"old":"sha0"}}}`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lf, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	lf.SetInputsDigest("")
+	if err := os.WriteFile(path, []byte(`{"lock_version":1,"inputs_digest":"sha256:old","config":{"layers":{"old":"sha0"}},"future_thing":{"x":1}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := top[inputsDigestKey]; ok {
+		t.Fatalf("inputs_digest should be deleted: %s", raw)
+	}
+	if _, ok := top["future_thing"]; !ok {
+		t.Fatalf("foreign section dropped during delete merge: %s", raw)
 	}
 }
 

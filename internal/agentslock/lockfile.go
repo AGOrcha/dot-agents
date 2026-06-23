@@ -7,9 +7,11 @@
 // either importing the other's schema (§7.4). A writer stages only its own
 // section and flushes; sibling sections are preserved verbatim. Flush is
 // atomic (temp file + rename, via fsops.WriteFileAtomic). A single Lockfile is
-// safe for concurrent SetSection from parallel resolver goroutines — the
-// in-process mutex guards the document and the on-disk write is the one
-// serialized step (§7.4 "parallel resolution, serialized write").
+// safe for concurrent SetSection from parallel resolver goroutines. Flush also
+// takes a portable sidecar-directory lock, rereads the latest on-disk document,
+// and reapplies only this process's staged top-level keys before the atomic
+// write. That keeps sibling sections written by another process from being lost
+// while preserving the §7.4 "parallel resolution, serialized write" contract.
 package agentslock
 
 import (
@@ -17,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
@@ -34,6 +37,11 @@ const lockVersionKey = "lock_version"
 // it cannot be staged via SetSection; use SetInputsDigest / InputsDigest.
 const inputsDigestKey = "inputs_digest"
 
+const (
+	lockAcquireTimeout = 5 * time.Second
+	lockRetryInterval  = 10 * time.Millisecond
+)
+
 // reservedKeys are the top-level scalar keys the writer manages itself. They are
 // never valid section names — SetSection rejects them so a caller cannot
 // accidentally overwrite a reserved field with an opaque section value.
@@ -45,16 +53,17 @@ var reservedKeys = map[string]bool{
 // Lockfile is the in-memory view of a .agentsrc.lock document: open it, read or
 // stage sections, then Flush. Safe for concurrent use.
 type Lockfile struct {
-	path string
-	mu   sync.Mutex
-	doc  map[string]json.RawMessage // lock_version + one entry per section
+	path  string
+	mu    sync.Mutex
+	doc   map[string]json.RawMessage // lock_version + one entry per section
+	dirty map[string]bool
 }
 
 // Open loads the lockfile at path. A missing file yields a fresh document
 // (lock_version only); a present file is parsed, preserving every top-level key
 // — including sections this process does not know about.
 func Open(path string) (*Lockfile, error) {
-	lf := &Lockfile{path: path, doc: map[string]json.RawMessage{}}
+	lf := &Lockfile{path: path, doc: map[string]json.RawMessage{}, dirty: map[string]bool{}}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -101,10 +110,12 @@ func (lf *Lockfile) SetInputsDigest(digest string) {
 	defer lf.mu.Unlock()
 	if digest == "" {
 		delete(lf.doc, inputsDigestKey)
+		lf.dirty[inputsDigestKey] = true
 		return
 	}
 	raw, _ := json.Marshal(digest) // a string never fails to marshal
 	lf.doc[inputsDigestKey] = raw
+	lf.dirty[inputsDigestKey] = true
 }
 
 // InputsDigest returns the top-level inputs_digest and whether it was present.
@@ -135,6 +146,7 @@ func (lf *Lockfile) SetSection(name string, v any) error {
 	}
 	lf.mu.Lock()
 	lf.doc[name] = raw
+	lf.dirty[name] = true
 	lf.mu.Unlock()
 	return nil
 }
@@ -145,6 +157,14 @@ func (lf *Lockfile) SetSection(name string, v any) error {
 func (lf *Lockfile) Flush() error {
 	lf.mu.Lock()
 	defer lf.mu.Unlock()
+	unlock, err := acquireFileLock(lf.path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := lf.mergeDiskLocked(); err != nil {
+		return err
+	}
 	data, err := json.MarshalIndent(lf.doc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("agentslock: encode document: %w", err)
@@ -154,4 +174,60 @@ func (lf *Lockfile) Flush() error {
 		return fmt.Errorf("agentslock: write %s: %w", lf.path, err)
 	}
 	return nil
+}
+
+func (lf *Lockfile) mergeDiskLocked() error {
+	latest, err := readDocument(lf.path)
+	if err != nil {
+		return err
+	}
+	if latest == nil {
+		latest = map[string]json.RawMessage{}
+	}
+	if _, ok := latest[lockVersionKey]; !ok {
+		latest[lockVersionKey] = lf.doc[lockVersionKey]
+	}
+	for key := range lf.dirty {
+		raw, ok := lf.doc[key]
+		if !ok {
+			delete(latest, key)
+			continue
+		}
+		latest[key] = raw
+	}
+	lf.doc = latest
+	return nil
+}
+
+func readDocument(path string) (map[string]json.RawMessage, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("agentslock: read %s: %w", path, err)
+	}
+	doc := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("agentslock: parse %s: %w", path, err)
+	}
+	return doc, nil
+}
+
+func acquireFileLock(path string) (func(), error) {
+	lockDir := path + ".lock"
+	deadline := time.Now().Add(lockAcquireTimeout)
+	for {
+		err := os.Mkdir(lockDir, 0o700)
+		if err == nil {
+			return func() { _ = os.Remove(lockDir) }, nil
+		}
+		if !os.IsExist(err) {
+			return nil, fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
+		}
+		time.Sleep(lockRetryInterval)
+	}
 }
