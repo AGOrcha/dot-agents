@@ -57,12 +57,17 @@ Autonomous agents already behave like a workflow system — resuming work across
 
 ## The Solution
 
-**dot-agents** solves both problems in layers, both shipping today:
+**dot-agents** rests on three pillars, all shipping today:
 
-- **Config management** — one source of truth, distributed automatically
-- **Workflow management** — agents orient, persist, delegate, and propose
-  changes autonomously, backed by a local knowledge graph of structured
-  project memory (`da kg`)
+- **Config management** — one source of truth at `~/.agents/`, distributed
+  automatically; layered manifests `extends` shared bases and pin resolved
+  layers in `.agentsrc.lock` (see [Layered config & the lockfile](#layered-config--the-lockfile-agentsrclock))
+- **Workflow management** — agents orient, persist, verify, delegate, and
+  propose changes autonomously through `da workflow` and `da review`
+- **Knowledge graph (`da kg`)** — a local store of structured project memory
+  plus a code graph and the cross-references between them, so agents resume
+  with what was already learned instead of rediscovering it (see the
+  [Knowledge Graph](#knowledge-graph-1) section)
 
 ### Layer 1: Config Management (Shipped)
 
@@ -104,15 +109,21 @@ Then **symlinks and hard links** distribute configs to your projects automatical
 └── (your code)
 ```
 
-### Layer 2: Workflow Management (Shipping)
+A repo's `.agentsrc.json` manifest can also `extends` shared config layers
+sourced from git, local paths, HTTP, or OCI; the resolved layer SHAs pin in
+`.agentsrc.lock` so every machine projects the same effective config. This
+layered model ships today — see
+[Layered config & the lockfile](#layered-config--the-lockfile-agentsrclock).
+
+### Layer 2: Workflow Management (Shipped)
 
 Workflow-state management ships today through `da workflow`: agents orient at
 session start, persist checkpoints and verification state as they go, manage
 canonical plans and tasks, delegate bounded fan-out work, and queue
 rule/skill/config changes for human review through `da review`. Orient and
-related context draw on the local knowledge graph (`da kg`) — structured
-project memory and a code graph that let agents resume with what was already
-learned (see the [Knowledge Graph](#knowledge-graph) section).
+related context draw on the knowledge graph (`da kg`) described below, so
+agents resume with what was already learned (see the
+[Knowledge Graph](#knowledge-graph-1) section).
 
 | Primitive | What It Does | Status |
 |-----------|-------------|--------|
@@ -123,6 +134,14 @@ learned (see the [Knowledge Graph](#knowledge-graph) section).
 
 The design principle: **agents operate, humans steer.** Deeper multi-agent
 coordination is on the roadmap; see the Roadmap section below.
+
+### Layer 3: Knowledge Graph (Shipped)
+
+The third pillar, `da kg`, is a local store of structured project memory —
+typed notes about decisions, entities, and sessions — plus a code graph and
+the cross-references between them. It backs the `workflow orient` context an
+agent loads at session start. See the [Knowledge Graph](#knowledge-graph-1)
+section for the full surface.
 
 ## Installation
 
@@ -649,11 +668,16 @@ Based on analysis of real session data across Claude Code, Cursor, and Codex, do
 
 ### Multi-Agent Coordination
 
-Drawing from supervisor and swarm-orchestration patterns, dot-agents will support:
+The foundation ships today: **bounded fan-out** (`workflow fanout`) spawns
+workers with explicit write scopes, **structured context bundles**
+(`workflow bundle`) front-load them so they don't rediscover state, and
+**merge-back** (`workflow merge-back`) collects results into parent
+continuation artifacts. Drawing from supervisor and swarm-orchestration
+patterns, the roadmap deepens this with:
 
-- **Context engineering**: Front-load subagents with structured context bundles so they don't waste tokens rediscovering state
-- **Structured coordination**: Intent marker protocols to prevent infinite loops and drift between cooperating agents
-- **Bounded fan-out**: Spawn workers with clear ownership constraints, collect results into parent continuation artifacts
+- **Richer coordination protocols**: intent-marker conventions that prevent infinite loops and drift between cooperating agents
+- **Adaptive context engineering**: tune each subagent's bundle from graph impact analysis instead of fixed scopes
+- **Cross-agent scheduling**: coordinate multiple concurrent workers against a shared plan with conflict detection
 
 ## FAQ
 
