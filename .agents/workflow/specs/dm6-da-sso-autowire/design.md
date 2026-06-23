@@ -17,7 +17,17 @@ Two of the three pieces now exist:
 - **Attach (PR #83).** `internal/docsaccess` already decorates outbound `/internal/*` requests to the docs host with the two CF-Access headers, sourced from the credstore credential ids `cf-access-client-id` / `cf-access-client-secret`, fail-loud when either is missing, and refuses to attach over a non-HTTPS transport.
 - **Mint (PR #93).** The docs Worker exposes `POST https://agorcha.dev/internal/provision`, gated by the same CF Access JWT (GitHub SSO) as the rest of `/internal/*`. On success it mints a *per-user* CF Access service token (named `agorcha-agents-<github-login|email-localpart>`) via the CF API using a server-held scoped token, and returns `{ client_id, client_secret, name }`. It is fail-closed (401 unauth, 405 wrong method, 422 no-identity, 503 mint-unconfigured, 502 CF API error).
 
-**The gap (this spec).** There is no path that gets a developer from "I have a GitHub login" to "my agents can read `/internal/*`". Today a developer would have to hand-obtain a JWT, hand-POST `/internal/provision` with curl, copy the returned secret, and hand-write it into the encrypted credstore under the two magic ids. No `da` command writes the credstore at all yet. This spec designs the one interactive command that closes the loop: authenticate the developer via CF Access, call the minting route, store the returned pair under the ids `docsaccess` already consumes, and ensure every subsequent `da` run (including `da init` / `da refresh`) picks them up with zero further steps.
+**Two access paths (important — they use different credentials):**
+
+- **Human, in a browser** → Cloudflare Access SSO (GitHub). The developer browses `agorcha.dev/internal/*` directly; the Access JWT cookie satisfies the gate. **No service token involved.** This already works once the gate is live (dm5-prod) and needs nothing from this spec.
+- **Agent / `da`, programmatically** → the per-user CF Access *service token* (the `CF-Access-Client-Id/Secret` headers). This is the path this spec enables. It only works when **`da` itself is the HTTP client** — a raw agent `WebFetch` will not carry those headers and will 401. So agent/programmatic internal-docs access must flow **through `da`**.
+
+**The gap (this spec).** Two gaps, both on the agent path:
+
+1. **No provisioner.** Nothing gets a developer from "I have a GitHub login" to "the service token is in my store". Today they'd hand-obtain a JWT, hand-POST `/internal/provision` with curl, copy the secret, and hand-write the encrypted credstore under the two magic ids. No `da` command writes the credstore at all yet.
+2. **No consumer.** The attach client (PR #83) currently has **no caller** — nothing in `da` actually fetches `/internal/*`, so a provisioned token does nothing on its own. And dm4's `.md`/`llms.txt` endpoints are public-only, so there is no agent-readable *internal* surface to fetch yet.
+
+This spec designs both halves of the agent path: (1) an interactive command that authenticates via CF Access, calls the minting route, and stores the returned pair under the ids `docsaccess` consumes (auto-wiring every subsequent `da` run); and (2) a consumer command + gated agent-readable surface so the stored token is actually *used* to read internal docs.
 
 **Why it matters:** D8 promises the credential is "auto-wired into dot-agents developers' setup so their agents get internal-docs access without hand-managing tokens." Without this command, D8 is unfulfilled — the attach + mint halves are inert without a self-service bridge.
 
@@ -60,7 +70,7 @@ Prompt the developer to run `cloudflared access token` (or grab the JWT from the
 
 ## 3. Command surface (decision: name, shape, UX)
 
-**Decision: a new `da docs login` command** (the docs-access counterpart to the obs proposal's `da observability login`). Rationale: it is discoverable, scoped to the docs-access concern, verb-consistent with the established `<noun> login` pattern in the obs proposal, and does not overload `da init`/`da refresh` with an interactive browser flow (those must stay non-interactive — see §5). A `--flag on da init` was considered and rejected: init runs in scaffolding/CI contexts where an unexpected browser pop is hostile; provisioning is a deliberate, occasional act, not part of every init.
+**Decision: a new `da docs` command group** with two verbs — `da docs login` (provision, this section) and `da docs get`/`sync` (consume, §3a). The docs-access counterpart to the obs proposal's `da observability login`. Rationale: discoverable, scoped to the docs-access concern, verb-consistent with the established `<noun> login` pattern, and does not overload `da init`/`da refresh` with an interactive browser flow (those must stay non-interactive — see §5). A `--flag on da init` was considered and rejected: init runs in scaffolding/CI contexts where an unexpected browser pop is hostile; provisioning is a deliberate, occasional act, not part of every init.
 
 Behavioral requirements for the command (not its flags' exact spelling — that's plan tier):
 
@@ -73,8 +83,16 @@ Behavioral requirements for the command (not its flags' exact spelling — that'
 **Output (UX requirements):**
 
 - Print the minted token's *name* and the credential ids it was stored under. NEVER print `client_secret` (or `client_id` beyond what's needed to confirm). Consistent with the client half's "secret value is never logged" posture.
-- On success, tell the developer they are done — no manual edit, no env var to set — and that `da` (incl. init/refresh) will now reach `/internal/*`.
+- On success, tell the developer they are done — no manual edit, no env var to set — and that `da docs get`/`sync` (and any da-mediated fetch) will now reach `/internal/*`.
 - On each failure mode from the Worker, map the status to a specific, actionable message (see §9). Never dump a raw secret or a raw JWT on error.
+
+## 3a. Consumer surface (decision: how the token actually gets used)
+
+Provisioning is inert without a consumer — the attach client (PR #83) has no caller today. This spec therefore also commits the agent-read path:
+
+- **Decision: a `da docs get <path>` / `da docs sync` consumer** that fetches the gated internal surface *through* `da`, so the attach client adds the service-token headers. `get` prints/saves one page; `sync` pulls the internal set into a local cache an agent can read. This is the only authenticated programmatic reader — agents must call `da`, not fetch the URL directly (a raw fetch is unauthenticated → 401).
+- **Decision: the agent-readable internal surface is gated `.md` endpoints.** Extend dm4's `.md`/`llms.txt` emission to also produce the INTERNAL pages' raw markdown under `/internal/*` (behind the same gate dm5 enforces) — markdown is the right shape for agents and avoids scraping rendered HTML. The public `.md` surface (dm4) is unchanged; this adds the gated internal counterpart that `da docs get`/`sync` consumes.
+- **Auth used by the consumer:** the stored service token via the attach client (NOT the SSO JWT — that's the human/browser path). HTTPS-only, same `DA_DOCS_HOST` override, same fail-loud-on-missing-credential behavior the attach client already enforces. On a 401 from stale/expired creds (§6), the consumer points the developer at `da docs login`.
 
 ---
 
@@ -121,17 +139,22 @@ developer            da CLI              cloudflared        Worker /internal/pro
 
 ---
 
-## 6. Idempotency, rotation, revocation
+## 6. Multi-device, idempotency, TTL, rotation, revocation
 
-This is the subtle part because the Worker mints by a *fixed per-user name* (`agorcha-agents-<slug>`), and the CF API returns `client_secret` ONLY at creation time.
+This is the subtle part: the CF API returns `client_secret` ONLY at creation time, so a secret can never be re-read or copied to another machine. That single fact drives the model below.
 
-**Decisions / requirements:**
+**Decision — per-DEVICE tokens, not one-per-developer.** Tokens are named `agorcha-agents-<user-slug>-<device>`, where `<user-slug>` is derived server-side from the verified JWT identity (unchanged from #93 — prevents minting under another user's name) and `<device>` is a sanitized suffix the client supplies (hostname or a stable locally-stored device id). Each device self-provisions its OWN token; **no secret ever moves between machines.** This is the SSH-key / GitHub-PAT model. The Access policy is `any_valid_service_token`, so every one of a developer's device tokens authenticates — no policy change. This dissolves the multi-device storage problem: forcing "one token per developer" would require exporting/syncing the create-only secret across devices, which is exactly the burden we avoid.
 
-- **Re-provision is the supported rotation path.** Running the command again is safe and yields a working credential. After it completes, the developer's local store holds a credential that authenticates.
-- **Old-token revocation must be addressed, not ignored.** Because re-minting under the same name may either (a) collide/error on the CF API or (b) create a second token, leaving a stale token live, the design must converge on "one live token per developer." The desired end state after a re-provision: exactly one valid `agorcha-agents-<slug>` token, and the local store holds its secret. Whether the *Worker* enforces this (delete-then-create / rotate-secret on the existing token) or the *client* drives it (a force/rotate mode) is an open question (§9, OQ-2) — but the spec REQUIRES that re-provision does not silently accumulate orphan tokens.
-- **Lost secret recovery:** because the secret is only shown at creation, a developer who lost their local secret cannot "re-read" it — recovery is necessarily a rotation (mint a new secret/token), which must invalidate the old one. The command's re-run path is this recovery path.
-- **Deprovision / explicit revocation** (delete my token, stop authenticating) is desirable for offboarding. The policy accepts *any valid* service token, so revocation = delete that developer's token at the edge. Whether `da` offers a deprovision command in v1 or this stays a maintainer action is an open question (§9, OQ-3). At minimum the spec notes that deletion of the named token is the revocation lever.
-- **Local clear:** removing the two ids from the local store disables `da`'s access without revoking the edge token. The command (or a sibling) should support clearing local creds.
+**Decision — server-enforced TTL (~30 days / one month).** The Worker mints with a bounded `duration` so secrets are short-lived: stale or leaked tokens self-expire and developers re-provision on a regular cadence (freshness + blast-radius reduction). The TTL is enforced **server-side** (a Worker constant/var on the mint call) — the client cannot request a longer-lived token (privilege boundary). Exact CF API `duration` format and any min/max are to be confirmed at implementation (t6) against the live API; the intent is ~720h. Expired tokens fail at the edge (401); the consumer (§3a) and `da docs login --status` surface "expired — re-run `da docs login`". The client SHOULD persist the (non-secret) expiry so `--status` can warn *before* expiry, not only after.
+
+**Other requirements:**
+
+- **Re-provision = rotation, per device.** Re-running on the same device rotates THAT device's named token (delete-then-create), so reinstalls/rotations do not accumulate orphans on a single machine. Across devices, tokens accumulate by design (one per device).
+- **Lost-secret recovery** is just re-provision on that device (the secret is create-only); it rotates the device token and re-stores it.
+- **Revocation:** lost laptop → delete that one device token; offboard a developer → delete all `agorcha-agents-<user-slug>-*` by prefix. The TTL also bounds a forgotten device: its token dies within ~30 days regardless. Whether `da` ships a developer-facing deprovision in v1 or revocation stays a maintainer action is OQ-3; the lever is deletion of the named token(s).
+- **Local clear:** removing the two ids from the local store disables that device's `da` access without revoking the edge token. `da docs login` (or a sibling verb) supports clearing local creds.
+
+This resolves OQ-2: the constraint is **one live token per device** (rotate-on-reprovision per device + server TTL), NOT one per developer. The Worker route gains a device suffix + delete-then-create + duration (a small extension — see §12/OQ-2 and the plan's t6).
 
 ---
 
@@ -141,7 +164,8 @@ This is the subtle part because the Worker mints by a *fixed per-user name* (`ag
 - **HTTPS-only.** The `/internal/provision` POST and any verification request must be HTTPS — consistent with the client half's `ErrInsecureScheme` posture (CF-Access headers and the JWT are bearer-equivalent secrets; refuse plaintext). A non-HTTPS docs host must fail loudly before any secret/JWT is transmitted.
 - **JWT handling.** The JWT is a short-lived bearer credential. `da` should hold it only for the duration of the provision call and not persist it itself (the cloudflared cache is cloudflared's; `da` does not copy it elsewhere). Paste-fallback input must be read without echoing to scrollback where feasible.
 - **At-rest.** The minted pair lands in the existing encrypted, keychain-wrapped store (0600 discipline) — no plaintext drop.
-- **No mint-anything secret in the binary.** Already enforced server-side (the scoped CF API token is a Worker secret, per dm6 notes / PR #93). `da` never holds a mint-capable credential — it only holds its own per-user service token. This spec must not introduce any client-side privileged key.
+- **No mint-anything secret in the binary.** Already enforced server-side (the scoped CF API token is a Worker secret, per dm6 notes / PR #93). `da` never holds a mint-capable credential — it only holds its own per-device service token. This spec must not introduce any client-side privileged key.
+- **Short-lived secrets (server-enforced TTL ~30 days).** Minted tokens expire so a leaked or forgotten secret has a bounded lifetime and developers rotate on a regular cadence (§6). The TTL is set on the mint call by the Worker; the client cannot extend it. This trades a periodic `da docs login` for a much smaller leak blast-radius.
 - **Least disclosure on failure.** Map Worker statuses to messages without revealing whether the endpoint exists to an unauthenticated caller (the Worker already returns 401 pre-method-check; `da` should not paper over that).
 
 ---
@@ -174,28 +198,30 @@ This is the subtle part because the Worker mints by a *fixed per-user name* (`ag
 
 - **Headless / CI auto-provision.** Per the dm6 handoff ("headless deferred"). CI could later use GitHub OIDC (no shared secret) to obtain identity, and a production headless agent may need a different mechanism (TBD). Do not build speculatively. This spec is the *interactive developer* path only.
 - **The `da service` auth-proxy injection layer** (proposal §5.5). Direct-attach via the credstore (PR #83) stands; the proxy is a later refactor and does not change this spec's storage contract.
-- **Auto-renewal of the service token.** Per-user service tokens are long-lived; rotation is manual re-provision (§6). A background renewer is out of scope.
+- **Auto-renewal of the service token.** Tokens carry a server-enforced ~30-day TTL (§6); renewal is a manual re-provision (`da docs login`), prompted by `--status` / a consumer 401. A background auto-renewer is out of scope (it would need a non-interactive auth path, which is the deferred headless work).
 - **Generalizing to non-docs credentials** (obs, sources). The obs proposal's `da observability login` is a sibling, not this work; if a shared credential-write/login path emerges, both benefit — but this spec only commits the docs-access flow.
 
 ---
 
 ## 11. Done criteria (verifiable)
 
-1. A developer with a valid GitHub identity, starting from a machine with no docsaccess credentials, can run a single `da` command and end with a working `agorcha-agents-<slug>` token whose `client_id`/`client_secret` are stored under `cf-access-client-id` / `cf-access-client-secret` in the encrypted store.
-2. Immediately afterward, an authenticated `/internal/*` request through the attach client succeeds (not 401 / not a login redirect) with NO further developer action — demonstrating auto-wire.
+1. A developer with a valid GitHub identity, starting from a machine with no docsaccess credentials, can run a single `da` command and end with a working `agorcha-agents-<user-slug>-<device>` token whose `client_id`/`client_secret` are stored under `cf-access-client-id` / `cf-access-client-secret` in the encrypted store.
+2. Immediately afterward, `da docs get`/`sync` (and any da-mediated `/internal/*` fetch through the attach client) succeeds (not 401 / not a login redirect) with NO further developer action — demonstrating auto-wire AND that a consumer actually exists.
 3. `da init` and `da refresh` run non-interactively (no browser) and never mint; they consume the stored creds via the existing attach client and, when creds are absent, fail loud or hint (existing behavior) rather than hang on a prompt.
-4. Re-running the provision command yields a working credential and does NOT leave an orphaned/duplicate live token for that developer (one live token per developer — per OQ-2 resolution).
-5. No secret (`client_secret`, `client_id` beyond confirmation) and no JWT appears in any output, log, dry-run, or error path; provisioning over a non-HTTPS host is refused before any secret/JWT leaves the process.
-6. When `cloudflared` is absent, the command degrades to a documented manual path instead of crashing.
-7. Each Worker failure status (401/422/503/502) produces a distinct, actionable message.
-8. Dry-run mints nothing and writes nothing, but describes the flow.
+4. **Multi-device:** a second device run by the same developer can independently provision its own token; both devices authenticate concurrently and neither invalidates the other (no secret syncing).
+5. **Rotation:** re-running on the SAME device rotates that device's token (delete-then-create) and leaves no orphaned/duplicate token for that device.
+6. **TTL:** minted tokens carry the server-enforced ~30-day expiry; an expired token is rejected at the edge, and `da docs login --status` reports it as expired and prompts re-provision (ideally warning before expiry).
+7. No secret (`client_secret`, `client_id` beyond confirmation) and no JWT appears in any output, log, dry-run, or error path; provisioning/consuming over a non-HTTPS host is refused before any secret/JWT leaves the process.
+8. When `cloudflared` is absent, the command degrades to a documented manual path instead of crashing.
+9. Each Worker failure status (401/422/503/502) produces a distinct, actionable message.
+10. Dry-run mints nothing and writes nothing, but describes the flow.
 
 ---
 
 ## 12. Open questions
 
 - **OQ-1 (auth mechanism confirmation).** Confirm Option A is acceptable as a hard-ish dependency on `cloudflared` (with Option C fallback), versus the team wanting a zero-extra-binary path. The dm6 notes say "device-flow"; `cloudflared access` is the concrete, supported realization — confirm this satisfies that intent. *(Recommendation: yes — Option A + C fallback.)*
-- **OQ-2 (rotation ownership).** On re-provision, who guarantees "one live token per developer"? Does the Worker delete-then-recreate / rotate the secret on the existing `agorcha-agents-<slug>` token (cleanest, but PR #93 currently only creates), or does the client drive an explicit rotate/force path? This must be settled before the plan, because the Worker contract may need a small extension (the current route only creates).
+- **OQ-2 (rotation ownership) — RESOLVED (2026-06-23).** Model is **per-device**, not per-developer (§6): name `agorcha-agents-<user-slug>-<device>`, re-provision rotates that device's token via Worker-side delete-then-create, tokens accumulate across devices, revoke by name/prefix. The Worker (#93, merged) gains: (a) an optional client-supplied device suffix appended to the JWT-derived user slug, (b) delete-then-create for that exact name, and (c) a server-enforced `duration` (~30-day TTL). This is the t6 scope. Remaining sub-question: exact CF API `duration` format + any min/max — confirm at implementation, not a blocker for the plan.
 - **OQ-3 (deprovision in v1?).** Does v1 ship a developer-facing deprovision/revoke (delete my edge token), or is revocation a maintainer-only action (delete the named token) for now? Local-clear (remove the two ids) is in scope regardless.
 - **OQ-4 (platform store coverage).** On platforms where the credstore's OS-keychain step is unavailable, what is the supported persistence target for these ids — fail with guidance, or a documented alternate write path? Inherited from credstore; must be answered so the command's behavior is defined everywhere.
 - **OQ-5 (verification-after-mint).** Should the command always do a post-mint authenticated `/internal/*` probe (catches policy mismatch immediately, costs one request and a moment), or only on an opt-in flag?
