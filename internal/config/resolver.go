@@ -481,10 +481,10 @@ func layersFromUnits(units map[string]LockedUnit) map[string]LockedLayer {
 
 // LayeredResolver extends the FLAT layer set with tier-1 `extends` imports
 // (spec §6 pass 1): product defaults → user-local → extends[] (left-to-right,
-// fetched over git/http/local) → repo-local. It resolves each extends ref to a
-// source, enforces the tier constraint (oci in extends is a schema error),
-// fetches + caches the layer content-addressed by SHA, validates it against the
-// layer schema, and records the resolved SHAs to .agentsrc.lock.
+// fetched over git/http/local/oci) → repo-local. It resolves each extends ref to
+// a source (any source type may supply a layer — config-distribution-model §15
+// D13), fetches + caches the layer content-addressed by SHA, validates it
+// against the layer schema, and records the resolved SHAs to .agentsrc.lock.
 type LayeredResolver struct {
 	flat *FlatResolver
 	// fetchers overrides the per-source-type Fetcher (test seam). When a type
@@ -855,9 +855,10 @@ func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sour
 	if !ok {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonNotFound, Err: fmt.Errorf("source %q not declared", parts.SourceID)}
 	}
-	// Tier constraint (spec §4): extends must reference git|http|local — oci
-	// cannot supply a config layer (§15 D8). Enforced before any fetch so the
-	// error surfaces early.
+	// Source selection (config-distribution-model §15 D13): any source type —
+	// git, http, local, or oci — may supply a config layer. An oci layer is
+	// guarded by the config-layer media type inside its fetcher, not rejected
+	// here. An unsupported source type still surfaces as a schema error.
 	fetcher, err := r.fetcherFor(src.Type)
 	if err != nil {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonSchema, Err: err}
@@ -928,6 +929,13 @@ func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entr
 	}
 	fetched, err := fetchWithRefresh(fetcher, src, parts, cacheDir, forceRefresh)
 	if err != nil {
+		// A fetcher that already classified the failure (e.g. the oci media-type
+		// guard's schema error) keeps its reason; otherwise the cause is treated
+		// as a transport failure.
+		var ie *ImportError
+		if errors.As(err, &ie) {
+			return FetchedLayer{}, nil, err
+		}
 		return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: err}
 	}
 	trace.emit(sourceFetchEvent(parts.SourceID, fetched.ResolvedSHA, fetched.CacheHit))

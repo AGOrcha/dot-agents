@@ -180,9 +180,11 @@ func fetchWithRefresh(f Fetcher, src Source, parts LayerRefParts, cacheDir strin
 }
 
 // SelectFetcher returns the Fetcher for a source type, or an error for an
-// unsupported or tier-invalid type. oci cannot supply a config layer, so it is
-// rejected for extends here (the only remaining source asymmetry; §15 D8).
-// Artifact resolution accepts oci via SelectPackageFetcher.
+// unsupported type. Per config-distribution-model §15 D13 there is no
+// source/kind asymmetry: every source type — git, http, local, and oci — is
+// valid for extends (config layers), just as every type is valid for packages.
+// An oci layer is pulled over the same plumbing as an oci artifact, guarded by
+// the config-layer media type (ociLayerFetcher), so `kind` stays meaningful.
 func SelectFetcher(sourceType string) (Fetcher, error) {
 	switch sourceType {
 	case "git":
@@ -192,7 +194,7 @@ func SelectFetcher(sourceType string) (Fetcher, error) {
 	case "local":
 		return &localFetcher{}, nil
 	case "oci":
-		return nil, fmt.Errorf("source type %q is not valid for extends (oci cannot supply a config layer)", sourceType)
+		return &ociLayerFetcher{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}

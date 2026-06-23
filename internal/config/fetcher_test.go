@@ -174,17 +174,46 @@ func TestSelectPackageFetcherAcceptsAllSourceTypes(t *testing.T) {
 	}
 }
 
-// TestSelectFetcherExtendsStillRejectsOCI guards the remaining tier asymmetry:
-// the unified artifact sourcing relaxation applies to packages/artifacts only.
-// extends (the layer tier) must still reject oci (config-distribution-model §4).
-func TestSelectFetcherExtendsStillRejectsOCI(t *testing.T) {
-	if _, err := SelectFetcher("oci"); err == nil {
-		t.Error("SelectFetcher(oci) = nil, want extends-tier rejection")
+// TestSelectFetcherAcceptsAllSourceTypes asserts full source/kind orthogonality
+// (config-distribution-model §15 D13): every source type — including oci — is
+// valid for extends (config layers), mirroring SelectPackageFetcher for
+// packages. There is no remaining source/kind asymmetry.
+func TestSelectFetcherAcceptsAllSourceTypes(t *testing.T) {
+	cases := map[string]any{
+		"git":   &gitFetcher{},
+		"http":  &httpFetcher{},
+		"local": &localFetcher{},
+		"oci":   &ociLayerFetcher{},
 	}
-	for _, typ := range []string{"git", "http", "local"} {
-		if _, err := SelectFetcher(typ); err != nil {
+	for typ, want := range cases {
+		got, err := SelectFetcher(typ)
+		if err != nil {
 			t.Errorf("SelectFetcher(%q) = %v, want fetcher", typ, err)
+			continue
 		}
+		if fmt.Sprintf("%T", got) != fmt.Sprintf("%T", want) {
+			t.Errorf("SelectFetcher(%q) = %T, want %T", typ, got, want)
+		}
+	}
+	if _, err := SelectFetcher("bogus"); err == nil {
+		t.Error("SelectFetcher(bogus) = nil, want unsupported error")
+	}
+}
+
+// TestOCIFetcherRejectsLayerMediaType is the mirror of the layer fetcher's
+// guard: a `packages` pull that resolves to a config-layer media type must fail
+// with a schema error so a layer blob is never installed as an artifact, even
+// though oci now serves both kinds (config-distribution-model §15 D13).
+func TestOCIFetcherRejectsLayerMediaType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("layer-doc-served-to-packages")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociLayerMediaType}, nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema media-type error, got %v", err)
 	}
 }
 
@@ -259,12 +288,12 @@ func TestOCIFetcherPullsAndCaches(t *testing.T) {
 	blob := []byte("artifact-bytes")
 	digest := "sha256:" + sha256Hex(blob)
 	pulls := 0
-	f := &ociFetcher{puller: func(_ context.Context, ref ociRef, _ []byte) ([]byte, string, error) {
+	f := &ociFetcher{puller: func(_ context.Context, ref ociRef, _ []byte) (ociBlob, error) {
 		pulls++
 		if ref.Registry != "reg.example" {
 			t.Fatalf("registry = %q", ref.Registry)
 		}
-		return blob, digest, nil
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example/base"}
 	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
@@ -294,9 +323,9 @@ func TestOCIFetcherDigestPinCacheHit(t *testing.T) {
 		t.Fatal(err)
 	}
 	pulled := false
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
 		pulled = true
-		return nil, "", errors.New("should not pull")
+		return ociBlob{}, errors.New("should not pull")
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
 	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
@@ -315,8 +344,8 @@ func TestOCIFetcherDigestMismatch(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("served")
 	served := "sha256:" + sha256Hex(blob)
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, served, nil
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: served, MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
 	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:sha256:deadbeef"})
@@ -332,8 +361,8 @@ func TestOCIFetcherDigestMismatch(t *testing.T) {
 func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("no-digest-from-reg")
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, "", nil // registry omits digest
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, MediaType: ociArtifactMediaType}, nil // registry omits digest
 	}}
 	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err != nil {
@@ -346,8 +375,8 @@ func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
 
 func TestOCIFetcherPullError(t *testing.T) {
 	withPackagesCache(t)
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return nil, "", errors.New("registry down")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{}, errors.New("registry down")
 	}}
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	var ie *ImportError
@@ -369,8 +398,8 @@ func TestOCIFetcherParseError(t *testing.T) {
 func TestOCIFetcherRequiredPostureFails(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("blob")
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, "sha256:" + sha256Hex(blob), nil
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{URL: "oci://reg.example", Auth: json.RawMessage(`{"signing":"required"}`)}
 	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
@@ -405,8 +434,8 @@ func TestOCIFetcherCacheWriteError(t *testing.T) {
 		t.Fatal(err)
 	}
 	blob := []byte("b")
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, "sha256:" + sha256Hex(blob), nil
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType}, nil
 	}}
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
@@ -415,8 +444,8 @@ func TestOCIFetcherCacheWriteError(t *testing.T) {
 }
 
 func TestOCIPullNotWired(t *testing.T) {
-	// The default (real) puller is a deterministic transport error in p5.
-	_, _, err := ociPull(context.Background(), ociRef{Registry: "r", Repository: "x"}, nil)
+	// The default (real) puller is a deterministic transport error until wired.
+	_, err := ociPull(context.Background(), ociRef{Registry: "r", Repository: "x"}, nil)
 	if err == nil {
 		t.Fatal("expected not-wired error from default oci puller")
 	}
@@ -635,14 +664,14 @@ func TestParseLayerRef(t *testing.T) {
 	}
 }
 
-func TestSelectFetcherTierConstraint(t *testing.T) {
-	for _, typ := range []string{"git", "http", "local"} {
+// TestSelectFetcherSourceTypes asserts every known source type — including oci
+// after D13 — selects a fetcher, and an unknown type is rejected. Acceptance of
+// each concrete fetcher type is asserted by TestSelectFetcherAcceptsAllSourceTypes.
+func TestSelectFetcherSourceTypes(t *testing.T) {
+	for _, typ := range []string{"git", "http", "local", "oci"} {
 		if _, err := SelectFetcher(typ); err != nil {
 			t.Errorf("SelectFetcher(%q) = error %v, want fetcher", typ, err)
 		}
-	}
-	if _, err := SelectFetcher("oci"); err == nil {
-		t.Error("SelectFetcher(\"oci\") = nil error, want schema rejection (oci cannot supply a config layer)")
 	}
 	if _, err := SelectFetcher("bogus"); err == nil {
 		t.Error("SelectFetcher(\"bogus\") = nil error, want unsupported-type error")
@@ -1106,8 +1135,8 @@ func TestOCIFetcherCapturesDigestCacheKey(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("artifact-bytes")
 	digest := artifactDigest(blob)
-	f := &ociFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) ([]byte, string, error) {
-		return blob, digest, nil
+	f := &ociFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
 	}}
 	got, err := f.FetchArtifact(Source{Type: "oci", URL: "oci://reg.test/base"}, PackageRefParts{SourceID: "acme", ArtifactPath: "skill/x", VersionSpec: "1.0.0"})
 	if err != nil {
