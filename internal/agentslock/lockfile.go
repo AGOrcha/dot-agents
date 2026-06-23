@@ -18,6 +18,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +43,18 @@ const inputsDigestKey = "inputs_digest"
 const (
 	lockAcquireTimeout = 5 * time.Second
 	lockRetryInterval  = 10 * time.Millisecond
+	// lockStaleTTL bounds how long an unreleased lock dir is tolerated before a
+	// contending writer treats it as orphaned and reclaims it. The mkdir lock
+	// has no kernel-backed auto-release, so a holder killed by SIGKILL/OOM/power
+	// loss would otherwise wedge every future Flush permanently. The TTL is set
+	// well above the expected sub-second hold time (a single read-merge-write)
+	// so a live, slow holder is never reclaimed out from under itself, yet a
+	// crashed holder's lock self-clears within the TTL rather than forever.
+	lockStaleTTL = 30 * time.Second
+	// holderFile is the name of the sidecar metadata file written inside the
+	// lock dir recording the acquiring PID and acquisition time, used to detect
+	// and reclaim stale locks.
+	holderFile = "holder"
 )
 
 // reservedKeys are the top-level scalar keys the writer manages itself. They are
@@ -217,17 +232,102 @@ func readDocument(path string) (map[string]json.RawMessage, error) {
 func acquireFileLock(path string) (func(), error) {
 	lockDir := path + ".lock"
 	deadline := time.Now().Add(lockAcquireTimeout)
+	reclaimed := false
 	for {
 		err := os.Mkdir(lockDir, 0o700)
 		if err == nil {
-			return func() { _ = os.Remove(lockDir) }, nil
+			writeHolder(lockDir)
+			return func() { unlockFileLock(lockDir) }, nil
 		}
 		if !os.IsExist(err) {
 			return nil, fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
+		}
+		// Contention: the lock dir already exists. Before waiting, decide whether
+		// the current holder is alive or stale (crashed without releasing). A
+		// stale lock is reclaimed at most once per call so a live holder racing
+		// us cannot be repeatedly torn down.
+		if !reclaimed && lockIsStale(lockDir) {
+			reclaimed = true
+			// Remove the whole lock dir (holder file included) so the next Mkdir
+			// can succeed. Ignore the error: if removal fails (e.g. another
+			// writer reclaimed first), we simply fall through to the retry/timeout
+			// path and try again.
+			_ = os.RemoveAll(lockDir)
+			continue
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
 		}
 		time.Sleep(lockRetryInterval)
+	}
+}
+
+// debugf surfaces non-fatal lock diagnostics (notably a failed unlock that would
+// otherwise leave a stale lock silently). It is gated on DA_DEBUG so it stays
+// quiet in normal operation without pulling in a logging dependency.
+func debugf(format string, args ...any) {
+	if os.Getenv("DA_DEBUG") == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
+
+// writeHolder records the acquiring PID and acquisition time inside the lock dir
+// so a later contender can detect a crashed holder. Best-effort: a write failure
+// only forfeits stale detection (the lock still functions), so the error is not
+// fatal to acquisition.
+func writeHolder(lockDir string) {
+	contents := fmt.Sprintf("%d\n%d\n", os.Getpid(), time.Now().UnixNano())
+	_ = os.WriteFile(filepath.Join(lockDir, holderFile), []byte(contents), 0o600)
+}
+
+// lockIsStale reports whether the existing lock dir should be treated as
+// orphaned. A lock is stale when its recorded acquisition time is older than
+// lockStaleTTL. The TTL alone is enough to guarantee no permanent deadlock; PID
+// liveness is deliberately not consulted because it cannot be checked portably
+// (notably on Windows).
+//
+// When the holder file is missing or unparseable the lock dir's own mtime is
+// used as the fallback age source. This avoids a reclaim race: os.Mkdir and the
+// subsequent writeHolder are two steps, so a live holder is momentarily visible
+// with no holder file yet — judging that instantly stale would let a contender
+// delete a healthy lock. Falling back to the dir mtime gives that window the
+// same TTL grace as a recorded acquisition.
+func lockIsStale(lockDir string) bool {
+	holderPath := filepath.Join(lockDir, holderFile)
+	data, err := os.ReadFile(holderPath)
+	if err != nil {
+		return dirOlderThanTTL(lockDir)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		return dirOlderThanTTL(lockDir) // unparseable
+	}
+	acquiredNanos, err := strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64)
+	if err != nil {
+		return dirOlderThanTTL(lockDir) // unparseable timestamp
+	}
+	age := time.Now().UnixNano() - acquiredNanos
+	return age > int64(lockStaleTTL)
+}
+
+// dirOlderThanTTL reports whether the lock dir's last-modified time is older than
+// lockStaleTTL. If the dir can't be stat'd it is treated as stale (it likely no
+// longer exists, in which case the retry will simply re-acquire).
+func dirOlderThanTTL(lockDir string) bool {
+	info, err := os.Stat(lockDir)
+	if err != nil {
+		return true
+	}
+	return time.Since(info.ModTime()) > lockStaleTTL
+}
+
+// unlockFileLock releases the lock by removing the dir and its holder file. A
+// failed removal would leave a stale lock with no signal until the TTL elapses,
+// so the failure is surfaced via the package debug channel rather than silently
+// dropped. RemoveAll clears the holder sidecar in the same call.
+func unlockFileLock(lockDir string) {
+	if err := os.RemoveAll(lockDir); err != nil {
+		debugf("agentslock: release lock %s: %v", lockDir, err)
 	}
 }

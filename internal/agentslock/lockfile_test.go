@@ -2,11 +2,39 @@ package agentslock
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
+
+// seedLockDir pre-creates the sidecar lock dir for path. When writeHolder is
+// true it writes a holder file whose acquisition timestamp is age in the past
+// (age 0 = a brand-new, live holder). When writeHolder is false it simulates a
+// crash mid-acquire (dir exists, no holder) and back-dates the dir's mtime by
+// age so the mtime fallback in lockIsStale can judge it.
+func seedLockDir(t *testing.T, path string, age time.Duration, writeHolder bool) {
+	t.Helper()
+	lockDir := path + ".lock"
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatalf("seed lock dir: %v", err)
+	}
+	if !writeHolder {
+		old := time.Now().Add(-age)
+		if err := os.Chtimes(lockDir, old, old); err != nil {
+			t.Fatalf("seed dir mtime: %v", err)
+		}
+		return
+	}
+	acquired := time.Now().Add(-age).UnixNano()
+	contents := fmt.Sprintf("%d\n%d\n", os.Getpid(), acquired)
+	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte(contents), 0o600); err != nil {
+		t.Fatalf("seed holder: %v", err)
+	}
+}
 
 type configSection struct {
 	Layers map[string]string `json:"layers,omitempty"`
@@ -411,6 +439,117 @@ func TestFlushMergesDirtyInputsDigestDelete(t *testing.T) {
 	}
 	if _, ok := top["future_thing"]; !ok {
 		t.Fatalf("foreign section dropped during delete merge: %s", raw)
+	}
+}
+
+func TestFlushTimesOutWhenLockHeldFresh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	// A fresh holder (just acquired) is NOT stale, so Flush must block then
+	// return the timeout error rather than reclaiming the lock.
+	seedLockDir(t, path, 0, true)
+
+	lf, _ := Open(path)
+	if err := lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+
+	start := time.Now()
+	err := lf.Flush()
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected timeout error while a fresh lock is held")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got: %v", err)
+	}
+	if elapsed < lockAcquireTimeout {
+		t.Fatalf("Flush returned before the acquire timeout: %v < %v", elapsed, lockAcquireTimeout)
+	}
+}
+
+func TestFlushReclaimsStaleLockByTTL(t *testing.T) {
+	cases := []struct {
+		name        string
+		age         time.Duration
+		writeHolder bool
+	}{
+		{name: "older than TTL", age: lockStaleTTL + time.Second, writeHolder: true},
+		{name: "missing holder file with old dir", age: lockStaleTTL + time.Second, writeHolder: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+			seedLockDir(t, path, tc.age, tc.writeHolder)
+
+			lf, _ := Open(path)
+			if err := lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}}); err != nil {
+				t.Fatalf("SetSection: %v", err)
+			}
+			start := time.Now()
+			if err := lf.Flush(); err != nil {
+				t.Fatalf("expected stale lock to be reclaimed, got: %v", err)
+			}
+			// Reclaim happens before the first retry sleep, so it must be quick —
+			// well under the acquire timeout.
+			if elapsed := time.Since(start); elapsed >= lockAcquireTimeout {
+				t.Fatalf("reclaim took too long (%v); did it wait out the timeout?", elapsed)
+			}
+			reopened, _ := Open(path)
+			var got configSection
+			if ok, _ := reopened.Section("config", &got); !ok || got.Layers["x"] != "y" {
+				t.Fatalf("flush did not persist after reclaim: %+v", got)
+			}
+		})
+	}
+}
+
+func TestFlushGarbageHolderTreatedStale(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	lockDir := path + ".lock"
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte("not-a-pid\nnot-a-time\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// An unparseable holder falls back to the dir mtime, so back-date the dir
+	// past the TTL to make it eligible for reclaim.
+	old := time.Now().Add(-(lockStaleTTL + time.Second))
+	if err := os.Chtimes(lockDir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	lf, _ := Open(path)
+	_ = lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}})
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("expected garbage holder to be reclaimed, got: %v", err)
+	}
+}
+
+func TestFlushSucceedsAfterContendingReleaseMidWait(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	// Hold a FRESH lock so the waiter does not reclaim it as stale; release it
+	// from a goroutine partway through the waiter's retry loop. The waiter must
+	// then acquire and succeed (not time out).
+	seedLockDir(t, path, 0, true)
+
+	lf, _ := Open(path)
+	_ = lf.SetSection("config", configSection{Layers: map[string]string{"x": "y"}})
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = os.RemoveAll(path + ".lock")
+	}()
+
+	start := time.Now()
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("expected Flush to succeed after the holder released: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed >= lockAcquireTimeout {
+		t.Fatalf("Flush waited out the timeout instead of acquiring after release: %v", elapsed)
+	}
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("Flush returned implausibly fast (%v); lock may not have been contended", elapsed)
 	}
 }
 
