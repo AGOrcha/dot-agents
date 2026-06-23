@@ -636,7 +636,7 @@ func stageRealSubtree(t *testing.T, repoRoot, subtree string) string {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if copied := copyGoProductionFiles(t, srcDir, dstDir); copied == 0 {
+	if copyGoProductionFiles(t, srcDir, dstDir) == 0 {
 		t.Fatalf("no production .go files staged from %s", srcDir)
 	}
 	commitStagedTree(t, dst)
