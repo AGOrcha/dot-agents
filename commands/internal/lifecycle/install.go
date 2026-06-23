@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
@@ -36,6 +37,16 @@ func (StdInstallDeps) Getwd() (string, error)                       { return os.
 func (StdInstallDeps) MkdirAll(path string, perm os.FileMode) error { return os.MkdirAll(path, perm) }
 func (StdInstallDeps) Symlink(oldname, newname string) error        { return os.Symlink(oldname, newname) }
 func (StdInstallDeps) LoadConfig() (*config.Config, error)          { return config.Load() }
+
+const installLockSection = "install"
+
+type installLockStamp struct {
+	Project  string `json:"project"`
+	Version  string `json:"version,omitempty"`
+	Commit   string `json:"commit,omitempty"`
+	Describe string `json:"describe,omitempty"`
+	Stamped  string `json:"stamped_at"`
+}
 
 // NewInstallCmd builds the `da install` cobra command. The Deps argument
 // carries UX helpers and the global-flags snapshot from the commands package;
@@ -112,6 +123,9 @@ func RunInstall(strict bool, deps InstallDeps) error {
 	fmt.Fprintf(os.Stdout, "Project: %s\n", ui.BoldText(projectName))
 	fmt.Fprintf(os.Stdout, "Path:    %s\n", ui.DimText(config.DisplayPath(projectPath)))
 
+	if err := ensureInstallResolved(projectPath); err != nil {
+		return err
+	}
 	resolvedSources, err := resolveInstallSources(rc.Sources, strict, deps)
 	if err != nil {
 		return err
@@ -126,14 +140,31 @@ func RunInstall(strict bool, deps InstallDeps) error {
 		return err
 	}
 
-	createInstallPlatformLinks(projectName, projectPath)
-	finalizeInstall(projectName, projectPath)
+	if err := createInstallPlatformLinks(projectName, projectPath); err != nil {
+		return err
+	}
+	if err := finalizeInstall(projectName, projectPath); err != nil {
+		return err
+	}
 
 	ui.SuccessBox(
 		fmt.Sprintf("Project '%s' installed successfully!", projectName),
 		"Check links: da status --audit",
 		"Update manifest: da install --generate",
 	)
+	return nil
+}
+
+func ensureInstallResolved(projectPath string) error {
+	ui.Section("Resolving config")
+	if Flags.DryRun {
+		ui.DryRun("ensure config lock is current")
+		return nil
+	}
+	if _, err := config.EnsureResolved(projectPath, config.EnsureOpts{}); err != nil {
+		return fmt.Errorf("ensuring resolved config: %w", err)
+	}
+	ui.Bullet("ok", "Config lock current")
 	return nil
 }
 
@@ -240,69 +271,91 @@ func RegisterInstallProject(projectName, projectPath string, deps InstallDeps) e
 	return nil
 }
 
-func createInstallPlatformLinks(projectName, projectPath string) {
+func createInstallPlatformLinks(projectName, projectPath string) error {
+	return createInstallPlatformLinksFor(projectName, projectPath, platform.All())
+}
+
+func createInstallPlatformLinksFor(projectName, projectPath string, platforms []platform.Platform) error {
 	ui.Section("Creating platform links")
 	config.SetWindowsMirrorContext(projectPath)
 
-	runInstallSharedTargets(projectName, projectPath)
-
-	for _, p := range platform.All() {
-		createInstallPlatformLink(p, projectName, projectPath)
+	if err := runInstallSharedTargetsFor(projectName, projectPath, platforms); err != nil {
+		return err
 	}
+
+	for _, p := range platforms {
+		if err := createInstallPlatformLink(p, projectName, projectPath); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // runInstallSharedTargets runs the shared-target projection across all
 // installed platforms and surfaces the resulting plan or warning lines.
-func runInstallSharedTargets(projectName, projectPath string) {
+func runInstallSharedTargets(projectName, projectPath string) error {
+	return runInstallSharedTargetsFor(projectName, projectPath, platform.All())
+}
+
+func runInstallSharedTargetsFor(projectName, projectPath string, platforms []platform.Platform) error {
 	var installed []platform.Platform
-	for _, p := range platform.All() {
+	for _, p := range platforms {
 		if p.IsInstalled() {
 			installed = append(installed, p)
 		}
 	}
-	lines, err := platform.RunSharedTargetProjection(projectName, projectPath, installed, Flags.DryRun)
+	lines, err := platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, true)
 	if err != nil {
-		if Flags.DryRun {
-			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
-		} else {
-			ui.Bullet("warn", fmt.Sprintf("shared targets: %v", err))
-		}
-		return
+		return fmt.Errorf("shared targets: %w", err)
 	}
 	for _, line := range lines {
 		ui.DryRun(line)
 	}
+	return nil
 }
 
 // createInstallPlatformLink refreshes (or skips) the link bundle for a
 // single platform during install, honoring verbose / dry-run flags.
-func createInstallPlatformLink(p platform.Platform, projectName, projectPath string) {
+func createInstallPlatformLink(p platform.Platform, projectName, projectPath string) error {
 	if !p.IsInstalled() {
 		if Flags.Verbose {
 			ui.Skip(p.DisplayName() + " (not installed)")
 		}
-		return
+		return nil
 	}
 	if Flags.DryRun {
 		ui.DryRun("refresh " + p.DisplayName() + " links")
-		return
+		return nil
 	}
 	if err := p.CreateLinks(projectName, projectPath); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("%s: %v", p.DisplayName(), err))
-		return
+		return fmt.Errorf("%s links: %w", p.DisplayName(), err)
 	}
 	ui.Bullet("ok", p.DisplayName()+" links created")
+	return nil
 }
 
-func finalizeInstall(projectName, projectPath string) {
+func finalizeInstall(projectName, projectPath string) error {
 	if Flags.DryRun {
-		return
+		return nil
 	}
-	if err := projectsync.WriteRefreshToAgentsRC(projectName, projectPath, Version, Commit, Describe); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
-		return
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		return fmt.Errorf("open install lock: %w", err)
 	}
-	ui.Bullet("ok", "Updated .agentsrc.json refresh details")
+	if err := lf.SetSection(installLockSection, installLockStamp{
+		Project:  projectName,
+		Version:  Version,
+		Commit:   Commit,
+		Describe: Describe,
+		Stamped:  time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		return fmt.Errorf("stage install lock stamp: %w", err)
+	}
+	if err := lf.Flush(); err != nil {
+		return fmt.Errorf("write install lock stamp: %w", err)
+	}
+	ui.Bullet("ok", "Recorded install stamp in .agentsrc.lock")
+	return nil
 }
 
 // ─── RunInstallGenerate ──────────────────────────────────────────────────────

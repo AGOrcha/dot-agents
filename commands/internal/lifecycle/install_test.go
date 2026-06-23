@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/spf13/cobra"
@@ -54,6 +56,28 @@ func (f fakeInstallDeps) LoadConfig() (*config.Config, error) {
 		return f.loadConfig()
 	}
 	return config.Load()
+}
+
+type fakeInstallPlatform struct {
+	id        string
+	installed bool
+	linkErr   error
+	intentErr error
+}
+
+func (f fakeInstallPlatform) ID() string                       { return f.id }
+func (f fakeInstallPlatform) DisplayName() string              { return f.id }
+func (f fakeInstallPlatform) IsInstalled() bool                { return f.installed }
+func (f fakeInstallPlatform) Version() string                  { return "" }
+func (f fakeInstallPlatform) RemoveLinks(string, string) error { return nil }
+func (f fakeInstallPlatform) HasDeprecatedFormat(string) bool  { return false }
+func (f fakeInstallPlatform) DeprecatedDetails(string) string  { return "" }
+func (f fakeInstallPlatform) CreateLinks(string, string) error { return f.linkErr }
+func (f fakeInstallPlatform) SharedTargetIntents(string) ([]platform.ResourceIntent, error) {
+	if f.intentErr != nil {
+		return nil, f.intentErr
+	}
+	return nil, nil
 }
 
 // ---------- installProjectName ----------
@@ -832,10 +856,12 @@ func TestFinalizeInstall_DryRunIsNoop(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	finalizeInstall("p", tmp)
+	if err := finalizeInstall("p", tmp); err != nil {
+		t.Fatalf("finalizeInstall dry-run: %v", err)
+	}
 }
 
-func TestFinalizeInstall_WritesRefreshMetadata(t *testing.T) {
+func TestFinalizeInstall_WritesLockStampNotManifest(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -853,14 +879,27 @@ func TestFinalizeInstall_WritesRefreshMetadata(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	finalizeInstall("p", projectPath)
+	if err := finalizeInstall("p", projectPath); err != nil {
+		t.Fatalf("finalizeInstall: %v", err)
+	}
 
 	loaded, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Refresh == nil || loaded.Refresh.RefreshedAt == "" {
-		t.Error("expected refresh metadata to be set")
+	if loaded.Refresh != nil {
+		t.Fatalf("install must not stamp .agentsrc.json refresh metadata: %+v", loaded.Refresh)
+	}
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var stamp installLockStamp
+	if ok, err := lf.Section(installLockSection, &stamp); err != nil || !ok {
+		t.Fatalf("install lock stamp missing: ok=%v err=%v", ok, err)
+	}
+	if stamp.Project != "p" || stamp.Stamped == "" {
+		t.Fatalf("install lock stamp = %+v", stamp)
 	}
 }
 
@@ -981,7 +1020,9 @@ func TestRunInstallSharedTargets_NoEnabledPlatforms(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
+		t.Fatalf("runInstallSharedTargets: %v", err)
+	}
 }
 
 // ---------- git source helpers (fetch / clone / update) ----------
@@ -1288,6 +1329,31 @@ func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(projDir, ".agentsrc.json")); err != nil {
 		t.Errorf("expected manifest to remain: %v", err)
 	}
+	loaded, err := config.LoadAgentsRC(projDir)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC: %v", err)
+	}
+	if loaded.Refresh != nil {
+		t.Fatalf("install must not stamp .agentsrc.json refresh metadata: %+v", loaded.Refresh)
+	}
+	lock, err := config.ReadUnits(projDir)
+	if err != nil {
+		t.Fatalf("ReadUnits: %v", err)
+	}
+	if lock.InputsDigest == "" {
+		t.Fatal("install must ensure the units lock carries inputs_digest")
+	}
+	lf, err := agentslock.Open(config.AgentsLockPath(projDir))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var stamp installLockStamp
+	if ok, err := lf.Section(installLockSection, &stamp); err != nil || !ok {
+		t.Fatalf("install stamp missing: ok=%v err=%v", ok, err)
+	}
+	if stamp.Project != "proj" || stamp.Stamped == "" {
+		t.Fatalf("install stamp = %+v", stamp)
+	}
 }
 
 func TestResolveInstallSources_StrictErrorPropagates(t *testing.T) {
@@ -1401,7 +1467,9 @@ func TestCreateInstallPlatformLink_DryRun(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	for _, p := range platform.All() {
-		createInstallPlatformLink(p, "p", filepath.Join(tmp, "p"))
+		if err := createInstallPlatformLink(p, "p", filepath.Join(tmp, "p")); err != nil {
+			t.Fatalf("createInstallPlatformLink dry-run: %v", err)
+		}
 	}
 }
 
@@ -1409,10 +1477,12 @@ func TestFinalizeInstall_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	finalizeInstall("p", t.TempDir())
+	if err := finalizeInstall("p", t.TempDir()); err != nil {
+		t.Fatalf("finalizeInstall dry-run: %v", err)
+	}
 }
 
-func TestFinalizeInstall_WriteFailWarns(t *testing.T) {
+func TestFinalizeInstall_WriteFailReturnsError(t *testing.T) {
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "not-a-dir"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)
@@ -1420,7 +1490,9 @@ func TestFinalizeInstall_WriteFailWarns(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	finalizeInstall("p", filepath.Join(tmp, "not-a-dir"))
+	if err := finalizeInstall("p", filepath.Join(tmp, "not-a-dir")); err == nil {
+		t.Fatal("expected finalizeInstall to return lock write error")
+	}
 }
 
 func TestRunInstallSharedTargets_DryRun(t *testing.T) {
@@ -1430,7 +1502,9 @@ func TestRunInstallSharedTargets_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	runInstallSharedTargets("p", filepath.Join(tmp, "p"))
+	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
+		t.Fatalf("runInstallSharedTargets dry-run: %v", err)
+	}
 }
 
 func TestShouldSkipLinkDestination_ForceDeletes(t *testing.T) {
@@ -1928,47 +2002,24 @@ func TestFetchGitSource_GitNotInstalled(t *testing.T) {
 	}
 }
 
-// TestCreateInstallPlatformLink_CreateLinksError covers the failure branch
-// when p.CreateLinks errors. Achieve by ensuring a platform reports as
-// installed but its CreateLinks fails (point HOME at a regular file so
-// CreateLinks cannot materialize children).
 func TestCreateInstallPlatformLink_CreateLinksError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("CreateLinks success/failure shape diverges on Windows")
-	}
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	// Mark claude installed (CLI on PATH).
-	seedClaudeInstalledSignalLifecycle(t, tmp)
-	// The dir itself is the CreateLinks write target: make it read-only so the
-	// .claude/rules MkdirAll inside CreateLinks fails.
-	os.MkdirAll(filepath.Join(tmp, ".claude"), 0755)
-	if err := os.Chmod(filepath.Join(tmp, ".claude"), 0o500); err != nil {
-		t.Skipf("chmod readonly: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(filepath.Join(tmp, ".claude"), 0o755) })
-	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
-	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
-
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	for _, p := range platform.All() {
-		if p.IsInstalled() {
-			createInstallPlatformLink(p, "p", filepath.Join(tmp, "p"))
-		}
+	p := fakeInstallPlatform{id: "boom", installed: true, linkErr: errors.New("link failed")}
+	if err := createInstallPlatformLink(p, "p", t.TempDir()); err == nil {
+		t.Fatal("expected installed platform link failure to be returned")
 	}
 }
 
 // TestRunInstallSharedTargets_ProjectionError exercises the err branch of
 // platform.RunSharedTargetProjection by passing a project path whose
-// parent is unwritable. The function should swallow and warn rather than
-// return; here we just exercise the path so coverage lights up.
+// parent is unwritable. Install treats projection errors as fatal so it never
+// stamps success over partial outputs.
 func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	seedClaudeInstalledSignalLifecycle(t, tmp)
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
 	os.MkdirAll(filepath.Join(tmp, ".agents"), 0755)
 
@@ -1977,7 +2028,11 @@ func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	defer func() { Flags = saved }()
 
 	// Empty project name + path under a non-existent parent → projection
-	// returns an error if any platform reports an issue. This call exercises
-	// both the error and the empty-lines branches.
-	runInstallSharedTargets("", filepath.Join(tmp, "no-such-parent", "p"))
+	// returns an error if any platform reports an issue.
+	platforms := []platform.Platform{
+		fakeInstallPlatform{id: "boom", installed: true, intentErr: errors.New("collect failed")},
+	}
+	if err := runInstallSharedTargetsFor("", filepath.Join(tmp, "no-such-parent", "p"), platforms); err == nil {
+		t.Fatal("expected shared target projection error")
+	}
 }
