@@ -34,6 +34,11 @@
     //   CF_ACCESS_TEAM_DOMAIN  — the Zero Trust team domain; the JWKS + iss are
     //                            derived from it.
     "CF_ACCESS_AUD": "50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff",
+    // Account id for the /internal/provision self-provision endpoint (dm6),
+    // which mints a per-user CF Access service token via the CF API. NOT a
+    // secret (account ids are not sensitive). The scoped API token it calls
+    // with is the CF_PROVISION_API_TOKEN Worker secret (set in CI, never here).
+    "CF_PROVISION_ACCOUNT_ID": "bfabaf5bb310ba98e4b95c74e88dd271",
     // The Zero Trust team domain (<team>.cloudflareaccess.com) — the JWKS
     // endpoint and the expected `iss` claim are both derived from it. NOT a
     // secret (it is a public Zero Trust identifier, like CF_ACCESS_AUD above).
@@ -56,6 +61,7 @@
       "vars": {
         "ENVIRONMENT": "production",
         "CF_ACCESS_AUD": "50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff",
+        "CF_PROVISION_ACCOUNT_ID": "bfabaf5bb310ba98e4b95c74e88dd271",
         "CF_ACCESS_TEAM_DOMAIN": "usepayout.cloudflareaccess.com"
       }
     }
