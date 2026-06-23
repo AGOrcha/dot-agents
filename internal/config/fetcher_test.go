@@ -1223,3 +1223,223 @@ func TestLayeredResolverCacheKeyOffline(t *testing.T) {
 		}
 	})
 }
+
+// refreshFakeFetcher is a refresh-aware Fetcher that records whether the resolver
+// asked it to bypass its cache (forceRefresh). It serves a cached SHA on a
+// repeat fetch unless forceRefresh is set, mirroring the real git/http fetchers,
+// so a test can assert the online resolve path consults the cache key.
+type refreshFakeFetcher struct {
+	files       map[string]string
+	sha         string
+	calls       int
+	refreshSeen []bool // forceRefresh value per call
+}
+
+func (f *refreshFakeFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, cacheDir, false)
+}
+
+func (f *refreshFakeFetcher) FetchRefresh(_ Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+	f.calls++
+	f.refreshSeen = append(f.refreshSeen, forceRefresh)
+	body, ok := f.files[parts.LayerPath]
+	if !ok {
+		return FetchedLayer{}, errors.New("fake: no such layer " + parts.LayerPath)
+	}
+	sha := f.sha
+	if sha == "" {
+		sha = contentHash([]byte(body))
+	}
+	if !forceRefresh {
+		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+		}
+	}
+	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+		return FetchedLayer{}, err
+	}
+	return FetchedLayer{Data: []byte(body), ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+}
+
+// TestLayeredResolverCacheKeyForcesOnlineRefetch is the headline online behavior
+// change: with a prior lock + cache, a default source serves the cache on the
+// second online resolve (negative: cache_keys inert path), while a force escape
+// (always_revalidate or --refresh) forces the fetcher to bypass its cache and
+// re-validate upstream (positive: cache_keys now changes the online resolve).
+// Reverting the fetchLayer wiring makes the positive cases fail.
+func TestLayeredResolverCacheKeyForcesOnlineRefetch(t *testing.T) {
+	seed := func(t *testing.T, manifest string) (repo string, fake *refreshFakeFetcher) {
+		t.Helper()
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		repo = t.TempDir()
+		writeManifest(t, repo, manifest)
+		fake = &refreshFakeFetcher{
+			files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+			sha:   "feedface000000000000000000000000000000aa",
+		}
+		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+			t.Fatalf("online seed Resolve: %v", err)
+		}
+		return repo, fake
+	}
+
+	const defaultManifest = `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"}],
+		"extends": ["acme:org/base.json"]
+	}`
+	const revalManifest = `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"always_revalidate": true}}],
+		"extends": ["acme:org/base.json"]
+	}`
+
+	// Negative: default cache_keys -> the second online resolve serves the cache
+	// (forceRefresh must be false; the recorded kind-default key still matches).
+	t.Run("default serves cache on re-resolve", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
+		if _, err := NewLayeredResolver().WithFetcher("git", second).Resolve(repo); err != nil {
+			t.Fatalf("second Resolve: %v", err)
+		}
+		if len(second.refreshSeen) != 1 || second.refreshSeen[0] {
+			t.Fatalf("default re-resolve forceRefresh = %v, want [false]", second.refreshSeen)
+		}
+	})
+
+	// Positive: always_revalidate -> the second online resolve forces a refresh
+	// (the AlwaysRevalidate sentinel never matches the recorded key).
+	t.Run("always_revalidate forces refresh on re-resolve", func(t *testing.T) {
+		repo, _ := seed(t, revalManifest)
+		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
+		if _, err := NewLayeredResolver().WithFetcher("git", second).Resolve(repo); err != nil {
+			t.Fatalf("second Resolve: %v", err)
+		}
+		if len(second.refreshSeen) != 1 || !second.refreshSeen[0] {
+			t.Fatalf("always_revalidate re-resolve forceRefresh = %v, want [true]", second.refreshSeen)
+		}
+	})
+
+	// Positive: a cache_keys override EDIT (adding an {env} selector) changes the
+	// key shape from the kind default, so the recorded key is stale and the next
+	// online resolve forces a refresh even though nothing else changed.
+	t.Run("override edit forces refresh on re-resolve", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		writeManifest(t, repo, `{
+			"version": 2,
+			"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"env": ["MY_TOKEN"]}}],
+			"extends": ["acme:org/base.json"]
+		}`)
+		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
+		if _, err := NewLayeredResolver().WithFetcher("git", second).Resolve(repo); err != nil {
+			t.Fatalf("second Resolve: %v", err)
+		}
+		if len(second.refreshSeen) != 1 || !second.refreshSeen[0] {
+			t.Fatalf("override-edit re-resolve forceRefresh = %v, want [true]", second.refreshSeen)
+		}
+	})
+
+	// Positive: --refresh force escape forces a refresh on re-resolve even for a
+	// default source (the runtime half of the R6 force escape).
+	t.Run("refresh flag forces refresh on re-resolve", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		second := &refreshFakeFetcher{files: map[string]string{"org/base.json": `{"skills":["online"]}`}, sha: "feedface000000000000000000000000000000aa"}
+		if _, err := NewLayeredResolver().WithFetcher("git", second).WithRefresh(true).Resolve(repo); err != nil {
+			t.Fatalf("second Resolve: %v", err)
+		}
+		if len(second.refreshSeen) != 1 || !second.refreshSeen[0] {
+			t.Fatalf("--refresh re-resolve forceRefresh = %v, want [true]", second.refreshSeen)
+		}
+	})
+}
+
+// TestGitFetcherRefreshBypassesCache proves the real git fetcher's FetchRefresh
+// bypasses the SHA-addressed cache serve when forceRefresh is set: a cached layer
+// whose on-disk bytes differ from the worktree is re-read on a forced refresh and
+// served from cache otherwise.
+func TestGitFetcherRefreshBypassesCache(t *testing.T) {
+	fresh := []byte(`{"skills":["fresh"]}`)
+	url, branch, sha := makeGitFixture(t, "org/base.json", fresh)
+	f := &gitFetcher{}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	src := Source{Type: "git", URL: url, Ref: branch}
+	parts := LayerRefParts{LayerPath: "org/base.json"}
+	// Pre-seed the cache at the resolved SHA with STALE bytes the fetcher would
+	// serve on a normal fetch.
+	stale := []byte(`{"skills":["stale"]}`)
+	if err := writeCachedLayer(cacheDir, sha, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without forceRefresh: serves the cached (stale) bytes.
+	got, err := f.FetchRefresh(src, parts, cacheDir, false)
+	if err != nil {
+		t.Fatalf("FetchRefresh(false): %v", err)
+	}
+	if !got.CacheHit || string(got.Data) != string(stale) {
+		t.Fatalf("FetchRefresh(false) = hit %v data %q, want cached stale bytes", got.CacheHit, got.Data)
+	}
+
+	// With forceRefresh: bypasses the cache and re-reads the fresh worktree bytes.
+	got2, err := f.FetchRefresh(src, parts, cacheDir, true)
+	if err != nil {
+		t.Fatalf("FetchRefresh(true): %v", err)
+	}
+	if got2.CacheHit || string(got2.Data) != string(fresh) {
+		t.Fatalf("FetchRefresh(true) = hit %v data %q, want fresh bytes", got2.CacheHit, got2.Data)
+	}
+}
+
+// TestHTTPFetcherRefreshBypassesCache proves the real http layer fetcher's
+// FetchRefresh rewrites the cache from the upstream response when forceRefresh is
+// set, instead of returning the cached-SHA fast path.
+func TestHTTPFetcherRefreshBypassesCache(t *testing.T) {
+	body := `{"rules":["r"]}`
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	f := &httpFetcher{client: srv.Client()}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	sha := contentHash([]byte(body))
+	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without forceRefresh: the matching SHA serves from cache (CacheHit true).
+	got, err := f.FetchRefresh(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, false)
+	if err != nil {
+		t.Fatalf("FetchRefresh(false): %v", err)
+	}
+	if !got.CacheHit {
+		t.Fatalf("FetchRefresh(false) CacheHit = false, want cache serve")
+	}
+
+	// With forceRefresh: bypasses the cache serve and reports a fresh fetch.
+	got2, err := f.FetchRefresh(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, true)
+	if err != nil {
+		t.Fatalf("FetchRefresh(true): %v", err)
+	}
+	if got2.CacheHit {
+		t.Fatalf("FetchRefresh(true) CacheHit = true, want cache bypass")
+	}
+}
+
+// TestFetchWithRefreshFallsBackToFetch proves fetchWithRefresh routes a plain
+// (non-refresh-aware) Fetcher through Fetch and ignores the forceRefresh signal,
+// so legacy fetchers and the cache-less local fetcher keep working.
+func TestFetchWithRefreshFallsBackToFetch(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	plain := &fakeFetcher{files: map[string]string{"org/base.json": `{"skills":["x"]}`}, sha: "abc0000000000000000000000000000000000000"}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	got, err := fetchWithRefresh(plain, Source{Type: "git"}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, true)
+	if err != nil {
+		t.Fatalf("fetchWithRefresh: %v", err)
+	}
+	if got.ResolvedSHA != plain.sha {
+		t.Fatalf("ResolvedSHA = %q, want %q", got.ResolvedSHA, plain.sha)
+	}
+	if plain.calls != 1 {
+		t.Fatalf("plain fetcher calls = %d, want 1", plain.calls)
+	}
+}

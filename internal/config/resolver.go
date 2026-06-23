@@ -779,12 +779,14 @@ func (r *LayeredResolver) resolveExtends(trace auditTrace, projectPath string, r
 	}
 
 	sources := indexSources(rc.Sources)
-	var prevLocked map[string]LockedLayer
-	if r.offline {
-		// Read through the §7A units model (one-time-migrates a legacy lock).
-		if prevLocked, err = readLockedLayersFromUnits(projectPath); err != nil {
-			return nil, nil, nil, err
-		}
+	// Read the prior lock on every resolve, not just offline: the online path
+	// consults each layer's recorded cache key (CacheKeyStaleForLayer) to decide
+	// whether a force escape or a cache_keys override edit must force a
+	// cache-bypassing re-fetch (config-distribution-model §7A.4 / R6). A missing
+	// or legacy lock yields an empty map, so a first resolve fetches normally.
+	prevLocked, err := readLockedLayersFromUnits(projectPath)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	// Fetch all layers concurrently. Each goroutine writes its own result slot
@@ -911,7 +913,19 @@ func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entr
 		trace.emit(sourceFetchEvent(parts.SourceID, prev.ResolvedSHA, true))
 		return FetchedLayer{Data: data, ResolvedSHA: prev.ResolvedSHA, CacheHit: true, KeyInputs: prev.cacheKeyInputs()}, warns, nil
 	}
-	fetched, err := fetcher.Fetch(src, parts, cacheDir)
+	// Cache-key consumption online (config-distribution-model §7A.4 / R6): when a
+	// previously-locked layer's recorded cache key is now stale — a `--refresh` /
+	// always_revalidate force escape, or a cache_keys override edit that changed
+	// the key shape — force the fetcher to bypass its SHA-addressed cache serve so
+	// the upstream is actually re-validated. Without this the recorded key would be
+	// written but never acted on online, leaving cache_keys a silent no-op on the
+	// resolve path. A first resolve (no prior lock) has nothing to compare and
+	// fetches normally.
+	forceRefresh := false
+	if prev, ok := prevLocked[entry.Ref]; ok && prev.ResolvedSHA != "" {
+		forceRefresh = r.CacheKeyStaleForLayer(src, prev)
+	}
+	fetched, err := fetchWithRefresh(fetcher, src, parts, cacheDir, forceRefresh)
 	if err != nil {
 		return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: err}
 	}
@@ -1025,8 +1039,9 @@ func gatherOverrideFacts(keys *CacheKeys, in CacheKeyInputs) CacheKeyInputs {
 //
 // Live-validator drift an http ETag or a local worktree edit would cause is not
 // detectable here (those facts are not in the lock); that axis is the online
-// re-fetch's job. This is the resolver-side consumer doctor/sync uses to nudge a
-// re-resolve, and the single non-test caller that activates staleness.go's
+// re-fetch's job. fetchLayer consults this on the online resolve path to force a
+// cache-bypassing re-fetch when the recorded key is stale, and doctor/sync use it
+// to nudge a re-resolve — it is the consumer that activates staleness.go's
 // CacheKeyStale on the cache-key axis.
 func (r *LayeredResolver) CacheKeyStaleForLayer(src Source, locked LockedLayer) bool {
 	effective := r.effectiveCacheKey(src, locked.cacheKeyInputs())
