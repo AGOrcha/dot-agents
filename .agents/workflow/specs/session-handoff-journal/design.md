@@ -226,12 +226,20 @@ its limit mid-finish-line; its p4g/p4h work was stranded in worktrees; the `~/Do
 checkout was TCC-locked). The snapshot + overlay + verified-recovery-view worked and would
 have eliminated the re-grounding storm. Three refinements fall out:
 
-- **R7 — Re-verify commands MUST be environment-robust (prefer remote/API over local git).**
-  Refines D7. The recovery itself must work when the working tree is locked or missing — in
-  the validation the TCC lock blocked *all* local `git`/`da`, so any git-based recovery would
-  itself fail. Snapshot re-verify cmds default to `gh`/remote/API queries (e.g.
-  `gh pr list`, `gh api .../commits/master`, `gh api .../contents/<TASKS.yaml>`) and treat
-  local `git`/`da` as a fallback, not the primary.
+- **R7 — Re-verify sources MUST be robust to a locked/missing working tree — the criterion is
+  the SOURCE, not the tool.** Refines D7. Recovery must work when the local checkout is
+  unavailable — in the validation the TCC lock blocked *all* local filesystem access to the
+  repo, so any recovery that read local `git` or on-disk files would itself fail. Prefer state
+  queries backed by a **store/service** that is available independent of the working tree.
+  Today only the remote/API qualifies (`gh pr list`, `gh api .../commits/master`,
+  `gh api .../contents/<file>`); local `git` and `da` *reading the on-disk files* do NOT (they
+  depend on the tree). This is **not** a permanent `gh`-over-`da` rule: by design, once the
+  KG-projection end-state lands (`[[knowledge-architecture-graph-views]]` — the scoped KG store
+  is the SoT and the git files are projections of it), `da` querying the KG store is
+  store-backed and equally robust — a first-class, preferred re-verify source (it hits the SoT
+  directly, not the projected files). The handoff's recovery-robustness and the KG-as-SoT
+  architecture reinforce each other; until then, `gh`/remote is primary and local `git`/`da`
+  is fallback.
 - **R8 — Snapshot/journal MUST distinguish canonical state from in-flight-PR state.** Refines
   D1/D3. A task can be "done in an open PR, not yet merged" (the validation had p4g/p4h
   `pending` on master but reconciled in unmerged PR #90). Each tracked item carries its locus —
