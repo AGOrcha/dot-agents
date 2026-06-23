@@ -1,0 +1,65 @@
+schema_version: 1
+plan_id: extends-oci-relax
+tasks:
+    - id: t1-spec-amend
+      title: 'Amend config-distribution-model §15 with D13 (extends accepts oci)'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/config-distribution-model/design.md
+      verification_required: false
+      notes: |-
+        Add decision D13 to §15 (extends D8): oci is valid for extends; no source/kind asymmetry remains; define the
+        OCI-layer representation (dedicated media type application/vnd.dot-agents.config-layer.v1+json; pull blob ->
+        FetchedLayer; media-type guard so kind stays meaningful). Update the §4 superseded banner (added in #111) to
+        note D13 fully removes the extends-oci carve-out. Don't rewrite §4 history — amend the banner + add D13.
+      app_type: docs
+    - id: t2-impl-extends-oci
+      title: 'Implement: SelectFetcher accepts oci; OCI layer fetcher + media-type guard'
+      status: pending
+      depends_on:
+        - t1-spec-amend
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher_oci_layer.go
+        - internal/config/fetcher_test.go
+        - internal/config/resolver.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: |-
+        Per D13. SelectFetcher (fetcher.go) returns an OCI LAYER fetcher for "oci" instead of the rejection. New
+        ociLayerFetcher implements the Fetcher interface (Fetch/FetchRefresh -> FetchedLayer): reuse the existing OCI
+        pull plumbing in ociFetcher.FetchArtifact (digest-addressing, auth, cache, posture/signing) — FACTOR the shared
+        pull, do not duplicate — and return the pulled blob as FetchedLayer (layer.json) rather than FetchedArtifact.
+        Media-type guard: an extends pull must carry the config-layer media type (fail clearly if it's an
+        artifact-bundle type; mirror the guard for packages). Flip TestSelectFetcherTierConstraint (was: oci rejected
+        for extends) to assert acceptance + add a test pulling an OCI-served layer -> merged by the resolver. Confirm
+        schema needs no change (enum already allows oci everywhere; only the resolve-time guard changes). Coverage
+        gate on touched files. ASSESS-FIRST: if the OCI pull can't cleanly return a layer (e.g. the blob/manifest
+        model needs a real new media-type handshake beyond pull-blob-parse), STOP and report a plan.
+      app_type: go-cli
+    - id: t3-docs-flip
+      title: 'Flip docs/comments: no source/kind asymmetry (extends accepts oci)'
+      status: pending
+      depends_on:
+        - t2-impl-extends-oci
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+        - README.md
+        - internal/config/fetcher.go
+      verification_required: false
+      notes: |-
+        AFTER PRs #110 + #111 merge (they set the CURRENT "extends rejects oci" framing correctly; this flips it to
+        post-D13). Update: docs/LAYERED_CONFIG_GUIDE.md source-type matrix (extends oci No -> Yes) + the callout (drop
+        "extends rejects oci"; state all sources serve all kinds, kind is set by media type); README extends-sources
+        line (add oci back); the SelectFetcher error string + the comments in fetcher.go/fetcher_oci.go/resolver.go
+        (no longer "oci cannot supply a config layer"). Verify each against the post-t2 code. Base on master AFTER
+        #110/#111 land to avoid conflicts.
+      app_type: docs
