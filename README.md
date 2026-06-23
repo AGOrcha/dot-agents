@@ -2,7 +2,7 @@
 
 **The operational layer for AI coding agents**
 
-One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and OpenCode.
+One CLI to manage configurations and workflow state across Cursor, Claude Code, Codex, GitHub Copilot, and OpenCode — and a set of composable primitives (dynamic loops, bounded workflows, agent teams) you assemble into your own agentic orchestration, not a closed set of commands.
 
 ```bash
 # Install
@@ -62,8 +62,10 @@ Autonomous agents already behave like a workflow system — resuming work across
 - **Config management** — one source of truth at `~/.agents/`, distributed
   automatically; layered manifests `extends` shared bases and pin resolved
   layers in `.agentsrc.lock` (see [Layered config & the lockfile](#layered-config--the-lockfile-agentsrclock))
-- **Workflow management** — agents orient, persist, verify, delegate, and
-  propose changes autonomously through `da workflow` and `da review`
+- **Workflow management** — composable primitives (dynamic loops, bounded
+  workflows, and agent teams) you assemble into your own orchestration; agents
+  orient, persist, verify, delegate, and propose changes autonomously through
+  `da workflow` and `da review`
 - **Knowledge graph (`da kg`)** — a local store of structured project memory
   plus a code graph and the cross-references between them, so agents resume
   with what was already learned instead of rediscovering it (see the
@@ -132,16 +134,51 @@ agents resume with what was already learned (see the
 | **Persist** | Save checkpoints, verification results, and plan/task progress at natural breakpoints | Shipped (`da workflow checkpoint`, `verify`, `advance`) |
 | **Delegate** | Bounded fan-out to sub-agents with write-scope constraints and merge-back | Shipped (`da workflow fanout`, `merge-back`) |
 
-The design principle: **agents operate, humans steer.** Deeper multi-agent
-coordination is on the roadmap; see the Roadmap section below.
+The design principle: **agents operate, humans steer.**
 
-### Layer 3: Knowledge Graph (Shipped)
+**These are primitives, not a fixed toolset.** dot-agents does not hand you one
+hard-coded loop — it gives you composable pieces to assemble your own agentic
+orchestration: **dynamic loops**, **bounded workflows**, and **agent teams**.
+Per `app_type`, an *execution profile* declares the **executor : verifier :
+reviewer** topology, an ordered **verifier sequence**, and a **review-lens** set
+with concurrency — resolve any of it with `da config relevance`. `da workflow
+fanout` spawns workers under explicit write scopes, `da workflow bundle` expands
+a delegation into its ordered `impl → verifier(s) → review` stages, a
+precondition gate enforces verification before a task can advance, and `da
+workflow merge-back` folds results back into the parent. The orchestration
+skills (`loop-worker`, `orchestrator-session-start`, `isp`,
+`delegation-lifecycle`) drive these primitives end to end. The CLI resolves,
+gates, and records the topology; the verifier and review *steps themselves* are
+run by the agents/skills you compose on top — so you build the bounded workflow
+and agent team that your project actually needs.
+
+Deeper multi-agent coordination is on the roadmap; see the Roadmap section below.
+
+### Layer 3: Knowledge Graph (Shipped, and evolving)
 
 The third pillar, `da kg`, is a local store of structured project memory —
 typed notes about decisions, entities, and sessions — plus a code graph and
 the cross-references between them. It backs the `workflow orient` context an
 agent loads at session start. See the [Knowledge Graph](#knowledge-graph-1)
 section for the full surface.
+
+**Shipped today:** typed notes, a hot-filesystem + warm-SQLite store (Postgres
+backend included), a code graph via the code-review-graph bridge
+(`kg build`/`update`/`impact`), bridge queries by intent, and note→symbol
+cross-references.
+
+**Where it's heading (in progress, not yet shipped):** dot-agents is evolving
+the KG from a fixed code-graph into a **dynamic, evolvable knowledge
+substrate** — one graph store fronted by **pluggable backend adapters** so you
+define your **own ontology of entities and relationships**, query it through a
+declarative query layer that **auto-queries across the available scopes**, and
+derive your **own operational views** tailored to your `app_type` and how your
+workflow actually needs them (the longer-term direction adds typed cognitive
+memory views — working / operational / semantic / episodic — over that single
+store). Today only a built-in `none`-adapter seam plus the design specs exist;
+this is the trajectory being built, distinct from the shipped code graph above.
+See the [graph backend adapter contract](.agents/workflow/specs/graph-backend-adapter-contract/design.md)
+and [knowledge-graph spec](docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md).
 
 ## Installation
 
