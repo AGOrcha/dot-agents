@@ -218,3 +218,35 @@ kg sync:            input {push}; observed {pull_status,push_status,head_sha?}
 
 Build **after the config-v2 0.4.0 cut** (it depends on `p4h` and benefits from the settled lock model).
 A plan (`workflow/plans/session-handoff-journal/`) follows this spec when scheduled.
+
+## Refinements from manual validation (2026-06-22)
+
+Manually dogfooded the read side against a live coach-death recovery (a Codex session hit
+its limit mid-finish-line; its p4g/p4h work was stranded in worktrees; the `~/Documents`
+checkout was TCC-locked). The snapshot + overlay + verified-recovery-view worked and would
+have eliminated the re-grounding storm. Three refinements fall out:
+
+- **R7 — Re-verify sources MUST be robust to a locked/missing working tree — the criterion is
+  the SOURCE, not the tool.** Refines D7. Recovery must work when the local checkout is
+  unavailable — in the validation the TCC lock blocked *all* local filesystem access to the
+  repo, so any recovery that read local `git` or on-disk files would itself fail. Prefer state
+  queries backed by a **store/service** that is available independent of the working tree.
+  Today only the remote/API qualifies (`gh pr list`, `gh api .../commits/master`,
+  `gh api .../contents/<file>`); local `git` and `da` *reading the on-disk files* do NOT (they
+  depend on the tree). This is **not** a permanent `gh`-over-`da` rule: by design, once the
+  KG-projection end-state lands (`[[knowledge-architecture-graph-views]]` — the scoped KG store
+  is the SoT and the git files are projections of it), `da` querying the KG store is
+  store-backed and equally robust — a first-class, preferred re-verify source (it hits the SoT
+  directly, not the projected files). The handoff's recovery-robustness and the KG-as-SoT
+  architecture reinforce each other; until then, `gh`/remote is primary and local `git`/`da`
+  is fallback.
+- **R8 — Snapshot/journal MUST distinguish canonical state from in-flight-PR state.** Refines
+  D1/D3. A task can be "done in an open PR, not yet merged" (the validation had p4g/p4h
+  `pending` on master but reconciled in unmerged PR #90). Each tracked item carries its locus —
+  `{canonical: master@sha}` vs `{in_open_pr: #N, status}` — so recovery doesn't treat
+  in-PR work as either done-on-master or fresh-eligible.
+- **R9 — The per-command journal (write side) is the non-optional, must-build piece.** The
+  manual replica covered only the READ side (snapshot + overlay + recovery-view, point-in-time).
+  The continuous, crash-survivable per-command append cannot be faked by hand; it is precisely
+  what survives a mid-turn kill. Manual handoffs validate the recovery UX; they do not deliver
+  the crash-survivability — that requires building the journal.
