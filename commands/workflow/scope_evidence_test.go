@@ -512,6 +512,20 @@ func TestGraphAdapterForProject_NoConfig(t *testing.T) {
 }
 
 func TestRunWorkflowPlanDeriveScopeDegradesGracefully(t *testing.T) {
+	// Isolate the graph home from the developer's real machine. The
+	// derive-scope confidence is computed from graph-lane readiness, and the
+	// graph home resolves to $HOME/knowledge-graph (via config.UserHomeDir,
+	// which honors $HOME first). Without isolation, a machine with a warm
+	// real graph reports lanes ready and yields confidence "medium", breaking
+	// the "low (no graph)" assertion below. Pointing every home-resolving env
+	// var at an empty temp dir makes the adapter deterministically see no
+	// graph regardless of the dev's ~/.agents / ~/knowledge-graph state.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("AGENTS_HOME", filepath.Join(tmpHome, ".agents"))
+	t.Setenv("KG_HOME", filepath.Join(tmpHome, "knowledge-graph"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpHome, ".local", "state"))
+
 	repo := initWorkflowTestRepo(t)
 	planDir := writeDeriveScopeFixture(t, repo)
 
