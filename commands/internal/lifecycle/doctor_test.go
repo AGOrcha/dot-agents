@@ -785,9 +785,10 @@ func TestRunDoctor_OrphanCanonicalReported(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_RepairBrokenLinksDryRun exercises the broken-link repair
-// branch in dry-run mode.
-func TestRunDoctor_RepairBrokenLinksDryRun(t *testing.T) {
+// TestRunDoctor_ReportsBrokenClaudeRuleLink asserts doctor surfaces a broken
+// .claude/rules managed link and completes without error. Doctor is read-only
+// (§7A.6) so it reports the breakage but does not repair it.
+func TestRunDoctor_ReportsBrokenClaudeRuleLink(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	seedClaudeInstalledSignalLifecycle(t, tmp)
@@ -806,11 +807,16 @@ func TestRunDoctor_RepairBrokenLinksDryRun(t *testing.T) {
 	}
 
 	saved := Flags
-	Flags = GlobalFlags{DryRun: true}
+	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
-		t.Errorf("runDoctor repair dry-run: %v", err)
+	out := captureDoctorOutput(t, func() {
+		if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
+			t.Errorf("runDoctor: %v", err)
+		}
+	})
+	if !strings.Contains(out, "broken") {
+		t.Fatalf("doctor should report the broken claude rule link; output:\n%s", out)
 	}
 }
 
@@ -998,7 +1004,9 @@ func TestRunDoctor_DetectsOrphanCanonicalResource(t *testing.T) {
 	}
 }
 
-func TestRunDoctor_DryRunWithBrokenLinks(t *testing.T) {
+// TestRunDoctor_ReportsBrokenAgentsMD asserts doctor reports a broken AGENTS.md
+// managed link and leaves the project tree unchanged (read-only, §7A.6).
+func TestRunDoctor_ReportsBrokenAgentsMD(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -1017,11 +1025,16 @@ func TestRunDoctor_DryRunWithBrokenLinks(t *testing.T) {
 	linktest.DanglingLink(t, filepath.Join(projectPath, "AGENTS.md"))
 
 	saved := Flags
-	Flags = GlobalFlags{DryRun: true}
+	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
+	before := doctorE2ESnapshotTree(t, projectPath)
 	if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
-		t.Errorf("runDoctor --dry-run with broken link: %v", err)
+		t.Errorf("runDoctor with broken link: %v", err)
+	}
+	after := doctorE2ESnapshotTree(t, projectPath)
+	if msg, ok := doctorE2ESnapshotsEqual(before, after); !ok {
+		t.Fatalf("doctor must be read-only but mutated the project repo: %s", msg)
 	}
 }
 
@@ -1259,7 +1272,11 @@ func TestPrintUserConfigStatus_LocalFiles(t *testing.T) {
 
 // TestRunDoctor_RepairBrokenLinksWithInstalledClaude covers the broken-link
 // repair branch in non-dry-run mode.
-func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
+// TestRunDoctor_BrokenLinksWithInstalledClaudeIsReadOnly asserts that, even
+// with a platform installed (so the old doctor would have re-run CreateLinks),
+// doctor only detects the broken managed link and leaves the project tree
+// byte-identical — the §7A.6 read-only contract.
+func TestRunDoctor_BrokenLinksWithInstalledClaudeIsReadOnly(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	seedClaudeInstalledSignalLifecycle(t, tmp)
@@ -1284,8 +1301,13 @@ func TestRunDoctor_RepairBrokenLinksWithInstalledClaude(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
+	before := doctorE2ESnapshotTree(t, projectPath)
 	if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
 		t.Errorf("runDoctor with broken links + installed claude: %v", err)
+	}
+	after := doctorE2ESnapshotTree(t, projectPath)
+	if msg, ok := doctorE2ESnapshotsEqual(before, after); !ok {
+		t.Fatalf("doctor must be read-only but mutated the project repo: %s", msg)
 	}
 }
 
@@ -1375,35 +1397,6 @@ func TestCollectBrokenUserLinks_BrokenClaudeMDCIDrift(t *testing.T) {
 }
 
 // TestRepairManagedProject_DryRunLines covers the repair-dry-run branch.
-// The doctorInstalledPlatforms seam is overridden so the test is
-// deterministic regardless of which platforms are installed on the runner.
-func TestRepairManagedProject_DryRunLines(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTS_HOME", agentsHome)
-	projectPath := filepath.Join(tmp, "proj")
-	if err := os.MkdirAll(projectPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	savedFlags := Flags
-	savedPlatforms := doctorInstalledPlatforms
-	Flags = GlobalFlags{DryRun: true}
-	doctorInstalledPlatforms = func() []platform.Platform { return nil }
-	defer func() {
-		Flags = savedFlags
-		doctorInstalledPlatforms = savedPlatforms
-	}()
-
-	if fixed := repairManagedProject("proj", projectPath); fixed != 0 {
-		t.Errorf("dry-run repair must apply nothing, got fixed=%d", fixed)
-	}
-}
-
 // TestRunDoctor_VerboseWithHealthyLinks covers the verbose-mode printAudit
 // branch when a project has healthy managed links (len(brokenLinks)==0,
 // total>0). Without this the line-229 verbose+healthy branch is uncovered.
@@ -1600,35 +1593,6 @@ func TestReportOnePluginSpec_ContinueBranches(t *testing.T) {
 	// projectPath == "" continue branch.
 	specOC := platform.PluginSpec{Scope: "global", Name: "demo2", Platforms: []string{"opencode"}}
 	reportOnePluginSpec(specOC, cfg, []string{"ghost"})
-}
-
-// TestRepairManagedProject_NoInstalledPlatformsIsNoOp covers the non-dry-run
-// branch with no installed platforms.
-func TestRepairManagedProject_NoInstalledPlatformsIsNoOp(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AGENTS_HOME", agentsHome)
-	projectPath := filepath.Join(tmp, "proj")
-	if err := os.MkdirAll(projectPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	savedFlags := Flags
-	savedPlatforms := doctorInstalledPlatforms
-	Flags = GlobalFlags{}
-	doctorInstalledPlatforms = func() []platform.Platform { return nil }
-	defer func() {
-		Flags = savedFlags
-		doctorInstalledPlatforms = savedPlatforms
-	}()
-
-	if fixed := repairManagedProject("proj", projectPath); fixed != 0 {
-		t.Errorf("no installed platforms must relink nothing, got fixed=%d", fixed)
-	}
 }
 
 // ---------- .agentsrc.lock health (config-v2 p2) ----------

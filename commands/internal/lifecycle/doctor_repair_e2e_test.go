@@ -103,20 +103,24 @@ func breakAndConfirmBrokenLink(t *testing.T, agentsHome, projectPath, target str
 	}
 }
 
-// runDoctorDryRunReportsBroken flips Flags into dry-run, runs doctor,
-// restores Flags, and asserts the doctor output reports the breakage.
-func runDoctorDryRunReportsBroken(t *testing.T) {
+// runDoctorReportsBrokenLeavesTreeUnchanged runs doctor against a project that
+// has a broken link and asserts (a) doctor reports the breakage and (b) doctor
+// did not mutate the project tree. This is the positive coverage for §7A.6's
+// read-only contract: doctor detects, it never repairs.
+func runDoctorReportsBrokenLeavesTreeUnchanged(t *testing.T, projectPath string) {
 	t.Helper()
-	Flags.DryRun = true
-	defer func() { Flags.DryRun = false }()
-	assertDoctorStdoutContainsBroken(t, "dry-run-broken", true)
+	before := doctorE2ESnapshotTree(t, projectPath)
+	assertDoctorStdoutContainsBroken(t, "broken-detected", true)
+	after := doctorE2ESnapshotTree(t, projectPath)
+	if msg, ok := doctorE2ESnapshotsEqual(before, after); !ok {
+		t.Fatalf("doctor must be read-only but mutated the project repo: %s", msg)
+	}
 }
 
 // seedResourcesAndRestore seeds agentsHome/resources/proj/AGENTS.md and runs
-// RestoreFromResourcesCountedWithDeps, asserting the broken target + link
-// are recovered. After t09 doctor is intra-lifecycle so it calls the
-// exported lifecycle helper directly (rather than the root-package
-// restoreFromResources wrapper the pre-move test used).
+// RestoreFromResourcesCountedWithDeps — the explicit remediation step a user
+// performs AFTER doctor reports the breakage (doctor itself never repairs per
+// §7A.6). It asserts the broken target + link are recovered.
 func seedResourcesAndRestore(t *testing.T, agentsHome, projectPath, linkPath, target string) {
 	t.Helper()
 	resources := filepath.Join(agentsHome, "resources", "proj")
@@ -206,10 +210,13 @@ func doctorE2ESnapshotsEqual(a, b []doctorE2ESnapshotEntry) (string, bool) {
 	return "", true
 }
 
-// TestDoctorRepairE2E_ReportsAndRestoresBrokenLink walks the full
-// add → break → doctor → restore → doctor cycle without depending on any
-// installed platform CLIs.
-func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
+// TestDoctorE2E_ReportsBrokenLinkAndIsReadOnly walks the full
+// add → break → doctor (read-only detect) → user-runs-restore → doctor cycle
+// without depending on any installed platform CLIs. Per §7A.6 doctor only
+// detects: the recovery in phase 4 is an explicit RestoreFromResources call
+// (the `da refresh`-equivalent) the USER runs after doctor surfaces the
+// breakage — doctor itself never mutates the tree (asserted in phase 3).
+func TestDoctorE2E_ReportsBrokenLinkAndIsReadOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX symlink semantics: this E2E breaks a managed link by deleting its target and asserts it dangles. A Windows managed *file* link is a hard link with no reparse point — removing the canonical source only decrements nlink, the content persists, so it cannot dangle and managedLinkBroken correctly reports it non-broken by design (see doctor.go managedLinkBroken doc). Windows healthy hard-link counting is covered by TestCountProjectLinks_AllHealthyVariants and internal/linktest/linktest_test.go.")
 	}
@@ -225,41 +232,44 @@ func TestDoctorRepairE2E_ReportsAndRestoresBrokenLink(t *testing.T) {
 	// Phase 2: break the link by deleting its target.
 	breakAndConfirmBrokenLink(t, agentsHome, projectPath, target)
 
-	// Phase 3: doctor in dry-run should report the breakage without erroring.
-	runDoctorDryRunReportsBroken(t)
+	// Phase 3: doctor reports the breakage and leaves the tree untouched
+	// (read-only — it does NOT repair).
+	runDoctorReportsBrokenLeavesTreeUnchanged(t, projectPath)
 
-	// Phase 4: seed resources/ so refresh's restore can recreate the deleted
-	// target, then re-run.
+	// Phase 4: the user runs the remediation command (restore from resources)
+	// to recreate the deleted target — this is NOT doctor's job.
 	seedResourcesAndRestore(t, agentsHome, projectPath, linkPath, target)
 
 	// Phase 5: doctor reports clean again.
-	assertDoctorStdoutContainsBroken(t, "post-repair", false)
+	assertDoctorStdoutContainsBroken(t, "post-restore", false)
 }
 
-// TestDoctorRepairE2E_DryRunDoesNotMutateRepo verifies doctor --dry-run never
-// re-runs CreateLinks against the project repo when broken links are present.
-func TestDoctorRepairE2E_DryRunDoesNotMutateRepo(t *testing.T) {
+// TestDoctorE2E_DoesNotMutateRepo verifies doctor never touches the project
+// repo when broken links are present — the core §7A.6 read-only guarantee.
+// Before the reshape doctor would re-run CreateLinks / shared-target projection
+// here; now it must leave the tree byte-identical.
+func TestDoctorE2E_DoesNotMutateRepo(t *testing.T) {
 	_, _, projectPath, _, _ := seedManagedClaudeLink(t)
 
-	// Introduce a dangling AGENTS.md symlink — only the doctor repair path
-	// would touch this file.
+	// Introduce a dangling AGENTS.md symlink — the only path the old doctor
+	// repair would have touched.
 	agentsMD := filepath.Join(projectPath, "AGENTS.md")
 	linktest.DanglingLink(t, agentsMD)
 
 	before := doctorE2ESnapshotTree(t, projectPath)
 
 	saved := Flags
-	Flags = GlobalFlags{DryRun: true}
+	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
 	_ = captureDoctorOutput(t, func() {
 		if err := runDoctor(NewDoctorCmd(testDoctorDeps()), nil, StdDoctorConfigLoader{}); err != nil {
-			t.Fatalf("dry-run doctor: %v", err)
+			t.Fatalf("doctor: %v", err)
 		}
 	})
 
 	after := doctorE2ESnapshotTree(t, projectPath)
 	if msg, ok := doctorE2ESnapshotsEqual(before, after); !ok {
-		t.Fatalf("dry-run doctor mutated the project repo: %s", msg)
+		t.Fatalf("doctor mutated the project repo (must be read-only): %s", msg)
 	}
 }
