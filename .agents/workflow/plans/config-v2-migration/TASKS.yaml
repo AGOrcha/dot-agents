@@ -276,7 +276,7 @@ tasks:
       app_type: go-cli
     - id: p4c-config-sync-lint
       title: 'Phase 4c: da config sync + da config lint + da config verify commands'
-      status: awaiting_owner_review
+      status: completed
       depends_on:
         - p4-config-explain-cli
         - p1b-resolver-extends-tier1
@@ -402,7 +402,7 @@ tasks:
       app_type: go-cli
     - id: p1c-verifier-profile-source-aware
       title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
-      status: awaiting_owner_review
+      status: completed
       depends_on:
         - p1b-resolver-extends-tier1
       blocks: []
@@ -505,7 +505,7 @@ tasks:
       app_type: release
     - id: p4f-units-lock-7a-wiring
       title: 'Phase 4f: wire §7A units lock (inputs_digest + units) into resolve/sync; verify tracks local-scope drift'
-      status: pending
+      status: completed
       depends_on:
         - p4-config-explain-cli
         - config-v2-coherence/ca-units-lock-schema
@@ -545,7 +545,7 @@ tasks:
       app_type: go-cli
     - id: p4g-da-install-units-sync
       title: 'Phase 4g: re-scope da install onto EnsureResolved + exact/prune projection (§15)'
-      status: pending
+      status: awaiting_agent_review
       depends_on:
         - p4f-units-lock-7a-wiring
         - p4c-config-sync-lint
@@ -605,7 +605,7 @@ tasks:
       app_type: go-cli
     - id: p4h-agentslock-interprocess-lock
       title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
-      status: pending
+      status: awaiting_agent_review
       depends_on:
         - p4f-units-lock-7a-wiring
       blocks: []
