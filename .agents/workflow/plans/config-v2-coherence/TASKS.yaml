@@ -112,17 +112,26 @@ tasks:
       blocks: []
       owner: dot-agents
       write_scope:
-        - internal/config/agentsrc.go
-        - internal/config/resolver.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_git_artifact.go
+        - internal/config/fetcher_local_artifact.go
+        - internal/config/fetcher_test.go
         - schemas/agentsrc.schema.json
-        - internal/config/resolver_test.go
       verification_required: true
       notes: |-
         Per §4 (relaxed) + §7A.1/§7A.2. Relax the tier-constraint: packages/artifacts may reference git/local/http/oci
         via source:path@version; only extends still rejects oci. Kind (layer|artifact) governs merge/trust, not which
-        source is permitted. Update schema validation + the resolve-time tier check. Absorbs the artifact-resolution
-        mechanic of the retired p6 (§15 D3/D8: one units model, any source serves any kind, OCI is one source not the
-        definition; no parallel `da packages` command tree). Build on p5 (source types) + p4f (units-lock wiring).
+        source is permitted. Absorbs the artifact-resolution mechanic of the retired p6 (§15 D3/D8: one units model,
+        any source serves any kind, OCI is one source not the definition; no parallel `da packages` command tree).
+        SCOPE CORRECTED 2026-06-23 (worker assessment): the schema source enum is ALREADY unified (local/git/http/oci,
+        no per-tier exclusion) and extends-rejects-oci is ALREADY correct in resolver.go via SelectFetcher — so the
+        original write_scope (agentsrc.go/resolver.go/resolver_test.go) had nothing to change. The real work lives in
+        the fetchers: relax SelectPackageFetcher in fetcher_oci.go (today rejects git/local), ADD net-new git + local
+        artifact-fetcher implementations of the FetchArtifact interface (only http+oci implement it today), and update
+        fetcher_test.go TestSelectPackageFetcherTierConstraint (currently asserts git/local REJECTED) + add accept
+        tests. SEQUENCING: collides with PR #96 (cl online cache_keys) on fetcher.go/fetcher_test.go — land #96 first,
+        then rebase. Build on p5 (source types) + p4f (units-lock wiring).
       app_type: go-cli
     - id: cf-local-source-autosetup
       title: 'Git-backed local source: auto-bootstrap so local units version by ref'
