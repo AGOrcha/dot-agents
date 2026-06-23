@@ -1,0 +1,8 @@
+schema_version: 1
+id: platform-dirs-claude-message-display
+plan_id: loop-discipline-stop-hooks
+task_id: p1d-claude-lifecycle-parity
+observation: 'Claude Code added hook event MessageDisplay (vendor docs, inserted between Notification and PreCompact). claudeEventTable in internal/platform/hooks.go has no message_display canonical entry, so HookSpec.When:message_display will not render. Add "message_display": "MessageDisplay" (1:1, no gate) mirroring the P1d wider-surface block; extend hooks_test coverage and the Claude event list. Sibling tables (codex/cursor/copilot) need no change — vendor change is Claude-only; no opencodeEventTable exists. ref docs/PLATFORM_DIRS_DOCS.md @ 2026-06-23 refresh.'
+classification: small
+routed_to: task_note:loop-discipline-stop-hooks/p1d-claude-lifecycle-parity
+created_at: "2026-06-23T17:14:52Z"
