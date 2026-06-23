@@ -146,6 +146,32 @@ Some commands already support `--json` on success. That does not change the fail
 | Unknown command / unknown flag | root parse path | yes | yes | Keep Cobra detail, add help hint |
 | Execution/runtime failure with no immediate recovery | wrapped error or `CLIError` | no | optional | Avoid misleading usage dumps |
 
+## Exit codes
+
+The current public exit-code contract is **binary**:
+
+- **`0`** on success.
+- **`1`** on any error.
+
+`cmd/da/main.go` flattens every non-nil error from `root.Execute()` to
+`os.Exit(1)` — there is no other exit-code path in the real binary:
+
+```go
+if err := root.Execute(); err != nil {
+    commands.RenderCommandError(os.Stderr, root, os.Args[1:], err)
+    os.Exit(1)
+}
+```
+
+`commands/config/explain.go` defines differentiated constants
+(`exitOK=0`, `exitLayerFetchErr=1`, `exitSchemaErr=2`, `exitAuthErr=3`), but
+these are **internal/reserved and NOT a public contract today**. They are only
+ever returned as an informational second value from the snapshot loaders and are
+discarded by the caller (`_ = code`); `main.go` then exits `1` for any error
+regardless. So even a `config` schema error exits `1`, not `2`. Automation must
+treat every failure as exit `1`. (Wiring those constants through to the process
+exit status is tracked separately as a code change.)
+
 ## Automation note
 
 Error rendering is still **human-first** today.
