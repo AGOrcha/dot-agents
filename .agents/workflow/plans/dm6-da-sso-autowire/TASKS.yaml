@@ -30,12 +30,13 @@ tasks:
         - internal/docsaccess/
       verification_required: true
       notes: |-
-        Implement the SSO leg per spec section 2 decision Option A: obtain a CF Access app JWT by shelling to
-        `cloudflared access login <app-url>` (browser SSO) then `cloudflared access token --app=<app-url>`. Behind an
-        interface-DI seam (exec runner injected) so tests drive present/absent/expired without a real browser. Detect
-        cloudflared absence and degrade to a paste-fallback prompt (Option C) + install hint; never crash. JWT is held
-        only for the provision call, never persisted by da, never logged (section 7). Resolves OQ-1 (recommendation:
-        accept cloudflared soft-dependency + paste fallback) pending maintainer confirmation.
+        Implement the SSO leg per spec section 2 (two-horizon). NEAR-TERM = Option A: obtain a CF Access app JWT by
+        shelling to `cloudflared access login <app-url>` then `cloudflared access token --app=<app-url>`; detect
+        cloudflared absence and degrade to a paste-fallback (Option C) + install hint; never crash. CRITICAL: put the
+        acquirer behind a swappable interface-DI seam (a JWTAcquirer interface; the exec runner injected) so the
+        command/consumer code is unchanged when the mechanism becomes Option B (loopback browser->127.0.0.1 callback,
+        the gh/VS Code/Claude pattern) on the future daemon + auth-proxy. JWT held only for the provision call, never
+        persisted by da, never logged (section 7). OQ-1: A now, B later via the seam.
       app_type: go-cli
     - id: t3-provision-client
       title: 'Provision HTTP client: POST /internal/provision, status mapping'

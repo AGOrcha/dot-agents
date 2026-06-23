@@ -48,12 +48,13 @@ The Worker's gate verifies a Cloudflare Access **application JWT** (issued after
 - **Pros:** Uses the *official, supported* SSO client — no bespoke OAuth/device-code code to maintain, no IdP secrets in `da`. Token caching, refresh-on-expiry, and the browser handshake are Cloudflare's problem. The JWT shape is guaranteed to satisfy the Worker gate (same tool the gate is designed for). Matches the team's stated direction (dm6 notes: "da runs the CLI device-flow yielding the user's CF Access identity"). Smallest surface in `da`.
 - **Cons:** Hard dependency on `cloudflared` being installed and on `PATH` (extra prerequisite; cross-platform availability varies — see §8). Parsing/handling another process's exit codes and stderr. The cached-token file is a (short-lived) bearer secret on disk owned by cloudflared, outside `da`'s control.
 
-### Option B — `da` implements the OAuth/device-code flow itself
+### Option B — `da` runs the loopback browser flow itself
 
-`da` registers/uses an OAuth client against the Access app and runs a device-code or loopback-redirect flow directly (open browser to the Access login URL, capture the JWT via `http://localhost:<port>/callback` or a device-code poll).
+`da` opens the system browser to the Access login URL with a `redirect` back to a transient `http://127.0.0.1:<port>/` callback it spins up, and captures the issued token on that callback (the same handshake `cloudflared access login` performs internally). A device-code poll is the headless-shell variant.
 
-- **Pros:** No `cloudflared` dependency. Full control over UX and where the token lives.
-- **Cons:** Largest implementation + maintenance surface (OAuth client registration, PKCE, loopback server or device-code polling, IdP-specific quirks, token verification). Re-implements what `cloudflared` already does correctly. Higher security-review burden (we'd own the token handling end to end). Cloudflare's Access app-token issuance is not a documented stable public OAuth endpoint to build against — fragile.
+- **This is the idiomatic CLI/IDE auth pattern.** `gh auth login`, the VS Code account flows, and Claude Code's own sign-in all use a browser→loopback-callback handshake. It is the pattern developers already expect from a CLI, and it removes the extra-binary prerequisite.
+- **Pros:** No `cloudflared` dependency. Full control over UX, the callback, and where the token lives. **Best fit for the eventual daemon + auth-proxy (§10):** a long-lived `da` daemon can own the loopback/session and proxy auth centrally, rather than shelling to `cloudflared` per call — so building B is the natural precursor to that layer, not throwaway work.
+- **Cons:** More implementation + security surface than A (a local callback server, state/PKCE, token handling we own). The exact CF Access loopback/redirect contract for an app-token must be pinned (it's what `cloudflared` drives, so it exists, but it's less publicly documented than a standard OAuth provider) — the main spike risk. A device-code fallback is still needed for no-browser shells.
 
 ### Option C — Ask the user to paste a token
 
@@ -64,7 +65,12 @@ Prompt the developer to run `cloudflared access token` (or grab the JWT from the
 
 ### Recommendation
 
-**Option A (delegate to `cloudflared access`), with Option C as an explicit manual fallback.** It is the lowest-code, lowest-risk path that reuses Cloudflare's own SSO client and aligns with the already-ratified dm6 direction. `da` orchestrates `cloudflared` for the SSO leg and owns only the `/internal/provision` POST and the credstore write. When `cloudflared` is absent or the developer prefers not to install it, `da` falls back to a paste prompt (Option C) and/or prints the exact `cloudflared` commands to run — so the feature degrades gracefully rather than hard-failing. Option B is rejected as speculative re-implementation.
+Two-horizon decision (revised 2026-06-23):
+
+- **Near-term (this command, ship fast): Option A** + Option C fallback. Lowest-code, lowest-risk way to deliver the interactive developer flow now; reuses Cloudflare's own SSO client; `da` owns only the `/internal/provision` POST + credstore write. Degrades to a paste prompt / printed `cloudflared` commands when `cloudflared` is absent.
+- **Strategic target: Option B (loopback).** This is the standard CLI/IDE auth pattern (gh, VS Code, Claude Code) and the right fit once the **daemon + auth-proxy** (§10) exists — the daemon owns the loopback/session and proxies auth, removing the `cloudflared` dependency entirely. Option B is **not rejected** (the earlier draft was wrong to call it speculative): it is deferred behind a spike to pin the CF Access loopback/redirect contract, and is the intended end state. Build A first so the feature lands; move to B with the daemon.
+
+Design so the SSO leg is a swappable seam (the JWT acquirer is an interface — A today, B later) so the consumer/command code does not change when the mechanism does. This is OQ-1.
 
 ---
 
@@ -197,7 +203,7 @@ This resolves OQ-2: the constraint is **one live token per device** (rotate-on-r
 ## 10. Deferred / out of scope
 
 - **Headless / CI auto-provision.** Per the dm6 handoff ("headless deferred"). CI could later use GitHub OIDC (no shared secret) to obtain identity, and a production headless agent may need a different mechanism (TBD). Do not build speculatively. This spec is the *interactive developer* path only.
-- **The `da service` auth-proxy injection layer** (proposal §5.5). Direct-attach via the credstore (PR #83) stands; the proxy is a later refactor and does not change this spec's storage contract.
+- **The `da service` daemon + auth-proxy injection layer** (proposal §5.5). Direct-attach via the credstore (PR #83) stands; the proxy is a later refactor and does not change this spec's storage contract. This layer is the home for **Option B (loopback) auth** (§2): the long-lived daemon owns the loopback/session and proxies auth, retiring the cloudflared dependency. The near-term command's JWT-acquirer seam is built so this swap is mechanism-only.
 - **Auto-renewal of the service token.** Tokens carry a server-enforced ~30-day TTL (§6); renewal is a manual re-provision (`da docs login`), prompted by `--status` / a consumer 401. A background auto-renewer is out of scope (it would need a non-interactive auth path, which is the deferred headless work).
 - **Generalizing to non-docs credentials** (obs, sources). The obs proposal's `da observability login` is a sibling, not this work; if a shared credential-write/login path emerges, both benefit — but this spec only commits the docs-access flow.
 
@@ -220,7 +226,7 @@ This resolves OQ-2: the constraint is **one live token per device** (rotate-on-r
 
 ## 12. Open questions
 
-- **OQ-1 (auth mechanism confirmation).** Confirm Option A is acceptable as a hard-ish dependency on `cloudflared` (with Option C fallback), versus the team wanting a zero-extra-binary path. The dm6 notes say "device-flow"; `cloudflared access` is the concrete, supported realization — confirm this satisfies that intent. *(Recommendation: yes — Option A + C fallback.)*
+- **OQ-1 (auth mechanism) — two-horizon (see §2 revised).** Near-term Option A (cloudflared) + paste fallback to ship now; strategic target Option B (loopback browser→localhost callback — the gh/VS Code/Claude pattern), moved onto the daemon + auth-proxy, which removes the cloudflared dependency. Build behind a swappable JWT-acquirer seam so the command/consumer code is unchanged when A→B. Remaining: confirm A is acceptable as the interim dependency, and schedule the B spike (pin the CF Access loopback/redirect contract) with the daemon work.
 - **OQ-2 (rotation ownership) — RESOLVED (2026-06-23).** Model is **per-device**, not per-developer (§6): name `agorcha-agents-<user-slug>-<device>`, re-provision rotates that device's token via Worker-side delete-then-create, tokens accumulate across devices, revoke by name/prefix. The Worker (#93, merged) gains: (a) an optional client-supplied device suffix appended to the JWT-derived user slug, (b) delete-then-create for that exact name, and (c) a server-enforced `duration` (~30-day TTL). This is the t6 scope. Remaining sub-question: exact CF API `duration` format + any min/max — confirm at implementation, not a blocker for the plan.
 - **OQ-3 (deprovision in v1?).** Does v1 ship a developer-facing deprovision/revoke (delete my edge token), or is revocation a maintainer-only action (delete the named token) for now? Local-clear (remove the two ids) is in scope regardless.
 - **OQ-4 (platform store coverage).** On platforms where the credstore's OS-keychain step is unavailable, what is the supported persistence target for these ids — fail with guidance, or a documented alternate write path? Inherited from credstore; must be answered so the command's behavior is defined everywhere.
