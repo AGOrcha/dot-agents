@@ -38,7 +38,12 @@
     // (<team>.cloudflareaccess.com) — the JWKS endpoint and the expected `iss`
     // claim are both derived from it. Until set, /internal/* JWT verification
     // cannot succeed (JWKS fetch + issuer check will fail).
-    "CF_ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com"
+    "CF_ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com",
+    // Account id for the /internal/provision self-provision endpoint (dm6),
+    // which mints a per-user CF Access service token via the CF API. NOT a
+    // secret (account ids are not sensitive). The scoped API token it calls
+    // with is the CF_PROVISION_API_TOKEN Worker secret (set in CI, never here).
+    "CF_PROVISION_ACCOUNT_ID": "bfabaf5bb310ba98e4b95c74e88dd271"
   },
   // Production-only routes: agorcha.dev custom_domain. Preview deploys
   // (PR branches) skip this env entirely and land at
@@ -58,7 +63,8 @@
         "ENVIRONMENT": "production",
         "CF_ACCESS_AUD": "50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff",
         // TODO(maintainer): set CF_ACCESS_TEAM_DOMAIN (see top-level note above).
-        "CF_ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com"
+        "CF_ACCESS_TEAM_DOMAIN": "REPLACE-ME.cloudflareaccess.com",
+        "CF_PROVISION_ACCOUNT_ID": "bfabaf5bb310ba98e4b95c74e88dd271"
       }
     }
   }

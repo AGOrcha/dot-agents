@@ -12,7 +12,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import worker, { classifyPath, verifyAccessJwt } from '../src/worker.js';
+import worker, {
+  classifyPath,
+  verifyAccessJwt,
+  provisionTokenName,
+  mintServiceToken,
+  provisionServiceToken,
+} from '../src/worker.js';
+
+// The provision endpoint path. Kept as a literal here (worker.js cannot export a
+// non-function const — workerd treats entry-module exports as handlers).
+const PROVISION_PATH = '/internal/provision';
 
 // Stub ASSETS binding: returns 200 with a marker so a leak (asset served when
 // it should have been gated) is unambiguous in assertions.
@@ -336,4 +346,184 @@ test('JWT: wrong issuer rejected (configured env)', async () => {
   );
   assert.equal(r.ok, false);
   assert.equal(r.reason, 'bad-issuer');
+});
+
+// --- dm6 self-provision endpoint (mint a per-user CF Access service token) ----
+
+// Env with the minting credentials configured (account id + scoped API token).
+const provEnv = {
+  ...env,
+  CF_PROVISION_ACCOUNT_ID: 'bfabaf5bb310ba98e4b95c74e88dd271',
+  CF_PROVISION_API_TOKEN: 'scoped-token-xyz',
+};
+
+// A verify() seam that simulates a passed CF Access gate with given claims —
+// a real signed JWT cannot be forged in a unit test, so the gate is injected.
+const okVerify = (claims) => async () => ({ ok: true, claims });
+const failVerify = async () => ({ ok: false, reason: 'no-token' });
+
+// A fetch() seam returning a canned CF API service_tokens creation response.
+function cfFetchOk(captured) {
+  return async (url, init) => {
+    captured.url = url;
+    captured.init = init;
+    return new Response(
+      JSON.stringify({
+        success: true,
+        result: {
+          id: 'tok-id',
+          name: JSON.parse(init.body).name,
+          client_id: 'cid-123.access',
+          client_secret: 'csecret-abc',
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  };
+}
+
+test('provisionTokenName: prefers github_login, then login, then email local-part', () => {
+  assert.equal(provisionTokenName({ github_login: 'Octo-Cat' }), 'agorcha-agents-octo-cat');
+  assert.equal(provisionTokenName({ login: 'dev1' }), 'agorcha-agents-dev1');
+  assert.equal(
+    provisionTokenName({ email: 'Nikash.P@example.com' }),
+    'agorcha-agents-nikash-p',
+  );
+});
+
+test('provisionTokenName: sanitizes to [a-z0-9-] and trims stray dashes', () => {
+  assert.equal(provisionTokenName({ login: 'a_b c!!d' }), 'agorcha-agents-a-b-c-d');
+  assert.equal(provisionTokenName({ github_login: '__weird__' }), 'agorcha-agents-weird');
+});
+
+test('provisionTokenName: no usable identity -> null', () => {
+  assert.equal(provisionTokenName(null), null);
+  assert.equal(provisionTokenName({}), null);
+  assert.equal(provisionTokenName({ email: 'no-at-sign' }), null);
+  assert.equal(provisionTokenName({ login: '###' }), null);
+});
+
+test('mintServiceToken: unconfigured token/account -> 503 (fail closed, no fetch)', async () => {
+  let called = false;
+  const noFetch = async () => {
+    called = true;
+    return new Response('{}');
+  };
+  const r1 = await mintServiceToken({ CF_PROVISION_ACCOUNT_ID: 'acct' }, 'n', noFetch);
+  assert.equal(r1.ok, false);
+  assert.equal(r1.status, 503);
+  const r2 = await mintServiceToken(
+    { CF_PROVISION_API_TOKEN: 'REPLACE-ME', CF_PROVISION_ACCOUNT_ID: 'acct' },
+    'n',
+    noFetch,
+  );
+  assert.equal(r2.status, 503);
+  assert.equal(called, false, 'must never hit the CF API when unconfigured');
+});
+
+test('mintServiceToken: posts to CF API with bearer auth and returns the token', async () => {
+  const captured = {};
+  const r = await mintServiceToken(provEnv, 'agorcha-agents-dev1', cfFetchOk(captured));
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.token, {
+    client_id: 'cid-123.access',
+    client_secret: 'csecret-abc',
+    name: 'agorcha-agents-dev1',
+  });
+  assert.ok(
+    captured.url.endsWith(
+      '/accounts/bfabaf5bb310ba98e4b95c74e88dd271/access/service_tokens',
+    ),
+  );
+  assert.equal(captured.init.headers.authorization, 'Bearer scoped-token-xyz');
+  assert.equal(JSON.parse(captured.init.body).name, 'agorcha-agents-dev1');
+});
+
+test('mintServiceToken: CF API failure / incomplete result -> 502', async () => {
+  const rejected = await mintServiceToken(provEnv, 'n', async () =>
+    new Response(JSON.stringify({ success: false, errors: [{ message: 'nope' }] }), {
+      status: 403,
+    }),
+  );
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.status, 502);
+
+  const incomplete = await mintServiceToken(provEnv, 'n', async () =>
+    new Response(JSON.stringify({ success: true, result: { client_id: 'only-id' } }), {
+      status: 200,
+    }),
+  );
+  assert.equal(incomplete.status, 502);
+
+  const threw = await mintServiceToken(provEnv, 'n', async () => {
+    throw new Error('network down');
+  });
+  assert.equal(threw.status, 502);
+});
+
+test('provisionServiceToken: unauthenticated -> 401 (any method, no disclosure)', async () => {
+  const resp = await provisionServiceToken(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'POST' }),
+    provEnv,
+    { verify: failVerify },
+  );
+  assert.equal(resp.status, 401);
+  // A GET is also 401 (auth precedes the method check) — never 405 pre-auth.
+  const getResp = await provisionServiceToken(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'GET' }),
+    provEnv,
+    { verify: failVerify },
+  );
+  assert.equal(getResp.status, 401);
+});
+
+test('provisionServiceToken: authed non-POST -> 405', async () => {
+  const resp = await provisionServiceToken(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'GET' }),
+    provEnv,
+    { verify: okVerify({ login: 'dev1' }) },
+  );
+  assert.equal(resp.status, 405);
+});
+
+test('provisionServiceToken: authed but no identity claim -> 422', async () => {
+  const resp = await provisionServiceToken(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'POST' }),
+    provEnv,
+    { verify: okVerify({}) },
+  );
+  assert.equal(resp.status, 422);
+});
+
+test('provisionServiceToken: happy path mints + returns client_id/secret (200)', async () => {
+  const captured = {};
+  const resp = await provisionServiceToken(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'POST' }),
+    provEnv,
+    { verify: okVerify({ github_login: 'dev1' }), fetchImpl: cfFetchOk(captured) },
+  );
+  assert.equal(resp.status, 200);
+  const body = await resp.json();
+  assert.equal(body.client_id, 'cid-123.access');
+  assert.equal(body.client_secret, 'csecret-abc');
+  assert.equal(body.name, 'agorcha-agents-dev1');
+});
+
+test('provisionServiceToken: authed but mint unconfigured -> 503', async () => {
+  const resp = await provisionServiceToken(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'POST' }),
+    env, // no CF_PROVISION_* configured
+    { verify: okVerify({ login: 'dev1' }) },
+  );
+  assert.equal(resp.status, 503);
+});
+
+test('fetch: POST /internal/provision is gated (401) under placeholder env (fail closed)', async () => {
+  // End-to-end through the real handler: the placeholder team domain makes JWT
+  // verification fail, so provision is inert (401) until dm5-prod configures it.
+  const resp = await worker.fetch(
+    new Request(`https://agorcha.dev${PROVISION_PATH}`, { method: 'POST' }),
+    env,
+  );
+  assert.equal(resp.status, 401, 'provision must be JWT-gated, never open');
 });

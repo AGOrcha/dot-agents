@@ -124,3 +124,14 @@ jobs:
           # custom-domain routes. Master push uses --env production to
           # activate the agorcha.dev routes from env.production in wrangler.jsonc.
           command: ${{ github.event_name == 'pull_request' && 'deploy --name agorcha-dev-docs-preview' || 'deploy --env production' }}
+          # Worker secret for the /internal/provision endpoint (dm6): the scoped
+          # CF API token (Access: Service Tokens Edit) used to mint per-user
+          # service tokens. wrangler-action uploads it as a Worker secret as part
+          # of this deploy; the value comes from the job env below. If the
+          # endpoint reports 503 mint-unconfigured after deploy, the secret did
+          # not attach to the active (production) Worker — set it manually with
+          # `wrangler secret put CF_PROVISION_API_TOKEN --env production`.
+          secrets: |
+            CF_PROVISION_API_TOKEN
+        env:
+          CF_PROVISION_API_TOKEN: ${{ secrets.CF_PROVISION_API_TOKEN }}

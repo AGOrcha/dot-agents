@@ -290,7 +290,10 @@ export async function verifyAccessJwt(request, env) {
   }
   if (!valid) return { ok: false, reason: 'bad-signature' };
 
-  return { ok: true };
+  // Surface the verified claims so authenticated handlers (e.g. /provision) can
+  // derive the caller's identity. Only reached after the signature + aud/iss/exp
+  // checks above, so the payload is trustworthy here.
+  return { ok: true, claims: payload };
 }
 
 /**
@@ -305,6 +308,169 @@ function unauthorized() {
   });
 }
 
+/**
+ * A small JSON response helper. Keeps the provision handler terse and ensures a
+ * consistent content-type. Never used to echo a secret beyond the single minted
+ * client_secret returned to the authenticated caller over HTTPS.
+ *
+ * @param {any} body
+ * @param {number} status
+ * @returns {Response}
+ */
+function jsonResponse(body, status) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
+// The gated self-provision endpoint. A developer who has authenticated through
+// Cloudflare Access (GitHub SSO) POSTs here once; the Worker mints them a
+// per-user CF Access service token and returns its client_id/client_secret,
+// which `da` stores under the cf-access-client-id / cf-access-client-secret
+// credential ids (see internal/docsaccess). It lives UNDER /internal/ so it
+// inherits the exact same JWT gate as the rest of the internal surface.
+//
+// NOT exported: a Worker entry module's named exports are each treated by
+// workerd as a handler/entrypoint, and a non-function export fails module load
+// ("Incorrect type for map entry"). Tests reference the literal path directly.
+const PROVISION_PATH = '/internal/provision';
+
+/**
+ * Derive the per-user service-token name from verified CF Access claims.
+ *
+ * Naming is `agorcha-agents-<slug>` so a maintainer can see at a glance which
+ * developer owns a token (and revoke it by deletion). The slug prefers an
+ * explicit GitHub-login claim when the Access policy surfaces one, else falls
+ * back to the email local-part — `email` is always present on an Access app
+ * JWT. The slug is lower-cased and reduced to [a-z0-9-] so the name is a stable,
+ * CF-API-safe identifier; any run of other characters collapses to a single '-'.
+ *
+ * @param {any} claims  verified JWT payload (from verifyAccessJwt's .claims)
+ * @returns {string | null}  the token name, or null if no identity is present
+ */
+export function provisionTokenName(claims) {
+  if (!claims || typeof claims !== 'object') return null;
+  // Prefer a GitHub login if the IdP/Access policy maps one into the token;
+  // otherwise the email local-part. Both are optional in shape, so guard each.
+  const login =
+    typeof claims.github_login === 'string' && claims.github_login
+      ? claims.github_login
+      : typeof claims.login === 'string' && claims.login
+        ? claims.login
+        : null;
+  let raw = login;
+  if (!raw && typeof claims.email === 'string' && claims.email.includes('@')) {
+    raw = claims.email.slice(0, claims.email.indexOf('@'));
+  }
+  if (!raw) return null;
+  const slug = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (slug === '') return null;
+  return `agorcha-agents-${slug}`;
+}
+
+/**
+ * Mint a Cloudflare Access service token via the CF API. Returns the parsed
+ * { client_id, client_secret, name } on success — the client_secret is returned
+ * by CF ONLY at creation time, so this is the one chance to relay it.
+ *
+ * The scoped API token (Access: Service Tokens Edit) lives in env.CF_PROVISION_API_TOKEN
+ * as a Worker secret; the account id in env.CF_PROVISION_ACCOUNT_ID. fetchImpl is
+ * injectable so the call is unit-testable without touching the network.
+ *
+ * @param {{ CF_PROVISION_API_TOKEN?: string, CF_PROVISION_ACCOUNT_ID?: string }} env
+ * @param {string} name
+ * @param {typeof fetch} [fetchImpl]
+ * @returns {Promise<{ ok: true, token: { client_id: string, client_secret: string, name: string } } | { ok: false, status: number, reason: string }>}
+ */
+export async function mintServiceToken(env, name, fetchImpl = fetch) {
+  const token = env.CF_PROVISION_API_TOKEN;
+  const accountId = env.CF_PROVISION_ACCOUNT_ID;
+  // Fail closed if the minting credentials are absent or still a placeholder —
+  // never attempt an unauthenticated CF API call.
+  if (!token || typeof token !== 'string' || token.startsWith('REPLACE-ME')) {
+    return { ok: false, status: 503, reason: 'mint-unconfigured' };
+  }
+  if (!accountId || typeof accountId !== 'string' || accountId.startsWith('REPLACE-ME')) {
+    return { ok: false, status: 503, reason: 'mint-unconfigured' };
+  }
+
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/service_tokens`;
+  let resp;
+  try {
+    resp = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ name }),
+    });
+  } catch {
+    return { ok: false, status: 502, reason: 'mint-unreachable' };
+  }
+
+  let data;
+  try {
+    data = await resp.json();
+  } catch {
+    return { ok: false, status: 502, reason: 'mint-bad-response' };
+  }
+  if (!resp.ok || !data || data.success !== true || !data.result) {
+    return { ok: false, status: 502, reason: 'mint-rejected' };
+  }
+  const { client_id: clientId, client_secret: clientSecret } = data.result;
+  if (typeof clientId !== 'string' || typeof clientSecret !== 'string') {
+    return { ok: false, status: 502, reason: 'mint-incomplete' };
+  }
+  return {
+    ok: true,
+    token: { client_id: clientId, client_secret: clientSecret, name },
+  };
+}
+
+/**
+ * Handle a POST {PROVISION_PATH} request: verify the caller's CF Access JWT,
+ * derive their per-user token name, mint a service token, and return it. Every
+ * failure path is fail-closed (401 unauthenticated, 405 wrong method, 503
+ * unconfigured, 502 CF API error). Dependencies are injectable for hermetic
+ * tests (a real signed JWT can't be forged in a unit test).
+ *
+ * @param {Request} request
+ * @param {object} env
+ * @param {{ verify?: typeof verifyAccessJwt, fetchImpl?: typeof fetch }} [deps]
+ * @returns {Promise<Response>}
+ */
+export async function provisionServiceToken(request, env, deps = {}) {
+  const verify = deps.verify || verifyAccessJwt;
+  const fetchImpl = deps.fetchImpl || fetch;
+
+  // Auth FIRST (before the method check) so an unauthenticated caller always
+  // gets 401 — identical to every other /internal/* path, and it never reveals
+  // the endpoint via a 405 to someone who hasn't passed the CF Access gate.
+  const auth = await verify(request, env);
+  if (!auth.ok) {
+    return unauthorized();
+  }
+  if (request.method !== 'POST') {
+    return jsonResponse({ error: 'method-not-allowed' }, 405);
+  }
+  const name = provisionTokenName(auth.claims);
+  if (!name) {
+    // Authenticated but the token carried no usable identity claim — refuse to
+    // mint an anonymous, un-attributable token.
+    return jsonResponse({ error: 'no-identity' }, 422);
+  }
+  const minted = await mintServiceToken(env, name, fetchImpl);
+  if (!minted.ok) {
+    return jsonResponse({ error: minted.reason }, minted.status);
+  }
+  return jsonResponse(minted.token, 200);
+}
+
 export default {
   /**
    * @param {Request} request
@@ -317,6 +483,15 @@ export default {
   async fetch(request, env) {
     const { pathname } = new URL(request.url);
     const route = classifyPath(pathname);
+
+    // 0. Self-provision endpoint (under /internal/, so already gated). Minting
+    //    is a Worker action, not a static asset, so it is handled here before
+    //    the generic /internal/* asset path would try to serve it from ASSETS.
+    //    Path is matched case-insensitively via the normalized classification
+    //    surface; the handler re-verifies the JWT itself (fail-closed).
+    if (route === 'internal' && pathname.toLowerCase() === PROVISION_PATH) {
+      return provisionServiceToken(request, env);
+    }
 
     // 1. Schemas: always public (carve-out checked first).
     if (route === 'schemas') {
