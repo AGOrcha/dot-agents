@@ -105,7 +105,7 @@ tasks:
       app_type: go-cli
     - id: ce-unified-artifact-sourcing
       title: 'Unified artifact sourcing: git/local valid for artifacts via @version'
-      status: pending
+      status: completed
       depends_on:
         - config-v2-migration/p5-source-types-http-oci
         - config-v2-migration/p4f-units-lock-7a-wiring
@@ -224,7 +224,7 @@ tasks:
       app_type: go-cli
     - id: ck-command-reshape
       title: 'Command reshape: config explain auto-locks + absorbs status; doctor nudges'
-      status: pending
+      status: completed
       depends_on:
         - cd-ensure-resolved-seam
         - config-v2-migration/p4f-units-lock-7a-wiring
