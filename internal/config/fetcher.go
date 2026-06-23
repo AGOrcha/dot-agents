@@ -152,6 +152,33 @@ type Fetcher interface {
 	Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error)
 }
 
+// refreshingFetcher is the optional cache-key-aware extension of Fetcher
+// (config-distribution-model §7A.4 / R6). When the resolver determines a
+// layer's recorded cache key is stale — a `--refresh` / always_revalidate force
+// escape, or a cache_keys override edit that changes the key shape — it asks the
+// fetcher to bypass its SHA-addressed cache serve and re-read the upstream, so
+// the consumption of cache_keys actually re-validates online instead of silently
+// serving the cached bytes. A Fetcher that does not implement this is treated as
+// always cache-serving (forceRefresh is a no-op for it), preserving the existing
+// behavior for fakes and the cache-less local fetcher.
+type refreshingFetcher interface {
+	// FetchRefresh behaves like Fetch but, when forceRefresh is true, skips the
+	// cached-SHA fast path and re-reads from the upstream so a stale cache key
+	// re-validates. forceRefresh=false is identical to Fetch.
+	FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error)
+}
+
+// fetchWithRefresh dispatches to a fetcher's refresh-aware path when it supports
+// one, falling back to the plain Fetch otherwise. It is the single point the
+// resolver routes a layer fetch through, so the force-refresh signal threads to
+// every refresh-aware fetcher uniformly while plain Fetchers stay unaffected.
+func fetchWithRefresh(f Fetcher, src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+	if rf, ok := f.(refreshingFetcher); ok {
+		return rf.FetchRefresh(src, parts, cacheDir, forceRefresh)
+	}
+	return f.Fetch(src, parts, cacheDir)
+}
+
 // SelectFetcher returns the Fetcher for a source type, or an error for an
 // unsupported or tier-invalid type. oci is valid only for packages (pass 2),
 // never for extends, so it is rejected here as a schema violation.
@@ -248,6 +275,13 @@ func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, b
 }
 
 func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, cacheDir, false)
+}
+
+// FetchRefresh resolves the ref→SHA, then serves the SHA-addressed cache unless
+// forceRefresh is set (a stale cache key), in which case it re-reads the layer
+// from the freshly cloned worktree and rewrites the cache.
+func (f *gitFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
 	ref := parts.Version
 	if ref == "" {
 		ref = src.Ref
@@ -283,8 +317,10 @@ func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (Fe
 	if sha == "" {
 		return FetchedLayer{}, fmt.Errorf("git ref %q not found at %s", ref, src.URL)
 	}
-	if cached, ok := readCachedLayer(cacheDir, sha); ok {
-		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+	if !forceRefresh {
+		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+		}
 	}
 
 	fh, err := wfs.Open(filepath.FromSlash(parts.LayerPath))
@@ -325,6 +361,13 @@ type httpFetcher struct {
 }
 
 func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, cacheDir, false)
+}
+
+// FetchRefresh GETs the layer, then serves the SHA-addressed cache unless
+// forceRefresh is set (a stale cache key), in which case it rewrites the cache
+// with the freshly fetched bytes so the upstream is re-validated.
+func (f *httpFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
 	url := strings.TrimRight(src.URL, "/") + "/" + strings.TrimLeft(parts.LayerPath, "/")
 	if !strings.HasPrefix(strings.ToLower(url), "https://") {
 		return FetchedLayer{}, fmt.Errorf("http source url must be https: %q", url)
@@ -361,8 +404,10 @@ func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (F
 		LastModified:  resp.Header.Get("Last-Modified"),
 		ContentDigest: sha,
 	}
-	if cached, ok := readCachedLayer(cacheDir, sha); ok {
-		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: keyInputs}, nil
+	if !forceRefresh {
+		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: keyInputs}, nil
+		}
 	}
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
