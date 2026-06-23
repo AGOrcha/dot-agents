@@ -1,0 +1,102 @@
+schema_version: 1
+plan_id: first-class-resource-docs
+tasks:
+    - id: rd-config-guide
+      title: 'Layered config guide (config-v2) — the exemplar template'
+      status: in_progress
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        The 0.4.0 layered-config guide (Overview/Model/Commands/Worked-example/Reference). Being built in PR
+        docs/layered-config-guide. Sets the shared first-class resource-family guide template the other families
+        follow. Reference target: the config schema + CONFIG_RELEVANCE.md. Public.
+      app_type: docs
+    - id: rd-hooks-guide
+      title: 'Hooks user guide (events -> platforms, authoring)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        First-class user guide for the hooks family: what hooks are, the event->platform mapping (verify against the
+        *EventTable maps in internal/platform/hooks.go), how to author/declare them, `da hooks` surface. Reference
+        target: HOOKS.md (the contract). Public.
+      app_type: docs
+    - id: rd-skills-guide
+      title: 'Skills user guide (authoring, promote, graph)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        First-class user guide for skills: authoring a skill, `da skills` surface (incl. promote), the
+        skill<->command<->graph integration. Reference target: SKILL_COMMAND_INTEGRATION.md. Public.
+      app_type: docs
+    - id: rd-agents-guide
+      title: 'Agents user guide (no doc today)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        First-class guide for the agents family (currently UNDOCUMENTED). Cover the `da agents` surface (incl.
+        promote --force) + how agents are declared/managed. Verify against commands/agents/ + da agents --help. Public.
+      app_type: docs
+    - id: rd-mcp-guide
+      title: 'MCP user guide (no doc today)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        First-class guide for the MCP family (currently UNDOCUMENTED). Cover declaring MCP servers, the per-platform
+        emit (.mcp.json / ~/.claude.json etc per PLATFORM_DIRS_DOCS), and the `da mcp` surface. Public.
+      app_type: docs
+    - id: rd-rules-guide
+      title: 'Rules user guide (no doc today)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        First-class guide for the rules family (currently UNDOCUMENTED). Cover rule files, the per-platform rule-file
+        locations (cross-link PLATFORM_DIRS_DOCS — the authoritative matrix), and the `da rules` surface. Public.
+      app_type: docs
+    - id: rd-plugins-guide
+      title: 'Plugins user guide (PLUGIN.yaml, emit)'
+      status: pending
+      depends_on:
+        - rd-config-guide
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: true
+      notes: |-
+        First-class user guide for plugins: PLUGIN.yaml shape, per-platform emitter status, `da` plugin surface.
+        Reference target: PLUGIN_CONTRACT.md (the contract). Public.
+      app_type: docs
