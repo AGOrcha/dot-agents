@@ -79,10 +79,7 @@ func collectRealSpecs(t *testing.T, repoRoot string, max int) []realCorpusSource
 	}
 	var names []string
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(specsDir, e.Name(), "design.md")); err == nil {
+		if specHasDesign(specsDir, e) {
 			names = append(names, e.Name())
 		}
 	}
@@ -102,6 +99,16 @@ func collectRealSpecs(t *testing.T, repoRoot string, max int) []realCorpusSource
 		})
 	}
 	return out
+}
+
+// specHasDesign reports whether dir entry e is a spec directory containing a
+// design.md file.
+func specHasDesign(specsDir string, e os.DirEntry) bool {
+	if !e.IsDir() {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(specsDir, e.Name(), "design.md"))
+	return err == nil
 }
 
 // collectRealResearch gathers a few real research markdown docs. These already
@@ -182,28 +189,45 @@ func TestKGDocLane_RealCorpus(t *testing.T) {
 
 	specs := collectRealSpecs(t, repoRoot, 12)
 	research := collectRealResearch(t, repoRoot, 3)
-	deps := testDeps()
 
-	// ── Ingest the real corpus ────────────────────────────────────────────
+	// ingest → assert source notes → warm → query → lint, each step flat.
+	ingestRealCorpus(t, specs, research)
+	assertSourceNotesExist(t, home, specs, research)
+	// At least one extracted note (entity/decision/etc.) beyond the raw source
+	// notes should exist — real specs carry entity/decision-shaped prose.
+	assertExtractedNotesExist(t, home)
+	assertWarmIndexedNotes(t, home, len(specs))
+	assertSourceLookupContent(t, specs[0])
+	assertLintRunsClean(t, home)
+}
+
+// ingestRealCorpus ingests every spec + research source into the active KG home.
+func ingestRealCorpus(t *testing.T, specs, research []realCorpusSource) {
+	t.Helper()
+	deps := testDeps()
 	for _, s := range specs {
 		ingestRealSource(t, deps, s, s.titleTok)
 	}
 	for _, r := range research {
 		ingestRealSource(t, deps, r, r.titleTok)
 	}
+}
 
-	// Every ingested source must have produced a source note on disk.
-	for _, s := range append(append([]realCorpusSource{}, specs...), research...) {
+// assertSourceNotesExist confirms each ingested source produced a source note.
+func assertSourceNotesExist(t *testing.T, home string, specs, research []realCorpusSource) {
+	t.Helper()
+	all := append(append([]realCorpusSource{}, specs...), research...)
+	for _, s := range all {
 		if exists, _ := noteExists(home, s.srcID); !exists {
 			t.Errorf("expected source note %s after ingesting %s", s.srcID, s.path)
 		}
 	}
+}
 
-	// At least one extracted note (entity/decision/etc.) beyond the raw source
-	// notes should exist — real specs carry entity/decision-shaped prose.
-	assertExtractedNotesExist(t, home)
-
-	// ── Warm the SQLite layer and confirm it indexed the real notes ───────
+// assertWarmIndexedNotes warms the SQLite layer and asserts it indexed at least
+// one note per spec.
+func assertWarmIndexedNotes(t *testing.T, home string, specCount int) {
+	t.Helper()
 	if err := runKGWarm(newKGWarmCmdForTest(), nil); err != nil {
 		t.Fatalf("runKGWarm: %v", err)
 	}
@@ -216,34 +240,23 @@ func TestKGDocLane_RealCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
-	if stats.NotesCount < len(specs) {
+	if stats.NotesCount < specCount {
 		t.Errorf("warm layer indexed %d notes, expected at least %d (one source note per spec)",
-			stats.NotesCount, len(specs))
+			stats.NotesCount, specCount)
 	}
+}
 
-	// ── Query: source_lookup must surface a real spec note by its name ────
-	jsonDeps := Deps{
-		Flags:        GlobalFlags{JSON: true},
-		ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") },
-	}
-	target := specs[0]
-	out := captureStdout(t, func() {
-		if err := runKGQuery(jsonDeps, newQueryCmd("source_lookup", "", 10), []string{target.titleTok}); err != nil {
-			t.Fatalf("runKGQuery source_lookup: %v", err)
-		}
-	})
-	var resp GraphQueryResponse
-	if err := json.Unmarshal(out, &resp); err != nil {
-		t.Fatalf("source_lookup JSON invalid: %v\nraw: %s", err, out)
-	}
+// assertSourceLookupContent runs source_lookup for the target spec and asserts
+// the matched result is genuinely that spec's source note (right type + title),
+// not just any non-empty row.
+func assertSourceLookupContent(t *testing.T, target realCorpusSource) {
+	t.Helper()
+	resp := runJSONQuery(t, newQueryCmd("source_lookup", "", 10), target.titleTok)
 	matched := findQueryResult(resp, target.srcID)
 	if matched == nil {
 		t.Fatalf("expected source_lookup(%q) to surface real spec note %s, got results=%#v",
 			target.titleTok, target.srcID, resp.Results)
 	}
-	// Content assertions: the returned result must genuinely be the real spec's
-	// source note — right note type, and a title/summary carrying the real spec
-	// name — not just any non-empty row.
 	if matched.Type != "source" {
 		t.Errorf("expected matched note type=source, got %q (result=%#v)", matched.Type, matched)
 	}
@@ -251,8 +264,27 @@ func TestKGDocLane_RealCorpus(t *testing.T) {
 		t.Errorf("expected matched note title to carry the real spec name %q, got title=%q",
 			target.titleTok, matched.Title)
 	}
+}
 
-	// ── Lint/maintain must run cleanly over the real corpus ───────────────
+// runJSONQuery runs runKGQuery in JSON mode and decodes the response envelope.
+func runJSONQuery(t *testing.T, cmd *cobra.Command, query string) GraphQueryResponse {
+	t.Helper()
+	out := captureStdout(t, func() {
+		if err := runKGQuery(jsonModeDeps(), cmd, []string{query}); err != nil {
+			t.Fatalf("runKGQuery %q: %v", query, err)
+		}
+	})
+	var resp GraphQueryResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("query JSON invalid: %v\nraw: %s", err, out)
+	}
+	return resp
+}
+
+// assertLintRunsClean runs lint over the real corpus and asserts the report
+// persists and reports zero hard errors (warnings are allowed).
+func assertLintRunsClean(t *testing.T, home string) {
+	t.Helper()
 	report, err := runGraphLint(testIO(), home)
 	if err != nil {
 		t.Fatalf("runGraphLint over real corpus: %v", err)
@@ -260,12 +292,17 @@ func TestKGDocLane_RealCorpus(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, "ops", "lint", "lint-report.json")); err != nil {
 		t.Errorf("expected lint-report.json persisted after lint: %v", err)
 	}
-	// Lint is allowed to surface warnings (orphan/stale pages are normal for a
-	// freshly-ingested corpus) but must not raise hard errors: a non-zero
-	// ErrorCount means lint itself choked on real content.
 	if report.ErrorCount > 0 {
 		t.Errorf("lint reported %d hard errors over the real corpus (results=%#v)",
 			report.ErrorCount, report.Results)
+	}
+}
+
+// jsonModeDeps returns Deps configured for JSON output.
+func jsonModeDeps() Deps {
+	return Deps{
+		Flags:        GlobalFlags{JSON: true},
+		ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") },
 	}
 }
 
@@ -326,22 +363,33 @@ func TestKGCodeLane_RealCorpus(t *testing.T) {
 		t.Skipf("real code-review-graph not available: %v", err)
 	}
 
+	// Stage a bounded subtree, build its real code graph, and return the build
+	// root + the graph.db node count (already asserted non-empty).
+	buildRoot, nodeCount := setupRealCodeGraph(t, repoRoot, crgBin)
+
+	// Flat sequence of code-lane assertions over the real built graph.
+	assertCodeStatusMatches(t, buildRoot, nodeCount)
+	assertImpactResolves(t, buildRoot)
+	assertRealCRGBridgeAndQuery(t, buildRoot, nodeCount)
+}
+
+// setupRealCodeGraph stages a bounded real subtree, symlinks the real .venv so
+// every bridge over the staged tree shares one working CRG + python, runs the
+// build, and returns the build root + the graph.db node count. Build failures
+// caused by an un-importable CRG python package skip rather than fail.
+func setupRealCodeGraph(t *testing.T, repoRoot, crgBin string) (string, int) {
+	t.Helper()
 	// Build over a bounded, representative subtree of the real source tree so
 	// the build stays fast under -race. Copying keeps the build off the live
 	// repo .git/.code-review-graph and avoids mutating developer state.
-	subtreeName := filepath.Join("commands", "kg")
-	buildRoot := stageRealSubtree(t, repoRoot, subtreeName)
+	buildRoot := stageRealSubtree(t, repoRoot, filepath.Join("commands", "kg"))
 
 	// Symlink the real .venv (the one DiscoverCRGBin just found) into the staged
-	// build root so every bridge built from buildRoot — build, code-status, and
-	// impact — discovers the same working CRG binary and resolves its sibling
-	// python3 (which has the code_review_graph package). Without this, the
-	// CRG-internal python query path (runKGImpact) would fall back to a system
-	// python lacking the module.
+	// build root so build/code-status/impact discover the same working CRG
+	// binary and resolve its sibling python3 (which has code_review_graph).
 	linkRealVenv(t, crgBin, buildRoot)
 
-	// NewCRGBridge re-discovers the binary from buildRoot/.venv (the symlink),
-	// so build/status/impact all share one consistent CRG + python.
+	// NewCRGBridge re-discovers the binary from buildRoot/.venv (the symlink).
 	bridge, err := graphstore.NewCRGBridge(buildRoot)
 	if err != nil {
 		t.Fatalf("NewCRGBridge over staged tree: %v", err)
@@ -357,70 +405,69 @@ func TestKGCodeLane_RealCorpus(t *testing.T) {
 		t.Fatalf("expected build outcome=%q over real source, got %q; summary: %s",
 			graphstore.CRGReadinessReady, report.Outcome, report.Summary)
 	}
-
-	// The produced graph.db must contain real Go symbol nodes.
-	nodeCount := assertRealGraphDBNonEmpty(t, buildRoot)
 	if report.Status == nil || report.Status.Nodes == 0 {
 		t.Fatalf("expected non-zero nodes from real source build, got status=%+v", report.Status)
 	}
+	// The produced graph.db must contain real Go symbol nodes.
+	return buildRoot, assertRealGraphDBNonEmpty(t, buildRoot)
+}
 
-	// code-status must agree with the graph.db the real build produced.
-	statusCmd := &cobra.Command{}
-	statusCmd.Flags().String("repo", buildRoot, "")
-	statusCmd.Flags().Bool("json", true, "")
-	statusOut := captureStdout(t, func() {
-		if err := runKGCodeStatus(testDeps(), statusCmd, nil); err != nil {
+// assertCodeStatusMatches asserts kg code-status agrees with the graph.db count.
+func assertCodeStatusMatches(t *testing.T, buildRoot string, nodeCount int) {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", buildRoot, "")
+	cmd.Flags().Bool("json", true, "")
+	out := captureStdout(t, func() {
+		if err := runKGCodeStatus(testDeps(), cmd, nil); err != nil {
 			t.Fatalf("runKGCodeStatus over real graph: %v", err)
 		}
 	})
 	var status graphstore.CRGStatus
-	if err := json.Unmarshal(statusOut, &status); err != nil {
-		t.Fatalf("code-status JSON invalid: %v\nraw: %s", err, statusOut)
+	if err := json.Unmarshal(out, &status); err != nil {
+		t.Fatalf("code-status JSON invalid: %v\nraw: %s", err, out)
 	}
 	if status.Nodes != nodeCount {
 		t.Errorf("code-status Nodes=%d disagrees with graph.db COUNT(*)=%d", status.Nodes, nodeCount)
 	}
+}
 
-	// ── Impact: a real changed Go file must resolve to real symbol nodes ──
-	impactCmd := &cobra.Command{}
-	impactCmd.Flags().String("repo", buildRoot, "")
-	impactCmd.Flags().String("base", "", "")
-	impactCmd.Flags().Int("depth", 2, "")
-	impactCmd.Flags().Int("limit", 50, "")
-	impactCmd.Flags().Bool("require-graph", true, "")
-	impactCmd.Flags().Bool("json", true, "")
+// assertImpactResolves runs kg impact for a real staged file and asserts it
+// resolves against the real graph with a coherent state + payload.
+func assertImpactResolves(t *testing.T, buildRoot string) {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", buildRoot, "")
+	cmd.Flags().String("base", "", "")
+	cmd.Flags().Int("depth", 2, "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Bool("require-graph", true, "")
+	cmd.Flags().Bool("json", true, "")
 
-	impactOut := captureStdout(t, func() {
+	out := captureStdout(t, func() {
 		// sync_code_warm_link.go is a real file in the staged subtree with many
 		// exported symbols, so impact should resolve nodes for it.
-		if err := runKGImpact(testDeps(), impactCmd, []string{"sync_code_warm_link.go"}); err != nil {
+		if err := runKGImpact(testDeps(), cmd, []string{"sync_code_warm_link.go"}); err != nil {
 			t.Fatalf("runKGImpact over real graph: %v", err)
 		}
 	})
 	var impact kgImpactJSONOutput
-	if err := json.Unmarshal(impactOut, &impact); err != nil {
-		t.Fatalf("impact JSON invalid: %v\nraw: %s", err, impactOut)
-	}
-	if impact.GraphState == "" {
-		t.Errorf("expected non-empty graph_state in impact output, got: %s", impactOut)
-	}
-	if impact.CRGImpactResult == nil {
-		t.Fatalf("expected an impact result payload, got: %s", impactOut)
+	if err := json.Unmarshal(out, &impact); err != nil {
+		t.Fatalf("impact JSON invalid: %v\nraw: %s", err, out)
 	}
 	// On a freshly-built graph with no diff, the changed/impacted sets may be
 	// empty; the load-bearing assertion is that the build produced real symbol
-	// nodes (asserted above) and that impact resolves against the real graph
-	// without error and reports a coherent state.
-	if impact.Summary == "" {
-		t.Errorf("expected a non-empty impact summary over the real graph, got: %s", impactOut)
+	// nodes (asserted in setup) and that impact resolves against the real graph
+	// without error and reports a coherent state + payload.
+	if impact.GraphState == "" {
+		t.Errorf("expected non-empty graph_state in impact output, got: %s", out)
 	}
-
-	// ── CRG bridge + bridge query over the real built code graph ──────────
-	// Import the real CRG nodes/edges into a warm SQLite KG home (this is the
-	// CRG bridge path: NewCRGBridge → ReadNodes/ReadEdges), then drive the
-	// `da kg bridge` surface and assert it returns a REAL Go symbol from the
-	// built subtree, with counts consistent with graph.db.
-	assertRealCRGBridgeAndQuery(t, buildRoot, nodeCount)
+	if impact.CRGImpactResult == nil {
+		t.Fatalf("expected an impact result payload, got: %s", out)
+	}
+	if impact.Summary == "" {
+		t.Errorf("expected a non-empty impact summary over the real graph, got: %s", out)
+	}
 }
 
 // assertRealCRGBridgeAndQuery exercises the CRG bridge import + the
@@ -441,7 +488,18 @@ func assertRealCRGBridgeAndQuery(t *testing.T, buildRoot string, graphNodeCount 
 		t.Fatalf("runKGSetup for bridge home: %v", err)
 	}
 
-	// ── CRG bridge import: real graph.db → warm SQLite store ──────────────
+	// import → warm-store stats → bridge query → bridge health, each step flat.
+	importRealCRGGraph(t, home, buildRoot, graphNodeCount)
+	assertWarmStoreStats(t, home, graphNodeCount)
+	assertBridgeSymbolLookup(t)
+	assertBridgeHealthAvailable(t)
+}
+
+// importRealCRGGraph imports the real graph.db nodes/edges into the warm SQLite
+// store at home (the CRG bridge path: NewCRGBridge → ReadNodes/ReadEdges) and
+// asserts the imported counts are consistent with the graph.db COUNT(*).
+func importRealCRGGraph(t *testing.T, home, buildRoot string, graphNodeCount int) {
+	t.Helper()
 	store, err := openKGStore(home)
 	if err != nil {
 		t.Fatalf("openKGStore: %v", err)
@@ -451,78 +509,85 @@ func assertRealCRGBridgeAndQuery(t *testing.T, buildRoot string, graphNodeCount 
 	if err != nil {
 		t.Fatalf("runKGWarmCodeImport over real CRG graph: %v", err)
 	}
-	// The bridge must have imported the real nodes. File-kind nodes plus
-	// function/class nodes are all counted in graph.db's nodes table, so the
-	// imported count should match the graph.db COUNT(*) the caller asserted.
+	// File-kind nodes plus function/class nodes are all counted in graph.db's
+	// nodes table, so the imported count should match the graph.db COUNT(*).
 	if nodesImported != graphNodeCount {
 		t.Errorf("CRG bridge imported %d nodes but graph.db has %d", nodesImported, graphNodeCount)
 	}
 	if edgesImported == 0 {
 		t.Errorf("expected the CRG bridge to import code edges from the real graph, got 0")
 	}
+}
 
-	// Cross-check the warm store stats agree with the import.
-	store2, err := openKGStore(home)
+// assertWarmStoreStats reopens the warm store and asserts its node count agrees
+// with the graph.db COUNT(*).
+func assertWarmStoreStats(t *testing.T, home string, graphNodeCount int) {
+	t.Helper()
+	store, err := openKGStore(home)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
 	}
-	stats, err := store2.GetStats()
-	store2.Close()
+	stats, err := store.GetStats()
+	store.Close()
 	if err != nil {
 		t.Fatalf("GetStats: %v", err)
 	}
 	if stats.TotalNodes != graphNodeCount {
 		t.Errorf("warm store TotalNodes=%d disagrees with graph.db COUNT(*)=%d", stats.TotalNodes, graphNodeCount)
 	}
+}
 
-	// ── kg bridge query (symbol_lookup) must surface a REAL symbol ────────
+// assertBridgeSymbolLookup drives the `da kg bridge` symbol_lookup code intent
+// for a real function from the staged subtree and asserts the result is that
+// real Go symbol with evidenced (non-sparse) provenance.
+func assertBridgeSymbolLookup(t *testing.T) {
+	t.Helper()
 	// runKGWarm is a real exported function defined in the staged
 	// sync_code_warm_link.go, so the warm-store-backed symbol_lookup bridge
 	// intent must return a node whose qualified name carries it.
 	const realSymbol = "runKGWarm"
-	jsonDeps := Deps{
-		Flags:        GlobalFlags{JSON: true},
-		ExampleBlock: func(s ...string) string { return strings.Join(s, "\n") },
-	}
-	bridgeCmd := &cobra.Command{}
-	bridgeCmd.Flags().String("intent", "symbol_lookup", "")
-	bridgeOut := captureStdout(t, func() {
-		if err := runKGBridgeQuery(jsonDeps, bridgeCmd, []string{realSymbol}); err != nil {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("intent", "symbol_lookup", "")
+	out := captureStdout(t, func() {
+		if err := runKGBridgeQuery(jsonModeDeps(), cmd, []string{realSymbol}); err != nil {
 			t.Fatalf("runKGBridgeQuery symbol_lookup: %v", err)
 		}
 	})
-	var bridgeResp GraphQueryResponse
-	if err := json.Unmarshal(bridgeOut, &bridgeResp); err != nil {
-		t.Fatalf("bridge symbol_lookup JSON invalid: %v\nraw: %s", err, bridgeOut)
+	var resp GraphQueryResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		t.Fatalf("bridge symbol_lookup JSON invalid: %v\nraw: %s", err, out)
 	}
-	if bridgeResp.Intent != "symbol_lookup" {
-		t.Errorf("bridge intent: got %q want symbol_lookup", bridgeResp.Intent)
+	if resp.Intent != "symbol_lookup" {
+		t.Errorf("bridge intent: got %q want symbol_lookup", resp.Intent)
 	}
-	if !bridgeResultMatchesSymbol(bridgeResp, realSymbol) {
+	if !bridgeResultMatchesSymbol(resp, realSymbol) {
 		t.Fatalf("expected bridge symbol_lookup(%q) to surface the real %s node from the built graph, got results=%#v",
-			realSymbol, realSymbol, bridgeResp.Results)
+			realSymbol, realSymbol, resp.Results)
 	}
 	// The matched node must carry real CRG-derived metadata (it's a Go function),
 	// proving the result came from the built code graph and not a stub.
-	if !bridgeResultHasGoSymbol(bridgeResp, realSymbol) {
+	if !bridgeResultHasGoSymbol(resp, realSymbol) {
 		t.Errorf("expected the matched %s node to be a Go symbol with a file path, got results=%#v",
-			realSymbol, bridgeResp.Results)
+			realSymbol, resp.Results)
 	}
 	// A warm store with imported nodes must NOT be flagged sparse.
-	if bridgeResp.SparsityScore == nil || *bridgeResp.SparsityScore != 0 {
-		t.Errorf("expected sparsity_score=0 for an evidenced bridge lookup, got %v", bridgeResp.SparsityScore)
+	if resp.SparsityScore == nil || *resp.SparsityScore != 0 {
+		t.Errorf("expected sparsity_score=0 for an evidenced bridge lookup, got %v", resp.SparsityScore)
 	}
+}
 
-	// ── kg bridge health must report the populated graph home ─────────────
-	healthCmd := &cobra.Command{}
-	healthOut := captureStdout(t, func() {
-		if err := runKGBridgeHealth(jsonDeps, healthCmd, nil); err != nil {
+// assertBridgeHealthAvailable drives `da kg bridge health` and asserts it
+// reports an available adapter over the populated KG home.
+func assertBridgeHealthAvailable(t *testing.T) {
+	t.Helper()
+	out := captureStdout(t, func() {
+		if err := runKGBridgeHealth(jsonModeDeps(), &cobra.Command{}, nil); err != nil {
 			t.Fatalf("runKGBridgeHealth: %v", err)
 		}
 	})
 	var health []KGAdapterHealth
-	if err := json.Unmarshal(healthOut, &health); err != nil {
-		t.Fatalf("bridge health JSON invalid: %v\nraw: %s", err, healthOut)
+	if err := json.Unmarshal(out, &health); err != nil {
+		t.Fatalf("bridge health JSON invalid: %v\nraw: %s", err, out)
 	}
 	if len(health) == 0 || !health[0].Available {
 		t.Errorf("expected bridge health to report an available adapter, got %#v", health)
@@ -571,18 +636,26 @@ func stageRealSubtree(t *testing.T, repoRoot, subtree string) string {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if copied := copyGoProductionFiles(t, srcDir, dstDir); copied == 0 {
+		t.Fatalf("no production .go files staged from %s", srcDir)
+	}
+	commitStagedTree(t, dst)
+	return dst
+}
+
+// copyGoProductionFiles copies the production (non-test) .go files directly
+// under srcDir into dstDir and returns the count copied.
+func copyGoProductionFiles(t *testing.T, srcDir, dstDir string) int {
+	t.Helper()
 	entries, err := os.ReadDir(srcDir)
 	if err != nil {
 		t.Fatalf("read subtree %s: %v", srcDir, err)
 	}
 	copied := 0
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
-			continue
-		}
-		// Skip test files — CRG only needs production symbols and test files
-		// inflate the build.
-		if strings.HasSuffix(e.Name(), "_test.go") {
+		// Skip dirs, non-Go files, and test files — CRG only needs production
+		// symbols and test files inflate the build.
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(srcDir, e.Name()))
@@ -594,17 +667,18 @@ func stageRealSubtree(t *testing.T, repoRoot, subtree string) string {
 		}
 		copied++
 	}
-	if copied == 0 {
-		t.Fatalf("no production .go files staged from %s", srcDir)
-	}
-	// Commit the staged files so CRG's full build (which parses tracked files)
-	// sees the real source. git add -A + commit captures the nested tree.
+	return copied
+}
+
+// commitStagedTree commits everything in the staged repo so CRG's full build
+// (which parses tracked files) sees the real source.
+func commitStagedTree(t *testing.T, dst string) {
+	t.Helper()
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-m", "stage real subtree"}} {
 		if out, err := runGit(t, dst, args...); err != nil {
 			t.Fatalf("git %v in staged tree: %v\n%s", args, err, out)
 		}
 	}
-	return dst
 }
 
 // linkRealVenv symlinks the real virtualenv that contains crgBin into
