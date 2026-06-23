@@ -59,6 +59,21 @@ func TestCopyMissingStarterAssetsCopiesStarterBundle(t *testing.T) {
 		"skills/global/loop-worker/instructions/gotchas.md",
 		"agents/global/loop-worker/AGENT.md",
 		"profiles/loop-worker.md",
+		// P3b companion discipline skills: agent-handoff and
+		// delegation-lifecycle ship their complete starter trees, not just
+		// SKILL.md. Representative instruction/template files are asserted so
+		// a partial copy (the agent-handoff stub regression) fails the build.
+		"skills/global/agent-handoff/SKILL.md",
+		"skills/global/agent-handoff/instructions/modes.md",
+		"skills/global/agent-handoff/instructions/create-mode.md",
+		"skills/global/agent-handoff/instructions/gotchas.md",
+		"skills/global/agent-handoff/templates/ai-agent.md",
+		"skills/global/agent-handoff/templates/coworker.md",
+		"skills/global/agent-handoff/templates/self-later.md",
+		"skills/global/delegation-lifecycle/SKILL.md",
+		"skills/global/delegation-lifecycle/instructions/workflow.md",
+		"skills/global/delegation-lifecycle/instructions/gotchas.md",
+		"skills/global/delegation-lifecycle/instructions/bundle-to-execution.md",
 	} {
 		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(rel))); err != nil {
 			t.Fatalf("expected %s: %v", rel, err)

@@ -1,49 +1,25 @@
 ---
-name: "Agent Handoff"
-description: "Prepare for the next agent or session by documenting work and leaving codebase in good state"
+name: "agent-handoff"
+description: "Package current session context into a structured handoff document for another agent, your future self, or a coworker. Use at end of sessions, before task switches, or when context window is getting full. Supports modes: list, update, view."
+argument-hint: "[list | update <slug> | view <slug> | <description>]"
 ---
 
 # Agent Handoff
 
-Prepare for the next agent or session by documenting your work and leaving the codebase in a good state.
+Package shaped context — plans, decisions, project state — into a structured handoff document. Supports four modes dispatched from arguments.
 
-## When to Use
+## Workflow
 
-- At the end of a work session
-- Before switching to a different task
-- When handing off to another developer or agent
-- When context window is getting full
+1. **Parse mode** — Read `instructions/modes.md` to determine which mode to run based on `$ARGUMENTS`.
 
-## Steps
+2. **Auto-gather context** — Read `instructions/auto-gather.md` and silently collect context before doing anything. Do NOT display or summarize what you gathered.
 
-1. **Commit completed work**
-   - Stage and commit any finished changes
-   - Write clear, descriptive commit messages
-   - Don't leave partial work uncommitted unless necessary
+3. **Run the mode** — Dispatch to the appropriate instruction file:
+   - Create/default → `instructions/create-mode.md`
+   - List → `instructions/list-mode.md`
+   - Update → `instructions/update-mode.md`
+   - View → `instructions/view-mode.md`
 
-2. **Document work in progress**
-   - Add TODO comments for incomplete work
-   - Update task lists or issue trackers
-   - Note any decisions made and why
+4. **Cleanup** (create mode only) — Before generating the handoff doc, reference `instructions/commit-cleanup.md` to ensure in-progress work is committed.
 
-3. **Summarize the session**
-   - What was accomplished?
-   - What remains to be done?
-   - Any blockers or issues encountered?
-
-4. **Clean up**
-   - Remove debugging code or console.logs
-   - Delete temporary files
-   - Ensure tests pass (or document why they don't)
-
-5. **Leave notes for next session**
-   - What should the next agent focus on?
-   - Any context that would be helpful?
-   - Links to relevant documentation or issues
-
-## Notes
-
-- Leave the codebase in a working state when possible
-- Don't leave uncommitted debugging code
-- Be explicit about what's done vs what's in progress
-- The next agent has no context - write notes accordingly
+5. **Gotchas** — Read `instructions/gotchas.md` if anything seems unclear or output feels thin.
