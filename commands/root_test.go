@@ -87,3 +87,30 @@ func TestNewRootCommand_VersionTemplate(t *testing.T) {
 		t.Errorf("version template = %q, want 'da version' prefix", tmpl)
 	}
 }
+
+// TestRootConfigDeps_FlagGetters verifies rootConfigDeps wires the global
+// --json and --dry-run flags into config.Deps as live getters, so the mutating
+// `da config sync` honors --dry-run the same way it honors --json. Both getters
+// must read back through the package-global Flags.
+func TestRootConfigDeps_FlagGetters(t *testing.T) {
+	prev := Flags
+	t.Cleanup(func() { Flags = prev })
+
+	deps := rootConfigDeps()
+	if deps.JSON == nil || deps.DryRun == nil {
+		t.Fatalf("rootConfigDeps must wire both JSON and DryRun getters, got JSON=%v DryRun=%v",
+			deps.JSON != nil, deps.DryRun != nil)
+	}
+
+	Flags.JSON = false
+	Flags.DryRun = false
+	if deps.JSON() || deps.DryRun() {
+		t.Errorf("getters should read false when flags are unset: json=%v dryRun=%v", deps.JSON(), deps.DryRun())
+	}
+
+	Flags.JSON = true
+	Flags.DryRun = true
+	if !deps.JSON() || !deps.DryRun() {
+		t.Errorf("getters should read true when flags are set: json=%v dryRun=%v", deps.JSON(), deps.DryRun())
+	}
+}

@@ -15,8 +15,10 @@ import (
 )
 
 // rootConfigDeps builds the config.Deps passed to config.NewConfigCmd. The
-// config subtree only needs the hint-emitting UX helpers from root — it does
-// not consume DryRun/Force/Yes today because explain is read-only.
+// config subtree threads the hint-emitting UX helpers plus the resolved global
+// --json/--dry-run getters from root. The mutating `da config sync` consumes
+// DryRun — it short-circuits the force re-resolve + lock rewrite in preview
+// mode; the read-only siblings (explain/verify/lint) ignore it.
 func rootConfigDeps() config.Deps {
 	return config.Deps{
 		ErrorWithHints:        ErrorWithHints,
@@ -24,6 +26,7 @@ func rootConfigDeps() config.Deps {
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
 		ExactArgsWithHints:    ExactArgsWithHints,
 		JSON:                  func() bool { return Flags.JSON },
+		DryRun:                func() bool { return Flags.DryRun },
 	}
 }
 
