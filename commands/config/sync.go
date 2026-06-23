@@ -252,31 +252,49 @@ func readResolvedUnits(projectPath string) (map[string]cfg.LockedUnit, error) {
 // printSyncHuman renders the sync outcome as a scannable per-layer list with a
 // one-line summary.
 func printSyncHuman(w io.Writer, report SyncReport) {
-	if report.DryRun {
-		if report.Layer != "" {
-			fmt.Fprintf(w, "Config sync --dry-run (layer %s) — would re-fetch and rewrite the lock:\n", report.Layer)
-		} else {
-			fmt.Fprintln(w, "Config sync --dry-run (all layers) — would re-fetch and rewrite the lock:")
-		}
-	} else if report.Layer != "" {
-		fmt.Fprintf(w, "Config sync (layer %s):\n", report.Layer)
-	} else {
-		fmt.Fprintln(w, "Config sync (all layers re-fetched):")
-	}
+	fmt.Fprintln(w, syncHeaderLine(report))
 	fmt.Fprintln(w)
 
 	if len(report.Layers) == 0 {
-		if report.DryRun {
-			fmt.Fprintln(w, "  no external layers declared; local stack would be re-resolved (lock not written)")
-		} else {
-			fmt.Fprintln(w, "  no external layers declared; local stack re-resolved")
-		}
+		fmt.Fprintln(w, syncEmptyLayersLine(report.DryRun))
 		fmt.Fprintf(w, "\nLockfile: %s\n", report.Lockfile)
 		return
 	}
 
+	targeted := printSyncLayerRows(w, report.Layers)
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, syncSummaryLine(report, targeted))
+}
+
+// syncHeaderLine renders the one-line header, varying by dry-run vs apply and by
+// whether a --layer scope is set. Flattened out of printSyncHuman so the latter
+// stays a flat sequence (Sonar cognitive-complexity).
+func syncHeaderLine(report SyncReport) string {
+	scope := "(all layers re-fetched)"
+	if report.Layer != "" {
+		scope = fmt.Sprintf("(layer %s)", report.Layer)
+	}
+	if !report.DryRun {
+		return "Config sync " + scope + ":"
+	}
+	if report.Layer == "" {
+		scope = "(all layers)"
+	}
+	return "Config sync --dry-run " + scope + " — would re-fetch and rewrite the lock:"
+}
+
+// syncEmptyLayersLine renders the no-declared-layers note, varying by dry-run.
+func syncEmptyLayersLine(dryRun bool) string {
+	if dryRun {
+		return "  no external layers declared; local stack would be re-resolved (lock not written)"
+	}
+	return "  no external layers declared; local stack re-resolved"
+}
+
+// printSyncLayerRows writes one row per layer and returns the targeted count.
+func printSyncLayerRows(w io.Writer, layers []SyncedLayer) int {
 	targeted := 0
-	for _, l := range report.Layers {
+	for _, l := range layers {
 		mark := "  -"
 		if l.Targeted {
 			mark = "  *"
@@ -291,12 +309,15 @@ func printSyncHuman(w io.Writer, report SyncReport) {
 		}
 		fmt.Fprintln(w, line)
 	}
-	fmt.Fprintln(w)
+	return targeted
+}
+
+// syncSummaryLine renders the trailing summary, varying by dry-run.
+func syncSummaryLine(report SyncReport, targeted int) string {
 	if report.DryRun {
-		fmt.Fprintf(w, "Summary: %d of %d layer(s) would be targeted — lock NOT rewritten (dry run) at %s\n",
+		return fmt.Sprintf("Summary: %d of %d layer(s) would be targeted — lock NOT rewritten (dry run) at %s",
 			targeted, len(report.Layers), report.Lockfile)
-		return
 	}
-	fmt.Fprintf(w, "Summary: %d of %d layer(s) targeted — lock rewritten at %s\n",
+	return fmt.Sprintf("Summary: %d of %d layer(s) targeted — lock rewritten at %s",
 		targeted, len(report.Layers), report.Lockfile)
 }
