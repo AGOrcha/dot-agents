@@ -66,44 +66,14 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 	// A digest-pinned artifact is content-addressed, so the shared packages cache
 	// is checked before any clone (offline fast path, spec §8).
 	if isPinned {
-		if cached, ok := readCachedArtifact(pinned); ok {
-			if err := verifySignature(posture, pinned, false); err != nil {
-				return FetchedArtifact{}, err
-			}
-			return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: pinned}}, nil
+		if art, ok, err := readCachedPinnedGitArtifact(posture, pinned); ok {
+			return art, err
 		}
 	}
 
-	// Validate/classify the source URL up front so a malformed remote fails
-	// before any network work. file:// (local fixture / on-disk repo) is a
-	// legitimate clone source, so an ErrNotRemote "file" classification is not
-	// itself an error — only a hard parse failure is.
-	if _, err := gitremote.ParseRemoteURL(src.URL); err != nil && !errors.Is(err, gitremote.ErrNotRemote) {
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonSchema, fmt.Errorf("git source url %q: %w", src.URL, err))
-	}
-
-	ref := gitArtifactRef(src, parts)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
+	data, commit, err := f.cloneAndRead(src, parts)
 	if err != nil {
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
-	}
-
-	head, err := repo.Head()
-	if err != nil {
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
-	}
-	commit := head.Hash().String()
-
-	fh, err := wfs.Open(filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/")))
-	if err != nil {
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
-	}
-	defer func() { _ = fh.Close() }()
-	data, err := readAllLimited(fh)
-	if err != nil {
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+		return FetchedArtifact{}, err
 	}
 
 	digest := artifactDigest(data)
@@ -122,4 +92,57 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 	// resolved commit recorded so the package resolver can derive an effective key
 	// sensitive to the source commit (config-distribution-model §7A.4).
 	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: digest, ResolvedCommit: commit}}, nil
+}
+
+// readCachedPinnedGitArtifact returns a cache-hit FetchedArtifact when a
+// digest-pinned git artifact is already in the shared packages cache, applying
+// the signing posture to the cached digest. ok is false when the caller must
+// fall through to a clone.
+func readCachedPinnedGitArtifact(posture SigningPosture, pinned string) (FetchedArtifact, bool, error) {
+	cached, ok := readCachedArtifact(pinned)
+	if !ok {
+		return FetchedArtifact{}, false, nil
+	}
+	if err := verifySignature(posture, pinned, false); err != nil {
+		return FetchedArtifact{}, true, err
+	}
+	return FetchedArtifact{Data: cached, Digest: pinned, CacheHit: true, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: pinned}}, true, nil
+}
+
+// cloneAndRead validates the source URL, shallow-clones at the resolved ref, and
+// reads the artifact bytes at the cloned HEAD. It returns the artifact bytes and
+// the resolved commit SHA, mapping each failure to its ImportError reason.
+func (f *gitArtifactFetcher) cloneAndRead(src Source, parts PackageRefParts) ([]byte, string, error) {
+	// Validate/classify the source URL up front so a malformed remote fails
+	// before any network work. file:// (local fixture / on-disk repo) is a
+	// legitimate clone source, so an ErrNotRemote "file" classification is not
+	// itself an error — only a hard parse failure is.
+	if _, err := gitremote.ParseRemoteURL(src.URL); err != nil && !errors.Is(err, gitremote.ErrNotRemote) {
+		return nil, "", newArtifactImportError(parts, ReasonSchema, fmt.Errorf("git source url %q: %w", src.URL, err))
+	}
+
+	ref := gitArtifactRef(src, parts)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
+	if err != nil {
+		return nil, "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
+	}
+
+	head, err := repo.Head()
+	if err != nil {
+		return nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
+	}
+	commit := head.Hash().String()
+
+	fh, err := wfs.Open(filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/")))
+	if err != nil {
+		return nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
+	defer func() { _ = fh.Close() }()
+	data, err := readAllLimited(fh)
+	if err != nil {
+		return nil, "", newArtifactImportError(parts, ReasonContent, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
+	return data, commit, nil
 }
