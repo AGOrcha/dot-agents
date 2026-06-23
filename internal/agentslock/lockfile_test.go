@@ -553,6 +553,77 @@ func TestFlushSucceedsAfterContendingReleaseMidWait(t *testing.T) {
 	}
 }
 
+func TestLockIsStaleShortHolderUsesDirMtime(t *testing.T) {
+	// A holder file with fewer than two lines is unparseable, so lockIsStale must
+	// fall back to the dir mtime. Back-date the dir past the TTL → stale.
+	dir := t.TempDir()
+	lockDir := filepath.Join(dir, "x.lock")
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte("only-one-line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-(lockStaleTTL + time.Second))
+	if err := os.Chtimes(lockDir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if !lockIsStale(lockDir) {
+		t.Fatal("short holder + old dir mtime must be stale")
+	}
+	// Fresh dir mtime with the same short holder must NOT be stale.
+	now := time.Now()
+	if err := os.Chtimes(lockDir, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if lockIsStale(lockDir) {
+		t.Fatal("short holder + fresh dir mtime must not be stale")
+	}
+}
+
+func TestDirOlderThanTTLMissingDirIsStale(t *testing.T) {
+	// A dir that cannot be stat'd (does not exist) is treated as stale.
+	if !dirOlderThanTTL(filepath.Join(t.TempDir(), "no-such-lock")) {
+		t.Fatal("missing lock dir must be reported stale")
+	}
+}
+
+func TestDebugfGatedOnEnv(t *testing.T) {
+	// debugf prints only when DA_DEBUG is set; otherwise it returns early.
+	// Exercise both branches for coverage. Output goes to stderr and is not
+	// asserted — we only need both branches taken.
+	t.Setenv("DA_DEBUG", "")
+	debugf("should be suppressed %d", 1)
+	t.Setenv("DA_DEBUG", "1")
+	debugf("should be emitted %d", 2)
+}
+
+func TestUnlockFileLockSurfacesRemoveError(t *testing.T) {
+	// Force RemoveAll of the lock dir to fail by stripping write permission from
+	// its parent so the child cannot be unlinked. unlockFileLock must take the
+	// debugf error branch without panicking. Skipped where the FS does not
+	// enforce the perm bit (e.g. running as root).
+	parent := filepath.Join(t.TempDir(), "ro-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := filepath.Join(parent, "x.lock")
+	if err := os.Mkdir(lockDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) }) // let TempDir cleanup proceed
+
+	t.Setenv("DA_DEBUG", "1")
+	unlockFileLock(lockDir) // must not panic; exercises the RemoveAll-error + debugf branch
+
+	if _, err := os.Stat(lockDir); os.IsNotExist(err) {
+		t.Skip("filesystem removed the lock dir despite a read-only parent; cannot force RemoveAll error here")
+	}
+}
+
 func TestConcurrentSetSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
 	lf, _ := Open(path)
