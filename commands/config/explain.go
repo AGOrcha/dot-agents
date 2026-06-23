@@ -63,11 +63,13 @@ type FieldExplanation struct {
 	Layers      []LayerValue `json:"layers"`
 }
 
-// snapshot is the package-local view of layered config. In flat mode (the
-// only mode wired today) it holds three maps keyed by the layer identifier.
-// When the layered resolver from p1 lands, snapshot will degrade to a thin
-// wrapper around internal/config.Snapshot — the surface this command consumes
-// stays the same.
+// snapshot is the package-local view of layered config consumed by the sibling
+// `relevance` and `verify` surfaces (relevance.go, verify.go), which read raw
+// layers directly. In flat mode it holds three maps keyed by the layer
+// identifier. `da config explain` itself no longer builds a snapshot this way —
+// it consumes the canonical resolved cfg.Snapshot via the auto-lock seam (see
+// loadSnapshot / runExplain) so explain is the single effective-config truth
+// surface.
 type snapshot struct {
 	// layers maps layer-id -> decoded JSON object (or nil if the layer was
 	// not present on disk).
@@ -89,6 +91,9 @@ type snapshot struct {
 // A schema parse error on the repo-local file is fatal (returned with
 // exitSchemaErr). Missing repo-local file is reported as "no manifest" — that
 // is also fatal because there is nothing to explain.
+//
+// This is the legacy raw-layer reader retained for the sibling relevance/verify
+// surfaces. `da config explain` resolves through loadSnapshot instead.
 func loadFlatSnapshot(projectPath string) (*snapshot, int, error) {
 	snap := &snapshot{
 		layers: map[string]map[string]any{
@@ -150,13 +155,6 @@ func fileExists(path string) bool {
 // mergeLayers produces the effective config object by walking orderedLayers
 // (lowest precedence first) and overlaying each non-nil layer onto the
 // accumulating result with last-writer-wins on top-level scalar fields.
-//
-// Nested objects are not deep-merged here — that is intentional. Spec §7.2
-// defines per-category merge rules (set-union, ordered-replace, map-merge);
-// implementing them lives in p1's resolver. This flat overlay is sufficient
-// to display provenance correctly for the manifest fields users care about
-// today (skills, rules, agents, hooks, mcp, settings, sources, repo_id,
-// features, …).
 func mergeLayers(layers map[string]map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, layerID := range orderedLayers {
@@ -171,51 +169,10 @@ func mergeLayers(layers map[string]map[string]any) map[string]any {
 	return out
 }
 
-// explainField builds the FieldExplanation for a single field path
-// against the snapshot. Path syntax is dot-separated keys
-// (e.g. "kg.bridge.enabled", "stage_profiles.verifier.unit").
-//
-// A field that is unset in every layer returns a FieldExplanation with
-// Value=nil and ActiveLayer="" — the caller decides whether to treat that as
-// an error (single-field default) or as informational ("not set" in --all).
-func (s *snapshot) explainField(path string) FieldExplanation {
-	parts := splitFieldPath(path)
-	out := FieldExplanation{Field: path, Layers: make([]LayerValue, 0, len(orderedLayers))}
-
-	for _, layerID := range orderedLayers {
-		val, ok := lookup(s.layers[layerID], parts)
-		entry := LayerValue{Layer: layerID, Value: nil, Active: false}
-		if ok {
-			entry.Value = val
-			out.ActiveLayer = layerID // last writer wins
-			out.Value = val
-		}
-		out.Layers = append(out.Layers, entry)
-	}
-
-	// Flip Active on the last layer that set a value (if any).
-	if out.ActiveLayer != "" {
-		for i := range out.Layers {
-			if out.Layers[i].Layer == out.ActiveLayer {
-				out.Layers[i].Active = true
-			}
-		}
-	}
-	return out
-}
-
-// splitFieldPath splits a dot-separated path into traversal parts. Empty
-// input returns an empty slice so callers can short-circuit on len==0.
-func splitFieldPath(path string) []string {
-	if path == "" {
-		return nil
-	}
-	return strings.Split(path, ".")
-}
-
 // lookup walks layer with parts and returns (value, true) if every step
 // resolved against an object key. Any non-object intermediate or missing key
-// short-circuits to (nil, false).
+// short-circuits to (nil, false). Retained for the sibling relevance/verify
+// surfaces.
 func lookup(layer map[string]any, parts []string) (any, bool) {
 	if layer == nil || len(parts) == 0 {
 		return nil, false
@@ -233,6 +190,74 @@ func lookup(layer map[string]any, parts []string) (any, bool) {
 		cur = v
 	}
 	return cur, true
+}
+
+// splitFieldPath splits a dot-separated path into traversal parts. Empty input
+// returns an empty slice so callers can short-circuit on len==0.
+func splitFieldPath(path string) []string {
+	if path == "" {
+		return nil
+	}
+	return strings.Split(path, ".")
+}
+
+// sortedKeys returns the keys of m in deterministic order.
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// ensureResolved is the auto-lock seam `da config explain` consumes. It is a
+// package var so tests can inject a hermetic resolver without touching the
+// network or the real lock writer. Production points it at the §7A.5 auto-sync
+// entry point config.EnsureResolved: running explain makes one cheap, local,
+// clock-free staleness decision and either re-resolves (rewriting the lock —
+// the `uv tree` auto-lock behavior) or, when the lock is already fresh, reads
+// it back read-only via ResolveLocked. Explain is therefore the single
+// effective-config truth surface: it consumes the units lock and auto-locks on
+// run, absorbing the config-inspection role status used to carry.
+var ensureResolved = cfg.EnsureResolved
+
+// loadSnapshot resolves the effective-config snapshot for the project at
+// projectPath through the auto-lock seam. The default EnsureOpts selects the
+// no-flag path: a fresh lock is a read-only no-op; a stale (or absent) lock is
+// re-resolved and the units lock is rewritten. A missing repo-local manifest is
+// fatal — there is nothing to explain — and is surfaced as a schema error.
+func loadSnapshot(projectPath string) (*cfg.Snapshot, int, error) {
+	res, err := ensureResolved(projectPath, cfg.EnsureOpts{})
+	if err != nil {
+		return nil, exitSchemaErr, err
+	}
+	return res.Snapshot, exitOK, nil
+}
+
+// explainField builds the FieldExplanation for a single dot-separated field
+// path against the resolved snapshot. It delegates the layer walk to the
+// canonical Snapshot.FieldAt so explain and the resolver can never disagree on
+// which layer wins, then maps the resolver's FieldProvenance into the stable
+// FieldExplanation JSON shape.
+//
+// A field that is unset in every layer returns a FieldExplanation with
+// Value=nil and ActiveLayer="" — the caller decides whether to treat that as an
+// error (single-field default) or as informational ("not set" in --all).
+func explainField(snap *cfg.Snapshot, path string) FieldExplanation {
+	fp := snap.FieldAt(path)
+	out := FieldExplanation{
+		Field:       path,
+		ActiveLayer: fp.ActiveLayer,
+		Layers:      make([]LayerValue, 0, len(fp.Layers)),
+	}
+	for _, lv := range fp.Layers {
+		out.Layers = append(out.Layers, LayerValue{Layer: lv.Layer, Value: lv.Value, Active: lv.Active})
+		if lv.Active {
+			out.Value = lv.Value
+		}
+	}
+	return out
 }
 
 // runExplainOptions captures the flag state for one invocation. Pulled into a
@@ -257,17 +282,22 @@ func newExplainCmd(deps Deps) *cobra.Command {
 stack that produced it. With --all, prints the entire effective configuration.
 With --flags, prints feature-flag resolution.
 
+explain is the single effective-config truth surface: it AUTO-LOCKS on run (like
+` + "`uv tree`" + `). It consumes the committed units lock and, when that lock is
+stale or absent, re-resolves and rewrites it before rendering; when the lock is
+already fresh it reads it back read-only. da status no longer inspects config —
+it reports fleet and link health only.
+
 Field paths are dot-separated (e.g. "kg.backend", "features.graph_bridge").
 
 Output is human-readable by default; --json emits a stable machine-readable
 shape documented on the FieldExplanation type in this package.
 
-In the current flat scope (no extends layers) the layer stack is:
-  [1] product-defaults     (reserved; currently empty)
-  [2] user-local           (~/.agents/agentsrc.json, if present)
-  [3] repo-local           (./.agentsrc.json)
-Once config-v2-migration/p1b lands, declared extends layers slot in between
-user-local and repo-local with the same provenance surface.`,
+The layer stack (lowest precedence first) is:
+  [1] product-defaults     (built-in defaults)
+  [2] user-local           (~/.agents/.agentsrc.json, if present)
+  [.] imported extends     (reconstructed from the lock at their locked SHA)
+  [n] repo-local           (./.agentsrc.json)`,
 		Example: exampleBlock(
 			"  da config explain",
 			"  da config explain repo_id",
@@ -305,13 +335,12 @@ func runExplain(opts *runExplainOptions, args []string, deps Deps) error {
 		return err
 	}
 
-	snap, code, err := loadFlatSnapshot(opts.cwd)
+	snap, code, err := loadSnapshot(opts.cwd)
 	if err != nil {
-		// Schema errors are surfaced to the operator via ErrorWithHints so the
-		// existing UX layer can add color and hints. Exit code is propagated
-		// through cobra by returning the error (cobra maps non-nil to exit
-		// status; the precise int is informational here per spec §10 — main()
-		// translates non-nil errors uniformly).
+		// Resolution errors are surfaced to the operator via ErrorWithHints so
+		// the existing UX layer can add color and hints. The precise exit int
+		// is informational here per spec §10 — main() translates non-nil errors
+		// uniformly.
 		_ = code
 		return deps.ErrorWithHints(err.Error(),
 			"Run `da install --generate` to create .agentsrc.json from current state.",
@@ -352,8 +381,8 @@ func validateFlagCombo(opts *runExplainOptions, args []string, deps Deps) error 
 // emitField handles the single-field path. Branches on --value-only,
 // --origin-only, --json, then falls through to the human-readable layer-stack
 // render.
-func emitField(opts *runExplainOptions, snap *snapshot, path string, deps Deps) error {
-	exp := snap.explainField(path)
+func emitField(opts *runExplainOptions, snap *cfg.Snapshot, path string, deps Deps) error {
+	exp := explainField(snap, path)
 
 	switch {
 	case opts.valueOnly:
@@ -377,21 +406,25 @@ func emitField(opts *runExplainOptions, snap *snapshot, path string, deps Deps) 
 // emitAll prints the full effective configuration. In JSON mode the shape is
 // {"effective": <merged map>, "provenance": {field-path: FieldExplanation, …}}
 // so consumers can decide whether to display provenance or just the values.
-func emitAll(opts *runExplainOptions, snap *snapshot) error {
+func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
+	effective, err := snap.EffectiveRaw()
+	if err != nil {
+		return fmt.Errorf("decoding effective config: %w", err)
+	}
 	if opts.jsonOut {
 		prov := map[string]FieldExplanation{}
-		for _, key := range sortedKeys(snap.effective) {
-			prov[key] = snap.explainField(key)
+		for _, key := range snap.FieldNames() {
+			prov[key] = explainField(snap, key)
 		}
 		return writeJSON(opts.stdout, map[string]any{
-			"effective":  snap.effective,
+			"effective":  effective,
 			"provenance": prov,
 		})
 	}
 	fmt.Fprintln(opts.stdout, "Effective configuration (with active layer per field):")
 	fmt.Fprintln(opts.stdout)
-	for _, key := range sortedKeys(snap.effective) {
-		exp := snap.explainField(key)
+	for _, key := range snap.FieldNames() {
+		exp := explainField(snap, key)
 		fmt.Fprintf(opts.stdout, "  %s\n", key)
 		fmt.Fprintf(opts.stdout, "    value  : %s\n", formatScalar(exp.Value))
 		fmt.Fprintf(opts.stdout, "    origin : %s\n", emptyAsDash(exp.ActiveLayer))
@@ -401,36 +434,15 @@ func emitAll(opts *runExplainOptions, snap *snapshot) error {
 }
 
 // emitFlags prints feature flag resolution. Flags live under the `features`
-// map per config-distribution-model §3.6. In flat mode the source for each
-// flag is whichever layer last wrote the `features.<name>` field.
-func emitFlags(opts *runExplainOptions, snap *snapshot) error {
-	// Collect the union of feature names across all layers so flags set only
-	// in user-local but absent in repo-local still show up.
-	names := map[string]struct{}{}
-	for _, layerID := range orderedLayers {
-		layer := snap.layers[layerID]
-		if layer == nil {
-			continue
-		}
-		raw, ok := layer["features"].(map[string]any)
-		if !ok {
-			continue
-		}
-		for name := range raw {
-			names[name] = struct{}{}
-		}
-	}
-
-	flagNames := make([]string, 0, len(names))
-	for name := range names {
-		flagNames = append(flagNames, name)
-	}
-	sort.Strings(flagNames)
+// map per config-distribution-model §3.6. The source for each flag is whichever
+// layer last wrote the `features.<name>` field, read off the resolved snapshot.
+func emitFlags(opts *runExplainOptions, snap *cfg.Snapshot) error {
+	flagNames := featureFlagNames(snap)
 
 	if opts.jsonOut {
 		out := make(map[string]FieldExplanation, len(flagNames))
 		for _, name := range flagNames {
-			out[name] = snap.explainField("features." + name)
+			out[name] = explainField(snap, "features."+name)
 		}
 		return writeJSON(opts.stdout, out)
 	}
@@ -442,7 +454,7 @@ func emitFlags(opts *runExplainOptions, snap *snapshot) error {
 	fmt.Fprintln(opts.stdout, "Feature flags (effective value + winning layer):")
 	fmt.Fprintln(opts.stdout)
 	for _, name := range flagNames {
-		exp := snap.explainField("features." + name)
+		exp := explainField(snap, "features."+name)
 		fmt.Fprintf(opts.stdout, "  %-30s = %s   [%s]\n",
 			name,
 			formatScalar(exp.Value),
@@ -450,6 +462,29 @@ func emitFlags(opts *runExplainOptions, snap *snapshot) error {
 		)
 	}
 	return nil
+}
+
+// featureFlagNames returns the sorted union of feature-flag names declared by
+// any layer in the snapshot. A layer whose `features` field is absent or not an
+// object contributes nothing (a non-object features field is ignored rather
+// than treated as a flag, matching the historical empty-flags behavior).
+func featureFlagNames(snap *cfg.Snapshot) []string {
+	names := map[string]struct{}{}
+	for _, layer := range snap.Layers {
+		raw, ok := layer.Raw["features"].(map[string]any)
+		if !ok {
+			continue
+		}
+		for name := range raw {
+			names[name] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // printFieldHuman renders the layer-stack human view matching the example in
@@ -530,18 +565,6 @@ func writeJSON(w io.Writer, v any) error {
 		return fmt.Errorf("encoding json output: %w", err)
 	}
 	return nil
-}
-
-// sortedKeys returns the keys of m in deterministic order. Sorting is
-// important for golden-file tests and for diffing `--all` output between
-// runs.
-func sortedKeys(m map[string]any) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // Exported error sentinel used by tests to assert the "missing manifest"

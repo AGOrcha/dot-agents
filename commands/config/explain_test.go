@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -48,7 +49,9 @@ func testDeps() Deps {
 
 // withRepoLayer writes a .agentsrc.json into a fresh temp dir and returns the
 // project root path. The user-local layer is isolated to the same temp tree
-// via HOME so cfg.AgentsHome resolves under t.TempDir.
+// via HOME so cfg.AgentsHome resolves under t.TempDir. Running explain through
+// the real auto-lock seam therefore writes the units lock under the temp
+// project — never the developer's real home.
 func withRepoLayer(t *testing.T, repoBody string, userBody string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -91,13 +94,122 @@ func mustOptions(project string) *runExplainOptions {
 	}
 }
 
-// ---------- snapshot construction ----------
+// withStubResolver swaps the package-level ensureResolved seam for the duration
+// of a test and restores it afterward. Tests that need to assert auto-lock
+// dispatch (e.g. an error path or a synthetic snapshot) inject a stub; tests
+// that exercise the real resolution path leave it untouched.
+func withStubResolver(t *testing.T, fn func(string, cfg.EnsureOpts) (*cfg.EnsureResult, error)) {
+	t.Helper()
+	prev := ensureResolved
+	ensureResolved = fn
+	t.Cleanup(func() { ensureResolved = prev })
+}
 
-func TestLoadFlatSnapshot_MissingRepoManifestIsSchemaError(t *testing.T) {
+// snapResult wraps a *cfg.Snapshot in an EnsureResult for stub returns.
+func snapResult(snap *cfg.Snapshot) *cfg.EnsureResult {
+	return &cfg.EnsureResult{Snapshot: snap, Fresh: true}
+}
+
+// flatSnapshot builds a resolved Snapshot by driving the real FlatResolver
+// against on-disk manifests, so render tests assert provenance through the same
+// canonical resolution path explain consumes in production. user may be nil (no
+// user-local layer); repo is required. Layer order is the canonical flat order
+// (product-defaults → user-local → repo-local).
+func flatSnapshot(t *testing.T, user, repo map[string]any) *cfg.Snapshot {
+	t.Helper()
+	dir := t.TempDir()
+	// Default to a guaranteed-absent path so the no-user case never picks up a
+	// stray ~/.agents/.agentsrc.json from the host.
+	userPath := filepath.Join(dir, "absent-user.agentsrc.json")
+	if user != nil {
+		userPath = filepath.Join(dir, "user.agentsrc.json")
+		writeJSONFile(t, userPath, user)
+	}
+	repo["version"] = 2 // FlatResolver decodes through the typed AgentsRC schema
+	writeJSONFile(t, filepath.Join(dir, cfg.AgentsRCFile), repo)
+	snap, err := cfg.NewFlatResolver().WithUserLocalPath(userPath).Resolve(dir)
+	if err != nil {
+		t.Fatalf("FlatResolver.Resolve: %v", err)
+	}
+	return snap
+}
+
+// writeJSONFile marshals v to path, failing the test on any error.
+func writeJSONFile(t *testing.T, path string, v any) {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// ---------- auto-lock dispatch ----------
+
+// TestRunExplain_AutoLocksThroughSeam asserts explain drives the EnsureResolved
+// auto-lock seam (the `uv tree` behavior): running explain consults the seam
+// exactly once with default opts and renders the returned snapshot.
+func TestRunExplain_AutoLocksThroughSeam(t *testing.T) {
+	calls := 0
+	var gotOpts cfg.EnsureOpts
+	withStubResolver(t, func(_ string, opts cfg.EnsureOpts) (*cfg.EnsureResult, error) {
+		calls++
+		gotOpts = opts
+		return snapResult(flatSnapshot(t, nil, map[string]any{"project": "demo"})), nil
+	})
+	opts := mustOptions("/does/not/matter")
+	if err := runExplain(opts, nil, testDeps()); err != nil {
+		t.Fatalf("runExplain: %v", err)
+	}
+	if calls != 1 {
+		t.Errorf("expected exactly one auto-lock resolve, got %d", calls)
+	}
+	// Default (auto-lock) opts: none of the mode flags are set, so the
+	// EnsureResolved default path runs (fresh ⇒ no-op read; stale/absent ⇒
+	// re-resolve + rewrite lock).
+	if gotOpts.Locked || gotOpts.Frozen || gotOpts.Offline || gotOpts.NoSync {
+		t.Errorf("expected default (auto-lock) EnsureOpts, got %+v", gotOpts)
+	}
+}
+
+// TestRunExplain_RealAutoLockWritesLock exercises the production seam end-to-end
+// against a flat manifest: explain must resolve and, because the lock is absent,
+// auto-write a .agentsrc.lock (the auto-lock contract) while rendering.
+func TestRunExplain_RealAutoLockWritesLock(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2,"project":"demo"}`, "")
+	opts := mustOptions(project)
+	if err := runExplain(opts, nil, testDeps()); err != nil {
+		t.Fatalf("runExplain: %v", err)
+	}
+	if _, err := os.Stat(cfg.AgentsLockPath(project)); err != nil {
+		t.Errorf("explain should auto-lock (write .agentsrc.lock), stat err: %v", err)
+	}
+}
+
+// ---------- snapshot construction / resolution ----------
+
+func TestLoadSnapshot_RepoLayerOnly(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2,"project":"demo","repo_id":"github.com/x/y"}`, "")
+	snap, code, err := loadSnapshot(project)
+	if err != nil || code != exitOK {
+		t.Fatalf("unexpected: code=%d err=%v", code, err)
+	}
+	eff, err := snap.EffectiveRaw()
+	if err != nil {
+		t.Fatalf("EffectiveRaw: %v", err)
+	}
+	if eff["project"] != "demo" {
+		t.Errorf("expected project=demo, got %v", eff["project"])
+	}
+}
+
+func TestLoadSnapshot_MissingRepoManifestErrors(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", filepath.Join(root, "home"))
 	t.Setenv("AGENTS_HOME", filepath.Join(root, "home", ".agents"))
-	_, code, err := loadFlatSnapshot(filepath.Join(root, "project"))
+	_, code, err := loadSnapshot(filepath.Join(root, "project"))
 	if err == nil {
 		t.Fatal("expected error for missing manifest")
 	}
@@ -106,53 +218,9 @@ func TestLoadFlatSnapshot_MissingRepoManifestIsSchemaError(t *testing.T) {
 	}
 }
 
-func TestLoadFlatSnapshot_RepoLayerOnly(t *testing.T) {
-	project := withRepoLayer(t, `{"version":2,"project":"demo","repo_id":"github.com/x/y"}`, "")
-	snap, code, err := loadFlatSnapshot(project)
-	if err != nil || code != exitOK {
-		t.Fatalf("unexpected: code=%d err=%v", code, err)
-	}
-	if snap.effective["project"] != "demo" {
-		t.Errorf("expected project=demo, got %v", snap.effective["project"])
-	}
-	if snap.layers[layerUserLocal] != nil {
-		t.Errorf("expected user-local nil, got %v", snap.layers[layerUserLocal])
-	}
-}
-
-func TestLoadFlatSnapshot_UserLocalOverlay(t *testing.T) {
-	project := withRepoLayer(t,
-		`{"version":2,"project":"demo","features":{"a":"repo"}}`,
-		`{"version":2,"features":{"a":"user","b":"user-only"}}`,
-	)
-	snap, _, err := loadFlatSnapshot(project)
-	if err != nil {
-		t.Fatalf("loadFlatSnapshot: %v", err)
-	}
-	// repo wins for "a"
-	feat := snap.effective["features"].(map[string]any)
-	if feat["a"] != "repo" {
-		t.Errorf("repo-local should win for features.a, got %v", feat["a"])
-	}
-	// repo's features map fully replaces user-local's at the top level
-	// because flat overlay is last-writer-wins at the top key. The
-	// per-field provenance test below covers the layered lookup directly.
-	if _, ok := feat["b"]; ok {
-		t.Errorf("flat overlay should replace top-level features map; got merged: %v", feat)
-	}
-}
-
-func TestLoadFlatSnapshot_InvalidRepoJSONIsSchemaError(t *testing.T) {
+func TestLoadSnapshot_InvalidRepoJSONErrors(t *testing.T) {
 	project := withRepoLayer(t, `{not-json`, "")
-	_, code, err := loadFlatSnapshot(project)
-	if err == nil || code != exitSchemaErr {
-		t.Fatalf("expected schema error, got code=%d err=%v", code, err)
-	}
-}
-
-func TestLoadFlatSnapshot_InvalidUserJSONIsSchemaError(t *testing.T) {
-	project := withRepoLayer(t, `{"version":2}`, `not-json`)
-	_, code, err := loadFlatSnapshot(project)
+	_, code, err := loadSnapshot(project)
 	if err == nil || code != exitSchemaErr {
 		t.Fatalf("expected schema error, got code=%d err=%v", code, err)
 	}
@@ -161,19 +229,10 @@ func TestLoadFlatSnapshot_InvalidUserJSONIsSchemaError(t *testing.T) {
 // ---------- field traversal ----------
 
 func TestExplainField_NestedPathResolves(t *testing.T) {
-	snap := &snapshot{
-		layers: map[string]map[string]any{
-			layerProductDefaults: nil,
-			layerUserLocal:       nil,
-			layerRepoLocal: {
-				"kg": map[string]any{
-					"backend": "sqlite",
-				},
-			},
-		},
-	}
-	snap.effective = mergeLayers(snap.layers)
-	exp := snap.explainField("kg.backend")
+	snap := flatSnapshot(t, nil, map[string]any{
+		"kg": map[string]any{"backend": "sqlite"},
+	})
+	exp := explainField(snap, "kg.backend")
 	if exp.Value != "sqlite" {
 		t.Errorf("expected sqlite, got %v", exp.Value)
 	}
@@ -192,27 +251,20 @@ func TestExplainField_NestedPathResolves(t *testing.T) {
 }
 
 func TestExplainField_MultiLayerOverride(t *testing.T) {
-	snap := &snapshot{
-		layers: map[string]map[string]any{
-			layerProductDefaults: nil,
-			layerUserLocal: {
-				"project": "user-value",
-			},
-			layerRepoLocal: {
-				"project": "repo-value",
-			},
-		},
-	}
-	snap.effective = mergeLayers(snap.layers)
-	exp := snap.explainField("project")
+	// "kg" is a map-merge field, so a nested scalar that exists only in
+	// repo-local resolves to repo-local while the lower layer still records its
+	// losing value in the per-field stack.
+	snap := flatSnapshot(t,
+		map[string]any{"kg": map[string]any{"backend": "user-value"}},
+		map[string]any{"kg": map[string]any{"backend": "repo-value"}},
+	)
+	exp := explainField(snap, "kg.backend")
 	if exp.ActiveLayer != layerRepoLocal {
 		t.Errorf("expected repo-local to win, got %s", exp.ActiveLayer)
 	}
 	if exp.Value != "repo-value" {
 		t.Errorf("expected repo-value, got %v", exp.Value)
 	}
-	// User-local layer entry must still record the losing value so JSON
-	// consumers can show the full stack.
 	var userEntry LayerValue
 	for _, lv := range exp.Layers {
 		if lv.Layer == layerUserLocal {
@@ -228,50 +280,13 @@ func TestExplainField_MultiLayerOverride(t *testing.T) {
 }
 
 func TestExplainField_AbsentFieldHasNoActiveLayer(t *testing.T) {
-	snap := &snapshot{
-		layers: map[string]map[string]any{
-			layerProductDefaults: nil,
-			layerUserLocal:       nil,
-			layerRepoLocal:       map[string]any{"version": float64(2)},
-		},
-	}
-	exp := snap.explainField("missing.path")
+	snap := flatSnapshot(t, nil, map[string]any{"version": float64(2)})
+	exp := explainField(snap, "missing.path")
 	if exp.ActiveLayer != "" {
 		t.Errorf("expected no active layer, got %q", exp.ActiveLayer)
 	}
 	if exp.Value != nil {
 		t.Errorf("expected nil value, got %v", exp.Value)
-	}
-}
-
-func TestLookup_TraversalGuards(t *testing.T) {
-	// nil layer
-	if v, ok := lookup(nil, []string{"x"}); ok || v != nil {
-		t.Error("nil layer should miss")
-	}
-	// empty parts
-	if v, ok := lookup(map[string]any{"x": 1}, nil); ok || v != nil {
-		t.Error("empty parts should miss")
-	}
-	// non-object intermediate
-	layer := map[string]any{"x": "string-value"}
-	if v, ok := lookup(layer, []string{"x", "child"}); ok || v != nil {
-		t.Error("descending into a non-object should miss")
-	}
-	// missing key
-	if v, ok := lookup(map[string]any{"x": map[string]any{}}, []string{"x", "missing"}); ok || v != nil {
-		t.Error("missing key should miss")
-	}
-}
-
-func TestSplitFieldPath_EmptyReturnsNil(t *testing.T) {
-	if got := splitFieldPath(""); got != nil {
-		t.Errorf("expected nil, got %v", got)
-	}
-	got := splitFieldPath("a.b.c")
-	want := []string{"a", "b", "c"}
-	if len(got) != 3 || got[0] != want[0] || got[2] != want[2] {
-		t.Errorf("expected %v, got %v", want, got)
 	}
 }
 
@@ -340,17 +355,7 @@ func TestWriteJSON_PrettyPrints(t *testing.T) {
 	}
 }
 
-func TestSortedKeys(t *testing.T) {
-	got := sortedKeys(map[string]any{"b": 1, "a": 2, "c": 3})
-	want := []string{"a", "b", "c"}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("at %d: got %s, want %s", i, got[i], w)
-		}
-	}
-}
-
-// ---------- runExplain table ----------
+// ---------- runExplain table (real resolution) ----------
 
 func TestRunExplain_DefaultBehaviorPrintsAll(t *testing.T) {
 	project := withRepoLayer(t, `{"version":2,"project":"demo"}`, "")
@@ -396,8 +401,20 @@ func TestRunExplain_SingleField_JSON(t *testing.T) {
 	if got.Field != "skills" || got.ActiveLayer != layerRepoLocal {
 		t.Errorf("unexpected json: %+v", got)
 	}
-	if len(got.Layers) != len(orderedLayers) {
-		t.Errorf("expected %d layers, got %d", len(orderedLayers), len(got.Layers))
+	// With no user-local manifest on disk the resolved stack is
+	// product-defaults + repo-local; the winning repo-local entry must be
+	// present in the stack.
+	if len(got.Layers) < 2 {
+		t.Errorf("expected at least 2 layers, got %d", len(got.Layers))
+	}
+	var sawRepo bool
+	for _, lv := range got.Layers {
+		if lv.Layer == layerRepoLocal && lv.Active {
+			sawRepo = true
+		}
+	}
+	if !sawRepo {
+		t.Errorf("expected repo-local active in stack, got %+v", got.Layers)
 	}
 }
 
@@ -527,10 +544,19 @@ func TestRunExplain_Flags_JSON(t *testing.T) {
 }
 
 func TestRunExplain_Flags_NonObjectFeaturesIgnored(t *testing.T) {
-	// features field exists but is not an object — should be ignored
-	// gracefully (no panic), yielding the empty-flags message.
-	project := withRepoLayer(t, `{"version":2,"features":"wat"}`, "")
-	opts := mustOptions(project)
+	// features field exists but is not an object — featureFlagNames ignores it
+	// gracefully (no panic), yielding the empty-flags message. Driven through a
+	// stub snapshot so the non-object features value survives into a layer's
+	// Raw (the typed AgentsRC decode would otherwise reject it).
+	withStubResolver(t, func(_ string, _ cfg.EnsureOpts) (*cfg.EnsureResult, error) {
+		layers := []cfg.ResolvedLayer{
+			{ID: cfg.LayerProductDefaults, Present: true, Raw: map[string]any{}},
+			{ID: cfg.LayerRepoLocal, Present: true, Raw: map[string]any{"features": "wat"}},
+		}
+		snap := &cfg.Snapshot{Layers: layers, Provenance: map[string]cfg.FieldProvenance{}, Warnings: []cfg.ProvenanceWarning{}}
+		return snapResult(snap), nil
+	})
+	opts := mustOptions("/x")
 	opts.flags = true
 	if err := runExplain(opts, nil, testDeps()); err != nil {
 		t.Fatalf("runExplain: %v", err)
@@ -604,6 +630,23 @@ func TestRunExplain_NoManifestSurfacesHint(t *testing.T) {
 	}
 }
 
+// TestRunExplain_ResolveErrorSurfacesHint covers the generic resolve-failure
+// branch (not just missing-manifest) via a stub that returns an arbitrary error.
+func TestRunExplain_ResolveErrorSurfacesHint(t *testing.T) {
+	withStubResolver(t, func(_ string, _ cfg.EnsureOpts) (*cfg.EnsureResult, error) {
+		return nil, errors.New("boom: cache gap")
+	})
+	opts := mustOptions("/x")
+	err := runExplain(opts, nil, testDeps())
+	var he *hintError
+	if !errors.As(err, &he) {
+		t.Fatalf("expected hintError, got %T %v", err, err)
+	}
+	if !strings.Contains(he.message, "boom: cache gap") {
+		t.Errorf("expected wrapped resolve error, got %q", he.message)
+	}
+}
+
 func TestErrNoManifest_IsExported(t *testing.T) {
 	// Sentinel must be usable with errors.Is by downstream consumers.
 	if !errors.Is(ErrNoManifest, ErrNoManifest) {
@@ -638,11 +681,11 @@ func TestNewConfigCmd_RegistersExplain(t *testing.T) {
 	}
 }
 
-func TestNewConfigCmd_ExampleMentionsKeyInvocations(t *testing.T) {
-	cmd := NewConfigCmd(testDeps())
-	for _, needle := range []string{"config explain", "--value-only", "--all", "--flags"} {
-		if !strings.Contains(cmd.Example, needle) {
-			t.Errorf("Example missing %q: %q", needle, cmd.Example)
+func TestExplainCmd_LongMentionsAutoLock(t *testing.T) {
+	cmd := newExplainCmd(testDeps())
+	for _, needle := range []string{"AUTO-LOCK", "single effective-config truth surface", "status no longer inspects config"} {
+		if !strings.Contains(cmd.Long, needle) {
+			t.Errorf("explain Long missing %q", needle)
 		}
 	}
 }
@@ -673,7 +716,7 @@ func TestExplainCmd_RunE_RoutesThroughCwd(t *testing.T) {
 	}
 }
 
-// ---------- example block + decodeJSONFile coverage ----------
+// ---------- example block coverage ----------
 
 func TestExampleBlock_JoinsWithNewline(t *testing.T) {
 	got := exampleBlock("a", "b")
@@ -682,42 +725,21 @@ func TestExampleBlock_JoinsWithNewline(t *testing.T) {
 	}
 }
 
-func TestDecodeJSONFile_NotFound(t *testing.T) {
-	if _, err := decodeJSONFile("/nonexistent/path/agentsrc.json"); err == nil {
-		t.Error("expected error for missing file")
-	}
-}
-
-func TestDecodeJSONFile_BadJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if _, err := decodeJSONFile(path); err == nil {
-		t.Error("expected json decode error")
-	}
-}
-
-func TestFileExists_FalseForMissing(t *testing.T) {
-	if fileExists(filepath.Join(t.TempDir(), "no-such-file")) {
-		t.Error("expected false for missing")
-	}
-}
-
 // ---------- end-to-end style assertion ----------
 
 // TestRunExplain_EndToEndProvenanceExample reproduces the proposal's example
 // shape (single field with multi-layer override) to make sure rendering does
-// not regress against the documented contract.
+// not regress against the documented contract. repo_id is a protected field, so
+// the user-local layer's attempt is dropped (recorded but never active) and
+// repo-local wins.
 func TestRunExplain_EndToEndProvenanceExample(t *testing.T) {
 	project := withRepoLayer(t,
-		`{"version":2,"project":"repo-project"}`,
-		`{"version":2,"project":"user-project"}`,
+		`{"version":2,"kg":{"backend":"repo-backend"}}`,
+		`{"version":2,"kg":{"backend":"user-backend"}}`,
 	)
 	opts := mustOptions(project)
 	opts.jsonOut = true
-	if err := runExplain(opts, []string{"project"}, testDeps()); err != nil {
+	if err := runExplain(opts, []string{"kg.backend"}, testDeps()); err != nil {
 		t.Fatalf("runExplain: %v", err)
 	}
 	var got FieldExplanation
@@ -727,13 +749,12 @@ func TestRunExplain_EndToEndProvenanceExample(t *testing.T) {
 	if got.ActiveLayer != layerRepoLocal {
 		t.Errorf("expected repo-local active, got %s", got.ActiveLayer)
 	}
-	if got.Value != "repo-project" {
-		t.Errorf("expected repo-project, got %v", got.Value)
+	if got.Value != "repo-backend" {
+		t.Errorf("expected repo-backend, got %v", got.Value)
 	}
-	// Make sure the user-local entry recorded its losing value in the stack.
 	var sawUser bool
 	for _, lv := range got.Layers {
-		if lv.Layer == layerUserLocal && lv.Value == "user-project" && !lv.Active {
+		if lv.Layer == layerUserLocal && lv.Value == "user-backend" && !lv.Active {
 			sawUser = true
 		}
 	}
@@ -745,7 +766,14 @@ func TestRunExplain_EndToEndProvenanceExample(t *testing.T) {
 // pretty marshaling sanity guard — ensure JSON output is deterministic
 // across runs even when the underlying map has random iteration order.
 func TestEmitAllJSON_DeterministicProvenance(t *testing.T) {
-	project := withRepoLayer(t, `{"version":2,"a":1,"b":2,"c":3,"d":4,"e":5}`, "")
+	project := withRepoLayer(t, `{"version":2,"project":"p","repo_id":"github.com/x/y","skills":["a"],"agents":["b"]}`, "")
+	snap, _, err := loadSnapshot(project)
+	if err != nil {
+		t.Fatalf("loadSnapshot: %v", err)
+	}
+	withStubResolver(t, func(_ string, _ cfg.EnsureOpts) (*cfg.EnsureResult, error) {
+		return snapResult(snap), nil
+	})
 	opts1 := mustOptions(project)
 	opts1.all = true
 	opts1.jsonOut = true
@@ -758,9 +786,6 @@ func TestEmitAllJSON_DeterministicProvenance(t *testing.T) {
 	if err := runExplain(opts2, nil, testDeps()); err != nil {
 		t.Fatalf("run2: %v", err)
 	}
-	// Reparse and recompare provenance keys — Go's json encoder sorts keys
-	// for maps, but verify here so a future change to the encoder cannot
-	// silently regress determinism.
 	a, b := opts1.stdout.(*bytes.Buffer).Bytes(), opts2.stdout.(*bytes.Buffer).Bytes()
 	if string(a) != string(b) {
 		t.Errorf("expected deterministic --all --json output:\n%s\n----\n%s", a, b)
@@ -794,9 +819,7 @@ func TestNewExplainCmd_UseString(t *testing.T) {
 	}
 }
 
-// Confirm the RunE path that resolves cwd via os.Getwd returns an error path
-// when cwd cannot be resolved. We exercise it by clearing cwd on opts to
-// force the RunE to call os.Getwd (success path).
+// Confirm the RunE path that resolves cwd via os.Getwd runs the success path.
 func TestExplainCmd_RunE_CallsGetwd(t *testing.T) {
 	project := withRepoLayer(t, `{"version":2,"project":"x"}`, "")
 	prev, _ := os.Getwd()
@@ -829,10 +852,8 @@ func TestExitCodeConstants(t *testing.T) {
 func TestFormatScalar_MarshalErrorFallback(t *testing.T) {
 	ch := make(chan int)
 	got := formatScalar(ch)
-	if got == "" || strings.Contains(got, "0x") == false && !strings.Contains(got, "chan") {
-		// We accept any non-empty fallback string; the goal is to make sure
-		// formatScalar does not panic on a marshal-error value.
-		t.Logf("fallback string: %q", got)
+	if got == "" {
+		t.Error("formatScalar should not return empty on a marshal-error value")
 	}
 }
 
@@ -843,6 +864,14 @@ func TestPrintScalarOrJSON_MarshalError(t *testing.T) {
 	ch := make(chan int)
 	err := printScalarOrJSON(&bytes.Buffer{}, ch)
 	if err == nil {
+		t.Error("expected error for unmarshalable value")
+	}
+}
+
+// writeJSON error path: encoding an unmarshalable value must surface an error
+// rather than panic.
+func TestWriteJSON_MarshalError(t *testing.T) {
+	if err := writeJSON(&bytes.Buffer{}, make(chan int)); err == nil {
 		t.Error("expected error for unmarshalable value")
 	}
 }
@@ -860,7 +889,94 @@ func TestHintError_FormatsMessageAndHints(t *testing.T) {
 	}
 }
 
-// catch-all: ensure mergeLayers is robust to a nil map at every position.
+// featureFlagNames returns a sorted union across layers.
+func TestFeatureFlagNames_SortedUnion(t *testing.T) {
+	snap := flatSnapshot(t,
+		map[string]any{"features": map[string]any{"b": "on", "a": "on"}},
+		map[string]any{"features": map[string]any{"c": "off"}},
+	)
+	got := featureFlagNames(snap)
+	want := []string{"a", "b", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("at %d: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// ---------- legacy flat-snapshot helpers (shared with relevance/verify) ----------
+//
+// loadFlatSnapshot, mergeLayers, lookup, splitFieldPath, decodeJSONFile,
+// fileExists, and sortedKeys are the raw-layer reader surface the sibling
+// `relevance` and `verify` commands still consume. explain no longer routes
+// through them (it uses the auto-lock cfg.Snapshot seam), but they live in
+// explain.go so they are unit-tested here to keep the file's behavior pinned.
+
+func TestLoadFlatSnapshot_MissingRepoManifestIsSchemaError(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", filepath.Join(root, "home"))
+	t.Setenv("AGENTS_HOME", filepath.Join(root, "home", ".agents"))
+	_, code, err := loadFlatSnapshot(filepath.Join(root, "project"))
+	if err == nil {
+		t.Fatal("expected error for missing manifest")
+	}
+	if code != exitSchemaErr {
+		t.Errorf("expected exitSchemaErr (%d), got %d", exitSchemaErr, code)
+	}
+}
+
+func TestLoadFlatSnapshot_RepoLayerOnly(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2,"project":"demo","repo_id":"github.com/x/y"}`, "")
+	snap, code, err := loadFlatSnapshot(project)
+	if err != nil || code != exitOK {
+		t.Fatalf("unexpected: code=%d err=%v", code, err)
+	}
+	if snap.effective["project"] != "demo" {
+		t.Errorf("expected project=demo, got %v", snap.effective["project"])
+	}
+	if snap.layers[layerUserLocal] != nil {
+		t.Errorf("expected user-local nil, got %v", snap.layers[layerUserLocal])
+	}
+}
+
+func TestLoadFlatSnapshot_UserLocalOverlay(t *testing.T) {
+	project := withRepoLayer(t,
+		`{"version":2,"project":"demo","features":{"a":"repo"}}`,
+		`{"version":2,"features":{"a":"user","b":"user-only"}}`,
+	)
+	snap, _, err := loadFlatSnapshot(project)
+	if err != nil {
+		t.Fatalf("loadFlatSnapshot: %v", err)
+	}
+	// repo wins for the top-level features map (last-writer-wins flat overlay).
+	feat := snap.effective["features"].(map[string]any)
+	if feat["a"] != "repo" {
+		t.Errorf("repo-local should win for features.a, got %v", feat["a"])
+	}
+	if _, ok := feat["b"]; ok {
+		t.Errorf("flat overlay should replace top-level features map; got merged: %v", feat)
+	}
+}
+
+func TestLoadFlatSnapshot_InvalidRepoJSONIsSchemaError(t *testing.T) {
+	project := withRepoLayer(t, `{not-json`, "")
+	_, code, err := loadFlatSnapshot(project)
+	if err == nil || code != exitSchemaErr {
+		t.Fatalf("expected schema error, got code=%d err=%v", code, err)
+	}
+}
+
+func TestLoadFlatSnapshot_InvalidUserJSONIsSchemaError(t *testing.T) {
+	project := withRepoLayer(t, `{"version":2}`, `not-json`)
+	_, code, err := loadFlatSnapshot(project)
+	if err == nil || code != exitSchemaErr {
+		t.Fatalf("expected schema error, got code=%d err=%v", code, err)
+	}
+}
+
 func TestMergeLayers_AllNil(t *testing.T) {
 	out := mergeLayers(map[string]map[string]any{
 		layerProductDefaults: nil,
@@ -872,10 +988,79 @@ func TestMergeLayers_AllNil(t *testing.T) {
 	}
 }
 
-// Ensures the package-level constants in orderedLayers cover the three
-// flat-scope layers (and stay in precedence order). A future addition would
-// require updating this guard, intentionally — the JSON shape depends on
-// stable ordering.
+func TestLookup_TraversalGuards(t *testing.T) {
+	if v, ok := lookup(nil, []string{"x"}); ok || v != nil {
+		t.Error("nil layer should miss")
+	}
+	if v, ok := lookup(map[string]any{"x": 1}, nil); ok || v != nil {
+		t.Error("empty parts should miss")
+	}
+	if v, ok := lookup(map[string]any{"x": "string-value"}, []string{"x", "child"}); ok || v != nil {
+		t.Error("descending into a non-object should miss")
+	}
+	if v, ok := lookup(map[string]any{"x": map[string]any{}}, []string{"x", "missing"}); ok || v != nil {
+		t.Error("missing key should miss")
+	}
+	if v, ok := lookup(map[string]any{"x": map[string]any{"y": "z"}}, []string{"x", "y"}); !ok || v != "z" {
+		t.Errorf("nested hit should resolve, got %v/%v", v, ok)
+	}
+}
+
+func TestSplitFieldPath_EmptyAndParts(t *testing.T) {
+	if got := splitFieldPath(""); got != nil {
+		t.Errorf("expected nil, got %v", got)
+	}
+	got := splitFieldPath("a.b.c")
+	if len(got) != 3 || got[0] != "a" || got[2] != "c" {
+		t.Errorf("expected [a b c], got %v", got)
+	}
+}
+
+func TestSortedKeys(t *testing.T) {
+	got := sortedKeys(map[string]any{"b": 1, "a": 2, "c": 3})
+	want := []string{"a", "b", "c"}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("at %d: got %s, want %s", i, got[i], w)
+		}
+	}
+}
+
+func TestDecodeJSONFile_NotFound(t *testing.T) {
+	if _, err := decodeJSONFile("/nonexistent/path/agentsrc.json"); err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestDecodeJSONFile_BadJSON(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := decodeJSONFile(path); err == nil {
+		t.Error("expected json decode error")
+	}
+}
+
+func TestDecodeJSONFile_OK(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ok.json")
+	if err := os.WriteFile(path, []byte(`{"a":1}`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	m, err := decodeJSONFile(path)
+	if err != nil || m["a"] != float64(1) {
+		t.Errorf("expected {a:1}, got %v err=%v", m, err)
+	}
+}
+
+func TestFileExists_FalseForMissing(t *testing.T) {
+	if fileExists(filepath.Join(t.TempDir(), "no-such-file")) {
+		t.Error("expected false for missing")
+	}
+}
+
 func TestOrderedLayers_StableSequence(t *testing.T) {
 	want := []string{layerProductDefaults, layerUserLocal, layerRepoLocal}
 	for i, w := range want {
