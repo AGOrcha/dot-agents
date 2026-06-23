@@ -61,7 +61,11 @@ func VerifyLayerLocks(projectPath string) ([]LayerLockStatus, error) {
 	}
 
 	sources := indexSources(rc.Sources)
-	locked, err := readLockedLayers(projectPath)
+	// §7A units read: verify reads the authoritative units section through the
+	// one-time on-read migration so a units-only lock verifies its pinned layers
+	// (and a legacy config-only lock is upgraded on first read) — not a permanent
+	// dual-read of the legacy section.
+	locked, err := readLockedLayersFromUnits(projectPath)
 	if err != nil {
 		return nil, err
 	}

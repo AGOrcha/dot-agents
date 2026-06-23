@@ -56,7 +56,7 @@ func TestReadLockedLayersOpenError(t *testing.T) {
 	if err := os.MkdirAll(AgentsLockPath(proj), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readLockedLayers(proj); err == nil {
+	if _, err := readLockedLayersFromUnits(proj); err == nil {
 		t.Fatal("expected open error when lock path is a directory")
 	}
 }

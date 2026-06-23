@@ -1116,7 +1116,7 @@ func TestLayeredResolverRecordsCacheKeyInLock(t *testing.T) {
 	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1146,7 +1146,7 @@ func TestLayeredResolverAlwaysRevalidateRecordsSentinel(t *testing.T) {
 	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}

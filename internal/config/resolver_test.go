@@ -545,7 +545,7 @@ func TestLayeredResolverGitMockedViaFakeFetcher(t *testing.T) {
 		t.Errorf("skills = %v, want [from-git]", got)
 	}
 	// The lockfile records the git-resolved SHA.
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +723,12 @@ func TestLayeredResolverNoExtendsBehavesLikeFlat(t *testing.T) {
 	assertLockfileSections(t, repo, nil)
 }
 
-func TestLayeredResolverTTLExpiryRecorded(t *testing.T) {
+// TestLayeredResolverUnitsLockDropsClockTTL pins the §7A clean-cutover decision:
+// the units lock is content-hash driven and does NOT persist the clock-based
+// cache-TTL (ttl_expires_at). A source with cache_ttl still records its
+// fetched_at and content cache_key in the units lock, but no TTL — staleness is
+// driven by the inputs_digest/cache_key content axes, not a wall clock.
+func TestLayeredResolverUnitsLockDropsClockTTL(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	repo := t.TempDir()
 	src := localLayerSourcePath(t)
@@ -737,7 +742,7 @@ func TestLayeredResolverTTLExpiryRecorded(t *testing.T) {
 	if _, err := r.Resolve(repo); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,8 +750,8 @@ func TestLayeredResolverTTLExpiryRecorded(t *testing.T) {
 	if got.FetchedAt != "2026-04-19T14:00:00Z" {
 		t.Errorf("fetched_at = %q", got.FetchedAt)
 	}
-	if got.TTLExpiresAt != "2026-04-19T18:00:00Z" {
-		t.Errorf("ttl_expires_at = %q, want +4h", got.TTLExpiresAt)
+	if got.TTLExpiresAt != "" {
+		t.Errorf("ttl_expires_at = %q, want empty (units lock drops the clock TTL)", got.TTLExpiresAt)
 	}
 }
 
@@ -976,7 +981,7 @@ func TestReadLockedLayersCorrupt(t *testing.T) {
 	if err := os.WriteFile(AgentsLockPath(repo), []byte(`{"config": "not-an-object"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readLockedLayers(repo); err == nil {
+	if _, err := readLockedLayersFromUnits(repo); err == nil {
 		t.Fatal("expected decode error for corrupt config section")
 	}
 }
@@ -1185,7 +1190,7 @@ func TestLayeredResolverGathersDirSelectorFacts(t *testing.T) {
 		t.Fatalf("Resolve: %v", err)
 	}
 
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1231,7 +1236,7 @@ func TestLayeredResolverGathersEnvSelectorFacts(t *testing.T) {
 		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
 			t.Fatalf("Resolve: %v", err)
 		}
-		locked, err := readLockedLayers(repo)
+		locked, err := readLockedLayersFromUnits(repo)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1332,23 +1337,31 @@ func jsonPath(p string) string {
 	return string(b[1 : len(b)-1])
 }
 
+// assertLockfileSections asserts the AUTHORITATIVE §7A lock shape after the
+// units-lock cutover (section-7a-units-lock-wiring): the lockfile carries the
+// "units" section (with a UnitKindLayer + resolved SHA per wanted ref) and a
+// top-level inputs_digest. The legacy "config"/"packages" sections are no longer
+// written.
 func assertLockfileSections(t *testing.T, repo string, wantLayerRefs []string) {
 	t.Helper()
 	lf, err := agentslock.Open(AgentsLockPath(repo))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cfg map[string]LockedLayer
-	if ok, _ := lf.Section(LockSectionConfig, &cfg); !ok {
-		t.Fatal("lockfile missing config section")
+	var units map[string]LockedUnit
+	if ok, _ := lf.Section(LockSectionUnits, &units); !ok {
+		t.Fatal("lockfile missing units section")
 	}
 	for _, ref := range wantLayerRefs {
-		if cfg[ref].ResolvedSHA == "" {
-			t.Errorf("lockfile config missing resolved_sha for %q", ref)
+		u, ok := units[ref]
+		if !ok || u.Digest == "" {
+			t.Errorf("lockfile units missing resolved digest for %q: %+v", ref, units[ref])
+		}
+		if u.Kind != UnitKindLayer {
+			t.Errorf("unit %q kind = %q, want %q", ref, u.Kind, UnitKindLayer)
 		}
 	}
-	var pkgs map[string]json.RawMessage
-	if ok, _ := lf.Section(LockSectionPackages, &pkgs); !ok {
-		t.Error("lockfile missing empty packages stub section")
+	if digest, ok := lf.InputsDigest(); !ok || digest == "" {
+		t.Error("lockfile missing inputs_digest")
 	}
 }
