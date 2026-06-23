@@ -855,8 +855,9 @@ func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sour
 	if !ok {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonNotFound, Err: fmt.Errorf("source %q not declared", parts.SourceID)}
 	}
-	// Tier constraint (spec §4): extends must reference git|http|local — oci is
-	// packages-only. Enforced before any fetch so the error surfaces early.
+	// Tier constraint (spec §4): extends must reference git|http|local — oci
+	// cannot supply a config layer (§15 D8). Enforced before any fetch so the
+	// error surfaces early.
 	fetcher, err := r.fetcherFor(src.Type)
 	if err != nil {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonSchema, Err: err}

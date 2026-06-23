@@ -189,8 +189,9 @@ type AgentsRC struct {
 	// Tier constraint (enforced at schema validation): extends entries must reference
 	// git|http|local sources — see config-distribution-model §4.
 	Extends []LayerRef `json:"extends,omitempty"`
-	// Packages references executable OCI/HTTP packages in the form
-	// "source-id:artifact-path@version-spec". Tier constraint: oci|http sources only.
+	// Packages references executable artifact bundles in the form
+	// `source-id:artifact-path@version-spec`. Any source kind (git|local|http|oci)
+	// may supply an artifact (config-distribution-model §15 D8).
 	Packages []PackageRef `json:"packages,omitempty"`
 	// Features overrides feature-flag defaults (config-distribution-model §3.6).
 	Features map[string]string `json:"features,omitempty"`

@@ -16,11 +16,10 @@ import (
 
 // This file adds the tier-2 (packages) source-type plumbing: the OCI registry
 // pull path plus the http-as-packages path's shared types, and the signing-
-// posture stub. Per config-distribution-model §4 the tier constraint is that
-// `oci` is packages-only (never valid for extends) and `http` is valid for both
-// tiers. The extends-only SelectFetcher (in fetcher.go) therefore continues to
-// reject `oci`; package resolution (pass 2, p6) selects through
-// SelectPackageFetcher here instead.
+// posture stub. Per config-distribution-model §15 D8 any source kind
+// (git/local/http/oci) may supply a `packages` artifact; the only remaining
+// source asymmetry is that `extends` rejects `oci` (enforced by SelectFetcher
+// in fetcher.go). Artifact fetchers are selected via SelectPackageFetcher here.
 
 // SigningPosture is the declared verification stance for a fetched package
 // artifact (config-distribution-model §12 scope boundary; signing brought in
@@ -138,7 +137,7 @@ func ParsePackageRef(ref string) (PackageRefParts, error) {
 }
 
 // PackageFetcher pulls a tier-2 package artifact from a resolved source. One
-// impl per packages-valid source type (oci, http). The interface is the test
+// impl per source type (oci, http, git, local). The interface is the test
 // seam: a fake stands in so no test touches a real registry or the network.
 type PackageFetcher interface {
 	// FetchArtifact returns the artifact blob for parts.ArtifactPath@VersionSpec

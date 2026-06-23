@@ -224,7 +224,7 @@ da install
 | Command | Description |
 |---------|-------------|
 | `config explain [field]` | Show the effective `.agentsrc.json` value of a field and which layer set it (`--all`, `--flags`, `--json`) |
-| `config sync` | Re-fetch every declared layer regardless of TTL, re-resolve, and rewrite the config section of `.agentsrc.lock` — the uv `--upgrade` analog (`--layer source-id:path`, `--json`) |
+| `config sync` | Re-fetch every declared layer regardless of TTL, re-resolve, and rewrite the `units` section + `inputs_digest` of `.agentsrc.lock` — the uv `--upgrade` analog (`--layer source-id:path`, `--json`) |
 | `config lint` | Validate the repo-local `.agentsrc.json` and each `extends` layer against the AgentsRC layer schema; non-zero exit if invalid (`--json`) |
 | `config verify` | Offline setup contract check — manifest parses, declared local source layers exist, integrations ready, and remote `extends` layers are cached at the lockfile's SHA (`--json`; non-zero exit on failure) |
 | `config relevance` | Resolve a task's execution profile (units, topology, lenses) by `app_type` (`--filter`, `--app-type`, `--task`, `--stage`, `--recompute`, `--json`; see [docs/CONFIG_RELEVANCE.md](docs/CONFIG_RELEVANCE.md)) |
@@ -232,12 +232,12 @@ da install
 #### Layered config & the lockfile (`.agentsrc.lock`)
 
 A `.agentsrc.json` manifest may `extends` one or more config layers sourced from
-git, local paths, HTTP, or OCI registries, declared as `source:path@version`.
+git, local paths, or HTTP (OCI is not valid for `extends`), declared as `source:path@version`.
 When the layers are resolved, the resolved layer SHAs are pinned in
 `.agentsrc.lock` so every machine projects the same effective config.
 
 - `da config sync` re-checks every declared layer upstream (ignoring TTL),
-  re-resolves the stack, and rewrites the config section of `.agentsrc.lock`.
+  re-resolves the stack, and rewrites the `units` section of `.agentsrc.lock`.
   This is the explicit upstream re-check — the uv `--upgrade` analog.
 - `da refresh` and `da install` re-project the locked config locally and only
   re-resolve when the lock is stale, so routine relinking never reaches the

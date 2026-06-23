@@ -188,6 +188,8 @@ An ordered array of executable package references in the form
 
 ## 4. Source types and tier constraints
 
+> **Superseded by §15 (D8).** git/local/http/oci are all valid for `packages`; the only retained source asymmetry is that `extends` rejects `oci`.
+
 | Source type | Valid for `extends` | Valid for `packages` | Notes |
 |---|---|---|---|
 | `git` | yes | no | Fetches raw JSON layer files by path |
