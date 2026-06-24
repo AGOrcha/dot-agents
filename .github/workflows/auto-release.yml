@@ -168,23 +168,37 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set up .NET (for the dotnet sign tool)
+      - name: Install jsign (Windows Authenticode signing)
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
-        with:
-          dotnet-version: '8.0.x'
+        # jsign is a JVM tool (Linux-native, no .NET/kernel32 dependency) that
+        # natively supports Azure Trusted Signing (--storetype TRUSTEDSIGNING),
+        # replacing the dotnet `sign` tool that crashed on Linux with a
+        # kernel32.dll DllNotFoundException (dotnet/sign#711) and broke 0.4.0.
+        # The JRE is already on the runner (Set up Java, above). Pinned +
+        # checksum-verified per supply-chain norm; bump both together to upgrade.
+        env:
+          JSIGN_VERSION: '7.4'
+          JSIGN_SHA256: 2abf2ade9ea322acc2d60c24794eadc465ff9380938fca4c932d09e0b25f1c28
+        run: |
+          curl -sSL --proto '=https' --proto-redir '=https' -o /tmp/jsign.jar "https://github.com/ebourg/jsign/releases/download/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+          echo "${JSIGN_SHA256}  /tmp/jsign.jar" | sha256sum -c -
+          echo "JSIGN_JAR=/tmp/jsign.jar" >> "${GITHUB_ENV}"
 
-      - name: Install Trusted Signing CLI (dotnet sign)
+      - name: Acquire Trusted Signing access token
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        # NOTE: --version is intentionally unpinned (only a prerelease exists
-        # today); pin it when a stable release is chosen. The whole signing path
-        # is dormant until the repo variables are populated.
-        run: dotnet tool install --global sign --prerelease
+        # jsign authenticates to Trusted Signing with an Azure access token for
+        # the codesigning resource, passed as the keystore password. The az CLI
+        # is already logged in via the OIDC step above. The token is masked and
+        # exported for the GoReleaser hook (scripts/sign-windows.sh).
+        run: |
+          token="$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)"
+          echo "::add-mask::${token}"
+          echo "TRUSTED_SIGNING_TOKEN=${token}" >> "${GITHUB_ENV}"
 
       # --- macOS Developer ID signing via quill (gated) ---
       # quill (https://github.com/anchore/quill) signs/notarizes Mach-O binaries
       # from Linux, so darwin binaries are Developer ID-signed on this ubuntu
-      # runner — the macOS counterpart to the dotnet-sign path above. Gated on
+      # runner — the macOS counterpart to the jsign path above. Gated on
       # MACOS_SIGNING_ENABLED so it stays dormant (and scripts/sign-macos.sh
       # no-ops on empty QUILL_SIGN_P12) until the cert + secrets are configured.
       - name: Install quill (macOS Developer ID signing)
@@ -226,9 +240,13 @@ jobs:
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
           # Trusted Signing (gated): empty until the repo variables are set, which
           # makes scripts/sign-windows.sh a no-op. NAMES referenced, not values.
+          # jsign signs against these via the TRUSTEDSIGNING storetype, using
+          # TRUSTED_SIGNING_TOKEN (set by the "Acquire Trusted Signing access
+          # token" step) as the keystore password and JSIGN_JAR as the pinned jar.
           TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
           TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          TRUSTED_SIGNING_TSA: ${{ vars.TRUSTED_SIGNING_TSA }}
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
