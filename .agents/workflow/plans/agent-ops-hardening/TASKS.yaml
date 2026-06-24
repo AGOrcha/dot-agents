@@ -18,7 +18,7 @@ tasks:
       app_type: config
     - id: p0-sonar-scanner-exclusions
       title: 'P0: exclude dist/ + .scannerwork from sonar-scanner (stop pre-push flake)'
-      status: pending
+      status: awaiting_owner_review
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -29,6 +29,7 @@ tasks:
         The sonar pre-push gate walked dist/ + .scannerwork created mid-session -> 1562 scannerwork hits -> 461
         --no-verify reaches. Add dist/ and .scannerwork to sonar.exclusions (and confirm the pre-push scanner config).
         Removes the root reason workers bypass the local gate.
+        Impl done; PR #121 open, awaiting owner merge.
       app_type: config
     - id: p0-move-repo-out-of-documents
       title: 'P0: migration to move repo out of ~/Documents (preserve primary-agent history)'
@@ -70,10 +71,12 @@ tasks:
       blocks: []
       owner: dot-agents
       write_scope:
-        - .agents/skills/orchestrator-session-start/
-        - .agents/skills/delegation-lifecycle/
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
       verification_required: true
       notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
         Extend existing skills, do NOT create a new sibling skill. The behavior already exists as instruction units
         validate-bundle-against-head + bundle-scope-via-code-graph in orchestrator-session-start; the gap is making them
         MANDATORY pre-fanout (in orchestrator-session-start/delegation-lifecycle), adding a coverage-delta-forecast
@@ -87,10 +90,12 @@ tasks:
       blocks: []
       owner: dot-agents
       write_scope:
-        - .agents/skills/
+        - internal/scaffold/home/starter/skills/global/release-cut/
         - .github/workflows/
       verification_required: true
       notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored). The release-cut skill dir does NOT exist yet under internal/scaffold/home/starter/skills/global/ — it must be CREATED there.
+
         KEEP as a real new skill (app_type: skill) — multi-step branching judgment justifies it. The 0.4.0 release
         burned 4 PRs + multiple failed runs on latent infra (unpinned dotnet sign -> kernel32 Linux crash; non-retryable
         workflow; stale-tag-on-retry; jsign tsmode). Skill: preflight pin-check the signing toolchain on Linux -> cut ->
@@ -106,10 +111,12 @@ tasks:
       blocks: []
       owner: dot-agents
       write_scope:
-        - .agents/skills/orchestrator-session-start/
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
         - .agents/active/orchestrator.loop.md
       verification_required: true
       notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
         Not a new skill. Reconcile is ALREADY in orchestrator-session-start preflight §3 (merged-task sweep); only
         missing a GUARDED `git fetch origin master` bullet (note: a bare fetch in a skill is too side-effectful — guard
         it / make it explicit/opt-in) so the eligible set is never derived off the divergent local branch. Stale-queue
@@ -157,9 +164,12 @@ tasks:
       blocks: []
       owner: dot-agents
       write_scope:
-        - .agents/skills/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
       verification_required: false
       notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
         Bake into the standard delegation bundle/brief: (1) keep functions under Sonar cognitive-complexity 15
         (extract helpers; gocognit != Sonar); (2) write_scope MUST include the tests a change breaks; (3) front-load a
         read-only boundary for plan/review tasks; (4) a skipped/tagged cross-platform test is UNVERIFIED until its CI
@@ -167,7 +177,7 @@ tasks:
       app_type: docs
     - id: p2-scrub-stealth-leak
       title: 'P2: scrub agent-tool session-author leak in worktree handoffs'
-      status: pending
+      status: awaiting_owner_review
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -178,6 +188,7 @@ tasks:
         Secondary review agent worktree-era handoffs were authored with an agent-tool session-author string — an
         AI-attribution trace. Grep .agents/ (active/context/history) for the session-author pattern + similar; scrub any
         committed instances per the stealth mandate.
+        Impl done; PR #122 open, awaiting owner merge.
       app_type: docs
     - id: p3-tool-routing-doc
       title: 'P3: document primary-agent vs secondary-review-agent work routing'
