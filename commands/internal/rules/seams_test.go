@@ -10,29 +10,36 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
-// withReadFileStub swaps osReadFile for the duration of the test.
-func withReadFileStub(t *testing.T, stub func(string) ([]byte, error)) {
-	t.Helper()
-	orig := osReadFile
-	osReadFile = stub
-	t.Cleanup(func() { osReadFile = orig })
+// fakeRuleIO is the test ruleIO. Each nil func-field delegates to the real
+// stdRuleIO implementation, so a test overrides only the operation it wants
+// to fault-inject. Per docs/TEST_SEAMS.md this replaces the legacy
+// withReadFileStub / withListCanonicalRuleFilesStub / withResolveCanonicalRuleFileStub
+// package func-var swaps.
+type fakeRuleIO struct {
+	readFile func(string) ([]byte, error)
+	list     func(string, string) ([]platform.RuleFileSpec, error)
+	resolve  func(string, string, string) (*platform.RuleFileSpec, error)
 }
 
-// withListCanonicalRuleFilesStub swaps the platform.ListCanonicalRuleFiles seam.
-func withListCanonicalRuleFilesStub(t *testing.T, stub func(string, string) ([]platform.RuleFileSpec, error)) {
-	t.Helper()
-	orig := platformListCanonicalRuleFiles
-	platformListCanonicalRuleFiles = stub
-	t.Cleanup(func() { platformListCanonicalRuleFiles = orig })
+func (f fakeRuleIO) ReadFile(name string) ([]byte, error) {
+	if f.readFile != nil {
+		return f.readFile(name)
+	}
+	return stdRuleIO{}.ReadFile(name)
 }
 
-// withResolveCanonicalRuleFileStub swaps the platform.ResolveCanonicalRuleFile
-// seam.
-func withResolveCanonicalRuleFileStub(t *testing.T, stub func(string, string, string) (*platform.RuleFileSpec, error)) {
-	t.Helper()
-	orig := platformResolveCanonicalRuleFile
-	platformResolveCanonicalRuleFile = stub
-	t.Cleanup(func() { platformResolveCanonicalRuleFile = orig })
+func (f fakeRuleIO) ListCanonicalRuleFiles(agentsHome, scope string) ([]platform.RuleFileSpec, error) {
+	if f.list != nil {
+		return f.list(agentsHome, scope)
+	}
+	return stdRuleIO{}.ListCanonicalRuleFiles(agentsHome, scope)
+}
+
+func (f fakeRuleIO) ResolveCanonicalRuleFile(agentsHome, scope, name string) (*platform.RuleFileSpec, error) {
+	if f.resolve != nil {
+		return f.resolve(agentsHome, scope, name)
+	}
+	return stdRuleIO{}.ResolveCanonicalRuleFile(agentsHome, scope, name)
 }
 
 // ─── ExtractRuleFrontmatterDescription read-error branch ─────────────────────
@@ -43,9 +50,10 @@ func withResolveCanonicalRuleFileStub(t *testing.T, stub func(string, string, st
 // cover the swallowed-error guard.
 func TestExtractRuleFrontmatterDescription_ReadError(t *testing.T) {
 	sentinel := errors.New("read boom")
-	withReadFileStub(t, func(string) ([]byte, error) { return nil, sentinel })
+	deps := testDeps(false, false, false)
+	deps.IO = fakeRuleIO{readFile: func(string) ([]byte, error) { return nil, sentinel }}
 
-	if got := ExtractRuleFrontmatterDescription("/whatever"); got != "" {
+	if got := ExtractRuleFrontmatterDescription(deps, "/whatever"); got != "" {
 		t.Errorf("read-error path should yield empty string, got %q", got)
 	}
 }
@@ -64,11 +72,12 @@ func TestRunList_ListErrorPropagates(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	sentinel := errors.New("list boom")
-	withListCanonicalRuleFilesStub(t, func(string, string) ([]platform.RuleFileSpec, error) {
+	deps := testDeps(false, false, false)
+	deps.IO = fakeRuleIO{list: func(string, string) ([]platform.RuleFileSpec, error) {
 		return nil, sentinel
-	})
+	}}
 
-	err := RunList(testDeps(false, false, false), "global")
+	err := RunList(deps, "global")
 	if err == nil {
 		t.Fatal("expected error from list seam")
 	}
@@ -90,11 +99,12 @@ func TestFindRuleSpec_ResolveError(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	withResolveCanonicalRuleFileStub(t, func(string, string, string) (*platform.RuleFileSpec, error) {
+	deps := testDeps(false, false, false)
+	deps.IO = fakeRuleIO{resolve: func(string, string, string) (*platform.RuleFileSpec, error) {
 		return nil, errors.New("resolve boom")
-	})
+	}}
 
-	_, err := FindRuleSpec(testDeps(false, false, false), agentsHome, "global", "anything.md")
+	_, err := FindRuleSpec(deps, agentsHome, "global", "anything.md")
 	if err == nil {
 		t.Fatal("expected wrapped resolve error")
 	}

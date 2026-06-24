@@ -9,8 +9,8 @@ import (
 // canonicalSpec assembles the `da rules` resource spec by combining the
 // static cmdutil.RulesResource definition (Kind/DirSegment/strings/
 // Examples + EnsureScope) with the per-leaf runner closures that need
-// access to platformListCanonicalRuleFiles (the seam, not the platform
-// helper directly) + FindRuleSpec for hint-aware errors.
+// access to deps.io().ListCanonicalRuleFiles (the injected ruleIO seam, not
+// the platform helper directly) + FindRuleSpec for hint-aware errors.
 //
 // Per plan duplicate-density-drop: keeping this body as a single call
 // into cmdutil.SpecForResource means the only duplication across the
@@ -25,7 +25,7 @@ func canonicalSpec(deps Deps) cmdutil.CanonicalFileSpec {
 		cmdutil.RulesResource,
 		cmdutil.ResourceRunners{
 			List: func(agentsHome, scope string) ([]cmdutil.CanonicalFileEntry, error) {
-				specs, err := platformListCanonicalRuleFiles(agentsHome, scope)
+				specs, err := deps.io().ListCanonicalRuleFiles(agentsHome, scope)
 				if err != nil {
 					return nil, err
 				}

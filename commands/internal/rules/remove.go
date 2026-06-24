@@ -25,7 +25,7 @@ func FindRuleSpec(deps Deps, agentsHome, scope, name string) (*platform.RuleFile
 	if name == "" {
 		return nil, deps.UsageError("rule name is empty", "Pass the file name or stem shown by `da rules list`.")
 	}
-	spec, err := platformResolveCanonicalRuleFile(agentsHome, scope, name)
+	spec, err := deps.io().ResolveCanonicalRuleFile(agentsHome, scope, name)
 	if err != nil {
 		return nil, deps.ErrorWithHints(
 			fmt.Sprintf("rule not found: %s / %s", scope, name),
