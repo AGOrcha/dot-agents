@@ -88,9 +88,10 @@ file against the canonical AgentsRC layer schema (schemas/agentsrc.schema.json,
 spec config-distribution-model §13.1, §14).
 
 For each layer it reports pass/fail with the structured validation error on
-failure. Local-source layers are read directly from disk; remote-source layers
-that are not locally readable without a fetch are skipped (run ` + "`da config sync`" + `
-first, then re-run lint).
+failure. Local-source layers are read directly from disk; a locked remote-source
+layer is validated against its cached bytes (at the SHA recorded in
+.agentsrc.lock); a remote layer that is unlocked or not cached is skipped (run
+` + "`da config sync`" + ` first, then re-run lint).
 
 Exits non-zero if any layer is invalid. Skipped layers do not fail the command.`,
 		Example: exampleBlock(
@@ -164,8 +165,13 @@ func buildLintReport(projectPath string) (LintReport, error) {
 			sources[s.ID] = s
 		}
 	}
+	// Read the locked layer set once so a LOCKED remote layer can be validated
+	// against its cached bytes (not blanket-skipped). A malformed lockfile is not
+	// terminal here — every remote layer simply degrades to the unlocked-skip path
+	// with the sync hint, exactly as if nothing were locked.
+	locked, _ := cfg.ReadLockedLayers(projectPath)
 	for _, ext := range rc.Extends {
-		report.Results = append(report.Results, lintExtendsLayer(sch, ext, sources))
+		report.Results = append(report.Results, lintExtendsLayer(sch, ext, sources, locked))
 	}
 
 	sort.Slice(report.Results, func(i, j int) bool {
@@ -177,9 +183,13 @@ func buildLintReport(projectPath string) (LintReport, error) {
 
 // lintExtendsLayer validates one declared extends layer. Local-source layers are
 // read directly from disk at source.Path/layer-path (the same path localFetcher
-// reads). Remote layers (git/http/oci) are not reachable without a fetch from
-// this command, so they are reported as skipped — never as a false pass/fail.
-func lintExtendsLayer(sch *jsonschema.Schema, ext cfg.LayerRef, sources map[string]cfg.Source) LintResult {
+// reads). A remote layer (git/http/oci) that is LOCKED — present in
+// .agentsrc.lock with a resolved SHA whose bytes are in the local cache — is
+// validated against those cached bytes, so a corrupt cached remote layer fails
+// lint instead of slipping through. A remote layer that is unlocked or whose
+// bytes are not cached is skipped (run `da config sync` then lint), never a false
+// pass/fail.
+func lintExtendsLayer(sch *jsonschema.Schema, ext cfg.LayerRef, sources map[string]cfg.Source, locked map[string]cfg.LockedLayer) LintResult {
 	parts, err := cfg.ParseLayerRef(ext.Ref)
 	if err != nil {
 		return LintResult{File: ext.Ref, Status: lintFail, Detail: "invalid layer ref: " + err.Error()}
@@ -189,15 +199,28 @@ func lintExtendsLayer(sch *jsonschema.Schema, ext cfg.LayerRef, sources map[stri
 		return LintResult{File: ext.Ref, Status: lintFail, Detail: fmt.Sprintf("source %q not declared in %s", parts.SourceID, cfg.AgentsRCFile)}
 	}
 	if src.Type != "local" {
-		return LintResult{File: ext.Ref, Status: lintSkip, Detail: src.Type + " layer; not locally readable without a fetch (run `da config sync` then lint)"}
+		return lintRemoteLayer(sch, ext.Ref, parts, src, locked)
 	}
 	base := src.Path
 	if base == "" {
 		base = src.URL
 	}
 	path := filepath.Join(base, filepath.FromSlash(parts.LayerPath))
-	res := lintOneFile(sch, ext.Ref, path)
-	return res
+	return lintOneFile(sch, ext.Ref, path)
+}
+
+// lintRemoteLayer validates a remote (git/http/oci) extends layer against its
+// LOCKED cached bytes when available, else skips it. When the ref is locked and
+// its bytes are cached, the cached layer.json is parsed and schema-validated
+// exactly like a local layer (so a corrupt cached layer fails). Otherwise the
+// layer is unlocked or uncached and is skipped with the sync hint, so lint never
+// claims a clean bill on bytes it never read.
+func lintRemoteLayer(sch *jsonschema.Schema, ref string, parts cfg.LayerRefParts, src cfg.Source, locked map[string]cfg.LockedLayer) LintResult {
+	data, ok := cfg.LockedRemoteLayerBytes(parts, ref, locked)
+	if !ok {
+		return LintResult{File: ref, Status: lintSkip, Detail: src.Type + " layer; unlocked or not cached (run `da config sync` then lint)"}
+	}
+	return lintBytes(sch, LintResult{File: ref}, data)
 }
 
 // lintOneFile reads path, parses it as JSON, and validates the document against
@@ -215,6 +238,15 @@ func lintOneFile(sch *jsonschema.Schema, label, path string) LintResult {
 		}
 		return res
 	}
+	return lintBytes(sch, res, data)
+}
+
+// lintBytes parses data as JSON and validates the document against the compiled
+// AgentsRC schema, recording the outcome on res. It is the shared validation core
+// for an on-disk local layer (lintOneFile) and a cached remote layer's locked
+// bytes (lintRemoteLayer): a parse failure is an "invalid JSON" fail, a schema
+// violation is a fail with the jsonschema detail, and a clean document passes.
+func lintBytes(sch *jsonschema.Schema, res LintResult, data []byte) LintResult {
 	var doc any
 	if err := json.Unmarshal(data, &doc); err != nil {
 		res.Status = lintFail

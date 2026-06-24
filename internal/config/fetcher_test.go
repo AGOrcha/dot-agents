@@ -1856,3 +1856,76 @@ func TestValidateGitSourceURL(t *testing.T) {
 		t.Fatalf("want schema error for malformed url, got %v", err)
 	}
 }
+
+// --- exported locked-layer read helpers ------------------------------------
+
+// TestReadCachedLayerBytes covers the exported offline cache read used by lint:
+// a hit returns the seeded bytes, and an absent SHA returns ok=false.
+func TestReadCachedLayerBytes(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte(`{"version":2,"skills":["s"]}`)
+	if err := writeCachedLayer(layerCacheDir("acme", "org/base.json"), "deadbeef", body); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	got, ok := ReadCachedLayerBytes("acme", "org/base.json", "deadbeef")
+	if !ok || string(got) != string(body) {
+		t.Fatalf("hit = %q (ok=%v), want %q", got, ok, body)
+	}
+	if _, ok := ReadCachedLayerBytes("acme", "org/base.json", "nope"); ok {
+		t.Fatalf("absent SHA should miss")
+	}
+}
+
+// TestLockedRemoteLayerBytes drives the locked-layer cache resolution: a locked
+// ref whose bytes are cached returns them; an unlocked ref, a lock with an empty
+// SHA, and a locked-but-uncached ref all miss (ok=false) so lint skips them.
+func TestLockedRemoteLayerBytes(t *testing.T) {
+	withPackagesCache(t)
+	parts, err := ParseLayerRef("acme:org/base.json")
+	if err != nil {
+		t.Fatalf("parse ref: %v", err)
+	}
+	body := []byte(`{"version":2}`)
+	if err := writeCachedLayer(layerCacheDir("acme", "org/base.json"), "sha1", body); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	locked := map[string]LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "sha1"},
+		"acme:org/empty":     {ResolvedSHA: ""},
+		"acme:org/uncached":  {ResolvedSHA: "sha-missing"},
+	}
+
+	if got, ok := LockedRemoteLayerBytes(parts, "acme:org/base.json", locked); !ok || string(got) != string(body) {
+		t.Fatalf("locked+cached = %q (ok=%v), want %q", got, ok, body)
+	}
+	if _, ok := LockedRemoteLayerBytes(parts, "acme:org/unlocked", locked); ok {
+		t.Errorf("unlocked ref should miss")
+	}
+	if _, ok := LockedRemoteLayerBytes(parts, "acme:org/empty", locked); ok {
+		t.Errorf("empty-SHA lock should miss")
+	}
+	uncachedParts, _ := ParseLayerRef("acme:org/uncached")
+	if _, ok := LockedRemoteLayerBytes(uncachedParts, "acme:org/uncached", locked); ok {
+		t.Errorf("locked-but-uncached ref should miss")
+	}
+}
+
+// TestReadLockedLayers projects a written lock (legacy config section, migrated on
+// read) into the LockedLayer set keyed by extends ref.
+func TestReadLockedLayers(t *testing.T) {
+	withPackagesCache(t)
+	project := t.TempDir()
+	if err := WriteConfigLock(project, map[string]LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "abc123", FetchedAt: "2026-06-02T00:00:00Z"},
+	}); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	got, err := ReadLockedLayers(project)
+	if err != nil {
+		t.Fatalf("ReadLockedLayers: %v", err)
+	}
+	if l, ok := got["acme:org/base.json"]; !ok || l.ResolvedSHA != "abc123" {
+		t.Fatalf("locked layer = %+v (ok=%v), want resolved_sha abc123", l, ok)
+	}
+}

@@ -47,6 +47,30 @@ func readAllLimited(r io.Reader) ([]byte, error) {
 	return data, nil
 }
 
+// ReadLockedLayers reads the project's locked extends-layer set from
+// .agentsrc.lock, keyed by the as-declared extends ref. It reads through the §7A
+// units view (ReadUnits, which migrates a legacy config-only lock on read) and
+// projects only the `layer` units, so callers get the same offline lock surface
+// the resolver and verify paths consume. A missing/empty lock yields an empty
+// (non-nil) map; a malformed lock surfaces an error. It performs NO fetch.
+func ReadLockedLayers(projectPath string) (map[string]LockedLayer, error) {
+	return readLockedLayersFromUnits(projectPath)
+}
+
+// LockedRemoteLayerBytes resolves the cached bytes of a LOCKED remote layer:
+// given the parsed ref parts and the locked set, it returns the cached layer.json
+// bytes at the recorded SHA. ok is false (and bytes nil) when the ref is not
+// locked, has no resolved SHA, or its bytes are not in the local cache — the
+// caller then treats the layer as an unlocked/uncached remote (skip + sync hint).
+// It is read-only and never fetches.
+func LockedRemoteLayerBytes(parts LayerRefParts, ref string, locked map[string]LockedLayer) ([]byte, bool) {
+	lock, ok := locked[ref]
+	if !ok || lock.ResolvedSHA == "" {
+		return nil, false
+	}
+	return ReadCachedLayerBytes(parts.SourceID, parts.LayerPath, lock.ResolvedSHA)
+}
+
 // ImportFailReason classifies a config-layer import failure, mapping 1:1 to the
 // `reason` field of the config.import.failed audit event (spec §9, §11).
 type ImportFailReason string
@@ -220,6 +244,16 @@ func layerCacheDir(sourceID, layerPath string) string {
 // for them; the on-disk layout matches the packages/artifact cache.
 func cachedLayerPath(cacheDir, sha string) string {
 	return filepath.Join(cacheDir, digestDir(sha), "layer.json")
+}
+
+// ReadCachedLayerBytes returns the cached layer.json bytes for a source+layer at
+// the given resolved SHA/digest, read from the content-addressed layer cache with
+// NO fetch. ok is false when nothing is cached at that SHA. It is the exported,
+// offline read commands use to validate a LOCKED remote layer against the bytes
+// already on disk (e.g. `da config lint`), mirroring the resolver's offline
+// cache-hit path (readOneLockedLayer) without re-exposing the internal layout.
+func ReadCachedLayerBytes(sourceID, layerPath, sha string) ([]byte, bool) {
+	return readCachedLayer(layerCacheDir(sourceID, layerPath), sha)
 }
 
 // readCachedLayer returns the cached layer bytes for sha, or (nil,false) if not
