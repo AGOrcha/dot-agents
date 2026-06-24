@@ -23,25 +23,16 @@ const (
 	statusCodexDir                = ".codex"
 	statusAgentsDir               = ".agents"
 	statusOpenCodeDir             = ".opencode"
-	statusGitHubDir               = ".github"
 	statusLocalFileFmt            = "    %s○%s %s %s(local file)%s\n"
-	statusLocalFileIndentedFmt    = "      %s○%s %s %s(local file)%s\n"
-	statusCursorDir               = ".cursor"
-	statusAgentsMarkdown          = "AGENTS.md"
-	statusCopilotInstructions     = "copilot-instructions.md"
-	statusCopilotMCPJSON          = "mcp.json"
 	statusClaudeDir               = ".claude"
 	statusClaudeSettingsLocalJSON = "settings.local.json"
 	statusClaudeSettingsJSON      = "settings.json"
-	globalRulesPrefix             = "global--"
-	statusClaudeMCPJSON           = ".mcp.json"
-	statusCodexConfigToml         = "config.toml"
-	statusOpenCodeJSON            = "opencode.json"
-	statusVSCodeDir               = ".vscode"
 	// statusAuditLinkOkFormat and statusAuditLinkBrokenFormat are shared by
-	// the printSymlinkDirAudit / printSymlinkAudit helpers so per-platform
-	// audit output stays byte-identical across rules, MCP, agents, skills,
-	// hooks. Keep the 6-leading-space indentation; tests rely on it.
+	// the surviving printSymlinkDirAudit helper (still exported as
+	// PrintSymlinkDirAudit) so its audit output stays byte-identical. The
+	// per-platform audit renderers themselves moved to the
+	// internal/platform/<name>.go PrintAudit implementations in Phase 5.
+	// Keep the 6-leading-space indentation; tests rely on it.
 	statusAuditLinkOkFormat     = "      %s✓%s %s %s→ %s%s\n"
 	statusAuditLinkBrokenFormat = "      %s✗%s %s %s→ %s (broken)%s\n"
 )
@@ -796,23 +787,20 @@ func PrintAudit(name, path, agentsHome, agentFilter string, cfg *config.Config) 
 	printAudit(name, path, agentsHome, agentFilter, cfg)
 }
 
+// printAudit renders the per-platform audit block, dispatching over the
+// platform.AuditPrinter sister interface for every platform that survives the
+// agentFilter. Per Phase 5 of platform-driven-diagnostics the per-platform-
+// by-name helpers (printCursorAudit/printClaudeAudit/...) have moved into the
+// internal/platform/<name>.go PrintAudit implementations; this loop is the
+// single dispatch site, so adding a platform that implements AuditPrinter
+// surfaces in `da status --audit` and `da doctor --verbose` automatically.
 func printAudit(name, path, agentsHome, agentFilter string, cfg *config.Config) {
 	fmt.Fprintln(os.Stdout)
 
-	if agentFilter == "" || agentFilter == "cursor" {
-		printCursorAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "claude" {
-		printClaudeAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "codex" {
-		printCodexAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "opencode" {
-		printOpenCodeAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "copilot" {
-		printCopilotAudit(name, path)
+	for _, p := range platform.Filter(platform.All(), agentFilter) {
+		if ap, ok := p.(platform.AuditPrinter); ok {
+			ap.PrintAudit(os.Stdout, name, path, agentsHome)
+		}
 	}
 	printSharedTargetRegistry(name, path, cfg)
 }
@@ -953,87 +941,6 @@ func appendUserConfigPlatformBadge(badges []platformBadge, label, homeDir string
 	return badges
 }
 
-// cursorRuleSourceInfo classifies a cursor rule entry into srcType
-// ("global"|"project"|"local") and returns the user-display path it should
-// link to (empty for local files).
-func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo string) {
-	switch {
-	case strings.HasPrefix(entryName, globalRulesPrefix):
-		srcName := strings.TrimPrefix(entryName, globalRulesPrefix)
-		return "global", "~/.agents/rules/global/" + srcName
-	case strings.HasPrefix(entryName, projectName+"--"):
-		srcName := strings.TrimPrefix(entryName, projectName+"--")
-		return "project", "~/.agents/rules/" + projectName + "/" + srcName
-	}
-	return "local", ""
-}
-
-// printCursorRuleEntry renders one cursor rule entry's audit line.
-func printCursorRuleEntry(name, rulesDir, agentsHome string, entryName string) {
-	srcType, linkedTo := cursorRuleSourceInfo(entryName, name)
-	if srcType == "local" {
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
-		return
-	}
-	f := filepath.Join(rulesDir, entryName)
-	srcPath := strings.Replace(linkedTo, "~/.agents", agentsHome, 1)
-	srcPath = strings.Replace(srcPath, "~", os.Getenv("HOME"), 1)
-	if linked, _ := links.AreHardlinked(f, srcPath); linked {
-		fmt.Fprintf(os.Stdout, "      %s✓%s %s %s← %s%s\n", ui.Green, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s!%s %s %s(not linked to %s)%s\n", ui.Yellow, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
-	}
-}
-
-// printCursorRules renders all valid cursor rule entries in rulesDir; returns
-// the count of entries actually rendered (used to detect empty rule sets).
-func printCursorRules(name, rulesDir, agentsHome string, entries []os.DirEntry) int {
-	count := 0
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), ".dot-agents-backup") {
-			continue
-		}
-		printCursorRuleEntry(name, rulesDir, agentsHome, e.Name())
-		count++
-	}
-	return count
-}
-
-// printCursorMCPLink renders the .cursor/mcp.json audit line.
-func printCursorMCPLink(path string) {
-	cursorMCPPath := filepath.Join(path, statusCursorDir, statusCopilotMCPJSON)
-	if _, err := os.Lstat(cursorMCPPath); err != nil {
-		fmt.Fprintf(os.Stdout, "      %s-%s .cursor/mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	dest, isLink, isBroken := managedLinkBroken(cursorMCPPath)
-	if !isLink {
-		fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s(hard link or local file)%s\n", ui.Green, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	displayDest := config.DisplayPath(resolveLinkDest(cursorMCPPath, dest))
-	if isBroken {
-		fmt.Fprintf(os.Stdout, "      %s✗%s .cursor/mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-	}
-}
-
-func printCursorAudit(name, path, agentsHome string) {
-	fmt.Fprintf(os.Stdout, "    %sCursor%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, statusCursorDir, "rules")
-	entries, err := os.ReadDir(rulesDir)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "      %s(no .cursor/rules/)%s\n", ui.Dim, ui.Reset)
-		return
-	}
-	if printCursorRules(name, rulesDir, agentsHome, entries) == 0 {
-		fmt.Fprintf(os.Stdout, "      %s(no rules)%s\n", ui.Dim, ui.Reset)
-	}
-	printCursorMCPLink(path)
-	fmt.Fprintln(os.Stdout)
-}
-
 // PrintSymlinkDirAudit is the exported entry point used by
 // commands/seams_test.go (still in root before t11). Reversed when t11 splits
 // the test file per cluster.
@@ -1071,179 +978,4 @@ func printSymlinkDirAudit(dir, emptyLabel, nameFormat string) (int, int) {
 		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(empty)%s\n", ui.Dim, ui.Reset, emptyLabel, ui.Dim, ui.Reset)
 	}
 	return okCount, brokenCount
-}
-
-// printSymlinkAudit reads a single symlink and prints its ✓/✗/(local file)/
-// (not linked) status with the supplied display label. A present path that is
-// not a managed link is a rendered/managed file on disk (e.g. .mcp.json,
-// .vscode/mcp.json), reported as "(local file)"; "(not linked)" is reserved
-// for a path that is truly absent.
-func printSymlinkAudit(linkPath, label string) {
-	if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink {
-		displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
-		if isBroken {
-			fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-		} else {
-			fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-		}
-		return
-	}
-	if _, err := os.Lstat(linkPath); err == nil {
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-}
-
-func printClaudeAudit(_, path, _ string) {
-	fmt.Fprintf(os.Stdout, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, statusClaudeDir, "rules")
-	if _, err := os.ReadDir(rulesDir); err != nil {
-		fmt.Fprintf(os.Stdout, "      %s(no %s/rules/)%s\n", ui.Dim, statusClaudeDir, ui.Reset)
-		fmt.Fprintln(os.Stdout)
-		return
-	}
-	printSymlinkDirAudit(rulesDir, statusClaudeDir+"/rules/", "%s")
-	// Claude MCP link (.mcp.json)
-	printSymlinkAudit(filepath.Join(path, statusClaudeMCPJSON), ".mcp.json")
-	fmt.Fprintln(os.Stdout)
-}
-
-func printCodexAudit(_, path, _ string) {
-	fmt.Fprintf(os.Stdout, "    %sCodex%s\n", ui.Cyan, ui.Reset)
-	printCodexAgentsMD(filepath.Join(path, statusAgentsMarkdown))
-	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusCodexConfigToml), ".codex/config.toml")
-	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusHooksJSON), ".codex/hooks.json")
-	printCodexSkillsAudit(filepath.Join(path, statusAgentsDir, "skills"))
-	printCodexAgentsAudit(filepath.Join(path, statusCodexDir, "agents"))
-	fmt.Fprintln(os.Stdout)
-}
-
-func printCodexAgentsMD(path string) {
-	if _, err := os.Lstat(path); err == nil {
-		if _, isLink, _ := managedLinkBroken(path); isLink {
-			printLinkedStatusLine(statusAgentsMarkdown, path)
-			return
-		}
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, statusAgentsMarkdown, ui.Dim, ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "      %s(no %s)%s\n", ui.Dim, statusAgentsMarkdown, ui.Reset)
-}
-
-func printCodexSymlinkAudit(path, label string) {
-	if _, isLink, _ := managedLinkBroken(path); isLink {
-		printLinkedStatusLine(label, path)
-		return
-	}
-	// A present-but-not-a-symlink path is a rendered/managed file on disk
-	// (e.g. .codex/hooks.json, .codex/config.toml), not an absent link.
-	// Only "(not linked)" when the path is truly absent.
-	if _, err := os.Lstat(path); err == nil {
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-}
-
-func printCodexSkillsAudit(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	okCount, brokenCount := 0, 0
-	for _, entry := range entries {
-		linkPath := filepath.Join(dir, entry.Name())
-		if _, isLink, _ := managedLinkBroken(linkPath); !isLink {
-			continue
-		}
-		if printLinkedStatusLine(".agents/skills/"+entry.Name(), linkPath) {
-			okCount++
-		} else {
-			brokenCount++
-		}
-	}
-	if okCount == 0 && brokenCount == 0 {
-		fmt.Fprintf(os.Stdout, "      %s○%s .agents/skills/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
-}
-
-func printCodexAgentsAudit(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	okCount, brokenCount := 0, 0
-	for _, entry := range entries {
-		linkPath := filepath.Join(dir, entry.Name())
-		if _, err := os.Stat(linkPath); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s .codex/agents/%s %s(native TOML)%s\n", ui.Green, ui.Reset, entry.Name(), ui.Dim, ui.Reset)
-			okCount++
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s .codex/agents/%s %s(unreadable)%s\n", ui.Red, ui.Reset, entry.Name(), ui.Dim, ui.Reset)
-			brokenCount++
-		}
-	}
-	if okCount == 0 && brokenCount == 0 {
-		fmt.Fprintf(os.Stdout, "      %s○%s .codex/agents/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
-}
-
-func printLinkedStatusLine(label, linkPath string) bool {
-	dest, _, isBroken := managedLinkBroken(linkPath)
-	displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
-	if !isBroken {
-		fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-		return true
-	}
-	fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-	return false
-}
-
-func printOpenCodeAudit(_, path, _ string) {
-	fmt.Fprintf(os.Stdout, "    %sOpenCode%s\n", ui.Cyan, ui.Reset)
-
-	// opencode.json symlink
-	opencodeJSON := filepath.Join(path, statusOpenCodeJSON)
-	if _, err := os.Lstat(opencodeJSON); err == nil {
-		if dest, isLink, isBroken := managedLinkBroken(opencodeJSON); isLink {
-			displayDest := config.DisplayPath(resolveLinkDest(opencodeJSON, dest))
-			if isBroken {
-				fmt.Fprintf(os.Stdout, "      %s✗%s opencode.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✓%s opencode.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s○%s opencode.json %s(local file)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-		}
-	}
-
-	// .opencode/agent/ directory
-	opencodeAgentDir := filepath.Join(path, statusOpenCodeDir, "agent")
-	if _, err := os.ReadDir(opencodeAgentDir); err == nil {
-		printSymlinkDirAudit(opencodeAgentDir, ".opencode/agent/", ".opencode/agent/%s")
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s(no .opencode/)%s\n", ui.Dim, ui.Reset)
-	}
-	fmt.Fprintln(os.Stdout)
-}
-
-func printCopilotAudit(_, path string) {
-	fmt.Fprintf(os.Stdout, "    %sGitHub Copilot%s\n", ui.Cyan, ui.Reset)
-	instructionsPath := filepath.Join(path, statusGitHubDir, statusCopilotInstructions)
-	if _, err := os.Lstat(instructionsPath); err == nil {
-		if dest, isLink, isBroken := managedLinkBroken(instructionsPath); isLink {
-			displayDest := config.DisplayPath(resolveLinkDest(instructionsPath, dest))
-			if isBroken {
-				fmt.Fprintf(os.Stdout, "      %s✗%s .github/copilot-instructions.md %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✓%s .github/copilot-instructions.md %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			}
-		}
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
-	// Copilot MCP link (.vscode/mcp.json)
-	printSymlinkAudit(filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON), ".vscode/mcp.json")
-	fmt.Fprintln(os.Stdout)
 }

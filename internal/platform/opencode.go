@@ -3,6 +3,8 @@ package platform
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
@@ -202,6 +205,41 @@ func (o *opencode) BrokenLinks(_, repoPath, _ string) []BrokenLink {
 		Dest:        raw,
 		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
 	}}
+}
+
+// PrintAudit implements AuditPrinter for the opencode platform: it renders the
+// opencode.json link and the .opencode/agent/ link directory. Moved verbatim
+// (output preserved) from the lifecycle-side printOpenCodeAudit in Phase 5.
+func (o *opencode) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sOpenCode%s\n", ui.Cyan, ui.Reset)
+	opencodePrintConfigLink(w, filepath.Join(repoPath, opencodeJSON))
+
+	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
+	if _, err := os.ReadDir(agentDir); err == nil {
+		printSymlinkDirAudit(w, agentDir, ".opencode/agent/", ".opencode/agent/%s")
+	} else {
+		fmt.Fprintf(w, "      %s(no .opencode/)%s\n", ui.Dim, ui.Reset)
+	}
+	fmt.Fprintln(w)
+}
+
+// opencodePrintConfigLink renders the opencode.json audit line to w. An absent
+// file prints nothing (preserving the historical printOpenCodeAudit behavior);
+// a managed link prints ✓/✗ with its resolved target; a present non-link is a
+// local file rendered with the ○ marker.
+func opencodePrintConfigLink(w io.Writer, opencodeJSONPath string) {
+	if _, err := os.Lstat(opencodeJSONPath); err != nil {
+		return
+	}
+	state, raw := classifyManagedLink(opencodeJSONPath)
+	switch state {
+	case linkStateNotALink:
+		fmt.Fprintf(w, "      %s○%s opencode.json %s(local file)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+	case linkStateBroken:
+		fmt.Fprintf(w, "      %s✗%s opencode.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest(opencodeJSONPath, raw), ui.Reset)
+	default:
+		fmt.Fprintf(w, "      %s✓%s opencode.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest(opencodeJSONPath, raw), ui.Reset)
+	}
 }
 
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
