@@ -48,7 +48,8 @@
           "lens_set": [
             "architecture-standards",
             "acceptance-invariants",
-            "adversarial"
+            "adversarial",
+            "cross-harness-adversarial"
           ],
           "lens_concurrency": "gated"
         }
@@ -97,6 +98,38 @@
             "architecture-standards",
             "acceptance-invariants",
             "adversarial"
+          ],
+          "lens_concurrency": "parallel"
+        }
+      },
+      "docs": {
+        "relevance": {
+          "verify": {
+            "core": [
+              "verifier"
+            ]
+          },
+          "review": {
+            "core": [
+              "architecture-standards",
+              "acceptance-invariants"
+            ]
+          }
+        },
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 1,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "citation-check",
+            "cli-runner"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants"
           ],
           "lens_concurrency": "parallel"
         }
@@ -206,6 +239,14 @@
           "reviewers/reviewer.base.md",
           "reviewers/architecture-standards.md",
           "reviewers/architecture-standards.project.md"
+        ]
+      },
+      "cross-harness-adversarial": {
+        "label": "Cross-harness adversarial lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/cross-harness-adversarial.md",
+          "reviewers/cross-harness-adversarial.project.md"
         ]
       }
     }

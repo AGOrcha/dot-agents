@@ -75,3 +75,13 @@ da workflow verify record --kind custom --status <pass|fail|partial|unknown> \
 
 A binary that builds and smokes clean but is missing the task's intended command — or returns the
 wrong content for it — is `missing-feature`, not `ok`.
+
+## 5. Quality-gate thresholds (project overlay)
+
+The locally-reproducible gate is the SonarCloud quality gate, not a local linter (literals in
+`docs/PROJECT_OVERLAY.md`):
+
+- **Cognitive complexity ≤ 15 (SonarCloud S3776).** `gocognit` ≠ S3776 — pin to the gate metric, not
+  the linter (a function can pass `gocognit` and still trip S3776, or vice versa).
+- **Analysis exclusions:** SonarCloud excludes `dist/` and `.scannerwork/`; do not let
+  generated/build output skew the gate.

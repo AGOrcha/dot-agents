@@ -303,9 +303,9 @@ func TestStarterVerifierSurfaceCrossReference(t *testing.T) {
 	}
 }
 
-// TestCopyStarterAssetsIncludesReviewerLensAgents asserts the three named
+// TestCopyStarterAssetsIncludesReviewerLensAgents asserts the named
 // reviewer-lens agent definitions (architecture-standards, acceptance-invariants,
-// adversarial) land via CopyMissingStarterAssets. Each lens is a separately
+// adversarial, cross-harness-adversarial) land via CopyMissingStarterAssets. Each lens is a separately
 // spawnable bounded reviewer per the staged-dispatch contract, and the
 // starter is the canonical distribution channel. Missing files here would
 // silently degrade the staged-runtime review stage to inlined-prose lookup
@@ -315,7 +315,7 @@ func TestCopyStarterAssetsIncludesReviewerLensAgents(t *testing.T) {
 	if err := CopyMissingStarterAssets(tmp); err != nil {
 		t.Fatalf("CopyMissingStarterAssets: %v", err)
 	}
-	for _, lens := range []string{"architecture-standards", "acceptance-invariants", "adversarial"} {
+	for _, lens := range []string{"architecture-standards", "acceptance-invariants", "adversarial", "cross-harness-adversarial"} {
 		path := filepath.Join(tmp, "agents", "global", lens+"-reviewer", "AGENT.md")
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("expected reviewer lens agent file missing: %s (err: %v)", path, err)
