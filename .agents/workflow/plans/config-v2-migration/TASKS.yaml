@@ -364,7 +364,7 @@ tasks:
       app_type: go-cli
     - id: p7-v1-deprecation-warnings
       title: 'Phase 7: v1 surface deprecation warnings (post-soak)'
-      status: awaiting_owner_review
+      status: completed
       depends_on:
         - p4b-app-types-snapshot-refactor
         - p4f-units-lock-7a-wiring
@@ -400,7 +400,7 @@ tasks:
 
         Open question for the user: how long is the soak window? Recommended: 2 minor releases. Document in §5 of dependency-map proposal.
 
-        Impl done; PR #123 open, awaiting owner merge.
+        Landed: merged to master via PR #123 (wave-2 state sync).
       app_type: go-cli
     - id: p1c-verifier-profile-source-aware
       title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
@@ -425,7 +425,7 @@ tasks:
       app_type: go-cli
     - id: p7b-v1-auto-migrator
       title: 'Phase 7b: v1→v2 auto-migrator with 1-day sunset'
-      status: pending
+      status: awaiting_owner_review
       depends_on:
         - p7-v1-deprecation-warnings
       blocks: []
@@ -447,6 +447,8 @@ tasks:
         5. Idempotent: running on already-v2 file is a no-op
 
         After this phase ships + the 1-day sunset window passes, v1 loading is REMOVED entirely (becomes a separate small PR after p7b proves the migrator covers).
+
+        Impl done; PR #138 (da config migrate, v1→v2) open, awaiting owner merge.
       app_type: go-cli
     - id: p4d-da-install-repurpose
       title: 'Phase 4d: repurpose da install per spec §13.3'
@@ -464,7 +466,7 @@ tasks:
       app_type: go-cli
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the config-v2 minor'
-      status: pending
+      status: completed
       depends_on:
         - p0-schema-additive-extension
         - p0b-repo-id-bootstrap
@@ -504,6 +506,9 @@ tasks:
         Action: bump VERSION + finalize the CHANGELOG "## [<target>]" section
         documenting the v2 config model. Merge to master fires auto-release.yml.
         Becomes eligible only once every dependency is completed.
+
+        Landed: 0.4.0 PUBLISHED (VERSION=0.4.0, CHANGELOG ## [0.4.0] - 2026-06-23) via
+        release PR #114. ARCHIVE-eligible (wave-2 state sync).
       app_type: release
     - id: p4f-units-lock-7a-wiring
       title: 'Phase 4f: wire §7A units lock (inputs_digest + units) into resolve/sync; verify tracks local-scope drift'
@@ -547,7 +552,7 @@ tasks:
       app_type: go-cli
     - id: p4g-da-install-units-sync
       title: 'Phase 4g: re-scope da install onto EnsureResolved + exact/prune projection (§15)'
-      status: awaiting_agent_review
+      status: completed
       depends_on:
         - p4f-units-lock-7a-wiring
         - p4c-config-sync-lint
@@ -604,6 +609,10 @@ tasks:
             legacy behavior of treating link/projection failures as warnings that still finalize
             success. Test: a forced projection failure must fail the install (or stamp incomplete),
             never report success with a current lock.
+
+        Landed: merged to master via PR #92 (install.go uses config.EnsureResolved +
+        RunSharedTargetProjectionExact with --inexact opt-out, fb6caf36). Status was stale
+        awaiting_agent_review from the #126 sync; reconciled to completed (wave-2 state sync).
       app_type: go-cli
     - id: p4h-agentslock-interprocess-lock
       title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
@@ -644,7 +653,7 @@ tasks:
       app_type: go-cli
     - id: lint-validate-locked-remote-layers
       title: 'Fast-follow: da config lint validates locked+cached remote layers (not blanket-skip)'
-      status: pending
+      status: completed
       depends_on:
         - p4c-config-sync-lint
         - p4f-units-lock-7a-wiring
@@ -680,4 +689,6 @@ tasks:
         Acceptance: a fixture with a locked remote (git) layer whose CACHED bytes are corrupt JSON makes
         lint FAIL (not skip); an unlocked/uncached remote layer still SKIPs with the sync hint; a valid
         cached remote layer PASSes.
+
+        Landed: merged to master via PR #127 (wave-2 state sync).
       app_type: go-cli

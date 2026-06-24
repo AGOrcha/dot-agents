@@ -4,8 +4,8 @@ title: Platform-driven diagnostics (doctor + status delegate to internal/platfor
 status: active
 summary: Migrate doctor + status from per-platform-by-name helpers to sister-interface dispatch over internal/platform.Platform.All(). 7 phases per .agents/proposals/codex-019e6245-examination-and-sequenced-plan.md (recovered). Multi-agent (cursor/claude/codex/copilot/opencode) + multi-OS (cross-platform via internal/links/).
 created_at: "2026-05-27T16:48:39Z"
-updated_at: "2026-06-22T20:30:08Z"
+updated_at: "2026-06-24T05:01:41Z"
 owner: dot-agents
 success_criteria: ""
 verification_strategy: ""
-current_focus_task: 'P5: AuditPrinter + delete per-platform helpers'
+current_focus_task: 'Release record: capability folds into 0.3.3 (no separate bump)'

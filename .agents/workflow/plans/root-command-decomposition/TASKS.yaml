@@ -785,7 +785,7 @@ tasks:
         (e.g. internal/architest).
     - id: t15-direct-followup-interface-di
       title: 'Direct follow-up: land interface-DI on the new lifecycle + mcp/settings/rules subpackages'
-      status: pending
+      status: completed
       depends_on:
         - t14-import-graph-assertion
       blocks: []
@@ -806,9 +806,13 @@ tasks:
         author as a sibling plan. Decide based on whether seam-
         interface-di's existing leaves (kg-pkg, skills-pkg, agents-
         pkg, platform-pkg) have shipped by the time this opens.
+
+        Landed: merged to master via PR #140 (interface-DI on mcp/settings/rules
+        subpackages). The lifecycle-cluster conversion was deferred to a separate
+        unit (see t17-lifecycle-interface-di) (wave-2 state sync).
     - id: t16-update-docs
       title: Update docs to reflect new package layout
-      status: pending
+      status: completed
       depends_on:
         - t14-import-graph-assertion
       blocks: []
@@ -824,6 +828,8 @@ tasks:
         also lifecycle home" shape. Cross-link the proposal at
         .agents/proposals/root-command-decomposition.md and mark it
         resolved.
+
+        Landed: merged to master via PR #137 (docs reconcile new package layout) (wave-2 state sync).
     - id: t13a-strip-resource-subpackage-shims
       title: Delete mcp/settings/rules root shims + rewire 3 root.go AddCommand lines + dead callers
       status: completed
@@ -1038,3 +1044,19 @@ tasks:
         coverage stays clean. cmd/da/main.go must compile
         unchanged.
       app_type: code-fix
+    - id: t17-lifecycle-interface-di
+      title: 'Convert commands/internal/lifecycle/ from func-var seams to interface-DI (deferred from t15)'
+      status: pending
+      depends_on:
+        - t15-direct-followup-interface-di
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/internal/lifecycle/
+      verification_required: true
+      notes: |-
+        Convert `commands/internal/lifecycle/` from func-var seams to
+        interface-DI as ONE unit (deferred from t15 — 13.9k LOC, ~8 seams
+        entangled with the init-time/import-cycle wiring from t13a/t13b).
+        Large; own PR.
+      app_type: go-cli
