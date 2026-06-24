@@ -493,9 +493,46 @@ revision; O4 now commits these schema points alongside the typed-node posture:
 - **Edge catalog revised:** spec→plan is **one-to-many**; proposal→spec
   (one-or-more, split-off/derived); a **spec↔spec** edge family
   (supersedes/derived-from/related-to) was added; an explicit **task→plan FK**
-  (`belongs_to_plan`) was added; and **result→plan is intentionally OMITTED**
-  (result→spec and result→task only; the plan is reachable transitively). Each
-  cardinality is grounded in a real repo case in the draft's §6 ledger.
+  (`belongs_to_plan`) was added. Each cardinality is grounded in a real repo case
+  in the draft's §6 ledger.
+
+**Schema v3 fold-in (2026-06-24, Codex + Cursor adversarial reconciliation).**
+The companion draft was hardened a second time against a Codex review and a Cursor
+review (both PR-comment artifacts on #136), each finding re-verified against the
+cited on-disk code/schema before acceptance. The schema-changing outcomes O4 now
+also commits (full accept/reject ledger in the draft's §5A):
+
+- **Composite identity.** task/result ids are PLAN-LOCAL and cross-plan deps are
+  code-enforced (`commands/workflow/base_resolution.go:223`, `<plan>/<task>` form).
+  The node keys are now composite — `task_key = plan_id + "/" + task_id`,
+  `result_key = wave + "/" + result_id` — with `plan_id` promoted onto the task and
+  result nodes so `result_for_task → belongs_to_plan` is unambiguous.
+- **app_type is on disk + gets provenance.** `CanonicalTask.AppType` exists
+  (`commands/workflow/types.go`) and live TASKS (e.g. `docs-starlight-migration`)
+  carry it, so task `app_type` is a **mirror**, not `[PROPOSED]` (the prior claim
+  was wrong). Added resolution-provenance fields (`app_type_source`, `matched`,
+  `resolved_profile_ref`, `source`, `version` per `docs/CONFIG_RELEVANCE.md` +
+  app-type-profiles), an **`app_type_profile` node** (the referent the ref form
+  needs), and `resolves_to`/`produced_under_profile_ref` join edges so "which
+  profile backed this run" is queryable.
+- **Outcome.** stored `outcome` now mirrors iter-log `verifiers[].status`
+  `[pass,fail,partial,unknown]` EXACTLY; `regressed` moved to a **derived
+  `outcome_rollup`** scoring field kept separate from the raw status.
+- **result→plan restored for waves.** dropping it entirely broke wave/fold_back
+  results (which span many tasks and have no single task FK); a `result_for_plan`
+  anchor is added for those kinds (task-scoped results still use `result_for_task`).
+- **Operational-knowledge materialization, scope anchoring, version/content-hash.**
+  `result`/`lesson` gained `rubric_dimensions`/`evidence_kind`/`surface_vs_path`/
+  `tags`; a `scope_root` node + `in_scope_of` edge anchor the scope axis; rule/
+  lesson/skill/stage_profile gained `content_hash`/`version` so the Q3 feedback
+  loop scores against the version that actually fired (O5 content-hash primitive).
+
+**Flagged schema-drift fix-task (NOT done in #136).** `schemas/workflow-tasks.schema.json`
+has `additionalProperties: false` and omits `app_type`, so it **rejects** the
+`app_type` field `CanonicalTask` + live TASKS.yaml already use. This is a real
+bug; recommended fix-task (add the optional `app_type` property, route via
+`da workflow`, scope = the schema file only) is recorded in the draft's §5. It is
+intentionally out of this docs-only PR.
 
 ### Blast radius / reversibility
 
@@ -892,7 +929,7 @@ first pass.
 | **O1** | Keep the **mechanical (no-ack) cutover gate** for v1; close §14 Q2 as "no opt-out" (its lean is stale vs ratified §10.3). | t5 | before t5 |
 | **O2** | **In-process HMAC** token signing (per-process ephemeral key) for v1; defer asymmetric to the `http`-backend milestone. | t1 (N13) | before t1 |
 | **O3** | **ACCEPTED** — `t7-app-type-profiles-wiring` being filed (`depends_on: [t1]`, `blocks: [release-minor]`); app-type spec/plan now coupled to the KG schema (open `app_type` vocab) and needs further development together. | release-minor | parallel w/ t2–t4 |
-| **O4** | **Typed nodes + `KGNote` projection** (honors D1′ tiers). Revised: OPEN `app_type` vocab, on-disk field mirroring, **proposal+lesson as first-class scoped nodes**, spec→plan one-to-many, proposal→spec, spec↔spec + task→plan edges, result→plan dropped. | work-tracking plan (future) | design now, build deferred |
+| **O4** | **Typed nodes + `KGNote` projection** (honors D1′ tiers). Schema v3 (Codex + Cursor reconciliation): composite `task_key`/`result_key` identity, app_type provenance + `app_type_profile` join node, raw-vs-derived outcome split, operational materialization fields, `scope_root` anchor, version/content-hash on correlation targets, `result_for_plan` anchor for waves. Flagged: `workflow-tasks.schema.json` app_type drift (separate fix-task). | work-tracking plan (future) | design now, build deferred |
 | **O5** | Adopt all five spec recommendations: **content-hash mutation; new-note revocation; depth-1 code hops + unbounded note-chains; taint persists until `kg refresh`; load-bearing LinkKind allowlist**. | t2, t4 | before t2 |
 | **O6** | **Fold A/C/D (testability gaps) into §11.1/§11.6 before t4; defer/reject G** (SQL-callable views break no-raw-SQL). | t4, t6 | before t4 (after re-reading the proposal) |
 | **O7** | **Executor sits ABOVE the `Store` seam**; add a one-paragraph reconciliation note to both specs. Orthogonal swap dimensions. | t1 | before t1 |
