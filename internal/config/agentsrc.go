@@ -230,6 +230,15 @@ type AgentsRC struct {
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+
+	// LegacyKeys lists the deprecated v1 JSON keys observed in the source
+	// manifest during UnmarshalJSON (verifier_profiles / reviewer_profiles /
+	// app_type_verifier_map). These keys are silently folded into the unified
+	// stage_profiles / execution_profile model (see foldLegacyProfiles) and
+	// never re-emitted; recording them here lets `da init` / `da doctor`
+	// surface a deprecation warning without re-parsing the file (config-v2
+	// §15.3 deprecation cadence). Not serialized.
+	LegacyKeys []string `json:"-"`
 }
 
 // PredicateSpec is the config-facing mirror of the commands/workflow Predicate:
@@ -663,7 +672,22 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 			a.ExtraFields[k] = v
 		}
 	}
+	a.recordLegacyKeys(all)
 	return nil
+}
+
+// recordLegacyKeys captures any deprecated v1 keys present in the raw manifest
+// into a.LegacyKeys (sorted for stable output). The keys are decoded and folded
+// elsewhere; this is purely the bookkeeping that lets init/doctor warn.
+func (a *AgentsRC) recordLegacyKeys(all map[string]json.RawMessage) {
+	var seen []string
+	for _, k := range deprecatedV1Keys {
+		if _, ok := all[k]; ok {
+			seen = append(seen, k)
+		}
+	}
+	sort.Strings(seen)
+	a.LegacyKeys = seen
 }
 
 func (a AgentsRC) MarshalJSON() ([]byte, error) {

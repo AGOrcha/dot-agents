@@ -255,6 +255,8 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 
 	ui.Header("da init")
 
+	warnLegacyManifestInCwd()
+
 	// Check existing
 	ui.Step("Checking existing installation...")
 	if _, err := os.Stat(agentsHome); err == nil {
@@ -326,6 +328,26 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 		"Check health: da doctor",
 	)
 	return nil
+}
+
+// warnLegacyManifestInCwd surfaces a v1 deprecation notice when the current
+// working directory holds a legacy (pre-v2) .agentsrc.json. da init bootstraps
+// the shared store and writes v2-shaped manifests, so a v1 file in the repo
+// being initialized is worth flagging — the file still loads, the warning only
+// nudges toward v2 (config-v2 §15.3). Best-effort: a missing/unreadable
+// manifest is silent (the common fresh-repo case).
+func warnLegacyManifestInCwd() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	rc, err := config.LoadAgentsRC(cwd)
+	if err != nil {
+		return
+	}
+	if w := config.DetectV1Deprecation(rc); w.Detected {
+		ui.Bullet("warn", w.Message()+"  hint: da config migrate")
+	}
 }
 
 // sidecarBackupFile preserves an unmanaged occupant before links replaces it
