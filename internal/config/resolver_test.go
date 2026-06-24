@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -582,7 +583,12 @@ func TestLayeredResolverProtectedFieldDroppedFromImportedLayer(t *testing.T) {
 	}
 }
 
-func TestLayeredResolverTierConstraintOCIFails(t *testing.T) {
+// TestLayeredResolverOCILayerResolvesEndToEnd asserts an OCI-sourced config
+// layer resolves through extends and merges like any other layer
+// (config-distribution-model §15 D13: full source/kind orthogonality). An
+// ociLayerFetcher with a fake puller serves the layer blob with the config-layer
+// media type; the resolver merges it with no special-casing.
+func TestLayeredResolverOCILayerResolvesEndToEnd(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	repo := t.TempDir()
 	writeManifest(t, repo, `{
@@ -590,7 +596,44 @@ func TestLayeredResolverTierConstraintOCIFails(t *testing.T) {
 		"sources": [{"id": "reg", "type": "oci", "url": "oci://example/reg"}],
 		"extends": ["reg:org/base.json"]
 	}`)
-	_, err := NewLayeredResolver().Resolve(repo)
+	body := []byte(`{"skills":["from-oci"]}`)
+	digest := "sha256:" + sha256Hex(body)
+	fetcher := &ociLayerFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
+		return ociBlob{Data: body, Digest: digest, MediaType: ociLayerMediaType}, nil
+	}}
+	snap, err := NewLayeredResolver().WithFetcher("oci", fetcher).Resolve(repo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := activeValue(findProvenance(snap, "skills")); !reflect.DeepEqual(got, []any{"from-oci"}) {
+		t.Errorf("skills = %v, want [from-oci]", got)
+	}
+	// The lockfile records the OCI-resolved digest as the layer's resolved SHA.
+	locked, err := readLockedLayersFromUnits(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if locked["reg:org/base.json"].ResolvedSHA != digest {
+		t.Errorf("locked sha = %q, want %q", locked["reg:org/base.json"].ResolvedSHA, digest)
+	}
+}
+
+// TestLayeredResolverOCILayerRejectsArtifactMediaType asserts the kind guard
+// flows through the resolver: an extends ref whose OCI blob carries the
+// artifact-bundle media type fails as a schema error (the layer fetcher's guard).
+func TestLayeredResolverOCILayerRejectsArtifactMediaType(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "reg", "type": "oci", "url": "oci://example/reg"}],
+		"extends": ["reg:org/base.json"]
+	}`)
+	body := []byte("artifact-bundle")
+	fetcher := &ociLayerFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
+		return ociBlob{Data: body, Digest: "sha256:" + sha256Hex(body), MediaType: ociArtifactMediaType}, nil
+	}}
+	_, err := NewLayeredResolver().WithFetcher("oci", fetcher).Resolve(repo)
 	var ie *ImportError
 	if !errors.As(err, &ie) {
 		t.Fatalf("expected *ImportError, got %v", err)

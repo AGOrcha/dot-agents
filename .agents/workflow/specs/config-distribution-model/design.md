@@ -188,7 +188,12 @@ An ordered array of executable package references in the form
 
 ## 4. Source types and tier constraints
 
-> **Superseded by §15 (D8).** git/local/http/oci are all valid for `packages`; the only retained source asymmetry is that `extends` rejects `oci`.
+> **Superseded by §15 (D3/D8/D15).** The source/kind matrix below is retained for history. D8
+> relaxed `packages` to all four sources; **D15 (extends-oci-relax) removes the last asymmetry —
+> `oci` is now valid for `extends` too**, so every source serves every kind. The constraint is no
+> longer schema-enforced: source no longer constrains kind. What stays enforced (at fetch time) is
+> the unit's **media type** matching its declared kind — a config layer carries
+> `application/vnd.dot-agents.config-layer.v1+json`, an artifact the artifact-bundle media type.
 
 | Source type | Valid for `extends` | Valid for `packages` | Notes |
 |---|---|---|---|
@@ -944,6 +949,26 @@ operational state — never a scope, never a source, never projected.
 generated platform configs, the `.agentsrc.local.json` overlay, and materialized asset units are
 **ignored**; `.agentsrc.json` and `.agentsrc.lock` stay **committed** (the resolved-state contract,
 like `uv.lock`). Re-runs converge (regenerated, not appended).
+
+#### D15 — `extends` accepts OCI; source/kind asymmetry removed (extends D8)
+*(the `extends-oci-relax` spec decision; tracked there as "D13" relative to that spec, recorded
+here as D15 to avoid the §15 numbering collision with the scoped-content decision above.)*
+
+D8 relaxed **artifact** sourcing to all four source types but left **`extends` (config layers)**
+rejecting `oci` — the one remaining source/kind asymmetry, enforced at resolve time by
+`SelectFetcher`. D15 removes it: **`oci` is now valid for `extends`** exactly as it is for
+`packages`, so **every** source (`local`/`git`/`http`/`oci`) serves **every** kind (layer or
+artifact). A config layer is published to OCI as a single blob carrying the layer document under a
+dedicated media type **`application/vnd.dot-agents.config-layer.v1+json`** (distinct from the
+artifact-bundle media type). The OCI layer fetcher reuses the existing OCI pull plumbing
+(digest-addressing, auth, cache, posture) — the shared pull is factored, not duplicated — and
+returns the blob as a `FetchedLayer` the resolver merges with no special-casing. A **media-type
+guard** keeps `kind` meaningful even though source is now unrestricted: an `extends` pull must
+carry the config-layer media type and a `packages` pull the artifact-bundle media type; a mismatch
+is a clear schema error, so a layer blob is never installed as an artifact (and vice-versa).
+`kind` (not source) continues to govern merge/trust. The user-facing doc flips (the §15 guide
+matrix/callout, README, and the `SelectFetcher` error string narrative) follow once #110/#111 land,
+per the extends-oci-relax sequencing.
 
 ### 15.4 Requirements (behavioral)
 

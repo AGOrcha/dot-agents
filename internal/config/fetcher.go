@@ -180,9 +180,11 @@ func fetchWithRefresh(f Fetcher, src Source, parts LayerRefParts, cacheDir strin
 }
 
 // SelectFetcher returns the Fetcher for a source type, or an error for an
-// unsupported or tier-invalid type. oci cannot supply a config layer, so it is
-// rejected for extends here (the only remaining source asymmetry; §15 D8).
-// Artifact resolution accepts oci via SelectPackageFetcher.
+// unsupported type. Per config-distribution-model §15 D13 there is no
+// source/kind asymmetry: every source type — git, http, local, and oci — is
+// valid for extends (config layers), just as every type is valid for packages.
+// An oci layer is pulled over the same plumbing as an oci artifact, guarded by
+// the config-layer media type (ociLayerFetcher), so `kind` stays meaningful.
 func SelectFetcher(sourceType string) (Fetcher, error) {
 	switch sourceType {
 	case "git":
@@ -192,7 +194,7 @@ func SelectFetcher(sourceType string) (Fetcher, error) {
 	case "local":
 		return &localFetcher{}, nil
 	case "oci":
-		return nil, fmt.Errorf("source type %q is not valid for extends (oci cannot supply a config layer)", sourceType)
+		return &ociLayerFetcher{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}
@@ -212,8 +214,12 @@ func layerCacheDir(sourceID, layerPath string) string {
 }
 
 // cachedLayerPath is the absolute path of a cached layer.json for a given SHA.
+// The SHA is mapped through digestDir so an OCI source's "sha256:<hex>" digest
+// (D13) becomes a colon-free directory segment — a colon is an illegal path
+// char on Windows. git/http/local SHAs are already bare hex, so this is a no-op
+// for them; the on-disk layout matches the packages/artifact cache.
 func cachedLayerPath(cacheDir, sha string) string {
-	return filepath.Join(cacheDir, sha, "layer.json")
+	return filepath.Join(cacheDir, digestDir(sha), "layer.json")
 }
 
 // readCachedLayer returns the cached layer bytes for sha, or (nil,false) if not
@@ -226,9 +232,12 @@ func readCachedLayer(cacheDir, sha string) ([]byte, bool) {
 	return data, true
 }
 
-// writeCachedLayer persists layer bytes under <cacheDir>/<sha>/layer.json.
+// writeCachedLayer persists layer bytes under <cacheDir>/<sha>/layer.json. The
+// SHA segment is mapped through digestDir (see cachedLayerPath) so an OCI
+// "sha256:<hex>" digest never embeds a colon in a path segment (illegal on
+// Windows); the read path uses the same mapping.
 func writeCachedLayer(cacheDir, sha string, data []byte) error {
-	dir := filepath.Join(cacheDir, sha)
+	dir := filepath.Join(cacheDir, digestDir(sha))
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating layer cache dir: %w", err)
 	}
