@@ -177,7 +177,7 @@ tasks:
       app_type: docs
     - id: p2-scrub-stealth-leak
       title: 'P2: scrub agent-tool session-author leak in worktree handoffs'
-      status: awaiting_owner_review
+      status: cancelled
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -185,10 +185,7 @@ tasks:
         - .agents/
       verification_required: false
       notes: |-
-        Secondary review agent worktree-era handoffs were authored with an agent-tool session-author string — an
-        AI-attribution trace. Grep .agents/ (active/context/history) for the session-author pattern + similar; scrub any
-        committed instances per the stealth mandate.
-        Impl done; PR #122 open, awaiting owner merge.
+        Cancelled: project policy relaxed to allow factual AI references; harness/model/created_by are legitimate operational metadata. PR #122 closed unmerged.
       app_type: docs
     - id: p3-tool-routing-doc
       title: 'P3: document primary-agent vs secondary-review-agent work routing'
