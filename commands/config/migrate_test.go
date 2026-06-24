@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,3 +129,48 @@ func TestRunMigrate_MissingManifestErrors(t *testing.T) {
 		t.Error("expected error when no .agentsrc.json is present")
 	}
 }
+
+// TestMigrateCmd_RunE_Cobra drives the cobra RunE closure end to end (bind +
+// cwd auto-resolution + runMigrate dispatch) by executing the config root with
+// the migrate args from inside a temp project the test chdirs into.
+func TestMigrateCmd_RunE_Cobra(t *testing.T) {
+	project := writeProjectManifest(t, migrateV1Manifest)
+	chdir(t, project)
+
+	root := NewConfigCmd(testDeps())
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"migrate"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("cobra execute: %v", err)
+	}
+	if !strings.Contains(out.String(), "rewrote") {
+		t.Fatalf("expected migrate output, got:\n%s", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(project, cfg.AgentsRCFile+cfg.V1BackupSuffix)); err != nil {
+		t.Errorf("backup not created via cobra path: %v", err)
+	}
+}
+
+// TestMigrateCmd_RunE_BindError exercises the RunE closure's bind-error return:
+// stubbing getwd to fail makes opts.bind surface a hinted error through cobra
+// (cwd is unset on the cobra path, so bind resolves it via getwd).
+func TestMigrateCmd_RunE_BindError(t *testing.T) {
+	orig := getwd
+	getwd = func() (string, error) { return "", errBindStub }
+	t.Cleanup(func() { getwd = orig })
+
+	root := NewConfigCmd(testDeps())
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"migrate"})
+
+	if err := root.Execute(); err == nil {
+		t.Fatal("expected a bind error when getwd fails")
+	}
+}
+
+var errBindStub = errors.New("getwd boom")

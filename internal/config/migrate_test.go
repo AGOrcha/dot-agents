@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -215,5 +217,97 @@ func TestMigrateAgentsRC_DryRunWritesNothing(t *testing.T) {
 func TestMigrateAgentsRC_MissingManifest(t *testing.T) {
 	if _, err := MigrateAgentsRC(t.TempDir(), false); err == nil {
 		t.Error("expected an error migrating a directory with no .agentsrc.json")
+	}
+}
+
+// TestMigrateAgentsRC_MalformedManifestErrors covers the LoadAgentsRC failure
+// path: os.ReadFile succeeds (the file exists) but the JSON is unparseable, so
+// the migration surfaces the loader's parse error.
+func TestMigrateAgentsRC_MalformedManifestErrors(t *testing.T) {
+	dir := t.TempDir()
+	writeManifest(t, dir, `{ "version": 1, this is not valid json `)
+
+	_, err := MigrateAgentsRC(dir, false)
+	if err == nil {
+		t.Fatal("expected an error migrating a malformed .agentsrc.json")
+	}
+	if !strings.Contains(err.Error(), AgentsRCFile) {
+		t.Errorf("error %q should name %s", err, AgentsRCFile)
+	}
+}
+
+// chmodTestSkip reports whether a chmod-based unwritable-path test is reliable
+// on the current platform/identity. On Windows os.Chmod cannot strip write
+// permission the way these tests need, and a root-owned run bypasses the mode
+// bits entirely — in both cases the write would unexpectedly succeed.
+func chmodTestSkip(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based write-permission tests are unreliable on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses file mode bits")
+	}
+}
+
+// TestMigrateAgentsRC_BackupWriteFailure covers the writeMigration backup-write
+// error path (and its propagation out of MigrateAgentsRC): the manifest dir is
+// made read-only so creating the .v1.bak sidecar fails before any rewrite.
+func TestMigrateAgentsRC_BackupWriteFailure(t *testing.T) {
+	chmodTestSkip(t)
+	dir := t.TempDir()
+	writeManifest(t, dir, v1WithLegacyKeys)
+
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	_, err := MigrateAgentsRC(dir, false)
+	if err == nil {
+		t.Fatal("expected an error when the backup sidecar cannot be written")
+	}
+	if !strings.Contains(err.Error(), "backup") {
+		t.Errorf("error %q should mention the backup write failure", err)
+	}
+}
+
+// TestMigrateAgentsRC_ManifestWriteFailure covers the writeMigration
+// manifest-write error path: the backup succeeds (its path is new and
+// writable) but the manifest itself is read-only, so the v2 rewrite fails.
+func TestMigrateAgentsRC_ManifestWriteFailure(t *testing.T) {
+	chmodTestSkip(t)
+	dir := t.TempDir()
+	writeManifest(t, dir, v1WithLegacyKeys)
+
+	manifestPath := filepath.Join(dir, AgentsRCFile)
+	if err := os.Chmod(manifestPath, 0o444); err != nil {
+		t.Fatalf("chmod manifest read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(manifestPath, 0o644) })
+
+	_, err := MigrateAgentsRC(dir, false)
+	if err == nil {
+		t.Fatal("expected an error when the v2 manifest cannot be written")
+	}
+	if !strings.Contains(err.Error(), "migrated") {
+		t.Errorf("error %q should mention the migrated-manifest write failure", err)
+	}
+}
+
+// TestMarshalManifest_Error covers marshalManifest's json-error branch by
+// handing it an AgentsRC whose ExtraFields carries an invalid raw JSON value:
+// the core marshal succeeds but the merge-and-remarshal step rejects the bad
+// RawMessage. This also exercises the version-bump marshal failure path in
+// MigrateAgentsRC, which delegates to the same helper.
+func TestMarshalManifest_Error(t *testing.T) {
+	rc := &AgentsRC{
+		Version: CurrentManifestVersion,
+		ExtraFields: map[string]json.RawMessage{
+			"broken": json.RawMessage("{not-json"),
+		},
+	}
+	if _, err := marshalManifest(rc); err == nil {
+		t.Fatal("expected marshalManifest to fail on an invalid ExtraFields value")
 	}
 }
