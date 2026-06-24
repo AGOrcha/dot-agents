@@ -18,6 +18,13 @@ it unblocks. Each recommendation is a **PROPOSAL**, not a decision.
 [`work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md`](../work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md)
 — the concrete SDD-entity node/edge schema draft referenced by O4.
 
+**For adversarial review:** this revision (the dossier + the companion schema
+draft) is staged for an adversarial pass — a **Codex** review and a **Cursor**
+review — before ratification. Every "real field," "known app_type," and
+edge-cardinality claim in the companion draft cites the on-disk file or git
+evidence it was grounded against (the draft's §6 evidence ledger); reviewers
+should challenge any claim lacking one.
+
 ---
 
 ## How to read this dossier
@@ -296,7 +303,25 @@ Treat the wiring as part of release finalization.
   Wiring is feature work, not release bookkeeping; smuggling it in violates that
   task's clean scope and hides a real integration step behind a version bump.
 
-### Recommendation + rationale — **PROPOSAL: Option A — add `t7-app-type-profiles-wiring`, `depends_on: [t1]`, `blocks: [release-minor]`**
+### Recommendation + rationale — **ACCEPTED: Option A — add `t7-app-type-profiles-wiring`, `depends_on: [t1]`, `blocks: [release-minor]`**
+
+**Status: ACCEPTED (2026-06-24).** A `t7-app-type-profiles-wiring` task is being
+filed via `da workflow` (this resolution is a `TASKS.yaml`/`PLAN.yaml` edit and
+goes through the CLI, not a hand-edit — see Sequencing). The task shape below is
+the proposal for that filing.
+
+**Coupling flag (NEW).** The app-type-profiles spec/plan now likely needs
+**further development in coordination with the KG schema work** (O4 + the
+companion `sdd-entity-kg-schema-draft.md`). The two became coupled this revision:
+the schema models `app_type` as an **OPEN/extensible vocabulary** (free string +
+documented known-starter set: `go-cli, ideation, go-http-service, api, ui,
+streaming, batch, po-core-api-se, research, resume-ideation`), which is *exactly*
+the surface t7 wires (`graph_backend` enum → adapter-ref; `app_type` ref-form
+resolution). t7's app-type-profiles edits and the KG schema's `app_type` /
+`plan.default_app_type` / `task.app_type` fields must be developed together so
+the profile resolver and the graph nodes agree on the open-vocabulary contract.
+Treat t7 and the app-type-profiles spec as a coupled pair with the KG schema —
+they should not be ratified independently.
 
 Add the explicit task. §15's own language ("a separate commit," "the wiring")
 asks for a discrete unit. The work is real and currently unowned: without it,
@@ -445,6 +470,32 @@ D1′'s already-ratified tier split:
 
 The full node/edge catalog is drafted in the companion artifact
 [`sdd-entity-kg-schema-draft.md`](../work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md).
+
+**Schema-revision fold-in (2026-06-24).** The companion draft was hardened this
+revision; O4 now commits these schema points alongside the typed-node posture:
+
+- **`app_type` is an OPEN vocabulary, not a closed enum.** The project promises
+  custom app-types; `app_type` is a free/extensible string with a *documented
+  known-starter set* (`go-cli, ideation, go-http-service, api, ui, streaming,
+  batch, po-core-api-se, research, resume-ideation`), grounded in
+  `internal/config/execution_profile.go` (`ByAppType map[string]…`),
+  `docs/CONFIG_RELEVANCE.md` ("no entry is not an error"), and
+  `app-type-profiles §7.1` (the `source-id:name@version` ref form). This couples
+  O4 to O3/t7 — see the O3 coupling flag.
+- **Node field-sets MIRROR the on-disk artifacts.** `plan`/`task` mirror
+  `schemas/workflow-plan.schema.json` / `schemas/workflow-tasks.schema.json`
+  (the real `task` status enum is `pending|in_progress|blocked|completed|
+  cancelled`, and lease/PR/app_type are marked `[PROPOSED]` because they are
+  **not** on disk today); `spec`/`proposal`/`lesson` mirror real frontmatter.
+- **`proposal` and `lesson` are first-class SCOPED node types** alongside
+  Plan/Task/Spec/Skill (with a `scope: repo|project|global` field) — enabling
+  the scoped-proposals/scoped-lessons goal.
+- **Edge catalog revised:** spec→plan is **one-to-many**; proposal→spec
+  (one-or-more, split-off/derived); a **spec↔spec** edge family
+  (supersedes/derived-from/related-to) was added; an explicit **task→plan FK**
+  (`belongs_to_plan`) was added; and **result→plan is intentionally OMITTED**
+  (result→spec and result→task only; the plan is reachable transitively). Each
+  cardinality is grounded in a real repo case in the draft's §6 ledger.
 
 ### Blast radius / reversibility
 
@@ -840,8 +891,8 @@ first pass.
 |---|---|---|---|
 | **O1** | Keep the **mechanical (no-ack) cutover gate** for v1; close §14 Q2 as "no opt-out" (its lean is stale vs ratified §10.3). | t5 | before t5 |
 | **O2** | **In-process HMAC** token signing (per-process ephemeral key) for v1; defer asymmetric to the `http`-backend milestone. | t1 (N13) | before t1 |
-| **O3** | **Add `t7-app-type-profiles-wiring`** (`depends_on: [t1]`, `blocks: [release-minor]`) — the §15 "wiring" commit has no owning task. | release-minor | parallel w/ t2–t4 |
-| **O4** | **Typed nodes for structure/state + `KGNote` projection for prose** (honors D1′ tiers); schema drafted in companion artifact. | work-tracking plan (future) | design now, build deferred |
+| **O3** | **ACCEPTED** — `t7-app-type-profiles-wiring` being filed (`depends_on: [t1]`, `blocks: [release-minor]`); app-type spec/plan now coupled to the KG schema (open `app_type` vocab) and needs further development together. | release-minor | parallel w/ t2–t4 |
+| **O4** | **Typed nodes + `KGNote` projection** (honors D1′ tiers). Revised: OPEN `app_type` vocab, on-disk field mirroring, **proposal+lesson as first-class scoped nodes**, spec→plan one-to-many, proposal→spec, spec↔spec + task→plan edges, result→plan dropped. | work-tracking plan (future) | design now, build deferred |
 | **O5** | Adopt all five spec recommendations: **content-hash mutation; new-note revocation; depth-1 code hops + unbounded note-chains; taint persists until `kg refresh`; load-bearing LinkKind allowlist**. | t2, t4 | before t2 |
 | **O6** | **Fold A/C/D (testability gaps) into §11.1/§11.6 before t4; defer/reject G** (SQL-callable views break no-raw-SQL). | t4, t6 | before t4 (after re-reading the proposal) |
 | **O7** | **Executor sits ABOVE the `Store` seam**; add a one-paragraph reconciliation note to both specs. Orthogonal swap dimensions. | t1 | before t1 |
@@ -867,14 +918,19 @@ design):**
 **Has a real decision to make, but the recommendation is well-grounded
 (moderate):**
 
-- **O3** — adding a task is a plan edit the maintainer should bless, but the gap
-  is real and §15 explicitly asks for this "separate commit." The only judgment
-  call is task granularity (separate t7 vs fold into t1), and the rationale for
-  separate is strong (different subsystem, clean scope).
+- **O3** — **ACCEPTED**; `t7-app-type-profiles-wiring` is being filed via
+  `da workflow`. The gap is real and §15 explicitly asks for this "separate
+  commit." Newly flagged: the app-type-profiles spec/plan and the KG schema are
+  now coupled (open `app_type` vocabulary) and need coordinated further
+  development — t7 should not be ratified independently of O4's schema.
 - **O4** — typed-nodes-vs-KGNote is a genuine design fork, but D1′'s ratified
-  tier split forces the hybrid answer. Contested only in *schema detail* (the
-  companion draft), not in the high-level posture. Build is deferred, so the cost
-  of getting detail wrong now is low.
+  tier split forces the hybrid answer. The 2026-06-24 revision tightened the
+  *schema detail* (companion draft): on-disk field mirroring, OPEN `app_type`
+  vocabulary, proposal+lesson as first-class scoped nodes, and an
+  evidence-grounded edge catalog (spec→plan one-to-many; spec↔spec; task→plan;
+  result→plan dropped). Contested only in remaining schema detail, not in the
+  high-level posture; build is deferred, so the cost of detail churn now is low.
+  Staged for the Codex + Cursor adversarial pass.
 
 **Genuinely contested / cannot fully verify here:**
 
