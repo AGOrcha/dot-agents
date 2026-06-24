@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 type codex struct {
@@ -505,6 +507,95 @@ func classifyCodexSingleFile(linkPath string) []BrokenLink {
 		Dest:        raw,
 		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
 	}}
+}
+
+// PrintAudit implements AuditPrinter for the codex platform: it renders the
+// AGENTS.md link, the .codex/config.toml + .codex/hooks.json links, the
+// shared .agents/skills/ mirror, and the native .codex/agents/ TOML entries.
+// Moved verbatim (output preserved) from the lifecycle-side printCodexAudit
+// in Phase 5.
+func (c *codex) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sCodex%s\n", ui.Cyan, ui.Reset)
+	codexPrintAgentsMD(w, filepath.Join(repoPath, codexAgentsMarkdown))
+	codexPrintSymlinkAudit(w, filepath.Join(repoPath, codexDir, codexConfigTOML), ".codex/config.toml")
+	codexPrintSymlinkAudit(w, filepath.Join(repoPath, codexDir, codexHooksJSON), ".codex/hooks.json")
+	codexPrintSkillsAudit(w, filepath.Join(repoPath, codexAgentsDir, "skills"))
+	codexPrintAgentsAudit(w, filepath.Join(repoPath, codexDir, "agents"))
+	fmt.Fprintln(w)
+}
+
+// codexPrintAgentsMD renders the AGENTS.md link/local-file/absent status to w.
+func codexPrintAgentsMD(w io.Writer, path string) {
+	if _, err := os.Lstat(path); err == nil {
+		if state, _ := classifyManagedLink(path); state != linkStateNotALink {
+			printLinkedStatusLine(w, codexAgentsMarkdown, path)
+			return
+		}
+		fmt.Fprintf(w, auditLocalFileIndentedFmt, ui.Dim, ui.Reset, codexAgentsMarkdown, ui.Dim, ui.Reset)
+		return
+	}
+	fmt.Fprintf(w, "      %s(no %s)%s\n", ui.Dim, codexAgentsMarkdown, ui.Reset)
+}
+
+// codexPrintSymlinkAudit renders a single codex managed-file link to w. A
+// present-but-not-a-link path is a rendered/managed file on disk (e.g.
+// .codex/hooks.json, .codex/config.toml), not an absent link; "(not linked)"
+// is reserved for a truly absent path.
+func codexPrintSymlinkAudit(w io.Writer, path, label string) {
+	if state, _ := classifyManagedLink(path); state != linkStateNotALink {
+		printLinkedStatusLine(w, label, path)
+		return
+	}
+	if _, err := os.Lstat(path); err == nil {
+		fmt.Fprintf(w, auditLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+		return
+	}
+	fmt.Fprintf(w, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+}
+
+// codexPrintSkillsAudit renders the shared .agents/skills/ mirror entries to w.
+func codexPrintSkillsAudit(w io.Writer, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	okCount, brokenCount := 0, 0
+	for _, entry := range entries {
+		linkPath := filepath.Join(dir, entry.Name())
+		if state, _ := classifyManagedLink(linkPath); state == linkStateNotALink {
+			continue
+		}
+		if printLinkedStatusLine(w, ".agents/skills/"+entry.Name(), linkPath) {
+			okCount++
+		} else {
+			brokenCount++
+		}
+	}
+	if okCount == 0 && brokenCount == 0 {
+		fmt.Fprintf(w, "      %s○%s .agents/skills/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+	}
+}
+
+// codexPrintAgentsAudit renders the native .codex/agents/ TOML entries to w.
+func codexPrintAgentsAudit(w io.Writer, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	okCount, brokenCount := 0, 0
+	for _, entry := range entries {
+		linkPath := filepath.Join(dir, entry.Name())
+		if _, err := os.Stat(linkPath); err == nil {
+			fmt.Fprintf(w, "      %s✓%s .codex/agents/%s %s(native TOML)%s\n", ui.Green, ui.Reset, entry.Name(), ui.Dim, ui.Reset)
+			okCount++
+		} else {
+			fmt.Fprintf(w, "      %s✗%s .codex/agents/%s %s(unreadable)%s\n", ui.Red, ui.Reset, entry.Name(), ui.Dim, ui.Reset)
+			brokenCount++
+		}
+	}
+	if okCount == 0 && brokenCount == 0 {
+		fmt.Fprintf(w, "      %s○%s .codex/agents/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+	}
 }
 
 func (c *codex) SharedTargetIntents(project string) ([]ResourceIntent, error) {

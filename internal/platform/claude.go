@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 type claude struct {
@@ -719,6 +722,23 @@ func (c *claude) brokenMCPLink(_, repoPath, _ string) []BrokenLink {
 	}}
 }
 
+// PrintAudit implements AuditPrinter for the claude platform: it renders the
+// per-project `.claude/rules/` link directory and the `.mcp.json` link. Moved
+// verbatim (output preserved) from the lifecycle-side printClaudeAudit in
+// Phase 5.
+func (c *claude) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
+	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
+	if _, err := os.ReadDir(rulesDir); err != nil {
+		fmt.Fprintf(w, "      %s(no %s/rules/)%s\n", ui.Dim, claudeDir, ui.Reset)
+		fmt.Fprintln(w)
+		return
+	}
+	printSymlinkDirAudit(w, rulesDir, claudeDir+"/rules/", "%s")
+	printSymlinkAudit(w, filepath.Join(repoPath, claudeMCPFile), claudeMCPFile)
+	fmt.Fprintln(w)
+}
+
 func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project,
 		filepath.Join(claudeDir, "skills"),
@@ -750,7 +770,7 @@ func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 func (c *claude) CountLinks(_, repoPath, _ string) (ok, broken int) {
 	ok, broken = claudeCountRules(filepath.Join(repoPath, claudeDir, "rules"))
 	addManagedFileCounts(&ok, &broken, []string{
-		filepath.Join(repoPath, ".mcp.json"),
+		filepath.Join(repoPath, claudeMCPFile),
 		filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON),
 	})
 	addManagedDirCounts(&ok, &broken, []string{

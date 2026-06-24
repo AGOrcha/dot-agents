@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 type copilot struct {
@@ -556,6 +559,35 @@ func classifyCopilotSingleFile(linkPath string) []BrokenLink {
 		Dest:        raw,
 		DisplayDest: config.DisplayPath(absolutizeDest(linkPath, raw)),
 	}}
+}
+
+// PrintAudit implements AuditPrinter for the copilot platform: it renders the
+// .github/copilot-instructions.md link and the .vscode/mcp.json link. Moved
+// verbatim (output preserved) from the lifecycle-side printCopilotAudit in
+// Phase 5. agentsHome is unused — copilot's audit surface is entirely
+// repo-relative.
+func (c *copilot) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sGitHub Copilot%s\n", ui.Cyan, ui.Reset)
+	copilotPrintInstructionsLink(w, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))
+	printSymlinkAudit(w, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON), ".vscode/mcp.json")
+	fmt.Fprintln(w)
+}
+
+// copilotPrintInstructionsLink renders the .github/copilot-instructions.md
+// audit line to w. A present managed link prints ✓/✗ with its resolved
+// target; a present non-link prints nothing (preserving the historical
+// printCopilotAudit behavior); an absent path prints "(not linked)".
+func copilotPrintInstructionsLink(w io.Writer, instructionsPath string) {
+	if _, err := os.Lstat(instructionsPath); err != nil {
+		fmt.Fprintf(w, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	switch state, raw := classifyManagedLink(instructionsPath); state {
+	case linkStateBroken:
+		fmt.Fprintf(w, "      %s✗%s .github/copilot-instructions.md %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest(instructionsPath, raw), ui.Reset)
+	case linkStateHealthy:
+		fmt.Fprintf(w, "      %s✓%s .github/copilot-instructions.md %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest(instructionsPath, raw), ui.Reset)
+	}
 }
 
 func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
