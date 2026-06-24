@@ -15,6 +15,8 @@ Typed staged dispatch is separate: the parent/orchestrator resolves shared bound
 - Run focused tests first; broaden only when justified.
 - Record a concrete **feedback_goal** per iteration; use **scenario_tags** and classify evidence (e.g. ok, ok-warning, impl-bug, tool-bug, blocked).
 - Require **negative-path** tests when the change introduces new failure modes.
+- Re-derive the coverage-delta against your diff before push: `write_scope` may omit the tests a change breaks. If a broken asserter sits outside scope, escalate rather than silently expanding it.
+- Validate cross-platform before push (reason about GOOS, never hand-join paths, treat skipped/build-tagged platform tests as unverified) and against fresh `origin/master` — green-in-isolation can go red once combined. Run the project's quality gate locally; a green forge check is not proof.
 
 ## Staged dispatch boundary
 
