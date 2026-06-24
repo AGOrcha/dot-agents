@@ -57,6 +57,62 @@ jobs:
             -ignore 'SC2086:' \
             -ignore 'is too old to run'
 
+      - name: Release signing-toolchain pin guard
+        # Guards the 0.4.0 class of release failures: a signing tool that
+        # resolves to a fresh version at job time can break the cut (the
+        # dotnet `sign` kernel32 Linux crash; an unpinned timestamp lib's
+        # DLSequence cast). Every signing-tool install in auto-release.yml MUST
+        # be version+sha256 pinned. This targets the curl|install signing-tool
+        # steps (jsign/quill/cosign), NOT the SHA-pinned `uses:` actions, which
+        # carry their pin in the ref. See the release-cut skill + the lesson
+        # pin-release-toolchain-and-make-releases-retryable.
+        run: |
+          set -euo pipefail
+          WF=.github/workflows/auto-release.yml
+          fail=0
+
+          flag() { echo "::error file=${WF}::$1"; fail=1; }
+
+          # 1. The dotnet `sign` tool must never come back: it crashed on Linux
+          #    with a kernel32.dll DllNotFoundException and broke 0.4.0.
+          if grep -Eq 'dotnet[[:space:]]+tool[[:space:]]+install[^\n]*(\bsign\b|--global[[:space:]]+sign)|\bdotnet[[:space:]]+sign\b' "${WF}"; then
+            flag "dotnet 'sign' tool reintroduced (0.4.0 kernel32 Linux regression). Use jsign instead."
+          fi
+
+          # 2. No signing/build tool may be installed via --prerelease or @latest.
+          if grep -Eq -- '--prerelease' "${WF}"; then
+            flag "a --prerelease install is present on the release path; pin an exact version instead."
+          fi
+          if grep -Eni 'tool[[:space:]]+install|go[[:space:]]+install|curl' "${WF}" \
+              | grep -Eqi 'jsign|quill|cosign|goreleaser' \
+              && grep -Eni 'jsign|quill|cosign' "${WF}" | grep -Eq '@latest'; then
+            flag "a signing tool is installed with @latest; pin an exact version instead."
+          fi
+
+          # 3. Every signing-tool that is fetched via curl must verify a checksum.
+          #    For jsign/quill/cosign, require BOTH a *_VERSION and a *_SHA256 env
+          #    var so the fetched bytes are pinned and verified.
+          for tool in JSIGN QUILL; do
+            if grep -Eqi "${tool}_VERSION" "${WF}"; then
+              if ! grep -Eqi "${tool}_SHA256" "${WF}"; then
+                flag "${tool} is version-pinned but has no ${tool}_SHA256 checksum; pin version + sha256 together."
+              fi
+            fi
+          done
+
+          # A signing tool pulled by curl must be checksum-verified (sha256sum -c).
+          if grep -Eqi 'curl[^\n]*(jsign|quill)' "${WF}"; then
+            if ! grep -Eq 'sha256sum[[:space:]]+-c' "${WF}"; then
+              flag "a signing tool is fetched via curl but no 'sha256sum -c' verification is present."
+            fi
+          fi
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "Release signing-toolchain pin guard FAILED. See errors above."
+            exit 1
+          fi
+          echo "Release signing-toolchain pin guard passed: signing tools are version+sha256 pinned, no dotnet 'sign', no --prerelease/@latest."
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
