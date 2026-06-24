@@ -54,8 +54,18 @@ command -v java >/dev/null 2>&1 || {
   exit 1
 }
 
-# Trusted Signing certs live ~3 days, so jsign auto-enables RFC3161 timestamping;
-# --tsaurl pins the timestamp authority explicitly for reproducibility.
+# Trusted Signing certs live ~3 days, so the signature MUST be timestamped.
+# jsign defaults to --tsmode Authenticode; with an RFC3161 timestamp server that
+# mismatch makes jsign parse the RFC3161 response in Authenticode mode and crash
+# (CMSException: Malformed content -> DLSequence cannot be cast to
+# ASN1ObjectIdentifier in AuthenticodeTimestamper). So pin --tsmode RFC3161 to
+# match the RFC3161 TSAs below.
+#
+# --tsaurl takes a comma-separated list for failover (jsign tries them in order);
+# both defaults are public RFC3161 servers. TRUSTED_SIGNING_TSA, if set, fully
+# overrides the list. --tsretries/--tsretrywait keep transient TSA blips from
+# failing the release.
+tsa="${TRUSTED_SIGNING_TSA:-http://timestamp.digicert.com,http://timestamp.sectigo.com}"
 echo "sign-windows: Authenticode-signing ${binary} via jsign + Trusted Signing profile ${TRUSTED_SIGNING_PROFILE}"
 java -jar "${jsign_jar}" \
   --storetype TRUSTEDSIGNING \
@@ -63,5 +73,8 @@ java -jar "${jsign_jar}" \
   --storepass "${TRUSTED_SIGNING_TOKEN}" \
   --alias "${TRUSTED_SIGNING_ACCOUNT}/${TRUSTED_SIGNING_PROFILE}" \
   --alg SHA-256 \
-  --tsaurl "${TRUSTED_SIGNING_TSA:-http://timestamp.acs.microsoft.com}" \
+  --tsmode RFC3161 \
+  --tsaurl "${tsa}" \
+  --tsretries 3 \
+  --tsretrywait 10 \
   "${binary}"
