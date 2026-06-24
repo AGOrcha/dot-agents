@@ -1,7 +1,7 @@
 schema_version: 1
 id: agent-ops-hardening
 title: Agent-ops hardening (retro of config-v2/0.4.0 + recent sessions)
-status: draft
+status: active
 summary: 'Operationalize the 4-stream retrospective: fix the environment taxes (TCC ~/Documents, Codex GOCACHE, sonar pre-push flake) and convert mature-but-unenforced lessons into skills + brief gates'
 created_at: "2026-06-24T01:02:42Z"
 updated_at: "2026-06-24T01:02:42Z"

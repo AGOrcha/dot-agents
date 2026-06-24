@@ -131,7 +131,7 @@ tasks:
       notes: 'Add sentinel-write at skill entry after prerequisites needed to construct its arguments, before governed work begins; update gotchas. Contract: tasks/p4-sentinel-wiring.contract.md.'
     - id: p5-e2e-integration
       title: 'End-to-end integration test: native remediation and advisory behavior'
-      status: pending
+      status: awaiting_owner_review
       depends_on:
         - p2-hook-scripts
         - p4-sentinel-wiring
@@ -140,7 +140,7 @@ tasks:
       write_scope:
         - tests/test-loop-discipline-stop-hooks.sh
       verification_required: true
-      notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert terminal and PreToolUse native remediation, SubagentStart/PreCompact non-blocking behavior, JSON block output where supported, Cursor followup output, and advisories. Contract: tasks/p5-e2e-integration.contract.md.'
+      notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert terminal and PreToolUse native remediation, SubagentStart/PreCompact non-blocking behavior, JSON block output where supported, Cursor followup output, and advisories. Contract: tasks/p5-e2e-integration.contract.md. Impl done; PR #124 open, awaiting owner merge.'
     - id: p6-payout-backfill
       title: Explicit payout migration and active-loop readback
       status: pending
