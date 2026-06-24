@@ -5,6 +5,10 @@ on:
     branches: [master]
     paths:
       - 'VERSION'
+  # Manual trigger so a release that failed on infra (e.g. a signing-tool
+  # regression) can be re-run from master WITHOUT a version bump; honors the
+  # 'Check if release exists' guard so it no-ops if the version already shipped.
+  workflow_dispatch:
 
 concurrency:
   group: release
