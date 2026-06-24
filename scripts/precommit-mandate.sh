@@ -306,14 +306,15 @@ cmd_push() {
   local remote="origin" branch="" passthru=()
   # Parse leading positional remote/branch, then `--` passthrough.
   while [[ $# -gt 0 ]]; do
-    case "$1" in
+    local arg="$1"
+    case "$arg" in
       --) shift; passthru=("$@"); break ;;
-      -*) passthru+=("$1"); shift ;;     # a flag with no positional remote/branch
+      -*) passthru+=("$arg"); shift ;;    # a flag with no positional remote/branch
       *)
         if [[ "$remote" == "origin" && -z "$branch" && "${_remote_set:-}" != 1 ]]; then
-          remote="$1"; _remote_set=1
+          remote="$arg"; _remote_set=1
         else
-          branch="$1"
+          branch="$arg"
         fi
         shift ;;
     esac
