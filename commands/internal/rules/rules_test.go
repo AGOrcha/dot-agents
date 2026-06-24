@@ -169,7 +169,7 @@ func TestExtractRuleFrontmatterDescription(t *testing.T) {
 			if err := os.WriteFile(p, []byte(tc.content), 0644); err != nil {
 				t.Fatal(err)
 			}
-			got := ExtractRuleFrontmatterDescription(p)
+			got := ExtractRuleFrontmatterDescription(testDeps(false, false, false), p)
 			if got != tc.want {
 				t.Errorf("ExtractRuleFrontmatterDescription = %q, want %q", got, tc.want)
 			}
@@ -179,7 +179,7 @@ func TestExtractRuleFrontmatterDescription(t *testing.T) {
 
 func TestExtractRuleFrontmatterDescription_MissingFile(t *testing.T) {
 	tmp := t.TempDir()
-	if got := ExtractRuleFrontmatterDescription(filepath.Join(tmp, "missing.md")); got != "" {
+	if got := ExtractRuleFrontmatterDescription(testDeps(false, false, false), filepath.Join(tmp, "missing.md")); got != "" {
 		t.Errorf("missing file should yield empty string, got %q", got)
 	}
 }

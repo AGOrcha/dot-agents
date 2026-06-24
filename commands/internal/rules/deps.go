@@ -23,4 +23,21 @@ type Deps struct {
 	UsageError            func(message string, hints ...string) error
 	MaximumNArgsWithHints func(n int, hints ...string) cobra.PositionalArgs
 	ExactArgsWithHints    func(n int, hints ...string) cobra.PositionalArgs
+
+	// IO is the filesystem + platform-lookup collaborator (seams.go). It is
+	// the interface-DI seam that replaced the legacy osReadFile /
+	// platform*CanonicalRuleFile package func-vars. Leave it nil in
+	// production and the zero-value data path; the io() accessor falls back
+	// to stdRuleIO{}. Tests inject a fake to fault the error branches.
+	IO ruleIO
+}
+
+// io returns the injected ruleIO collaborator, defaulting to the real
+// os/platform-backed stdRuleIO when Deps.IO is nil so production and
+// zero-value Deps callers never have to wire it.
+func (d Deps) io() ruleIO {
+	if d.IO != nil {
+		return d.IO
+	}
+	return stdRuleIO{}
 }
