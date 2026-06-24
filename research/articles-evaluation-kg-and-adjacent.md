@@ -1,7 +1,7 @@
 # KG & Adjacent Articles — Evaluation Against dot-agents
 
-**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17)
-**Scope:** 28 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
+**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17; 2026-06-24 added Part H — five new x.com-sourced articles (compaction-orchestrator, prompt-debt, token-capital-efficiency, jailbreak-prompt-opt-duality [PENDING paste], agent-without-phone) evaluated against graph-backend-adapter-contract / scoped-knowledge-graphs / work-tracking-storage-abstraction / kg-command-surface-readiness + the KG-as-SOT typed-views theme)
+**Scope:** 33 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
 **Rubric per article:** core idea → pros → cons/tradeoffs → mapping to our stack with one of three labels:
 - **[OVERLAP-SHARPEN]** — we do it, they do it better or differently in a way we should learn from
 - **[GAP-ADOPT]** — we don't do it, worth adding
@@ -941,6 +941,97 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 | rubric-check | 3 abbreviated §A.2 entries (soft) | Non-blocking; flag for future pass |
 
 **§F.3.3 fix (citation-presence hard failure):** Replacing the incorrect claim about Codex/Copilot MCP support in §F.3.3.
+
+---
+
+## Part H — 2026-06-24 addendum: five x.com-sourced articles vs the KG anchor specs
+
+**Why a new part:** This batch of five was sourced fresh (x.com tweets) and explicitly tasked against four anchor specs — `graph-backend-adapter-contract`, `scoped-knowledge-graphs`, `work-tracking-storage-abstraction`, `kg-command-surface-readiness` — plus the memory theme **"KG is SOT for SDD artifacts + typed working/operational/semantic/episodic views."** Raw sources are in `research/articles/`; per-article concept extracts in `research/extracts/`. Rubric and `[OVERLAP-SHARPEN]` / `[GAP-ADOPT]` / `[WE-AHEAD]` labels are the same as Part A.
+
+**Retrieval note (honesty):** every x.com tweet was a bare link card; four articles were fully recovered via author-controlled mirrors (GitHub README, dbreunig.com, kmad.ai, raisingpixels.dev Substack). One — aminkarbasi — is an X-native long-form article that is paywalled (HTTP 402) with no public cross-post; only its thesis/tagline (from the article card) and its 8 verified arXiv references were recoverable. See "Part H — PENDING (needs paste)" below.
+
+### H.1 compaction-orchestrator — *Your Agent Does Not Need One Summary, It Needs a Compaction Plan* (@luhsnaa)
+
+**Core.** Context compaction is a *routing decision*, not a single summary. Classify each context segment, route each to a strategy (`keep_verbatim` / `extract_active_error` / `externalize_for_retrieval` / `structured_summary`), and emit an inspectable **compaction plan** plus a derived runtime view over an **immutable raw event log** that is never overwritten. Policy-driven (`balanced` / `cost_first`), pluggable strategies, SQLite store, importers for Claude Code & Codex JSONL. Self-reported ACCS metric (coding 0.836 vs 0.698 rolling-summary; support 0.773 vs 0.474; voice 0.886 vs 0.767).
+
+**Pros.** A running instance of exactly our derivation model — immutable source + provenance-bearing derived views. The Claude-Code-JSONL importer + immutable log is essentially our session-handoff-journal substrate. Per-segment routing is concrete prior art for episodic→semantic projection.
+
+**Cons.** Alpha; ACCS numbers self-reported on curated fixtures. Policy is deterministic-only today (LLM strategies are future work).
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** vs `scoped-knowledge-graphs` derivation model — the compaction *plan* is a provenance-bearing derivation shaped like our `{reason, because[], fired_at}`. They make the plan a first-class auditable artifact; our spec keeps derivation provenance but doesn't expose a "what was deliberately dropped" record. Steal the inspectable-plan idea.
+- **[GAP-ADOPT]** vs `work-tracking-storage-abstraction` §3A typed views — a `compaction-plan` note type in the **episodic view** (edges `derived_from` → raw events, `preserves` → surviving facts) lets handoff/recovery replay *kept vs dropped*, not just a summary. Their `externalize_for_retrieval` (pointer-to-canonical) is a candidate for keeping the journal lean while the KG holds the payload.
+- **[WE-AHEAD with quirk]** — our scope-chain + event-driven staleness is a richer substrate than their single SQLite store; the quirk worth importing is the **typed, domain-specific output package** (e.g. a support handoff carrying identity/escalation/policy/next-action) instead of free text.
+
+### H.2 prompt-debt — *The Problem is Prompt Debt* (@dbreunig / Drew Breunig)
+
+**Core.** Hand-written natural-language prompts are great prototypes but accrue as technical debt and silently lock you to one model (NL was never a specification language; spurious cross-instruction interference makes prompts brittle). Specify behavior with **evals / typed specs, not prose**; stop hand-writing prompts — *search* for them via DSPy/GEPA. "You can't be model agnostic if you're hand-tuning prompts."
+
+**Pros.** Independent validation of our KG-as-SOT direction (spec/eval canonical, prose a regenerable projection) and of verifier/reviewer stage profiles + evidence-backed write_scope. Sharp portability framing.
+
+**Cons.** Our *own* skills, CLAUDE.md, and delegation bundles are exactly the large hand-tuned NL prompts he warns about — and we don't yet auto-optimize prompts against evals.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** vs KG-as-SOT theme + `work-tracking-storage-abstraction` D1′ — our "committed YAML = regenerable projection, prose indexed into the semantic view" is the same instinct; he sharpens *why* (durability/portability), not just hygiene.
+- **[GAP-ADOPT]** — a **`prompt-debt audit` lens** over the operational view: query for skills/rules with no attached eval and high edit-churn / repeated-instruction ("fighting the weights") signatures, flag as debt. Pairs with §3A's result→skill/rule correlation edges.
+- **[WE-AHEAD]** — we already keep behavior in typed stage/app-type profiles + verifier evals rather than one monolithic prompt; the gap is auto-optimization, not structure.
+
+### H.3 token-capital-efficiency — *Token Capital Efficiency* (@kmad / Kevin Madura)
+
+**Core.** Value captured per dollar of tokens. Determinism↔probabilism spectrum: the *what* (intent) never disappears, only specification of the *how* fades. "Wrap the probabilistic core in a deterministic shell." Motion: **define → match → measure → optimize.** Evals become owned, composable, compounding IP — a "digital inventory of tasks + evals." Match model to task by *measuring* it (capability + cost), then ride the cost curve until accuracy crosses tolerance.
+
+**Pros.** Names the economic learning-loop that §3A's result→profile/skill/rule/spec correlation edges are built to support. "Wrap probabilistic core in deterministic shell" == our deterministic CLI/workflow shell with the KG as the durable boundary. "The *what* never disappears, only the *how* fades" is a clean articulation of why intent/spec lives in the KG while agent prose is disposable.
+
+**Cons.** Strategy piece, no benchmarks of its own; builds on a referenced Satya Nadella "token capital" article.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** vs `work-tracking-storage-abstraction` §3A self-improvement loop — his "digital inventory of tasks + evals that compounds" is our typed operational+episodic views; he supplies the economic vocabulary (token capital efficiency) to motivate it.
+- **[GAP-ADOPT]** — add `token_budget` + `tolerance` to stage/app-type profiles; emit per-task token spend into the episodic view; a `da kg` query computes efficiency per task type and recommends model down-shifts where eval pass-rate stays above tolerance.
+- **[OVERLAP-SHARPEN]** vs `kg-command-surface-readiness` — "you can't move to a cheaper model without a defined bar" reinforces that `da kg` surfaces must make the eval/measurement boundary queryable, not just return notes.
+
+### H.4 jailbreak-prompt-opt-duality — *Jailbreaking and Prompt Optimization: Two Facets of the Same Coin* (@aminkarbasi) — PENDING full paste
+
+**Core (from article card + verified arXiv refs; full prose pending).** Automated jailbreaking and automated prompt optimization are the same iterative loop (propose → evaluate → score → reflect/refine), differing only in objective function. "Prompt is a control surface." Attack lineage PAIR→TAP→Adversarial Reasoning; optimization lineage APE→DSPy→MIPROv2→GEPA→ACE. The communities should cross-pollinate (query efficiency + evaluator robustness ↔ multi-step pipeline abstractions).
+
+**Pros.** Our verify/score/refine iteration loop is the same abstraction. GEPA/ACE "evolving playbooks" mirror our operational view evolving from result correlations; ACE's **"context collapse"** is a direct warning for any KG semantic-view summarization (echoes H.1).
+
+**Cons.** Full article body NOT retrieved (paywalled). Thesis/tagline from the card; a "FAPO" label from one mirror could not be verified and is excluded.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** vs `planner-evidence-backed-write-scope` + verifier profiles — the emphasis on **evaluator/judge robustness** says: harden the verifier stage as the judge the whole loop rides on; a weak judge breaks both safety and quality.
+- **[GAP-ADOPT]** — adopt GEPA/ACE-style *reflective* (not RL) optimization for evolving operational-view skills/rules with the verifier as scoring judge, guarded against "context collapse."
+- **[GAP-ADOPT — security, no current spec]** — "prompt is a control surface" implies KG-canonical skills/rules are an attack surface. Consider an adversarial-eval gate / red-team edge type before a skill/rule is promoted. No anchor spec covers this.
+
+### H.5 agent-without-phone — *How I Run an AI Agent Without Touching My Phone* (@madebydia / Diana Park) — adjacent
+
+**Core.** The interface (and the social signal it sends), not the agent, is the problem. Three capture tiers: fast (Watch dictation → iMessage executor → agent), slow (notebook, classify-later), none (scheduled/cron). Automation's value is removing the *decision point* before the task, not just task-minutes. "The best interface is no interface."
+
+**Pros.** *Ingest-now, classify-later* (slow capture) and proactive scheduled surfacing (no capture) validate an async path into the KG over pull-only `da kg query`.
+
+**Cons.** Personal attention/UX essay; no metrics or technical contracts. Weakest structural tie of the five.
+
+**Mapping.**
+- **[GAP-ADOPT — soft]** vs episodic view + background-worker direction — a `capture_tier` attribute on episodic ingest (synchronous command / deferred note / autonomous-scheduled) so the operational view can distinguish human-intent from machine-generated knowledge.
+- **[OVERLAP-SHARPEN]** — "remove the decision point" is a clean rationale for KG-driven *push* (stale-note alerts, eligible-task push) over pull-only commands; reinforces `kg-command-surface-readiness`'s "empty result ≠ no impact" surfacing instinct.
+
+### H.6 Part H synthesis (cross-cutting)
+
+1. **Eval/spec is the durable boundary; prose is disposable.** H.2 (prompt debt), H.3 (eval-as-IP), and H.4 (eval-as-objective) independently converge on the KG-as-SOT claim: the canonical, ownable artifact is the *measurement/spec*; the natural-language *how* is a regenerable projection. Strongest external validation yet of D1′ + §3A.
+2. **Immutable canonical source + provenance-bearing derived views.** H.1 (compaction plan over an immutable event log) is a working instance of our scoped-KG derivation model; H.4's ACE "context collapse" is the failure mode that justifies *why* derivations must be provenance-tracked, not lossy re-summaries.
+3. **The self-improvement loop is an economic, compounding asset.** H.3 frames §3A's correlation loop as "token capital efficiency"; H.4 supplies the concrete optimizer (GEPA/ACE reflective evolution) + judge-robustness needed to run it. Together they argue operational+episodic views should carry cost/tolerance + eval edges.
+4. **Optimization and adversarial robustness are the same machinery.** H.4's "prompt is a control surface" reframes soon-to-be-KG-canonical skills/rules as both optimization target and attack surface — a gap none of the anchor specs cover.
+5. **Capture/surfacing is a first-class design axis.** H.1 (routing what enters context) and H.5 (fast/slow/none capture tiers) argue that how knowledge enters/exits the working set is a deliberate, typed decision — supporting a `capture_tier` dimension on episodic ingest and a push (not just pull) `da kg` surface.
+
+### Part H — PENDING (needs paste)
+- **H.4 aminkarbasi — "Jailbreaking == Prompt Optimization"** (`research/articles/jailbreak-prompt-opt-duality.md`, marked `STATUS: PARTIAL`): X-native long-form article body is paywalled (HTTP 402); no public cross-post located. **Verified:** author, date, thesis + "prompt is a control surface" tagline, all 8 arXiv references (titles/authors). **Missing:** full verbatim prose. *Maintainer action:* paste the article body into that file under a "Source content" section and clear the `STATUS: PARTIAL` marker.
+
+### Part H — open questions raised
+1. **Episodic→semantic projection policy:** H.1 has a running per-segment router; §3A describes projection abstractly. Do we adopt a compaction-plan-style typed router for what survives into the semantic view, and is the plan itself a KG node?
+2. **Cost/tolerance as a profile dimension:** Should stage/app-type profiles carry `token_budget` + `tolerance`, and should the episodic view record per-task token spend to compute efficiency (H.3)?
+3. **Reflective optimization of operational-view artifacts:** Do we use GEPA/ACE reflective evolution (verifier as judge) to evolve skills/rules, guarding against "context collapse" (H.4)?
+4. **Adversarial/red-team surface for KG-canonical skills/rules:** Do we need an adversarial-eval gate / red-team edge type before promotion (H.4)? Not covered by any anchor spec.
+5. **Prompt-debt audit lens:** Can we query the operational view for un-eval'd, high-churn, repeated-instruction skills/rules and flag them as debt (H.2)?
+6. **Capture-tier provenance on ingest:** Is human-intent vs. deferred vs. machine-scheduled provenance (H.5) worth modeling on episodic ingest?
 
 ---
 
