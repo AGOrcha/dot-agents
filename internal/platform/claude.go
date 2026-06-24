@@ -735,7 +735,7 @@ func (c *claude) PrintAudit(w io.Writer, _, repoPath, _ string) {
 		return
 	}
 	printSymlinkDirAudit(w, rulesDir, claudeDir+"/rules/", "%s")
-	printSymlinkAudit(w, filepath.Join(repoPath, claudeMCPFile), ".mcp.json")
+	printSymlinkAudit(w, filepath.Join(repoPath, claudeMCPFile), claudeMCPFile)
 	fmt.Fprintln(w)
 }
 
@@ -770,7 +770,7 @@ func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 func (c *claude) CountLinks(_, repoPath, _ string) (ok, broken int) {
 	ok, broken = claudeCountRules(filepath.Join(repoPath, claudeDir, "rules"))
 	addManagedFileCounts(&ok, &broken, []string{
-		filepath.Join(repoPath, ".mcp.json"),
+		filepath.Join(repoPath, claudeMCPFile),
 		filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON),
 	})
 	addManagedDirCounts(&ok, &broken, []string{

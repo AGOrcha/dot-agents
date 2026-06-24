@@ -590,7 +590,7 @@ func cursorPrintRuleEntry(w io.Writer, project, rulesDir, agentsHome, entryName 
 func cursorPrintRules(w io.Writer, project, rulesDir, agentsHome string, entries []os.DirEntry) int {
 	count := 0
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), ".dot-agents-backup") {
+		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), backupSuffix) {
 			continue
 		}
 		cursorPrintRuleEntry(w, project, rulesDir, agentsHome, e.Name())
@@ -663,7 +663,7 @@ func cursorCountRules(project, repoPath, agentsHome string) (ok, broken int) {
 		return 0, 0
 	}
 	for _, e := range entries {
-		if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
+		if strings.Contains(e.Name(), backupSuffix) || !strings.HasSuffix(e.Name(), ".mdc") {
 			continue
 		}
 		scope, rest, isManaged := cursorEntryScope(e.Name(), project)
@@ -768,7 +768,7 @@ func cursorBrokenRuleEntry(entry os.DirEntry, rulesDir, project, agentsHome stri
 // existing classification semantics are preserved verbatim.
 func cursorBrokenRuleScope(entryName, projectName string) (scope, rest string, ok bool) {
 	switch {
-	case strings.Contains(entryName, ".dot-agents-backup"):
+	case strings.Contains(entryName, backupSuffix):
 		return "", "", false
 	case !strings.HasSuffix(entryName, ".mdc"):
 		return "", "", false

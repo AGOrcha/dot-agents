@@ -124,6 +124,11 @@ func recordRenderHash(io platformIO, dst, hash string) {
 // seam-interface-di-migration plan does not target this var.
 var BackupBeforeOverwrite = func(dst string) error { return sidecarBackup(stdPlatformIO{}, dst) }
 
+// backupSuffix is the sibling suffix dot-agents appends to a genuine user file
+// it preserves before installing a managed link over the owned path (the
+// established repo convention: <path>.dot-agents-backup).
+const backupSuffix = ".dot-agents-backup"
+
 // sidecarBackup is the default BackupBeforeOverwrite impl. It is also the
 // production-side call when render_manifest internals invoke the backup
 // path; in either case the injected platformIO governs the WriteFile that
@@ -134,7 +139,7 @@ func sidecarBackup(io platformIO, dst string) error {
 	if err != nil {
 		return fmt.Errorf("read %s for backup: %w", dst, err)
 	}
-	bak := dst + ".dot-agents-backup"
+	bak := dst + backupSuffix
 	if err := io.WriteFile(bak, data, 0644); err != nil {
 		return fmt.Errorf("write backup %s: %w", bak, err)
 	}
