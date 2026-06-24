@@ -282,10 +282,87 @@ cmd_sonar() {
     || fail "sonar: new SonarCloud issues introduced (new_violations>0)"
 }
 
+# cmd_push — safe `git push` wrapper for this repo's slow pre-push hook.
+#
+# Two failure modes the bare `git push` hits and this guards against (see lesson
+# .agents/lessons/ssh-keepalive-for-slow-pre-push-hook):
+#
+#   1. SSH idle-timeout drop. `git push` negotiates the SSH transport BEFORE
+#      running the (multi-minute: build-vet + coverage + sonar) pre-push hook.
+#      While the hook runs, the idle connection is closed by GitHub's server-side
+#      timeout, so the pack send fails with "Connection ... closed by remote
+#      host" AFTER the hooks print all-green. Force keepalives so the connection
+#      survives the hook. Respect a caller-supplied GIT_SSH_COMMAND (append our
+#      options) rather than clobbering it.
+#
+#   2. Silent non-landing. The exit code can surface as 0 when piped, masking the
+#      drop, so the ref never lands. After a reportedly-successful push, VERIFY
+#      the remote ref SHA equals local HEAD and fail loudly otherwise.
+#
+# Usage: precommit-mandate.sh push [<remote>] [<branch>] [-- <extra git push args>]
+# Defaults: remote=origin, branch=current HEAD branch. Extra args after `--` are
+# passed through to `git push` (e.g. --force-with-lease).
+cmd_push() {
+  local remote="origin" branch="" passthru=()
+  # Parse leading positional remote/branch, then `--` passthrough.
+  while [[ $# -gt 0 ]]; do
+    local arg="$1"
+    case "$arg" in
+      --) shift; passthru=("$@"); break ;;
+      -*) passthru+=("$arg"); shift ;;    # a flag with no positional remote/branch
+      *)
+        if [[ "$remote" == "origin" && -z "$branch" && "${_remote_set:-}" != 1 ]]; then
+          remote="$arg"; _remote_set=1
+        else
+          branch="$arg"
+        fi
+        shift ;;
+    esac
+  done
+  if [[ -z "$branch" ]]; then
+    branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    [[ -z "$branch" || "$branch" == "HEAD" ]] && fail "push: cannot determine current branch (detached HEAD?) — pass it explicitly"
+  fi
+
+  local local_head
+  local_head="$(git rev-parse HEAD 2>/dev/null || true)"
+  [[ -z "$local_head" ]] && fail "push: cannot resolve local HEAD"
+
+  # Keepalive: send a probe every 15s during the long hook so GitHub never sees
+  # the connection as idle; tolerate up to ~30 missed probes before giving up.
+  # Append to any caller GIT_SSH_COMMAND so a custom ssh/identity is preserved.
+  local ssh_keepalive="ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=30 -o TCPKeepAlive=yes"
+  if [[ -n "${GIT_SSH_COMMAND:-}" ]]; then
+    GIT_SSH_COMMAND="${GIT_SSH_COMMAND} -o ServerAliveInterval=15 -o ServerAliveCountMax=30 -o TCPKeepAlive=yes"
+  else
+    GIT_SSH_COMMAND="$ssh_keepalive"
+  fi
+  export GIT_SSH_COMMAND
+
+  say push "git push ${remote} ${branch} (SSH keepalive: ServerAliveInterval=15)"
+  git push "${remote}" "HEAD:${branch}" ${passthru[@]+"${passthru[@]}"} \
+    || fail "push: git push failed (see output above)"
+
+  # Ref-land verification: a green hook + exit 0 is NOT proof the pack landed —
+  # an idle-dropped connection can still surface as 0 when piped. Confirm the
+  # remote ref now points at our local HEAD.
+  say push "verifying ref landed on ${remote} (ls-remote SHA == local HEAD)"
+  local remote_sha
+  remote_sha="$(git ls-remote "${remote}" "refs/heads/${branch}" 2>/dev/null | awk '{print $1}' | head -1)"
+  if [[ -z "$remote_sha" ]]; then
+    fail "push: ref refs/heads/${branch} not found on ${remote} after push — it did NOT land (likely an SSH idle-drop; re-run, the keepalive is already set)"
+  fi
+  if [[ "$remote_sha" != "$local_head" ]]; then
+    fail "push: ${remote}/${branch} is at ${remote_sha} but local HEAD is ${local_head} — the push did NOT land your commit (idle-drop or stale lease); re-run the push"
+  fi
+  say push "OK: ${remote}/${branch} landed at ${local_head}"
+}
+
 case "${1:-}" in
   fmt)       cmd_fmt ;;
   build-vet) cmd_build_vet ;;
   coverage)  cmd_coverage ;;
   sonar)     cmd_sonar ;;
-  *) echo "usage: precommit-mandate.sh {fmt|build-vet|coverage|sonar}" >&2; exit 2 ;;
+  push)      shift; cmd_push "$@" ;;
+  *) echo "usage: precommit-mandate.sh {fmt|build-vet|coverage|sonar|push}" >&2; exit 2 ;;
 esac

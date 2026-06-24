@@ -34,6 +34,9 @@ dodge the hook — that is a hard project constraint; keepalive is the correct f
 
 ## How to apply
 
+- This is now scripted: `bash scripts/precommit-mandate.sh push [<remote>] [<branch>]`
+  sets the keepalive `GIT_SSH_COMMAND` and verifies the ref landed (ls-remote SHA ==
+  local HEAD), failing loudly if not. Prefer it over a bare `git push` for this repo.
 - After any push, confirm the ref landed: `git ls-remote origin refs/heads/<branch>`.
   Do not trust a piped exit code alone.
 - If a push shows green hooks then `Connection ... closed by remote host`, it's
