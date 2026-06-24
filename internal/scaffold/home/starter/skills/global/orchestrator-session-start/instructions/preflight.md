@@ -12,6 +12,8 @@ ToolSearch select:SendMessage,Monitor,TaskStop,PushNotification,Agent
 
 The `mcp__code-review-graph__*` / `mcp__sonarqube__*` MCP tools and the core `Bash`/`Read`/`Grep`/`Glob` tools load with the `orchestrator` agent's `tools:` allow-list — no fetch needed. If you are running under the `orchestrator` AGENT.md, this is already declared; the call above just resolves the deferred schemas in one round-trip instead of N.
 
+This batched `select:` is the **interim** mechanism. The durable fix is to **preload the deferred orchestrator toolset for the orchestrator profile** (schemas resident at session start, zero fetch) — tracked under `p1-reconcile-eligible-and-preload-tools` (agent-ops-hardening design §3.7). Keep the batched-select here until that lands.
+
 ## 1. Pending proposals
 
 ```bash
@@ -42,18 +44,25 @@ A contract file without a matching bundle (or vice versa) is a stale artifact �
 
 ## 3. Stale-status drift check
 
-**First, a GUARDED `origin/master` reconcile (read-only).** `workflow eligible` and every local `da` command read the local tree; over a long parallel session the local `master` ref silently falls behind `origin/master`, so the whole orientation reasons off stale state (`[[stale-local-master-ref]]`, `[[stale-local-checkout-mass-drift]]`). Refresh the ref BEFORE the drift check — but only under guard:
+**First, identify the active-line remote — a fork clone has more than one.** `origin` is usually the **active line** (where forge PRs target), `upstream` is the parent (often stale or divergent). Never conclude "stale / already-shipped" off the wrong remote: a task can read merged on `upstream` and still be open on the active line, or vice versa.
+
+```bash
+git remote -v                 # which remotes exist? confirm the active line (the one PRs target)
+```
+
+**Then a GUARDED reconcile of the active-line ref (read-only).** `workflow eligible` and every local `da` command read the local tree; over a long parallel session the local `master` ref silently falls behind the active-line ref, so the whole orientation reasons off stale state (`[[stale-local-master-ref]]`, `[[stale-local-checkout-mass-drift]]`). Refresh BEFORE the drift check — but only under guard, and **cross-check BOTH refs while deriving from the active line**:
 
 ```bash
 # ONLY on a clean tree. Refuse if dirty — never fetch-then-stomp local work.
 [ -z "$(git status --porcelain)" ] || echo "DIRTY TREE — skip fetch, reconcile by hand"
-git fetch origin master            # updates origin/master ref ONLY; no merge, no checkout move
-git rev-parse origin/master HEAD   # if they differ, you are reasoning off a stale base
+git fetch origin master                            # active line: ref ONLY; no merge, no checkout move
+git fetch upstream master 2>/dev/null || true      # cross-check only; may not exist
+git rev-parse origin/master upstream/master HEAD 2>/dev/null   # compare; derive eligible from the ACTIVE line
 ```
 
-This is a **read-only** fetch of the remote ref. Do NOT `git merge`, `git pull`, or `git reset` here — auto-merging mid-orientation is how you stomp uncommitted local work (`[[stale-local-checkout-mass-drift]]` recovers a tree where that already happened). If `HEAD` lags `origin/master`, reason about "what's on master" via `origin/master` (`git show origin/master:<path>`, `git merge-base --is-ancestor <sha> origin/master`), not the local ref.
+This is a **read-only** fetch of the remote refs. Do NOT `git merge`, `git pull`, or `git reset` here — auto-merging mid-orientation is how you stomp uncommitted local work (`[[stale-local-checkout-mass-drift]]` recovers a tree where that already happened). If `HEAD` lags the active-line ref, reason about "what's on master" via that ref (`git show origin/master:<path>`, `git merge-base --is-ancestor <sha> origin/master`) — the **active line**, not `upstream` and not the local ref.
 
-Then, the status drift check. `workflow eligible` reports tasks by their TASKS.yaml `status` field, which drifts behind merged PRs after parallel-worker batches. Before treating any "pending" or "in_progress" task as truly active, spot-check against your forge:
+Then, the status drift check (against the active-line forge). `workflow eligible` reports tasks by their TASKS.yaml `status` field, which drifts behind merged PRs after parallel-worker batches. Before treating any "pending" or "in_progress" task as truly active, spot-check against your forge:
 
 ```bash
 gh pr list --state merged --search "<task-id>" --limit 3

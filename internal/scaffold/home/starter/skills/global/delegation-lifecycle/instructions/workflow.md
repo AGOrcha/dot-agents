@@ -43,13 +43,20 @@ grep -rln "<symbol>\b" <relevant-dirs>/ --include="*.go"
 
 ### 0d. Coverage-delta forecast — an asserting test outside write_scope MUST fail the gate
 
-A change that alters or deletes a symbol breaks every `*_test.go` that asserts on it. If an asserting test caller falls **outside** the proposed write_scope, the worker cannot fix it within scope and will be forced into a fold-back (the t13 chain burned 3 spawns exactly this way — `[[bundle-scope-via-code-graph]]`). So:
+A change breaks every test that asserts on it. If a broken asserting test falls **outside** the proposed write_scope, the worker cannot fix it within scope and will be forced into a fold-back (the t13 chain burned 3 spawns exactly this way — `[[bundle-scope-via-code-graph]]`). The forecast has TWO shapes by the task's `app_type` — most tasks in this repo are docs/config/skill-prose, so the non-Go branch is the common case, not the edge:
 
-1. For every **changed or deleted** symbol in the scope, list its `*_test.go` callers (`query_graph_tool tests_for` for exported names; the `grep -rln '<symbol>\b' --include='*_test.go'` pass for unexported).
-2. Compute the delta: `{test files that assert on the change}  −  {test files already inside write_scope}`.
-3. If the delta is **non-empty**, you **MUST** either expand write_scope to include those test files, or **REFUSE the fanout** and re-shape the task. Do NOT fanout a scope that breaks an out-of-scope test — that is a guaranteed fold-back.
+- **Go write_scopes:** for every **changed or deleted** symbol, list its `*_test.go` callers (`query_graph_tool tests_for` for exported names; the `grep -rln '<symbol>\b' --include='*_test.go'` pass for unexported).
+- **Non-Go write_scopes (docs / config / skill-prose, e.g. `internal/scaffold`):** the breaking tests are **manifest / snapshot tests that assert on the scaffold file tree, file existence, file counts, or embedded content** (e.g. `internal/scaffold` `copy_test.go`, embed-FS golden tests). Adding/renaming/moving a scaffold file or skill instruction flips those assertions. **Walk THOSE tests, not symbol callers.** `grep -rln "<changed-path-or-basename>" --include='*_test.go'` and check any `embed`/golden/manifest fixtures for the touched tree.
 
-This is the canonical statement of the coverage-delta / "write_scope MUST include the tests a change breaks" rule. The delegation brief-template bullet (§ "Brief-template defaults") and the orchestrator AGENT.md both reference it; it is authored only here.
+Then, for either shape:
+
+1. Compute the delta: `{test files broken by the change}  −  {test files already inside write_scope}`.
+2. If the delta is **non-empty**, apply the **EXPAND-vs-REFUSE rule** — do NOT silently widen scope:
+   - **EXPAND** write_scope to include the broken test files ONLY IF every broken asserting test lives in the **same package** as a file already in write_scope (it is genuinely part of the same disjoint slice).
+   - **REFUSE** the fanout and bounce the bundle back for deliberate re-scope (or an additive-helper approach that does not break the asserters) IF the broken asserters span **other packages**. Silently widening scope across packages shatters the disjoint-slice invariant that makes parallel fanout safe AND hides an author scoping error — both are worse than a refused bundle.
+3. Never fanout a scope that breaks an out-of-scope test — that is a guaranteed fold-back.
+
+This is the canonical statement of the coverage-delta / "write_scope MUST include the tests a change breaks" rule, the Go-vs-non-Go branch, and the expand-vs-refuse rule. The delegation brief-template bullet (§ "Brief-template defaults") and the orchestrator AGENT.md both reference it; it is authored only here.
 
 ### 0e. No overlapping active delegation — MUST NOT re-fanout
 
