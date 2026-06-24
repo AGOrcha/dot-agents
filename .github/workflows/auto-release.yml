@@ -152,34 +152,22 @@ jobs:
           version: latest
           install-only: true
 
-      # --- Windows Authenticode signing via Azure Trusted Signing (gated) ---
-      # The whole signing path is gated on TRUSTED_SIGNING_PROFILE — the LAST
-      # variable to be set (only after identity validation clears and the Public
-      # Trust cert profile exists). The other AZURE_*/TRUSTED_SIGNING_* vars can
-      # be populated ahead of time with zero effect: until a profile name is set
-      # these steps skip and the GoReleaser sign-windows hook no-ops, so releases
-      # ship unsigned Windows binaries exactly as today. Only variable NAMES are
-      # referenced here — no credential values live in the workflow.
-      - name: Azure login (OIDC, for Trusted Signing)
-        if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
-        with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Set up .NET (for the dotnet sign tool)
-        if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Install Trusted Signing CLI (dotnet sign)
-        if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        # NOTE: --version is intentionally unpinned (only a prerelease exists
-        # today); pin it when a stable release is chosen. The whole signing path
-        # is dormant until the repo variables are populated.
-        run: dotnet tool install --global sign --prerelease
+      # --- Windows Authenticode signing via osslsigncode (gated) ---
+      # osslsigncode is a Linux-native C tool (no .NET / kernel32 dependency), so
+      # it runs cleanly on this ubuntu runner. It replaces the dotnet `sign` tool,
+      # whose stable 1.x line aborts on Linux with a kernel32.dll
+      # DllNotFoundException (Kernel32.SetDllDirectoryW in AppInitializer;
+      # dotnet/sign#711) — that crash broke the 0.4.0 release.
+      #
+      # Gated on WINDOWS_SIGNING_ENABLED so it stays dormant (and
+      # scripts/sign-windows.sh no-ops on an empty WINDOWS_CERT_P12) until a
+      # code-signing certificate is configured. osslsigncode signs with a
+      # PKCS#12/PFX cert+password — it CANNOT use Azure Trusted Signing's cloud
+      # HSM, so the prior AZURE_*/TRUSTED_SIGNING_* path (Azure login + .NET +
+      # dotnet sign) is removed here.
+      - name: Install osslsigncode (Windows Authenticode signing)
+        if: steps.check.outputs.exists == 'false' && vars.WINDOWS_SIGNING_ENABLED == 'true'
+        run: sudo apt-get update && sudo apt-get install -y osslsigncode
 
       # --- macOS Developer ID signing via quill (gated) ---
       # quill (https://github.com/anchore/quill) signs/notarizes Mach-O binaries
@@ -224,14 +212,13 @@ jobs:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           HOMEBREW_TAP_GPG_KEY_ID: ${{ secrets.HOMEBREW_TAP_GPG_KEY_ID }}
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
-          # Trusted Signing (gated): empty until the repo variables are set, which
-          # makes scripts/sign-windows.sh a no-op. NAMES referenced, not values.
-          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
-          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
-          TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
-          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
-          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
-          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          # Windows Authenticode signing via osslsigncode (gated): empty until the
+          # cert secret is set, which makes scripts/sign-windows.sh a no-op. The
+          # cert is a base64 PKCS#12 bundle + password; osslsigncode reads them
+          # from the environment.
+          WINDOWS_CERT_P12: ${{ secrets.WINDOWS_CERT_P12 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WINDOWS_CERT_TSA: ${{ vars.WINDOWS_CERT_TSA }}
           # macOS Developer ID signing/notarization via quill (gated): these are
           # empty until the QUILL_* secrets are set, which makes
           # scripts/sign-macos.sh a no-op. quill reads them from the environment.
