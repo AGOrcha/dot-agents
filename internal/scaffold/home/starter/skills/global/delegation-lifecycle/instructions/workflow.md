@@ -12,7 +12,7 @@ This is the **single canonical pre-fanout gate**. Every other skill (orchestrato
 
 ```bash
 gh pr list --state merged --search "<task-id>" --json number,title,mergedAt --limit 5
-git log --oneline origin/master | grep -iE "(<task-id>|<task-keyword>)" | head -5
+git log --oneline <active-line>/master | grep -iE "(<task-id>|<task-keyword>)" | head -5   # <active-line> = resolved active-line remote, not hardcoded
 ```
 
 If the work already shipped, you **MUST NOT** fanout. Run closeout instead (archives artifacts AND auto-advances; do not also call `workflow advance`):
@@ -26,7 +26,7 @@ da workflow delegation closeout --plan <plan-id> --task <task-id> --decision acc
 Bundle write_scope decays as the tree moves under it (`[[validate-bundle-against-head]]`). Before fanout:
 
 1. You **MUST** confirm every file in the proposed `--write-scope` exists on current HEAD.
-2. If the task notes assert a premise ("dedup these duplicates", "X has no caller"), you **MUST** re-confirm the premise still holds on `origin/master` — not against a stale local ref (`[[stale-local-master-ref]]`).
+2. If the task notes assert a premise ("dedup these duplicates", "X has no caller"), you **MUST** re-confirm the premise still holds on the **active-line** ref (the resolved active-line remote's `master`, e.g. `<active-line>/master`) — not against a stale local ref (`[[stale-local-master-ref]]`).
 
 ### 0c. Caller walk — write_scope MUST include cross-file callers
 
@@ -43,10 +43,10 @@ grep -rln "<symbol>\b" <relevant-dirs>/ --include="*.go"
 
 ### 0d. Coverage-delta forecast — an asserting test outside write_scope MUST fail the gate
 
-A change breaks every test that asserts on it. If a broken asserting test falls **outside** the proposed write_scope, the worker cannot fix it within scope and will be forced into a fold-back (the t13 chain burned 3 spawns exactly this way — `[[bundle-scope-via-code-graph]]`). The forecast has TWO shapes by the task's `app_type` — most tasks in this repo are docs/config/skill-prose, so the non-Go branch is the common case, not the edge:
+A change breaks every test that asserts on it. If a broken asserting test falls **outside** the proposed write_scope, the worker cannot fix it within scope and will be forced into a fold-back (`[[bundle-scope-via-code-graph]]`). The forecast has TWO shapes by the task's `app_type` — which shape applies (and the concrete test files to walk) is resolved via `da config relevance --filter topology --app-type <t>` and the project's test layout, not assumed:
 
-- **Go write_scopes:** for every **changed or deleted** symbol, list its `*_test.go` callers (`query_graph_tool tests_for` for exported names; the `grep -rln '<symbol>\b' --include='*_test.go'` pass for unexported).
-- **Non-Go write_scopes (docs / config / skill-prose, e.g. `internal/scaffold`):** the breaking tests are **manifest / snapshot tests that assert on the scaffold file tree, file existence, file counts, or embedded content** (e.g. `internal/scaffold` `copy_test.go`, embed-FS golden tests). Adding/renaming/moving a scaffold file or skill instruction flips those assertions. **Walk THOSE tests, not symbol callers.** `grep -rln "<changed-path-or-basename>" --include='*_test.go'` and check any `embed`/golden/manifest fixtures for the touched tree.
+- **Code write_scopes:** for every **changed or deleted** symbol, list its unit-test callers (e.g. `*_test.go` in Go) (`query_graph_tool tests_for` for exported names; the `grep -rln '<symbol>\b' --include='<test-glob>'` pass for unexported).
+- **Non-code write_scopes (docs / config / skill-prose, e.g. scaffold/template content):** the breaking tests are **manifest / snapshot tests that assert on the generated file tree, file existence, file counts, or embedded content** (the project's manifest/golden test — e.g. a `copy_test.go`-style scaffold-tree test or an embed-FS golden test). Adding/renaming/moving such a file flips those assertions. **Walk THOSE tests, not symbol callers.** `grep -rln "<changed-path-or-basename>" --include='<test-glob>'` and check any embed/golden/manifest fixtures for the touched tree. The concrete manifest test that asserts on the file tree is a **project value** — the project overlay names it.
 
 Then, for either shape:
 
@@ -111,7 +111,7 @@ da workflow contract create --plan <plan-id> --task <task-id> --direct --write-s
 
 Bundle every delegation with these six defaults unless the task explicitly overrides them. They encode lessons that recurred across the run (`.agents/workflow/specs/agent-ops-hardening/design.md` §3.10); each links the owning lesson rather than re-authoring it.
 
-1. **Cognitive complexity ≤ 15.** New/changed functions must stay under Sonar's cognitive-complexity 15 (extract helpers). Note that `gocognit` ≠ Sonar S3776 — pass the Sonar gate, not the linter (`[[sonarcloud-gate-mechanics]]`, `[[gates-must-be-locally-reproducible]]`).
+1. **Satisfy the project's quality gate, not just a local linter.** New/changed functions must clear the project's actual gate thresholds (complexity, coverage, duplication) — resolve the exact gate commands + thresholds + analysis exclusions from the project overlay (`da config relevance` / the project's gate docs), and pass THAT authoritative gate. A local linter can disagree with the gate's metric (e.g. a complexity linter computing the metric differently than the SAST gate), so pin to the gate, not the linter (`[[sonarcloud-gate-mechanics]]`, `[[gates-must-be-locally-reproducible]]`).
 2. **write_scope MUST include the tests a change breaks.** This is the coverage-delta rule — authored once in **§ 0d** of this file. The bundle inherits it: if a change asserts-breaks a `*_test.go` outside scope, the scope was wrong, not the worker (`[[bundle-scope-via-code-graph]]`). Do not restate the rule in the brief; reference § 0d.
 3. **Read-only boundary for plan/review tasks.** A task whose intent is analysis, planning, or review gets a read-only brief — no `Edit`/`Write` in the bundle's tool expectation. Route un-bounded hygiene to `general-purpose`, not `loop-worker` (`[[loop-worker-vs-general-purpose]]`).
 4. **A skipped/tagged cross-platform test is UNVERIFIED until its CI shard is green.** A `t.Skip` or build-tagged (e.g. Windows) test passing locally proves nothing about the skipped platform — the worker must treat it as unverified until the matching CI shard goes green, never as covered (`[[match-ci-test-flags-locally]]`).

@@ -44,23 +44,25 @@ A contract file without a matching bundle (or vice versa) is a stale artifact �
 
 ## 3. Stale-status drift check
 
-**First, identify the active-line remote — a fork clone has more than one.** `origin` is usually the **active line** (where forge PRs target), `upstream` is the parent (often stale or divergent). Never conclude "stale / already-shipped" off the wrong remote: a task can read merged on `upstream` and still be open on the active line, or vice versa.
+**First, identify the active-line remote — a fork clone has more than one.** Conventionally `origin` is the **active line** (where forge PRs target) and `upstream` is the parent (often stale or divergent), but the actual remote NAMES are a **project overlay value** — do not assume them. Resolve the active line from `git remote -v` + the project's overlay (`da config relevance` / the project's contributing docs), then use that name in the commands below. Never conclude "stale / already-shipped" off the wrong remote: a task can read merged on the parent and still be open on the active line, or vice versa.
 
 ```bash
 git remote -v                 # which remotes exist? confirm the active line (the one PRs target)
+# below, <active-line> / <parent> are the resolved remote names, NOT hardcoded
 ```
 
 **Then a GUARDED reconcile of the active-line ref (read-only).** `workflow eligible` and every local `da` command read the local tree; over a long parallel session the local `master` ref silently falls behind the active-line ref, so the whole orientation reasons off stale state (`[[stale-local-master-ref]]`, `[[stale-local-checkout-mass-drift]]`). Refresh BEFORE the drift check — but only under guard, and **cross-check BOTH refs while deriving from the active line**:
 
 ```bash
 # ONLY on a clean tree. Refuse if dirty — never fetch-then-stomp local work.
+# <active-line> / <parent> are the resolved remote names (often origin / upstream).
 [ -z "$(git status --porcelain)" ] || echo "DIRTY TREE — skip fetch, reconcile by hand"
-git fetch origin master                            # active line: ref ONLY; no merge, no checkout move
-git fetch upstream master 2>/dev/null || true      # cross-check only; may not exist
-git rev-parse origin/master upstream/master HEAD 2>/dev/null   # compare; derive eligible from the ACTIVE line
+git fetch <active-line> master                         # active line: ref ONLY; no merge, no checkout move
+git fetch <parent> master 2>/dev/null || true          # cross-check only; may not exist
+git rev-parse <active-line>/master <parent>/master HEAD 2>/dev/null   # compare; derive eligible from the ACTIVE line
 ```
 
-This is a **read-only** fetch of the remote refs. Do NOT `git merge`, `git pull`, or `git reset` here — auto-merging mid-orientation is how you stomp uncommitted local work (`[[stale-local-checkout-mass-drift]]` recovers a tree where that already happened). If `HEAD` lags the active-line ref, reason about "what's on master" via that ref (`git show origin/master:<path>`, `git merge-base --is-ancestor <sha> origin/master`) — the **active line**, not `upstream` and not the local ref.
+This is a **read-only** fetch of the remote refs. Do NOT `git merge`, `git pull`, or `git reset` here — auto-merging mid-orientation is how you stomp uncommitted local work (`[[stale-local-checkout-mass-drift]]` recovers a tree where that already happened). If `HEAD` lags the active-line ref, reason about "what's on master" via that ref (`git show <active-line>/master:<path>`, `git merge-base --is-ancestor <sha> <active-line>/master`) — the **active line**, not the parent and not the local ref.
 
 Then, the status drift check (against the active-line forge). `workflow eligible` reports tasks by their TASKS.yaml `status` field, which drifts behind merged PRs after parallel-worker batches. Before treating any "pending" or "in_progress" task as truly active, spot-check against your forge:
 
