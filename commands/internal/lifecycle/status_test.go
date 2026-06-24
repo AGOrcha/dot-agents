@@ -1016,6 +1016,16 @@ func TestPrintSymlinkDirAudit_MissingDir(t *testing.T) {
 // non-symlink file (isLink=false continue branch). This is the dispatch the
 // AuditPrinter refactor left under-covered.
 func TestPrintSymlinkDirAudit_HealthyAndBroken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// POSIX symlink semantics: this exercises printSymlinkDirAudit's
+		// healthy-link (ok++) branch, which requires links.ManagedLinkTarget
+		// to resolve a *file* link. On Windows a managed file link is a hard
+		// link with no reparse point, so ManagedLinkTarget returns ("",false)
+		// (isLink=false) and the ok++ branch is unreachable by design (see
+		// doctor.go managedLinkBroken doc). The audit lines stay covered by
+		// the Linux/macOS run in the merged multi-OS coverage profile.
+		t.Skip("POSIX symlink semantics: file links are reparse-point symlinks on POSIX, hard links on Windows")
+	}
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "agent")
 	os.MkdirAll(dir, 0755)
@@ -1052,6 +1062,14 @@ func TestPrintSymlinkDirAudit_HealthyAndBroken(t *testing.T) {
 // wrapper used by the legacy commands/seams_test callers — it must delegate to
 // the unexported impl and return the same counts.
 func TestPrintSymlinkDirAudit_Exported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// POSIX symlink semantics: same reason as
+		// TestPrintSymlinkDirAudit_HealthyAndBroken — the (1,0) assertion
+		// needs a healthy *file* link recognized by ManagedLinkTarget, which
+		// is a hard link (no reparse point) on Windows. The exported wrapper
+		// delegates to the same impl whose lines are covered on Linux/macOS.
+		t.Skip("POSIX symlink semantics: file links are reparse-point symlinks on POSIX, hard links on Windows")
+	}
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "agent")
 	os.MkdirAll(dir, 0755)
@@ -1074,7 +1092,14 @@ func TestResolveLinkDest_Branches(t *testing.T) {
 	if got := resolveLinkDest("/links/a", ""); got != "" {
 		t.Errorf("empty dest: expected \"\", got %q", got)
 	}
-	abs := filepath.Join(string(filepath.Separator), "abs", "target")
+	// Use a genuinely OS-absolute path so the already-absolute branch
+	// (filepath.IsAbs true) is hit on every platform. A bare-separator path
+	// like "\abs\target" is NOT absolute on Windows (no drive/UNC volume), so
+	// derive an absolute path from a real dir to stay portable.
+	abs := filepath.Join(t.TempDir(), "abs", "target")
+	if !filepath.IsAbs(abs) {
+		t.Fatalf("test setup: expected %q to be absolute", abs)
+	}
 	if got := resolveLinkDest("/links/a", abs); got != abs {
 		t.Errorf("abs dest: expected %q, got %q", abs, got)
 	}
