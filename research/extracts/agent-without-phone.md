@@ -1,7 +1,23 @@
-# Extract: How I Run an AI Agent Without Touching My Phone (@madebydia / Diana Park)
+## Extract: How I Run an AI Agent Without Touching My Phone (@madebydia / Diana Park)
 
-Source: research/articles/agent-without-phone.md
+**Source**: https://x.com/madebydia/status/2069413760540852403 (body: raisingpixels.dev Substack cross-post)
+**Author**: Diana Park (@madebydia)
+**Date**: 2026-05-30
+**Method**: Playwright (tweet) + WebFetch (author Substack)
+**Raw archive**: research/articles/agent-without-phone.md
 (Tagged "related concepts to draw on later" — adjacent UX/interface piece.)
+
+### Summary
+
+The interface (and its social signal), not the agent, is the problem. Three capture tiers — fast (Watch), slow (notebook, classify-later), none (scheduled). Automation removes the decision point before the task. Validates ingest-now/classify-later + proactive push into the KG over pull-only query.
+
+### Key Quotes
+
+> "The best interface is no interface at all."
+
+> "Automation is not just about saving the minutes spent doing the task. It removes the decision point before the task."
+
+---
 
 ## Key claims
 - The interface, not the agent, is the problem. The value of an interface is the *social signal* it sends, not just throughput.

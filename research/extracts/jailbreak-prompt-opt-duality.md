@@ -1,7 +1,23 @@
-# Extract: Jailbreaking == Prompt Optimization (@aminkarbasi / Amin Karbasi)
+## Extract: Jailbreakers and Prompt Optimizers Are Looping the Same Problem (@aminkarbasi / Amin Karbasi)
 
-Source: research/articles/jailbreak-prompt-opt-duality.md
-STATUS: PARTIAL — thesis + verified references only; full prose pending maintainer paste.
+**Source**: https://x.com/aminkarbasi/status/2069666945134375225 (X-native article https://x.com/i/article/2069652814331285504 — LOGIN-WALLED)
+**Author**: Amin Karbasi (@aminkarbasi)
+**Date**: 2026-06-24
+**Method**: Playwright (tweet + article card; full article body redirected to X login wall)
+**Raw archive**: research/articles/jailbreak-prompt-opt-duality.md
+**STATUS: NEEDS-PASTE** — verified title/excerpt/timestamp + 8 arXiv refs only; full prose login-walled, pending maintainer paste from an authenticated X session.
+
+### Summary
+
+Jailbreaking and prompt optimization are the same iterative loop (propose -> evaluate -> score -> refine), differing only in objective. "Prompt is a control surface." Sharpens our verify/score/refine loop and the judge-robustness requirement on our verifier stage; raises an uncovered red-team/adversarial surface for KG-canonical skills.
+
+### Key Quotes
+
+> "Automated jailbreaking and automated prompt optimization are usually treated as two different research areas. I think they are two facets of the same coin." (verbatim, article card)
+
+> "Prompt is a control surface." (tagline)
+
+---
 
 ## Key claims (from article card + verified abstracts)
 - Automated jailbreaking and automated prompt optimization are **two facets of the same coin**: the same iterative loop (propose candidate prompt -> evaluate -> score -> reflect/refine), differing only in objective (maximize a safety failure vs. maximize task performance).

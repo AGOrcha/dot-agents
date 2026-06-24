@@ -1,6 +1,22 @@
-# Extract: Compaction Orchestrator (@luhsnaa)
+## Extract: Compaction Orchestrator (@luhsnaa)
 
-Source: research/articles/compaction-orchestrator.md
+**Source**: https://x.com/luhsnaa/status/2068709582537654775 (body: github.com/anshulluhsna/compaction-orchestrator)
+**Author**: Anshul (@luhsnaa)
+**Date**: 2026-06-21
+**Method**: Playwright (tweet) + WebFetch (project README)
+**Raw archive**: research/articles/compaction-orchestrator.md
+
+### Summary
+
+Compaction is a routing decision, not one summary: classify each context segment, route to a per-segment strategy, emit an inspectable plan + derived view over an immutable raw event log. Maps onto our derivation model and §3A typed-view projection.
+
+### Key Quotes
+
+> "Compaction is not one operation. It is a routing decision."
+
+> "What should each piece of context become before the next model call?"
+
+---
 
 ## Key claims
 - One generic summary is the wrong primitive for agent context compaction. Compaction is a **routing decision**, not a single operation: classify each segment, route it to a strategy, emit an inspectable **plan** + a derived runtime view.

@@ -1,18 +1,23 @@
-# The Problem is Prompt Debt
+## The Problem is Prompt Debt
 
-- **Author:** Drew Breunig (@dbreunig)
-- **Source tweet:** https://x.com/dbreunig/status/2069455716478603536
-- **X long-form article:** https://x.com/i/article/2069201811307917312 (body paywalled / HTTP 402)
-- **Canonical blog cross-post:** https://www.dbreunig.com/2026/06/22/the-problem-is-prompt-debt.html
-- **Published:** 2026-06-22
-- **Retrieved:** 2026-06-24
-- **Status:** RETRIEVED — tweet was a link card with no prose; full article reproduced from the author's blog cross-post.
+**Source**: https://x.com/dbreunig/status/2069455716478603536
+**Canonical body source**: https://www.dbreunig.com/2026/06/22/the-problem-is-prompt-debt.html (author blog cross-post of the X-native article https://x.com/i/article/2069201811307917312)
+**Author**: Drew Breunig (@dbreunig)
+**Date**: 2026-06-22
+**Method**: Playwright (x.com tweet — verified link card, no tweet prose) + WebFetch (author blog cross-post for verbatim body)
+**Word count**: ~900 words
+
+---
+
+### Summary
+
+Hand-written natural-language prompts make prototypes effortless but accrue as "prompt debt" in production: iteration slows, teams can't read the prompts, and you get silently locked to a single model. The fix mirrors coding-agent best practice — specify behavior with evals/metrics/typed specs rather than prose, and stop hand-writing prompts (search/optimize them via DSPy/GEPA), which restores model-agnosticism.
 
 **Subtitle:** You can't be model agnostic if you're hand-tuning prompts
 
 ---
 
-## Source content (verbatim, blog cross-post)
+### Body
 
 Thanks to natural language interfaces, AI applications can be prototyped quickly. You write what you want in English, hand it to a frontier model, and a working prototype appears in an afternoon. This is extraordinarily powerful and for one-off tasks, optimal. But as a way to build reliable systems, the natural language prompt is a trap.
 
@@ -51,3 +56,21 @@ Second principle: stop writing the prompt by hand. Once you have metrics to scor
 Once prompts are generated and behavior is defined by measurements, you are no longer bound to a model. Evaluating a new model takes hours, not weeks. A deprecation email becomes a chore, not a fire drill (e.g., Anthropic pulling Fable for regulatory reasons; Groq deprecating Llama-3.1-8b).
 
 Every mature engineering discipline eventually stops doing by hand the thing it once prided itself on doing by hand: assembly gave way to compilers, hand-tuned queries to planners, manual memory management to machines. Prompt-writing is no different. Coaxing the model with exactly the right words is a real skill, optimal for one-off tasks — but to build reliable, improvable, and portable systems we should not be hand-tuning prompts.
+
+---
+
+### Key Quotes
+
+> "The plain-English prompt that makes prototypes effortless turns out to be a poor way to specify how a system should behave, and the bill arrives slowly, disguised as ordinary progress, until the application can barely move."
+
+> "Claude Code tells Opus seven times to return multiple tool calls in a single response."
+
+> "Once we have metrics that can score candidates, the prompt is no longer something to craft but something for which to search."
+
+> "Every mature engineering discipline eventually stops doing by hand the very thing it once prided itself on doing by hand."
+
+---
+
+### Extraction Notes
+
+The x.com tweet (`/status/2069455716478603536`) was navigated via Playwright (`article-extract` skill, Path B) and confirmed to be a bare link card to the X-native article `/i/article/2069201811307917312`; the X-native article body itself is login-walled. The verbatim body above is from the author's own blog cross-post of the identical piece (dbreunig.com), fetched via WebFetch — author-published, not a third-party mirror.

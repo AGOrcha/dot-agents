@@ -1,6 +1,22 @@
-# Extract: Token Capital Efficiency (@kmad / Kevin Madura)
+## Extract: Token Capital Efficiency (@kmad / Kevin Madura)
 
-Source: research/articles/token-capital-efficiency.md
+**Source**: https://x.com/kmad/status/2069362498663317737 (body: kmad.ai cross-post)
+**Author**: Kevin Madura (@kmad)
+**Date**: 2026-06-23
+**Method**: Playwright (tweet) + WebFetch (author site)
+**Raw archive**: research/articles/token-capital-efficiency.md
+
+### Summary
+
+Value per token. Wrap the probabilistic core in a deterministic shell; run define -> match -> measure -> optimize. Evals become owned, composable IP — a "digital inventory of tasks + evals" that compounds. Names the economic learning-loop our §3A correlation edges support.
+
+### Key Quotes
+
+> "Every gap you leave, Claude fills with in-distribution choice." (quoting Thariq, Anthropic)
+
+> "On your specific tasks, an eval becomes your IP, because it's the boundary that measures a model's performance."
+
+---
 
 ## Key claims
 - **Token capital efficiency** = business value captured per dollar of tokens (value / (tokens x price), across reasoning/execution/learning). Almost no firm is efficient; default-to-frontier-for-everything is driving a CFO/board "token spend backlash."

@@ -1,16 +1,21 @@
-# Token Capital Efficiency
+## Token Capital Efficiency
 
-- **Author:** Kevin Madura (@kmad)
-- **Source tweet:** https://x.com/kmad/status/2069362498663317737
-- **X long-form article:** https://x.com/i/article/2068874313608871936 (body paywalled / HTTP 402)
-- **Canonical cross-post:** https://kmad.ai/Token-Capital-Efficiency
-- **Published:** 2026-06-23
-- **Retrieved:** 2026-06-24
-- **Status:** RETRIEVED — tweet was a link card; full article reproduced from author's site.
+**Source**: https://x.com/kmad/status/2069362498663317737
+**Canonical body source**: https://kmad.ai/Token-Capital-Efficiency (author site cross-post of the X-native article https://x.com/i/article/2068874313608871936)
+**Author**: Kevin Madura (@kmad)
+**Date**: 2026-06-23
+**Method**: Playwright (x.com tweet — verified link card) + WebFetch (author site for verbatim body)
+**Word count**: ~1,500 words
 
 ---
 
-## Source content (verbatim, author's site)
+### Summary
+
+Extends Satya Nadella's "token capital" with token capital efficiency = business value per dollar of tokens. Defaulting every task to the frontier model is driving a CFO backlash. The fix: place work on a determinism-probabilism spectrum, "wrap the probabilistic core in a deterministic shell," and run the loop define -> match -> measure -> optimize. Evals become owned, composable IP that lets you swap models down the cost curve until accuracy crosses a defined tolerance.
+
+---
+
+### Body
 
 Satya Nadella recently published an excellent article on what a future firm looks like in an AI-driven economy. He also introduces the concept of "token capital" which now exists alongside human capital (and financial capital).
 
@@ -55,3 +60,21 @@ A natural first step is prompt optimization — and not by hand. With frameworks
 ### Can you measure your token capital efficiency?
 
 Companies that create an inventory of valuable tasks and evals will save costs short-term, but more importantly will be set up to "build the learning loop … where human capital and token capital compound." Organizations that learn to create a digital inventory of important work won't just spend less — they'll benefit from compounding knowledge, model capability, and cost improvements, while competitors flail re-writing prompts from scratch. Those with high token capital efficiency will win.
+
+---
+
+### Key Quotes
+
+> "Every gap you leave, Claude fills with in-distribution choice." (quoting Thariq, Anthropic)
+
+> "The crucial thing here is that the *what* never disappears. You always have an intent … It's only the specification of the *how* that fades out as you move to the right."
+
+> "On your specific tasks, an eval becomes your IP, because it's the boundary that measures a model's performance."
+
+> "A company should be able to switch out a 'generalist' model without losing the 'company veteran' expertise built into their learning system." (quoting Satya Nadella)
+
+---
+
+### Extraction Notes
+
+The x.com tweet (`/status/2069362498663317737`) was navigated via Playwright (`article-extract` skill, Path B) and confirmed to be a bare link card to the X-native article `/i/article/2068874313608871936`, whose body is login-walled. The verbatim body above is from the author's own site cross-post (kmad.ai) of the identical piece, fetched via WebFetch.

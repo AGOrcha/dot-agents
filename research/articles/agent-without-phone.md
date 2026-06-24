@@ -1,17 +1,21 @@
-# How I Run an AI Agent Without Touching My Phone
+## How I Run an AI Agent Without Touching My Phone
 
-- **Author:** Diana Park (@madebydia)
-- **Source tweet:** https://x.com/madebydia/status/2069413760540852403
-- **X long-form article:** "How I Run an AI Agent Without Touching My Phone" (X-native, login-walled)
-- **Canonical cross-post (Substack):** https://blog.raisingpixels.dev/p/how-i-run-an-ai-agent-without-touching
-- **Author site:** https://raisingpixels.dev ; product: https://buildwithyourkid.com
-- **Published:** 2026-05-30 (Substack); tweet shared 2026-06-23
-- **Retrieved:** 2026-06-24
-- **Status:** RETRIEVED — tweet was a link card; full article reproduced from the author's Substack cross-post. (Tagged "related concepts to draw on later" in the brief.)
+**Source**: https://x.com/madebydia/status/2069413760540852403
+**Canonical body source**: https://blog.raisingpixels.dev/p/how-i-run-an-ai-agent-without-touching (author Substack cross-post of the X-native article; author site https://raisingpixels.dev, product https://buildwithyourkid.com)
+**Author**: Diana Park (@madebydia)
+**Date**: 2026-05-30 (Substack post; tweet shared 2026-06-23)
+**Method**: Playwright (x.com tweet — verified link card) + WebFetch (author Substack for verbatim body)
+**Word count**: ~1,100 words
 
 ---
 
-## Source content (verbatim, Substack cross-post)
+### Summary
+
+Reframes AI-agent UX around presence/attention rather than throughput: the interface, not the agent, is the problem, because the input device sends a social signal (especially to a watching child). Uses three capture tiers — fast (Apple Watch dictation routed to a Hermes agent via a Poke iMessage executor), slow (smart pen / notebook, classified into the pipeline later), and none (scheduled/cron automation). Automation's real value is removing the decision point before the task, not just saving task-minutes. (Tagged "related concepts to draw on later" in the brief.)
+
+---
+
+### Body
 
 My 3-year-old doesn't know what AI is. He knows that mom sometimes talks to her watch, scribbles in a notebook, and that things happen because of it — a game appears on his computer, groceries show up, a recipe prints itself. He thinks this is normal. He's right.
 
@@ -50,3 +54,21 @@ You don't need Hermes, an inq pen, or an Apple Watch. The principle is interface
 Right now he sees a mom who writes in notebooks, talks to her watch sometimes, and gets things done without staring at a screen. For now, he sees the outcome: a parent whose attention returns quickly. That's the output I'm shipping.
 
 (The post closes with a soft CTA to a 12-week screen-free "computational thinking" curriculum for ages 2–6 at buildwithyourkid.com.)
+
+---
+
+### Key Quotes
+
+> "The strange part is not that I use an AI agent. The strange part is that, for a while, the only way to talk to it looked exactly like not being present."
+
+> "Automation is not just about saving the minutes spent doing the task. It removes the decision point before the task."
+
+> "The best interface is no interface at all."
+
+> "Your kid can't tell the difference between 'mom is doing something important' and 'mom is scrolling.' They see the rectangle."
+
+---
+
+### Extraction Notes
+
+The x.com tweet (`/status/2069413760540852403`) was navigated via Playwright (`article-extract` skill, Path B) and confirmed to be a bare link card to an X-native article (login-walled). The verbatim body above is from the author's own Substack cross-post of the identical piece, fetched via WebFetch.

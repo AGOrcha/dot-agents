@@ -1,6 +1,22 @@
-# Extract: The Problem is Prompt Debt (@dbreunig / Drew Breunig)
+## Extract: The Problem is Prompt Debt (@dbreunig / Drew Breunig)
 
-Source: research/articles/prompt-debt.md
+**Source**: https://x.com/dbreunig/status/2069455716478603536 (body: dbreunig.com blog cross-post)
+**Author**: Drew Breunig (@dbreunig)
+**Date**: 2026-06-22
+**Method**: Playwright (tweet) + WebFetch (author blog)
+**Raw archive**: research/articles/prompt-debt.md
+
+### Summary
+
+Hand-tuned NL prompts accrue as technical debt and lock you to one model. Specify behavior with evals/typed specs, not prose; search/optimize prompts (DSPy/GEPA) instead of hand-writing. Validates our KG-as-SOT direction; challenges our own large NL skill/agent prompts.
+
+### Key Quotes
+
+> "You can't be model agnostic if you're hand-tuning prompts."
+
+> "Once we have metrics that can score candidates, the prompt is no longer something to craft but something for which to search."
+
+---
 
 ## Key claims
 - Hand-written natural-language prompts are great for prototypes but accrue as **technical debt** in production; cost arrives slowly until the app can "barely move."
