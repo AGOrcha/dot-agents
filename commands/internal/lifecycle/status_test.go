@@ -13,6 +13,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 // testStatusDeps returns a lifecycle.Deps suitable for status_test exercises:
@@ -34,6 +35,11 @@ func testStatusDeps() Deps {
 		ExactArgsWithHints:    func(int, ...string) cobra.PositionalArgs { return accept },
 	}
 }
+
+// auditNameFmt is the default name format passed to printSymlinkDirAudit in
+// tests (the entry name is printed verbatim). Shared const so the literal is
+// not duplicated across cases (SonarCloud go:S1192).
+const auditNameFmt = "%s"
 
 // jsonOff is the default jsonOutput closure: emit text mode.
 func jsonOff() bool { return false }
@@ -126,6 +132,62 @@ func TestProbeAgentsHomeGit_BareGitDir(t *testing.T) {
 	g := probeAgentsHomeGit(tmp)
 	if !g.IsRepo {
 		t.Error("expected IsRepo=true when .git dir exists")
+	}
+}
+
+// TestPrintAgentsHomeGitStatusLine_WithRemote drives the git-remote rendering
+// branch (status.go 254-259 canonicalize + 270-273 "with remote" line). It
+// initializes a real repo via `git init` and configures an origin URL so
+// gitremote.ReadOriginURL/CanonicalRepoID resolve to a non-empty remote.
+func TestPrintAgentsHomeGitStatusLine_WithRemote(t *testing.T) {
+	if _, err := execabs.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	tmp := t.TempDir()
+	run := func(args ...string) {
+		cmd := execabs.Command("git", append([]string{"-C", tmp}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+tmp)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	run("remote", "add", "origin", "git@github.com:AGOrcha/dot-agents.git")
+
+	probe := probeAgentsHomeGit(tmp)
+	if !probe.IsRepo {
+		t.Fatal("expected IsRepo=true for initialized repo")
+	}
+	if probe.Remote == "" {
+		t.Errorf("expected non-empty canonical remote, got %q", probe.Remote)
+	}
+	// Renders the "with remote" status line without panic.
+	printAgentsHomeGitStatusLine(tmp)
+	// statusGitInfo mirrors the same probe into JSON form.
+	if g := statusGitInfo(tmp); !g.Initialized || g.Remote == "" {
+		t.Errorf("expected initialized git info with remote, got %+v", g)
+	}
+}
+
+// TestCountClaudeRulesDir_HardlinkedRule covers the Windows-style hard-linked
+// managed rule branch (status.go 363-365: HasMultipleHardLinks → ok++). The
+// HasMultipleHardLinks seam is overridden so the branch is exercised on every
+// OS without relying on host hard-link semantics.
+func TestCountClaudeRulesDir_HardlinkedRule(t *testing.T) {
+	tmp := t.TempDir()
+	rulesDir := filepath.Join(tmp, ".claude", "rules")
+	os.MkdirAll(rulesDir, 0755)
+	// A plain regular file (not a managed symlink) so managedLinkBroken
+	// reports isLink=false and control falls through to the hard-link check.
+	os.WriteFile(filepath.Join(rulesDir, "hardrule.md"), []byte("x"), 0644)
+
+	prev := HasMultipleHardLinks
+	HasMultipleHardLinks = func(string) bool { return true }
+	defer func() { HasMultipleHardLinks = prev }()
+
+	ok, warn := countClaudeRulesDir(rulesDir)
+	if ok != 1 || warn != 0 {
+		t.Errorf("expected (1,0) for hard-linked managed rule, got (%d,%d)", ok, warn)
 	}
 }
 
@@ -936,6 +998,90 @@ func TestPrintSymlinkDirAudit_EmptyDir(t *testing.T) {
 	ok, broken := printSymlinkDirAudit(dir, ".some/path/", "%s")
 	if ok != 0 || broken != 0 {
 		t.Errorf("expected (0,0), got (%d,%d)", ok, broken)
+	}
+}
+
+// TestPrintSymlinkDirAudit_MissingDir covers the os.ReadDir error early-return
+// (a directory that does not exist returns (0,0) without printing).
+func TestPrintSymlinkDirAudit_MissingDir(t *testing.T) {
+	ok, broken := printSymlinkDirAudit(filepath.Join(t.TempDir(), "nope"), "empty", auditNameFmt)
+	if ok != 0 || broken != 0 {
+		t.Errorf("expected (0,0) for missing dir, got (%d,%d)", ok, broken)
+	}
+}
+
+// TestPrintSymlinkDirAudit_HealthyAndBroken drives the loop body: a healthy
+// managed symlink (ok++ / statusAuditLinkOkFormat branch), a broken managed
+// symlink (broken++ / statusAuditLinkBrokenFormat branch), and a plain
+// non-symlink file (isLink=false continue branch). This is the dispatch the
+// AuditPrinter refactor left under-covered.
+func TestPrintSymlinkDirAudit_HealthyAndBroken(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "agent")
+	os.MkdirAll(dir, 0755)
+
+	// Healthy managed symlink → ok++.
+	target := filepath.Join(tmp, "target")
+	os.WriteFile(target, []byte("x"), 0644)
+	linktest.Link(t, target, filepath.Join(dir, "good"))
+
+	// Broken managed symlink → broken++.
+	linktest.DanglingLink(t, filepath.Join(dir, "bad"))
+
+	// Plain file (not a managed link) → continue branch, neither counted.
+	os.WriteFile(filepath.Join(dir, "plain"), []byte("x"), 0644)
+
+	out := captureStatusStdout(t, func() {
+		ok, broken := printSymlinkDirAudit(dir, "empty", auditNameFmt)
+		if ok != 1 {
+			t.Errorf("expected ok=1, got %d", ok)
+		}
+		if broken != 1 {
+			t.Errorf("expected broken=1, got %d", broken)
+		}
+	})
+	if !strings.Contains(out, "good") || !strings.Contains(out, "bad") {
+		t.Errorf("expected both link names in audit output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(broken)") {
+		t.Errorf("expected broken marker in output, got:\n%s", out)
+	}
+}
+
+// TestPrintSymlinkDirAudit_Exported pins the exported PrintSymlinkDirAudit
+// wrapper used by the legacy commands/seams_test callers — it must delegate to
+// the unexported impl and return the same counts.
+func TestPrintSymlinkDirAudit_Exported(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "agent")
+	os.MkdirAll(dir, 0755)
+	target := filepath.Join(tmp, "t")
+	os.WriteFile(target, []byte("x"), 0644)
+	linktest.Link(t, target, filepath.Join(dir, "good"))
+
+	ok, broken := PrintSymlinkDirAudit(dir, "empty", auditNameFmt)
+	if ok != 1 || broken != 0 {
+		t.Errorf("expected (1,0) from exported wrapper, got (%d,%d)", ok, broken)
+	}
+}
+
+// TestResolveLinkDest_Branches covers all three return paths of
+// resolveLinkDest: empty dest, already-absolute dest, and the relative-dest
+// branch (line 119) that joins against the link's directory. The relative
+// branch was previously only reachable on platforms whose symlinks resolve
+// relative, so this pins it directly.
+func TestResolveLinkDest_Branches(t *testing.T) {
+	if got := resolveLinkDest("/links/a", ""); got != "" {
+		t.Errorf("empty dest: expected \"\", got %q", got)
+	}
+	abs := filepath.Join(string(filepath.Separator), "abs", "target")
+	if got := resolveLinkDest("/links/a", abs); got != abs {
+		t.Errorf("abs dest: expected %q, got %q", abs, got)
+	}
+	linkPath := filepath.Join("links", "sub", "a")
+	want := filepath.Clean(filepath.Join("links", "sub", "rel", "target"))
+	if got := resolveLinkDest(linkPath, filepath.Join("rel", "target")); got != want {
+		t.Errorf("relative dest: expected %q, got %q", want, got)
 	}
 }
 
