@@ -220,12 +220,12 @@ func TestLintExtendsLayer_BranchMatrix(t *testing.T) {
 	}{
 		{"invalid ref", "no-colon-here", lintFail, "invalid layer ref"},
 		{"undeclared source", "ghost:org/base.json", lintFail, "not declared"},
-		{"non-local skipped", "git:org/base.json", lintSkip, "not locally readable"},
+		{"unlocked remote skipped", "git:org/base.json", lintSkip, "unlocked or not cached"},
 		{"valid local pass", "acme:org/base.json", lintPass, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			res := lintExtendsLayer(sch, cfg.LayerRef{Ref: tt.ref}, sources)
+			res := lintExtendsLayer(sch, cfg.LayerRef{Ref: tt.ref}, sources, nil)
 			if res.Status != tt.wantStatus {
 				t.Fatalf("status = %q, want %q (detail %q)", res.Status, tt.wantStatus, res.Detail)
 			}
@@ -388,7 +388,7 @@ func TestLintExtendsLayer_LocalSourceURLFallback(t *testing.T) {
 	sources := map[string]cfg.Source{
 		"acme": {ID: "acme", Type: "local", URL: localRoot},
 	}
-	res := lintExtendsLayer(sch, cfg.LayerRef{Ref: "acme:org/base.json"}, sources)
+	res := lintExtendsLayer(sch, cfg.LayerRef{Ref: "acme:org/base.json"}, sources, nil)
 	if res.Status != lintPass {
 		t.Fatalf("status = %q (detail %q), want pass via URL fallback", res.Status, res.Detail)
 	}
@@ -440,6 +440,141 @@ func runLintCmdInDir(t *testing.T, project string, wantErr bool) {
 // error branch in buildLintReport and the corresponding build-error branch in
 // runLint. The embedded schema always compiles, so we inject a compile error into
 // the package-level memoized result for the duration of the test and restore it.
+// gitExtendsManifest is a project manifest declaring one git-source extends layer
+// at the given ref, used by the locked-remote-layer lint tests.
+const gitExtendsManifest = `{
+	"version": 2,
+	"repo_id": "github.com/acme/app",
+	"sources": [{"id": "acme", "type": "git", "url": "https://example.com/repo.git", "ref": "main"}],
+	"extends": ["acme:org/base.json"]
+}`
+
+// seedCachedLayerBytes writes raw bytes as a cached layer.json under the resolved
+// cache root for sourceID/layerPath at sha, so a locked remote layer's cached
+// content is present for lint to read (the cache path mirrors writeCachedLayer).
+func seedCachedLayerBytes(t *testing.T, sourceID, layerPath, sha string, body []byte) {
+	t.Helper()
+	dir := filepath.Join(cfg.AgentsHome(), "cache", "config", sourceID, filepath.FromSlash(layerPath), sha)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "layer.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// lockGitBase writes a units lock pinning the acme:org/base.json git layer to sha
+// so it is treated as a LOCKED remote layer by lint.
+func lockGitBase(t *testing.T, project, sha string) {
+	t.Helper()
+	if err := cfg.WriteConfigLock(project, map[string]cfg.LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: sha, FetchedAt: "2026-06-02T00:00:00Z"},
+	}); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+}
+
+// TestBuildLintReport_LockedRemoteValidCachedPasses: a locked git layer whose
+// cached bytes are valid passes lint (validated, not skipped).
+func TestBuildLintReport_LockedRemoteValidCachedPasses(t *testing.T) {
+	project := withRepoLayer(t, gitExtendsManifest, "")
+	lockGitBase(t, project, "abcdef0123456789")
+	seedCachedLayerBytes(t, "acme", "org/base.json", "abcdef0123456789", []byte(`{"version":2,"skills":["org-skill"]}`))
+
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	layer, ok := findLintResult(report.Results, "acme:org/base.json")
+	if !ok || layer.Status != lintPass {
+		t.Fatalf("locked+cached valid remote layer = %+v (ok=%v), want pass", layer, ok)
+	}
+	if !report.OK {
+		t.Errorf("expected OK=true, got %+v", report)
+	}
+}
+
+// TestBuildLintReport_LockedRemoteCorruptCachedFails: a locked git layer whose
+// cached bytes are corrupt JSON FAILS lint (the F-005 gap — lint no longer claims
+// a clean bill on a remote layer it never validated).
+func TestBuildLintReport_LockedRemoteCorruptCachedFails(t *testing.T) {
+	project := withRepoLayer(t, gitExtendsManifest, "")
+	lockGitBase(t, project, "abcdef0123456789")
+	seedCachedLayerBytes(t, "acme", "org/base.json", "abcdef0123456789", []byte(`{not valid json`))
+
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	if report.OK {
+		t.Fatalf("expected OK=false on corrupt cached remote layer, got %+v", report)
+	}
+	layer, ok := findLintResult(report.Results, "acme:org/base.json")
+	if !ok || layer.Status != lintFail {
+		t.Fatalf("corrupt cached remote layer = %+v (ok=%v), want fail", layer, ok)
+	}
+	if !strings.Contains(layer.Detail, "invalid JSON") {
+		t.Errorf("detail = %q, want it to mention invalid JSON", layer.Detail)
+	}
+}
+
+// TestBuildLintReport_LockedRemoteSchemaViolationFails: a locked git layer whose
+// cached bytes parse but violate the schema FAILS lint with the schema detail.
+func TestBuildLintReport_LockedRemoteSchemaViolationFails(t *testing.T) {
+	project := withRepoLayer(t, gitExtendsManifest, "")
+	lockGitBase(t, project, "abcdef0123456789")
+	seedCachedLayerBytes(t, "acme", "org/base.json", "abcdef0123456789", []byte(`{"bogus_top_level_field": true}`))
+
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	layer, ok := findLintResult(report.Results, "acme:org/base.json")
+	if !ok || layer.Status != lintFail {
+		t.Fatalf("schema-violating cached remote layer = %+v (ok=%v), want fail", layer, ok)
+	}
+	if !strings.Contains(layer.Detail, "schema violation") {
+		t.Errorf("detail = %q, want it to mention a schema violation", layer.Detail)
+	}
+}
+
+// TestBuildLintReport_UnlockedRemoteSkipped: a remote layer with NO lock entry is
+// still skipped with the sync hint (never a false pass/fail).
+func TestBuildLintReport_UnlockedRemoteSkipped(t *testing.T) {
+	project := withRepoLayer(t, gitExtendsManifest, "")
+	// No lock written → unlocked remote.
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	layer, ok := findLintResult(report.Results, "acme:org/base.json")
+	if !ok || layer.Status != lintSkip {
+		t.Fatalf("unlocked remote layer = %+v (ok=%v), want skip", layer, ok)
+	}
+	if !strings.Contains(layer.Detail, "unlocked or not cached") {
+		t.Errorf("detail = %q, want the sync hint", layer.Detail)
+	}
+	if !report.OK {
+		t.Errorf("a skip must not flip OK, got %+v", report)
+	}
+}
+
+// TestBuildLintReport_LockedRemoteUncachedSkipped: a remote layer that IS locked
+// but whose cached bytes are absent is skipped (the cache gap degrades to the
+// sync hint, not a fail).
+func TestBuildLintReport_LockedRemoteUncachedSkipped(t *testing.T) {
+	project := withRepoLayer(t, gitExtendsManifest, "")
+	lockGitBase(t, project, "abcdef0123456789") // locked, but no cached bytes seeded
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	layer, ok := findLintResult(report.Results, "acme:org/base.json")
+	if !ok || layer.Status != lintSkip {
+		t.Fatalf("locked-but-uncached remote layer = %+v (ok=%v), want skip", layer, ok)
+	}
+}
+
 func TestBuildLintReport_SchemaCompileFailurePropagates(t *testing.T) {
 	restore := injectSchemaCompileErr(errors.New("injected: schema compile failed"))
 	t.Cleanup(restore)
