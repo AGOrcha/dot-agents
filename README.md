@@ -328,6 +328,10 @@ These inspect and manage canonical files under `~/.agents/`. Each supports
 | `mcp` | Inspect and manage canonical `~/.agents/mcp` config files |
 | `settings` | Inspect and manage canonical `~/.agents/settings` files |
 
+See the [**Managing rules, MCP & settings guide**](docs/RESOURCE_MANAGEMENT_GUIDE.md) for the
+canonical model, per-platform emit, and the `list`/`show`/`remove` surface (hooks have their
+own [Hooks guide](docs/HOOKS.md)).
+
 ### Workflow Proposals
 
 | Command | Description |
@@ -349,9 +353,11 @@ queries — so humans and agents can resume work safely.
 | `workflow orient` | Render session orient context for the current project |
 | `workflow next` | Suggest the next actionable canonical task |
 | `workflow eligible` | List all unblocked eligible tasks across active plans with conflict detection |
+| `workflow slots` | Show the slot ledger (occupied / awaiting-owner / blocked) across active plans (`--plan`) |
 | `workflow complete --plan <id>` | Probe scoped plan-completion state |
 | `workflow health` | Show workflow health snapshot |
 | `workflow app-types` | List available app_type values for the current repo |
+| `workflow resolve-prompt --kind <k> --slug <s>` | Resolve a stage profile's composed (base-first, scope-resolved) `prompt_files` |
 
 #### Plans & Tasks
 
@@ -384,6 +390,7 @@ queries — so humans and agents can resume work safely.
 
 | Command | Description |
 |---------|-------------|
+| `workflow contract create --task <id>` | Materialize a delegation contract for direct orchestrator work (`list` subcommand; `--plan`, `--mode`, `--write-scope`) |
 | `workflow fanout --plan <id> --task <id>` | Delegate a task to a sub-agent with a bounded write scope |
 | `workflow merge-back --task <id> --summary <s>` | Record a sub-agent's completed work as a merge-back artifact |
 | `workflow delegation closeout` | Archive merge-back artifacts and reconcile canonical task state |
@@ -397,6 +404,23 @@ queries — so humans and agents can resume work safely.
 |---------|-------------|
 | `workflow drift` | Detect workflow drift across managed repos (read-only) |
 | `workflow sweep` | Plan and optionally apply fixes for workflow drift (`--apply`) |
+
+#### Automation / internal commands
+
+These are driven by skills and lifecycle hooks (e.g. iteration-close, loop-worker), not run by
+hand. They are listed for completeness; reach for the end-user commands above for day-to-day work.
+
+| Command | Description |
+|---------|-------------|
+| `workflow hook-sentinel` | Write/read/clear hook sentinels declaring per-skill stop-gate context (`write`/`read`/`clear`) |
+| `workflow hook-outcome write` | Append a hook gate outcome record to the active iteration's `iter-N.hook-outcomes.yaml` sidecar |
+| `workflow commit` | Stage and commit workflow-state changes (managed roots + declared session paths) |
+| `workflow archive-orphans` | Sweep stale active merge-back/delegation artifacts after a plan archive |
+| `kg lockfile show` | Inspect adapter lockfile state (`reconcile` subcommand runs fail-closed view reconciliation) |
+
+A task may also carry the parameterized status `blocked-on:<ref>` (set via
+`workflow advance --status blocked-on:<ref>`); it is a task *state*, not a standalone command,
+and frees its parallelism slot in the `workflow slots` ledger until the blocker auto-resolves.
 
 ### Knowledge Graph
 
@@ -463,7 +487,7 @@ structured project memory, bridge queries, and code-to-note context.
 | Command | Description |
 |---------|-------------|
 | `explain [topic]` | Explain da concepts |
-| `score run` | Compute and query agent-run outcome scores (`iteration <N>`, `session <id>` subcommands) |
+| `score run` | Compute and query agent-run outcome scores (`iteration <N>`, `session <id>` subcommands; see the [**Scoring guide**](docs/SCORE_GUIDE.md)) |
 | `session stats` | Show usage statistics from each installed AI platform |
 | `--help` | Show help for any command |
 | `--version` | Show version |

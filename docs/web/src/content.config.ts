@@ -50,6 +50,8 @@ const PUBLIC_PAGES: { src: string; id: string; order: number }[] = [
   { src: 'docs/DEMO_WORKFLOW_WALKTHROUGH.md', id: 'guides/demo-workflow-walkthrough', order: 6 },
   { src: 'docs/DEMO_DIAGRAM.md', id: 'guides/demo-diagram', order: 7 },
   { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 8 },
+  { src: 'docs/RESOURCE_MANAGEMENT_GUIDE.md', id: 'guides/resource-management', order: 9 },
+  { src: 'docs/SCORE_GUIDE.md', id: 'guides/score', order: 10 },
 
   // Reference
   { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },
