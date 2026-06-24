@@ -282,11 +282,15 @@ func reportOneProjectManifestHealth(name, path string) bool {
 		}
 		return true
 	}
+	legacy := reportManifestDeprecation(name, rc)
 	missingGit, presentGit := partitionManifestGitSources(rc)
 	if len(missingGit) > 0 {
 		for _, url := range missingGit {
 			ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
 		}
+		return true
+	}
+	if legacy {
 		return true
 	}
 	if len(presentGit) > 0 {
@@ -295,6 +299,20 @@ func reportOneProjectManifestHealth(name, path string) bool {
 		ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (local)", name))
 	}
 	return false
+}
+
+// reportManifestDeprecation emits a warn bullet when the manifest uses a
+// legacy v1 shape (old schema version or deprecated v1 keys folded silently on
+// load). It is read-only — doctor only surfaces the deprecation (config-v2
+// §15.3); the file still loads. Returns true when a warning was emitted so the
+// caller can mark the manifest section as having an issue.
+func reportManifestDeprecation(name string, rc *config.AgentsRC) bool {
+	w := config.DetectV1Deprecation(rc)
+	if !w.Detected {
+		return false
+	}
+	ui.Bullet("warn", fmt.Sprintf("%s — %s  hint: da config migrate", name, w.Message()))
+	return true
 }
 
 // partitionManifestGitSources splits the manifest's git sources into two
