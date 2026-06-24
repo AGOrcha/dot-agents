@@ -279,11 +279,23 @@ func TestOpenReadError(t *testing.T) {
 	}
 }
 
-func TestFlushWriteError(t *testing.T) {
-	// Parent dir does not exist → fsops.WriteFileAtomic's temp-create fails.
-	lf, _ := Open(filepath.Join(t.TempDir(), "no-such-dir", "x.lock"))
-	if err := lf.Flush(); err == nil {
-		t.Fatal("expected write error when parent dir is missing")
+func TestAcquireFileLockParentCannotBeCreated(t *testing.T) {
+	// acquireFileLock now MkdirAll's the lock dir's parent (the Windows mkdir
+	// fix). When that parent cannot be made — here an intermediate path component
+	// is a regular FILE, not a directory — acquire must surface the error rather
+	// than proceeding to a doomed Mkdir. Deterministic and portable across OSes.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Lock path sits under the file-blocker, so filepath.Dir(lockDir) is a path
+	// whose ancestor is a file → MkdirAll fails.
+	_, err := acquireFileLock(filepath.Join(blocker, "sub", ".agentsrc.lock"))
+	if err == nil {
+		t.Fatal("expected acquire error when the lock parent cannot be created")
+	}
+	if !strings.Contains(err.Error(), "ensure lock parent") {
+		t.Fatalf("expected an ensure-lock-parent error, got: %v", err)
 	}
 }
 
@@ -621,6 +633,83 @@ func TestUnlockFileLockSurfacesRemoveError(t *testing.T) {
 
 	if _, err := os.Stat(lockDir); os.IsNotExist(err) {
 		t.Skip("filesystem removed the lock dir despite a read-only parent; cannot force RemoveAll error here")
+	}
+}
+
+// TestAcquireFileLockCreatesMissingParent is the Windows regression guard for
+// the field bug where `da config explain --all` / `da install` failed in the
+// agentslock acquire with "mkdir <...>.agentsrc.lock.lock: The system cannot
+// find the file specified" (ERROR_FILE_NOT_FOUND). The lock dir is created with
+// os.Mkdir, which — unlike MkdirAll — does not create intermediate path
+// components: if the lockfile's parent directory does not yet exist when the
+// lock is first taken, the bare Mkdir fails (ENOENT on unix, ERROR_FILE_NOT_FOUND
+// on Windows). acquireFileLock must MkdirAll the parent first.
+//
+// This runs on ALL OSes (no GOOS skip) so windows-latest CI exercises the exact
+// failure surface. It drives the real exported Flush → acquireFileLock path, not
+// the helper, so it catches the class end-to-end.
+func TestAcquireFileLockCreatesMissingParent(t *testing.T) {
+	// Lockfile path whose parent directory does NOT exist yet — the field repro:
+	// the first resolve takes the lock before any writer has materialized the dir.
+	parent := filepath.Join(t.TempDir(), "not-yet-created", "prov-workspace")
+	path := filepath.Join(parent, ".agentsrc.lock")
+
+	lf, err := Open(path) // Open tolerates a missing file (fresh document)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := lf.SetSection("units", map[string]string{"git:a@1": "sha1"}); err != nil {
+		t.Fatalf("SetSection: %v", err)
+	}
+	// Flush acquires the mkdir lock (the line that failed in the field) and then
+	// atomically writes the document. Both need the parent to exist; the fix
+	// MkdirAll's it inside acquireFileLock.
+	if err := lf.Flush(); err != nil {
+		t.Fatalf("Flush into a missing-parent path must succeed after the fix, got: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("lockfile not written: %v", err)
+	}
+	// The sidecar lock dir must have been removed on release (RemoveAll in
+	// unlockFileLock), leaving a clean directory for the next acquire.
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock dir should be released after Flush, stat err=%v", err)
+	}
+}
+
+// TestAcquireReleaseReAcquireCycle drives the full acquire → release →
+// re-acquire cycle through the real lock path on every OS, so a Windows-specific
+// regression in the create/remove/recreate sequence (e.g. delete-pending vs a
+// fresh Mkdir) is caught by windows-latest CI rather than only on unix.
+func TestAcquireReleaseReAcquireCycle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	for i := 0; i < 3; i++ {
+		unlock, err := acquireFileLock(path)
+		if err != nil {
+			t.Fatalf("acquire #%d: %v", i, err)
+		}
+		if _, err := os.Stat(path + ".lock"); err != nil {
+			t.Fatalf("lock dir absent while held (#%d): %v", i, err)
+		}
+		unlock()
+		if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+			t.Fatalf("lock dir not released (#%d): stat err=%v", i, err)
+		}
+	}
+}
+
+// TestAcquireFileLockMissingParentDirect exercises acquireFileLock directly (not
+// via Flush) against a path several levels below an absent directory, asserting
+// the parent is created and the lock acquired. Runs on all OSes.
+func TestAcquireFileLockMissingParentDirect(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a", "b", "c", ".agentsrc.lock")
+	unlock, err := acquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquireFileLock with missing parents must succeed: %v", err)
+	}
+	defer unlock()
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf("lock dir not created under freshly-made parents: %v", err)
 	}
 }
 

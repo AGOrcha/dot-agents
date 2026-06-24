@@ -1012,10 +1012,17 @@ func TestReadAllLimitedOverLimit(t *testing.T) {
 }
 
 func TestWriteConfigLockFlushError(t *testing.T) {
-	// A non-existent project dir means Flush cannot write the lockfile.
-	missing := filepath.Join(t.TempDir(), "no", "such", "dir")
-	if err := WriteConfigLock(missing, map[string]LockedLayer{}); err == nil {
-		t.Fatal("expected error writing lock into a non-existent dir")
+	// Flush now MkdirAll's the lock's parent, so a merely-absent project dir is
+	// created on demand (fixing the Windows mkdir-lock failure). To still cover
+	// the Flush error-return wiring, place the project under a regular FILE so
+	// the parent cannot be made a directory — portable across OSes.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(blocker, "dir")
+	if err := WriteConfigLock(project, map[string]LockedLayer{}); err == nil {
+		t.Fatal("expected error writing lock when the lock parent cannot be created")
 	}
 }
 

@@ -230,7 +230,24 @@ func readDocument(path string) (map[string]json.RawMessage, error) {
 }
 
 func acquireFileLock(path string) (func(), error) {
-	lockDir := path + ".lock"
+	// Build the sidecar lock-dir path through filepath so it carries the
+	// platform separator (backslashes on Windows) rather than whatever the
+	// caller's `path` happened to use, and ensure its parent exists before the
+	// first Mkdir. os.Mkdir (unlike MkdirAll) does NOT create intermediate
+	// components: if the parent directory is absent it fails with ENOENT on unix
+	// and ERROR_FILE_NOT_FOUND ("The system cannot find the file specified") on
+	// Windows — the exact failure seen in the field, where the lock is taken
+	// before any sibling writer (or fsops.WriteFileAtomic) has materialized the
+	// directory. MkdirAll-ing only the parent keeps the lock-dir Mkdir itself a
+	// single, atomic, EEXIST-distinguishable create — preserving the
+	// contention/stale-reclaim semantics below — while removing the
+	// missing-parent failure mode. A nil/empty parent (".") MkdirAll is a no-op.
+	lockDir := filepath.Clean(path) + ".lock"
+	if parent := filepath.Dir(lockDir); parent != "." && parent != "" {
+		if err := os.MkdirAll(parent, 0o700); err != nil {
+			return nil, fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
+		}
+	}
 	deadline := time.Now().Add(lockAcquireTimeout)
 	reclaimed := false
 	for {

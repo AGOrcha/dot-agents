@@ -250,9 +250,17 @@ func TestWriteUnitsLockOpenError(t *testing.T) {
 }
 
 func TestWriteUnitsLockFlushError(t *testing.T) {
-	// Parent dir does not exist → Flush's atomic write fails.
-	missing := filepath.Join(t.TempDir(), "no-such-dir")
-	if err := WriteUnitsLock(missing, UnitsLock{}); err == nil {
-		t.Fatal("expected flush error when project dir is missing")
+	// Flush now MkdirAll's the lock's parent, so a merely-absent project dir is
+	// auto-created and is no longer an error (that was the Windows mkdir bug).
+	// To still cover the Flush error-return wiring, make the project path's
+	// parent a regular FILE: MkdirAll of the lock parent then fails because an
+	// intermediate component is not a directory — portable across OSes.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(blocker, "project") // parent "blocker" is a file
+	if err := WriteUnitsLock(project, UnitsLock{}); err == nil {
+		t.Fatal("expected flush error when the lock parent cannot be created")
 	}
 }
