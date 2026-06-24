@@ -1,7 +1,7 @@
 # Graph Backend Adapter Contract — Design Spec
 
-**Status:** draft v5 (canonical)
-**Written:** 2026-05-09 (proposal v1) → 2026-05-09 v2 → 2026-05-09 v3 graduated to sibling spec → 2026-05-09 v4 → 2026-05-09 v4.1 → 2026-05-11 v5 (this revision)
+**Status:** draft v6.1 (canonical)
+**Written:** 2026-05-09 (proposal v1) → 2026-05-09 v2 → 2026-05-09 v3 graduated to sibling spec → 2026-05-09 v4 → 2026-05-09 v4.1 → 2026-05-11 v5 → 2026-05-19 v6 → v6.1 (this revision)
 **Plan:** [`.agents/workflow/plans/graph-backend-adapter-contract/graph-backend-adapter-contract.plan.md`](../../plans/graph-backend-adapter-contract/graph-backend-adapter-contract.plan.md) — implementation-detail companion (DSL grammar conformance test catalog, lockfile state-machine implementation, namespace token SDK shape, TTRPG grammar-extension decision)
 **Supersedes:** `.agents/proposals/graph-backend-adapter-contract.md` (proposal accepted; this spec is the canonical artifact)
 
@@ -1146,29 +1146,6 @@ materialized_views:
       RETURN c.id, e.id, f.id
 ```
 
-```yaml
-materialized_views:
-  - name: controls_with_changed_function_evidence
-    description: |-
-      Controls whose cited evidence references a function that has
-      changed in CRG since the evidence was collected.
-    reads_from:
-      - { adapter: crg, version: ^1.0,
-          note_types: [function],
-          edge_types: [defines] }
-      - { adapter: compliance-register, version: ^1.0,
-          note_types: [evidence, control],
-          edge_types: [cited_by, references] }
-    refresh_on:
-      - { adapter: crg, driver: source_mutation, on_types: [function] }
-      - { adapter: compliance-register, driver: source_mutation, on_types: [evidence] }
-    query: |-
-      MATCH (e:evidence)-[:references]->(f:function)
-      MATCH (e)-[:cited_by]->(c:control)
-      WHERE f.last_changed > e.collected_at
-      RETURN c.id, e.id, f.id
-```
-
 Cross-namespace reads outside a `reads_from` declaration are rejected
 at adapter load. The version range pins compatibility — see §10 for
 how cutover handles version drift.
@@ -1370,7 +1347,7 @@ When an adapter's own schema changes:
    version, transforms, writes back with new `adapter_schema_version`
    tag. Skill reports per-note status.
 4. **Detect own materialized views referencing migrated note types.**
-   Mark each as `view_status: stale-needs-rebuild`.
+   Mark each as `view_status: pending-rebuild`.
 5. **Rebuild own materialized views** in dependency order (views that
    read from other views are rebuilt last).
 6. **Behavior-preservation gate** (§6.2 of app-type-profiles, extended
@@ -1677,7 +1654,7 @@ the `crg-bridge` adapter are decommissioned together, only when:
    `reads_from: [crg-bridge]` — verified by sweeping lockfiles across
    the dot-agents-managed repo set (per `workflow drift`)
 
-Until all three are satisfied, the CRG adapter ships in **dual-read
+Until all four are satisfied, the CRG adapter ships in **dual-read
 mode**: bootstrap writes to the new kg-native namespace, the bridge
 remains active for tools without parity, and `da` core prefers the
 new namespace when both are available.
