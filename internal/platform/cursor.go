@@ -548,30 +548,36 @@ func (c *cursor) PrintAudit(w io.Writer, project, repoPath, agentsHome string) {
 }
 
 // cursorRuleSourceInfo classifies a cursor rule entry into srcType
-// ("global"|"project"|"local") and returns the user-display path it should
-// link to (empty for local files).
-func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo string) {
+// ("global"|"project"|"local"), the user-display path it should link to
+// (empty for local files), and the canonical scope/filename used to resolve
+// the on-disk source under <agentsHome>/rules/. scope and srcName are empty
+// for local files.
+func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo, scope, srcName string) {
 	switch {
 	case strings.HasPrefix(entryName, globalRulesPrefix):
 		srcName := strings.TrimPrefix(entryName, globalRulesPrefix)
-		return "global", "~/.agents/rules/global/" + srcName
+		return "global", "~/.agents/rules/global/" + srcName, "global", srcName
 	case strings.HasPrefix(entryName, projectName+"--"):
 		srcName := strings.TrimPrefix(entryName, projectName+"--")
-		return "project", "~/.agents/rules/" + projectName + "/" + srcName
+		return "project", "~/.agents/rules/" + projectName + "/" + srcName, projectName, srcName
 	}
-	return "local", ""
+	return "local", "", "", ""
 }
 
 // cursorPrintRuleEntry renders one cursor rule entry's audit line to w.
 func cursorPrintRuleEntry(w io.Writer, project, rulesDir, agentsHome, entryName string) {
-	srcType, linkedTo := cursorRuleSourceInfo(entryName, project)
+	srcType, linkedTo, scope, srcName := cursorRuleSourceInfo(entryName, project)
 	if srcType == "local" {
 		fmt.Fprintf(w, auditLocalFileIndentedFmt, ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
 		return
 	}
 	f := filepath.Join(rulesDir, entryName)
-	srcPath := strings.Replace(linkedTo, "~/.agents", agentsHome, 1)
-	srcPath = strings.Replace(srcPath, "~", os.Getenv("HOME"), 1)
+	// Resolve the canonical source under agentsHome with filepath.Join rather
+	// than tilde string-substitution: on Windows agentsHome can contain an 8.3
+	// short-path segment (e.g. RUNNER~1) whose literal '~' a naive
+	// strings.Replace(…, "~", …) would clobber, corrupting the path so the
+	// healthy hard link is misreported as "not linked".
+	srcPath := filepath.Join(agentsHome, "rules", scope, srcName)
 	if linked, _ := links.AreHardlinked(f, srcPath); linked {
 		fmt.Fprintf(w, "      %s✓%s %s %s← %s%s\n", ui.Green, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
 	} else {
