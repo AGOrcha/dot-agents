@@ -2,6 +2,16 @@
 
 Run these checks **before** `workflow orient/status/next`. They prevent redundant fanouts, wasted spawns on already-shipped work, and surface in-flight state that the workflow commands won't show.
 
+## 0. Front-load the orchestrator toolset (one ToolSearch call)
+
+The orchestrator's coordination tools are deferred-schema in most harnesses, and the transcripts showed them re-fetched piecemeal mid-session (`SendMessage` alone ~10×). Fetch the whole toolset once, up front, in a single batched `select:` call:
+
+```
+ToolSearch select:SendMessage,Monitor,TaskStop,PushNotification,Agent
+```
+
+The `mcp__code-review-graph__*` / `mcp__sonarqube__*` MCP tools and the core `Bash`/`Read`/`Grep`/`Glob` tools load with the `orchestrator` agent's `tools:` allow-list — no fetch needed. If you are running under the `orchestrator` AGENT.md, this is already declared; the call above just resolves the deferred schemas in one round-trip instead of N.
+
 ## 1. Pending proposals
 
 ```bash
@@ -32,7 +42,18 @@ A contract file without a matching bundle (or vice versa) is a stale artifact �
 
 ## 3. Stale-status drift check
 
-`workflow eligible` reports tasks by their TASKS.yaml `status` field, which drifts behind merged PRs after parallel-worker batches. Before treating any "pending" or "in_progress" task as truly active, spot-check against your forge:
+**First, a GUARDED `origin/master` reconcile (read-only).** `workflow eligible` and every local `da` command read the local tree; over a long parallel session the local `master` ref silently falls behind `origin/master`, so the whole orientation reasons off stale state (`[[stale-local-master-ref]]`, `[[stale-local-checkout-mass-drift]]`). Refresh the ref BEFORE the drift check — but only under guard:
+
+```bash
+# ONLY on a clean tree. Refuse if dirty — never fetch-then-stomp local work.
+[ -z "$(git status --porcelain)" ] || echo "DIRTY TREE — skip fetch, reconcile by hand"
+git fetch origin master            # updates origin/master ref ONLY; no merge, no checkout move
+git rev-parse origin/master HEAD   # if they differ, you are reasoning off a stale base
+```
+
+This is a **read-only** fetch of the remote ref. Do NOT `git merge`, `git pull`, or `git reset` here — auto-merging mid-orientation is how you stomp uncommitted local work (`[[stale-local-checkout-mass-drift]]` recovers a tree where that already happened). If `HEAD` lags `origin/master`, reason about "what's on master" via `origin/master` (`git show origin/master:<path>`, `git merge-base --is-ancestor <sha> origin/master`), not the local ref.
+
+Then, the status drift check. `workflow eligible` reports tasks by their TASKS.yaml `status` field, which drifts behind merged PRs after parallel-worker batches. Before treating any "pending" or "in_progress" task as truly active, spot-check against your forge:
 
 ```bash
 gh pr list --state merged --search "<task-id>" --limit 3

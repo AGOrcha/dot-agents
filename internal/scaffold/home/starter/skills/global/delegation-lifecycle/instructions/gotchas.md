@@ -6,11 +6,11 @@ Common failure points:
 
 - Declare write scope at fanout time and treat it as immutable. Changing scope informally later defeats the conflict model.
 - Prefer directory paths such as `commands/` rather than ad-hoc file globs for common cases. The overlap checks are built around prefix containment.
-- **Pre-validate scope against current HEAD** before fanout: confirm every listed file exists, and run a graph + grep pass for callers of moving symbols. A bundle authored from stale task notes either spawns on already-shipped work or ships an incomplete scope that forces a fold-back.
+- Pre-validating scope (file-exists-on-HEAD, caller walk, coverage-delta) is the canonical pre-fanout gate — see **§ 0** of `instructions/workflow.md` in this skill. A bundle authored from stale task notes spawns on shipped work or forces a fold-back; § 0 is the hard gate that prevents it.
 
 ## Bundle Drift
 
-- TASKS.yaml entries (`status`, `notes`, `write_scope`) are write-time snapshots. They decay as the tree moves. Before every fanout, cross-check the task ID against merged PRs (`gh pr list --state merged --search "<task-id>"` or your forge's equivalent) — if the work shipped, run `workflow delegation closeout --decision accept` instead of fanout.
+- TASKS.yaml entries (`status`, `notes`, `write_scope`) are write-time snapshots; they decay as the tree moves. The cross-check-vs-shipped-PRs step is **§ 0a** of the canonical pre-fanout gate (`instructions/workflow.md`).
 - If every task that `depends_on: <X>` is marked completed, then X is almost certainly status-stale; verify by PR search, then closeout.
 
 ## Worker Profile Selection
