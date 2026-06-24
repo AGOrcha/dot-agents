@@ -32,8 +32,15 @@ Rationale:
 - **User mental model:** `da hooks …` matches how people already talk about hook bundles;
   burying hooks under a generic `resources` command would add indirection without reducing code
   duplication.
-- **Implementation:** shared code lives in `internal/` packages; command files stay thin
-  adapters. That satisfies the guardrail above without forcing a single CLI noun for all resources.
+- **Implementation:** shared mutation/projection code lives in `internal/` packages
+  (`internal/links`, `internal/projectsync`, `internal/scaffold`); the per-resource command code
+  is a thin composition adapter. After the **root-command-decomposition** plan landed, each family's
+  command package is a leaf rather than a flat `commands/*.go` file: `hooks` lives at
+  `commands/hooks/`, while `rules`, `mcp`, and `settings` live under `commands/internal/{rules,mcp,settings}/`
+  (alongside `commands/internal/lifecycle/` for `install`/`doctor`/`init`/`status`). Root
+  (`commands/root.go`) is a composition root that wires each leaf in via its constructor
+  (`NewHooksCmd`, `rules.NewRulesCmd`, `mcp.NewCmd`, `settings.NewCmd`, …). That satisfies the
+  guardrail above without forcing a single CLI noun for all resources.
 - **Phasing:** families can ship incrementally (hooks first) while readback commands (`status`,
   `explain`, `doctor`) stay aligned in later phases.
 
@@ -86,3 +93,8 @@ do not treat “phase 5 completed” as proof that phases 3–4 are done.
 1. Update this document and `.agents/workflow/plans/resource-command-parity/resource-command-parity.plan.md`.
 2. Adjust tests or help text in `commands/` when boundaries or naming change.
 3. Run `go test ./commands/...` (or broader) before merge.
+
+> **Boundary note (maintainers):** The `commands/internal/{lifecycle,mcp,settings,rules}` leaves are
+> composition targets and **must not import each other**. `tools/importguard` enforces this in CI;
+> outsider imports are already blocked by Go's `internal/` package rule. A new resource leaf added
+> under `commands/internal/` should be added to `tools/importguard/main.go`'s guarded set.
