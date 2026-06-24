@@ -48,6 +48,9 @@ ICG="${HOOKS_SRC}/iteration-close-gate/gate.sh"
 ISPG="${HOOKS_SRC}/isp-gate/gate.sh"
 LWG="${HOOKS_SRC}/loop-worker-gate/gate.sh"
 
+# Native hard-block marker emitted by the Claude/Codex/Copilot platforms.
+readonly BLOCK_JSON='"decision":"block"'
+
 if [[ ! -x "$DA" ]]; then
   echo "SKIP: da binary not found at $DA (run 'make build' or set DA= to override)" >&2
   exit 0
@@ -116,7 +119,7 @@ r="$(fresh_repo lw-scope)"
 echo "out of scope" >"$r/escapee.txt"
 run_gate "$LWG" "$r" subagent_stop '{}' claude
 [[ "$G_RC" -eq 2 ]] || fail "case1: expected hard-block exit 2, got $G_RC (stderr: $(cat "$G_ERR"))"
-grep -q '"decision":"block"' "$G_OUT" || fail "case1: missing Claude native block JSON ($(cat "$G_OUT"))"
+grep -q "$BLOCK_JSON" "$G_OUT" || fail "case1: missing Claude native block JSON ($(cat "$G_OUT"))"
 grep -q 'escapee.txt' "$G_OUT" || fail "case1: block reason did not name the out-of-scope path"
 grep -q 'loop-worker.R3.1' "$G_OUT" || fail "case1: block reason did not cite rule loop-worker.R3.1"
 ok "case1: loop-worker out-of-scope edit => native block naming the scope violation (R3.1)"
@@ -139,7 +142,7 @@ r="$(fresh_repo ic-terminal)"
 # merge-back.md is intentionally absent => portable hard remediation (R1.1).
 run_gate "$ICG" "$r" stop '{}' claude
 [[ "$G_RC" -eq 2 ]] || fail "case2: expected hard-block exit 2, got $G_RC"
-grep -q '"decision":"block"' "$G_OUT" || fail "case2: missing native block JSON"
+grep -q "$BLOCK_JSON" "$G_OUT" || fail "case2: missing native block JSON"
 grep -q 'merge-back.md' "$G_OUT" || fail "case2: block reason did not name the missing artifact"
 grep -q 'iteration-close.R1.1' "$G_OUT" || fail "case2: block reason did not cite rule iteration-close.R1.1"
 ok "case2: iteration-close missing artifact => native block (R1.1)"
@@ -152,7 +155,7 @@ echo "merge-back recorded" >"$r/merge-back.md"
 (cd "$r" && git add -A && git commit -qm "artifact" >/dev/null)
 run_gate "$ICG" "$r" stop '{}' claude
 [[ "$G_RC" -eq 0 ]] || fail "case2b: artifact present must exit 0, got $G_RC (out: $(cat "$G_OUT"))"
-grep -q '"decision":"block"' "$G_OUT" && fail "case2b: must not block when artifact present (no enforced trace rule)"
+grep -q "$BLOCK_JSON" "$G_OUT" && fail "case2b: must not block when artifact present (no enforced trace rule)"
 grep -qi 'deferred' "$G_ERR" || fail "case2b: expected trace-coverage advisory on stderr ($(cat "$G_ERR"))"
 grep -q 'R1.4' "$G_ERR" || fail "case2b: advisory did not name the deferred trace rule R1.4"
 ok "case2b: trace-backed rule reported as advisory coverage, not an enforced block (R1.4 deferred)"
@@ -171,7 +174,7 @@ r="$(fresh_repo lw-soft)"
 echo "in scope change" >"$r/src/feature.txt"
 run_gate "$LWG" "$r" subagent_stop '{}' claude
 [[ "$G_RC" -eq 0 ]] || fail "case3: in-scope dirty state must exit 0, got $G_RC (out: $(cat "$G_OUT"))"
-grep -q '"decision":"block"' "$G_OUT" && fail "case3: in-scope change must not block"
+grep -q "$BLOCK_JSON" "$G_OUT" && fail "case3: in-scope change must not block"
 grep -qi 'advisory' "$G_ERR" || fail "case3: expected explanatory advisory on stderr ($(cat "$G_ERR"))"
 ok "case3: loop-worker dirty-but-in-scope => success with explanatory stderr advisory"
 
@@ -189,20 +192,20 @@ r="$(fresh_repo pre-tool)"
 # loop-worker may not run any orchestrator command (R3.9).
 run_gate "$LWG" "$r" pre_tool_use '{"command":"da workflow advance"}' claude
 [[ "$G_RC" -eq 2 ]] || fail "case4a: loop-worker PreToolUse must block, got $G_RC"
-grep -q '"decision":"block"' "$G_OUT" || fail "case4a: missing native block JSON"
+grep -q "$BLOCK_JSON" "$G_OUT" || fail "case4a: missing native block JSON"
 grep -q 'loop-worker.R3.9' "$G_OUT" || fail "case4a: block did not cite rule loop-worker.R3.9"
 ok "case4a: loop-worker PreToolUse 'workflow advance' => native prevention (R3.9)"
 
 # A non-orchestrator command must NOT be prevented (no false positive).
 run_gate "$LWG" "$r" pre_tool_use '{"command":"git status"}' claude
 [[ "$G_RC" -eq 0 ]] || fail "case4b: benign PreToolUse command must exit 0, got $G_RC"
-grep -q '"decision":"block"' "$G_OUT" && fail "case4b: benign command must not be blocked"
+grep -q "$BLOCK_JSON" "$G_OUT" && fail "case4b: benign command must not be blocked"
 ok "case4b: loop-worker PreToolUse benign command => allowed (no false prevention)"
 
 # Delegated iteration-close may not call `workflow advance` (R1.8).
 run_gate "$ICG" "$r" pre_tool_use '{"command":"da workflow advance"}' claude
 [[ "$G_RC" -eq 2 ]] || fail "case4c: iteration-close PreToolUse advance must block, got $G_RC"
-grep -q '"decision":"block"' "$G_OUT" || fail "case4c: missing native block JSON"
+grep -q "$BLOCK_JSON" "$G_OUT" || fail "case4c: missing native block JSON"
 grep -q 'iteration-close.R1.8' "$G_OUT" || fail "case4c: block did not cite rule iteration-close.R1.8"
 ok "case4c: delegated iteration-close PreToolUse 'workflow advance' => native prevention (R1.8)"
 
