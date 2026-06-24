@@ -38,17 +38,17 @@ REPO_PATH=""
 LINES=40
 PATH_ONLY=0
 
-while [ $# -gt 0 ]; do
+while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage 0 ;;
     --lines)
-      [ $# -ge 2 ] || { echo "error: --lines needs a value" >&2; usage 2; }
+      [[ $# -ge 2 ]] || { echo "error: --lines needs a value" >&2; usage 2; }
       LINES="$2"; shift 2 ;;
     --path-only) PATH_ONLY=1; shift ;;
     --) shift; break ;;
     -*) echo "error: unknown option: $1" >&2; usage 2 ;;
     *)
-      if [ -z "$REPO_PATH" ]; then REPO_PATH="$1"; shift
+      if [[ -z "$REPO_PATH" ]]; then REPO_PATH="$1"; shift
       else echo "error: unexpected argument: $1" >&2; usage 2; fi ;;
   esac
 done
@@ -57,7 +57,7 @@ REPO_PATH="${REPO_PATH:-$PWD}"
 
 # Normalize to an absolute path (the encoding is computed from the absolute
 # path, matching how Claude Code records it).
-if [ -d "$REPO_PATH" ]; then
+if [[ -d "$REPO_PATH" ]]; then
   REPO_PATH="$(cd "$REPO_PATH" && pwd)"
 fi
 
@@ -67,7 +67,7 @@ encoded="$(printf '%s' "$REPO_PATH" | tr '/.' '--')"
 projects_root="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 session_dir="${projects_root}/${encoded}"
 
-if [ ! -d "$session_dir" ]; then
+if [[ ! -d "$session_dir" ]]; then
   echo "No Claude session directory for ${REPO_PATH}" >&2
   echo "  expected: ${session_dir}" >&2
   exit 3
@@ -78,21 +78,21 @@ fi
 latest=""
 latest_mtime=0
 for f in "$session_dir"/*.jsonl; do
-  [ -e "$f" ] || continue
+  [[ -e "$f" ]] || continue
   # macOS: stat -f %m ; GNU: stat -c %Y. Try both.
   m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)"
-  if [ "$m" -gt "$latest_mtime" ]; then
+  if [[ "$m" -gt "$latest_mtime" ]]; then
     latest_mtime="$m"
     latest="$f"
   fi
 done
 
-if [ -z "$latest" ]; then
+if [[ -z "$latest" ]]; then
   echo "No .jsonl transcript in ${session_dir}" >&2
   exit 3
 fi
 
-if [ "$PATH_ONLY" -eq 1 ]; then
+if [[ "$PATH_ONLY" -eq 1 ]]; then
   printf '%s\n' "$latest"
   exit 0
 fi
