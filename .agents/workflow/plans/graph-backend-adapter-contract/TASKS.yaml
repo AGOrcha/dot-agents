@@ -3,7 +3,7 @@ plan_id: graph-backend-adapter-contract
 tasks:
     - id: t1-none-adapter-end-to-end
       title: Built-in `none` adapter end-to-end pipeline
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-compliance-read-only
@@ -43,7 +43,6 @@ tasks:
                 clear-cut)
           verifier: integration tests
           review: code review
-
     - id: t2-compliance-read-only
       title: Compliance register adapter (read-only / stub bootstrap)
       status: pending
@@ -81,7 +80,6 @@ tasks:
           coalesce in WHERE accepted but only for params (T23 passes,
           T24 must reject — guard against accidentally allowing
           field-level computation).
-
     - id: t3-ttrpg-dogfood
       title: TTRPG dogfood adapter — first real adapter author UX
       status: pending
@@ -118,7 +116,6 @@ tasks:
           No grammar extensions (§5.1) — TTRPG works within v1.
           Wishlist accumulates §12 budget signals; do NOT pre-emptively
           extend grammar.
-
     - id: t4-crg-dual-read
       title: CRG migration — dual-read mode with crg-bridge adapter
       status: pending
@@ -161,7 +158,6 @@ tasks:
         Anti-scope:
           NO decommissioning in this task — bridge stays active.
           flows/communities/postprocess parity is t6.
-
     - id: t5-cross-adapter-reads-from
       title: Cross-adapter `reads_from` — compliance view from CRG
       status: pending
@@ -204,7 +200,6 @@ tasks:
         Common false positive:
           Cross-adapter writes attempted via materialized view —
           must be storage-layer rejected (N8).
-
     - id: t6-bridge-decommission
       title: Bridge decommissioning — close §11.4 gate
       status: pending
@@ -246,7 +241,6 @@ tasks:
           Do NOT delete bridge until ALL §11.4 gate conditions are
           met. If even one consumer's lockfile still has
           `reads_from: [crg-bridge]`, keep the bridge.
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the graph-backend minor'
       status: pending
@@ -278,9 +272,11 @@ tasks:
         completes once parity is proven — keeping the consumer-visible behavior
         identical, which is why it stays MINOR.
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        minor is 0.4.0, but resolve from VERSION when this task becomes
-        ready; serialize at the VERSION bump if another minor ships first.
+        ready-time (do NOT hardcode). VERSION is already 0.4.0 (that minor
+        shipped), so the next minor resolves to 0.5.0 — but always recompute
+        from the live VERSION when this task becomes ready rather than
+        hardcoding, and serialize at the VERSION bump if another minor ships
+        first.
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, documenting the bridge migration as
         an internal backend swap (no consumer-facing change). Merge to master
