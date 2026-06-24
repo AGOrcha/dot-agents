@@ -44,14 +44,14 @@ done
 command -v jq >/dev/null || { echo "error: jq is required (brew install jq)" >&2; exit 1; }
 
 # Resolve absolute paths (without requiring the dest to exist yet).
-abspath() { python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$1"; }
+abspath() { local p="$1"; python3 -c 'import os,sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$p"; }
 OLD_ABS="$(abspath "${ARGS[0]}")"
 DEST_PARENT="$(abspath "${ARGS[1]:-$HOME/code}")"
 NAME="$(basename "$OLD_ABS")"
 NEW_ABS="$DEST_PARENT/$NAME"
 
 # Claude's dir-encoding: replace '/' and '.' with '-'.
-encode() { printf '%s' "$1" | sed 's#[/.]#-#g'; }
+encode() { local s="$1"; printf '%s' "$s" | sed 's#[/.]#-#g'; }
 CL_PROJECTS="$HOME/.claude/projects"
 OLD_KEYDIR="$CL_PROJECTS/$(encode "$OLD_ABS")"
 NEW_KEYDIR="$CL_PROJECTS/$(encode "$NEW_ABS")"
