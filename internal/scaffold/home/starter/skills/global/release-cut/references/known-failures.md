@@ -1,6 +1,14 @@
-# Reference: Known Release-Failure Classifier
+# Reference (PROJECT EXAMPLE): Known Release-Failure Classifier
 
-Match the failed `auto-release.yml` step + log signature to a class, then route.
+> **This is an illustrative project example, not load-bearing.** The rows below are
+> one concrete project's signatures (a specific Windows-signing tool, timestamp
+> library, and signing stack). They show the SHAPE of a failure classifier —
+> *signature → failing area → class (toolchain fault vs. real regression) → action*.
+> **Build / read your project's own classifier as authoritative**; the generic classes
+> are described in `instructions/gotchas.md`, and these rows are a worked template for
+> filling them in with the project's real tools and error strings.
+
+Match the failed release-workflow step + log signature to a class, then route.
 Two top-level classes: **toolchain fault** (re-pin or re-drive — the project did
 not change) vs. **real regression** (fix the code; do NOT re-drive).
 

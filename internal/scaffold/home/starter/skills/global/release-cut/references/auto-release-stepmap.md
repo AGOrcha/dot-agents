@@ -1,4 +1,12 @@
-# Reference: auto-release.yml Step Map
+# Reference (PROJECT EXAMPLE): a release-workflow step map
+
+> **This is an illustrative project example, not load-bearing.** It maps one concrete
+> release workflow (`auto-release.yml`) to show the SHAPE a step map takes — the
+> idempotency guard, the version-match gate, the pinned signing-tool installs, and the
+> signature-verification done-signal. **Read your project's own release-workflow step
+> map as authoritative**; use this only as a template for what to capture. The
+> placeholders in `instructions/workflow.md` (release-workflow file, signing toolchain,
+> pin-check job, done-signal step) resolve to the project's real values, not these.
 
 Single `release` job (`runs-on: ubuntu-latest`, `environment: release`). Triggers:
 push to `master` touching `VERSION`, **or** `workflow_dispatch` (the re-drive path).
