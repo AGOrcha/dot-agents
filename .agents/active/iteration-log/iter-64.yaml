@@ -12,7 +12,7 @@ agent:
     session_id: ed4c8af1-4683-4e96-9b76-76059b304bde
     harness: claude-code
     harness_version: 2.1.138
-    model: claude-opus-4-7
+    model: opus-4-7
     entrypoint: cli
 checkpoint_at: "2026-05-12T02:40:57Z"
 session_tokens:

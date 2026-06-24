@@ -43,7 +43,7 @@ rationale: |
   ground the briefing; only the structural-contradiction step is adapter-gated and degrades
   gracefully (see the deferral note).
 created_at: "2026-05-10T00:00:00Z"
-created_by: claude-sonnet-4-6
+created_by: agent
 content: |
   ## SKILL.md
 

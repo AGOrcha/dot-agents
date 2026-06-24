@@ -12,7 +12,7 @@ agent:
   session_id: ed4c8af1-4683-4e96-9b76-76059b304bde
   harness: claude-code
   harness_version: 2.1.138
-  model: claude-sonnet-4-6
+  model: sonnet-4-6
   entrypoint: cli
 ```
 
