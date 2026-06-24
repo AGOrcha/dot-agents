@@ -1,0 +1,183 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+tasks:
+    - id: p0-codex-gocache-sandbox
+      title: 'P0: pre-set GOCACHE/GOTMPDIR/TMPDIR + da-write perms in Codex sandbox'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .codex/
+      verification_required: true
+      notes: |-
+        Kills the biggest tax (1,222 GOCACHE=/tmp workarounds across 159 Codex sessions). Set GOCACHE/GOTMPDIR/TMPDIR
+        to a writable sandbox dir in the Codex config/profile, and grant sandbox write for da/~/.agents/~/.codex paths
+        so legitimate da refresh / KG / git writes stop triggering per-command escalation. Verify a Codex go build
+        runs with no manual cache redirect.
+      app_type: config
+    - id: p0-sonar-scanner-exclusions
+      title: 'P0: exclude dist/ + .scannerwork from sonar-scanner (stop pre-push flake)'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - sonar-project.properties
+      verification_required: true
+      notes: |-
+        The sonar pre-push gate walked dist/ + .scannerwork created mid-session -> 1562 scannerwork hits -> 461
+        --no-verify reaches. Add dist/ and .scannerwork to sonar.exclusions (and confirm the pre-push scanner config).
+        Removes the root reason workers bypass the local gate.
+      app_type: config
+    - id: p0-move-repo-out-of-documents
+      title: 'P0: migration to move repo out of ~/Documents (preserve Claude history)'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+      verification_required: false
+      notes: |-
+        The ~/Documents TCC lock cost 190 hits (Claude) + the Codex worktree-escape/reconstruction. Only protected
+        folders are Documents/Desktop/Downloads/iCloud, so a repo at ~/dot-agents needs no FDA at all (brew-cdhash
+        grants are upgrade-fragile; a detached tmux server is its own responsible process). Provide a migration script
+        that: mv the repo; move ~/.claude/projects/<old-encoded>/ -> <new-encoded> (carries transcripts + memory/);
+        merge the ~/.claude.json projects["<old abs path>"] entry into the new key; backup first. MAINTAINER runs it.
+      app_type: ops
+    - id: p1-safe-push-skill
+      title: 'P1 skill: safe-push (clean artifacts + serialize + run gate)'
+      status: pending
+      depends_on:
+        - p0-sonar-scanner-exclusions
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/
+      verification_required: true
+      notes: |-
+        Design via /skill-architect. Cleans dist/+.scannerwork, serializes pushes (one-at-a-time lock; parallel pushes
+        wedge the sonar hook), runs the local gate; gates any --no-verify behind an explicit flake-confirmed check.
+        Removes the most expensive recurring loop. Promote + da refresh after.
+      app_type: skill
+    - id: p1-delegation-brief-hardening-skill
+      title: 'P1 skill: delegation-brief-hardening (code-graph scope + test-caller walk + HEAD-validate)'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/
+      verification_required: true
+      notes: |-
+        Highest structural leverage. Pre-fanout gate: derive write_scope from the code-review-graph (not name-similarity),
+        walk all *_test.go callers of changed/deleted symbols (the co-commit wall), HEAD-validate the bundle premise,
+        forecast coverage-delta for test moves; refuse a bundle whose asserting tests fall outside scope. Retires the
+        largest fold-back cluster. Design via /skill-architect; fold into orchestrator-session-start/delegation-lifecycle.
+      app_type: skill
+    - id: p1-release-cut-skill
+      title: 'P1 skill: release-cut-monitor-retry + pin-toolchain CI check'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/
+        - .github/workflows/
+      verification_required: true
+      notes: |-
+        The 0.4.0 release burned 4 PRs + multiple failed runs on latent infra (unpinned dotnet sign -> kernel32 Linux
+        crash; non-retryable workflow; stale-tag-on-retry; jsign tsmode). Skill: preflight pin-check the signing
+        toolchain on Linux -> cut -> monitor auto-release -> on infra failure clean the stale tag + workflow_dispatch
+        re-drive -> classify known failures (kernel32, DLSequence cast). + a CI step that fails if a signing/build tool
+        installs unpinned. release-patch-train is a standing plan, so this pays off every release.
+      app_type: skill
+    - id: p1-reconcile-eligible-and-preload-tools
+      title: 'P1: reconcile-eligible orientation + pre-load orchestrator toolset'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/orchestrator-session-start/
+      verification_required: true
+      notes: |-
+        Stale-queue re-discovery cost 483 "already done" hits + wasted spawns. Add a reconcile step to
+        orchestrator-session-start: git fetch origin master + mark merged-to-master tasks done before emitting the
+        eligible set (never orient off the divergent local branch). Pre-load the deferred orchestrator tools
+        (SendMessage/TaskStop/Monitor/PushNotification/sonarqube gate-status) for active.loop sessions so they aren't
+        ToolSearch-refetched (~70 calls/run).
+      app_type: skill
+    - id: p1-helper-skills
+      title: 'P1 helpers: pr-gate-wait, locate-and-tail-claude-session, sonar-issue-fetch(MCP)'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/
+      verification_required: false
+      notes: |-
+        pr-gate-wait: wrap gh pr checks --watch + Monitor-until-green + auto-fetch failure logs (replaces 283 ad-hoc
+        poll loops). locate-and-tail-claude-session: cross-tool resume (replaces unbounded find ~/.claude). sonar-issue-fetch:
+        encode the mcp__sonarqube path (kills the curl/DNS loop). Small; design via /skill-architect or as scripts.
+      app_type: skill
+    - id: p2-lessons
+      title: 'P2: capture the 3 un-captured lessons'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/lessons/
+      verification_required: false
+      notes: |-
+        New lessons: pin-release-toolchain-and-make-releases-retryable (no lesson exists for the biggest churn
+        cluster); hermetic-home-for-state-resolving-tests (the flaky-test root; generalizes the keychain lesson — any
+        test resolving $HOME/graph-home/keychain must t.Setenv an isolated temp env); gates-must-be-locally-reproducible.
+        Update .agents/lessons/index.md.
+      app_type: docs
+    - id: p2-brief-template-hardening
+      title: 'P2: harden the delegation brief/bundle template'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/
+      verification_required: false
+      notes: |-
+        Bake into the standard delegation bundle/brief: (1) keep functions under Sonar cognitive-complexity 15
+        (extract helpers; gocognit != Sonar); (2) write_scope MUST include the tests a change breaks; (3) front-load a
+        read-only boundary for plan/review tasks; (4) a skipped/tagged cross-platform test is UNVERIFIED until its CI
+        shard is green; (5) sanitize FS paths for Windows (no : * ? etc.); (6) never --no-verify (fix/isolate the test).
+      app_type: docs
+    - id: p2-scrub-stealth-leak
+      title: 'P2: scrub Author: Claude Code session leak in worktree handoffs'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/
+      verification_required: false
+      notes: |-
+        Codex worktree-era handoffs were authored "Author: Claude Code session" — an AI-attribution trace. Grep
+        .agents/ (active/context/history) for it + similar; scrub any committed instances per the stealth mandate.
+      app_type: docs
+    - id: p3-tool-routing-doc
+      title: 'P3: document Claude-vs-Codex work routing'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: false
+      notes: |-
+        Per the cross-tool analysis: route to Codex = adversarial/second-opinion review (read-only, cited),
+        cross-tool resume of rate-limited Claude sessions, bounded staged delegation (its native spawn/wait/close);
+        keep on Claude = heavy iterative Go build-test loops (until P0 env taxes fixed, after which either). Short
+        routing doc/reference.
+      app_type: docs
