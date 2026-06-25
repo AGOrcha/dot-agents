@@ -166,7 +166,8 @@
     "orchestrator-session-start",
     "plan-wave-picker",
     "provider-consumer-pair",
-    "isp"
+    "isp",
+    "release-cut"
   ],
   "sources": [
     {
