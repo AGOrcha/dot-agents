@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-24
+
+A cross-platform reliability release: first-run lock acquisition now works on
+Windows, and `da config migrate` lands as the opt-in v1→v2 manifest migrator.
+
+### Fixed
+
+- **First-run lock acquisition on Windows.** `da config explain` / `da install`
+  no longer fail with "The system cannot find the file specified" — `agentslock`
+  acquire now creates the lock file's parent directory (`MkdirAll`) before
+  acquiring, so first-run lock acquisition succeeds cross-platform (#148).
+
+### Added
+
+- **`da config migrate`** — an opt-in v1→v2 `.agentsrc.json` migrator. It backs up
+  the original to `.agentsrc.json.v1.bak`, is idempotent, and supports `--dry-run`
+  to preview without writing. The `da init` deprecation hint now points at this
+  real command (#138).
+
+### Internal
+
+- First-run absent-parent lock smoke test across the OS matrix, guarding the #148
+  escape (#152).
+- A `fsguard` lint enforcing that filesystem mutations route through
+  `internal/fsops` (#151).
+
 ## [0.4.0] - 2026-06-23
 
 The config-v2 release: a layered configuration model with a content-addressed
