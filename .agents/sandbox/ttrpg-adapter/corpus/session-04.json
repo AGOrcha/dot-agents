@@ -1,0 +1,19 @@
+{
+  "session": { "number": 4, "title": "Doran's Fall", "played_at": "2026-01-25" },
+  "notes": [
+    { "id": "char:doran", "type": "character", "fields": { "name": "Doran Hale", "kind": "pc", "status": "dead", "stated_location": "loc:hollowcourt", "allegiance": "fac:wardens" } },
+    { "id": "evt:s4-betrayal", "type": "event", "fields": { "summary": "Thane betrays the party; Doran is slain", "session": 4, "occurred_in": "loc:hollowcourt" } },
+    { "id": "quest:avenge", "type": "quest", "fields": { "title": "Avenge Doran Hale", "status": "open", "giver": "char:mara" } }
+  ],
+  "edges": [
+    { "type": "present_at", "from": "char:doran", "to": "evt:s4-betrayal" },
+    { "type": "present_at", "from": "char:mara", "to": "evt:s4-betrayal" },
+    { "type": "present_at", "from": "char:thane", "to": "evt:s4-betrayal" },
+    { "type": "involves", "from": "evt:s4-betrayal", "to": "char:doran" },
+    { "type": "involves", "from": "evt:s4-betrayal", "to": "char:thane" },
+    { "type": "occurred_at", "from": "evt:s4-betrayal", "to": "loc:hollowcourt" },
+    { "type": "targets", "from": "quest:avenge", "to": "char:thane" },
+    { "type": "advances", "from": "evt:s4-betrayal", "to": "quest:avenge" },
+    { "type": "knows", "from": "char:mara", "to": "char:thane" }
+  ]
+}

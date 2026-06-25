@@ -1,0 +1,124 @@
+# TTRPG named queries (graph-backend-adapter-contract §13.3, §5 DSL).
+#
+# Every query here is authored within the v1 grammar (§5.1) and deliberately
+# exercises a different boundary case so the dogfood is a real conformance
+# stress test, not a happy-path demo. The case each query targets is noted in
+# its `exercises:` line. Expected results for the synthetic corpus are encoded
+# in oracle.yaml and asserted by ttrpg_dogfood_test.go — this file is the
+# author-facing contract; oracle.yaml is the machine-checkable truth.
+#
+# NONE of these needs a grammar extension. Where a query *wanted* one
+# (reverse traversal, ORDER BY, shortest-path), it was rewritten within v1 and
+# the friction logged in WISHLIST.md as a §12 signal (signals only — Anti-scope
+# forbids pre-emptive grammar growth).
+queries:
+  # 1. Bare-ref read (§5.4.1 rule 1 / T5): no JOIN, returns the scalar ref id.
+  - name: character_location
+    description: |-
+      Where is character X currently? Returns the bare stated_location ref id.
+    exercises: bare-ref-read (T5, no JOIN)
+    params:
+      - { name: character_id, type: string, required: true }
+    query: |-
+      MATCH (c:character)
+      WHERE c.id = $character_id
+      RETURN c.name, c.stated_location
+
+  # 2. Ref field-traversal (§5.4.1 rule 2 / T6): one LEFT JOIN to read a field
+  #    on the resolved ref. required-MATCH source → predicate stays in WHERE
+  #    (T13): characters with a NULL stated_location are excluded.
+  - name: characters_in_region
+    description: |-
+      Which characters are stated to be somewhere in a given region?
+      Ref-traversal c.stated_location.region in WHERE on a required MATCH —
+      NULL-location characters are correctly excluded (§5.4.2 test 1).
+    exercises: ref-traversal-in-WHERE, required source (T6, T13)
+    params:
+      - { name: region, type: string, required: true }
+    query: |-
+      MATCH (c:character)
+      WHERE c.stated_location.region = $region
+      RETURN c.id, c.name, c.stated_location.name
+
+  # 3. Single edge traversal (T2) + bare ref in RETURN.
+  - name: faction_members
+    description: |-
+      Who are the members of a given faction? Single edge hop.
+    exercises: single-edge-traversal (T2)
+    params:
+      - { name: faction_id, type: string, required: true }
+    query: |-
+      MATCH (c:character)-[:member_of]->(f:faction)
+      WHERE f.id = $faction_id
+      RETURN c.id, c.name, c.allegiance
+
+  # 4. Variable-length edge pattern (§5.1 / T3), bounded by max_depth.
+  #    "What locations are reachable from here in up to 3 connects_to hops?"
+  #    Returns end-node + hop_count; paths-as-objects forbidden (T31) so we
+  #    return the destination, not the route.
+  - name: reachable_locations
+    description: |-
+      Locations reachable from a starting location within 3 travel hops.
+      Variable-length pattern; RETURNs the destination and hop_count (no
+      paths-as-objects, per §5.2).
+    exercises: variable-length-pattern + hop_count (T3)
+    params:
+      - { name: location_id, type: string, required: true }
+    query: |-
+      MATCH (start:location)-[:connects_to*1..3]->(dest:location)
+      WHERE start.id = $location_id
+      RETURN dest.id, dest.name, hop_count
+
+  # 5. coalesce param-normalization in WHERE (§5.1.1 / T23): optional filter.
+  #    min_session defaults to 0 when the caller omits it.
+  - name: events_since
+    description: |-
+      Events from session >= $min_session (defaults to all when omitted).
+      coalesce normalizes the optional param in WHERE — function on a PARAM,
+      never on a field (§5.1.1 / T23).
+    exercises: coalesce-param-normalization in WHERE (T23)
+    params:
+      - { name: min_session, type: int, required: false }
+    query: |-
+      MATCH (e:event)
+      WHERE e.session >= coalesce($min_session, 0)
+      RETURN e.id, e.summary, e.session
+
+  # 6. count(*) aggregate in RETURN (§5.1.1 / T1+aggregate).
+  - name: faction_member_count
+    description: |-
+      How many members does each faction have? count(*) aggregate.
+    exercises: count(*) aggregate (RETURN)
+    params: []
+    query: |-
+      MATCH (c:character)-[:member_of]->(f:faction)
+      RETURN f.id, f.name, count(*)
+
+  # 7. OPTIONAL MATCH source, predicate hoists to ON (§5.4.2 test 2 / T14).
+  #    "All living characters, plus their faction's seat region IF the faction
+  #    is hostile" — null-preserving: characters with no/neutral faction still
+  #    appear, with NULL on the joined region.
+  - name: living_characters_hostile_seat
+    description: |-
+      All living characters; for those whose faction is hostile, also surface
+      that faction's seat region. OPTIONAL MATCH source → the region predicate
+      hoists to ON, preserving characters with no hostile faction (§5.4.2 test
+      2 / T14).
+    exercises: OPTIONAL-source predicate hoist to ON (T14)
+    params: []
+    query: |-
+      MATCH (c:character)
+      OPTIONAL MATCH (c)-[:member_of]->(f:faction)
+      WHERE c.status = 'alive' AND f.stance = 'hostile'
+      RETURN c.id, c.name, f.name
+
+  # 8. Open quests (simple WHERE on enum, T1) + ref-traversal for giver name.
+  - name: open_quests
+    description: |-
+      All quests not yet completed/failed/abandoned, with the giver's name.
+    exercises: enum WHERE (T1) + ref-traversal giver.name (T6)
+    params: []
+    query: |-
+      MATCH (q:quest)
+      WHERE q.status = 'open'
+      RETURN q.id, q.title, q.giver.name

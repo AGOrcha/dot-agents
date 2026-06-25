@@ -1,0 +1,14 @@
+{
+  "session": { "number": 10, "title": "The Ember Key Turns", "played_at": "2026-03-08" },
+  "notes": [
+    { "id": "item:emberkey", "type": "item", "fields": { "name": "The Ember Key", "rarity": "rare", "held_by": "char:mara" } },
+    { "id": "quest:emberkey", "type": "quest", "fields": { "title": "Recover the Ember Key", "status": "completed", "giver": "char:mara" } },
+    { "id": "evt:s10-key", "type": "event", "fields": { "summary": "Mara claims the Ember Key from Thane's vault", "session": 10, "occurred_in": "loc:hollowcourt" } }
+  ],
+  "edges": [
+    { "type": "present_at", "from": "char:mara", "to": "evt:s10-key" },
+    { "type": "involves", "from": "evt:s10-key", "to": "char:mara" },
+    { "type": "occurred_at", "from": "evt:s10-key", "to": "loc:hollowcourt" },
+    { "type": "advances", "from": "evt:s10-key", "to": "quest:emberkey" }
+  ]
+}

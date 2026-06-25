@@ -1,0 +1,16 @@
+{
+  "session": { "number": 9, "title": "Siege of the Hollow Court", "played_at": "2026-03-01" },
+  "notes": [
+    { "id": "char:thane", "type": "character", "fields": { "name": "Thane Morrow", "kind": "npc", "status": "dead", "stated_location": "loc:hollowcourt", "allegiance": "fac:cinder" } },
+    { "id": "evt:s9-siege", "type": "event", "fields": { "summary": "The Wardens storm the Hollow Court; Thane falls to Mara", "session": 9, "occurred_in": "loc:hollowcourt" } },
+    { "id": "quest:avenge", "type": "quest", "fields": { "title": "Avenge Doran Hale", "status": "completed", "giver": "char:mara" } }
+  ],
+  "edges": [
+    { "type": "present_at", "from": "char:mara", "to": "evt:s9-siege" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s9-siege" },
+    { "type": "present_at", "from": "char:thane", "to": "evt:s9-siege" },
+    { "type": "involves", "from": "evt:s9-siege", "to": "char:thane" },
+    { "type": "occurred_at", "from": "evt:s9-siege", "to": "loc:hollowcourt" },
+    { "type": "advances", "from": "evt:s9-siege", "to": "quest:avenge" }
+  ]
+}

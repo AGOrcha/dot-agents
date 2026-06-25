@@ -1,0 +1,19 @@
+{
+  "session": { "number": 6, "title": "Coriane's Drowned Library", "played_at": "2026-02-08" },
+  "notes": [
+    { "id": "loc:coriane", "type": "location", "fields": { "name": "Coriane", "region": "Coriane", "kind": "ruin" } },
+    { "id": "item:tideglass", "type": "item", "fields": { "name": "Tideglass Lens", "rarity": "legendary", "held_by": "char:sera" } },
+    { "id": "evt:s6-library", "type": "event", "fields": { "summary": "Sera recovers the Tideglass Lens from the drowned library", "session": 6, "occurred_in": "loc:coriane" } },
+    { "id": "quest:lens", "type": "quest", "fields": { "title": "Decipher the Tideglass Lens", "status": "active", "giver": "char:pell" } }
+  ],
+  "edges": [
+    { "type": "connects_to", "from": "loc:saltmarch", "to": "loc:coriane" },
+    { "type": "present_at", "from": "char:mara", "to": "evt:s6-library" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s6-library" },
+    { "type": "involves", "from": "evt:s6-library", "to": "char:sera" },
+    { "type": "occurred_at", "from": "evt:s6-library", "to": "loc:coriane" },
+    { "type": "rewards", "from": "quest:lens", "to": "item:tideglass" },
+    { "type": "targets", "from": "quest:lens", "to": "char:sera" },
+    { "type": "advances", "from": "evt:s6-library", "to": "quest:lens" }
+  ]
+}
