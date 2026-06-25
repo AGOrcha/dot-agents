@@ -16,3 +16,8 @@ Drive the delegation fanout, merge-back, and orient loop for bounded sub-agent w
 2. **Review failure points**
    Load → `instructions/gotchas.md`
    Check the write-scope, coordination, and cleanup pitfalls before using the flow.
+
+3. **Worker self-gate before push** (executor side)
+   Load → `instructions/bundle-to-execution.md` § "Worker self-gate"
+   Re-derive the coverage-delta, cross-platform, and local-gate checks against the
+   diff. Rationale + defect→prevention map: `references/executor-prompt-retro.md`.

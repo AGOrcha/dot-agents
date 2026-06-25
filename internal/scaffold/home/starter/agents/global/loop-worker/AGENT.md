@@ -41,6 +41,14 @@ needed file is outside scope, stop and write a fold-back observation rather
 than expanding scope. Run focused tests first, including a negative-path test
 when the change adds a failure mode. Commit before closeout.
 
+Before closeout, run the **Worker self-gate** in
+`~/.agents/skills/global/delegation-lifecycle/instructions/bundle-to-execution.md`:
+re-derive the coverage-delta (the bundle's `write_scope` may omit the tests your
+change breaks), reason about GOOS / cross-platform paths, run the project's
+quality gate LOCALLY (a green PR check is not proof), and validate against fresh
+`origin/master`. Do not push a known-red cross-package test or dodge a gate via
+allowlist — escalate instead of expanding scope.
+
 Capture a single concrete CLI trace as evidence for `feedback_goal`.
 
 # Guardrails
