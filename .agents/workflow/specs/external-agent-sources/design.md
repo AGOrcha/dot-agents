@@ -112,6 +112,13 @@ Illustrative `.agentsrc` shapes (future integration). All package refs use the
 }
 ```
 
+> **Field-name note (verified 2026-06-25).** `verifier_profiles` is a **deprecated legacy key**
+> folded into `stage_profiles` on load (`internal/config/agentsrc.go` `foldLegacyProfiles`); the
+> live shape is `stage_profiles.<stage>.<id>`. The illustration above is preserved for the
+> package-ref syntax it shows (`source-id:artifact-path@version-spec`), which is unchanged — only the
+> wrapping field renamed. Canonical mapping:
+> [config-distribution-model §15](../config-distribution-model/design.md#15-coherence-model-v2-scopes-sources-units-and-the-lock).
+
 **Publish CLI:** `da packages publish agent|verifier|skill|bundle <path>` per artifact
 type — see
 [config-distribution-model §13.2](../config-distribution-model/design.md#132-new-command-subtree-da-packages).

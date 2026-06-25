@@ -492,6 +492,16 @@ The existing `registry.*` events cover package fetching. Add:
 
 Walks the resolved layer stack and reports where each field value originated.
 
+> **Field-name note (verified against shipped code).** The examples below name
+> `app_type_verifier_map`/`verifier_profiles` for historical continuity, but those are
+> **deprecated legacy keys** — read and folded into the unified
+> `execution_profile` / `stage_profiles` model on load (`internal/config/agentsrc.go`
+> `foldLegacyProfiles`), never re-emitted. The live field a real `explain` walk reports is
+> `execution_profile.by_app_type.<type>.topology.verifier_sequence` (the
+> `app_type_verifier_map` successor, `internal/config/execution_profile.go`) and the
+> `stage_profiles.<stage>.<id>` map (the `verifier_profiles` successor). The provenance/layer-stack
+> mechanic shown here is unchanged; only the field names moved.
+
 ### Single field
 
 ```
@@ -653,8 +663,24 @@ colliding with the existing `da sync` (git ops on `~/.agents`) and `da explain`
 | `da config explain --flags` | Show feature flag resolution across all layers |
 | `da config lint` | Validate all declared layer files against the AgentsRC layer schema |
 | `da config verify` | Run repo setup contract checks (hooks, binary readiness, doctor) |
+| `da config relevance` | Report the resolved relevance/topology/lens facets for the current `app_type`×stage (the `execution_profile` working-set view; `--filter units\|topology\|lenses\|all`, `--json`). Shipped, `commands/config/relevance.go` (skill-relevance-filter). |
+| `da config migrate` | Opt-in v1→v2 `.agentsrc.json` migrator: backs the original up to `.agentsrc.json.v1.bak`, folds legacy keys into `stage_profiles`/`execution_profile`, bumps `version`, idempotent, `--dry-run`. Shipped 0.4.1, `commands/config/migrate.go` (#138). |
+
+> **Shipped surface (verified 2026-06-25).** The full `da config` subtree on master is
+> `explain` / `sync` / `lint` / `verify` / `relevance` / `migrate` (`commands/config/`).
+> `relevance` and `migrate` are the two new verbs that surfaced after the original §13.1
+> table; they are folded in above rather than tracked in a sibling doc.
 
 ### 13.2 New command subtree: `da packages`
+
+> **Superseded by §15 (D3) — not shipped.** The collapse of the config/packages tier wall into
+> one `units` model retired the parallel `da packages` command tree: artifacts are `kind:artifact`
+> units resolved by the same resolver and CRUD'd via `--scope`/`--source`, not a separate verb
+> family. No `commands/packages/` package exists on master (verified 2026-06-25); the migration
+> task that would have built it (`config-v2-migration/p6`) is **cancelled**, its surviving
+> artifact-resolution mechanic folded into `config-v2-coherence/ce-unified-artifact-sourcing`. The
+> table below is retained for history. `publish` is not implemented; OCI artifact publish remains a
+> v2 roadmap item owned by external-agent-sources.
 
 All package-tier operations live under a new `packages` subcommand.
 
@@ -682,6 +708,16 @@ the distribution flow.
 | `da import` | Ad-hoc local agent/skill import | **Scope-reduce.** Retained for local-first authoring only (`local` source type). Package refs from `oci` sources must use `da packages install`. Add deprecation path for OCI-capable use cases. |
 
 ### 13.4 Health surfaces: `da status` and `da doctor`
+
+> **Superseded by §15 (D12) — shipped reshape differs.** The "repair surface" framing below is
+> historical. As shipped (`commands/internal/lifecycle/{status,doctor}.go`, verified 2026-06-25):
+> **`da doctor` is read-only and never repairs** — it surfaces health, driver-event drift, and
+> per-source review-nudges only; and **`da status` is fleet/link-health only** — it dropped all
+> config-value/freshness reporting, which now lives solely in `da config explain` (the single
+> effective-config truth surface, which auto-locks). The staleness model the surfaces report is the
+> §15 D4 content-hash/`inputs_digest` driver-event model, not the §13.4 TTL/clock model below (TTL
+> is demoted to a review-nudge). Read the §13.4 bullets as the original intent; §15 D12 is the
+> shipped contract.
 
 New persistent state introduced by this spec must have an explicit inspection and
 repair surface.
@@ -1053,14 +1089,64 @@ git; not implemented here).
 - The graph `adapters` lock section (owned by `graph-backend-adapter-contract`; this section only
   guarantees it is preserved as a peer section).
 - OCI artifact transport/signing specifics (owned by `external-agent-sources`).
-- v1 deprecation + auto-migration (separate, soak-gated `config-v2-migration` tail).
+- v1 loading **removal** (deferred to 0.5.0+ per the 2-release soak; the opt-in `da config migrate`
+  shipped in 0.4.1, but v1 manifests still load with a deprecation warning).
+- **Doc + prompt-overlay surfacing decision (deferred):** whether shipped-vs-installed provenance and
+  drift for starter-owned profiles/agents/skills is surfaced through `da config explain` or an
+  adjacent `inspect` command (the §10 "Installed starter-seed upgrade boundary" addendum). Non-blocking
+  for the units substrate; an owner-facing UX decision, not a substrate gap. Tracked here so it is not
+  re-litigated as a §15 open question.
 
 ### 15.8 Implementation status note (context, not contract)
 
-The §7A lock model — `inputs_digest` computation, the `units` lock structure, and the
-`EnsureResolved` auto-sync seam — is **already implemented and tested in-tree but unwired** (no
-production callers). The near-term work is therefore predominantly *wiring + reader migration +
-command reshape*, not greenfield. The editability **interface** (D11/D-open-1) is also already built
-(`internal/config/editability.go`); what remains net-new is its **routing consumer**
-(`--scope`/`--source` write path), the `local`-source auto-setup (D6), the project-local overlay
-scope (D9), `.gitignore` auto-fill (D14), and the command reshape (D12). 
+**SHIPPED in 0.4.0 / 0.4.1 (verified against master 2026-06-25).** The §7A model is no longer
+"implemented but unwired" — the full §15 surface is wired, released, and has production callers:
+
+- **Units lock + `inputs_digest`** (D3/D4/D7, R1/R7): one `units` section keyed by
+  `source:path@version` with per-unit `kind`/`digest`/`last_checked_at`, plus a top-level
+  `inputs_digest`; `adapters` preserved as a peer section. `internal/config/lock_units.go`,
+  `internal/agentslock/lockfile.go`.
+- **Content-hash staleness, TTL→nudge** (D4): `internal/config/staleness.go`,
+  `internal/config/lockstatus.go`. No clock-driven invalidation anywhere.
+- **`EnsureResolved` auto-sync seam** + `--locked`/`--frozen`/`--no-sync`/`--offline`:
+  `internal/config/ensure_resolved.go`; production callers in `da config explain`
+  (`commands/config/explain.go`, auto-locks), `da install`, and `da refresh`.
+- **Editability seam** (D11/D-open-1): `WriteAuthorizer` + `Checker` in
+  `internal/config/editability.go`; `--scope`/`--source` routing in
+  `commands/internal/cmdutil/source_routing.go`.
+- **Local-source auto-bootstrap** (D6): `internal/config/local_source.go`.
+- **Project-local overlay** (D9): `internal/config/overlay.go` (`.agentsrc.local.json`, gitignored,
+  hashed into `inputs_digest`).
+- **Managed `.gitignore` auto-fill** (D14): `internal/links/gitignore.go`.
+- **Exact/prune outputs projection** (D10, cj): `internal/platform/resource_plan.go`,
+  `commands/refresh.go` (`--inexact` opt-out); `da install` reuses `RunSharedTargetProjectionExact`.
+- **Command reshape** (D12): `da doctor` read-only/never-repairs and `da status` fleet/link-health
+  only (`commands/internal/lifecycle/{doctor,status}.go`); `da config explain` is the single
+  effective-config truth surface.
+- **`extends`-accepts-oci** (D15, extends-oci-relax): `internal/config/fetcher_oci_layer.go` (the
+  `application/vnd.dot-agents.config-layer.v1+json` media-type-guarded layer fetcher); `SelectFetcher`
+  in `internal/config/fetcher.go` returns it for `oci` — the source/kind asymmetry is removed in code,
+  satisfying the "doc flips once #110/#111 land" caveat in D15.
+- **Unified artifact sourcing** (D8, ce): git/local artifact fetchers added
+  (`internal/config/fetcher_git_artifact.go`, `internal/config/fetcher_local_artifact.go`); any source
+  serves any kind.
+- **`da config migrate`** (0.4.1, #138): opt-in v1→v2, folds legacy keys into
+  `stage_profiles`/`execution_profile`, `.agentsrc.json.v1.bak` backup, idempotent.
+  `commands/config/migrate.go`, `internal/config/migrate.go`.
+- **`agentslock` interprocess lost-update protection** (p4h, #148 Windows-parent fix in 0.4.1):
+  `internal/agentslock/lockfile.go`.
+
+**Source-content-gap learning folded in (cc → cl).** `cache_keys` was parsed but **inert** when
+first shipped (`config-v2-coherence/cc`): `EffectiveCacheKey`/`DefaultCacheKey` had zero non-test
+callers, so setting `cache_keys` in `.agentsrc.json` was a silent no-op. The follow-up
+`config-v2-coherence/cl-cache-keys-consume` wired the parsed primitive into the http/oci fetchers and
+the resolver/staleness path (`internal/config/cache_keys.go` consumed by `fetcher_http.go`,
+`fetcher_oci.go`, `resolver.go`, `staleness.go`). Likewise `da config lint` originally blanket-skipped
+all non-local layers; the `lint-validate-locked-remote-layers` fast-follow (#127) made it validate
+locked+cached remote layers at their recorded digest. **Lesson recorded here so future "spec says X is
+configurable" claims are checked against a real consumer, not just a parser.**
+
+**Net-new remaining (small):** none of the §15 substrate. The only open §15-adjacent items are the
+deferred ones in §15.7 (governance backend impl; v1-loading removal; the doc/prompt-overlay surfacing
+UX decision) and the §15.6 inherited §14 questions (Q3 ERROR-by-default signing; Q5 workspace
+lockfile).
