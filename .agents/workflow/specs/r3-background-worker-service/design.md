@@ -168,6 +168,83 @@ Framing: `da`'s core is git-like (pure CLI, no daemon), its background/team
 features are docker-like (want a daemon) — so the service is optional-but-
 able-to-be-always-on, value-gated on obs/service features landing.
 
+## 2A. Transport & protocol (single source for the R-series)
+
+**This section is the single source of truth for how the service moves bytes
+on each surface.** R2 (`r2-observability-dashboard`) and the `streaming` /
+`http-service` app-type profiles reference it rather than re-deciding
+transport per surface. The governing principle is **not HTTP-by-default**:
+HTTP-over-TCP has genuine benefits *and* genuine drawbacks, and we pay them
+deliberately only where the benefit applies.
+
+### Why "not HTTP everywhere"
+
+HTTP-over-TCP buys us browser reach, proxy traversal, a ubiquitous client
+ecosystem, and a familiar request/response shape — real benefits on the
+edges that face browsers, other machines, or external tools. But on a
+same-host control path it is mostly cost: TCP connection + TLS handshake
+setup latency, header/framing overhead on every request, head-of-line
+blocking under HTTP/1.1 (and even HOL within a TCP stream under HTTP/2),
+ephemeral-port and bind-address management, and a request/response shape
+that fits poll-style reads better than dispatch or streaming. R3 already
+leans **loopback-only** (OQ3 default `127.0.0.1`, OQ4's `da service stop`
+locked to loopback) — so the cross-machine justification for HTTP is largely
+*absent* on the local control plane. Defaulting that path to HTTP would pay
+TCP/TLS/HTTP costs for a benefit (remote reach) we have explicitly scoped out.
+
+### Surface → transport map
+
+| Surface | Transport | Rationale |
+|---|---|---|
+| **Browser / dashboard** (R2 SPA, `/api/*`, the R2 push channel) | **HTTP + SSE** | Browsers speak HTTP natively; SSE is R2's server-push primitive (r2 §D2.2 "server-pushed, not polled"; survives reverse proxies without a special handshake). Genuinely fits — keep here. |
+| **Cross-machine / external-tool-consumed** (anything bound beyond loopback via the explicit `--addr` of OQ3; future external API clients) | **HTTP** (+ TLS / RBAC when R5 lands) | The one place HTTP-over-TCP's benefits (proxy traversal, ubiquitous clients) actually apply. Network exposure is gated behind OQ3's explicit opt-in and R5's RBAC. |
+| **Local control plane** (`da service status`/`stop`, `da` CLI→service routing per §D6 "CLI-routes-when-present", OQ4's loopback-only stop) | **Unix-domain socket** (named pipe on Windows); optionally gRPC-over-UDS or a length-prefixed framed protocol | Same-host only. UDS removes TCP/TLS/HTTP overhead and port management, and gives **peer-credential passing** (`SO_PEERCRED` / `LOCAL_PEERCRED`) — which makes OQ4's "loopback-only stop" a *filesystem-permission + peer-uid* check instead of a network-ACL guess. |
+| **Worker dispatch** (scheduler → task RunFns, §D2) | **In-process Go call** (no transport); UDS only if a task is ever hosted out-of-process | The v1 tasks are co-located goroutines (§D2, §D3). There is no wire here at all in v1; introducing one would be pure overhead. UDS is the escape hatch if/when D2's `river` re-evaluation moves a worker out-of-process. |
+| **Streaming / event bus** (§D4 `Publish(topic, payload)` → subscribers; R2's push fan-out) | **In-process channels internally** (§D4 is already in-process pub/sub); **SSE at the browser edge**; evaluate WebSocket / a binary framed stream only if a non-browser consumer needs bidirectional or binary framing | The bus itself never crosses a process boundary in v1 (§D4). The only externalized stream is R2's browser push, which SSE already covers. SSE vs WebSocket vs binary-framed is decided against the **backpressure / slow-consumer-drop** policy already specified (r2 OQ5 "bounded buffer, disconnect-on-overflow"; r3 R8 "slow consumers do not block publishers") — SSE's unidirectional server→client shape matches that drop-on-overflow model; WebSocket's bidirectionality buys nothing for a read-only v1 (r2 §D2.2). |
+
+### The selection rule (so future surfaces choose deliberately)
+
+> **Use HTTP for a surface when it is: browser-facing, OR cross-machine, OR
+> consumed by an external tool that speaks HTTP. Otherwise use the local
+> high-efficiency transport (Unix-domain socket on POSIX, named pipe on
+> Windows; or an in-process call when the peer is co-located).**
+
+Any new surface added to the service states which arm of this rule it falls
+under, so the transport is a recorded decision, not an accident of "the
+HTTP server was already there."
+
+### Cross-platform note
+
+The local high-efficiency transport is a **Unix-domain socket on POSIX** and a
+**named pipe** (`\\.\pipe\...`) on Windows — Go's `net.Listen("unix", ...)`
+vs `winio`/named-pipe equivalent behind one small dialer abstraction. Because
+the platform split is exactly where the prior **agentslock / TCC** failures
+bit (a same-host IPC path with OS-specific permission semantics), the named-
+pipe path **must be exercised on the Windows box**, not assumed to mirror the
+UDS path. Peer-credential checks differ too (`SO_PEERCRED` on Linux,
+`LOCAL_PEERCRED` on macOS, the named-pipe client token on Windows) — the
+loopback-only-stop guarantee (OQ4) is only as portable as that check.
+
+### Tie to the app-type profiles
+
+The `http-service` and `streaming` app-type profiles
+(`app-type-profiles` §8A.2 / §8A.3) attach verifier chains per surface, and
+those choices must reflect **which transport the surface actually uses**:
+
+- A surface that resolves to **HTTP/SSE** (browser/dashboard, external bind)
+  takes the `http-service` chain — `api-contract` (wire schema doesn't drift,
+  r2 DC5) + `integration` (route served by a started host).
+- A surface that resolves to the **local high-efficiency transport / event
+  bus** takes the `streaming` chain — `race` (`go test -race` over the
+  goroutine bus, §D4.1) + `stream-replay`/idempotence + `backpressure`
+  (slow-consumer drop, r2 OQ5 / r3 R8). A UDS control endpoint is verified by
+  `integration` against a *socket* listener, not a TCP one; an
+  in-process-only path needs neither `api-contract` nor a network
+  `integration` verifier — only `unit` + `race`.
+
+In other words: the verifier chain is selected by the surface's transport (via
+the selection rule above), not by the binary's name.
+
 ## 3. Requirements (behavioral, not implementation)
 
 1. The service runs continuously in the foreground and exits cleanly on
@@ -207,7 +284,30 @@ able-to-be-always-on, value-gated on obs/service features landing.
   /admin/stop ... gated on loopback only" — this is the only state-
   changing endpoint on the v1 server. Lock down to loopback even if D5
   later allows external bind. Tracked here because it cuts across `http-
-  server` and `cobra-surface`.
+  server` and `cobra-surface`. **Note:** §2A makes this cleaner — if the
+  control plane is on a UDS, `stop` is gated by socket file permission +
+  peer-uid (`SO_PEERCRED`) rather than a network-ACL check.
+- **OQ5 — Transport for the local control plane: HTTP-everywhere vs
+  UDS-first-with-HTTP-edge?** This is an **architecture decision and an
+  owner-decision** (see §2A for the full map and selection rule). The two
+  candidate shapes:
+  - *(A) HTTP-everywhere:* one TCP/HTTP listener serves browser, external,
+    *and* local control. Simplest single surface; pays TCP/TLS/HTTP cost on
+    the local path for a remote benefit R3 has scoped out (loopback-only
+    default, OQ3/OQ4).
+  - *(B) UDS-first + HTTP edge (recommended):* the local control plane and
+    `da`-routes-when-present (§D6) ride a Unix-domain socket (named pipe on
+    Windows); HTTP/SSE is mounted **only** on the browser/dashboard + the
+    explicit external-bind edge. Removes TCP/TLS/HTTP overhead, removes port
+    management, and turns OQ4's loopback-stop into a peer-credential check.
+  - **Recommendation: (B).** It follows directly from R3's existing
+    loopback-only posture and from the selection rule in §2A; HTTP stays
+    where it genuinely fits (R2's browser surface, external bind) and the
+    high-throughput same-host path drops the HTTP tax. The cost is one small
+    cross-platform dialer abstraction (UDS / named-pipe) that must be tested
+    on the Windows box (agentslock / TCC lesson). **Owner must rule** before
+    `http-server` lands, because the ruling determines what that task *is*
+    (see the frontier-task note below).
 
 ## 5. Done criteria
 
@@ -285,7 +385,7 @@ the single source for status. (Status column refreshed 2026-06-25.)
 | design-doc | completed | Replaced by this spec; in-plan design.md retained for archive context |
 | scheduler-core | completed | Shipped 2026-06-25 (commit 0a57f0b6); `fsnotify` dep added |
 | event-bus | completed | Shipped via PR #172; surface is `Publish(topic, payload)` + `Subscribe` per D4 |
-| http-server | pending | OQ3 (loopback default) + OQ4 (`/admin/stop` lockdown) must be answered before fanout |
+| http-server | pending | OQ3 (loopback default) + OQ4 (`/admin/stop` lockdown) + **OQ5 (transport)** must be answered before fanout. OQ5 reframes this task: under the recommended option (B), it is not an "HTTP server" but a **transport layer** — a UDS/named-pipe control listener (local plane + `da`-routes-when-present) with an **HTTP/SSE edge** mounted only for the browser/dashboard + explicit external bind. Under option (A) it stays a single HTTP listener. Owner ruling on OQ5 decides which. |
 | tasks-iterlog-ingester | pending | Must call into `internal/scoring`, not duplicate |
 | tasks-rescore | pending | Idempotent — no-op when rubric version unchanged |
 | service-runtime | pending | Composes scheduler+http+bus; integration test is the umbrella verifier |
