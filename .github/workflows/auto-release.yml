@@ -191,13 +191,32 @@ jobs:
       - name: Acquire Trusted Signing access token
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
         # jsign authenticates to Trusted Signing with an Azure access token for
-        # the codesigning resource, passed as the keystore password. The az CLI
-        # is already logged in via the OIDC step above. The token is masked and
-        # exported for the GoReleaser hook (scripts/sign-windows.sh).
+        # the codesigning resource, used as the keystore password. The az CLI is
+        # already logged in via the azure/login OIDC step above (no long-lived
+        # secret is stored: the runner exchanges its short-lived GitHub OIDC token
+        # for the Azure token at job time).
+        #
+        # The minted token is written ONLY to a runner-local file with 0600 perms
+        # and NEVER to $GITHUB_ENV, a CLI arg, or an echo. jsign reads it via its
+        # `--storepass file:<path>` convention (see scripts/sign-windows.sh), so
+        # the secret never lands in a process argument list, a `set -x` trace, or
+        # the GoReleaser child-process environment. We still ::add-mask:: it as a
+        # belt-and-suspenders guard against any incidental log line.
+        #
+        # The file lives under RUNNER_TEMP (ephemeral, wiped with the runner) and
+        # is removed in the always() cleanup step at the end of the job. It is
+        # never uploaded as an artifact.
         run: |
+          set -euo pipefail
+          token_file="${RUNNER_TEMP}/trusted-signing-token"
+          # Create with restrictive perms BEFORE writing the secret into it.
+          install -m 600 /dev/null "${token_file}"
           token="$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)"
           echo "::add-mask::${token}"
-          echo "TRUSTED_SIGNING_TOKEN=${token}" >> "${GITHUB_ENV}"
+          printf '%s' "${token}" > "${token_file}"
+          unset token
+          # Hand jsign a file reference, not the token value.
+          echo "TRUSTED_SIGNING_TOKEN_FILE=${token_file}" >> "${GITHUB_ENV}"
 
       # --- macOS Developer ID signing via quill (gated) ---
       # quill (https://github.com/anchore/quill) signs/notarizes Mach-O binaries
@@ -244,9 +263,11 @@ jobs:
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
           # Trusted Signing (gated): empty until the repo variables are set, which
           # makes scripts/sign-windows.sh a no-op. NAMES referenced, not values.
-          # jsign signs against these via the TRUSTEDSIGNING storetype, using
-          # TRUSTED_SIGNING_TOKEN (set by the "Acquire Trusted Signing access
-          # token" step) as the keystore password and JSIGN_JAR as the pinned jar.
+          # jsign signs against these via the TRUSTEDSIGNING storetype, reading the
+          # access token through `--storepass file:${TRUSTED_SIGNING_TOKEN_FILE}`
+          # (path set by the "Acquire Trusted Signing access token" step) and using
+          # JSIGN_JAR as the pinned jar. The token VALUE is never placed in this
+          # env block, so it is not exported into the GoReleaser child process.
           TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
           TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
@@ -293,3 +314,10 @@ jobs:
       - name: Cleanup smoke home
         if: always()
         run: rm -rf "${SMOKE_HOME}"
+
+      - name: Cleanup Trusted Signing token file
+        if: always()
+        # Defense-in-depth: RUNNER_TEMP is ephemeral and wiped when the runner is
+        # torn down, but remove the minted-token file explicitly so it does not
+        # outlive the signing step within the job. Never fails the release.
+        run: rm -f "${RUNNER_TEMP}/trusted-signing-token"
