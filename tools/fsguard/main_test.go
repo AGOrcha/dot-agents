@@ -241,48 +241,62 @@ func runMainCase(args []string, scan runFunc) (int, string) {
 	return code, buf.String()
 }
 
+// assertExitCode fails unless mainRun returned the wanted exit code.
+func assertExitCode(t *testing.T, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("exit=%d, want %d", got, want)
+	}
+}
+
+// assertStderrContains fails unless substr appears in the captured stderr.
+func assertStderrContains(t *testing.T, stderr, substr string) {
+	t.Helper()
+	if !strings.Contains(stderr, substr) {
+		t.Errorf("stderr should contain %q, got %q", substr, stderr)
+	}
+}
+
+// assertPatterns fails unless the scan was invoked with exactly want.
+func assertPatterns(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("patterns = %v, want %v", got, want)
+	}
+}
+
+// capturePatterns runs mainRun, recording the patterns the scan received.
+func capturePatterns(t *testing.T, args []string) []string {
+	t.Helper()
+	var seen []string
+	_, _ = runMainCase(args, func(p []string) ([]finding, error) { seen = p; return nil, nil })
+	return seen
+}
+
 func TestMainRun(t *testing.T) {
 	t.Run("clean exits 0", func(t *testing.T) {
-		if code, _ := runMainCase(nil, cleanScan); code != 0 {
-			t.Errorf("clean exit=%d, want 0", code)
-		}
+		code, _ := runMainCase(nil, cleanScan)
+		assertExitCode(t, code, 0)
 	})
 	t.Run("default pattern is ./...", func(t *testing.T) {
-		var seen []string
-		_, _ = runMainCase(nil, func(p []string) ([]finding, error) { seen = p; return nil, nil })
-		if len(seen) != 1 || seen[0] != "./..." {
-			t.Errorf("default patterns = %v, want [./...]", seen)
-		}
+		assertPatterns(t, capturePatterns(t, nil), []string{"./..."})
 	})
 	t.Run("explicit patterns override", func(t *testing.T) {
-		var seen []string
-		_, _ = runMainCase([]string{"./internal/..."}, func(p []string) ([]finding, error) { seen = p; return nil, nil })
-		if len(seen) != 1 || seen[0] != "./internal/..." {
-			t.Errorf("explicit patterns = %v, want [./internal/...]", seen)
-		}
+		assertPatterns(t, capturePatterns(t, []string{"./internal/..."}), []string{"./internal/..."})
 	})
 	t.Run("load error exits 2", func(t *testing.T) {
 		code, stderr := runMainCase(nil, failScan)
-		if code != 2 {
-			t.Errorf("load error exit=%d, want 2", code)
-		}
-		if !strings.Contains(stderr, "synthetic load failure") {
-			t.Errorf("stderr should surface load error: %q", stderr)
-		}
+		assertExitCode(t, code, 2)
+		assertStderrContains(t, stderr, "synthetic load failure")
 	})
 	t.Run("findings exit 1 and render", func(t *testing.T) {
 		code, stderr := runMainCase(nil, findScan)
-		if code != 1 {
-			t.Errorf("findings exit=%d, want 1", code)
-		}
-		if !strings.Contains(stderr, "internal/x/x.go:5  os.Mkdir") {
-			t.Errorf("stderr should contain finding: %q", stderr)
-		}
+		assertExitCode(t, code, 1)
+		assertStderrContains(t, stderr, "internal/x/x.go:5  os.Mkdir")
 	})
 	t.Run("bad flag exits 2", func(t *testing.T) {
-		if code, _ := runMainCase([]string{"-nope"}, cleanScan); code != 2 {
-			t.Errorf("bad flag exit=%d, want 2", code)
-		}
+		code, _ := runMainCase([]string{"-nope"}, cleanScan)
+		assertExitCode(t, code, 2)
 	})
 }
 

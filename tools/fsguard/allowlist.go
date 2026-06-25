@@ -39,6 +39,10 @@ var preciseAllow = []allowEntry{
 	},
 }
 
+// reasonUnmigrated is the bare "predates the guard, not yet migrated" reason
+// shared by packages with no further detail to record.
+const reasonUnmigrated = "predates fsguard; not yet migrated"
+
 // grandfatheredPackages enumerates packages with pre-existing raw os.* mutators
 // at the time fsguard landed. The reason records WHY it is still on the list
 // (almost always: predates the guard, not yet migrated). Migrating a package to
@@ -46,13 +50,13 @@ var preciseAllow = []allowEntry{
 var grandfatheredPackages = map[string]string{
 	"github.com/AGOrcha/dot-agents/cmd/globalflag-coverage":     "predates fsguard; dev tool, not yet migrated",
 	"github.com/AGOrcha/dot-agents/commands":                    "predates fsguard; import/review/remove deps wrappers, not yet migrated",
-	"github.com/AGOrcha/dot-agents/commands/agents":             "predates fsguard; not yet migrated",
-	"github.com/AGOrcha/dot-agents/commands/hooks":              "predates fsguard; not yet migrated",
-	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil":   "predates fsguard; not yet migrated",
+	"github.com/AGOrcha/dot-agents/commands/agents":             reasonUnmigrated,
+	"github.com/AGOrcha/dot-agents/commands/hooks":              reasonUnmigrated,
+	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil":   reasonUnmigrated,
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle": "predates fsguard; init/install/backup/kgmcp, not yet migrated",
 	"github.com/AGOrcha/dot-agents/commands/kg":                 "predates fsguard; io/bridge/query deps wrappers, not yet migrated",
 	"github.com/AGOrcha/dot-agents/commands/skills":             "predates fsguard; io deps wrapper, not yet migrated",
-	"github.com/AGOrcha/dot-agents/commands/sync":               "predates fsguard; not yet migrated",
+	"github.com/AGOrcha/dot-agents/commands/sync":               reasonUnmigrated,
 	"github.com/AGOrcha/dot-agents/commands/workflow":           "predates fsguard; fs/delegation/sweep/prefs/hook seams, not yet migrated",
 	"github.com/AGOrcha/dot-agents/internal/config":             "predates fsguard; config/proposals/agentsrc writers, not yet migrated",
 	"github.com/AGOrcha/dot-agents/internal/credstore":          "predates fsguard; sys deps wrapper, not yet migrated",
