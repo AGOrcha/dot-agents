@@ -108,8 +108,11 @@ kind of resolvable unit; this spec relies on that, it does not re-establish it.
 the project specifics are already in this git tree. A git source pointing at the
 same repo would be redundant indirection at v1.
 
-*Owner-needed gate:* whether to publish a public `dotagents-builtin` starter
-source (app-type-profiles Q10) is an owner decision — see §8 Q1.
+*Resolved gate:* publishing a public `dotagents-builtin` starter source
+(app-type-profiles Q10 / §8 Q1) is **owner-ratified (2026-06-25): yes** — the
+generic starter set graduates to the published layer; the project-specifics source
+here stays `local`/private. This spec's local-first authoring is unchanged; only
+the *generic* layer goes public.
 
 ### D3 — Composition is `extends` + the §15 merge categories; no new merge rule
 
@@ -189,10 +192,11 @@ follows §15 D7.)
 
 ### 4.3 The git-promotion path (forward door, not v1)
 
-If app-type-profiles Q10 resolves to "publish a starter source," the *generic*
-profiles graduate to a `dotagents-builtin` git/oci source (§15 D15 allows oci
-for `extends`), and the **project** layer stays local (or moves to a private
-`git` source). The split — generic published, specifics private — is exactly the
+Per the owner ruling (Q10/§8 Q1 = yes), the *generic* profiles graduate to a
+published `dotagents-builtin` git/oci source (§15 D15 allows oci for `extends`),
+and the **project** layer stays local (or moves to a private `git` source). The
+forward door is now the planned path, not a conditional. The split — generic
+published, specifics private — is exactly the
 payout topology (`org/base` shared, `app/po-core-api-se` repo-scoped). No shape
 change is required to take this door; only `sources[].type` + the ref.
 
@@ -270,13 +274,15 @@ verify.
 
 ## 8. Open questions
 
-### Q1 — Publish a public `dotagents-builtin` starter source? (owner-needed)
+### Q1 — Publish a public `dotagents-builtin` starter source? → RESOLVED (owner ruling 2026-06-25: yes)
 
-Whether the **generic** starter profiles (§8A) graduate from documented-in-spec
-to a published `dotagents-builtin` git/oci source is an owner decision (also
-app-type-profiles Q10). It gates whether §4.3's promotion is local-stays-local or
-generic-goes-public. The project-specifics source (this spec's subject) is
-unaffected either way — it stays local/private. **Owner-needed.**
+**Resolved: yes** — the **generic** starter profiles (§8A) graduate from
+documented-in-spec to a published `dotagents-builtin` git/oci source (also
+app-type-profiles Q10). §4.3's promotion path is therefore **generic-goes-public,
+project-stays-local**: the generic starter set is the one versioned, extensible
+artifact everyone consumes, while the project-specifics source (this spec's
+subject) stays local/private. The published layer is the single bump-and-diff
+point the behavior-preservation guarantee depends on.
 
 ### Q2 — Which skills are "generic starter" vs "project-specific"? (autonomous, confirm)
 

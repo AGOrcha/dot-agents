@@ -892,14 +892,18 @@ Closed by [graph-backend-adapter-contract §10](../graph-backend-adapter-contrac
 
 Defined in [graph-backend-adapter-contract §12](../graph-backend-adapter-contract/design.md). Thresholds (5 / 8 points) are judgment-based defaults; re-tune after the first 3 months of TTRPG dogfood data and after the compliance-register adapter ships.
 
-### Q10: Should the starter catalog (§8A) ship as a published config layer or stay inline in this spec?
+### Q10: Should the starter catalog (§8A) ship as a published config layer or stay inline in this spec? → RESOLVED (owner ruling 2026-06-25: published `dotagents-builtin` layer)
 
-§8A specifies generic starter profiles. Open: do they ship as a `dotagents-builtin`
-config **layer** (one source everyone extends, so a starter-set bump propagates),
-or do they stay documented-in-spec and each consumer copies the shape into its own
-source? Lean: published layer, because §6 behavior-preservation only has teeth if
-there is a single versioned artifact to bump. Owner-needed: confirms whether the
-project ships a public starter source. Tracked also in da-project-specifics-source.
+§8A specifies generic starter profiles. **Resolved: they ship as a published
+`dotagents-builtin` config layer** — one versioned source everyone `extends`, so a
+starter-set bump propagates instead of each consumer copying the shape. This is the
+single-source-of-truth choice the §6 behavior-preservation guarantee needs to have
+teeth (there is one versioned artifact to bump and diff). Project-custom and
+project-specific profiles still layer **on top** locally via the
+`da-project-specifics-source` (which stays local/private); only the *generic*
+starter set graduates to the public layer. This also resolves
+`da-project-specifics-source` §8 Q1 ("publish a public starter source") to **yes**,
+and makes §4.3's promotion path "generic-goes-public, project-stays-local."
 
 ### Q11: `db` profile timing — specify-ahead vs land-with-store
 
