@@ -147,6 +147,55 @@ anecdotal:
 This is what closes `CLAUDE.md`'s self-improvement loop on data instead of memory: lessons, rules,
 skills, and `stage_profiles` stop being write-only and become nodes results are scored against.
 
+## 3B. Agent interface model — the file-system projection IS the agent's interface (zero new semantics)
+
+**This is the foundational principle of the whole storage model, stated once here as the
+single source. Every tier (§3 D1/D1′), the daemon (D4), the `WorkStore` facade (D3), and
+the R-series service surfaces are subordinate to it.**
+
+> **The file-system projection is the agent's primary interface — zero new semantics.**
+
+Agents live on the server and have direct file-system access. They operate by **reading and
+writing the projected files directly** — the `.agents/workflow/**` YAML/markdown, specs,
+plans, tasks, lessons, results. Those files are *just there and available*. An agent does
+**not** need to learn any `da` command, RPC, HTTP/UDS call, or event-bus API to do its work:
+its default and only required path is to read and edit the files. Editing a file is the act;
+nothing new must be invoked.
+
+**The system reconciles file changes after the fact.** When an agent writes a file, the
+**system** — the `da service` daemon (D4) ingesting + reconciling local edits into the KG /
+state / event log — picks up the change afterward and propagates it (status transition,
+graph node update, episodic event). The agent does not perform that propagation and does not
+wait on it; reconciliation is the system's job, downstream of the file write. This is exactly
+what D2 ("agents never block on the backend") and Requirement 2 ("agents read/edit the same
+local YAML/markdown — no agent-facing change") already assert; §3B names *why* it must hold:
+**the projection is the interface, so the interface must carry zero semantics beyond "it's a
+file."**
+
+### The boundary: agent-facing vs system-side
+
+| Plane | What it is | Who uses it | Required for the agent? |
+|---|---|---|---|
+| **Agent-facing** | The **FS projection** — `.agents/workflow/**` and the other projected files. Read/write a file; zero new semantics. | **Agents** (on the server, with FS access) | **Yes — this is the agent's interface.** |
+| **System-side** | `da` commands, UDS / HTTP (R3 §2A), the `EventBus` / transport (R3 §D4), and external integrations (Jira/Linear, CF DO). Propagation, control plane, external integration. | The **daemon / system / operators / external tools** | **No.** Optional sugar at most. |
+
+- **`da` commands are optional, not required.** A human or script *may* use `da workflow …`
+  for convenience (it writes through `WorkStore`, D7/D3), but an agent reaching the same
+  outcome by editing the projected file is the **default, fully-supported path** — the
+  daemon reconciles that edit identically. `da` is sugar over the file, never a gate in
+  front of it.
+- **UDS / HTTP / EventBus are system-side propagation, not the agent's interface.** R3 §2A's
+  local transport and R3 §D4's `EventBus` move bytes *between system components and to
+  external consumers*; they are the control plane and external-integration plane. An agent
+  never has to speak UDS, HTTP, or the bus to get its work recorded — it writes a file and
+  the system carries it onward.
+
+**Net rule for any design that touches this model:** if a change would require an agent to
+call a command, an RPC, or a transport to do ordinary work — instead of just reading/writing
+a projected file — it **violates §3B** and must be reworked so the file path remains the
+agent's interface. New semantics belong in the *system's* reconciliation, never on the
+agent's side of the projection.
+
 ## 4. Requirements (behavioral)
 
 1. The orchestrator/scout's eligibility reflects **authoritative** status — an in-flight /
@@ -215,6 +264,8 @@ skills, and `stage_profiles` stop being write-only and become nodes results are 
 - **external-agent-sources** — credential model + the credential-proxy daemon mode the backend auth
   reuses.
 - **r3-background-worker-service / workflow-orchestrator-daemon** — the daemon that runs the sync loop.
+  Its §2A local transport (UDS/HTTP) and §D4 `EventBus` are the **system-side** propagation/control
+  plane of §3B, not the agent's interface; R3 §2A/§D4 point back here for that boundary.
 - **layered-pr-fanout** — its `awaiting_review` status only actually gates the scout once a shared
   backend exists; today worktree isolation defeats it (this spec is the missing substrate).
 - **knowledge-architecture-graph-views** — the end-state this spec's `kg` backend converges on: one
