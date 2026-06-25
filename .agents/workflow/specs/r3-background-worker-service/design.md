@@ -250,6 +250,31 @@ guarantees per topic are needed independently. (Per-subscriber buffer
 strategy — currently bounded drop-oldest — is a separate, already-decided
 axis; revisit only if a different back-pressure policy is wanted.)
 
+#### D4.6 — Backend-conformance test suite (proves the seam mechanically)
+
+The seam is proven, not asserted, by a **reusable backend-conformance test
+suite**: a contract/conformance suite that **any** `EventBus` implementation
+must pass. It exercises the §D4.1 interface (`Publish` / `Subscribe`
+semantics — topic routing, the unsubscribe func, `Close` drain) and asserts
+the §D4.2 G1–G4 floor (at-most-once best-effort delivery, best-effort
+per-topic order, non-blocking publish under a slow subscriber / drop-oldest,
+no cross-publish atomicity). The suite takes a backend constructor and runs
+the whole battery against it — so it is backend-agnostic by construction.
+
+- **v1 anchor: the in-process builtin (§D4.3).** The conformance suite is
+  driven by the channel bus in v1, which makes that builtin the seam's
+  **integration test backend** — the in-tree backend that exercises the
+  interface end-to-end and demonstrates the contract holds against a real,
+  shipping implementation. (The §5 `iteration.scored` / `rescore.done`
+  subscriber assertions are this integration test at the service boundary.)
+- **Future external adapters run the SAME suite.** When a Kafka/NATS/Redis
+  adapter (§D4.4) is built, it is validated by re-running this identical
+  conformance battery against the adapter's constructor — mechanical
+  validation that a new backend meets the floor, not a hand-written re-proof.
+  This is why the seam is proven from day one: the contract has executable
+  teeth, and "swappable later" is a config + adapter install that must pass a
+  test that already exists.
+
 ### D5 — HTTP surface is reservation, not implementation
 
 `internal/service/http` exposes `RegisterMount(prefix, handler)`. R3 only
@@ -456,29 +481,47 @@ the selection rule above), not by the binary's name.
     `http-server` lands, because the ruling determines what that task *is*
     (see the frontier-task note below).
 - **OQ6 — Event-bus backend seam: ship a reference external adapter now, or
-  interface-only?** §D4 wires the `EventBus` behind a pluggable interface
-  from day one (forward-evolvability: an org's existing Kafka/NATS/Redis may
-  be requested "relatively soon"), but the *external adapters themselves* are
-  post-v1 work. The two candidate shapes:
-  - *(A) Interface-only in v1 (recommended):* v1 ships **only** the in-process
+  interface-only? — RESOLVED (option A, interface-only).** §D4 wires the
+  `EventBus` behind a pluggable interface from day one (forward-evolvability:
+  an org's existing Kafka/NATS/Redis may be requested "relatively soon"), but
+  the *external adapters themselves* are post-v1 work. The two candidate
+  shapes were:
+  - *(A) Interface-only in v1 (chosen):* v1 ships **only** the in-process
     builtin (§D4.3) behind the §D4.1 interface. No external adapter, no new
-    runtime dep, no Kafka/NATS/Redis client in the tree. The seam is proven by
-    a second in-tree fake-backend in tests (so "swappable" is demonstrated,
-    not just asserted). External adapters land when an org actually requests
-    one, scoped against that org's real semantics.
+    runtime dep, no Kafka/NATS/Redis client in the tree. External adapters
+    land when an org actually requests one, scoped against that org's real
+    semantics.
   - *(B) Spec + ship a reference NATS adapter in v1:* validates the seam
     against a real external backend's quirks (JetStream durability, queue-group
     reordering) before declaring the interface stable, at the cost of a new
     dependency and ops surface v1 has no consumer for.
-  - **Recommendation: (A).** It matches D2's "don't force Redis/Postgres for a
-    use case that's absent" posture and the project's no-pre-optimization
-    stance, while still satisfying the maintainer forward-evolvability
-    requirement — the interface and the G1–G4 contract (§D4.1/§D4.2) are the
-    deliverable, and they make (B) a config + adapter install later rather than
-    a rewrite. **Owner-decision flag:** confirm (A) interface-only before the
-    `event-bus` surface is considered closed; if the org Kafka/NATS request is
-    already concrete, escalate to (B) and scope a reference adapter against
-    that specific backend.
+  - **RESOLVED — (A) interface-only.** Matches D2's "don't force
+    Redis/Postgres for a use case that's absent" posture and the project's
+    no-pre-optimization stance, while still satisfying the maintainer
+    forward-evolvability requirement: the interface and the G1–G4 contract
+    (§D4.1/§D4.2) are the v1 deliverable, and they make any external backend a
+    config + adapter install later rather than a rewrite. The ruling stands on
+    three points:
+    - **The in-process channel bus (§D4.3) is the seam's integration test
+      backend.** It is the in-tree backend that exercises the `EventBus`
+      interface end-to-end and proves the G1–G4 floor — so "swappable" is
+      demonstrated by a real, shipping backend driving the contract, not
+      asserted. The §5 integration tests (the `iteration.scored` /
+      `rescore.done` subscriber assertions) ARE this seam's integration test:
+      they run the interface against the builtin.
+    - **A backend-conformance test suite is the mechanical seam proof
+      (§D4.6).** A reusable contract/conformance suite — `Publish`/`Subscribe`
+      semantics plus the G1–G4 floor — that **any** `EventBus` implementation
+      must pass, anchored by the in-process backend in v1. Every future
+      external adapter (Kafka/NATS/Redis) runs the **same** suite, so the seam
+      is proven from day one and a new backend is validated mechanically
+      rather than by hand. See §D4.6.
+    - **External adapters are prepped-but-not-built, demand-gated (future).**
+      The §D4.4 backend table stays as the prepped design, not v1 work. The
+      anticipated first external consumer is payout's future external-bus
+      integration (planned down the line); because the seam is prepped, payout
+      — and any organization that wants to plug in its own Kafka/NATS/Redis —
+      gets a drop-in adapter swap, not a rewrite, when the demand is real.
 
 ## 5. Done criteria
 
