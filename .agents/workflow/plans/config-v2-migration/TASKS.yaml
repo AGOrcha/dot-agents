@@ -425,7 +425,7 @@ tasks:
       app_type: go-cli
     - id: p7b-v1-auto-migrator
       title: 'Phase 7b: v1→v2 auto-migrator with 1-day sunset'
-      status: awaiting_owner_review
+      status: completed
       depends_on:
         - p7-v1-deprecation-warnings
       blocks: []
@@ -448,7 +448,12 @@ tasks:
 
         After this phase ships + the 1-day sunset window passes, v1 loading is REMOVED entirely (becomes a separate small PR after p7b proves the migrator covers).
 
-        Impl done; PR #138 (da config migrate, v1→v2) open, awaiting owner merge.
+        Landed: `da config migrate` (opt-in v1→v2; v1.bak backup; folds legacy keys into
+        stage_profiles/execution_profile; idempotent; --dry-run) merged to master via PR #138
+        (2026-06-25) and shipped in the 0.4.1 release (#154, CHANGELOG ## [0.4.1] - 2026-06-24).
+        Implemented as the OPT-IN migrator with a 2-release soak (NOT a 1-day forced sunset — the
+        title is historical); v1 loading still works with a deprecation warning and is removed in a
+        later release. commands/config/migrate.go + internal/config/migrate.go.
       app_type: go-cli
     - id: p4d-da-install-repurpose
       title: 'Phase 4d: repurpose da install per spec §13.3'

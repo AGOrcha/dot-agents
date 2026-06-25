@@ -15,6 +15,21 @@
 - This document focuses on resolution semantics, config layering, repo identity, and operational rollout.
 - It does not commit the current `loop-agent-pipeline` plan to implementation work.
 
+> **Field-vocabulary supersession (single-source pointer; verified against shipped code
+> 2026-06-25).** This document predates the staged-dispatch consolidation and names
+> `verifier_profiles` and `app_type_verifier_map` as live first-class `AgentsRC` fields
+> (notably §2.2, §7.2, §7.3, §8). **In the shipped code those are deprecated legacy keys** — read
+> and folded on load into the unified `stage_profiles` + `execution_profile` model
+> (`internal/config/agentsrc.go` `foldLegacyProfiles`; `internal/config/execution_profile.go`),
+> never re-emitted. The canonical successor mapping lives once in
+> [config-distribution-model §15](../config-distribution-model/design.md#15-coherence-model-v2-scopes-sources-units-and-the-lock)
+> and §10 (field-name note): `app_type_verifier_map` → `execution_profile.by_app_type.<type>.topology.verifier_sequence`;
+> `verifier_profiles` → `stage_profiles.<stage>.<id>`. The **layering/precedence/merge semantics this
+> document defines remain authoritative and accurate** — only the field *names* moved. Where a section
+> below says `verifier_profiles`/`app_type_verifier_map`, read the successor field; the merge category
+> (map-merge / ordered-replace) is unchanged. This pointer is the single source for the rename so the
+> rule is not restated per occurrence.
+
 ## 1. Problem statement
 
 The current repo-local `app_type -> verifier_sequence` mechanism is useful, but it is not a sufficient project model for larger organizations.
