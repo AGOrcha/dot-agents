@@ -1,9 +1,10 @@
 // Package crg implements the built-in kg-native Code Review Graph adapter
 // (graph-backend-adapter-contract §11). It replaces the legacy Python
 // subprocess bridge: its bootstrap performs Tree-sitter-style symbol
-// ingestion into the kg_crg.* namespace through the da-adapter-sdk, and it
-// exposes the structured parity surfaces (snapshot, upserts, impact radius)
-// the §11.6 corpus tests compare against the crg-bridge mirror.
+// ingestion into the kg_crg.* namespace through the da-adapter-sdk, and the
+// parity surfaces the §11.6 corpus tests compare are computed by READING BACK
+// the actually-persisted notes/edges from the Store seam (readback.go) — never
+// from the input corpus.
 //
 // Tree-sitter parsing itself is the bootstrap skill's concern; this package
 // models ingestion over a normalized symbol corpus so the §11.1 parity rows
@@ -22,8 +23,10 @@ import (
 // Name is the adapter's short name and its kg namespace stem (kg_crg.*).
 const Name = "crg"
 
-// driverSourceMutation is the O5 staleness driver this adapter declares and
-// fires per ingested symbol on its content-hash (not per any-upsert).
+// driverSourceMutation is the O5 staleness driver this adapter declares. It
+// fires per symbol ONLY when the symbol's content-hash actually changed
+// relative to the prior persisted state (insert or content-change) — not on
+// every bootstrap, and not per any-upsert.
 const driverSourceMutation = "source_mutation"
 
 //go:embed schema.yaml
@@ -48,13 +51,10 @@ func (Adapter) Schema() registry.Schema {
 // Name returns the adapter name.
 func (a Adapter) Name() string { return a.Schema().Name }
 
-// ImpactRadius runs the adapter's impact-radius operation against an already
-// bootstrapped namespace view. The kg-native adapter expands the changed ids
-// along CALLS/TESTED_BY/IMPORTS edges up to the schema's max_depth — the
-// parity counterpart of the legacy bridge's impact-radius tool.
+// ImpactRadius runs the no-op identity used when no store is bound. The real
+// blast-radius computation reads the persisted edge graph back from the store
+// (ImpactRadiusFromStore); this method satisfies the registry.Adapter contract.
 func (a Adapter) ImpactRadius(req registry.ImpactRequest) (registry.ImpactResult, error) {
-	// Without a bootstrapped store this degenerates to the identity (the
-	// changed ids themselves) — the same shape the contract's no-op returns.
 	ids := make([]string, len(req.ChangedIDs))
 	copy(ids, req.ChangedIDs)
 	return registry.ImpactResult{IDs: ids}, nil
@@ -66,11 +66,13 @@ func Register(reg *registry.Registry) error {
 }
 
 // Bootstrap ingests corpus into the adapter's kg_crg.* namespace through the
-// SDK (writes only — §8.2 ModeWrite) and returns the structured build
-// snapshot. It is the kg-native replacement for the bridge `build` tool. The
-// snapshot's per-kind buckets are the O6-refinement-A anchor columns the
-// §11.6 parity test compares.
-func Bootstrap(s *sdk.SDK, corpus Corpus, commit string) (graphstore.ParitySnapshot, error) {
+// SDK (writes only — §8.2 ModeWrite), fires the O5 source_mutation driver only
+// for symbols whose content-hash changed relative to prevNotes (the prior
+// commit's persisted notes; nil for the first commit), then returns the build
+// snapshot computed by READING BACK the persisted namespace from the store. The
+// returned snapshot reflects what storage actually holds, so dropped dangling
+// edges do not appear and parity is verified, not guaranteed by construction.
+func Bootstrap(s *sdk.SDK, store StoreReader, corpus Corpus, prevNotes []sdk.Note) (graphstore.ParitySnapshot, error) {
 	notes, edges := corpus.ToGraph()
 	if err := s.WriteNotes(notes); err != nil {
 		return graphstore.ParitySnapshot{}, err
@@ -78,13 +80,27 @@ func Bootstrap(s *sdk.SDK, corpus Corpus, commit string) (graphstore.ParitySnaps
 	if err := s.WriteEdges(edges); err != nil {
 		return graphstore.ParitySnapshot{}, err
 	}
-	// O5: source_mutation fires per ingested symbol on its content-hash, not
-	// per any-upsert — the driver event the contract's staleness slice needs.
-	for _, sym := range corpus.Symbols {
+	fireSourceMutations(s, prevNotes, notes)
+	return SnapshotFromStore(s.Adapter(), store, s.Adapter(), corpus.Commit)
+}
+
+// fireSourceMutations fires the O5 source_mutation driver for each newly-written
+// note whose content-hash differs from its prior persisted value (insert or
+// content change). An unchanged re-bootstrap fires nothing (O5: content-hash
+// change, not any-upsert).
+func fireSourceMutations(s *sdk.SDK, prevNotes, curNotes []sdk.Note) {
+	prevHash := make(map[string]string, len(prevNotes))
+	for _, n := range prevNotes {
+		prevHash[n.ID] = fieldString(n, fieldContentSum)
+	}
+	for _, n := range curNotes {
+		cur := fieldString(n, fieldContentSum)
+		if old, existed := prevHash[n.ID]; existed && old == cur {
+			continue // content unchanged — driver must NOT fire (O5)
+		}
 		s.DeclarePredicateFired(driverSourceMutation, map[string]any{
-			"id":            symbolID(sym),
-			fieldContentSum: sym.ContentHash,
+			"id":            n.ID,
+			fieldContentSum: cur,
 		})
 	}
-	return Snapshot(Name, corpus, commit), nil
 }

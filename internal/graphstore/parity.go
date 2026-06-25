@@ -234,60 +234,75 @@ func impactIDSet(rows []ImpactRow) map[string]bool {
 // returns the fraction of co-membership decisions the two partitions agree on,
 // in [0,1] (1.0 = identical partition up to cluster relabeling). community maps
 // node id → cluster id; cluster ids need not match between the two inputs.
-func PartitionAgreement(a, b map[string]string) float64 {
-	ids := partitionMembers(a, b)
+//
+// The second return is false when the two partitions do NOT cover the same node
+// set — a missing or extra node is a parity divergence, not a free pass, so the
+// score is meaningless and callers must treat ok=false as a failure. (Earlier
+// this leniently returned 1.0 for <2 ids, which masked a dropped node; that was
+// MEDIUM #5.) When ok is true and there is at most one shared node, agreement is
+// trivially 1.0 (no pair to disagree on).
+func PartitionAgreement(a, b map[string]string) (float64, bool) {
+	if !sameKeySet(a, b) {
+		return 0, false
+	}
+	ids := partitionMembers(a)
 	if len(ids) < 2 {
-		return 1.0
+		return 1.0, true
 	}
 	var agree, total int
 	for i := 0; i < len(ids); i++ {
 		for j := i + 1; j < len(ids); j++ {
 			total++
-			sameA := a[ids[i]] == a[ids[j]]
-			sameB := b[ids[i]] == b[ids[j]]
-			if sameA == sameB {
+			if (a[ids[i]] == a[ids[j]]) == (b[ids[i]] == b[ids[j]]) {
 				agree++
 			}
 		}
 	}
-	return float64(agree) / float64(total)
+	return float64(agree) / float64(total), true
 }
 
-// partitionMembers returns the sorted union of two partitions' node ids.
-func partitionMembers(a, b map[string]string) []string {
-	seen := make(map[string]bool, len(a)+len(b))
+// partitionMembers returns the sorted node ids of a partition.
+func partitionMembers(a map[string]string) []string {
+	out := make([]string, 0, len(a))
 	for k := range a {
-		seen[k] = true
-	}
-	for k := range b {
-		seen[k] = true
-	}
-	out := make([]string, 0, len(seen))
-	for k := range seen {
 		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
 }
 
-// SpearmanTau is the Spearman rank correlation between two rankings keyed by
-// the same ids (O6 refinement C: risk_index parity via Spearman τ). Each map is
-// id → score; only ids present in both are correlated. Returns a value in
-// [-1,1]; 1.0 is identical rank order. Fewer than two shared ids yields 1.0
-// (degenerate — nothing to disagree about).
-func SpearmanTau(a, b map[string]float64) float64 {
-	var ids []string
-	for id := range a {
-		if _, ok := b[id]; ok {
-			ids = append(ids, id)
+// sameKeySet reports whether two string-keyed maps have identical key sets.
+func sameKeySet[V any](a, b map[string]V) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			return false
 		}
 	}
-	if len(ids) < 2 {
-		return 1.0
+	return true
+}
+
+// SpearmanTau is the Spearman rank correlation between two rankings keyed by the
+// same ids (O6 refinement C: risk_index parity via Spearman τ). Each map is
+// id → score. The second return is false when the two rankings do NOT cover the
+// same id set — a missing or extra ranked node is a parity divergence, not a
+// free pass (MEDIUM #5: this no longer silently correlates only the shared ids
+// and passes). When ok is true the score is in [-1,1]; 1.0 is identical rank
+// order. With at most one shared id the order is trivially identical (1.0).
+func SpearmanTau(a, b map[string]float64) (float64, bool) {
+	if !sameKeySet(a, b) {
+		return 0, false
 	}
-	ra := ranksOf(ids, a)
-	rb := ranksOf(ids, b)
-	return pearson(ra, rb)
+	ids := make([]string, 0, len(a))
+	for id := range a {
+		ids = append(ids, id)
+	}
+	if len(ids) < 2 {
+		return 1.0, true
+	}
+	return pearson(ranksOf(ids, a), ranksOf(ids, b)), true
 }
 
 // scoredID pairs a node id with its score, for rank assignment.

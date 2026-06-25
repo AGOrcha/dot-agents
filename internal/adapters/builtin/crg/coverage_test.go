@@ -10,17 +10,19 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
-// failStore is a sdk.Store whose writes fail after failAfter successful calls,
-// so Bootstrap's WriteNotes / WriteEdges error paths are reachable.
+// failStore is a sdk.Store whose writes fail after failAfter successful calls
+// and whose reads can be made to fail, so Bootstrap's write and the readback
+// error paths are reachable. It satisfies both sdk.Store and crg.StoreReader.
 type failStore struct {
 	writeCalls int
 	failAfter  int
+	failReads  bool
 }
 
 func (s *failStore) WriteNotes(_ sdk.Token, _ string, _ []sdk.Note) error { return s.maybeFail() }
 func (s *failStore) WriteEdges(_ sdk.Token, _ string, _ []sdk.Edge) error { return s.maybeFail() }
-func (s *failStore) Notes(_ sdk.Token, _ string) ([]sdk.Note, error)      { return nil, nil }
-func (s *failStore) Edges(_ sdk.Token, _ string) ([]sdk.Edge, error)      { return nil, nil }
+func (s *failStore) Notes(_ sdk.Token, _ string) ([]sdk.Note, error)      { return nil, s.readErr() }
+func (s *failStore) Edges(_ sdk.Token, _ string) ([]sdk.Edge, error)      { return nil, s.readErr() }
 func (s *failStore) maybeFail() error {
 	s.writeCalls++
 	if s.writeCalls > s.failAfter {
@@ -28,19 +30,66 @@ func (s *failStore) maybeFail() error {
 	}
 	return nil
 }
+func (s *failStore) readErr() error {
+	if s.failReads {
+		return errors.New("store: injected read failure")
+	}
+	return nil
+}
 
 func TestBootstrap_PropagatesWriteNotesError(t *testing.T) {
-	s := sdk.For(Name, &failStore{failAfter: 0})
-	if _, err := Bootstrap(s, smallCorpus(), "c"); err == nil {
+	fs := &failStore{failAfter: 0}
+	s := sdk.For(Name, fs)
+	if _, err := Bootstrap(s, fs, smallCorpus(), nil); err == nil {
 		t.Fatal("Bootstrap must propagate a WriteNotes failure")
 	}
 }
 
 func TestBootstrap_PropagatesWriteEdgesError(t *testing.T) {
-	s := sdk.For(Name, &failStore{failAfter: 1}) // notes ok, edges fail
-	if _, err := Bootstrap(s, smallCorpus(), "c"); err == nil {
+	fs := &failStore{failAfter: 1} // notes ok, edges fail
+	s := sdk.For(Name, fs)
+	if _, err := Bootstrap(s, fs, smallCorpus(), nil); err == nil {
 		t.Fatal("Bootstrap must propagate a WriteEdges failure")
 	}
+}
+
+func TestBootstrap_PropagatesReadbackError(t *testing.T) {
+	fs := &failStore{failAfter: 100, failReads: true} // writes ok, readback fails
+	s := sdk.For(Name, fs)
+	if _, err := Bootstrap(s, fs, smallCorpus(), nil); err == nil {
+		t.Fatal("Bootstrap must propagate a readback (snapshot) failure")
+	}
+}
+
+func TestSnapshotFromStore_ReadEdgesError(t *testing.T) {
+	// Notes succeed, edges fail: exercise the second readback error branch.
+	fs := &edgeFailStore{}
+	if _, err := SnapshotFromStore(Name, fs, Name, "c"); err == nil {
+		t.Fatal("SnapshotFromStore must propagate an Edges read failure")
+	}
+}
+
+func TestDiffFromStore_ReadError(t *testing.T) {
+	fs := &failStore{failReads: true}
+	if _, err := DiffFromStore(nil, fs, Name); err == nil {
+		t.Fatal("DiffFromStore must propagate a read failure")
+	}
+}
+
+func TestImpactRadiusFromStore_ReadError(t *testing.T) {
+	fs := &failStore{failReads: true}
+	if _, err := ImpactRadiusFromStore(fs, Name, []string{"x"}, 1); err == nil {
+		t.Fatal("ImpactRadiusFromStore must propagate a read failure")
+	}
+}
+
+// edgeFailStore reads notes fine but fails on Edges, to cover the edges-read
+// error branch of readNamespace.
+type edgeFailStore struct{}
+
+func (edgeFailStore) Notes(_ sdk.Token, _ string) ([]sdk.Note, error) { return nil, nil }
+func (edgeFailStore) Edges(_ sdk.Token, _ string) ([]sdk.Edge, error) {
+	return nil, errors.New("store: injected edge read failure")
 }
 
 func TestImpactRadius_IdentityWithoutStore(t *testing.T) {

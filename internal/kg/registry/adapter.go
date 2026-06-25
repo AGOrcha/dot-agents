@@ -105,11 +105,15 @@ type Adapter interface {
 type Registry struct {
 	mu       sync.RWMutex
 	adapters map[string]Adapter
+	// readsFrom records each adapter's declared cross-adapter dependencies
+	// (DeclareReadsFrom), so the §11.2 migration_only gate can be enforced
+	// transitively.
+	readsFrom map[string][]string
 }
 
 // New returns an empty Registry.
 func New() *Registry {
-	return &Registry{adapters: make(map[string]Adapter)}
+	return &Registry{adapters: make(map[string]Adapter), readsFrom: make(map[string][]string)}
 }
 
 // Register adds a in the registry keyed by its Name. It returns an error if
@@ -160,32 +164,85 @@ func (r *Registry) Resolve(ref string) (Adapter, error) {
 	return a, nil
 }
 
-// ValidateReadsFrom enforces the §11.2 loader rule: a long-term adapter must
-// not declare reads_from against any migration_only adapter. It is called at
-// adapter load when a materialized view declares cross-adapter dependencies.
-// dependent is the adapter declaring the reads_from; readsFrom are the
-// dependency adapter names. It returns an error naming the first migration_only
-// dependency found, so the loader can reject the adapter before activation.
-//
-// A migration_only adapter MAY read another migration_only adapter (mirrors
-// are not long-term consumers); only a non-migration adapter depending on a
-// migration_only one is rejected.
+// DeclareReadsFrom is the loader entry point that records dependent's
+// cross-adapter reads_from declaration and GATES it against the §11.2 rule. The
+// loader calls this when an adapter (or one of its materialized views) declares
+// reads_from; a returned error means the declaration is rejected and the
+// adapter must not activate. On success the declaration is recorded so later
+// transitive checks see it. Both the dependent and every named dependency must
+// already be registered (missing names are rejected — a reads_from against an
+// unregistered adapter cannot be validated and so cannot be allowed).
+func (r *Registry) DeclareReadsFrom(dependent string, readsFrom []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.checkReadsFromLocked(dependent, readsFrom); err != nil {
+		return err
+	}
+	r.readsFrom[dependent] = append([]string(nil), readsFrom...)
+	return nil
+}
+
+// ValidateReadsFrom checks the §11.2 rule for a candidate reads_from
+// declaration WITHOUT recording it (the read-only counterpart of
+// DeclareReadsFrom). It is the gate a loader runs before activation.
 func (r *Registry) ValidateReadsFrom(dependent string, readsFrom []string) error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	if dep, ok := r.adapters[dependent]; ok && dep.Schema().MigrationOnly {
+	return r.checkReadsFromLocked(dependent, readsFrom)
+}
+
+// checkReadsFromLocked enforces the §11.2 rule. The caller holds r.mu.
+//
+//   - A migration_only dependent MAY read migration_only deps (mirrors are not
+//     long-term consumers) — short-circuit allow.
+//   - A self-reference is rejected (an adapter cannot reads_from itself).
+//   - Every named dependency must be registered; an unknown dep is rejected.
+//   - A non-migration dependent must not reach ANY migration_only adapter, even
+//     transitively through other adapters' recorded reads_from edges.
+func (r *Registry) checkReadsFromLocked(dependent string, readsFrom []string) error {
+	dependentMigration := r.isMigrationOnlyLocked(dependent)
+	for _, name := range readsFrom {
+		if name == dependent {
+			return fmt.Errorf("registry: adapter %q must not reads_from itself", dependent)
+		}
+		if _, ok := r.adapters[name]; !ok {
+			return fmt.Errorf("registry: adapter %q reads_from unregistered adapter %q", dependent, name)
+		}
+	}
+	if dependentMigration {
 		return nil
 	}
-	for _, name := range readsFrom {
-		a, ok := r.adapters[name]
-		if !ok {
-			continue // unknown deps are a separate validation concern
-		}
-		if a.Schema().MigrationOnly {
-			return fmt.Errorf("registry: adapter %q must not reads_from migration_only adapter %q (spec §11.2)", dependent, name)
-		}
+	if hit := r.reachesMigrationOnlyLocked(readsFrom); hit != "" {
+		return fmt.Errorf("registry: adapter %q must not reads_from migration_only adapter %q (spec §11.2)", dependent, hit)
 	}
 	return nil
+}
+
+// isMigrationOnlyLocked reports whether a registered adapter is migration_only.
+func (r *Registry) isMigrationOnlyLocked(name string) bool {
+	a, ok := r.adapters[name]
+	return ok && a.Schema().MigrationOnly
+}
+
+// reachesMigrationOnlyLocked returns the first migration_only adapter reachable
+// from any of seeds, following recorded reads_from edges transitively. Empty
+// string means none is reachable.
+func (r *Registry) reachesMigrationOnlyLocked(seeds []string) string {
+	seen := make(map[string]bool, len(seeds))
+	stack := append([]string(nil), seeds...)
+	for len(stack) > 0 {
+		name := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		if r.isMigrationOnlyLocked(name) {
+			return name
+		}
+		stack = append(stack, r.readsFrom[name]...)
+	}
+	return ""
 }
 
 // Names returns the registered adapter names in sorted order.

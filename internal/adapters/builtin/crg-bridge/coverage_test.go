@@ -4,50 +4,24 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
-// failStore fails writes after failAfter successful calls, so Bootstrap's
-// WriteNotes / WriteEdges error paths are reachable.
-type failStore struct {
-	writeCalls int
-	failAfter  int
+// readFailStore is a crg.StoreReader whose reads fail, so MirrorSnapshot's
+// readback error path is reachable.
+type readFailStore struct{}
+
+func (readFailStore) Notes(_ sdk.Token, _ string) ([]sdk.Note, error) {
+	return nil, errors.New("store: injected read failure")
+}
+func (readFailStore) Edges(_ sdk.Token, _ string) ([]sdk.Edge, error) {
+	return nil, errors.New("store: injected read failure")
 }
 
-func (s *failStore) WriteNotes(_ sdk.Token, _ string, _ []sdk.Note) error { return s.maybeFail() }
-func (s *failStore) WriteEdges(_ sdk.Token, _ string, _ []sdk.Edge) error { return s.maybeFail() }
-func (s *failStore) Notes(_ sdk.Token, _ string) ([]sdk.Note, error)      { return nil, nil }
-func (s *failStore) Edges(_ sdk.Token, _ string) ([]sdk.Edge, error)      { return nil, nil }
-func (s *failStore) maybeFail() error {
-	s.writeCalls++
-	if s.writeCalls > s.failAfter {
-		return errors.New("store: injected write failure")
-	}
-	return nil
-}
-
-func bridgeTestCorpus() crg.Corpus {
-	return crg.Corpus{
-		Symbols: []crg.Symbol{
-			{QualifiedName: "x", Kind: "Function", Language: "go", FilePath: "x.go", LineStart: 1, ContentHash: "h"},
-		},
-		References: []crg.Reference{{Kind: "CALLS", From: "x", To: "x"}},
-	}
-}
-
-func TestBootstrap_PropagatesWriteNotesError(t *testing.T) {
-	s := sdk.For(Name, &failStore{failAfter: 0})
-	if _, err := Bootstrap(s, bridgeTestCorpus(), "c"); err == nil {
-		t.Fatal("Bootstrap must propagate a WriteNotes failure")
-	}
-}
-
-func TestBootstrap_PropagatesWriteEdgesError(t *testing.T) {
-	s := sdk.For(Name, &failStore{failAfter: 1})
-	if _, err := Bootstrap(s, bridgeTestCorpus(), "c"); err == nil {
-		t.Fatal("Bootstrap must propagate a WriteEdges failure")
+func TestMirrorSnapshot_PropagatesReadError(t *testing.T) {
+	if _, err := MirrorSnapshot(readFailStore{}, "c"); err == nil {
+		t.Fatal("MirrorSnapshot must propagate a readback failure")
 	}
 }
 

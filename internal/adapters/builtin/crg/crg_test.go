@@ -46,68 +46,129 @@ func TestRegisterAndResolve(t *testing.T) {
 	}
 }
 
-func TestBootstrapWritesToOwnNamespaceAndSnapshots(t *testing.T) {
-	c := smallCorpus()
+// TestBootstrapSnapshotReadsBackFromStore proves the snapshot is computed from
+// the persisted namespace (readback), NOT the input corpus: a corpus with a
+// dangling reference (dropped on write) must not be counted in EdgesByKind.
+func TestBootstrapSnapshotReadsBackFromStore(t *testing.T) {
+	c := Corpus{
+		Commit: "deadbeef",
+		Symbols: []Symbol{
+			{QualifiedName: "pkg.A", Kind: kindFn, Language: "go", FilePath: "a.go", LineStart: 1, ContentHash: "h1"},
+			{QualifiedName: "pkg.B", Kind: kindType, Language: "go", FilePath: "b.go", LineStart: 2, ContentHash: "h2"},
+		},
+		References: []Reference{
+			{Kind: kindCalls, From: "pkg.A", To: "pkg.B"}, // real edge
+			{Kind: kindCalls, From: "pkg.A", To: "ghost"}, // dangling — dropped on write
+		},
+	}
 	store := sdk.NewMemStore()
 	s := sdk.For(Name, store)
-	snap, err := Bootstrap(s, c, c.Commit)
+	snap, err := Bootstrap(s, store, c, nil)
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 	if snap.Adapter != Name {
 		t.Fatalf("snapshot adapter = %q, want %q", snap.Adapter, Name)
 	}
-	if snap.NodesTotal != len(c.Symbols) {
-		t.Fatalf("nodes total = %d, want %d", snap.NodesTotal, len(c.Symbols))
+	if snap.NodesTotal != 2 {
+		t.Fatalf("nodes total = %d, want 2 (from readback)", snap.NodesTotal)
 	}
-	// Wrote ONLY to kg-native namespace (Name), nothing else.
+	// Crucial: the dangling reference must NOT be counted — only 1 CALLS edge
+	// actually reached storage.
+	if snap.EdgesByKind[kindCalls] != 1 {
+		t.Fatalf("EdgesByKind[CALLS] = %d, want 1 (dangling edge dropped on write, absent from readback)",
+			snap.EdgesByKind[kindCalls])
+	}
 	ns := store.Namespaces()
 	if len(ns) != 1 || ns[0] != Name {
 		t.Fatalf("namespaces = %v, want exactly [%s]", ns, Name)
 	}
-	// O5: source_mutation fired once per symbol (content-hash event), not per
-	// any-upsert.
-	if got := len(s.FiredPredicates()); got != len(c.Symbols) {
-		t.Fatalf("source_mutation fired %d times, want %d (one per symbol)", got, len(c.Symbols))
+}
+
+// TestSourceMutationFiresOnContentHashChange proves O5: the driver fires for new
+// and content-changed symbols, and does NOT fire for unchanged ones.
+func TestSourceMutationFiresOnContentHashChange(t *testing.T) {
+	prev := []sdk.Note{
+		{ID: "pkg.A@a.go", Type: noteTypeSymbol, Fields: map[string]any{fieldContentSum: "h1"}},
+		{ID: "pkg.B@b.go", Type: noteTypeSymbol, Fields: map[string]any{fieldContentSum: "h2"}},
 	}
-	for _, fp := range s.FiredPredicates() {
-		if fp.Predicate != "source_mutation" {
+	cur := Corpus{
+		Commit: "c2",
+		Symbols: []Symbol{
+			{QualifiedName: "pkg.A", Kind: kindFn, Language: "go", FilePath: "a.go", LineStart: 1, ContentHash: "h1"},     // unchanged
+			{QualifiedName: "pkg.B", Kind: kindFn, Language: "go", FilePath: "b.go", LineStart: 2, ContentHash: "h2-NEW"}, // changed
+			{QualifiedName: "pkg.C", Kind: kindFn, Language: "go", FilePath: "c.go", LineStart: 3, ContentHash: "h3"},     // new
+		},
+	}
+	store := sdk.NewMemStore()
+	s := sdk.For(Name, store)
+	if _, err := Bootstrap(s, store, cur, prev); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	fired := s.FiredPredicates()
+	if len(fired) != 2 {
+		t.Fatalf("source_mutation fired %d times, want 2 (changed + new only); got %v", len(fired), fired)
+	}
+	firedIDs := map[string]bool{}
+	for _, fp := range fired {
+		if fp.Predicate != driverSourceMutation {
 			t.Fatalf("unexpected predicate %q", fp.Predicate)
 		}
-		if _, ok := fp.Args["content_hash"]; !ok {
-			t.Fatal("source_mutation event must carry content_hash (O5)")
-		}
+		firedIDs[fp.Args["id"].(string)] = true
+	}
+	if firedIDs["pkg.A@a.go"] {
+		t.Fatal("unchanged symbol pkg.A must NOT fire source_mutation (O5)")
+	}
+	if !firedIDs["pkg.B@b.go"] || !firedIDs["pkg.C@c.go"] {
+		t.Fatalf("changed+new symbols must fire; fired ids = %v", firedIDs)
 	}
 }
 
-func TestDiff_InsertUpdateDelete(t *testing.T) {
-	prev := Corpus{Symbols: []Symbol{
-		{QualifiedName: "a", Kind: kindFn, FilePath: "a.go", LineStart: 1, ContentHash: "h1"},
-		{QualifiedName: "b", Kind: kindFn, FilePath: "b.go", LineStart: 2, ContentHash: "h2"},
-	}}
-	next := Corpus{Symbols: []Symbol{
+func TestSourceMutation_FirstBootstrapFiresAll(t *testing.T) {
+	c := smallCorpus()
+	store := sdk.NewMemStore()
+	s := sdk.For(Name, store)
+	if _, err := Bootstrap(s, store, c, nil); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if got := len(s.FiredPredicates()); got != len(c.Symbols) {
+		t.Fatalf("first bootstrap fired %d, want %d (all symbols new)", got, len(c.Symbols))
+	}
+}
+
+func TestDiffFromStore_InsertUpdateDelete(t *testing.T) {
+	prev := []sdk.Note{
+		note("a@a.go", "a", kindFn, "a.go", "h1"),
+		note("b@b.go", "b", kindFn, "b.go", "h2"),
+	}
+	store := sdk.NewMemStore()
+	s := sdk.For(Name, store)
+	cur := Corpus{Symbols: []Symbol{
 		{QualifiedName: "a", Kind: kindFn, FilePath: "a.go", LineStart: 1, ContentHash: "h1-NEW"}, // update
 		{QualifiedName: "c", Kind: kindType, FilePath: "c.go", LineStart: 3, ContentHash: "h3"},   // insert
 		// b removed → delete
 	}}
-	got := Diff(prev, next)
+	notes, edges := cur.ToGraph()
+	if err := s.WriteNotes(notes); err != nil {
+		t.Fatalf("seed notes: %v", err)
+	}
+	if err := s.WriteEdges(edges); err != nil {
+		t.Fatalf("seed edges: %v", err)
+	}
+	got, err := DiffFromStore(prev, store, Name)
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
 	ops := map[graphstore.UpsertOp]int{}
 	for _, u := range got {
 		ops[u.Op]++
 	}
 	if ops[graphstore.OpInsert] != 1 || ops[graphstore.OpUpdate] != 1 || ops[graphstore.OpDelete] != 1 {
-		t.Fatalf("expected 1 each of insert/update/delete, got %+v (%v)", ops, got)
+		t.Fatalf("expected 1 each insert/update/delete, got %+v (%v)", ops, got)
 	}
 }
 
-func TestDiff_NoChangeIsEmpty(t *testing.T) {
-	c := smallCorpus()
-	if got := Diff(c, c); len(got) != 0 {
-		t.Fatalf("identical corpus diff should be empty, got %v", got)
-	}
-}
-
-func TestImpactRadius_ExpandsAlongEdges(t *testing.T) {
+func TestImpactRadiusFromStore_ExpandsAlongEdges(t *testing.T) {
 	c := Corpus{
 		Symbols: []Symbol{
 			{QualifiedName: "a", Kind: kindFn, FilePath: "a.go"},
@@ -120,8 +181,16 @@ func TestImpactRadius_ExpandsAlongEdges(t *testing.T) {
 			{Kind: kindCalls, From: "b", To: "d"},
 		},
 	}
+	store := sdk.NewMemStore()
+	s := sdk.For(Name, store)
+	if _, err := Bootstrap(s, store, c, nil); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
 	seed := SymbolID(c.Symbols[0]) // a
-	rows := ImpactRadiusRows(c, []string{seed}, 3)
+	rows, err := ImpactRadiusFromStore(store, Name, []string{seed}, 3)
+	if err != nil {
+		t.Fatalf("impact: %v", err)
+	}
 	ids := map[string]bool{}
 	for _, r := range rows {
 		ids[r.QualifiedName] = true
@@ -137,17 +206,26 @@ func TestImpactRadius_ExpandsAlongEdges(t *testing.T) {
 	}
 }
 
-func TestImpactRadius_DepthBound(t *testing.T) {
+func TestImpactRadiusFromStore_DepthBound(t *testing.T) {
 	c := Corpus{
 		Symbols: []Symbol{
-			{QualifiedName: "a", Kind: kindFn}, {QualifiedName: "b", Kind: kindFn},
-			{QualifiedName: "d", Kind: kindFn},
+			{QualifiedName: "a", Kind: kindFn, FilePath: "a.go"},
+			{QualifiedName: "b", Kind: kindFn, FilePath: "b.go"},
+			{QualifiedName: "d", Kind: kindFn, FilePath: "d.go"},
 		},
 		References: []Reference{
 			{Kind: kindCalls, From: "a", To: "b"}, {Kind: kindCalls, From: "b", To: "d"},
 		},
 	}
-	rows := ImpactRadiusRows(c, []string{SymbolID(c.Symbols[0])}, 1)
+	store := sdk.NewMemStore()
+	s := sdk.For(Name, store)
+	if _, err := Bootstrap(s, store, c, nil); err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	rows, err := ImpactRadiusFromStore(store, Name, []string{SymbolID(c.Symbols[0])}, 1)
+	if err != nil {
+		t.Fatalf("impact: %v", err)
+	}
 	if len(rows) != 1 || rows[0].QualifiedName != "b" {
 		t.Fatalf("depth-1 from a should reach only b, got %v", rows)
 	}
@@ -188,6 +266,13 @@ func smallCorpus() Corpus {
 		},
 		References: []Reference{{Kind: kindCalls, From: "pkg.A", To: "pkg.C"}},
 	}
+}
+
+// note builds a persisted symbol note for diff tests.
+func note(id, qn, kind, file, hash string) sdk.Note {
+	return sdk.Note{ID: id, Type: noteTypeSymbol, Fields: map[string]any{
+		fieldQualified: qn, fieldKind: kind, fieldFilePath: file, fieldContentSum: hash, fieldLineStart: 1,
+	}}
 }
 
 // parityDir resolves testdata/crg-parity relative to this test file.

@@ -128,39 +128,54 @@ func TestCompareImpactRadius_Divergent(t *testing.T) {
 func TestPartitionAgreement_IdenticalUpToRelabel(t *testing.T) {
 	a := map[string]string{"n1": "A", "n2": "A", "n3": "B"}
 	b := map[string]string{"n1": "X", "n2": "X", "n3": "Y"} // same partition, relabeled
-	if got := PartitionAgreement(a, b); got != 1.0 {
-		t.Fatalf("relabeled-identical partition agreement = %v, want 1.0", got)
+	got, ok := PartitionAgreement(a, b)
+	if !ok || got != 1.0 {
+		t.Fatalf("relabeled-identical partition agreement = %v (ok=%v), want 1.0,true", got, ok)
 	}
 }
 
 func TestPartitionAgreement_Disagreement(t *testing.T) {
 	a := map[string]string{"n1": "A", "n2": "A", "n3": "B"}
 	b := map[string]string{"n1": "A", "n2": "B", "n3": "B"} // n2 moved
-	got := PartitionAgreement(a, b)
-	if got >= 1.0 || got < 0 {
-		t.Fatalf("partial agreement should be in [0,1); got %v", got)
+	got, ok := PartitionAgreement(a, b)
+	if !ok || got >= 1.0 || got < 0 {
+		t.Fatalf("partial agreement should be in [0,1) with ok=true; got %v ok=%v", got, ok)
 	}
 }
 
 func TestPartitionAgreement_Trivial(t *testing.T) {
-	if got := PartitionAgreement(map[string]string{"n1": "A"}, map[string]string{"n1": "B"}); got != 1.0 {
-		t.Fatalf("single-member partition agreement = %v, want 1.0", got)
+	got, ok := PartitionAgreement(map[string]string{"n1": "A"}, map[string]string{"n1": "B"})
+	if !ok || got != 1.0 {
+		t.Fatalf("single-member partition agreement = %v (ok=%v), want 1.0,true", got, ok)
+	}
+}
+
+// TestPartitionAgreement_MissingNodeFails is the MEDIUM #5 guard: a node present
+// in one partition but absent in the other is a divergence (ok=false), not a
+// free 1.0 pass.
+func TestPartitionAgreement_MissingNodeFails(t *testing.T) {
+	a := map[string]string{"n1": "A", "n2": "A"}
+	b := map[string]string{"n1": "A"} // n2 dropped
+	if _, ok := PartitionAgreement(a, b); ok {
+		t.Fatal("a partition missing a node must report ok=false, not a free pass")
 	}
 }
 
 func TestSpearmanTau_IdenticalOrder(t *testing.T) {
 	a := map[string]float64{"n1": 1, "n2": 2, "n3": 3, "n4": 4}
 	b := map[string]float64{"n1": 10, "n2": 20, "n3": 30, "n4": 40} // same order, scaled
-	if got := SpearmanTau(a, b); math.Abs(got-1.0) > 1e-9 {
-		t.Fatalf("identical rank order tau = %v, want 1.0", got)
+	got, ok := SpearmanTau(a, b)
+	if !ok || math.Abs(got-1.0) > 1e-9 {
+		t.Fatalf("identical rank order tau = %v (ok=%v), want 1.0,true", got, ok)
 	}
 }
 
 func TestSpearmanTau_ReversedOrder(t *testing.T) {
 	a := map[string]float64{"n1": 1, "n2": 2, "n3": 3, "n4": 4}
 	b := map[string]float64{"n1": 4, "n2": 3, "n3": 2, "n4": 1}
-	if got := SpearmanTau(a, b); math.Abs(got-(-1.0)) > 1e-9 {
-		t.Fatalf("reversed rank order tau = %v, want -1.0", got)
+	got, ok := SpearmanTau(a, b)
+	if !ok || math.Abs(got-(-1.0)) > 1e-9 {
+		t.Fatalf("reversed rank order tau = %v (ok=%v), want -1.0,true", got, ok)
 	}
 }
 
@@ -173,37 +188,47 @@ func TestSpearmanTau_AboveThreshold(t *testing.T) {
 		b[string(rune('a'+i))] = float64(i)
 	}
 	b["a"], b["b"] = b["b"], b["a"] // swap top two
-	if got := SpearmanTau(a, b); got < DefaultSpearmanTau {
-		t.Fatalf("single swap tau = %v, want >= %v", got, DefaultSpearmanTau)
+	got, ok := SpearmanTau(a, b)
+	if !ok || got < DefaultSpearmanTau {
+		t.Fatalf("single swap tau = %v (ok=%v), want >= %v", got, ok, DefaultSpearmanTau)
 	}
 }
 
 func TestSpearmanTau_Ties(t *testing.T) {
 	a := map[string]float64{"n1": 1, "n2": 1, "n3": 2}
 	b := map[string]float64{"n1": 5, "n2": 5, "n3": 9}
-	if got := SpearmanTau(a, b); math.Abs(got-1.0) > 1e-9 {
-		t.Fatalf("tie-consistent ranking tau = %v, want 1.0", got)
+	got, ok := SpearmanTau(a, b)
+	if !ok || math.Abs(got-1.0) > 1e-9 {
+		t.Fatalf("tie-consistent ranking tau = %v (ok=%v), want 1.0,true", got, ok)
 	}
 }
 
-func TestSpearmanTau_Degenerate(t *testing.T) {
-	if got := SpearmanTau(map[string]float64{"n1": 1}, map[string]float64{"n1": 9}); got != 1.0 {
-		t.Fatalf("single shared id tau = %v, want 1.0", got)
+func TestSpearmanTau_SingleShared(t *testing.T) {
+	got, ok := SpearmanTau(map[string]float64{"n1": 1}, map[string]float64{"n1": 9})
+	if !ok || got != 1.0 {
+		t.Fatalf("single shared id tau = %v (ok=%v), want 1.0,true", got, ok)
 	}
 }
 
 func TestSpearmanTau_ZeroVarianceIsDegenerate(t *testing.T) {
-	// All-equal scores on one side → zero rank variance → pearson returns 1.0
-	// (degenerate agreement, not NaN).
+	// All-equal scores on one side → zero rank variance → pearson returns 1.0.
 	a := map[string]float64{"n1": 5, "n2": 5, "n3": 5}
 	b := map[string]float64{"n1": 1, "n2": 2, "n3": 3}
-	if got := SpearmanTau(a, b); got != 1.0 {
-		t.Fatalf("zero-variance ranking tau = %v, want 1.0", got)
+	got, ok := SpearmanTau(a, b)
+	if !ok || got != 1.0 {
+		t.Fatalf("zero-variance ranking tau = %v (ok=%v), want 1.0,true", got, ok)
 	}
 }
 
-func TestSpearmanTau_NoSharedIDs(t *testing.T) {
-	if got := SpearmanTau(map[string]float64{"a": 1}, map[string]float64{"b": 2}); got != 1.0 {
-		t.Fatalf("disjoint id sets tau = %v, want 1.0 (nothing to disagree on)", got)
+// TestSpearmanTau_MissingNodeFails is the MEDIUM #5 guard: differing id sets are
+// a divergence (ok=false), not a free pass over only the shared ids.
+func TestSpearmanTau_MissingNodeFails(t *testing.T) {
+	a := map[string]float64{"n1": 1, "n2": 2}
+	b := map[string]float64{"n1": 1} // n2 dropped
+	if _, ok := SpearmanTau(a, b); ok {
+		t.Fatal("differing id sets must report ok=false, not correlate only shared ids")
+	}
+	if _, ok := SpearmanTau(map[string]float64{"a": 1}, map[string]float64{"b": 2}); ok {
+		t.Fatal("disjoint id sets must report ok=false")
 	}
 }

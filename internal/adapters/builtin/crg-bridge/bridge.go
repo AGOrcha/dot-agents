@@ -6,10 +6,11 @@
 // internal/graphstore. It is marked migration_only: true; long-term adapters
 // must not declare reads_from against it (the loader rejects that).
 //
-// Like the kg-native crg adapter, the mirror models ingestion over a
-// normalized corpus (the bridge's legacy SQLite rows, exported to the same
-// Symbol/Reference shape) so the §11.6 parity rows are machine-verifiable with
-// no live Python subprocess.
+// The mirror is READ-ONLY at the adapter layer: this package exposes NO write
+// path. The legacy bridge namespace is populated externally by the Python
+// subprocess (modeled in tests by a legacy seeder that writes as the external
+// process). The adapter only reads that state back through the Store seam to
+// produce parity snapshots, so it can never mutate the mirror.
 package crgbridge
 
 import (
@@ -17,7 +18,6 @@ import (
 	_ "embed"
 
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
-	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
@@ -66,19 +66,11 @@ func Register(reg *registry.Registry) error {
 	return reg.Register(New())
 }
 
-// Bootstrap mirrors the legacy bridge corpus into the kg_crg-bridge.* mirror
-// namespace through the SDK and returns the structured build snapshot. The
-// mirror reuses the kg-native crg ingestion (corpus.toGraph / Snapshot) so the
-// two surfaces are directly comparable; the only difference is the namespace
-// the SDK writes to (Name vs crg.Name). No staleness drivers fire — bridge
-// mutation is observed externally (§11.2).
-func Bootstrap(s *sdk.SDK, corpus crg.Corpus, commit string) (graphstore.ParitySnapshot, error) {
-	notes, edges := corpus.ToGraph()
-	if err := s.WriteNotes(notes); err != nil {
-		return graphstore.ParitySnapshot{}, err
-	}
-	if err := s.WriteEdges(edges); err != nil {
-		return graphstore.ParitySnapshot{}, err
-	}
-	return crg.Snapshot(Name, corpus, commit), nil
+// MirrorSnapshot reads the legacy bridge state back from the mirror namespace
+// (kg_crg-bridge.*) through the Store seam and returns its build snapshot. This
+// is READ-ONLY: the adapter never writes to the namespace. The namespace is
+// populated externally by the legacy Python bridge; the adapter only mirrors
+// (reads) it for parity comparison against the kg-native crg snapshot.
+func MirrorSnapshot(store crg.StoreReader, commit string) (graphstore.ParitySnapshot, error) {
+	return crg.SnapshotFromStore(Name, store, Name, commit)
 }
