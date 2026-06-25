@@ -40,6 +40,8 @@ Per the umbrella spec D3, any change to the signal mix requires a major rubric v
 
 **Why:** treating labels as a first-class signal is the whole point of "feed the loop." Hiding labels in a sidebar makes them a comment, not a reward signal. The version bump preserves comparability of older scores under the prior rubric version (no retroactive score invalidation).
 
+> **Version coordination (single source = R1.5 design D5 + `docs/OUTCOME_SCORING_RUBRIC.md`).** R1.5 shipped first and bumped the rubric to **2.1.0** (adding the `hook_outcomes` signal — the live rubric now has seven signals, not six). Per the R1.5 D5 ordering policy, R5 owns the next **major** bump as the first signal that depends on external human input. The concrete target is resolved by *reading the `RubricVersion` constant at implementation time* (`r1-integration` task), not by hardcoding "3.0.0" here — this spec defers the exact number to that single policy so the two plans never collide on a version. The earlier "3.0.0" wording in this spec predates R1.5 shipping 2.1.0.
+
 **Rejected:** patching the existing rubric version in place (breaks comparability across time); a parallel "label score" outside the rubric (forks the metric).
 
 ### D5.3 — Identity is a bearer token presented to the service; users are managed via CLI

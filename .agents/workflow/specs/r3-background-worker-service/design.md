@@ -265,21 +265,26 @@ These trace back to umbrella spec
   poll CI independently and are not run as scheduler tasks. R3's
   scheduler is for repo-local file watchers and idempotent rescores,
   not for tasks that need their own polling loop.
-- **`[[validate-bundle-against-head]]`:** when this plan is fanned out,
-  verify `internal/service/` does not exist on HEAD (confirmed
-  2026-05-27 — `find /Users/nikashp/Documents/dot-agents/internal/
-  service` returns nothing). Task `scheduler-core` adds it.
+- **`[[validate-bundle-against-head]]`:** the 2026-05-27 note asserted
+  `internal/service/` did not exist on HEAD. STALE as of 2026-06-25:
+  `internal/service/scheduler/` (commit 0a57f0b6) and
+  `internal/service/events/` (PR #172) have since shipped — those two
+  tasks are now `completed`. The remaining tasks add
+  `internal/service/{http,tasks,state}` + `commands/service/`
+  (HEAD-verified absent 2026-06-25); re-validate write_scope before each
+  remaining fanout.
 
 ## Candidate canonical-plan tasks (appendix)
 
 These already exist in `TASKS.yaml` (HEAD-verified 2026-05-27 — task IDs
-match). This appendix is descriptive, not authoritative.
+match). This appendix is descriptive, not authoritative; `TASKS.yaml` is
+the single source for status. (Status column refreshed 2026-06-25.)
 
 | Task ID | Status | Notes |
 |---|---|---|
 | design-doc | completed | Replaced by this spec; in-plan design.md retained for archive context |
-| scheduler-core | pending | Add `fsnotify` dep; OQ2 (concurrency on tick overrun) must be answered before fanout |
-| event-bus | pending | Confirm D4 surface is exactly `Publish(topic, payload)` before fanout |
+| scheduler-core | completed | Shipped 2026-06-25 (commit 0a57f0b6); `fsnotify` dep added |
+| event-bus | completed | Shipped via PR #172; surface is `Publish(topic, payload)` + `Subscribe` per D4 |
 | http-server | pending | OQ3 (loopback default) + OQ4 (`/admin/stop` lockdown) must be answered before fanout |
 | tasks-iterlog-ingester | pending | Must call into `internal/scoring`, not duplicate |
 | tasks-rescore | pending | Idempotent — no-op when rubric version unchanged |
