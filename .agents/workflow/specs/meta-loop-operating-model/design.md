@@ -110,7 +110,8 @@ slice is dispatched, every state mutation routes through `da workflow`) is the c
   distinguishing job is to see the whole board (work tasks *and* refinement tasks) and reconcile status
   against shipped PRs so an in-flight/done task is never re-dispatched.
 - **Classify + schedule:** each ingested idea becomes a task tagged WORK or REFINEMENT, routed to the
-  matching `execution_profile` app_type, and scheduled within the budget split (§5, open question).
+  matching `execution_profile` app_type, and scheduled within the event-driven budget + in-flight cap
+  (§5A, OQ2 resolved).
 - **Self-emit:** while managing the general steps the orchestrator emits new ideation/refinement tasks
   it discovers (e.g. a 2nd-occurrence pattern, a gate that should be mechanized) back into the queue.
 
@@ -216,15 +217,18 @@ Resolutions are **defaults that the plan (§6) implements**, not relitigations.
   emission is a `da workflow` mutation (orchestrator has no Write), keeping the
   task-state machine the single SOT.
 
-- **OQ2 — Refinement-vs-work budget → OWNER DECISION (default proposed).**
-  Proposed default: **event-driven, not a fixed ratio** — refine when the
-  2nd-occurrence trigger (OQ1) fires or a friction threshold trips, rather than a
-  blanket "1 refinement per N work" quota. Rationale: a fixed ratio manufactures
-  refinement work in quiet periods and starves it in busy ones. The
-  `agent-ops-hardening` ~57%-overhead datum justifies a *non-trivial* budget but
-  not a hardcoded ratio. The **exact threshold / cap is a maintainer tuning knob**
-  (how many refinement tasks may be in-flight per wave) and is flagged for owner
-  sign-off; it is not derivable from the scaffold.
+- **OQ2 — Refinement-vs-work budget → RESOLVED (owner ruling 2026-06-25:
+  event-driven + maintainer cap).** The budget is **event-driven, not a fixed
+  ratio** — refine when the 2nd-occurrence trigger (OQ1) fires or a friction
+  threshold trips, rather than a blanket "1 refinement per N work" quota.
+  Rationale: a fixed ratio manufactures refinement work in quiet periods and
+  starves it in busy ones; the `agent-ops-hardening` ~57%-overhead datum justifies
+  a *non-trivial* budget but not a hardcoded ratio. On top of the event trigger, a
+  **maintainer-set cap bounds in-flight refinement** so a noisy wave cannot crowd
+  out shipping: starting default **≤2 refinement tasks in-flight per wave**, raised
+  or lowered by the maintainer as the meta-loop's true overhead is observed over a
+  few runs. The cap is a tuning knob (an orchestration-pass parameter), not a
+  design invariant.
 
 - **OQ3 — When does the inner loop self-interrupt → RESOLVED (no self-interrupt).**
   The work loop does **not** self-interrupt to refine. A worker that hits a
@@ -237,19 +241,30 @@ Resolutions are **defaults that the plan (§6) implements**, not relitigations.
   refining a skill mid-task would be exactly the "while I'm here I'll also tweak
   the skill" anti-pattern §2 forbids.
 
-- **OQ4 — Refinement task profile → OWNER DECISION (default proposed).**
-  Proposed default: a refinement task reuses the **non-code verifier_sequence**
-  the scaffold already ships for prose/config/scaffold changes
+- **OQ4 — Refinement task profile → RESOLVED (owner ruling 2026-06-25: reuse
+  `docs` now; `meta` is emergent, not a v1 registry entry).** A refinement task
+  **reuses the existing non-code `docs` profile / `verifier_sequence`** the
+  scaffold already ships for prose/config/scaffold changes
   (`schema-check → citation-check → cli-runner`, with the `copy_test.go` manifest
-  walk for scaffold edits — the non-Go branch of the §0 coverage-delta gate), and
-  adds a **re-dogfood gate** as its acceptance invariant (the change was *re-run*,
-  not just edited — §4.1's "build → dogfood → observe → refine" arc). Whether this
-  warrants a **dedicated `meta`/`refinement` `app_type`** in `stage_profiles`
-  vs. reusing `docs`/`ideation` is the owner decision: a dedicated app_type buys a
-  re-dogfood-evidence assertion the docs profile lacks, at the cost of a new
-  `stage_profiles` entry. Recommend the dedicated app_type **only if** the
-  re-dogfood evidence is mechanically checkable; otherwise reuse `docs` + a
-  manual acceptance note.
+  walk for scaffold edits — the non-Go branch of the §0 coverage-delta gate), plus
+  a **re-dogfood acceptance note** (the change was *re-run*, not just edited —
+  §4.1's "build → dogfood → observe → refine" arc). A **dedicated `meta` app_type
+  is deliberately deferred**: per the owner, the meta profile is *emergent* — its
+  structure/rubric will surface over a few runs, it will **compose configs from
+  several existing app_types** (docs/ideation today) and accrue its own only as
+  the need proves out, and it will **vary per project/goal** rather than be one
+  fixed registry entry. So v1 ships `meta` as a *composition over existing
+  profiles*, and we promote it to a first-class `stage_profiles` entry later **only
+  if** a re-dogfood-evidence assertion becomes mechanically checkable and recurs
+  across projects.
+  - **Scope (owner expansion 2026-06-25):** OQ4's profile question is **not limited
+    to plans + skills** — it covers **proposals and lessons** too. Refinement
+    artifacts that are *scoped* (a project-local proposal or lesson, per
+    `proposal-routing`) run under the same non-code `docs`-composed profile, so the
+    meta-loop can emit/refine scoped proposals and lessons on the same gate as plan
+    and skill refinements. The `proposal.schema.json` + `lesson.schema.json`
+    formalization (kg-ideate `t8`) is the typed substrate this scope expansion
+    rides on.
 
 - **OQ5 — Cross-harness as gate vs advisory → RESOLVED (blocking on
   refinement-tagged tasks; advisory elsewhere).** The shipped
@@ -275,30 +290,34 @@ Resolutions are **defaults that the plan (§6) implements**, not relitigations.
   P5, not a blocker. This matches the `knowledge-architecture-graph-views`
   project direction (docs/files are a STOPGAP; the graph store is the end state).
 
-**Owner-decision summary (for the maintainer):** OQ2 (budget threshold/cap) and
-OQ4 (dedicated `meta` app_type vs reuse `docs`) are the two that need a human
-ruling — both have a proposed default above but turn on tuning/registry choices
-the scaffold cannot imply. OQ1, OQ3, OQ5, OQ6 are resolved by the shipped
-scaffold + canonical lessons and are encoded as plan defaults.
+**Owner-decision summary (for the maintainer):** all six §5 questions are now
+resolved. OQ2 (budget) = **event-driven + a maintainer-set in-flight cap**
+(starting default ≤2/wave); OQ4 (refinement profile) = **reuse the non-code
+`docs`-composed profile now, defer a dedicated `meta` app_type as emergent, and
+extend the scope to scoped proposals + lessons**. OQ1, OQ3, OQ5, OQ6 are resolved
+by the shipped scaffold + canonical lessons. The only remaining knobs are
+tuning/operational (the exact cap; when `meta` graduates to its own
+`stage_profiles` entry), not design gates.
 
 ## 6. Plan outline (thin — the deliverable is this spec)
 
 Indicative phases for a follow-on `workflow/plans/meta-loop-operating-model/`; not authored here.
 Each phase carries the §5A resolution for its open question (P1↔OQ4, P2↔OQ1+OQ3, P3↔OQ2, P4↔OQ5,
-P5↔OQ6) — the plan implements those defaults; only OQ2 and OQ4 still await the maintainer ruling
-flagged in §5A:
+P5↔OQ6) — the plan implements those resolutions; all six are now owner-resolved (§5A), so the phases
+encode rulings, not proposed defaults:
 
 - **P0 — Name the two loops in doctrine.** State the WORK/REFINEMENT separation in the operating
   doctrine (global `CLAUDE.md` §Workflow Orchestration + a pointer from the orchestrator AGENT.md), and
   add the WORK|REFINEMENT task tag convention. No code.
-- **P1 — Refinement task profile.** Resolve OQ4: define (or reuse) an `execution_profile` app_type for
-  refinement tasks, with a verifier_sequence that asserts re-dogfood evidence; register in
-  `stage_profiles`.
+- **P1 — Refinement task profile.** Per OQ4: refinement tasks (incl. scoped proposals + lessons) run
+  under the existing non-code `docs`-composed profile + a re-dogfood acceptance note. Do **not** add a
+  dedicated `meta` `stage_profiles` entry in v1 — `meta` stays an emergent composition over existing
+  profiles, promoted later only when re-dogfood evidence is mechanically checkable and recurs.
 - **P2 — Orchestrator self-emit.** Resolve OQ1+OQ3: specify the `da workflow` surface for the
   orchestrator to ingest/emit ideation tasks (classify WORK|REFINEMENT, recurrence-threshold trigger).
-- **P3 — Budget/cadence.** Resolve OQ2: encode the refinement-vs-work budget into the orchestration
-  pass. Default per §5A is **event-driven** (trigger on the 2nd-occurrence/friction threshold, not a
-  fixed ratio); the maintainer sets the in-flight-refinement cap.
+- **P3 — Budget/cadence.** Per OQ2: encode the refinement-vs-work budget into the orchestration pass as
+  **event-driven** (trigger on the 2nd-occurrence/friction threshold, not a fixed ratio) **plus a
+  maintainer-set in-flight cap** (starting default ≤2 refinement tasks/wave, tunable).
 - **P4 — Cross-harness gate policy.** Resolve OQ5: make `cross-harness-adversarial` blocking on
   refinement-tagged tasks (advisory elsewhere).
 - **P5 — Feedback wiring.** Resolve OQ6: wire result→operational/semantic correlation (§3A) once the
