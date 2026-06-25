@@ -490,26 +490,32 @@ func TestBuildRelevanceResult_Filters(t *testing.T) {
 	profile, _ := resolveExecutionProfile(snap)
 
 	cases := []struct {
-		filter    string
-		wantUnits bool
-		wantTopo  bool
-		wantLens  bool
-		wantGraph bool
+		filter      string
+		wantUnits   bool
+		wantTopo    bool
+		wantLens    bool
+		wantGraph   bool
+		wantLessons bool
 	}{
-		{filterUnits, true, false, false, false},
-		{filterTopology, false, true, false, false},
-		{filterLenses, false, false, true, false},
-		{filterGraph, false, false, false, true},
-		{filterAll, true, true, true, true},
+		{filterUnits, true, false, false, false, false},
+		{filterTopology, false, true, false, false, false},
+		{filterLenses, false, false, true, false, false},
+		{filterGraph, false, false, false, true, false},
+		{filterLessons, false, false, false, false, true},
+		{filterAll, true, true, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.filter, func(t *testing.T) {
-			opts := &runRelevanceOptions{filter: tc.filter, stage: "review"}
-			res := buildRelevanceResult(opts, profile, "go-cli", "flag")
+			opts := &runRelevanceOptions{filter: tc.filter, stage: "review", cwd: project}
+			res, err := buildRelevanceResult(opts, profile, "go-cli", "flag")
+			if err != nil {
+				t.Fatalf("buildRelevanceResult: %v", err)
+			}
 			assertFacetPresence(t, "units", res.Units != nil, tc.wantUnits)
 			assertFacetPresence(t, "topology", res.Topology != nil, tc.wantTopo)
 			assertFacetPresence(t, "lenses", res.Lenses != nil, tc.wantLens)
 			assertFacetPresence(t, "graph", res.Graph != nil, tc.wantGraph)
+			assertFacetPresence(t, "lessons", res.Lessons != nil, tc.wantLessons)
 			if !res.Matched {
 				t.Fatalf("expected matched=true for go-cli")
 			}
@@ -532,8 +538,11 @@ func TestBuildRelevanceResult_UnmatchedAppType(t *testing.T) {
 	snap, _, _ := loadFlatSnapshot(project)
 	profile, _ := resolveExecutionProfile(snap)
 
-	opts := &runRelevanceOptions{filter: filterAll}
-	res := buildRelevanceResult(opts, profile, "unknown-app", "flag")
+	opts := &runRelevanceOptions{filter: filterAll, cwd: project}
+	res, err := buildRelevanceResult(opts, profile, "unknown-app", "flag")
+	if err != nil {
+		t.Fatalf("buildRelevanceResult: %v", err)
+	}
 	if res.Matched {
 		t.Fatalf("unknown app should not match")
 	}
