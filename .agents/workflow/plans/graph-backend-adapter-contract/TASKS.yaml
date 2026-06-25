@@ -63,7 +63,7 @@ tasks:
           review: code review
     - id: t2-compliance-read-only
       title: Compliance register adapter (read-only / stub bootstrap)
-      status: pending
+      status: in_progress
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
@@ -113,7 +113,7 @@ tasks:
         confirmed.
     - id: t3-ttrpg-dogfood
       title: TTRPG dogfood adapter — first real adapter author UX
-      status: pending
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks: []
@@ -149,7 +149,7 @@ tasks:
           extend grammar.
     - id: t4-crg-dual-read
       title: CRG migration — dual-read mode with crg-bridge adapter
-      status: pending
+      status: in_progress
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
@@ -301,7 +301,7 @@ tasks:
           `reads_from: [crg-bridge]`, keep the bridge.
     - id: t7-app-type-profiles-wiring
       title: Wire graph_backend adapter-ref selection into app-type-profiles
-      status: pending
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
