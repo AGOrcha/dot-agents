@@ -110,6 +110,8 @@ which prints human concept documentation rather than live repo state.`,
 			"  da config lint --json",
 			"  da config verify",
 			"  da config relevance --filter topology --app-type go-cli",
+			"  da config migrate",
+			"  da config migrate --dry-run",
 		),
 	}
 	cmd.AddCommand(newExplainCmd(deps))
@@ -117,6 +119,7 @@ which prints human concept documentation rather than live repo state.`,
 	cmd.AddCommand(newLintCmd(deps))
 	cmd.AddCommand(newVerifyCmd(deps))
 	cmd.AddCommand(newRelevanceCmd(deps))
+	cmd.AddCommand(newMigrateCmd(deps))
 	return cmd
 }
 

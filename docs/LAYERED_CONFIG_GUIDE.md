@@ -262,9 +262,10 @@ da config sync              Re-fetch layers and rewrite the lock (explicit upstr
 da config lint              Validate declared layer files against the schema
 da config verify            Run offline repo setup contract checks (no layer re-fetch)
 da config relevance         Resolve a task's execution profile by app_type
+da config migrate           Rewrite a legacy v1 .agentsrc.json into the v2 schema (opt-in)
 ```
 
-All five accept the global `--json` flag for machine-readable output. **All config command errors
+All accept the global `--json` flag for machine-readable output. **All config command errors
 exit with code `1`** — there is no differentiated exit code per failure class today.
 
 ### `da config explain`
@@ -333,6 +334,38 @@ repairs).
 
 Resolves a task's **execution profile** (units, topology, lenses) by `app_type`. This is a separate
 layer with its own canonical reference — see [Config Relevance](./CONFIG_RELEVANCE.md).
+
+### `da config migrate`
+
+An **explicit, opt-in** rewrite of a legacy v1 `.agentsrc.json` into the equivalent v2 manifest. It
+is a convenience for moving a repo to v2 on your own schedule — it is **not** a forced cutover.
+
+- **Detection** — a manifest is migratable when it declares an old schema version, or when it
+  carries the deprecated keys `verifier_profiles` / `reviewer_profiles` / `app_type_verifier_map`
+  (which the loader already folds silently into the unified `stage_profiles` / `execution_profile`
+  model on every read).
+- **Backup-on-write** — the **original** manifest is copied to `.agentsrc.json.v1.bak` *before* the
+  v2 file is written, so the pre-migration manifest is always recoverable.
+- **Equivalent rewrite** — the schema `version` is bumped to `2` and the legacy keys are folded
+  away (the same fold the loader performs, so nothing is lost). The legacy keys are not re-emitted.
+- **Idempotent** — running it on a clean v2 manifest is a no-op with a clear message; no backup is
+  written.
+- **`--dry-run`** — previews the rewrite (and the planned backup path) and exits **without writing**
+  anything.
+
+It operates on the **current repository's** `.agentsrc.json`, so it is repo-agnostic. During the
+deprecation soak window maintainers run it **per-repo** (including `payout`) to migrate each repo
+when convenient.
+
+> **Soak, not removal.** This command exists during a **two-release deprecation soak**. v1 manifests
+> continue to load unchanged and the existing v1 deprecation warning still fires — `da config migrate`
+> only lets you opt a repo into v2 early. v1 loading is **not** removed by this change.
+
+```
+da config migrate              # rewrite this repo's manifest to v2 (backs up to .v1.bak)
+da config migrate --dry-run    # preview the rewrite, write nothing
+da config migrate --json       # machine-readable report
+```
 
 ---
 
