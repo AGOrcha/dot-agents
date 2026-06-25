@@ -342,7 +342,7 @@ tasks:
           review: code review
     - id: t8-tasks-schema-app-type-drift
       title: Fix workflow-tasks.schema.json app_type drift (schema rejects a field code uses)
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
