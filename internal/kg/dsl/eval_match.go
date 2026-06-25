@@ -2,38 +2,104 @@ package dsl
 
 import "github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 
+// joinKind classifies an edge MATCH by which endpoints are already bound.
+type joinKind int
+
+const (
+	// joinForward: source (Nodes[0]) bound, end (Nodes[1]) new — extend forward.
+	joinForward joinKind = iota
+	// joinReverse: end (Nodes[1]) bound, source (Nodes[0]) new — walk INTO the
+	// anchor (the §13.2 `(f:finding)-[:affects]->(changed)` shape).
+	joinReverse
+	// joinBoth: both endpoints already bound — FILTER the row, keeping it only
+	// when an edge actually connects the two bound notes (do NOT overwrite).
+	joinBoth
+)
+
 // applyMatch joins an edge MATCH clause onto the existing rows. The clause's
-// pattern is `Nodes[0]-[edge]->Nodes[1]`; whichever endpoint is already bound
-// is the anchor and the other is the newly-introduced alias. A forward join
-// extends from a bound Nodes[0] to a new Nodes[1]; a reverse join (the §13.2
-// `(f:finding)-[:affects]->(changed)` shape, where `changed` is already bound)
-// finds the new source nodes whose edge points at the bound end. OPTIONAL
-// clauses preserve anchor rows with a NULL new alias (LEFT JOIN, §5.4.2).
+// pattern is `Nodes[0]-[edge]->Nodes[1]`. Three cases are distinguished by which
+// endpoints are already bound (classifyJoin): forward (extend from a bound
+// source), reverse (walk into a bound end), and both-bound (filter pre-bound
+// pairs by edge existence). OPTIONAL clauses preserve anchor rows with a NULL
+// new alias (LEFT JOIN, §5.4.2).
 func (ev *evaluator) applyMatch(rows []binding, m MatchClause) ([]binding, error) {
 	if m.Edge == nil {
 		return ev.applyNodeMatch(rows, m)
 	}
-	if ev.isReverseJoin(rows, m) {
+	switch ev.classifyJoin(rows, m) {
+	case joinReverse:
 		return ev.applyReverseMatch(rows, m), nil
+	case joinBoth:
+		return ev.applyBothBoundMatch(rows, m), nil
+	default:
+		return ev.applyForwardMatch(rows, m), nil
 	}
+}
+
+// classifyJoin determines which endpoints of the edge clause are already bound.
+func (ev *evaluator) classifyJoin(rows []binding, m MatchClause) joinKind {
+	if len(rows) == 0 {
+		return joinForward
+	}
+	_, srcBound := rows[0][m.Nodes[0].Alias]
+	_, endBound := rows[0][m.Nodes[1].Alias]
+	switch {
+	case srcBound && endBound:
+		return joinBoth
+	case endBound && !srcBound:
+		return joinReverse
+	default:
+		return joinForward
+	}
+}
+
+// applyForwardMatch extends each row from its bound source (Nodes[0]) to the new
+// end alias (Nodes[1]).
+func (ev *evaluator) applyForwardMatch(rows []binding, m MatchClause) []binding {
 	src, end := m.Nodes[0].Alias, m.Nodes[1].Alias
 	endType := m.Nodes[1].Type
 	var out []binding
 	for _, row := range rows {
 		out = ev.extendRow(out, row, m, src, end, endType)
 	}
-	return out, nil
+	return out
 }
 
-// isReverseJoin reports whether the clause's end alias (Nodes[1]) is the bound
-// anchor and the source alias (Nodes[0]) is new — the reverse-direction join.
-func (ev *evaluator) isReverseJoin(rows []binding, m MatchClause) bool {
-	if len(rows) == 0 {
+// applyBothBoundMatch filters rows where both endpoints are already bound,
+// keeping a row only when an edge of the clause's type connects the bound source
+// to the bound end. It NEVER rebinds either alias — it is a pure predicate on
+// the existing pair. A variable-length pattern uses reachability within bounds;
+// a fixed edge requires a direct edge. OPTIONAL keeps rows that fail (the join
+// is satisfied as "no edge required"), matching LEFT JOIN semantics where an
+// absent edge does not drop the source row.
+func (ev *evaluator) applyBothBoundMatch(rows []binding, m MatchClause) []binding {
+	srcAlias, endAlias := m.Nodes[0].Alias, m.Nodes[1].Alias
+	var out []binding
+	for _, row := range rows {
+		if ev.pairConnected(row[srcAlias], row[endAlias], m.Edge) || m.Optional {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// pairConnected reports whether an edge of the clause's type connects src→end.
+// A NULL endpoint is never connected. Fixed edges require a direct hop;
+// variable-length edges require reachability within [VarMin, VarMax].
+func (ev *evaluator) pairConnected(src, end *sdk.Note, edge *EdgePattern) bool {
+	if src == nil || end == nil {
 		return false
 	}
-	_, srcBound := rows[0][m.Nodes[0].Alias]
-	_, endBound := rows[0][m.Nodes[1].Alias]
-	return endBound && !srcBound
+	if !edge.IsVarLength() {
+		for _, to := range ev.outEdges[edge.Type+"|"+src.ID] {
+			if to == end.ID {
+				return true
+			}
+		}
+		return false
+	}
+	hops, ok := ev.bfsMinHops(edge.Type, src.ID, edge.VarMax)[end.ID]
+	return ok && hops >= edge.VarMin
 }
 
 // applyReverseMatch joins a new source alias (Nodes[0]) onto a bound end alias

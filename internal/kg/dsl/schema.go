@@ -134,12 +134,59 @@ func (q *Query) validateSchema(info SchemaInfo) error {
 	if err := q.validateVarLength(info); err != nil {
 		return err
 	}
+	if err := q.validateMatches(info); err != nil {
+		return err
+	}
 	for _, pred := range q.Where {
 		if err := q.validateRef(pred.Left, info); err != nil {
 			return err
 		}
 	}
 	return q.validateReturns(info)
+}
+
+// validateMatches checks every edge MATCH clause against the schema: the edge
+// type must be declared, and the from/to node types of the clause's endpoints
+// must match the declared edge endpoints. The check is direction-aware — the
+// declared edge `from`/`to` must align with the pattern's source/end node types
+// (§5.1). A wrong-direction pattern (e.g. control->finding for an edge declared
+// finding->control) or an unknown edge type is rejected at load rather than
+// silently returning empty data at eval time.
+func (q *Query) validateMatches(info SchemaInfo) error {
+	for _, m := range q.Matches {
+		if m.Edge == nil {
+			continue
+		}
+		if err := validateEdgeClause(m, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateEdgeClause validates one edge MATCH clause's type and endpoint types.
+func validateEdgeClause(m MatchClause, info SchemaInfo) error {
+	ei, ok := info.Edges[m.Edge.Type]
+	if !ok {
+		return fmt.Errorf("dsl: MATCH references unknown edge type %q", m.Edge.Type)
+	}
+	fromType, toType := m.Nodes[0].Type, m.Nodes[1].Type
+	if err := edgeEndpointOK(m.Edge.Type, "from", fromType, ei.From); err != nil {
+		return err
+	}
+	return edgeEndpointOK(m.Edge.Type, "to", toType, ei.To)
+}
+
+// edgeEndpointOK checks one endpoint's node type against the declared type. An
+// untyped endpoint alias (no `:type` in the pattern, e.g. a re-referenced bound
+// alias `(c)`) is permitted — its type was fixed at its binding MATCH and the
+// ref/return validators enforce field access; here only an explicit mismatch is
+// rejected.
+func edgeEndpointOK(edgeType, role, patternType, declaredType string) error {
+	if patternType == "" || patternType == declaredType {
+		return nil
+	}
+	return fmt.Errorf("dsl: edge %q expects %s-node of type %q, but the pattern uses %q (wrong direction or type)", edgeType, role, declaredType, patternType)
 }
 
 // validateVarLength enforces the declared max_depth on every variable-length

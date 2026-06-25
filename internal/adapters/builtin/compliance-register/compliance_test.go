@@ -87,18 +87,22 @@ func TestHardTestImpactRadius(t *testing.T) {
 // derivation-stale and policy_review_due_impact surfaces them.
 func TestHardTestPolicyReviewDueImpact(t *testing.T) {
 	a, view := loadCorpusView(t)
-	// Fire the policy.review_due webhook for pol-access only → that policy is
-	// tagged environmental; pol-retention is untouched.
+	// Fire the policy.review_due webhook for pol-access only, then run the
+	// named query DIRECTLY — no manual derivation step. FireEnvTrigger drives
+	// the full env→derivation lifecycle (§7.3), so a real caller gets the
+	// surfaced controls from the single fire. If FireEnvTrigger alone did NOT
+	// propagate derivation (the hollow-lifecycle anti-pattern), this query
+	// would return zero rows and the assertions below would fail.
 	view, err := a.FireEnvTrigger(view, dsl.EnvTrigger{Kind: dsl.KindWebhook, Endpoint: "policy.review_due", Targets: []string{"pol-access"}, TriggerID: "wh-1"})
 	if err != nil {
 		t.Fatalf("fire env: %v", err)
 	}
-	// Propagate env→derivation: controls deriving from pol-access become
-	// derivation-stale (§7.3).
-	view = a.ApplyDerivation(view)
 	rows, err := a.RunNamed("policy_review_due_impact", view, nil)
 	if err != nil {
 		t.Fatalf("named query: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("FireEnvTrigger alone must drive policy_review_due_impact (no manual derivation step) — got zero rows")
 	}
 	ctlIDs := collect(rows, "c.control_id")
 	// ctl-mfa and ctl-rbac derive from pol-access; ctl-retention derives from

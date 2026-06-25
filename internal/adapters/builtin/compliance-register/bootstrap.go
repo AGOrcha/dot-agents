@@ -64,17 +64,22 @@ func (a *Adapter) LoadView(s *sdk.SDK) (sdk.NamespaceView, error) {
 }
 
 // FireEnvTrigger applies an environmental trigger (§7) to the corpus view and
-// returns the notes that should be tagged stale, plus a new view in which those
-// notes carry the §7.3 environmental stale payload. The derivation propagation
-// (env policy → derives_from controls) is computed by ApplyDerivation so the
-// policy_review_due_impact query has both the env tag and the derivation tag to
-// read.
+// returns a new view in which the lifecycle is COMPLETE: matching notes carry
+// the §7.3 environmental stale payload AND the §7.3 env→derivation propagation
+// has already run, so controls deriving from an environmentally-invalidated
+// policy carry their derivation-stale tag too. This is the whole driver
+// lifecycle in one call — a caller that fires `policy.review_due` and then runs
+// `policy_review_due_impact` gets the surfaced controls without a separate
+// propagation step. ApplyEnvTrigger + ApplyDerivation remain exported for
+// callers that need the stages individually, but the driver path does not
+// require a manual second call.
 func (a *Adapter) FireEnvTrigger(view sdk.NamespaceView, trig dsl.EnvTrigger) (sdk.NamespaceView, error) {
 	tagged, err := dsl.ApplyEnvTrigger(a.envPred, view.Notes, trig)
 	if err != nil {
 		return sdk.NamespaceView{}, err
 	}
-	return mergeTagged(view, tagged), nil
+	env := mergeTagged(view, tagged)
+	return a.ApplyDerivation(env), nil
 }
 
 // toSDKNotes converts corpus notes to SDK notes.
