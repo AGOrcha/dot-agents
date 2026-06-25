@@ -232,6 +232,33 @@ func runFactionMemberCount(t *testing.T, s *sdk.SDK) map[string]int {
 	return res
 }
 
+// hostileFactionName returns the name of the first hostile faction among
+// factionIDs, or nil when none is hostile (extracted from the Q7 runner to
+// flatten its query closure). It models the optional-join + hoisted f.stance
+// predicate: a non-hostile or absent faction yields a NULL name.
+func hostileFactionName(idx map[string]sdk.Note, factionIDs []string) any {
+	for _, fID := range factionIDs {
+		f, ok := idx[fID]
+		if !ok {
+			continue
+		}
+		if st, _ := strField(f, "stance"); st == "hostile" {
+			name, _ := strField(f, "name")
+			return name
+		}
+	}
+	return nil
+}
+
+// indexMemberFactions groups member_of edges by source character id.
+func indexMemberFactions(v sdk.NamespaceView) map[string][]string {
+	memberFactions := map[string][]string{}
+	for _, e := range v.EdgesByType("member_of") {
+		memberFactions[e.From] = append(memberFactions[e.From], e.To)
+	}
+	return memberFactions
+}
+
 // Q7 — OPTIONAL MATCH source, predicate hoists to ON (§5.4.2 test 2 / T14).
 // MATCH (c) OPTIONAL MATCH (c)-[:member_of]->(f) WHERE c.status='alive' AND
 // f.stance='hostile'. The required predicate (c.status) filters source rows;
@@ -243,25 +270,16 @@ func runLivingHostileSeat(t *testing.T, s *sdk.SDK) (living []string, hostilePre
 	t.Helper()
 	rows, err := s.Query(func(v sdk.NamespaceView) []sdk.Row {
 		idx := noteByID(v)
-		memberFactions := map[string][]string{}
-		for _, e := range v.EdgesByType("member_of") {
-			memberFactions[e.From] = append(memberFactions[e.From], e.To)
-		}
+		memberFactions := indexMemberFactions(v)
 		var out []sdk.Row
 		for _, c := range v.NotesByType("character") {
 			if status, _ := strField(c, "status"); status != "alive" {
 				continue // required-source predicate filters the row out
 			}
-			// optional join + hoisted predicate: faction name only when hostile
-			var hostileName any
-			for _, fID := range memberFactions[c.ID] {
-				if f, ok := idx[fID]; ok {
-					if st, _ := strField(f, "stance"); st == "hostile" {
-						hostileName, _ = strField(f, "name")
-					}
-				}
-			}
-			out = append(out, sdk.Row{"id": c.ID, "faction_name": hostileName})
+			out = append(out, sdk.Row{
+				"id":           c.ID,
+				"faction_name": hostileFactionName(idx, memberFactions[c.ID]),
+			})
 		}
 		return out
 	})

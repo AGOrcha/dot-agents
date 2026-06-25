@@ -205,69 +205,86 @@ func TestNamedQueriesHardTest(t *testing.T) {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	t.Run("Q1_character_location", func(t *testing.T) {
-		rows := runCharacterLocation(t, s, "char:mara")
-		want := o.Queries.CharacterLocation.Rows
-		if len(rows) != len(want) {
-			t.Fatalf("rows = %v, want %v", rows, want)
-		}
-		for i, w := range want {
-			if rows[i]["name"] != w["name"] || rows[i][fieldStatedLocation] != w[fieldStatedLocation] {
-				t.Fatalf("row %d = %v, want %v", i, rows[i], w)
-			}
-		}
-	})
+	// Each subtest's body is a named helper so this test stays a flat list of
+	// t.Run dispatches (keeps cognitive complexity low; one query per helper).
+	cases := []struct {
+		name   string
+		assert func(*testing.T, *sdk.SDK, oracle)
+	}{
+		{"Q1_character_location", assertQ1CharacterLocation},
+		{"Q2_characters_in_region", assertQ2CharactersInRegion},
+		{"Q3_faction_members", assertQ3FactionMembers},
+		{"Q4_reachable_locations", assertQ4ReachableLocations},
+		{"Q5_events_since", assertQ5EventsSince},
+		{"Q6_faction_member_count", assertQ6FactionMemberCount},
+		{"Q7_living_characters_hostile_seat", assertQ7LivingHostileSeat},
+		{"Q8_open_quests", assertQ8OpenQuests},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { c.assert(t, s, o) })
+	}
+}
 
-	t.Run("Q2_characters_in_region", func(t *testing.T) {
-		for region, exp := range o.Queries.CharactersInRegion {
-			got := runCharactersInRegion(t, s, region)
-			assertIDs(t, "Q2 "+region, got, exp.IDs)
+func assertQ1CharacterLocation(t *testing.T, s *sdk.SDK, o oracle) {
+	rows := runCharacterLocation(t, s, "char:mara")
+	want := o.Queries.CharacterLocation.Rows
+	if len(rows) != len(want) {
+		t.Fatalf("rows = %v, want %v", rows, want)
+	}
+	for i, w := range want {
+		if rows[i]["name"] != w["name"] || rows[i][fieldStatedLocation] != w[fieldStatedLocation] {
+			t.Fatalf("row %d = %v, want %v", i, rows[i], w)
 		}
-	})
+	}
+}
 
-	t.Run("Q3_faction_members", func(t *testing.T) {
-		cases := map[string]string{"wardens": "fac:wardens", "cinder": "fac:cinder"}
-		for key, facID := range cases {
-			got := runFactionMembers(t, s, facID)
-			assertIDs(t, "Q3 "+key, got, o.Queries.FactionMembers[key].IDs)
-		}
-	})
+func assertQ2CharactersInRegion(t *testing.T, s *sdk.SDK, o oracle) {
+	for region, exp := range o.Queries.CharactersInRegion {
+		assertIDs(t, "Q2 "+region, runCharactersInRegion(t, s, region), exp.IDs)
+	}
+}
 
-	t.Run("Q4_reachable_locations", func(t *testing.T) {
-		got := runReachableLocations(t, s, "loc:ironhold", 3)
-		want := o.Queries.ReachableLocations.FromIronhold.DestHops
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("reachable = %v, want %v", got, want)
-		}
-	})
+func assertQ3FactionMembers(t *testing.T, s *sdk.SDK, o oracle) {
+	cases := map[string]string{"wardens": "fac:wardens", "cinder": "fac:cinder"}
+	for key, facID := range cases {
+		assertIDs(t, "Q3 "+key, runFactionMembers(t, s, facID), o.Queries.FactionMembers[key].IDs)
+	}
+}
 
-	t.Run("Q5_events_since", func(t *testing.T) {
-		all := runEventsSince(t, s, nil)
-		if len(all) != o.Queries.EventsSince.All.Count {
-			t.Fatalf("events (all) = %d, want %d", len(all), o.Queries.EventsSince.All.Count)
-		}
-		seven := 7
-		assertIDs(t, "Q5 since_7", runEventsSince(t, s, &seven), o.Queries.EventsSince.Since7.IDs)
-	})
+func assertQ4ReachableLocations(t *testing.T, s *sdk.SDK, o oracle) {
+	got := runReachableLocations(t, s, "loc:ironhold", 3)
+	want := o.Queries.ReachableLocations.FromIronhold.DestHops
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("reachable = %v, want %v", got, want)
+	}
+}
 
-	t.Run("Q6_faction_member_count", func(t *testing.T) {
-		got := runFactionMemberCount(t, s)
-		if !reflect.DeepEqual(got, o.Queries.FactionMemberCount.Counts) {
-			t.Fatalf("counts = %v, want %v", got, o.Queries.FactionMemberCount.Counts)
-		}
-	})
+func assertQ5EventsSince(t *testing.T, s *sdk.SDK, o oracle) {
+	all := runEventsSince(t, s, nil)
+	if len(all) != o.Queries.EventsSince.All.Count {
+		t.Fatalf("events (all) = %d, want %d", len(all), o.Queries.EventsSince.All.Count)
+	}
+	seven := 7
+	assertIDs(t, "Q5 since_7", runEventsSince(t, s, &seven), o.Queries.EventsSince.Since7.IDs)
+}
 
-	t.Run("Q7_living_characters_hostile_seat", func(t *testing.T) {
-		living, hostilePresent := runLivingHostileSeat(t, s)
-		assertIDs(t, "Q7 living", living, o.Queries.LivingCharactersHostileSeat.LivingIDs)
-		if hostilePresent != o.Queries.LivingCharactersHostileSeat.HostileFactionNamesPresent {
-			t.Fatalf("hostile names present = %d, want %d", hostilePresent, o.Queries.LivingCharactersHostileSeat.HostileFactionNamesPresent)
-		}
-	})
+func assertQ6FactionMemberCount(t *testing.T, s *sdk.SDK, o oracle) {
+	got := runFactionMemberCount(t, s)
+	if !reflect.DeepEqual(got, o.Queries.FactionMemberCount.Counts) {
+		t.Fatalf("counts = %v, want %v", got, o.Queries.FactionMemberCount.Counts)
+	}
+}
 
-	t.Run("Q8_open_quests", func(t *testing.T) {
-		assertIDs(t, "Q8", runOpenQuests(t, s), o.Queries.OpenQuests.IDs)
-	})
+func assertQ7LivingHostileSeat(t *testing.T, s *sdk.SDK, o oracle) {
+	living, hostilePresent := runLivingHostileSeat(t, s)
+	assertIDs(t, "Q7 living", living, o.Queries.LivingCharactersHostileSeat.LivingIDs)
+	if hostilePresent != o.Queries.LivingCharactersHostileSeat.HostileFactionNamesPresent {
+		t.Fatalf("hostile names present = %d, want %d", hostilePresent, o.Queries.LivingCharactersHostileSeat.HostileFactionNamesPresent)
+	}
+}
+
+func assertQ8OpenQuests(t *testing.T, s *sdk.SDK, o oracle) {
+	assertIDs(t, "Q8", runOpenQuests(t, s), o.Queries.OpenQuests.IDs)
 }
 
 func assertIDs(t *testing.T, label string, got, want []string) {
