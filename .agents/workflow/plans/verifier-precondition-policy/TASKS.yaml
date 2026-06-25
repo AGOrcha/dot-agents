@@ -1,0 +1,61 @@
+schema_version: 1
+plan_id: verifier-precondition-policy
+tasks:
+    - id: pa-predicate-evaluator
+      title: 'Slice A: predicate model + registry + evaluator; rework verifierTransition'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/preconditions.go
+        - commands/workflow/preconditions_test.go
+        - commands/workflow/transitions.go
+        - commands/workflow/transitions_test.go
+      verification_required: true
+      notes: 'SHIPPED via PR #51 (merged 2026-06-22). Predicate/PreconditionPolicy/SignalSnapshot types + table-driven predicate-evaluator registry over the event kind registry + generic evaluatePolicy + built-in default policy (the historical 4); reworked verifierTransition off the hardcoded verifierPreconditions struct (struct deleted; only a doc-comment reference remains). Verified live in commands/workflow/preconditions.go. Full code-level design in verifier-precondition-policy.plan.md section Slice A.'
+      app_type: go-cli
+    - id: pb-config-registry
+      title: 'Slice B1/B2: precondition_policies registry (6 sync points) + StageProfile ref'
+      status: completed
+      depends_on:
+        - pa-predicate-evaluator
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: 'SHIPPED via PR #56 (merged 2026-06-22). Top-level precondition_policies registry across all 6 AgentsRC sync points (struct, agentsRCCore, UnmarshalJSON, MarshalJSON, agentsRCKnown, schema json), object-keyed no enum; plus StageProfile.precondition_policy name ref. Verified in schemas/agentsrc.schema.json (precondition_policies + StageProfile.precondition_policy) and internal/config/agentsrc.go. Full design in plan.md section Slice B1/B2.'
+      app_type: go-cli
+    - id: pc-lockfile-resolution
+      title: 'Slice B3/B4: resolve named policy from lockfile + wire verifier call site'
+      status: completed
+      depends_on:
+        - pa-predicate-evaluator
+        - pb-config-registry
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/precondition_resolve.go
+        - internal/config/precondition_resolve_test.go
+        - commands/workflow/transitions.go
+      verification_required: true
+      notes: 'SHIPPED via PR #57 (merged 2026-06-22). internal/config.ResolvePreconditionPolicy reads RESOLVED config from the lockfile (ResolveLocked -> Snapshot), not raw .agentsrc.json: app_type -> stage profile -> precondition_policy name -> named entry -> config-side ResolvedPreconditionPolicy, converted to commands/workflow PreconditionPolicy at the call site (avoids the import cycle); unset -> built-in default. The verifier dispatch seam shipped as the overridable resolvePreconditionPolicy package var with a documented future call site (lpf-e had no live dispatch caller, per the plan allowance). Verified in internal/config/precondition_resolve.go + commands/workflow/preconditions.go. Full design in plan.md section Slice B3/B4.'
+      app_type: go-cli
+    - id: pd-validation
+      title: 'Slice B5: config verify/lint fail-closed on bad policy ref + unknown signal kind'
+      status: completed
+      depends_on:
+        - pb-config-registry
+        - pc-lockfile-resolution
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/precondition_resolve.go
+        - commands/config/verify.go
+        - internal/config/verify_layers.go
+      verification_required: true
+      notes: 'SHIPPED via PR #60 (merged 2026-06-22). Fail-closed validation via da config verify (verifyPreconditionPolicies in commands/config/verify.go): a StageProfile.precondition_policy naming a key absent from precondition_policies -> fail; a predicate signal kind not registered (reuse of the evaluator registry / ValidSignalKind) -> fail; clean pass when none declared. Verified in commands/config/verify.go. Full design in plan.md section Slice B5.'
+      app_type: go-cli
