@@ -101,6 +101,11 @@ transport seam** (the `EventBus` interface + the delivery/ordering/
 backpressure guarantees it bounds); see §D4.0 for why the seam, not the
 payload, lives here.
 
+> **System-side, not the agent's interface.** The `EventBus`/transport (§D4) is *system-side*
+> propagation + external integration; an agent never has to publish/subscribe to get its work
+> recorded — it writes the file-system projection and the system reconciles it afterward. See
+> `work-tracking-storage-abstraction` §3B (the canonical "Agent interface model").
+
 #### D4.0 — Where the transport seam is canonical (single-source)
 
 There are **two distinct contracts** and they live in two places — do not
@@ -325,6 +330,11 @@ on each surface.** R2 (`r2-observability-dashboard`) and the `streaming` /
 transport per surface. The governing principle is **not HTTP-by-default**:
 HTTP-over-TCP has genuine benefits *and* genuine drawbacks, and we pay them
 deliberately only where the benefit applies.
+
+> **System-side, not the agent's interface.** Everything in §2A (UDS/HTTP transport) is
+> *system-side* propagation / control plane; an agent does its work via the file-system
+> projection, not by speaking this transport — see `work-tracking-storage-abstraction` §3B
+> (the canonical "Agent interface model").
 
 ### Why "not HTTP everywhere"
 
