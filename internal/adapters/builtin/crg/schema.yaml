@@ -1,0 +1,50 @@
+name: crg
+version: 1.0.0
+description: |-
+  Code Review Graph adapter (kg-native). Bootstrap performs Tree-sitter
+  ingestion of a repo's symbols into the kg_crg.* namespace: functions, types,
+  and the call / test / import edges between them. Replaces the legacy Python
+  subprocess bridge (spec §11). Dual-read mode (§11.3): da core prefers this
+  namespace; the crg-bridge mirror remains active until the §11.4 gate passes.
+# §11.6 anchor columns: nodes.kind (Function|Type), nodes.language, edges.kind.
+note_types:
+  - name: symbol
+    fields:
+      - name: qualified_name
+        type: string
+        required: true
+      - name: kind
+        type: enum
+        required: true
+        values: [Function, Type]
+      - name: language
+        type: string
+        required: true
+      - name: file_path
+        type: string
+        required: true
+      - name: line_start
+        type: int
+        required: true
+      - name: content_hash
+        type: string
+        required: true
+edge_types:
+  - name: CALLS
+    from: symbol
+    to: symbol
+  - name: TESTED_BY
+    from: symbol
+    to: symbol
+  - name: IMPORTS
+    from: symbol
+    to: symbol
+# O5 staleness: the source_mutation driver fires on note content-hash change
+# (per O5 — NOT on any-upsert).
+staleness_drivers: [source_mutation]
+impact_radius:
+  query: |-
+    MATCH (s:symbol)-[:CALLS|TESTED_BY|IMPORTS*1..max_depth]->(n:symbol)
+    WHERE s.id IN $changed_ids
+    RETURN n.id AS id
+  max_depth: 3

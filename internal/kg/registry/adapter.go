@@ -57,9 +57,14 @@ type ImpactRadius struct {
 // materialized_views, env_predicates, planner hints) are added by later
 // tasks in this plan.
 type Schema struct {
-	Name             string       `yaml:"name" json:"name"`
-	Version          string       `yaml:"version" json:"version"`
-	Description      string       `yaml:"description,omitempty" json:"description,omitempty"`
+	Name        string `yaml:"name" json:"name"`
+	Version     string `yaml:"version" json:"version"`
+	Description string `yaml:"description,omitempty" json:"description,omitempty"`
+	// MigrationOnly marks an adapter that exists solely as a temporary
+	// migration surface (spec §11.2, added in v4.2). Long-term adapters must
+	// not declare reads_from against a migration_only adapter; the crg-bridge
+	// adapter sets this true so the loader can reject such dependencies.
+	MigrationOnly    bool         `yaml:"migration_only,omitempty" json:"migration_only,omitempty"`
 	NoteTypes        []NoteType   `yaml:"note_types" json:"note_types"`
 	EdgeTypes        []EdgeType   `yaml:"edge_types" json:"edge_types"`
 	ImpactRadius     ImpactRadius `yaml:"impact_radius" json:"impact_radius"`
@@ -153,6 +158,34 @@ func (r *Registry) Resolve(ref string) (Adapter, error) {
 		}
 	}
 	return a, nil
+}
+
+// ValidateReadsFrom enforces the §11.2 loader rule: a long-term adapter must
+// not declare reads_from against any migration_only adapter. It is called at
+// adapter load when a materialized view declares cross-adapter dependencies.
+// dependent is the adapter declaring the reads_from; readsFrom are the
+// dependency adapter names. It returns an error naming the first migration_only
+// dependency found, so the loader can reject the adapter before activation.
+//
+// A migration_only adapter MAY read another migration_only adapter (mirrors
+// are not long-term consumers); only a non-migration adapter depending on a
+// migration_only one is rejected.
+func (r *Registry) ValidateReadsFrom(dependent string, readsFrom []string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if dep, ok := r.adapters[dependent]; ok && dep.Schema().MigrationOnly {
+		return nil
+	}
+	for _, name := range readsFrom {
+		a, ok := r.adapters[name]
+		if !ok {
+			continue // unknown deps are a separate validation concern
+		}
+		if a.Schema().MigrationOnly {
+			return fmt.Errorf("registry: adapter %q must not reads_from migration_only adapter %q (spec §11.2)", dependent, name)
+		}
+	}
+	return nil
 }
 
 // Names returns the registered adapter names in sorted order.
