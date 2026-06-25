@@ -1,13 +1,30 @@
 # Orchestration Companion Lifecycle Hooks - Design
 
 - spec-id: `orchestration-companion-stop-hooks`
-- status: draft follow-up proposal
-- date: 2026-05-25
+- status: draft follow-up proposal (coherence-reconciled 2026-06-25)
+- date: 2026-05-25 (coherence-reconciled 2026-06-25)
 - owner: dot-agents
-- upstream dependency: `loop-discipline-stop-hooks`
+- upstream dependency: `loop-discipline-stop-hooks` (core delivered — see its coherence note)
 - telemetry integration: `r1-5-hook-enforcement-telemetry`
 - investigated skills: `orchestrator-session-start`, `delegation-lifecycle`,
   `plan-wave-picker`
+
+> **Coherence note (2026-06-25).** Since this follow-up was drafted, the
+> orchestrator surface shipped substantially: the pure-orchestration
+> `orchestrator` AGENT.md (PR #134, **no `Edit`/`Write`** — every slice
+> dispatched, every state mutation via `da workflow`), the consolidated §0
+> pre-fanout gate (homed in `delegation-lifecycle/instructions/workflow.md §0`),
+> the executor self-gate (PR #144), and the `cross-harness-adversarial` reviewer
+> as a first-class lens (PRs #145/#149). The "Present in current starter: no"
+> readback (Evidence Readback below) is **stale** — `orchestrator-session-start`,
+> `delegation-lifecycle`, and `plan-wave-picker` now all ship under
+> `internal/scaffold/home/starter/skills/global/`, and the upstream gate bundles
+> (`iteration-close-gate`, `isp-gate`, `loop-worker-gate`) ship under
+> `internal/scaffold/hooks/global/`. R1.1's "promote orchestrator-session-start"
+> is therefore already satisfied for the skill *tree*; the residual companion
+> work is the two **new sentinel-backed gates** (orchestrator handoff gate,
+> delegation closeout gate) plus the wave-picker no-hook decision — NOT the skill
+> promotion. The Evidence-Readback table and R1.1/R5 are corrected inline below.
 
 ## Problem
 
@@ -48,16 +65,18 @@ investigated skills. The approved upstream plan introduces `isp-gate` and
 
 ### Existing skill and starter coverage
 
-| Skill | Present source asset | Present in current starter | Upstream planned coverage |
+| Skill | Source asset | Present in current starter (2026-06-25) | Upstream planned coverage |
 | --- | --- | --- | --- |
-| `orchestrator-session-start` | `.agents/skills/orchestrator-session-start/` and `~/.agents/skills/dot-agents/orchestrator-session-start/` | no | none |
-| `delegation-lifecycle` | `.agents/skills/delegation-lifecycle/` and `~/.agents/skills/dot-agents/delegation-lifecycle/` | no | scaffold and hook-suitability assessment in `loop-discipline-stop-hooks` P3b |
-| `plan-wave-picker` | `.agents/skills/plan-wave-picker/` and `~/.agents/skills/dot-agents/plan-wave-picker/` | no | none |
+| `orchestrator-session-start` | `internal/scaffold/home/starter/skills/global/orchestrator-session-start/` | **yes** (shipped with PR #134) | none (skill tree shipped; no upstream hook) |
+| `delegation-lifecycle` | `internal/scaffold/home/starter/skills/global/delegation-lifecycle/` | **yes** (shipped via `loop-discipline-stop-hooks` P3b) | scaffold + hook-suitability assessment in `loop-discipline-stop-hooks` P3b (completed) |
+| `plan-wave-picker` | `internal/scaffold/home/starter/skills/global/plan-wave-picker/` | **yes** (shipped) | none |
 
-The repository-local and installed versions of all three investigated skill
-trees are currently equivalent. Promotion should therefore copy repository
-assets into the starter after the upstream scaffold work lands, not attempt to
-merge divergent versions.
+All three skill trees now ship in the starter. **The residual companion work is
+NOT skill promotion** (done) — it is the two new sentinel-backed gates (D1/D2)
+and the wave-picker no-hook decision (D3). The promotion guidance below is kept
+only as the historical motivation for the plan's `t0` task, which is reduced to
+"align wave-picker canonical guidance + add the new sentinel wiring", not a
+copy-the-tree task.
 
 ### Durable workflow evidence already available
 
@@ -180,11 +199,14 @@ bounded, redacted, deduplicated observation is retained.
 
 ### R1. Starter assets
 
-- R1.1 Promote the complete `orchestrator-session-start` and
-  `plan-wave-picker` skill trees into
-  `internal/scaffold/home/starter/skills/global/`.
+- R1.1 ~~Promote the complete `orchestrator-session-start` and
+  `plan-wave-picker` skill trees~~ **— DONE (2026-06-25):** both trees now ship
+  under `internal/scaffold/home/starter/skills/global/` (PR #134 + later
+  promotion). The residual obligation is only to keep them current and add the
+  new sentinel-write call (R2.3); no fresh promotion is needed.
 - R1.2 Consume upstream P3b's `delegation-lifecycle` starter tree rather than
   creating a competing copy; extend it only for approved sentinel wiring.
+  **(P3b shipped — the tree exists; this is now an extend-only obligation.)**
 - R1.3 Extend starter-copy tests for the newly promoted assets.
 - R1.4 Update `plan-wave-picker` guidance so canonical plan/task ledgers and
   `workflow eligible` are the primary selection source; legacy active markdown

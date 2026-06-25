@@ -199,9 +199,94 @@ when a mechanism happens to be under construction.
    files + `iteration-close` records — is that an acceptable interim, or is the data-driven feedback the
    precondition that gates adopting this operating model wholesale?
 
+### 5A. Open-question resolution dossier (coherence pass, 2026-06-25)
+
+The §5 questions are resolved below where the shipped scaffold + canonical
+lessons already imply an answer; the genuine owner-decisions are flagged as such.
+Resolutions are **defaults that the plan (§6) implements**, not relitigations.
+
+- **OQ1 — Self-emit aggressiveness → RESOLVED (default b).** The orchestrator
+  self-emits a refinement/ideation task only on the **2nd occurrence** of a
+  pattern, matching the existing "promote on 2nd occurrence" lesson the
+  `agent-ops-hardening` reflection cited (the write_scope/co-commit wall recurring
+  four times is the canonical failure of *not* doing this). 1st occurrence → a
+  fold-back observation into plan notes; 2nd occurrence → an emitted REFINEMENT
+  task. Option (c) auto-schedule is explicitly rejected for v1 — it risks the
+  "spends itself refining instead of shipping" failure mode named in §5. The
+  emission is a `da workflow` mutation (orchestrator has no Write), keeping the
+  task-state machine the single SOT.
+
+- **OQ2 — Refinement-vs-work budget → OWNER DECISION (default proposed).**
+  Proposed default: **event-driven, not a fixed ratio** — refine when the
+  2nd-occurrence trigger (OQ1) fires or a friction threshold trips, rather than a
+  blanket "1 refinement per N work" quota. Rationale: a fixed ratio manufactures
+  refinement work in quiet periods and starves it in busy ones. The
+  `agent-ops-hardening` ~57%-overhead datum justifies a *non-trivial* budget but
+  not a hardcoded ratio. The **exact threshold / cap is a maintainer tuning knob**
+  (how many refinement tasks may be in-flight per wave) and is flagged for owner
+  sign-off; it is not derivable from the scaffold.
+
+- **OQ3 — When does the inner loop self-interrupt → RESOLVED (no self-interrupt).**
+  The work loop does **not** self-interrupt to refine. A worker that hits a
+  recurring friction stays in its lane and **emits an observation** (fold-back);
+  the orchestrator — the only agent that sees the cross-plan board (§3.2) — owns
+  scheduling the refinement out-of-band. This is forced by the shipped reality:
+  the `loop-worker` is bounded to one `write_scope` and refuses cross-cutting
+  scope by design (orchestrator AGENT.md "if a `loop-worker` REFUSES … that
+  refusal is correct"), and the orchestrator is pure-orchestration. A worker
+  refining a skill mid-task would be exactly the "while I'm here I'll also tweak
+  the skill" anti-pattern §2 forbids.
+
+- **OQ4 — Refinement task profile → OWNER DECISION (default proposed).**
+  Proposed default: a refinement task reuses the **non-code verifier_sequence**
+  the scaffold already ships for prose/config/scaffold changes
+  (`schema-check → citation-check → cli-runner`, with the `copy_test.go` manifest
+  walk for scaffold edits — the non-Go branch of the §0 coverage-delta gate), and
+  adds a **re-dogfood gate** as its acceptance invariant (the change was *re-run*,
+  not just edited — §4.1's "build → dogfood → observe → refine" arc). Whether this
+  warrants a **dedicated `meta`/`refinement` `app_type`** in `stage_profiles`
+  vs. reusing `docs`/`ideation` is the owner decision: a dedicated app_type buys a
+  re-dogfood-evidence assertion the docs profile lacks, at the cost of a new
+  `stage_profiles` entry. Recommend the dedicated app_type **only if** the
+  re-dogfood evidence is mechanically checkable; otherwise reuse `docs` + a
+  manual acceptance note.
+
+- **OQ5 — Cross-harness as gate vs advisory → RESOLVED (blocking on
+  refinement-tagged tasks; advisory elsewhere).** The shipped
+  `cross-harness-adversarial` reviewer already emits a `fail` verdict on any
+  confirmed BLOCKER/HIGH and degrades to a non-blocking skip when no alternate
+  harness is installed. The operating-model policy: cross-harness review is
+  **blocking on REFINEMENT-tagged tasks** (a change to *how we work* must be
+  signed off by an engine that did not author it — the "second brain reviews the
+  brain" framing) and **advisory on WORK tasks** (where it joins the other lenses
+  in the consolidated parent decision). The graceful-skip path means this never
+  hard-blocks a single-harness machine — it degrades to advisory there, which is
+  the correct floor. Plan P4 encodes the WORK-vs-REFINEMENT tag → blocking-policy
+  mapping.
+
+- **OQ6 — KG dependency → RESOLVED (interim lessons/proposals path is
+  acceptable; KG is the end-state, not a precondition).** The §3.5 queryable
+  feedback presumes the unbuilt KG-as-SOT backend, but adopting the operating
+  model does **not** gate on it. The interim substrate is explicit: `iteration-close`
+  records + `.agents/lessons/` + `.agents/proposals/` files, with the
+  lessons/proposals → ideation path (§3.1) closing the loop manually. The KG
+  upgrade (`work-tracking-storage-abstraction §3A`) turns those write-only records
+  into queryable nodes — a strict *enhancement* of the same loop, sequenced as
+  P5, not a blocker. This matches the `knowledge-architecture-graph-views`
+  project direction (docs/files are a STOPGAP; the graph store is the end state).
+
+**Owner-decision summary (for the maintainer):** OQ2 (budget threshold/cap) and
+OQ4 (dedicated `meta` app_type vs reuse `docs`) are the two that need a human
+ruling — both have a proposed default above but turn on tuning/registry choices
+the scaffold cannot imply. OQ1, OQ3, OQ5, OQ6 are resolved by the shipped
+scaffold + canonical lessons and are encoded as plan defaults.
+
 ## 6. Plan outline (thin — the deliverable is this spec)
 
-Indicative phases for a follow-on `workflow/plans/meta-loop-operating-model/`; not authored here:
+Indicative phases for a follow-on `workflow/plans/meta-loop-operating-model/`; not authored here.
+Each phase carries the §5A resolution for its open question (P1↔OQ4, P2↔OQ1+OQ3, P3↔OQ2, P4↔OQ5,
+P5↔OQ6) — the plan implements those defaults; only OQ2 and OQ4 still await the maintainer ruling
+flagged in §5A:
 
 - **P0 — Name the two loops in doctrine.** State the WORK/REFINEMENT separation in the operating
   doctrine (global `CLAUDE.md` §Workflow Orchestration + a pointer from the orchestrator AGENT.md), and
@@ -212,7 +297,8 @@ Indicative phases for a follow-on `workflow/plans/meta-loop-operating-model/`; n
 - **P2 — Orchestrator self-emit.** Resolve OQ1+OQ3: specify the `da workflow` surface for the
   orchestrator to ingest/emit ideation tasks (classify WORK|REFINEMENT, recurrence-threshold trigger).
 - **P3 — Budget/cadence.** Resolve OQ2: encode the refinement-vs-work budget into the orchestration
-  pass (wave-level window or ratio).
+  pass. Default per §5A is **event-driven** (trigger on the 2nd-occurrence/friction threshold, not a
+  fixed ratio); the maintainer sets the in-flight-refinement cap.
 - **P4 — Cross-harness gate policy.** Resolve OQ5: make `cross-harness-adversarial` blocking on
   refinement-tagged tasks (advisory elsewhere).
 - **P5 — Feedback wiring.** Resolve OQ6: wire result→operational/semantic correlation (§3A) once the
