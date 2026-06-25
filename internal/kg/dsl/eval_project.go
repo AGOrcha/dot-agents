@@ -1,8 +1,6 @@
 package dsl
 
 import (
-	"fmt"
-
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 )
 
@@ -19,19 +17,15 @@ const (
 // items. When the RETURN list contains an aggregate (count/min/max), the whole
 // result collapses to a single grouped row (v1 has no GROUP BY; aggregates
 // aggregate the entire result set, matching the dogfood count(*) usage).
-func (ev *evaluator) project(bindings []binding) ([]sdk.Row, error) {
+func (ev *evaluator) project(bindings []binding) []sdk.Row {
 	if ev.hasAggregate() {
 		return ev.projectAggregate(bindings)
 	}
 	rows := make([]sdk.Row, 0, len(bindings))
 	for _, b := range bindings {
-		row, err := ev.projectRow(b)
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, row)
+		rows = append(rows, ev.projectRow(b))
 	}
-	return rows, nil
+	return rows
 }
 
 // hasAggregate reports whether any RETURN item is an aggregate function.
@@ -45,50 +39,47 @@ func (ev *evaluator) hasAggregate() bool {
 }
 
 // projectRow evaluates the non-aggregate RETURN items for one binding.
-func (ev *evaluator) projectRow(b binding) (sdk.Row, error) {
+func (ev *evaluator) projectRow(b binding) sdk.Row {
 	row := sdk.Row{}
 	for _, item := range ev.q.Returns {
-		v, err := ev.evalReturnItem(item, b)
-		if err != nil {
-			return nil, err
-		}
-		row[item.Alias] = v
+		row[item.Alias] = ev.evalReturnItem(item, b)
 	}
-	return row, nil
+	return row
 }
 
 // evalReturnItem evaluates a single non-aggregate RETURN item against a binding.
-func (ev *evaluator) evalReturnItem(item ReturnItem, b binding) (any, error) {
+// item.Func is one of the parser-produced projection kinds (empty field ref,
+// hop_count, coalesce, bare param); the parser admits no others, so resolution
+// is total and a plain value is returned.
+func (ev *evaluator) evalReturnItem(item ReturnItem, b binding) any {
 	switch item.Func {
 	case funcHopCount:
-		return ev.hopCount[bindingKey(b)], nil
+		return ev.hopCount[bindingKey(b)]
 	case funcCoalesce:
 		return ev.evalReturnCoalesce(item.FuncArgs, b)
 	case returnParamFunc:
-		return ev.params[item.FuncArgs[0].Alias], nil
-	case "":
+		return ev.params[item.FuncArgs[0].Alias]
+	default: // "" — a plain field projection
 		v, _ := ev.resolveFieldRef(item.Ref, b)
-		return v, nil
-	default:
-		return nil, fmt.Errorf("dsl: unexpected RETURN function %q in row projection", item.Func)
+		return v
 	}
 }
 
 // evalReturnCoalesce returns the first non-nil value among coalesce args, each
 // of which may be a field ref or a literal/param default.
-func (ev *evaluator) evalReturnCoalesce(args []ReturnItem, b binding) (any, error) {
+func (ev *evaluator) evalReturnCoalesce(args []ReturnItem, b binding) any {
 	for _, arg := range args {
 		if arg.Ref.Alias != "" {
 			if v, ok := ev.resolveFieldRef(arg.Ref, b); ok {
-				return v, nil
+				return v
 			}
 			continue
 		}
 		if arg.Alias != "" {
-			return literalFromArg(arg.Alias), nil
+			return literalFromArg(arg.Alias)
 		}
 	}
-	return nil, nil
+	return nil
 }
 
 // literalFromArg recovers a coalesce default literal from a return arg's stored
@@ -102,12 +93,12 @@ func literalFromArg(text string) any {
 
 // projectAggregate collapses all bindings into a single grouped row of
 // aggregate values (count(*), min(field), max(field)).
-func (ev *evaluator) projectAggregate(bindings []binding) ([]sdk.Row, error) {
+func (ev *evaluator) projectAggregate(bindings []binding) []sdk.Row {
 	row := sdk.Row{}
 	for _, item := range ev.q.Returns {
 		row[item.Alias] = ev.aggregateValue(item, bindings)
 	}
-	return []sdk.Row{row}, nil
+	return []sdk.Row{row}
 }
 
 // aggregateValue computes one aggregate over all bindings.
@@ -122,8 +113,7 @@ func (ev *evaluator) aggregateValue(item ReturnItem, bindings []binding) any {
 		if len(bindings) == 0 {
 			return nil
 		}
-		v, _ := ev.evalReturnItem(item, bindings[0])
-		return v
+		return ev.evalReturnItem(item, bindings[0])
 	}
 }
 

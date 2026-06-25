@@ -15,14 +15,14 @@ import (
 // with hop_count (§5.1), and the stale-tag selectors (§7.3). It operates over
 // the in-memory NamespaceView the SDK hands a query runner, so it needs no SQL
 // backend — the lowering rules are honored by construction, not by emitting SQL.
+// Eval returns (rows, error). The in-memory evaluator's execution is total —
+// every query was schema-validated at parse, so evaluation never fails — but the
+// error return is retained as the stable contract a future storage-backed
+// executor (§2.7) needs without re-touching every caller.
 func Eval(q *Query, view sdk.NamespaceView, params map[string]any) ([]sdk.Row, error) {
 	ev := &evaluator{q: q, params: params, byID: indexNotes(view.Notes)}
 	ev.indexEdges(view.Edges)
-	bindings, err := ev.buildBindings()
-	if err != nil {
-		return nil, err
-	}
-	return ev.project(bindings)
+	return ev.project(ev.buildBindings()), nil
 }
 
 // evaluator holds the per-call evaluation state: the parsed query, the bound
@@ -64,18 +64,14 @@ type binding map[string]*sdk.Note
 
 // buildBindings produces the joined alias rows after applying the MATCH chain
 // and the WHERE filter (with §5.4.2 lowering folded into the join step).
-func (ev *evaluator) buildBindings() ([]binding, error) {
+func (ev *evaluator) buildBindings() []binding {
 	ev.hopCount = map[string]int{}
 	if len(ev.q.Matches) == 0 {
-		return []binding{{}}, nil // RETURN-only query (e.g. the none adapter)
+		return []binding{{}} // RETURN-only query (e.g. the none adapter)
 	}
 	rows := ev.seedRows(ev.q.Matches[0])
 	for _, m := range ev.q.Matches[1:] {
-		next, err := ev.applyMatch(rows, m)
-		if err != nil {
-			return nil, err
-		}
-		rows = next
+		rows = ev.applyMatch(rows, m)
 	}
 	return ev.applyWhere(rows)
 }
@@ -89,8 +85,7 @@ func (ev *evaluator) seedRows(m MatchClause) []binding {
 		rows = append(rows, binding{m.Nodes[0].Alias: &n})
 	}
 	if m.Edge != nil {
-		out, _ := ev.applyMatch(rows, m)
-		return out
+		return ev.applyMatch(rows, m)
 	}
 	return rows
 }

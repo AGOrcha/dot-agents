@@ -32,26 +32,18 @@ func compareNumbers(op string, l, r float64) bool {
 	}
 }
 
-// compareNonNumeric handles equality on strings/bools (the only ordered type in
-// v1 is numeric; ordering operators on non-numbers do not hold).
+// compareNonNumeric handles equality on strings/bools. It is reached only after
+// compare() has ruled out a both-numeric pair, so equality is plain Go `==` on
+// the (non-numeric) operands; ordering operators on non-numbers do not hold.
 func compareNonNumeric(op string, left, right any) bool {
 	switch op {
 	case "=":
-		return valuesEqual(left, right)
+		return left == right
 	case "!=":
-		return !valuesEqual(left, right)
+		return left != right
 	default:
 		return false
 	}
-}
-
-// valuesEqual compares two values for equality, treating numerically-equal
-// int/float pairs as equal.
-func valuesEqual(left, right any) bool {
-	if lf, rf, ok := asFloats(left, right); ok {
-		return lf == rf
-	}
-	return left == right
 }
 
 // asFloats coerces two values to float64 when both are numeric, reporting ok.

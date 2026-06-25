@@ -41,38 +41,54 @@ type Adapter struct {
 	envPred []dsl.EnvPredicate
 }
 
-// New constructs the adapter, compiling its schema, SchemaInfo, impact-radius
-// query, and named queries. It panics on a malformed embed or query (a
-// build-time-fixable bug that cannot occur for a shipped binary).
+// New constructs the adapter from the embedded schema, panicking on a malformed
+// embed or query — a build-time-fixable bug that cannot occur for a shipped
+// binary. The fallible construction logic lives in newFromYAML so its error
+// paths are exercised by tests with deliberately-bad input; New is the thin
+// can't-fail-in-production entry point.
 func New() *Adapter {
-	schema, err := registry.LoadSchema(schemaYAML)
+	a, err := newFromYAML(schemaYAML)
 	if err != nil {
-		panic("compliance-register: embedded schema invalid: " + err.Error())
+		panic("compliance-register: " + err.Error())
 	}
-	info, err := buildSchemaInfo(schema)
-	if err != nil {
-		panic("compliance-register: schema info: " + err.Error())
-	}
-	a := &Adapter{schema: schema, info: info, envPred: envPredicates(), named: map[string]*dsl.Query{}}
-	a.compileQueries()
 	return a
 }
 
+// newFromYAML builds the adapter from an adapter-schema YAML, returning an error
+// (rather than panicking) for an invalid schema or a query that fails to
+// compile against it. This is the testable core of New.
+func newFromYAML(yaml []byte) (*Adapter, error) {
+	schema, err := registry.LoadSchema(yaml)
+	if err != nil {
+		return nil, fmt.Errorf("embedded schema invalid: %w", err)
+	}
+	info, err := buildSchemaInfo(schema)
+	if err != nil {
+		return nil, fmt.Errorf("schema info: %w", err)
+	}
+	a := &Adapter{schema: schema, info: info, envPred: envPredicates(), named: map[string]*dsl.Query{}}
+	if err := a.compileQueries(); err != nil {
+		return nil, err
+	}
+	return a, nil
+}
+
 // compileQueries parses the impact-radius and named queries against the
-// adapter's SchemaInfo, panicking on any DSL error (build-time bug).
-func (a *Adapter) compileQueries() {
+// adapter's SchemaInfo, returning the first DSL compile error.
+func (a *Adapter) compileQueries() error {
 	q, err := dsl.ParseWithSchema(a.schema.ImpactRadius.Query, a.info)
 	if err != nil {
-		panic("compliance-register: impact_radius query: " + err.Error())
+		return fmt.Errorf("impact_radius query: %w", err)
 	}
 	a.impact = q
 	for name, src := range namedQuerySources() {
 		nq, err := dsl.ParseWithSchema(src, a.info)
 		if err != nil {
-			panic(fmt.Sprintf("compliance-register: named query %q: %v", name, err))
+			return fmt.Errorf("named query %q: %w", name, err)
 		}
 		a.named[name] = nq
 	}
+	return nil
 }
 
 // Name returns the adapter name.

@@ -22,17 +22,17 @@ const (
 // source), reverse (walk into a bound end), and both-bound (filter pre-bound
 // pairs by edge existence). OPTIONAL clauses preserve anchor rows with a NULL
 // new alias (LEFT JOIN, §5.4.2).
-func (ev *evaluator) applyMatch(rows []binding, m MatchClause) ([]binding, error) {
+func (ev *evaluator) applyMatch(rows []binding, m MatchClause) []binding {
 	if m.Edge == nil {
 		return ev.applyNodeMatch(rows, m)
 	}
 	switch ev.classifyJoin(rows, m) {
 	case joinReverse:
-		return ev.applyReverseMatch(rows, m), nil
+		return ev.applyReverseMatch(rows, m)
 	case joinBoth:
-		return ev.applyBothBoundMatch(rows, m), nil
+		return ev.applyBothBoundMatch(rows, m)
 	default:
-		return ev.applyForwardMatch(rows, m), nil
+		return ev.applyForwardMatch(rows, m)
 	}
 }
 
@@ -148,7 +148,7 @@ func (ev *evaluator) reverseSources(edgeType, endID, srcType string) []sdk.Note 
 // applyNodeMatch handles a bare (edgeless) additional MATCH: a cross-product
 // against all notes of the clause's type. Used when a query MATCHes a second
 // independent node set (e.g. the §13.5 concept clause).
-func (ev *evaluator) applyNodeMatch(rows []binding, m MatchClause) ([]binding, error) {
+func (ev *evaluator) applyNodeMatch(rows []binding, m MatchClause) []binding {
 	alias, typ := m.Nodes[0].Alias, m.Nodes[0].Type
 	notes := ev.notesOfTypeSlice(typ)
 	var out []binding
@@ -158,7 +158,7 @@ func (ev *evaluator) applyNodeMatch(rows []binding, m MatchClause) ([]binding, e
 			out = append(out, cloneWith(row, alias, &n))
 		}
 	}
-	return out, nil
+	return out
 }
 
 // extendRow appends the joined rows for one source binding. For variable-length

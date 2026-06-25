@@ -65,9 +65,11 @@ func (ev *evaluator) followRef(cur *sdk.Note, field string) (*sdk.Note, bool) {
 
 // staleSubfield reads a subfield of a note's structured stale payload (§7.3),
 // e.g. stale.reason / stale.fired_at. A fresh note (no stale payload) yields
-// (nil, false), matching the §7.3 "fresh → stale omitted" convention.
+// (nil, false), matching the §7.3 "fresh → stale omitted" convention. The note
+// is always non-nil here (resolvePath reaches a stale selector only on a
+// resolved note), but a note with no fields at all is a valid "fresh" case.
 func staleSubfield(n *sdk.Note, rest []string) (any, bool) {
-	if n == nil || n.Fields == nil {
+	if n.Fields == nil {
 		return nil, false
 	}
 	raw, ok := n.Fields[staleKey]
@@ -84,28 +86,26 @@ func staleSubfield(n *sdk.Note, rest []string) (any, bool) {
 
 // evalValueExpr evaluates the right-hand side of a predicate: a param, a
 // literal, or a coalesce(...) call over params/literals (§5.1.1).
-func (ev *evaluator) evalValueExpr(e ValueExpr, _ binding) (any, error) {
+// It cannot fail: every WHERE-side value form (param, literal, coalesce over
+// params/literals) was validated at parse time (§5.1.1), so resolution is total.
+func (ev *evaluator) evalValueExpr(e ValueExpr) any {
 	switch {
 	case e.Call != nil:
 		return ev.evalCoalesce(e.Call)
 	case e.IsLiteral:
-		return e.Literal, nil
+		return e.Literal
 	default:
-		return ev.params[e.Param], nil // nil when the optional param is absent
+		return ev.params[e.Param] // nil when the optional param is absent
 	}
 }
 
 // evalCoalesce returns the first non-nil argument of a coalesce call, folding
 // the WHERE-side param normalization before predicate evaluation (§5.1.1).
-func (ev *evaluator) evalCoalesce(call *FuncCall) (any, error) {
+func (ev *evaluator) evalCoalesce(call *FuncCall) any {
 	for _, arg := range call.Args {
-		v, err := ev.evalValueExpr(arg, nil)
-		if err != nil {
-			return nil, err
-		}
-		if v != nil {
-			return v, nil
+		if v := ev.evalValueExpr(arg); v != nil {
+			return v
 		}
 	}
-	return nil, nil
+	return nil
 }
