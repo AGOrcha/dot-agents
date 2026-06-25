@@ -305,10 +305,12 @@ Treat the wiring as part of release finalization.
 
 ### Recommendation + rationale — **ACCEPTED: Option A — add `t7-app-type-profiles-wiring`, `depends_on: [t1]`, `blocks: [release-minor]`**
 
-**Status: ACCEPTED (2026-06-24).** A `t7-app-type-profiles-wiring` task is being
-filed via `da workflow` (this resolution is a `TASKS.yaml`/`PLAN.yaml` edit and
-goes through the CLI, not a hand-edit — see Sequencing). The task shape below is
-the proposal for that filing.
+**Status: ACCEPTED (2026-06-24); FILED (2026-06-25).** The
+`t7-app-type-profiles-wiring` task now exists in the plan's `TASKS.yaml`
+(`depends_on: [t1]`, `blocks: [release-minor]`), and `release-minor.depends_on`
+includes it. The task shape below is the spec-of-record for that task. (The
+flagged `workflow-tasks.schema.json` app_type-drift fix from O4 was also filed
+as `t8-tasks-schema-app-type-drift`, schema-file-only write scope.)
 
 **Coupling flag (NEW).** The app-type-profiles spec/plan now likely needs
 **further development in coordination with the KG schema work** (O4 + the
