@@ -35,6 +35,7 @@ func sampleProfile() *ExecutionProfile {
 					LensSet:         []string{"architecture-standards", "adversarial"},
 					LensConcurrency: "gated",
 				},
+				GraphBackend: "dotagents-builtin:graph/none@^1.0",
 			},
 			"ideation": {
 				Topology: Topology{Executors: 3, VerifiersPerExecutor: 0, Reviewers: "0"},
@@ -143,6 +144,18 @@ func TestContains(t *testing.T) {
 	}
 	if contains([]string{"a", "b"}, "c") {
 		t.Error("contains([a b], c) should be false")
+	}
+}
+
+// TestAppTypeProfile_GraphBackendRef covers facet 4's accessor: a populated ref
+// is returned verbatim, and an unset graph_backend reads as "" (inherit default).
+func TestAppTypeProfile_GraphBackendRef(t *testing.T) {
+	set := AppTypeProfile{GraphBackend: "dotagents-builtin:graph/none@^1.0"}
+	if set.GraphBackendRef() != "dotagents-builtin:graph/none@^1.0" {
+		t.Errorf("GraphBackendRef = %q", set.GraphBackendRef())
+	}
+	if (AppTypeProfile{}).GraphBackendRef() != "" {
+		t.Error("empty profile should report no graph_backend (inherit default)")
 	}
 }
 
@@ -449,6 +462,12 @@ func TestExecutionProfile_JSONRoundTrip(t *testing.T) {
 	if gc.Lenses.LensConcurrency != "gated" || len(gc.Lenses.LensSet) != 2 {
 		t.Errorf("lenses round-trip lost: %+v", gc.Lenses)
 	}
+	if gc.GraphBackend != "dotagents-builtin:graph/none@^1.0" {
+		t.Errorf("graph_backend round-trip lost: %q", gc.GraphBackend)
+	}
+	if gc.GraphBackendRef() != gc.GraphBackend {
+		t.Errorf("GraphBackendRef mismatch: %q vs %q", gc.GraphBackendRef(), gc.GraphBackend)
+	}
 	if rt.ClassOf("go-cli", "orchestrate", "playwright") != "noise" {
 		t.Errorf("relevance round-trip lost noise classification")
 	}
@@ -458,7 +477,7 @@ func TestExecutionProfile_JSONRoundTrip(t *testing.T) {
 
 	// JSON keys must be snake_case per the config-v2 wire format.
 	for _, key := range []string{"by_app_type", "default_class", "verifiers_per_executor",
-		"verifier_sequence", "lens_set", "lens_concurrency"} {
+		"verifier_sequence", "lens_set", "lens_concurrency", "graph_backend"} {
 		if !contains(jsonKeys(t, data), key) {
 			t.Errorf("expected snake_case key %q in marshaled output: %s", key, data)
 		}

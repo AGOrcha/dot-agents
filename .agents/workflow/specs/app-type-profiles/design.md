@@ -493,6 +493,14 @@ owns the *generic starter shape*; the project source owns *its specifics*. (SoT:
 one home per concern — the project profiles live in the project source, not
 duplicated here.)
 
+**Canonical roster + single-source pointer:** §8A.1a is the **authoritative
+starter-set roster**. It is the one place the documented starter `app_type`
+values are enumerated; every other surface (notably the SDD entity/KG schema's
+`known_starter_values`) **references it rather than copying the list**, so the
+catalog cannot drift (Finding 8). See §8A.1a for the roster, the
+`http-service`/`go-http-service` alias rule, the starter-children-are-selectable
+reconciliation (Finding 7), and the `meta` custom-for-now ruling.
+
 ### 8A.0 Two vocabularies, one app-type name
 
 The shipped CLI today carries the per-app-type execution shape under
@@ -540,6 +548,64 @@ app-types the R-series needs but the original set lacked (`http-service`, `db`,
 `api`, `batch`, and `streaming` keep the shapes the §3.2 / §8.2 composite already
 implies; the three new entries (`http-service`, `db`, `ui`) are specified in
 full below because the R-series introduces them.
+
+### 8A.1a Canonical starter-set roster (the single source of truth)
+
+**This subsection is the authoritative starter catalog.** Every starter profile
+`da` ships in the published `dotagents-builtin` layer (Q10) is listed here, with
+exactly one home per concern. Prose elsewhere — including the SDD entity/KG
+schema's `known_starter_values` (work-tracking-storage-abstraction
+`sdd-entity-kg-schema-draft.md` §1.0) — **references this roster rather than
+re-listing it**, so the two surfaces cannot drift (Finding 8). The roster does
+not close the vocabulary: §2 / schema v3 keep `app_type` an OPEN string with
+`custom_allowed: true`; this is the *documented, non-exhaustive starter set*,
+not an enum.
+
+| Starter `app_type` | Kind | Selectable directly? | Notes |
+|---|---|---|---|
+| `go-cli` | code | yes | the project's own CLI baseline (`.agentsrc.json` key) |
+| `ideation` | non-code | yes | the project's ideation stage (`.agentsrc.json` key) |
+| `docs` | non-code | yes | documentation work (§8.5 / project docs profile) |
+| `http-service` | code | yes | §8A.2; **`go-http-service` is an alias** of `http-service` (Go is the project language), not a separate starter |
+| `api` | code | yes | §8A.1 / §3.2 — request/response slice; **independently selectable AND composable** |
+| `ui` | code | yes | §8A.5 — browser-rendered surface; **independently selectable AND composable** |
+| `streaming` | code | yes | §8A.3 — pushed/long-lived/concurrent; **independently selectable AND composable** |
+| `batch` | code | yes | §8A — leased-job/retry surface; **independently selectable AND composable** |
+| `db` | code | yes | §8A.4 — persistence/migration; specify-ahead (Q11), no consumer references it until the `Store` forward door lands |
+| `graph-knowledge` | code | yes | §8B — graph/KG/CRG work; ships generic here, adopted via the project source |
+| `research` | non-code | yes | §8.3 — citation-backed research |
+| `resume-ideation` | non-code | yes | §8.4 — artifact-set ideation |
+| `po-core-api-se` | code (composite) | yes | §8.2 — `composes: [api, batch, streaming]`; a worked composite, not itself a starter child |
+
+**Starter children are independently selectable (Finding 7 reconciliation).**
+`api`, `ui`, `streaming`, and `batch` are **both** standalone starter profiles
+**and** valid composite children. The earlier "COMPOSITE-MEMBER, not
+independently selectable" framing carried by the SDD schema draft is **dropped
+for starter children**: a profile being usable as a `composes:` child does not
+remove it from the selectable starter set — `app_type: api` is a legitimate
+repo-level selection for a pure request/response service, exactly as `app_type:
+streaming` is for a pure event surface. (`po-core-api-se` remains a *worked
+composite example*, distinct from the starter children it composes.)
+
+**`http-service` carries the `go-http-service` alias.** The §8.1 baseline name
+`go-http-service` and the generalized §8A.2 name `http-service` denote one
+starter profile; the Go-specific spelling is an alias, not a second roster entry.
+A consumer may select either name and resolves to the same published profile.
+
+**`meta` is custom-for-now, NOT a fixed starter (owner ruling 2026-06-25).**
+Meta-work (the project working on its own workflow/agent machinery) is treated as
+**emergent / custom**: it currently **reuses the `docs` profile** rather than
+shipping a dedicated `meta` starter. `meta` is therefore deliberately **absent
+from the published starter set** above; a repo that wants a distinct meta shape
+declares it as a custom `app_type` via the open-vocab ref form (§7.1) and layers
+it in through its own config source. If meta-work later stabilizes into a
+recurring distinct verifier surface, promoting it to a starter is a visible act
+(a new roster row + a published-layer minor bump), not a silent addition.
+
+**`db` timing.** `db` is on the roster but specify-ahead (§8A.4 / Q11): the
+profile exists so it is ready when the `Store` forward door is taken; until then
+no `.agentsrc.json` references it. Listing it here keeps the roster complete
+without implying a live SQLite surface.
 
 ### 8A.2 `http-service` (a.k.a. `go-http-service`) — HTTP API surface
 
@@ -904,6 +970,36 @@ project-specific profiles still layer **on top** locally via the
 starter set graduates to the public layer. This also resolves
 `da-project-specifics-source` §8 Q1 ("publish a public starter source") to **yes**,
 and makes §4.3's promotion path "generic-goes-public, project-stays-local."
+
+The roster of what that published layer ships is enumerated once in **§8A.1a**
+(the canonical starter-set roster). `known_starter_values` in the SDD entity/KG
+schema must **point at §8A.1a, not duplicate it** — see Q13 for the tracked
+schema-side follow-up.
+
+### Q13: SDD schema `known_starter_values` must reference §8A.1a, not copy it → OPEN (schema-side follow-up; owner of `sdd-entity-kg-schema-draft.md`)
+
+Finding 8 (single-source the starter catalog). §8A.1a is now the authoritative
+roster. The SDD entity/KG schema draft
+(work-tracking-storage-abstraction/`sdd-entity-kg-schema-draft.md` §1.0)
+currently inlines a `known_starter_values: [go-cli, ideation, go-http-service,
+api, ui, streaming, batch, po-core-api-se, research, resume-ideation]` list and
+marks `api/ui/streaming/batch` as "COMPOSITE-MEMBER, not independently
+selectable." Both must be reconciled against §8A.1a:
+
+1. Replace the inlined `known_starter_values` array with a **reference** to
+   app-type-profiles §8A.1a (e.g. `known_starter_values_ref:
+   app-type-profiles#8A.1a`), so the list lives in exactly one place.
+2. Drop the "not independently selectable" annotation on `api/ui/streaming/batch`
+   — per §8A.1a these are both standalone-selectable starters and composite
+   children.
+3. Align the documented set with the §8A.1a roster: it should additionally carry
+   `http-service` (with the `go-http-service` alias), `db`, `graph-knowledge`,
+   and `docs`; and must **not** add a fixed `meta` entry (`meta` is custom-for-now
+   per §8A.1a).
+
+**This edit is owned by the worker holding `sdd-entity-kg-schema-draft.md`** —
+this spec does not edit that file. Flagged as a cross-spec follow-up so the
+pointer lands once that file is free.
 
 ### Q11: `db` profile timing — specify-ahead vs land-with-store
 

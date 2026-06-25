@@ -41,6 +41,23 @@ type AppTypeProfile struct {
 	// Lenses is facet 3: the review-lens config folded in from
 	// lens-evidence-policy (lens_set + lens_concurrency).
 	Lenses Lenses `json:"lenses,omitempty"`
+	// GraphBackend is facet 4: the graph-backend adapter-ref the profile
+	// selects (app-type-profiles §2.6 / §3.1). It is an open adapter-ref of the
+	// form `dotagents-builtin:graph/<name>@<constraint>` (or a bare `<name>`),
+	// resolved against the graph-backend adapter registry
+	// (graph-backend-adapter-contract §4/§8) — not a closed enum. An empty value
+	// means the profile inherits the pipeline's default backend (crg). The
+	// resolver (commands/config relevance --filter graph) turns this ref into a
+	// registered adapter and surfaces whether it resolves.
+	GraphBackend string `json:"graph_backend,omitempty"`
+}
+
+// GraphBackendRef returns the profile's declared graph-backend adapter ref, or
+// the empty string when the profile selects none (and inherits the pipeline
+// default). Centralising the read keeps callers from poking the field directly,
+// so a later default-backend policy has one place to land.
+func (p AppTypeProfile) GraphBackendRef() string {
+	return p.GraphBackend
 }
 
 // RelevanceClasses partitions the units relevant to one app_type × stage into

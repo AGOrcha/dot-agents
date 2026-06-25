@@ -36,7 +36,8 @@ const relevanceRepoBody = `{
         "lenses": {
           "lens_set": ["architecture-standards", "adversarial"],
           "lens_concurrency": "gated"
-        }
+        },
+        "graph_backend": "dotagents-builtin:graph/none@^1.0"
       },
       "ideation": {
         "topology": {"executors": 3, "verifiers_per_executor": 0, "reviewers": "0"},
@@ -493,11 +494,13 @@ func TestBuildRelevanceResult_Filters(t *testing.T) {
 		wantUnits bool
 		wantTopo  bool
 		wantLens  bool
+		wantGraph bool
 	}{
-		{filterUnits, true, false, false},
-		{filterTopology, false, true, false},
-		{filterLenses, false, false, true},
-		{filterAll, true, true, true},
+		{filterUnits, true, false, false, false},
+		{filterTopology, false, true, false, false},
+		{filterLenses, false, false, true, false},
+		{filterGraph, false, false, false, true},
+		{filterAll, true, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.filter, func(t *testing.T) {
@@ -511,6 +514,9 @@ func TestBuildRelevanceResult_Filters(t *testing.T) {
 			}
 			if (res.Lenses != nil) != tc.wantLens {
 				t.Fatalf("lenses presence %v want %v", res.Lenses != nil, tc.wantLens)
+			}
+			if (res.Graph != nil) != tc.wantGraph {
+				t.Fatalf("graph presence %v want %v", res.Graph != nil, tc.wantGraph)
 			}
 			if !res.Matched {
 				t.Fatalf("expected matched=true for go-cli")
@@ -562,6 +568,35 @@ func TestRunRelevance_JSON(t *testing.T) {
 		t.Fatalf("units payload mismatch: %+v", got.Units)
 	}
 	if got.Topology != nil || got.Lenses != nil {
+		t.Fatalf("non-requested facets should be omitted: %+v", got)
+	}
+}
+
+// TestRunRelevance_GraphJSON is the t7 hard test through the run path: a profile
+// declaring graph_backend: dotagents-builtin:graph/none@^1.0 resolves end-to-end
+// through config resolution to the registry's ref resolver — not just the direct
+// adapter path. The no-op none adapter resolves, so the facet reports it.
+func TestRunRelevance_GraphJSON(t *testing.T) {
+	project := withRepoLayer(t, relevanceRepoBody, "")
+	opts := mustRelevanceOptions(project)
+	opts.filter = filterGraph
+	opts.appType = "go-cli"
+	opts.jsonOut = true
+
+	if err := runRelevance(opts, testDeps()); err != nil {
+		t.Fatalf("runRelevance: %v", err)
+	}
+	var got relevanceResult
+	if err := json.Unmarshal([]byte(relevanceOut(opts)), &got); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, relevanceOut(opts))
+	}
+	if got.Filter != filterGraph || got.Graph == nil {
+		t.Fatalf("graph facet missing: %+v", got)
+	}
+	if !got.Graph.Resolved || got.Graph.Adapter != "none" || got.Graph.Version != "1.0.0" {
+		t.Fatalf("graph facet did not resolve the none adapter: %+v", got.Graph)
+	}
+	if got.Units != nil || got.Topology != nil || got.Lenses != nil {
 		t.Fatalf("non-requested facets should be omitted: %+v", got)
 	}
 }

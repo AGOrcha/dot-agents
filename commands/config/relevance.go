@@ -22,12 +22,13 @@ const (
 	filterUnits    = "units"
 	filterTopology = "topology"
 	filterLenses   = "lenses"
+	filterGraph    = "graph"
 	filterAll      = "all"
 )
 
 // validFilters is the closed set accepted by --filter. Sorted form is used in
 // the usage hint so the error message lists the choices deterministically.
-var validFilters = []string{filterAll, filterLenses, filterTopology, filterUnits}
+var validFilters = []string{filterAll, filterGraph, filterLenses, filterTopology, filterUnits}
 
 // relevanceResult is the stable JSON shape emitted by
 // `da config relevance --json`. It reports the resolution context (resolved
@@ -66,6 +67,9 @@ type relevanceResult struct {
 	Topology *topologyFacet `json:"topology,omitempty"`
 	// Lenses is facet 3, present when --filter is lenses/all.
 	Lenses *lensesFacet `json:"lenses,omitempty"`
+	// Graph is facet 4 (the graph-backend adapter-ref selection), present when
+	// --filter is graph/all.
+	Graph *graphFacet `json:"graph,omitempty"`
 }
 
 // unitsFacet is the per-stage core/situational/noise classification. When a
@@ -113,6 +117,32 @@ type lensesFacet struct {
 	LensConcurrency string   `json:"lens_concurrency,omitempty"`
 }
 
+// graphFacet reports the resolution of facet 4: the graph-backend adapter-ref
+// the app_type profile selects, and whether it resolves against the built-in
+// adapter registry (graph-backend-adapter-contract §4/§8). The ref flows from
+// the profile through config resolution to the registry's ref resolver (t1),
+// exactly mirroring how a profile's `graph_backend` selects a backend at
+// dispatch time.
+type graphFacet struct {
+	// Ref is the adapter-ref the profile declared (e.g.
+	// "dotagents-builtin:graph/none@^1.0"), or "" when the profile selects
+	// none and inherits the pipeline default.
+	Ref string `json:"ref,omitempty"`
+	// Resolved is true when Ref resolved to a registered adapter satisfying its
+	// version constraint. False with a non-empty Ref means the ref is set but
+	// did not resolve (the Error field carries the reason).
+	Resolved bool `json:"resolved"`
+	// Adapter is the resolved adapter's short name (e.g. "none"), present only
+	// when Resolved is true.
+	Adapter string `json:"adapter,omitempty"`
+	// Version is the resolved adapter's schema version, present only when
+	// Resolved is true.
+	Version string `json:"version,omitempty"`
+	// Error is the resolution failure reason, present only when Ref is non-empty
+	// and Resolved is false.
+	Error string `json:"error,omitempty"`
+}
+
 // runRelevanceOptions captures one invocation's flag state. stdout/stderr/cwd
 // are injected so the run path is table-drivable without going through cobra.
 type runRelevanceOptions struct {
@@ -147,6 +177,7 @@ scope-overridable facets per app_type (design
   units     facet 1 — per-stage core/situational/noise unit relevance
   topology  facet 2 — the executor:verifier:reviewer fan-out + verifier_sequence
   lenses    facet 3 — the review-lens set + concurrency
+  graph     facet 4 — the graph_backend adapter-ref + its registry resolution
 
 --filter slices the facet you want (default "all") so the command stays
 evolvable as new facets land. The app_type is selected by, in precedence order:
@@ -168,6 +199,7 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			"  da config relevance --filter units --app-type go-cli --stage review",
 			"  da config relevance --filter topology --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --filter lenses --app-type ideation",
+			"  da config relevance --filter graph --app-type go-cli",
 			"  da config relevance --recompute --app-type go-cli",
 			"  da config relevance --recompute --app-type go-cli --write",
 			"  da config relevance --json",
@@ -187,7 +219,7 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			return runRelevance(opts, deps)
 		},
 	}
-	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | all")
+	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | graph | all")
 	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
@@ -256,7 +288,7 @@ func normalizeFilter(opts *runRelevanceOptions, deps Deps) error {
 		opts.filter = filterAll
 	}
 	switch opts.filter {
-	case filterUnits, filterTopology, filterLenses, filterAll:
+	case filterUnits, filterTopology, filterLenses, filterGraph, filterAll:
 		return nil
 	default:
 		return deps.UsageError(
@@ -396,6 +428,9 @@ func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfi
 	if opts.filter == filterLenses || opts.filter == filterAll {
 		result.Lenses = buildLensesFacet(prof)
 	}
+	if opts.filter == filterGraph || opts.filter == filterAll {
+		result.Graph = buildGraphFacet(prof)
+	}
 	return result
 }
 
@@ -498,6 +533,32 @@ func buildLensesFacet(prof cfg.AppTypeProfile) *lensesFacet {
 	}
 }
 
+// buildGraphFacet renders facet 4: it reads the profile's selected
+// graph_backend adapter-ref and resolves it through the built-in adapter
+// registry (graph-backend-adapter-contract §4/§8). An empty ref reports the
+// inherit-default case (Resolved=true, no adapter named); a non-empty ref that
+// fails to resolve carries the failure reason so the operator sees a missing or
+// version-incompatible backend before fanout, not at runtime.
+func buildGraphFacet(prof cfg.AppTypeProfile) *graphFacet {
+	ref := prof.GraphBackendRef()
+	if ref == "" {
+		// No backend selected: the profile inherits the pipeline default, which
+		// is a valid resolution (there is nothing to fail).
+		return &graphFacet{Resolved: true}
+	}
+	adapter, err := resolveGraphBackend(ref)
+	if err != nil {
+		return &graphFacet{Ref: ref, Resolved: false, Error: err.Error()}
+	}
+	schema := adapter.Schema()
+	return &graphFacet{
+		Ref:      ref,
+		Resolved: true,
+		Adapter:  schema.Name,
+		Version:  schema.Version,
+	}
+}
+
 // renderRelevance emits the result as JSON (stable envelope) or as the
 // human-readable facet view.
 func renderRelevance(opts *runRelevanceOptions, result relevanceResult) error {
@@ -524,6 +585,9 @@ func printRelevanceHuman(w io.Writer, result relevanceResult) error {
 	}
 	if result.Lenses != nil {
 		printLensesHuman(w, result.Lenses)
+	}
+	if result.Graph != nil {
+		printGraphHuman(w, result.Graph)
 	}
 	return nil
 }
@@ -576,6 +640,28 @@ func printLensesHuman(w io.Writer, l *lensesFacet) {
 	fmt.Fprintf(w, "  lens_set         : %s\n", joinUnits(l.LensSet))
 	fmt.Fprintf(w, "  lens_concurrency : %s\n", emptyAsDash(l.LensConcurrency))
 	fmt.Fprintln(w)
+}
+
+func printGraphHuman(w io.Writer, g *graphFacet) {
+	fmt.Fprintln(w, "graph")
+	fmt.Fprintf(w, "  graph_backend : %s\n", graphRefLabel(g.Ref))
+	fmt.Fprintf(w, "  resolved      : %t\n", g.Resolved)
+	if g.Adapter != "" {
+		fmt.Fprintf(w, "  adapter       : %s@%s\n", g.Adapter, g.Version)
+	}
+	if g.Error != "" {
+		fmt.Fprintf(w, "  error         : %s\n", g.Error)
+	}
+	fmt.Fprintln(w)
+}
+
+// graphRefLabel renders an empty ref as "(inherit default)" so the no-backend
+// case reads as a deliberate inherit rather than a hanging blank.
+func graphRefLabel(ref string) string {
+	if ref == "" {
+		return "(inherit default)"
+	}
+	return ref
 }
 
 // joinUnits renders a unit list as a comma-joined string, or "-" when empty, so
