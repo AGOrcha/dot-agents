@@ -18,13 +18,15 @@ duplicating the facet contract.
 An **execution profile** is a single, scope-mergeable config layer that routes a task's *workflow
 execution shape* by `app_type`. It consolidates routing that used to be scattered across
 `app_type_verifier_map`, the lens-routing config, and `max_parallel_tasks` into one surface with
-three independently overridable **facets** per `app_type`:
+independently overridable **facets** per `app_type`:
 
 | Facet | What it controls | Filter |
 |---|---|---|
 | **units** | per-stage core / situational / noise classification of skills, agents, and lenses (the noise filter) | `--filter units` |
 | **topology** | the executor : verifier : reviewer fan-out + `verifier_sequence` | `--filter topology` |
 | **lenses** | the review-lens set + concurrency | `--filter lenses` |
+| **graph** | the graph-backend adapter-ref and built-in registry resolution | `--filter graph` |
+| **lessons** | repo-local `.agents/lessons/<name>/LESSON.md` selection by app_type plus task/path/package scope | `--filter lessons` |
 
 The layer lives under `execution_profile` in `.agentsrc.json` (and, once config-v2 §15 lands,
 merges by scope precedence org → team → repo → project-local — it is already shaped for that). It
@@ -35,12 +37,14 @@ set.
 ## Command surface
 
 ```
-da config relevance [--filter units|topology|lenses|all] [--app-type <t>] [--stage <s>] [--task <plan/task>] [--json]
+da config relevance [--filter units|topology|lenses|graph|lessons|all] [--app-type <t>] [--stage <s>] [--task <plan/task>] [--path <p>] [--package <pkg>] [--json]
 da config relevance --recompute [--write] [--app-type <t>] [--stage <s>]
 ```
 
 - `--filter` (default `all`) slices the facet you want, so one command stays evolvable as new
   facets land — no verb-per-facet sprawl.
+- `--path` and `--package` add touched-path/package hints for `--filter lessons`; when `--task`
+  is set, that task's `write_scope` is included automatically.
 - `--json` emits a stable envelope (documented on `relevanceResult` in
   `commands/config/relevance.go`) so scripts can pin the envelope while the facet payload varies.
 - `--recompute` is the **explicit driver event** (never on a timer): it reads the scored iteration
@@ -60,7 +64,7 @@ the JSON envelope reports which selector won):
 
 `--task` must be `<plan-id>/<task-id>`; a bare task id cannot locate its plan.
 
-## The three facets, by example
+## The facets, by example
 
 The repo ships two real profiles in `.agentsrc.json` — `go-cli` (execution/throughput: verify and
 review heavily) and `ideation` (divergence: wide executor fan-out, with the verify and review gates
@@ -143,6 +147,23 @@ lenses
 runs the same three (`architecture-standards`, `acceptance-invariants`, `adversarial`) in `parallel`,
 applied to the design artifact.
 
+### Facet 5 — lessons (repo lessons for the task)
+
+```
+$ da config relevance --filter lessons --task config-relevance-profiles/t2-config-relevance-resolver
+lessons
+  - config-relevance-scope
+    description : Keep config relevance changes scoped to command and profile surfaces
+    path        : .agents/lessons/config-relevance-scope/LESSON.md
+```
+
+The lessons facet walks `.agents/lessons/*/LESSON.md`, parses existing YAML frontmatter when present
+(`name`, `description`, `tags`, `app_type`, and path/package metadata fields), and falls back to the
+lesson directory name plus first heading for older lessons. Legacy lessons without tags use name/description tokens as low-cost keywords. A lesson declaring `app_type` must match
+the resolved profile app_type, unless it declares a wildcard (`*`, `all`, or `any`) or leaves the
+field unset. Scope matching uses the task `write_scope` plus any `--path` / `--package` hints against
+lesson tags and path/package metadata, then ranks deterministic most-specific matches first.
+
 ## JSON envelope (the structure contract)
 
 `--json` wraps the requested facet(s) in a stable envelope with **one consistent rule**:
@@ -150,7 +171,7 @@ applied to the design artifact.
 - **Resolution context** — `app_type`, `app_type_source`, `stage`, `filter`, and `matched` — is
   always at the **top level**. It is *cross-facet*: with `--filter all` one resolution either
   matched a profile or it did not, regardless of which facet you sliced.
-- **Facet payloads** — `topology`, `units`, `lenses` — nest under their own key.
+- **Facet payloads** — `topology`, `units`, `lenses`, `graph`, and `lessons` — nest under their own key.
 
 ```json
 {

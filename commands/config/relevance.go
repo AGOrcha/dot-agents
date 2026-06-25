@@ -23,12 +23,13 @@ const (
 	filterTopology = "topology"
 	filterLenses   = "lenses"
 	filterGraph    = "graph"
+	filterLessons  = "lessons"
 	filterAll      = "all"
 )
 
 // validFilters is the closed set accepted by --filter. Sorted form is used in
 // the usage hint so the error message lists the choices deterministically.
-var validFilters = []string{filterAll, filterGraph, filterLenses, filterTopology, filterUnits}
+var validFilters = []string{filterAll, filterGraph, filterLenses, filterLessons, filterTopology, filterUnits}
 
 // relevanceResult is the stable JSON shape emitted by
 // `da config relevance --json`. It reports the resolution context (resolved
@@ -70,6 +71,9 @@ type relevanceResult struct {
 	// Graph is facet 4 (the graph-backend adapter-ref selection), present when
 	// --filter is graph/all.
 	Graph *graphFacet `json:"graph,omitempty"`
+	// Lessons is facet 5 (repo-local lesson relevance), present when --filter
+	// is lessons/all.
+	Lessons *lessonsFacet `json:"lessons,omitempty"`
 }
 
 // unitsFacet is the per-stage core/situational/noise classification. When a
@@ -143,13 +147,28 @@ type graphFacet struct {
 	Error string `json:"error,omitempty"`
 }
 
+// lessonsFacet reports the lessons selected for the resolved app_type and
+// optional task/package/path scope.
+type lessonsFacet struct {
+	Items []lessonResult `json:"items"`
+}
+
+// lessonResult is the public JSON/human shape for one relevant lesson.
+type lessonResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Path        string `json:"path"`
+}
+
 // runRelevanceOptions captures one invocation's flag state. stdout/stderr/cwd
 // are injected so the run path is table-drivable without going through cobra.
 type runRelevanceOptions struct {
-	filter  string
-	appType string
-	stage   string
-	task    string
+	filter   string
+	appType  string
+	stage    string
+	task     string
+	paths    []string
+	packages []string
 	// recompute switches the command from the inspector path to the explicit
 	// driver-event path (design §5: `da config relevance --recompute [--write]`).
 	// It is a flag rather than a subcommand so the public surface matches the
@@ -168,9 +187,9 @@ func newRelevanceCmd(deps Deps) *cobra.Command {
 	opts := &runRelevanceOptions{}
 	cmd := &cobra.Command{
 		Use:   "relevance",
-		Short: "Resolve a task's execution profile (units, topology, lenses) by app_type",
+		Short: "Resolve a task's execution profile facets by app_type",
 		Long: `Resolve the effective execution_profile layer for a task and print the
-requested facet. The execution profile bundles three independently
+requested facet. The execution profile bundles independently
 scope-overridable facets per app_type (design
 .agents/proposals/skill-relevance-filter.md §2):
 
@@ -178,6 +197,7 @@ scope-overridable facets per app_type (design
   topology  facet 2 — the executor:verifier:reviewer fan-out + verifier_sequence
   lenses    facet 3 — the review-lens set + concurrency
   graph     facet 4 — the graph_backend adapter-ref + its registry resolution
+  lessons   facet 5 — relevant repo lessons for the resolved app_type + scope
 
 --filter slices the facet you want (default "all") so the command stays
 evolvable as new facets land. The app_type is selected by, in precedence order:
@@ -200,6 +220,7 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			"  da config relevance --filter topology --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --filter lenses --app-type ideation",
 			"  da config relevance --filter graph --app-type go-cli",
+			"  da config relevance --filter lessons --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --recompute --app-type go-cli",
 			"  da config relevance --recompute --app-type go-cli --write",
 			"  da config relevance --json",
@@ -219,10 +240,12 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			return runRelevance(opts, deps)
 		},
 	}
-	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | graph | all")
+	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | graph | lessons | all")
 	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
+	cmd.Flags().StringArrayVar(&opts.paths, "path", nil, "Touched path to include when matching the lessons facet (repeatable; --task write_scope is included automatically)")
+	cmd.Flags().StringArrayVar(&opts.packages, "package", nil, "Touched package/import path to include when matching the lessons facet (repeatable)")
 	// recompute is the explicit driver event (design §5): it reads the scored
 	// iteration corpus and proposes relevance-class changes. It is a flag on this
 	// command (not a subcommand) so the public surface matches the design
@@ -275,7 +298,12 @@ func runRelevance(opts *runRelevanceOptions, deps Deps) error {
 		return err
 	}
 
-	result := buildRelevanceResult(opts, profile, appType, source)
+	result, err := buildRelevanceResult(opts, profile, appType, source)
+	if err != nil {
+		return deps.ErrorWithHints(err.Error(),
+			"Check .agents/lessons/<name>/LESSON.md frontmatter and any --task write_scope values.",
+		)
+	}
 	return renderRelevance(opts, result)
 }
 
@@ -288,7 +316,7 @@ func normalizeFilter(opts *runRelevanceOptions, deps Deps) error {
 		opts.filter = filterAll
 	}
 	switch opts.filter {
-	case filterUnits, filterTopology, filterLenses, filterGraph, filterAll:
+	case filterUnits, filterTopology, filterLenses, filterGraph, filterLessons, filterAll:
 		return nil
 	default:
 		return deps.UsageError(
@@ -408,7 +436,7 @@ func readYAMLFile(path string, out any) error {
 // buildRelevanceResult assembles the result envelope, attaching only the facets
 // the chosen --filter requested. Resolution against a missing app_type entry
 // renders defaults/empty facets and sets Matched=false.
-func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfile, appType, source string) relevanceResult {
+func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfile, appType, source string) (relevanceResult, error) {
 	result := relevanceResult{
 		AppType:       appType,
 		AppTypeSource: source,
@@ -431,7 +459,14 @@ func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfi
 	if opts.filter == filterGraph || opts.filter == filterAll {
 		result.Graph = buildGraphFacet(prof)
 	}
-	return result
+	if opts.filter == filterLessons || opts.filter == filterAll {
+		facet, err := buildLessonsFacet(opts, appType)
+		if err != nil {
+			return relevanceResult{}, err
+		}
+		result.Lessons = facet
+	}
+	return result, nil
 }
 
 // appTypeMatched reports whether the resolved app_type has an explicit entry in
@@ -589,6 +624,9 @@ func printRelevanceHuman(w io.Writer, result relevanceResult) error {
 	if result.Graph != nil {
 		printGraphHuman(w, result.Graph)
 	}
+	if result.Lessons != nil {
+		printLessonsHuman(w, result.Lessons)
+	}
 	return nil
 }
 
@@ -651,6 +689,21 @@ func printGraphHuman(w io.Writer, g *graphFacet) {
 	}
 	if g.Error != "" {
 		fmt.Fprintf(w, "  error         : %s\n", g.Error)
+	}
+	fmt.Fprintln(w)
+}
+
+func printLessonsHuman(w io.Writer, l *lessonsFacet) {
+	fmt.Fprintln(w, "lessons")
+	if len(l.Items) == 0 {
+		fmt.Fprintln(w, "  (no matching lessons)")
+		fmt.Fprintln(w)
+		return
+	}
+	for _, item := range l.Items {
+		fmt.Fprintf(w, "  - %s\n", item.Name)
+		fmt.Fprintf(w, "    description : %s\n", emptyAsDash(item.Description))
+		fmt.Fprintf(w, "    path        : %s\n", item.Path)
 	}
 	fmt.Fprintln(w)
 }
