@@ -157,7 +157,7 @@ func (q *Query) validateMatches(info SchemaInfo) error {
 		if m.Edge == nil {
 			continue
 		}
-		if err := validateEdgeClause(m, info); err != nil {
+		if err := q.validateEdgeClause(m, info); err != nil {
 			return err
 		}
 	}
@@ -165,22 +165,40 @@ func (q *Query) validateMatches(info SchemaInfo) error {
 }
 
 // validateEdgeClause validates one edge MATCH clause's type and endpoint types.
-func validateEdgeClause(m MatchClause, info SchemaInfo) error {
+// An endpoint with no inline `:type` (a re-referenced bound alias such as the
+// reverse-join `(changed)`) is resolved to the type fixed at its binding MATCH
+// via q.aliasType, so a wrong-direction shape against a bound alias is caught
+// here too — not just one with an inline type.
+func (q *Query) validateEdgeClause(m MatchClause, info SchemaInfo) error {
 	ei, ok := info.Edges[m.Edge.Type]
 	if !ok {
 		return fmt.Errorf("dsl: MATCH references unknown edge type %q", m.Edge.Type)
 	}
-	fromType, toType := m.Nodes[0].Type, m.Nodes[1].Type
+	fromType := q.endpointType(m.Nodes[0])
+	toType := q.endpointType(m.Nodes[1])
 	if err := edgeEndpointOK(m.Edge.Type, "from", fromType, ei.From); err != nil {
 		return err
 	}
 	return edgeEndpointOK(m.Edge.Type, "to", toType, ei.To)
 }
 
-// edgeEndpointOK checks one endpoint's node type against the declared type. An
-// untyped endpoint alias (no `:type` in the pattern, e.g. a re-referenced bound
-// alias `(c)`) is permitted — its type was fixed at its binding MATCH and the
-// ref/return validators enforce field access; here only an explicit mismatch is
+// endpointType resolves a node pattern's type: its inline `:type` when present,
+// otherwise the type the alias was bound to at its first MATCH (q.aliasType).
+// Returns "" only when neither is known (a genuinely typeless alias), which the
+// endpoint check then treats as unconstrained.
+func (q *Query) endpointType(n NodePattern) string {
+	if n.Type != "" {
+		return n.Type
+	}
+	if t, ok := q.aliasType[n.Alias]; ok && t != edgeAliasType {
+		return t
+	}
+	return ""
+}
+
+// edgeEndpointOK checks one endpoint's node type against the declared type. A
+// genuinely typeless endpoint (no inline type and no recorded alias binding) is
+// permitted — there is nothing to contradict; only an explicit type mismatch is
 // rejected.
 func edgeEndpointOK(edgeType, role, patternType, declaredType string) error {
 	if patternType == "" || patternType == declaredType {

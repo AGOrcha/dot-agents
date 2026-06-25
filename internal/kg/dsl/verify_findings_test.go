@@ -71,16 +71,28 @@ func TestBothBoundVarLength(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eval: %v", err)
 	}
-	pairs := map[string]bool{}
+	// Count each (a,b) pair to assert EXACT multiplicity, not just set
+	// membership: a broken forward-rebind that yields the right pairs WITH
+	// duplicate rows (cross-product artifact) must fail here. The only
+	// reachable pairs within 3 hops are l1->l2, l1->l3, l2->l3 — each exactly
+	// once (both endpoints are pre-bound, so the join filters, never multiplies).
+	counts := map[string]int{}
 	for _, r := range rows {
-		pairs[r["a.id"].(string)+"->"+r["b.id"].(string)] = true
+		counts[r["a.id"].(string)+"->"+r["b.id"].(string)]++
 	}
-	// Reachable pairs within 3 hops: l1->l2, l1->l3, l2->l3.
-	if !pairs["l1->l2"] || !pairs["l1->l3"] || !pairs["l2->l3"] {
-		t.Fatalf("both-bound var-length: missing reachable pairs, got %v", pairs)
+	want := map[string]int{"l1->l2": 1, "l1->l3": 1, "l2->l3": 1}
+	if len(rows) != len(want) {
+		t.Fatalf("both-bound var-length: expected exactly %d rows (no duplicates/cross-product), got %d: %v", len(want), len(rows), rows)
 	}
-	if pairs["l1->l1"] || pairs["l3->l1"] {
-		t.Fatalf("both-bound var-length: spurious unconnected pair, got %v", pairs)
+	for pair, n := range want {
+		if counts[pair] != n {
+			t.Fatalf("both-bound var-length: pair %q expected %d row(s), got %d (counts=%v)", pair, n, counts[pair], counts)
+		}
+	}
+	for pair := range counts {
+		if want[pair] == 0 {
+			t.Fatalf("both-bound var-length: spurious/unconnected pair %q present (counts=%v)", pair, counts)
+		}
 	}
 }
 
@@ -116,18 +128,48 @@ func TestEdgeWrongDirectionRejected(t *testing.T) {
 	}
 }
 
-// TestEdgeUntypedEndpointAccepted confirms a re-referenced bound alias with no
-// `:type` (e.g. `(changed)` in the impact_radius reverse join) is accepted —
-// its type was fixed at its binding MATCH.
-func TestEdgeUntypedEndpointAccepted(t *testing.T) {
+// dirSchema declares affects: finding->control plus a risk type, for the
+// bound-alias direction tests.
+func dirSchema(t *testing.T) dsl.SchemaInfo {
+	t.Helper()
 	info, err := dsl.NewSchemaInfo([]dsl.NoteTypeDecl{
 		{Name: tControl, Fields: []dsl.FieldDecl{{Name: "k", Type: tString}}},
 		{Name: tFinding, Fields: []dsl.FieldDecl{{Name: "k", Type: tString}}},
+		{Name: "risk", Fields: []dsl.FieldDecl{{Name: "k", Type: tString}}},
 	}, []dsl.EdgeTypeDecl{{Name: "affects", From: tFinding, To: tControl}}, 2)
 	if err != nil {
 		t.Fatalf(errSchemaFmt, err)
 	}
-	if _, err := dsl.ParseWithSchema("MATCH (changed:control) OPTIONAL MATCH (f:finding)-[:affects]->(changed) RETURN changed.id, f.id", info); err != nil {
-		t.Fatalf("untyped re-referenced endpoint should load: %v", err)
+	return info
+}
+
+// TestEdgeUntypedEndpointAccepted confirms a re-referenced bound alias with no
+// `:type` (e.g. `(changed)` in the impact_radius reverse join) is accepted when
+// its binding type matches the declared edge endpoint — affects.to == control.
+func TestEdgeUntypedEndpointAccepted(t *testing.T) {
+	if _, err := dsl.ParseWithSchema("MATCH (changed:control) OPTIONAL MATCH (f:finding)-[:affects]->(changed) RETURN changed.id, f.id", dirSchema(t)); err != nil {
+		t.Fatalf("untyped re-referenced endpoint matching the declared edge type should load: %v", err)
+	}
+}
+
+// TestEdgeBoundAliasWrongDirectionRejected is the #3-tightening regression: an
+// untyped reverse-join endpoint whose BINDING type contradicts the declared
+// edge endpoint must be rejected at load. `changed` is bound to `risk` but
+// `affects.to` is `control`, so the reverse-join shape is wrong-direction even
+// though `(changed)` carries no inline type — resolution via q.aliasType catches
+// it.
+func TestEdgeBoundAliasWrongDirectionRejected(t *testing.T) {
+	if _, err := dsl.ParseWithSchema("MATCH (changed:risk) OPTIONAL MATCH (f:finding)-[:affects]->(changed) RETURN changed.id", dirSchema(t)); err == nil {
+		t.Fatal("bound-alias wrong-direction (changed:risk vs affects.to=control) must be rejected at load")
+	}
+}
+
+// TestEdgeBoundAliasForwardWrongDirRejected covers the symmetric forward case:
+// a bound source alias of the wrong type for the edge's `from`.
+func TestEdgeBoundAliasForwardWrongDirRejected(t *testing.T) {
+	// `changed` is bound to risk; affects.from is finding. The forward shape
+	// (changed)-[:affects]->(c:control) is wrong on the `from` side.
+	if _, err := dsl.ParseWithSchema("MATCH (changed:risk) MATCH (changed)-[:affects]->(c:control) RETURN c.id", dirSchema(t)); err == nil {
+		t.Fatal("bound-alias forward wrong-direction (changed:risk vs affects.from=finding) must be rejected at load")
 	}
 }
