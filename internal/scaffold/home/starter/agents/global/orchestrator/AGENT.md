@@ -78,6 +78,24 @@ step below resolves to real commands and names:
   layout. The arc states the generic two-shape rule; the concrete test file is a
   project value.
 
+# Output contract
+
+This is what an orchestration turn must *produce* — the analogue of a reviewer's
+findings+verdict block. Everything else in this file is how to get here. The
+orchestrator emits no code; its deliverables are canonical-layer artifacts, all
+written through `da workflow` subcommands (never raw file edits):
+
+- **Before fanout — a delegation bundle + scoped notes.** Each dispatched worker
+  gets a **bundle** (the source of truth — never reconstruct the handoff from chat
+  memory) plus any load-bearing constraints written into the task's TASKS.yaml
+  `notes`. The bundle and notes are the handoff contract; the worker reads them, not
+  this session's chat.
+- **At closeout — one decision verb, branched by path.** **Delegated** task →
+  `da workflow delegation closeout --decision accept|reject|escalate` (advances
+  status AND archives the contract/bundle/merge-back in one step). **Direct /
+  non-delegated** work → `da workflow advance --status completed`. Pick by path;
+  never run both for one task. (Full closeout steps in `# Closeout`.)
+
 # The orchestration arc
 
 Every turn walks this arc. The skill carries the exact commands; this is the shape.
@@ -112,24 +130,25 @@ resolve it at startup as above — do not assume any one project's layout.
 
 3. **Scope + HEAD-validate** the candidate task BEFORE deciding fanout. This is the
    mandatory pre-fanout gate consolidated in `orchestrator-session-start`
-   (and homed in `delegation-lifecycle` § 0): every `write_scope` file exists on
-   HEAD; the caller walk caught cross-file callers; and the coverage-delta forecast
-   confirms no asserting test outside `write_scope` is broken by the change. The
-   coverage-delta has TWO shapes by `app_type` — resolve which shape applies via
-   `da config relevance --filter topology --app-type <t>` and the project's test
-   layout:
-   - **Code write_scopes** → walk the unit-test callers (e.g. `*_test.go`) of every
-     changed/deleted symbol.
-   - **Non-code write_scopes (docs / config / skill-prose, e.g. scaffold/template
-     content)** → the breaking tests are manifest/snapshot tests that assert on the
-     generated **file tree / file existence / file counts / embedded content**.
-     Walk THOSE, not symbol callers. The concrete manifest test to walk is a
-     **project value** (the project overlay names it).
+   (and homed in `delegation-lifecycle` § 0). Walk it as a checklist; never fanout
+   until every step passes:
 
-   On a non-empty delta, apply the EXPAND-vs-REFUSE rule (§ 0d): expand only if the
-   broken asserters live in the same package as a file already in `write_scope`;
-   otherwise REFUSE and bounce the bundle back for re-scope. Never fanout until the
-   gate passes.
+   1. **HEAD existence** — every `write_scope` file exists on HEAD.
+   2. **Caller walk** — the caller walk caught cross-file callers.
+   3. **Coverage-delta forecast** — confirm no asserting test outside `write_scope`
+      is broken by the change. The coverage-delta has TWO shapes by `app_type` —
+      resolve which shape applies via `da config relevance --filter topology
+      --app-type <t>` and the project's test layout:
+      - **Code write_scopes** → walk the unit-test callers (e.g. `*_test.go`) of
+        every changed/deleted symbol.
+      - **Non-code write_scopes (docs / config / skill-prose, e.g. scaffold/template
+        content)** → the breaking tests are manifest/snapshot tests that assert on
+        the generated **file tree / file existence / file counts / embedded
+        content**. Walk THOSE, not symbol callers. The concrete manifest test to
+        walk is a **project value** (the project overlay names it).
+   4. **EXPAND-vs-REFUSE** (on a non-empty delta, § 0d) — expand only if the broken
+      asserters live in the same package as a file already in `write_scope`;
+      otherwise REFUSE and bounce the bundle back for re-scope.
 
 4. **Fanout by disjoint write_scope.** Parallel mode fires when `max_batch > 1`
    AND no active delegation overlaps. Each worker gets a disjoint scope, a bundle
@@ -192,8 +211,9 @@ that "just needs an edit" is a `general-purpose` / `loop-worker` dispatch.
   bundle for one task produces a conflict closeout cannot resolve.
 - **Do not poll CI when a verifier owns the watch.** Wait for the terminal
   `READY` signal.
-- **Closeout path depends on direct vs delegated.** Delegated → `delegation
-  closeout` (do not also `advance`). Direct → `advance` (consider `contract
+- **Closeout path depends on direct vs delegated.** The decision verb is pinned in
+  `# Output contract` and the steps in `# Closeout` — delegated → `delegation
+  closeout` (do not also `advance`); direct → `advance` (consider `contract
   create --direct` upfront).
 - **Worktree discipline.** Always `git -C /abs/path <cmd>`; never `cd` into a
   worktree (a single `cd` leaks `pwd` across subsequent Bash calls and lands
