@@ -25,7 +25,7 @@ tasks:
 
     - id: scheduler-core
       title: In-process scheduler with interval + fsnotify triggers
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -52,11 +52,15 @@ tasks:
         watermark logic (per-task in tasks/).
         Reviewer verifies: race detector clean, panic recovery test,
         Stop honors ctx cancellation, fsnotify coalesces rapid events.
+        SHIPPED (coherence 2026-06-25): internal/service/scheduler/
+        (scheduler.go + trigger.go + tests) landed via commit 0a57f0b6
+        ("feat(service): in-process scheduler core") with the SonarCloud
+        follow-up f9ea6632. Marked completed.
       app_type: go-cli
 
     - id: event-bus
       title: In-process pub/sub bus for task → consumer events
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -83,6 +87,12 @@ tasks:
         reads canonical state from sidecars), NO cross-process IPC.
         Reviewer verifies: drop-oldest semantics under back-pressure,
         unsubscribe closes channel cleanly, race detector clean.
+        SHIPPED (coherence 2026-06-25): internal/service/events/
+        (events.go + tests) landed via PR #172 (commits 7cd41916
+        "feat(service): in-process event bus" + 594d0e75 Sonar fix).
+        The shipped surface is Publish(topic, payload) +
+        Subscribe(topic) (<-chan Event, func()) per D4; R2 t04-sse-broker
+        and R5 collection-endpoint bind to it. Marked completed.
       app_type: go-cli
 
     - id: http-server
@@ -311,9 +321,9 @@ tasks:
         command + new surface, MINOR not MAJOR (no public surface removed
         or incompatibly changed).
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        minor is 0.4.0, but resolve from VERSION when this task becomes
-        ready; if another minor ships first, rebase recomputes (0.5.0, etc.).
+        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
+        shipped), so the next minor is 0.5.0; resolve from VERSION when this
+        task becomes ready; if another minor ships first, rebase recomputes.
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, moving the da-service entries out
         of Unreleased. Merge to master fires auto-release.yml (tag + publish).
