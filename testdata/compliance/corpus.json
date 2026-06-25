@@ -1,0 +1,32 @@
+{
+  "notes": [
+    { "id": "owner-alice", "type": "owner", "fields": { "name": "Alice Stone", "team": "Security", "role": "Control Owner" } },
+    { "id": "owner-bob", "type": "owner", "fields": { "name": "Bob Liang", "team": "Compliance", "role": "Risk Owner" } },
+
+    { "id": "pol-access", "type": "policy", "fields": { "version": "3.1", "last_reviewed_at": "2025-01-15", "review_window_days": 365 } },
+    { "id": "pol-retention", "type": "policy", "fields": { "version": "1.4", "last_reviewed_at": "2025-06-01", "review_window_days": 365 } },
+
+    { "id": "reg-soc2-cc6", "type": "regulation", "fields": { "authority": "AICPA SOC2", "version": "2017", "jurisdiction": "us", "effective_date": "2017-05-01" } },
+    { "id": "reg-nist-ac2", "type": "regulation", "fields": { "authority": "NIST 800-53", "version": "rev5", "jurisdiction": "us", "effective_date": "2020-09-23" } },
+
+    { "id": "risk-unauth-access", "type": "risk", "fields": { "severity": "high", "likelihood": "possible", "status": "open", "owner": "owner-bob" } },
+
+    { "id": "ctl-mfa", "type": "control", "fields": { "control_id": "AC-2-MFA", "framework": "SOC2", "status": "effective", "owner": "owner-alice", "derives_from": "pol-access" } },
+    { "id": "ctl-rbac", "type": "control", "fields": { "control_id": "AC-3-RBAC", "framework": "NIST", "status": "effective", "owner": "owner-alice", "derives_from": "pol-access" } },
+    { "id": "ctl-retention", "type": "control", "fields": { "control_id": "DR-1-RETENTION", "framework": "SOC2", "status": "effective", "owner": "owner-bob", "derives_from": "pol-retention" } },
+
+    { "id": "ev-mfa-screenshot", "type": "evidence", "fields": { "artifact_url": "s3://ev/mfa.png", "collected_at": "2025-02-01", "expires_at": "2026-02-01", "type": "screenshot" } },
+    { "id": "ev-rbac-log", "type": "evidence", "fields": { "artifact_url": "s3://ev/rbac.log", "collected_at": "2025-03-01", "expires_at": "2027-03-01", "type": "log" } },
+
+    { "id": "find-mfa-gap", "type": "finding", "fields": { "source": "pentest", "severity": "high", "status": "open", "opened_at": "2026-05-01" } }
+  ],
+  "edges": [
+    { "type": "satisfies", "from": "ctl-mfa", "to": "reg-soc2-cc6" },
+    { "type": "satisfies", "from": "ctl-mfa", "to": "reg-nist-ac2" },
+    { "type": "satisfies", "from": "ctl-rbac", "to": "reg-nist-ac2" },
+    { "type": "mitigates", "from": "ctl-mfa", "to": "risk-unauth-access" },
+    { "type": "cited_by", "from": "ev-mfa-screenshot", "to": "ctl-mfa" },
+    { "type": "cited_by", "from": "ev-rbac-log", "to": "ctl-rbac" },
+    { "type": "affects", "from": "find-mfa-gap", "to": "ctl-mfa" }
+  ]
+}
