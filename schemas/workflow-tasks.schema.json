@@ -62,7 +62,12 @@
             "items": { "type": "string" }
           },
           "verification_required": { "type": "boolean" },
-          "notes": { "type": "string" }
+          "notes": { "type": "string" },
+          "app_type": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Open-vocabulary execution-profile app_type (e.g. go-cli, docs, http-service, meta). Not a closed enum — project-custom and starter profiles both layer in. Matches CanonicalTask.AppType."
+          }
         }
       }
     }
