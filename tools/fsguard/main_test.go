@@ -146,6 +146,37 @@ func TestCheckPackagesSkipsFsopsAndErrors(t *testing.T) {
 	}
 }
 
+// TestCheckPackagesSortsFindings drives the stable-sort comparator: two findings
+// in different files (exercising the relPath-differs branch) plus a same-file
+// pair from one package with two calls (exercising the line tiebreak). The
+// result must come back ordered by relPath then line.
+func TestCheckPackagesSortsFindings(t *testing.T) {
+	zed := parseToPkg(t, modulePath+"/internal/zed",
+		"/src/dot-agents/internal/zed/z.go",
+		srcWithCalls(`"os"`, `_ = os.Mkdir("d", 0)`))
+	abc := parseToPkg(t, modulePath+"/internal/abc",
+		"/src/dot-agents/internal/abc/a.go",
+		srcWithCalls(`"os"`, `_ = os.Mkdir("d", 0)`, `_ = os.Remove("e")`))
+
+	got := checkPackages([]*packages.Package{zed, abc})
+	if len(got) != 3 {
+		t.Fatalf("got %d findings, want 3: %+v", len(got), got)
+	}
+	wantPaths := []string{
+		"internal/abc/a.go",
+		"internal/abc/a.go",
+		"internal/zed/z.go",
+	}
+	for i, want := range wantPaths {
+		if got[i].relPath != want {
+			t.Errorf("finding[%d].relPath = %q, want %q", i, got[i].relPath, want)
+		}
+	}
+	if got[0].line >= got[1].line {
+		t.Errorf("same-file findings not line-ordered: %d then %d", got[0].line, got[1].line)
+	}
+}
+
 // TestAllowed covers the allowlist decision matrix: fsguard's own package is
 // always allowed (so its synthetic-plant tests pass), a precise file:line entry
 // matches exactly, a grandfathered package matches by path, and an unknown
@@ -198,6 +229,9 @@ func TestRelPath(t *testing.T) {
 		"/home/x/dot-agents/internal/agentslock/lockfile.go": "internal/agentslock/lockfile.go",
 		"/tmp/dot-agents-p2/commands/workflow/fs.go":         "commands/workflow/fs.go",
 		"/weird/internal/config/config.go":                   "internal/config/config.go",
+		// Neither the /dot-agents/ marker nor any repo-dir root matches, so the
+		// cleaned absolute path falls through unchanged (the last-resort branch).
+		"/opt/elsewhere/pkg/file.go": "/opt/elsewhere/pkg/file.go",
 	}
 	for in, want := range cases {
 		if got := relPath(in); got != want {
