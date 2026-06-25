@@ -153,3 +153,9 @@ tasks:
         for each shape. Validate the new schemas against existing proposal + lesson artifacts.
         Independent of the skill build and the citation gate; can start immediately. Governed by
         the single-source-per-concern lesson.
+        OWNER RULING 2026-06-25 (meta-loop OQ4 scope expansion): proposals + lessons are
+        first-class refinement-loop artifacts alongside plans + skills, and SCOPED variants are
+        wanted. Both schemas must carry an explicit `scope` discriminator (e.g.
+        global -> ~/.agents/{proposals,lessons}/ vs project-local -> .agents/{proposals,lessons}/,
+        per the proposal-routing rule) so the meta-loop can emit/refine scoped proposals + lessons
+        on the same non-code `docs`-composed profile (meta-loop-operating-model §5A OQ4).
