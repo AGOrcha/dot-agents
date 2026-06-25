@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -323,9 +324,20 @@ func TestReadLessonDoc_ReadErrorWrapped(t *testing.T) {
 }
 
 // TestLoadLessonDocs_ReadDirErrorWrapped exercises the non-NotExist directory
-// read failure: when the lessons path is a file rather than a directory,
-// os.ReadDir fails and the error must be wrapped, not swallowed as empty.
+// read failure: when the lessons path is a regular file rather than a directory,
+// os.ReadDir fails (ENOTDIR, not IsNotExist) and the error must be wrapped, not
+// swallowed as an empty result.
+//
+// Skipped on Windows: Go's Windows os.ReadDir does not return an error for a
+// regular file the way POSIX ENOTDIR does (it succeeds with an empty listing),
+// and the alternative parent-is-a-file path maps to ERROR_PATH_NOT_FOUND, which
+// Windows reports as IsNotExist — so there is no portable trigger for *this*
+// branch on Windows. The branch stays covered on Linux/macOS, and the CI
+// coverage gate enforces a merged multi-OS profile, so per-file coverage holds.
 func TestLoadLessonDocs_ReadDirErrorWrapped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.ReadDir on a regular file is a no-op on Windows; no portable ENOTDIR trigger")
+	}
 	project := withRepoLayer(t, relevanceRepoBody, "")
 	// Make .agents/lessons a file so ReadDir returns a non-NotExist error.
 	if err := os.MkdirAll(filepath.Join(project, ".agents"), 0o755); err != nil {
@@ -334,9 +346,13 @@ func TestLoadLessonDocs_ReadDirErrorWrapped(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, lessonDirName), []byte("not a dir"), 0o644); err != nil {
 		t.Fatalf("write lessons file: %v", err)
 	}
-	if _, err := loadLessonDocs(project); err == nil ||
-		!strings.Contains(err.Error(), "reading lessons directory") {
+	_, err := loadLessonDocs(project)
+	if err == nil || !strings.Contains(err.Error(), "reading lessons directory") {
 		t.Fatalf("loadLessonDocs readdir error = %v", err)
+	}
+	// Guard the intent: the failure must NOT be the IsNotExist swallow path.
+	if os.IsNotExist(err) {
+		t.Fatalf("expected a non-NotExist ReadDir error, got IsNotExist: %v", err)
 	}
 }
 
