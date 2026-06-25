@@ -12,7 +12,15 @@ lessons as first-class scoped nodes, rubric-driven view expansion) ·
 composite `task_key`/`result_key` identity + `plan_id` on task/result; app_type
 provenance + `app_type_profile` node/join edges; raw-vs-derived outcome split;
 operational-knowledge materialization fields; `scope_root` anchor; version/
-content-hash on correlation targets; result→plan anchor for waves; see §5A).
+content-hash on correlation targets; result→plan anchor for waves; see §5A) ·
+**Revised:** 2026-06-25 (schema v4 — cross-harness adversarial pass: spec-edge
+cardinality/direction fixes — `supersedes_spec` one-to-many + `superseded_by_spec`
+inverse, `derives_spec` forward derivation edge with explicit propagation direction,
+`derives_plans` widened to many-to-many; NORMATIVE result→{task|plan} policy
+(removed the stale "no result→plan edge" caveat); scope split into TWO axes
+`placement` vs `origin_scope` (§1.2A) with `in_scope_of` typed for all scoped nodes
+and a one-of requirement on proposal/lesson; `operation_invocation` node + explicit
+rubric enum values; see §5B).
 **Author:** Nikash Prakash
 **Owning spec:** `work-tracking-storage-abstraction/design.md` (§6 open question
 "KG schema for SDD entities + correlation edges"; D1′ tiers; §3A typed views +
@@ -211,7 +219,12 @@ note_types:
       - { name: type,        type: string, required: false }  # [mirror: yaml `type: skill|spec`]
       - { name: action,      type: enum, values: [create, modify, retire], required: false }  # [mirror: yaml `action: create`]
       - { name: target,      type: string, required: false }  # [mirror: yaml `target.installed_at`/`starter_source`]
-      - { name: scope,       type: enum, values: [repo, project, global], required: false }   # [mirror: prose `.md` `**Scope:**` frontmatter; PROPOSED for the canonical `.yaml`] enables SCOPED proposals — the OQ4 goal the §4.3 view-mapping + §1.1 note already claim; was MISSING here (Codex#1)
+      # --- SCOPE: two distinct axes (cross-harness HIGH / OQ4) — see §1.2A ---
+      - { name: placement,     type: enum, values: [project-local, global], required: false }   # [mirror: prose `.md` `**Scope:**` frontmatter; PROPOSED for the canonical `.yaml`] WHERE the proposal is filed, per proposal-routing.md (global `~/.agents/` vs project-local `.agents/`). This is the placement/routing axis — NOT the scoped-KG origin axis.
+      - { name: origin_scope,  type: enum, values: [repo, user, team, org, public], required: false }   # [PROPOSED] WHOSE knowledge this is, on the scoped-KG origin chain (scoped-knowledge-graphs §2.1: repo→user→team→org→public). Distinct axis from `placement`.
+      # ONE-OF REQUIRED (OQ4): a proposal MUST carry `origin_scope` OR `in_scope_of`
+      # (the §2.1 edge to a scope_root) so "which proposals are in scope HERE?" always
+      # has an answer. A proposal with neither is rejected by the build's validation.
       - { name: prose_note,  type: ref<kg_note>, required: false }   # the proposal body / rationale (tier 3). OPTIONAL until the projection link is built (M3).
 
   - name: lesson
@@ -223,9 +236,15 @@ note_types:
       - { name: lesson_id,   type: string, required: true }   # [mirror: frontmatter `name` / dir name]
       - { name: description, type: string, required: true }   # [mirror: frontmatter `description` == index one-liner]
       - { name: type,        type: enum, values: [feedback, pattern, rule], required: false }  # [mirror: frontmatter `type: feedback`]
-      - { name: scope,       type: enum, values: [repo, project, global], required: false }   # [PROPOSED] enables SCOPED lessons (rules: [global, project])
+      # --- SCOPE: two distinct axes (cross-harness HIGH / OQ4) — see §1.2A ---
+      - { name: placement,     type: enum, values: [project-local, global], required: false }   # [mirror: `.agentsrc.json rules: [global, project]` maps onto placement] WHERE the lesson is filed (global `~/.agents/` vs project-local `.agents/`), per proposal-routing.md.
+      - { name: origin_scope,  type: enum, values: [repo, user, team, org, public], required: false }   # [PROPOSED] WHOSE knowledge this lesson is, on the scoped-KG origin chain (scoped-knowledge-graphs §2.1). Distinct axis from `placement`.
+      # ONE-OF REQUIRED (OQ4): a lesson MUST carry `origin_scope` OR `in_scope_of`
+      # (the §2.1 edge to a scope_root) so "which lessons are in scope HERE?" always
+      # resolves. A lesson with neither is rejected by the build's validation.
       # --- operational-knowledge materialization (rubric §4.1 made queryable, Codex#6) ---
-      - { name: rubric_dimensions, type: list<enum>, required: false }   # [PROPOSED] §4.1 dimensions this lesson evidences: [source, lifecycle, scope, provenance, what_only_doing_reveals, surface_vs_path]
+      - { name: rubric_dimensions, type: list<enum>,
+          values: [source, lifecycle, scope, provenance, what_only_doing_reveals, surface_vs_path], required: false }   # [PROPOSED] which §4.1 rubric dimensions this lesson evidences (enum values now declared explicitly, cross-harness MEDIUM)
       - { name: evidence_kind,     type: enum, values: [discovered_by_doing, declared_surface, correction, pattern], required: false }  # [PROPOSED] is this knowable from the file, or only by running the work? (the §4.1 what-only-doing-reveals split)
       - { name: surface_vs_path,   type: enum, values: [declared_surface, exercised_path], required: false }  # [PROPOSED] §4.1 surface-vs-path axis
       - { name: tags,              type: list<string>, required: false }  # [PROPOSED] free tags for cross-cutting query
@@ -240,6 +259,31 @@ note_types:
 > lessons are in scope here?" and "which proposal graduated this spec?"
 > queryable. The `.agentsrc.json` `rules: [global, project]` field
 > [evidence: `.agentsrc.json`] is the existing scope axis these nodes inherit.
+
+### 1.2A Scope is TWO orthogonal axes (placement vs origin) — OQ4
+
+A cross-harness review caught the schema conflating two unrelated scope axes into
+a single `scope: [repo, project, global]` enum. They answer different questions and
+must be modeled separately:
+
+| Axis | Field | Values | Source of truth | Question |
+|---|---|---|---|---|
+| **Placement** | `placement` | `project-local`, `global` | `proposal-routing.md` (global `~/.agents/` vs project-local `.agents/`) | *Where is this artifact filed / routed?* |
+| **Origin** | `origin_scope` | `repo`, `user`, `team`, `org`, `public` | `scoped-knowledge-graphs` §2.1 ordered chain `repo→user→team→org→public` | *Whose knowledge is this — who does it apply to?* |
+
+These are independent: a lesson can be filed `global` (placement) yet have
+`origin_scope: team` (whose knowledge), or filed `project-local` with
+`origin_scope: repo`. Collapsing them lost the distinction proposal-routing and the
+scoped-KG spec each depend on.
+
+**OQ4 one-of rule.** `proposal` and `lesson` nodes (the OQ4 "scoped proposals and
+lessons" ask) **must** carry `origin_scope` OR an `in_scope_of` edge (§2.1) to a
+`scope_root`. Neither-present is invalid. Other scoped nodes (`skill`, `rule`,
+`agent`, `hook`, `app_type_profile`) carry both axes as optional `[PROPOSED]`
+surface and may anchor via `in_scope_of` (§2.1, typed for all of them). `rule` is
+the one node whose `placement` is an on-disk `[mirror]` (`.agentsrc.json
+rules: [global, project]`, where `project` == `project-local`); its `origin_scope`
+is `[PROPOSED]`.
 
 ### 1.2 Operational-view nodes (tier 2: what produced a result)
 
@@ -270,15 +314,17 @@ work reveals + the paths actually exercised*, not the full declared surface).
 
   - name: skill
     fields:
-      - { name: name,       type: string, required: true }          # [mirror: .agentsrc.json `skills[]` entry / SKILL.md dir]
-      - { name: scope,      type: enum, values: [repo, project, global], required: false }  # [PROPOSED] scoped skills
+      - { name: name,         type: string, required: true }          # [mirror: .agentsrc.json `skills[]` entry / SKILL.md dir]
+      - { name: placement,    type: enum, values: [project-local, global], required: false }  # [PROPOSED] WHERE filed (§1.2A placement axis)
+      - { name: origin_scope, type: enum, values: [repo, user, team, org, public], required: false }  # [PROPOSED] WHOSE knowledge (§1.2A origin axis)
       - { name: content_hash, type: string, required: false }       # [PROPOSED] M1 — which skill content a result ran under
       - { name: prose_note, type: ref<kg_note>, required: false }   # SKILL.md
 
   - name: rule
     fields:
       - { name: rule_id,    type: string, required: true }          # [mirror: .agentsrc.json `rules[]` entry: global|project]
-      - { name: scope,      type: enum, values: [global, project], required: false }  # [mirror: rules[] values]
+      - { name: placement,  type: enum, values: [project-local, global], required: false }  # [mirror: `.agentsrc.json rules: [global, project]` — `project` == `project-local`, mapped onto the §1.2A placement axis]
+      - { name: origin_scope, type: enum, values: [repo, user, team, org, public], required: false }  # [PROPOSED] §1.2A origin axis (rule mirrors only placement on disk)
       - { name: content_hash, type: string, required: false }       # [PROPOSED] M1 — pins the rule content version a result fired under (Q3 soundness)
       - { name: prose_note, type: ref<kg_note>, required: false }
 
@@ -294,42 +340,73 @@ work reveals + the paths actually exercised*, not the full declared surface).
       - { name: name,        type: string, required: true }   # [mirror: profile name, e.g. go-http-service]
       - { name: source_id,   type: string, required: false }  # [mirror: §2.5/§7.1 config source-id]
       - { name: version,     type: string, required: false }  # [mirror: §2.3 profile semver]
-      - { name: scope,       type: enum, values: [repo, project, global], required: false }  # [PROPOSED] profiles are scoped via sources/extends
+      - { name: placement,    type: enum, values: [project-local, global], required: false }  # [PROPOSED] §1.2A placement axis — profiles are filed project-local or global (sources/extends)
+      - { name: origin_scope, type: enum, values: [repo, user, team, org, public], required: false }  # [PROPOSED] §1.2A origin axis
       - { name: composes,    type: list<string>, required: false }  # [mirror: §3.2 `composes: [api, batch, streaming]`] composite children (see L1)
 
   - name: agent
     fields:
-      - { name: agent_id, type: string, required: true }            # [PROPOSED] L2 — composite id (scope + name); bare name collides across scopes
+      - { name: agent_id, type: string, required: true }            # [PROPOSED] L2 — composite id (placement + name); bare name collides across placements
       - { name: name, type: string, required: true }                # [mirror: .agentsrc.json `agents[]`, e.g. loop-worker]
-      - { name: scope, type: enum, values: [repo, project, global], required: false }  # [PROPOSED] L2 — agents are as scoped as skills/rules
+      - { name: placement,    type: enum, values: [project-local, global], required: false }  # [PROPOSED] L2 / §1.2A placement axis
+      - { name: origin_scope, type: enum, values: [repo, user, team, org, public], required: false }  # [PROPOSED] §1.2A origin axis
 
   - name: hook
     fields:
-      - { name: hook_id, type: string, required: true }             # [PROPOSED] L2 — composite id (scope + event + name); event+name alone collides across scopes
+      - { name: hook_id, type: string, required: true }             # [PROPOSED] L2 — composite id (placement + event + name); event+name alone collides across placements
       - { name: event, type: string, required: true }               # [mirror: schemas/hook.schema.json event]
       - { name: name,  type: string, required: true }
-      - { name: scope, type: enum, values: [repo, project, global], required: false }  # [PROPOSED] L2 — scope axis for hooks
+      - { name: placement,    type: enum, values: [project-local, global], required: false }  # [PROPOSED] L2 / §1.2A placement axis
+      - { name: origin_scope, type: enum, values: [repo, user, team, org, public], required: false }  # [PROPOSED] §1.2A origin axis
 
   - name: scope_root
-    # H4 (accepted): `scope: project` resolves against WHICH project? Without a
+    # H4 (accepted): `placement: project-local` resolves against WHICH project? Without a
     # scope-root entity the query "which lessons are in scope here?" has no graph
     # answer. proposal-routing.md draws the concrete boundary: global (`~/.agents/`)
-    # vs project-local (`.agents/`). This node is the anchor a scoped node points at.
+    # vs project-local (`.agents/`). This node is the anchor a scoped node's `in_scope_of`
+    # edge (§2.1) points at. A scope_root can anchor EITHER axis: a placement root
+    # (global / project-local filing location) or an origin root (a repo/user/team/org/
+    # public origin in the scoped-KG chain). `axis` disambiguates which one this root is.
     fields:
-      - { name: root_id, type: string, required: true }   # e.g. "global:~/.agents" or "project:<repo>/.agents"
-      - { name: kind,    type: enum, values: [global, project, repo], required: true }   # [mirror: proposal-routing.md global vs project-local boundary]
-      - { name: path,    type: string, required: false }  # the `.agents/` root this scope resolves against
+      - { name: root_id, type: string, required: true }   # e.g. "global:~/.agents", "project-local:<repo>/.agents", or "origin:team:<id>"
+      - { name: axis,    type: enum, values: [placement, origin], required: true }   # [§1.2A] which scope axis this root anchors
+      - { name: kind,    type: enum, values: [project-local, global, repo, user, team, org, public], required: true }   # placement values (project-local|global, per proposal-routing.md) when axis=placement; origin values (repo|user|team|org|public, per scoped-knowledge-graphs §2.1) when axis=origin
+      - { name: path,    type: string, required: false }  # the `.agents/` root this scope resolves against (placement roots)
 
-  # SCOPE-ENUM reconciliation (H4, accepted): the scope axis is INCONSISTENT across
-  # nodes — `rule.scope = [global, project]` (mirrors `.agentsrc.json rules[]` which
-  # only carries those two literal values) vs `lesson/skill/proposal/app_type_profile/
-  # agent/hook.scope = [repo, project, global]`. Rationale for keeping them distinct:
-  # `rule` MIRRORS an on-disk two-value field, so widening it would invent surface;
-  # the others are [PROPOSED] and adopt the full three-value axis. The canonical axis
-  # is [repo, project, global]; `rule` is the documented two-value subset until
-  # `.agentsrc.json` gains a `repo` rule scope. `spec`/`plan`/`task` are flagged as
-  # ALSO scopable (specs/plans are equally global-vs-project per proposal-routing.md)
-  # — adding their scope is deferred to the work-tracking build, not invented here.
+  - name: operation_invocation
+    # OPERATIONAL-PATH node (cross-harness MEDIUM — owner's "specific operational paths"
+    # concern). `surface_vs_path` on result/lesson NAMES that an exercised path exists, but
+    # there was no node for the ACTUAL operation that ran — so "which operations did this
+    # result actually invoke, with what args, to what exit?" had no graph answer. This node
+    # is the materialized exercised path: one row per real invocation of a surface
+    # (CLI command, MCP tool, skill, hook, agent run). It is the concrete instance behind
+    # the rubric's surface-vs-path axis (§4.1) — the surface node (stage_profile/skill/
+    # agent/hook) is the DECLARED surface; this is the PATH actually exercised.
+    fields:
+      - { name: invocation_id, type: string, required: true }   # unique node key for this single invocation
+      - { name: surface_kind,  type: enum, values: [cli_command, mcp_tool, skill, hook, agent, verifier, profile], required: true }   # which kind of surface was exercised
+      - { name: operation_id,  type: string, required: true }   # the specific operation invoked (e.g. "da workflow advance", mcp tool name, skill slug)
+      - { name: args_hash,     type: string, required: false }  # content hash of the invocation args (lets identical invocations be grouped / compared without storing raw args)
+      - { name: exit_status,   type: enum, values: [success, failure, error, timeout, skipped, unknown], required: false }  # how the invocation terminated
+      - { name: evidence_uri,  type: string, required: false }  # pointer to the log/artifact/iter-log line that recorded this invocation
+      - { name: occurred_at,   type: date,   required: false }  # when the invocation ran
+
+  # SCOPE — TWO DISTINCT AXES (cross-harness HIGH / OQ4; supersedes the old single
+  # `scope` reconciliation). The previous draft collapsed two orthogonal axes into one
+  # `scope: [repo, project, global]` enum, which is incoherent: `project`/`global` are a
+  # FILING/PLACEMENT distinction (proposal-routing.md: project-local `.agents/` vs global
+  # `~/.agents/`), whereas `repo` belongs to the scoped-KG ORIGIN chain
+  # (scoped-knowledge-graphs §2.1: repo→user→team→org→public). They are different
+  # questions: "where is it filed?" vs "whose knowledge is it?". This schema now splits
+  # them on every scoped node (see §1.2A):
+  #   - placement:    enum [project-local, global]          — proposal-routing axis (WHERE filed)
+  #   - origin_scope: enum [repo, user, team, org, public]  — scoped-KG axis (WHOSE knowledge)
+  # `rule` is the one exception that MIRRORS an on-disk two-value field
+  # (`.agentsrc.json rules: [global, project]`) — those literal values map onto the
+  # `placement` axis ([global, project-local], with `project` == `project-local`); `rule`
+  # gains `origin_scope` only as [PROPOSED] surface. `spec`/`plan`/`task` are flagged as
+  # ALSO scopable (specs/plans are equally project-local-vs-global per proposal-routing.md)
+  # — adding their scope fields is deferred to the work-tracking build, not invented here.
 ```
 
 ### 1.3 Episodic-view nodes (tier 2: results + history)
@@ -350,7 +427,7 @@ work reveals + the paths actually exercised*, not the full declared surface).
       - { name: result_key,  type: string, required: true }   # COMPOSITE node key = wave (plan id) + "/" + result_id (globally unique)
       - { name: result_id,   type: string, required: true }   # [mirror: iter-log `iteration` (iter-N) / wave-M] PLAN-LOCAL; not unique on its own
       - { name: kind,        type: enum, values: [iteration, wave, fold_back, review, merge_back], required: true }
-      - { name: plan_id,         type: string, required: false }   # [mirror: iter-log `wave` / merge-back `parent_plan_id` / impl-results `Plan:`] provenance metadata (NOT a traversable result→plan edge, §2.2)
+      - { name: plan_id,         type: string, required: false }   # [mirror: iter-log `wave` / merge-back `parent_plan_id` / impl-results `Plan:`] provenance metadata on the result node. The TRAVERSABLE plan anchor is an edge: result_for_task for task-scoped results, result_for_plan for plan-scoped wave/fold_back results (§2.2). plan_id stays as the raw provenance label alongside whichever edge applies.
       - { name: parent_task_key, type: string, required: false }   # COMPOSITE FK to the producing task (plan_id + "/" + task_id); empty for wave/fold_back results that span many tasks (see §2.2 H2 handling)
       # --- outcome: STORE the raw verifier status; DERIVE rollups separately ---
       - { name: outcome,     type: enum, values: [pass, fail, partial, unknown], required: false }  # [mirror: iter-log verifiers[].status EXACTLY — schema enum is pass|fail|partial|unknown]
@@ -359,7 +436,8 @@ work reveals + the paths actually exercised*, not the full declared surface).
       - { name: occurred_at, type: date,  required: true }      # [mirror: iter-log `date`]
       - { name: wave,        type: string, required: false }    # [mirror: iter-log `wave` == active plan id]
       # --- operational-knowledge materialization (rubric §4.1 made queryable) ---
-      - { name: rubric_dimensions, type: list<enum>, required: false }   # [PROPOSED] which §4.1 dimensions this result evidences: [source, lifecycle, scope, provenance, what_only_doing_reveals, surface_vs_path]
+      - { name: rubric_dimensions, type: list<enum>,
+          values: [source, lifecycle, scope, provenance, what_only_doing_reveals, surface_vs_path], required: false }   # [PROPOSED] which §4.1 rubric dimensions this result evidences (enum values now declared explicitly, cross-harness MEDIUM)
       - { name: evidence_kind,     type: enum, values: [failure, win, regression, flake, surface_path_gap], required: false }  # [PROPOSED] what KIND of operational evidence this is (§4.2)
       - { name: surface_vs_path,   type: enum, values: [declared_surface, exercised_path], required: false }  # [PROPOSED] §4.1 surface-vs-path axis — was this the full declared surface or the path actually run?
       - { name: tags,              type: list<string>, required: false }  # [PROPOSED] free tags for cross-cutting query (e.g. "re-dispatch-storm", "buildvcs")
@@ -430,10 +508,16 @@ edge_types:
     # [evidence: spec `config-distribution-model` ⇒ TWO plans: config-v2-migration
     #  AND config-v2-coherence both name it as owning spec in PLAN.yaml; this PR's own
     #  dossier spans 5 owning specs]
-  - { name: derives_plans,   from: spec, to: plan, cardinality: one-to-many }
-    # The forward spec→plan one-to-many, named explicitly. Same evidence as above.
+  - { name: derives_plans,   from: spec, to: plan, cardinality: many-to-many }
+    # CARDINALITY FIX (cross-harness HIGH): this is the inverse of plan_for_spec
+    # (plan→spec, many-to-many), so it MUST be many-to-many too — a one-to-many
+    # derives_plans contradicted plan_for_spec by implying a plan derives from exactly
+    # one spec, while plan_for_spec allows a plan to span >1 spec (THIS PR spans 5 owning
+    # specs). Forward spec→plan: one spec drives many plans AND one plan can serve many
+    # specs. Cardinalities now agree: plan_for_spec (plan→specs, many-to-many) and
+    # derives_plans (spec→plans, many-to-many) are exact inverses.
     # [evidence: also agent-run-scoring-observability-platform proposal records its
-    #  spec was "promoted to a workflow spec + FOUR plans"]
+    #  spec was "promoted to a workflow spec + FOUR plans"; this PR's dossier spans 5 specs]
   - { name: implements_spec, from: task, to: spec, cardinality: many-to-many }   # a task can touch >1 spec; a spec is implemented by many tasks
 
   # --- proposal → spec (a proposal yields one or more specs) ---
@@ -450,21 +534,60 @@ edge_types:
     # L3 (accepted): proposals get revised, so they deserve the same supersedes
     # family the spec↔spec edges (below) have. [parallel to supersedes_spec]
 
-  # --- scope anchoring (H4) ---
-  - { name: in_scope_of,     from: proposal, to: scope_root, cardinality: many-to-one }
-    # also applies from lesson/skill/rule/agent/hook/app_type_profile → scope_root.
-    # This is the edge that answers "which lessons/proposals are in scope HERE?"
-    # against a concrete global (`~/.agents/`) or project (`.agents/`) root.
+  # --- scope anchoring (H4 / OQ4) ---
+  # in_scope_of is typed for EVERY scoped node, not just proposal (cross-harness HIGH).
+  # `from` is the union {proposal, lesson, skill, rule, agent, hook, app_type_profile};
+  # listed per-source so the edge is well-typed for each. Each is many-to-one to a
+  # scope_root. This is the edge that answers "which lessons/proposals/skills/… are in
+  # scope HERE?" against a concrete scope_root (a placement root — global `~/.agents/`
+  # vs project-local `.agents/` — or an origin root on the repo→user→team→org→public
+  # chain). A node satisfies the OQ4 "scoped" requirement by carrying EITHER an
+  # `origin_scope` field OR an `in_scope_of` edge (proposal/lesson require one-of; §1.1).
+  - { name: in_scope_of, from: proposal,         to: scope_root, cardinality: many-to-one }
+  - { name: in_scope_of, from: lesson,           to: scope_root, cardinality: many-to-one }
+  - { name: in_scope_of, from: skill,            to: scope_root, cardinality: many-to-one }
+  - { name: in_scope_of, from: rule,             to: scope_root, cardinality: many-to-one }
+  - { name: in_scope_of, from: agent,            to: scope_root, cardinality: many-to-one }
+  - { name: in_scope_of, from: hook,             to: scope_root, cardinality: many-to-one }
+  - { name: in_scope_of, from: app_type_profile, to: scope_root, cardinality: many-to-one }
 
   # --- spec → spec (was MISSING — added per feedback) ---
-  - { name: supersedes_spec, from: spec, to: spec, cardinality: many-to-one,
+  - { name: supersedes_spec, from: spec, to: spec, cardinality: one-to-many,
       relation: supersedes }
-    # [evidence: scoped-knowledge-graphs/design.md "**Supersedes:** spec.1.md, spec.2.md";
-    #  graph-backend §11 "go-native-code-graph-analysis — superseded-in-part by §11"]
+    # CARDINALITY FIX (cross-harness HIGH): newer-spec → older-spec is ONE-TO-MANY —
+    # a SINGLE newer spec can supersede MANY older ones. The live case is in this very
+    # repo: scoped-knowledge-graphs/design.md "**Supersedes:** spec.1.md, spec.2.md"
+    # supersedes TWO specs at once, which a many-to-one edge cannot represent. Direction
+    # is newer→older. [evidence: scoped-knowledge-graphs/design.md "**Supersedes:**
+    #  spec.1.md, spec.2.md"; graph-backend §11 "go-native-code-graph-analysis —
+    #  superseded-in-part by §11"]
+  - { name: superseded_by_spec, from: spec, to: spec, cardinality: many-to-one,
+      relation: superseded-by }
+    # INVERSE of supersedes_spec (older-spec → newer-replacement), added so the
+    # old→replacement traversal "what replaced spec.1.md?" is expressible. An older spec
+    # is superseded by AT MOST ONE replacement (many-to-one), the exact inverse of the
+    # one-to-many supersedes_spec. The two cardinalities now agree.
   - { name: derived_from_spec, from: spec, to: spec, cardinality: many-to-many,
-      relation: derived-from }
+      relation: derived-from, derivation: true }
+    # DIRECTION FIX (cross-harness HIGH): derivative-spec → source-spec (a derived spec
+    # points AT the base it was derived from). The `derivation: true` flag marks this as a
+    # derivation edge for the scoped-KG staleness propagator (scoped-knowledge-graphs
+    # design.md §2.6 / §4.2, gated per adapter §7.3). CRITICAL — staleness propagates
+    # OUTWARD from a mutated source to its derivatives, so the propagator must REVERSE-
+    # traverse derived_from_spec: a change to a base spec reaches every spec that points
+    # at it via derived_from_spec. (See the companion source→derivative edge `derives_spec`
+    # below for callers that prefer to walk the propagation direction forward.)
     # [evidence: work-tracking-storage-abstraction owns the KG schema sibling of
     #  graph-backend-adapter-contract (this very draft's "Owning spec" header)]
+  - { name: derives_spec, from: spec, to: spec, cardinality: many-to-many,
+      relation: derives, derivation: true }
+    # EXPLICIT FORWARD source→derivative edge (the inverse of derived_from_spec), added so
+    # staleness propagation has an UNAMBIGUOUS forward direction: a mutation on a base spec
+    # walks derives_spec to reach each spec derived from it. Materializing both directions
+    # mirrors the bidirectional-FK convention this schema already adopts (contains_task /
+    # belongs_to_plan, §2.1). Cardinalities agree: derives_spec (source→derivatives,
+    # many-to-many) is the exact inverse of derived_from_spec (derivative→sources,
+    # many-to-many). The propagation direction is now explicit, not inferred.
   - { name: related_spec,    from: spec, to: spec, cardinality: many-to-many,
       relation: related-to }
     # The design.md "**Related:**" frontmatter list, typed.
@@ -484,48 +607,54 @@ These are the edges §3A calls "the feedback loop." A `result` node fans out to
 every operational + semantic node in its working set, making the
 self-improvement loop *queryable* instead of anecdotal.
 
-**Result-edge policy (per maintainer):** `result → spec` **YES**,
-`result → task` **YES**, `result → plan` **conditional** (see H2/M4 below).
+**Result-edge policy (NORMATIVE, per maintainer):** every result anchors to
+exactly ONE of two structural edges by `kind`:
 
-> **H2 / M4 reconciliation (Cursor, accepted).** The original "drop `result→plan`,
-> reach it transitively via `result_for_task→belongs_to_plan`" policy has two holes:
-> (1) a **`wave`/`fold_back` result spans MANY tasks**, so a many-to-one
-> `result_for_task` cannot represent it and the transitive path has no single task
-> to walk — leaving a plan-scoped result with **no structural anchor at all** (H2).
-> (2) The dedup rationale is **inconsistent** (M4): `result→plan` was dropped to
-> avoid "double-tracking the FK," yet §2.1 keeps BOTH `contains_task` (plan→task)
-> and `belongs_to_plan` (task→plan) — the same FK in both directions. Resolution:
-> bidirectional FK edges are accepted as the project's chosen convention (they make
-> traversal symmetric and were added per maintainer feedback), so the same standard
-> applies to results: add an explicit **`result_for_plan`** anchor for `wave`/
-> `fold_back` results (which have no single task), keep `result_for_task` for
-> task-scoped results, and retain `plan_id` on the result node as provenance. This
-> removes the contradiction and gives wave-level results a real anchor.
+- **task-scoped results** (`kind ∈ {iteration, review, merge_back}`) → **`result_for_task`**.
+  The owning plan is reachable transitively via
+  `result --result_for_task--> task --belongs_to_plan--> plan`.
+- **plan-scoped results** (`kind ∈ {wave, fold_back}`) → **`result_for_plan`**.
+  These span MANY tasks, so they have no single producing task to anchor on; the
+  many-to-one `result_for_task` cannot represent them and the transitive path has no
+  single task to walk. `result_for_plan` is their real structural anchor.
+
+`result → spec` is **always YES** (`result_implements`, §2.2). The two result→work
+edges are **mutually exclusive per result** — a result carries `result_for_task`
+XOR `result_for_plan`, never both. `plan_id` on the result node stays as raw
+**provenance metadata** in either case (it is the on-disk label, not the edge).
+
+> **Why both directions are materialized (H2 / M4 reconciliation, Cursor, accepted).**
+> An earlier draft tried to drop `result→plan` and reach the plan only transitively,
+> but that had two holes: (1) a `wave`/`fold_back` result spans MANY tasks, leaving a
+> plan-scoped result with **no structural anchor at all** (H2); (2) the dedup rationale
+> was inconsistent (M4) — §2.1 already keeps BOTH `contains_task` (plan→task) and
+> `belongs_to_plan` (task→plan), the same FK in both directions. Bidirectional FK edges
+> are the project's chosen convention (symmetric traversal), so the same standard applies
+> to results. `result_for_plan` is therefore a NORMATIVE edge for wave/fold_back results,
+> not a deferred caveat.
 >
-> **On-disk caveat (flagged for the build, not contradicted here):** the
-> `merge-back.md` frontmatter literally carries `parent_plan_id`
+> **On-disk grounding:** the `merge-back.md` frontmatter carries `parent_plan_id`
 > [evidence: `…/delegate-merge-back-archive/2026-04-21/smoke-and-precedence-tests/merge-back.md`:
-> `task_id: …`, `parent_plan_id: …`], and `impl-results.md` names a `Plan:`
-> [evidence: `.agents/history/graphstore-concurrency-contract/impl-results.md`].
-> The schema **deliberately does not** materialize a `result → plan` edge: the
-> plan is reachable transitively via `result --result_for_task--> task
-> --belongs_to_plan--> plan`, so a direct edge would double-track the FK and
-> let result-quality be scored against a plan rather than the task/spec that
-> actually produced it. The `parent_plan_id` on disk is retained as *provenance
-> metadata on the result node*, not promoted to a traversable edge.
+> `task_id: …`, `parent_plan_id: …`], `impl-results.md` names a `Plan:`
+> [evidence: `.agents/history/graphstore-concurrency-contract/impl-results.md`], and
+> iter-log carries `wave` (== plan id). These back `result_for_plan` for plan-scoped
+> results and remain as `plan_id` provenance on every result node.
 
 ```yaml
   # result -> semantic (which spec it implemented) — result→spec YES
   - { name: result_implements,      from: result, to: spec, cardinality: many-to-many }
     # [evidence: impl-results.md names `Spec: .agents/workflow/specs/graphstore-concurrency-contract/design.md`]
-  # result -> working (which task produced it) — result→task YES
+  # result -> working (which task produced it) — NORMATIVE for task-scoped results
   - { name: result_for_task,        from: result, to: task, cardinality: many-to-one }
-    # task-scoped results (iteration/review/merge_back). [evidence: iter-log `task_id`; merge-back.md `task_id`]
-  # result -> plan: anchor for WAVE/FOLD_BACK results that span many tasks (H2/M4 fix)
+    # task-scoped results (kind ∈ {iteration, review, merge_back}). [evidence: iter-log
+    # `task_id`; merge-back.md `task_id`]. Owning plan reached transitively via
+    # belongs_to_plan. MUTUALLY EXCLUSIVE with result_for_plan per result.
+  # result -> plan: NORMATIVE anchor for WAVE/FOLD_BACK results that span many tasks
   - { name: result_for_plan,        from: result, to: plan, cardinality: many-to-one }
-    # ONLY for kind ∈ {wave, fold_back} which have no single producing task.
+    # NORMATIVE for kind ∈ {wave, fold_back}, which have no single producing task.
     # [evidence: iter-log `wave` == plan id; merge-back `parent_plan_id`]. Task-scoped
-    # results use result_for_task instead; the two are mutually exclusive per result.
+    # results use result_for_task instead; the two are MUTUALLY EXCLUSIVE per result.
+    # This is the real structural anchor for plan-scoped results — not provenance-only.
 
   # result -> operational (what it ran under)
   - { name: produced_under_profile, from: result, to: stage_profile, cardinality: many-to-many }
@@ -534,6 +663,22 @@ self-improvement loop *queryable* instead of anecdotal.
   - { name: exercised_rule,         from: result, to: rule,          cardinality: many-to-many }
   - { name: ran_agent,              from: result, to: agent,         cardinality: many-to-many }
   - { name: fired_hook,             from: result, to: hook,          cardinality: many-to-many }
+
+  # result -> operation_invocation (the ACTUAL operational paths exercised, §1.2 / §4.2)
+  - { name: invoked_operation,      from: result, to: operation_invocation, cardinality: one-to-many }
+    # a result fans out to every concrete invocation it ran (cli/mcp/skill/hook/agent).
+    # one-to-many: a single result exercises MANY invocations, each invocation belongs to
+    # ONE result. Inverse `invocation_of_result` (below) is the exact many-to-one mirror.
+  - { name: invocation_of_result,   from: operation_invocation, to: result, cardinality: many-to-one }
+    # INVERSE of invoked_operation. Cardinalities agree: invoked_operation (result→
+    # invocations, one-to-many) ⟷ invocation_of_result (invocation→result, many-to-one).
+  # operation_invocation -> the DECLARED surface it exercised (path → surface, §4.1)
+  - { name: invocation_of_surface,  from: operation_invocation, to: code_node, cardinality: many-to-one }
+    # the surface node the invocation exercised. `to` resolves to whichever surface the
+    # `surface_kind` names — stage_profile|skill|rule|agent|hook|app_type_profile (the §1.2
+    # operational nodes) or a CRG code_node for cli_command/mcp_tool surfaces. many-to-one:
+    # many invocations exercise ONE surface; this is the link that makes "which paths of
+    # surface X were actually run?" (the surface-vs-path question) a graph traversal.
 
   # result/plan/task -> app_type_profile (H3 fix: the app_type JOIN, not a dead string)
   - { name: produced_under_profile_ref, from: result, to: app_type_profile, cardinality: many-to-one }
@@ -655,11 +800,16 @@ knowledge is **much broader**. It now includes:
   until a worktree at a sibling path was actually run). [evidence:
   `.agents/lessons/worktree-sibling-path-buildvcs`, `hermetic-env-for-cli-probe-tests`]
 - **Specific operational PATHS (used, not the full surface)** — the rubric's
-  *surface-vs-path* dimension. A `stage_profile`/`skill`/`agent` defines a
-  *surface* (everything it *could* do); the operational view records the
-  **path actually exercised** via the `produced_under_profile` / `exercised_*`
-  edges from real `result` nodes. "Which of the verifier_sequence slugs actually
-  fired and gated?" is a path question, not a surface question.
+  *surface-vs-path* dimension, now MATERIALIZED. A `stage_profile`/`skill`/`agent`
+  defines a *surface* (everything it *could* do); the operational view records the
+  **path actually exercised** as a first-class **`operation_invocation`** node (§1.2)
+  carrying `surface_kind` / `operation_id` / `args_hash` / `exit_status` /
+  `evidence_uri`, linked `result --invoked_operation--> operation_invocation
+  --invocation_of_surface--> <surface>` (§2.2). The coarse `produced_under_profile`
+  / `exercised_*` edges still answer "which surfaces ran"; `operation_invocation`
+  answers the finer "WHICH operation, with what args, to what exit?" — e.g. "which
+  of the verifier_sequence slugs actually fired and gated, and did it pass?" is now a
+  node+edge traversal, not just prose.
 - **Patterns / notes found while working** — `lesson` of `type: pattern`, plus
   `result.prose_note` (merge-back.md narrative is precisely "notes found while
   working"). [evidence: merge-back.md per-task write-up; `CLAUDE.md` "Per-task
@@ -671,14 +821,15 @@ knowledge is **much broader**. It now includes:
 |---|---|---|
 | **working** | mutable in-flight; source=declared YAML; scope=plan | `task`, `plan` (+ `status`/lease/PR/`write_scope`), `proposal` (open/draft), in-flight result state |
 | **semantic** | durable declared definition; read-the-file knowability | `spec`, `proposal` (accepted/graduated), `lesson` (durable rule), `stage_profile` *definition*, rule/skill *definition* |
-| **operational** | routing + path-actually-used + what-doing-reveals | `stage_profile` (routing), `skill`, `rule`, `agent`, `hook`, **`lesson` (operational know-how)**, **failure/win `result`s + the `exercised_*`/`produced_lesson`/`applied_lesson` edges (the paths actually run)** |
+| **operational** | routing + path-actually-used + what-doing-reveals | `stage_profile` (routing), `skill`, `rule`, `agent`, `hook`, **`operation_invocation` (the concrete exercised path)**, **`lesson` (operational know-how)**, **failure/win `result`s + the `exercised_*`/`invoked_operation`/`produced_lesson`/`applied_lesson` edges (the paths actually run)** |
 | **episodic** | append-only history; provenance | `result`, the correlation edges (§2.2), `result_changed` (§2.3) |
 
 `WorkStore` (D3) is the read/write facade over the **working** view; the other
 three are read-oriented services over the same store (§3A). `proposal`,
-`lesson`, `skill`, and `rule` carry a `scope` field (§1) so each view can be
-queried **scoped** (repo / project / global) — the OQ4 "scoped proposals and
-lessons" goal.
+`lesson`, `skill`, and `rule` carry the TWO scope axes (§1.2A) — `placement`
+(`project-local`/`global`) and `origin_scope` (`repo`/`user`/`team`/`org`/
+`public`) — plus optional `in_scope_of` anchoring, so each view can be queried
+**scoped** on either axis — the OQ4 "scoped proposals and lessons" goal.
 
 ---
 
@@ -785,6 +936,24 @@ principle, not fully materialized in this draft, with one-line rationale):
 
 ---
 
+## 5B. Reconciliation — cross-harness adversarial pass (2026-06-25)
+
+A second, cross-harness adversarial review (a different model family) audited the
+edge schema for cardinality/inverse coherence and operational-knowledge depth. Six
+findings accepted; each fix keeps every edge's cardinality in agreement with its
+inverse and every claimed traversal expressible.
+
+| # | Finding | Sev | Fix | Coherence check |
+|---|---|---|---|---|
+| 1 | `supersedes_spec` declared many-to-one, but one spec can supersede MANY (scoped-KG supersedes spec.1+spec.2) | HIGH | `supersedes_spec` → **one-to-many** (newer→older); added inverse **`superseded_by_spec`** many-to-one (older→replacement) | one-to-many ⟷ many-to-one inverse agree |
+| 2 | `derived_from_spec` points derivative→source, but staleness propagates source→derivative, so a base change never reaches derivatives | HIGH | added forward **`derives_spec`** (source→derivative, `derivation: true`); marked `derived_from_spec` `derivation: true`; made scoped-KG §2.6/§4.2 propagation direction explicit (reverse-traverse `derived_from`, or walk inverse `derives`) | both many-to-many inverses; propagation direction fixed in both specs |
+| 3 | `plan_for_spec` many-to-many but inverse `derives_plans` still one-to-many | HIGH | `derives_plans` → **many-to-many** | matches `plan_for_spec` many-to-many inverse |
+| 4 | header/reconciliation restored `result_for_plan`, but a caveat + ledger still said schema does NOT materialize result→plan | HIGH | deleted stale caveat/ledger text; made policy NORMATIVE: task-scoped → `result_for_task`, plan-scoped wave/fold_back → `result_for_plan`, `plan_id` = provenance | mutually-exclusive edges by `kind`; no contradiction remains |
+| 5 | proposal/lesson scope optional + `repo\|project\|global`; scoped-KG origin is `repo→user→team→org→public`; `in_scope_of` typed only from proposal | HIGH | split into TWO axes (§1.2A): `placement [project-local,global]` vs `origin_scope [repo,user,team,org,public]`; required one-of (`origin_scope` OR `in_scope_of`) on proposal+lesson; typed `in_scope_of` for lesson/skill/rule/agent/hook/app_type_profile | placement (proposal-routing) and origin (scoped-KG) are now distinct, non-conflated axes |
+| 6 | `surface_vs_path` names a path but no node for the ACTUAL operation; `rubric_dimensions` had no declared enum values | MEDIUM | added **`operation_invocation`** node (`surface_kind`/`operation_id`/`args_hash`/`exit_status`/`evidence_uri`) + edges `invoked_operation`/`invocation_of_result`/`invocation_of_surface`; declared `rubric_dimensions` enum values on result+lesson | `invoked_operation` one-to-many ⟷ `invocation_of_result` many-to-one inverse agree; surface-vs-path now a traversal |
+
+---
+
 ## 6. Research / evidence ledger (grounding for the adversarial pass)
 
 Every cardinality and "real field" claim above is grounded in one of these
@@ -836,13 +1005,16 @@ ledger.
 - **task→plan FK:** `TASKS.yaml` `plan_id` header + `tasks[]` array;
   `.agents/workflow/plans/loop-discipline-stop-hooks/TASKS.yaml` = 17 tasks under
   one `plan_id`.
-- **result→{spec,task}, NOT plan:** `impl-results.md`
+- **result→spec + result→{task|plan}:** `impl-results.md`
   (`.agents/history/graphstore-concurrency-contract/impl-results.md`) names
   `Plan:` + `Spec:`; `merge-back.md`
   (`…/delegate-merge-back-archive/2026-04-21/smoke-and-precedence-tests/merge-back.md`)
-  carries `task_id` + `parent_plan_id`; iter-log carries `task_id`. The
-  `parent_plan_id`/`Plan:` are kept as provenance metadata on the result node,
-  **not** a traversable `result→plan` edge (§2.2 policy).
+  carries `task_id` + `parent_plan_id`; iter-log carries `task_id` + `wave`. Per the
+  §2.2 NORMATIVE policy: task-scoped results anchor via `result_for_task` (the
+  `task_id`); plan-scoped `wave`/`fold_back` results — which span many tasks and have
+  no single producing task — anchor via the traversable `result_for_plan` edge (the
+  `wave`/`parent_plan_id`). `plan_id` is retained as raw provenance on every result
+  node in both cases.
 
 **Could NOT ground (reported, not invented):**
 
