@@ -96,6 +96,22 @@ must not assume an ephemeral provider).
 - maxNodes Low-1 closed *via the contract*; di-refactor OD-1 closed
   (singleton justified by the provider-owns-concurrency rationale).
 
+## Executor tier vs the `Store` seam (O7 reconciliation)
+
+The graph **executor** ([graph-backend-adapter-contract §2.7](../graph-backend-adapter-contract/design.md#27-the-executor-is-an-architectural-tier-separate-from-the-contract))
+sits *above* this `Store` contract: it owns traversal algorithm, DSL ref-join
+lowering, and namespace-token resolution-at-boundary, and it reads/writes
+*exclusively* through the role-segregated `Store` roles
+(`CodeGraphReader`/`CodeGraphWriter`/`KGNoteStore`/`NoteSymbolLinkStore`/`Closer`)
+— never bypassing them and never opening a backend directly. This `Store`
+provider owns the orthogonal concern of connection/concurrency/bounds (the
+ephemeral→pooled→daemon C-Hybrid swap below). An executor swap (B-tree → CSR)
+and a provider swap (A → B daemon) are **independent**; neither is a contract
+change to the other. The executor tier is single-sourced in adapter-contract
+§2.7 — this note points *up* to it rather than re-specifying it. The shipped
+role definitions live in [`internal/graphstore/CONTRACT.md`](../../../../internal/graphstore/CONTRACT.md)
+([O7](../graph-backend-adapter-contract/open-questions-resolutions.md#o7--graphstore-store-seam-vs-adapter-executor-seam-reconciliation)).
+
 ## Relationship to existing artifacts
 
 - Supersedes the standalone maxNodes follow-up (folds into contract

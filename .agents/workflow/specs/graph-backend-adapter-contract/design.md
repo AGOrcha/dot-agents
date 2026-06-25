@@ -2145,14 +2145,29 @@ source.
 defaults. Re-tune after the first 3 months of TTRPG dogfood data and
 after the compliance-register adapter ships.
 
-### Q2: Cross-adapter view dependency version compatibility
+### Q2: Cross-adapter view dependency version compatibility — RESOLVED (O1, no opt-out)
 
 §10.3's pre-activation check uses the dependent's `reads_from` version
-range to gate dependee upgrades. Open: should dependents be allowed
-to declare `accepts_breaking_changes: true` to opt out of the gate
-(letting the dependee upgrade and accepting view-stale until manual
-rebuild)? Trade-off: faster dependee upgrades vs. potential silent
-breakage. Lean: yes, opt-in only, requires acknowledgement in lockfile.
+range to gate dependee upgrades.
+
+**Resolved per [O1](open-questions-resolutions.md#o1--accepts_breaking_changes-opt-out-vs-the-mechanical-no-ack-cutover-gate)
+(2026-06-23): no `accepts_breaking_changes` opt-out in v1 — the mechanical
+cutover gate is retained.** The earlier *lean* ("yes, opt-in only, requires
+acknowledgement in lockfile") predates the §10.3 hardening and **directly
+contradicts** the ratified mechanical-gate design (§10.1.4 "There is
+intentionally no `da kg view ack-breaking-change`…"; §10.3.2 "no human 'ack'
+step… no operator override"). An opt-out would reintroduce exactly the
+silent-breakage / operator-fatigue failure modes §10.3.2 rejects: a view whose
+compiled form references a removed field cannot fall through (§10.3.3), so
+"accept breaking changes" means "serve errors or nothing until someone
+notices." The opt-out's only legitimate motivator (faster dependee upgrades
+when the dependent is slow) is already served by §10.3.3
+fall-through-to-source-of-truth for the recoverable case; a genuinely broken
+query is precisely the case that *should* block. If post-v1 dogfood shows the
+gate is too rigid, an opt-out can be added as a v1.5 amendment (reversible);
+shipping it and removing it later would be a contract break. This unblocks
+**t5** by removing any need for an `accepts_breaking_changes` lockfile field or
+ack-command surface.
 
 ### Q3: Query result caching across schema migration boundaries
 
@@ -2216,3 +2231,17 @@ edits in §3.1 of the proposal (revised §2.6, §3.1, §7.3, §8.3/§8.4,
 §10 of app-type-profiles) need to be applied as a separate commit.
 This spec is the contract reference; the app-type-profiles edits are
 the wiring.
+
+**Wiring is now an owned task ([O3](open-questions-resolutions.md#o3--the-missing-app-type-profiles-wiring-task),
+ACCEPTED 2026-06-24).** This "separate commit" the note asks for is the
+**`t7-app-type-profiles-wiring`** task in the plan's `TASKS.yaml`
+(`depends_on: [t1]`, `blocks: [release-minor]`): it replaces the closed
+`graph_backend` enum (§1 problem statement) with an adapter-ref resolving via
+sources/extends and pinned in the lockfile (§9). **Coupling note:** t7 and the
+app-type-profiles spec are now coupled to the KG-schema work (O4 +
+[`work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md`](../work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md))
+— the schema models `app_type` as an **open/extensible vocabulary** (free
+string + documented known-starter set), the same surface t7 wires
+(`graph_backend` enum → adapter-ref; `app_type` ref-form resolution). They must
+be developed together so the profile resolver and the graph nodes agree on the
+open-vocabulary contract; do not ratify t7 independently of O4's schema.
