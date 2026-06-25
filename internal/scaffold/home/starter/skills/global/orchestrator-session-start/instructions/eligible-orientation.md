@@ -47,19 +47,7 @@ If `total_eligible == 0`: surface the lock/pause state from `workflow orient` an
 
 ## Stale-status drift check (before announcing the batch)
 
-`workflow eligible` reports tasks by TASKS.yaml `status`, which drifts behind merged PRs after parallel-worker batches. For each task in `max_batch`, spot-check against the forge:
-
-```bash
-gh pr list --state merged --search "<task-id>" --limit 3
-```
-
-If a task's work shipped, do NOT include it in the batch you hand to ISP. Instead, run:
-
-```bash
-da workflow delegation closeout --plan <plan-id> --task <task-id> --decision accept
-```
-
-That step advances status AND archives the delegation artifacts. Do NOT also call `workflow advance` for delegated work.
+`workflow eligible` reports TASKS.yaml `status`, which drifts behind merged PRs after parallel batches. Before you announce a `max_batch`, drop any task whose work already shipped — this is check **0a** of the canonical pre-fanout gate (**`delegation-lifecycle` → `instructions/workflow.md` § 0**); a shipped task gets `workflow delegation closeout --decision accept`, not a batch slot. Spot-check each `max_batch` task with `gh pr list --state merged --search "<task-id>" --limit 3` here so the announced batch is already reconciled.
 
 ## Parallel fanout trigger
 
@@ -86,7 +74,7 @@ For `low` or `none` confidence: skip sidecar loading. Note thin context for the 
 
 ## Validate write_scope against HEAD
 
-Before passing any task in `max_batch` downstream, confirm that every file the proposed `--write-scope` references exists on HEAD, and run a code-graph + `grep -rln '<symbol>\b'` pass for symbol callers to catch test files and cross-package call sites the static plan notes missed. Note any expansion to the orientation summary so ISP's fanout step uses the corrected scope rather than the stale plan-notes one.
+Scope validation (file-exists-on-HEAD, caller walk, coverage-delta forecast) is checks **0b–0d** of the canonical pre-fanout gate (**`delegation-lifecycle` → `instructions/workflow.md` § 0**). Run them per `max_batch` task before passing it downstream, and note any scope expansion in the orientation summary so ISP's fanout step uses the corrected scope, not the stale plan-notes one.
 
 ## Chain to ISP skill
 
