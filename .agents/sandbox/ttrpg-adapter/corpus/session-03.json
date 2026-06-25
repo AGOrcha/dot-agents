@@ -1,0 +1,19 @@
+{
+  "session": { "number": 3, "title": "Court of the Hollow King", "played_at": "2026-01-18" },
+  "notes": [
+    { "id": "loc:hollowcourt", "type": "location", "fields": { "name": "The Hollow Court", "region": "Vael", "kind": "fortress" } },
+    { "id": "char:thane", "type": "character", "fields": { "name": "Thane Morrow", "kind": "npc", "status": "alive", "stated_location": "loc:hollowcourt", "allegiance": "fac:cinder" } },
+    { "id": "evt:s3-audience", "type": "event", "fields": { "summary": "The party seeks an audience with Thane Morrow", "session": 3, "occurred_in": "loc:hollowcourt" } }
+  ],
+  "edges": [
+    { "type": "connects_to", "from": "loc:emberdeep", "to": "loc:hollowcourt" },
+    { "type": "controls", "from": "fac:cinder", "to": "loc:hollowcourt" },
+    { "type": "member_of", "from": "char:thane", "to": "fac:cinder" },
+    { "type": "present_at", "from": "char:mara", "to": "evt:s3-audience" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s3-audience" },
+    { "type": "present_at", "from": "char:thane", "to": "evt:s3-audience" },
+    { "type": "involves", "from": "evt:s3-audience", "to": "char:thane" },
+    { "type": "occurred_at", "from": "evt:s3-audience", "to": "loc:hollowcourt" },
+    { "type": "knows", "from": "char:mara", "to": "char:thane" }
+  ]
+}

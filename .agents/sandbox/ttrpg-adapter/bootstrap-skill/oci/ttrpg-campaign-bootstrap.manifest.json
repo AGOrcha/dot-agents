@@ -1,0 +1,40 @@
+{
+  "_comment": [
+    "OCI image manifest for the Tier 2 ttrpg-campaign-bootstrap skill package",
+    "(graph-backend-adapter-contract §9; external-agent-sources §6 OCI wire).",
+    "SCAFFOLD ONLY: this task delivers the manifest + descriptor, NOT a live",
+    "registry push (Anti-scope: 'do not stand up a live registry'). The sha256",
+    "digests below are placeholders the publish step recomputes from the actual",
+    "layer/config bytes at `da` push time. The artifactType + annotations are",
+    "the contract-stable parts a consumer resolves and digest-pins against."
+  ],
+  "schemaVersion": 2,
+  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+  "artifactType": "application/vnd.dotagents.bootstrap-skill.v1+json",
+  "config": {
+    "mediaType": "application/vnd.dotagents.bootstrap-skill.config.v1+json",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 0
+  },
+  "layers": [
+    {
+      "mediaType": "application/vnd.dotagents.skill.layer.v1.tar+gzip",
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "size": 0,
+      "annotations": {
+        "org.opencontainers.image.title": "ttrpg-campaign-bootstrap",
+        "io.dotagents.skill.entrypoint": "bootstrap.Run"
+      }
+    }
+  ],
+  "annotations": {
+    "org.opencontainers.image.title": "ttrpg-campaign-bootstrap",
+    "org.opencontainers.image.version": "1.0.0",
+    "org.opencontainers.image.description": "Bootstrap skill for the ttrpg graph-backend adapter; parses session-log corpora into scoped KG storage via da-adapter-sdk.",
+    "io.dotagents.adapter.name": "ttrpg",
+    "io.dotagents.adapter.version": "^1.0",
+    "io.dotagents.tier": "2",
+    "io.dotagents.sdk.required": "da-adapter-sdk",
+    "io.dotagents.bootstrap.timeout": "30m"
+  }
+}
