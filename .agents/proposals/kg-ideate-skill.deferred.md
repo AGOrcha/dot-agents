@@ -1,5 +1,11 @@
 # Deferral note: kg-ideate-skill
 
+**PROMOTED 2026-06-25** → spec `.agents/workflow/specs/kg-ideate-skill/design.md` + plan
+`.agents/workflow/plans/kg-ideate-skill/`. The non-citation phases (Phase 1 degraded + Phases
+2–4) are scheduled active now; only the structural-contradiction step stays gated — see the
+plan's `t7-structural-contradiction-traversal` (cross-plan dep on the citation adapter,
+graph-backend-adapter-contract §13.4). This note is retained for the degradation rationale.
+
 **Decision date:** 2026-05-20
 **Re-scoped:** 2026-05-29 — proposal broadened from "KG-grounded spec authoring" to the full
 ideation→execution pipeline (idea/proposal → spec → plan → concurrent staged execution) and

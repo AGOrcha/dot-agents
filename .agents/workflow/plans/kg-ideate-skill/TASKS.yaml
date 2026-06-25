@@ -1,0 +1,161 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+tasks:
+    - id: t1-kg-brief-molecule
+      title: Phase 1 molecule `kg-brief` (degraded-mode capable)
+      status: pending
+      depends_on: []
+      blocks:
+        - t2-spec-scaffold-molecule
+        - t5-orchestrator-compound
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/
+      verification_required: true
+      notes: |-
+        Author the kg-brief molecule + its instruction files (kg-queries.md, corpus-scan.md,
+        context-scan.md) and the briefing-output.md template, per the proposal. CLI-first
+        (`da kg query`), MCP fallback; impact-radius only when topic names code. NOT gated:
+        semantic KG search + research corpus + lessons need no citation adapter. The
+        Contradictions section renders [adapter-absent] when contradicting_claims is missing.
+        Spec ref: kg-ideate-skill design.md D2, D3, D4; proposal Phase 1.
+    - id: t2-spec-scaffold-molecule
+      title: Phase 2 molecule `spec-scaffold` (competing-decisions fallback)
+      status: pending
+      depends_on:
+        - t1-kg-brief-molecule
+      blocks:
+        - t3-plan-scaffold-molecule
+        - t5-orchestrator-compound
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/spec-scaffold/
+      verification_required: true
+      notes: |-
+        Author spec-scaffold + instructions (decision-review.md, gap-conversion.md,
+        contradiction-framing.md, done-criteria.md) and spec-output.md template. Implements
+        the graceful-degradation contract: step 7 ships with the competing-decisions fallback
+        path active; the structural-traversal branch is authored as adapter-conditional but
+        verified end-to-end only by the gated task t7. Respects the spec tier (no file paths /
+        function names / task lists). Spec ref: design.md D3, D6; proposal Phase 2.
+    - id: t3-plan-scaffold-molecule
+      title: Phase 3 molecule `plan-scaffold` (spec->tasks/write-scopes/dep-order)
+      status: pending
+      depends_on:
+        - t2-spec-scaffold-molecule
+      blocks:
+        - t4-staged-execution-handoff-molecule
+        - t5-orchestrator-compound
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/
+      verification_required: true
+      notes: |-
+        Author plan-scaffold + plan-scaffolding.md instruction + plan-output.md template.
+        Implements the mandatory recorded concurrency decision (sequential default;
+        concurrent/folded only when no open questions change ordering/write-scopes). Derives
+        write-scopes from the Phase 1 impact radius. Authors via `da workflow plan create`;
+        never hand-edits task status. Spec ref: design.md D5, D6; proposal Phase 3.
+    - id: t4-staged-execution-handoff-molecule
+      title: Phase 4 molecule `staged-execution-handoff` (no implementation)
+      status: pending
+      depends_on:
+        - t3-plan-scaffold-molecule
+      blocks:
+        - t5-orchestrator-compound
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/staged-execution-handoff/
+      verification_required: true
+      notes: |-
+        Author staged-execution-handoff + execution-handoff.md instruction. Produces the
+        direct-vs-fanout decision and hands briefing + spec + plan into
+        [[orchestrator-session-start]] / [[isp]]; feeds layered-pr-fanout. Emits NO code.
+        Spec ref: design.md Requirement 5; proposal Phase 4.
+    - id: t5-orchestrator-compound
+      title: Compound orchestrator `kg-ideate` (T2, dispatches the four molecules)
+      status: pending
+      depends_on:
+        - t1-kg-brief-molecule
+        - t2-spec-scaffold-molecule
+        - t3-plan-scaffold-molecule
+        - t4-staged-execution-handoff-molecule
+      blocks:
+        - t6-degraded-mode-e2e
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/SKILL.md
+      verification_required: true
+      notes: |-
+        Author the compound SKILL.md: tier: compound, calls: [kg-brief, spec-scaffold,
+        plan-scaffold, staged-execution-handoff], verifier: batch. Owns only brief ->
+        (spec <-> plan fork) -> handoff. Subagent-planning path documented (briefing is
+        self-contained cold-start context). Spec ref: design.md D1.
+    - id: t6-degraded-mode-e2e
+      title: Degraded-mode end-to-end demonstration (graceful-degradation contract)
+      status: pending
+      depends_on:
+        - t5-orchestrator-compound
+      blocks: []
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/
+      verification_required: true
+      notes: |-
+        Demonstrate Requirements 1-2 + 4-5: a full four-phase run on a profile WITHOUT the
+        citation adapter completes; Contradictions renders [adapter-absent]; the spec still
+        resolves competing decisions explicitly; Phase 4 emits no code. This is the
+        ship-now proof that early shipping does not reintroduce the silent-no-op problem.
+        Spec ref: design.md done-criteria 3.
+    # --- GATED: structural-contradiction traversal (the ONLY adapter-gated step) ---
+    - id: t7-structural-contradiction-traversal
+      title: "GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)"
+      status: blocked
+      depends_on:
+        - t2-spec-scaffold-molecule
+        - graph-backend-adapter-contract/t4-crg-dual-read
+      blocks: []
+      owner: AGOrcha
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/kg-ideate/spec-scaffold/instructions/contradiction-framing.md
+        - internal/scaffold/home/starter/skills/global/kg-ideate/spec-scaffold/instructions/kg-queries.md
+      verification_required: true
+      notes: |-
+        GATE: this is the single adapter-gated step. It flips from the competing-decisions
+        fallback to structural traversal ONLY WHEN `dotagents-builtin:graph/citation@^1.0`
+        ships the `contradicting_claims` named query end-to-end (build -> query -> MCP) per
+        graph-backend-adapter-contract design.md §13.4. The cross-plan dependency
+        `graph-backend-adapter-contract/t4-crg-dual-read` represents the citation-adapter
+        implementation wave ("~ graph plan t4, end of impl" per the deferral note); the
+        precise trigger is the §13.4 contradicting_claims named query, not t4 in general.
+        Partial-shipping is fine: if the adapter ships only claims_citing_source /
+        claims_supported_by_source, this stays blocked and the rest of the skill is fully
+        functional via t6's fallback. Verify Requirement 3 once the gate clears:
+        `da graph query contradicting_claims` emits explicit spec decision points.
+        status: blocked until the gate clears (do not advance manually).
+    # --- Cross-cutting: proposal/lesson schema formalization (single-source) ---
+    - id: t8-proposal-lesson-schema-formalization
+      title: Formalize canonical proposal.schema.json + lesson.schema.json (single-source)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: AGOrcha
+      write_scope:
+        - schemas/proposal.schema.json
+        - schemas/lesson.schema.json
+      verification_required: true
+      notes: |-
+        The kg-ideate proposal mirrors a de-facto proposal shape (schema_version, id, status,
+        type, action, target, rationale, content, ...) with NO canonical schema; lessons share
+        the same gap. Create formal schemas/proposal.schema.json + schemas/lesson.schema.json
+        that BOTH the global proposal/lesson system (`.agents/proposals/`, `.agents/lessons/`)
+        AND the KG typed `Proposal` / `Lesson` nodes reference, so there is one source of truth
+        for each shape. Validate the new schemas against existing proposal + lesson artifacts.
+        Independent of the skill build and the citation gate; can start immediately. Governed by
+        the single-source-per-concern lesson.
+        OWNER RULING 2026-06-25 (meta-loop OQ4 scope expansion): proposals + lessons are
+        first-class refinement-loop artifacts alongside plans + skills, and SCOPED variants are
+        wanted. Both schemas must carry an explicit `scope` discriminator (e.g.
+        global -> ~/.agents/{proposals,lessons}/ vs project-local -> .agents/{proposals,lessons}/,
+        per the proposal-routing rule) so the meta-loop can emit/refine scoped proposals + lessons
+        on the same non-code `docs`-composed profile (meta-loop-operating-model §5A OQ4).
