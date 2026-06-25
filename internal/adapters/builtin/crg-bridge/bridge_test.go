@@ -44,6 +44,42 @@ func TestRegisterAndResolveBridge(t *testing.T) {
 	}
 }
 
+// TestRegisterCRGFamily_RegistersBothAndEnforces proves the composite entry
+// registers the kg-native crg adapter and the migration_only mirror and runs
+// the §11.2 enforcement (the CRG family declares no reads_from, so it passes).
+func TestRegisterCRGFamily_RegistersBothAndEnforces(t *testing.T) {
+	reg := registry.New()
+	if err := RegisterCRGFamily(reg); err != nil {
+		t.Fatalf("RegisterCRGFamily: %v", err)
+	}
+	if _, err := reg.Resolve("dotagents-builtin:graph/crg@^1.0"); err != nil {
+		t.Fatalf("resolve crg: %v", err)
+	}
+	if _, err := reg.Resolve("dotagents-builtin:graph/crg-bridge@^0.1"); err != nil {
+		t.Fatalf("resolve crg-bridge: %v", err)
+	}
+}
+
+func TestRegisterCRGFamily_PropagatesCRGRegisterError(t *testing.T) {
+	reg := registry.New()
+	if err := crg.Register(reg); err != nil { // pre-register crg → family's crg.Register collides
+		t.Fatalf("pre-register crg: %v", err)
+	}
+	if err := RegisterCRGFamily(reg); err == nil {
+		t.Fatal("RegisterCRGFamily must propagate a crg registration collision")
+	}
+}
+
+func TestRegisterCRGFamily_PropagatesBridgeRegisterError(t *testing.T) {
+	reg := registry.New()
+	if err := Register(reg); err != nil { // pre-register crg-bridge → family's Register collides
+		t.Fatalf("pre-register crg-bridge: %v", err)
+	}
+	if err := RegisterCRGFamily(reg); err == nil {
+		t.Fatal("RegisterCRGFamily must propagate a crg-bridge registration collision")
+	}
+}
+
 // legacySeed simulates the external Python CRG bridge having already written its
 // state into the kg_crg-bridge namespace. It writes through a bootstrap token
 // for the bridge namespace — the EXTERNAL process, not the adapter (the adapter

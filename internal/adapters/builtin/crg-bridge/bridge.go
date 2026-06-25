@@ -66,6 +66,23 @@ func Register(reg *registry.Registry) error {
 	return reg.Register(New())
 }
 
+// RegisterCRGFamily registers the kg-native crg adapter AND the migration-only
+// crg-bridge mirror, then ENFORCES the §11.2 reads_from rule across the whole
+// registry (registry.EnforceReadsFrom). This is the single correct entry point
+// the built-in graph-backend registration path should use for the CRG family:
+// it guarantees the migration_only gate actually fires at load, so an adapter
+// declaring reads_from a migration_only adapter is rejected rather than loaded.
+// Registering the adapters without this enforcement step leaves the gate inert.
+func RegisterCRGFamily(reg *registry.Registry) error {
+	if err := crg.Register(reg); err != nil {
+		return err
+	}
+	if err := Register(reg); err != nil {
+		return err
+	}
+	return reg.EnforceReadsFrom()
+}
+
 // MirrorSnapshot reads the legacy bridge state back from the mirror namespace
 // (kg_crg-bridge.*) through the Store seam and returns its build snapshot. This
 // is READ-ONLY: the adapter never writes to the namespace. The namespace is

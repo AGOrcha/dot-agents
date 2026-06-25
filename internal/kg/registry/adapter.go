@@ -52,23 +52,51 @@ type ImpactRadius struct {
 	AlgorithmHint string `yaml:"algorithm_hint,omitempty" json:"algorithm_hint,omitempty"`
 }
 
+// MaterializedView is a declared materialized view (spec §8.3). Cross-adapter
+// reads are expressed ONLY through a view's reads_from list — a named query
+// cannot read another namespace. The §11.2 loader rule gates these reads_from
+// declarations against migration_only dependencies.
+type MaterializedView struct {
+	Name      string   `yaml:"name" json:"name"`
+	ReadsFrom []string `yaml:"reads_from,omitempty" json:"reads_from,omitempty"`
+}
+
 // Schema is the declarative adapter schema (spec §4). It captures only the
-// fields the `none` adapter exercises end-to-end; richer fields (queries,
-// materialized_views, env_predicates, planner hints) are added by later
-// tasks in this plan.
+// fields the built-in adapters exercise end-to-end; richer fields (queries,
+// env_predicates, planner hints) are added by later tasks in this plan.
 type Schema struct {
 	Name        string `yaml:"name" json:"name"`
 	Version     string `yaml:"version" json:"version"`
 	Description string `yaml:"description,omitempty" json:"description,omitempty"`
 	// MigrationOnly marks an adapter that exists solely as a temporary
 	// migration surface (spec §11.2, added in v4.2). Long-term adapters must
-	// not declare reads_from against a migration_only adapter; the crg-bridge
-	// adapter sets this true so the loader can reject such dependencies.
-	MigrationOnly    bool         `yaml:"migration_only,omitempty" json:"migration_only,omitempty"`
-	NoteTypes        []NoteType   `yaml:"note_types" json:"note_types"`
-	EdgeTypes        []EdgeType   `yaml:"edge_types" json:"edge_types"`
-	ImpactRadius     ImpactRadius `yaml:"impact_radius" json:"impact_radius"`
-	StalenessDrivers []string     `yaml:"staleness_drivers,omitempty" json:"staleness_drivers,omitempty"`
+	// not declare reads_from against a migration_only adapter; the loader
+	// rejects such dependencies at registration time.
+	MigrationOnly bool       `yaml:"migration_only,omitempty" json:"migration_only,omitempty"`
+	NoteTypes     []NoteType `yaml:"note_types" json:"note_types"`
+	EdgeTypes     []EdgeType `yaml:"edge_types" json:"edge_types"`
+	// MaterializedViews declares the adapter's cross-adapter views (§8.3); each
+	// view's reads_from is gated by the §11.2 rule at load.
+	MaterializedViews []MaterializedView `yaml:"materialized_views,omitempty" json:"materialized_views,omitempty"`
+	ImpactRadius      ImpactRadius       `yaml:"impact_radius" json:"impact_radius"`
+	StalenessDrivers  []string           `yaml:"staleness_drivers,omitempty" json:"staleness_drivers,omitempty"`
+}
+
+// ReadsFrom returns the de-duplicated union of every materialized view's
+// reads_from targets — the full set of adapters this schema declares a
+// cross-adapter dependency on. It is the input the §11.2 load gate validates.
+func (s Schema) ReadsFrom() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range s.MaterializedViews {
+		for _, dep := range v.ReadsFrom {
+			if !seen[dep] {
+				seen[dep] = true
+				out = append(out, dep)
+			}
+		}
+	}
+	return out
 }
 
 // ImpactRequest is the input to an adapter's ImpactRadius operation.
@@ -191,6 +219,45 @@ func (r *Registry) ValidateReadsFrom(dependent string, readsFrom []string) error
 	return r.checkReadsFromLocked(dependent, readsFrom)
 }
 
+// EnforceReadsFrom is the load gate that validates EVERY registered adapter's
+// schema-declared reads_from (the union across its materialized views) against
+// the §11.2 rule, and records the dependency edges so the check is transitive
+// and order-independent. The built-in registration path calls this once after
+// all adapters are registered; a returned error means an adapter declares a
+// forbidden (direct or transitive) dependency on a migration_only adapter and
+// the load is rejected. Without this call the gate is inert — declaring
+// reads_from [crg-bridge] from a long-term adapter would otherwise load.
+func (r *Registry) EnforceReadsFrom() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	names := make([]string, 0, len(r.adapters))
+	for name := range r.adapters {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic error ordering
+	// Pass 1: structural checks (self-ref, unknown dep) + record every edge so
+	// pass 2's transitive walk sees the full graph regardless of sweep order.
+	for _, name := range names {
+		deps := r.adapters[name].Schema().ReadsFrom()
+		if err := r.checkReadsFromEdgesLocked(name, deps); err != nil {
+			return err
+		}
+		if len(deps) > 0 {
+			r.readsFrom[name] = append([]string(nil), deps...)
+		}
+	}
+	// Pass 2: transitive migration_only reachability over the recorded graph.
+	for _, name := range names {
+		if r.isMigrationOnlyLocked(name) {
+			continue // mirrors may read mirrors
+		}
+		if hit := r.reachesMigrationOnlyLocked(r.readsFrom[name]); hit != "" {
+			return fmt.Errorf("registry: adapter %q must not reads_from migration_only adapter %q (spec §11.2)", name, hit)
+		}
+	}
+	return nil
+}
+
 // checkReadsFromLocked enforces the §11.2 rule. The caller holds r.mu.
 //
 //   - A migration_only dependent MAY read migration_only deps (mirrors are not
@@ -200,7 +267,22 @@ func (r *Registry) ValidateReadsFrom(dependent string, readsFrom []string) error
 //   - A non-migration dependent must not reach ANY migration_only adapter, even
 //     transitively through other adapters' recorded reads_from edges.
 func (r *Registry) checkReadsFromLocked(dependent string, readsFrom []string) error {
-	dependentMigration := r.isMigrationOnlyLocked(dependent)
+	if err := r.checkReadsFromEdgesLocked(dependent, readsFrom); err != nil {
+		return err
+	}
+	if r.isMigrationOnlyLocked(dependent) {
+		return nil
+	}
+	if hit := r.reachesMigrationOnlyLocked(readsFrom); hit != "" {
+		return fmt.Errorf("registry: adapter %q must not reads_from migration_only adapter %q (spec §11.2)", dependent, hit)
+	}
+	return nil
+}
+
+// checkReadsFromEdgesLocked runs the per-edge structural checks shared by the
+// single-declaration and whole-registry gates: no self-reference, and every
+// named dependency must be registered. The caller holds r.mu.
+func (r *Registry) checkReadsFromEdgesLocked(dependent string, readsFrom []string) error {
 	for _, name := range readsFrom {
 		if name == dependent {
 			return fmt.Errorf("registry: adapter %q must not reads_from itself", dependent)
@@ -208,12 +290,6 @@ func (r *Registry) checkReadsFromLocked(dependent string, readsFrom []string) er
 		if _, ok := r.adapters[name]; !ok {
 			return fmt.Errorf("registry: adapter %q reads_from unregistered adapter %q", dependent, name)
 		}
-	}
-	if dependentMigration {
-		return nil
-	}
-	if hit := r.reachesMigrationOnlyLocked(readsFrom); hit != "" {
-		return fmt.Errorf("registry: adapter %q must not reads_from migration_only adapter %q (spec §11.2)", dependent, hit)
 	}
 	return nil
 }
