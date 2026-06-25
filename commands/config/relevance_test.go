@@ -506,22 +506,24 @@ func TestBuildRelevanceResult_Filters(t *testing.T) {
 		t.Run(tc.filter, func(t *testing.T) {
 			opts := &runRelevanceOptions{filter: tc.filter, stage: "review"}
 			res := buildRelevanceResult(opts, profile, "go-cli", "flag")
-			if (res.Units != nil) != tc.wantUnits {
-				t.Fatalf("units presence %v want %v", res.Units != nil, tc.wantUnits)
-			}
-			if (res.Topology != nil) != tc.wantTopo {
-				t.Fatalf("topology presence %v want %v", res.Topology != nil, tc.wantTopo)
-			}
-			if (res.Lenses != nil) != tc.wantLens {
-				t.Fatalf("lenses presence %v want %v", res.Lenses != nil, tc.wantLens)
-			}
-			if (res.Graph != nil) != tc.wantGraph {
-				t.Fatalf("graph presence %v want %v", res.Graph != nil, tc.wantGraph)
-			}
+			assertFacetPresence(t, "units", res.Units != nil, tc.wantUnits)
+			assertFacetPresence(t, "topology", res.Topology != nil, tc.wantTopo)
+			assertFacetPresence(t, "lenses", res.Lenses != nil, tc.wantLens)
+			assertFacetPresence(t, "graph", res.Graph != nil, tc.wantGraph)
 			if !res.Matched {
 				t.Fatalf("expected matched=true for go-cli")
 			}
 		})
+	}
+}
+
+// assertFacetPresence checks one facet's presence against the table expectation,
+// keeping the per-case loop body flat (one call per facet rather than an inline
+// if per facet).
+func assertFacetPresence(t *testing.T, facet string, got, want bool) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s presence %v want %v", facet, got, want)
 	}
 }
 
