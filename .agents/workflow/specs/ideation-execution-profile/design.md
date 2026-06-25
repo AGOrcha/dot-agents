@@ -1,6 +1,23 @@
 # Spec: ideation execution profile — verifiers + reviewers + kg-ideate
 
-**Status:** draft (for review) — feeds the `config-relevance-profiles` plan (new task t8), folds into PR #29.
+**Status:** SHIPPED (the `ideation` `execution_profile` entry below is live in
+`.agentsrc.json`). Feeds the `config-relevance-profiles` plan; folded into PR #29.
+
+> **Single-source note (2026-06-25).** The `verifier_sequence` / `lens_set` /
+> topology *model* (the shape of these fields and how routing references the
+> named profiles) is owned by `[[stage-profile-and-routing-consolidation]]`
+> §3 (D2) — this spec does **not** restate it; it only specifies the *ideation
+> app_type's values* within that model. The legacy `verifier_profiles` map this
+> spec was written against has since been **retired into
+> `stage_profiles.verifier`** (same plan, D5); references below are updated to the
+> shipped `stage_profiles` surface.
+>
+> Reconciled vs shipped `.agentsrc.json`: ideation ships exactly as D1–D3, D6
+> describe — `executors: 3`, `verifiers_per_executor: 3`, `reviewers: per_executor`,
+> `verifier_sequence: [schema-check, citation-check, task-schedule]`,
+> `lens_set: [architecture-standards, acceptance-invariants, adversarial]`
+> (`lens_concurrency: parallel`). The three artifact-integrity verifier prompts
+> all shipped.
 **Depends on:** the execution-profile layer (shipped t1–t6) and the `cli-runner` verifier pattern
 (t7) this mirrors. **Forward-references:** the proposed `kg-ideate` skill
 (`.agents/proposals/kg-ideate-skill.yaml`, draft/deferred).
@@ -42,7 +59,8 @@ the task schedule is acyclic and its deps resolve.
   task-schedule]`, `verifiers_per_executor: 3` (one pass per profile — coherent, like go-cli's 2).
   `schema-check` runs **first** (Q1): a structurally invalid artifact can't be citation- or
   DAG-analyzed, so structural validity gates the rest. Each is a new verifier-class profile (prompt
-  + `verifier_profiles` entry), modeled on `cli-runner`/`unit`.
+  + `stage_profiles.verifier` entry — the slug map that retired the legacy `verifier_profiles`,
+  see `[[stage-profile-and-routing-consolidation]]`), modeled on `cli-runner`/`unit`.
 - **D4 — Verifiers orchestrate existing tooling; no new Go.**
   - **`citation-check`** — every reference in the artifact resolves: `[[wikilinks]]`, file paths,
     KGNote IDs, cross-spec/§-proposal refs. Uses `da kg query` and, where the citation adapter is
@@ -78,7 +96,8 @@ the task schedule is acyclic and its deps resolve.
 1. Three prompts under `.agents/prompts/verifiers/` (`citation-check.project.md`,
    `schema-check.project.md`, `task-schedule.project.md`), each mirroring the verifier-prompt
    contract (role boundary / preconditions / commands / result artifact / evidence classification).
-2. `verifier_profiles` gains `citation-check`, `schema-check`, `task-schedule` entries.
+2. `stage_profiles.verifier` (the slug map that retired `verifier_profiles`) gains `citation-check`,
+   `schema-check`, `task-schedule` entries. **(Done — all three are live.)**
 3. The `ideation` `execution_profile` entry is revised per D1–D3, D6.
 4. `docs/CONFIG_RELEVANCE.md` ideation examples updated (verifiers + reviewers, not "no gate").
 5. All resolution/verify checks in §3 pass; config + workflow + internal suites stay green.
@@ -87,8 +106,8 @@ the task schedule is acyclic and its deps resolve.
 
 - **Building the `kg-ideate` skill itself** — separate proposal (draft/deferred). This profile only
   references it; the skill's two-phase implementation is its own work.
-- The first-class **versioned** `verifier_profiles` layer (app-type-profiles §11.4–11.5) — these
-  ship in today's flat map.
+- The first-class **versioned** `stage_profiles.verifier` layer (app-type-profiles §11.4–11.5) —
+  these ship in today's unversioned slug map.
 - A standalone Go command per verifier — they are prompt-driven, like `unit`/`cli-runner`.
 - Deep semantic contradiction detection beyond what the citation adapter ships today.
 

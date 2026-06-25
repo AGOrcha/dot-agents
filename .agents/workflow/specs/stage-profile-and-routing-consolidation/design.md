@@ -1,9 +1,22 @@
 # Spec: stage-profile & routing consolidation — one `StageProfile` primitive + retire `app_type_verifier_map`
 
-**Status:** draft (for review). Supersedes PR #40 (`config-v2-p1c-verifier-source-aware`), whose
-source-aware `PromptFileRef` work is **absorbed** here as the prompt-composition shape inside
+**Status:** SHIPPED (2026-06-22). This spec is now the **canonical owner** of the
+`stage_profiles` primitive and the `execution_profile.topology.verifier_sequence` /
+`lenses.lens_set` routing model — sibling specs (ideation-execution-profile,
+lens-evidence-policy) reference these sections rather than restating the model.
+Supersedes PR #40 (`config-v2-p1c-verifier-source-aware`), whose source-aware
+`PromptFileRef` work is **absorbed** here as the prompt-composition shape inside
 `StageProfile` (nothing from #40 is discarded).
-**Date:** 2026-06-07.
+**Date:** 2026-06-07 (designed) / 2026-06-22 (shipped via the
+`stage-profile-and-routing-consolidation` plan, t1–t6 all `completed`).
+
+> **Coherence note (2026-06-25, reconciled vs shipped `.agentsrc.json`).** The
+> model below shipped as designed, with two reconciliations against the live
+> registry: (a) the live `stage_profiles` populates **only** `verifier` (5 slugs)
+> and `reviewer` (now **4** slugs — see §3) — `executor`/`orchestrator` remain
+> addressable-but-empty per §7 (dispatch deferred); (b) the reviewer set gained a
+> **fourth** lens, `cross-harness-adversarial`, after this spec was first written
+> (shipped PR #149) — folded into §3 below.
 
 ---
 
@@ -45,7 +58,7 @@ now; the legacy keys are deprecated for a later hard cut.
 "stage_profiles": {
   "executor":     { "<slug>": { "label": "…", "prompt_files": [ /* PromptFileRef */ ] } },
   "verifier":     { "unit": {…}, "cli-runner": {…}, "schema-check": {…}, "citation-check": {…}, "task-schedule": {…} },
-  "reviewer":     { "architecture-standards": {…}, "acceptance-invariants": {…}, "adversarial": {…} },
+  "reviewer":     { "architecture-standards": {…}, "acceptance-invariants": {…}, "adversarial": {…}, "cross-harness-adversarial": {…} },
   "orchestrator": { "<slug>": {…} }
 }
 ```
@@ -79,7 +92,8 @@ now; the legacy keys are deprecated for a later hard cut.
   execution_profile.by_app_type[type].topology.verifier_sequence` (creating the `by_app_type` entry
   when absent, only when the new field is unset). Canonical marshal emits **only** the new keys. The
   three legacy keys remain in `agentsRCKnown` as deprecated read aliases (removed in a later cut). The
-  live `.agentsrc.json` (5 verifier + 3 reviewer profiles) and Go testdata/fixtures migrate now.
+  live `.agentsrc.json` (5 verifier + **4** reviewer profiles, the fourth being
+  `cross-harness-adversarial` added post-migration in PR #149) and Go testdata/fixtures migrated.
   - **Open (resolve in plan):** fold at `AgentsRC.UnmarshalJSON` vs an effective-layer helper.
     Effective-layer is safer w.r.t. scope merge (legacy keys may appear at different layers); the
     `app_type_verifier_map` fold in particular spans an untyped (ExtraFields) key and a typed
@@ -124,6 +138,38 @@ now; the legacy keys are deprecated for a later hard cut.
   skill instructions, specs/proposals naming the old keys) — accurate while aliases read; separate commit.
 - Native executor/orchestrator *dispatch* (spawning those stage agents from `stage_profiles`) — this
   spec only makes them addressable; dispatch is the `staged-profile-dispatch-and-return-gate` line.
+
+## 7A. Reviewer-set additions folded post-migration (shipped)
+
+After the consolidation migrated the original three lenses, the reviewer stage
+gained a fourth, registered in the same `stage_profiles.reviewer` map this spec
+owns. These are reconciled against the shipped `.agentsrc.json` registry and
+`internal/scaffold/.../prompts/`:
+
+- **`cross-harness-adversarial`** (PR #149) — an adversarial lens that routes the
+  pass to a *different* agent harness than the one running, discovered on the host
+  by probing PATH (mirrors `internal/platform/cliprobe.go`), excluding the running
+  engine, degrading gracefully to a non-blocking `pass`-with-caveat when no
+  alternate is installed. The machine-active-platform routing contract is the
+  canonical content of `reviewers/cross-harness-adversarial.md` +
+  `references/cross-harness-routing.md` (+ the dot-agents overlay); this spec does
+  not restate it. It is in the live `go-cli` `lens_set`
+  (`[architecture-standards, acceptance-invariants, adversarial, cross-harness-adversarial]`,
+  `lens_concurrency: gated`).
+- The verifier stage's `cli-runner` (built-binary smoke, PR #146) and
+  `citation-check` docs↔code link-integrity enhancement (PR #149) shipped as
+  prompt content under the verifier slugs this spec already enumerates; they are
+  canonical in their prompt files, not here.
+
+**Open idea (not yet a task): a typed worker-self-gate / `pr-ci`/SAST verifier
+profile.** The executor retro (PR #144,
+`delegation-lifecycle/references/executor-prompt-retro.md`) records, as a
+RECOMMENDED-needs-review item, promoting the worker self-gate (the mechanical
+coverage/Sonar/shell-lint/S3776 surface) into a reusable typed verifier stage so
+the worker exits at merge-back and the verifier owns the loop (per
+`[[verifier-owns-ci-watch-shift-left]]`). That would be a new `stage_profiles.verifier`
+slug (`pr-ci`) routed into `topology.verifier_sequence` — additive to this model.
+Tracked as a follow-up; **not** in scope of the shipped consolidation.
 
 ## 8. Relationships
 

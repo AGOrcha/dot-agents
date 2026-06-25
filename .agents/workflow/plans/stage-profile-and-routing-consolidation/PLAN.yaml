@@ -1,7 +1,7 @@
 schema_version: 1
 id: stage-profile-and-routing-consolidation
 title: 'Stage-profile & routing consolidation (supersedes PR #40)'
-status: draft
+status: completed
 summary: Unify verifier_profiles+reviewer_profiles into one StageProfile under stage_profiles (4 stages); retire app_type_verifier_map into execution_profile.topology; read back-compat + migrate + deprecate.
 created_at: "2026-06-07T23:07:12Z"
 updated_at: "2026-06-07T23:51:49Z"
