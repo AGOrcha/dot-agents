@@ -127,3 +127,6 @@ pip-delete-this-directory.txt
 .agents/active/iteration-log/*.score.yaml
 # Per-worktree CRG Python venv symlink (see venv-symlink-into-worktrees lesson) — never commit
 .venv
+
+# terraform plan outputs
+*.tfplan

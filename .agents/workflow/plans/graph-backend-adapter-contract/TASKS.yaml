@@ -63,7 +63,7 @@ tasks:
           review: code review
     - id: t2-compliance-read-only
       title: Compliance register adapter (read-only / stub bootstrap)
-      status: in_progress
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
@@ -149,7 +149,7 @@ tasks:
           extend grammar.
     - id: t4-crg-dual-read
       title: CRG migration — dual-read mode with crg-bridge adapter
-      status: in_progress
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
@@ -408,3 +408,15 @@ tasks:
         an internal backend swap (no consumer-facing change). Merge to master
         fires auto-release.yml.
       app_type: release
+    - id: t9-sdk-materializeview-readsfrom-gate
+      title: Wire reads_from enforcement into SDK.MaterializeView
+      status: pending
+      depends_on:
+        - t4-crg-dual-read
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/sdk/
+      verification_required: true
+      notes: Codex review of t4 (#172) found SDK.MaterializeView accepts arbitrary readsFrom without consulting the registry, so the migration_only reads_from gate (registry.EnforceReadsFrom, wired at load in t4) does not cover the materialized-view path. Wire EnforceReadsFrom (or an equivalent registry consult) into SDK.MaterializeView so a view reading a migration_only adapter is rejected. Add an integration test; mutation-verify the gate.
+      app_type: go-cli
