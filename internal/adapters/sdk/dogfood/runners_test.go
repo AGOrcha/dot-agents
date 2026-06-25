@@ -6,6 +6,11 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 )
 
+// fieldStatedLocation is the character note's stated_location ref field name,
+// hoisted to a const so the literal is declared once (it is read in the bare-
+// ref Q1 and the ref-traversal Q2 runners and their assertions).
+const fieldStatedLocation = "stated_location"
+
 // This file implements the queries.yaml named queries with v1 §5 DSL semantics
 // as Go runners. They stand in for compiled DSL queries (the internal/kg/dsl
 // compiler is a sibling task, not yet built — STATE NOTE in TASKS.yaml). Each
@@ -60,8 +65,8 @@ func runCharacterLocation(t *testing.T, s *sdk.SDK, charID string) []map[string]
 				continue
 			}
 			name, _ := strField(c, "name")
-			loc, _ := strField(c, "stated_location") // bare ref id, no resolution
-			out = append(out, sdk.Row{"name": name, "stated_location": loc})
+			loc, _ := strField(c, fieldStatedLocation) // bare ref id, no resolution
+			out = append(out, sdk.Row{"name": name, fieldStatedLocation: loc})
 		}
 		return out
 	})
@@ -71,8 +76,8 @@ func runCharacterLocation(t *testing.T, s *sdk.SDK, charID string) []map[string]
 	res := make([]map[string]string, 0, len(rows))
 	for _, r := range rows {
 		res = append(res, map[string]string{
-			"name":            r["name"].(string),
-			"stated_location": r["stated_location"].(string),
+			"name":              r["name"].(string),
+			fieldStatedLocation: r[fieldStatedLocation].(string),
 		})
 	}
 	return res
@@ -88,7 +93,7 @@ func runCharactersInRegion(t *testing.T, s *sdk.SDK, region string) []string {
 		idx := noteByID(v)
 		var out []sdk.Row
 		for _, c := range v.NotesByType("character") {
-			locID, ok := strField(c, "stated_location")
+			locID, ok := strField(c, fieldStatedLocation)
 			if !ok { // NULL ref → LEFT JOIN NULL row → fails WHERE → excluded
 				continue
 			}
@@ -126,6 +131,33 @@ func runFactionMembers(t *testing.T, s *sdk.SDK, facID string) []string {
 	return ids(rows)
 }
 
+// bfsMinHops returns, for each node reachable from start within maxHops, the
+// minimum hop count to reach it (extracted from the Q4 runner to keep that
+// runner's query closure flat). adj is the directed adjacency list.
+func bfsMinHops(adj map[string][]string, start string, maxHops int) map[string]int {
+	type qn struct {
+		id  string
+		hop int
+	}
+	best := map[string]int{}
+	queue := []qn{{start, 0}}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.hop >= maxHops {
+			continue
+		}
+		for _, nb := range adj[cur.id] {
+			h := cur.hop + 1
+			if prev, ok := best[nb]; !ok || h < prev {
+				best[nb] = h
+				queue = append(queue, qn{nb, h})
+			}
+		}
+	}
+	return best
+}
+
 // Q4 — variable-length pattern *1..maxHops (§5.1 / T3). BFS over connects_to,
 // recording the MINIMUM hop count to each reachable destination; returns
 // destination + hop_count (no paths-as-objects, §5.2 / T31).
@@ -136,28 +168,8 @@ func runReachableLocations(t *testing.T, s *sdk.SDK, startID string, maxHops int
 		for _, e := range v.EdgesByType("connects_to") {
 			adj[e.From] = append(adj[e.From], e.To)
 		}
-		best := map[string]int{}
-		type qn struct {
-			id  string
-			hop int
-		}
-		queue := []qn{{startID, 0}}
-		for len(queue) > 0 {
-			cur := queue[0]
-			queue = queue[1:]
-			if cur.hop >= maxHops {
-				continue
-			}
-			for _, nb := range adj[cur.id] {
-				h := cur.hop + 1
-				if prev, ok := best[nb]; !ok || h < prev {
-					best[nb] = h
-					queue = append(queue, qn{nb, h})
-				}
-			}
-		}
 		var out []sdk.Row
-		for dest, hop := range best {
+		for dest, hop := range bfsMinHops(adj, startID, maxHops) {
 			out = append(out, sdk.Row{"dest_id": dest, "hop_count": hop})
 		}
 		return out

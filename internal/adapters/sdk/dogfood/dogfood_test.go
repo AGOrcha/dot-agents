@@ -212,7 +212,7 @@ func TestNamedQueriesHardTest(t *testing.T) {
 			t.Fatalf("rows = %v, want %v", rows, want)
 		}
 		for i, w := range want {
-			if rows[i]["name"] != w["name"] || rows[i]["stated_location"] != w["stated_location"] {
+			if rows[i]["name"] != w["name"] || rows[i][fieldStatedLocation] != w[fieldStatedLocation] {
 				t.Fatalf("row %d = %v, want %v", i, rows[i], w)
 			}
 		}

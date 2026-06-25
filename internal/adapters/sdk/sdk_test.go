@@ -1,12 +1,51 @@
 package sdk
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )
 
 // compile-time proof: MemStore satisfies Store.
 var _ Store = (*MemStore)(nil)
+
+// faultStore is a Store whose Notes/Edges/Write calls can be made to fail on
+// demand, so the SDK's error-propagation branches are exercised without
+// crafting an unauthorized token. It composes a MemStore for the success path.
+type faultStore struct {
+	inner        *MemStore
+	failNotes    bool
+	failEdges    bool
+	failWriteOn  string // namespace whose writes fail; "" disables
+	failReadEdge bool   // Edges fails only after a successful Notes (for Query)
+}
+
+var errFault = errors.New("fault")
+
+func (f *faultStore) WriteNotes(token Token, ns string, notes []Note) error {
+	if f.failWriteOn != "" && ns == f.failWriteOn {
+		return errFault
+	}
+	return f.inner.WriteNotes(token, ns, notes)
+}
+
+func (f *faultStore) WriteEdges(token Token, ns string, edges []Edge) error {
+	return f.inner.WriteEdges(token, ns, edges)
+}
+
+func (f *faultStore) Notes(token Token, ns string) ([]Note, error) {
+	if f.failNotes {
+		return nil, errFault
+	}
+	return f.inner.Notes(token, ns)
+}
+
+func (f *faultStore) Edges(token Token, ns string) ([]Edge, error) {
+	if f.failEdges || f.failReadEdge {
+		return nil, errFault
+	}
+	return f.inner.Edges(token, ns)
+}
 
 func TestBootstrapWriteAndQuery(t *testing.T) {
 	store := NewMemStore()
@@ -140,10 +179,109 @@ func TestDeclarePredicateFired(t *testing.T) {
 
 func TestWriteValidatesInput(t *testing.T) {
 	s := For("ttrpg", NewMemStore())
+	// note: empty type (second validateNotes branch) and empty id (first).
 	if err := s.WriteNotes([]Note{{ID: "", Type: "t"}}); err == nil {
 		t.Fatal("empty note id must be rejected")
 	}
+	if err := s.WriteNotes([]Note{{ID: "n", Type: ""}}); err == nil {
+		t.Fatal("empty note type must be rejected")
+	}
+	// edge: empty type (first validateEdges branch) and missing from/to (second).
 	if err := s.WriteEdges([]Edge{{Type: "", From: "a", To: "b"}}); err == nil {
 		t.Fatal("empty edge type must be rejected")
+	}
+	if err := s.WriteEdges([]Edge{{Type: "t", From: "", To: "b"}}); err == nil {
+		t.Fatal("edge missing from must be rejected")
+	}
+	if err := s.WriteEdges([]Edge{{Type: "t", From: "a", To: ""}}); err == nil {
+		t.Fatal("edge missing to must be rejected")
+	}
+}
+
+func TestAdapterName(t *testing.T) {
+	if got := For("ttrpg", NewMemStore()).Adapter(); got != "ttrpg" {
+		t.Fatalf("Adapter() = %q, want ttrpg", got)
+	}
+}
+
+func TestNamespaceViewEdgesByType(t *testing.T) {
+	v := NamespaceView{Edges: []Edge{
+		{Type: "knows", From: "a", To: "b"},
+		{Type: "present_at", From: "a", To: "e"},
+		{Type: "knows", From: "b", To: "c"},
+	}}
+	if got := v.EdgesByType("knows"); len(got) != 2 {
+		t.Fatalf("EdgesByType(knows) = %d edges, want 2", len(got))
+	}
+	if got := v.EdgesByType("none"); got != nil {
+		t.Fatalf("EdgesByType(none) = %v, want nil", got)
+	}
+}
+
+func TestMemStoreNamespaces(t *testing.T) {
+	store := NewMemStore()
+	if got := store.Namespaces(); len(got) != 0 {
+		t.Fatalf("empty store Namespaces = %v, want none", got)
+	}
+	if err := store.WriteNotes(BootstrapToken("b"), "b", []Note{{ID: "n", Type: "t"}}); err != nil {
+		t.Fatalf("seed notes: %v", err)
+	}
+	if err := store.WriteEdges(BootstrapToken("a"), "a", []Edge{{Type: "e", From: "x", To: "y"}}); err != nil {
+		t.Fatalf("seed edges: %v", err)
+	}
+	got := store.Namespaces()
+	if !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Fatalf("Namespaces = %v, want [a b] sorted", got)
+	}
+}
+
+func TestQueryPropagatesNotesError(t *testing.T) {
+	s := For("ttrpg", &faultStore{inner: NewMemStore(), failNotes: true})
+	if _, err := s.Query(func(NamespaceView) []Row { return nil }); err == nil {
+		t.Fatal("Query must propagate a Notes read error")
+	}
+}
+
+func TestQueryPropagatesEdgesError(t *testing.T) {
+	// Notes succeeds, Edges fails — exercises the second Query error branch.
+	s := For("ttrpg", &faultStore{inner: NewMemStore(), failReadEdge: true})
+	if _, err := s.Query(func(NamespaceView) []Row { return nil }); err == nil {
+		t.Fatal("Query must propagate an Edges read error")
+	}
+}
+
+func TestMaterializeViewPropagatesRunnerError(t *testing.T) {
+	s := For("ttrpg", NewMemStore())
+	err := s.MaterializeView("v", nil, func(func(string) ([]Note, error)) ([]Note, error) {
+		return nil, errFault
+	})
+	if err == nil {
+		t.Fatal("MaterializeView must propagate a runner error")
+	}
+}
+
+func TestMaterializeViewPropagatesWriteError(t *testing.T) {
+	// Runner succeeds but the final write to the adapter namespace fails.
+	s := For("ttrpg", &faultStore{inner: NewMemStore(), failWriteOn: "ttrpg"})
+	err := s.MaterializeView("v", nil, func(func(string) ([]Note, error)) ([]Note, error) {
+		return []Note{{ID: "n", Type: "t"}}, nil
+	})
+	if err == nil {
+		t.Fatal("MaterializeView must propagate the persist write error")
+	}
+}
+
+func TestWriteEdgesStoreRejectsUnauthorized(t *testing.T) {
+	store := NewMemStore()
+	// WriteEdges store-level rejection (own-read token cannot write edges).
+	if err := store.WriteEdges(OwnReadToken("a", "q"), "a", []Edge{{Type: "t", From: "x", To: "y"}}); err == nil {
+		t.Fatal("WriteEdges with a read-only token must be rejected")
+	}
+}
+
+func TestEdgesStoreRejectsUnauthorized(t *testing.T) {
+	store := NewMemStore()
+	if _, err := store.Edges(OwnReadToken("a", "q"), "b"); err == nil {
+		t.Fatal("Edges read of an unauthorized namespace must be rejected")
 	}
 }

@@ -301,12 +301,22 @@ func NewMemStore() *MemStore {
 	return &MemStore{notes: map[string][]Note{}, edges: map[string][]Edge{}}
 }
 
+// authorize is the single storage-layer authorization check (§8.2). It returns
+// a uniform error when token does not grant mode on ns, so the four store
+// methods share one rejection message instead of repeating the literal.
+func (m *MemStore) authorize(token Token, ns string, mode Mode) error {
+	if token.authorizes(ns, mode) {
+		return nil
+	}
+	return fmt.Errorf("storage: token issued_for %q does not authorize %s of namespace %q", token.IssuedFor, mode, ns)
+}
+
 // WriteNotes appends notes to ns after token authorization (§8.2 N8: a write to
 // a namespace the token does not grant write on is rejected at the storage
 // layer regardless of token contents).
 func (m *MemStore) WriteNotes(token Token, ns string, notes []Note) error {
-	if !token.authorizes(ns, ModeWrite) {
-		return fmt.Errorf("storage: token issued_for %q does not authorize write to namespace %q", token.IssuedFor, ns)
+	if err := m.authorize(token, ns, ModeWrite); err != nil {
+		return err
 	}
 	m.notes[ns] = append(m.notes[ns], notes...)
 	return nil
@@ -314,8 +324,8 @@ func (m *MemStore) WriteNotes(token Token, ns string, notes []Note) error {
 
 // WriteEdges appends edges to ns after token authorization.
 func (m *MemStore) WriteEdges(token Token, ns string, edges []Edge) error {
-	if !token.authorizes(ns, ModeWrite) {
-		return fmt.Errorf("storage: token issued_for %q does not authorize write to namespace %q", token.IssuedFor, ns)
+	if err := m.authorize(token, ns, ModeWrite); err != nil {
+		return err
 	}
 	m.edges[ns] = append(m.edges[ns], edges...)
 	return nil
@@ -324,8 +334,8 @@ func (m *MemStore) WriteEdges(token Token, ns string, edges []Edge) error {
 // Notes returns ns's notes after token authorization (§8.2 N9: defense in
 // depth — even a valid token is checked per-namespace).
 func (m *MemStore) Notes(token Token, ns string) ([]Note, error) {
-	if !token.authorizes(ns, ModeRead) {
-		return nil, fmt.Errorf("storage: token issued_for %q does not authorize read of namespace %q", token.IssuedFor, ns)
+	if err := m.authorize(token, ns, ModeRead); err != nil {
+		return nil, err
 	}
 	out := make([]Note, len(m.notes[ns]))
 	copy(out, m.notes[ns])
@@ -334,8 +344,8 @@ func (m *MemStore) Notes(token Token, ns string) ([]Note, error) {
 
 // Edges returns ns's edges after token authorization.
 func (m *MemStore) Edges(token Token, ns string) ([]Edge, error) {
-	if !token.authorizes(ns, ModeRead) {
-		return nil, fmt.Errorf("storage: token issued_for %q does not authorize read of namespace %q", token.IssuedFor, ns)
+	if err := m.authorize(token, ns, ModeRead); err != nil {
+		return nil, err
 	}
 	out := make([]Edge, len(m.edges[ns]))
 	copy(out, m.edges[ns])
