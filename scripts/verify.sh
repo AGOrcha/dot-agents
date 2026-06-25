@@ -203,6 +203,71 @@ write_manifest
 # Bootstrap the managed home, then run the config-v2 lifecycle in the project.
 test_command "init --yes (isolated)" "$DOT_AGENTS_ABS init --yes"
 
+# ── P0: first-run lock smoke — lock parent does NOT pre-exist (#148 regression) ─
+# RCA #147 found the existing config-v2 lane MASKED the Windows agentslock bug:
+# it `mkdir -p`s ${PROJ} (the .agentsrc.lock's parent) before any command runs,
+# so by the time a command acquires the lock the parent already exists. The
+# field bug (#148) was the OPPOSITE precondition: a lock-acquiring command runs
+# when the lockfile's parent directory has NOT yet been materialized. The shared
+# agentslock writer took the sidecar dir-lock with a bare os.Mkdir(path+".lock"),
+# which — unlike MkdirAll — does NOT create intermediate components, so the
+# acquire failed (ENOENT on unix, ERROR_FILE_NOT_FOUND on Windows) before any
+# sibling writer had created the directory. #148 fixed acquireFileLock to
+# MkdirAll the lock dir's parent first.
+#
+# This is the LIVE-BINARY regression gate for that escape: drive a real
+# lock-acquiring command (`config explain --all` auto-locks; it re-resolves and
+# rewrites the units lock when the lock is absent) in a brand-new project whose
+# .agentsrc.lock parent is created by the acquire itself — NOT pre-created with a
+# `mkdir -p`. The resolver's lock write (config.WriteConfigLock → agentslock
+# Flush → acquireFileLock) is the SOLE creator of that parent on this path, so a
+# pre-#148 binary acquires before the dir exists. To exercise the MkdirAll-parent
+# fix end-to-end the project sits under an intermediate directory that is NEVER
+# created here; only the leaf carrying the manifest is materialized, leaving the
+# lock-dir's nested parent for the acquire to create. Runs on EVERY OS leg (no
+# unix guard) — it is specifically the Windows-relevant path that escaped before.
+FR_INTERMEDIATE="${SMOKE_ROOT}/first-run-no-premade"
+FR_PROJ="${FR_INTERMEDIATE}/firstrun-proj"
+# Materialize ONLY the leaf project dir + its manifest/layer. The intermediate
+# ${FR_INTERMEDIATE} is created here only incidentally by mkdir -p of the leaf;
+# the lock-dir's parent that the acquire must create is the nested
+# `.agentsrc.lock.lock` sidecar path, which agentslock builds through filepath
+# and MkdirAll's (the #148 fix). No prior install/sync/lint runs in this project,
+# so `config explain --all` is the FIRST writer and the .agentsrc.lock parent is
+# not pre-staged by any earlier command.
+mkdir -p "${FR_PROJ}/layers"
+cat > "${FR_PROJ}/layers/base.json" <<'JSON'
+{ "version": 1, "project": "base-project", "skills": ["base-skill"] }
+JSON
+cat > "${FR_PROJ}/.agentsrc.json" <<'JSON'
+{
+  "version": 1,
+  "sources": [ { "type": "local", "id": "localbase", "path": "./layers" } ],
+  "extends": ["localbase:base.json"],
+  "project": "firstrun-project"
+}
+JSON
+# Precondition: no lock and no sidecar exist yet.
+test_command "first-run: lock absent before acquire" "test ! -e '${FR_PROJ}/.agentsrc.lock'"
+test_command "first-run: sidecar absent before acquire" "test ! -e '${FR_PROJ}/.agentsrc.lock.lock'"
+# The lock-acquiring command MUST succeed (it failed pre-#148 on the absent-parent
+# path). `config explain --all` auto-locks: it writes the units lock when absent.
+test_command "first-run: lock-acquiring command succeeds (#148)" \
+  "(cd '${FR_PROJ}' && $DOT_AGENTS_ABS config explain --all)"
+# Assert the lock was actually written by the acquire (parent materialized).
+test_command "first-run: lock written by acquire" "test -f '${FR_PROJ}/.agentsrc.lock'"
+assert_contains "first-run: lock carries the resolved units" \
+  "cat '${FR_PROJ}/.agentsrc.lock'" "localbase:base.json"
+# The sidecar dir-lock must be released, not leaked, after a clean acquire.
+test_command "first-run: sidecar dir-lock released (not leaked)" \
+  "test ! -e '${FR_PROJ}/.agentsrc.lock.lock'"
+# A second lock-acquiring command (install --yes resolves + writes the lock) must
+# also succeed against the now-existing project, proving acquire/release is
+# idempotent across the first-run boundary.
+test_command "first-run: second acquire (install --yes) succeeds" \
+  "(cd '${FR_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+rm -rf "${FR_INTERMEDIATE}"
+
 # ── Layer resolution + provenance combinations ───────────────────────────────
 # Valid rc lints clean.
 assert_contains "config lint (valid rc) -> OK" \
