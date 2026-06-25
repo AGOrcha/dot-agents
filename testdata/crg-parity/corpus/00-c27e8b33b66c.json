@@ -1,0 +1,1372 @@
+{
+  "commit": "c27e8b33b66c",
+  "symbols": [
+    {
+      "qualified_name": "go.pkg0.sym000",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file0.go",
+      "line_start": 7,
+      "content_hash": "959d87584f63"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym001",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file0.ts",
+      "line_start": 14,
+      "content_hash": "ecb42e0e95c7"
+    },
+    {
+      "qualified_name": "py.pkg2.sym002",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file0.py",
+      "line_start": 21,
+      "content_hash": "a838263ae614"
+    },
+    {
+      "qualified_name": "go.pkg3.sym003",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file0.go",
+      "line_start": 28,
+      "content_hash": "05a2a0102232"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym004",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file0.ts",
+      "line_start": 35,
+      "content_hash": "935450a1b717"
+    },
+    {
+      "qualified_name": "py.pkg0.sym005",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file1.py",
+      "line_start": 42,
+      "content_hash": "06e37bf47e75"
+    },
+    {
+      "qualified_name": "go.pkg1.sym006",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file1.go",
+      "line_start": 49,
+      "content_hash": "785e0c9a79d2"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym007",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file1.ts",
+      "line_start": 56,
+      "content_hash": "13d192913e0a"
+    },
+    {
+      "qualified_name": "py.pkg3.sym008",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file1.py",
+      "line_start": 63,
+      "content_hash": "62dbc1bc8f94"
+    },
+    {
+      "qualified_name": "go.pkg4.sym009",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file1.go",
+      "line_start": 70,
+      "content_hash": "f4580749fb39"
+    },
+    {
+      "qualified_name": "ts.pkg0.sym010",
+      "kind": "Type",
+      "language": "ts",
+      "file_path": "ts/pkg0/file2.ts",
+      "line_start": 77,
+      "content_hash": "5daac0b644a9"
+    },
+    {
+      "qualified_name": "py.pkg1.sym011",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg1/file2.py",
+      "line_start": 84,
+      "content_hash": "e2129c96e872"
+    },
+    {
+      "qualified_name": "go.pkg2.sym012",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg2/file2.go",
+      "line_start": 91,
+      "content_hash": "1bf5cd0c1a4a"
+    },
+    {
+      "qualified_name": "ts.pkg3.sym013",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg3/file2.ts",
+      "line_start": 98,
+      "content_hash": "582311397f46"
+    },
+    {
+      "qualified_name": "py.pkg4.sym014",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg4/file2.py",
+      "line_start": 105,
+      "content_hash": "213cfe422e1e"
+    },
+    {
+      "qualified_name": "go.pkg0.sym015",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file3.go",
+      "line_start": 112,
+      "content_hash": "e6f918f59b9d"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym016",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file3.ts",
+      "line_start": 119,
+      "content_hash": "93d0ad4e61b9"
+    },
+    {
+      "qualified_name": "py.pkg2.sym017",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file3.py",
+      "line_start": 126,
+      "content_hash": "63dfc3524866"
+    },
+    {
+      "qualified_name": "go.pkg3.sym018",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file3.go",
+      "line_start": 133,
+      "content_hash": "2f2c87465ddf"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym019",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file3.ts",
+      "line_start": 140,
+      "content_hash": "07e81880b02b"
+    },
+    {
+      "qualified_name": "py.pkg0.sym020",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file0.py",
+      "line_start": 147,
+      "content_hash": "a5620ff96c8d"
+    },
+    {
+      "qualified_name": "go.pkg1.sym021",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file0.go",
+      "line_start": 154,
+      "content_hash": "7ff96cc6d5bf"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym022",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file0.ts",
+      "line_start": 161,
+      "content_hash": "60adb1bbbbee"
+    },
+    {
+      "qualified_name": "py.pkg3.sym023",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file0.py",
+      "line_start": 168,
+      "content_hash": "7be2333e9289"
+    },
+    {
+      "qualified_name": "go.pkg4.sym024",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file0.go",
+      "line_start": 175,
+      "content_hash": "339fe3f9507f"
+    },
+    {
+      "qualified_name": "ts.pkg0.sym025",
+      "kind": "Type",
+      "language": "ts",
+      "file_path": "ts/pkg0/file1.ts",
+      "line_start": 182,
+      "content_hash": "a4f0c8394b3d"
+    },
+    {
+      "qualified_name": "py.pkg1.sym026",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg1/file1.py",
+      "line_start": 189,
+      "content_hash": "cb8e00ce181b"
+    },
+    {
+      "qualified_name": "go.pkg2.sym027",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg2/file1.go",
+      "line_start": 196,
+      "content_hash": "593d3d11b4c5"
+    },
+    {
+      "qualified_name": "ts.pkg3.sym028",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg3/file1.ts",
+      "line_start": 203,
+      "content_hash": "39a34d2e60ac"
+    },
+    {
+      "qualified_name": "py.pkg4.sym029",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg4/file1.py",
+      "line_start": 210,
+      "content_hash": "e8164707ef6c"
+    },
+    {
+      "qualified_name": "go.pkg0.sym030",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file2.go",
+      "line_start": 217,
+      "content_hash": "8d5a7be2d726"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym031",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file2.ts",
+      "line_start": 224,
+      "content_hash": "6f0565d66564"
+    },
+    {
+      "qualified_name": "py.pkg2.sym032",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file2.py",
+      "line_start": 231,
+      "content_hash": "a7f8541ec5e1"
+    },
+    {
+      "qualified_name": "go.pkg3.sym033",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file2.go",
+      "line_start": 238,
+      "content_hash": "f2ae670d90c8"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym034",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file2.ts",
+      "line_start": 245,
+      "content_hash": "1c27fd8d953d"
+    },
+    {
+      "qualified_name": "py.pkg0.sym035",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file3.py",
+      "line_start": 252,
+      "content_hash": "fd44928b4a6c"
+    },
+    {
+      "qualified_name": "go.pkg1.sym036",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file3.go",
+      "line_start": 259,
+      "content_hash": "d4086e2eabaa"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym037",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file3.ts",
+      "line_start": 266,
+      "content_hash": "0d99eb7a73b7"
+    },
+    {
+      "qualified_name": "py.pkg3.sym038",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file3.py",
+      "line_start": 273,
+      "content_hash": "749400792008"
+    },
+    {
+      "qualified_name": "go.pkg4.sym039",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file3.go",
+      "line_start": 280,
+      "content_hash": "49b086275a09"
+    },
+    {
+      "qualified_name": "ts.pkg0.sym040",
+      "kind": "Type",
+      "language": "ts",
+      "file_path": "ts/pkg0/file0.ts",
+      "line_start": 287,
+      "content_hash": "26328dbd6442"
+    },
+    {
+      "qualified_name": "py.pkg1.sym041",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg1/file0.py",
+      "line_start": 294,
+      "content_hash": "6fbc76429d99"
+    },
+    {
+      "qualified_name": "go.pkg2.sym042",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg2/file0.go",
+      "line_start": 301,
+      "content_hash": "d8ad85042fd1"
+    },
+    {
+      "qualified_name": "ts.pkg3.sym043",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg3/file0.ts",
+      "line_start": 308,
+      "content_hash": "4ff7f9380b3f"
+    },
+    {
+      "qualified_name": "py.pkg4.sym044",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg4/file0.py",
+      "line_start": 315,
+      "content_hash": "3064d7d258ed"
+    },
+    {
+      "qualified_name": "go.pkg0.sym045",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file1.go",
+      "line_start": 322,
+      "content_hash": "4bca5d8cab80"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym046",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file1.ts",
+      "line_start": 329,
+      "content_hash": "1d64fe90db85"
+    },
+    {
+      "qualified_name": "py.pkg2.sym047",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file1.py",
+      "line_start": 336,
+      "content_hash": "40594fe12fcb"
+    },
+    {
+      "qualified_name": "go.pkg3.sym048",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file1.go",
+      "line_start": 343,
+      "content_hash": "31bea418c918"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym049",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file1.ts",
+      "line_start": 350,
+      "content_hash": "17de8413f26e"
+    },
+    {
+      "qualified_name": "py.pkg0.sym050",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file2.py",
+      "line_start": 357,
+      "content_hash": "ab7e1d0d3b1c"
+    },
+    {
+      "qualified_name": "go.pkg1.sym051",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file2.go",
+      "line_start": 364,
+      "content_hash": "2c2c338e2e00"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym052",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file2.ts",
+      "line_start": 371,
+      "content_hash": "540e329b2b0c"
+    },
+    {
+      "qualified_name": "py.pkg3.sym053",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file2.py",
+      "line_start": 378,
+      "content_hash": "cbd437201414"
+    },
+    {
+      "qualified_name": "go.pkg4.sym054",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file2.go",
+      "line_start": 385,
+      "content_hash": "4fc030f9abcc"
+    },
+    {
+      "qualified_name": "ts.pkg0.sym055",
+      "kind": "Type",
+      "language": "ts",
+      "file_path": "ts/pkg0/file3.ts",
+      "line_start": 392,
+      "content_hash": "b323d1e2c1bf"
+    },
+    {
+      "qualified_name": "py.pkg1.sym056",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg1/file3.py",
+      "line_start": 399,
+      "content_hash": "4b3971ebe794"
+    },
+    {
+      "qualified_name": "go.pkg2.sym057",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg2/file3.go",
+      "line_start": 406,
+      "content_hash": "1e32f3aa2fde"
+    },
+    {
+      "qualified_name": "ts.pkg3.sym058",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg3/file3.ts",
+      "line_start": 413,
+      "content_hash": "43ed38f4eda8"
+    },
+    {
+      "qualified_name": "py.pkg4.sym059",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg4/file3.py",
+      "line_start": 420,
+      "content_hash": "6071e78b6329"
+    },
+    {
+      "qualified_name": "go.pkg0.sym060",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file0.go",
+      "line_start": 427,
+      "content_hash": "c06435e87d68"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym061",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file0.ts",
+      "line_start": 434,
+      "content_hash": "ae86f88e856e"
+    },
+    {
+      "qualified_name": "py.pkg2.sym062",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file0.py",
+      "line_start": 441,
+      "content_hash": "62d313b3cb47"
+    },
+    {
+      "qualified_name": "go.pkg3.sym063",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file0.go",
+      "line_start": 448,
+      "content_hash": "8b5820b97630"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym064",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file0.ts",
+      "line_start": 455,
+      "content_hash": "fa571ab79962"
+    },
+    {
+      "qualified_name": "py.pkg0.sym065",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file1.py",
+      "line_start": 462,
+      "content_hash": "1b399f0cb119"
+    },
+    {
+      "qualified_name": "go.pkg1.sym066",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file1.go",
+      "line_start": 469,
+      "content_hash": "90809d4b2a7e"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym067",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file1.ts",
+      "line_start": 476,
+      "content_hash": "a53b5b712081"
+    },
+    {
+      "qualified_name": "py.pkg3.sym068",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file1.py",
+      "line_start": 483,
+      "content_hash": "f4f292c20b13"
+    },
+    {
+      "qualified_name": "go.pkg4.sym069",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file1.go",
+      "line_start": 490,
+      "content_hash": "cf82b84ebef5"
+    },
+    {
+      "qualified_name": "ts.pkg0.sym070",
+      "kind": "Type",
+      "language": "ts",
+      "file_path": "ts/pkg0/file2.ts",
+      "line_start": 497,
+      "content_hash": "510a51763788"
+    },
+    {
+      "qualified_name": "py.pkg1.sym071",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg1/file2.py",
+      "line_start": 504,
+      "content_hash": "3b2efb461405"
+    },
+    {
+      "qualified_name": "go.pkg2.sym072",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg2/file2.go",
+      "line_start": 511,
+      "content_hash": "fcbdb3ff2c6e"
+    },
+    {
+      "qualified_name": "ts.pkg3.sym073",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg3/file2.ts",
+      "line_start": 518,
+      "content_hash": "c185571ddb1b"
+    },
+    {
+      "qualified_name": "py.pkg4.sym074",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg4/file2.py",
+      "line_start": 525,
+      "content_hash": "eb9b1b29afae"
+    },
+    {
+      "qualified_name": "go.pkg0.sym075",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file3.go",
+      "line_start": 532,
+      "content_hash": "65efbd8d032a"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym076",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file3.ts",
+      "line_start": 539,
+      "content_hash": "f0cce60d004c"
+    },
+    {
+      "qualified_name": "py.pkg2.sym077",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file3.py",
+      "line_start": 546,
+      "content_hash": "bca507121a0e"
+    },
+    {
+      "qualified_name": "go.pkg3.sym078",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file3.go",
+      "line_start": 553,
+      "content_hash": "cf2a2e73ae1a"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym079",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file3.ts",
+      "line_start": 560,
+      "content_hash": "4fc226914def"
+    },
+    {
+      "qualified_name": "py.pkg0.sym080",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file0.py",
+      "line_start": 567,
+      "content_hash": "378e69d6ae49"
+    },
+    {
+      "qualified_name": "go.pkg1.sym081",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file0.go",
+      "line_start": 574,
+      "content_hash": "ef3a6571b296"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym082",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file0.ts",
+      "line_start": 581,
+      "content_hash": "da8de2e0c9d2"
+    },
+    {
+      "qualified_name": "py.pkg3.sym083",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file0.py",
+      "line_start": 588,
+      "content_hash": "5e3321552d40"
+    },
+    {
+      "qualified_name": "go.pkg4.sym084",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file0.go",
+      "line_start": 595,
+      "content_hash": "4dddc0587cf4"
+    },
+    {
+      "qualified_name": "ts.pkg0.sym085",
+      "kind": "Type",
+      "language": "ts",
+      "file_path": "ts/pkg0/file1.ts",
+      "line_start": 602,
+      "content_hash": "30e54602710c"
+    },
+    {
+      "qualified_name": "py.pkg1.sym086",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg1/file1.py",
+      "line_start": 609,
+      "content_hash": "a09c3cb41820"
+    },
+    {
+      "qualified_name": "go.pkg2.sym087",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg2/file1.go",
+      "line_start": 616,
+      "content_hash": "b8058175cdf0"
+    },
+    {
+      "qualified_name": "ts.pkg3.sym088",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg3/file1.ts",
+      "line_start": 623,
+      "content_hash": "a3bc997e5ea0"
+    },
+    {
+      "qualified_name": "py.pkg4.sym089",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg4/file1.py",
+      "line_start": 630,
+      "content_hash": "eacedb5cf81c"
+    },
+    {
+      "qualified_name": "go.pkg0.sym090",
+      "kind": "Type",
+      "language": "go",
+      "file_path": "go/pkg0/file2.go",
+      "line_start": 637,
+      "content_hash": "19b32a7b5dc3"
+    },
+    {
+      "qualified_name": "ts.pkg1.sym091",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg1/file2.ts",
+      "line_start": 644,
+      "content_hash": "33f62d8408d2"
+    },
+    {
+      "qualified_name": "py.pkg2.sym092",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg2/file2.py",
+      "line_start": 651,
+      "content_hash": "ca4fe4179120"
+    },
+    {
+      "qualified_name": "go.pkg3.sym093",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg3/file2.go",
+      "line_start": 658,
+      "content_hash": "6ca1edf71d5c"
+    },
+    {
+      "qualified_name": "ts.pkg4.sym094",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg4/file2.ts",
+      "line_start": 665,
+      "content_hash": "6e643290bfa9"
+    },
+    {
+      "qualified_name": "py.pkg0.sym095",
+      "kind": "Type",
+      "language": "py",
+      "file_path": "py/pkg0/file3.py",
+      "line_start": 672,
+      "content_hash": "71ee9d5f63c9"
+    },
+    {
+      "qualified_name": "go.pkg1.sym096",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg1/file3.go",
+      "line_start": 679,
+      "content_hash": "ead12f841260"
+    },
+    {
+      "qualified_name": "ts.pkg2.sym097",
+      "kind": "Function",
+      "language": "ts",
+      "file_path": "ts/pkg2/file3.ts",
+      "line_start": 686,
+      "content_hash": "89a494135762"
+    },
+    {
+      "qualified_name": "py.pkg3.sym098",
+      "kind": "Function",
+      "language": "py",
+      "file_path": "py/pkg3/file3.py",
+      "line_start": 693,
+      "content_hash": "0e7d28f387d4"
+    },
+    {
+      "qualified_name": "go.pkg4.sym099",
+      "kind": "Function",
+      "language": "go",
+      "file_path": "go/pkg4/file3.go",
+      "line_start": 700,
+      "content_hash": "beccf8856d7d"
+    }
+  ],
+  "references": [
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym000",
+      "to": "py.pkg2.sym002"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "go.pkg0.sym000",
+      "to": "go.pkg3.sym003"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym001",
+      "to": "py.pkg2.sym002"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym002",
+      "to": "go.pkg3.sym003"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym003",
+      "to": "ts.pkg4.sym004"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym004",
+      "to": "py.pkg0.sym005"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym005",
+      "to": "ts.pkg2.sym007"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym006",
+      "to": "ts.pkg2.sym007"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym007",
+      "to": "py.pkg3.sym008"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "ts.pkg2.sym007",
+      "to": "ts.pkg0.sym010"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym008",
+      "to": "go.pkg4.sym009"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg4.sym009",
+      "to": "ts.pkg0.sym010"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "ts.pkg0.sym010",
+      "to": "go.pkg2.sym012"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg1.sym011",
+      "to": "go.pkg2.sym012"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg2.sym012",
+      "to": "ts.pkg3.sym013"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg3.sym013",
+      "to": "py.pkg4.sym014"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg4.sym014",
+      "to": "go.pkg0.sym015"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "py.pkg4.sym014",
+      "to": "py.pkg2.sym017"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym015",
+      "to": "py.pkg2.sym017"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym016",
+      "to": "py.pkg2.sym017"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym017",
+      "to": "go.pkg3.sym018"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym018",
+      "to": "ts.pkg4.sym019"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym019",
+      "to": "py.pkg0.sym020"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym020",
+      "to": "ts.pkg2.sym022"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym021",
+      "to": "ts.pkg2.sym022"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "go.pkg1.sym021",
+      "to": "go.pkg4.sym024"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym022",
+      "to": "py.pkg3.sym023"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym023",
+      "to": "go.pkg4.sym024"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg4.sym024",
+      "to": "ts.pkg0.sym025"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "ts.pkg0.sym025",
+      "to": "go.pkg2.sym027"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg1.sym026",
+      "to": "go.pkg2.sym027"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg2.sym027",
+      "to": "ts.pkg3.sym028"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg3.sym028",
+      "to": "py.pkg4.sym029"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "ts.pkg3.sym028",
+      "to": "ts.pkg1.sym031"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg4.sym029",
+      "to": "go.pkg0.sym030"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym030",
+      "to": "py.pkg2.sym032"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym031",
+      "to": "py.pkg2.sym032"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym032",
+      "to": "go.pkg3.sym033"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym033",
+      "to": "ts.pkg4.sym034"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym034",
+      "to": "py.pkg0.sym035"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym035",
+      "to": "ts.pkg2.sym037"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "py.pkg0.sym035",
+      "to": "py.pkg3.sym038"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym036",
+      "to": "ts.pkg2.sym037"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym037",
+      "to": "py.pkg3.sym038"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym038",
+      "to": "go.pkg4.sym039"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg4.sym039",
+      "to": "ts.pkg0.sym040"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "ts.pkg0.sym040",
+      "to": "go.pkg2.sym042"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg1.sym041",
+      "to": "go.pkg2.sym042"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg2.sym042",
+      "to": "ts.pkg3.sym043"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "go.pkg2.sym042",
+      "to": "go.pkg0.sym045"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg3.sym043",
+      "to": "py.pkg4.sym044"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg4.sym044",
+      "to": "go.pkg0.sym045"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym045",
+      "to": "py.pkg2.sym047"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym046",
+      "to": "py.pkg2.sym047"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym047",
+      "to": "go.pkg3.sym048"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym048",
+      "to": "ts.pkg4.sym049"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym049",
+      "to": "py.pkg0.sym050"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "ts.pkg4.sym049",
+      "to": "ts.pkg2.sym052"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym050",
+      "to": "ts.pkg2.sym052"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym051",
+      "to": "ts.pkg2.sym052"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym052",
+      "to": "py.pkg3.sym053"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym053",
+      "to": "go.pkg4.sym054"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg4.sym054",
+      "to": "ts.pkg0.sym055"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "ts.pkg0.sym055",
+      "to": "go.pkg2.sym057"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg1.sym056",
+      "to": "go.pkg2.sym057"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "py.pkg1.sym056",
+      "to": "py.pkg4.sym059"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg2.sym057",
+      "to": "ts.pkg3.sym058"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg3.sym058",
+      "to": "py.pkg4.sym059"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg4.sym059",
+      "to": "go.pkg0.sym060"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym060",
+      "to": "py.pkg2.sym062"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym061",
+      "to": "py.pkg2.sym062"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym062",
+      "to": "go.pkg3.sym063"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym063",
+      "to": "ts.pkg4.sym064"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "go.pkg3.sym063",
+      "to": "go.pkg1.sym066"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym064",
+      "to": "py.pkg0.sym065"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym065",
+      "to": "ts.pkg2.sym067"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym066",
+      "to": "ts.pkg2.sym067"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym067",
+      "to": "py.pkg3.sym068"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym068",
+      "to": "go.pkg4.sym069"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg4.sym069",
+      "to": "ts.pkg0.sym070"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "ts.pkg0.sym070",
+      "to": "go.pkg2.sym072"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "ts.pkg0.sym070",
+      "to": "ts.pkg3.sym073"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg1.sym071",
+      "to": "go.pkg2.sym072"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg2.sym072",
+      "to": "ts.pkg3.sym073"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg3.sym073",
+      "to": "py.pkg4.sym074"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg4.sym074",
+      "to": "go.pkg0.sym075"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym075",
+      "to": "py.pkg2.sym077"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym076",
+      "to": "py.pkg2.sym077"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym077",
+      "to": "go.pkg3.sym078"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "py.pkg2.sym077",
+      "to": "py.pkg0.sym080"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym078",
+      "to": "ts.pkg4.sym079"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym079",
+      "to": "py.pkg0.sym080"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym080",
+      "to": "ts.pkg2.sym082"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym081",
+      "to": "ts.pkg2.sym082"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym082",
+      "to": "py.pkg3.sym083"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym083",
+      "to": "go.pkg4.sym084"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg4.sym084",
+      "to": "ts.pkg0.sym085"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "go.pkg4.sym084",
+      "to": "go.pkg2.sym087"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "ts.pkg0.sym085",
+      "to": "go.pkg2.sym087"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg1.sym086",
+      "to": "go.pkg2.sym087"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg2.sym087",
+      "to": "ts.pkg3.sym088"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg3.sym088",
+      "to": "py.pkg4.sym089"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg4.sym089",
+      "to": "go.pkg0.sym090"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "go.pkg0.sym090",
+      "to": "py.pkg2.sym092"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg1.sym091",
+      "to": "py.pkg2.sym092"
+    },
+    {
+      "kind": "IMPORTS",
+      "from": "ts.pkg1.sym091",
+      "to": "ts.pkg4.sym094"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg2.sym092",
+      "to": "go.pkg3.sym093"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg3.sym093",
+      "to": "ts.pkg4.sym094"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg4.sym094",
+      "to": "py.pkg0.sym095"
+    },
+    {
+      "kind": "TESTED_BY",
+      "from": "py.pkg0.sym095",
+      "to": "ts.pkg2.sym097"
+    },
+    {
+      "kind": "CALLS",
+      "from": "go.pkg1.sym096",
+      "to": "ts.pkg2.sym097"
+    },
+    {
+      "kind": "CALLS",
+      "from": "ts.pkg2.sym097",
+      "to": "py.pkg3.sym098"
+    },
+    {
+      "kind": "CALLS",
+      "from": "py.pkg3.sym098",
+      "to": "go.pkg4.sym099"
+    }
+  ]
+}

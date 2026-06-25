@@ -1,0 +1,13 @@
+# Pinned commits for the CRG dual-read parity corpus (§11.6).
+# 10 deterministic synthetic commits; each corpus/<NN>-<id>.json is the
+# normalized Tree-sitter ingestion both adapters run against.
+c27e8b33b66c
+73b6a272f929
+61429876559b
+0051373a7ff6
+8cd492da38e3
+086153222acf
+06ffa6c0a87d
+3dd7858218ed
+c3525cfbdd45
+78270e6cae04
