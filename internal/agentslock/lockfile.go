@@ -244,13 +244,17 @@ func acquireFileLock(path string) (func(), error) {
 	// missing-parent failure mode. A nil/empty parent (".") MkdirAll is a no-op.
 	lockDir := filepath.Clean(path) + ".lock"
 	if parent := filepath.Dir(lockDir); parent != "." && parent != "" {
-		if err := os.MkdirAll(parent, 0o700); err != nil {
+		if err := fsops.MkdirAll(parent, 0o700); err != nil {
 			return nil, fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
 		}
 	}
 	deadline := time.Now().Add(lockAcquireTimeout)
 	reclaimed := false
 	for {
+		// fsguard:allow os.Mkdir — atomic mkdir-as-lock primitive; see allowlist.go.
+		// The single-component create here is the lock acquisition itself: its
+		// success/EEXIST result is the mutual-exclusion signal. fsops has no
+		// atomic-mkdir-lock equivalent, so this one call stays on raw os.Mkdir.
 		err := os.Mkdir(lockDir, 0o700)
 		if err == nil {
 			writeHolder(lockDir)
@@ -269,7 +273,7 @@ func acquireFileLock(path string) (func(), error) {
 			// can succeed. Ignore the error: if removal fails (e.g. another
 			// writer reclaimed first), we simply fall through to the retry/timeout
 			// path and try again.
-			_ = os.RemoveAll(lockDir)
+			_ = fsops.RemoveAll(lockDir)
 			continue
 		}
 		if time.Now().After(deadline) {
@@ -295,7 +299,7 @@ func debugf(format string, args ...any) {
 // fatal to acquisition.
 func writeHolder(lockDir string) {
 	contents := fmt.Sprintf("%d\n%d\n", os.Getpid(), time.Now().UnixNano())
-	_ = os.WriteFile(filepath.Join(lockDir, holderFile), []byte(contents), 0o600)
+	_ = fsops.WriteFile(filepath.Join(lockDir, holderFile), []byte(contents), 0o600)
 }
 
 // lockIsStale reports whether the existing lock dir should be treated as
@@ -344,7 +348,7 @@ func dirOlderThanTTL(lockDir string) bool {
 // so the failure is surfaced via the package debug channel rather than silently
 // dropped. RemoveAll clears the holder sidecar in the same call.
 func unlockFileLock(lockDir string) {
-	if err := os.RemoveAll(lockDir); err != nil {
+	if err := fsops.RemoveAll(lockDir); err != nil {
 		debugf("agentslock: release lock %s: %v", lockDir, err)
 	}
 }

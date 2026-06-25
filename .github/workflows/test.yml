@@ -196,6 +196,18 @@ jobs:
       - name: Import boundary guard (commands/internal/* cross-leaf)
         run: go run ./tools/importguard ./...
 
+      # Mechanically enforces the leverage-cross-platform-fs-helpers lesson:
+      # filesystem mutations (os.{Mkdir,MkdirAll,Remove,RemoveAll,Rename,
+      # WriteFile}) must route through internal/fsops, which carries the
+      # Windows PowerShell fallbacks a raw os.* call lacks. A raw os.Mkdir
+      # against a missing parent is exactly the #148 Windows bug. Pre-existing
+      # call sites are grandfathered with reasons in tools/fsguard/allowlist.go;
+      # this gate ratchets so a NEW raw mutator in an un-grandfathered package
+      # fails the build. Runs before the coverage gate so the regression can't
+      # ride a green test suite into master.
+      - name: FS-helpers guard (raw os.* fs-mutators outside fsops)
+        run: go run ./tools/fsguard ./...
+
       - name: Go test
         run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="coverage-${{ matrix.os }}.out" ./...
 
