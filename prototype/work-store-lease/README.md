@@ -44,24 +44,37 @@ faithful:
 |---|---|---|
 | `TestHStorm_NaiveLocalStaleRead_ReproducesStorm` | 5 isolated worktrees, **no shared store** → ALL 5 dispatch (deterministic 5/5, the storm) | `ScoutNaive` |
 | `TestHStorm_SharedClaim_PreventsStorm_{TTL,CAS}` | same 5 isolated worktrees + shared store → exactly 1 dispatch; store stats: **attempts=5, grants=1** | `ScoutTTL`/`ScoutCAS` |
+| `TestAntiMutex_TTL_SameMutex_GuardDecidesNotLock` | **same mutex**, guard ON grants 1 vs guard OFF grants 5 — proves the claim guard (not the lock) serializes | `ClaimTTL` guard modes |
+| `TestAntiMutex_CAS_GuardLayers` | same mutex: no-guard=5, version-only=1, full=1 — the CAS version check is the serializer | `ClaimCAS` guard modes |
 | `TestHClaim_ExactlyOneWinner{TTL,CAS}` | 16 isolated worktrees, 1200 iters under `-race` → 1 dispatch, store grants 1 | both |
 | `TestHTtl_DeadHolderReclaimableUnderTTL` | dead holder's lease expires → another worktree reclaims, no deadlock | `ScoutTTL` |
 | `TestHTtl_CASWedgesOnDeadHolder` | **failure mode** — CAS (no expiry) wedges forever | `ScoutCAS` |
 | `TestHConflict_*` | backend-status + local-content merge; mutation-sensitive to ownership flip | `Merge` |
 | `TestFinding_*` | re-validates the design findings (terminal/blocked/fencing) against the model | `Merge` + `CompleteFenced` |
 
-### Why the contention is shared-store-mediated, not mutex-trivial
+### Why the contention is shared-store-mediated, not mutex-trivial (EXECUTABLE)
 
-The decisive mutation: **keep the mutex, remove the store's claim guard** (`ttlClaimable` /
-the CAS version+status checks). The mutex still serializes the goroutines, but the store then
-**grants all 5** → `TestHStorm_SharedClaim_PreventsStorm` fails with "storm leaked, got 5".
-So the serialization that prevents the storm is the **claim decision inside the store**, not
-the lock. Conversely, the negative control touches no shared object at all yet still storms —
-proving the bug and its fix both live at the coordination layer, not in goroutine scheduling.
+This is proven by `TestAntiMutex_*` (`antimutex_test.go`), not just described. The store has a
+`guard guardMode` flag; **every mode still takes `s.mu`**, so the lock is held constant and
+only the claim DECISION varies. The same 5-isolated-worktree wave runs through each mode in
+one `-race` run:
 
-CAS specifically: removing BOTH CAS guards → storm leaks (got 5); keeping ONLY the version
-guard → still serializes. The version check is load-bearing precisely *because* isolated
-worktrees carry stale local versions, so only one scout's expected-version matches.
+- **TTL** (`TestAntiMutex_TTL_SameMutex_GuardDecidesNotLock`): guarded (`guardFull`) grants
+  **1**; the same-mutex unguarded store (`guardNone`) grants **5** — the storm leaks straight
+  through the lock. Same `sync.Mutex`, opposite outcome ⇒ the serializer is the claim guard,
+  not the lock.
+- **CAS** (`TestAntiMutex_CAS_GuardLayers`): `guardNone` grants **5**; `guardCASVersion`
+  (version check only) grants **1**; `guardFull` grants **1**. The version check is
+  load-bearing precisely because isolated worktrees carry stale local versions, so only one
+  scout's expected-version matches the store.
+
+Observed in-run: `guarded grants=1, unguarded grants=5` (TTL); `guardNone=5, versionOnly=1,
+guardFull=1` (CAS). The test is itself mutation-verified — forcing the unguarded store to
+apply the guard anyway makes it grant 1, and the contrast assertion then fails.
+
+Conversely, the negative control (`ScoutNaive`) touches no shared object at all yet still
+storms — so the bug and its fix both live at the coordination layer, not in goroutine
+scheduling.
 
 ## Findings — measured against the FAITHFUL model
 
@@ -72,9 +85,10 @@ worktrees carry stale local versions, so only one scout's expected-version match
 | **H-ttl** (dead holder) | CAS: wedged forever (0 reclaims) | TTL: reclaims after expiry, no deadlock |
 | **H-conflict** | flip ownership table → outcome inverts (test fails) | backend-status + local-content kept |
 
-Mutation checks (all on the **production path**, all falsify the right proof): remove the
-store claim guard → storm leaks despite the mutex; flip `status` ownership → H-conflict
-fails; lease never expires → H-ttl reclaim fails; drop the version fence → fencing test fails.
+Mutation checks (all on the **production path**, all falsify the right proof): the
+anti-mutex contrast is itself an executed test (guard off → 5 grants through the same lock);
+flip `status` ownership → H-conflict fails; lease never expires → H-ttl reclaim fails; drop
+the version fence → fencing test fails.
 
 ## What this DOES and does NOT prove
 

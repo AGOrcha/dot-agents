@@ -116,11 +116,37 @@ type Store struct {
 	tasks         map[string]*Task
 	claimAttempts int64 // total Claim* calls that reached the store
 	claimGrants   int64 // Claim* calls the store granted (must be 1 per task race)
+
+	// guard selects which claim-admission checks ClaimTTL/ClaimCAS apply. It
+	// exists for ONE purpose: the anti-mutex proof (TestAntiMutex_*). Every mode
+	// still takes the mutex and bumps instrumentation, so the lock is held
+	// constant across modes; only the claim DECISION varies. With the guard off
+	// the same mutex that serializes goroutines grants EVERY claim — proving,
+	// in-run, that the storm is prevented by the claim decision, not the lock.
+	// Production stores always use guardFull (the New() default).
+	guard guardMode
 }
 
-// New returns an empty Store.
+// guardMode enumerates the claim-admission checks, used by the anti-mutex proof
+// to hold the mutex constant while varying the decision logic.
+type guardMode int
+
+const (
+	guardFull       guardMode = iota // real behaviour: all checks applied
+	guardNone                        // skip ALL checks: every claim granted (storm leaks)
+	guardCASVersion                  // CAS: apply ONLY the version check, skip the status check
+)
+
+// New returns an empty Store with the FULL claim guard (the real behaviour).
 func New() *Store {
-	return &Store{tasks: make(map[string]*Task)}
+	return &Store{tasks: make(map[string]*Task), guard: guardFull}
+}
+
+// newGuarded returns a Store with a specific guard mode. Unexported so no
+// production path can construct a weakened store; only the anti-mutex proof uses
+// the non-full modes.
+func newGuarded(g guardMode) *Store {
+	return &Store{tasks: make(map[string]*Task), guard: g}
 }
 
 // ClaimStats returns (attempts, grants) observed by the shared store. Used by
@@ -174,7 +200,7 @@ func (s *Store) ClaimTTL(id, owner string, now time.Time, ttl time.Duration) (Ta
 	if !ok {
 		return Task{}, ErrNotFound
 	}
-	if !t.ttlClaimable(now) {
+	if s.guard != guardNone && !t.ttlClaimable(now) {
 		return Task{}, ErrAlreadyClaimed
 	}
 	t.Status = StatusInProgress
@@ -212,11 +238,16 @@ func (s *Store) ClaimCAS(id, owner string, expectedVersion int) (Task, error) {
 	if !ok {
 		return Task{}, ErrNotFound
 	}
-	if t.Version != expectedVersion {
-		return Task{}, ErrVersionConflict
-	}
-	if t.Status != StatusPending {
-		return Task{}, ErrAlreadyClaimed
+	// guardNone:       skip both checks  -> every claim granted (storm leaks)
+	// guardCASVersion: version check only -> the stale-version losers are rejected
+	// guardFull:       version AND status -> real behaviour
+	if s.guard != guardNone {
+		if t.Version != expectedVersion {
+			return Task{}, ErrVersionConflict
+		}
+		if s.guard == guardFull && t.Status != StatusPending {
+			return Task{}, ErrAlreadyClaimed
+		}
 	}
 	t.Status = StatusInProgress
 	t.Lease = Lease{Owner: owner} // CAS lease has no expiry by design
