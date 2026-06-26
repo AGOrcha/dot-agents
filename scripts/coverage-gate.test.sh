@@ -51,4 +51,35 @@ COVERAGE_FILE=$tmp/cov.out COVERAGE_EXCEPTIONS=$tmp/bad.txt bash "$gate" >/dev/n
 set -e
 chk "$rc3" "1" "allowlist entry without rationale is a hard error"
 
+# ── COVERAGE_INCLUDE_FILES scoping (what `make gate` uses) ────────────────
+# Scoped to the weak file → enforce FAILS on it (the #173 shape: a changed
+# sub-95% file must fail the gate).
+set +e
+out4="$(COVERAGE_FILE=$tmp/cov.out COVERAGE_EXCEPTIONS=$tmp/exc.txt \
+        COVERAGE_PKG_MODE=off COVERAGE_FILE_MODE=enforce \
+        COVERAGE_INCLUDE_FILES='commands/weak.go' bash "$gate" 2>&1)"; rc4=$?
+set -e
+chk "$rc4" "1" "scoped-to-weak: changed sub-95% file fails enforce"
+grep -q "scoped to changed files" <<<"$out4" && echo "ok: scoped header shown" || { echo "FAIL: no scoped header"; fail=1; }
+grep -q "commands/weak.go .* FAIL" <<<"$out4" && echo "ok: scoped weak FAIL" || { echo "FAIL: scoped weak not FAIL"; fail=1; }
+
+# Scoped to only the good file → weak.go is out of scope, so enforce PASSES
+# (proves scoping narrows enforcement to the changed set, not all files).
+set +e
+out5="$(COVERAGE_FILE=$tmp/cov.out COVERAGE_EXCEPTIONS=$tmp/exc.txt \
+        COVERAGE_PKG_MODE=off COVERAGE_FILE_MODE=enforce \
+        COVERAGE_INCLUDE_FILES='commands/good.go' bash "$gate" 2>&1)"; rc5=$?
+set -e
+chk "$rc5" "0" "scoped-to-good: out-of-scope weak file does not fail enforce"
+grep -q "commands/weak.go" <<<"$out5" && { echo "FAIL: out-of-scope weak reported"; fail=1; } || echo "ok: out-of-scope weak skipped"
+
+# Scoped to a file with no coverage rows → nothing to enforce, PASS.
+set +e
+out6="$(COVERAGE_FILE=$tmp/cov.out COVERAGE_EXCEPTIONS=$tmp/exc.txt \
+        COVERAGE_PKG_MODE=off COVERAGE_FILE_MODE=enforce \
+        COVERAGE_INCLUDE_FILES='commands/absent.go' bash "$gate" 2>&1)"; rc6=$?
+set -e
+chk "$rc6" "0" "scoped-to-absent: no changed file in profile => PASS"
+grep -q "nothing to enforce" <<<"$out6" && echo "ok: nothing-to-enforce message" || { echo "FAIL: no nothing-to-enforce msg"; fail=1; }
+
 [[ $fail -eq 0 ]] && echo "coverage-gate.test: PASS" || { echo "coverage-gate.test: FAIL"; exit 1; }

@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# precommit-mandate.sh — heavy pre-push checks, dispatched by prek
+# precommit-mandate.sh — pre-push checks, dispatched by prek
 # (see .pre-commit-config.yaml). Subcommands:
 #
-#   build-vet   POSIX + GOOS=windows `go build` and `go vet ./...`
-#   coverage    regenerate a fresh profile and enforce the 95%-per-package
-#               gate (scripts/coverage-gate.sh)
-#   sonar       containerized SonarCloud analysis when Docker + SONAR_TOKEN
-#               are present; loud actionable skip otherwise
+#   fmt         gofmt -l check (pre-commit stage)
+#   gate        the fast merge-blocking mandate — delegates to `make gate`
+#               (build + vet (POSIX + windows) + gofmt + per-file coverage
+#               ENFORCE on changed files). This is the SINGLE SOURCE OF TRUTH;
+#               build-vet/coverage below are thin back-compat shims that call it
+#               so there is no parallel gate definition (spec D1).
+#   build-vet   (deprecated shim) → `make gate`
+#   coverage    (deprecated shim) → `make gate`
+#   sonar       native (or containerized) SonarCloud analysis when a token is
+#               present; loud actionable skip otherwise
 #
 # These run at the pre-push stage, NOT per commit: they are slow and the
 # coverage step runs the full test suite. Running them per commit also
@@ -73,24 +78,19 @@ cmd_fmt() {
   fi
 }
 
-cmd_build_vet() {
-  say build-vet "go build (POSIX + windows) + go vet"
-  go build ./...               || fail "go build failed"
-  GOOS=windows go build ./...  || fail "GOOS=windows go build failed"
-  go vet ./...                 || fail "go vet reported findings"
+# cmd_gate — the fast merge-blocking mandate. Single source of truth lives in
+# scripts/gate.sh (`make gate`); this just delegates so the hook and any direct
+# caller share ONE definition (spec D1).
+cmd_gate() {
+  say gate "make gate (build+vet+cross + per-file coverage of changed files)"
+  make -C "$repo_root" gate || fail "make gate failed (see output above)"
 }
 
-cmd_coverage() {
-  say coverage "95%-per-package gate (fresh profile)"
-  # Plain covermode=atomic — coverage % is identical to the -race CI
-  # profile; -race only adds the race detector, not coverage.
-  go test -count=1 -timeout=300s -covermode=atomic \
-      -coverprofile=coverage.out ./... \
-    || fail "go test failed (coverage profile not produced)"
-  COVERAGE_FILE=coverage.out COVERAGE_THRESHOLD=95 \
-    bash scripts/coverage-gate.sh \
-    || fail "coverage gate: a package is below 95%"
-}
+# Deprecated back-compat shims: the build-vet and per-package coverage steps are
+# now folded into `make gate`. Kept so anything still invoking these subcommands
+# routes to the single definition instead of a divergent copy.
+cmd_build_vet() { cmd_gate; }
+cmd_coverage()  { cmd_gate; }
 
 # _sonar_scan_native runs the native sonar-scanner CLI (no container) from the
 # repo root, with the same SonarCloud-CE-flake retry as the containerized path.
@@ -360,9 +360,10 @@ cmd_push() {
 
 case "${1:-}" in
   fmt)       cmd_fmt ;;
+  gate)      cmd_gate ;;
   build-vet) cmd_build_vet ;;
   coverage)  cmd_coverage ;;
   sonar)     cmd_sonar ;;
   push)      shift; cmd_push "$@" ;;
-  *) echo "usage: precommit-mandate.sh {fmt|build-vet|coverage|sonar|push}" >&2; exit 2 ;;
+  *) echo "usage: precommit-mandate.sh {fmt|gate|build-vet|coverage|sonar|push}" >&2; exit 2 ;;
 esac
