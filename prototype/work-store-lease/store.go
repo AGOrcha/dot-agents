@@ -98,17 +98,38 @@ var (
 	ErrNotOwner = errors.New("workstore: caller does not hold the lease")
 )
 
-// Store is the in-memory WorkStore. All mutations are serialized by mu so the
-// claim path is atomic: read-decide-write happens under one lock, which is the
-// in-process analogue of an atomic backend transaction.
+// Store is the shared WorkStore — the single source of truth the spec proposes
+// to add. The claim path is the COORDINATION POINT: a read-decide-write that
+// must be atomic. Here that atomicity is a process-local mutex; in a real `kg`
+// / Cloudflare-DO backend it is a transactional CAS or a single-threaded DO
+// actor. The mutex is the in-process *analogue* of that atomic backend txn — it
+// stands in for the transport, NOT for the whole coordination design (which is
+// the lease/CAS semantics layered on top, exercised independently of the lock).
+//
+// claimAttempts / claimGrants are instrumentation that let the proofs show the
+// contention is mediated by the SHARED STORE: every scout reaches the store and
+// attempts a claim, but the store grants exactly one. That is what distinguishes
+// "the lease design serializes dispatch" from "a mutex trivially serialized
+// goroutines" — in the negative control no scout touches the store at all.
 type Store struct {
-	mu    sync.Mutex
-	tasks map[string]*Task
+	mu            sync.Mutex
+	tasks         map[string]*Task
+	claimAttempts int64 // total Claim* calls that reached the store
+	claimGrants   int64 // Claim* calls the store granted (must be 1 per task race)
 }
 
 // New returns an empty Store.
 func New() *Store {
 	return &Store{tasks: make(map[string]*Task)}
+}
+
+// ClaimStats returns (attempts, grants) observed by the shared store. Used by
+// the proofs to assert N scouts all contended on the store yet exactly one was
+// granted — i.e. the store, not an external mutex, is the serialization point.
+func (s *Store) ClaimStats() (attempts, grants int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.claimAttempts, s.claimGrants
 }
 
 // Add inserts a pending task with the given content. Used to seed scenarios.
@@ -148,6 +169,7 @@ func (s *Store) Get(id string) (Task, error) {
 func (s *Store) ClaimTTL(id, owner string, now time.Time, ttl time.Duration) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.claimAttempts++
 	t, ok := s.tasks[id]
 	if !ok {
 		return Task{}, ErrNotFound
@@ -158,6 +180,7 @@ func (s *Store) ClaimTTL(id, owner string, now time.Time, ttl time.Duration) (Ta
 	t.Status = StatusInProgress
 	t.Lease = Lease{Owner: owner, Expires: now.Add(ttl)}
 	t.Version++
+	s.claimGrants++
 	return t.clone(), nil
 }
 
@@ -184,6 +207,7 @@ func (t *Task) ttlClaimable(now time.Time) bool {
 func (s *Store) ClaimCAS(id, owner string, expectedVersion int) (Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.claimAttempts++
 	t, ok := s.tasks[id]
 	if !ok {
 		return Task{}, ErrNotFound
@@ -197,6 +221,7 @@ func (s *Store) ClaimCAS(id, owner string, expectedVersion int) (Task, error) {
 	t.Status = StatusInProgress
 	t.Lease = Lease{Owner: owner} // CAS lease has no expiry by design
 	t.Version++
+	s.claimGrants++
 	return t.clone(), nil
 }
 
@@ -210,6 +235,31 @@ func (s *Store) Release(id, owner string) error {
 // may complete.
 func (s *Store) Complete(id, owner string) error {
 	return s.transitionByOwner(id, owner, StatusCompleted, false)
+}
+
+// CompleteFenced is the recommended FIX for the lease-expiry-mid-work hazard
+// (see design-finding test). The worker presents the fencing token (the version
+// it observed when it claimed). If the lease has since been reclaimed by another
+// scout, the live version has moved past the token and the stale completion is
+// REJECTED with ErrVersionConflict — preventing the double-dispatch-via-the-back
+// -door. Owner check still applies. This is what the spec under-specifies today.
+func (s *Store) CompleteFenced(id, owner string, fenceVersion int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tasks[id]
+	if !ok {
+		return ErrNotFound
+	}
+	if t.Lease.Owner != owner {
+		return ErrNotOwner
+	}
+	if t.Version != fenceVersion {
+		return ErrVersionConflict // lease was superseded; reject the stale finish
+	}
+	t.Status = StatusCompleted
+	t.Lease = Lease{}
+	t.Version++
+	return nil
 }
 
 // transitionByOwner is the shared owner-gated transition used by Release and
@@ -228,23 +278,6 @@ func (s *Store) transitionByOwner(id, owner string, to Status, _ bool) error {
 	t.Lease = Lease{}
 	t.Version++
 	return nil
-}
-
-// MarkInProgress is the non-atomic "set status to in_progress" write used by
-// the naive negative-control scout. It is a LAST-WRITER-WINS update with no
-// guard: it does not check whether someone else already claimed the task. This
-// is deliberately the broken primitive — it cannot prevent double-dispatch
-// because the eligibility decision was made before it ran.
-func (s *Store) MarkInProgress(id, owner string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	t, ok := s.tasks[id]
-	if !ok {
-		return
-	}
-	t.Status = StatusInProgress
-	t.Owner = owner
-	t.Version++
 }
 
 // AdvanceStatus forces a backend-authoritative status transition (e.g. the

@@ -4,9 +4,8 @@ import "time"
 
 // DispatchResult records what a scout did with one eligible task: either it won
 // the claim and dispatched (Dispatched=true), or it observed the task already
-// claimed and backed off (Dispatched=false, BackedOff=true). Exactly one scout
-// in a race must report Dispatched=true — that is the no-double-dispatch
-// invariant the storm regression asserts.
+// claimed/leased and backed off (BackedOff=true). Exactly one scout in a wave
+// must report Dispatched=true — the no-double-dispatch invariant.
 type DispatchResult struct {
 	Scout      string
 	TaskID     string
@@ -15,49 +14,57 @@ type DispatchResult struct {
 	Err        error
 }
 
-// ScoutNaive is the NEGATIVE CONTROL: the exact broken logic that caused the
-// real 5xp1c re-dispatch storm. It reads the task, sees it is eligible
-// (pending), and dispatches — with NO atomic claim. Two concurrent scouts both
-// read "pending" before either marks it in_progress, so BOTH dispatch. The
-// MarkInProgress write is best-effort and races; the read-then-dispatch gap is
-// the bug. The proofs assert this path PRODUCES double-dispatch (it must fail
-// the exactly-one-winner invariant) — proving the lease/CAS paths actually fix
-// something, not just pass a weak test.
-func ScoutNaive(s *Store, scout, taskID string) DispatchResult {
-	cur, err := s.Get(taskID)
-	if err != nil {
-		return DispatchResult{Scout: scout, TaskID: taskID, Err: err}
+// A scout in this model has TWO layers:
+//
+//	1. its own LocalView   — a private, isolated worktree checkout of TASKS.yaml
+//	2. (optionally) a shared *Store — the proposed single source of truth
+//
+// The negative control uses ONLY layer 1. The fix consults layer 2 before
+// dispatching. This is the faithful split: the real bug is the ABSENCE of a
+// shared claim, not a lost in-process race on one object.
+
+// ScoutNaive is the NEGATIVE CONTROL and the FAITHFUL model of the real 5xp1c
+// storm. The scout decides eligibility and dispatches off its OWN LOCAL VIEW,
+// with NO shared store and NO claim. It does not — cannot — see what any other
+// worktree decided. N scouts in N isolated worktrees each read p1c as `pending`
+// in their private copy and each dispatch it. The local mark it writes
+// (markLocalInProgress) updates only its own worktree and never propagates.
+//
+// Crucially this path touches NO shared coordination object: its double-dispatch
+// cannot be blamed on a missing mutex, because there is nothing to lock. The bug
+// is architectural (no shared SOT), exactly as spec §1 describes.
+func ScoutNaive(v *LocalView, taskID string) DispatchResult {
+	if !v.Eligible(taskID) {
+		return DispatchResult{Scout: v.Owner(), TaskID: taskID, BackedOff: true}
 	}
-	if cur.Status != StatusPending {
-		return DispatchResult{Scout: scout, TaskID: taskID, BackedOff: true}
-	}
-	// THE BUG: dispatch decided on a stale read; no atomic guard between the
-	// eligibility check above and the mark below. A concurrent scout passes the
-	// same check before this write lands.
-	s.MarkInProgress(taskID, scout)
-	return DispatchResult{Scout: scout, TaskID: taskID, Dispatched: true}
+	v.markLocalInProgress(taskID) // writes only this worktree's copy; invisible to peers
+	return DispatchResult{Scout: v.Owner(), TaskID: taskID, Dispatched: true}
 }
 
-// ScoutTTL is the production claim+dispatch path under the TTL-lease mechanism.
-// A real scout calls exactly this: lease the eligible task, and only dispatch
-// if the lease was won. The proofs drive THIS function (not ClaimTTL directly)
-// so the test exercises the same entry point a wave scout uses.
-func ScoutTTL(s *Store, scout, taskID string, now time.Time, ttl time.Duration) DispatchResult {
-	_, err := s.ClaimTTL(taskID, scout, now, ttl)
-	return classify(scout, taskID, err)
+// ScoutTTL is the FIX under the TTL-lease mechanism. The scout still decides
+// eligibility from its (possibly stale) local view, but before dispatching it
+// must CLAIM the task in the SHARED store. The shared claim is the coordination
+// point: even when all scouts' local views say `pending`, the store grants the
+// lease to exactly one and rejects the rest, so exactly one dispatches.
+func ScoutTTL(s *Store, v *LocalView, taskID string, now time.Time, ttl time.Duration) DispatchResult {
+	if !v.Eligible(taskID) { // local pre-filter, as a real scout does
+		return DispatchResult{Scout: v.Owner(), TaskID: taskID, BackedOff: true}
+	}
+	_, err := s.ClaimTTL(taskID, v.Owner(), v.clock(now), ttl)
+	return classify(v.Owner(), taskID, err)
 }
 
-// ScoutCAS is the production claim+dispatch path under the CAS mechanism. The
-// scout reads the current version (its eligibility snapshot), then claims with
-// that expected version. A concurrent winner bumps the version, so every loser
-// gets ErrVersionConflict or ErrAlreadyClaimed and backs off.
-func ScoutCAS(s *Store, scout, taskID string) DispatchResult {
-	cur, err := s.Get(taskID)
-	if err != nil {
-		return DispatchResult{Scout: scout, TaskID: taskID, Err: err}
+// ScoutCAS is the FIX under the compare-and-set mechanism. The scout carries its
+// LOCAL (stale) version as the expected version. Because views are isolated, a
+// loser's local version is stale relative to the winner's bump, so the SHARED
+// store's CAS check rejects it — the rejection happens at the store, not in the
+// scout. Exactly one CAS succeeds.
+func ScoutCAS(s *Store, v *LocalView, taskID string) DispatchResult {
+	if !v.Eligible(taskID) {
+		return DispatchResult{Scout: v.Owner(), TaskID: taskID, BackedOff: true}
 	}
-	_, err = s.ClaimCAS(taskID, scout, cur.Version)
-	return classify(scout, taskID, err)
+	_, err := s.ClaimCAS(taskID, v.Owner(), v.version(taskID))
+	return classify(v.Owner(), taskID, err)
 }
 
 // classify turns a claim error into a dispatch outcome. A nil error is a
