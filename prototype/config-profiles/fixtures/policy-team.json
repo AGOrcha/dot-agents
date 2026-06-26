@@ -1,0 +1,11 @@
+{
+  "kind": "layering_policy",
+  "scope": "team",
+  "locks": [
+    "skills.deny:{plan-wave-picker}@role:loop-worker"
+  ],
+  "override_permissions": {
+    "user":    ["skills.preload", "mcp"],
+    "project": ["mcp"]
+  }
+}

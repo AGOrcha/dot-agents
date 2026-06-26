@@ -1,0 +1,15 @@
+{
+  "kind": "profile",
+  "ref": "app_type/go-cli",
+  "selector": { "app_type": "go-cli" },
+  "bundle": {
+    "tools": {
+      "allow": ["Bash"]
+    },
+    "skills": {
+      "preload": ["build-graph"],
+      "allow": ["gh-fix-ci", "self-review"]
+    },
+    "mcp": ["sonar"]
+  }
+}

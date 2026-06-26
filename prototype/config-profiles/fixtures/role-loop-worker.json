@@ -1,0 +1,14 @@
+{
+  "kind": "profile",
+  "ref": "role/loop-worker",
+  "selector": { "role": "loop-worker" },
+  "bundle": {
+    "tools": {
+      "allow": ["Read", "Bash", "Edit", "Write", "Skill"]
+    },
+    "skills": {
+      "allow": ["iteration-close"]
+    },
+    "hooks": ["skill-gate"]
+  }
+}

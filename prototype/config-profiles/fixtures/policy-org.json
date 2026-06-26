@@ -1,0 +1,15 @@
+{
+  "kind": "layering_policy",
+  "scope": "org",
+  "precedence": ["repo", "project", "user", "team", "org"],
+  "locks": [
+    "tools.deny:{Edit,Write}@role:reviewer"
+  ],
+  "override_permissions": {
+    "org":     ["tools.allow", "tools.deny", "skills.allow", "skills.preload", "skills.deny", "hooks", "mcp", "model"],
+    "team":    ["tools.allow", "skills.allow", "skills.preload", "hooks", "mcp"],
+    "user":    ["skills.preload", "skills.allow", "mcp"],
+    "project": ["mcp"],
+    "repo":    ["tools.allow", "tools.deny", "skills.allow", "skills.preload", "hooks", "mcp"]
+  }
+}

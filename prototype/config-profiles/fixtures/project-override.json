@@ -1,0 +1,8 @@
+{
+  "kind": "profile",
+  "ref": "project/mcp-additive",
+  "selector": { "scope": "project" },
+  "bundle": {
+    "mcp": ["atlassian"]
+  }
+}

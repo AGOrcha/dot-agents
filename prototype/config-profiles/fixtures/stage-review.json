@@ -1,0 +1,13 @@
+{
+  "kind": "profile",
+  "ref": "stage/review",
+  "selector": { "stage": "review" },
+  "bundle": {
+    "tools": {
+      "deny": ["Edit", "Write"]
+    },
+    "skills": {
+      "preload": ["code-review"]
+    }
+  }
+}

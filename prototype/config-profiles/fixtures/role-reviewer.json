@@ -1,0 +1,13 @@
+{
+  "kind": "profile",
+  "ref": "role/reviewer",
+  "selector": { "role": "reviewer" },
+  "bundle": {
+    "tools": {
+      "allow": ["Read", "Bash", "Grep", "Glob"]
+    },
+    "skills": {
+      "allow": ["code-review", "review-pr"]
+    }
+  }
+}

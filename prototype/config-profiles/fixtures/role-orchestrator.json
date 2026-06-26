@@ -1,0 +1,21 @@
+{
+  "kind": "profile",
+  "ref": "role/orchestrator",
+  "selector": { "role": "orchestrator" },
+  "bundle": {
+    "tools": {
+      "allow": ["Read", "Bash", "Skill", "Agent", "SendMessage", "Monitor"]
+    },
+    "skills": {
+      "allow": [
+        "orchestrator-session-start",
+        "delegation-lifecycle",
+        "isp",
+        "iteration-close",
+        "plan-wave-picker"
+      ]
+    },
+    "hooks": ["skill-gate"],
+    "mcp": ["crg", "sonar"]
+  }
+}
