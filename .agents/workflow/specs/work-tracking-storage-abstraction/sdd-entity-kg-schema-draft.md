@@ -20,7 +20,11 @@ inverse, `derives_spec` forward derivation edge with explicit propagation direct
 (removed the stale "no result→plan edge" caveat); scope split into TWO axes
 `placement` vs `origin_scope` (§1.2A) with `in_scope_of` typed for all scoped nodes
 and a one-of requirement on proposal/lesson; `operation_invocation` node + explicit
-rubric enum values; see §5B).
+rubric enum values; GAP 4 (PR #179 KG dogfood): spec node reconciled to freeform
+on-disk frontmatter — closed status enum `[draft,ratified,superseded]` re-declared
+as a [PROPOSED] NORMALIZED enum (not a disk mirror; `ratified`/`superseded` never
+appear on disk), added `status_raw` [mirror] for the verbatim freeform `**Status:**`
+text, `spec_dir` [mirror] as the real identity + `spec_id` [PROPOSED]; see §5B / §1.1).
 **Author:** Nikash Prakash
 **Owning spec:** `work-tracking-storage-abstraction/design.md` (§6 open question
 "KG schema for SDD entities + correlation edges"; D1′ tiers; §3A typed views +
@@ -200,10 +204,35 @@ note_types:
     # Mirrors design.md frontmatter: Status / Written(+revision history) /
     # Supersedes / Related / Plan. [evidence: graph-backend-adapter-contract/design.md
     # lines 1-14; scoped-knowledge-graphs/design.md line 6]
+    #
+    # IDENTITY + STATUS RECONCILIATION (GAP 4, PR #179 KG dogfood — Option A):
+    # spec frontmatter is FREEFORM markdown. There is NO spec JSON Schema in `schemas/`,
+    # there is NO schema'd `spec_id` field, and `**Status:**` is FREE TEXT. PR #179's
+    # `parseSpecFrontmatter` (internal/adapters/builtin/sdd-register/ingest.go) attests
+    # ONLY a freeform `**Status:**` line — `ratified`/`superseded` are values that do
+    # NOT hold against the real corpus (the live `**Status:**` values seen on disk are
+    # things like `SHIPPED`, `accepted`, `active`, `delivered`, `design artifact`,
+    # `draft (canonical)`, `draft (for review)` — never `ratified`/`superseded`).
+    # [evidence: grep `^\*\*Status:\*\*` over .agents/workflow/specs/*/design.md;
+    #  PR #179 ingest.go parseSpecFrontmatter (freeform `**Status:**` only); NO schemas/spec*.json]
+    #
+    # DECISION (Option A): the only reliable on-disk identity is the dir name and the
+    # freeform status string, so:
+    #   - the closed `status` enum is a [PROPOSED] spec-frontmatter contract this design
+    #     ADDS (it is NOT mirrored from disk); a `status_raw` [mirror] holds the freeform
+    #     `**Status:**` text the future build normalizes INTO that enum.
+    #   - `spec_id` as a schema'd frontmatter field is likewise [PROPOSED]; the [mirror]
+    #     identity that exists today is the dir name.
+    # Rationale: a closed status enum is the queryable target the work-tracking build
+    # wants, but the field-fidelity rule (§0) forbids claiming it is mirrored when the
+    # corpus violates it — so it is declared as ADDED surface, with the freeform string
+    # preserved as the real mirror.
     fields:
-      - { name: spec_id,    type: string, required: true }   # [mirror: dir name] e.g. graph-backend-adapter-contract
+      - { name: spec_dir,   type: string, required: true }   # [mirror: dir name] e.g. graph-backend-adapter-contract — the ONLY reliable on-disk identity today (node key)
+      - { name: spec_id,    type: string, required: false }  # [PROPOSED] (not on disk) a schema'd spec-frontmatter id the future contract ADDS; absent today, so `spec_dir` is the mirror identity. Defaults to `spec_dir` until the contract lands.
       - { name: title,      type: string, required: true }   # [mirror: H1]
-      - { name: status,     type: enum, values: [draft, ratified, superseded], required: true }  # PARTIAL mirror (M2): `draft` is attested in **Status:** frontmatter ("draft v5 (canonical)"), but there is NO spec JSON Schema and `ratified`/`superseded` are INVENTED enum values (spec frontmatter is freeform). Treat `ratified`/`superseded` as [PROPOSED] normalized values, not on-disk mirrors.
+      - { name: status_raw, type: string, required: false }  # [mirror: freeform `**Status:**` line] the verbatim on-disk status text (e.g. "SHIPPED (2026-06-22)", "draft (for review)", "design artifact"). This is what disk actually carries. [evidence: PR #179 parseSpecFrontmatter]
+      - { name: status,     type: enum, values: [draft, active, accepted, shipped, superseded], required: false }  # [PROPOSED] (not on disk) NORMALIZED status enum the future spec-frontmatter contract ADDS. NOT a mirror — `**Status:**` is freeform; the build normalizes `status_raw` into this enum. Values chosen to cover observed freeform text (draft/active/accepted/shipped) plus the lifecycle terminal `superseded`. A closed enum is NOT claimed to be mirrored from disk.
       - { name: revision,   type: string, required: false }  # [mirror: **Status:**/**Written:** revision tail, e.g. "v6.1"]
       - { name: prose_note, type: ref<kg_note>, required: false }   # the design.md body (tier 3). OPTIONAL until the KGNote projection link is built (M3).
       # Note: Supersedes/Related/Plan frontmatter lines are modeled as EDGES (§2.1), not fields.
@@ -457,12 +486,15 @@ note, referenced by the typed structural node.
 `internal/graphstore/store.go:104-114`: `KGNote{Status string; Version int;
 ArchivedAt string /*RFC3339*/; IndexedAt float64}`):**
 
-- **Status/version authority rule.** The typed `spec.status` + `spec.revision`
-  duplicate `KGNote.Status` + `KGNote.Version`. **Authority: the typed node is
-  canonical for structure/state (tier 2); `KGNote.Status`/`Version` are the
-  projection's cached copy and MUST be derived from the typed node, never the
-  reverse.** When they diverge, the typed node wins and the projection is
-  re-synced. This removes the coherence hazard O4's open question flags.
+- **Status/version authority rule.** The typed `spec.status` (the [PROPOSED]
+  NORMALIZED enum, §1.1) + `spec.revision` duplicate `KGNote.Status` +
+  `KGNote.Version`. **Authority: the typed node is canonical for structure/state
+  (tier 2); `KGNote.Status`/`Version` are the projection's cached copy and MUST be
+  derived from the typed node, never the reverse.** When they diverge, the typed
+  node wins and the projection is re-synced. This removes the coherence hazard O4's
+  open question flags. NOTE: the on-disk `**Status:**` is freeform (no spec JSON
+  Schema — GAP 4); the typed `spec.status` enum is the build's NORMALIZATION of the
+  `status_raw` [mirror], not a value mirrored verbatim from disk.
 - **Date-type mapping.** Typed nodes use `type: date` (e.g. `result.occurred_at`,
   `plan.updated_at`), but the existing store uses heterogeneous representations:
   `KGNote.IndexedAt` is `float64` (unix secs) and `KGNote.ArchivedAt` is an RFC3339
@@ -907,6 +939,7 @@ code/schema before acceptance (a second brain can also be wrong). Disposition:
 | **Cursor H4** — `scope` has no anchor entity; inconsistent enums | **ACCEPT** | `proposal-routing.md` global vs project boundary; `rule.scope=[global,project]` vs others `[repo,project,global]` | §1.2 `scope_root` node + enum-reconciliation note; §2.1 `in_scope_of` edge |
 | **Cursor M1** — correlation edges carry no version/hash; defeats Q3 | **ACCEPT** | edges point at versionless nodes; O5 makes content-hash the mutation primitive | §1.2 `content_hash`/`version` on rule/lesson/skill/stage_profile |
 | **Cursor M2** — invented fields not `[PROPOSED]` (score, spec.status, proposal.status) | **ACCEPT** | iter-log has no `score`; no spec JSON Schema; only `draft/promoted/deferred` attested | §1.1 status notes; §1.3 `score [PROPOSED]` |
+| **GAP 4 (PR #179 KG dogfood)** — spec node claimed a CLOSED status enum `[draft, ratified, superseded]` as a PARTIAL mirror, but spec frontmatter is freeform (no spec JSON Schema; `ratified`/`superseded` never appear on disk) and `spec_id` had no schema'd source | **ACCEPT (Option A)** | grep `^\*\*Status:\*\*` over `.agents/workflow/specs/*/design.md` = freeform text (`SHIPPED`/`accepted`/`active`/`design artifact`/`draft (…)`, never `ratified`/`superseded`); NO `schemas/spec*.json`; PR #179 `parseSpecFrontmatter` (ingest.go) attests only a freeform `**Status:**` line | §1.1 spec node: `status_raw` [mirror] + `status` enum re-declared `[PROPOSED] (not on disk)` (normalized, not mirrored) + `spec_dir` [mirror] identity + `spec_id` [PROPOSED]; §1.4 authority note |
 | **Cursor M3** — KGNote projection double-track + date mismatch + required-on-nonexistent | **ACCEPT** | `store.go:104-114` `KGNote{Status;Version;ArchivedAt RFC3339;IndexedAt float64}` | §1.4 authority rule + date mapping + `prose_note` relaxed to optional |
 | **Cursor M4** — dedup applied inconsistently (drop result→plan but keep both task/plan FK edges) | **ACCEPT** | §2.1 has both `contains_task` + `belongs_to_plan` | §2.2 reconciliation note (bidirectional FK accepted; result→plan restored for waves) |
 | **Cursor M5** — `produced_lesson` one-to-many loses reinforcement history | **ACCEPT** | `CLAUDE.md` "update an EXISTING LESSON.md after corrections" | §2.2 made many-to-many |
@@ -951,6 +984,7 @@ inverse and every claimed traversal expressible.
 | 4 | header/reconciliation restored `result_for_plan`, but a caveat + ledger still said schema does NOT materialize result→plan | HIGH | deleted stale caveat/ledger text; made policy NORMATIVE: task-scoped → `result_for_task`, plan-scoped wave/fold_back → `result_for_plan`, `plan_id` = provenance | mutually-exclusive edges by `kind`; no contradiction remains |
 | 5 | proposal/lesson scope optional + `repo\|project\|global`; scoped-KG origin is `repo→user→team→org→public`; `in_scope_of` typed only from proposal | HIGH | split into TWO axes (§1.2A): `placement [project-local,global]` vs `origin_scope [repo,user,team,org,public]`; required one-of (`origin_scope` OR `in_scope_of`) on proposal+lesson; typed `in_scope_of` for lesson/skill/rule/agent/hook/app_type_profile | placement (proposal-routing) and origin (scoped-KG) are now distinct, non-conflated axes |
 | 6 | `surface_vs_path` names a path but no node for the ACTUAL operation; `rubric_dimensions` had no declared enum values | MEDIUM | added **`operation_invocation`** node (`surface_kind`/`operation_id`/`args_hash`/`exit_status`/`evidence_uri`) + edges `invoked_operation`/`invocation_of_result`/`invocation_of_surface`; declared `rubric_dimensions` enum values on result+lesson | `invoked_operation` one-to-many ⟷ `invocation_of_result` many-to-one inverse agree; surface-vs-path now a traversal |
+| 7 (GAP 4, PR #179 KG dogfood) | spec node claimed a CLOSED status enum `[draft, ratified, superseded]` as a PARTIAL on-disk mirror, but spec frontmatter is FREEFORM (no spec JSON Schema; `**Status:**` is free text and `ratified`/`superseded` never appear on disk), and `spec_id` had no schema'd source — only the dir name | HIGH | **Option A:** re-declared the closed `status` enum as `[PROPOSED] (not on disk)` NORMALIZED surface (values `[draft, active, accepted, shipped, superseded]` covering observed freeform text); added `status_raw` [mirror] for the verbatim freeform `**Status:**` text; `spec_dir` [mirror] is the real identity, `spec_id` is `[PROPOSED]`. Grounded in PR #179 `parseSpecFrontmatter` (ingest.go) + corpus grep | a closed status enum is no longer claimed as mirrored; the freeform string is the mirror, the enum is ADDED build surface (§0 field-fidelity rule satisfied) |
 
 ---
 
@@ -980,6 +1014,14 @@ ledger.
 - spec frontmatter: `graph-backend-adapter-contract/design.md` lines 1-14
   (`**Status:** draft v5`, `**Supersedes:**`, `**Related:**` list, `**Plan:**`);
   `scoped-knowledge-graphs/design.md:6` (`**Supersedes:** spec.1.md, spec.2.md`).
+  **Spec frontmatter is FREEFORM (no spec JSON Schema in `schemas/`):** `**Status:**`
+  is free text — a `grep ^\*\*Status:\*\*` over `.agents/workflow/specs/*/design.md`
+  returns `SHIPPED (…)`, `accepted (…)`, `active`, `delivered`, `design artifact`,
+  `draft (canonical)`, `draft (for review)`, etc. — and **never** `ratified`/`superseded`.
+  PR #179's `parseSpecFrontmatter` (`internal/adapters/builtin/sdd-register/ingest.go`)
+  attests only this freeform `**Status:**` line and the dir-name identity. This grounds
+  GAP 4: the spec node's closed status enum is [PROPOSED] normalization surface, not a
+  disk mirror (§1.1).
 - proposal shapes: `.agents/proposals/kg-ideate-skill.yaml`
   (`schema_version,id,status,type,action,target,rationale`);
   `.agents/proposals/agent-context-resolution-architecture.md` frontmatter
