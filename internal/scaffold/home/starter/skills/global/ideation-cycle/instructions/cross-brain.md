@@ -22,6 +22,15 @@ This is the same dynamic that makes cross-harness review the catch for hollow te
 3. **Collect the opinions** and reconcile them with your own analysis. Where you and the
    second brain disagree, that disagreement is itself signal for the owner — surface it.
 
+## Also review the TRIAGE decisions (not only the judgment calls)
+
+The cross-brain pass closes the silent-skip-the-gate hole (triage guard, step 3): hand the
+different harness the **full step-3 tag list** plus each `already-settled` / briefing-decidable
+verdict's **cited decisive fact**, and ask: *"is any 'easy' call actually a disguised hard
+fork — does the cited fact genuinely settle it?"* Any fork the second brain flags as
+mis-triaged is re-routed to the empirical or cross-brain gate. A fork must not reach converge
+labeled easy on an uncited or unconvincing basis.
+
 ## Output: a ranked must-decide list
 
 Produce a single ranked list of must-decide items for the owner. Each item:

@@ -14,24 +14,32 @@ upstream-fresh briefing already exists — but the default is: run `kg-brief`.
 hard fork to you. You MAY consume that briefing **by artifact** (0 dispatch hops) — but only
 after a freshness check. **A stale brief must never silently propagate.**
 
-**Freshness check (gate before reuse):**
+**Freshness check (gate before reuse).** Two conditions, BOTH must hold:
 
-1. **`inputs_digest` match.** The briefing carries an `inputs_digest` over its inputs — the
-   KG snapshot / query results, the research set, the applicable lessons, and the
-   idea/proposal text. Recompute the digest over the *current* inputs and compare. This is
-   the same `inputs_digest` primitive config-v2 uses (`ComputeInputsDigest`, `sha256:…`
-   convention; staleness = digest mismatch — see `internal/config/staleness.go`,
-   `resolver.go`). Reuse it for coherence; do not invent a parallel staleness scheme.
-2. **No shared-state mutation since the brief.** If a *prior fork's resolution* (earlier in
-   this same `kg-ideate` / `ideation-cycle` run) mutated shared state the brief depended on
-   — a decision the brief cited got re-ratified, a lesson got written, a KG node changed —
-   the brief is stale even if the raw `inputs_digest` of static inputs still matches. Treat
-   a prior-fork mutation of a brief-input as a digest mismatch.
+1. **`inputs_digest` match.** The briefing carries an `inputs_digest` over a **concrete,
+   canonicalized, ordered input set**:
+   - the **idea/proposal text** — content hash;
+   - the **KG snapshot id** (or query-engine revision) the brief queried against;
+   - the **named-query results** the brief consumed — each query id + its result-set hash;
+   - the **applicable-lessons set** — lesson ids + each lesson file's content hash;
+   - the **cited-artifact set** — every spec/proposal the brief cited, by path + content hash.
 
-**On any mismatch → RE-RUN `kg-brief`** scoped to the fork's topic. On a clean match →
-consume the upstream briefing by artifact and proceed to step 2. Either path is a TERMINAL
-leaf (`kg-brief` calls nothing downstream), so neither extends dispatch depth — the
-`kg-ideate → spec-scaffold → ideation-cycle` path stays within the ≤2-hop bound.
+   These are ordered and canonicalized, then hashed via the config-v2 `ComputeInputsDigest`
+   primitive (`sha256:…`; staleness = digest mismatch — `internal/config/staleness.go`,
+   `resolver.go`). Reuse this primitive for coherence; do NOT invent a parallel staleness
+   scheme. Recompute over the *current* inputs and compare.
+2. **Dependency manifest unchanged.** The brief also records a **dependency manifest** — the
+   specific KG nodes / decisions / lessons it actually READ to reach its conclusions. The brief
+   is stale if **any manifest entry changed**. This is the operational definition of "a prior
+   fork's resolution mutated shared brief state": a prior fork (earlier in this run) that
+   re-ratified a decision, wrote a lesson, or changed a KG node the brief read flips that
+   manifest entry → re-brief. (This catches staleness the static `inputs_digest` alone can miss
+   when a dependency mutates mid-run.)
+
+**On any mismatch (digest OR manifest) → RE-RUN `kg-brief`** scoped to the fork's topic. On a
+clean match → consume the upstream briefing by artifact and proceed to step 2. `kg-brief` calls
+nothing downstream (a terminal leaf), and deep multi-hop delegation is driver-orchestrated, not
+recursively nested — see `instructions/composition.md` for the engineering bounds.
 
 ### B. Standalone (one-off design question) — always fresh
 

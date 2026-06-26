@@ -3,14 +3,17 @@
 The forks have been routed: empirical verdicts from step 4, the ranked must-decide list
 from step 5, the already-settled citations, the owner-decisions. Now the owner ratifies.
 
-Where the ratified decision goes depends on the invocation mode (see
+`ideation-cycle` produces a **ratified decision + a per-fork evidence sidecar** and RETURNS
+them. It does **not** type the spec file in either mode — `spec-scaffold` (or a delegated
+spec-drafting equivalent) writes the prose. Where the return goes (see
 `instructions/composition.md`):
 
-- **Dispatched from `kg-ideate`** — return the ratified decision + evidence pointers to
-  Phase 2 (`spec-scaffold`), which folds it into the spec it is authoring.
-  `ideation-cycle` does NOT own that spec; it resolved one fork inside it. Skip
-  "Seed or refine the spec" below — `spec-scaffold` does the writing.
-- **Standalone** — seed or refine the canonical spec yourself, per below.
+- **Dispatched from `kg-ideate`** — return the ratified decision + evidence sidecar pointer to
+  Phase 2 (`spec-scaffold`), which writes the spec prose. `ideation-cycle` resolved the fork;
+  it does not author the spec.
+- **Standalone** — hand the ratified decision + sidecar to a **delegated spec-drafting step**
+  (a `spec-scaffold`-equivalent) that writes the prose; see "What the spec must carry" below
+  for what to brief it with. `ideation-cycle` still does not type the spec file itself.
 
 ## Owner ratification
 
@@ -22,10 +25,12 @@ Where the ratified decision goes depends on the invocation mode (see
   it; for owner-decisions the owner picks.
 - A `[PROPOSED]` decision becomes ratified here, or is sent back as a still-open fork.
 
-## Seed or refine the spec (standalone mode)
+## What the spec must carry (brief the spec-drafting step with this)
 
-Write the ratified decisions into `.agents/workflow/specs/<id>/design.md` per the
-`workflow-artifact-model` rule. The spec owns:
+The spec-drafting step (`spec-scaffold` dispatched, or a delegated equivalent standalone)
+writes `.agents/workflow/specs/<id>/design.md` per the `workflow-artifact-model` rule. Brief it
+— via a **structured/pointer hand-back, not retold prose** (relay discipline) — with the
+ratified decisions + the evidence sidecar pointers. The spec it writes owns:
 
 - **What & why** — the problem statement and goals.
 - **Decisions + rationale** — each ratified fork: what was chosen and why the
@@ -56,14 +61,17 @@ audited evidence in one hop. In dispatched mode, return the sidecar pointer so
 - **Dispatched mode:** hand the ratified decision + evidence back to `spec-scaffold`; its
   spec, plan, and the eventual handoff to `[[isp]]` continue from there. `ideation-cycle`
   is done once the fork is resolved.
-- **Standalone mode:** once the spec is ratified it is the contract; the execution half
-  (`[[isp]]` / `[[orchestrator-session-start]]`) plans and implements against it.
+- **Standalone mode:** once the spec-drafting step has written it and it is ratified, it is the
+  contract; the execution half (`[[isp]]` / `[[orchestrator-session-start]]`) plans and
+  implements against it.
 
-Either way: do not start writing product code here — that is `isp`'s turn. `ideation-cycle`
-resolves forks; it does not implement them.
+Either way: do not start writing product code here — that is `isp`'s turn. And do not type the
+spec file here — that is `spec-scaffold`'s. `ideation-cycle` resolves forks and returns
+decisions + evidence; it does not author the spec and does not implement.
 
 ## Dispatch the authoring
 
-As in the empirical pass, the driver orchestrates and steers; dispatch the actual spec
-drafting to a subagent with the ratified decisions and evidence pointers, then review.
-The driver's leverage is in the framing and the gates, not in typing the spec.
+The driver orchestrates and steers; it dispatches the actual spec drafting to `spec-scaffold`
+(or an equivalent subagent) with the ratified decisions and evidence sidecar pointers — handed
+back structured/pointer-based, never retold prose — then reviews. The driver's leverage is in
+the framing and the gates, not in typing the spec.

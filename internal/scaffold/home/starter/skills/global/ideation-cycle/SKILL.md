@@ -1,12 +1,19 @@
 ---
 name: "ideation-cycle"
-description: "Fork-resolution engine: turn a HARD or OPEN design fork into a ratified, fidelity-audited decision + evidence. Use when a briefing alone can't decide a fork — an under-specified spec decision, a deferred architectural question, a recurring 'we keep re-explaining this', or a [PROPOSED] item — and you need to DISCOVER the answer: empirical prototype (under the prototype-experiment-fidelity-gate) → independent cross-harness audit → cross-brain the judgment calls → ratified decision. Composable molecule: it REUSES kg-brief for grounding and is dispatchable from kg-ideate Phase 2 (spec-scaffold) for hard forks, AND independently invocable for a one-off design question. Not the authoring front-end (that is kg-ideate) and not implementation (that is isp)."
+description: "Fork-resolution loop: turn a HARD or OPEN design fork into a ratified, fidelity-audited decision + evidence. Use when a briefing alone can't decide a fork — an under-specified spec decision, a deferred architectural question, a recurring 'we keep re-explaining this', or a [PROPOSED] item — and you need to DISCOVER the answer: empirical prototype (under the prototype-experiment-fidelity-gate) → independent cross-harness audit → cross-brain the judgment calls → ratified decision. Composable compound: it RUNS kg-brief for grounding and is dispatchable from kg-ideate Phase 2 (spec-scaffold) for hard forks, AND independently invocable for a one-off design question. It RETURNS the ratified decision + evidence sidecar; spec-scaffold writes the spec prose. Not the authoring front-end (that is kg-ideate) and not implementation (that is isp)."
 argument-hint: "[<fork-or-spec-id> | --spec <path> | --question \"<open design question>\" | --brief <briefing-path>]"
-tier: molecule
-# Composition is governed by dispatch DEPTH (≤2 reliable skill-to-skill hops on any runtime
-# path), NOT tier-adjacency: a molecule MAY call molecules. See the refined tiering contract
-# delta: .agents/proposals/skill-tiering-molecule-composition.md. `kg-brief` (a molecule) is
-# ideation-cycle's grounding step 1 — RUN by ideation-cycle, not handed down pre-baked.
+# tier: compound. ideation-cycle orchestrates delegated workers (prototype authors, the
+# independent cross-harness auditor, the cross-brain reviewer) with UNBOUNDED judgment over
+# which to run and how to weigh them — that is a compound, not a bounded molecule.
+tier: compound
+# Composition is governed by judgment-autonomy, NOT tier-adjacency: a compound MAY call
+# molecules/compounds (refined tiering delta:
+# .agents/proposals/skill-tiering-molecule-composition.md). NOTE: the tiering contract's old
+# "fidelity degrades past depth ~2–3 hops" premise did NOT replicate in our tests — see the
+# evidence sidecar (evidence/depth-degradation-dogfood.md, v1–v3; v4 in flight). The real,
+# evidence-backed bounds are the infra delegation-nesting ceiling (~hop 4 in this harness) and
+# RELAY DISCIPLINE (structured/pointer hand-backs, never retold prose). kg-brief is RUN by
+# ideation-cycle as step 1 (reuse-by-artifact when fresh, else re-run).
 calls:
   - kg-brief        # grounding step 1 (reuse-by-artifact when fresh, else re-run — see below)
   - enumerate-forks
@@ -16,11 +23,10 @@ calls:
   - cross-brain
   - converge-decision
   - dogfood-decision
-# kg-brief is a TERMINAL leaf (calls nothing downstream): on any runtime path it either
-# reuses an upstream-fresh briefing BY ARTIFACT (0 dispatch hops) or re-runs as a leaf, so it
-# never extends unbounded-dispatch depth. The 2-hop path kg-ideate→spec-scaffold→ideation-cycle
-# is therefore in-bound. Reuse is gated on an inputs_digest freshness check
-# (see instructions/ground-via-kg-brief.md).
+# Deep multi-hop delegation must be DRIVER-ORCHESTRATED hop-by-hop (fresh Agent per hop, relay
+# via on-disk artifact), NOT recursively nested — nested Agent-tool delegation collapses past
+# ~hop 4 in this harness (reproduced; sidecar v2/v3). Reuse of an upstream briefing is gated on
+# an inputs_digest + dependency-manifest freshness check (see instructions/ground-via-kg-brief.md).
 dispatchable_from:
   - kg-ideate       # invoked at Phase 2 (spec-scaffold) when a decision is a HARD/OPEN fork
 verifier: batch
@@ -42,15 +48,16 @@ It is **not** the whole authoring front-end and **not** implementation:
 | Role | Skill | Owns |
 |------|-------|------|
 | Authoring front-end | **`kg-ideate`** (T2 compound) | the WHOLE pipeline: idea → spec → plan → staged-execution handoff |
-| **idea→spec segment** | **`ideation-cycle`** (this molecule) | how idea→spec is now done: grounded idea → ratified spec + evidence |
+| **idea→spec fork-resolution** | **`ideation-cycle`** (T2 compound) | grounded idea → ratified decision + evidence sidecar (it does NOT write the spec prose) |
 | Execution | **`[[isp]]` / `[[orchestrator-session-start]]`** | how & in what order: staged impl → verify → review |
 
-`kg-ideate` owns the whole pipeline; `ideation-cycle` owns its idea→spec SEGMENT (Phase 1
-`kg-brief` + Phase 2 `spec-scaffold`, evolved into rigor). `kg-ideate` Phases 3–4
-(`plan-scaffold`, handoff) are unchanged — control returns to `kg-ideate` with a ratified
-spec in hand. See `instructions/composition.md` for the segment boundary and the handoff.
-Canonical formalization:
-`.agents/workflow/specs/ideation-system-composition/design.md`.
+`kg-ideate` owns the whole pipeline; `ideation-cycle` owns the idea→spec **fork-resolution**
+(the evolved, fidelity-gated form of that transition). It **RETURNS** ratified decisions + a
+per-fork evidence sidecar; **`spec-scaffold` writes the spec prose**, then `kg-ideate` Phases
+3–4 (`plan-scaffold`, handoff) continue unchanged. See `instructions/composition.md` for the
+segment boundary, the relay-discipline hand-back rule, and the handoff. Canonical
+formalization: `.agents/workflow/specs/ideation-system-composition/design.md` (DRAFT — owner-ruled,
+pending human ratification + the v4 experiment; the depth claims rest on the evidence sidecar).
 
 ## Operating posture (read before starting)
 
@@ -72,12 +79,12 @@ Canonical formalization:
    Load → `instructions/ground-via-kg-brief.md`
    `ideation-cycle` RUNS `kg-brief` as its grounding step (KG / research / lessons traversal
    → the shared briefing block). When dispatched from `kg-ideate`, the Phase 1 briefing may
-   be reused BY ARTIFACT (0 dispatch hops) — but only if it is FRESH (its `inputs_digest`
-   still matches the current KG snapshot / research set / lessons / idea text, AND no prior
-   fork's resolution mutated shared state the brief depended on). On any digest mismatch or
-   shared-state mutation, RE-RUN `kg-brief` — a stale brief must never silently propagate.
-   Standalone runs always run `kg-brief` fresh. Either way we never reinvent a separate
-   baseline scan.
+   be reused BY ARTIFACT — but only if it is FRESH: its `inputs_digest` (over a concrete input
+   set: idea text + KG snapshot id + named-query results + applicable-lessons set + cited-artifact
+   hashes) still matches, AND no entry in the brief's **dependency manifest** (the KG nodes /
+   decisions / lessons it read) changed. On any digest mismatch or manifest change, RE-RUN
+   `kg-brief` — a stale brief must never silently propagate. Standalone runs always run
+   `kg-brief` fresh. Either way we never reinvent a separate baseline scan.
 
 2. **Enumerate the forks**
    Load → `instructions/enumerate-forks.md`
@@ -86,11 +93,14 @@ Canonical formalization:
    from `kg-ideate` for a single decision, the fork is already named — enumerate only its
    sub-forks.
 
-3. **Classify each fork**
+3. **Classify each fork (triage — with a guard)**
    Load → `instructions/classify-forks.md`
    Tag every fork: already-settled (prior / dogfood) · empirically-determinable
    (prototype) · judgment-call (cross-brain) · owner-decision · deferred. The tag routes
-   the fork to step 4, step 5, or straight to step 6.
+   the fork to step 4, step 5, or straight to step 6. **Triage guard:** a "briefing-decidable
+   / already-settled" verdict MUST cite the decisive briefing fact; if none is citable, the
+   fork defaults to HARD. The step-5 cross-brain pass also reviews the triage calls themselves,
+   so a fork cannot be waved past the gate by mislabeling it easy.
 
 4. **Empirical pass — under the fidelity gate**
    Load → `instructions/empirical-pass.md`
@@ -99,21 +109,26 @@ Canonical formalization:
    (own `go.mod`, isolated from the coverage gate) that runs the REAL scenario and asserts
    the hypotheses, then run it through the fidelity gate (faithful inputs + negative
    control + real execution + self-audit + **independent cross-harness audit**). Only an
-   audited-sound experiment is allowed to inform the decision.
+   audited-sound experiment is allowed to inform the decision. **Relay discipline:** every
+   hand-back from a dispatched worker (and hop→hop in any multi-hop chain) MUST be
+   structured/pointer-based — artifact path + a constraint/decision checklist — never retold
+   prose. Lossy summary relay drops non-reconstructable detail that reaches the deliverable
+   (evidence sidecar v3 family-2: 16→13). Deep delegation is driver-orchestrated hop-by-hop,
+   not recursively nested (nested `Agent` delegation collapses past ~hop 4).
 
 5. **Cross-brain the judgment calls**
    Load → `instructions/cross-brain.md`
    For each non-empirical fork, get a cross-harness (codex) adversarial opinion. Produce a
    ranked list of must-decide items, each with a recommended default and its rationale.
 
-6. **Converge — ratify the decision**
+6. **Converge — ratify the decision, RETURN it (don't write the spec)**
    Load → `instructions/converge.md`
-   The owner ratifies. Standalone: seed or refine the canonical spec per the
-   `workflow-artifact-model` rule (decisions + rationale + open questions + done-criteria;
-   the prototype artifacts and audits are the recorded evidence). Dispatched from
-   `kg-ideate`: return the ratified decision + evidence so Phase 2 (`spec-scaffold`) folds
-   it back into the spec it is authoring — `ideation-cycle` does not own that spec, it
-   resolves one fork inside it.
+   The owner ratifies. `ideation-cycle` produces a **ratified decision + a per-fork evidence
+   sidecar** — it does **not** type the spec file. Dispatched from `kg-ideate`: return the
+   decision + sidecar pointer; **`spec-scaffold` writes the spec prose**. Standalone: hand the
+   decision + sidecar to a spec-drafting step (a delegated `spec-scaffold`-equivalent) to write
+   the prose, per the `workflow-artifact-model` rule. Evidence is linked from the decision, not
+   inlined.
 
 7. **Dogfood / migration**
    Load → `instructions/dogfood.md`
@@ -125,9 +140,10 @@ Canonical formalization:
 
 Load → `instructions/composition.md` — the role-split with `kg-ideate`, how the shared
 `kg-brief` grounding is reused-by-artifact-when-fresh (and re-run on staleness), the segment
-boundary (kg-ideate Phase 2 autonomous triage → hard forks run the loop), the two invocation
-modes (dispatched vs standalone), and why the depth-governed tiering contract keeps this
-in-bound. Read this whenever invoked from `kg-ideate`.
+boundary (kg-ideate Phase 2 autonomous triage → hard forks run the loop), the relay-discipline
+hand-back rule, the two invocation modes (dispatched vs standalone), and the engineering bounds
+(infra nesting ceiling + relay discipline — NOT a measured fidelity cliff; see the evidence
+sidecar). Read this whenever invoked from `kg-ideate`.
 
 ## Gotchas
 

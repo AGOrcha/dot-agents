@@ -34,6 +34,22 @@ The driver's leverage is framing the hypotheses and running the gate — not typ
 experiment. Brief the worker so the fidelity directive propagates down the delegation
 chain (it binds every subagent).
 
+## Relay discipline — how workers hand back (load-bearing)
+
+Every hand-back from a dispatched worker (and every hop → hop in a multi-hop chain) MUST be
+**structured / pointer-based: the artifact path(s) + a structured constraint/decision
+checklist — NOT a retold prose summary.** This is not a style preference; it is an
+evidence-backed rule. Lossy summary relay verifiably drops **non-reconstructable** detail and
+that loss **reaches the deliverable** (evidence sidecar
+`evidence/depth-degradation-dogfood.md` v3 family-2: a summarised hand-back compressed away an
+arbitrary schema choice → terminal artifact 16/16 → 13/16; verbatim relay was lossless across
+8 hops). State this rule in every worker bundle — it binds every subagent and hop you spawn.
+
+If an experiment's own SUBJECT is multi-hop delegation, it must be **driver-orchestrated
+hop-by-hop** (a fresh top-level `Agent` per hop, relay via on-disk file), never recursively
+nested: nested `Agent`-tool delegation collapses past ~hop 4 in this harness (sidecar v2/v3
+fold-back), and bundles for such experiments must forbid CLI-driver improvisation.
+
 ## On return
 
 1. Read the worker's report **and** its fidelity self-audit as two separate things.
@@ -47,5 +63,7 @@ chain (it binds every subagent).
 ## Output
 
 Per empirically-determinable fork: the audited verdict (which option holds), a pointer to
-the prototype module, and the fidelity audit that cleared it. These become the evidence
-rows in the spec at step 6.
+the prototype module, and the fidelity audit that cleared it — collected into the fork's
+**evidence sidecar**. At converge (step 6) the decision + sidecar pointer are RETURNED (to
+`spec-scaffold` when dispatched, or to a spec-drafting step when standalone); `ideation-cycle`
+does not write the spec prose itself.

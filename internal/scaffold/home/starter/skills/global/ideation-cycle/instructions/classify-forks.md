@@ -15,12 +15,28 @@ guess; a judgment call sent to a prototype burns a cycle proving something un-pr
 | **owner-decision** | A preference or product call only the owner can make (naming, scope, priority). | Step 6 — present options + default; owner picks. |
 | **deferred** | Real, but out of scope for this cycle. | Note as deferred in the spec; do not work it now. |
 
+## Triage guard (do not let a fork slip past the gate)
+
+Classification is autonomous — you tag forks yourself and surface the rationale; the human
+gate is spec ratification at converge, not per-fork confirmation. But autonomy needs a guard
+so a hard fork can't be quietly relabeled "easy" and skip the empirical/cross-brain gate:
+
+- **An `already-settled` / briefing-decidable verdict MUST cite the decisive fact** — the
+  specific prior ratified decision / lesson / query result that settles it. Record the citation
+  next to the tag.
+- **If no decisive fact is citable, the fork DEFAULTS to a hard route** (empirically-determinable
+  or judgment-call), not to already-settled. "It feels obvious" is not a citation.
+- **The step-5 cross-brain pass reviews the triage decisions themselves**, not only the
+  hard forks: hand the different harness the full tag list + each "easy" call's cited fact and
+  ask whether any briefing-decidable verdict is actually a disguised hard fork.
+
 ## How to tag
 
 Ask, in order:
 
 1. **Is it already answered?** A ratified decision in step 1, or a dogfood result, settles
-   it → **already-settled**. (A `[PROPOSED]` is NOT settled — it still needs step 6.)
+   it → **already-settled** — but only if you can **cite the decisive fact** (else default
+   hard, per the triage guard). (A `[PROPOSED]` is NOT settled — it still needs step 6.)
 2. **Could a prototype falsify one option?** If there is a concrete scenario where the
    wrong choice would *fail an assertion* — divergent resolution, data loss, a race, a
    migration diff — it is **empirically-determinable**. The test: can you write a negative

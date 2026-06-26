@@ -58,23 +58,43 @@ The highest-signal failure points. Read before the empirical pass.
 ## Don't reuse a stale upstream briefing
 
 - When dispatched from `kg-ideate`, you MAY reuse its Phase 1 briefing by artifact — but
-  ONLY after the freshness gate (`inputs_digest` match AND no prior-fork mutation of a
-  brief input). On any mismatch, re-run `kg-brief`. A stale brief poisons every fork
-  downstream — re-running the leaf is cheap; silently propagating staleness is not.
+  ONLY after the freshness gate (`inputs_digest` match AND no dependency-manifest entry
+  changed). On any mismatch, re-run `kg-brief`. A stale brief poisons every fork downstream —
+  re-running is cheap; silently propagating staleness is not.
 
-## Dispatch depth is governed by DEPTH, not tier-adjacency (resolved)
+## Don't cite a depth-2–3 "fidelity cliff" — it didn't replicate
 
-- `kg-ideate → spec-scaffold → ideation-cycle` is a 2-hop path, in-bound. `kg-brief` is a
-  TERMINAL leaf (reuse-by-artifact = 0 hops, or re-run = leaf) — it never extends depth, so
-  NO hoist back to the compound is needed. A molecule calling a molecule is legal under the
-  refined contract (`.agents/proposals/skill-tiering-molecule-composition.md`); the lint
-  warns on static call-graph depth >2, not on a molecule-calls-molecule edge.
+- The tier contract's "fidelity degrades past depth ~2–3 hops" premise **did NOT replicate**
+  in our tests (no same-agent cliff found ≤ depth 10 / ~15k tokens, two harnesses — but the
+  null is **power-limited**, ceiling ~97.6%; **v4 in flight**). Write "no cliff found in the
+  tested regime," NEVER "no cliff exists." Cite the evidence sidecar
+  (`evidence/depth-degradation-dogfood.md`). The composition is bounded by ENGINEERING, not a
+  measured cognitive cliff: the **infra delegation-nesting ceiling (~hop 4)** + **relay
+  discipline** + hygiene. Tier-adjacency is dropped, so the chain is legal regardless.
+
+## Relay hand-backs MUST be structured/pointer-based — never retold prose
+
+- The one positive finding: lossy summary relay drops **non-reconstructable** detail and it
+  **reaches the deliverable** (sidecar v3 family-2: 16→13). Every hand-back (worker → driver,
+  hop → hop) returns the **artifact path + a constraint/decision checklist**, not a prose
+  retelling. Reconstructable defaults survive a retell; arbitrary structural detail does not.
+- Deep multi-hop delegation is **driver-orchestrated hop-by-hop** (fresh `Agent` per hop,
+  relay via on-disk file), never recursively nested — nested `Agent` delegation collapses past
+  ~hop 4 in this harness.
+
+## ideation-cycle RETURNS the decision; spec-scaffold writes the prose
+
+- `ideation-cycle` is a **compound** that produces a ratified decision + a per-fork evidence
+  sidecar — it does NOT type the spec file. Dispatched: return the decision + sidecar pointer
+  to `spec-scaffold`. Standalone: hand them to a delegated spec-drafting step. Writing the
+  spec prose yourself breaks the segment-ownership split.
 
 ## Fork evidence is a sidecar, not inline
 
 - A hard fork's prototype + negative-control + cross-brain audit is its own sidecar
-  artifact, LINKED from the spec's decision entry (anticipating the lineage `derives_from`
-  evidence edge). Don't paste it into the spec body or bury it in transient task notes.
+  artifact, LINKED from the decision entry (anticipating the lineage `derives_from` evidence
+  edge). Don't paste it into the spec body or bury it in transient task notes. The founding
+  instance is this skill's own `evidence/depth-degradation-dogfood.md`.
 
 ## Don't let the spec become a plan
 
