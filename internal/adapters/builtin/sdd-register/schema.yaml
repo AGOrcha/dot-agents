@@ -1,0 +1,49 @@
+name: sdd-register
+version: 1.0.0
+description: |-
+  SDD-entity dogfood graph: ingests THIS repo's .agents/workflow/ specs, plans,
+  and tasks as typed KG nodes + edges (sdd-entity-kg-schema-draft.md v4 SUBSET).
+  Only [mirror] fields with an on-disk source are modeled; [PROPOSED] fields
+  with no on-disk artifact (leases, scope axes, prose_note projection) are
+  deferred. Populates the adapter-layer KG from real artifacts and answers the
+  proposal→spec→plan→task trace queries D1' requires queryable.
+note_types:
+  # Mirrors design.md frontmatter (dir name = spec_id; H1 = title; **Status:**).
+  - name: spec
+    fields:
+      - { name: spec_id, type: string }   # [mirror: specs/<dir> name]
+      - { name: title,   type: string }   # [mirror: H1]
+      - { name: status,  type: string }   # [mirror: **Status:** line, freeform — NOT a closed enum on disk]
+  # Mirrors schemas/workflow-plan.schema.json (PLAN.yaml).
+  - name: plan
+    fields:
+      - { name: plan_id, type: string }   # [mirror: PLAN.yaml `id`]
+      - { name: title,   type: string }   # [mirror: `title`]
+      - { name: status,  type: string }   # [mirror: `status`]
+      - { name: summary, type: string }   # [mirror: `summary`]
+  # Mirrors schemas/workflow-tasks.schema.json tasks[] item.
+  # IDENTITY: task ids are PLAN-LOCAL, so the node key is COMPOSITE:
+  # task_key = plan_id + "/" + task_id. plan_id is materialized onto every task
+  # node (TASKS.yaml carries it only in the file header).
+  - name: task
+    fields:
+      - { name: task_key, type: string }   # COMPOSITE node key = plan_id + "/" + task_id (globally unique)
+      - { name: task_id,  type: string }   # [mirror: TASKS.yaml tasks[].id] PLAN-LOCAL
+      - { name: plan_id,  type: string }   # [mirror: TASKS.yaml file-header `plan_id`] materialized onto the task
+      - { name: title,    type: string }   # [mirror: tasks[].title]
+      - { name: status,   type: string }   # [mirror: tasks[].status]
+      - { name: app_type, type: string }   # [mirror: CanonicalTask.AppType / live TASKS.yaml]
+edge_types:
+  - { name: contains_task,   from: plan, to: task, cardinality: one-to-many }   # plan -> its tasks
+  - { name: belongs_to_plan, from: task, to: plan, cardinality: many-to-one }   # task -> its plan (explicit inverse FK)
+  - { name: depends_on,      from: task, to: task, cardinality: many-to-many }  # [mirror: tasks[].depends_on], incl. cross-plan
+  - { name: plan_for_spec,   from: plan, to: spec, cardinality: many-to-many }  # plan -> spec it implements
+  - { name: implements_spec, from: task, to: spec, cardinality: many-to-many }  # task -> spec it implements
+impact_radius:
+  # A spec/plan/task change fans out to the tasks it contains and the specs it
+  # implements. max_depth 2 covers task -> plan -> spec.
+  query: |-
+    MATCH (p:plan)-[:contains_task]->(t:task)
+    WHERE p.plan_id = $plan_id
+    RETURN t.task_key
+  max_depth: 2
