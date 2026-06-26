@@ -1,8 +1,16 @@
-# Step 6: Converge — ratify and seed the spec
+# Step 6: Converge — ratify the decision
 
 The forks have been routed: empirical verdicts from step 4, the ranked must-decide list
-from step 5, the already-settled citations, the owner-decisions. Now the owner ratifies,
-and the decisions are written into the canonical spec.
+from step 5, the already-settled citations, the owner-decisions. Now the owner ratifies.
+
+Where the ratified decision goes depends on the invocation mode (see
+`instructions/composition.md`):
+
+- **Dispatched from `kg-ideate`** — return the ratified decision + evidence pointers to
+  Phase 2 (`spec-scaffold`), which folds it into the spec it is authoring.
+  `ideation-cycle` does NOT own that spec; it resolved one fork inside it. Skip
+  "Seed or refine the spec" below — `spec-scaffold` does the writing.
+- **Standalone** — seed or refine the canonical spec yourself, per below.
 
 ## Owner ratification
 
@@ -14,7 +22,7 @@ and the decisions are written into the canonical spec.
   it; for owner-decisions the owner picks.
 - A `[PROPOSED]` decision becomes ratified here, or is sent back as a still-open fork.
 
-## Seed or refine the spec
+## Seed or refine the spec (standalone mode)
 
 Write the ratified decisions into `.agents/workflow/specs/<id>/design.md` per the
 `workflow-artifact-model` rule. The spec owns:
@@ -39,12 +47,16 @@ decisions. Reference them from the spec (and carry them into `.agents/history/<i
 the plan archives); do not paste experiment code into the spec. A decision in the spec
 should be traceable to its audited evidence in one hop.
 
-## Hand off to the execution half
+## Hand off
 
-Once the spec is ratified, the ideation cycle's job is done. The spec is the contract;
-the execution half (`isp` / `orchestrator-session-start`) plans and implements against it.
-Ideation produced the spec/proposal; execution implements it. Do not start writing
-product code here — that is `isp`'s turn.
+- **Dispatched mode:** hand the ratified decision + evidence back to `spec-scaffold`; its
+  spec, plan, and the eventual handoff to `[[isp]]` continue from there. `ideation-cycle`
+  is done once the fork is resolved.
+- **Standalone mode:** once the spec is ratified it is the contract; the execution half
+  (`[[isp]]` / `[[orchestrator-session-start]]`) plans and implements against it.
+
+Either way: do not start writing product code here — that is `isp`'s turn. `ideation-cycle`
+resolves forks; it does not implement them.
 
 ## Dispatch the authoring
 

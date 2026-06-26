@@ -33,13 +33,33 @@ The highest-signal failure points. Read before the empirical pass.
   felt like work. "Empirical where possible, else cross-brain" — the test is whether you
   can write a negative control.
 
-## Don't skip the baseline sweep
+## Don't reinvent `kg-brief` grounding
 
+- The grounding stage IS the `kg-brief` molecule. If you find yourself grepping
+  proposals/specs/lessons by hand in step 1, stop — that duplicates `kg-brief` and splits
+  the briefing into two divergent shapes. Consume the passed briefing (dispatched) or
+  invoke `kg-brief` (standalone). See `instructions/ground-via-kg-brief.md`.
 - A fork raised without the prior thinking gets re-litigated from scratch — the exact
   "we keep re-explaining this" the skill exists to kill. Every fork must trace to a
-  baseline row. If it doesn't, you're reinventing.
+  briefing row. If it doesn't, you skipped grounding.
 - A `[PROPOSED]` decision is NOT settled — it still needs ratification in step 6. A
   *ratified* decision is a constraint — don't re-open it without new evidence.
+
+## Don't author the surrounding spec when dispatched from `kg-ideate`
+
+- Dispatched mode resolves ONE fork and returns the decision + evidence to `spec-scaffold`,
+  which owns the spec. Writing the spec yourself in dispatched mode duplicates
+  `spec-scaffold` and breaks the role-split. Only standalone mode seeds/refines a spec.
+- Conversely, don't pull a briefing-decidable decision into a full empirical cycle. If the
+  briefing already settles it, `spec-scaffold` authors it directly — `ideation-cycle` is
+  for the HARD/OPEN forks only (see `instructions/composition.md` boundary test).
+
+## Mind the dispatch-hop bound
+
+- `kg-ideate → spec-scaffold → ideation-cycle → kg-brief` is potentially 3 dispatch hops,
+  past the reliable 1–2-hop bound (`skill-tiering-contract` §1.2). Prefer hoisting the
+  dispatch to the compound, or reuse `kg-brief` by consuming its artifact (no re-dispatch).
+  This is an unresolved composition ambiguity — surface it, don't silently pick one.
 
 ## Don't let the spec become a plan
 

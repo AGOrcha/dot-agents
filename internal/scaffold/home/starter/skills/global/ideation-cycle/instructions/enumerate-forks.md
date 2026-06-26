@@ -1,8 +1,13 @@
 # Step 2: Enumerate the forks
 
 A **fork** is one open design decision with more than one defensible answer. Turn the
-**Open** column from step 1 into an explicit, numbered list of forks. This is the agenda
-the rest of the cycle works through.
+unresolved rows of the step-1 briefing (the `kg-brief` block — its **Gaps**,
+**Contradictions**, and any **Open Question** a prior spec left) into an explicit, numbered
+list of forks. This is the agenda the rest of the cycle works through.
+
+When dispatched from `kg-ideate` for a single named decision, the fork is already given —
+enumerate only its sub-forks (the distinct sub-decisions hidden inside it), still anchored
+to the briefing.
 
 ## What counts as a fork
 
@@ -21,8 +26,9 @@ Each fork is one entry with:
   "does profile resolution layer scopes last-wins or first-wins when two profiles set
   the same key?").
 - **Options** — the 2+ defensible answers, each one sentence.
-- **Baseline anchor** — the step-1 row it traces to: the prior decision it extends or the
-  gap it fills. A fork with no anchor means you skipped step 1 for it — go back.
+- **Briefing anchor** — the `kg-brief` row it traces to (a Gap, a Contradiction, a prior
+  Open Question, a `[PROPOSED]`): the prior decision it extends or the gap it fills. A fork
+  with no anchor means you skipped grounding for it — go back to step 1.
 - **Stakes** — what depends on getting this right (what breaks downstream if wrong).
 
 ## Frame against the baseline, not in a vacuum
