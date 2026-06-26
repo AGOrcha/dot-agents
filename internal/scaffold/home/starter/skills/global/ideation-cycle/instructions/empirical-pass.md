@@ -1,0 +1,51 @@
+# Step 4: Empirical pass
+
+For every fork tagged **empirically-determinable** in step 3, settle it with a prototype
+that runs the REAL scenario and asserts the hypotheses — and that survives the fidelity
+gate. **Read `instructions/fidelity-gate.md` before trusting any result here.** A prototype
+result that has not passed the gate does not exist as far as the spec is concerned.
+
+## Build a self-contained prototype
+
+- **Own `go.mod`, isolated from the coverage gate.** Put each prototype under its own
+  module (e.g. `.agents/active/experiments/<fork-id>/`) with its own `go.mod` so it is
+  excluded from the repo's test/coverage gate and never ships in product code. It is
+  throwaway evidence, not a feature.
+- **Run the real scenario.** Model the actual data, schema, enums, and the specific
+  failure case — not a simplified shape (the fidelity gate enforces this; see step 5
+  there).
+- **Assert the hypotheses.** Each fork's options become assertions: the prototype proves
+  which option holds under the real scenario. Deterministic asserts; for concurrency,
+  `-race` × many randomized iterations.
+
+## Dispatch the authoring; the driver orchestrates
+
+The ideation driver does **not** hand-build the prototype. Dispatch it to a subagent with
+a bundle that states, up front (Hybrid orchestration model):
+
+- the fork(s) and the exact hypotheses to assert;
+- the fidelity directive verbatim — **faithful inputs + a negative control + real
+  execution + no hidden losses + a fidelity self-audit in the report** (see
+  `fidelity-gate.md`);
+- the real schema/data to model and where it lives;
+- the isolation requirement (own `go.mod`, out of the coverage gate).
+
+The driver's leverage is framing the hypotheses and running the gate — not typing the
+experiment. Brief the worker so the fidelity directive propagates down the delegation
+chain (it binds every subagent).
+
+## On return
+
+1. Read the worker's report **and** its fidelity self-audit as two separate things.
+2. Re-run the negative control yourself — confirm the broken impl actually fails.
+3. Hand off to the fidelity gate (step 5 of `fidelity-gate.md`): the independent
+   cross-harness audit whose job is to invalidate the experiment. Re-run until it passes.
+4. Only then record the result as evidence for the fork. Surface the result honestly,
+   including any field that could not round-trip or case that broke — those are findings,
+   never things to drop for a green check.
+
+## Output
+
+Per empirically-determinable fork: the audited verdict (which option holds), a pointer to
+the prototype module, and the fidelity audit that cleared it. These become the evidence
+rows in the spec at step 6.
