@@ -58,8 +58,9 @@ EOF
 # Drive the production enforce logic directly via the subcommand. COVERAGE_EXCEPTIONS
 # points at the empty fixture allowlist; everything else (enforce mode, threshold,
 # per-package warn) is fixed inside gate.sh, exactly as production runs it.
-enforce() {  # $1 = profile fixture
-  COVERAGE_EXCEPTIONS="$tmp/exc.txt" bash "$gate" enforce-coverage "$1" 2>&1
+enforce() {
+  local profile="$1"  # S7679: bind positional to a named local before use
+  COVERAGE_EXCEPTIONS="$tmp/exc.txt" bash "$gate" enforce-coverage "$profile" 2>&1
 }
 
 echo "== case 1: #173 replay (sub-95% production file) =="
