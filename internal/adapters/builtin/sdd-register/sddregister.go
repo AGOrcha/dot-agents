@@ -19,8 +19,8 @@ package sddregister
 import (
 	// blank import enables the //go:embed directive on schemaYAML.
 	_ "embed"
-	"fmt"
 
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/adapterkit"
 	"github.com/AGOrcha/dot-agents/internal/kg/dsl"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
@@ -61,37 +61,11 @@ func mustFromYAML(yaml []byte) *Adapter {
 // error (rather than panicking) for an invalid schema or a query that fails to
 // compile against it. This is the testable core of New.
 func newFromYAML(yaml []byte) (*Adapter, error) {
-	schema, err := registry.LoadSchema(yaml)
+	c, err := adapterkit.Load(yaml, namedQuerySources())
 	if err != nil {
-		return nil, fmt.Errorf("embedded schema invalid: %w", err)
-	}
-	info, err := buildSchemaInfo(schema)
-	if err != nil {
-		return nil, fmt.Errorf("schema info: %w", err)
-	}
-	a := &Adapter{schema: schema, info: info, named: map[string]*dsl.Query{}}
-	if err := a.compileQueries(); err != nil {
 		return nil, err
 	}
-	return a, nil
-}
-
-// compileQueries parses the impact-radius and named trace queries against the
-// adapter's SchemaInfo, returning the first DSL compile error.
-func (a *Adapter) compileQueries() error {
-	q, err := dsl.ParseWithSchema(a.schema.ImpactRadius.Query, a.info)
-	if err != nil {
-		return fmt.Errorf("impact_radius query: %w", err)
-	}
-	a.impact = q
-	for name, src := range namedQuerySources() {
-		nq, err := dsl.ParseWithSchema(src, a.info)
-		if err != nil {
-			return fmt.Errorf("named query %q: %w", name, err)
-		}
-		a.named[name] = nq
-	}
-	return nil
+	return &Adapter{schema: c.Schema, info: c.Info, impact: c.Impact, named: c.Named}, nil
 }
 
 // Name returns the adapter name.
@@ -111,23 +85,6 @@ func (a *Adapter) ImpactRadius(req registry.ImpactRequest) (registry.ImpactResul
 	ids := make([]string, len(req.ChangedIDs))
 	copy(ids, req.ChangedIDs)
 	return registry.ImpactResult{IDs: ids}, nil
-}
-
-// buildSchemaInfo compiles a dsl.SchemaInfo from the registry schema.
-func buildSchemaInfo(s registry.Schema) (dsl.SchemaInfo, error) {
-	notes := make([]dsl.NoteTypeDecl, 0, len(s.NoteTypes))
-	for _, nt := range s.NoteTypes {
-		fields := make([]dsl.FieldDecl, 0, len(nt.Fields))
-		for _, f := range nt.Fields {
-			fields = append(fields, dsl.FieldDecl{Name: f.Name, Type: f.Type, Derivation: f.Derivation})
-		}
-		notes = append(notes, dsl.NoteTypeDecl{Name: nt.Name, Fields: fields})
-	}
-	edges := make([]dsl.EdgeTypeDecl, 0, len(s.EdgeTypes))
-	for _, et := range s.EdgeTypes {
-		edges = append(edges, dsl.EdgeTypeDecl{Name: et.Name, From: et.From, To: et.To, Derivation: et.Derivation})
-	}
-	return dsl.NewSchemaInfo(notes, edges, s.ImpactRadius.MaxDepth)
 }
 
 // Register adds the sdd-register adapter to reg.

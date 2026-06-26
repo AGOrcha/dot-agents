@@ -19,8 +19,8 @@ package complianceregister
 import (
 	// blank import enables the //go:embed directive on schemaYAML.
 	_ "embed"
-	"fmt"
 
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/adapterkit"
 	"github.com/AGOrcha/dot-agents/internal/kg/dsl"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
@@ -46,8 +46,13 @@ type Adapter struct {
 // binary. The fallible construction logic lives in newFromYAML so its error
 // paths are exercised by tests with deliberately-bad input; New is the thin
 // can't-fail-in-production entry point.
-func New() *Adapter {
-	a, err := newFromYAML(schemaYAML)
+func New() *Adapter { return mustFromYAML(schemaYAML) }
+
+// mustFromYAML builds the adapter or panics. It is the panic seam New uses; a
+// white-box test drives it with bad bytes so the panic branch is exercised
+// (New itself can only ever be called with the valid embed).
+func mustFromYAML(yaml []byte) *Adapter {
+	a, err := newFromYAML(yaml)
 	if err != nil {
 		panic("compliance-register: " + err.Error())
 	}
@@ -58,37 +63,11 @@ func New() *Adapter {
 // (rather than panicking) for an invalid schema or a query that fails to
 // compile against it. This is the testable core of New.
 func newFromYAML(yaml []byte) (*Adapter, error) {
-	schema, err := registry.LoadSchema(yaml)
+	c, err := adapterkit.Load(yaml, namedQuerySources())
 	if err != nil {
-		return nil, fmt.Errorf("embedded schema invalid: %w", err)
-	}
-	info, err := buildSchemaInfo(schema)
-	if err != nil {
-		return nil, fmt.Errorf("schema info: %w", err)
-	}
-	a := &Adapter{schema: schema, info: info, envPred: envPredicates(), named: map[string]*dsl.Query{}}
-	if err := a.compileQueries(); err != nil {
 		return nil, err
 	}
-	return a, nil
-}
-
-// compileQueries parses the impact-radius and named queries against the
-// adapter's SchemaInfo, returning the first DSL compile error.
-func (a *Adapter) compileQueries() error {
-	q, err := dsl.ParseWithSchema(a.schema.ImpactRadius.Query, a.info)
-	if err != nil {
-		return fmt.Errorf("impact_radius query: %w", err)
-	}
-	a.impact = q
-	for name, src := range namedQuerySources() {
-		nq, err := dsl.ParseWithSchema(src, a.info)
-		if err != nil {
-			return fmt.Errorf("named query %q: %w", name, err)
-		}
-		a.named[name] = nq
-	}
-	return nil
+	return &Adapter{schema: c.Schema, info: c.Info, impact: c.Impact, named: c.Named, envPred: envPredicates()}, nil
 }
 
 // Name returns the adapter name.
@@ -104,25 +83,6 @@ func (a *Adapter) SchemaInfo() dsl.SchemaInfo { return a.info }
 
 // EnvPredicates returns the declared environmental predicates (§7).
 func (a *Adapter) EnvPredicates() []dsl.EnvPredicate { return a.envPred }
-
-// buildSchemaInfo compiles a dsl.SchemaInfo from the registry schema: it
-// translates note/edge declarations into the DSL's typed-ref-aware form and
-// carries the impact_radius max_depth as the variable-length bound.
-func buildSchemaInfo(s registry.Schema) (dsl.SchemaInfo, error) {
-	notes := make([]dsl.NoteTypeDecl, 0, len(s.NoteTypes))
-	for _, nt := range s.NoteTypes {
-		fields := make([]dsl.FieldDecl, 0, len(nt.Fields))
-		for _, f := range nt.Fields {
-			fields = append(fields, dsl.FieldDecl{Name: f.Name, Type: f.Type, Derivation: f.Derivation})
-		}
-		notes = append(notes, dsl.NoteTypeDecl{Name: nt.Name, Fields: fields})
-	}
-	edges := make([]dsl.EdgeTypeDecl, 0, len(s.EdgeTypes))
-	for _, et := range s.EdgeTypes {
-		edges = append(edges, dsl.EdgeTypeDecl{Name: et.Name, From: et.From, To: et.To, Derivation: et.Derivation})
-	}
-	return dsl.NewSchemaInfo(notes, edges, s.ImpactRadius.MaxDepth)
-}
 
 // envPredicates is the §13.2 env-predicate declaration set: evidence expiry via
 // time_after, and policy review-due via a webhook endpoint.
