@@ -7,11 +7,18 @@
 #                              prek run --all-files --hook-stage pre-push
 #
 # Design: the pre-commit stage is fast (formatting only) so every commit
-# stays cheap. The heavy mandate — build, vet, the 95%-per-package
-# coverage gate (full test suite), and containerized sonar-scanner — runs
-# at the pre-push stage. (Running the suite per commit also previously
-# corrupted the shared git config via leaked GIT_DIR; scripts/
-# precommit-mandate.sh now strips that env and prek isolates hook exec.)
+# stays cheap. The heavy mandate runs at the pre-push stage in two hooks:
+#   1. `make gate` — the SINGLE SOURCE OF TRUTH for the fast merge-blocking
+#      mandate: build + vet (POSIX + windows cross-compile) + gofmt + per-file
+#      coverage ENFORCE over the FULL profile, exactly as CI runs it (same
+#      coverage-gate.sh enforce mode + coverage-exceptions allowlist + 95%
+#      threshold). This replaced the separate go-build-vet + per-PACKAGE
+#      coverage hooks, which drifted from CI (per-package passed locally,
+#      per-file failed CI — #173). One definition: scripts/gate.sh.
+#   2. sonar — the native SonarCloud quality gate (unchanged here).
+# (Running the suite per commit previously corrupted the shared git config via
+# leaked GIT_DIR; scripts/gate.sh + precommit-mandate.sh strip that env and
+# prek isolates hook exec.)
 default_install_hook_types: [pre-commit, pre-push]
 
 repos:
@@ -27,16 +34,13 @@ repos:
         stages: [pre-commit]
 
       # ---- heavy, on push -----------------------------------------
-      - id: go-build-vet
-        name: go build + vet (POSIX + windows)
-        entry: bash scripts/precommit-mandate.sh build-vet
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-
-      - id: coverage-gate
-        name: coverage gate (>=95% per package)
-        entry: bash scripts/precommit-mandate.sh coverage
+      # `make gate` is the single source of truth for the fast merge-blocking
+      # mandate: build + vet (POSIX + windows cross-compile) + gofmt + full
+      # per-file coverage ENFORCE (exactly as CI). It replaces the old
+      # go-build-vet + per-package coverage hooks (which drifted from CI).
+      - id: gate
+        name: make gate (build+vet+cross+full per-file coverage enforce)
+        entry: make gate
         language: system
         pass_filenames: false
         stages: [pre-push]
