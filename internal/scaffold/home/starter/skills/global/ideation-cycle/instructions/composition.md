@@ -32,20 +32,30 @@ handoff) are unchanged; control returns to `kg-ideate` with a ratified spec in h
 `supersedes` `kg-ideate`'s original idea→spec stage — an *evolution* edge, not a
 `related_to` sibling edge.
 
-## The shared stage: grounding IS `kg-brief`
+## The shared stage: `ideation-cycle` RUNS `kg-brief`
 
 Both skills ground on the **same** primitive — the `kg-brief` molecule (KG / research /
-lessons → briefing block). `ideation-cycle` does NOT carry its own baseline scan:
+lessons → briefing block). `ideation-cycle` RUNS `kg-brief` as its step 1; it does NOT carry
+its own baseline scan and `kg-brief` is NOT handed down pre-baked unconditionally:
 
-- **Dispatched from `kg-ideate`:** the Phase 1 briefing already exists; consume it.
-- **Standalone:** invoke `kg-brief` first to produce that same briefing.
+- **Dispatched from `kg-ideate`:** the Phase 1 briefing may be reused **by artifact** (0
+  dispatch hops) — but ONLY if fresh. Freshness = the briefing's `inputs_digest` still
+  matches the current KG snapshot / research set / lessons / idea text, AND no prior fork's
+  resolution mutated shared state the brief depended on. On any mismatch, **re-run
+  `kg-brief`**. (Same `inputs_digest` primitive config-v2 uses — `ComputeInputsDigest`,
+  `sha256:…`; reuse it, don't fork a parallel staleness scheme.)
+- **Standalone:** always run `kg-brief` fresh.
 
-This is the anti-duplication invariant. See `instructions/ground-via-kg-brief.md`.
+This is the anti-duplication invariant plus the no-stale-brief invariant. See
+`instructions/ground-via-kg-brief.md`.
 
 ## The segment boundary + triage
 
 The idea→spec segment (Phase 1 `kg-brief` + Phase 2 `spec-scaffold`) is now traversed by
-this loop. Not every decision needs the full loop — triage within the segment:
+this loop. Not every decision needs the full loop — `ideation-cycle` triages each fork
+**autonomously and surfaces its rationale** (it does NOT ask for per-fork confirmation; the
+human gate is spec ratification at converge, not triage — that is what stops the
+re-explaining):
 
 1. **Briefing-decidable** → resolved inline, exactly as `spec-scaffold` does today. The
    briefing settles it; no prototype, no cross-brain.
@@ -64,7 +74,11 @@ The segment's output is a **ratified spec in hand**; control returns to `kg-idea
 continue at Phase 3 (`plan-scaffold`). `ideation-cycle` owns the idea→spec method;
 `kg-ideate` owns the surrounding pipeline.
 
-## Two invocation modes
+## Two invocation modes (BOTH registered)
+
+`ideation-cycle` is a **top-level invocable skill AND dispatchable from `kg-ideate`** — it
+is independently useful (the fork-resolution loop ran standalone for every config-profiles
+decision), not only a `kg-ideate` sub-step.
 
 - **Dispatched** (from `kg-ideate` Phase 2): resolve ONE named fork; return decision +
   evidence; do not author the surrounding spec. Steps 1–2 are scoped to that fork.
@@ -72,28 +86,31 @@ continue at Phase 3 (`plan-scaffold`). `ideation-cycle` owns the idea→spec met
   the full cycle including seeding/refining the spec at converge (step 6). This is the
   entry point when there is no `kg-ideate` run in flight.
 
-## Dispatch-hop note (surface to the owner if it bites)
+## Fork evidence is a per-fork sidecar
 
-The tier contract (`skill-tiering-contract` §1.2) holds that agents reliably dispatch
-through **1–2 hops** of skill-to-skill composition and degrade past that. The full chain
-here is:
+A hard fork's evidence — the prototype dir, the negative-control result, the cross-brain
+audit verdicts — is its **own artifact (a sidecar)**, LINKED from the spec's decision entry.
+Not inlined into the spec, not buried in transient task notes. This anticipates the lineage
+schema (decision `derives_from` evidence edge): the decision points at its evidence sidecar.
+Standalone mode links the sidecar from the spec it seeds; dispatched mode returns the
+sidecar pointer to `spec-scaffold` to link from the decision it folds in.
+
+## Dispatch depth (resolved — depth governs, not tier-adjacency)
+
+The reliability finding behind the tier contract is about dispatch **DEPTH**, not
+tier-adjacency. Composition is governed by **≤2 reliable skill-to-skill hops on any runtime
+path**; a molecule MAY call molecules (see the refined contract delta:
+`.agents/proposals/skill-tiering-molecule-composition.md`). The chain here:
 
 ```
-kg-ideate (compound)  →  spec-scaffold (molecule)  →  ideation-cycle (molecule)  →  kg-brief (reuse)
-        hop 1                     hop 2                        hop 3
+kg-ideate (compound)  →  spec-scaffold (molecule)  →  ideation-cycle (molecule)  →  kg-brief
+        hop 1                     hop 2                        ↑ TERMINAL LEAF
 ```
 
-Dispatching `ideation-cycle` from inside `spec-scaffold`, and then reusing `kg-brief` from
-inside `ideation-cycle`, can exceed the reliable 1–2-hop bound. Two ways to stay in bound,
-**for the owner to rule** (see the composition spec's open questions):
-
-- **(a) Hoist the dispatch to the compound.** `spec-scaffold` does not call
-  `ideation-cycle` itself; it *flags* a decision as a hard fork and returns control to the
-  `kg-ideate` compound, which dispatches `ideation-cycle` as a sibling phase. Keeps every
-  edge at hop ≤ 2 from the compound. **(default recommendation.)**
-- **(b) Reuse `kg-brief` by artifact, not by dispatch.** When dispatched, `ideation-cycle`
-  consumes the *already-produced* briefing (no `kg-brief` re-dispatch), so the chain is
-  data-passing, not a 3rd dispatch hop. Standalone runs are hop-1 to `kg-brief` and fine.
-
-These are not yet ratified — they are the live composition ambiguity. Do not hard-code one
-until the owner picks; the composition spec tracks it as an open question.
+`kg-brief` calls nothing downstream. On any runtime path it either **reuses the upstream
+briefing by artifact (0 dispatch hops)** or **re-runs as a leaf** — neither extends
+unbounded-dispatch depth. So `kg-ideate → spec-scaffold → ideation-cycle` is a 2-hop path,
+in-bound. **No hoist is needed** — forcing `spec-scaffold` to bounce control back to the
+compound purely to satisfy tier-adjacency was the artifact of an over-strict rule; the
+depth-governed contract removes it. The static call-graph depth here is 2 (warning fires
+only at >2).

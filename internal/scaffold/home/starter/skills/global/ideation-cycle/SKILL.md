@@ -3,7 +3,12 @@ name: "ideation-cycle"
 description: "Fork-resolution engine: turn a HARD or OPEN design fork into a ratified, fidelity-audited decision + evidence. Use when a briefing alone can't decide a fork — an under-specified spec decision, a deferred architectural question, a recurring 'we keep re-explaining this', or a [PROPOSED] item — and you need to DISCOVER the answer: empirical prototype (under the prototype-experiment-fidelity-gate) → independent cross-harness audit → cross-brain the judgment calls → ratified decision. Composable molecule: it REUSES kg-brief for grounding and is dispatchable from kg-ideate Phase 2 (spec-scaffold) for hard forks, AND independently invocable for a one-off design question. Not the authoring front-end (that is kg-ideate) and not implementation (that is isp)."
 argument-hint: "[<fork-or-spec-id> | --spec <path> | --question \"<open design question>\" | --brief <briefing-path>]"
 tier: molecule
+# Composition is governed by dispatch DEPTH (≤2 reliable skill-to-skill hops on any runtime
+# path), NOT tier-adjacency: a molecule MAY call molecules. See the refined tiering contract
+# delta: .agents/proposals/skill-tiering-molecule-composition.md. `kg-brief` (a molecule) is
+# ideation-cycle's grounding step 1 — RUN by ideation-cycle, not handed down pre-baked.
 calls:
+  - kg-brief        # grounding step 1 (reuse-by-artifact when fresh, else re-run — see below)
   - enumerate-forks
   - classify-forks
   - empirical-pass
@@ -11,8 +16,11 @@ calls:
   - cross-brain
   - converge-decision
   - dogfood-decision
-reuses:
-  - kg-brief        # the grounding stage IS kg-brief — not a reinvented baseline scan
+# kg-brief is a TERMINAL leaf (calls nothing downstream): on any runtime path it either
+# reuses an upstream-fresh briefing BY ARTIFACT (0 dispatch hops) or re-runs as a leaf, so it
+# never extends unbounded-dispatch depth. The 2-hop path kg-ideate→spec-scaffold→ideation-cycle
+# is therefore in-bound. Reuse is gated on an inputs_digest freshness check
+# (see instructions/ground-via-kg-brief.md).
 dispatchable_from:
   - kg-ideate       # invoked at Phase 2 (spec-scaffold) when a decision is a HARD/OPEN fork
 verifier: batch
@@ -60,13 +68,16 @@ Canonical formalization:
 
 ## Workflow
 
-1. **Ground — reuse `kg-brief`, don't reinvent it**
+1. **Ground — run `kg-brief` (reuse upstream briefing only if fresh)**
    Load → `instructions/ground-via-kg-brief.md`
-   The grounding stage **IS** the `kg-brief` molecule (KG / research / lessons traversal →
-   the shared briefing block). When dispatched from `kg-ideate`, the Phase 1 briefing
-   already exists — consume it, do not re-run grounding. When invoked standalone, invoke
-   `kg-brief` (or run it inline) to produce that same briefing first. Either way, the fork
-   carries the prior thinking and we never reinvent a separate baseline scan.
+   `ideation-cycle` RUNS `kg-brief` as its grounding step (KG / research / lessons traversal
+   → the shared briefing block). When dispatched from `kg-ideate`, the Phase 1 briefing may
+   be reused BY ARTIFACT (0 dispatch hops) — but only if it is FRESH (its `inputs_digest`
+   still matches the current KG snapshot / research set / lessons / idea text, AND no prior
+   fork's resolution mutated shared state the brief depended on). On any digest mismatch or
+   shared-state mutation, RE-RUN `kg-brief` — a stale brief must never silently propagate.
+   Standalone runs always run `kg-brief` fresh. Either way we never reinvent a separate
+   baseline scan.
 
 2. **Enumerate the forks**
    Load → `instructions/enumerate-forks.md`
@@ -113,9 +124,10 @@ Canonical formalization:
 ## Composition
 
 Load → `instructions/composition.md` — the role-split with `kg-ideate`, how the shared
-`kg-brief` grounding is reused, the dispatch boundary (kg-ideate Phase 2 triage → dispatch
-hard forks here), the two invocation modes (dispatched vs standalone), and the
-dispatch-hop note. Read this whenever invoked from `kg-ideate`.
+`kg-brief` grounding is reused-by-artifact-when-fresh (and re-run on staleness), the segment
+boundary (kg-ideate Phase 2 autonomous triage → hard forks run the loop), the two invocation
+modes (dispatched vs standalone), and why the depth-governed tiering contract keeps this
+in-bound. Read this whenever invoked from `kg-ideate`.
 
 ## Gotchas
 

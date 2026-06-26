@@ -42,8 +42,8 @@ empirical prototype → negative-control + independent cross-brain audit → rat
 
 | Phase | Molecule | Owns (today) | Owns (proposed) |
 |-------|----------|--------------|-----------------|
-| 1 | `kg-brief` | KG/research/lessons → briefing | unchanged — `kg-brief` is the shared grounding both skills reuse |
-| 2 | `spec-scaffold` | briefing → decisions/open-questions → `design.md` | **evolved:** triage each decision — briefing-decidable → author inline (as today); hard/open fork → run the full `ideation-cycle` loop, fold the ratified decision + evidence into the spec |
+| 1 | `kg-brief` | KG/research/lessons → briefing | unchanged as a molecule, BUT its output now carries an `inputs_digest` so `ideation-cycle` can reuse it by artifact when fresh (re-runs `kg-brief` on staleness) |
+| 2 | `spec-scaffold` | briefing → decisions/open-questions → `design.md` | **evolved:** **autonomously** triage each decision (surfaced rationale, no per-fork ask) — briefing-decidable → author inline (as today); hard/open fork → run the full `ideation-cycle` loop, fold the ratified decision + its evidence **sidecar pointer** into the spec |
 | 3 | `plan-scaffold` | spec → tasks/write-scopes/dep-order | **unchanged** |
 | 4 | `staged-execution-handoff` | spec+plan → fanout/ISP | **unchanged** |
 
@@ -52,46 +52,61 @@ empirical prototype → negative-control + independent cross-brain audit → rat
 > **D7 — The idea→spec front is the `ideation-cycle` segment.** Phase 1 (`kg-brief`) +
 > Phase 2 (`spec-scaffold`) constitute the idea→spec transition, which is now traversed by
 > the `ideation-cycle` molecule (the matured, fidelity-gated form of that transition).
-> Within the segment, briefing-decidable decisions resolve inline; hard/open forks run the
-> full loop (classify → empirical[fidelity-gate] / cross-brain → ratify). The segment
-> output is a ratified spec; control returns to `kg-ideate` at Phase 3. Phases 3–4 are
-> unchanged. `kg-ideate` owns the whole pipeline; `ideation-cycle` owns this segment.
-> Lineage: `ideation-cycle derives_from / supersedes` the original `spec-scaffold`
-> idea→spec behavior (evolution edge — see composition spec D5).
+> Within the segment, triage is **autonomous** (surfaced rationale; the human gate is spec
+> ratification, not per-fork triage): briefing-decidable decisions resolve inline; hard/open
+> forks run the full loop (classify → empirical[fidelity-gate] / cross-brain → ratify). Each
+> hard fork's evidence is a **per-fork sidecar linked from the decision**. The segment output
+> is a ratified spec; control returns to `kg-ideate` at Phase 3. Phases 3–4 are unchanged.
+> `kg-ideate` owns the whole pipeline; `ideation-cycle` owns this segment. Lineage:
+> `ideation-cycle derives_from / supersedes` the original `spec-scaffold` idea→spec behavior
+> (evolution edge — see composition spec D5/D7).
 
-### 3. New plan task (proposed in `kg-ideate-skill` plan)
+### 3. Phase-1 → ideation-cycle handoff: briefing digest, consume-or-rebrief
 
-A task that wires `spec-scaffold` (t2 in the kg-ideate-skill plan) to the segment-triage +
-`ideation-cycle` invocation, depending on the `ideation-cycle` molecule existing. Verifier:
-`batch`. Block-scalar notes (YAML colon-space rule). Cross-plan dep form
-`ideation-system-composition/<task>` once that spec has a plan.
+Phase 1 (`kg-brief`) stamps its briefing output with an `inputs_digest` over its inputs (KG
+snapshot / query results, research set, applicable lessons, idea/proposal text), using the
+config-v2 `inputs_digest` primitive (`ComputeInputsDigest`, `sha256:…`) for coherence. When
+Phase 2 dispatches a hard fork to `ideation-cycle`, it passes that briefing + its digest.
+`ideation-cycle` **consumes the briefing by artifact only if the digest still matches AND no
+prior fork's resolution mutated a brief input**; otherwise it **re-runs `kg-brief`**. This is
+the reuse-by-artifact optimization that keeps the dispatch path at 2 hops (`kg-brief` is a
+terminal leaf — see composition spec D6) while guaranteeing a stale brief never propagates.
+
+### 4. New plan task (proposed in `kg-ideate-skill` plan)
+
+A task that wires `spec-scaffold` (t2 in the kg-ideate-skill plan) to the **autonomous**
+segment-triage + `ideation-cycle` invocation (with the briefing-digest handoff above),
+depending on the `ideation-cycle` molecule existing. Verifier: `batch`. Block-scalar notes
+(YAML colon-space rule). Cross-plan dep form `ideation-system-composition/<task>` once that
+spec has a plan.
 
 ## What stays the same (do not change)
 
-- `kg-brief` (Phase 1) — it is the shared grounding; `ideation-cycle` reuses it, does not
-  replace it.
+- `kg-brief` (Phase 1) — it is the shared grounding; `ideation-cycle` RUNS it (reusing its
+  output by artifact when fresh), it does not replace it.
 - `plan-scaffold` (Phase 3) and `staged-execution-handoff` (Phase 4) — untouched.
 - The single-source boundary: `ideation-execution-profile` still owns the ideation
   *profile*; `kg-ideate-skill` still owns the four-phase skill; the composition spec owns
   only the idea→spec evolution seam.
 
-## Open questions (inherit from the composition spec — owner ruling needed)
+## Resolved (owner-ruled — inherited from the composition spec §7)
 
-- **Dispatch-hop bound (composition spec OQ1):** `kg-ideate → spec-scaffold →
-  ideation-cycle → kg-brief` can hit 3 hops, past the reliable 1–2-hop bound. Recommend
-  hoisting the `ideation-cycle` invocation to the `kg-ideate` compound (so `spec-scaffold`
-  flags a hard fork and the compound runs `ideation-cycle` as a sibling phase), and/or
-  reusing `kg-brief` by artifact rather than re-dispatch. **This decides how the wiring task
-  above is implemented — settle it before that task starts.**
-- **Triage authority (composition spec OQ3):** does `spec-scaffold` triage autonomously
-  (recommended: yes, with a surfaced one-line rationale, human veto) or always ask first?
-- **Evidence location (composition spec OQ2):** where the hard-fork evidence (prototype +
-  audits) attaches when produced inside a `kg-ideate` run.
+- **Dispatch-hop bound (OQ1) → DEPTH governs, no hoist.** `kg-ideate → spec-scaffold →
+  ideation-cycle` is a 2-hop, in-bound path; `kg-brief` is a terminal leaf
+  (reuse-by-artifact-when-fresh or leaf re-run). The wiring task above does NOT hoist to the
+  compound. Depends on the tiering refinement
+  (`.agents/proposals/skill-tiering-molecule-composition.md`).
+- **Triage authority (OQ3) → AUTONOMOUS** with surfaced rationale; the human gate is spec
+  ratification, not per-fork triage.
+- **Evidence location (OQ2) → per-fork SIDECAR** linked from the spec decision entry (not
+  task notes, not inline).
 
 ## Verification of this delta (once ratified + implemented)
 
 - A `kg-ideate` run whose briefing surfaces a hard fork runs the `ideation-cycle` loop and
-  the resulting spec decision carries an evidence pointer (not a bare assertion).
+  the resulting spec decision links a per-fork evidence sidecar (not a bare assertion).
+- A `kg-ideate` run that dispatches a hard fork with a fresh briefing reuses it by artifact
+  (no `kg-brief` re-run); mutating a brief input before dispatch forces a re-brief.
 - A `kg-ideate` run with only briefing-decidable decisions authors them inline and does NOT
   invoke the full loop (no over-dispatch).
 - Phases 3–4 outputs are byte-identical to pre-delta behavior for the same inputs (the

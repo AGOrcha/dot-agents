@@ -35,10 +35,11 @@ The highest-signal failure points. Read before the empirical pass.
 
 ## Don't reinvent `kg-brief` grounding
 
-- The grounding stage IS the `kg-brief` molecule. If you find yourself grepping
-  proposals/specs/lessons by hand in step 1, stop — that duplicates `kg-brief` and splits
-  the briefing into two divergent shapes. Consume the passed briefing (dispatched) or
-  invoke `kg-brief` (standalone). See `instructions/ground-via-kg-brief.md`.
+- The grounding stage IS the `kg-brief` molecule, RUN by `ideation-cycle`. If you find
+  yourself grepping proposals/specs/lessons by hand in step 1, stop — that duplicates
+  `kg-brief` and splits the briefing into two divergent shapes. Reuse the upstream briefing
+  by artifact ONLY if it passes the freshness gate; otherwise run `kg-brief`. See
+  `instructions/ground-via-kg-brief.md`.
 - A fork raised without the prior thinking gets re-litigated from scratch — the exact
   "we keep re-explaining this" the skill exists to kill. Every fork must trace to a
   briefing row. If it doesn't, you skipped grounding.
@@ -54,12 +55,26 @@ The highest-signal failure points. Read before the empirical pass.
   briefing already settles it, `spec-scaffold` authors it directly — `ideation-cycle` is
   for the HARD/OPEN forks only (see `instructions/composition.md` boundary test).
 
-## Mind the dispatch-hop bound
+## Don't reuse a stale upstream briefing
 
-- `kg-ideate → spec-scaffold → ideation-cycle → kg-brief` is potentially 3 dispatch hops,
-  past the reliable 1–2-hop bound (`skill-tiering-contract` §1.2). Prefer hoisting the
-  dispatch to the compound, or reuse `kg-brief` by consuming its artifact (no re-dispatch).
-  This is an unresolved composition ambiguity — surface it, don't silently pick one.
+- When dispatched from `kg-ideate`, you MAY reuse its Phase 1 briefing by artifact — but
+  ONLY after the freshness gate (`inputs_digest` match AND no prior-fork mutation of a
+  brief input). On any mismatch, re-run `kg-brief`. A stale brief poisons every fork
+  downstream — re-running the leaf is cheap; silently propagating staleness is not.
+
+## Dispatch depth is governed by DEPTH, not tier-adjacency (resolved)
+
+- `kg-ideate → spec-scaffold → ideation-cycle` is a 2-hop path, in-bound. `kg-brief` is a
+  TERMINAL leaf (reuse-by-artifact = 0 hops, or re-run = leaf) — it never extends depth, so
+  NO hoist back to the compound is needed. A molecule calling a molecule is legal under the
+  refined contract (`.agents/proposals/skill-tiering-molecule-composition.md`); the lint
+  warns on static call-graph depth >2, not on a molecule-calls-molecule edge.
+
+## Fork evidence is a sidecar, not inline
+
+- A hard fork's prototype + negative-control + cross-brain audit is its own sidecar
+  artifact, LINKED from the spec's decision entry (anticipating the lineage `derives_from`
+  evidence edge). Don't paste it into the spec body or bury it in transient task notes.
 
 ## Don't let the spec become a plan
 

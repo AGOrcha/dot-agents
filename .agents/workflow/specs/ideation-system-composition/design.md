@@ -1,7 +1,8 @@
 # Spec: ideation-system composition — kg-ideate (authoring) ⟷ ideation-cycle (fork-resolution)
 
 **Spec ID:** ideation-system-composition
-**Status:** draft (for review) — D1–D4 proposed, several open questions need an owner ruling
+**Status:** draft (for final review) — D1–D7 decided; the four prior OQs are owner-ruled
+(§7) and folded into the decisions; no unresolved open questions remain
 **Created:** 2026-06-26
 **Author:** agent-proposed (drafted with agent assist), pending human review
 **Related:**
@@ -65,7 +66,8 @@ idea→spec; `kg-ideate` still owns the whole pipeline), (b) the **shared ground
 
 Non-goals: re-authoring the ideation *profile* (verifiers/reviewers/relevance — owned by
 `ideation-execution-profile`); rebuilding `kg-ideate`'s phases (owned by `kg-ideate-skill`);
-authoring the lint that would enforce the dispatch-hop bound (plan-tier work).
+authoring the depth-bound lint (owned by `skill-tiering-contract` + its refinement delta,
+plan-tier work).
 
 ## 3. Decisions
 
@@ -101,13 +103,24 @@ fidelity-gated loop is the rigorous way to traverse that front. `kg-ideate` Phas
 (`plan-scaffold`, `staged-execution-handoff`) are unchanged — the evolution is confined to
 the idea→spec segment, and control returns to `kg-ideate` with a ratified spec in hand.
 
-### D2 — Grounding is a single shared stage (`kg-brief`)
+### D2 — `ideation-cycle` RUNS `kg-brief`; reuse-by-artifact only if fresh (`inputs_digest`)
 
-Both skills ground on the same primitive: the `kg-brief` molecule (KG / research / lessons
-→ the briefing block). `ideation-cycle` does NOT carry its own baseline scan. When
-dispatched from `kg-ideate`, it consumes the Phase 1 briefing; standalone, it invokes
-`kg-brief` to produce the same briefing. This is the anti-duplication invariant — the
-reframe's core requirement. `ideation-cycle`'s step 1 (`ground-via-kg-brief.md`) enforces it.
+`kg-brief` is `ideation-cycle`'s grounding step 1 — it is **run by** `ideation-cycle`, not
+handed down pre-baked unconditionally. Both skills ground on the same primitive (the
+`kg-brief` molecule: KG / research / lessons → the briefing block); `ideation-cycle` does NOT
+carry its own baseline scan (anti-duplication invariant).
+
+**Optimization + invalidation:** when dispatched from `kg-ideate` (which already produced a
+Phase 1 briefing), `ideation-cycle` MAY consume that briefing **by artifact** (0 dispatch
+hops) — **but only if it is FRESH.** Freshness is an `inputs_digest` over the briefing's
+inputs (KG snapshot / query results, research set, applicable lessons, the idea/proposal
+text). This **reuses the config-v2 `inputs_digest` primitive** (`ComputeInputsDigest`,
+`sha256:…`; staleness = digest mismatch — `internal/config/staleness.go`, `resolver.go`) for
+coherence — not a parallel scheme. **Invalidation:** on any digest mismatch, OR if a prior
+fork's resolution mutated shared state the brief depended on, `ideation-cycle` **re-runs
+`kg-brief`**. A stale brief must never silently propagate. Standalone runs (no upstream
+artifact) always run `kg-brief` fresh. `ideation-cycle`'s step 1 (`ground-via-kg-brief.md`)
+enforces this gate.
 
 ### D3 — `kg-ideate`'s idea→spec front (Phase 1 + Phase 2) evolves INTO invoking `ideation-cycle`
 
@@ -116,7 +129,11 @@ grounding (Phase 1) followed by `spec-scaffold` (Phase 2) — *becomes* the `ide
 loop. Spec authoring itself is now `ideation-cycle`'s output, folded back into `kg-ideate`'s
 pipeline before Phase 3.
 
-Within that evolved segment, triage still applies (not every decision needs the full loop):
+Within that evolved segment, triage still applies (not every decision needs the full loop).
+**Triage is AUTONOMOUS** (OQ3 ruling): `ideation-cycle` classifies each fork itself and
+**surfaces its rationale** — it does NOT ask for per-fork confirmation. The human gate is
+**spec ratification** at converge, not per-fork triage; always-asking would defeat the
+stop-re-explaining-itself purpose.
 
 1. **Briefing-decidable** → resolved inline, exactly as `spec-scaffold` does today. The
    briefing settles it; no prototype, no cross-brain.
@@ -143,41 +160,76 @@ the edge from `ideation-cycle` to `kg-ideate`'s original `spec-scaffold` behavio
 "this replaced how we used to do idea→spec" history. Recorded here so the lineage-schema
 work picks it up rather than re-deriving it.
 
-### D4 — `ideation-cycle` is dual-invocable
+### D4 — `ideation-cycle` is registered BOTH ways (top-level invocable AND dispatchable)
+
+`ideation-cycle` is registered as a **top-level invocable skill AND** dispatchable from
+`kg-ideate` (OQ4 ruling). It is independently useful — the fork-resolution loop ran
+standalone for every config-profiles decision this session — not only a `kg-ideate`
+sub-step. The two modes:
 
 - **Dispatched** (from `kg-ideate` Phase 2): resolve one named fork; return decision +
-  evidence; do not author the surrounding spec.
+  evidence sidecar pointer; do not author the surrounding spec.
 - **Standalone** (one-off design question, or a fork surfaced from execution): run the full
   cycle, including seeding/refining the spec at converge.
 
 Both modes ground via `kg-brief` (D2) and gate prototypes via the fidelity gate.
 
+### D6 — Dispatch DEPTH governs composition; no hoist needed (OQ1 ruling)
+
+The `kg-ideate → spec-scaffold → ideation-cycle → kg-brief` "3-hop" concern is dissolved by
+refining the tiering contract so composition is governed by dispatch **DEPTH (≤2 reliable
+hops on any runtime path), not tier-adjacency** — a molecule MAY call a molecule (delta:
+`.agents/proposals/skill-tiering-molecule-composition.md`). `kg-brief` is a **terminal
+leaf** (calls nothing downstream; satisfied by reuse-by-artifact-when-fresh or a leaf
+re-run), so it adds no depth. The chain `kg-ideate → spec-scaffold → ideation-cycle` is a
+**2-hop, in-bound** path. **No hoist of the dispatch up to the compound is required** —
+forcing one purely to satisfy adjacency was redundant indirection. `ideation-cycle`'s
+frontmatter carries `kg-brief` in `calls:` (legal under the refined contract), not a special
+`reuses:` field.
+
+### D7 — A hard fork's evidence is a per-fork SIDECAR, linked from the decision (OQ2 ruling)
+
+A hard fork's evidence — the prototype dir, the negative-control result, the cross-brain
+audit verdicts — is its **own sidecar artifact**, LINKED from the spec's decision entry. Not
+inlined into the spec, not in transient task notes. This anticipates lineage schema-v4 (the
+decision `derives_from` its evidence sidecar — consistent with D5's evolution-edge lineage).
+Standalone mode links the sidecar from the spec it seeds; dispatched mode returns the sidecar
+pointer to `spec-scaffold` to link from the decision it folds in.
+
 ## 4. Requirements (behavioral)
 
-1. A standalone `ideation-cycle` run with no `kg-ideate` in flight invokes `kg-brief` to
+1. A standalone `ideation-cycle` run with no `kg-ideate` in flight runs `kg-brief` fresh to
    ground, then resolves the fork end-to-end and seeds/refines the spec.
 2. A `kg-ideate` Phase 2 run that hits a briefing-decidable decision authors it directly —
-   it does NOT dispatch to `ideation-cycle` (no over-dispatch).
+   it does NOT dispatch to `ideation-cycle` (no over-dispatch). Triage is autonomous with a
+   surfaced rationale.
 3. A `kg-ideate` Phase 2 run that hits a hard fork dispatches to `ideation-cycle`, receives
-   a ratified decision + evidence pointer, and folds it into the spec — `ideation-cycle`
-   does not write that spec.
+   a ratified decision + evidence sidecar pointer, and folds it into the spec —
+   `ideation-cycle` does not write that spec.
 4. No prototype result informs any decision until it has cleared the fidelity gate
    (faithful inputs + negative control + real execution + independent cross-harness audit).
 5. Neither skill reinvents grounding: there is exactly one briefing shape (`kg-brief`'s),
    consumed by both.
+6. When dispatched, `ideation-cycle` reuses the upstream briefing by artifact ONLY when its
+   `inputs_digest` matches and no prior fork mutated a brief input; otherwise it re-runs
+   `kg-brief`. A stale briefing is never silently reused.
+7. A hard fork's evidence is a per-fork sidecar linked from the decision entry (not inlined,
+   not in transient task notes).
 
 ## 5. Done criteria
 
-1. `ideation-cycle/SKILL.md` declares `tier: molecule`, `reuses: [kg-brief]`,
-   `dispatchable_from: [kg-ideate]`, and its `calls:` molecule/atom set.
-2. `ideation-cycle` step 1 consumes-or-invokes `kg-brief` and never hand-scans the baseline
-   (Requirement 5 demonstrated).
+1. `ideation-cycle/SKILL.md` declares `tier: molecule`, `calls:` including `kg-brief` (legal
+   under the refined depth-governed contract), and `dispatchable_from: [kg-ideate]`.
+2. `ideation-cycle` step 1 runs-or-reuses-if-fresh `kg-brief` and never hand-scans the
+   baseline (Requirement 5), with the `inputs_digest` freshness gate (Requirement 6).
 3. This composition spec exists and is cross-referenced from both `ideation-cycle/SKILL.md`
    and the `kg-ideate` Phase 2 delta proposal.
 4. The `kg-ideate` Phase 2 fork-triage + dispatch delta is captured as a project-local
    proposal (NOT a unilateral edit to `kg-ideate-skill/design.md`) and references this spec.
-5. The dispatch-hop ambiguity (§7 OQ1) is recorded as an open question with a recommended
-   default, for the owner to rule before the dispatch seam is implemented.
+5. The tiering-contract depth-refinement is captured as a project-local proposal
+   (`.agents/proposals/skill-tiering-molecule-composition.md`) and resolves OQ1.
+6. The four OQs (§7) are owner-ruled and folded into D2–D7; the spec stays `draft` pending
+   final review but carries no unresolved open questions.
 
 ## 6. Relationship to `kg-ideate-skill`
 
@@ -192,38 +244,33 @@ The single-source boundary holds: `kg-ideate-skill` owns the four-phase skill;
 `ideation-execution-profile` owns the profile; this spec owns only the **composition seam**
 between `kg-ideate` and `ideation-cycle`.
 
-## 7. Open questions (need an owner ruling)
+## 7. Resolved questions (owner-ruled — RATIFIED, folded into §3)
 
-**OQ1 — Dispatch-hop bound (the live ambiguity).** The chain
-`kg-ideate (compound) → spec-scaffold (molecule) → ideation-cycle (molecule) → kg-brief`
-can reach 3 dispatch hops, past the reliable 1–2-hop bound (`skill-tiering-contract` §1.2).
-Two in-bound options, **recommend (a)**:
-- **(a) Hoist the dispatch to the compound.** `spec-scaffold` *flags* a decision as a hard
-  fork and returns control to the `kg-ideate` compound, which dispatches `ideation-cycle`
-  as a sibling phase. Every edge stays ≤ 2 hops from the compound.
-- **(b) Reuse `kg-brief` by artifact, not dispatch.** When dispatched, `ideation-cycle`
-  consumes the already-produced briefing (no `kg-brief` re-dispatch) — the last edge is
-  data-passing, not a dispatch hop. Standalone runs are hop-1 to `kg-brief` and fine.
-These are not mutually exclusive — (b) is sound regardless; (a) is the structural fix for
-the spec-scaffold→ideation-cycle edge. Owner picks whether to require (a), (b), or both.
+All four prior open questions are closed by owner ruling. The decisions are **RATIFIED** and
+encoded in §3 (the spec stays `draft` pending final review, but these are settled, not
+framing-to-apply). Summary of the rulings and where each lives:
 
-**OQ2 — Where does the dispatched fork's evidence live?** `ideation-cycle` produces
-prototype modules + audits. When dispatched, does that evidence attach to the
-`kg-ideate` plan's task notes, to the spec's Related section, or to a per-fork evidence
-sidecar? (Standalone mode already records it against the spec it seeds.)
+**OQ1 — Dispatch-hop bound → RESOLVED (D6): DEPTH governs, no hoist.** The "3-hop" problem
+was an artifact of an over-strict tier-adjacency rule. Composition is now governed by
+dispatch **DEPTH (≤2 hops on any runtime path)**, not tier-adjacency — a molecule MAY call a
+molecule (delta: `.agents/proposals/skill-tiering-molecule-composition.md`). `kg-brief` is a
+terminal leaf (reuse-by-artifact = 0 hops, or leaf re-run), so `kg-ideate → spec-scaffold →
+ideation-cycle` is 2-hop and in-bound. No hoist required.
 
-**OQ3 — Triage authority.** Does `spec-scaffold` decide briefing-decidable-vs-hard-fork
-autonomously, or surface the triage to the human/orchestrator for confirmation before
-dispatching (dispatch is expensive — a full empirical cycle)? Recommend: autonomous triage
-with a one-line surfaced rationale, human can veto.
+**OQ2 — Fork evidence → RESOLVED (D7): per-fork SIDECAR, linked from the decision.** Not
+inlined, not in transient task notes. Anticipates lineage schema-v4 (`derives_from` edge).
 
-**OQ4 — Standalone entry registration.** `ideation-cycle` is dual-invocable. Is it
-registered as a top-level invocable skill (like `kg-ideate`), or only reachable via
-`kg-ideate` + an explicit `--question` standalone flag? Recommend: top-level invocable —
-forks surface from execution too, not only from authoring.
+**OQ3 — Triage authority → RESOLVED (D3): AUTONOMOUS + surfaced rationale.** The human gate
+is spec ratification, not per-fork triage.
+
+**OQ4 — Registration → RESOLVED (D4): BOTH.** Top-level invocable AND dispatchable from
+`kg-ideate`.
 
 ## 8. Deferred
 
-- Lint enforcing the dispatch-hop bound (plan-tier; `skill-tiering-contract` reserves it).
+- The depth-bound lint itself (plan-tier; owned by `skill-tiering-contract` + its refinement
+  delta `.agents/proposals/skill-tiering-molecule-composition.md`).
+- Lineage schema-v4 (`derives_from` decision→evidence edge; D5/D7 anticipate it, do not build
+  it here).
 - Starter promotion of `ideation-cycle` (owner runs `da skills promote` after review; both
   skills are starter candidates under `internal/scaffold/home/starter/skills/global/`).

@@ -40,12 +40,16 @@ The spec does NOT carry file paths, function names, or task breakdowns — those
 the plan, written downstream by the execution half. A spec that starts accumulating them
 has become a plan; keep it focused on requirements and decisions.
 
-## Evidence is recorded, not inlined
+## Evidence is a per-fork sidecar, linked from the decision
 
-The prototype modules and the fidelity/cross-brain audits are the **evidence** behind the
-decisions. Reference them from the spec (and carry them into `.agents/history/<id>/` when
-the plan archives); do not paste experiment code into the spec. A decision in the spec
-should be traceable to its audited evidence in one hop.
+Each hard fork's evidence — the prototype dir, the negative-control result, the
+cross-brain audit verdicts — is its **own sidecar artifact**, LINKED from the spec's
+decision entry. It is NOT inlined into the spec body and NOT buried in transient task
+notes. This anticipates the lineage schema (the decision `derives_from` its evidence
+sidecar). Reference the sidecar from the spec decision (and carry it into
+`.agents/history/<id>/` when the plan archives); a decision should be traceable to its
+audited evidence in one hop. In dispatched mode, return the sidecar pointer so
+`spec-scaffold` links it from the decision it folds in.
 
 ## Hand off
 
