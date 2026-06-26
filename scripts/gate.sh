@@ -40,9 +40,15 @@
 # derive the changed set from `git merge-base origin/master HEAD` and FAIL LOUD
 # if origin/master is absent (never a silent HEAD~1 fallback).
 #
-# Env knobs (mostly for tests / CI):
-#   GATE_SKIP_COVERAGE=1  run build/vet/fmt only (used by the coverage unit
-#                         test which drives coverage-gate.sh directly).
+# NO COVERAGE-BYPASS KNOB. There is deliberately no env var that lets a caller
+# skip or substitute the real coverage run on the production path — that would be
+# the same hole as `--no-verify` (git hooks inherit the environment, so any such
+# var would be settable on a `git push`). The coverage-enforce LOGIC is exposed
+# as a subcommand (`gate.sh enforce-coverage <profile>`) so scripts/gate.test.sh
+# can exercise it against fixture profiles WITHOUT changing what production does:
+# `make gate` always generates the real profile via `go test` and enforces on it.
+#
+# Env knobs (these only tune thresholds/paths to MATCH CI — none can skip a step):
 #   COVERAGE_THRESHOLD    per-file threshold (default 95, matches CI).
 #   COVERAGE_EXCEPTIONS   allowlist path (default scripts/coverage-exceptions.txt,
 #                         same file CI uses).
@@ -59,65 +65,72 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_EXEC_PATH \
 say()  { printf '\n\033[1m[gate:%s] %s\033[0m\n' "${1:-?}" "${2:-}"; }
 fail() { printf '\n\033[31m[gate] BLOCKED: %s\033[0m\n' "${1:-}" >&2; exit 1; }
 
-# --- 1. gofmt -------------------------------------------------------------
-say fmt "gofmt -l (cmd commands internal)"
-unformatted="$(gofmt -l ./cmd ./commands ./internal 2>/dev/null || true)"
-if [[ -n "$unformatted" ]]; then
-  printf '%s\n' "$unformatted"
-  fail "gofmt: run 'gofmt -w' on the files above"
-fi
+# enforce_coverage_profile <profile> — the per-file coverage ENFORCE step, given
+# a coverage profile. This is the SAME invocation CI's coverage-gate job uses:
+# per-file ENFORCE, per-package warn, the shared coverage-exceptions allowlist +
+# threshold. coverage-gate.sh is the single coverage authority, so there is zero
+# coverage-mode drift between the hook and CI even before t5 wires CI to call
+# `make gate`. Both the production path AND gate.test.sh call THIS function — the
+# test passes a fixture profile, production passes the real `go test` profile, so
+# the test exercises the exact production enforce logic with no bypass.
+enforce_coverage_profile() {
+  local profile="$1"
+  COVERAGE_FILE="$profile" \
+  COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-95}" \
+  COVERAGE_PKG_MODE=warn \
+  COVERAGE_FILE_MODE=enforce \
+    bash "$repo_root/scripts/coverage-gate.sh" \
+    || fail "coverage gate: a file is below ${COVERAGE_THRESHOLD:-95}% per-file coverage (not allowlisted)"
+}
 
-# --- 2/3. build + vet (POSIX) --------------------------------------------
-say build-vet "go build ./... + go vet ./..."
-go build ./... || fail "go build failed"
-go vet ./...   || fail "go vet reported findings"
-
-# --- 4. cross-compile parity (windows build + vet) -----------------------
-say cross "GOOS=windows go build ./... + go vet ./..."
-GOOS=windows go build ./... || fail "GOOS=windows go build failed"
-GOOS=windows go vet ./...   || fail "GOOS=windows go vet reported findings"
-
-if [[ "${GATE_SKIP_COVERAGE:-0}" == "1" ]]; then
-  say ok "build/vet/fmt PASS (coverage skipped via GATE_SKIP_COVERAGE)"
-  exit 0
-fi
-
-# --- 5. per-file coverage ENFORCE over the FULL profile (exactly as CI) ---
-# Run the suite once with coverage, then enforce per-file >=95% on EVERY
-# non-allowlisted file — the same invocation CI's coverage-gate job runs
-# (COVERAGE_FILE_MODE=enforce + scripts/coverage-exceptions.txt + threshold 95).
-# Full enforce (not diff-scoping) is what makes the local gate faithful to CI:
-#   - platform-tagged files are handled by the shared allowlist, not skipped;
-#   - a test-only change that drops a *production* file <95% is still caught
-#     (diff-scoping skipped it because no production .go "changed").
-#
+# run_coverage — PRODUCTION coverage step: always generate the real full-suite
+# profile, then enforce on it. No knob can skip or substitute the `go test` run.
 # Plain covermode=atomic — coverage % is identical to CI's -race profile (-race
-# only adds the race detector). Write the profile to a temp file so `make gate`
-# never mutates the worktree (determinism + prek never sees a hook-modified
-# file).
-say coverage "full-suite per-file enforce (>=${COVERAGE_THRESHOLD:-95}%, CI's coverage-exceptions allowlist)"
-# Test seam: GATE_COVERAGE_PROFILE lets scripts/gate.test.sh drive the SAME
-# enforce code path below against a synthetic profile (a real fixture-based
-# regression for the #173 sub-95% case and the test-only-weakening case)
-# without paying for a full `go test` run. Production never sets it.
-if [[ -n "${GATE_COVERAGE_PROFILE:-}" ]]; then
-  cov_out="$GATE_COVERAGE_PROFILE"
-else
+# only adds the race detector). The profile is a temp file so `make gate` never
+# mutates the worktree (determinism + prek never sees a hook-modified file).
+run_coverage() {
+  say coverage "full-suite per-file enforce (>=${COVERAGE_THRESHOLD:-95}%, CI's coverage-exceptions allowlist)"
+  local cov_out
   cov_out="$(mktemp -t gate-cov.XXXXXX)"
   trap 'rm -f "$cov_out"' EXIT
   go test -count=1 -timeout=300s -covermode=atomic -coverprofile="$cov_out" ./... \
     || fail "go test failed (coverage profile not produced)"
-fi
+  enforce_coverage_profile "$cov_out"
+}
 
-# Same coverage-gate.sh invocation CI's coverage-gate job uses: per-file ENFORCE,
-# per-package warn, default exceptions allowlist + threshold. coverage-gate.sh is
-# the single coverage authority shared with CI, so there is zero coverage-mode
-# drift even before t5 wires CI to literally call `make gate`.
-COVERAGE_FILE="$cov_out" \
-COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-95}" \
-COVERAGE_PKG_MODE=warn \
-COVERAGE_FILE_MODE=enforce \
-  bash "$repo_root/scripts/coverage-gate.sh" \
-  || fail "coverage gate: a file is below ${COVERAGE_THRESHOLD:-95}% per-file coverage (not allowlisted)"
+# run_gate — the full fast-tier mandate (what `make gate` runs).
+run_gate() {
+  # --- 1. gofmt ----------------------------------------------------------
+  say fmt "gofmt -l (cmd commands internal)"
+  local unformatted
+  unformatted="$(gofmt -l ./cmd ./commands ./internal 2>/dev/null || true)"
+  if [[ -n "$unformatted" ]]; then
+    printf '%s\n' "$unformatted"
+    fail "gofmt: run 'gofmt -w' on the files above"
+  fi
 
-say ok "gate PASS"
+  # --- 2/3. build + vet (POSIX) -----------------------------------------
+  say build-vet "go build ./... + go vet ./..."
+  go build ./... || fail "go build failed"
+  go vet ./...   || fail "go vet reported findings"
+
+  # --- 4. cross-compile parity (windows build + vet) --------------------
+  say cross "GOOS=windows go build ./... + go vet ./..."
+  GOOS=windows go build ./... || fail "GOOS=windows go build failed"
+  GOOS=windows go vet ./...   || fail "GOOS=windows go vet reported findings"
+
+  # --- 5. per-file coverage ENFORCE over the FULL profile (exactly as CI)
+  run_coverage
+
+  say ok "gate PASS"
+}
+
+# Dispatch. Default (no args) runs the full gate. `enforce-coverage <profile>`
+# exposes ONLY the enforce logic for scripts/gate.test.sh — it does NOT generate
+# a profile and is not used by production `make gate`.
+case "${1:-}" in
+  "")               run_gate ;;
+  enforce-coverage) shift; [[ -n "${1:-}" ]] || fail "enforce-coverage: profile path required"
+                    enforce_coverage_profile "$1" ;;
+  *) echo "usage: gate.sh [enforce-coverage <profile>]" >&2; exit 2 ;;
+esac
