@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # gate.sh — the FAST, every-push merge-blocking mandate, single source of truth.
 #
-# This is what `make gate` runs, what the prek pre-push hook invokes, and the
-# shared definition CI uses for the fast tier (per the local-gate-ci-parity
-# spec, decisions D1/D2/D4). Run it directly any time:
+# This is what `make gate` runs and what the prek pre-push hook invokes (per the
+# local-gate-ci-parity spec, decisions D1/D2/D4). Run it directly any time:
 #
 #     make gate           # preferred
 #     bash scripts/gate.sh
@@ -16,19 +15,37 @@
 #   2. go build ./...
 #   3. go vet ./...
 #   4. GOOS=windows go build ./...  +  GOOS=windows go vet ./...  (cross parity)
-#   5. per-file coverage ENFORCE >=95%, SCOPED to the .go files changed vs
-#      `git merge-base origin/master HEAD`. Scoping to changed files matches
-#      CI's per-file enforce contract for new code while sidestepping the
-#      single-OS false-fail on platform-tagged files and pre-existing debt
-#      (spec R2/D2/D4). coverage-gate.sh remains the single coverage authority.
+#   5. per-file coverage ENFORCE >=95% over the FULL-suite profile, EXACTLY as CI
+#      runs it — COVERAGE_FILE_MODE=enforce with CI's same scripts/
+#      coverage-exceptions.txt allowlist + threshold. This is faithful to CI by
+#      construction (zero coverage-mode drift between the hook and CI even before
+#      t5 wires CI to call `make gate`), and no slower (the full suite already
+#      runs to produce the profile).
+#
+#      NOTE (gap owned by t3/gate-cross): a genuinely NEW platform-only file
+#      (e.g. a brand-new *_windows.go) has zero coverage rows on this single-OS
+#      local run, so the local per-file enforce cannot see it. The merged
+#      multi-OS profile in `make gate-cross`/CI is what closes that residual gap.
+#      Existing platform-tagged files (fsops_windows.go, …) are already handled
+#      identically to CI because they are in coverage-exceptions.txt.
+#
+#      An earlier revision scoped per-file enforce to the changed `.go` files; a
+#      cross-harness (Codex) adversarial review showed that diff-scoping reopens
+#      pass-local-fail-CI holes (zero-row platform files passed locally;
+#      test-only changes dropped a production file <95% but were skipped because
+#      no production .go "changed"). The pivot to full enforce closes both.
+#
+# The fast tier no longer needs a diff base at all (coverage is full-suite, not
+# diff-scoped). When t3 adds Windows-package selection / gate-cross it will
+# derive the changed set from `git merge-base origin/master HEAD` and FAIL LOUD
+# if origin/master is absent (never a silent HEAD~1 fallback).
 #
 # Env knobs (mostly for tests / CI):
-#   GATE_DIFF_BASE        override the diff base (default: merge-base of
-#                         origin/master and HEAD; falls back to origin/master,
-#                         then master, then HEAD~1).
 #   GATE_SKIP_COVERAGE=1  run build/vet/fmt only (used by the coverage unit
 #                         test which drives coverage-gate.sh directly).
 #   COVERAGE_THRESHOLD    per-file threshold (default 95, matches CI).
+#   COVERAGE_EXCEPTIONS   allowlist path (default scripts/coverage-exceptions.txt,
+#                         same file CI uses).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,69 +82,42 @@ if [[ "${GATE_SKIP_COVERAGE:-0}" == "1" ]]; then
   exit 0
 fi
 
-# --- 5. per-file coverage ENFORCE on CHANGED .go files -------------------
-# Diff base (OQ2): the merge-base of origin/master and HEAD, so the changed set
-# is exactly this branch's contribution. Degrade gracefully when the remote ref
-# is unavailable (fresh clone without origin, detached state).
-diff_base="${GATE_DIFF_BASE:-}"
-if [[ -z "$diff_base" ]]; then
-  if git rev-parse --verify -q origin/master >/dev/null; then
-    diff_base="$(git merge-base origin/master HEAD 2>/dev/null || true)"
-  fi
-  [[ -z "$diff_base" ]] && diff_base="$(git rev-parse --verify -q master 2>/dev/null || true)"
-  [[ -z "$diff_base" ]] && diff_base="$(git rev-parse --verify -q HEAD~1 2>/dev/null || true)"
+# --- 5. per-file coverage ENFORCE over the FULL profile (exactly as CI) ---
+# Run the suite once with coverage, then enforce per-file >=95% on EVERY
+# non-allowlisted file — the same invocation CI's coverage-gate job runs
+# (COVERAGE_FILE_MODE=enforce + scripts/coverage-exceptions.txt + threshold 95).
+# Full enforce (not diff-scoping) is what makes the local gate faithful to CI:
+#   - platform-tagged files are handled by the shared allowlist, not skipped;
+#   - a test-only change that drops a *production* file <95% is still caught
+#     (diff-scoping skipped it because no production .go "changed").
+#
+# Plain covermode=atomic — coverage % is identical to CI's -race profile (-race
+# only adds the race detector). Write the profile to a temp file so `make gate`
+# never mutates the worktree (determinism + prek never sees a hook-modified
+# file).
+say coverage "full-suite per-file enforce (>=${COVERAGE_THRESHOLD:-95}%, CI's coverage-exceptions allowlist)"
+# Test seam: GATE_COVERAGE_PROFILE lets scripts/gate.test.sh drive the SAME
+# enforce code path below against a synthetic profile (a real fixture-based
+# regression for the #173 sub-95% case and the test-only-weakening case)
+# without paying for a full `go test` run. Production never sets it.
+if [[ -n "${GATE_COVERAGE_PROFILE:-}" ]]; then
+  cov_out="$GATE_COVERAGE_PROFILE"
+else
+  cov_out="$(mktemp -t gate-cov.XXXXXX)"
+  trap 'rm -f "$cov_out"' EXIT
+  go test -count=1 -timeout=300s -covermode=atomic -coverprofile="$cov_out" ./... \
+    || fail "go test failed (coverage profile not produced)"
 fi
 
-# Collect changed .go files: committed (base..HEAD) + uncommitted (working tree
-# and staged), filter to non-test .go, keep only files that still exist. Test
-# files are not coverage targets for their own coverage, so they are excluded
-# from the enforce set (they still execute and contribute to other files' %).
-collect_changed() {
-  {
-    if [[ -n "$diff_base" ]]; then
-      git diff --name-only --diff-filter=ACMR "$diff_base"...HEAD 2>/dev/null || true
-    fi
-    git diff --name-only --diff-filter=ACMR HEAD 2>/dev/null || true       # unstaged
-    git diff --name-only --diff-filter=ACMR --cached 2>/dev/null || true   # staged
-  } | sort -u
-}
-
-changed_go=()
-while IFS= read -r f; do
-  [[ -z "$f" ]] && continue
-  [[ "$f" == *.go ]] || continue
-  [[ "$f" == *_test.go ]] && continue
-  [[ -f "$f" ]] || continue
-  changed_go+=("$f")
-done < <(collect_changed)
-
-if [[ "${#changed_go[@]}" -eq 0 ]]; then
-  say coverage "no changed .go files vs ${diff_base:-<base>} — per-file coverage gate has nothing to enforce"
-  say ok "gate PASS (build + vet + cross-compile; no changed Go to cover)"
-  exit 0
-fi
-
-say coverage "${#changed_go[@]} changed .go file(s); running suite + per-file enforce (>=${COVERAGE_THRESHOLD:-95}%)"
-printf '  - %s\n' "${changed_go[@]}"
-
-# Run the suite once with coverage. Plain covermode=atomic — coverage % is
-# identical to CI's -race profile (-race only adds the race detector).
-# Write the profile to a temp file so `make gate` never mutates the worktree
-# (coverage.out is not gitignored as a committed artifact; keep the tree
-# pristine for determinism + so prek never sees a hook-modified file).
-cov_out="$(mktemp -t gate-cov.XXXXXX)"
-trap 'rm -f "$cov_out"' EXIT
-go test -count=1 -timeout=300s -covermode=atomic -coverprofile="$cov_out" ./... \
-  || fail "go test failed (coverage profile not produced)"
-
-# Enforce per-file >=95% ONLY on the changed files (single-OS profile is faithful
-# for changed code; coverage-gate.sh honors the same exceptions allowlist as CI).
+# Same coverage-gate.sh invocation CI's coverage-gate job uses: per-file ENFORCE,
+# per-package warn, default exceptions allowlist + threshold. coverage-gate.sh is
+# the single coverage authority shared with CI, so there is zero coverage-mode
+# drift even before t5 wires CI to literally call `make gate`.
 COVERAGE_FILE="$cov_out" \
 COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-95}" \
-COVERAGE_PKG_MODE=off \
+COVERAGE_PKG_MODE=warn \
 COVERAGE_FILE_MODE=enforce \
-COVERAGE_INCLUDE_FILES="$(printf '%s\n' "${changed_go[@]}")" \
   bash "$repo_root/scripts/coverage-gate.sh" \
-  || fail "coverage gate: a changed file is below ${COVERAGE_THRESHOLD:-95}% per-file coverage"
+  || fail "coverage gate: a file is below ${COVERAGE_THRESHOLD:-95}% per-file coverage (not allowlisted)"
 
 say ok "gate PASS"

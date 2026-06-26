@@ -4,8 +4,8 @@
 #
 #   fmt         gofmt -l check (pre-commit stage)
 #   gate        the fast merge-blocking mandate — delegates to `make gate`
-#               (build + vet (POSIX + windows) + gofmt + per-file coverage
-#               ENFORCE on changed files). This is the SINGLE SOURCE OF TRUTH;
+#               (build + vet (POSIX + windows) + gofmt + FULL per-file coverage
+#               ENFORCE, exactly as CI). This is the SINGLE SOURCE OF TRUTH;
 #               build-vet/coverage below are thin back-compat shims that call it
 #               so there is no parallel gate definition (spec D1).
 #   build-vet   (deprecated shim) → `make gate`
@@ -82,7 +82,7 @@ cmd_fmt() {
 # scripts/gate.sh (`make gate`); this just delegates so the hook and any direct
 # caller share ONE definition (spec D1).
 cmd_gate() {
-  say gate "make gate (build+vet+cross + per-file coverage of changed files)"
+  say gate "make gate (build+vet+cross + full per-file coverage enforce)"
   make -C "$repo_root" gate || fail "make gate failed (see output above)"
 }
 

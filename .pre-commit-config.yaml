@@ -10,10 +10,11 @@
 # stays cheap. The heavy mandate runs at the pre-push stage in two hooks:
 #   1. `make gate` — the SINGLE SOURCE OF TRUTH for the fast merge-blocking
 #      mandate: build + vet (POSIX + windows cross-compile) + gofmt + per-file
-#      coverage ENFORCE scoped to changed .go files (matches CI's per-file
-#      contract for new code). This replaced the separate go-build-vet +
-#      per-PACKAGE coverage hooks, which drifted from CI (per-package passed
-#      locally, per-file failed CI). One definition: scripts/gate.sh.
+#      coverage ENFORCE over the FULL profile, exactly as CI runs it (same
+#      coverage-gate.sh enforce mode + coverage-exceptions allowlist + 95%
+#      threshold). This replaced the separate go-build-vet + per-PACKAGE
+#      coverage hooks, which drifted from CI (per-package passed locally,
+#      per-file failed CI — #173). One definition: scripts/gate.sh.
 #   2. sonar — the native SonarCloud quality gate (unchanged here).
 # (Running the suite per commit previously corrupted the shared git config via
 # leaked GIT_DIR; scripts/gate.sh + precommit-mandate.sh strip that env and
@@ -34,11 +35,11 @@ repos:
 
       # ---- heavy, on push -----------------------------------------
       # `make gate` is the single source of truth for the fast merge-blocking
-      # mandate: build + vet (POSIX + windows cross-compile) + gofmt + per-file
-      # coverage ENFORCE scoped to changed .go files. It replaces the old
+      # mandate: build + vet (POSIX + windows cross-compile) + gofmt + full
+      # per-file coverage ENFORCE (exactly as CI). It replaces the old
       # go-build-vet + per-package coverage hooks (which drifted from CI).
       - id: gate
-        name: make gate (build+vet+cross+per-file coverage of changed files)
+        name: make gate (build+vet+cross+full per-file coverage enforce)
         entry: make gate
         language: system
         pass_filenames: false

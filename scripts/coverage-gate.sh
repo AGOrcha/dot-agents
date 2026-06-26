@@ -21,17 +21,6 @@
 #   COVERAGE_PKG_MODE    enforce|warn|off  (default: enforce)
 #   COVERAGE_FILE_MODE   enforce|warn|off  (default: warn  — Phase 1)
 #   COVERAGE_EXCEPTIONS  allowlist path (default: scripts/coverage-exceptions.txt)
-#   COVERAGE_INCLUDE_FILES  when set (newline/space-separated repo-relative
-#                        paths), the PER-FILE gate is SCOPED to only those
-#                        files — every other file is skipped (neither
-#                        enforced nor reported). This is how `make gate`
-#                        runs the per-file enforce on a single-OS profile
-#                        against only the CHANGED .go files: it sidesteps the
-#                        single-OS false-fail on platform-tagged files AND
-#                        pre-existing debt, while still matching CI's per-file
-#                        ENFORCE contract for new/changed code. Unset = all
-#                        files (CI's merged-profile behaviour). The PER-PACKAGE
-#                        gate is unaffected by this filter.
 #
 # Project mandate: every file exhaustively tested. A file below threshold
 # must either be brought up, or added to the exceptions allowlist with a
@@ -44,18 +33,6 @@ THRESHOLD="${COVERAGE_THRESHOLD:-95}"
 PKG_MODE="${COVERAGE_PKG_MODE:-enforce}"
 FILE_MODE="${COVERAGE_FILE_MODE:-warn}"
 EXCEPTIONS_FILE="${COVERAGE_EXCEPTIONS:-scripts/coverage-exceptions.txt}"
-
-# Optional per-file scoping: when COVERAGE_INCLUDE_FILES is non-empty the
-# per-file gate only considers the listed repo-relative paths (one per line).
-# Written to a temp file so awk reads it the same way it reads the allowlist
-# (no quoting/IFS surprises with paths). Empty/unset => no scoping.
-INCLUDE_TMP=""
-if [[ -n "${COVERAGE_INCLUDE_FILES:-}" ]]; then
-  INCLUDE_TMP="$(mktemp)"
-  # Split on whitespace/newlines into one path per line (intentional split).
-  # shellcheck disable=SC2086
-  printf '%s\n' ${COVERAGE_INCLUDE_FILES} > "$INCLUDE_TMP"
-fi
 
 # Default exclusions (apply to BOTH gates):
 # - cmd/* — main entrypoints; no business logic.
@@ -86,7 +63,7 @@ fi
 # entry, prove there is no test-driven path to the threshold, bump the
 # pragma in the same commit, and include the rationale in PR review.
 ALLOW_TMP="$(mktemp)"
-trap 'rm -f "$ALLOW_TMP" "$INCLUDE_TMP"' EXIT
+trap 'rm -f "$ALLOW_TMP"' EXIT
 RATCHET_MAX=""
 if [[ -f "$EXCEPTIONS_FILE" ]]; then
   lineno=0
@@ -124,17 +101,11 @@ fi
 
 awk -v threshold="$THRESHOLD" -v exclude_re="$EXCLUDE_RE" \
     -v pkg_mode="$PKG_MODE" -v file_mode="$FILE_MODE" \
-    -v allowfile="$ALLOW_TMP" -v includefile="${INCLUDE_TMP:-}" '
+    -v allowfile="$ALLOW_TMP" '
 function below(p) { return (p + 0 < (threshold + 0) - 0.05) }   # 0.05pp tol
 BEGIN {
   while ((getline ln < allowfile) > 0) if (ln != "") allowed[ln] = 1
   close(allowfile)
-  scoped = 0
-  if (includefile != "") {
-    scoped = 1
-    while ((getline ln < includefile) > 0) if (ln != "") included[ln] = 1
-    close(includefile)
-  }
 }
 NR > 1 {
   # $1 = path/file.go:sLine.col,eLine.col   $2 = numStmts   $3 = count
@@ -170,15 +141,10 @@ END {
   }
 
   if (file_mode != "off") {
-    if (scoped)
-      printf "\n== PER-FILE (%s, threshold %s%%, scoped to changed files) ==\n", file_mode, threshold
-    else
-      printf "\n== PER-FILE (%s, threshold %s%%) ==\n", file_mode, threshold
-    ff = 0; nlist = 0; stale = 0; nchecked = 0
+    printf "\n== PER-FILE (%s, threshold %s%%) ==\n", file_mode, threshold
+    ff = 0; nlist = 0; stale = 0
     for (i = 1; i <= fn; i++) { f = forder[i]
       if (fstmts[f] == 0) continue
-      if (scoped && !(f in included)) continue
-      nchecked++
       pct = fcov[f]/fstmts[f]*100
       if (below(pct)) {
         if (f in allowed) { printf "  %-66s %7.2f%%  ALLOWLISTED\n", f, pct }
@@ -187,9 +153,7 @@ END {
         printf "  %-66s %7.2f%%  STALE-ALLOWLIST (>=thr, remove entry)\n", f, pct; stale = 1
       }
     }
-    if (scoped && nchecked == 0)
-      printf "  no changed .go files in this coverage profile (nothing to enforce)\n"
-    else if (nlist == 0) printf "  all non-excluded files >= %s%% (or allowlisted)\n", threshold
+    if (nlist == 0) printf "  all non-excluded files >= %s%% (or allowlisted)\n", threshold
     else printf "  %d file(s) below %s%% and NOT allowlisted\n", nlist, threshold
     if (stale) printf "  note: stale allowlist entries above should be pruned\n"
     if (ff && file_mode == "enforce") rc = 1
