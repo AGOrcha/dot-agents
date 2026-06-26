@@ -1,12 +1,16 @@
-// Command work-store-projection is the demo driver for the KG-as-SOT projection
-// prototype. It ingests the real PLAN.yaml/TASKS.yaml under a plan dir,
-// regenerates them from the typed model, and prints a per-file fidelity grade
-// plus a unified diff so the churn (if any) is visible.
+// Command work-store-projection drives the KG-as-SOT projection prototype.
+//
+// The PRIMARY experiment routes through a REAL graph (nodes+edges): it ingests
+// the real PLAN/TASKS/SLICES into a graphstore under a schema profile, then
+// reconstructs the YAML PURELY from graph readback and reports the field loss.
+// This answers the actual D1' question (what must the graph store to be a
+// lossless projection), not the tautological struct-mirror round-trip.
 //
 // Usage:
 //
-//	go run . --roundtrip <plan-dir>          # one plan
-//	go run . --sweep <plans-root>            # every plan under the root
+//	go run . --graph-loss <plans-root>   # PRIMARY: schema-v4 vs complete field loss
+//	go run . --roundtrip <plan-dir>      # struct-level serializer fidelity (one plan)
+//	go run . --sweep <plans-root>        # struct-level serializer fidelity (all)
 package main
 
 import (
@@ -20,11 +24,17 @@ import (
 )
 
 func main() {
-	roundtrip := flag.String("roundtrip", "", "path to a single plan dir (containing PLAN.yaml/TASKS.yaml)")
-	sweep := flag.String("sweep", "", "path to a plans root; round-trips every plan under it")
+	roundtrip := flag.String("roundtrip", "", "path to a single plan dir (struct-level serializer fidelity)")
+	sweep := flag.String("sweep", "", "path to a plans root (struct-level serializer fidelity)")
+	graphLoss := flag.String("graph-loss", "", "path to a plans root (PRIMARY: real-graph field-loss, v4 vs complete)")
 	flag.Parse()
 
 	switch {
+	case *graphLoss != "":
+		if err := runGraphLoss(*graphLoss); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
 	case *roundtrip != "":
 		if err := runOne(*roundtrip); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)

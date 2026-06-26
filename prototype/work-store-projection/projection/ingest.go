@@ -52,6 +52,24 @@ func ParseTasks(data []byte) (*TaskFile, error) {
 	return &tf, nil
 }
 
+// IngestSlices parses a SLICES.yaml file into the typed model.
+func IngestSlices(path string) (*SliceFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read slices %s: %w", path, err)
+	}
+	return ParseSlices(data)
+}
+
+// ParseSlices is the in-memory form of IngestSlices.
+func ParseSlices(data []byte) (*SliceFile, error) {
+	var sf SliceFile
+	if err := yaml.Unmarshal(data, &sf); err != nil {
+		return nil, fmt.Errorf("parse slices: %w", err)
+	}
+	return &sf, nil
+}
+
 // planKnownKeys is the set of top-level PLAN.yaml keys the canonical schema
 // covers. Anything else found at the top level is non-projectable residue.
 func planKnownKeys() map[string]bool {

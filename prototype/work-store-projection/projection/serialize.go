@@ -37,6 +37,15 @@ func SerializeTasks(tf *TaskFile) ([]byte, error) {
 	return out, nil
 }
 
+// SerializeSlices renders a SliceFile back to canonical SLICES.yaml bytes.
+func SerializeSlices(sf *SliceFile) ([]byte, error) {
+	out, err := yaml.Marshal(sf)
+	if err != nil {
+		return nil, fmt.Errorf("serialize slices: %w", err)
+	}
+	return out, nil
+}
+
 // Marshal is the single shared serialization entry point used by both Plan and
 // TaskFile so the canonical settings (indent, encoder options) live in exactly
 // one place. Hoisted to defeat any future drift between the two serializers.

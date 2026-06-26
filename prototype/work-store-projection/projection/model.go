@@ -1,12 +1,18 @@
-// Package projection is a self-contained prototype that validates the KG-as-SOT
-// "Group C" fork: if the graph is the source of truth for plan/task STRUCTURE and
-// STATE and the committed .agents/workflow/**/{PLAN,TASKS}.yaml are a PROJECTION,
-// then regenerating that YAML from the typed model must be (a) lossless and
-// (b) churn-free, and a hand-edited file must re-ingest cleanly.
+// Package projection holds the typed YAML model + the canonical (de)serializer.
 //
-// The typed model here mirrors commands/workflow.CanonicalPlan / CanonicalTask
-// (the shipped PLAN.yaml / TASKS.yaml schema) but is kept independent so the
-// prototype has its own go.mod and does not couple to the main module.
+// SCOPE NOTE (read this): this package proves only the SERIALIZER half — that a
+// typed model marshals to canonical, deterministic, churn-free YAML. Because the
+// model mirrors the YAML schema 1:1, "lossless for typed fields" here is
+// TAUTOLOGICAL and does NOT validate the D1' claim that a GRAPH can losslessly
+// project the YAML. The real D1' experiment lives in package graphproj, which
+// routes through an actual node+edge graph and measures what the graph DROPS.
+// These struct-level proofs are kept because the serializer IS the YAML-write
+// half of the graph round-trip (graphproj reconstructs a model, then this
+// package serializes it).
+//
+// The typed model mirrors commands/workflow.CanonicalPlan / CanonicalTask /
+// CanonicalSlice (the shipped PLAN/TASKS/SLICES schema) but is independent so
+// the prototype has its own go.mod and does not couple to the main module.
 package projection
 
 // Plan is the typed projection of a PLAN.yaml. Field order here defines the
@@ -56,4 +62,25 @@ type Task struct {
 	VerificationRequired bool     `yaml:"verification_required"`
 	Notes                string   `yaml:"notes"`
 	AppType              string   `yaml:"app_type,omitempty"`
+}
+
+// SliceFile is the typed projection of a SLICES.yaml.
+type SliceFile struct {
+	SchemaVersion int     `yaml:"schema_version"`
+	PlanID        string  `yaml:"plan_id"`
+	Slices        []Slice `yaml:"slices"`
+}
+
+// Slice is one entry in a SLICES.yaml (mirrors CanonicalSlice). Field order =
+// canonical key order.
+type Slice struct {
+	ID                string   `yaml:"id"`
+	ParentTaskID      string   `yaml:"parent_task_id"`
+	Title             string   `yaml:"title"`
+	Summary           string   `yaml:"summary"`
+	Status            string   `yaml:"status"`
+	DependsOn         []string `yaml:"depends_on"`
+	WriteScope        []string `yaml:"write_scope"`
+	VerificationFocus string   `yaml:"verification_focus"`
+	Owner             string   `yaml:"owner"`
 }
