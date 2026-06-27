@@ -140,11 +140,16 @@ and how to act on it:
 - **Tier-adjacency was the wrong lever anyway.** A compound/molecule may call any tier
   (refined delta: `.agents/proposals/skill-tiering-molecule-composition.md`), so the chain is
   legal with no hoist — independent of the cliff question.
-- **The real, evidence-backed bounds are engineering:**
-  - **Infra delegation-nesting ceiling (~hop 4).** Nested `Agent`-tool delegation collapses
-    past ~hop 4 in this harness (reproduced, sidecar v2/v3): subagents lack the dispatcher tool.
-    So deep multi-hop delegation must be **driver-orchestrated hop-by-hop** (a fresh top-level
-    `Agent` per hop, relay via on-disk artifact), never recursively nested.
+- **The real, evidence-backed bounds are engineering** — and **harness-capability-dependent**
+  (the numbers below are **current-harness-observed**, not universal; re-assess per harness as the
+  set grows — Hermes, Pi-agent, Aider, Antigravity-CLI, … — treating a new harness's limits as a
+  variable to measure, not assume):
+  - **Infra delegation-nesting ceiling (~hop 4, current harness).** Nested `Agent`-tool delegation
+    collapses past ~hop 4 on Claude Code's `Agent` tool (reproduced, sidecar v2/v3): subagents lack
+    the dispatcher tool. That number is a property of *this* harness — a harness whose subagents can
+    delegate raises it. Regardless, deep multi-hop delegation should be **driver-orchestrated
+    hop-by-hop** (a fresh top-level worker per hop, relay via on-disk artifact), not recursively
+    nested, until a harness is measured to nest reliably deeper.
   - **Relay discipline (below).**
   - **Decompose error-prone compounding work** (narrow v4 support) — fan-out into bounded,
     independently-verifiable sub-artifacts rather than one long compounding chain.

@@ -78,6 +78,11 @@ The highest-signal failure points. Read before the empirical pass.
   is bounded by ENGINEERING, not a measured cognitive cliff: **infra delegation-nesting ceiling
   (~hop 4)** + **relay discipline** + **decomposition of compounding work** + hygiene.
   Tier-adjacency is dropped, so the chain is legal regardless.
+- **These bounds are CURRENT-HARNESS-OBSERVED, not universal laws.** The ~hop-4 ceiling and the
+  v4 capability map were measured on Claude Code's `Agent` tool + `codex exec`; **re-assess per
+  harness** (Hermes, Pi-agent, Aider, Antigravity-CLI, …) — a new harness's nesting/capability
+  limits are a variable to **measure, not assume**. The tiering model is stable; its numbers are
+  per-harness.
 
 ## Relay hand-backs MUST be structured/pointer-based — never retold prose
 
@@ -87,7 +92,7 @@ The highest-signal failure points. Read before the empirical pass.
   retelling. Reconstructable defaults survive a retell; arbitrary structural detail does not.
 - Deep multi-hop delegation is **driver-orchestrated hop-by-hop** (fresh `Agent` per hop,
   relay via on-disk file), never recursively nested — nested `Agent` delegation collapses past
-  ~hop 4 in this harness.
+  ~hop 4 *on the current harness* (re-assess per harness).
 
 ## ideation-cycle RETURNS the decision; spec-scaffold writes the prose
 

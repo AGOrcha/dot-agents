@@ -89,14 +89,27 @@ are wrong here, and the evidence separates them:
 
 The contract should **stop justifying its bound by a same-agent fidelity cliff** (unsupported —
 §"what the evidence shows"). Replace that justification with the constraints that ARE
-evidence-backed or mechanically real:
+evidence-backed or mechanically real.
 
-- **(a) Infra delegation-nesting ceiling (~hop 4) — a hard harness mechanic.** Nested
-  `Agent`-tool delegation **collapses past ~hop 4**: subagents spawned via the `Agent` tool
-  lack the dispatcher tool themselves, so a recursive chain degrades to same-agent
-  (reproduced across v2 and v3). Bound **delegation NESTING depth by this harness mechanic** —
-  not by a cognitive cliff. Deep multi-hop delegation must be **driver-orchestrated hop-by-hop**
-  (fresh top-level `Agent` per hop, relay via on-disk artifact), never recursively nested.
+**These bounds are HARNESS-CAPABILITY-DEPENDENT, not universal laws.** The numeric thresholds
+below (the ~hop-4 nesting ceiling; the capability map; even what "decompose" needs to buy) were
+**observed on the current harness set** (Claude Code's `Agent` tool + `codex exec`). The *tiering
+model* is stable — composition is governed by judgment-autonomy + the engineering bounds — but its
+**numbers are per-harness** and must be **re-assessed as the harness set grows** (Hermes, Pi-agent,
+Aider, Antigravity-CLI, …). The contract records each bound **with the harness it was observed on**,
+and treats a new harness's delegation / nesting / capability limits as a **variable to measure, not
+assume** (a harness with deeper reliable nesting raises the ceiling; a weaker one lowers it). Do not
+read any number below as a constant.
+
+- **(a) Infra delegation-nesting ceiling (~hop 4) — observed on the CURRENT harness, re-assess
+  per harness.** On Claude Code's `Agent` tool, nested delegation **collapses past ~hop 4**:
+  subagents spawned via the `Agent` tool lack the dispatcher tool themselves, so a recursive chain
+  degrades to same-agent (reproduced across v2 and v3). This is a property of *that* harness's
+  tool surface, **not a universal constant** — a harness whose subagents can themselves delegate
+  raises this bound; record the observed ceiling against the harness. Regardless of the number,
+  deep multi-hop delegation should be **driver-orchestrated hop-by-hop** (fresh top-level worker
+  per hop, relay via on-disk artifact) rather than relying on recursive nesting, until a given
+  harness is *measured* to nest reliably deeper.
 - **(b) Relay discipline** — see D-refine-4 (the headline new rule).
 - **(c) Hygiene, not fidelity.** Delegation remains worthwhile for **context isolation,
   parallelism, write-scope discipline, and inspectability** — the honest reasons — not a
@@ -131,9 +144,11 @@ isolates a mechanism).
 
 - **DROP** any "molecule-with-a-molecule-call → error" (and compound-calls-compound error).
   Tier-adjacency is no longer a lint rule.
-- **ADD** "**delegation-nesting depth approaching the harness ceiling (~hop 4) → warning**"
-  (recursive `Agent`-tool nesting; recommend driver-orchestration past ~hop 3). This is the
-  mechanically-real bound, replacing the old cognitive "depth > 2" warning.
+- **ADD** "**delegation-nesting depth approaching the active harness's ceiling → warning**"
+  (recursive `Agent`-tool nesting; on the current harness the ceiling is ~hop 4, so warn /
+  recommend driver-orchestration past ~hop 3). The threshold is a **per-harness configured value**,
+  not a hardcoded 4 — the lint reads the active harness's observed ceiling; this replaces the old
+  cognitive "depth > 2" warning.
 - **ADD** "**delegation bundle hand-back not structured/pointer-based → warning**" (relay
   discipline, D-refine-4).
 - **KEEP** unchanged: atom-with-downstream-calls → error; molecule/compound-without-verifier →
@@ -168,8 +183,9 @@ Rule text to add to the contract:
   finding **did not replicate** in our tests (no same-agent cliff ≤ depth 10 / ~15k tokens, two
   harnesses; null power-limited — sidecar v1–v3). v4 found a *narrow* drift on **compounding
   chains** (not hop depth), GATE-2-audited NOT-SOUND for the broad claim; mechanism deferred to
-  v5 — cite the sidecar §v4/§v4.9. Keep the *infra* nesting ceiling (~hop 4) as the
-  mechanically-real bound.
+  v5 — cite the sidecar §v4/§v4.9. Keep the *infra* nesting ceiling as the mechanically-real
+  bound, but record it as **current-harness-observed (~hop 4 on Claude Code's `Agent` tool),
+  re-assessed per harness** — not a universal constant.
 - **§3 tier table "Intent" (T1)** — "judgment bounded to picking among declared **atoms**" →
   "...among declared **calls (atoms, molecules, or compounds)**."
 - **§4 T1 Composition** — "`calls:` lists the **atoms** it invokes" → "`calls:` lists the
@@ -178,8 +194,12 @@ Rule text to add to the contract:
 - **§4 / new** — add the **relay-discipline** invariant (D-refine-4) to the delegation-bundle
   contract surface.
 - **§5 done-criteria lint fixtures** — replace the adjacency fixture with: "lint passes a
-  molecule-calls-molecule/compound edge; warns on recursive delegation-nesting past ~hop 4;
-  warns on a non-pointer/non-checklist delegation hand-back; still errors on atom-with-calls."
+  molecule-calls-molecule/compound edge; warns on recursive delegation-nesting past the **active
+  harness's configured ceiling** (~hop 4 on the current harness); warns on a non-pointer/non-checklist
+  delegation hand-back; still errors on atom-with-calls."
+- **§1.2 / new** — record that the engineering bounds (nesting ceiling, the v4 capability map) are
+  **harness-capability-dependent**: each bound is stored with the harness it was observed on, and a
+  new harness's limits are a variable to **measure**, not assume.
 
 ## What stays the same
 
@@ -195,7 +215,8 @@ Rule text to add to the contract:
 
 - A fixture molecule whose `calls:` includes a molecule/compound **passes** lint (was an
   adjacency violation).
-- A fixture with recursive `Agent`-tool delegation nesting past ~hop 4 raises a **warning**.
+- A fixture with recursive `Agent`-tool delegation nesting past the active harness's configured
+  ceiling (~hop 4 on the current harness) raises a **warning**.
 - A fixture delegation hand-back that is retold prose (no artifact pointer + checklist) raises a
   **warning**.
 - An atom declaring any downstream call still raises an **error**; > 10-children still warns.

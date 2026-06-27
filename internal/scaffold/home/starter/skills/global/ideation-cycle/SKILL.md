@@ -14,6 +14,8 @@ tier: compound
 # broad claim; mechanism deferred to v5. The real, evidence-backed bounds are: infra
 # delegation-nesting ceiling (~hop 4), RELAY DISCIPLINE (structured/pointer hand-backs, never
 # retold prose), and DECOMPOSING error-prone compounding chains into verifiable sub-artifacts.
+# These bounds are CURRENT-HARNESS-OBSERVED (Claude Code Agent tool + codex), NOT universal — the
+# numbers are per-harness, re-assess as the harness set grows (Hermes, Pi-agent, Aider, …).
 # kg-brief is RUN by ideation-cycle as step 1 (reuse-by-artifact when fresh, else re-run).
 calls:
   - kg-brief        # grounding step 1 (reuse-by-artifact when fresh, else re-run — see below)
@@ -26,8 +28,9 @@ calls:
   - dogfood-decision
 # Deep multi-hop delegation must be DRIVER-ORCHESTRATED hop-by-hop (fresh Agent per hop, relay
 # via on-disk artifact), NOT recursively nested — nested Agent-tool delegation collapses past
-# ~hop 4 in this harness (reproduced; sidecar v2/v3). Reuse of an upstream briefing is gated on
-# an inputs_digest + dependency-manifest freshness check (see instructions/ground-via-kg-brief.md).
+# ~hop 4 on the CURRENT harness (reproduced; sidecar v2/v3; re-assess per harness). Reuse of an
+# upstream briefing is gated on an inputs_digest + dependency-manifest freshness check
+# (see instructions/ground-via-kg-brief.md).
 dispatchable_from:
   - kg-ideate       # invoked at Phase 2 (spec-scaffold) when a decision is a HARD/OPEN fork
 verifier: batch
@@ -116,7 +119,8 @@ depth/compounding claims rest on the evidence sidecar).
    structured/pointer-based — artifact path + a constraint/decision checklist — never retold
    prose. Lossy summary relay drops non-reconstructable detail that reaches the deliverable
    (evidence sidecar v3 family-2: 16→13). Deep delegation is driver-orchestrated hop-by-hop,
-   not recursively nested (nested `Agent` delegation collapses past ~hop 4).
+   not recursively nested (nested `Agent` delegation collapses past ~hop 4 on the current
+   harness; the ceiling is per-harness, re-assess as the harness set grows).
 
 5. **Cross-brain the judgment calls**
    Load → `instructions/cross-brain.md`

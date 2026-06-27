@@ -244,16 +244,25 @@ answer reshapes the decision:
   call any tier; composition is governed by judgment-autonomy, not which tier calls which). So
   the chain is legal; no hoist is forced. (Delta:
   `.agents/proposals/skill-tiering-molecule-composition.md`.)
-- **The real, evidence-backed bounds are engineering, not cognitive:** (a) a hard **infra
-  delegation-nesting ceiling (~hop 4)** — nested `Agent`-tool delegation collapses past ~hop 4
-  (reproduced), so deep delegation must be **driver-orchestrated hop-by-hop**, not recursively
-  nested; (b) **relay discipline** (D8); (c) **decompose error-prone compounding chains** into
-  independently-verifiable sub-artifacts (narrow v4 support — fan-out as a capability argument, not
-  a depth myth); (d) hygiene — context isolation, parallelism, write-scope, inspectability.
+- **The real, evidence-backed bounds are engineering, not cognitive:** (a) an **infra
+  delegation-nesting ceiling** — nested `Agent`-tool delegation collapses past ~hop 4 *on the
+  current harness* (reproduced), so deep delegation must be **driver-orchestrated hop-by-hop**, not
+  recursively nested; (b) **relay discipline** (D8); (c) **decompose error-prone compounding chains**
+  into independently-verifiable sub-artifacts (narrow v4 support — fan-out as a capability argument,
+  not a depth myth); (d) hygiene — context isolation, parallelism, write-scope, inspectability.
+
+**These bounds are HARNESS-CAPABILITY-DEPENDENT, not universal laws.** The numbers (the ~hop-4
+nesting ceiling; the v4 capability map) were **observed on the current harness set** (Claude Code's
+`Agent` tool + `codex exec`). The *model* is stable, but the **thresholds are per-harness** and must
+be **re-assessed as the harness set grows** (Hermes, Pi-agent, Aider, Antigravity-CLI, …): the
+contract records each bound **with the harness it was observed on** and treats a new harness's
+delegation / nesting / capability limits as a **variable to measure, not assume** (deeper reliable
+nesting raises the ceiling). Do not read any number here as a constant. (Folded into the tiering
+delta's D-refine-2.)
 
 So: the chain is fine, but for the honest reasons (adjacency was wrong; the bounds are infra +
-relay discipline + decomposition of error-prone compounding work), not a 2-hop cognitive cliff we
-could demonstrate.
+relay discipline + decomposition of error-prone compounding work — each per-harness), not a 2-hop
+cognitive cliff we could demonstrate.
 
 ### D7 — A hard fork's evidence is a per-fork SIDECAR, linked from the decision (OQ2 ruling)
 
@@ -351,9 +360,11 @@ self-checkable constraints, two harnesses; **power-limited null**). v4 induced a
 **compounding** work (not hop depth) but its GATE-2 audit ruled the broad claim NOT-SOUND, so it
 folds only as support for **decomposing** error-prone compounding chains; mechanism deferred to
 v5. Tier-adjacency is dropped regardless (the wrong lever), so the chain is legal with no hoist.
-The real bounds are the **infra delegation-nesting ceiling (~hop 4)**, **relay discipline (D8)**,
-**decomposition of error-prone compounding work**, and hygiene. Evidence: sidecar §v3.6/§v4/§v4.9;
-delta: `.agents/proposals/skill-tiering-molecule-composition.md`.
+The real bounds are the **infra delegation-nesting ceiling (~hop 4, current-harness-observed)**,
+**relay discipline (D8)**, **decomposition of error-prone compounding work**, and hygiene — all
+**harness-capability-dependent** (per-harness thresholds, re-assessed as the harness set grows; see
+D6). Evidence: sidecar §v3.6/§v4/§v4.9; delta:
+`.agents/proposals/skill-tiering-molecule-composition.md`.
 
 **OQ2 — Fork evidence → D7: per-fork SIDECAR, linked from the decision.** Founding instance:
 `evidence/depth-degradation-dogfood.md`. Anticipates lineage schema-v4 (`derives_from` edge).

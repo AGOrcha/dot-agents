@@ -47,8 +47,9 @@ arbitrary schema choice → terminal artifact 16/16 → 13/16; verbatim relay wa
 
 If an experiment's own SUBJECT is multi-hop delegation, it must be **driver-orchestrated
 hop-by-hop** (a fresh top-level `Agent` per hop, relay via on-disk file), never recursively
-nested: nested `Agent`-tool delegation collapses past ~hop 4 in this harness (sidecar v2/v3
-fold-back), and bundles for such experiments must forbid CLI-driver improvisation.
+nested: nested `Agent`-tool delegation collapses past ~hop 4 *on the current harness* (sidecar
+v2/v3 fold-back; this ceiling is per-harness — re-assess for any new harness), and bundles for
+such experiments must forbid CLI-driver improvisation.
 
 ## On return
 
