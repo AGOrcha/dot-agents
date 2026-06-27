@@ -412,19 +412,19 @@ Behavioral, not implementation. Each must be verifiable.
 
 ---
 
-## 5. Open Questions — HARD FORKS (UNRESOLVED, owner ratification required)
+## 5. Open Questions — HARD FORKS (ALL OWNER-RATIFIED 2026-06-27)
 
-These are the load-bearing decisions. They are to be resolved by the method in
+These are the load-bearing decisions. They were resolved by the method in
 `.agents/proposals/scientific-method-spine-domain-general.md` (hypothesis → cheapest
-discriminating test → ratify), **not** unilaterally in the plan. A recommended default is
-given for each where the owner has leaned; status is UNRESOLVED until ratified.
+discriminating test → ratify), **not** unilaterally in the plan.
 
-**Status after the GATE-1 + grounding revisions:** FORK-1 is **RESOLVED = hybrid**. FORK-2 is
-**refined** (refuse non-empty / allow empty; `--adopt` near-roadmap). **NEW-FORK-B** (git
-credential bootstrap) is **RESOLVED = explicit auth threading, ambient-first, creds never
-synced** (one small host-key-policy sub-question remains a plan detail). Still open for owner
-ruling: **FORK-3, FORK-4, FORK-5**, and **NEW-FORK-A** (agents manage-intent split mechanism +
-default-enable change).
+**Status — ALL FORKS NOW RATIFIED (owner ruling 2026-06-27):** FORK-1 **RESOLVED = hybrid**;
+FORK-2 **refined** (refuse non-empty / allow empty; `--adopt` near-roadmap); **FORK-3
+RESOLVED = `~/.agents/local/`**; **FORK-4 RESOLVED = keep separate, forward-compat
+constraint**; **FORK-5 RESOLVED = pure `Load` + `UpgradeNeeded` + persist-on-mutate**;
+**NEW-FORK-A RESOLVED = add explicit intent field + flip the default-enable**; **NEW-FORK-B
+RESOLVED = explicit auth threading, ambient-first, creds never synced** (one small
+host-key-policy sub-question remains a plan detail). No forks remain open.
 
 ### FORK-1 (THE CRUX) — Portable project identity — **RESOLVED = hybrid**
 
@@ -488,36 +488,36 @@ machine that already has a home). Deferring `--adopt`/`--merge` indefinitely mea
 misses its headline use case; it is acceptable to defer the *conflict-merge semantics*, but the
 adopt path should be on the near roadmap, not the far one.
 
-### FORK-3 — Where the machine-local registry physically lives
+### FORK-3 — Where the machine-local registry physically lives — **OWNER-RATIFIED 2026-06-27 = `~/.agents/local/`**
 
 The already-gitignored `~/.agents/local/` (only `local/` is excluded today) vs. an XDG state
 dir (`~/.local/state/dot-agents`, see the XDG path helper in `internal/platform/paths.go`).
 
-**Recommended default: `~/.agents/local/`.** It is already gitignored and already the home for
+**RATIFIED = `~/.agents/local/`.** It is already gitignored and already the home for
 machine-local provenance (`EnsureProvenanceGitignore`, `internal/config/local_source.go`),
 so it satisfies R7 with the least new machinery. XDG is cleaner in principle but introduces a
 second root to discover, back up, and reason about. Revisit if cross-tool XDG compliance
 becomes a goal.
 
-### FORK-4 — Relationship to §15 Q5 workspace lockfile
+### FORK-4 — Relationship to §15 Q5 workspace lockfile — **OWNER-RATIFIED 2026-06-27 = keep separate, forward-compat**
 
 config-distribution-model §15 Q5 raises a "workspace" aggregate lockfile (owner-ruled
 either-or, currently unimplemented). Should the machine-local registry **be** that workspace
 aggregate — unifying the project-registry thread and the workspace-lock thread — or stay a
 separate artifact?
 
-**Recommended default: keep separate for now, design the registry so it *could* become the
+**RATIFIED = keep separate for now, design the registry so it *could* become the
 workspace aggregate later.** Unifying prematurely couples this portability fix to an
 unimplemented lockfile design; but the registry's shape should not preclude the merge. Mark as
 a forward-compatibility constraint, not a phase-0 deliverable.
 
-### FORK-5 — `config.json` schema migration mechanics
+### FORK-5 — `config.json` schema migration mechanics — **OWNER-RATIFIED 2026-06-27 = pure Load + UpgradeNeeded + persist-on-mutate**
 
 `config.Load` has no migrator (R9). The fork is *how* to introduce one: a `config migrate`
 sibling to `da config migrate`, an in-`Load` lazy upgrade, or an explicit upgrade step in
 `refresh`/`init`.
 
-**Recommended default: keep `Load` PURE — decode + an `UpgradeNeeded` signal, persist on the
+**RATIFIED = keep `Load` PURE — decode + an `UpgradeNeeded` signal, persist on the
 next mutating command.** `config.Load` is today a pure read/decode (`internal/config/config.go:40`
 — `ReadFile` + `json.Unmarshal`, no writes); it must stay that way. So on load, detect the old
 shape from the version field and surface an `UpgradeNeeded` flag (decode old rows into the new
@@ -531,12 +531,12 @@ it would convert a pure read into a writer, breaking every read-only caller's ex
 risking writes from contexts that should never mutate the home (CI checks, dry-runs, concurrent
 reads). The fork remains the *mechanism choice* among the non-side-effecting options.
 
-### NEW-FORK-A — Agents manage-intent split mechanism (owner ruling)
+### NEW-FORK-A — Agents manage-intent split mechanism — **OWNER-RATIFIED 2026-06-27 = (a) explicit intent field + default-enable flip**
 
 D-A/R11 require splitting `Agents.<id>` into a **portable manage-intent** and a **machine-local
 detected state**, which is not representable today (`config.Agent` = `Enabled`+`Version` only,
 `config.go:29-31`; `refresh` auto-enables every installed platform, `refresh.go:37`; absent =
-enabled, `config.go:125-126`). The fork is **how**:
+enabled, `config.go:125-126`). The fork was **how**:
 
 - **(a) Add an explicit `manage`/`intent` field** to the portable user-local layer and treat
   the machine-local `enabled`/`version` purely as detection output; change the default so an
@@ -544,10 +544,14 @@ enabled, `config.go:125-126`). The fork is **how**:
 - **(b) Keep one field but relocate it** — intent lives in the synced user-local layer,
   detection in the machine-local binding/registry, with a derived effective value.
 
-**Owner ruling needed** on the default-enable behavior change (today's "absent ⇒ enabled" is
-load-bearing for existing single-machine users; flipping it risks disabling platforms on
-upgrade). Constraint either way: **intent gates candidacy, probe gates realization** (R11), and
-any schema addition follows the AgentsRC additive-field lifecycle
+**RATIFIED = (a):** add an explicit portable **intent** field, treat machine-local
+`enabled`/`version` as pure detection output, **and flip the default-enable** — `refresh` no
+longer auto-enables every installed platform; candidacy is driven by declared intent, not mere
+installation. Because this changes today's load-bearing "absent ⇒ enabled" behavior for existing
+single-machine users, the plan must carry a **migration that preserves currently-managed
+platforms** (backfill intent for already-enabled agents on upgrade) so no platform is silently
+disabled. Constraint preserved: **intent gates candidacy, probe gates realization** (R11), and
+the schema addition follows the AgentsRC additive-field lifecycle
 (`.agents/rules/dot-agents/schema-usage.md`).
 
 ### NEW-FORK-B — Fresh-machine git credential bootstrap — **RESOLVED = explicit auth threading, ambient-first**
@@ -687,6 +691,8 @@ required / not configured" message rather than silently skip or embed a secret.
   artifact; design notes only). Relevant because the user-scope layering policy (D-A) is where
   profile attachment would eventually hang; tracked as a relationship, not a dependency.
 - **Method:** `.agents/proposals/scientific-method-spine-domain-general.md` — the
-  hypothesis → cheapest-discriminating-test → ratify discipline by which the open forks
-  (FORK-3/4/5 + NEW-FORK-A/B; FORK-1 resolved=hybrid, FORK-2 refined) are to be resolved before
-  this spec leaves DRAFT.
+  hypothesis → cheapest-discriminating-test → ratify discipline by which the forks were
+  resolved. **All forks are now owner-ratified (2026-06-27):** FORK-1 hybrid, FORK-2 refined,
+  FORK-3 `~/.agents/local/`, FORK-4 keep-separate/forward-compat, FORK-5 pure-Load +
+  UpgradeNeeded, NEW-FORK-A explicit-intent + default-enable flip, NEW-FORK-B explicit
+  ambient-first auth threading. No forks block this spec from leaving DRAFT.
