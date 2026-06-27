@@ -241,6 +241,15 @@ type AgentsRC struct {
 	// resolveAuthorityGrants in authority.go.
 	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
 
+	// LayeringPolicy is the scope-attached unified-config-profiles (L1) policy
+	// unit: the Phase-1 layering governance a scope emits — precedence, absolute
+	// locks (deny/value, no force-allow), the Decision-2 three-state
+	// override_permissions, and the Q4 replace-mode marker. Its owning authority
+	// scope is SOURCE-derived (set by the resolver from the owning layer), never
+	// authored on the unit. See internal/config/profile.go and the
+	// unified-config-profiles design (§2.3).
+	LayeringPolicy *LayeringPolicy `json:"layering_policy,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -598,6 +607,8 @@ var agentsRCKnown = map[string]bool{
 	"precondition_policies": true,
 	// §15 D1a authority/value two-axis resolver fields (config-distribution-model §15.9)
 	"locks": true, "authority_grants": true,
+	// unified-config-profiles (L1): scope-attached layering policy unit
+	"layering_policy": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
 	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
 	// Listed as "known" so they are not captured into ExtraFields (which would
@@ -637,6 +648,7 @@ type agentsRCCore struct {
 
 	Locks           *PolicyLockSpec           `json:"locks,omitempty"`
 	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
+	LayeringPolicy  *LayeringPolicy           `json:"layering_policy,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -666,6 +678,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.PreconditionPolicies = core.PreconditionPolicies
 	a.Locks = core.Locks
 	a.AuthorityGrants = core.AuthorityGrants
+	a.LayeringPolicy = core.LayeringPolicy
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -735,6 +748,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		PreconditionPolicies: a.PreconditionPolicies,
 		Locks:                a.Locks,
 		AuthorityGrants:      a.AuthorityGrants,
+		LayeringPolicy:       a.LayeringPolicy,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {

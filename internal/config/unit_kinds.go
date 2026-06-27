@@ -20,7 +20,7 @@ const descriptorsSourceShipped = false
 // unit (see IsProjectableKind).
 func KnownUnitKind(kind string) bool {
 	switch kind {
-	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindDescriptor:
+	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindDescriptor, UnitKindProfile:
 		return true
 	default:
 		return false
@@ -33,7 +33,7 @@ func KnownUnitKind(kind string) bool {
 // until descriptorsSourceShipped flips (§15 D3/A3).
 func IsProjectableKind(kind string) bool {
 	switch kind {
-	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet:
+	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindProfile:
 		return true
 	case UnitKindDescriptor:
 		return descriptorsSourceShipped
@@ -49,7 +49,7 @@ func IsProjectableKind(kind string) bool {
 // is not synced until source-shipped.
 func IsSyncedUnitKind(kind string) bool {
 	switch kind {
-	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet:
+	case UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindProfile:
 		return true
 	default:
 		return false
