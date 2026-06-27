@@ -38,7 +38,7 @@ is encoded as *logic* (bespoke Go) rather than *data* (a descriptor the engine r
    `All()` returns five literal constructors (`platform.go:75-83`), and `ByID` walks it
    (`platform.go:86-93`). There is no data path to register a harness, and the command
    layer reaches the engine by enumerating `platform.All()` then running shared
-   projection + per-platform `CreateLinks` (`commands/install.go:292-348`,
+   projection + per-platform `CreateLinks` (`commands/internal/lifecycle/install.go:292-348`,
    `commands/add.go:597-616`, `commands/import.go:1632-1651`).
 
 2. **Hooks need a hand-maintained per-harness event table.** Canonical event names are
@@ -291,7 +291,7 @@ emission — there is no separate native-projection feature.
   the new harness.
 - **R9 — Command-integration compatibility.** The descriptor + core must slot into the
   existing command paths that enumerate `platform.All()` then run shared projection +
-  `CreateLinks` (`commands/install.go:292-348`, `commands/add.go:597-616`,
+  `CreateLinks` (`commands/internal/lifecycle/install.go:292-348`, `commands/add.go:597-616`,
   `commands/import.go:1632-1651`) without per-command changes per harness.
 - **R10 — Descriptor validation + versioning + destructive-replace policy.** Descriptors
   must be **validated** (well-formed read-paths, known transports, event-map shape) and
@@ -429,10 +429,21 @@ default**, not a decision.
   machines") are orthogonal; descriptors should not assume a fixed home layout.
 - **`config-distribution-model`** (`source` / `scope` model) — descriptors are data that
   flows through the same source/scope distribution machinery; the dialect/read-path data
-  is scope-attachable in principle.
+  is scope-attachable in principle. **Descriptor-provenance position (adopts §15 Amendment 3,
+  owner-ratified 2026-06-27 — `.agents/proposals/config-distribution-model-coherence-amendments.md`):
+  CONDITIONAL.** A descriptor stays an **internal / probe artifact** — Go-internal declarative
+  data, **not** a §15 `units` member (no `kind`, no lock entry, no `inputs_digest` participation) —
+  **until the F4 hand-add probe (DC0) completes.** It becomes a **full §15 `kind: descriptor` unit**
+  (with a defined media type, resolver order, validation, lock entry, and local `inputs_digest`
+  behavior) **only if/when it is source-shipped** (see the `external-agent-sources` note below).
+  Amendment 3 is the **owning decision** for this position; this spec adopts it rather than
+  re-deciding descriptor provenance. The amendment supplies the *substrate position* only — it does
+  **not** substitute for the F4 probe, which independently gates the descriptor *schema*.
 - **`external-agent-sources`** — a harness descriptor and an external agent *source* are
   distinct axes; a future external source could ship descriptors, but that is not in
-  scope here.
+  scope here. **That source-shipping moment is exactly the condition under which §15 Amendment 3
+  promotes the descriptor from an internal artifact to a full `kind: descriptor` unit** — until
+  then it carries no lock/digest obligation.
 - **`.agents/proposals/scientific-method-spine-domain-general.md`** — the method behind the
   F4 gate: the hand-add-one-harness probe is the **mandatory experiment** that ratifies or
   refutes the descriptor schema before any plan commits to it. Schema ratification is
