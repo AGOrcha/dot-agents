@@ -223,6 +223,62 @@ func TestResolveAuthorityGrants_EmptyIsClean(t *testing.T) {
 	}
 }
 
+func TestValidFieldPathAndArrayIndex(t *testing.T) {
+	good := []string{"model", "features.flag", "a.b.c"}
+	for _, p := range good {
+		if err := validFieldPath(p); err != nil {
+			t.Errorf("validFieldPath(%q) unexpected error: %v", p, err)
+		}
+	}
+	bad := []string{"", "a..b", "skills.0", "12"}
+	for _, p := range bad {
+		if err := validFieldPath(p); err == nil {
+			t.Errorf("validFieldPath(%q) must reject", p)
+		}
+	}
+	if !isArrayIndex("0") || !isArrayIndex("123") {
+		t.Error("all-digit segments are array indices")
+	}
+	if isArrayIndex("a1") || isArrayIndex("") {
+		t.Error("non-digit / empty segments are not array indices")
+	}
+}
+
+func TestIsPathPrefix(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"features", "features.graph_bridge", true},
+		{"a.b", "a.b.c", true},
+		{"features", "features", false},              // equal is not a STRICT prefix
+		{"feat", "features", false},                  // segment-wise, not string-wise
+		{"a.x", "a.y.z", false},                      // shorter but a shared segment differs
+		{"features.x", "features.y", false},          // siblings
+		{"features.graph_bridge", "features", false}, // longer is not a prefix of shorter
+	}
+	for _, c := range cases {
+		if got := isPathPrefix(c.a, c.b); got != c.want {
+			t.Errorf("isPathPrefix(%q,%q) = %v, want %v", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestOverlappingLockPaths(t *testing.T) {
+	none := overlappingLockPaths(map[string]effectiveValueLock{
+		"features.a": {}, "features.b": {}, "model": {},
+	})
+	if len(none) != 0 {
+		t.Fatalf("disjoint paths must not overlap, got %+v", none)
+	}
+	over := overlappingLockPaths(map[string]effectiveValueLock{
+		"features": {}, "features.graph_bridge": {},
+	})
+	if len(over) != 1 || over[0].Kind != violOverlapLock || !over[0].Fatal {
+		t.Fatalf("prefix overlap must yield one fatal violation, got %+v", over)
+	}
+}
+
 // TestParseGrants_FailClosed proves a malformed authority_grants block is a
 // validation ERROR (fail-closed), never a silent skip.
 func TestParseGrants_FailClosed(t *testing.T) {
@@ -251,11 +307,21 @@ func TestParseGrants_FailClosed(t *testing.T) {
 }
 
 func TestValidateLockSpec_FailClosed(t *testing.T) {
-	if err := validateLockSpec(PolicyLockSpec{DenyLocks: []string{"skills:risky"}}); err != nil {
-		t.Fatalf("well-formed deny_lock must validate, got %v", err)
+	ok := PolicyLockSpec{
+		ValueLocks: vl("features.flag", "x"),
+		DenyLocks:  []string{"skills:risky"},
+	}
+	if err := validateLockSpec(ok); err != nil {
+		t.Fatalf("well-formed spec must validate, got %v", err)
 	}
 	if err := validateLockSpec(PolicyLockSpec{DenyLocks: []string{"no-colon"}}); err == nil {
 		t.Fatal("malformed deny_lock must be a validation error")
+	}
+	if err := validateLockSpec(PolicyLockSpec{DenyLocks: []string{"skills.0:risky"}}); err == nil {
+		t.Fatal("array-index deny_lock field must be a validation error")
+	}
+	if err := validateLockSpec(PolicyLockSpec{ValueLocks: vl("a.0.b", "x")}); err == nil {
+		t.Fatal("array-index value_lock path must be a validation error")
 	}
 }
 

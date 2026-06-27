@@ -283,6 +283,76 @@ func TestExploit_MalformedPolicyFailsClosed(t *testing.T) {
 	}
 }
 
+// EXPLOIT D2 (round 3): a TYPO'd or unknown lock key must FAIL CLOSED — strict
+// decoding, so a mistyped admin deny can never silently bind nothing.
+func TestExploit_UnknownLockFieldFailsClosed(t *testing.T) {
+	cases := []struct {
+		name  string
+		locks map[string]any
+	}{
+		{"deny_lock typo (missing s)", map[string]any{"deny_lock": []any{"skills:risky"}}},
+		{"force_alow typo", map[string]any{"force_alow": []any{"Edit"}}},
+		{"unknown lock key", map[string]any{"bogus_lock": []any{"x"}}},
+		{"array-index value_lock path", map[string]any{"value_locks": map[string]any{"skills.0": "x"}}},
+		{"empty-segment value_lock path", map[string]any{"value_locks": map[string]any{"a..b": "x"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := resolve(t, layer(LayerRepoLocal, map[string]any{"locks": c.locks}))
+			if err == nil || !strings.Contains(err.Error(), "malformed") {
+				t.Fatalf("typo'd/unknown lock (%s) must fail closed, got err=%v", c.name, err)
+			}
+		})
+	}
+
+	// A VALID lock spec still resolves (no false-positive regression).
+	snap := mustResolve(t, layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+		"value_locks": map[string]any{"model": "X"},
+		"deny_locks":  []any{"skills:risky"},
+	}}))
+	if got := rawModel(t, snap); got != "X" {
+		t.Fatalf("valid lock spec must resolve, model=%v want X", got)
+	}
+}
+
+// EXPLOIT C (round 3): overlapping value-lock paths are ambiguous and rejected
+// deterministically (fail-closed), not resolved in Go map-iteration order.
+func TestExploit_OverlappingLockPathsRejected(t *testing.T) {
+	// repo locks the broad "features" AND the nested "features.graph_bridge".
+	_, err := resolve(t, layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+		"value_locks": map[string]any{
+			"features":              map[string]any{"graph_bridge": "a"},
+			"features.graph_bridge": "b",
+		},
+	}}))
+	if err == nil || !strings.Contains(err.Error(), "overlapping") {
+		t.Fatalf("overlapping value-locks must be rejected, got err=%v", err)
+	}
+
+	// Deterministic across runs: same error every time (map order must not leak).
+	for i := 0; i < 8; i++ {
+		_, e := resolve(t, layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+			"value_locks": map[string]any{
+				"features":              map[string]any{"graph_bridge": "a"},
+				"features.graph_bridge": "b",
+			},
+		}}))
+		if e == nil || !strings.Contains(e.Error(), `"features" is a prefix of "features.graph_bridge"`) {
+			t.Fatalf("overlap rejection must be deterministic, run %d got %v", i, e)
+		}
+	}
+
+	// Non-overlapping sibling paths are fine.
+	snap := mustResolve(t, layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+		"value_locks": map[string]any{"features.a": "1", "features.b": "2"},
+	}}))
+	m, _ := snap.EffectiveRaw()
+	feats := m["features"].(map[string]any)
+	if feats["a"] != "1" || feats["b"] != "2" {
+		t.Fatalf("disjoint nested locks must both apply, got %v", feats)
+	}
+}
+
 // --- additive / no-op guarantee ---------------------------------------------
 
 func TestAuthorityPass_NoOpWhenNoPolicy(t *testing.T) {

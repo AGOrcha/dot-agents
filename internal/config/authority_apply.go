@@ -1,8 +1,10 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -29,6 +31,7 @@ func applyAuthority(layers []ResolvedLayer, merged map[string]any) ([]LockCollis
 
 	res := runAuthorityPass(al)
 	viols := append(grantViols, res.violations...)
+	viols = append(viols, overlappingLockPaths(res.valueLocks)...)
 	if fatal := fatalViolations(viols); len(fatal) > 0 {
 		return nil, viols, authorityError(fatal)
 	}
@@ -118,9 +121,11 @@ func sourceIDOf(ref string) string {
 }
 
 // extractLocks decodes and VALIDATES a layer's `locks` block fail-closed. An
-// absent block yields an empty spec; a present-but-malformed block (not an
-// object, or a deny_lock without "field:member" shape) is an ERROR, never a
-// silent empty — a silently-ignored lock is fail-open.
+// absent block yields an empty spec. Decoding is STRICT (DisallowUnknownFields):
+// any unknown/typo'd key — `deny_lock` (missing the s), `force_alow`, etc. — is a
+// "malformed/unknown lock field" ERROR rather than silently decoding to a no-op
+// policy (a mistyped admin deny that bound nothing is fail-open). A non-object
+// block, an invalid value_lock path, or a malformed deny_lock are likewise errors.
 func extractLocks(raw map[string]any) (PolicyLockSpec, error) {
 	v, ok := raw["locks"]
 	if !ok {
@@ -130,9 +135,11 @@ func extractLocks(raw map[string]any) (PolicyLockSpec, error) {
 	if err != nil {
 		return PolicyLockSpec{}, fmt.Errorf("malformed locks block: %w", err)
 	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
 	var spec PolicyLockSpec
-	if err := json.Unmarshal(data, &spec); err != nil {
-		return PolicyLockSpec{}, fmt.Errorf("malformed locks block: %w", err)
+	if err := dec.Decode(&spec); err != nil {
+		return PolicyLockSpec{}, fmt.Errorf("malformed/unknown lock field: %w", err)
 	}
 	if err := validateLockSpec(spec); err != nil {
 		return PolicyLockSpec{}, err
@@ -148,8 +155,14 @@ func extractLocks(raw map[string]any) (PolicyLockSpec, error) {
 // plain value still wins over the pin, so a user-scope lock can never out-rank a
 // repo-scope value.
 func applyValueLocks(layers []authorityLayer, locks map[string]effectiveValueLock, merged map[string]any) []LockCollision {
+	fields := make([]string, 0, len(locks))
+	for field := range locks {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields) // deterministic apply + collision order (overlaps already rejected)
 	var collisions []LockCollision
-	for field, lock := range locks {
+	for _, field := range fields {
+		lock := locks[field]
 		parts := splitFieldPath(field)
 		winning := winningLockedValue(layers, parts, lock)
 		setPath(merged, parts, winning)

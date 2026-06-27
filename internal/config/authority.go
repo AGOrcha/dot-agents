@@ -133,6 +133,7 @@ const (
 	violForceAllow     = "force_allow"
 	violZeroAuthLock   = "zero_authority_lock"
 	violGrantOverwrite = "grant_overwrite"
+	violOverlapLock    = "overlapping_lock"
 
 	collisionValueLock = "value_lock"
 	collisionDenyLock  = "deny_lock"
@@ -437,16 +438,96 @@ func sortedAnyKeys(m map[string]any) []string {
 	return keys
 }
 
-// validateLockSpec checks a decoded lock spec fail-closed. A deny_lock that is
-// not "field:member" is a malformed-policy error — a typo'd deny that silently
+// validateLockSpec checks a decoded lock spec fail-closed. A value_lock path or a
+// deny_lock that is malformed is a policy error — a typo'd lock that silently
 // protected nothing would be fail-open.
 func validateLockSpec(spec PolicyLockSpec) error {
+	for path := range spec.ValueLocks {
+		if err := validFieldPath(path); err != nil {
+			return fmt.Errorf("malformed value_lock path %q: %w", path, err)
+		}
+	}
 	for _, d := range spec.DenyLocks {
-		if _, _, ok := splitDenyLock(d); !ok {
+		field, _, ok := splitDenyLock(d)
+		if !ok {
 			return fmt.Errorf("malformed deny_lock %q: want \"field:member\"", d)
+		}
+		if err := validFieldPath(field); err != nil {
+			return fmt.Errorf("malformed deny_lock field %q: %w", field, err)
 		}
 	}
 	return nil
+}
+
+// validFieldPath checks a dot-separated lock path fail-closed. Empty paths/
+// segments are rejected, and array-index segments (all-digit) are rejected as
+// unsupported in v1 (§15.9/D1a) — array-index paths are NOT silently treated as
+// map keys.
+func validFieldPath(path string) error {
+	if path == "" {
+		return fmt.Errorf("empty path")
+	}
+	for _, seg := range strings.Split(path, ".") {
+		if seg == "" {
+			return fmt.Errorf("empty path segment")
+		}
+		if isArrayIndex(seg) {
+			return fmt.Errorf("array-index segment %q is unsupported in v1", seg)
+		}
+	}
+	return nil
+}
+
+// isArrayIndex reports whether a non-empty segment is all digits (an array
+// index). Callers reject empty segments before this.
+func isArrayIndex(seg string) bool {
+	for _, r := range seg {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return seg != ""
+}
+
+// overlappingLockPaths returns a fatal violation for every pair of effective
+// value-lock paths where one is a strict prefix of the other (e.g. "features" and
+// "features.graph_bridge"). Such an overlap is ambiguous — a broad lock and a
+// nested lock on the same subtree have no well-defined precedence — so it is
+// rejected fail-closed rather than resolved in nondeterministic map order
+// (§15.9/D1a). Paths are sorted so the violation sequence is deterministic.
+func overlappingLockPaths(locks map[string]effectiveValueLock) []AuthorityViolation {
+	paths := make([]string, 0, len(locks))
+	for p := range locks {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	var viols []AuthorityViolation
+	for i := 0; i < len(paths); i++ {
+		for j := i + 1; j < len(paths); j++ {
+			if isPathPrefix(paths[i], paths[j]) {
+				viols = append(viols, AuthorityViolation{
+					Kind: violOverlapLock, Fatal: true,
+					Reason: fmt.Sprintf("ambiguous overlapping value-locks: %q is a prefix of %q", paths[i], paths[j]),
+				})
+			}
+		}
+	}
+	return viols
+}
+
+// isPathPrefix reports whether dot-path a is a STRICT segment-wise prefix of b.
+func isPathPrefix(a, b string) bool {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	if len(as) >= len(bs) {
+		return false
+	}
+	for i := range as {
+		if as[i] != bs[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // fatalViolations returns the subset of violations that must abort the resolve.

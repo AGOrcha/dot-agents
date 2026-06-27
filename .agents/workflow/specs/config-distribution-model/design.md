@@ -1322,6 +1322,16 @@ closed** (a resolve-time validation error), never a silent skip. Conferring org-
 onto an org source remains the deferred trusted-root/governance bootstrap (§15.7) — it does not
 flow through the peer guard.
 
+**Round-3 hardening.** (D) Lock decoding is **strict**: `extractLocks` uses `DisallowUnknownFields`,
+so any unknown/typo'd key in a `locks` block (`deny_lock` missing the `s`, `force_alow`, …) is a
+fail-closed "malformed/unknown lock field" error rather than a silently-ignored no-op policy — a
+mistyped admin deny can never silently bind nothing. (C) Overlapping value-lock paths are
+**ambiguous and rejected** fail-closed: if one effective lock path is a strict segment-wise prefix
+of another (e.g. `features` and `features.graph_bridge`), the resolve aborts rather than applying
+them in nondeterministic Go map order; disjoint sibling paths (`features.a`, `features.b`) are fine.
+**Array-index path segments are unsupported in v1** — an all-digit segment (e.g. `skills.0`) in a
+value_lock or deny_lock path is a validation error, not silently treated as a map key.
+
 **From D1a (Amendment 1 — authority/value two-axis + source-authority registry):**
 1. **[DONE] Policy-authority pass (Phase 1).** A resolve phase ahead of the existing value-merge
    applies the **AUTHORITY-RANK** total order (`org > team > repo > user`, deny-overrides, higher
