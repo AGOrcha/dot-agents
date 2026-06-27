@@ -17,6 +17,20 @@ const LockSectionUnits = "units"
 const (
 	UnitKindLayer    = "layer"
 	UnitKindArtifact = "artifact"
+	// UnitKindProjectSet is the §15 D13/A2 synced identity-registry unit: the
+	// portable project IDENTITY (id + portable key, NO path). It is a first-class
+	// unit — scope- and manifest-referenceable, locked, and a member of
+	// inputs_digest when locally authored — under the same selector-merge law as
+	// every other unit. The machine-local BINDING table (id → absolute-path) is
+	// NOT this unit and is never synced/scoped/projected (see IsSyncedUnitKind).
+	UnitKindProjectSet = "project-set"
+	// UnitKindDescriptor is the §15 D3/A3 CONDITIONAL fourth behavior: declarative,
+	// non-merging, non-installing projection data. It stays Go-internal / NOT a
+	// §15 unit (no lock entry, not projected) until a descriptor becomes
+	// source-shipped (gated by the multi-harness F4 probe). The constant reserves
+	// the kind so the resolver/lock recognize and fail-closed on a descriptor unit
+	// today rather than mis-resolving it (see IsProjectableKind).
+	UnitKindDescriptor = "descriptor"
 )
 
 // LockedUnit is one entry in the lockfile's "units" section (§7A.3). The map key

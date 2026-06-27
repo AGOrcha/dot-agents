@@ -1295,39 +1295,54 @@ configurable" claims are checked against a real consumer, not just a parser.**
 amendments (D1a, D13/A2, D3/A3) introduce **net-new resolver obligations** that are **NOT yet
 implemented** — see §15.9.
 
-### 15.9 Coherence-fold resolver obligations (NOT yet implemented — follow-on PR)
+### 15.9 Coherence-fold resolver obligations
 
-The three amendments folded above are **contract** changes; the shipped resolver does not yet honor
-them. This is the checklist the follow-on resolver-code PR is accountable to (the contract is §15;
-this just itemizes the deltas it now obligates). None of these are shipped in 0.4.0/0.4.1.
+The three amendments folded above are **contract** changes. This is the checklist the resolver-code
+work is accountable to (the contract is §15; this itemizes the deltas it obligates).
+
+**Implementation status (PR #193, `impl/15-fold-amendments`).** Items 1-5 (the D1a authority core +
+security) and item 8 (the descriptor kind guard) are **IMPLEMENTED** here; items 6-7 (the
+`project-set` unit) are **PARTIAL** (kind enum + binding-separation guards landed; the full
+synced-unit resolver behavior is a tracked follow-on). The authority pass is **additive**: a layer
+set that declares no `locks`/`authority_grants` resolves exactly as before, so no shipped
+value-merge behavior changed. Code: `internal/config/authority.go`,
+`internal/config/authority_apply.go`, `internal/config/unit_kinds.go`; wired into the shared
+`resolveSnapshot` so both the flat and layered resolvers honor it; negative-control suite in
+`internal/config/authority_test.go` + `authority_apply_test.go`.
 
 **From D1a (Amendment 1 — authority/value two-axis + source-authority registry):**
-1. **Policy-authority pass (Phase 1).** Add a resolve phase ahead of the existing value-merge that
+1. **[DONE] Policy-authority pass (Phase 1).** A resolve phase ahead of the existing value-merge
    applies the **AUTHORITY-RANK** total order (`org > team > repo > user`, deny-overrides, higher
-   binds lower) and evaluates locks / value-locks / override-caps. The current resolver implements
-   value-precedence (Phase 2) only.
-2. **Locked-field collision + provenance.** When a lower scope writes a value a higher scope
-   value-locked, reject/ignore the write (lock wins) and surface attempted value + winning value +
-   owning scope through `da config explain`.
-3. **Cross-authority deny / no force-allow.** A lower deny cannot erase a higher allow; subtraction
-   only via a higher-scope deny-lock.
-4. **Source-authority registry + `authority_grants`.** Derive authority from
-   `ref.source → registry → scope`; add the `authority_grants` block; enforce the **write-guard**:
-   only a strictly-higher scope may write a grant, and **no self-blessing** (a resolve-time
-   rejection, including for public/foreign sources unless co-signed by a trusted root).
-5. **Schema fields.** Represent the two orderings as **two explicitly-named fields**
-   (`authority_rank`, `value_precedence`), not one reused `scope_chain` (F1.1).
+   binds lower) and evaluates locks / value-locks. `runAuthorityPass` + `applyAuthority`.
+2. **[DONE] Locked-field collision + provenance.** A lower-scope write a higher scope value-locked is
+   rejected (lock wins) and surfaced as a `LockCollision` (attempted + winning + owner) through
+   `da config explain` (`printLockCollisions`).
+3. **[DONE] Cross-authority deny / no force-allow.** A lower deny cannot erase a higher allow
+   (deny-locks bind only lower scopes); `force_allow` is a fatal validation error.
+4. **[DONE] Source-authority registry + `authority_grants`.** Authority derives from
+   `ref.source → registry → scope`; the `authority_grants` block is honored only when written by a
+   scope whose authority is at least the conferred scope. Self-elevation by a scoped lower layer is a
+   **fatal** resolve-time rejection; a value-only/public source's claim is **inert**. The bootstrap
+   of the first org/team-scope registry is the trusted-root/governance-backend concern (deferred,
+   §15.7) — so org/team authority does not yet enter via a built-in local layer, but the guards and
+   the resolver path are in place and tested. `resolveAuthorityGrants` / `evaluateGrant`.
+5. **[DONE] Schema fields.** Two explicitly-named orderings (`authority_rank`, `value_precedence`)
+   in `ScopeOrdering`/`CanonicalScopeOrdering` (NOT one reused `scope_chain`, F1.1); manifest-side
+   `locks` + `authority_grants` typed fields + `schemas/agentsrc.schema.json`.
 
 **From D13 (Amendment 2 — registry split):**
-6. **`kind: project-set` unit.** Add the synced identity-registry unit kind (lock entry +
-   `inputs_digest` participation when locally authored), referenceable by `home-config` at personal
-   scope and a manifest at team scope under the selector-merge law.
-7. **Binding-table separation.** Keep the machine-local `id → absolute-path` binding table (+
-   `added` + caches) strictly out of any synced/scoped/projected path; it is never a unit.
+6. **[PARTIAL] `kind: project-set` unit.** The `UnitKindProjectSet` kind + `IsSyncedUnitKind`/
+   `IsProjectableKind` guards landed; the full synced identity-registry unit (lock entry +
+   `inputs_digest` participation, `home-config`/team-manifest referencing under selector-merge) is a
+   tracked follow-on.
+7. **[PARTIAL] Binding-table separation.** The guard surface (`IsSyncedUnitKind` excludes the
+   binding table) is in place; physically relocating the machine-local `id → absolute-path` table out
+   of the registry is the same follow-on as item 6.
 
 **From D3 (Amendment 3 — conditional descriptor):**
-8. **CONDITIONAL — no work today.** Descriptors stay Go-internal through the `multi-harness` F4
-   probe. **Only if** a descriptor becomes source-shipped: add the fourth resolver behavior
-   (`kind: descriptor`) with its media type, resolver order, validation, lock entry, and
-   `inputs_digest` participation. The F4 probe still gates the descriptor schema independently of
-   this fold.
+8. **[DONE — guard only, by design] CONDITIONAL.** Descriptors stay Go-internal through the
+   `multi-harness` F4 probe: the `UnitKindDescriptor` kind is reserved and `ValidateUnitKind` /
+   `IsProjectableKind` fail-closed on it (`descriptorsSourceShipped = false`), so the resolver/lock
+   recognize but never mis-resolve a descriptor today. The full fourth behavior (media type, resolver
+   order, validation, lock entry, `inputs_digest`) fires only if a descriptor becomes source-shipped;
+   the F4 probe still gates the schema independently of this fold.
