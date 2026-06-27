@@ -24,19 +24,24 @@ const StageProfileRefPrefix = "stage-profile"
 
 // profilesFromExecutionProfile re-expresses each execution_profile.by_app_type
 // entry as one app_type-kind profile selected by {app_type: <key>}, carried at
-// the given source-derived authority scope. The bundle is the AppTypeProfile
-// marshaled to the same JSON object the legacy merge operates on, so a deep-map
-// merge of these fragments equals the legacy execution_profile merge.
-func profilesFromExecutionProfile(ep *ExecutionProfile, scope AuthorityScope) []ConfigProfile {
+// the given source-derived authority scope. source is the real provenance of the
+// contributing layer (its lock/source ref), woven into the absolute ref so two
+// DIFFERENT source sets produce DISTINGUISHABLE refs — and therefore distinct
+// digests (Decision 7 / FIX 4) — even when their resolved values coincide. The
+// bundle is the AppTypeProfile marshaled to the same JSON object the legacy merge
+// operates on, so a deep-map merge of these fragments equals the legacy
+// execution_profile merge.
+func profilesFromExecutionProfile(ep *ExecutionProfile, scope AuthorityScope, source string, order int) []ConfigProfile {
 	if ep == nil || len(ep.ByAppType) == 0 {
 		return nil
 	}
 	out := make([]ConfigProfile, 0, len(ep.ByAppType))
 	for _, appType := range sortedStringKeys(ep.ByAppType) {
 		out = append(out, ConfigProfile{
-			Ref:      AppTypeProfileRefPrefix + ":" + appType,
+			Ref:      derivedRef(source, AppTypeProfileRefPrefix, appType),
 			Kind:     ProfileKindAppType,
 			Scope:    scope,
+			Order:    order,
 			Selector: ProfileSelector{AppType: appType},
 			Bundle:   toBundle(ep.ByAppType[appType]),
 		})
@@ -46,24 +51,36 @@ func profilesFromExecutionProfile(ep *ExecutionProfile, scope AuthorityScope) []
 
 // profilesFromStageProfiles re-expresses stage_profiles (stage → slug → profile)
 // as one stage-kind profile per stage, selected by {stage: <stage>}, carried at
-// the given source-derived authority scope. The bundle is the slug→profile map
-// for that stage; a deep-map merge across scopes equals the legacy stage_profiles
-// merge.
-func profilesFromStageProfiles(sp map[string]map[string]StageProfile, scope AuthorityScope) []ConfigProfile {
+// the given source-derived authority scope, with source provenance woven into the
+// ref (FIX 4). The bundle is the slug→profile map for that stage; a deep-map merge
+// across scopes equals the legacy stage_profiles merge.
+func profilesFromStageProfiles(sp map[string]map[string]StageProfile, scope AuthorityScope, source string, order int) []ConfigProfile {
 	if len(sp) == 0 {
 		return nil
 	}
 	out := make([]ConfigProfile, 0, len(sp))
 	for _, stage := range sortedStageKeys(sp) {
 		out = append(out, ConfigProfile{
-			Ref:      StageProfileRefPrefix + ":" + stage,
+			Ref:      derivedRef(source, StageProfileRefPrefix, stage),
 			Kind:     ProfileKindStage,
 			Scope:    scope,
+			Order:    order,
 			Selector: ProfileSelector{Stage: stage},
 			Bundle:   toBundle(sp[stage]),
 		})
 	}
 	return out
+}
+
+// derivedRef builds a source-provenanced absolute ref "<source>:<prefix>:<name>"
+// for a profile derived from a contributing layer's config. The source segment is
+// what carries provenance into the digest (FIX 4); it falls back to the bare
+// prefix when the layer has no distinct source id.
+func derivedRef(source, prefix, name string) string {
+	if source == "" {
+		return prefix + ":" + name
+	}
+	return source + ":" + prefix + ":" + name
 }
 
 // toBundle marshals a typed value into the generic JSON object the engine merges

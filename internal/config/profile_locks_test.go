@@ -14,26 +14,26 @@ func denyLockPolicy(scope AuthorityScope, field string, members ...string) Layer
 }
 
 // TestLockH8aOrgLockBeatsLowerGrant is H8(a): an org deny-lock wins over a
-// lower-scope (team) grant of the same capability — the lower grant is dropped
-// from the additive allow set and forced out of the effective bundle (Decision
-// 4: a lower scope can never punch a capability through a higher deny).
+// lower-scope (team) grant — routed THROUGH the §15 applyDenyLocks, which removes
+// the member only when its highest contributing rank (team=3) is below the lock
+// owner (org=4).
 func TestLockH8aOrgLockBeatsLowerGrant(t *testing.T) {
 	set := ProfileSet{
 		Profiles: []ConfigProfile{
 			capProfile("team:grant", AuthTeam, ProfileSelector{}, "Edit", "Read"),
 		},
-		Policies: []LayeringPolicy{denyLockPolicy(AuthOrg, "tools.allow", "Edit")},
+		Policies: []LayeringPolicy{denyLockPolicy(AuthOrg, "tools_allow", "Edit")},
 	}
 	ctx := ProfileContext{ScopeChain: []AuthorityScope{AuthTeam, AuthOrg}}
-	got := ResolveProfile(set, ctx)
-	if reflect.DeepEqual(toolsAllow(got.Bundle), []string{"Edit", "Read"}) {
-		t.Fatal("org deny-lock did not bind (H8a)")
-	}
+	got := mustResolveProfile(t, set, ctx)
 	if !reflect.DeepEqual(toolsAllow(got.Bundle), []string{"Read"}) {
-		t.Fatalf("tools.allow = %v, want [Read] (Edit denied by org lock)", toolsAllow(got.Bundle))
+		t.Fatalf("tools_allow = %v, want [Read] (Edit denied by org lock, H8a)", toolsAllow(got.Bundle))
 	}
 	if len(got.Locks) != 1 || got.Locks[0].Owner != AuthOrg {
 		t.Fatalf("binding lock not surfaced with org owner: %+v", got.Locks)
+	}
+	if len(got.Collisions) == 0 {
+		t.Fatal("expected a §15 lock collision recording the rejected team grant")
 	}
 }
 
@@ -44,20 +44,37 @@ func TestLockH8bTeamLockHoldsWhereOrgSilent(t *testing.T) {
 		Profiles: []ConfigProfile{
 			capProfile("repo:grant", AuthRepo, ProfileSelector{}, "Edit", "Read"),
 		},
-		Policies: []LayeringPolicy{denyLockPolicy(AuthTeam, "tools.allow", "Edit")},
+		Policies: []LayeringPolicy{denyLockPolicy(AuthTeam, "tools_allow", "Edit")},
 	}
 	ctx := ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthTeam}}
-	got := toolsAllow(ResolveProfile(set, ctx).Bundle)
+	got := toolsAllow(mustResolveProfile(t, set, ctx).Bundle)
 	if !reflect.DeepEqual(got, []string{"Read"}) {
-		t.Fatalf("tools.allow = %v, want [Read] (team lock holds where org silent, H8b)", got)
+		t.Fatalf("tools_allow = %v, want [Read] (team lock holds where org silent, H8b)", got)
+	}
+}
+
+// TestLockHigherAllowSurvivesLowerDeny is the round-2 invariant ported via §15: a
+// lower-scope deny-lock must NOT erase a HIGHER-scope allow. Org grants Edit; a
+// team deny-lock (rank 3) cannot subtract org's (rank 4) contribution.
+func TestLockHigherAllowSurvivesLowerDeny(t *testing.T) {
+	set := ProfileSet{
+		Profiles: []ConfigProfile{
+			capProfile("org:grant", AuthOrg, ProfileSelector{}, "Edit", "Read"),
+		},
+		Policies: []LayeringPolicy{denyLockPolicy(AuthTeam, "tools_allow", "Edit")},
+	}
+	ctx := ProfileContext{ScopeChain: []AuthorityScope{AuthTeam, AuthOrg}}
+	got := toolsAllow(mustResolveProfile(t, set, ctx).Bundle)
+	if !reflect.DeepEqual(got, []string{"Edit", "Read"}) {
+		t.Fatalf("tools_allow = %v, want [Edit Read] (a lower deny cannot erase a higher allow)", got)
 	}
 }
 
 // TestLockSelectorScoping proves a context-scoped lock binds only matching
-// contexts (e.g. deny Edit/Write only @role:reviewer).
+// contexts (e.g. deny Edit only @role:reviewer).
 func TestLockSelectorScoping(t *testing.T) {
 	policy := LayeringPolicy{Scope: AuthOrg, Locks: []ProfileLock{
-		{Field: "tools.allow", Deny: []string{"Edit"}, Owner: AuthOrg, Selector: ProfileSelector{Role: "reviewer"}},
+		{Field: "tools_allow", Deny: []string{"Edit"}, Owner: AuthOrg, Selector: ProfileSelector{Role: "reviewer"}},
 	}}
 	set := ProfileSet{
 		Profiles: []ConfigProfile{capProfile("a:1", AuthRepo, ProfileSelector{}, "Edit", "Read")},
@@ -65,17 +82,17 @@ func TestLockSelectorScoping(t *testing.T) {
 	}
 	chain := []AuthorityScope{AuthRepo, AuthOrg}
 
-	reviewer := toolsAllow(ResolveProfile(set, ProfileContext{Role: "reviewer", ScopeChain: chain}).Bundle)
+	reviewer := toolsAllow(mustResolveProfile(t, set, ProfileContext{Role: "reviewer", ScopeChain: chain}).Bundle)
 	if !reflect.DeepEqual(reviewer, []string{"Read"}) {
-		t.Fatalf("reviewer context: tools.allow = %v, want [Read]", reviewer)
+		t.Fatalf("reviewer context: tools_allow = %v, want [Read]", reviewer)
 	}
-	worker := toolsAllow(ResolveProfile(set, ProfileContext{Role: "worker", ScopeChain: chain}).Bundle)
+	worker := toolsAllow(mustResolveProfile(t, set, ProfileContext{Role: "worker", ScopeChain: chain}).Bundle)
 	if !reflect.DeepEqual(worker, []string{"Edit", "Read"}) {
-		t.Fatalf("worker context: tools.allow = %v, want [Edit Read] (lock does not match)", worker)
+		t.Fatalf("worker context: tools_allow = %v, want [Edit Read] (lock does not match)", worker)
 	}
 }
 
-// TestValueLockPinsScalar proves a value-lock pins a scalar absolutely.
+// TestValueLockPinsScalar proves a §15 value-lock pins a scalar absolutely.
 func TestValueLockPinsScalar(t *testing.T) {
 	policy := LayeringPolicy{Scope: AuthOrg, Locks: []ProfileLock{
 		{Field: "model", Value: json.RawMessage(`"sonnet"`), Owner: AuthOrg},
@@ -86,22 +103,31 @@ func TestValueLockPinsScalar(t *testing.T) {
 		},
 		Policies: []LayeringPolicy{policy},
 	}
-	got := ResolveProfile(set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}})
+	got := mustResolveProfile(t, set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}})
 	if got.Bundle["model"] != "sonnet" {
 		t.Fatalf("model = %v, want sonnet (value-lock pin)", got.Bundle["model"])
 	}
 }
 
-// TestZeroAuthorityLockInert proves a value-only scope's lock cannot bind.
+// TestForceAllowLockRejected proves a force-allow is impossible to author: the
+// decode path is fail-closed (Decision 4).
+func TestForceAllowLockRejected(t *testing.T) {
+	if _, err := decodeLayeringPolicy(json.RawMessage(`{"locks":[{"field":"x","force_allow":["y"]}]}`), AuthOrg); err == nil {
+		t.Fatal("force_allow must be a fail-closed decode error (Decision 4)")
+	}
+}
+
+// TestZeroAuthorityLockInert proves a value-only scope's lock cannot bind — §15
+// runAuthorityPass records it inert.
 func TestZeroAuthorityLockInert(t *testing.T) {
 	policy := LayeringPolicy{Scope: AuthProjectLocal, Locks: []ProfileLock{
-		{Field: "tools.allow", Deny: []string{"Edit"}, Owner: AuthProjectLocal},
+		{Field: "tools_allow", Deny: []string{"Edit"}, Owner: AuthProjectLocal},
 	}}
 	set := ProfileSet{
 		Profiles: []ConfigProfile{capProfile("a:1", AuthRepo, ProfileSelector{}, "Edit")},
 		Policies: []LayeringPolicy{policy},
 	}
-	got := ResolveProfile(set, ProfileContext{ScopeChain: []AuthorityScope{AuthProjectLocal, AuthRepo}})
+	got := mustResolveProfile(t, set, ProfileContext{ScopeChain: []AuthorityScope{AuthProjectLocal, AuthRepo}})
 	if !reflect.DeepEqual(toolsAllow(got.Bundle), []string{"Edit"}) {
 		t.Fatal("a zero-authority scope's deny-lock must be inert")
 	}
@@ -117,7 +143,7 @@ func TestSameScopeConflictShowsBoth(t *testing.T) {
 		{Ref: "b:model", Kind: ProfileKindAgentCapability, Scope: AuthRepo, Bundle: map[string]any{"model": "haiku"}},
 		{Ref: "a:model", Kind: ProfileKindAgentCapability, Scope: AuthRepo, Bundle: map[string]any{"model": "sonnet"}},
 	}}
-	got := ResolveProfile(set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo}})
+	got := mustResolveProfile(t, set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo}})
 	if len(got.Conflicts) != 1 {
 		t.Fatalf("expected 1 same-scope conflict, got %d: %+v", len(got.Conflicts), got.Conflicts)
 	}
@@ -135,7 +161,7 @@ func TestNoConflictWhenValuesAgree(t *testing.T) {
 		{Ref: "a:1", Kind: ProfileKindAgentCapability, Scope: AuthRepo, Bundle: map[string]any{"model": "x"}},
 		{Ref: "a:2", Kind: ProfileKindAgentCapability, Scope: AuthRepo, Bundle: map[string]any{"model": "x"}},
 	}}
-	got := ResolveProfile(set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo}})
+	got := mustResolveProfile(t, set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo}})
 	if len(got.Conflicts) != 0 {
 		t.Fatalf("agreeing same-scope values should not conflict: %+v", got.Conflicts)
 	}
@@ -146,7 +172,7 @@ func TestNoConflictWhenValuesAgree(t *testing.T) {
 func TestPermissionGatesWrite(t *testing.T) {
 	policy := LayeringPolicy{
 		Scope:               AuthOrg,
-		OverridePermissions: NewOverridePermissions(map[AuthorityScope][]string{AuthOrg: {"tools.allow"}}),
+		OverridePermissions: NewOverridePermissions(map[AuthorityScope][]string{AuthOrg: {"tools_allow"}}),
 	}
 	set := ProfileSet{
 		Profiles: []ConfigProfile{
@@ -155,8 +181,8 @@ func TestPermissionGatesWrite(t *testing.T) {
 		},
 		Policies: []LayeringPolicy{policy},
 	}
-	got := toolsAllow(ResolveProfile(set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}}).Bundle)
+	got := toolsAllow(mustResolveProfile(t, set, ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}}).Bundle)
 	if !reflect.DeepEqual(got, []string{"Read"}) {
-		t.Fatalf("tools.allow = %v, want [Read] (repo write gated out by allowlist)", got)
+		t.Fatalf("tools_allow = %v, want [Read] (repo write gated out by allowlist)", got)
 	}
 }

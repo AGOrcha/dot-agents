@@ -47,7 +47,7 @@ func TestResolveProfileReplaceModeEndToEnd(t *testing.T) {
 		{Ref: "r:1", Kind: ProfileKindAgentCapability, Scope: AuthRepo, Bundle: map[string]any{"model": "x"}},
 	}
 	policies := []LayeringPolicy{{Scope: AuthOrg, Mode: PolicyModeReplace}}
-	got := ResolveProfile(ProfileSet{Profiles: profiles, Policies: policies},
+	got := mustResolveProfile(t, ProfileSet{Profiles: profiles, Policies: policies},
 		ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}})
 	if got.PolicyMode != PolicyModeReplace || got.ReplacedBy != AuthOrg {
 		t.Fatalf("expected replace mode by org, got %q/%q", got.PolicyMode, got.ReplacedBy)
@@ -62,7 +62,7 @@ func TestPrecedenceRankerAbsentScopeSortsFirst(t *testing.T) {
 	// Precedence lists only org; user is absent → ranks lowest (sorts first), so
 	// org is the local-wins tail.
 	policies := []LayeringPolicy{{Scope: AuthOrg, Precedence: []AuthorityScope{AuthOrg}}}
-	got := ResolveProfile(ProfileSet{Profiles: profiles, Policies: policies},
+	got := mustResolveProfile(t, ProfileSet{Profiles: profiles, Policies: policies},
 		ProfileContext{ScopeChain: []AuthorityScope{AuthUser, AuthOrg}})
 	if got.Bundle["model"] != "org" {
 		t.Fatalf("model = %v, want org (user absent from precedence sorts first)", got.Bundle["model"])
@@ -80,37 +80,51 @@ func TestDeepBundlePermissionSkip(t *testing.T) {
 		{Ref: "repo:go", Kind: ProfileKindAppType, Scope: AuthRepo, Selector: ProfileSelector{AppType: "go"},
 			Bundle: map[string]any{"topology": map[string]any{"executors": float64(9)}}},
 	}
-	got := ResolveProfile(ProfileSet{Profiles: profiles, Policies: []LayeringPolicy{policy}},
+	got := mustResolveProfile(t, ProfileSet{Profiles: profiles, Policies: []LayeringPolicy{policy}},
 		ProfileContext{AppType: "go", ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}})
 	if _, ok := got.Bundle["topology"]; ok {
 		t.Fatal("repo topology write should be gated out (repo not in allowlist)")
 	}
 }
 
-func TestApplyDenyMembersNonSetField(t *testing.T) {
-	// A deny-lock on a scalar / absent field is a no-op, not a panic.
+func TestDenyLockOnNonSetFieldIsNoOp(t *testing.T) {
+	// Routed through §15: a deny-lock on a scalar / absent field is a no-op.
 	policy := LayeringPolicy{Scope: AuthOrg, Locks: []ProfileLock{
 		{Field: "model", Deny: []string{"x"}, Owner: AuthOrg},
-		{Field: "absent.path", Deny: []string{"y"}, Owner: AuthOrg},
+		{Field: "absent_path", Deny: []string{"y"}, Owner: AuthOrg},
 	}}
 	profiles := []ConfigProfile{
 		{Ref: "r:1", Kind: ProfileKindAgentCapability, Scope: AuthRepo, Bundle: map[string]any{"model": "keep"}},
 	}
-	got := ResolveProfile(ProfileSet{Profiles: profiles, Policies: []LayeringPolicy{policy}},
+	got := mustResolveProfile(t, ProfileSet{Profiles: profiles, Policies: []LayeringPolicy{policy}},
 		ProfileContext{ScopeChain: []AuthorityScope{AuthRepo, AuthOrg}})
 	if got.Bundle["model"] != "keep" {
 		t.Fatalf("scalar deny-lock should be a no-op, model = %v", got.Bundle["model"])
 	}
 }
 
-func TestLockInfosTieBreakByOwner(t *testing.T) {
-	locks := []ProfileLock{
-		{Field: "tools.allow", Deny: []string{"Edit"}, Owner: AuthTeam},
-		{Field: "tools.allow", Deny: []string{"Write"}, Owner: AuthOrg},
+func TestEffectiveLockInfosGroupsAndSorts(t *testing.T) {
+	res := authorityResult{
+		valueLocks: map[string]effectiveValueLock{
+			"model": {owner: AuthOrg, rank: 4, value: "sonnet"},
+		},
+		denyLocks: []effectiveDenyLock{
+			{field: "tools_allow", member: "Edit", owner: AuthTeam, rank: 3},
+			{field: "tools_allow", member: "Write", owner: AuthTeam, rank: 3},
+			{field: "tools_allow", member: "Bash", owner: AuthOrg, rank: 4},
+		},
 	}
-	infos := lockInfos(locks)
-	if len(infos) != 2 || infos[0].Owner != AuthOrg || infos[1].Owner != AuthTeam {
-		t.Fatalf("same-field locks should sort by owner: %+v", infos)
+	infos := effectiveLockInfos(res)
+	// 1 value-lock + 2 deny groups (team, org) = 3, sorted by field then owner.
+	if len(infos) != 3 {
+		t.Fatalf("expected 3 grouped lock infos, got %d: %+v", len(infos), infos)
+	}
+	// "model" sorts before "tools_allow"; within tools_allow, "org" < "team".
+	if infos[0].Field != "model" || infos[1].Owner != AuthOrg || infos[2].Owner != AuthTeam {
+		t.Fatalf("lock infos not grouped/sorted: %+v", infos)
+	}
+	if !reflect.DeepEqual(infos[2].Deny, []string{"Edit", "Write"}) {
+		t.Fatalf("team deny members not grouped: %+v", infos[2].Deny)
 	}
 }
 

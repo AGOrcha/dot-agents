@@ -131,6 +131,15 @@ type ConfigProfile struct {
 	// Scope is the SOURCE-derived authority scope (Decision 1). It is not
 	// authored on the unit; the loader stamps it from the source registry.
 	Scope AuthorityScope
+	// Order is the VALUE-axis merge position of the contributing layer — lower
+	// merges first (lower precedence), so a higher-Order fragment wins scalar
+	// conflicts. The snapshot bridge sets it to the layer's index in the
+	// value-precedence-ordered stack (product → user → extends → repo →
+	// project-local), so imported (extends) fragments merge BELOW repo for VALUES
+	// exactly as the legacy resolveSnapshot does — independent of the fragment's
+	// AUTHORITY scope (which governs only locks). When Order ties (e.g. engine
+	// tests that leave it 0), the value-precedence rank of Scope breaks the tie.
+	Order int
 	// Selector constrains the context this fragment applies to (Decision 5).
 	Selector ProfileSelector
 	// Bundle is the config payload the profile contributes — a kind-agnostic

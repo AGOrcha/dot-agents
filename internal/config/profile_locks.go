@@ -1,144 +1,135 @@
 package config
 
 import (
+	"encoding/json"
 	"sort"
 )
 
-// profile_locks.go implements the Phase-2 capability merge, the absolute-lock
-// application, and the same-scope conflict detection for the profile engine. It
-// reuses the §15 dot-path helpers (lookupPath, setPath, splitFieldPath) so the
-// profile engine and the layer-stack authority pass share one path vocabulary.
+// profile_locks.go implements the Phase-2 capability value-merge and the
+// same-scope conflict detection, and routes the lock/grant axis THROUGH the §15
+// authority substrate (runAuthorityPass + applyValueLocks/applyDenyLocks). It
+// does NOT re-implement value-locks, deny-locks, or deny-provenance — those are
+// §15's, so the profile engine inherits the round-2 fix where a deny subtracts a
+// member only when its highest contributing authority-rank is strictly below the
+// lock owner's (a lower deny can never erase a higher/peer allow).
 
 // mergeCapabilityBundle unions a capability fragment's additive leaf fields into
 // the accumulator, gated by the Decision-2 permission cap at FIELD-PATH
-// granularity (e.g. "tools.allow", "mcp", "model"). Additive sets (arrays) union
-// with stable dedup; scalars are last-writer. A leaf the scope may not change is
-// skipped. Lock-forbidden values are dropped from additive allow sets so a lower
-// scope can never re-grant a denied capability (Decision 4).
-func mergeCapabilityBundle(acc map[string]any, pr ConfigProfile, policy EffectivePolicy, ctx ProfileContext) {
+// granularity (e.g. "tools_allow", "mcp", "model"). Additive sets (arrays) union
+// via the §15 unionSlices primitive; scalars are last-writer. A field the scope
+// may not change is skipped. Deny enforcement is NOT done here — it is applied
+// after the merge by the §15 deny-lock pass (applyProfileAuthority), which alone
+// owns the contributor-rank provenance.
+func mergeCapabilityBundle(acc map[string]any, pr ConfigProfile, policy EffectivePolicy) {
 	for _, leaf := range flattenLeaves(pr.Bundle) {
 		if !policy.Permissions.mayChange(pr.Scope, leaf.path) {
 			continue
 		}
 		parts := splitFieldPath(leaf.path)
 		if arr, ok := leaf.value.([]any); ok {
-			add := dropLockForbidden(leaf.path, arr, policy, ctx)
 			existing, _ := lookupPath(acc, parts)
-			setPath(acc, parts, unionSlices(existing, add))
+			setPath(acc, parts, unionSlices(existing, arr))
 			continue
 		}
 		setPath(acc, parts, leaf.value)
 	}
 }
 
-// dropLockForbidden removes from an additive allow set any member a matching
-// deny-lock forbids re-granting (the org-lock-wins enforcement on the additive
-// path — remove this and H8(a) fails).
-func dropLockForbidden(path string, add []any, policy EffectivePolicy, ctx ProfileContext) []any {
-	forbidden := lockedDenyMembers(policy, ctx, path)
-	if len(forbidden) == 0 {
-		return add
+// applyProfileAuthority runs the lock/grant axis over the value-merged bundle by
+// reusing the §15 substrate end-to-end — the same orchestration applyAuthority
+// uses for the layer stack, only sourcing locks from the resolved layering policy
+// (context-matched) and contributors from the matched profiles:
+//
+//  1. runAuthorityPass folds the policy's locks into the effective value/deny
+//     set (owner-precedence, zero-authority rejection, force-allow validation);
+//  2. overlapping value-locks + any force-allow are fatal, fail-closed;
+//  3. applyValueLocks / applyDenyLocks pin/subtract over the bundle — the deny
+//     pass uses highestContributingRank so a lower-scope deny cannot erase a
+//     higher/peer allow (the round-2 invariant, ported for free).
+//
+// It mutates bundle in place and returns the effective binding locks (for
+// explain) and the lower-scope write collisions.
+func applyProfileAuthority(bundle map[string]any, matched []ConfigProfile, policy EffectivePolicy, ctx ProfileContext) ([]ResolvedLockInfo, []LockCollision, error) {
+	res := runAuthorityPass(profileLockLayers(policy, ctx))
+	viols := append([]AuthorityViolation{}, res.violations...)
+	viols = append(viols, overlappingLockPaths(res.valueLocks)...)
+	if fatal := fatalViolations(viols); len(fatal) > 0 {
+		return nil, nil, authorityError(fatal)
 	}
-	out := make([]any, 0, len(add))
-	for _, v := range add {
-		if s, ok := v.(string); ok && forbidden[s] {
-			continue
-		}
-		out = append(out, v)
-	}
-	return out
+	contrib := profileContribLayers(matched)
+	collisions := applyValueLocks(contrib, res.valueLocks, bundle)
+	collisions = append(collisions, applyDenyLocks(contrib, res.denyLocks, bundle)...)
+	return effectiveLockInfos(res), collisions, nil
 }
 
-// applyEffectiveLocks forces every effective lock into the merged bundle: a
-// value-lock pins its field, a deny-lock subtracts its members from the field
-// set (absolute — permission never beats a lock, Decision 4). A lock binds only
-// scopes ranked BELOW its owner: a member a peer/higher scope contributed
-// survives (Decision 8), so a lower-scope deny can never erase a higher allow.
-func applyEffectiveLocks(bundle map[string]any, policy EffectivePolicy, ctx ProfileContext) {
+// profileLockLayers translates the resolved policy's context-matched locks into
+// §15 authorityLayers — one per owning policy scope — so runAuthorityPass can
+// fold them with full §15 semantics. Only locks whose selector matches the
+// context contribute (lock context-scoping happens here, before §15 sees them);
+// each lock's authority is its owning policy scope.
+func profileLockLayers(policy EffectivePolicy, ctx ProfileContext) []authorityLayer {
+	byOwner := map[AuthorityScope]*PolicyLockSpec{}
+	owners := []AuthorityScope{}
 	for _, lock := range policy.Locks {
 		if !lock.Selector.matches(ctx) {
 			continue
 		}
-		if AuthorityRankOf(lock.Owner) == 0 {
-			continue // a zero-authority scope cannot bind
+		spec, ok := byOwner[lock.Owner]
+		if !ok {
+			spec = &PolicyLockSpec{ValueLocks: map[string]json.RawMessage{}}
+			byOwner[lock.Owner] = spec
+			owners = append(owners, lock.Owner)
 		}
-		parts := splitFieldPath(lock.Field)
 		if len(lock.Value) > 0 {
-			setPath(bundle, parts, decodeLockValue(lock.Value))
-			continue
-		}
-		applyDenyMembers(bundle, parts, lock)
-	}
-}
-
-// applyDenyMembers removes each denied member from the set at the lock's field
-// path.
-func applyDenyMembers(bundle map[string]any, parts []string, lock ProfileLock) {
-	cur, ok := lookupPath(bundle, parts)
-	if !ok {
-		return
-	}
-	arr, ok := cur.([]any)
-	if !ok {
-		return
-	}
-	deny := map[string]bool{}
-	for _, m := range lock.Deny {
-		deny[m] = true
-	}
-	out := make([]any, 0, len(arr))
-	for _, v := range arr {
-		if s, ok := v.(string); ok && deny[s] {
-			continue
-		}
-		out = append(out, v)
-	}
-	setPath(bundle, parts, out)
-}
-
-// lockedDenyMembers returns the set of deny-locked members for a field path in
-// this context (selector-matched, authority-bearing owner).
-func lockedDenyMembers(policy EffectivePolicy, ctx ProfileContext, field string) map[string]bool {
-	out := map[string]bool{}
-	for _, lock := range policy.Locks {
-		if lock.Field != field || len(lock.Value) > 0 {
-			continue
-		}
-		if AuthorityRankOf(lock.Owner) == 0 || !lock.Selector.matches(ctx) {
+			spec.ValueLocks[lock.Field] = lock.Value
 			continue
 		}
 		for _, m := range lock.Deny {
-			out[m] = true
+			spec.DenyLocks = append(spec.DenyLocks, lock.Field+":"+m)
 		}
+	}
+	sort.SliceStable(owners, func(i, j int) bool {
+		return AuthorityRankOf(owners[i]) < AuthorityRankOf(owners[j])
+	})
+	out := make([]authorityLayer, 0, len(owners))
+	for _, scope := range owners {
+		out = append(out, authorityLayer{id: string(scope), scope: scope, locks: *byOwner[scope]})
 	}
 	return out
 }
 
-// bindingLocks returns the effective binding locks for a context — those whose
-// selector matches and whose owner carries authority — in deterministic order
-// for explain (R6).
-func bindingLocks(policy EffectivePolicy, ctx ProfileContext) []ResolvedLockInfo {
-	var binding []ProfileLock
-	for _, lock := range policy.Locks {
-		if AuthorityRankOf(lock.Owner) == 0 || !lock.Selector.matches(ctx) {
-			continue
-		}
-		binding = append(binding, lock)
+// profileContribLayers maps the matched profiles to §15 authorityLayers (scope +
+// bundle) so applyValueLocks/applyDenyLocks read contributor provenance off the
+// real fragments — the per-member highest-contributing-rank the deny pass needs.
+func profileContribLayers(matched []ConfigProfile) []authorityLayer {
+	out := make([]authorityLayer, 0, len(matched))
+	for _, pr := range matched {
+		out = append(out, authorityLayer{id: pr.Ref, scope: pr.Scope, raw: pr.Bundle})
 	}
-	return lockInfos(binding)
+	return out
 }
 
-// lockInfos projects locks into the explain/digest shape in deterministic order.
-func lockInfos(locks []ProfileLock) []ResolvedLockInfo {
-	out := make([]ResolvedLockInfo, 0, len(locks))
-	for _, lock := range locks {
-		info := ResolvedLockInfo{Field: lock.Field, Kind: lock.kind(), Owner: lock.Owner}
-		if len(lock.Value) > 0 {
-			info.Value = decodeLockValue(lock.Value)
-		} else {
-			info.Deny = append([]string{}, lock.Deny...)
+// effectiveLockInfos projects the §15 authority-pass result into the explain/JSON
+// lock shape, grouping deny-lock members by (field, owner), in deterministic order.
+func effectiveLockInfos(res authorityResult) []ResolvedLockInfo {
+	out := make([]ResolvedLockInfo, 0, len(res.valueLocks)+len(res.denyLocks))
+	for field, vl := range res.valueLocks {
+		out = append(out, ResolvedLockInfo{Field: field, Kind: collisionValueLock, Owner: vl.owner, Value: vl.value})
+	}
+	denyByKey := map[string]*ResolvedLockInfo{}
+	var denyOrder []string
+	for _, dl := range res.denyLocks {
+		key := dl.field + "\x00" + string(dl.owner)
+		info, ok := denyByKey[key]
+		if !ok {
+			info = &ResolvedLockInfo{Field: dl.field, Kind: collisionDenyLock, Owner: dl.owner}
+			denyByKey[key] = info
+			denyOrder = append(denyOrder, key)
 		}
-		out = append(out, info)
+		info.Deny = append(info.Deny, dl.member)
+	}
+	for _, key := range denyOrder {
+		out = append(out, *denyByKey[key])
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Field != out[j].Field {

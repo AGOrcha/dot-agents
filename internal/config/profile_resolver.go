@@ -58,8 +58,12 @@ type ResolvedProfile struct {
 	Bundle map[string]any `json:"bundle"`
 	// Contributing is the sorted set of absolute refs that contributed.
 	Contributing []string `json:"contributing_refs"`
-	// Locks is the effective binding lock set (owner-tagged).
+	// Locks is the effective binding lock set (owner-tagged), as resolved by the
+	// §15 authority pass.
 	Locks []ResolvedLockInfo `json:"locks"`
+	// Collisions is the §15 lock collisions: each lower-scope write a value-lock or
+	// deny-lock rejected, with attempted/winning/owner provenance.
+	Collisions []LockCollision `json:"collisions,omitempty"`
 	// Permissions is the effective permission map (scope→fields), nil-omitted.
 	Permissions map[AuthorityScope][]string `json:"permissions,omitempty"`
 	// Conflicts records same-scope value conflicts: both contributors are shown,
@@ -201,9 +205,14 @@ func hasWildcard(fields []string) bool {
 // ---------------------------------------------------------------------------
 
 // ResolveProfile runs both phases for a context. Input order of profiles and
-// policies does NOT affect the output (H1): policies sort by authority and
-// profiles sort by precedence then specificity then ref before merging.
-func ResolveProfile(set ProfileSet, ctx ProfileContext) ResolvedProfile {
+// policies does NOT affect the output (H1). It is THIN over the §15 substrate:
+// it SELECTS the matching fragments and orders them on the VALUE axis, then hands
+// the value-merged bundle to the §15 authority pass (runAuthorityPass +
+// applyValueLocks/applyDenyLocks) for the lock/grant axis — it does not
+// re-implement locks, grants, or deny-provenance. A fatal authority violation
+// (force-allow, overlapping lock, self-blessing grant) is returned as an error,
+// fail-closed, exactly as the §15 layer resolver does.
+func ResolveProfile(set ProfileSet, ctx ProfileContext) (ResolvedProfile, error) {
 	policy := resolveEffectivePolicy(set, ctx)
 	matched := matchingProfiles(set, ctx)
 	orderProfiles(matched, policy)
@@ -212,22 +221,34 @@ func ResolveProfile(set ProfileSet, ctx ProfileContext) ResolvedProfile {
 	refs := make([]string, 0, len(matched))
 	conflicts := detectConflicts(matched, policy)
 	for _, pr := range matched {
-		mergeProfileInto(bundle, pr, policy, ctx)
+		mergeProfileInto(bundle, pr, policy)
 		refs = append(refs, pr.Ref)
 	}
-	applyEffectiveLocks(bundle, policy, ctx)
+
+	// Authority/lock axis routed THROUGH §15 (FIX 2/3): the policy's
+	// context-matched locks fold through runAuthorityPass (force-allow validation,
+	// owner-precedence, zero-authority rejection) and apply over the merged bundle
+	// via the §15 applyValueLocks/applyDenyLocks — which subtract a denied member
+	// ONLY when its highest contributing authority-rank is strictly below the lock
+	// owner's (highestContributingRank), so a lower deny can never erase a
+	// higher/peer allow.
+	locks, collisions, err := applyProfileAuthority(bundle, matched, policy, ctx)
+	if err != nil {
+		return ResolvedProfile{}, err
+	}
 
 	sort.Strings(refs)
 	return ResolvedProfile{
 		Bundle:       bundle,
 		Contributing: refs,
-		Locks:        bindingLocks(policy, ctx),
+		Locks:        locks,
+		Collisions:   collisions,
 		Permissions:  permissionMap(policy.Permissions),
 		Conflicts:    conflicts,
 		PolicyMode:   effectiveMode(policy),
 		ReplacedBy:   policy.Replaced,
 		Digest:       digestProfile(bundle, refs, policy),
-	}
+	}, nil
 }
 
 func effectiveMode(policy EffectivePolicy) PolicyMode {
@@ -252,12 +273,20 @@ func matchingProfiles(set ProfileSet, ctx ProfileContext) []ConfigProfile {
 	return out
 }
 
-// orderProfiles sorts matched profiles low→high precedence so later entries win
-// scalar conflicts (local-wins tail). Ties break by selector specificity (a more
-// specific fragment wins) then by absolute ref (Decision 6 determinism).
+// orderProfiles sorts matched profiles low→high on the VALUE axis so later
+// entries win scalar conflicts (local-wins tail). The primary key is the
+// contributing layer's value-merge Order (so imported fragments merge below repo
+// exactly as legacy resolveSnapshot does); ties fall back to the value-precedence
+// rank of Scope (or the policy's explicit precedence override), then selector
+// specificity (a more specific fragment wins), then absolute ref (Decision 6
+// determinism). The AUTHORITY axis is NEVER consulted here — it governs only the
+// lock/grant pass.
 func orderProfiles(profiles []ConfigProfile, policy EffectivePolicy) {
 	rank := precedenceRanker(policy)
 	sort.SliceStable(profiles, func(i, j int) bool {
+		if profiles[i].Order != profiles[j].Order {
+			return profiles[i].Order < profiles[j].Order
+		}
 		ri, rj := rank(profiles[i].Scope), rank(profiles[j].Scope)
 		if ri != rj {
 			return ri < rj
@@ -270,21 +299,29 @@ func orderProfiles(profiles []ConfigProfile, policy EffectivePolicy) {
 	})
 }
 
-// precedenceRanker returns a scope→rank function from the policy precedence,
-// falling back to the §15 AUTHORITY-RANK when the policy is silent.
+// precedenceRanker returns a scope→rank function for the VALUE axis. It keys off
+// the §15 VALUE-PRECEDENCE order (CanonicalScopeOrdering().ValuePrecedence:
+// product → user → org → team → repo → project-local → runtime), NOT the
+// AUTHORITY-RANK order — these are the two distinct axes §15 deliberately splits.
+// Using authority-rank here was the soundness bug: it placed an imported org/team
+// source ABOVE repo for VALUES, but the legacy resolveSnapshot merges imported
+// (extends) layers BELOW repo-local. Values follow value-precedence (repo wins
+// over a granted org's values); only the lock/grant pass uses authority-rank. A
+// policy may override the value order with an explicit precedence list.
 func precedenceRanker(policy EffectivePolicy) func(AuthorityScope) int {
-	if len(policy.Precedence) == 0 {
-		return AuthorityRankOf
+	order := policy.Precedence
+	if len(order) == 0 {
+		order = CanonicalScopeOrdering().ValuePrecedence
 	}
 	idx := map[AuthorityScope]int{}
-	for i, s := range policy.Precedence {
+	for i, s := range order {
 		idx[s] = i
 	}
 	return func(s AuthorityScope) int {
 		if r, ok := idx[s]; ok {
 			return r
 		}
-		return -1 // scopes absent from precedence sort first (lowest)
+		return -1 // scopes absent from the value order sort first (lowest)
 	}
 }
 
@@ -294,9 +331,9 @@ func precedenceRanker(policy EffectivePolicy) func(AuthorityScope) int {
 // merge for zero behavioral diff); agent-capability unions additive sets and
 // subtracts deny. A field the profile's scope may not change (Decision 2) is
 // skipped; a value a lock forbids re-granting (Decision 4) is dropped.
-func mergeProfileInto(acc map[string]any, pr ConfigProfile, policy EffectivePolicy, ctx ProfileContext) {
+func mergeProfileInto(acc map[string]any, pr ConfigProfile, policy EffectivePolicy) {
 	if pr.Kind == ProfileKindAgentCapability {
-		mergeCapabilityBundle(acc, pr, policy, ctx)
+		mergeCapabilityBundle(acc, pr, policy)
 		return
 	}
 	mergeDeepBundle(acc, pr, policy)
@@ -350,7 +387,7 @@ func policyVersion(policy EffectivePolicy) string {
 		Replaced    AuthorityScope              `json:"replaced"`
 	}{
 		Precedence:  policy.Precedence,
-		Locks:       lockInfos(policy.Locks),
+		Locks:       policyLockDigestForm(policy.Locks),
 		Permissions: permissionMap(policy.Permissions),
 		Replaced:    policy.Replaced,
 	})
@@ -359,6 +396,23 @@ func policyVersion(policy EffectivePolicy) string {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// policyLockDigestForm projects the policy's authored locks into a stable,
+// owner-tagged shape for the policy-version hash (Decision 7) — so the digest
+// moves when a lock's field/owner/deny/value/selector changes.
+func policyLockDigestForm(locks []ProfileLock) []ResolvedLockInfo {
+	out := make([]ResolvedLockInfo, 0, len(locks))
+	for _, lock := range locks {
+		info := ResolvedLockInfo{Field: lock.Field, Kind: lock.kind(), Owner: lock.Owner}
+		if len(lock.Value) > 0 {
+			info.Value = decodeLockValue(lock.Value)
+		} else {
+			info.Deny = append([]string{}, lock.Deny...)
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 // permissionMap projects the effective permission cap into a plain, sorted-key
