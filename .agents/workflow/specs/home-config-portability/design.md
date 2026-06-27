@@ -4,7 +4,7 @@
 - **status:** DRAFT (revision pass — re-gates after; pending owner ratification of the open forks in §5)
 - **author:** Nikash Prakash
 - **created:** 2026-06-26
-- **revised:** 2026-06-26 (GATE-1 two-leg audit fixes — portable project identity, hybrid default, agents-split + cache-boundary defects; then a git-grounding pass — projection is the existing, never-regressed multi-harness fan-out and is NOT a portability blocker, D-G references `docs/PLATFORM_DIRS_DOCS.md`, native-path descoped to multi-harness-extensibility, NEW-FORK-B git-auth resolved)
+- **revised:** 2026-06-26 (GATE-1 two-leg audit fixes — portable project identity, hybrid default, agents-split + cache-boundary defects; then a git-grounding pass — projection is the existing, working multi-harness fan-out reused as-is and is NOT a portability redesign blocker, D-G references `docs/PLATFORM_DIRS_DOCS.md`, native-path descoped to multi-harness-extensibility, NEW-FORK-B git-auth resolved)
 - **owns:** the *what & why* of making the dot-agents user scope (`~/.agents`) portable across machines. File paths, function names, task ordering, and migration code belong to a later plan, not here.
 
 ---
@@ -232,13 +232,19 @@ There is a bounded immediate fix that unblocks device-to-device **before** the f
 - **Phase 0 (MVP seam) — three changes that MUST ship together:** (i) ship the **portable
   project identity registry** (synced surface: id + portable key, no path); (ii) stop syncing
   the machine-local **binding table** *and* the `cache/` dirs (fix the `gitignore` /
-  classification divergence in defects 2 and 5); (iii) move the portable preferences (D-A's
-  portable rows) into the user-local layer (D-B). **(i) is a hard precondition for (ii):**
-  stopping the path sync *without* the identity registry regresses machine B from "knows the
-  project names" to "No managed projects" (defect 3 / BLOCKER 1). After phase 0 done right, a
-  synced home carries no absolute paths and no caches, machine B still sees the project list,
-  and `refresh` binds each project's identity to a local path (or reports it unbound) instead
-  of all-skipping on a foreign machine's paths.
+  classification divergence in defects 2 and 5); (iii) move the portable preferences into the
+  user-local layer (D-B) — **specifically `Defaults`, `Features`, and declared user sources /
+  layering policy ONLY**. **(i) is a hard precondition for (ii):** stopping the path sync
+  *without* the identity registry regresses machine B from "knows the project names" to "No
+  managed projects" (defect 3 / BLOCKER 1). After phase 0 done right, a synced home carries no
+  absolute paths and no caches, machine B still sees the project list, and `refresh` binds each
+  project's identity to a local path (or reports it unbound) instead of all-skipping on a
+  foreign machine's paths.
+- **Phase 0 explicitly EXCLUDES the `Agents.<id>` manage-intent split.** That split needs a
+  schema addition and a default-enable behavior change (R11 / NEW-FORK-A), which is **not**
+  required for the device-to-device fix: in phase 0 the agents table stays machine-local and
+  re-detected fresh (D-E), exactly as today. So **NEW-FORK-A does not block phase 0** — it is a
+  phase-1+ concern, and phase 0 ships without it.
 - **Phase 1+:** the full `init --from` bootstrap (D-D) including credential bootstrap
   (NEW-FORK-B), the global home-source default (D-C), and the agents manage-intent split
   (R11 / NEW-FORK-A).
@@ -254,14 +260,14 @@ realization as a binary ("user/project free, team/org projected") and then re-de
 per-asset × per-harness projection matrix inline. Both were wrong turns. Two grounded facts
 settle it:
 
-1. **The multi-harness projection already works and was never regressed.** The resource model
-   was introduced multi-harness across all five platforms at once (commit `2c0733db`); the
-   later refactor **relocated** per-platform skill wiring into the shared
-   `SharedTargetIntents` fan-out (`createSkillsLinks` became per-platform no-ops feeding the
-   shared path) — coverage moved, it was not dropped. Each platform implements
-   `SharedTargetIntents` today (`internal/platform/{claude,codex,cursor,copilot,opencode}.go`),
-   and the fan-out projects across all five. So there is **no "restore multi-harness resource
-   planning" work** in this spec — that is a misdiagnosis.
+1. **The multi-harness projection is the existing, working machinery.** The resource model was
+   **born multi-harness** — introduced across all five platforms at once (commit `2c0733db`) —
+   and the later refactor **relocated** per-platform skill wiring into the shared
+   `SharedTargetIntents` fan-out (`createSkillsLinks` became per-platform delegations feeding the
+   shared path). Each platform implements `SharedTargetIntents` today
+   (`internal/platform/{claude,codex,cursor,copilot,opencode}.go`) and the fan-out projects
+   across all five. So this spec **reuses** that projection — there is no multi-harness
+   resource-planning work to build or re-do here.
 
 2. **The authoritative per-harness × per-asset × scope matrix already exists as a maintained
    doc.** `docs/PLATFORM_DIRS_DOCS.md` is the source of truth for where each of the five
@@ -273,9 +279,10 @@ settle it:
 working projection — it does not redesign it. Standing up machine B is just: reconstruct the
 machine-local split (binding table + caches), re-hydrate the identity registry, then **re-run
 the existing projection** (`refresh`) so the same multi-harness materialization happens on B as
-on A. The projection is not on the portability critical path; the portability-specific work is
-narrow: the **machine-local split**, the **identity registry**, **`init --from`**, and
-**git-auth** (NEW-FORK-B).
+on A. Re-running the projection **is** a required reconstruction step (R10/DC7 make it a done
+criterion) — but projection is **not a portability *redesign* blocker**: it is reused as-is. The
+portability-specific *new* work is narrow: the **machine-local split**, the **identity
+registry**, **`init --from`**, and **git-auth** (NEW-FORK-B).
 
 **Native-path projection is explicitly NOT a portability concern.** Where a harness already
 reads the compat path (e.g. `.agents/skills/`), additional native-path projection is redundant —
@@ -341,6 +348,11 @@ Behavioral, not implementation. Each must be verifiable.
   binding table. The registry is what makes machine B aware of *which* projects to rebind.
 - **R5.** The portable-identity → local-path binding (the binding table) is a machine-local
   fact. Establishing or repairing a binding on machine B must not mutate any synced surface.
+- **R12.** `repo_id` may be used as the portable key (FORK-1 hybrid) **only** once it is
+  trustworthy. Since `DeriveRepoIDFromGit` reads only the first `origin` URL with no
+  ambiguity detection (`internal/config/agentsrc.go:47`; `internal/gitremote/gitremote.go`), the
+  plan must add **either** ambiguous-remote detection **or** an explicit operator `repo_id`
+  override before trusting it; the logical-id table is the fallback for ambiguous/non-git cases.
 
 ### Sync boundary
 
@@ -392,9 +404,11 @@ Behavioral, not implementation. Each must be verifiable.
 - **R9.** Splitting the `config.json` struct (D-A) is a schema change. Because `config.Load`
   (`internal/config/config.go:40-66`) has **no migrator** today (unlike `.agentsrc.json`'s
   `da config migrate`), the plan must define a migration + backfill: existing absolute-path
-  rows must be re-expressed as (portable identity, machine-local binding) on first run, and a
-  version bump must gate the new shape. Exact migrator code is a plan detail; the *requirement*
-  is that an existing single-machine user upgrades in place without losing their project table.
+  rows must be re-expressed as (portable identity, machine-local binding), and a version bump
+  must gate the new shape. The migration must **not** make `config.Load` a writer — `Load` stays
+  a pure read/decode (FORK-5); persistence happens in a mutating command. Exact migrator code is
+  a plan detail; the *requirement* is that an existing single-machine user upgrades in place
+  without losing their project table.
 
 ---
 
@@ -417,11 +431,15 @@ default-enable change).
 What replaces absolute `Project.Path` as the **portable key** so a project re-binds on machine B?
 
 - **(a) `repo_id` from git remote** — reuse `DeriveRepoIDFromGit`
-  (`internal/config/agentsrc.go:47`; the canonical id collapses ambiguous/multi-remote cases to
-  `""`, `agentsrc.go:24-25`). *Risk:* ambiguous under multi-remote / fork topologies — e.g. the
-  real AGOrcha case where a project has both an `origin` (stale `NikashPrakash` fork) and an
-  `org` (`AGOrcha`) remote, so "the remote" is not well-defined; non-git / monorepo projects
-  have no usable repo_id.
+  (`internal/config/agentsrc.go:47`). *Risk — and a correction to an earlier draft:*
+  `DeriveRepoIDFromGit` reads **only the first `origin` URL** (`gitRemoteOriginURL` →
+  `gitremote.CanonicalRepoID`, `internal/gitremote/gitremote.go`) and canonicalizes it; it
+  returns `""` **only** on read error / empty remote, **not** on multi-remote ambiguity. There is
+  **no ambiguity detection** today (and no test coverage for it). So under multi-remote / fork
+  topologies — e.g. the real AGOrcha case where a project has both an `origin` (stale
+  `NikashPrakash` fork) and an `org` (`AGOrcha`) remote — `repo_id` silently resolves to whatever
+  `origin` happens to be, which may be the *wrong* identity rather than a safe blank. Non-git /
+  monorepo projects have no usable repo_id.
 - **(b) Per-machine logical-id table** — identity is a logical name; each machine keeps a
   machine-local `id → path` binding, populated at `init`/`add` time or **lazily on first `cd`
   into the project**.
@@ -433,10 +451,18 @@ no `chpwd`, no `PROMPT_COMMAND`, no `direnv` integration — so first-touch reso
 actually available today and (b) cannot deliver its headline ergonomics. Meanwhile `repo_id`
 **already exists**, auto-derived from the git origin (`DeriveRepoIDFromGit`,
 `internal/config/agentsrc.go:47`; field `RepoID`, `agentsrc.go:186`). So the default is hybrid:
-use the explicit/unambiguous `repo_id` as the portable key, and fall back to a logical-id table
-for **non-git / monorepo / ambiguous-remote** projects (exactly the AGOrcha origin-vs-org case,
-where `DeriveRepoIDFromGit` already returns `""`). The portable key lives in the identity
-registry (R4a); the local binding stays machine-local (R5/R7).
+use `repo_id` as the portable key **where it is trustworthy**, and fall back to a logical-id
+table for **non-git / monorepo / ambiguous-remote** projects (e.g. the AGOrcha origin-vs-org
+case).
+
+**Plan requirement (R12) — `repo_id` is not yet safe to trust blindly.** Because there is no
+ambiguity detection today (the corrected point above), the plan must add **either** explicit
+ambiguous-remote detection (multiple remotes / origin-vs-canonical mismatch → treat as
+ambiguous) **or** require an explicit operator-set `repo_id` override, **before** `repo_id` is
+trusted as the portable key. Until that detection (or override) exists, the **logical-id table
+is the safe fallback** for any project whose single-`origin` derivation might be wrong. The
+portable key lives in the identity registry (R4a); the local binding stays machine-local
+(R5/R7).
 
 **Deliverable note:** if the lazy-`cd` ergonomics are still wanted, **shell integration must be
 an EXPLICIT deliverable** of this work — it does not exist and cannot be assumed. Absent that,
@@ -488,13 +514,22 @@ a forward-compatibility constraint, not a phase-0 deliverable.
 ### FORK-5 — `config.json` schema migration mechanics
 
 `config.Load` has no migrator (R9). The fork is *how* to introduce one: a `config migrate`
-sibling to `da config migrate`, an in-`Load` lazy upgrade, or an explicit
-upgrade step in `refresh`/`init`.
+sibling to `da config migrate`, an in-`Load` lazy upgrade, or an explicit upgrade step in
+`refresh`/`init`.
 
-**Recommended default: lazy in-`Load` upgrade gated by a version bump**, with the backfill
-(re-derive identity for existing absolute-path rows per the ratified FORK-1 mechanism) run
-once and persisted. This makes existing single-machine users upgrade transparently without a
-separate command. The exact placement is a plan detail; the fork is the *mechanism choice*.
+**Recommended default: keep `Load` PURE — decode + an `UpgradeNeeded` signal, persist on the
+next mutating command.** `config.Load` is today a pure read/decode (`internal/config/config.go:40`
+— `ReadFile` + `json.Unmarshal`, no writes); it must stay that way. So on load, detect the old
+shape from the version field and surface an `UpgradeNeeded` flag (decode old rows into the new
+in-memory shape, re-deriving identity per the ratified FORK-1 mechanism), but **write nothing**.
+The backfill is persisted by the next command that already mutates `config.json` (`add`,
+`refresh`, `init --from`), or by an explicit one-shot `config migrate`. Existing single-machine
+users still upgrade transparently, without turning a read into a write.
+
+**Explicitly rejected:** a **side-effecting `Load`** (lazy in-`Load` upgrade that writes back) —
+it would convert a pure read into a writer, breaking every read-only caller's expectations and
+risking writes from contexts that should never mutate the home (CI checks, dry-runs, concurrent
+reads). The fork remains the *mechanism choice* among the non-side-effecting options.
 
 ### NEW-FORK-A — Agents manage-intent split mechanism (owner ruling)
 
@@ -637,10 +672,11 @@ required / not configured" message rather than silently skip or embed a secret.
   × scope matrix (Claude Code, Cursor, Codex, OpenCode, GitHub Copilot). This spec **references**
   it as the source of truth for where each harness reads rules/skills/agents/MCP/hooks; D-G/R10
   do not re-derive it.
-- **multi-harness-extensibility** (planned sibling spec, not yet a repo artifact) — owns the
-  *projection-engine* questions that are **out of scope here**: native-path projection
-  redundancy, skill-frontmatter translation, and data-driven harness descriptors / pluggability.
-  This spec deliberately descopes those and cross-refs them; portability builds on the existing
+- **multi-harness-extensibility** (`.agents/workflow/specs/multi-harness-extensibility/design.md`)
+  — the sibling spec that owns the *projection-engine* questions **out of scope here**:
+  native-path projection redundancy, skill-frontmatter translation, and data-driven harness
+  descriptors / pluggability. This spec deliberately descopes those and cross-refs them;
+  portability builds on the existing
   projection rather than extending it.
 - **da-project-specifics-source** (`.agents/workflow/specs/da-project-specifics-source/`) —
   the per-project source mechanism whose manual per-project source-add D-C replaces with a
