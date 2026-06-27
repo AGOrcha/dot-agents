@@ -811,6 +811,15 @@ SHAs across repos, or does each repo own its own lockfile exclusively? | Human A
 
 **Status:** canonical (folded in from the former `config-v2-coherence` spec, which graduated
 from proposals `config-v2-coherence-scopes-sources-lock.md` + `section-7a-units-lock-wiring.md`).
+**Coherence amendments folded (2026-06-27):** the three owner-ratified amendments in
+`.agents/proposals/config-distribution-model-coherence-amendments.md` (rev 2, all 8 forks
+OWNER-RATIFIED 2026-06-27; merged to master via PR #188) are now folded into this section:
+**A1** — D1 rewritten as **D1a** (the scope axis splits into AUTHORITY-RANK vs VALUE-PRECEDENCE,
+plus the source-authority registry); **A2** — D13 split (portable project IDENTITY becomes the
+first-class `kind: project-set` unit; machine-local BINDING stays non-scoped); **A3** — D3 gains a
+**conditional** fourth resolver behavior `kind: descriptor`. These amendments are substrate
+(contract) changes; the resolver-code work they obligate is itemized in **§15.9** and shipped by a
+separate follow-on PR.
 **Design philosophy:** agent DX is the primary operator; humans are a secondary, cross-cutting
 audience.
 
@@ -862,17 +871,92 @@ answers incoherently:
 
 Each decision was settled in design review; the rejected alternative is noted.
 
-#### D1 — Three orthogonal axes, not one overloaded directory
-A resolvable unit is described by three independent axes:
-- **Scope** (precedence; *merges* into effective policy): product → user-local → org → team →
-  repo-imported → repo-local (committed) → **project-local overlay (uncommitted)** → runtime.
-  Answers "who gets the last word." (Extends `org-config-resolution` §4 with one new scope — see D9.)
-- **Source** (origin/transport; *resolves + versions* a unit): `git` / `http` / `local` / `oci`.
-  Answers "where a unit comes from and how it is versioned." Orthogonal to scope.
-- **Kind** (behavior): `layer` (mergeable policy) vs `artifact` (installable executable).
+#### D1 — Three orthogonal axes, not one overloaded directory  *(amended → D1a)*
 
-*Rejected:* keeping scope/source/kind fused in one directory with special-cased paths — the root
-cause of the half-old/half-new feeling.
+> **Superseded by D1a (coherence fold, 2026-06-27, Amendment 1).** The original D1 below is
+> retained for history. It named the scope axis as a **single** ordering and said it "*merges*
+> into effective **policy**" — silently conflating two orthogonal things (who may *lock/cap* vs
+> whose *value* wins) under one chain. D1a splits them into two explicitly-named orderings and adds
+> the source-authority registry. The original value-precedence chain is preserved **verbatim** as
+> D1a's VALUE-PRECEDENCE ordering, so no shipped value-merge behavior changes.
+
+> A resolvable unit is described by three independent axes:
+> - **Scope** (precedence; *merges* into effective policy): product → user-local → org → team →
+>   repo-imported → repo-local (committed) → **project-local overlay (uncommitted)** → runtime.
+>   Answers "who gets the last word." (Extends `org-config-resolution` §4 with one new scope — see D9.)
+> - **Source** (origin/transport; *resolves + versions* a unit): `git` / `http` / `local` / `oci`.
+>   Answers "where a unit comes from and how it is versioned." Orthogonal to scope.
+> - **Kind** (behavior): `layer` (mergeable policy) vs `artifact` (installable executable).
+>
+> *Rejected:* keeping scope/source/kind fused in one directory with special-cased paths — the root
+> cause of the half-old/half-new feeling.
+
+#### D1a — Scope carries TWO orderings (authority-rank ≠ value-precedence); plus source and kind
+A resolvable unit is still described by three axes (**scope**, **source**, **kind**), but the
+**scope** axis is not one ordering — it carries **two distinct, co-existing orderings** that the
+original D1 collapsed into one. They do not contradict; they govern different questions and run in
+two resolver phases (a policy-authority pass, then a value-merge pass).
+
+- **AUTHORITY-RANK — who may emit locks / value-locks / override-caps.** A **single total order**,
+  **`org > team > repo > user`**, **deny-overrides** (any sufficiently-authoritative `deny` wins;
+  there is **no force-allow** — a lower scope can never punch a capability *through* a higher deny),
+  **higher binds lower** (a higher scope's locks/caps are absolute over every lower one). The
+  **user is the LOWEST authority rung** — on the chain, beneath repo — and may emit locks/caps
+  **only at its own scope**; **every higher scope, including repo, overrides it** (this is why a
+  personal/user scope can never constrain a shared repo). **repo MAY set its own local guardrails**
+  (lock down *its own* surface) but ranks **below team**, so a team lock still binds the repo.
+  *Grounding:* AWS SCP/IAM, VS Code admin policy, and AD **Enforced** GPO all rank an individual
+  beneath the shared resource — no security-grade system lets a user out-rank a shared resource.
+- **VALUE-PRECEDENCE — whose VALUE wins within the locks the authority pass leaves surviving.**
+  **`user / repo / runtime`**, **most-local-wins** — the **user still wins on value** for its own
+  preferences. This is the **verbatim preservation** of the original D1 chain (product floor →
+  user-local → org → team → repo-imported → repo-local → project-local overlay → runtime) as the
+  value-merge ordering. It applies **only** to fields the authority pass left **unlocked and
+  within-cap**; a locked field never reaches this pass.
+- **LOCKED-FIELD COLLISION.** When a lower scope sets a value a higher scope holds **value-locked**,
+  the **lock wins** and the lower write is **rejected/ignored** — and the rejection is
+  provenance-visible: `da config explain` reports the **attempted value**, the **winning (locked)
+  value**, and the **owning scope** (e.g. "repo-local `model=Y` rejected by org value-lock
+  `model=X` ⇒ effective `model=X`"). Cross-authority subtraction is legitimate **only** via a
+  higher-scope deny-lock; a lower deny can never erase a higher allow.
+- **SPECIAL scopes.** `product` = the **floor** (zero authority, ships defaults, everything
+  overrides it). `public` = **VALUE-ONLY** (may supply values at the lowest precedence; **any
+  authority/lock claim it ships is IGNORED unless co-signed by a trusted root** — the
+  supply-chain-signing guard, so a foreign/public source can never bind via an unsigned lock).
+  `runtime` and the project-local overlay = **value-only, zero authority** (highest value-precedence,
+  set values but never locks).
+
+**SOURCE-AUTHORITY REGISTRY (net-new substrate concept).** A scope's authority is **never
+self-declared** by a unit — it derives from **`ref.source → source-authority registry → scope`**.
+The registry carries an optional **`authority_grants`** block: a per-source allowlist of the form
+*"source `<S>` may carry the authority of scope `<O>`."* Two invariants gate it:
+- **(a) Write-authority.** An `authority_grants` entry **MAY be written only by a strictly-higher
+  authority scope.** An org-scope registry may bless a team source to carry org authority; a team
+  source may not bless itself or a peer to carry org authority.
+- **(b) No self-blessing.** A lower **repo / user / public** layer **CANNOT** grant authority to
+  itself or to a source it controls — self-elevation is a **resolve-time rejection**, not a silent
+  no-op. This closes the public-source injection vector: a foreign/public source shipping its own
+  `authority_grants` claiming org authority is **inert**, because the grant is honored only when
+  written by a strictly-higher scope's registry.
+
+**Compatibility (explicit — shipped behavior is unchanged).** (i) The existing value-precedence
+chain is preserved **verbatim** as the VALUE-PRECEDENCE ordering; no shipped value-merge behavior
+changes. (ii) Any downstream reference to "the D1 scope chain" resolves, by default, to the
+VALUE-PRECEDENCE ordering (back-compat). (iii) AUTHORITY-RANK and the source-authority registry are
+**net-new**; nothing that exists today silently re-binds. This is the §15-side home for
+`unified-config-profiles` Q1 (the one canonical scope ordering + its authority ranks) and Q6 (the
+source-authority-registry grant shape); downstream specs **reference** D1a rather than redefining
+either ordering.
+
+> **Resolver-code obligation (NOT yet implemented — follow-on PR; see §15.9).** D1a obligates a
+> **policy-authority pass** (Phase 1: apply the AUTHORITY-RANK total order, evaluate locks /
+> value-locks / override-caps / cross-authority deny-overrides) ahead of the existing value-merge
+> (Phase 2), and a **registry write-guard** enforcing invariants (a)+(b) at resolve time. The
+> current resolver implements value-precedence only.
+
+*Rejected:* keeping scope/source/kind fused in one directory (the original D1 root cause); and
+keeping the scope axis as a **single** ordering — that conflation is exactly what blocked a single
+canonical scope ordering downstream.
 
 #### D2 — Versioning and sourcing are unified via `source:path@version`
 Everything resolvable is addressed by the reference syntax in §5: `source-id : layer-or-artifact-path
@@ -890,6 +974,35 @@ that drives exactly two behaviors:
   protected-field rules apply; it may *declare* further units.
 - **artifact**: a bundle *installed discretely* into the asset store and invoked; trust/signing
   rules apply; it does not merge.
+
+**Amended (2026-06-27, Amendment 3) — a CONDITIONAL fourth behavior `kind: descriptor`.** Beyond
+mergeable `layer` and installable `artifact`, the substrate reserves a **fourth resolver behavior**
+for **descriptors** — declarative, **non-merging, non-installing** projection data (consumed by the
+projector to drive per-harness output). Its provenance is **conditional**:
+- **Default (until the F4 probe completes):** descriptors stay **internal / probe artifacts** —
+  Go-internal declarative data, **NOT** a §15 unit (no `kind`, no lock entry, not a member of
+  `inputs_digest`). This holds through `multi-harness-extensibility`'s F4 hand-add-one-harness probe
+  (the DC0 experiment that ratifies/refutes the descriptor schema). This amendment supplies only the
+  substrate *position*; it does **not** unblock the multi-harness descriptor schema — the F4 probe
+  still gates that independently.
+- **Only if a descriptor becomes source-shipped** (`multi-harness` §8 "a future external source could
+  ship descriptors") does it become a **full §15 unit** — at which point `kind: descriptor` must
+  define, before it ships: a **media type** distinct from config-layer/artifact-bundle (mirroring
+  D15's media-type guard, so a descriptor blob is never mis-resolved); its **resolver order** (where
+  the fourth behavior sits relative to layer-merge and artifact-install); **validation** rules; a
+  **lock entry** shape; and its **local `inputs_digest`** participation (in `inputs_digest` when
+  authored locally, only in `units` when sourced). Until that source-shipping need is real, none of
+  that substrate surface is added.
+
+The **irreducible Go renderer / procedural core is NOT a unit in any case** — it is code shipped
+with the binary (`CreateLinks`/`RemoveLinks`, source-priority selection, user-home fanout,
+stale-file pruning, semantic hook rendering), per `multi-harness` D2. The descriptor owns the
+declarative projection; the named, audited Go core owns the rest.
+
+> **Resolver-code obligation (CONDITIONAL — only fires on source-shipping; see §15.9).** No resolver
+> change is owed today: the default keeps descriptors Go-internal. *If* the source-shipping condition
+> fires, the follow-on must add the fourth resolver behavior (media type, resolver order, validation,
+> lock entry, `inputs_digest` participation).
 
 Consequences: one lock `units` section; one source model (any source serves any kind); one CRUD
 surface (a `--scope`/`--source` flag, not parallel command trees). The §6 two-pass resolution
@@ -974,11 +1087,39 @@ governs writes. This replaces both a `sync`→`config sync` rename and the packa
 - `config sync` — explicit upstream config re-check (≈ `uv --upgrade`).
 - `sync` (git) — git-manage a source repo; `--source <id>` selects which (default `local`).
 
-#### D13 — Scoped content routes to its scope's source
+#### D13 — Scoped content routes to its scope's source  *(amended: registry split, 2026-06-27)*
 `proposals/`, `context/`, lessons, and asset units are **scoped** (user/repo/team/org) and route to
 the source backing that scope (generalizing proposal-routing's global-vs-project split to all four
-scopes). Only the fetch `cache/` and the managed-project registry are genuinely non-scoped local
-operational state — never a scope, never a source, never projected.
+scopes). Only the fetch `cache/` and the **machine-local binding table** are genuinely non-scoped
+local operational state — never a scope, never a source, never projected.
+
+**Amended (2026-06-27, Amendment 2) — the managed-project registry is NOT wholesale
+machine-local; it splits into two surfaces.** The original D13 classified the *entire* registry as
+non-scoped machine-local state. That is too coarse: portable project identity must travel between
+machines while machine paths must not. The split:
+- **(a) portable project IDENTITY** (`id` + a portable key, **no path**) is **synced** config,
+  promoted to a **first-class `kind: project-set` unit** (a.k.a. identity-registry): scope- and
+  manifest-referenceable, layered under the **same selector-merge law** as every other unit. It
+  rides the user-local layer like any other portable config; it is **not** non-scoped operational
+  state. A single neutral `project-set` unit is the **one owner** that **both** `home-config`
+  portability (referencing it at personal scope) **and** a team manifest (referencing it at team
+  scope) point at — neither owns the other's surface, so standalone portability does not depend on a
+  manifest and team distribution does not reach down into a personal spec.
+- **(b) machine-local BINDING** (`id → absolute-path`, plus `added` bookkeeping) **stays exactly as
+  D13 said**: machine-local, **never synced, never a scope, never projected**. Caches stay
+  machine-local too; credentials remain always-machine-local.
+
+D13's "never a scope" clause now narrows from "the registry" to "the **binding table** (id→path) +
+`added` + caches." **Two distinct registries — do not conflate.** The **identity registry** here
+(which projects exist + their portable keys) is a **different registry** from the
+**source-authority registry** in D1a (which source may carry which scope's authority). They serve
+different purposes and are named distinctly.
+
+> **Resolver-code obligation (NOT yet implemented — follow-on PR; see §15.9).** Amendment 2
+> obligates a new `kind: project-set` resolver behavior (a synced identity-registry unit with its own
+> lock entry + `inputs_digest` participation when authored locally), and a clean separation of the
+> machine-local binding table out of any synced/scoped path. The current registry is wholesale
+> machine-local.
 
 #### D14 — Managed-resource `.gitignore` auto-fill in consuming projects
 `da` owns a delimited, idempotent block in each consuming project's `.gitignore`: projected links,
@@ -1011,7 +1152,11 @@ per the extends-oci-relax sequencing.
 R1. **A lockfile exists for every resolved project**, including flat/local-only, carrying
 `lock_version`, `inputs_digest`, and a `units` map keyed by `source:path@version` →
 `{kind, digest, fetched_at, last_checked_at}`. The `adapters` section is preserved untouched (owned
-by `graph-backend-adapter-contract`).
+by `graph-backend-adapter-contract`). Per the coherence fold, `kind` ranges over `layer` /
+`artifact` / **`project-set`** (the synced identity-registry unit, D13/A2) and **conditionally**
+`descriptor` (only once source-shipped, D3/A3); the **machine-local binding table** (id→path) is
+**not** a unit and never appears in the lock. A synced `project-set` (and a locally-authored
+descriptor, if/when that condition fires) participates in `inputs_digest` like any other local unit.
 
 R2. **Staleness never consults a clock.** A project is fresh ⇔ `inputs_digest` matches, the declared
 ref set is unchanged, and recorded digests match. `last_checked_at` only powers nudges; it never
@@ -1146,7 +1291,43 @@ all non-local layers; the `lint-validate-locked-remote-layers` fast-follow (#127
 locked+cached remote layers at their recorded digest. **Lesson recorded here so future "spec says X is
 configurable" claims are checked against a real consumer, not just a parser.**
 
-**Net-new remaining (small):** none of the §15 substrate. The only open §15-adjacent items are the
-deferred ones in §15.7 (governance backend impl; v1-loading removal; the doc/prompt-overlay surfacing
-UX decision) and the §15.6 inherited §14 questions (Q3 ERROR-by-default signing; Q5 workspace
-lockfile).
+**Net-new remaining (small):** none of the §15 substrate as it stood at 0.4.1. The coherence-fold
+amendments (D1a, D13/A2, D3/A3) introduce **net-new resolver obligations** that are **NOT yet
+implemented** — see §15.9.
+
+### 15.9 Coherence-fold resolver obligations (NOT yet implemented — follow-on PR)
+
+The three amendments folded above are **contract** changes; the shipped resolver does not yet honor
+them. This is the checklist the follow-on resolver-code PR is accountable to (the contract is §15;
+this just itemizes the deltas it now obligates). None of these are shipped in 0.4.0/0.4.1.
+
+**From D1a (Amendment 1 — authority/value two-axis + source-authority registry):**
+1. **Policy-authority pass (Phase 1).** Add a resolve phase ahead of the existing value-merge that
+   applies the **AUTHORITY-RANK** total order (`org > team > repo > user`, deny-overrides, higher
+   binds lower) and evaluates locks / value-locks / override-caps. The current resolver implements
+   value-precedence (Phase 2) only.
+2. **Locked-field collision + provenance.** When a lower scope writes a value a higher scope
+   value-locked, reject/ignore the write (lock wins) and surface attempted value + winning value +
+   owning scope through `da config explain`.
+3. **Cross-authority deny / no force-allow.** A lower deny cannot erase a higher allow; subtraction
+   only via a higher-scope deny-lock.
+4. **Source-authority registry + `authority_grants`.** Derive authority from
+   `ref.source → registry → scope`; add the `authority_grants` block; enforce the **write-guard**:
+   only a strictly-higher scope may write a grant, and **no self-blessing** (a resolve-time
+   rejection, including for public/foreign sources unless co-signed by a trusted root).
+5. **Schema fields.** Represent the two orderings as **two explicitly-named fields**
+   (`authority_rank`, `value_precedence`), not one reused `scope_chain` (F1.1).
+
+**From D13 (Amendment 2 — registry split):**
+6. **`kind: project-set` unit.** Add the synced identity-registry unit kind (lock entry +
+   `inputs_digest` participation when locally authored), referenceable by `home-config` at personal
+   scope and a manifest at team scope under the selector-merge law.
+7. **Binding-table separation.** Keep the machine-local `id → absolute-path` binding table (+
+   `added` + caches) strictly out of any synced/scoped/projected path; it is never a unit.
+
+**From D3 (Amendment 3 — conditional descriptor):**
+8. **CONDITIONAL — no work today.** Descriptors stay Go-internal through the `multi-harness` F4
+   probe. **Only if** a descriptor becomes source-shipped: add the fourth resolver behavior
+   (`kind: descriptor`) with its media type, resolver order, validation, lock entry, and
+   `inputs_digest` participation. The F4 probe still gates the descriptor schema independently of
+   this fold.
