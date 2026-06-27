@@ -64,12 +64,36 @@ formalization: `.agents/workflow/specs/ideation-system-composition/design.md` (D
 pending human ratification; no longer blocked on v4 — v4 folded narrow, v5 deferred; the
 depth/compounding claims rest on the evidence sidecar).
 
+## The scientific-method spine (the documented hard-fork path)
+
+Hard forks are resolved by an invariant **scientific-method spine** — domain-general, so the
+protocol is the same whether the fork is software, agent-behavior, a factual claim, a UX call,
+or ops/infra; only the **evidence form** changes (see the evidence-form table in
+`classify-forks.md`). The spine:
+
+1. **Frame** competing hypotheses + state what evidence would discriminate.
+2. **Pre-register** predictions + power/discrimination criteria BEFORE gathering evidence.
+3. **GATE 1 — design audit (PRE-run):** an independent brain tries to invalidate the *design*
+   before the spend (the cheaper, higher-leverage gate — catches the wrong experiment).
+4. **Gather faithful evidence** in the domain-appropriate form, with a real negative control.
+5. **Power + regime check:** can the evidence discriminate (sub-ceiling baseline), and is it
+   measuring where the effect lives?
+6. **GATE 2 — results audit (POST-run):** an independent brain tries to invalidate the
+   *conclusion*. Both gates are the same cross-harness discipline at the two points it pays off.
+7. **Null is first-class;** iterate or extract the sound subset, fold narrow + caveated.
+
+This spine was **empirically validated** in the depth-degradation experiment arc (v1–v4 +
+GATE-1/GATE-2 audits; see `prototype-experiment-fidelity-gate` and
+`.agents/proposals/scientific-method-spine-domain-general.md`) — it encodes a proven method.
+
 ## Operating posture (read before starting)
 
-- **Empirical where possible, else cross-brain.** A fork a prototype can decide gets a
-  prototype (under the fidelity gate). A fork that is a judgment call gets a cross-harness
-  adversarial opinion. Never settle a determinable fork by opinion; never fake-empiricize
-  a judgment call.
+- **Empirical where possible, else cross-brain — domain-general.** A fork faithful evidence can
+  decide runs the spine in its evidence form (under the fidelity gate); a judgment call with no
+  empirical handle gets a single cross-harness adversarial pass. "Empirical" is not
+  Go-prototype-specific — it is a controlled eval for agent-behavior, a sought-out disconfirming
+  source for a factual claim, a load test for infra. Never settle a determinable fork by
+  opinion; never fake-empiricize a judgment call.
 - **The fidelity gate is mandatory for any prototype-based claim.** No prototype result
   informs the decision until it passes the gate in step 4. See lesson
   `prototype-experiment-fidelity-gate` and `instructions/fidelity-gate.md`.
@@ -98,34 +122,42 @@ depth/compounding claims rest on the evidence sidecar).
    from `kg-ideate` for a single decision, the fork is already named — enumerate only its
    sub-forks.
 
-3. **Classify each fork (triage — with a guard)**
+3. **Classify each fork (evidence-type triage — with a guard)**
    Load → `instructions/classify-forks.md`
-   Tag every fork: already-settled (prior / dogfood) · empirically-determinable
-   (prototype) · judgment-call (cross-brain) · owner-decision · deferred. The tag routes
-   the fork to step 4, step 5, or straight to step 6. **Triage guard:** a "briefing-decidable
-   / already-settled" verdict MUST cite the decisive briefing fact; if none is citable, the
-   fork defaults to HARD. The step-5 cross-brain pass also reviews the triage calls themselves,
-   so a fork cannot be waved past the gate by mislabeling it easy.
+   Tag every fork: already-settled/briefing-decidable (prior / dogfood / citable fact) ·
+   empirically-testable (run the spine in the fork's evidence form) · judgment-call
+   (cross-brain trade-off) · owner-decision · unfalsifiable-needs-reframe · deferred. The
+   evidence-form table maps each empirical fork to its evidence kind + negative control
+   (software→prototype; agent-behavior→controlled eval; factual→corpus+KG; UX→user data;
+   infra→measurement). **Triage guard:** a "briefing-decidable / already-settled" verdict MUST
+   cite the decisive fact; if none is citable, the fork defaults to HARD. The step-5 cross-brain
+   pass also reviews the triage calls themselves, so a fork cannot be waved past the gate by
+   mislabeling it easy.
 
-4. **Empirical pass — under the fidelity gate**
+4. **Empirical pass — run the spine, under the fidelity gate**
    Load → `instructions/empirical-pass.md`
    THEN Load → `instructions/fidelity-gate.md` (load-bearing — read before trusting any
-   result). For each empirically-determinable fork, dispatch a SELF-CONTAINED prototype
-   (own `go.mod`, isolated from the coverage gate) that runs the REAL scenario and asserts
-   the hypotheses, then run it through the fidelity gate (faithful inputs + negative
-   control + real execution + self-audit + **independent cross-harness audit**). Only an
-   audited-sound experiment is allowed to inform the decision. **Relay discipline:** every
-   hand-back from a dispatched worker (and hop→hop in any multi-hop chain) MUST be
-   structured/pointer-based — artifact path + a constraint/decision checklist — never retold
-   prose. Lossy summary relay drops non-reconstructable detail that reaches the deliverable
-   (evidence sidecar v3 family-2: 16→13). Deep delegation is driver-orchestrated hop-by-hop,
-   not recursively nested (nested `Agent` delegation collapses past ~hop 4 on the current
-   harness; the ceiling is per-harness, re-assess as the harness set grows).
+   result). For each empirically-testable fork: **pre-register** hypotheses + predictions +
+   power/discrimination criteria, run **GATE 1 (design audit) BEFORE the run**, gather faithful
+   evidence in the fork's form (e.g. a SELF-CONTAINED prototype with its own `go.mod` for a
+   software fork) with a real negative control, run the **power + regime check**, then **GATE 2
+   (results audit)** — the fidelity gate (faithful inputs + negative control + real execution +
+   self-audit + **independent cross-harness audit**). Only an audited-sound result informs the
+   decision; **null is first-class**. **Relay discipline:** every hand-back from a dispatched
+   worker (and hop→hop in any multi-hop chain) MUST be structured/pointer-based — artifact path
+   + a constraint/decision checklist — never retold prose. Lossy summary relay drops
+   non-reconstructable detail that reaches the deliverable (evidence sidecar v3 family-2:
+   16→13). Deep delegation is driver-orchestrated hop-by-hop, not recursively nested (nested
+   `Agent` delegation collapses past ~hop 4 on the current harness; the ceiling is per-harness,
+   re-assess as the harness set grows).
 
-5. **Cross-brain the judgment calls**
+5. **Cross-brain — the two-gate audit + judgment calls**
    Load → `instructions/cross-brain.md`
-   For each non-empirical fork, get a cross-harness (codex) adversarial opinion. Produce a
-   ranked list of must-decide items, each with a recommended default and its rationale.
+   Cross-brain is one discipline applied at two points: **GATE 1** invalidates the experiment
+   *design* (pre-run, cheaper/higher-leverage), **GATE 2** invalidates the *conclusion*
+   (post-run). Judgment-call forks (no empirical handle) get a single trade-off pass. Serialize
+   the codex calls to protect quota. Produce a ranked list of must-decide items, each with a
+   recommended default and its rationale.
 
 6. **Converge — ratify the decision, RETURN it (don't write the spec)**
    Load → `instructions/converge.md`

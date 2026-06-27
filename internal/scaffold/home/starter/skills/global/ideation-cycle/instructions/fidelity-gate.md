@@ -19,6 +19,36 @@ Every prototype is gated on both:
    Do the assertions discriminate between the options?
 2. **Execution** — Real inputs, real interleavings, independently-verified sensitivity?
 
+## The four levels of discrimination (a green self-audit usually only proves the first)
+
+"Does it discriminate?" is not one question. The depth-degradation arc (v1–v4) surfaced four
+distinct levels, and an experiment can pass the lower ones while failing a higher one — which
+is exactly how three runs each *felt* like the win and were each reined in by the independent
+audit. Separate them explicitly:
+
+1. **Instrument discrimination** — does the scorer/assertion catch a *synthetic* violation?
+   (Inject a known-bad case; the instrument must flag it.) A green self-audit usually proves
+   only this.
+2. **Experiment discrimination** — *can the effect occur at all* under this design? (v1 was
+   confounded — it measured salient-token recall, not the thing claimed.)
+3. **Regime validity** — are you measuring **where the effect lives**? Internal rigor ≠ regime
+   validity. (v2 ran the few-KB band when the effect, if any, is a lost-in-the-middle
+   phenomenon — clean run, wrong regime.)
+4. **Power** — does a **sub-ceiling baseline** exist, so "no effect" is distinguishable from
+   "task too easy / instrument maxed out"? (v3 was underpowered — a 97.6% ceiling left no
+   headroom; a null there is uninformative.)
+
+Check all four before trusting a verdict. A failure at levels 2–4 is not a smaller version of
+a level-1 pass — it means the experiment answered a different question than the fork asked.
+
+## Null is first-class
+
+A documented "couldn't induce the effect / couldn't reach the regime / generalizes to one
+family only" is a **finding**, not a failure. Record it as the result and fold it *narrow and
+caveated* (see `converge.md`). Never launder a hollow null — an underpowered or wrong-regime
+run that "found no effect" — into a clean answer; that is the failure mode the four levels
+above exist to catch.
+
 ## The five checks
 
 1. **Faithful inputs, not toys.** Real schema/data — real enums, real fields, the actual
@@ -31,11 +61,15 @@ Every prototype is gated on both:
    corpus per-item, not an aggregate; deterministic assertions.
 4. **Don't hide losses to pass.** A field that can't round-trip, a case that breaks — that
    is a RESULT to surface, never a thing to silently drop for a green check.
-5. **Independent post-hoc audit.** A cross-harness (different-model, e.g. codex)
-   review whose explicit job is to **invalidate the experiment** — find the strawman, the
-   non-discriminating assert, the fake mutation, the hidden loss, the false-pass, the
-   model-faithfulness gap — PLUS re-running the negative control itself. Only an
-   experiment the second brain can't break informs the decision.
+5. **Independent post-hoc audit (this is GATE 2).** A cross-harness (different-model, e.g.
+   codex) review whose explicit job is to **invalidate the CONCLUSION** — find the strawman,
+   the non-discriminating assert, the fake mutation, the hidden loss, the false-pass, the
+   model-faithfulness gap, the wrong regime, the hollow null, the over-generalized claim —
+   PLUS re-running the negative control itself. Only an experiment the second brain can't
+   break informs the decision. This is the post-run half of the two-gate cross-brain
+   (`cross-brain.md`); GATE 1 already audited the *design* before the run — a self-audit
+   structurally cannot catch "wrong experiment" or "hollow null," which is why both gates are
+   cross-harness, not same-model.
 
 ## Running the gate
 

@@ -1,4 +1,35 @@
-# Step 5: Cross-brain the judgment calls
+# Step 5: Cross-brain — the two-gate independent adversarial audit
+
+Cross-brain is one discipline — *an independent brain whose job is to invalidate* — applied
+at the **two points where it pays off**:
+
+- **GATE 1 — invalidate the DESIGN (pre-run).** For an empirically-testable fork, before the
+  experiment runs, a different harness audits the *design*: are the hypotheses falsifiable, the
+  predictions pre-committed, the power/regime adequate, the negative control real, the inputs
+  faithful, the evidence form appropriate? Its job is to **send a flawed design back before the
+  spend**. This is the cheaper, higher-leverage gate — it catches the *wrong experiment* (the
+  expensive error class), not just the wrong conclusion.
+- **GATE 2 — invalidate the CONCLUSION (post-run).** After the run, a different harness audits
+  the *result*: does the evidence actually support the claim, what confounds remain, where is it
+  over-claimed, is the null hollow? (This is the fidelity-gate audit — `fidelity-gate.md`.)
+- **Judgment-call forks (no empirical handle)** still get a **single cross-brain trade-off
+  pass** — there is no run to gate, so the independent brain argues the rejected option and
+  names the decisive trade-off (the rest of this file).
+
+Same independent-brain discipline at all three; what changes is whether it's invalidating a
+design, a conclusion, or a trade-off choice. The two gates are the load-bearing reason the
+audit is **cross-harness, not same-model**: a self-audit reliably catches *internal* faults
+but structurally cannot catch "wrong experiment" / "hollow null" / over-generalized claim —
+only a different brain does (caught us 3× in the depth-degradation arc).
+
+## Quota discipline — serialize the codex calls
+
+Cross-brain calls go to a different harness (codex) with a finite quota. **Serialize them** —
+run GATE 1, GATE 2, and judgment-call passes one at a time, not fanned out in parallel — so a
+burst of concurrent calls doesn't exhaust the quota mid-cycle. Batch the forks for a given gate
+into as few calls as the framing allows.
+
+## The judgment-call trade-off pass
 
 For every fork tagged **judgment-call** in step 3, get a cross-harness (codex) adversarial
 opinion. These are the trade-off forks no single run decides — the answer is a defensible
