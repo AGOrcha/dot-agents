@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 )
 
@@ -15,10 +16,14 @@ import (
 
 // applyAuthority runs Phase 1 over the resolved layers and applies the effective
 // locks to the merged value map (mutated in place). It returns the recorded
-// collisions and non-fatal violations, or a fatal error when a self-blessing
-// grant or a force-allow lock is present (fail-closed).
+// collisions and non-fatal violations, or a fatal error when a layer's policy is
+// malformed, or when a self-blessing/overwrite grant or a force-allow lock is
+// present (all fail-closed).
 func applyAuthority(layers []ResolvedLayer, merged map[string]any) ([]LockCollision, []AuthorityViolation, error) {
-	al := buildAuthorityLayers(layers)
+	al, err := buildAuthorityLayers(layers)
+	if err != nil {
+		return nil, nil, err
+	}
 	grants, grantViols := resolveAuthorityGrants(al)
 	applyGrantsToScopes(al, grants)
 
@@ -34,20 +39,29 @@ func applyAuthority(layers []ResolvedLayer, merged map[string]any) ([]LockCollis
 }
 
 // buildAuthorityLayers maps each resolved layer to its BASE authority scope and
-// extracts its declared locks. Built-in layers carry a fixed scope; an imported
-// (extends) layer defaults to AuthPublic — value-only — until the
-// source-authority registry grants it a real scope.
-func buildAuthorityLayers(layers []ResolvedLayer) []authorityLayer {
+// parses+validates its declared policy fail-closed. Built-in layers carry a fixed
+// scope; an imported (extends) layer defaults to AuthPublic — value-only — until
+// the source-authority registry grants it a real scope. A malformed locks or
+// authority_grants block aborts the resolve rather than being silently skipped.
+func buildAuthorityLayers(layers []ResolvedLayer) ([]authorityLayer, error) {
 	out := make([]authorityLayer, 0, len(layers))
 	for _, l := range layers {
+		locks, err := extractLocks(l.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("layer %q: %w", l.ID, err)
+		}
+		grants, err := parseGrants(l.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("layer %q: %w", l.ID, err)
+		}
 		out = append(out, authorityLayer{
 			id:    l.ID,
 			scope: baseLayerScope(l.ID),
 			raw:   l.Raw,
-			locks: extractLocks(l.Raw),
+			locks: locks, grants: grants,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // baseLayerScope returns the fixed authority scope for a built-in layer id, or
@@ -103,35 +117,43 @@ func sourceIDOf(ref string) string {
 	return ref
 }
 
-// extractLocks decodes a layer's `locks` block into a PolicyLockSpec. An absent
-// or malformed block yields an empty spec.
-func extractLocks(raw map[string]any) PolicyLockSpec {
+// extractLocks decodes and VALIDATES a layer's `locks` block fail-closed. An
+// absent block yields an empty spec; a present-but-malformed block (not an
+// object, or a deny_lock without "field:member" shape) is an ERROR, never a
+// silent empty — a silently-ignored lock is fail-open.
+func extractLocks(raw map[string]any) (PolicyLockSpec, error) {
 	v, ok := raw["locks"]
 	if !ok {
-		return PolicyLockSpec{}
+		return PolicyLockSpec{}, nil
 	}
 	data, err := json.Marshal(v)
 	if err != nil {
-		return PolicyLockSpec{}
+		return PolicyLockSpec{}, fmt.Errorf("malformed locks block: %w", err)
 	}
 	var spec PolicyLockSpec
 	if err := json.Unmarshal(data, &spec); err != nil {
-		return PolicyLockSpec{}
+		return PolicyLockSpec{}, fmt.Errorf("malformed locks block: %w", err)
 	}
-	return spec
+	if err := validateLockSpec(spec); err != nil {
+		return PolicyLockSpec{}, err
+	}
+	return spec, nil
 }
 
-// applyValueLocks pins every value-locked field and records a collision for the
-// highest-precedence lower-authority writer the lock rejected. A lock binds ONLY
-// scopes ranked BELOW its owner (higher binds lower): a peer-or-higher scope that
-// set the field with a plain value still wins over the pin, so a user-scope lock
-// can never out-rank a repo-scope value.
+// applyValueLocks pins every value-locked field — walking the dot-separated FIELD
+// PATH so a lock on a nested key (e.g. "features.flag") pins the nested value, not
+// a literal top-level key — and records a collision for the highest-precedence
+// lower-authority writer the lock rejected. A lock binds ONLY scopes ranked BELOW
+// its owner (higher binds lower): a peer-or-higher scope that set the field with a
+// plain value still wins over the pin, so a user-scope lock can never out-rank a
+// repo-scope value.
 func applyValueLocks(layers []authorityLayer, locks map[string]effectiveValueLock, merged map[string]any) []LockCollision {
 	var collisions []LockCollision
 	for field, lock := range locks {
-		winning := winningLockedValue(layers, field, lock)
-		merged[field] = winning
-		if attempted, found := rejectedWrite(layers, field, winning, lock.rank); found {
+		parts := splitFieldPath(field)
+		winning := winningLockedValue(layers, parts, lock)
+		setPath(merged, parts, winning)
+		if attempted, found := rejectedWrite(layers, parts, winning, lock.rank); found {
 			collisions = append(collisions, LockCollision{
 				Field: field, Attempted: attempted, Winning: winning,
 				Owner: lock.owner, OwnerRank: lock.rank, Kind: collisionValueLock,
@@ -141,18 +163,18 @@ func applyValueLocks(layers []authorityLayer, locks map[string]effectiveValueLoc
 	return collisions
 }
 
-// winningLockedValue returns the value a value-locked field resolves to: the
-// owner's pinned value, unless a scope ranked at-or-above the owner set the field
+// winningLockedValue returns the value a value-locked field path resolves to: the
+// owner's pinned value, unless a scope ranked at-or-above the owner set the path
 // with a plain value (a peer/higher authority is NOT bound by the lock and wins).
 // Layers are in value-precedence order (lowest first), so the last such writer is
 // the one that would win the value-merge.
-func winningLockedValue(layers []authorityLayer, field string, lock effectiveValueLock) any {
+func winningLockedValue(layers []authorityLayer, parts []string, lock effectiveValueLock) any {
 	winning := lock.value
 	for _, l := range layers {
 		if AuthorityRankOf(l.scope) < lock.rank {
 			continue
 		}
-		if v, ok := l.raw[field]; ok {
+		if v, ok := lookupPath(l.raw, parts); ok {
 			winning = v
 		}
 	}
@@ -160,15 +182,16 @@ func winningLockedValue(layers []authorityLayer, field string, lock effectiveVal
 }
 
 // rejectedWrite finds the highest-value-precedence lower-authority layer that set
-// field to a value other than the winning one, returning that attempted value.
-func rejectedWrite(layers []authorityLayer, field string, winning any, rank int) (any, bool) {
+// the field path to a value other than the winning one, returning that attempted
+// value.
+func rejectedWrite(layers []authorityLayer, parts []string, winning any, rank int) (any, bool) {
 	var attempted any
 	found := false
 	for _, l := range layers {
 		if AuthorityRankOf(l.scope) >= rank {
 			continue
 		}
-		v, ok := l.raw[field]
+		v, ok := lookupPath(l.raw, parts)
 		if !ok || valuesEqual(v, winning) {
 			continue
 		}
@@ -177,20 +200,41 @@ func rejectedWrite(layers []authorityLayer, field string, winning any, rank int)
 	return attempted, found
 }
 
-// applyDenyLocks removes every deny-locked set member from the merged field and
-// records a collision for each lower-authority layer that tried to add it back
-// (deny-overrides: the lower allow loses).
+// applyDenyLocks subtracts each deny-locked set member from the merged field —
+// but ONLY when no scope ranked at-or-above the deny owner contributed it. A deny
+// binds only LOWER scopes (§15 D1a :920/:1320): a member a peer/higher scope
+// allowed SURVIVES, so a lower-scope deny can never erase a higher allow. When the
+// member is removed, each lower contributor whose add was dropped is recorded.
 func applyDenyLocks(layers []authorityLayer, locks []effectiveDenyLock, merged map[string]any) []LockCollision {
 	var collisions []LockCollision
 	for _, lock := range locks {
+		if highestContributingRank(layers, lock.field, lock.member) >= lock.rank {
+			continue // a peer/higher scope allowed it — deny binds only lower
+		}
 		removeSetMember(merged, lock.field, lock.member)
 		collisions = append(collisions, denyCollisions(layers, lock)...)
 	}
 	return collisions
 }
 
-// denyCollisions records a collision for each lower-authority layer whose set
-// for the denied field included the denied member.
+// highestContributingRank returns the highest authority rank among layers that
+// contributed member to the set field, or -1 when no layer did. It is the
+// provenance the deny-overrides rule needs to tell a lower allow from a higher one.
+func highestContributingRank(layers []authorityLayer, field, member string) int {
+	max := -1
+	for _, l := range layers {
+		if !setHasMember(l.raw[field], member) {
+			continue
+		}
+		if r := AuthorityRankOf(l.scope); r > max {
+			max = r
+		}
+	}
+	return max
+}
+
+// denyCollisions records a collision for each lower-authority layer whose set for
+// the denied field included the denied member.
 func denyCollisions(layers []authorityLayer, lock effectiveDenyLock) []LockCollision {
 	var out []LockCollision
 	for _, l := range layers {
@@ -205,6 +249,30 @@ func denyCollisions(layers []authorityLayer, lock effectiveDenyLock) []LockColli
 		}
 	}
 	return out
+}
+
+// setPath sets val at the dot-path parts in m, COPY-ON-WRITE: each nested level
+// is cloned before descending, so it never mutates a sub-map the value-merge may
+// have aliased from a layer's raw object (mergeMaps returns the first writer's map
+// by reference). Mutating in place would corrupt that layer's provenance and make
+// the rejected-write check read the pinned value back. An intermediate that is not
+// an object is replaced with a fresh one so a nested pin always lands; an empty
+// path is a no-op.
+func setPath(m map[string]any, parts []string, val any) {
+	if len(parts) == 0 {
+		return
+	}
+	if len(parts) == 1 {
+		m[parts[0]] = val
+		return
+	}
+	child, _ := m[parts[0]].(map[string]any)
+	clone := make(map[string]any, len(child)+1)
+	for k, v := range child {
+		clone[k] = v
+	}
+	setPath(clone, parts[1:], val)
+	m[parts[0]] = clone
 }
 
 // removeSetMember drops member from the merged field when it is a JSON array.

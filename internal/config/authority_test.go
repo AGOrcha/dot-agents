@@ -76,13 +76,14 @@ func TestPolicyLockSpecIsZero(t *testing.T) {
 	}
 }
 
-// grantLayer builds an authorityLayer that declares an authority_grants block.
+// grantLayer builds an authorityLayer carrying a pre-parsed authority_grants set
+// at the given authority scope (resolveAuthorityGrants reads the parsed grants).
 func grantLayer(scope AuthorityScope, grants map[string]string) authorityLayer {
-	g := map[string]any{}
+	g := map[string]AuthorityScope{}
 	for k, v := range grants {
-		g[k] = v
+		g[k] = AuthorityScope(v)
 	}
-	return authorityLayer{scope: scope, raw: map[string]any{"authority_grants": g}}
+	return authorityLayer{scope: scope, grants: g}
 }
 
 func TestResolveAuthorityGrants_WriteGuard(t *testing.T) {
@@ -94,14 +95,21 @@ func TestResolveAuthorityGrants_WriteGuard(t *testing.T) {
 		wantFatal   bool
 	}{
 		{
-			name:        "org may bless a source to carry org authority",
-			layer:       grantLayer(AuthOrg, map[string]string{"acme": "org"}),
-			wantHonored: map[string]AuthorityScope{"acme": AuthOrg},
-		},
-		{
-			name:        "org may bless a source downward to team",
+			name:        "org may bless a source DOWNWARD to team (strictly higher)",
 			layer:       grantLayer(AuthOrg, map[string]string{"acme": "team"}),
 			wantHonored: map[string]AuthorityScope{"acme": AuthTeam},
+		},
+		{
+			name:      "org granting its OWN rank (peer) is rejected — strictly-higher only",
+			layer:     grantLayer(AuthOrg, map[string]string{"acme": "org"}),
+			wantKind:  violSelfBlessing,
+			wantFatal: true,
+		},
+		{
+			name:      "team granting its OWN rank (peer) is rejected",
+			layer:     grantLayer(AuthTeam, map[string]string{"acme": "team"}),
+			wantKind:  violSelfBlessing,
+			wantFatal: true,
 		},
 		{
 			name:      "user self-elevating to org is a fatal rejection",
@@ -181,16 +189,84 @@ func TestResolveAuthorityGrants_DeterministicOrder(t *testing.T) {
 	}
 }
 
-func TestResolveAuthorityGrants_Skips(t *testing.T) {
-	// A layer with no grants block, and a malformed (non-object) block.
+// TestResolveAuthorityGrants_OverwriteRejected proves a same-or-lower-rank later
+// layer cannot overwrite/downgrade a higher scope's grant (the downgrade vector).
+func TestResolveAuthorityGrants_OverwriteRejected(t *testing.T) {
+	// org grants acme→team first; a later repo layer tries to downgrade acme→user.
 	layers := []authorityLayer{
-		{scope: AuthOrg, raw: map[string]any{}},
-		{scope: AuthOrg, raw: map[string]any{"authority_grants": "not-an-object"}},
-		{scope: AuthOrg, raw: map[string]any{"authority_grants": map[string]any{"acme": 42}}},
+		grantLayer(AuthOrg, map[string]string{"acme": "team"}),
+		grantLayer(AuthRepo, map[string]string{"acme": "user"}),
 	}
 	grants, viols := resolveAuthorityGrants(layers)
+	if grants["acme"] != AuthTeam {
+		t.Fatalf("higher grant must survive: acme=%q, want team", grants["acme"])
+	}
+	if len(viols) != 1 || viols[0].Kind != violGrantOverwrite || !viols[0].Fatal {
+		t.Fatalf("expected one fatal grant_overwrite violation, got %+v", viols)
+	}
+
+	// A PEER (same rank) later layer also cannot overwrite an incumbent grant.
+	peer := []authorityLayer{
+		grantLayer(AuthOrg, map[string]string{"acme": "team"}),
+		grantLayer(AuthOrg, map[string]string{"acme": "repo"}),
+	}
+	g2, v2 := resolveAuthorityGrants(peer)
+	if g2["acme"] != AuthTeam || len(v2) != 1 || v2[0].Kind != violGrantOverwrite {
+		t.Fatalf("peer overwrite must be rejected, got grants=%v viols=%+v", g2, v2)
+	}
+}
+
+func TestResolveAuthorityGrants_EmptyIsClean(t *testing.T) {
+	grants, viols := resolveAuthorityGrants([]authorityLayer{{scope: AuthOrg}})
 	if len(grants) != 0 || len(viols) != 0 {
-		t.Fatalf("malformed/absent grants must contribute nothing: grants=%v viols=%v", grants, viols)
+		t.Fatalf("a layer with no grants must contribute nothing: grants=%v viols=%v", grants, viols)
+	}
+}
+
+// TestParseGrants_FailClosed proves a malformed authority_grants block is a
+// validation ERROR (fail-closed), never a silent skip.
+func TestParseGrants_FailClosed(t *testing.T) {
+	if g, err := parseGrants(map[string]any{}); err != nil || g != nil {
+		t.Fatalf("absent grants: want (nil,nil), got (%v,%v)", g, err)
+	}
+	good, err := parseGrants(map[string]any{"authority_grants": map[string]any{"acme": "team"}})
+	if err != nil || good["acme"] != AuthTeam {
+		t.Fatalf("well-formed grant must parse, got (%v,%v)", good, err)
+	}
+	cases := []struct {
+		name string
+		raw  map[string]any
+	}{
+		{"non-object block", map[string]any{"authority_grants": "not-an-object"}},
+		{"non-string value", map[string]any{"authority_grants": map[string]any{"acme": 42}}},
+		{"unknown scope", map[string]any{"authority_grants": map[string]any{"acme": "superuser"}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := parseGrants(c.raw); err == nil {
+				t.Fatalf("malformed grants (%s) must error, got nil", c.name)
+			}
+		})
+	}
+}
+
+func TestValidateLockSpec_FailClosed(t *testing.T) {
+	if err := validateLockSpec(PolicyLockSpec{DenyLocks: []string{"skills:risky"}}); err != nil {
+		t.Fatalf("well-formed deny_lock must validate, got %v", err)
+	}
+	if err := validateLockSpec(PolicyLockSpec{DenyLocks: []string{"no-colon"}}); err == nil {
+		t.Fatal("malformed deny_lock must be a validation error")
+	}
+}
+
+func TestValidScope(t *testing.T) {
+	for _, s := range []AuthorityScope{AuthOrg, AuthTeam, AuthRepo, AuthUser, AuthProduct, AuthPublic, AuthRuntime, AuthProjectLocal} {
+		if !validScope(s) {
+			t.Errorf("%q must be a valid scope", s)
+		}
+	}
+	if validScope(AuthorityScope("superuser")) {
+		t.Error("unknown scope must be invalid")
 	}
 }
 

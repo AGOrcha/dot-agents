@@ -128,14 +128,28 @@ func (p *PolicyLockSpec) IsZero() bool {
 
 // Violation kinds, recorded as stable strings so explain/audit can branch.
 const (
-	violSelfBlessing = "self_blessing"
-	violInertGrant   = "inert_grant"
-	violForceAllow   = "force_allow"
-	violZeroAuthLock = "zero_authority_lock"
+	violSelfBlessing   = "self_blessing"
+	violInertGrant     = "inert_grant"
+	violForceAllow     = "force_allow"
+	violZeroAuthLock   = "zero_authority_lock"
+	violGrantOverwrite = "grant_overwrite"
 
 	collisionValueLock = "value_lock"
 	collisionDenyLock  = "deny_lock"
 )
+
+// validScope reports whether s names a known authority scope. A grant or other
+// policy carrying an unknown scope is a malformed (fail-closed) input, not a
+// silently-ignored one.
+func validScope(s AuthorityScope) bool {
+	switch s {
+	case AuthProduct, AuthPublic, AuthRuntime, AuthProjectLocal,
+		AuthUser, AuthRepo, AuthTeam, AuthOrg:
+		return true
+	default:
+		return false
+	}
+}
 
 // AuthorityViolation is a fatal or recorded breach surfaced by Phase 1. Fatal
 // violations (self-elevation, force-allow) abort the resolve fail-closed;
@@ -160,13 +174,16 @@ type LockCollision struct {
 	Kind      string         `json:"kind"`
 }
 
-// authorityLayer is one resolved layer paired with its authority scope and
-// declared locks, fed to Phase 1 in value-precedence order (lowest first).
+// authorityLayer is one resolved layer paired with its authority scope and its
+// pre-parsed, pre-validated policy (locks + grants), fed to Phase 1 in
+// value-precedence order (lowest first). Parsing/validation happens before the
+// pass (buildAuthorityLayers) so a malformed policy fails closed there.
 type authorityLayer struct {
-	id    string
-	scope AuthorityScope
-	raw   map[string]any
-	locks PolicyLockSpec
+	id     string
+	scope  AuthorityScope
+	raw    map[string]any
+	locks  PolicyLockSpec
+	grants map[string]AuthorityScope
 }
 
 // effectiveValueLock is the winning value-lock for a field after the authority
@@ -210,46 +227,37 @@ type authorityResult struct {
 //     self-blessing rejection.
 func resolveAuthorityGrants(layers []authorityLayer) (map[string]AuthorityScope, []AuthorityViolation) {
 	grants := map[string]AuthorityScope{}
+	owners := map[string]int{} // granter rank that set each honored grant
 	var viols []AuthorityViolation
 	for _, l := range layers {
-		raw, ok := l.raw["authority_grants"]
-		if !ok {
-			continue
-		}
-		decoded := decodeGrantBlock(raw)
-		applyGrantBlock(l.scope, decoded, grants, &viols)
+		applyGrantBlock(l.scope, l.grants, grants, owners, &viols)
 	}
 	return grants, viols
 }
 
-// decodeGrantBlock coerces a raw authority_grants block into source→scope. A
-// malformed block (not an object of scope strings) contributes nothing.
-func decodeGrantBlock(raw any) map[string]AuthorityScope {
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return nil
-	}
-	out := make(map[string]AuthorityScope, len(obj))
-	for src, v := range obj {
-		if s, ok := v.(string); ok {
-			out[src] = AuthorityScope(s)
-		}
-	}
-	return out
-}
-
 // applyGrantBlock evaluates every grant a single layer declares against the
-// write-guard, honoring or rejecting each. It iterates sources in sorted order
-// so the violation sequence is deterministic.
-func applyGrantBlock(granter AuthorityScope, block map[string]AuthorityScope, grants map[string]AuthorityScope, viols *[]AuthorityViolation) {
+// write-guard, honoring or rejecting each, in sorted source order so the
+// violation sequence is deterministic. A grant that passes the guard is recorded
+// ONLY if the granter STRICTLY outranks any incumbent grant for that source —
+// closing the downgrade/overwrite vector where a same-or-lower-rank later layer
+// replaces a higher scope's grant.
+func applyGrantBlock(granter AuthorityScope, block map[string]AuthorityScope, grants map[string]AuthorityScope, owners map[string]int, viols *[]AuthorityViolation) {
+	g := AuthorityRankOf(granter)
 	for _, src := range sortedGrantKeys(block) {
 		conferred := block[src]
-		honored, v := evaluateGrant(granter, src, conferred)
-		if honored {
-			grants[src] = conferred
+		if honored, v := evaluateGrant(granter, src, conferred); !honored {
+			*viols = append(*viols, v)
 			continue
 		}
-		*viols = append(*viols, v)
+		if incumbent, ok := owners[src]; ok && g <= incumbent {
+			*viols = append(*viols, AuthorityViolation{
+				Kind: violGrantOverwrite, Source: src, Scope: conferred, Fatal: true,
+				Reason: fmt.Sprintf("grant overwrite rejected: %q (rank %d) cannot replace an existing grant owned by rank %d", granter, g, incumbent),
+			})
+			continue
+		}
+		grants[src] = conferred
+		owners[src] = g
 	}
 }
 
@@ -264,6 +272,22 @@ func sortedGrantKeys(block map[string]AuthorityScope) []string {
 
 // evaluateGrant decides a single grant against the write-guard, returning the
 // honored flag and (when not honored) the violation to record.
+//
+// A grant is honored ONLY when the granter STRICTLY outranks the conferred scope
+// (`g > c`, §15.9 item 4 / D1a :1316 "only a strictly-higher scope may write a
+// grant"). A PEER (same rank) cannot confer its own rank — so no scope can spread
+// its authority laterally to a source it controls. Conferring org-level authority
+// onto an org source is the deferred trusted-root/governance-backend bootstrap
+// path (§15.7), which does not flow through this peer guard.
+//
+// Outcomes:
+//   - conferred rank == 0: not honored (a value-only scope carries no authority).
+//   - granter rank > conferred rank: HONORED.
+//   - granter rank == 0 below a real conferred scope: INERT (recorded, non-fatal)
+//     — a foreign/public source's claim is ignored unless co-signed by a trusted
+//     root.
+//   - a SCOPED layer (user/repo/team/org) at or below the conferred rank: FATAL
+//     self-blessing rejection (peer or elevation).
 func evaluateGrant(granter AuthorityScope, src string, conferred AuthorityScope) (bool, AuthorityViolation) {
 	g := AuthorityRankOf(granter)
 	c := AuthorityRankOf(conferred)
@@ -273,7 +297,7 @@ func evaluateGrant(granter AuthorityScope, src string, conferred AuthorityScope)
 			Kind: violInertGrant, Source: src, Scope: conferred,
 			Reason: "conferred scope carries no authority; grant ignored",
 		}
-	case g >= c:
+	case g > c:
 		return true, AuthorityViolation{}
 	case g == 0:
 		return false, AuthorityViolation{
@@ -283,7 +307,7 @@ func evaluateGrant(granter AuthorityScope, src string, conferred AuthorityScope)
 	default:
 		return false, AuthorityViolation{
 			Kind: violSelfBlessing, Source: src, Scope: conferred, Fatal: true,
-			Reason: fmt.Sprintf("self-elevation rejected: %q (rank %d) cannot grant %q (rank %d) authority", granter, g, conferred, c),
+			Reason: fmt.Sprintf("self-elevation rejected: %q (rank %d) cannot grant %q (rank %d) authority (only a strictly-higher scope may grant)", granter, g, conferred, c),
 		}
 	}
 }
@@ -374,6 +398,55 @@ func decodeLockValue(raw json.RawMessage) any {
 		return string(raw)
 	}
 	return v
+}
+
+// parseGrants decodes and VALIDATES a layer's authority_grants block fail-closed.
+// An absent block yields (nil, nil). A present block that is not an object of
+// known-scope strings is a malformed-policy ERROR — never silently skipped, since
+// a silently-ignored authority grant is fail-open.
+func parseGrants(raw map[string]any) (map[string]AuthorityScope, error) {
+	v, ok := raw["authority_grants"]
+	if !ok {
+		return nil, nil
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("malformed authority_grants: must be an object")
+	}
+	out := make(map[string]AuthorityScope, len(obj))
+	for _, src := range sortedAnyKeys(obj) {
+		s, ok := obj[src].(string)
+		if !ok {
+			return nil, fmt.Errorf("malformed authority_grants[%q]: must be a scope string", src)
+		}
+		scope := AuthorityScope(s)
+		if !validScope(scope) {
+			return nil, fmt.Errorf("malformed authority_grants[%q]: unknown scope %q", src, s)
+		}
+		out[src] = scope
+	}
+	return out, nil
+}
+
+func sortedAnyKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// validateLockSpec checks a decoded lock spec fail-closed. A deny_lock that is
+// not "field:member" is a malformed-policy error — a typo'd deny that silently
+// protected nothing would be fail-open.
+func validateLockSpec(spec PolicyLockSpec) error {
+	for _, d := range spec.DenyLocks {
+		if _, _, ok := splitDenyLock(d); !ok {
+			return fmt.Errorf("malformed deny_lock %q: want \"field:member\"", d)
+		}
+	}
+	return nil
 }
 
 // fatalViolations returns the subset of violations that must abort the resolve.

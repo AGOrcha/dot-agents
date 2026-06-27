@@ -197,6 +197,92 @@ func TestNegativeControl_UserCannotOutrankRepo(t *testing.T) {
 	}
 }
 
+// --- EXPLOIT-DIRECTION negative controls (the holes the audit found) --------
+
+// EXPLOIT 1 (FIX B): a LOWER-scope deny must NOT erase a HIGHER/peer allow.
+func TestExploit_LowerDenyCannotEraseHigherAllow(t *testing.T) {
+	// user (rank 1) deny-locks skills:privileged; repo (rank 2) ALLOWS it.
+	// deny binds only lower scopes, so the repo allow SURVIVES.
+	snap := mustResolve(t,
+		layer(LayerUserLocal, map[string]any{"locks": map[string]any{
+			"deny_locks": []any{"skills:privileged"},
+		}}),
+		layer(LayerRepoLocal, map[string]any{"skills": []any{"privileged"}}),
+	)
+	if !containsStr(snap.Effective.Skills, "privileged") {
+		t.Fatalf("a lower deny must NOT erase a higher allow: skills=%v", snap.Effective.Skills)
+	}
+	if len(snap.LockCollisions) != 0 {
+		t.Fatalf("an ineffective lower deny must not record a collision, got %+v", snap.LockCollisions)
+	}
+
+	// Control: when the SAME deny owner outranks the contributor, it DOES bind.
+	bound := mustResolve(t,
+		layer(LayerUserLocal, map[string]any{"skills": []any{"privileged"}}),
+		layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+			"deny_locks": []any{"skills:privileged"},
+		}}),
+	)
+	if containsStr(bound.Effective.Skills, "privileged") {
+		t.Fatalf("a higher deny must bind a lower allow: skills=%v", bound.Effective.Skills)
+	}
+}
+
+// EXPLOIT 2 (FIX D): a value-lock on a NESTED field path must pin the nested
+// value, not a literal top-level key, and leave siblings intact.
+func TestExploit_NestedFieldPathValueLock(t *testing.T) {
+	snap := mustResolve(t,
+		layer(LayerUserLocal, map[string]any{
+			"features": map[string]any{"graph_bridge": "on", "other": "keep"},
+		}),
+		layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+			"value_locks": map[string]any{"features.graph_bridge": "off"},
+		}}),
+	)
+	m, err := snap.EffectiveRaw()
+	if err != nil {
+		t.Fatalf("EffectiveRaw: %v", err)
+	}
+	feats, ok := m["features"].(map[string]any)
+	if !ok {
+		t.Fatalf("features must remain a nested object, got %T", m["features"])
+	}
+	if feats["graph_bridge"] != "off" {
+		t.Fatalf("nested value-lock must pin features.graph_bridge=off, got %v", feats["graph_bridge"])
+	}
+	if feats["other"] != "keep" {
+		t.Fatalf("sibling nested key must be preserved, got %v", feats["other"])
+	}
+	if _, stray := m["features.graph_bridge"]; stray {
+		t.Fatal("a nested lock must NOT create a literal top-level dotted key")
+	}
+	c := findCollision(t, snap.LockCollisions, "features.graph_bridge")
+	if c.Attempted != "on" || c.Winning != "off" || c.Owner != AuthRepo {
+		t.Fatalf("collision = %+v, want attempted=on winning=off owner=repo", c)
+	}
+}
+
+// EXPLOIT 5 (HARDENING): a malformed policy is a resolve-time error (fail-closed).
+func TestExploit_MalformedPolicyFailsClosed(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  map[string]any
+	}{
+		{"non-object grants", map[string]any{"authority_grants": "not-an-object"}},
+		{"unknown grant scope", map[string]any{"authority_grants": map[string]any{"acme": "superuser"}}},
+		{"non-object locks", map[string]any{"locks": "not-an-object"}},
+		{"malformed deny_lock", map[string]any{"locks": map[string]any{"deny_locks": []any{"no-colon"}}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := resolve(t, layer(LayerRepoLocal, c.raw))
+			if err == nil || !strings.Contains(err.Error(), "malformed") {
+				t.Fatalf("malformed policy (%s) must fail closed, got err=%v", c.name, err)
+			}
+		})
+	}
+}
+
 // --- additive / no-op guarantee ---------------------------------------------
 
 func TestAuthorityPass_NoOpWhenNoPolicy(t *testing.T) {
@@ -259,16 +345,21 @@ func TestSourceIDOf(t *testing.T) {
 	}
 }
 
-func TestExtractLocksMalformed(t *testing.T) {
-	if absent := extractLocks(map[string]any{}); !absent.IsZero() {
-		t.Error("absent locks block must be zero")
+func TestExtractLocks_FailClosed(t *testing.T) {
+	absent, err := extractLocks(map[string]any{})
+	if err != nil || !absent.IsZero() {
+		t.Fatalf("absent locks block: want (zero,nil), got (%+v,%v)", absent, err)
 	}
-	if bad := extractLocks(map[string]any{"locks": "not-an-object"}); !bad.IsZero() {
-		t.Error("malformed locks block must be zero")
+	good, err := extractLocks(map[string]any{"locks": map[string]any{"deny_locks": []any{"a:b"}}})
+	if err != nil || len(good.DenyLocks) != 1 {
+		t.Fatalf("well-formed locks block must decode, got (%+v,%v)", good, err)
 	}
-	spec := extractLocks(map[string]any{"locks": map[string]any{"deny_locks": []any{"a:b"}}})
-	if len(spec.DenyLocks) != 1 {
-		t.Errorf("well-formed locks block must decode, got %+v", spec)
+	// Malformed block (not an object) and a malformed deny_lock both error.
+	if _, err := extractLocks(map[string]any{"locks": "not-an-object"}); err == nil {
+		t.Error("non-object locks block must be a validation error")
+	}
+	if _, err := extractLocks(map[string]any{"locks": map[string]any{"deny_locks": []any{"no-colon"}}}); err == nil {
+		t.Error("malformed deny_lock must be a validation error")
 	}
 }
 
@@ -305,10 +396,28 @@ func TestRejectedWrite_LowerMatchingValueNotFlagged(t *testing.T) {
 		{id: LayerUserLocal, scope: AuthUser, raw: map[string]any{"model": "X"}},
 		{id: LayerRepoLocal, scope: AuthRepo},
 	}
-	attempted, found := rejectedWrite(layers, "model", "X", AuthorityRankOf(AuthRepo))
+	attempted, found := rejectedWrite(layers, []string{"model"}, "X", AuthorityRankOf(AuthRepo))
 	if found {
 		t.Fatalf("a lower write equal to the winning value must not be flagged, got %v", attempted)
 	}
+}
+
+// TestSetPath covers the nested-path setter used by value-lock pinning.
+func TestSetPath(t *testing.T) {
+	m := map[string]any{"features": map[string]any{"other": "Z"}}
+	setPath(m, []string{"features", "flag"}, "X")
+	feats := m["features"].(map[string]any)
+	if feats["flag"] != "X" || feats["other"] != "Z" {
+		t.Fatalf("nested set must pin leaf and preserve siblings, got %v", feats)
+	}
+	// A non-object intermediate is replaced so the pin still lands.
+	m2 := map[string]any{"a": "scalar"}
+	setPath(m2, []string{"a", "b"}, 1)
+	if m2["a"].(map[string]any)["b"] != 1 {
+		t.Fatalf("non-object intermediate must be replaced, got %v", m2)
+	}
+	// Empty path is a no-op (no panic).
+	setPath(m2, nil, "ignored")
 }
 
 // --- collision helpers ------------------------------------------------------

@@ -1310,6 +1310,18 @@ value-merge behavior changed. Code: `internal/config/authority.go`,
 `resolveSnapshot` so both the flat and layered resolvers honor it; negative-control suite in
 `internal/config/authority_test.go` + `authority_apply_test.go`.
 
+**Security-audit hardening (round 2).** A cross-brain audit found the first cut tested only the
+SAFE direction; these exploit-direction holes are now closed and covered by exploit-direction
+negative controls: (A) grants require a **strictly-higher** granter (`g > c`) — a peer cannot
+confer its own rank, and the grant table rejects same-rank/downgrade **overwrite** of an incumbent
+grant; (B) a **lower** deny can no longer erase a **higher/peer** allow — deny application is now
+provenance-aware (a member survives when its highest contributor outranks the deny owner); (D)
+`value_locks` traverse the **dot field-path** (copy-on-write) so a lock on `features.flag` pins the
+nested value, not a literal top-level key; and malformed `locks`/`authority_grants` now **fail
+closed** (a resolve-time validation error), never a silent skip. Conferring org-level authority
+onto an org source remains the deferred trusted-root/governance bootstrap (§15.7) — it does not
+flow through the peer guard.
+
 **From D1a (Amendment 1 — authority/value two-axis + source-authority registry):**
 1. **[DONE] Policy-authority pass (Phase 1).** A resolve phase ahead of the existing value-merge
    applies the **AUTHORITY-RANK** total order (`org > team > repo > user`, deny-overrides, higher
