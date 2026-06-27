@@ -33,7 +33,7 @@ evidence actually supports, no more:
 - **Fold narrow + caveated when the result is narrow.** If the verdict held for one task
   family, one regime, or one condition, the ratified decision says exactly that — the scope is
   part of the decision, not a footnote dropped on the way to a clean headline. The
-  depth-degradation arc's durable findings were the *small* ones that survived the audit (relay
+  experiment arc's durable findings were the *small* ones that survived the audit (relay
   loss → structured hand-backs; the infra nesting ceiling), never the headline claim.
 - **Record the unsettled axes explicitly.** Every axis the run could NOT decide — the
   confound it couldn't separate, the regime it couldn't reach, the mechanism left open — is

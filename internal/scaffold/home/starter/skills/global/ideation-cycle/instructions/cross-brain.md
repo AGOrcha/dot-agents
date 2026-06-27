@@ -20,7 +20,7 @@ Same independent-brain discipline at all three; what changes is whether it's inv
 design, a conclusion, or a trade-off choice. The two gates are the load-bearing reason the
 audit is **cross-harness, not same-model**: a self-audit reliably catches *internal* faults
 but structurally cannot catch "wrong experiment" / "hollow null" / over-generalized claim —
-only a different brain does (caught us 3× in the depth-degradation arc).
+only a different brain does (caught us 3× in this skill's own experiment arc).
 
 ## Quota discipline — serialize the codex calls
 
@@ -41,8 +41,8 @@ choice across competing values, not an empirical fact. A second brain that argue
 Same-model self-review rubber-stamps the option you already lean toward — it reads the
 fork as "justifying X" rather than "is X actually better than the alternative?". A
 different-model reviewer, briefed to argue against, surfaces the costs you discounted.
-This is the same dynamic that makes cross-harness review the catch for hollow tests
-(`tests-must-drive-the-production-path`), applied to design choices.
+This is the same dynamic that makes cross-harness review the catch for hollow tests,
+applied to design choices.
 
 ## How to run it
 

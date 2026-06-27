@@ -103,15 +103,15 @@ Every hand-back from a dispatched worker (and every hop → hop in a multi-hop c
 **structured / pointer-based: the artifact path(s) + a structured constraint/decision
 checklist — NOT a retold prose summary.** This is not a style preference; it is an
 evidence-backed rule. Lossy summary relay verifiably drops **non-reconstructable** detail and
-that loss **reaches the deliverable** (evidence sidecar
-`evidence/depth-degradation-dogfood.md` v3 family-2: a summarised hand-back compressed away an
-arbitrary schema choice → terminal artifact 16/16 → 13/16; verbatim relay was lossless across
-8 hops). State this rule in every worker bundle — it binds every subagent and hop you spawn.
+that loss **reaches the deliverable** (in a measured case, a summarised hand-back compressed
+away an arbitrary schema choice → terminal artifact 16/16 → 13/16; verbatim relay was lossless
+across 8 hops). State this rule in every worker bundle — it binds every subagent and hop you
+spawn.
 
 If an experiment's own SUBJECT is multi-hop delegation, it must be **driver-orchestrated
 hop-by-hop** (a fresh top-level `Agent` per hop, relay via on-disk file), never recursively
-nested: nested `Agent`-tool delegation collapses past ~hop 4 *on the current harness* (sidecar
-v2/v3 fold-back; this ceiling is per-harness — re-assess for any new harness), and bundles for
+nested: nested `Agent`-tool delegation collapses past ~hop 4 *on the current harness* (this
+ceiling is per-harness — re-assess for any new harness), and bundles for
 such experiments must forbid CLI-driver improvisation.
 
 ## Power + regime check (on the gathered evidence)

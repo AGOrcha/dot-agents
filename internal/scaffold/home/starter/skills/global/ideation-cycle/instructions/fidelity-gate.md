@@ -6,9 +6,8 @@ unsound — a strawman model that trivially holds, a non-discriminating assertio
 would pass, an input that dodges the hard case, or a self-reported mutation-check that
 was never really run. No prototype result informs the spec until it clears this gate.
 
-Canonical reference: lesson `prototype-experiment-fidelity-gate`. This file is the
-operational checklist; that lesson is the why. It is the experiment-level lift of
-`tests-must-drive-the-production-path` — from "is the code correct?" to "is the
+This file is the operational checklist for the fidelity gate — and the why behind it. It is
+the experiment-level lift of test-fidelity discipline — from "is the code correct?" to "is the
 **experiment** valid?"
 
 ## The two soundness axes
@@ -21,7 +20,7 @@ Every prototype is gated on both:
 
 ## The four levels of discrimination (a green self-audit usually only proves the first)
 
-"Does it discriminate?" is not one question. The depth-degradation arc (v1–v4) surfaced four
+"Does it discriminate?" is not one question. The experiment arc (v1–v4) surfaced four
 distinct levels, and an experiment can pass the lower ones while failing a higher one — which
 is exactly how three runs each *felt* like the win and were each reined in by the independent
 audit. Separate them explicitly:

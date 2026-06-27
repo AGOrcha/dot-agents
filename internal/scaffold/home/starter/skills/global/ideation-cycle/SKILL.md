@@ -1,15 +1,15 @@
 ---
 name: "ideation-cycle"
-description: "Fork-resolution loop: turn a HARD or OPEN design fork into a ratified, fidelity-audited decision + evidence. Use when a briefing alone can't decide a fork — an under-specified spec decision, a deferred architectural question, a recurring 'we keep re-explaining this', or a [PROPOSED] item — and you need to DISCOVER the answer: empirical prototype (under the prototype-experiment-fidelity-gate) → independent cross-harness audit → cross-brain the judgment calls → ratified decision. Composable compound: it RUNS kg-brief for grounding and is dispatchable from kg-ideate Phase 2 (spec-scaffold) for hard forks, AND independently invocable for a one-off design question. It RETURNS the ratified decision + evidence sidecar; spec-scaffold writes the spec prose. Not the authoring front-end (that is kg-ideate) and not implementation (that is isp)."
+description: "Fork-resolution loop: turn a HARD or OPEN design fork into a ratified, fidelity-audited decision + evidence. Use when a briefing alone can't decide a fork — an under-specified spec decision, a deferred architectural question, a recurring 'we keep re-explaining this', or a [PROPOSED] item — and you need to DISCOVER the answer: empirical prototype (under a mandatory fidelity gate) → independent cross-harness audit → cross-brain the judgment calls → ratified decision. Composable compound: it RUNS kg-brief for grounding and is dispatchable from kg-ideate Phase 2 (spec-scaffold) for hard forks, AND independently invocable for a one-off design question. It RETURNS the ratified decision + evidence sidecar; spec-scaffold writes the spec prose. Not the authoring front-end (that is kg-ideate) and not implementation (that is isp)."
 argument-hint: "[<fork-or-spec-id> | --spec <path> | --question \"<open design question>\" | --brief <briefing-path>]"
 # tier: compound. ideation-cycle orchestrates delegated workers (prototype authors, the
 # independent cross-harness auditor, the cross-brain reviewer) with UNBOUNDED judgment over
 # which to run and how to weigh them — that is a compound, not a bounded molecule.
 tier: compound
 # Composition is governed by judgment-autonomy, NOT tier-adjacency: a compound MAY call
-# molecules/compounds (refined tiering delta:
-# .agents/proposals/skill-tiering-molecule-composition.md). NOTE: the tiering contract's old
-# "fidelity degrades past depth ~2–3 hops" premise did NOT replicate (sidecar v1–v3). v4 found a
+# molecules/compounds. NOTE: the tiering contract's old
+# "fidelity degrades past depth ~2–3 hops" premise did NOT replicate across the experiment arc
+# (v1–v3). v4 found a
 # NARROW drift on error-prone COMPOUNDING work (not hop depth), GATE-2-audited NOT-SOUND for the
 # broad claim; mechanism deferred to v5. The real, evidence-backed bounds are: infra
 # delegation-nesting ceiling (~hop 4), RELAY DISCIPLINE (structured/pointer hand-backs, never
@@ -28,7 +28,7 @@ calls:
   - dogfood-decision
 # Deep multi-hop delegation must be DRIVER-ORCHESTRATED hop-by-hop (fresh Agent per hop, relay
 # via on-disk artifact), NOT recursively nested — nested Agent-tool delegation collapses past
-# ~hop 4 on the CURRENT harness (reproduced; sidecar v2/v3; re-assess per harness). Reuse of an
+# ~hop 4 on the CURRENT harness (reproduced; re-assess per harness). Reuse of an
 # upstream briefing is gated on an inputs_digest + dependency-manifest freshness check
 # (see instructions/ground-via-kg-brief.md).
 dispatchable_from:
@@ -59,10 +59,7 @@ It is **not** the whole authoring front-end and **not** implementation:
 (the evolved, fidelity-gated form of that transition). It **RETURNS** ratified decisions + a
 per-fork evidence sidecar; **`spec-scaffold` writes the spec prose**, then `kg-ideate` Phases
 3–4 (`plan-scaffold`, handoff) continue unchanged. See `instructions/composition.md` for the
-segment boundary, the relay-discipline hand-back rule, and the handoff. Canonical
-formalization: `.agents/workflow/specs/ideation-system-composition/design.md` (DRAFT — owner-ruled,
-pending human ratification; no longer blocked on v4 — v4 folded narrow, v5 deferred; the
-depth/compounding claims rest on the evidence sidecar).
+segment boundary, the relay-discipline hand-back rule, and the handoff.
 
 ## The scientific-method spine (the documented hard-fork path)
 
@@ -82,9 +79,9 @@ or ops/infra; only the **evidence form** changes (see the evidence-form table in
    *conclusion*. Both gates are the same cross-harness discipline at the two points it pays off.
 7. **Null is first-class;** iterate or extract the sound subset, fold narrow + caveated.
 
-This spine was **empirically validated** in the depth-degradation experiment arc (v1–v4 +
-GATE-1/GATE-2 audits; see `prototype-experiment-fidelity-gate` and
-`.agents/proposals/scientific-method-spine-domain-general.md`) — it encodes a proven method.
+This spine was **empirically validated** through a multi-version experiment arc (v1–v4 +
+GATE-1/GATE-2 audits; the operational checklist is `instructions/fidelity-gate.md`) — it
+encodes a proven method.
 
 ## Operating posture (read before starting)
 
@@ -95,8 +92,8 @@ GATE-1/GATE-2 audits; see `prototype-experiment-fidelity-gate` and
   source for a factual claim, a load test for infra. Never settle a determinable fork by
   opinion; never fake-empiricize a judgment call.
 - **The fidelity gate is mandatory for any prototype-based claim.** No prototype result
-  informs the decision until it passes the gate in step 4. See lesson
-  `prototype-experiment-fidelity-gate` and `instructions/fidelity-gate.md`.
+  informs the decision until it passes the gate in step 4. See
+  `instructions/fidelity-gate.md`.
 - **Dispatch the authoring; orchestrate, don't hand-build.** The ideation driver scopes,
   steers, and audits. Prototypes and spec drafts are authored by dispatched subagents
   (Hybrid orchestration model). The driver's leverage is framing the forks and running
@@ -146,8 +143,9 @@ GATE-1/GATE-2 audits; see `prototype-experiment-fidelity-gate` and
    decision; **null is first-class**. **Relay discipline:** every hand-back from a dispatched
    worker (and hop→hop in any multi-hop chain) MUST be structured/pointer-based — artifact path
    + a constraint/decision checklist — never retold prose. Lossy summary relay drops
-   non-reconstructable detail that reaches the deliverable (evidence sidecar v3 family-2:
-   16→13). Deep delegation is driver-orchestrated hop-by-hop, not recursively nested (nested
+   non-reconstructable detail that reaches the deliverable (measured: a lossy hand-back
+   degraded the terminal artifact 16→13). Deep delegation is driver-orchestrated hop-by-hop,
+   not recursively nested (nested
    `Agent` delegation collapses past ~hop 4 on the current harness; the ceiling is per-harness,
    re-assess as the harness set grows).
 
@@ -180,8 +178,8 @@ Load → `instructions/composition.md` — the role-split with `kg-ideate`, how 
 `kg-brief` grounding is reused-by-artifact-when-fresh (and re-run on staleness), the segment
 boundary (kg-ideate Phase 2 autonomous triage → hard forks run the loop), the relay-discipline
 hand-back rule, the two invocation modes (dispatched vs standalone), and the engineering bounds
-(infra nesting ceiling + relay discipline — NOT a measured fidelity cliff; see the evidence
-sidecar). Read this whenever invoked from `kg-ideate`.
+(infra nesting ceiling + relay discipline — NOT a measured fidelity cliff). Read this whenever
+invoked from `kg-ideate`.
 
 ## Gotchas
 
