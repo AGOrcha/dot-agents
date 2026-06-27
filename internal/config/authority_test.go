@@ -224,13 +224,17 @@ func TestResolveAuthorityGrants_EmptyIsClean(t *testing.T) {
 }
 
 func TestValidFieldPathAndArrayIndex(t *testing.T) {
-	good := []string{"model", "features.flag", "a.b.c"}
+	good := []string{"model", "features.flag", "a.b.c", "go-cli", "graph_bridge", "kebab-case-key"}
 	for _, p := range good {
 		if err := validFieldPath(p); err != nil {
 			t.Errorf("validFieldPath(%q) unexpected error: %v", p, err)
 		}
 	}
-	bad := []string{"", "a..b", "skills.0", "12"}
+	bad := []string{
+		"", "a..b", "skills.0", "12", // empty/array-index
+		" model", "model ", "a. b", "skills risky", // whitespace
+		"skills[0]", "a.b[1]", "feat:ure", // brackets/colon
+	}
 	for _, p := range bad {
 		if err := validFieldPath(p); err == nil {
 			t.Errorf("validFieldPath(%q) must reject", p)
@@ -241,6 +245,35 @@ func TestValidFieldPathAndArrayIndex(t *testing.T) {
 	}
 	if isArrayIndex("a1") || isArrayIndex("") {
 		t.Error("non-digit / empty segments are not array indices")
+	}
+}
+
+func TestValidToken(t *testing.T) {
+	for _, ok := range []string{"risky", "risky-skill", "snake_case", "Mixed123"} {
+		if err := validToken(ok, "member"); err != nil {
+			t.Errorf("validToken(%q) unexpected error: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", " x", "x ", "a b", "x[0]", "a:b", "tab\tx"} {
+		if err := validToken(bad, "member"); err == nil {
+			t.Errorf("validToken(%q) must reject", bad)
+		}
+	}
+}
+
+func TestValidateDenyLock(t *testing.T) {
+	if err := validateDenyLock("skills:risky-skill"); err != nil {
+		t.Errorf("clean deny_lock must validate, got %v", err)
+	}
+	bad := []string{
+		"skills", ":risky", "skills:", "skills:risky:extra", // colon count / empty token
+		"skills :risky", "skills: risky", // whitespace around colon
+		"skills:risky[0]", "sk ills:risky", // bracket / whitespace token
+	}
+	for _, d := range bad {
+		if err := validateDenyLock(d); err == nil {
+			t.Errorf("validateDenyLock(%q) must reject", d)
+		}
 	}
 }
 

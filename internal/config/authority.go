@@ -3,9 +3,18 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 )
+
+// lockTokenRe is the STRICT grammar for a lock path segment or a deny-lock
+// category/member token: a clean identifier — letters, digits, `_`, `-` — with no
+// whitespace, brackets, dots, colons, or control characters. Real config keys
+// (app types like `go-cli`, feature-flag names, profile slugs) are all clean
+// identifiers, so this rejects only mistyped tokens. A token failing the grammar
+// is a fail-closed resolve error, never silently trimmed or no-op'd (§15.9/D1a).
+var lockTokenRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // authority.go implements the §15 D1a authority/value two-axis resolver — the
 // policy-authority pass (Phase 1) that runs AHEAD of the existing value-merge
@@ -448,32 +457,59 @@ func validateLockSpec(spec PolicyLockSpec) error {
 		}
 	}
 	for _, d := range spec.DenyLocks {
-		field, _, ok := splitDenyLock(d)
-		if !ok {
-			return fmt.Errorf("malformed deny_lock %q: want \"field:member\"", d)
-		}
-		if err := validFieldPath(field); err != nil {
-			return fmt.Errorf("malformed deny_lock field %q: %w", field, err)
+		if err := validateDenyLock(d); err != nil {
+			return fmt.Errorf("malformed deny_lock %q: %w", d, err)
 		}
 	}
 	return nil
 }
 
-// validFieldPath checks a dot-separated lock path fail-closed. Empty paths/
-// segments are rejected, and array-index segments (all-digit) are rejected as
-// unsupported in v1 (§15.9/D1a) — array-index paths are NOT silently treated as
-// map keys.
+// validateDenyLock checks a "category:member" deny-lock fail-closed: EXACTLY one
+// `:` separator, with a valid field-path category and a clean-identifier member on
+// either side. Whitespace ("skills :risky", "skills: risky"), bracket notation,
+// missing/empty tokens, or extra colons are all errors.
+func validateDenyLock(raw string) error {
+	if strings.Count(raw, ":") != 1 {
+		return fmt.Errorf("want exactly one ':' separating category:member")
+	}
+	field, member, ok := splitDenyLock(raw)
+	if !ok {
+		return fmt.Errorf("empty category or member")
+	}
+	if err := validFieldPath(field); err != nil {
+		return err
+	}
+	return validToken(member, "member")
+}
+
+// validFieldPath checks a dot-separated lock path fail-closed: every segment must
+// be a clean identifier (lockTokenRe), and array-index segments (all-digit) are
+// rejected as unsupported in v1 (§15.9/D1a) — array-index paths are NOT silently
+// treated as map keys.
 func validFieldPath(path string) error {
 	if path == "" {
 		return fmt.Errorf("empty path")
 	}
 	for _, seg := range strings.Split(path, ".") {
-		if seg == "" {
-			return fmt.Errorf("empty path segment")
+		if err := validToken(seg, "path segment"); err != nil {
+			return err
 		}
 		if isArrayIndex(seg) {
 			return fmt.Errorf("array-index segment %q is unsupported in v1", seg)
 		}
+	}
+	return nil
+}
+
+// validToken enforces the strict identifier grammar (lockTokenRe) on a single
+// path segment or deny-lock member, rejecting empty/whitespace/bracket/colon/
+// control-char tokens with a clear error.
+func validToken(tok, kind string) error {
+	if tok == "" {
+		return fmt.Errorf("empty %s", kind)
+	}
+	if !lockTokenRe.MatchString(tok) {
+		return fmt.Errorf("%s %q is not a clean identifier (letters/digits/_/- only, no whitespace or brackets)", kind, tok)
 	}
 	return nil
 }

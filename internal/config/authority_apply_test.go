@@ -315,6 +315,67 @@ func TestExploit_UnknownLockFieldFailsClosed(t *testing.T) {
 	}
 }
 
+// EXPLOIT D3 (round 4): a lock path/member that fails the strict identifier
+// grammar (whitespace, brackets, bad colon count) must FAIL CLOSED — a mistyped
+// admin deny can never silently bind nothing.
+func TestExploit_MalformedLockGrammarFailsClosed(t *testing.T) {
+	valueLockCases := map[string]string{
+		"path with space":     "skills: risky",
+		"leading space path":  " model",
+		"trailing space path": "model ",
+		"bracket notation":    "skills[0]",
+	}
+	for name, path := range valueLockCases {
+		t.Run("value_lock/"+name, func(t *testing.T) {
+			_, err := resolve(t, layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+				"value_locks": map[string]any{path: "x"},
+			}}))
+			if err == nil || !strings.Contains(err.Error(), "malformed") {
+				t.Fatalf("malformed value_lock path %q must fail closed, got %v", path, err)
+			}
+		})
+	}
+
+	denyLockCases := map[string]string{
+		"space after colon":  "skills: risky",
+		"space before colon": "skills :risky",
+		"no colon":           "skills",
+		"empty category":     ":risky",
+		"empty member":       "skills:",
+		"extra colon":        "skills:risky:extra",
+		"bracket member":     "skills:risky[0]",
+	}
+	for name, deny := range denyLockCases {
+		t.Run("deny_lock/"+name, func(t *testing.T) {
+			_, err := resolve(t, layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+				"deny_locks": []any{deny},
+			}}))
+			if err == nil || !strings.Contains(err.Error(), "malformed") {
+				t.Fatalf("malformed deny_lock %q must fail closed, got %v", deny, err)
+			}
+		})
+	}
+
+	// NO FALSE POSITIVE: clean tokens (incl. hyphenated identifiers) still resolve.
+	snap := mustResolve(t,
+		layer(LayerUserLocal, map[string]any{
+			"features": map[string]any{"graph_bridge": "on"},
+			"skills":   []any{"risky-skill"},
+		}),
+		layer(LayerRepoLocal, map[string]any{"locks": map[string]any{
+			"value_locks": map[string]any{"features.graph_bridge": "off"},
+			"deny_locks":  []any{"skills:risky-skill"},
+		}}),
+	)
+	m, _ := snap.EffectiveRaw()
+	if m["features"].(map[string]any)["graph_bridge"] != "off" {
+		t.Fatalf("clean value_lock must still apply, got %v", m["features"])
+	}
+	if containsStr(snap.Effective.Skills, "risky-skill") {
+		t.Fatalf("clean deny_lock must still apply, got %v", snap.Effective.Skills)
+	}
+}
+
 // EXPLOIT C (round 3): overlapping value-lock paths are ambiguous and rejected
 // deterministically (fail-closed), not resolved in Go map-iteration order.
 func TestExploit_OverlappingLockPathsRejected(t *testing.T) {

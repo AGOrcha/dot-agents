@@ -1332,6 +1332,16 @@ them in nondeterministic Go map order; disjoint sibling paths (`features.a`, `fe
 **Array-index path segments are unsupported in v1** — an all-digit segment (e.g. `skills.0`) in a
 value_lock or deny_lock path is a validation error, not silently treated as a map key.
 
+**Round-4 hardening (strict lock grammar).** The claim "a mistyped admin deny can never silently
+bind nothing" now holds for the token grammar too, not just unknown keys. A value_lock path segment
+and a deny_lock `category:member` token must be a **clean identifier** — letters, digits, `_`, `-`
+(the alphabet real config keys use: app types like `go-cli`, feature-flag names, profile slugs) —
+with **no whitespace, brackets, colons-in-token, dots-in-segment, or control characters**, and a
+deny_lock must have **exactly one** `:` separating two non-empty valid tokens. Any token that fails
+the grammar (`skills: risky`, `skills :risky`, `" model"`, `model `, `skills[0]`, `:risky`,
+`skills:`, `skills:risky:extra`) is a **fail-closed resolve error** — never silently trimmed,
+normalized, or no-op'd. So a mistyped lock aborts the resolve instead of binding nothing.
+
 **From D1a (Amendment 1 — authority/value two-axis + source-authority registry):**
 1. **[DONE] Policy-authority pass (Phase 1).** A resolve phase ahead of the existing value-merge
    applies the **AUTHORITY-RANK** total order (`org > team > repo > user`, deny-overrides, higher
