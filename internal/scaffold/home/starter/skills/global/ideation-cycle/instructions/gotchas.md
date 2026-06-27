@@ -13,7 +13,7 @@ The highest-signal failure points. Read before the empirical pass.
   self-reported mutation-check.
 - The independent cross-harness audit's job is to **invalidate**, not confirm. If it
   can't break the experiment, only then is the result usable. Reference:
-  `prototype-experiment-fidelity-gate`.
+  `fidelity-gate.md`.
 
 ## Don't turn the ideation driver into the prototype author
 
@@ -74,9 +74,9 @@ The highest-signal failure points. Read before the empirical pass.
   ONLY as: decompose error-prone compounding chains into verifiable sub-artifacts; prefer a
   code-executing agent for computable closures. NOT a mechanism, NOT a routing law — mechanism
   deferred to **v5**. It is about compounding-chain length, not hop depth.
-- Cite the evidence sidecar (`evidence/depth-degradation-dogfood.md`, §v4/§v4.9). The composition
-  is bounded by ENGINEERING, not a measured cognitive cliff: **infra delegation-nesting ceiling
-  (~hop 4)** + **relay discipline** + **decomposition of compounding work** + hygiene.
+- The composition is bounded by ENGINEERING, not a measured cognitive cliff: **infra
+  delegation-nesting ceiling (~hop 4)** + **relay discipline** + **decomposition of compounding
+  work** + hygiene.
   Tier-adjacency is dropped, so the chain is legal regardless.
 - **These bounds are CURRENT-HARNESS-OBSERVED, not universal laws.** The ~hop-4 ceiling and the
   v4 capability map were measured on Claude Code's `Agent` tool + `codex exec`; **re-assess per
@@ -87,7 +87,8 @@ The highest-signal failure points. Read before the empirical pass.
 ## Relay hand-backs MUST be structured/pointer-based — never retold prose
 
 - The one positive finding: lossy summary relay drops **non-reconstructable** detail and it
-  **reaches the deliverable** (sidecar v3 family-2: 16→13). Every hand-back (worker → driver,
+  **reaches the deliverable** (measured: a lossy hand-back degraded the terminal artifact
+  16→13). Every hand-back (worker → driver,
   hop → hop) returns the **artifact path + a constraint/decision checklist**, not a prose
   retelling. Reconstructable defaults survive a retell; arbitrary structural detail does not.
 - Deep multi-hop delegation is **driver-orchestrated hop-by-hop** (fresh `Agent` per hop,
@@ -105,8 +106,7 @@ The highest-signal failure points. Read before the empirical pass.
 
 - A hard fork's prototype + negative-control + cross-brain audit is its own sidecar
   artifact, LINKED from the decision entry (anticipating the lineage `derives_from` evidence
-  edge). Don't paste it into the spec body or bury it in transient task notes. The founding
-  instance is this skill's own `evidence/depth-degradation-dogfood.md`.
+  edge). Don't paste it into the spec body or bury it in transient task notes.
 
 ## Don't let the spec become a plan
 

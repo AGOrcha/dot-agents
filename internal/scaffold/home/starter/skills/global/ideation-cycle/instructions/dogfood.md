@@ -28,8 +28,7 @@ corpus? Dogfood it before the loop is closed.
 If the cycle corrected a wrong assumption — a prototype that proved the wrong thing, a
 fork misclassified, a baseline decision missed — capture it in
 `.agents/lessons/<name>/LESSON.md` (or extend an existing one) and update the index. The
-two anchor lessons for this skill — `prototype-experiment-fidelity-gate` and
-`tests-must-drive-the-production-path` — both came from exactly this kind of close-out.
+fidelity gate (`fidelity-gate.md`) itself came from exactly this kind of close-out.
 
 ## The loop is closed when
 
