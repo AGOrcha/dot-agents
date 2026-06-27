@@ -753,3 +753,285 @@ near-misses, not depth or lost-in-the-middle drift.
   omission only matters if it reaches the deliverable, and whether it does is task-dependent
   (reconstructable vs arbitrary). The fidelity gate should require "score the thing that ships,"
   not the intermediate relay, as the primary metric.
+
+---
+
+## v4 — compounding constraints x model-capability variety
+
+Fourth dogfood pass. v1–v3 returned a robust null on same-agent degradation but were
+**power-limited**: every constraint family was LOCAL and self-checkable, so Opus 4.8 (and even
+codex/GPT) sat at a ~97.6% ceiling and "no drift" could not be separated from "task too easy."
+v3's calibration wrongly concluded "no fair sub-90% constraint set exists" — it had only tested
+ONE family (local explicit formatting). v4 fixes the POWER flaw with **both** levers the prior
+runs/audits missed:
+
+- **FIX 1 — COMPOUNDING / STATEFUL constraints** (Aleph principle, logicalintelligence.com):
+  difficulty comes from *compounding fragility* — "reasoning chains become deeper, search spaces
+  fragile, tiny mistakes compound into complete failure"; "no partial credit"; the system must
+  "maintain consistency across long chains without drifting into an invalid state." So the hard
+  constraints are **referential / stateful / non-reconstructable** (an early arbitrary choice must
+  be tracked and CASCADES if dropped), not independent formatting rules a model trivially
+  self-checks.
+- **FIX 2 — MODEL-CAPABILITY VARIETY.** Run the SAME tasks across capability tiers (Opus 4.8,
+  Sonnet 4.6, Haiku 4.5 via the `Agent` `model` param; GPT-5.5 via `codex exec`). Weaker tiers
+  have lower ceilings → they drift where Opus won't → discrimination, AND the practical payoff:
+  a CAPABILITY × COMPLEXITY MAP for routing work to the right model.
+
+- **Harnesses:** Claude Code (Opus 4.8 `claude-opus-4-8[1m]`, Sonnet 4.6, Haiku 4.5 via fresh
+  `Agent` subagents, one per trial); `codex exec` (codex-cli 0.142.0, model `gpt-5.5`, reasoning
+  effort high) as cross-harness. **Date:** 2026-06-26.
+- **Harness/eval code:** `<scratchpad>/depth-exp-v4/` — `gen.py` (both families, seeded,
+  randomised arbitrary choices per trial), `score.py` (deterministic graded+binary scorer),
+  `mutation_test.py` (per-constraint instrument + cascade proof), `agg.py` (aggregator),
+  `run_codex*.sh`, `trials/<fam>/<level>/s<seed>/`, `gpt_clean/`. Full path:
+  `/private/tmp/claude-502/-Users-nikashp-proj-docs-dot-agents/327154c6-3b96-4f48-b9c5-237263d27ec2/scratchpad/depth-exp-v4/`.
+  Kept out of the repo tree / coverage gate per `empirical-pass.md` isolation rule.
+
+### v4.1 Design — two compounding, meta-loop-shaped families
+
+Both families are **deterministically checkable against a ground truth the experimenter
+generates** (the agent is never trusted for truth), **non-reconstructable** (random ids / deltas
+re-seeded per trial — cannot be regenerated from defaults), and **compounding** (one early miss
+cascades). The agent reasons in-context and writes a YAML artifact; the scorer parses and
+validates it. **The pure-reasoning condition is enforced by instruction** ("do NOT write or
+execute any code; reason directly") — Claude subagents complied (2 tool calls each: read input +
+write answer; verified by usage traces and by sub-100% scores, which a truth-peek would have
+made impossible).
+
+- **Family A — dependency-DAG transitive closure (TASKS.yaml-shaped).** Given N tasks with random
+  3-char ids and a random acyclic direct-dependency DAG, the agent must emit, per task, the FULL
+  TRANSITIVE CLOSURE of its dependencies (`all_deps`, sorted) and the longest-chain `depth`, plus
+  a global `total_transitive_edges` invariant. Compounding: each closure = union of its parents'
+  closures, so a single early wrong edge propagates to every descendant and breaks the global
+  total. Realistic: this is exactly what a planner/build-system does to a TASKS.yaml DAG.
+- **Family B — running-balance ledger fold (stateful config/counter).** Given A accounts and M
+  ordered `post acct delta` ops, the agent must emit the running balance AFTER each post, the
+  final balances, and a `total` invariant. Compounding: balance is a per-account fold; one early
+  arithmetic slip cascades to all later balances of that account and the total. Realistic: a
+  stateful config/ledger with a running counter that must stay consistent.
+
+Complexity ladder (re-seeded N=5 per cell unless noted): **moderate / hard / xhard / xxhard /
+xxxhard** = Family A `N∈{8,16,24,32,48}` nodes (max depth up to 14, up to ~836 transitive
+edges at xxxhard); Family B `(accounts, posts) ∈ {(3,10),(5,24),(6,40),(8,60),(10,100)}`.
+
+**Metric (graded AND binary, per Aleph "no partial credit"):** *graded* = per-constraint
+consistency (fraction of tasks/steps + invariants that held); *binary* = 1 iff the WHOLE artifact
+is internally consistent (every closure/balance correct AND all invariants hold), else 0. The
+binary is the ceiling-breaker: a compounding artifact fails completely on a single early drift.
+
+### v4.2 INSTRUMENT discrimination — PASSED (with cascade proof)
+
+`mutation_test.py` builds the perfect artifact from the ground truth (binary 1, graded full),
+then applies targeted single-constraint mutations and confirms the scorer catches **each**:
+Family A — drop-an-early-edge, wrong-depth, wrong-total all → binary 0 with the exact violation
+flagged; Family B — corrupt-an-early-balance, wrong-final, wrong-total all caught; YAML
+parse-failure → binary 0 (drift into invalid state). **Cascade demonstrated deterministically:**
+re-deriving one task's closure as if a single early dep were dropped corrupts **12** downstream
+tasks in A (graded 17→5); one early fold slip corrupts **8** downstream balances in B. So the
+all-or-nothing binary is a real property of the constraint structure, not a scorer artifact. The
+metric discriminates; where agents score < 100 it is because they **drifted**, not because the
+scorer is blind.
+
+### v4.3 CALIBRATION GATE — sub-ceiling baseline ACHIEVED (the v1–v3 blocker, fixed)
+
+The gate requires the weaker tiers to land **below ~90% binary** on the hard level, or escalate
+until a sub-ceiling appears. Family A delivered it. Haiku 4.5 (pure reasoning) on Family A:
+
+| Level (N nodes) | graded % | binary pass |
+|---|---|---|
+| moderate (8) | 100.0 | 5/5 = 100% |
+| hard (16) | 100.0 | 5/5 = 100% |
+| xhard (24) | 98.4 | **4/5 = 80%** |
+| xxhard (32) | 96.4 | **2/5 = 40%** |
+| xxxhard (48) | 57.6 | **0/5 = 0%** |
+
+A genuine, fair (satisfiable, deterministic, no-precedence) **sub-90% — indeed sub-50% and a full
+0% — baseline** exists for a compounding task. This is the thing v1–v3 lacked. It did **not**
+require unfair arithmetic/packing near-misses (v3's failure mode): the constraints are explicit
+and a perfect fixture is machine-verified at every N. The discriminating ingredient was
+**compounding structure + a binary metric**, not harder local rules.
+
+**Family B is non-discriminating** — Haiku aced it through xxxhard (100 posts, 5/5 binary). A
+clean, important secondary finding: **compounding alone is insufficient; the per-step operation
+must also be error-prone.** Graph-reachability union cascades errors (Family A breaks); integer
+addition does not (Family B holds even at depth 100). Re-seeded randomisation rules out memorised
+answers in both.
+
+### v4.4 MAIN RUN — the capability × complexity raw tables (Family A, pure reasoning)
+
+Binary pass-rate (graded % in parens), fresh `Agent` per trial, identical seeded task per cell
+across tiers:
+
+| Level (N) | Haiku 4.5 | Sonnet 4.6 | Opus 4.8 |
+|---|---|---|---|
+| moderate (8) | 100% (100.0) | — | — |
+| hard (16) | 100% (100.0) | 100% (100.0, N=3) | 100% (100.0, N=3) |
+| xhard (24) | **80%** (98.4) | 100% (100.0) | 100% (100.0, N=3) |
+| xxhard (32) | **40%** (96.4) | 100% (100.0) | **80%** (99.4) |
+| xxxhard (48) | **0%** (57.6) | **incomplete** (0/5)¹ | **80%** (97.6) |
+
+¹ Sonnet 4.6 at xxxhard hit a **distinct, tier-specific failure mode**: its chain-of-thought for
+the 48-node closure exceeded the 32k subagent output budget on all 5 trials (and again on 5 retries
+with an explicit "be terse" instruction), so it never emitted an artifact — **incompletion by
+output-budget exhaustion**, not a wrong answer. Opus completes the same task; Haiku completes it
+(wrongly). Sonnet's measured *accuracy* is therefore a flat 100% through xxhard (32 nodes); its
+accuracy above that is unmeasurable in this harness. Logged as fold-back friction.
+
+**Family B:** Haiku 100% binary at hard/xxhard/xxxhard; not run on stronger tiers (they cannot be
+weaker than Haiku on a task Haiku aces). Non-discriminating for all tiers ≤100 posts.
+
+**The compounding signature — binary ≪ graded:**
+
+| tier/level | graded | binary | gap |
+|---|---|---|---|
+| Haiku xhard | 98.4% | 80% | 18.4pp |
+| Haiku xxhard | 96.4% | 40% | 56.4pp |
+| Haiku xxxhard | 57.6% | 0% | 57.6pp |
+| Opus xxhard | 99.4% | 80% | 19.4pp |
+| Opus xxxhard | 97.6% | 80% | 17.6pp |
+
+A ~2–4% per-element error rate produces a 20–60pp binary-failure rate — **"no partial credit"
+confirmed empirically.** Concrete cascade (Haiku xxxhard s1, graded 2/49): the **3rd task in topo
+order** was the first error and it propagated to **46 of 48** tasks — one early miss → near-total
+artifact failure, the Aleph principle made literal.
+
+### v4.5 The CAPABILITY × COMPLEXITY MAP — drift-onset by model tier
+
+Complexity (Family A node count) at which binary-pass-rate first falls below each threshold:
+
+| Tier | <90% binary at | <50% binary at | notes |
+|---|---|---|---|
+| **Haiku 4.5** | **~24 nodes** (xhard, 80%) | **~32 nodes** (xxhard, 40%) | full collapse (0%) by 48 |
+| **Sonnet 4.6** | **> 32 nodes** (100% through xxhard) | not reached in range | hits output-budget wall at 48 before accuracy drift is measurable |
+| **Opus 4.8** | **~32 nodes** (xxhard, one slip → 80%) | **not reached** (still 80% at 48) | most robust; occasional single-trial cascade, never a majority failure |
+| **GPT-5.5 (agentic)** | n/a — see v4.6 | n/a | bypasses reasoning entirely by writing a solver |
+
+Clean monotone tiering: **Haiku ≪ Sonnet ≈ Opus.** Haiku has a sharp drift cliff between 16 and
+32 nodes; Opus holds ≥80% to 48 nodes; Sonnet matches Opus on accuracy up to the edge of
+measurability. Onset complexity scales with model capability — the map the meta-loop wants.
+
+### v4.6 GPT / codex arm — a fidelity casualty turned finding
+
+The codex/GPT arm as first run was **invalid and discarded** — a load-bearing fidelity catch:
+under the read-only sandbox, gpt-5.5 (a) ran `python3 -c '<transitive-closure solver>'` to
+**compute the answer programmatically** (tool-assisted, not reasoning), and (b) in two trials ran
+`sed/cat truth.json`, **reading the ground-truth file co-located in the trial dir** (answer leak).
+Both inflate it to a meaningless 100%. Fixes applied: input-only `gpt_clean/` dirs (no truth.json)
+and a session-log audit that discards any trial that runs an interpreter or reads `truth`. The
+**clean, no-code re-run was then blocked by a codex usage limit** and could not complete this
+session (retry deferred). So a *fair pure-reasoning* GPT datapoint is **missing**; the only GPT
+observation is the **agentic** one.
+
+That agentic observation is itself the **practical headline**: an agent with code execution
+**solves these compounding tasks trivially with a 5-line script** — its reasoning ceiling is
+irrelevant. (Claude tiers would too, if not forbidden; the discriminating result is a property of
+*unaided* reasoning.) **Routing implication:** compounding/stateful artifact work (DAG closures,
+ledgers, referential invariants) should be routed to a **code-executing** agent, or the
+per-agent compounding-chain length kept inside the model's reliable band (see v4.7).
+
+**Relay arm:** not run this session (codex budget + the discriminating result already secured).
+v3 already quantified summary-relay loss; the v4-specific question — does lossy relay amplify loss
+*more* on weaker tiers / compounding constraints — is deferred. Noted, not hidden.
+
+### v4.7 FIDELITY + POWER + REGIME SELF-AUDIT
+
+- **INSTRUMENT discrimination — PASSED.** Deterministic scorer + full per-constraint mutation
+  suite for both families; cascade proven deterministically (1 early miss → 12/8 downstream).
+  Re-run yourself: `venv/bin/python mutation_test.py` → ALL PASS.
+- **POWER — ACHIEVED (the v1–v3 gap, closed).** A fair, satisfiable, deterministic constraint set
+  lands Haiku at **80% → 40% → 0%** binary and Opus at **80%**. There is now a real sub-ceiling
+  baseline against which "robust" is distinguishable from "too easy." This is the central v4
+  advance: v3 concluded no sub-90% fair set exists; it was wrong because it never tested
+  **compounding** structure with a **binary** metric.
+- **REGIME / EXPERIMENT validity.** Constraints are genuinely *compounding* (a single early drift
+  cascades to binary-fail — shown both synthetically and in a real Haiku trace, 1 error → 46/48
+  tasks), genuinely *non-reconstructable* (random ids/deltas, re-seeded per trial), and *realistic*
+  (DAG closure / ledger fold are meta-loop-shaped). Note this is a **compounding-depth** axis at
+  **small context** (inputs ≲1k tokens) — orthogonal to v3's token-mass axis. v4 found drift that
+  v3 could not, and did so at small context: the limiting factor is **compounding reasoning chain
+  length, not context length.**
+- **Residual confounds (named honestly):**
+  - (a) **The drift is conditional on the pure-reasoning rule.** Forbidding code is what makes the
+    task discriminating; with code, all tiers ace (GPT proved it). The finding is about *unaided*
+    reasoning fidelity — which is the right question for "how much compounding work can I put in one
+    agent hop," but must be stated as such.
+  - (b) **Sonnet's top-end is output-budget-confounded** (32k cap), not a clean accuracy datapoint
+    at 48 nodes.
+  - (c) **Family B non-discriminating** — the result rests on Family A; B shows the boundary
+    condition (compounding needs an error-prone per-step op).
+  - (d) **Small N** (3–5/cell); single-trial slips (Opus xxhard 80% = one slip) carry sampling
+    noise — the *curve shape* is robust, exact per-cell rates are ±1 trial.
+  - (e) **GPT pure-reasoning arm missing** (usage limit) — cross-harness reasoning comparison
+    incomplete; only the agentic condition observed.
+  - (f) **Truth co-located in trial dirs** (Claude arm): mitigated, not eliminated — verified clean
+    by sub-100% scores + 2-tool-call traces; future runs should keep truth out of the agent's cwd
+    from the start (as `gpt_clean/` now does).
+- **Honest null handling:** there is **no null to soften** this time — drift was induced cleanly in
+  Haiku and partially in Opus. Where a tier did NOT drift (Sonnet/Opus on the lower ladder), that is
+  reported as genuine robustness, and Sonnet's 48-node failure is reported as incompletion, not
+  miscalculation.
+
+### v4.8 VERDICT
+
+**(1) Do COMPOUNDING stateful constraints induce same-agent drift where local ones did not?**
+**YES — decisively.** The same model class (Opus 4.8, and a fortiori Haiku) that v1–v3 could not
+push below a 97.6% ceiling on local self-checkable rules **drifts to 40%, 0% (Haiku) and 80%
+(Opus) binary** on compounding referential constraints. The discriminating ingredients were
+exactly the two the prior runs lacked: **referential/stateful structure where an early arbitrary
+choice cascades**, and a **binary "no-partial-credit" metric**. v3's "no fair sub-90% set exists"
+is **refuted** — it was an artifact of testing only local formatting.
+
+**(2) How does drift-onset complexity vary by MODEL tier (the map)?** Monotone with capability.
+Haiku crosses <90% at ~24 nodes and <50% at ~32; Opus holds ≥80% even at 48 and never reaches a
+majority failure in range; Sonnet matches Opus on accuracy up to 32 nodes (then hits an
+output-budget wall). **Drift-onset complexity is a clean function of model tier** — directly usable
+for routing and for sizing per-agent compounding work.
+
+**(3) Does this finally give the same-agent question real POWER?** **YES — sub-ceiling baseline
+achieved** (Haiku 80/40/0%, Opus 80%), the precise thing v1–v3 lacked. The same-agent question is
+now answerable with discrimination rather than a power-limited null.
+
+**(4) Practical — routing tasks to models + designing plans to capability.** (i) **Route
+compounding/stateful artifact work** (DAG closures, dependency planning, ledgers, referential
+schema invariants) **to a code-executing agent**, or keep the **compounding-chain length inside the
+tier's reliable band** — for Haiku-class reasoning that means **≲16–24 nodes per hop**; Opus-class
+tolerates ~48 but with occasional cascade. (ii) **The binary, no-partial-credit nature is the real
+risk**: a tier can be ~97% accurate per element and still fail the *whole artifact* most of the
+time once the chain is long enough — so **decompose long compounding chains into shorter
+independently-verifiable sub-artifacts** (which is precisely what delegation/fan-out with bounded
+write-scopes buys, restated as an honest capability argument rather than a depth-2–3 fidelity
+myth). (iii) **Match verbosity budget to tier**: Sonnet's 48-node incompletion warns that a
+capable model can still fail by exhausting its output budget on a long single-shot reasoning task —
+another argument for decomposition over monolithic compounding prompts.
+
+### v4.9 GATE-2 independent audit — NOT-SOUND for the BROAD claim (fold narrow only)
+
+The independent cross-harness (codex) GATE-2 audit reviewed §v4 and ruled it **NOT-SOUND for
+the broad claim** the v4.8 verdict reaches. The v4.8 self-assessment ("decisively YES", "a clean
+function of model tier") **over-reaches** the evidence; only a narrow finding survives the audit.
+Per the fidelity gate, the audit ruling is recorded here and governs how v4 is folded into the
+spec/proposals.
+
+**What v4 LEGITIMATELY supports (fold ONLY this, caveated):** unaided reasoning degrades on
+error-prone referential / COMPOUNDING tasks — demonstrated on **ONE family** (Family A, DAG
+transitive-closure) under a **binary whole-artifact (no-partial-credit)** metric — strongly on
+weaker tiers (Haiku), holding on Opus. Contract-relevant, all caveated:
+- whole-artifact (no-partial-credit) risk **compounds with task size** on error-prone referential
+  work → an argument for **decomposing into independently-verifiable sub-artifacts** (narrow
+  support for fan-out / delegation with bounded write-scopes).
+- use a **code-executing agent** for computable closures (better-supported than tier-routing —
+  GPT solved it with a 5-line script).
+- the Haiku ≪ Sonnet ≈ Opus map is **suggestive / preliminary, NOT routing-grade.**
+
+**What v4 does NOT establish (the GATE-2 BLOCKERs — do NOT claim):**
+- NOT a clean "compounding-chain LENGTH" mechanism — it confounded node-count, depth,
+  transitive-edge-count (~836), output size, and closure density.
+- NOT a "route by tier" law — small N, one family, one Sonnet output-budget-exhaustion failure
+  mixed into the metric, one Opus slip.
+- NOT generalizable beyond the one error-prone family (Family B / ledger did not cascade).
+
+**Disposition:** fold v4 as **"narrow, preliminary, v5-pending evidence FOR
+decomposition/code-execution,"** NOT as a mechanism or a routing law. The mechanism question
+(isolating compounding-chain length from its confounds) is **deferred to v5** —
+`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`. This audit **clears the v4
+hold**: the tiering reframe can go to human ratification (still DRAFT, no longer blocked on v4).

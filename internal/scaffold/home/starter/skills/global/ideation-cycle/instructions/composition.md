@@ -120,15 +120,23 @@ The original worry was that `kg-ideate → spec-scaffold → ideation-cycle` cro
 dispatch-hop "cliff" the tier contract warns about. We **dogfooded that question** (the first
 use of this very skill on its own founding fork) — see the evidence sidecar
 `evidence/depth-degradation-dogfood.md` (v1 token-recall, v2 multi-constraint drift, v3
-regime-valid token-mass × depth × lossy-relay; two harnesses; **v4 in flight**). What it
-actually shows, and how to act on it:
+regime-valid token-mass × depth × lossy-relay, v4 compounding-constraints × capability; two
+harnesses; **v4 folded narrow per its §v4.9 GATE-2 audit; v5 deferred**). What it actually shows,
+and how to act on it:
 
-- **No same-agent fidelity cliff was FOUND in the tested regime** — constraint-honoring stayed
-  flat through depth 10 and ~15k accumulated tokens, including an adversarial buried-constraint
-  placement, on Opus 4.8 AND codex/GPT. **This null is power-limited** (the depth-1 ceiling held
-  ~97.6%, never sub-90%), so write it as *"no cliff found in the tested regime,"* **never** *"no
-  cliff exists."* The harder referential/stateful regime + weaker-model power is under test in
-  **v4**. Do **not** cite the contract's "degrades past depth ~2–3" as established fact.
+- **No same-agent hop-depth fidelity cliff was FOUND in the tested regime** — constraint-honoring
+  stayed flat through depth 10 and ~15k accumulated tokens on *local self-checkable* constraints,
+  including an adversarial buried-constraint placement, on Opus 4.8 AND codex/GPT. **This null is
+  power-limited** (depth-1 ceiling ~97.6%, never sub-90%), so write it *"no cliff found in the
+  tested regime,"* **never** *"no cliff exists."* Do **not** cite the contract's "degrades past
+  depth ~2–3 hops" as established fact.
+- **v4 found a NARROW drift — on compounding work, not hop depth.** Error-prone, referential,
+  *compounding* constraints with a binary no-partial-credit metric induced drift (Haiku
+  80%→40%→0%; Opus slips to 80%). But its **GATE-2 audit ruled the broad claim NOT-SOUND** (one
+  family; confounded length/edges/output-size; not a route-by-tier law). So it supports only:
+  **decompose** error-prone compounding chains into independently-verifiable sub-artifacts, and
+  prefer a **code-executing agent** for computable closures. Mechanism deferred to **v5**. This is
+  about compounding-chain length, NOT skill-to-skill hop depth.
 - **Tier-adjacency was the wrong lever anyway.** A compound/molecule may call any tier
   (refined delta: `.agents/proposals/skill-tiering-molecule-composition.md`), so the chain is
   legal with no hoist — independent of the cliff question.
@@ -138,6 +146,8 @@ actually shows, and how to act on it:
     So deep multi-hop delegation must be **driver-orchestrated hop-by-hop** (a fresh top-level
     `Agent` per hop, relay via on-disk artifact), never recursively nested.
   - **Relay discipline (below).**
+  - **Decompose error-prone compounding work** (narrow v4 support) — fan-out into bounded,
+    independently-verifiable sub-artifacts rather than one long compounding chain.
   - **Hygiene** — context isolation, parallelism, write-scope discipline, inspectability.
 
 ## Relay discipline (the headline finding — every hand-back is structured/pointer-based)

@@ -62,15 +62,22 @@ The highest-signal failure points. Read before the empirical pass.
   changed). On any mismatch, re-run `kg-brief`. A stale brief poisons every fork downstream —
   re-running is cheap; silently propagating staleness is not.
 
-## Don't cite a depth-2–3 "fidelity cliff" — it didn't replicate
+## Don't cite a depth-2–3 hop "fidelity cliff" — it didn't replicate
 
 - The tier contract's "fidelity degrades past depth ~2–3 hops" premise **did NOT replicate**
-  in our tests (no same-agent cliff found ≤ depth 10 / ~15k tokens, two harnesses — but the
-  null is **power-limited**, ceiling ~97.6%; **v4 in flight**). Write "no cliff found in the
-  tested regime," NEVER "no cliff exists." Cite the evidence sidecar
-  (`evidence/depth-degradation-dogfood.md`). The composition is bounded by ENGINEERING, not a
-  measured cognitive cliff: the **infra delegation-nesting ceiling (~hop 4)** + **relay
-  discipline** + hygiene. Tier-adjacency is dropped, so the chain is legal regardless.
+  (no same-agent hop cliff found ≤ depth 10 / ~15k tokens on local self-checkable constraints,
+  two harnesses; null **power-limited**, ceiling ~97.6%). Write "no cliff found in the tested
+  regime," NEVER "no cliff exists."
+- **v4 found a NARROW drift on COMPOUNDING work** (error-prone referential constraints, binary
+  metric: Haiku 80%→40%→0%, Opus slips to 80%) — but its **GATE-2 audit ruled the broad claim
+  NOT-SOUND** (one family; confounds length/edges/output-size; not a route-by-tier law). Fold it
+  ONLY as: decompose error-prone compounding chains into verifiable sub-artifacts; prefer a
+  code-executing agent for computable closures. NOT a mechanism, NOT a routing law — mechanism
+  deferred to **v5**. It is about compounding-chain length, not hop depth.
+- Cite the evidence sidecar (`evidence/depth-degradation-dogfood.md`, §v4/§v4.9). The composition
+  is bounded by ENGINEERING, not a measured cognitive cliff: **infra delegation-nesting ceiling
+  (~hop 4)** + **relay discipline** + **decomposition of compounding work** + hygiene.
+  Tier-adjacency is dropped, so the chain is legal regardless.
 
 ## Relay hand-backs MUST be structured/pointer-based — never retold prose
 

@@ -9,11 +9,12 @@ tier: compound
 # Composition is governed by judgment-autonomy, NOT tier-adjacency: a compound MAY call
 # molecules/compounds (refined tiering delta:
 # .agents/proposals/skill-tiering-molecule-composition.md). NOTE: the tiering contract's old
-# "fidelity degrades past depth ~2–3 hops" premise did NOT replicate in our tests — see the
-# evidence sidecar (evidence/depth-degradation-dogfood.md, v1–v3; v4 in flight). The real,
-# evidence-backed bounds are the infra delegation-nesting ceiling (~hop 4 in this harness) and
-# RELAY DISCIPLINE (structured/pointer hand-backs, never retold prose). kg-brief is RUN by
-# ideation-cycle as step 1 (reuse-by-artifact when fresh, else re-run).
+# "fidelity degrades past depth ~2–3 hops" premise did NOT replicate (sidecar v1–v3). v4 found a
+# NARROW drift on error-prone COMPOUNDING work (not hop depth), GATE-2-audited NOT-SOUND for the
+# broad claim; mechanism deferred to v5. The real, evidence-backed bounds are: infra
+# delegation-nesting ceiling (~hop 4), RELAY DISCIPLINE (structured/pointer hand-backs, never
+# retold prose), and DECOMPOSING error-prone compounding chains into verifiable sub-artifacts.
+# kg-brief is RUN by ideation-cycle as step 1 (reuse-by-artifact when fresh, else re-run).
 calls:
   - kg-brief        # grounding step 1 (reuse-by-artifact when fresh, else re-run — see below)
   - enumerate-forks
@@ -57,7 +58,8 @@ per-fork evidence sidecar; **`spec-scaffold` writes the spec prose**, then `kg-i
 3–4 (`plan-scaffold`, handoff) continue unchanged. See `instructions/composition.md` for the
 segment boundary, the relay-discipline hand-back rule, and the handoff. Canonical
 formalization: `.agents/workflow/specs/ideation-system-composition/design.md` (DRAFT — owner-ruled,
-pending human ratification + the v4 experiment; the depth claims rest on the evidence sidecar).
+pending human ratification; no longer blocked on v4 — v4 folded narrow, v5 deferred; the
+depth/compounding claims rest on the evidence sidecar).
 
 ## Operating posture (read before starting)
 

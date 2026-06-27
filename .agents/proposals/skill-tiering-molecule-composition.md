@@ -4,8 +4,10 @@
 **Scope:** project-local (markdown per `proposal-routing` — amends a repo spec, not a shared
 `~/.agents/` resource)
 **Status:** proposed (delta against `skill-tiering-contract`). Owner-ruled on direction;
-**DRAFT pending human ratification + the v4 experiment** (referential/stateful constraints ×
-weaker-model power) still in flight. Do not treat as finalized.
+**DRAFT pending human ratification.** **No longer blocked on v4** — v4 returned and is folded
+NARROW (its GATE-2 audit ruled the broad claim NOT-SOUND; see §"what the evidence shows" + sidecar
+§v4.9); the mechanism question is **deferred to v5**
+(`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`). Do not treat as finalized.
 **Created:** 2026-06-26
 **Author:** agent-proposed, capturing an owner ruling, grounded in the evidence sidecar
 **Targets:**
@@ -14,8 +16,9 @@ weaker-model power) still in flight. Do not treat as finalized.
   (the cited "degrades past 2–3 hops" reliability claim).
 **Evidence:**
 - `.agents/workflow/specs/ideation-system-composition/evidence/depth-degradation-dogfood.md`
-  — three throwaway experiments (v1 token-recall, v2 multi-constraint drift, v3 regime-valid
-  token-mass × depth × lossy-relay) + cross-harness codex replication. **v4 in flight.**
+  — four throwaway experiments (v1 token-recall, v2 multi-constraint drift, v3 regime-valid
+  token-mass × depth × lossy-relay, **v4 compounding constraints × capability**) + cross-harness
+  codex replication and GATE-2 audits. **v4 folded narrow (§v4.9 audit); v5 deferred.**
 **Motivated by:**
 - `.agents/workflow/specs/ideation-system-composition/design.md` — the
   `kg-ideate → spec-scaffold → ideation-cycle` chain crossing tier-adjacency, and the
@@ -27,8 +30,9 @@ weaker-model power) still in flight. Do not treat as finalized.
 
 `skill-tiering-contract` is the canonical tier spec. Per `proposal-routing`, a change to it
 is **proposed as a delta**; the owner folds it in after human ratification. This proposal
-captures the owner-ruled direction plus the empirical findings; it is not yet final (v4 in
-flight).
+captures the owner-ruled direction plus the empirical findings (v1–v4 folded, v4 narrow per its
+GATE-2 audit; v5 mechanism deferred); it is **ready for human ratification, no longer blocked on
+v4**, but not yet final.
 
 ## The problem with the current contract — and what the evidence actually shows
 
@@ -49,11 +53,23 @@ are wrong here, and the evidence separates them:
    the >10k "lost-in-the-middle" regime v1/v2 dodged), including an adversarial placement (the
    most-driftable constraint buried at the recency-disfavored level 1). **This null is
    power-limited** (the depth-1 ceiling held at ~97.6%, never the sub-90% needed to fully
-   separate "robust" from "task too easy" — a fair sub-ceiling on self-checkable constraints may
-   not be reachable for frontier models). So: **no cliff was FOUND in the tested regime — NOT
-   "no cliff exists."** The harder referential/stateful regime and weaker-model power are under
-   test in **v4 (in flight)**. The "degrades past depth ~2–3" premise must therefore **not be
-   cited as established fact.**
+   separate "robust" from "task too easy" on *local self-checkable* constraints). So for that
+   regime: **no cliff was FOUND — NOT "no cliff exists."** The "degrades past depth ~2–3 hops"
+   premise must therefore **not be cited as established fact.**
+
+3. **v4 found a NARROW degradation — on compounding work, not on hop-depth.** A fourth run
+   (sidecar §v4) closed the v1–v3 power gap by switching to **error-prone, referential,
+   COMPOUNDING** constraints with a **binary, no-partial-credit** metric: unaided reasoning then
+   drifts (Haiku 80%→40%→0%; Opus slips to 80%) on one family. **But its GATE-2 audit (§v4.9)
+   ruled the broad reading NOT-SOUND:** it is NOT a clean compounding-chain-LENGTH *mechanism*
+   (confounded node-count, depth, ~836 edges, output size, density), NOT a "route by tier" law
+   (small N, one family, one budget-exhaustion failure, one Opus slip), and NOT generalizable
+   beyond the one family. So v4 supports only the **narrow** argument folded in D-refine-2(d)
+   (decompose error-prone compounding work; prefer code execution for computable closures). The
+   **mechanism** question is **deferred to v5**
+   (`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`). Crucially, even the
+   narrow v4 result is about **compounding-chain length, not skill-to-skill hop depth** — it does
+   **not** revive the depth-2–3 hop cliff.
 
 ## The ruling (the delta)
 
@@ -85,10 +101,31 @@ evidence-backed or mechanically real:
 - **(c) Hygiene, not fidelity.** Delegation remains worthwhile for **context isolation,
   parallelism, write-scope discipline, and inspectability** — the honest reasons — not a
   measured depth-2–3 fidelity threshold.
+- **(d) Decompose error-prone COMPOUNDING work — narrow, preliminary support (v4).** A v4 run
+  (sidecar §v4; **GATE-2-audited NOT-SOUND for the broad claim**, see §v4.9) showed that on **one**
+  error-prone, referential, *compounding* task family (DAG transitive-closure) under a **binary,
+  no-partial-credit** metric, unaided reasoning drifts — strongly on a weak tier (Haiku: 80%→40%→0%
+  as the chain grows), and even slips on Opus (80% at the top cell). Because a single early miss
+  cascades to the whole artifact, ~2–4% per-element error becomes a 20–60pp whole-artifact failure.
+  **Narrow, caveated takeaways:** (i) **decompose** long error-prone compounding chains into
+  **independently-verifiable sub-artifacts** — which is exactly what fan-out / delegation with
+  bounded write-scopes buys; this is a *capability* argument for decomposition, stated honestly,
+  NOT a revival of the depth-2–3 myth. (ii) For **computable** closures (DAG reachability, ledger
+  folds, referential invariants), prefer a **code-executing agent** — better-supported than
+  tier-routing (a code-writing agent solved the task with a 5-line script). **Do NOT over-read
+  this:** v4 did NOT isolate a compounding-chain-LENGTH *mechanism* (it confounded node-count,
+  depth, ~836 transitive edges, output size, closure density), is NOT a "route by tier" law (small
+  N, one family, one output-budget-exhaustion failure, one Opus slip), and did NOT generalize
+  beyond the one family (the ledger family did not cascade). The Haiku ≪ Sonnet ≈ Opus map is
+  **suggestive, not routing-grade.** The mechanism question is **deferred to v5**
+  (`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`).
 
 Same-agent composition `calls:` depth carries **no evidence-backed cognitive cap** at the
-depths tested (≤10); any soft depth signal the lint keeps is for **inspectability**, not a
-claimed reliability cliff, and must be labeled as such (and revisited after v4).
+depths tested (≤10) for *local self-checkable* constraints; for *error-prone compounding*
+constraints v4 shows whole-artifact risk that grows with chain size (narrow, one family) →
+decompose rather than impose a generic depth number. Any soft depth signal the lint keeps is for
+**inspectability**, not a claimed reliability cliff, and must be labeled as such (revisited if v5
+isolates a mechanism).
 
 ### D-refine-3 — Lint change
 
@@ -129,8 +166,10 @@ Rule text to add to the contract:
 
 - **§1.2** — soften the cited reliability claim: the "agents degrade past 1–2 / 2–3 hops"
   finding **did not replicate** in our tests (no same-agent cliff ≤ depth 10 / ~15k tokens, two
-  harnesses; null power-limited; v4 pending — cite the sidecar). Keep the *infra* nesting
-  ceiling (~hop 4) as the mechanically-real bound.
+  harnesses; null power-limited — sidecar v1–v3). v4 found a *narrow* drift on **compounding
+  chains** (not hop depth), GATE-2-audited NOT-SOUND for the broad claim; mechanism deferred to
+  v5 — cite the sidecar §v4/§v4.9. Keep the *infra* nesting ceiling (~hop 4) as the
+  mechanically-real bound.
 - **§3 tier table "Intent" (T1)** — "judgment bounded to picking among declared **atoms**" →
   "...among declared **calls (atoms, molecules, or compounds)**."
 - **§4 T1 Composition** — "`calls:` lists the **atoms** it invokes" → "`calls:` lists the
@@ -161,10 +200,14 @@ Rule text to add to the contract:
   **warning**.
 - An atom declaring any downstream call still raises an **error**; > 10-children still warns.
 
-## Open / pending (do not finalize without)
+## Open / pending
 
-- **v4 experiment** (referential/stateful constraints × weaker-model power) — may surface a real
-  same-agent degradation regime the current power-limited null cannot exclude. If it does, §1.2
-  and D-refine-2 get revised again; the relay-discipline rule (D-refine-4) is independent of v4
-  and stands either way.
-- **Human ratification** of the contract delta.
+- **v4 — FOLDED (narrow).** v4 returned; its GATE-2 audit ruled the broad claim NOT-SOUND, so it
+  is folded only as narrow, preliminary support for decomposition + code-execution (D-refine-2(d)).
+  **This proposal is no longer blocked on v4** — it is ready for human ratification.
+- **v5 (DEFERRED)** — `.agents/proposals/v5-compounding-degradation-experiment-deferred.md`: would
+  isolate the compounding-chain-LENGTH mechanism from v4's confounds, across ≥2 error-prone
+  families, with routing-grade N. If v5 passes its own GATE-2, D-refine-2(d) hardens from a
+  caveated heuristic to a mechanism/routing rule; otherwise it stays narrow. The relay-discipline
+  rule (D-refine-4) is independent of v4/v5 and stands either way.
+- **Human ratification** of the contract delta — the only remaining gate.

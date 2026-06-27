@@ -4,8 +4,9 @@
 **Scope:** project-local (markdown per `proposal-routing` — targets this repo's
 `kg-ideate-skill` spec/plan, not a shared `~/.agents/` resource)
 **Status:** **DRAFT — proposed delta against `kg-ideate-skill`.** Owner-ruled on direction;
-**not finally ratified** (the empirical backing is power-limited and the v4 experiment is in
-flight). Do NOT fold into the `kg-ideate-skill` spec until human ratification + v4.
+**not finally ratified** (pending human ratification; **no longer blocked on v4** — v4 folded
+narrow per its GATE-2 audit, v5 deferred). Do NOT fold into the `kg-ideate-skill` spec until human
+ratification.
 **Created:** 2026-06-26
 **Author:** agent-proposed, pending human review
 **Targets:**
@@ -14,7 +15,8 @@ flight). Do NOT fold into the `kg-ideate-skill` spec until human ratification + 
 **Depends on / formalized by:**
 - `.agents/workflow/specs/ideation-system-composition/design.md` (the composition spec — D1–D8)
 - `.agents/workflow/specs/ideation-system-composition/evidence/depth-degradation-dogfood.md`
-  (the depth/relay evidence; **v4 in flight** — backs the relay-discipline rule below)
+  (the depth/relay/compounding evidence; **v4 folded narrow (§v4.9 audit); v5 deferred** — backs
+  the relay-discipline rule below)
 - `internal/scaffold/home/starter/skills/global/ideation-cycle/` (the **compound** this dispatches to)
 
 ---
@@ -107,10 +109,12 @@ rule). Cross-plan dep form `ideation-system-composition/<task>` once that spec h
 
 ## Owner-ruled direction (DRAFT — inherited from the composition spec §7; not finally ratified)
 
-- **Dispatch-hop bound (OQ1) → engineering bounds, not a measured cliff.** The depth-2–3
-  fidelity cliff **did not replicate** (sidecar v1–v3, two harnesses; power-limited null; **v4
-  in flight**). Tier-adjacency is dropped regardless (the chain is legal, no hoist), and the
-  real bounds are the infra delegation-nesting ceiling (~hop 4) + relay discipline + hygiene.
+- **Dispatch-hop bound (OQ1) → engineering bounds, not a measured cliff.** The depth-2–3 hop
+  cliff **did not replicate** (sidecar v1–v3, two harnesses; power-limited null). v4 found a
+  *narrow* drift on compounding work (GATE-2-audited NOT-SOUND for the broad claim; mechanism
+  deferred to v5), supporting only **decomposition** of error-prone compounding chains — not a
+  hop cliff. Tier-adjacency is dropped regardless (the chain is legal, no hoist); the real bounds
+  are the infra delegation-nesting ceiling (~hop 4) + relay discipline + decomposition + hygiene.
   Depends on the tiering refinement
   (`.agents/proposals/skill-tiering-molecule-composition.md`).
 - **Triage authority (OQ3) → AUTONOMOUS with a guard.** Surfaced rationale; human gate is spec

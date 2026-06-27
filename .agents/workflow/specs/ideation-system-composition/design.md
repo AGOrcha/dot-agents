@@ -1,11 +1,13 @@
 # Spec: ideation-system composition — kg-ideate (authoring) ⟷ ideation-cycle (fork-resolution)
 
 **Spec ID:** ideation-system-composition
-**Status:** **DRAFT — owner-ruled on the OQs; pending human ratification + the v4 experiment.**
-The four prior OQs have an owner-ruled direction (§7) folded into the decisions, but no
-artifact here claims final ratification: the empirical backing (evidence sidecar v1–v3) is
-power-limited and a v4 experiment (referential/stateful constraints × weaker-model power) is
-**in flight**. Treat D1–D8 as decided-direction, not ratified contract.
+**Status:** **DRAFT — owner-ruled on the OQs; pending human ratification (no longer blocked on
+v4).** The four prior OQs have an owner-ruled direction (§7) folded into the decisions, but no
+artifact here claims final ratification. v4 has returned and is folded **narrow**: its GATE-2
+audit (sidecar §v4.9) ruled the broad claim NOT-SOUND, so it contributes only preliminary support
+for decomposition/code-execution; the mechanism question is **deferred to v5**
+(`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`). Treat D1–D8 as
+decided-direction, not ratified contract.
 **Created:** 2026-06-26
 **Author:** agent-proposed (drafted with agent assist), pending human review
 **Related:**
@@ -15,8 +17,10 @@ power-limited and a v4 experiment (referential/stateful constraints × weaker-mo
 - `internal/scaffold/home/starter/skills/global/ideation-cycle/SKILL.md` — the
   fork-resolution **compound** this spec formalizes.
 - `.agents/workflow/specs/ideation-system-composition/evidence/depth-degradation-dogfood.md`
-  — the evidence sidecar (D7): v1–v3 depth/relay experiments + cross-harness audit. **v4 in
-  flight.** Source for every depth/relay claim below.
+  — the evidence sidecar (D7): v1–v4 experiments + cross-harness audits. **v4 folded narrow
+  (§v4.9 GATE-2 audit); v5 deferred.** Source for every depth/relay/compounding claim below.
+- `.agents/proposals/v5-compounding-degradation-experiment-deferred.md` — the deferred follow-up
+  that would isolate the compounding-chain-length mechanism v4 only suggested.
 - `.agents/proposals/skill-tiering-molecule-composition.md` — the tiering-contract delta the
   same evidence drives (tier-adjacency dropped; relay discipline added).
 - `.agents/rules/dot-agents/workflow-artifact-model.md` — the spec→plan→tasks→history tiers.
@@ -218,13 +222,24 @@ OQ1 asked whether the `kg-ideate → spec-scaffold → ideation-cycle` chain bre
 bound. We dogfooded the underlying question (evidence sidecar v1–v3, two harnesses) and the
 answer reshapes the decision:
 
-- **The depth-2–3 fidelity cliff did NOT replicate.** No same-agent composition degradation was
-  **found in the tested regime** — flat constraint-honoring through **depth 10 and ~15k
-  accumulated tokens**, including an adversarial buried-constraint placement, on Opus 4.8 and
-  codex/GPT. **This null is power-limited** (depth-1 ceiling ~97.6%, never sub-90%): so **no
-  cliff was FOUND in the tested regime — NOT "no cliff exists."** The harder referential/stateful
-  regime + weaker-model power is under test in **v4 (in flight)**. The tiering contract's "degrades
-  past depth ~2–3" premise must **not** be cited as established fact (sidecar §v3.6).
+- **The depth-2–3 hop fidelity cliff did NOT replicate.** No same-agent composition degradation
+  was **found in the tested regime** — flat constraint-honoring through **depth 10 and ~15k
+  accumulated tokens** on *local self-checkable* constraints, including an adversarial buried-
+  constraint placement, on Opus 4.8 and codex/GPT. **This null is power-limited** (depth-1 ceiling
+  ~97.6%, never sub-90%): so **no cliff was FOUND in that regime — NOT "no cliff exists"** (sidecar
+  §v3.6). The tiering contract's "degrades past depth ~2–3 hops" premise must **not** be cited as
+  established fact.
+- **v4 found a NARROW degradation — on compounding work, not hop depth.** Switching to error-prone,
+  referential, **compounding** constraints with a **binary no-partial-credit** metric induced drift
+  (Haiku 80%→40%→0%, Opus slips to 80% — sidecar §v4). But its **GATE-2 audit (§v4.9) ruled the
+  broad claim NOT-SOUND**: it is NOT a clean compounding-chain-LENGTH mechanism (confounded
+  node-count/depth/edges/output-size/density), NOT a route-by-tier law (small N, one family, one
+  budget-exhaustion failure, one Opus slip), NOT generalizable beyond the one family. It supports
+  only the **narrow** argument to **decompose** error-prone compounding work into
+  independently-verifiable sub-artifacts (an honest capability argument for fan-out — see D6a) and
+  to prefer a **code-executing agent** for computable closures. Mechanism deferred to **v5**
+  (`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`). Note: this is about
+  compounding-chain length, NOT skill-to-skill hop depth — it does not revive the hop cliff.
 - **Tier-adjacency is dropped anyway** — it was always the wrong lever (a molecule/compound may
   call any tier; composition is governed by judgment-autonomy, not which tier calls which). So
   the chain is legal; no hoist is forced. (Delta:
@@ -232,11 +247,13 @@ answer reshapes the decision:
 - **The real, evidence-backed bounds are engineering, not cognitive:** (a) a hard **infra
   delegation-nesting ceiling (~hop 4)** — nested `Agent`-tool delegation collapses past ~hop 4
   (reproduced), so deep delegation must be **driver-orchestrated hop-by-hop**, not recursively
-  nested; (b) **relay discipline** (D8); (c) hygiene — context isolation, parallelism,
-  write-scope, inspectability.
+  nested; (b) **relay discipline** (D8); (c) **decompose error-prone compounding chains** into
+  independently-verifiable sub-artifacts (narrow v4 support — fan-out as a capability argument, not
+  a depth myth); (d) hygiene — context isolation, parallelism, write-scope, inspectability.
 
-So: the chain is fine, but for the honest reason (adjacency was wrong + the bound is infra +
-relay discipline), not because of a 2-hop cognitive cliff we could demonstrate.
+So: the chain is fine, but for the honest reasons (adjacency was wrong; the bounds are infra +
+relay discipline + decomposition of error-prone compounding work), not a 2-hop cognitive cliff we
+could demonstrate.
 
 ### D7 — A hard fork's evidence is a per-fork SIDECAR, linked from the decision (OQ2 ruling)
 
@@ -305,7 +322,8 @@ guidance.
 5. The tiering-contract refinement (tier-adjacency dropped; relay discipline added; §1.2 cliff
    claim corrected) is captured as `.agents/proposals/skill-tiering-molecule-composition.md`.
 6. The four OQs (§7) have an owner-ruled direction folded into D2–D8; **no artifact claims
-   final ratification** — all stay DRAFT pending human ratification + the v4 experiment.
+   final ratification** — all stay DRAFT pending human ratification. v4 is folded narrow (§v4.9
+   audit); v5 deferred — **no longer blocked on v4.**
 
 ## 6. Relationship to `kg-ideate-skill`
 
@@ -323,16 +341,19 @@ between `kg-ideate` and `ideation-cycle`.
 ## 7. The OQs — owner-ruled direction (DRAFT, not finally ratified)
 
 The four prior open questions have an **owner-ruled direction** folded into §3. They are NOT
-claimed as finally ratified: the empirical backing (sidecar v1–v3) is power-limited and **v4 is
-in flight**. Human ratification is still pending. Summary and where each lives:
+claimed as finally ratified; human ratification is still pending. But the work is **no longer
+blocked on v4**: v4 returned and is folded narrow (sidecar §v4.9 GATE-2 audit), v5 deferred.
+Summary and where each lives:
 
-**OQ1 — Dispatch-hop bound → D6: engineering bounds, not a measured cliff.** The depth-2–3
-fidelity cliff **did not replicate** (no same-agent degradation found ≤ depth 10 / ~15k tokens,
-two harnesses; **power-limited null** — "not found in the tested regime", not "doesn't exist";
-**v4 in flight**). Tier-adjacency is dropped regardless (it was the wrong lever), so the chain
-is legal with no hoist. The real bounds are the **infra delegation-nesting ceiling (~hop 4)**,
-**relay discipline (D8)**, and hygiene. Evidence: sidecar; delta:
-`.agents/proposals/skill-tiering-molecule-composition.md`.
+**OQ1 — Dispatch-hop bound → D6: engineering bounds, not a measured cliff.** The depth-2–3 hop
+cliff **did not replicate** (no same-agent degradation found ≤ depth 10 / ~15k tokens on local
+self-checkable constraints, two harnesses; **power-limited null**). v4 induced a *narrow* drift on
+**compounding** work (not hop depth) but its GATE-2 audit ruled the broad claim NOT-SOUND, so it
+folds only as support for **decomposing** error-prone compounding chains; mechanism deferred to
+v5. Tier-adjacency is dropped regardless (the wrong lever), so the chain is legal with no hoist.
+The real bounds are the **infra delegation-nesting ceiling (~hop 4)**, **relay discipline (D8)**,
+**decomposition of error-prone compounding work**, and hygiene. Evidence: sidecar §v3.6/§v4/§v4.9;
+delta: `.agents/proposals/skill-tiering-molecule-composition.md`.
 
 **OQ2 — Fork evidence → D7: per-fork SIDECAR, linked from the decision.** Founding instance:
 `evidence/depth-degradation-dogfood.md`. Anticipates lineage schema-v4 (`derives_from` edge).
@@ -349,10 +370,15 @@ dependency manifest (D2); segment ownership is fixed so `spec-scaffold` writes t
 
 ## 8. Open / deferred
 
-- **v4 experiment (IN FLIGHT)** — referential/stateful constraints × weaker-model power. May
-  surface a real same-agent degradation regime the power-limited v1–v3 null cannot exclude. If
-  it does, D6 and the tiering §1.2 correction get revised; D8's relay discipline is independent
-  of v4 and stands either way. **No artifact here is final until v4 lands + human ratification.**
+- **v4 — FOLDED (narrow).** v4 returned; its GATE-2 audit (sidecar §v4.9) ruled the broad claim
+  NOT-SOUND, so it is folded only as narrow, preliminary support for decomposing error-prone
+  compounding work + preferring code execution for computable closures (D6). **This unblocks the
+  spec for human ratification** — it is no longer waiting on v4.
+- **v5 — DEFERRED** (`.agents/proposals/v5-compounding-degradation-experiment-deferred.md`):
+  would isolate the compounding-chain-length *mechanism* from v4's confounds (node-count, depth,
+  edges, output size, density), across ≥2 error-prone families, with routing-grade N. If it
+  passes its own GATE-2, D6's decomposition argument hardens into a mechanism/routing rule;
+  otherwise it stays narrow. Relay discipline (D8) is independent of v4/v5.
 - The tiering / relay-discipline lint (plan-tier; owned by `skill-tiering-contract` + its
   refinement delta).
 - Lineage schema-v4 (`derives_from` decision→evidence edge; D5/D7 anticipate it, do not build
