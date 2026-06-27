@@ -417,8 +417,9 @@ func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 			prov[key] = explainField(snap, key)
 		}
 		return writeJSON(opts.stdout, map[string]any{
-			"effective":  effective,
-			"provenance": prov,
+			"effective":       effective,
+			"provenance":      prov,
+			"lock_collisions": snap.LockCollisions,
 		})
 	}
 	fmt.Fprintln(opts.stdout, "Effective configuration (with active layer per field):")
@@ -430,7 +431,27 @@ func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 		fmt.Fprintf(opts.stdout, "    origin : %s\n", emptyAsDash(exp.ActiveLayer))
 		fmt.Fprintln(opts.stdout)
 	}
+	printLockCollisions(opts.stdout, snap.LockCollisions)
 	return nil
+}
+
+// printLockCollisions surfaces the §15 D1a authority-pass rejections: each
+// lower-scope write a higher-scope value-lock or deny-lock rejected, with the
+// attempted value, the winning (locked) value, and the owning scope. Nothing is
+// printed when no collision occurred.
+func printLockCollisions(w io.Writer, collisions []cfg.LockCollision) {
+	if len(collisions) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Authority-lock rejections (a higher scope's lock won):")
+	fmt.Fprintln(w)
+	for _, c := range collisions {
+		fmt.Fprintf(w, "  %s\n", c.Field)
+		fmt.Fprintf(w, "    attempted : %s\n", formatScalar(c.Attempted))
+		fmt.Fprintf(w, "    winning   : %s\n", formatScalar(c.Winning))
+		fmt.Fprintf(w, "    owner     : %s (%s)\n", c.Owner, c.Kind)
+		fmt.Fprintln(w)
+	}
 }
 
 // emitFlags prints feature flag resolution. Flags live under the `features`

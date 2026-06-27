@@ -227,6 +227,20 @@ type AgentsRC struct {
 	// from the lockfile. Absent ⇒ the built-in `default` gate applies.
 	PreconditionPolicies map[string]PreconditionPolicySpec `json:"precondition_policies,omitempty"`
 
+	// Locks is the §15 D1a authority-axis lock block a layer emits in the
+	// policy-authority pass (Phase 1): value_locks (pin a field, rejecting lower
+	// writes) and deny_locks (subtract a set member, deny-overrides). force_allow
+	// is invalid and aborts the resolve. A lock binds only scopes ranked below
+	// its owner's AUTHORITY-RANK (org > team > repo > user). See authority.go.
+	Locks *PolicyLockSpec `json:"locks,omitempty"`
+
+	// AuthorityGrants is the §15 D1a source-authority registry block: a per-source
+	// allowlist "source-id → scope it may carry." It is honored only when written
+	// by a layer whose own authority is at least the conferred scope — a lower
+	// scope cannot self-bless authority (a resolve-time rejection). See
+	// resolveAuthorityGrants in authority.go.
+	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -582,6 +596,8 @@ var agentsRCKnown = map[string]bool{
 	// precondition_policies: top-level named registry of verifier precondition
 	// policies (verifier-precondition-policy plan, Slice B)
 	"precondition_policies": true,
+	// §15 D1a authority/value two-axis resolver fields (config-distribution-model §15.9)
+	"locks": true, "authority_grants": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
 	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
 	// Listed as "known" so they are not captured into ExtraFields (which would
@@ -618,6 +634,9 @@ type agentsRCCore struct {
 
 	StageProfiles        map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
 	PreconditionPolicies map[string]PreconditionPolicySpec  `json:"precondition_policies,omitempty"`
+
+	Locks           *PolicyLockSpec           `json:"locks,omitempty"`
+	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -645,6 +664,8 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.PRSource = core.PRSource
 	a.StageProfiles = core.StageProfiles
 	a.PreconditionPolicies = core.PreconditionPolicies
+	a.Locks = core.Locks
+	a.AuthorityGrants = core.AuthorityGrants
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -712,6 +733,8 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		PRSource:             a.PRSource,
 		StageProfiles:        a.StageProfiles,
 		PreconditionPolicies: a.PreconditionPolicies,
+		Locks:                a.Locks,
+		AuthorityGrants:      a.AuthorityGrants,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {

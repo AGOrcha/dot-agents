@@ -191,19 +191,51 @@ func resolveSnapshot(layers []ResolvedLayer) (*Snapshot, error) {
 		}
 	}
 
+	// §15 D1a policy-authority pass (Phase 1): apply the AUTHORITY-RANK total
+	// order, the source-authority registry write-guard, and any surviving
+	// value-locks / deny-locks BEFORE the effective config is decoded. It runs
+	// here so BOTH the flat and layered resolvers honor it from one path; it is
+	// additive (a no-op when no layer declares `locks` or `authority_grants`),
+	// so shipped value-merge behavior is unchanged. A self-blessing grant or a
+	// force-allow lock aborts the resolve fail-closed.
+	collisions, authViols, err := applyAuthority(layers, merged)
+	if err != nil {
+		return nil, err
+	}
+
 	effective, err := decodeEffective(merged)
 	if err != nil {
 		return nil, err
 	}
 
 	snap := &Snapshot{
-		Effective:  effective,
-		Provenance: map[string]FieldProvenance{},
-		Layers:     layers,
-		Warnings:   warnings,
+		Effective:           effective,
+		Provenance:          map[string]FieldProvenance{},
+		Layers:              layers,
+		Warnings:            warnings,
+		LockCollisions:      normalizeCollisions(collisions),
+		AuthorityViolations: normalizeViolations(authViols),
 	}
 	snap.populateProvenance()
 	return snap, nil
+}
+
+// normalizeCollisions guarantees a non-nil slice so the Snapshot marshals
+// lock_collisions to [] not null.
+func normalizeCollisions(c []LockCollision) []LockCollision {
+	if c == nil {
+		return []LockCollision{}
+	}
+	return c
+}
+
+// normalizeViolations guarantees a non-nil slice so the Snapshot marshals
+// authority_violations to [] not null.
+func normalizeViolations(v []AuthorityViolation) []AuthorityViolation {
+	if v == nil {
+		return []AuthorityViolation{}
+	}
+	return v
 }
 
 // populateProvenance fills snap.Provenance with the per-field layer stack for

@@ -102,6 +102,40 @@
         "$ref": "#/$defs/preconditionPolicy"
       }
     },
+    "locks": {
+      "type": "object",
+      "description": "Section 15 D1a authority-axis lock block emitted by a layer in the policy-authority pass (Phase 1). value_locks pin a field (rejecting lower-scope writes); deny_locks subtract a set member (deny-overrides). force_allow is invalid and aborts the resolve (the no-force-allow invariant). A lock binds only scopes ranked below its owner on the AUTHORITY-RANK total order (org > team > repo > user).",
+      "additionalProperties": false,
+      "properties": {
+        "value_locks": {
+          "type": "object",
+          "description": "Field path -> pinned value. A lower-authority scope that writes a different value has its write rejected; da config explain surfaces attempted/winning/owner."
+        },
+        "deny_locks": {
+          "type": "array",
+          "description": "Set-member denials, each 'field:member' (e.g. 'skills:risky-skill'). deny-overrides: a lower-scope union-add of the member is dropped.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "force_allow": {
+          "type": "array",
+          "description": "ALWAYS invalid: any entry is a resolve-time validation error. A lower scope can never punch a capability through a higher deny.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "authority_grants": {
+      "type": "object",
+      "description": "Section 15 D1a source-authority registry: a per-source allowlist 'source-id -> scope it may carry'. Honored only when written by a layer whose own authority is at least the conferred scope; a lower scope cannot self-bless authority (a resolve-time rejection). A value-only source's claim is inert unless co-signed by a trusted root.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["org", "team", "repo", "user", "product", "public", "runtime", "project-local"]
+      }
+    },
     "verifier_profiles": {
       "$ref": "#/$defs/stageProfileMap",
       "deprecated": true,
