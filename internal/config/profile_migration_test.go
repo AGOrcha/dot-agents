@@ -228,25 +228,139 @@ func TestZeroDiffReproducibleDigest(t *testing.T) {
 	}
 }
 
+// grantedImportLayers is a stack where repo (rank 2) confers user (rank 1) on the
+// imported source "acme" — a strictly-lower scope honored by the §15 write-guard.
+// The imported layer carries an execution_profile so a real profile is DERIVED
+// from the granted source.
+func grantedImportLayers() []ResolvedLayer {
+	return []ResolvedLayer{
+		{ID: LayerProductDefaults, Present: true, Raw: map[string]any{}},
+		{ID: "acme:base", Present: true, Raw: map[string]any{
+			"execution_profile": map[string]any{
+				"by_app_type": map[string]any{
+					"go-cli": map[string]any{"graph_backend": "imported"},
+				},
+			},
+		}},
+		{ID: LayerRepoLocal, Present: true, Raw: map[string]any{
+			"authority_grants": map[string]any{"acme": "user"},
+		}},
+	}
+}
+
 // TestProfileGrantUpgradesImportedScope is the FIX-3 proof: a §15 source-authority
 // grant flows through ProfileSetFromSnapshot (resolveAuthorityGrants +
-// applyGrantsToScopes), so an imported source is carried at its CONFERRED scope,
-// not the AuthPublic default of an ungranted import.
+// applyGrantsToScopes), so an imported source — and the PROFILE DERIVED from it —
+// is carried at its CONFERRED scope, not the AuthPublic default of an ungranted
+// import.
 func TestProfileGrantUpgradesImportedScope(t *testing.T) {
-	layers := []ResolvedLayer{
-		{ID: LayerProductDefaults, Present: true, Raw: map[string]any{}},
-		{ID: "acme:base", Present: true, Raw: map[string]any{}},
-		// repo (rank 2) may confer user (rank 1) on source "acme" — a strictly-lower
-		// scope, honored by the §15 write-guard.
-		{ID: LayerRepoLocal, Present: true, Raw: map[string]any{"authority_grants": map[string]any{"acme": "user"}}},
-	}
-	scopes, err := effectiveLayerScopes(layers)
+	snap := mustResolveLayers(t, grantedImportLayers())
+
+	// (a) the layer scope is upgraded.
+	scopes, err := effectiveLayerScopes(snap.Layers)
 	if err != nil {
 		t.Fatalf("effectiveLayerScopes: %v", err)
 	}
 	if scopes["acme:base"] != AuthUser {
-		t.Fatalf("imported scope = %q, want user (granted via §15 applyGrantsToScopes)", scopes["acme:base"])
+		t.Fatalf("imported layer scope = %q, want user", scopes["acme:base"])
 	}
+
+	// (b) the DERIVED profile from that granted source carries the conferred scope,
+	// NOT AuthPublic — the assertion the round-3 review asked for.
+	set, err := ProfileSetFromSnapshot(snap)
+	if err != nil {
+		t.Fatalf("derive profile set: %v", err)
+	}
+	found := false
+	for _, p := range set.Profiles {
+		if p.Ref == "acme:base:execution-profile:go-cli" {
+			found = true
+			if p.Scope != AuthUser {
+				t.Fatalf("derived profile %q scope = %q, want user (granted authority, not AuthPublic)", p.Ref, p.Scope)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected a profile derived from the granted imported source")
+	}
+}
+
+// TestDigestDistinguishesSourceSets is the FIX-4 proof: two DISTINCT source sets
+// with byte-EQUAL resolved values produce DIFFERENT digests, because the digest
+// covers the contributing absolute refs (which carry source provenance) — not the
+// bundle values alone (Decision 7). A digest over values alone would call these
+// identical and miss a provenance change.
+func TestDigestDistinguishesSourceSets(t *testing.T) {
+	ep := map[string]any{
+		"by_app_type": map[string]any{
+			"go-cli": map[string]any{"topology": map[string]any{"executors": 2}},
+		},
+	}
+	importFrom := func(source string) ResolvedProfile {
+		snap := mustResolveLayers(t, []ResolvedLayer{
+			{ID: LayerProductDefaults, Present: true, Raw: map[string]any{}},
+			{ID: source, Present: true, Raw: map[string]any{"execution_profile": ep}},
+		})
+		return mustResolveProfileFromSnapshot(t, snap, "go-cli")
+	}
+	a := importFrom("acme:base")
+	b := importFrom("other:base")
+
+	if !reflect.DeepEqual(a.Bundle, b.Bundle) {
+		t.Fatalf("test setup: bundles must be byte-equal\n a=%+v\n b=%+v", a.Bundle, b.Bundle)
+	}
+	if a.Digest == b.Digest {
+		t.Fatalf("digests must differ for distinct source sets with equal values (Decision 7 / FIX 4): both %s", a.Digest)
+	}
+	if !reflect.DeepEqual(a.Contributing, []string{"acme:base:execution-profile:go-cli"}) {
+		t.Fatalf("contributing ref must carry source provenance: %v", a.Contributing)
+	}
+}
+
+// TestZeroDiffGateWithCapabilityLocks consolidates the lock-divergence cases into
+// the SAME widened migration fixture (round-3 ask #3): on the three-layer
+// product→import→repo stack, it asserts BOTH (a) layering a capability profile +
+// a team deny-lock + an org allow on top leaves the app_type zero-diff against
+// legacy CategoryMapMerge UNCHANGED (locks on capability fields never touch
+// execution_profile), AND (b) the higher org allow survives the lower team deny in
+// that same multi-scope context — so a future regression in either path is caught
+// by the gate fixture, not only by isolated unit tests.
+func TestZeroDiffGateWithCapabilityLocks(t *testing.T) {
+	legacy := mustResolveLayers(t, migrationLayers())
+	set, err := ProfileSetFromSnapshot(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Layer a capability profile (org grants Edit) + a team deny-lock onto the
+	// SAME derived set the gate uses.
+	set.Profiles = append(set.Profiles, capProfile("org:cap", AuthOrg, ProfileSelector{Role: "reviewer"}, "Edit", "Read"))
+	set.Policies = append(set.Policies, denyLockPolicy(AuthTeam, "tools_allow", "Edit"))
+	chain := append(SnapshotScopeChain(legacy), AuthOrg, AuthTeam)
+
+	// (a) the app_type bundle still equals legacy — the capability lock did not
+	// perturb the execution_profile merge.
+	engine := decodeAppType(t, mustResolveProfile(t, set, ProfileContext{AppType: "go-cli", ScopeChain: chain}).Bundle, "go-cli")
+	if !reflect.DeepEqual(engine, legacy.Effective.ExecutionProfile.ByAppType["go-cli"]) {
+		t.Fatalf("app_type zero-diff broke when a capability lock was layered on:\n engine=%+v", engine)
+	}
+
+	// (b) higher-allow-survives-lower-deny holds in the same multi-scope context:
+	// org (rank 4) granted Edit; team (rank 3) deny cannot subtract it.
+	cap := toolsAllow(mustResolveProfile(t, set, ProfileContext{Role: "reviewer", AppType: "go-cli", ScopeChain: chain}).Bundle)
+	if !reflect.DeepEqual(cap, []string{"Edit", "Read"}) {
+		t.Fatalf("tools_allow = %v, want [Edit Read] (org allow survives team deny in the gate fixture)", cap)
+	}
+}
+
+// mustResolveProfileFromSnapshot resolves a single app_type context through the
+// snapshot bridge.
+func mustResolveProfileFromSnapshot(t *testing.T, snap *Snapshot, appType string) ResolvedProfile {
+	t.Helper()
+	got, err := ResolveProfileContext(snap, "", appType, "", "")
+	if err != nil {
+		t.Fatalf("ResolveProfileContext: %v", err)
+	}
+	return got
 }
 
 func mustResolveLayers(t *testing.T, layers []ResolvedLayer) *Snapshot {
