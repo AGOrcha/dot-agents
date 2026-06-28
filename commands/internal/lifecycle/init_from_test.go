@@ -689,56 +689,59 @@ func TestReconcileExistingAgentsHome(t *testing.T) {
 	})
 }
 
-// TestEnsureStagedMachineLocalGitignored covers create, append-missing,
-// already-present, and read-error branches.
-func TestEnsureStagedMachineLocalGitignored(t *testing.T) {
-	t.Run("creates when absent", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := ensureStagedMachineLocalGitignored(dir); err != nil {
-			t.Fatal(err)
+// The TestEnsureStagedMachineLocalGitignored_* tests cover the create,
+// append-missing, already-present, and read-error branches. Split per-branch to
+// keep each test's cognitive complexity low (S3776).
+
+func TestEnsureStagedMachineLocalGitignored_CreatesWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	if err := ensureStagedMachineLocalGitignored(dir); err != nil {
+		t.Fatal(err)
+	}
+	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	for _, w := range []string{"local/", "cache/"} {
+		if !strings.Contains(string(gi), w) {
+			t.Errorf("missing %q:\n%s", w, gi)
 		}
-		gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-		for _, w := range []string{"local/", "cache/"} {
-			if !strings.Contains(string(gi), w) {
-				t.Errorf("missing %q:\n%s", w, gi)
-			}
-		}
-	})
-	t.Run("appends only missing", func(t *testing.T) {
-		dir := t.TempDir()
-		// No trailing newline — exercises the newline-normalizing append branch.
-		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("local/\nfoo"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := ensureStagedMachineLocalGitignored(dir); err != nil {
-			t.Fatal(err)
-		}
-		gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-		if strings.Count(string(gi), "local/") != 1 {
-			t.Errorf("local/ duplicated or missing:\n%s", gi)
-		}
-		if !strings.Contains(string(gi), "cache/") {
-			t.Errorf("cache/ not appended:\n%s", gi)
-		}
-	})
-	t.Run("noop when present", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("local/\ncache/\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-		if err := ensureStagedMachineLocalGitignored(dir); err != nil {
-			t.Fatal(err)
-		}
-	})
-	t.Run("read error", func(t *testing.T) {
-		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, ".gitignore"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := ensureStagedMachineLocalGitignored(dir); err == nil {
-			t.Error("a directory .gitignore should be a read error")
-		}
-	})
+	}
+}
+
+func TestEnsureStagedMachineLocalGitignored_AppendsOnlyMissing(t *testing.T) {
+	dir := t.TempDir()
+	// No trailing newline — exercises the newline-normalizing append branch.
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("local/\nfoo"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureStagedMachineLocalGitignored(dir); err != nil {
+		t.Fatal(err)
+	}
+	gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if strings.Count(string(gi), "local/") != 1 {
+		t.Errorf("local/ duplicated or missing:\n%s", gi)
+	}
+	if !strings.Contains(string(gi), "cache/") {
+		t.Errorf("cache/ not appended:\n%s", gi)
+	}
+}
+
+func TestEnsureStagedMachineLocalGitignored_NoopWhenPresent(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("local/\ncache/\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureStagedMachineLocalGitignored(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnsureStagedMachineLocalGitignored_ReadError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".gitignore"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureStagedMachineLocalGitignored(dir); err == nil {
+		t.Error("a directory .gitignore should be a read error")
+	}
 }
 
 // TestMoveStagedHome_RenamesAndClearsEmpty covers the empty-target clear + rename.

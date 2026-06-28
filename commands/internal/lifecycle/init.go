@@ -256,6 +256,23 @@ func initNoArgs(hints ...string) cobra.PositionalArgs {
 	}
 }
 
+// reportExistingInstall logs the existing-~/.agents state and returns true if
+// init should halt (a home already exists and --force was not given).
+func reportExistingInstall(agentsHome string) bool {
+	ui.Step("Checking existing installation...")
+	if _, err := os.Stat(agentsHome); err != nil {
+		ui.Bullet("none", "No existing ~/.agents/ found")
+		return false
+	}
+	if !InitForceFn() {
+		ui.Bullet("found", "Existing ~/.agents/ directory found")
+		fmt.Fprintln(os.Stdout, "\n  Use --force to reinitialize (creates backup first)")
+		return true
+	}
+	ui.Bullet("warn", "Will reinitialize (--force)")
+	return false
+}
+
 func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 	// `da init --from <home-source>` is the L3 cross-machine bootstrap: it clones
 	// a remote home into ~/.agents and re-materializes the user surface, instead
@@ -270,17 +287,8 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 
 	warnLegacyManifestInCwd()
 
-	// Check existing
-	ui.Step("Checking existing installation...")
-	if _, err := os.Stat(agentsHome); err == nil {
-		if !InitForceFn() {
-			ui.Bullet("found", "Existing ~/.agents/ directory found")
-			fmt.Fprintln(os.Stdout, "\n  Use --force to reinitialize (creates backup first)")
-			return nil
-		}
-		ui.Bullet("warn", "Will reinitialize (--force)")
-	} else {
-		ui.Bullet("none", "No existing ~/.agents/ found")
+	if reportExistingInstall(agentsHome) {
+		return nil
 	}
 
 	if InitDryRunFn() {
