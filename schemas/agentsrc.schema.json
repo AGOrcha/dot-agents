@@ -189,6 +189,32 @@
         }
       }
     },
+    "manifests": {
+      "type": "object",
+      "description": "Distributable-config-manifest (L2) scope-attached manifest units, keyed by name; each manifest's absolute ref is <owning-source>:<name>. A manifest is the ONE publishable bundle that REFERENCES (by ref) the canonical sources to pull, the layering policy/profiles that bind, and (optionally) the project-set to manage — the inputs `init --from` reproduces a setup from. It never inlines copies, carries NO secrets, and NEVER self-declares authority (source-derived, D4). A manifest->manifest edge (extends/inherits/composes), an authority/scope/authority_grants self-declaration, and force_allow are validation errors, not silently dropped.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "One kind:manifest unit. Carries only references; identity + authority are loader-stamped, never authored.",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "description": "Canonical source refs to pull (<source>:<path>@<version>). Names only — a private source carries no credential; auth is threaded ambient-first at init --from, never embedded.",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "binds": {
+            "type": "array",
+            "description": "Refs of the layering_policy + profile units that bind. Empty = bind whatever the scope chain resolves; non-empty narrows the bound fragments to exactly these refs.",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "project_set": {
+            "type": "string",
+            "minLength": 1,
+            "description": "OPTIONAL ref of a kind:project-set unit (the portable identity registry). Absent = a manifest with no project-set, which is valid and resolves."
+          }
+        }
+      }
+    },
     "verifier_profiles": {
       "$ref": "#/$defs/stageProfileMap",
       "deprecated": true,
