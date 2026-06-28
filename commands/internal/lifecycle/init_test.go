@@ -313,8 +313,8 @@ func TestRunInit_FreshInstallCreatesStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Version != 1 {
-		t.Errorf("expected config version 1, got %d", loaded.Version)
+	if loaded.Version != 2 {
+		t.Errorf("expected config version 2, got %d", loaded.Version)
 	}
 	if loaded.Projects == nil {
 		t.Error("expected initialized projects map")
@@ -352,8 +352,8 @@ func TestRunInit_ForceReinitializes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Version != 1 {
-		t.Errorf("expected config version 1 after force, got %d", loaded.Version)
+	if loaded.Version != 2 {
+		t.Errorf("expected config version 2 after force, got %d", loaded.Version)
 	}
 }
 

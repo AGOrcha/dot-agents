@@ -52,6 +52,63 @@ func DeriveRepoIDFromGit(repoPath string) string {
 	return gitremote.CanonicalRepoID(raw)
 }
 
+// gitRemoteAllURLs is the seam returning every configured remote's URLs for a
+// repo path. Defaults to gitremote.ReadAllRemotes; tests override it to inject
+// multi-remote / divergent-origin topologies without standing up real .git
+// directories.
+var gitRemoteAllURLs = gitremote.ReadAllRemotes
+
+// DeriveTrustedRepoID returns the canonical repo_id for the project at repoPath
+// ONLY when the git origin is unambiguous (FORK-1 hybrid / R12). The second
+// return is true when origin cannot be trusted as a portable identity:
+//
+//   - origin has multiple configured URLs, OR
+//   - another remote canonicalizes to a DIFFERENT repo_id than origin
+//     (e.g. the AGOrcha case: origin=NikashPrakash fork vs org=AGOrcha).
+//
+// On a non-git path, a repo with no/empty origin, or an unparseable origin URL
+// the result is ("", false): not ambiguous, just no portable key — the caller
+// falls back to the logical id (the registry map key). Callers MUST NOT trust
+// repoID when ambiguous is true.
+func DeriveTrustedRepoID(repoPath string) (repoID string, ambiguous bool) {
+	remotes, err := gitRemoteAllURLs(repoPath)
+	if err != nil || len(remotes) == 0 {
+		return "", false
+	}
+	origin := remotes["origin"]
+	if len(origin) == 0 || origin[0] == "" {
+		return "", false
+	}
+	if len(origin) > 1 {
+		return "", true // multiple origin URLs — not a single trusted identity
+	}
+	originID := gitremote.CanonicalRepoID(origin[0])
+	if originID == "" {
+		return "", false
+	}
+	if hasDivergentRemote(remotes, originID) {
+		return "", true
+	}
+	return originID, false
+}
+
+// hasDivergentRemote reports whether any non-origin remote canonicalizes to a
+// repo_id different from origin's — the signal that origin is not a trustworthy
+// portable identity (R12, e.g. AGOrcha origin=fork vs org=canonical).
+func hasDivergentRemote(remotes map[string][]string, originID string) bool {
+	for name, urls := range remotes {
+		if name == "origin" {
+			continue
+		}
+		for _, u := range urls {
+			if id := gitremote.CanonicalRepoID(u); id != "" && id != originID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isDirEntry reports whether the path is a directory, following symlinks.
 func isDirEntry(path string) bool {
 	info, err := os.Stat(path)
