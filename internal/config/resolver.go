@@ -664,7 +664,7 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	// repairs a stale lock must write exactly those. The legacy §7 `config`
 	// section is no longer written — units-only is the steady state; a legacy
 	// config-only lock is upgraded once on read (see ReadUnits).
-	if err := r.writeUnitsLock(projectPath, locked); err != nil {
+	if err := r.writeUnitsLock(projectPath, snap, locked); err != nil {
 		return nil, fmt.Errorf("writing %s units: %w", AgentsLockFile, err)
 	}
 	return snap, nil
@@ -679,7 +679,7 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 // like-for-like. A flat/local-only project (no extends) still gets a lockfile
 // carrying a non-empty inputs_digest and an empty units map — the property §7A
 // wires in.
-func (r *LayeredResolver) writeUnitsLock(projectPath string, locked map[string]LockedLayer) error {
+func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, locked map[string]LockedLayer) error {
 	digest, err := ComputeInputsDigest(projectPath, r.effectiveUserLocalPath())
 	if err != nil {
 		return err
@@ -694,7 +694,19 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, locked map[string]L
 			CacheKey:      l.CacheKey,
 		}
 	}
-	return WriteUnitsLock(projectPath, UnitsLock{Units: units, InputsDigest: digest})
+	// kind:profile units (R2): the resolved profile fragments are recorded as
+	// first-class lock units so a profile resolution reproduces from the lock
+	// without re-resolving. They are derived from the SAME snapshot the resolve just
+	// produced (no divergent re-derivation) and timestamped on the resolver's clock
+	// seam (r.clock(), test-overridable) — not a fresh time.Now() — so the lock is
+	// byte-stable under a fixed clock. A malformed layering_policy / authored profile
+	// fails the resolve closed here (R9), exactly as `da config explain` does, rather
+	// than silently writing a lock that omits the unit.
+	profileUnits, err := ProfileUnitsForSnapshot(snap, r.clock())
+	if err != nil {
+		return err
+	}
+	return WriteUnitsLock(projectPath, UnitsLock{Units: units, InputsDigest: digest, ProfileUnits: profileUnits})
 }
 
 // effectiveUserLocalPath returns the user-local manifest path the resolver

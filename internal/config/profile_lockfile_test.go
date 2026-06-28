@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -194,6 +196,132 @@ func TestWriteUnitsLockEmitsProfileUnits(t *testing.T) {
 	}
 	if ul.InputsDigest != "sha256:inputs" {
 		t.Fatalf("inputs digest = %q, want sha256:inputs", ul.InputsDigest)
+	}
+}
+
+// TestResolveWritesProfileUnitsToLock is bug 1's END-TO-END production proof: a
+// real project with execution_profile + stage_profiles is resolved through the
+// actual resolver entry (LayeredResolver.Resolve, which calls writeUnitsLock), and
+// the GENERATED .agentsrc.lock is read back and asserted to carry kind:profile
+// units with the right kind + content digest. Unlike the WriteUnitsLock-in-isolation
+// test, this drives the resolver's own lock-generation assembly site.
+func TestResolveWritesProfileUnitsToLock(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"repo_id": "github.com/acme/profiled",
+		"execution_profile": {
+			"by_app_type": {
+				"go-cli": {
+					"topology": {"executors": 2},
+					"relevance": {"verify": {"core": ["go-test"]}}
+				}
+			}
+		},
+		"stage_profiles": {
+			"verify": {"default": {"label": "Default verify"}}
+		}
+	}`)
+
+	snap, err := NewLayeredResolver().Resolve(repo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	units, err := ReadUnits(repo)
+	if err != nil {
+		t.Fatalf("ReadUnits: %v", err)
+	}
+	written := map[string]LockedUnit{}
+	for key, u := range units.Units {
+		if u.Kind == UnitKindProfile {
+			written[key] = u
+		}
+	}
+	if len(written) == 0 {
+		t.Fatal("Resolve must write kind:profile units into .agentsrc.lock (R2)")
+	}
+	for key, u := range written {
+		if u.Digest == "" || !strings.HasPrefix(u.Digest, profileDigestPrefix) {
+			t.Fatalf("profile unit %q must carry a content digest, got %q", key, u.Digest)
+		}
+	}
+
+	// Every written profile unit's digest matches an independent derivation from the
+	// SAME snapshot Resolve returned — proving the lock records exactly the fragments
+	// the engine resolves, not a re-derived divergence. (Digests exclude timestamps,
+	// so the clock used here is irrelevant.)
+	want, err := ProfileUnitsForSnapshot(snap, time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(want) != len(written) {
+		t.Fatalf("written profile units (%d) != derived (%d)", len(written), len(want))
+	}
+	for key, w := range want {
+		got, ok := written[key]
+		if !ok {
+			t.Fatalf("derived profile unit %q missing from the written lock", key)
+		}
+		if got.Digest != w.Digest {
+			t.Fatalf("profile unit %q digest = %q, want %q", key, got.Digest, w.Digest)
+		}
+	}
+}
+
+// TestResolveLockProfileUnitsDeterministic confirms the generated lock has no
+// map-ordering (or clock) nondeterminism: two resolves of the same project under a
+// fixed clock produce byte-identical .agentsrc.lock files (the units section is a
+// map, and a profile contribution must not perturb its key-sorted serialization).
+func TestResolveLockProfileUnitsDeterministic(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"repo_id": "github.com/acme/profiled",
+		"execution_profile": {"by_app_type": {
+			"go-cli": {"topology": {"executors": 2}},
+			"ideation": {"topology": {"executors": 1}}
+		}},
+		"stage_profiles": {"verify": {"default": {"label": "D"}, "strict": {"label": "S"}}}
+	}`)
+	fixed := func() time.Time { return time.Date(2026, 6, 28, 9, 0, 0, 0, time.UTC) }
+
+	if _, err := NewLayeredResolver().WithClock(fixed).Resolve(repo); err != nil {
+		t.Fatalf("first Resolve: %v", err)
+	}
+	first, err := os.ReadFile(AgentsLockPath(repo))
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if _, err := NewLayeredResolver().WithClock(fixed).Resolve(repo); err != nil {
+		t.Fatalf("second Resolve: %v", err)
+	}
+	second, err := os.ReadFile(AgentsLockPath(repo))
+	if err != nil {
+		t.Fatalf("read lock: %v", err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("lock output is nondeterministic across resolves:\nfirst=%s\nsecond=%s", first, second)
+	}
+}
+
+// TestResolveFailsClosedOnMalformedPolicyAtLockGen covers the new fail-closed
+// branch the activation adds to writeUnitsLock: a project whose config carries a
+// malformed layering_policy resolves its layers fine but fails when the lock
+// generation derives profile units (R9) — the resolve aborts rather than writing a
+// lock that silently omits the unit.
+func TestResolveFailsClosedOnMalformedPolicyAtLockGen(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"repo_id": "github.com/acme/bad",
+		"layering_policy": {"mode": "merge"}
+	}`)
+	if _, err := NewLayeredResolver().Resolve(repo); err == nil {
+		t.Fatal("a malformed layering_policy must fail the resolve closed at lock generation (R9)")
 	}
 }
 
