@@ -30,11 +30,13 @@ func gitLF(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// makeHomeSourceRepo builds a committed home-source git repo that models a
-// machine-A synced home: a v2 config.json (portable identity registry, NO paths),
-// a gitignored machine-local local/ + cache/, and a user-local .agentsrc.json
-// declaring a manifest. Returns the repo path to clone from.
-func makeHomeSourceRepo(t *testing.T, projects string) string {
+// makeHomeSourceRepo builds a committed home-source git repo modelling a machine-A
+// synced home: a v2 config.json (portable identity registry, NO paths) and a
+// user-local .agentsrc.json declaring a manifest. When trackLocal is false the
+// machine-local local/ is gitignored (the correct synced shape); when true the
+// foreign local/bindings.json is COMMITTED (the BUG-2 misconfigured-source case).
+// Returns the repo path to clone from.
+func makeHomeSourceRepo(t *testing.T, projects string, trackLocal bool) string {
 	t.Helper()
 	requireGitLF(t)
 	t.Setenv("GIT_AUTHOR_NAME", "Test")
@@ -63,8 +65,11 @@ func makeHomeSourceRepo(t *testing.T, projects string) string {
 	write(".agentsrc.json", `{
   "manifests": {"home": {"sources": ["team:base@v1.0.0"], "project_set": "team:projects"}}
 }`)
-	write(".gitignore", "local/\ncache/\n")
-	// Machine-local state that MUST NOT travel — gitignored, so the clone omits it.
+	if !trackLocal {
+		write(".gitignore", "local/\ncache/\n")
+	}
+	// Machine-local state holding a SOURCE-machine absolute path. Gitignored ⇒ it
+	// never travels; tracked ⇒ it travels and BUG-2's repair must drop it.
 	write("local/bindings.json", `{"version":2,"bindings":{"svc":{"path":"/machine-a/svc","added":"2024-01-01T00:00:00Z"}}}`)
 
 	gitLF(t, src, "add", "-A")
@@ -73,7 +78,7 @@ func makeHomeSourceRepo(t *testing.T, projects string) string {
 }
 
 // freshAgentsHome points AGENTS_HOME at a not-yet-created path under a temp dir
-// (so the clone materializes it) and HOME at an isolated dir.
+// (so adoption materializes it) and HOME at an isolated dir.
 func freshAgentsHome(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
@@ -84,39 +89,33 @@ func freshAgentsHome(t *testing.T) string {
 }
 
 // TestRunInitFrom_AdoptsHome is the headline cross-machine case: a fresh machine
-// clones a remote home, ends with the user scope present, and reports the synced
-// project as known-but-unbound (not vanished). Machine-local state from machine A
-// (local/bindings.json) does NOT travel.
+// adopts a remote home, ends with the user scope present, and reports the synced
+// project known-but-unbound. The gitignored machine-A binding does not travel.
 func TestRunInitFrom_AdoptsHome(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`)
+	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`, false)
 	home := freshAgentsHome(t)
 
 	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInitFrom: %v", err)
 	}
-
-	// User scope present: the synced config.json + user-local layer arrived.
 	for _, rel := range []string{"config.json", ".agentsrc.json"} {
 		if _, err := os.Stat(filepath.Join(home, rel)); err != nil {
 			t.Errorf("expected %s in adopted home: %v", rel, err)
 		}
 	}
-	// Machine-local binding table from machine A must NOT have travelled.
 	if data, _ := os.ReadFile(filepath.Join(home, "local", "bindings.json")); strings.Contains(string(data), "/machine-a/svc") {
 		t.Errorf("machine-A binding leaked into adopted home:\n%s", data)
 	}
 }
 
 // TestRunInitFrom_ProjectKnownButUnbound asserts the synced identity survives the
-// trip and resolves through Load as known-but-unbound (R4/R4a) — no "No managed
-// projects", no fabricated path.
+// trip and resolves as known-but-unbound (R4/R4a) with no fabricated path.
 func TestRunInitFrom_ProjectKnownButUnbound(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`)
+	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`, false)
 	home := freshAgentsHome(t)
 	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInitFrom: %v", err)
 	}
-
 	cfgRaw, err := os.ReadFile(filepath.Join(home, "config.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -124,16 +123,106 @@ func TestRunInitFrom_ProjectKnownButUnbound(t *testing.T) {
 	if !strings.Contains(string(cfgRaw), "github.com/acme/svc") {
 		t.Errorf("synced identity registry should carry the portable repo_id:\n%s", cfgRaw)
 	}
-	// No absolute path may appear in the synced surface (R7 / DC3).
 	if strings.Contains(string(cfgRaw), "/machine-a/") {
 		t.Errorf("synced config.json leaked an absolute path:\n%s", cfgRaw)
 	}
 }
 
-// TestRunInitFrom_RefusesNonEmptyHome covers the FORK-2 reconcile: a non-empty
-// existing ~/.agents is refused with a clear message (distinct from --force).
+// TestRunInitFrom_V2TrackedBindingsDropped is the BUG-2 regression: a v2 source
+// that mistakenly TRACKED local/bindings.json (foreign paths) must not import
+// those paths — post-adopt the bindings are empty, every project is unbound, and
+// local/ is untracked + gitignored so it stops re-syncing.
+func TestRunInitFrom_V2TrackedBindingsDropped(t *testing.T) {
+	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`, true)
+	home := freshAgentsHome(t)
+	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err != nil {
+		t.Fatalf("runInitFrom: %v", err)
+	}
+
+	bind, _ := os.ReadFile(filepath.Join(home, "local", "bindings.json"))
+	if strings.Contains(string(bind), "/machine-a/svc") {
+		t.Errorf("foreign source-machine path was imported (BUG-2):\n%s", bind)
+	}
+	tracked, err := execabs.Command("git", "-C", home, "ls-files").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(tracked), "local/") {
+		t.Errorf("local/ still tracked after adopt:\n%s", tracked)
+	}
+	gi, _ := os.ReadFile(filepath.Join(home, ".gitignore"))
+	if !strings.Contains(string(gi), "local/") {
+		t.Errorf(".gitignore should exclude local/ after the repair:\n%s", gi)
+	}
+}
+
+// TestRunInitFrom_PostCloneFailureNoPartialHome is the BUG-1 regression: a failure
+// AFTER the clone (here a malformed .agentsrc.json) must leave NO partial
+// ~/.agents, so the retry is not refused as non-empty. A second, good adoption
+// then succeeds.
+func TestRunInitFrom_PostCloneFailureNoPartialHome(t *testing.T) {
+	home := freshAgentsHome(t)
+	orig := cloneHomeSourceFn
+	defer func() { cloneHomeSourceFn = orig }()
+
+	cloneHomeSourceFn = func(ref, dest string) error {
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dest, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte("{not json"), 0644)
+	}
+	if err := runInitFrom(&cobra.Command{}, "fixture://bad", stdInitDirMaker{}); err == nil {
+		t.Fatal("expected a post-clone resolve failure")
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("a failed adoption must leave NO partial ~/.agents (err=%v)", err)
+	}
+
+	// The retry must NOT be refused — a good clone now adopts cleanly.
+	cloneHomeSourceFn = func(ref, dest string) error {
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dest, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte(`{}`), 0644)
+	}
+	if err := runInitFrom(&cobra.Command{}, "fixture://good", stdInitDirMaker{}); err != nil {
+		t.Fatalf("retry after a failed adoption must not be refused: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "config.json")); err != nil {
+		t.Errorf("retry did not materialize the home: %v", err)
+	}
+}
+
+// TestRunInitFrom_RefusesCredentialURL is the BUG-3 regression: a --from URL with
+// embedded userinfo is refused before any clone, and nothing lands in ~/.agents.
+func TestRunInitFrom_RefusesCredentialURL(t *testing.T) {
+	home := freshAgentsHome(t)
+	called := false
+	orig := cloneHomeSourceFn
+	cloneHomeSourceFn = func(ref, dest string) error { called = true; return nil }
+	defer func() { cloneHomeSourceFn = orig }()
+
+	err := runInitFrom(&cobra.Command{}, "https://user:s3cr3t@example.com/home.git", stdInitDirMaker{})
+	if err == nil || !strings.Contains(err.Error(), "credential") {
+		t.Fatalf("expected a credential-bearing URL refusal, got %v", err)
+	}
+	if called {
+		t.Error("clone must not run for a credential-bearing --from URL")
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Errorf("a refused credential URL must not create ~/.agents (err=%v)", err)
+	}
+}
+
+// TestRunInitFrom_RefusesNonEmptyHome covers the FORK-2 reconcile.
 func TestRunInitFrom_RefusesNonEmptyHome(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{}`)
+	src := makeHomeSourceRepo(t, `{}`, false)
 	home := freshAgentsHome(t)
 	if err := os.MkdirAll(home, 0755); err != nil {
 		t.Fatal(err)
@@ -141,24 +230,18 @@ func TestRunInitFrom_RefusesNonEmptyHome(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, "occupant"), []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
 	err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{})
-	if err == nil {
-		t.Fatal("expected refusal for a non-empty existing ~/.agents")
+	if err == nil || !strings.Contains(err.Error(), "not empty") {
+		t.Fatalf("expected non-empty refusal, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "not empty") {
-		t.Errorf("error should explain the non-empty refusal, got: %v", err)
-	}
-	// The occupant must be untouched — init --from never clobbers.
 	if _, err := os.Stat(filepath.Join(home, "occupant")); err != nil {
 		t.Errorf("init --from must not clobber the existing home: %v", err)
 	}
 }
 
-// TestRunInitFrom_AllowsEmptyDir: an empty placeholder ~/.agents is treated as
-// fresh and the clone proceeds.
+// TestRunInitFrom_AllowsEmptyDir: an empty placeholder ~/.agents is adoptable.
 func TestRunInitFrom_AllowsEmptyDir(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{}`)
+	src := makeHomeSourceRepo(t, `{}`, false)
 	home := freshAgentsHome(t)
 	if err := os.MkdirAll(home, 0755); err != nil {
 		t.Fatal(err)
@@ -167,15 +250,14 @@ func TestRunInitFrom_AllowsEmptyDir(t *testing.T) {
 		t.Fatalf("empty dir should be adoptable: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "config.json")); err != nil {
-		t.Errorf("clone did not materialize into the empty dir: %v", err)
+		t.Errorf("adoption did not materialize into the empty dir: %v", err)
 	}
 }
 
-// TestRunInitFrom_AmbientAuthCredsNotSynced asserts the clone uses ambient git
-// (no credential is threaded by dot-agents) and that no credential material is
+// TestRunInitFrom_AmbientAuthCredsNotSynced asserts no credential material is
 // written into the adopted tree (NEW-FORK-B / R7).
 func TestRunInitFrom_AmbientAuthCredsNotSynced(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`)
+	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`, false)
 	home := freshAgentsHome(t)
 	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err != nil {
 		t.Fatalf("runInitFrom: %v", err)
@@ -187,19 +269,22 @@ func TestRunInitFrom_AmbientAuthCredsNotSynced(t *testing.T) {
 	}
 }
 
-// TestRunInitFrom_CloneError surfaces a clone failure (bad source ref).
+// TestRunInitFrom_CloneError surfaces a clone failure and leaves no partial home.
 func TestRunInitFrom_CloneError(t *testing.T) {
 	requireGitLF(t)
-	freshAgentsHome(t)
+	home := freshAgentsHome(t)
 	err := runInitFrom(&cobra.Command{}, filepath.Join(t.TempDir(), "does-not-exist"), stdInitDirMaker{})
 	if err == nil || !strings.Contains(err.Error(), "cloning home source") {
 		t.Errorf("expected clone error, got %v", err)
 	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Errorf("a clone failure must leave no partial ~/.agents (err=%v)", err)
+	}
 }
 
-// TestRunInitFrom_DryRun prints the plan and clones nothing.
+// TestRunInitFrom_DryRun prints the plan and adopts nothing.
 func TestRunInitFrom_DryRun(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{}`)
+	src := makeHomeSourceRepo(t, `{}`, false)
 	home := freshAgentsHome(t)
 	InitDryRunFn = func() bool { return true }
 	defer func() { InitDryRunFn = func() bool { return initDryRun } }()
@@ -207,13 +292,13 @@ func TestRunInitFrom_DryRun(t *testing.T) {
 	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, "config.json")); !os.IsNotExist(err) {
-		t.Errorf("dry-run must not clone: err=%v", err)
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not adopt: err=%v", err)
 	}
 }
 
 // TestRunInitFrom_ResolveError surfaces a user-scope resolution failure (a
-// malformed cloned .agentsrc.json) instead of silently continuing.
+// malformed cloned .agentsrc.json) and leaves no partial home.
 func TestRunInitFrom_ResolveError(t *testing.T) {
 	requireGitLF(t)
 	t.Setenv("GIT_AUTHOR_NAME", "Test")
@@ -236,16 +321,18 @@ func TestRunInitFrom_ResolveError(t *testing.T) {
 	gitLF(t, src, "add", "-A")
 	gitLF(t, src, "commit", "-m", "bad home")
 
-	freshAgentsHome(t)
+	home := freshAgentsHome(t)
 	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err == nil {
 		t.Error("expected user-scope resolve error from malformed .agentsrc.json")
 	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Errorf("a resolve failure must leave no partial ~/.agents (err=%v)", err)
+	}
 }
 
-// TestRunInit_DispatchesToFrom proves runInit routes to the --from path when the
-// flag is set on the command.
+// TestRunInit_DispatchesToFrom proves runInit routes to the --from path.
 func TestRunInit_DispatchesToFrom(t *testing.T) {
-	src := makeHomeSourceRepo(t, `{}`)
+	src := makeHomeSourceRepo(t, `{}`, false)
 	home := freshAgentsHome(t)
 
 	cmd := &cobra.Command{}
@@ -263,7 +350,7 @@ func TestRunInit_DispatchesToFrom(t *testing.T) {
 		t.Fatalf("runInit --from: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, "config.json")); err != nil {
-		t.Errorf("dispatch did not clone the home: %v", err)
+		t.Errorf("dispatch did not adopt the home: %v", err)
 	}
 }
 
@@ -277,8 +364,210 @@ func TestInitFromValue_NilAndUnregistered(t *testing.T) {
 	}
 }
 
-// TestReconcileExistingAgentsHome covers the FORK-2 branches: missing (allowed),
-// empty (allowed), non-empty (refused), and read-error (a file at the path).
+// TestValidateAmbientAuthRef covers the BUG-3 contract: credential-bearing URLs
+// refused, ambient ssh / clean refs allowed.
+func TestValidateAmbientAuthRef(t *testing.T) {
+	tests := []struct {
+		ref     string
+		refused bool
+	}{
+		{"git@github.com:acme/repo.git", false},
+		{"ssh://git@github.com/acme/repo.git", false},
+		{"https://github.com/acme/repo.git", false},
+		{"/local/path/to/home", false},
+		{"file:///local/home", false},
+		{"https://user:token@github.com/acme/repo.git", true},
+		{"https://ghp_tokenonly@github.com/acme/repo.git", true},
+		{"http://u:p@host/repo.git", true},
+		{"ssh://git:secret@github.com/acme/repo.git", true},
+	}
+	for _, tt := range tests {
+		err := validateAmbientAuthRef(tt.ref)
+		if tt.refused && err == nil {
+			t.Errorf("%q should be refused", tt.ref)
+		}
+		if !tt.refused && err != nil {
+			t.Errorf("%q should be allowed, got %v", tt.ref, err)
+		}
+	}
+}
+
+// TestRedactRef masks an embedded password and passes clean refs through —
+// including an ssh ref whose userinfo is a login user, not a credential.
+func TestRedactRef(t *testing.T) {
+	if got := redactRef("https://user:token@host/repo.git"); strings.Contains(got, "token") {
+		t.Errorf("redactRef leaked the password: %q", got)
+	}
+	for _, clean := range []string{"git@github.com:acme/repo.git", "https://github.com/acme/repo.git", "/path", "ssh://git@github.com/acme/repo.git"} {
+		if got := redactRef(clean); got != clean {
+			t.Errorf("redactRef(%q) = %q, want unchanged", clean, got)
+		}
+	}
+}
+
+// TestRunInitFrom_StagingMkdirError covers stageAndAdoptHome's MkdirTemp-error
+// branch: a target whose parent dir does not exist fails staging before any clone.
+func TestRunInitFrom_StagingMkdirError(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("HOME", base)
+	t.Setenv("AGENTS_HOME", filepath.Join(base, "missing-parent", "dot-agents"))
+	called := false
+	orig := cloneHomeSourceFn
+	cloneHomeSourceFn = func(ref, dest string) error { called = true; return nil }
+	defer func() { cloneHomeSourceFn = orig }()
+
+	if err := runInitFrom(&cobra.Command{}, "fixture://home", stdInitDirMaker{}); err == nil {
+		t.Error("expected a staging-dir creation error")
+	}
+	if called {
+		t.Error("clone must not run when staging cannot be created")
+	}
+}
+
+// TestResolveAndRebindStaged_GitignoreError covers the ensureGitignore-error
+// branch: a staged .gitignore that is a directory fails the machine-local repair.
+func TestResolveAndRebindStaged_GitignoreError(t *testing.T) {
+	staging := t.TempDir()
+	if err := os.WriteFile(filepath.Join(staging, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, ".agentsrc.json"), []byte(`{}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(staging, ".gitignore"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := resolveAndRebindStaged(staging); err == nil {
+		t.Error("expected a .gitignore write error")
+	}
+}
+
+// TestMoveStagedHome_NonEmptyTargetError covers the clear-target error branch: a
+// non-empty target cannot be removed for the rename.
+func TestMoveStagedHome_NonEmptyTargetError(t *testing.T) {
+	base := t.TempDir()
+	staging := filepath.Join(base, "staging")
+	if err := os.MkdirAll(staging, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "home")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "occupant"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveStagedHome(staging, target); err == nil {
+		t.Error("expected an error clearing a non-empty target")
+	}
+}
+
+// TestReportRebind covers the render loop.
+func TestReportRebind(t *testing.T) {
+	reportRebind([]string{"unbound-a", "unbound-b"})
+}
+
+// TestRebindProjectSet_AllUnbound: every known project starts unbound, with the
+// path-free split persisted.
+func TestRebindProjectSet_AllUnbound(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.json"),
+		[]byte(`{"version":2,"projects":{"a":{"repo_id":"github.com/x/a"},"b":{}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	known, unbound, err := rebindProjectSet()
+	if err != nil {
+		t.Fatalf("rebindProjectSet: %v", err)
+	}
+	if known != 2 || len(unbound) != 2 {
+		t.Errorf("known=%d unbound=%v; want 2/[a b]", known, unbound)
+	}
+}
+
+// TestRebindProjectSet_DropsTrackedBindings: a binding table present in the home
+// (foreign path) is dropped — every project unbound, no foreign path persisted
+// (BUG-2 at the unit level).
+func TestRebindProjectSet_DropsTrackedBindings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.json"),
+		[]byte(`{"version":2,"projects":{"svc":{"repo_id":"github.com/x/svc"}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, "local"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "local", "bindings.json"),
+		[]byte(`{"version":2,"bindings":{"svc":{"path":"/machine-a/svc","added":"2024-01-01T00:00:00Z"}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	known, unbound, err := rebindProjectSet()
+	if err != nil {
+		t.Fatalf("rebindProjectSet: %v", err)
+	}
+	if known != 1 || len(unbound) != 1 {
+		t.Errorf("known=%d unbound=%v; want 1/[svc]", known, unbound)
+	}
+	bind, _ := os.ReadFile(filepath.Join(home, "local", "bindings.json"))
+	if strings.Contains(string(bind), "/machine-a/svc") {
+		t.Errorf("foreign binding not dropped:\n%s", bind)
+	}
+}
+
+// TestRebindProjectSet_LoadError covers the Load-error branch.
+func TestRebindProjectSet_LoadError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "local"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "local", "bindings.json"), []byte("{bad"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := rebindProjectSet(); err == nil {
+		t.Error("expected load error from malformed binding table")
+	}
+}
+
+// TestRebindProjectSet_SaveError covers the persist-error branch: a read-only home
+// lets Load read config.json but fails Save's MkdirAll(local).
+func TestRebindProjectSet_SaveError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits do not gate writes the same way on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission bits")
+	}
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.json"),
+		[]byte(`{"version":2,"projects":{"svc":{"repo_id":"github.com/x/svc"}}}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0500); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chmod(home, 0755) }()
+
+	if _, _, err := rebindProjectSet(); err == nil {
+		t.Error("expected Save error persisting the adopted registry")
+	}
+}
+
+// TestGitCloneHomeSource_Error covers the production clone seam's error branch.
+func TestGitCloneHomeSource_Error(t *testing.T) {
+	requireGitLF(t)
+	err := gitCloneHomeSource(filepath.Join(t.TempDir(), "nonexistent"), filepath.Join(t.TempDir(), "dst"))
+	if err == nil || !strings.Contains(err.Error(), "git clone") {
+		t.Errorf("expected git clone error, got %v", err)
+	}
+}
+
+// TestReconcileExistingAgentsHome covers the FORK-2 branches.
 func TestReconcileExistingAgentsHome(t *testing.T) {
 	t.Run("missing is allowed", func(t *testing.T) {
 		if err := reconcileExistingAgentsHome(filepath.Join(t.TempDir(), "nope")); err != nil {
@@ -310,181 +599,91 @@ func TestReconcileExistingAgentsHome(t *testing.T) {
 	})
 }
 
-// TestRebindProjectSet_V2AllUnbound: a fresh v2 clone with no binding table
-// reports every project known-but-unbound.
-func TestRebindProjectSet_V2AllUnbound(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("AGENTS_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config.json"),
-		[]byte(`{"version":2,"projects":{"a":{"repo_id":"github.com/x/a"},"b":{}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	known, bound, unbound, err := rebindProjectSet()
-	if err != nil {
-		t.Fatalf("rebindProjectSet: %v", err)
-	}
-	if known != 2 || len(bound) != 0 || len(unbound) != 2 {
-		t.Errorf("known=%d bound=%v unbound=%v; want 2/0/2", known, bound, unbound)
-	}
-}
-
-// TestRebindProjectSet_V1DropsForeignPaths: a legacy v1 home (paths inline from
-// machine A) must NOT inherit those paths — they are dropped, the project is
-// unbound, and the v2 split is persisted path-free.
-func TestRebindProjectSet_V1DropsForeignPaths(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("AGENTS_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config.json"),
-		[]byte(`{"version":1,"projects":{"svc":{"path":"/machine-a/svc","added":"2024-01-02T03:04:05Z"}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	known, bound, unbound, err := rebindProjectSet()
-	if err != nil {
-		t.Fatalf("rebindProjectSet: %v", err)
-	}
-	if known != 1 || len(bound) != 0 || len(unbound) != 1 {
-		t.Errorf("known=%d bound=%v unbound=%v; want 1/0/1 (foreign path dropped)", known, bound, unbound)
-	}
-	migrated, _ := os.ReadFile(filepath.Join(home, "config.json"))
-	if strings.Contains(string(migrated), "/machine-a/svc") {
-		t.Errorf("persisted v2 config.json still carries the foreign path:\n%s", migrated)
-	}
-}
-
-// TestRebindProjectSet_LoadError covers the Load-error branch (a malformed
-// machine-local binding table).
-func TestRebindProjectSet_LoadError(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("AGENTS_HOME", home)
-	if err := os.MkdirAll(filepath.Join(home, "local"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "local", "bindings.json"), []byte("{bad"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := rebindProjectSet(); err == nil {
-		t.Error("expected load error from malformed binding table")
-	}
-}
-
-// TestReportRebind covers both render loops (bound + unbound).
-func TestReportRebind(t *testing.T) {
-	reportRebind([]string{"bound-a"}, []string{"unbound-b"})
-}
-
-// TestRebindProjectSet_BoundProject: a project carrying a machine-local binding
-// is reported bound (the empty-dir adoption that kept a prior local/ table).
-func TestRebindProjectSet_BoundProject(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("AGENTS_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config.json"),
-		[]byte(`{"version":2,"projects":{"svc":{"repo_id":"github.com/x/svc"}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(home, "local"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "local", "bindings.json"),
-		[]byte(`{"version":2,"bindings":{"svc":{"path":"/here/svc","added":"2024-01-01T00:00:00Z"}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	known, bound, unbound, err := rebindProjectSet()
-	if err != nil {
-		t.Fatalf("rebindProjectSet: %v", err)
-	}
-	if known != 1 || len(bound) != 1 || bound[0] != "svc" || len(unbound) != 0 {
-		t.Errorf("known=%d bound=%v unbound=%v; want 1/[svc]/[]", known, bound, unbound)
-	}
-}
-
-// TestRebindProjectSet_SaveError covers the migrated-home Save-error branch: a
-// legacy v1 home (UpgradeNeeded) whose machine-local binding write fails must
-// surface the persist error rather than silently dropping the migration. The
-// home is made read-only so Load still reads config.json but Save's
-// MkdirAll(local) fails.
-func TestRebindProjectSet_SaveError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission bits do not gate writes the same way on Windows")
-	}
-	if os.Geteuid() == 0 {
-		t.Skip("root bypasses permission bits")
-	}
-	home := t.TempDir()
-	t.Setenv("AGENTS_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config.json"),
-		[]byte(`{"version":1,"projects":{"svc":{"path":"/a/svc","added":"2024-01-01T00:00:00Z"}}}`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(home, 0500); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = os.Chmod(home, 0755) }()
-
-	if _, _, _, err := rebindProjectSet(); err == nil {
-		t.Error("expected Save error persisting the migrated registry")
-	}
-}
-
-// TestRunInitFrom_RebindError covers runInitFrom's rebind-error branch: a clone
-// that lands a malformed machine-local binding table makes config.Load fail
-// during the rebind step, and the error must surface (not be swallowed).
-func TestRunInitFrom_RebindError(t *testing.T) {
-	freshAgentsHome(t)
-	orig := cloneHomeSourceFn
-	cloneHomeSourceFn = func(ref, dest string) error {
-		if err := os.MkdirAll(filepath.Join(dest, "local"), 0755); err != nil {
-			return err
+// TestEnsureStagedMachineLocalGitignored covers create, append-missing,
+// already-present, and read-error branches.
+func TestEnsureStagedMachineLocalGitignored(t *testing.T) {
+	t.Run("creates when absent", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := ensureStagedMachineLocalGitignored(dir); err != nil {
+			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dest, "config.json"),
-			[]byte(`{"version":2,"projects":{}}`), 0644); err != nil {
-			return err
+		gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+		for _, w := range []string{"local/", "cache/"} {
+			if !strings.Contains(string(gi), w) {
+				t.Errorf("missing %q:\n%s", w, gi)
+			}
 		}
-		if err := os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte(`{}`), 0644); err != nil {
-			return err
+	})
+	t.Run("appends only missing", func(t *testing.T) {
+		dir := t.TempDir()
+		// No trailing newline — exercises the newline-normalizing append branch.
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("local/\nfoo"), 0644); err != nil {
+			t.Fatal(err)
 		}
-		return os.WriteFile(filepath.Join(dest, "local", "bindings.json"), []byte("{bad"), 0644)
-	}
-	defer func() { cloneHomeSourceFn = orig }()
+		if err := ensureStagedMachineLocalGitignored(dir); err != nil {
+			t.Fatal(err)
+		}
+		gi, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+		if strings.Count(string(gi), "local/") != 1 {
+			t.Errorf("local/ duplicated or missing:\n%s", gi)
+		}
+		if !strings.Contains(string(gi), "cache/") {
+			t.Errorf("cache/ not appended:\n%s", gi)
+		}
+	})
+	t.Run("noop when present", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("local/\ncache/\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := ensureStagedMachineLocalGitignored(dir); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("read error", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".gitignore"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := ensureStagedMachineLocalGitignored(dir); err == nil {
+			t.Error("a directory .gitignore should be a read error")
+		}
+	})
+}
 
-	if err := runInitFrom(&cobra.Command{}, "fixture://home", stdInitDirMaker{}); err == nil {
-		t.Error("expected rebind error from a malformed binding table")
+// TestMoveStagedHome_RenamesAndClearsEmpty covers the empty-target clear + rename.
+func TestMoveStagedHome_RenamesAndClearsEmpty(t *testing.T) {
+	base := t.TempDir()
+	staging := filepath.Join(base, "staging")
+	if err := os.MkdirAll(staging, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staging, "f"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(base, "home")
+	if err := os.MkdirAll(target, 0755); err != nil { // empty placeholder
+		t.Fatal(err)
+	}
+	if err := moveStagedHome(staging, target); err != nil {
+		t.Fatalf("moveStagedHome: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "f")); err != nil {
+		t.Errorf("staged content not moved into target: %v", err)
 	}
 }
 
-// TestGitCloneHomeSource_Error covers the production clone seam's error branch.
-func TestGitCloneHomeSource_Error(t *testing.T) {
-	requireGitLF(t)
-	err := gitCloneHomeSource(filepath.Join(t.TempDir(), "nonexistent"), filepath.Join(t.TempDir(), "dst"))
-	if err == nil || !strings.Contains(err.Error(), "git clone") {
-		t.Errorf("expected git clone error, got %v", err)
+// TestWithAgentsHome_RestoresUnset covers the previously-unset restore branch.
+func TestWithAgentsHome_RestoresUnset(t *testing.T) {
+	if err := os.Unsetenv("AGENTS_HOME"); err != nil {
+		t.Fatal(err)
 	}
-}
-
-// TestRunInitFrom_CloneSeamInjected covers the cloneHomeSourceFn seam: a fixture
-// copy stands in for the network clone, exercising the post-clone resolve +
-// rebind without git.
-func TestRunInitFrom_CloneSeamInjected(t *testing.T) {
-	home := freshAgentsHome(t)
-	orig := cloneHomeSourceFn
-	cloneHomeSourceFn = func(ref, dest string) error {
-		if err := os.MkdirAll(dest, 0755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(dest, "config.json"),
-			[]byte(`{"version":2,"projects":{"svc":{"repo_id":"github.com/x/svc"}}}`), 0644); err != nil {
-			return err
-		}
-		return os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte(`{}`), 0644)
+	restore := withAgentsHome("/tmp/x")
+	if got := os.Getenv("AGENTS_HOME"); got != "/tmp/x" {
+		t.Errorf("AGENTS_HOME = %q, want /tmp/x", got)
 	}
-	defer func() { cloneHomeSourceFn = orig }()
-
-	if err := runInitFrom(&cobra.Command{}, "fixture://home", stdInitDirMaker{}); err != nil {
-		t.Fatalf("runInitFrom (seam): %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, "local")); err != nil {
-		t.Errorf("machine-local local/ dir should be materialized: %v", err)
+	restore()
+	if _, ok := os.LookupEnv("AGENTS_HOME"); ok {
+		t.Error("AGENTS_HOME should be unset again after restore")
 	}
 }
