@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-l1-followups-1782677806
+mode: delegated
+parent_plan_id: config-architecture-impl
+parent_task_id: l1-followups
+title: 'L1 follow-ups: R2 lock-file profile units, R7/R8 projection+drift, authored profiles key'
+summary: Delegated from plan Config-architecture implementation (substrate-first layer cascade)
+write_scope:
+    - internal/config/profile.go
+    - internal/config/profile_resolver.go
+    - internal/config/profile_locks.go
+    - internal/config/profile_snapshot.go
+    - internal/config/profile_migration.go
+    - internal/config/profile_lockfile.go
+    - internal/config/profile_projection.go
+    - internal/config/profile_drift.go
+success_criteria: ""
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: l1-followups-worker
+status: active
+created_at: "2026-06-28T20:16:46Z"
+updated_at: "2026-06-28T20:16:46Z"

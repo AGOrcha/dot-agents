@@ -1,0 +1,8 @@
+schema_version: 1
+id: codex-179-adapter-findings
+plan_id: sdd-kg-schema-v4-corrections
+task_id: g7-task-planid-source-mismatch
+observation: 'Codex adversarial review of PR #179 (orchestrator stream B) corroborated #179 as NOT tautological (real disk walk + mutation-test anti-tautology) and merge-ready, but surfaced adapter bugs beyond the 6 reported gaps: (1) STRONGEST: task.plan_id is documented [mirror: TASKS.yaml header plan_id] but ingest sources it from PLAN.yaml effectivePlanID — silent wrong-key on a mismatch (-> task g7). (2) intra-type duplicate-id collision still possible (two plan dirs same PLAN.yaml id, or dup task ids) — prefix fix only closes CROSS-type collision. (3) coverage floors reject empty graph but not a materially under-linked one (trace-edge checks are >0 only; NodeCount is len(notes) not unique ids). (4) dangling depends_on edges are deliberate but conflict with the SDK edge-between-two-notes model — gap 5 should make the policy normative. Full review: scratchpad/codex-review-179.txt.'
+classification: small
+routed_to: task_note:sdd-kg-schema-v4-corrections/g7-task-planid-source-mismatch
+created_at: "2026-06-26T01:18:50Z"
