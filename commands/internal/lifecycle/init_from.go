@@ -248,11 +248,26 @@ func redactRef(ref string) string {
 // Adopting a remote home INTO a populated one (--adopt/--merge) is deferred
 // (FORK-2 near-roadmap).
 func reconcileExistingAgentsHome(agentsHome string) error {
-	entries, err := os.ReadDir(agentsHome)
+	info, err := os.Stat(agentsHome)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil // fresh — the common path
 		}
+		return fmt.Errorf("inspecting %s: %w", config.DisplayPath(agentsHome), err)
+	}
+	if !info.IsDir() {
+		// A non-directory at the home path (e.g. a regular file) is an occupied,
+		// invalid home — refuse it. os.ReadDir on a file is ENOTDIR on POSIX but
+		// does not reliably error on Windows, so stat explicitly for cross-platform
+		// parity (Windows-CI parity: TestReconcileExistingAgentsHome/read_error).
+		return InitUsageErrorFn(
+			fmt.Sprintf("%s exists and is not a directory", config.DisplayPath(agentsHome)),
+			"init --from needs ~/.agents to be absent or an empty directory.",
+			"Move or remove the file at ~/.agents and re-run, or run `da init` for a fresh local scaffold.",
+		)
+	}
+	entries, err := os.ReadDir(agentsHome)
+	if err != nil {
 		return fmt.Errorf("inspecting %s: %w", config.DisplayPath(agentsHome), err)
 	}
 	if len(entries) == 0 {
