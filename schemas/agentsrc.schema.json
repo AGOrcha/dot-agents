@@ -102,6 +102,119 @@
         "$ref": "#/$defs/preconditionPolicy"
       }
     },
+    "locks": {
+      "type": "object",
+      "description": "Section 15 D1a authority-axis lock block emitted by a layer in the policy-authority pass (Phase 1). value_locks pin a field (rejecting lower-scope writes); deny_locks subtract a set member (deny-overrides). force_allow is invalid and aborts the resolve (the no-force-allow invariant). A lock binds only scopes ranked below its owner on the AUTHORITY-RANK total order (org > team > repo > user).",
+      "additionalProperties": false,
+      "properties": {
+        "value_locks": {
+          "type": "object",
+          "description": "Field path -> pinned value. A lower-authority scope that writes a different value has its write rejected; da config explain surfaces attempted/winning/owner."
+        },
+        "deny_locks": {
+          "type": "array",
+          "description": "Set-member denials, each 'field:member' (e.g. 'skills:risky-skill'). deny-overrides: a lower-scope union-add of the member is dropped.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "force_allow": {
+          "type": "array",
+          "description": "ALWAYS invalid: any entry is a resolve-time validation error. A lower scope can never punch a capability through a higher deny.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "authority_grants": {
+      "type": "object",
+      "description": "Section 15 D1a source-authority registry: a per-source allowlist 'source-id -> scope it may carry'. Honored only when written by a layer whose own authority is at least the conferred scope; a lower scope cannot self-bless authority (a resolve-time rejection). A value-only source's claim is inert unless co-signed by a trusted root.",
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["org", "team", "repo", "user", "product", "public", "runtime", "project-local"]
+      }
+    },
+    "layering_policy": {
+      "type": "object",
+      "description": "Unified-config-profiles (L1) scope-attached layering policy: the Phase-1 governance a scope emits for the profile selector-merge engine. Its owning authority scope is SOURCE-derived (from the layer it lives in), never authored here. precedence orders scopes low->high for value resolution; locks are absolute deny/value pins (NO force-allow, Decision 4); override_permissions is the Decision-2 three-state cap (omitted=no opinion, {}=lockdown, non-empty=allowlist); mode is the Q4 replace-mode marker.",
+      "additionalProperties": false,
+      "properties": {
+        "precedence": {
+          "type": "array",
+          "description": "Scope ordering low->high for value resolution (later wins scalar conflicts). Empty falls back to the canonical AUTHORITY-RANK order.",
+          "items": {
+            "type": "string",
+            "enum": ["org", "team", "repo", "user", "product", "public", "runtime", "project-local"]
+          }
+        },
+        "mode": {
+          "type": "string",
+          "description": "Decision-3 / Q4 merge mode. 'narrow' (default) may only tighten lower grants; 'replace' supersedes the inherited precedence + override_permissions as a visible, named act. Locks always accumulate regardless.",
+          "enum": ["narrow", "replace"]
+        },
+        "override_permissions": {
+          "type": "object",
+          "description": "Decision-2 three-state cap, keyed by authority scope -> permitted field-paths ('*' = all). OMITTED (field absent) = no opinion / inherit-higher; explicit {} = lockdown (no scope may change anything); explicit non-empty = allowlist (a scope absent from the map may change nothing).",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "locks": {
+          "type": "array",
+          "description": "Absolute layering locks (Decision 4): deny-lock (force members out of a set field, forbidding lower-scope re-grant) or value-lock (pin a scalar). There is NO force-allow lock; a force_allow key is a validation error.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field"],
+            "properties": {
+              "field": { "type": "string", "minLength": 1, "description": "Dot-path the lock governs (e.g. 'tools.allow', 'model')." },
+              "deny": { "type": "array", "items": { "type": "string" }, "description": "Set members forced out of field and forbidden from lower-scope re-grant. Mutually exclusive with value." },
+              "value": { "description": "Scalar pinned for field (value-lock). Mutually exclusive with deny." },
+              "selector": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Optional context scoping for the lock (empty = all contexts). Exact-match selector keys only.",
+                "properties": {
+                  "role": { "type": "string" },
+                  "app_type": { "type": "string" },
+                  "stage": { "type": "string" },
+                  "harness": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "manifests": {
+      "type": "object",
+      "description": "Distributable-config-manifest (L2) scope-attached manifest units, keyed by name; each manifest's absolute ref is <owning-source>:<name>. A manifest is the ONE publishable bundle that REFERENCES (by ref) the canonical sources to pull, the layering policy/profiles that bind, and (optionally) the project-set to manage — the inputs `init --from` reproduces a setup from. It never inlines copies, carries NO secrets, and NEVER self-declares authority (source-derived, D4). A manifest->manifest edge (extends/inherits/composes), an authority/scope/authority_grants self-declaration, and force_allow are validation errors, not silently dropped.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "One kind:manifest unit. Carries only references; identity + authority are loader-stamped, never authored.",
+        "properties": {
+          "sources": {
+            "type": "array",
+            "description": "Canonical source refs to pull, fully PINNED as <source>:<path>@<version>. Names only — a private source carries no credential; auth is threaded ambient-first at init --from, never embedded. An unpinned/mutable source ref is rejected: hashing it as a stable input would be false reproducibility.",
+            "items": { "type": "string", "minLength": 1, "pattern": "^[^:]+:.+@.+$" }
+          },
+          "binds": {
+            "type": "array",
+            "description": "Refs of the layering_policy + profile units that bind. Empty = bind whatever the scope chain resolves; non-empty narrows the bound fragments to exactly these refs.",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "project_set": {
+            "type": "string",
+            "minLength": 1,
+            "description": "OPTIONAL ref of a kind:project-set unit (the portable identity registry). Absent = a manifest with no project-set, which is valid and resolves."
+          }
+        }
+      }
+    },
     "verifier_profiles": {
       "$ref": "#/$defs/stageProfileMap",
       "deprecated": true,

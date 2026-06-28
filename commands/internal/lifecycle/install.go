@@ -281,7 +281,16 @@ func RegisterInstallProject(projectName, projectPath string, deps InstallDeps) e
 		ui.DryRun("register '" + projectName + "' in config.json")
 		return nil
 	}
-	cfg.AddProject(projectName, projectPath)
+	// A project already in the SYNCED identity registry but unbound on this
+	// machine (machine-B rebind) is rebound via BindProject — machine-local path
+	// only, preserving the synced repo_id. AddProject (which re-derives repo_id
+	// from this machine's git remotes) is reserved for a genuinely new project;
+	// using it on a known identity would overwrite/corrupt the synced identity.
+	if cfg.IsProjectKnown(projectName) {
+		cfg.BindProject(projectName, projectPath)
+	} else {
+		cfg.AddProject(projectName, projectPath)
+	}
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}

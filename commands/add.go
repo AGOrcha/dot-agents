@@ -633,8 +633,20 @@ func createAddLinks(projectName, projectPath string) error {
 
 // registerAddedProject persists the project in config.json. Only call after
 // every prior step succeeded — registration is the success-stamp moment.
+//
+// A project whose portable identity is already in the SYNCED registry (the
+// machine-B rebind case: synced identity present, no local binding yet) is
+// rebound via BindProject — which writes ONLY the machine-local path and leaves
+// repo_id untouched. Re-deriving identity here would OVERWRITE the synced
+// repo_id from this machine's git remotes, corrupting the very identity this
+// layer exists to protect. AddProject (which derives repo_id) is reserved for a
+// genuinely new project.
 func registerAddedProject(cfg *config.Config, projectName, projectPath string) error {
-	cfg.AddProject(projectName, projectPath)
+	if cfg.IsProjectKnown(projectName) {
+		cfg.BindProject(projectName, projectPath)
+	} else {
+		cfg.AddProject(projectName, projectPath)
+	}
 	if err := cfg.Save(); err != nil {
 		return fmt.Errorf("saving config: %w", err)
 	}

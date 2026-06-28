@@ -162,6 +162,33 @@ func ReadOriginURL(repoPath string) (string, error) {
 	return rc.URLs[0], nil
 }
 
+// ReadAllRemotes returns every configured remote's URLs for the repository at
+// repoPath, read in-process via go-git/v6 (no subprocess). The map is keyed by
+// remote name (e.g. "origin", "org") → that remote's configured URL list (a
+// copy, so callers may retain it safely).
+//
+// It powers the FORK-1 hybrid ambiguity guard (R12): a project with more than
+// one remote identity (or an origin carrying multiple URLs) cannot trust its
+// repo_id as a portable key. A git repo with no remotes yields an empty
+// (non-nil) map and nil error; a non-checkout path yields a wrapped error.
+func ReadAllRemotes(repoPath string) (map[string][]string, error) {
+	repo, err := git.PlainOpenWithOptions(repoPath, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
+		return nil, fmt.Errorf("gitremote: open %s: %w", repoPath, err)
+	}
+	cfg, err := repo.Config()
+	if err != nil {
+		return nil, fmt.Errorf("gitremote: read config for %s: %w", repoPath, err)
+	}
+	out := make(map[string][]string, len(cfg.Remotes))
+	for name, rc := range cfg.Remotes {
+		urls := make([]string, len(rc.URLs))
+		copy(urls, rc.URLs)
+		out[name] = urls
+	}
+	return out, nil
+}
+
 // CanonicalRepoID is a convenience wrapper around ParseRemoteURL that
 // returns just the "<host>/<path>" canonical repo_id form, or "" for any
 // input that does not yield a valid host+path pair.
