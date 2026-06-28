@@ -137,6 +137,14 @@ func TestSaveSplitsIdentityFromBinding(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
+	wantPath := filepath.FromSlash("/abs/machine/path/svc")
+	// JSON escapes backslashes, so a Windows path (\abs\...) appears doubled in
+	// the raw file. Compare against the JSON-encoded form for raw-substring
+	// checks, and decode for field checks — never the bare OS path (Windows-CI
+	// parity: TestSaveSplitsIdentityFromBinding).
+	pathJSON, _ := json.Marshal(wantPath)
+	wantPathJSON := strings.Trim(string(pathJSON), `"`)
+
 	cfgRaw, err := os.ReadFile(filepath.Join(home, "config.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +152,7 @@ func TestSaveSplitsIdentityFromBinding(t *testing.T) {
 	if !strings.Contains(string(cfgRaw), "github.com/acme/repo") {
 		t.Errorf("synced config.json should carry the portable repo_id:\n%s", cfgRaw)
 	}
-	if strings.Contains(string(cfgRaw), filepath.FromSlash("/abs/machine/path/svc")) {
+	if strings.Contains(string(cfgRaw), wantPathJSON) {
 		t.Errorf("synced config.json leaked an absolute path:\n%s", cfgRaw)
 	}
 
@@ -152,8 +160,12 @@ func TestSaveSplitsIdentityFromBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected machine-local binding table: %v", err)
 	}
-	if !strings.Contains(string(bindRaw), filepath.FromSlash("/abs/machine/path/svc")) {
-		t.Errorf("binding table should hold the absolute path:\n%s", bindRaw)
+	var table bindingTableFile
+	if err := json.Unmarshal(bindRaw, &table); err != nil {
+		t.Fatalf("decode binding table: %v", err)
+	}
+	if got := table.Bindings["svc"].Path; got != wantPath {
+		t.Errorf("binding table should hold the absolute path %q, got %q:\n%s", wantPath, got, bindRaw)
 	}
 }
 

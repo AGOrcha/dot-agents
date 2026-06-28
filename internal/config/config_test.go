@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,7 +38,10 @@ func TestConfigLoadSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read config.json: %v", err)
 	}
-	if strings.Contains(string(rawCfg), filepath.FromSlash("/home/user/myproject")) {
+	// JSON escapes backslashes; compare against the JSON-encoded path so a
+	// Windows path (\home\...) is matched in its doubled form, not the bare OS path.
+	leakJSON, _ := json.Marshal(filepath.FromSlash("/home/user/myproject"))
+	if strings.Contains(string(rawCfg), strings.Trim(string(leakJSON), `"`)) {
 		t.Errorf("synced config.json leaked an absolute path:\n%s", rawCfg)
 	}
 	if _, err := os.Stat(filepath.Join(tmp, "local", "bindings.json")); err != nil {
