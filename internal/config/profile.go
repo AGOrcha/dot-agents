@@ -146,7 +146,43 @@ type ConfigProfile struct {
 	// object so one engine carries app_type facets, stage composition, and
 	// capability sets without a per-kind resolver.
 	Bundle map[string]any
+	// Authored marks a profile WRITTEN directly as a kind:profile unit (a
+	// user-authored profile declared in a layer's `profiles` block) as opposed to
+	// one SYNTHESIZED from the legacy execution_profile / stage_profiles surfaces
+	// (profile_migration.go). The two share one engine, but an authored profile is
+	// addressable and orderable distinctly from a derived one (see Key): a derived
+	// fragment is a projection of legacy config and must never collide in the
+	// addressable namespace with a profile a human wrote.
+	Authored bool
 }
+
+// authoredKeyPrefix namespaces an AUTHORED profile's stable key so it sorts and
+// addresses distinctly from a synthesized (derived) profile, whose key is its
+// bare derived ref. It is a stable string segment, not a value the unit declares.
+const authoredKeyPrefix = "authored:"
+
+// AuthoredProfileRefPrefix is the synthetic source segment for a profile authored
+// directly in a layer's `profiles` block. The absolute ref is
+// "<source>:<prefix>:<name>" (or "<prefix>:<name>" for a source-less layer),
+// keeping authored refs in their own namespace, disjoint from the
+// execution-profile / stage-profile derived refs.
+const AuthoredProfileRefPrefix = "profile"
+
+// Key is the profile's stable, addressable identity for ordering and lookup. An
+// authored profile is namespaced under authoredKeyPrefix so it is distinguishable
+// from a synthesized profile (whose key is its bare ref) — two profiles with the
+// same underlying ref but different provenance (authored vs derived) yield
+// different keys and never alias one another.
+func (p ConfigProfile) Key() string {
+	if p.Authored {
+		return authoredKeyPrefix + p.Ref
+	}
+	return p.Ref
+}
+
+// IsAuthored reports whether the profile was authored directly (vs synthesized
+// from the legacy execution_profile / stage_profiles surfaces).
+func (p ConfigProfile) IsAuthored() bool { return p.Authored }
 
 // PolicyMode is the Q4 named replace-mode marker (Decision 3). The default is
 // narrow (merge that may only tighten); replace supersedes the inherited
@@ -373,6 +409,123 @@ func decodeOneLock(raw json.RawMessage, scope AuthorityScope) (ProfileLock, erro
 		Field: wire.Field, Deny: wire.Deny, Value: wire.Value,
 		Selector: sel, Owner: scope,
 	}, nil
+}
+
+// authoredProfileWire is the strict decode shape of one authored kind:profile
+// unit declared in a layer's `profiles` block. It is a named type WITHOUT a
+// custom UnmarshalJSON so DisallowUnknownFields rejects a typo'd key rather than
+// silently dropping it (R9).
+type authoredProfileWire struct {
+	Kind     ProfileKind     `json:"kind"`
+	Selector json.RawMessage `json:"selector,omitempty"`
+	Bundle   map[string]any  `json:"bundle,omitempty"`
+}
+
+// authoredForbiddenFields are top-level keys an authored profile may NOT carry,
+// each mapped to the loud reason it is a validation error rather than a silently
+// dropped input. They enforce the two hard invariants the spec shares with
+// manifests: authority is SOURCE-derived, never self-declared (Decision 1), and
+// there are ZERO profile→profile inheritance edges (§2.1).
+var authoredForbiddenFields = map[string]string{
+	"scope":            "profile authority is source-derived (ref.source -> source-registry -> scope), never self-declared",
+	"authority":        "profile authority is source-derived (ref.source -> source-registry -> scope), never self-declared",
+	"authority_grants": "a profile cannot self-grant authority; authority is source-derived",
+	"extends":          "profiles do not extend or inherit other profiles (no profile->profile edge); composition is selector-merge across the scope chain",
+	"inherits":         "profiles do not extend or inherit other profiles (no profile->profile edge); composition is selector-merge across the scope chain",
+	"composes":         "profiles do not compose other profiles by reference; composition is selector-merge across the scope chain",
+}
+
+// decodeAuthoredProfiles decodes a layer's `profiles` block — an object of
+// <name> -> authored profile — into kind:profile units stamped Authored=true and
+// carried at the layer's SOURCE-derived authority scope (Decision 1) and
+// value-merge order. Names are processed in sorted order for deterministic output;
+// a malformed entry, a forbidden self-declared field, an unknown kind, or an
+// unknown selector key is a fail-closed error (R9). A nil/absent block yields no
+// profiles.
+func decodeAuthoredProfiles(raw any, scope AuthorityScope, source string, order int) ([]ConfigProfile, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("profiles must be an object of <name> -> profile")
+	}
+	out := make([]ConfigProfile, 0, len(obj))
+	for _, name := range sortedAnyKeys(obj) {
+		// obj[name] came from decoded JSON, so re-encoding cannot fail (the same
+		// impossible-marshal convention as WriteUnitsLock / toBundle).
+		data, _ := json.Marshal(obj[name])
+		pr, err := decodeAuthoredProfile(data, derivedRef(source, AuthoredProfileRefPrefix, name), scope, order)
+		if err != nil {
+			return nil, fmt.Errorf("profile %q: %w", name, err)
+		}
+		out = append(out, pr)
+	}
+	return out, nil
+}
+
+// decodeAuthoredProfile decodes one authored profile fail-closed and stamps its
+// loader-supplied identity (ref), SOURCE-derived authority (scope), and
+// value-merge order — none of which are read from the payload itself.
+func decodeAuthoredProfile(raw json.RawMessage, ref string, scope AuthorityScope, order int) (ConfigProfile, error) {
+	if err := rejectForbiddenAuthoredFields(raw); err != nil {
+		return ConfigProfile{}, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var wire authoredProfileWire
+	if err := dec.Decode(&wire); err != nil {
+		return ConfigProfile{}, fmt.Errorf("malformed profile: %w", err)
+	}
+	if err := validateProfileKind(wire.Kind); err != nil {
+		return ConfigProfile{}, err
+	}
+	sel, err := decodeSelector(wire.Selector)
+	if err != nil {
+		return ConfigProfile{}, err
+	}
+	bundle := wire.Bundle
+	if bundle == nil {
+		bundle = map[string]any{}
+	}
+	return ConfigProfile{
+		Ref:      ref,
+		Kind:     wire.Kind,
+		Scope:    scope,
+		Order:    order,
+		Selector: sel,
+		Bundle:   bundle,
+		Authored: true,
+	}, nil
+}
+
+// rejectForbiddenAuthoredFields fails closed on a self-declared-authority or
+// inheritance field BEFORE the strict decode, so the error names the specific
+// invariant violated rather than a generic "unknown field". Keys are checked in
+// sorted order so the surfaced violation is deterministic.
+func rejectForbiddenAuthoredFields(raw json.RawMessage) error {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return fmt.Errorf("malformed profile: %w", err)
+	}
+	for _, k := range sortedRawKeys(probe) {
+		if reason, bad := authoredForbiddenFields[k]; bad {
+			return fmt.Errorf("profile field %q is invalid: %s", k, reason)
+		}
+	}
+	return nil
+}
+
+// validateProfileKind rejects an absent or unrecognized profile kind: a
+// kind:profile unit must name one of the three nameable categories (§2.2), so a
+// missing or typo'd kind fails loudly rather than resolving as an empty fragment.
+func validateProfileKind(k ProfileKind) error {
+	switch k {
+	case ProfileKindAppType, ProfileKindStage, ProfileKindAgentCapability:
+		return nil
+	default:
+		return fmt.Errorf("unknown profile kind %q (valid: agent-capability, app_type, stage)", k)
+	}
 }
 
 // sortedScopes returns the keys of an authority-scope map in deterministic order.
