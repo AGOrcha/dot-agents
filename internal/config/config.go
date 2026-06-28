@@ -290,6 +290,17 @@ func (c *Config) RemoveProject(name string) {
 	delete(c.bindings, name)
 }
 
+// DropLocalBindings clears the machine-local binding table while preserving the
+// synced identity registry. `da init --from` calls it when Load reports a legacy
+// v1 home was cloned (UpgradeNeeded): the inline paths a v1 config carries are
+// the SOURCE machine's absolute paths and are invalid on this machine, so they
+// must be discarded rather than inherited (home-config defect 1). The project
+// identities still travel; each project is then reported known-but-unbound until
+// rebound on THIS machine (R5/R7). It does not touch the synced registry.
+func (c *Config) DropLocalBindings() {
+	c.bindings = make(map[string]Binding)
+}
+
 // GetProjectPath returns the machine-local path bound to a project, or "" when
 // the project is known but unbound on this machine.
 func (c *Config) GetProjectPath(name string) string {

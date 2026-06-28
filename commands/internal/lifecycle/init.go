@@ -131,6 +131,7 @@ var InitCmdExample = strings.Join([]string{
 	"  da init",
 	"  da init --dry-run",
 	"  da init --force",
+	"  da init --from git@github.com:you/agents-config.git",
 }, "\n")
 
 // RunInit is the exported entry the shim's RunE closure calls. It
@@ -190,6 +191,11 @@ func NewInitCmd(deps Deps) *cobra.Command {
 			return RunInit(cmd, args)
 		},
 	}
+	// --from <home-source> bootstraps ~/.agents from a remote home (git URL) —
+	// the L3 cross-machine adoption path (init_from.go). Read at RunE time via
+	// initFromValue so a bare lifecycle-only test command (no --from registered)
+	// safely falls back to the fresh-local scaffold.
+	cmd.Flags().String(initFromFlag, "", "Bootstrap ~/.agents from a remote home source (git URL) — cross-machine adoption")
 	return cmd
 }
 
@@ -251,6 +257,13 @@ func initNoArgs(hints ...string) cobra.PositionalArgs {
 }
 
 func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
+	// `da init --from <home-source>` is the L3 cross-machine bootstrap: it clones
+	// a remote home into ~/.agents and re-materializes the user surface, instead
+	// of scaffolding a fresh-local home from embedded starters (init_from.go).
+	if from := initFromValue(cmd); from != "" {
+		return runInitFrom(cmd, from, deps)
+	}
+
 	agentsHome := config.AgentsHome()
 
 	ui.Header("da init")
