@@ -2,6 +2,7 @@ package commands
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,77 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
+
+// captureRefreshStdout runs fn with os.Stdout redirected and returns what it
+// wrote — used to assert the user-facing refresh resolution messages (item 5).
+func captureRefreshStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+// TestRefresh_KnownButUnboundReported models machine B after a sync: the project
+// identity is known (synced registry) but has no machine-local binding, so
+// refresh must report it as unbound-on-this-machine rather than silently
+// skip-as-missing or claim "No managed projects" (defect 3, R4).
+func TestRefresh_KnownButUnboundReported(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// A synced config.json carrying identity only (no binding table on disk).
+	synced := `{"version":2,"projects":{"svc":{"repo_id":"github.com/acme/repo"}}}`
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(synced), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	out := captureRefreshStdout(t, func() {
+		if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+			t.Errorf("runRefresh: %v", err)
+		}
+	})
+	if strings.Contains(out, "No managed projects") {
+		t.Errorf("machine B must still see the synced project list, got:\n%s", out)
+	}
+	if !strings.Contains(out, "unbound on this machine") {
+		t.Errorf("expected known-but-unbound report, got:\n%s", out)
+	}
+}
+
+// TestCheckRefreshProjectPath_UnboundVsMissing pins the per-project resolution
+// branches: empty path → unbound-on-this-machine, present dir → ok (R4).
+func TestCheckRefreshProjectPath_UnboundVsMissing(t *testing.T) {
+	out := captureRefreshStdout(t, func() {
+		if checkRefreshProjectPath("svc", "") {
+			t.Error("empty path must not be treated as refreshable")
+		}
+	})
+	if !strings.Contains(out, "unbound on this machine") {
+		t.Errorf("empty-path message: %q", out)
+	}
+
+	dir := t.TempDir()
+	if !checkRefreshProjectPath("svc", dir) {
+		t.Error("present directory should be refreshable")
+	}
+}
 
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
 
@@ -425,10 +497,11 @@ func TestRunRefresh_SkipsProjectWithoutPath(t *testing.T) {
 	os.MkdirAll(agentsHome, 0755)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	// Manually write a config with a "." path
-	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{
-		"dot-project": {Path: "."},
+	// Manually write a config whose only project is bound to a "." path.
+	cfg := &config.Config{Version: 2, Projects: map[string]config.Project{
+		"dot-project": {},
 	}, Agents: map[string]config.Agent{}}
+	cfg.BindProject("dot-project", ".")
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -553,10 +626,11 @@ func TestRunRefresh_SkipsProjectWithEmptyPath(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	cfg := &config.Config{
-		Version:  1,
-		Projects: map[string]config.Project{"weird": {Path: "."}},
+		Version:  2,
+		Projects: map[string]config.Project{"weird": {}},
 		Agents:   map[string]config.Agent{},
 	}
+	cfg.BindProject("weird", ".")
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}

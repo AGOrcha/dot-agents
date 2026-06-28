@@ -98,6 +98,17 @@ type Snapshot struct {
 	// Warnings holds non-fatal resolution events (protected-field violations).
 	// Always non-nil ([]ProvenanceWarning{}) so JSON marshals to [].
 	Warnings []ProvenanceWarning `json:"warnings"`
+	// LockCollisions holds the §15 D1a authority-pass rejections: a lower-scope
+	// write a higher-scope value-lock or deny-lock rejected. Each entry carries
+	// the attempted value, the winning (locked) value, and the owning scope so
+	// `da config explain` can surface why the lower write did not win. Always
+	// non-nil so JSON marshals to [].
+	LockCollisions []LockCollision `json:"lock_collisions"`
+	// AuthorityViolations holds non-fatal §15 D1a authority-pass notes (an inert
+	// public grant, a zero-authority lock that bound nothing). Fatal violations
+	// (self-blessing, force-allow) abort the resolve instead of landing here.
+	// Always non-nil so JSON marshals to [].
+	AuthorityViolations []AuthorityViolation `json:"authority_violations"`
 }
 
 // EffectiveRaw returns the effective config as a decoded top-level JSON object.

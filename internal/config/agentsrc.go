@@ -52,6 +52,63 @@ func DeriveRepoIDFromGit(repoPath string) string {
 	return gitremote.CanonicalRepoID(raw)
 }
 
+// gitRemoteAllURLs is the seam returning every configured remote's URLs for a
+// repo path. Defaults to gitremote.ReadAllRemotes; tests override it to inject
+// multi-remote / divergent-origin topologies without standing up real .git
+// directories.
+var gitRemoteAllURLs = gitremote.ReadAllRemotes
+
+// DeriveTrustedRepoID returns the canonical repo_id for the project at repoPath
+// ONLY when the git origin is unambiguous (FORK-1 hybrid / R12). The second
+// return is true when origin cannot be trusted as a portable identity:
+//
+//   - origin has multiple configured URLs, OR
+//   - another remote canonicalizes to a DIFFERENT repo_id than origin
+//     (e.g. the AGOrcha case: origin=NikashPrakash fork vs org=AGOrcha).
+//
+// On a non-git path, a repo with no/empty origin, or an unparseable origin URL
+// the result is ("", false): not ambiguous, just no portable key — the caller
+// falls back to the logical id (the registry map key). Callers MUST NOT trust
+// repoID when ambiguous is true.
+func DeriveTrustedRepoID(repoPath string) (repoID string, ambiguous bool) {
+	remotes, err := gitRemoteAllURLs(repoPath)
+	if err != nil || len(remotes) == 0 {
+		return "", false
+	}
+	origin := remotes["origin"]
+	if len(origin) == 0 || origin[0] == "" {
+		return "", false
+	}
+	if len(origin) > 1 {
+		return "", true // multiple origin URLs — not a single trusted identity
+	}
+	originID := gitremote.CanonicalRepoID(origin[0])
+	if originID == "" {
+		return "", false
+	}
+	if hasDivergentRemote(remotes, originID) {
+		return "", true
+	}
+	return originID, false
+}
+
+// hasDivergentRemote reports whether any non-origin remote canonicalizes to a
+// repo_id different from origin's — the signal that origin is not a trustworthy
+// portable identity (R12, e.g. AGOrcha origin=fork vs org=canonical).
+func hasDivergentRemote(remotes map[string][]string, originID string) bool {
+	for name, urls := range remotes {
+		if name == "origin" {
+			continue
+		}
+		for _, u := range urls {
+			if id := gitremote.CanonicalRepoID(u); id != "" && id != originID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // isDirEntry reports whether the path is a directory, following symlinks.
 func isDirEntry(path string) bool {
 	info, err := os.Stat(path)
@@ -226,6 +283,39 @@ type AgentsRC struct {
 	// StageProfile.PreconditionPolicy; the verifier reads the resolved policy
 	// from the lockfile. Absent ⇒ the built-in `default` gate applies.
 	PreconditionPolicies map[string]PreconditionPolicySpec `json:"precondition_policies,omitempty"`
+
+	// Locks is the §15 D1a authority-axis lock block a layer emits in the
+	// policy-authority pass (Phase 1): value_locks (pin a field, rejecting lower
+	// writes) and deny_locks (subtract a set member, deny-overrides). force_allow
+	// is invalid and aborts the resolve. A lock binds only scopes ranked below
+	// its owner's AUTHORITY-RANK (org > team > repo > user). See authority.go.
+	Locks *PolicyLockSpec `json:"locks,omitempty"`
+
+	// AuthorityGrants is the §15 D1a source-authority registry block: a per-source
+	// allowlist "source-id → scope it may carry." It is honored only when written
+	// by a layer whose own authority is at least the conferred scope — a lower
+	// scope cannot self-bless authority (a resolve-time rejection). See
+	// resolveAuthorityGrants in authority.go.
+	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
+
+	// LayeringPolicy is the scope-attached unified-config-profiles (L1) policy
+	// unit: the Phase-1 layering governance a scope emits — precedence, absolute
+	// locks (deny/value, no force-allow), the Decision-2 three-state
+	// override_permissions, and the Q4 replace-mode marker. Its owning authority
+	// scope is SOURCE-derived (set by the resolver from the owning layer), never
+	// authored on the unit. See internal/config/profile.go and the
+	// unified-config-profiles design (§2.3).
+	LayeringPolicy *LayeringPolicy `json:"layering_policy,omitempty"`
+
+	// Manifests are the scope-attached distributable config manifest units (L2),
+	// keyed by name; each manifest's absolute ref is <owning-source>:<name>. A
+	// manifest REFERENCES (by ref) the sources to pull, the layering policy/profiles
+	// that bind, and (optionally) the project-set to manage — it never inlines
+	// copies (distributable-config-manifest D1/D2/R2). This lenient typed shape is
+	// what round-trips; the strict fail-closed decode (no manifest->manifest edge,
+	// no self-declared authority, no force-allow) runs at resolve time in
+	// manifest.go. Its owning authority is SOURCE-derived, never authored here (D4).
+	Manifests map[string]ManifestSpec `json:"manifests,omitempty"`
 
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
@@ -582,6 +672,12 @@ var agentsRCKnown = map[string]bool{
 	// precondition_policies: top-level named registry of verifier precondition
 	// policies (verifier-precondition-policy plan, Slice B)
 	"precondition_policies": true,
+	// §15 D1a authority/value two-axis resolver fields (config-distribution-model §15.9)
+	"locks": true, "authority_grants": true,
+	// unified-config-profiles (L1): scope-attached layering policy unit
+	"layering_policy": true,
+	// distributable-config-manifest (L2): scope-attached manifest units
+	"manifests": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
 	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
 	// Listed as "known" so they are not captured into ExtraFields (which would
@@ -618,6 +714,11 @@ type agentsRCCore struct {
 
 	StageProfiles        map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
 	PreconditionPolicies map[string]PreconditionPolicySpec  `json:"precondition_policies,omitempty"`
+
+	Locks           *PolicyLockSpec           `json:"locks,omitempty"`
+	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
+	LayeringPolicy  *LayeringPolicy           `json:"layering_policy,omitempty"`
+	Manifests       map[string]ManifestSpec   `json:"manifests,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -645,6 +746,10 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.PRSource = core.PRSource
 	a.StageProfiles = core.StageProfiles
 	a.PreconditionPolicies = core.PreconditionPolicies
+	a.Locks = core.Locks
+	a.AuthorityGrants = core.AuthorityGrants
+	a.LayeringPolicy = core.LayeringPolicy
+	a.Manifests = core.Manifests
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -712,6 +817,10 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		PRSource:             a.PRSource,
 		StageProfiles:        a.StageProfiles,
 		PreconditionPolicies: a.PreconditionPolicies,
+		Locks:                a.Locks,
+		AuthorityGrants:      a.AuthorityGrants,
+		LayeringPolicy:       a.LayeringPolicy,
+		Manifests:            a.Manifests,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -885,10 +994,36 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.StageProfiles) > 0 {
 		out.StageProfiles = cloneStageProfiles(existing.StageProfiles)
 	}
+	// manifests are author-owned config like stage_profiles: now that they are a
+	// typed field (L2) they no longer ride along in ExtraFields, so a generate /
+	// refresh rewrite must carry a committed set over explicitly or `da install` /
+	// refresh would silently drop a project's authored manifests (the
+	// schema-usage.md typed-field/ExtraFields breakage rule).
+	if len(existing.Manifests) > 0 {
+		out.Manifests = cloneManifests(existing.Manifests)
+	}
 	if existing.Refresh != nil {
 		out.Refresh = existing.Refresh
 	}
 	return &out
+}
+
+// cloneManifests deep-copies a manifests map (name → spec, including each spec's
+// source/bind ref slices) so the merged manifest does not alias the existing
+// manifest's data.
+func cloneManifests(m map[string]ManifestSpec) map[string]ManifestSpec {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]ManifestSpec, len(m))
+	for name, spec := range m {
+		out[name] = ManifestSpec{
+			Sources:    append([]string(nil), spec.Sources...),
+			Binds:      append([]string(nil), spec.Binds...),
+			ProjectSet: spec.ProjectSet,
+		}
+	}
+	return out
 }
 
 // cloneStageProfiles deep-copies a stage_profiles map (stage → slug → profile,

@@ -313,6 +313,28 @@ func TestFormatScalar_Cases(t *testing.T) {
 	}
 }
 
+func TestPrintLockCollisions(t *testing.T) {
+	// No collisions => no output (the common case).
+	var empty bytes.Buffer
+	printLockCollisions(&empty, nil)
+	if empty.Len() != 0 {
+		t.Fatalf("no collisions should print nothing, got %q", empty.String())
+	}
+
+	// A value-lock rejection surfaces attempted / winning / owner.
+	var buf bytes.Buffer
+	printLockCollisions(&buf, []cfg.LockCollision{{
+		Field: "model", Attempted: "Y", Winning: "X",
+		Owner: cfg.AuthRepo, Kind: "value_lock",
+	}})
+	out := buf.String()
+	for _, want := range []string{"model", "Y", "X", "repo", "value_lock"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("collision render missing %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestEmptyAsDash(t *testing.T) {
 	if emptyAsDash("") != "-" {
 		t.Error("empty should map to dash")

@@ -4,7 +4,7 @@ Use this skill when delegating a task to a sub-agent with a bounded write scope 
 
 ## 0. Pre-fanout gate (parent / orchestrator) — CANONICAL
 
-This is the **single canonical pre-fanout gate**. Every other skill (orchestrator-session-start preflight / gotchas / workflow / eligible-orientation) points here rather than re-stating it. The orchestrator **MUST** clear all four checks below before any `da workflow fanout`; a failed check **MUST** block the fanout. The whole gate exists because the same wasted-spawn / stale-bundle / missed-caller pattern recurred across the run despite the lessons being written (`.agents/workflow/specs/agent-ops-hardening/design.md` §3.5) — so it is now a hard gate, not advice.
+This is the **single canonical pre-fanout gate**. Every other skill (orchestrator-session-start preflight / gotchas / workflow / eligible-orientation) points here rather than re-stating it. The orchestrator **MUST** clear all the checks below (0a–0e) before any `da workflow fanout`; a failed check **MUST** block the fanout. The whole gate exists because the same wasted-spawn / stale-bundle / missed-caller pattern recurred across delegation runs despite the lessons being written down — so it is now a hard gate, not advice. The checks below (0a–0e) ARE the gate; clear them all before fanout.
 
 ### 0a. Task status vs. shipped PRs — MUST cross-check the forge
 
@@ -109,7 +109,7 @@ da workflow contract create --plan <plan-id> --task <task-id> --direct --write-s
 
 ### Brief-template defaults (every fanout bundle)
 
-Bundle every delegation with these six defaults unless the task explicitly overrides them. They encode lessons that recurred across the run (`.agents/workflow/specs/agent-ops-hardening/design.md` §3.10); each links the owning lesson rather than re-authoring it.
+Bundle every delegation with these six defaults unless the task explicitly overrides them. They encode lessons that recurred across delegation runs; each one links its owning lesson by slug (the `[[lesson-slug]]` references below) rather than re-authoring it.
 
 1. **Satisfy the project's quality gate, not just a local linter.** New/changed functions must clear the project's actual gate thresholds (complexity, coverage, duplication) — resolve the exact gate commands + thresholds + analysis exclusions from the project overlay (`da config relevance` / the project's gate docs), and pass THAT authoritative gate. A local linter can disagree with the gate's metric (e.g. a complexity linter computing the metric differently than the SAST gate), so pin to the gate, not the linter (`[[sonarcloud-gate-mechanics]]`, `[[gates-must-be-locally-reproducible]]`).
 2. **write_scope MUST include the tests a change breaks.** This is the coverage-delta rule — authored once in **§ 0d** of this file. The bundle inherits it: if a change asserts-breaks a `*_test.go` outside scope, the scope was wrong, not the worker (`[[bundle-scope-via-code-graph]]`). Do not restate the rule in the brief; reference § 0d.

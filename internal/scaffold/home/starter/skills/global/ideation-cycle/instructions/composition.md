@@ -2,8 +2,7 @@
 
 `ideation-cycle` is the **matured form of `kg-ideate`'s idea/proposal → spec segment** —
 not a sibling engine `kg-ideate` happens to dispatch. Read this whenever you are invoked
-from `kg-ideate`, or when deciding whether a question belongs here. Canonical
-formalization: `.agents/workflow/specs/ideation-system-composition/design.md`.
+from `kg-ideate`, or when deciding whether a question belongs here.
 
 ## The evolution (segment ownership)
 
@@ -118,11 +117,10 @@ sidecar pointer to `spec-scaffold` to link from the decision it folds in.
 
 The original worry was that `kg-ideate → spec-scaffold → ideation-cycle` crosses a
 dispatch-hop "cliff" the tier contract warns about. We **dogfooded that question** (the first
-use of this very skill on its own founding fork) — see the evidence sidecar
-`evidence/depth-degradation-dogfood.md` (v1 token-recall, v2 multi-constraint drift, v3
-regime-valid token-mass × depth × lossy-relay, v4 compounding-constraints × capability; two
-harnesses; **v4 folded narrow per its §v4.9 GATE-2 audit; v5 deferred**). What it actually shows,
-and how to act on it:
+use of this very skill on its own founding fork): an experiment arc across v1 (token-recall),
+v2 (multi-constraint drift), v3 (regime-valid token-mass × depth × lossy-relay), and v4
+(compounding-constraints × capability) on two harnesses — **v4 folded narrow per its GATE-2
+audit; v5 deferred**. What it actually shows, and how to act on it:
 
 - **No same-agent hop-depth fidelity cliff was FOUND in the tested regime** — constraint-honoring
   stayed flat through depth 10 and ~15k accumulated tokens on *local self-checkable* constraints,
@@ -137,15 +135,14 @@ and how to act on it:
   **decompose** error-prone compounding chains into independently-verifiable sub-artifacts, and
   prefer a **code-executing agent** for computable closures. Mechanism deferred to **v5**. This is
   about compounding-chain length, NOT skill-to-skill hop depth.
-- **Tier-adjacency was the wrong lever anyway.** A compound/molecule may call any tier
-  (refined delta: `.agents/proposals/skill-tiering-molecule-composition.md`), so the chain is
-  legal with no hoist — independent of the cliff question.
+- **Tier-adjacency was the wrong lever anyway.** A compound/molecule may call any tier, so the
+  chain is legal with no hoist — independent of the cliff question.
 - **The real, evidence-backed bounds are engineering** — and **harness-capability-dependent**
   (the numbers below are **current-harness-observed**, not universal; re-assess per harness as the
   set grows — Hermes, Pi-agent, Aider, Antigravity-CLI, … — treating a new harness's limits as a
   variable to measure, not assume):
   - **Infra delegation-nesting ceiling (~hop 4, current harness).** Nested `Agent`-tool delegation
-    collapses past ~hop 4 on Claude Code's `Agent` tool (reproduced, sidecar v2/v3): subagents lack
+    collapses past ~hop 4 on Claude Code's `Agent` tool (reproduced): subagents lack
     the dispatcher tool. That number is a property of *this* harness — a harness whose subagents can
     delegate raises it. Regardless, deep multi-hop delegation should be **driver-orchestrated
     hop-by-hop** (a fresh top-level worker per hop, relay via on-disk artifact), not recursively
@@ -158,7 +155,7 @@ and how to act on it:
 ## Relay discipline (the headline finding — every hand-back is structured/pointer-based)
 
 The one positive, reproducible result of the whole investigation: **lossy summary relay drops
-non-reconstructable detail, and that loss reaches the deliverable.** In sidecar v3 family-2, a
+non-reconstructable detail, and that loss reaches the deliverable.** In one measured case, a
 hop's summary hand-back compressed away an arbitrary schema choice ("env as a list of
 {key,value} mappings" → "4 key/value entries") and the terminal artifact **degraded 16/16 →
 13/16**. Verbatim/structured relay was **lossless across 8 hops**. Reconstructable defaults

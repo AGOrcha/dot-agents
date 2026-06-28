@@ -268,9 +268,22 @@ type runExplainOptions struct {
 	valueOnly  bool
 	originOnly bool
 	jsonOut    bool
-	stdout     io.Writer
-	stderr     io.Writer
-	cwd        string
+	// Profile context selectors (unified-config-profiles R6): when any is set,
+	// explain resolves the effective profile bundle for that dispatch context
+	// through the shared selector-merge engine instead of a single field.
+	role    string
+	appType string
+	stage   string
+	harness string
+	stdout  io.Writer
+	stderr  io.Writer
+	cwd     string
+}
+
+// profileContextRequested reports whether any profile selector flag was set, in
+// which case explain resolves the profile bundle for that context.
+func (o *runExplainOptions) profileContextRequested() bool {
+	return o.role != "" || o.appType != "" || o.stage != "" || o.harness != ""
 }
 
 func newExplainCmd(deps Deps) *cobra.Command {
@@ -324,6 +337,10 @@ The layer stack (lowest precedence first) is:
 	cmd.Flags().BoolVar(&opts.flags, "flags", false, "Print resolved feature flags (features.*) across all layers")
 	cmd.Flags().BoolVar(&opts.valueOnly, "value-only", false, "Print only the effective value (JSON-encoded for non-scalars)")
 	cmd.Flags().BoolVar(&opts.originOnly, "origin-only", false, "Print only the winning layer identifier")
+	cmd.Flags().StringVar(&opts.role, "role", "", "Resolve the effective profile bundle for this runtime role (profile context)")
+	cmd.Flags().StringVar(&opts.appType, "app-type", "", "Resolve the effective profile bundle for this app_type (profile context)")
+	cmd.Flags().StringVar(&opts.stage, "stage", "", "Resolve the effective profile bundle for this stage (profile context)")
+	cmd.Flags().StringVar(&opts.harness, "harness", "", "Resolve the effective profile bundle for this harness (profile context)")
 	return cmd
 }
 
@@ -348,6 +365,8 @@ func runExplain(opts *runExplainOptions, args []string, deps Deps) error {
 	}
 
 	switch {
+	case opts.profileContextRequested():
+		return emitProfile(opts, snap, deps)
 	case opts.flags:
 		return emitFlags(opts, snap)
 	case opts.all:
@@ -375,7 +394,100 @@ func validateFlagCombo(opts *runExplainOptions, args []string, deps Deps) error 
 	if (opts.valueOnly || opts.originOnly) && (opts.all || opts.flags) {
 		return deps.UsageError("--value-only and --origin-only cannot be combined with --all or --flags")
 	}
+	if opts.profileContextRequested() {
+		if opts.valueOnly || opts.originOnly || opts.all || opts.flags {
+			return deps.UsageError("profile context flags (--role/--app-type/--stage/--harness) cannot be combined with --value-only/--origin-only/--all/--flags")
+		}
+		if len(args) != 0 {
+			return deps.UsageError("profile context flags resolve a bundle, not a single field — drop the field-path argument")
+		}
+	}
 	return nil
+}
+
+// emitProfile resolves the effective profile bundle for the requested dispatch
+// context through the shared selector-merge engine and renders it: the effective
+// bundle, every contributing absolute ref (both shown on a same-scope conflict),
+// the binding locks with owning scope, the effective permission map, the policy
+// mode (replace vs narrow), and the reproducibility digest (R6).
+func emitProfile(opts *runExplainOptions, snap *cfg.Snapshot, deps Deps) error {
+	resolved, err := cfg.ResolveProfileContext(snap, opts.role, opts.appType, opts.stage, opts.harness)
+	if err != nil {
+		return deps.ErrorWithHints("resolving profile context", err.Error())
+	}
+	if opts.jsonOut {
+		return writeJSON(opts.stdout, resolved)
+	}
+	printProfileHuman(opts.stdout, opts, resolved)
+	return nil
+}
+
+// printProfileHuman renders the resolved profile bundle in the human view.
+func printProfileHuman(w io.Writer, opts *runExplainOptions, r cfg.ResolvedProfile) {
+	fmt.Fprintln(w, "Effective profile bundle for context:")
+	fmt.Fprintf(w, "  role=%s app_type=%s stage=%s harness=%s\n\n",
+		emptyAsDash(opts.role), emptyAsDash(opts.appType), emptyAsDash(opts.stage), emptyAsDash(opts.harness))
+	fmt.Fprintf(w, "  bundle     : %s\n", formatScalar(r.Bundle))
+	fmt.Fprintf(w, "  digest     : %s\n", emptyAsDash(r.Digest))
+	fmt.Fprintf(w, "  policy     : %s", string(r.PolicyMode))
+	if r.ReplacedBy != "" {
+		fmt.Fprintf(w, " (replaced by %s)", r.ReplacedBy)
+	}
+	fmt.Fprintln(w)
+	printProfileRefs(w, r.Contributing)
+	printProfileLocks(w, r.Locks)
+	printProfilePermissions(w, r.Permissions)
+	printProfileConflicts(w, r.Conflicts)
+}
+
+func printProfileRefs(w io.Writer, refs []string) {
+	if len(refs) == 0 {
+		fmt.Fprintln(w, "  contributing: (none matched)")
+		return
+	}
+	fmt.Fprintln(w, "  contributing refs:")
+	for _, ref := range refs {
+		fmt.Fprintf(w, "    - %s\n", ref)
+	}
+}
+
+func printProfileLocks(w io.Writer, locks []cfg.ResolvedLockInfo) {
+	if len(locks) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  binding locks:")
+	for _, l := range locks {
+		if l.Kind == "value_lock" {
+			fmt.Fprintf(w, "    - %s = %s  [value-lock, owner %s]\n", l.Field, formatScalar(l.Value), l.Owner)
+			continue
+		}
+		fmt.Fprintf(w, "    - %s deny %s  [deny-lock, owner %s]\n", l.Field, formatScalar(l.Deny), l.Owner)
+	}
+}
+
+func printProfilePermissions(w io.Writer, perms map[cfg.AuthorityScope][]string) {
+	if perms == nil {
+		return
+	}
+	fmt.Fprintln(w, "  override permissions (allowlist):")
+	scopes := make([]string, 0, len(perms))
+	for s := range perms {
+		scopes = append(scopes, string(s))
+	}
+	sort.Strings(scopes)
+	for _, s := range scopes {
+		fmt.Fprintf(w, "    - %s: %s\n", s, formatScalar(perms[cfg.AuthorityScope(s)]))
+	}
+}
+
+func printProfileConflicts(w io.Writer, conflicts []cfg.ProfileConflict) {
+	if len(conflicts) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "  same-scope conflicts (both contributors shown):")
+	for _, c := range conflicts {
+		fmt.Fprintf(w, "    - %s @%s: winner=%s among %s\n", c.Field, c.Scope, c.Winner, formatScalar(c.Refs))
+	}
 }
 
 // emitField handles the single-field path. Branches on --value-only,
@@ -417,8 +529,9 @@ func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 			prov[key] = explainField(snap, key)
 		}
 		return writeJSON(opts.stdout, map[string]any{
-			"effective":  effective,
-			"provenance": prov,
+			"effective":       effective,
+			"provenance":      prov,
+			"lock_collisions": snap.LockCollisions,
 		})
 	}
 	fmt.Fprintln(opts.stdout, "Effective configuration (with active layer per field):")
@@ -430,7 +543,27 @@ func emitAll(opts *runExplainOptions, snap *cfg.Snapshot) error {
 		fmt.Fprintf(opts.stdout, "    origin : %s\n", emptyAsDash(exp.ActiveLayer))
 		fmt.Fprintln(opts.stdout)
 	}
+	printLockCollisions(opts.stdout, snap.LockCollisions)
 	return nil
+}
+
+// printLockCollisions surfaces the §15 D1a authority-pass rejections: each
+// lower-scope write a higher-scope value-lock or deny-lock rejected, with the
+// attempted value, the winning (locked) value, and the owning scope. Nothing is
+// printed when no collision occurred.
+func printLockCollisions(w io.Writer, collisions []cfg.LockCollision) {
+	if len(collisions) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Authority-lock rejections (a higher scope's lock won):")
+	fmt.Fprintln(w)
+	for _, c := range collisions {
+		fmt.Fprintf(w, "  %s\n", c.Field)
+		fmt.Fprintf(w, "    attempted : %s\n", formatScalar(c.Attempted))
+		fmt.Fprintf(w, "    winning   : %s\n", formatScalar(c.Winning))
+		fmt.Fprintf(w, "    owner     : %s (%s)\n", c.Owner, c.Kind)
+		fmt.Fprintln(w)
+	}
 }
 
 // emitFlags prints feature flag resolution. Flags live under the `features`

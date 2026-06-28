@@ -25,6 +25,25 @@ spec-drafting equivalent) writes the prose. Where the return goes (see
   it; for owner-decisions the owner picks.
 - A `[PROPOSED]` decision becomes ratified here, or is sent back as a still-open fork.
 
+## Fold the result HONESTLY — narrow + caveated, unsettled axes named
+
+A spine run rarely settles the whole fork cleanly; it settles a *part* of it. Ratify what the
+evidence actually supports, no more:
+
+- **Fold narrow + caveated when the result is narrow.** If the verdict held for one task
+  family, one regime, or one condition, the ratified decision says exactly that — the scope is
+  part of the decision, not a footnote dropped on the way to a clean headline. The
+  experiment arc's durable findings were the *small* ones that survived the audit (relay
+  loss → structured hand-backs; the infra nesting ceiling), never the headline claim.
+- **Record the unsettled axes explicitly.** Every axis the run could NOT decide — the
+  confound it couldn't separate, the regime it couldn't reach, the mechanism left open — is
+  written down as an open question / unsettled axis on the decision, not silently dropped. A
+  documented **null** ("couldn't induce / couldn't reach the regime / generalizes to one family
+  only") is a first-class outcome that ratifies as such.
+- **Iterate or extract.** Each gate reveals the next flaw; either loop until the fork is sound,
+  or **extract the actionable subset** that IS settled and mark the rest explicitly unsettled.
+  Chasing mechanistic closure past diminishing returns is optional; the honest scoping is not.
+
 ## What the spec must carry (brief the spec-drafting step with this)
 
 The spec-drafting step (`spec-scaffold` dispatched, or a delegated equivalent standalone)
@@ -36,7 +55,9 @@ ratified decisions + the evidence sidecar pointers. The spec it writes owns:
 - **Decisions + rationale** — each ratified fork: what was chosen and why the
   alternatives were rejected. For empirical forks, the rationale cites the audited
   experiment; for judgment calls, the decisive trade-off.
-- **Open questions** — forks not yet resolved (kicked to a later cycle).
+- **Open questions / unsettled axes** — forks not yet resolved, AND the axes a spine run
+  couldn't decide (the confound, the unreached regime, the open mechanism) — recorded
+  explicitly, never dropped to manufacture a clean answer.
 - **Done criteria** — verifiable, not vague. The execution half's verification traces
   back to these.
 - **Deferred items** — the forks tagged deferred in step 3, explicitly out of scope.
@@ -47,9 +68,10 @@ has become a plan; keep it focused on requirements and decisions.
 
 ## Evidence is a per-fork sidecar, linked from the decision
 
-Each hard fork's evidence — the prototype dir, the negative-control result, the
-cross-brain audit verdicts — is its **own sidecar artifact**, LINKED from the spec's
-decision entry. It is NOT inlined into the spec body and NOT buried in transient task
+Each hard fork's evidence — the pre-registration, the evidence artifact (prototype dir / eval
+matrix / ingested corpus + KG query), the negative-control result, the power/regime check, and
+both the GATE 1 (design) and GATE 2 (conclusion) cross-brain audit verdicts — is its **own
+sidecar artifact**, LINKED from the spec's decision entry. It is NOT inlined into the spec body and NOT buried in transient task
 notes. This anticipates the lineage schema (the decision `derives_from` its evidence
 sidecar). Reference the sidecar from the spec decision (and carry it into
 `.agents/history/<id>/` when the plan archives); a decision should be traceable to its
