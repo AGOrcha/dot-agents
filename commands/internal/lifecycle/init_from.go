@@ -43,6 +43,14 @@ var stagedMachineLocalDirs = []string{"local/", "cache/"}
 // production uses gitCloneHomeSource (the git CLI, ambient-first auth).
 var cloneHomeSourceFn = gitCloneHomeSource
 
+// linkClaudeGlobalFn / linkCursorGlobalFn are seams over the existing global-link
+// helpers so a post-adopt link failure — which is NON-FATAL (see
+// materializeUserSurface) — is exercisable without an installed harness.
+var (
+	linkClaudeGlobalFn = linkClaudeGlobalSettings
+	linkCursorGlobalFn = linkCursorGlobalHooks
+)
+
 // initFromValue safely reads the `--from` flag from cmd. A nil command or an
 // init invocation that never registered the flag (the lifecycle-only unit-test
 // constructors that build a bare cobra command) yields "", routing runInit to
@@ -85,9 +93,13 @@ func runInitFrom(cmd *cobra.Command, fromRef string, deps initDirMaker) error {
 		return err
 	}
 
-	if err := materializeUserSurface(agentsHome, deps); err != nil {
-		return err
-	}
+	// Adoption has SUCCEEDED — the expensive clone+resolve+rebind landed
+	// atomically. Harness linking is a cheap, idempotent step that targets the
+	// FINAL ~/.agents (so it cannot move before the rename), and `da refresh`
+	// owns it. A link failure here is therefore NON-FATAL: it must never leave
+	// the user with a populated, adopted ~/.agents while reporting failure (which
+	// the retry would then refuse). Warn and continue to a successful exit.
+	materializeUserSurface(agentsHome, deps)
 	reportRebind(unbound)
 
 	ui.SuccessBox("Home adopted from the remote source!",
@@ -145,7 +157,9 @@ func resolveAndRebindStaged(staging string) (int, []string, error) {
 	if err := reportUserScope(); err != nil {
 		return 0, nil, err
 	}
-	untrackStagedMachineLocal(staging)
+	if err := untrackStagedMachineLocal(staging); err != nil {
+		return 0, nil, err
+	}
 	if err := ensureStagedMachineLocalGitignored(staging); err != nil {
 		return 0, nil, fmt.Errorf("writing machine-local .gitignore: %w", err)
 	}
@@ -300,9 +314,17 @@ func reportResolvedManifest(m config.ResolvedManifest) {
 // files (BUG-2: a source that committed local/bindings.json or cache/ must stop
 // re-syncing it). Mirrors commands/sync/init.go's in-place repair;
 // --ignore-unmatch makes it a no-op when nothing is tracked.
-func untrackStagedMachineLocal(staging string) {
+//
+// The error is PROPAGATED, not swallowed: this runs inside the atomic staging
+// window (before the rename), so a failure triggers staging cleanup and a clean
+// refusal — never a partial home with tracked local//cache/ surviving despite
+// the .gitignore.
+func untrackStagedMachineLocal(staging string) error {
 	args := append([]string{"-C", staging, "rm", "--cached", "-r", "--ignore-unmatch", "--quiet"}, stagedMachineLocalDirs...)
-	_ = execabs.Command("git", args...).Run()
+	if out, err := execabs.Command("git", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("untracking machine-local files in staged home: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // ensureStagedMachineLocalGitignored guarantees the staged home's .gitignore
@@ -344,20 +366,28 @@ func ensureStagedMachineLocalGitignored(staging string) error {
 // linkClaudeGlobalSettings / linkCursorGlobalHooks `da init` uses (D-D step 3,
 // reuse-not-reimplement). Each is a no-op when its harness is not installed, so
 // detection is fresh on this machine (D-E). It runs AFTER the staged home is
-// renamed into place so the links point at the permanent path. The machine-local
-// roots (state dir + ~/.agents/local/) are (re)created so the binding table has a
-// home outside the synced tree.
-func materializeUserSurface(agentsHome string, deps initDirMaker) error {
+// renamed into place so the links point at the permanent path.
+//
+// A link failure is NON-FATAL by contract: adoption already succeeded, the link
+// targets the final ~/.agents, and `da refresh` owns (re)linking — so a failure
+// is reported as a warning rather than returned, never leaving a populated,
+// adopted home behind a "failed" exit that the retry would refuse. The
+// machine-local roots (state dir + ~/.agents/local/) are (re)created so the
+// binding table has a home outside the synced tree.
+func materializeUserSurface(agentsHome string, deps initDirMaker) {
 	ui.Step("Materializing harness user surface...")
-	if err := linkClaudeGlobalSettings(agentsHome, deps); err != nil {
-		return err
-	}
-	if err := linkCursorGlobalHooks(agentsHome, deps); err != nil {
-		return err
-	}
+	warnIfLinkFailed("Claude Code", linkClaudeGlobalFn(agentsHome, deps))
+	warnIfLinkFailed("Cursor", linkCursorGlobalFn(agentsHome, deps))
 	_ = deps.MkdirAll(config.AgentsStateDir(), 0755)
 	_ = deps.MkdirAll(filepath.Join(agentsHome, "local"), 0755)
-	return nil
+}
+
+// warnIfLinkFailed reports a non-fatal global-link failure and points the user at
+// `da refresh` to complete the linking (the home is already adopted).
+func warnIfLinkFailed(name string, err error) {
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("%s global link not established (%v); run `da refresh` to complete linking", name, err))
+	}
 }
 
 // rebindProjectSet joins the synced portable identity registry (config.json,

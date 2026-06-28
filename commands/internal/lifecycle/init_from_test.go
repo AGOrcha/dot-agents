@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,6 +76,22 @@ func makeHomeSourceRepo(t *testing.T, projects string, trackLocal bool) string {
 	gitLF(t, src, "add", "-A")
 	gitLF(t, src, "commit", "-m", "machine A home")
 	return src
+}
+
+// seedStagedClone stands in for a real clone: it git-inits dest (so the
+// post-clone untrack repair has a repo to operate on) and writes a v2 config.json
+// + the given .agentsrc.json. Used by cloneHomeSourceFn seam overrides.
+func seedStagedClone(dest, agentsrc string) error {
+	if err := os.MkdirAll(dest, 0755); err != nil {
+		return err
+	}
+	if err := execabs.Command("git", "init", dest).Run(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dest, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte(agentsrc), 0644)
 }
 
 // freshAgentsHome points AGENTS_HOME at a not-yet-created path under a temp dir
@@ -182,15 +199,8 @@ func TestRunInitFrom_PostCloneFailureNoPartialHome(t *testing.T) {
 	}
 
 	// The retry must NOT be refused — a good clone now adopts cleanly.
-	cloneHomeSourceFn = func(ref, dest string) error {
-		if err := os.MkdirAll(dest, 0755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(dest, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
-			return err
-		}
-		return os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte(`{}`), 0644)
-	}
+	requireGitLF(t)
+	cloneHomeSourceFn = func(ref, dest string) error { return seedStagedClone(dest, `{}`) }
 	if err := runInitFrom(&cobra.Command{}, "fixture://good", stdInitDirMaker{}); err != nil {
 		t.Fatalf("retry after a failed adoption must not be refused: %v", err)
 	}
@@ -427,7 +437,10 @@ func TestRunInitFrom_StagingMkdirError(t *testing.T) {
 // TestResolveAndRebindStaged_GitignoreError covers the ensureGitignore-error
 // branch: a staged .gitignore that is a directory fails the machine-local repair.
 func TestResolveAndRebindStaged_GitignoreError(t *testing.T) {
+	requireGitLF(t)
 	staging := t.TempDir()
+	// git-init so the untrack repair succeeds and the gitignore branch is reached.
+	gitLF(t, staging, "init")
 	if err := os.WriteFile(filepath.Join(staging, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -440,6 +453,83 @@ func TestResolveAndRebindStaged_GitignoreError(t *testing.T) {
 	if _, _, err := resolveAndRebindStaged(staging); err == nil {
 		t.Error("expected a .gitignore write error")
 	}
+}
+
+// TestRunInitFrom_LinkFailureIsNonFatal is the post-adopt-link-failure regression:
+// a harness link failure AFTER the staged home is renamed into place must be
+// NON-FATAL — runInitFrom returns success, ~/.agents EXISTS as the adopted home,
+// and `da refresh` (not a re-run of init --from) owns completing the linking.
+func TestRunInitFrom_LinkFailureIsNonFatal(t *testing.T) {
+	src := makeHomeSourceRepo(t, `{"svc":{"repo_id":"github.com/acme/svc"}}`, false)
+	home := freshAgentsHome(t)
+
+	orig := linkClaudeGlobalFn
+	linkClaudeGlobalFn = func(string, initDirMaker) error { return errors.New("simulated link failure") }
+	defer func() { linkClaudeGlobalFn = orig }()
+
+	if err := runInitFrom(&cobra.Command{}, src, stdInitDirMaker{}); err != nil {
+		t.Fatalf("a post-adopt link failure must be non-fatal, got: %v", err)
+	}
+	// Adoption succeeded: the home exists and carries the adopted content.
+	if _, err := os.Stat(filepath.Join(home, "config.json")); err != nil {
+		t.Errorf("adopted home must exist after a link hiccup: %v", err)
+	}
+	cfgRaw, _ := os.ReadFile(filepath.Join(home, "config.json"))
+	if !strings.Contains(string(cfgRaw), "github.com/acme/svc") {
+		t.Errorf("home should be the adopted one despite the link hiccup:\n%s", cfgRaw)
+	}
+}
+
+// TestRunInitFrom_UntrackErrorNoPartialHome is the NIT regression: a propagated
+// untrack failure (here a clone that is not a git repo) must abort inside the
+// staging window, leaving NO partial ~/.agents.
+func TestRunInitFrom_UntrackErrorNoPartialHome(t *testing.T) {
+	requireGitLF(t)
+	home := freshAgentsHome(t)
+	orig := cloneHomeSourceFn
+	cloneHomeSourceFn = func(ref, dest string) error {
+		if err := os.MkdirAll(dest, 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dest, "config.json"), []byte(`{"version":2,"projects":{}}`), 0644); err != nil {
+			return err
+		}
+		// No git init → the untrack `git rm --cached` fails (not a git repo).
+		return os.WriteFile(filepath.Join(dest, ".agentsrc.json"), []byte(`{}`), 0644)
+	}
+	defer func() { cloneHomeSourceFn = orig }()
+
+	err := runInitFrom(&cobra.Command{}, "fixture://nogit", stdInitDirMaker{})
+	if err == nil || !strings.Contains(err.Error(), "untracking") {
+		t.Fatalf("expected an untrack error to propagate, got %v", err)
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Errorf("an untrack failure must leave no partial ~/.agents (err=%v)", err)
+	}
+}
+
+// TestUntrackStagedMachineLocal covers the no-op (clean repo) and error
+// (non-git dir) branches directly.
+func TestUntrackStagedMachineLocal(t *testing.T) {
+	requireGitLF(t)
+	t.Run("clean repo is a no-op", func(t *testing.T) {
+		dir := t.TempDir()
+		gitLF(t, dir, "init")
+		if err := untrackStagedMachineLocal(dir); err != nil {
+			t.Errorf("untrack on a clean repo should succeed: %v", err)
+		}
+	})
+	t.Run("non-git dir errors", func(t *testing.T) {
+		if err := untrackStagedMachineLocal(t.TempDir()); err == nil {
+			t.Error("expected an error untracking in a non-git dir")
+		}
+	})
+}
+
+// TestWarnIfLinkFailed covers both render branches (nil + error).
+func TestWarnIfLinkFailed(t *testing.T) {
+	warnIfLinkFailed("Claude Code", nil)
+	warnIfLinkFailed("Cursor", errors.New("boom"))
 }
 
 // TestMoveStagedHome_NonEmptyTargetError covers the clear-target error branch: a
