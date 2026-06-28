@@ -307,6 +307,16 @@ type AgentsRC struct {
 	// unified-config-profiles design (§2.3).
 	LayeringPolicy *LayeringPolicy `json:"layering_policy,omitempty"`
 
+	// Manifests are the scope-attached distributable config manifest units (L2),
+	// keyed by name; each manifest's absolute ref is <owning-source>:<name>. A
+	// manifest REFERENCES (by ref) the sources to pull, the layering policy/profiles
+	// that bind, and (optionally) the project-set to manage — it never inlines
+	// copies (distributable-config-manifest D1/D2/R2). This lenient typed shape is
+	// what round-trips; the strict fail-closed decode (no manifest->manifest edge,
+	// no self-declared authority, no force-allow) runs at resolve time in
+	// manifest.go. Its owning authority is SOURCE-derived, never authored here (D4).
+	Manifests map[string]ManifestSpec `json:"manifests,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
@@ -666,6 +676,8 @@ var agentsRCKnown = map[string]bool{
 	"locks": true, "authority_grants": true,
 	// unified-config-profiles (L1): scope-attached layering policy unit
 	"layering_policy": true,
+	// distributable-config-manifest (L2): scope-attached manifest units
+	"manifests": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
 	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
 	// Listed as "known" so they are not captured into ExtraFields (which would
@@ -706,6 +718,7 @@ type agentsRCCore struct {
 	Locks           *PolicyLockSpec           `json:"locks,omitempty"`
 	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
 	LayeringPolicy  *LayeringPolicy           `json:"layering_policy,omitempty"`
+	Manifests       map[string]ManifestSpec   `json:"manifests,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -736,6 +749,7 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Locks = core.Locks
 	a.AuthorityGrants = core.AuthorityGrants
 	a.LayeringPolicy = core.LayeringPolicy
+	a.Manifests = core.Manifests
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -806,6 +820,7 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Locks:                a.Locks,
 		AuthorityGrants:      a.AuthorityGrants,
 		LayeringPolicy:       a.LayeringPolicy,
+		Manifests:            a.Manifests,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -979,10 +994,36 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.StageProfiles) > 0 {
 		out.StageProfiles = cloneStageProfiles(existing.StageProfiles)
 	}
+	// manifests are author-owned config like stage_profiles: now that they are a
+	// typed field (L2) they no longer ride along in ExtraFields, so a generate /
+	// refresh rewrite must carry a committed set over explicitly or `da install` /
+	// refresh would silently drop a project's authored manifests (the
+	// schema-usage.md typed-field/ExtraFields breakage rule).
+	if len(existing.Manifests) > 0 {
+		out.Manifests = cloneManifests(existing.Manifests)
+	}
 	if existing.Refresh != nil {
 		out.Refresh = existing.Refresh
 	}
 	return &out
+}
+
+// cloneManifests deep-copies a manifests map (name → spec, including each spec's
+// source/bind ref slices) so the merged manifest does not alias the existing
+// manifest's data.
+func cloneManifests(m map[string]ManifestSpec) map[string]ManifestSpec {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]ManifestSpec, len(m))
+	for name, spec := range m {
+		out[name] = ManifestSpec{
+			Sources:    append([]string(nil), spec.Sources...),
+			Binds:      append([]string(nil), spec.Binds...),
+			ProjectSet: spec.ProjectSet,
+		}
+	}
+	return out
 }
 
 // cloneStageProfiles deep-copies a stage_profiles map (stage → slug → profile,

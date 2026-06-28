@@ -10,7 +10,7 @@ import (
 // closed) until source-shipped.
 
 func TestKnownUnitKind(t *testing.T) {
-	for _, k := range []string{UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindDescriptor} {
+	for _, k := range []string{UnitKindLayer, UnitKindArtifact, UnitKindProjectSet, UnitKindDescriptor, UnitKindProfile, UnitKindManifest} {
 		if !KnownUnitKind(k) {
 			t.Errorf("%q must be a known kind", k)
 		}
@@ -25,6 +25,8 @@ func TestIsProjectableKind(t *testing.T) {
 		UnitKindLayer:      true,
 		UnitKindArtifact:   true,
 		UnitKindProjectSet: true,
+		UnitKindProfile:    true,
+		UnitKindManifest:   true,  // L2 distributable bundle: synced + projectable
 		UnitKindDescriptor: false, // internal-only until source-shipped
 		"bogus":            false,
 	}
@@ -38,6 +40,9 @@ func TestIsProjectableKind(t *testing.T) {
 func TestIsSyncedUnitKind(t *testing.T) {
 	if !IsSyncedUnitKind(UnitKindProjectSet) {
 		t.Error("project-set is synced portable identity")
+	}
+	if !IsSyncedUnitKind(UnitKindManifest) {
+		t.Error("manifest is a synced, scope-attachable L2 bundle")
 	}
 	if IsSyncedUnitKind(UnitKindDescriptor) {
 		t.Error("descriptor is not synced until source-shipped")
@@ -53,6 +58,9 @@ func TestValidateUnitKind(t *testing.T) {
 	}
 	if err := ValidateUnitKind(UnitKindProjectSet); err != nil {
 		t.Errorf("project-set must validate, got %v", err)
+	}
+	if err := ValidateUnitKind(UnitKindManifest); err != nil {
+		t.Errorf("manifest must validate, got %v", err)
 	}
 	err := ValidateUnitKind(UnitKindDescriptor)
 	if err == nil || !strings.Contains(err.Error(), "internal-only") {
