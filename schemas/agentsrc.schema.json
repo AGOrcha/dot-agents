@@ -199,8 +199,8 @@
         "properties": {
           "sources": {
             "type": "array",
-            "description": "Canonical source refs to pull (<source>:<path>@<version>). Names only — a private source carries no credential; auth is threaded ambient-first at init --from, never embedded.",
-            "items": { "type": "string", "minLength": 1 }
+            "description": "Canonical source refs to pull, fully PINNED as <source>:<path>@<version>. Names only — a private source carries no credential; auth is threaded ambient-first at init --from, never embedded. An unpinned/mutable source ref is rejected: hashing it as a stable input would be false reproducibility.",
+            "items": { "type": "string", "minLength": 1, "pattern": "^[^:]+:.+@.+$" }
           },
           "binds": {
             "type": "array",

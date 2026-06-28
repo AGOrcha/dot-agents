@@ -937,10 +937,36 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.StageProfiles) > 0 {
 		out.StageProfiles = cloneStageProfiles(existing.StageProfiles)
 	}
+	// manifests are author-owned config like stage_profiles: now that they are a
+	// typed field (L2) they no longer ride along in ExtraFields, so a generate /
+	// refresh rewrite must carry a committed set over explicitly or `da install` /
+	// refresh would silently drop a project's authored manifests (the
+	// schema-usage.md typed-field/ExtraFields breakage rule).
+	if len(existing.Manifests) > 0 {
+		out.Manifests = cloneManifests(existing.Manifests)
+	}
 	if existing.Refresh != nil {
 		out.Refresh = existing.Refresh
 	}
 	return &out
+}
+
+// cloneManifests deep-copies a manifests map (name → spec, including each spec's
+// source/bind ref slices) so the merged manifest does not alias the existing
+// manifest's data.
+func cloneManifests(m map[string]ManifestSpec) map[string]ManifestSpec {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]ManifestSpec, len(m))
+	for name, spec := range m {
+		out[name] = ManifestSpec{
+			Sources:    append([]string(nil), spec.Sources...),
+			Binds:      append([]string(nil), spec.Binds...),
+			ProjectSet: spec.ProjectSet,
+		}
+	}
+	return out
 }
 
 // cloneStageProfiles deep-copies a stage_profiles map (stage → slug → profile,

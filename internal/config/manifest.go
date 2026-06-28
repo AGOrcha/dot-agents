@@ -85,22 +85,54 @@ var manifestForbiddenFields = map[string]string{
 	"force_allow":      "there is no force-allow: a lower scope can never punch a capability through a higher deny",
 }
 
-// decodeManifest decodes and validates one manifest payload fail-closed. A
-// forbidden field (extends/inherits/composes, authority/scope/authority_grants,
-// force_allow), an unknown field, malformed JSON, or a malformed ref are all
-// loud errors (R10). ref and scope are loader-supplied: identity is the absolute
-// ref, authority is source-derived (D4) and never read from the payload.
-func decodeManifest(raw json.RawMessage, ref string, scope AuthorityScope) (ConfigManifest, error) {
+// manifestSpecWire is the strict decode shape for a ManifestSpec: a named type
+// WITHOUT ManifestSpec's UnmarshalJSON, so DisallowUnknownFields decoding cannot
+// recurse back into the custom unmarshaler (the agentsRCCore aliasing convention).
+type manifestSpecWire ManifestSpec
+
+// decodeManifestSpec decodes and validates one manifest payload fail-closed,
+// independent of identity/scope. A forbidden field (manifest->manifest edge,
+// self-declared authority, force-allow), an unknown field, malformed JSON, or an
+// unpinned/malformed ref is a loud error (R10/D3/D4). It is the SINGLE validation
+// gate shared by both the raw resolve path (decodeManifest) and the typed AgentsRC
+// load path (ManifestSpec.UnmarshalJSON), so the fail-closed guarantee holds
+// across the whole lifecycle — not only at resolve (FIX C).
+func decodeManifestSpec(raw json.RawMessage) (ManifestSpec, error) {
 	if err := rejectForbiddenManifestFields(raw); err != nil {
-		return ConfigManifest{}, err
+		return ManifestSpec{}, err
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	var spec ManifestSpec
-	if err := dec.Decode(&spec); err != nil {
-		return ConfigManifest{}, fmt.Errorf("malformed manifest: %w", err)
+	var wire manifestSpecWire
+	if err := dec.Decode(&wire); err != nil {
+		return ManifestSpec{}, fmt.Errorf("malformed manifest: %w", err)
 	}
+	spec := ManifestSpec(wire)
 	if err := validateManifestSpec(spec); err != nil {
+		return ManifestSpec{}, err
+	}
+	return spec, nil
+}
+
+// UnmarshalJSON decodes a manifest spec through the SAME fail-closed gate the
+// resolve path uses (FIX C): a forbidden or unpinned field on the typed AgentsRC
+// `manifests` map is rejected at load, never silently dropped before Save
+// re-emits the typed field (the schema-usage.md typed-field/ExtraFields rule).
+func (s *ManifestSpec) UnmarshalJSON(data []byte) error {
+	spec, err := decodeManifestSpec(data)
+	if err != nil {
+		return err
+	}
+	*s = spec
+	return nil
+}
+
+// decodeManifest decodes one manifest payload through the shared fail-closed gate
+// and stamps its loader-supplied identity (ref) and SOURCE-derived authority
+// (scope, D4) — never read from the payload itself.
+func decodeManifest(raw json.RawMessage, ref string, scope AuthorityScope) (ConfigManifest, error) {
+	spec, err := decodeManifestSpec(raw)
+	if err != nil {
 		return ConfigManifest{}, err
 	}
 	return ConfigManifest{Ref: ref, Scope: scope, Spec: spec}, nil
@@ -123,12 +155,17 @@ func rejectForbiddenManifestFields(raw json.RawMessage) error {
 	return nil
 }
 
-// validateManifestSpec checks every referenced ref is a well-formed absolute ref
-// fail-closed: a typo'd source/bind/project_set ref must fail loudly, never
-// resolve to nothing silently (R10).
+// validateManifestSpec checks every referenced ref fail-closed. Sources must be
+// fully PINNED (<source>:<path>@<version>): an unpinned/mutable source ref hashed
+// as a stable digest input is false reproducibility, so it is rejected loudly
+// (FIX D / F5). Bind and project_set refs must be well-formed absolute refs
+// (<source>:<name>); a typo'd ref must fail loudly, never resolve to nothing
+// silently (R10).
 func validateManifestSpec(spec ManifestSpec) error {
-	if err := validateManifestRefs("source", spec.Sources); err != nil {
-		return err
+	for _, ref := range spec.Sources {
+		if !validPinnedSourceRef(ref) {
+			return fmt.Errorf("manifest source ref %q is not pinned (want <source>:<path>@<version>); an unpinned/mutable source breaks reproducibility", ref)
+		}
 	}
 	if err := validateManifestRefs("bind", spec.Binds); err != nil {
 		return err
@@ -154,6 +191,20 @@ func validateManifestRefs(label string, refs []string) error {
 func validManifestRef(ref string) bool {
 	idx := strings.Index(ref, ":")
 	return idx > 0 && idx < len(ref)-1
+}
+
+// validPinnedSourceRef reports whether ref is a fully PINNED source ref
+// <source>:<path>@<version>: a non-empty source segment, a non-empty path, and a
+// non-empty @version. An unpinned ref (no @version) is rejected so the
+// transitive-pin digest only ever hashes immutable inputs (FIX D / F5).
+func validPinnedSourceRef(ref string) bool {
+	idx := strings.Index(ref, ":")
+	if idx <= 0 || idx >= len(ref)-1 {
+		return false
+	}
+	rest := ref[idx+1:]
+	at := strings.LastIndex(rest, "@")
+	return at > 0 && at < len(rest)-1
 }
 
 // manifestRef builds the absolute unit ref <source>:<name> for a manifest
@@ -295,23 +346,28 @@ func bindProfileSet(set ProfileSet, binds []string) ProfileSet {
 	return bound
 }
 
-// manifestDigest hashes the manifest's pinned inputs — its ref, its sorted
-// referenced source + bind refs, its project-set ref, and the resolved policy
-// digest — into the transitive-pin digest (F5). Sorting makes it order-
-// independent; folding the policy digest in makes it move when a referenced unit's
-// RESOLVED version changes, not only when a ref STRING changes.
+// manifestDigest hashes the manifest's pinned inputs — its ref, its RESOLVED
+// authority scope, its sorted referenced source + bind refs, its project-set ref,
+// and the resolved policy digest — into the transitive-pin digest (F5). Including
+// the resolved scope means an authority/grant change that alters the manifest's
+// resolved authority moves the pin (FIX D): the scope is part of the resolved
+// setup, so omitting it would let authority drift under a "pinned" digest. Sorting
+// makes the ref-set order-independent; folding the policy digest in makes it move
+// when a referenced unit's RESOLVED version changes, not only when a ref STRING
+// changes.
 func manifestDigest(m ConfigManifest, policyDigest string) string {
 	sources := append([]string{}, m.Spec.Sources...)
 	sort.Strings(sources)
 	binds := append([]string{}, m.Spec.Binds...)
 	sort.Strings(binds)
 	payload := struct {
-		Ref          string   `json:"ref"`
-		Sources      []string `json:"sources"`
-		Binds        []string `json:"binds"`
-		ProjectSet   string   `json:"project_set"`
-		PolicyDigest string   `json:"policy_digest"`
-	}{Ref: m.Ref, Sources: sources, Binds: binds, ProjectSet: m.Spec.ProjectSet, PolicyDigest: policyDigest}
+		Ref          string         `json:"ref"`
+		Scope        AuthorityScope `json:"scope"`
+		Sources      []string       `json:"sources"`
+		Binds        []string       `json:"binds"`
+		ProjectSet   string         `json:"project_set"`
+		PolicyDigest string         `json:"policy_digest"`
+	}{Ref: m.Ref, Scope: m.Scope, Sources: sources, Binds: binds, ProjectSet: m.Spec.ProjectSet, PolicyDigest: policyDigest}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return ""

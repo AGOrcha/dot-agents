@@ -349,3 +349,119 @@ func TestAgentsRCManifestsRoundTrip(t *testing.T) {
 		t.Fatal("manifests leaked into ExtraFields — agentsRCKnown out of sync")
 	}
 }
+
+// FIX D.1: the resolved scope is part of the pinned setup, so manifestDigest must
+// include it — two manifests identical but for resolved scope must differ.
+func TestManifestDigestIncludesResolvedScope(t *testing.T) {
+	ctx := ProfileContext{ScopeChain: []AuthorityScope{AuthRepo}}
+	m1 := sampleManifest() // AuthRepo
+	m2 := m1
+	m2.Scope = AuthOrg
+	if mustResolveManifest(t, m1, ProfileSet{}, ctx).Digest == mustResolveManifest(t, m2, ProfileSet{}, ctx).Digest {
+		t.Fatal("manifestDigest must include the resolved authority scope (FIX D)")
+	}
+}
+
+// FIX D.1 end-to-end: a §15 authority GRANT that elevates the manifest's imported
+// source changes its resolved scope — and the pin must move with it.
+func TestManifestDigestMovesWhenGrantChangesResolvedScope(t *testing.T) {
+	mref := manifestRef("acme:base", "m")
+	importLayer := ResolvedLayer{ID: "acme:base", Present: true, Raw: map[string]any{
+		"manifests": map[string]any{"m": map[string]any{"sources": []any{mfSrcBase}}},
+	}}
+	noGrant := &Snapshot{Layers: []ResolvedLayer{importLayer}}
+	d1, err := ResolveManifestFromSnapshot(noGrant, mref, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A repo-local layer (rank 2) may grant the imported "acme" source the user
+	// scope (rank 1) — a strictly-lower conferred rank, so it is honored.
+	granted := &Snapshot{Layers: []ResolvedLayer{
+		{ID: LayerRepoLocal, Present: true, Raw: map[string]any{
+			"authority_grants": map[string]any{"acme": "user"},
+		}},
+		importLayer,
+	}}
+	d2, err := ResolveManifestFromSnapshot(granted, mref, "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d1.Scope != AuthPublic || d2.Scope != AuthUser {
+		t.Fatalf("grant must change resolved scope: %q -> %q (want public -> user)", d1.Scope, d2.Scope)
+	}
+	if d1.Digest == d2.Digest {
+		t.Fatal("a grant change that alters the resolved scope must move the digest (FIX D)")
+	}
+}
+
+// FIX D.2: an unpinned/mutable source ref is rejected; a pinned ref resolves.
+func TestManifestRejectsUnpinnedSource(t *testing.T) {
+	unpinned := []string{
+		`{"sources":["acme:base"]}`,                    // no @version
+		`{"sources":["acme:base@"]}`,                   // empty version
+		`{"sources":["acme:@v1"]}`,                     // empty path
+		`{"sources":[":base@v1"]}`,                     // empty source
+		`{"sources":["acme:tools@v2","plain-no-pin"]}`, // one good, one unpinned
+	}
+	for _, raw := range unpinned {
+		if _, err := decodeManifest([]byte(raw), "acme:m", AuthRepo); err == nil {
+			t.Fatalf("expected an unpinned source ref to be rejected: %s", raw)
+		}
+	}
+	if _, err := decodeManifest([]byte(`{"sources":["acme:base@v1"]}`), "acme:m", AuthRepo); err != nil {
+		t.Fatalf("a pinned source ref must resolve: %v", err)
+	}
+}
+
+// FIX C: the fail-closed gate holds on the TYPED AgentsRC load path too — a
+// forbidden field or an unpinned source on the typed manifests map is rejected at
+// load (json.Unmarshal), never silently dropped before Save re-emits it.
+func TestManifestTypedPathFailsClosed(t *testing.T) {
+	cases := map[string]string{
+		"forbidden_extends": `{"version":1,"manifests":{"m":{"extends":["a:b"]}}}`,
+		"forbidden_grant":   `{"version":1,"manifests":{"m":{"authority_grants":{"acme":"org"}}}}`,
+		"unknown_field":     `{"version":1,"manifests":{"m":{"bogus":1}}}`,
+		"unpinned_source":   `{"version":1,"manifests":{"m":{"sources":["acme:base"]}}}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			var rc AgentsRC
+			if err := json.Unmarshal([]byte(raw), &rc); err == nil {
+				t.Fatalf("typed path must reject %s at load, not silently drop it", name)
+			}
+		})
+	}
+	// A valid typed manifest still loads.
+	var ok AgentsRC
+	if err := json.Unmarshal([]byte(`{"version":1,"manifests":{"m":{"sources":["acme:base@v1"]}}}`), &ok); err != nil {
+		t.Fatalf("a valid typed manifest must load: %v", err)
+	}
+	if len(ok.Manifests["m"].Sources) != 1 {
+		t.Fatalf("typed manifest not decoded: %+v", ok.Manifests)
+	}
+}
+
+// FIX F: a generate/refresh-style merge over an AgentsRC with authored manifests
+// must PRESERVE them — they no longer ride in ExtraFields now that they are typed.
+func TestMergeGenerateAgentsRCPreservesManifests(t *testing.T) {
+	existing := &AgentsRC{Version: 1, Manifests: map[string]ManifestSpec{
+		"team": {Sources: []string{mfSrcBase}, Binds: []string{mfProfRef}, ProjectSet: "acme:repos"},
+	}}
+	generated := &AgentsRC{Version: 1} // a fresh scan carries no manifests
+	merged := MergeGenerateAgentsRC(existing, generated)
+	got, ok := merged.Manifests["team"]
+	if !ok {
+		t.Fatal("merge dropped the authored manifest (typed-field/ExtraFields breakage, FIX F)")
+	}
+	if got.ProjectSet != "acme:repos" || len(got.Sources) != 1 {
+		t.Fatalf("merge did not preserve the manifest payload: %+v", got)
+	}
+	// The clone must not alias the existing manifest's slices.
+	got.Sources[0] = "mutated:x@v9"
+	if existing.Manifests["team"].Sources[0] != mfSrcBase {
+		t.Fatal("cloneManifests aliased the existing manifest's source slice")
+	}
+	if cloneManifests(nil) != nil {
+		t.Fatal("cloneManifests(nil) must be nil")
+	}
+}
