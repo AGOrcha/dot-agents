@@ -1,13 +1,20 @@
 # Multi-harness extensibility — design spec
 
 - **id:** multi-harness-extensibility
-- **status:** DRAFT (revised after GATE-1; pending owner ratification of the open forks in §5)
+- **status:** DRAFT (F4 probe executed; pending owner ratification of the open forks in §5)
 - **author:** Nikash Prakash
 - **created:** 2026-06-26
 - **revised:** 2026-06-26 — GATE-1 audit fixes: D3 made capability-granular, D2 reframed to
   descriptor + irreducible Go core (no descriptor-only claim), D1 survey-gated, F4 promoted
   to a mandatory probe gating schema ratification, completeness items added (R7-R10, DC0,
   DC6-DC7)
+- **revised:** 2026-06-28 — **F4 "hand-add-one-harness" probe run (read-only, empirical).**
+  The concrete touchpoint inventory the F4 gate demands is now recorded in **§9**: every
+  hard-coded harness edit site (file:line), classified data-vs-logic per D2/F1, plus the
+  partial irreducible-Go inventory DC0 requires. One stale citation corrected
+  (`commands/install.go` no longer exists — projection now enters via `commands/refresh.go`).
+  This satisfies the *enumeration* half of the F4 gate; DC0 still requires a *real* harness
+  to be hand-added end-to-end before schema ratification.
 
 ---
 
@@ -38,7 +45,7 @@ is encoded as *logic* (bespoke Go) rather than *data* (a descriptor the engine r
    `All()` returns five literal constructors (`platform.go:75-83`), and `ByID` walks it
    (`platform.go:86-93`). There is no data path to register a harness, and the command
    layer reaches the engine by enumerating `platform.All()` then running shared
-   projection + per-platform `CreateLinks` (`commands/install.go:292-348`,
+   projection + per-platform `CreateLinks` (`commands/internal/lifecycle/install.go:292-348`,
    `commands/add.go:597-616`, `commands/import.go:1632-1651`).
 
 2. **Hooks need a hand-maintained per-harness event table.** Canonical event names are
@@ -291,7 +298,7 @@ emission — there is no separate native-projection feature.
   the new harness.
 - **R9 — Command-integration compatibility.** The descriptor + core must slot into the
   existing command paths that enumerate `platform.All()` then run shared projection +
-  `CreateLinks` (`commands/install.go:292-348`, `commands/add.go:597-616`,
+  `CreateLinks` (`commands/internal/lifecycle/install.go:292-348`, `commands/add.go:597-616`,
   `commands/import.go:1632-1651`) without per-command changes per harness.
 - **R10 — Descriptor validation + versioning + destructive-replace policy.** Descriptors
   must be **validated** (well-formed read-paths, known transports, event-map shape) and
@@ -429,11 +436,130 @@ default**, not a decision.
   machines") are orthogonal; descriptors should not assume a fixed home layout.
 - **`config-distribution-model`** (`source` / `scope` model) — descriptors are data that
   flows through the same source/scope distribution machinery; the dialect/read-path data
-  is scope-attachable in principle.
+  is scope-attachable in principle. **Descriptor-provenance position (adopts §15 Amendment 3,
+  owner-ratified 2026-06-27 — `.agents/proposals/config-distribution-model-coherence-amendments.md`):
+  CONDITIONAL.** A descriptor stays an **internal / probe artifact** — Go-internal declarative
+  data, **not** a §15 `units` member (no `kind`, no lock entry, no `inputs_digest` participation) —
+  **until the F4 hand-add probe (DC0) completes.** It becomes a **full §15 `kind: descriptor` unit**
+  (with a defined media type, resolver order, validation, lock entry, and local `inputs_digest`
+  behavior) **only if/when it is source-shipped** (see the `external-agent-sources` note below).
+  Amendment 3 is the **owning decision** for this position; this spec adopts it rather than
+  re-deciding descriptor provenance. The amendment supplies the *substrate position* only — it does
+  **not** substitute for the F4 probe, which independently gates the descriptor *schema*.
 - **`external-agent-sources`** — a harness descriptor and an external agent *source* are
   distinct axes; a future external source could ship descriptors, but that is not in
-  scope here.
+  scope here. **That source-shipping moment is exactly the condition under which §15 Amendment 3
+  promotes the descriptor from an internal artifact to a full `kind: descriptor` unit** — until
+  then it carries no lock/digest obligation.
 - **`.agents/proposals/scientific-method-spine-domain-general.md`** — the method behind the
   F4 gate: the hand-add-one-harness probe is the **mandatory experiment** that ratifies or
   refutes the descriptor schema before any plan commits to it. Schema ratification is
   blocked on it (dogfood pattern; DC0).
+
+## 9. F4 probe findings — "what it takes to hand-add ONE harness today"
+
+This section is the **empirical half of the F4 gate** (DC0): a read-only enumeration of
+every place a harness is hard-coded today, run against the current tree on 2026-06-28 by
+reading `internal/platform/*`, `internal/config/*`, `internal/links/*`, `commands/*`, and
+the templates. It answers the probe question literally — *to hand-add a hypothetical
+"windsurf" (or "zed") harness, which sites must a contributor edit?* — and classifies each
+**data (descriptorizable, D2.1)** vs **logic (irreducible Go core, D2.2)** so the inventory
+feeds F1 and the DC0 record directly. The remaining half of the gate (hand-add a *real*
+harness end-to-end and record what surfaces) is still required before schema ratification.
+
+### 9.1 Headline numbers
+
+- **~7 Go files must be edited in lockstep** to add one harness; **0 config-layer files** and
+  **0 template files** need to change.
+- **One new `*.go` harness file of ~300–700 lines** implementing **~30–41 method receivers**
+  (the concrete `claude.go` carries **41** `func (c *claude)` receivers; `opencode.go` is the
+  floor at ~15). The mandatory `Platform` interface is **9 methods**
+  (`platform.go:49-72`); the rest are the optional-but-de-facto-required diagnostics/session
+  surfaces.
+- **The friction is entirely in the projection/platform layer.** The config layer is already
+  data-driven and needs no edit (see §9.4) — which is exactly the asymmetry D2 exploits: the
+  *enable/select* side is data; the *project* side is code.
+
+### 9.2 The hard-coded edit sites (data-vs-logic classified)
+
+| # | Touchpoint | file:line | What a "windsurf" addition requires | D2 class |
+|---|---|---|---|---|
+| 1 | **Registration slice** `All()` | `internal/platform/platform.go:75-83` | Add `NewWindsurf()` literal; `ByID` (`:86-93`) and every `platform.All()` caller pick it up automatically | **data** (registry) |
+| 2 | **New harness file** `windsurf.go` | (new file) | ~300–700 LOC: const block (`.windsurf` dir, config/hook/mcp filenames), `ID`/`DisplayName`/`IsInstalled`/`Version`, `CreateLinks`/`RemoveLinks`, `HasDeprecatedFormat`/`DeprecatedDetails`, `SharedTargetIntents` | **mixed** — paths/transports are data; `CreateLinks` body is logic |
+| 3 | **Hook event table** | `internal/platform/hooks.go:736 / :779 / :799 / :837` | Add a fifth `windsurfEventTable` map literal | **data** (canonical→native name map) |
+| 4 | **Event-set validation loop** | `hooks.go:616-622` (`isKnownCanonicalEvent`) | Add the new table to the literal slice it ranges over | **data** (derivable from #3) |
+| 5 | **Event dispatch helper** | `hooks.go:864-876` (`mapEventName` wrappers) | Add a `windsurf` wrapper binding the table | **data** |
+| 6 | **Hook render fn** | `hooks.go:879 (claude) / :959 (codex) / :1009 (cursor) / :1057 (copilot)` | New `renderWindsurfHookConfig/Entry/File` in the harness's native shape; **plus** any matcher-narrowing semantics (Codex whitelist `hooks.go:929-1007`, Copilot matcher rejection `:1057-1085`) | **logic** (semantic rendering ≠ name map) |
+| 7 | **Shared-mirror allowlist** | `internal/platform/resource_plan.go:267-276` (`isAllowlistedSharedMirrorTarget`) | Add windsurf's destructive-replace target roots (e.g. `.windsurf/skills/`, `.windsurf/agents/`) to the 7-prefix literal — until added, the projector refuses to overwrite them (`:253`) | **data** (roots) + **policy** (the replace guard) |
+| 8 | **Frontmatter translation** *(only if dialect diverges)* | `internal/platform/codex.go:418` (`renderCodexAgentToml`) + `internal/platform/resources.go:205-239` (`readFrontmatter`) | Only if windsurf reads a non-md serialization (like Codex TOML). The existing parser `strings.Cut`s each line on the first `:` (`resources.go:232`) → cannot represent nesting/lists/typed values; a real YAML parser is a prerequisite (F2) | **data** (field map) on a **logic** foundation that must be replaced |
+| 9 | **Diagnostics/status interfaces** | `internal/platform/diagnostics.go:94 / :101 / :109 / :119 / :132 / :142` | Implement `BrokenLinkReporter`, `LinkCounter`, `StatusBadger`, `UserConfigReporter`, `OrphanCanonicalReporter`, `AuditPrinter` in `windsurf.go` — else `da doctor`/`da status` silently degrade for the harness (R8/DC7) | **mixed** — counts derive from declared roots; some scans are logic |
+| 10 | **Session/stats readers** *(optional, stubs allowed)* | `internal/platform/platform.go:11-46` | `SessionReader`/`StatsReader`/`SessionTokenScanner`/`BranchSessionFinder` — empty stubs are valid until the harness's env-var + session-store contract is known | **logic** (per-vendor store formats) |
+| 11 | **Plugin-import switch** | `commands/import_plugins.go:419-465` | Per-harness `case` arms for `da import`'s plugin handling | **logic** |
+| 12 | **Projection entry-points** | `commands/refresh.go:146` + `:309-322`; `commands/add.go:348/450/605`; `commands/import.go:1639` | **No per-harness edit** — all iterate `platform.All()`, so #1 wires them. (Confirms R9: command layer is already harness-agnostic.) | **none** (auto) |
+
+**Stale-citation correction:** §1, R9, R1 and the DC1/DC3 cites reference
+`commands/install.go:292-348` as a projection entry-point. **That file no longer exists.**
+The install/refresh path now lives in `commands/refresh.go` — `reportEnabledPlatforms`
+ranges `platform.All()` at `:146`, and `recreatePlatformLinks` re-runs `CreateLinks` for
+every enabled+installed platform at `:309-322` (`platform.InstalledEnabledPlatforms` at
+`:89`). The behavioral claim (commands enumerate `All()` then project) holds; only the
+filename is wrong and should be fixed when the plan is written.
+
+### 9.3 Partial irreducible-Go inventory (DC0 down-payment)
+
+The probe confirms the §1/§2 honesty caveats with concrete sites. These resist
+descriptorization and define the *floor* of the Go core the plan must keep (F1). This is the
+**enumeration-derived** inventory; the **execution-derived** inventory (what actually
+surfaces when a real harness is hand-added) is still owed by DC0:
+
+- **Source-priority selection** — candidate-source ordering when several canonical files
+  could feed one target (e.g. Copilot legacy-vs-canonical hook spec, `copilot.go:304-326`;
+  Claude/Codex rule-source enumeration across `.md`/`.mdc`/`.txt`).
+- **User-home fanout** — per-user mirror writes distinct from repo-local projection
+  (`copilot.go:216-219`; `claude.go` `ensureUser*` family `:404-509`).
+- **Stale-render pruning** — deleting previously-rendered fan-out files no longer wanted
+  (`copilot.go:321-325`).
+- **Config-merge semantics** — settings-MERGE, and MCP folding into `config.toml` /
+  `opencode.json` rather than a standalone file.
+- **Semantic hook rendering beyond the name map** — Codex matcher whitelist
+  (`hooks.go:929-1007`), Copilot matcher rejection (`hooks.go:1057-1085`).
+- **`CreateLinks`/`RemoveLinks` symmetry** (`platform.go:58-61`) — teardown must mirror
+  creation exactly, including capability-granular native paths and user-home fanout (R7).
+- **Per-vendor session/stats store formats** — JSONL vs SQLite, distinct schemas, no overlap
+  (`claude.go`, `cursor.go`, `codex.go`, `opencode.go` reader bodies).
+
+### 9.4 The negative finding (sharpens D2)
+
+The **config layer requires no changes to add a harness**, which is the empirical evidence
+for D2's data/code split being drawn in the *right* place:
+
+- `.agentsrc.json` `agents` is an **open `[]string`** (`internal/config/agentsrc.go:231`);
+  `agentsRCKnown` validates the *key* `"agents"`, never the member harness names
+  (`agentsrc.go:658-688`).
+- Home config `agents` is an **open `map[string]Agent`** with only `{enabled, version}`
+  (`internal/config/config.go:28`, `:65-68`); the only harness-name `switch` is a 2-arm
+  legacy alias (`claude-code`/`github-copilot`, `config.go:365-368`) — read-side fallback,
+  not a closed set.
+- A profile can already scope to a harness via the `harness` selector key with **no
+  registration** (`internal/config/profile.go:50-52`, `:61`, `:89-103`); matching is plain
+  string equality. Unit kinds (`unit_kinds.go`, `lock_units.go:17-33`) are harness-agnostic.
+
+**Implication for the descriptor's home (F1/§5):** because the config substrate already
+treats harness identity as open data and a profile selector already keys on `harness`, a
+**harness descriptor is a natural §15 `unit` of a new `kind` (e.g. `kind: harness`)** — the
+distribution/scope/lock machinery would carry it for free, and built-in descriptors for the
+five existing harnesses would be the seed set, with user-contributed descriptors arriving
+through the same source/scope path as any other unit. The probe does **not** decide this
+(it remains an F1/§5 fork), but it shows the substrate is ready to host descriptors without
+new plumbing.
+
+### 9.5 Templates: no per-harness surface
+
+`src/share/templates/` (cited in older planning notes) **no longer exists**. The only
+templates are `internal/scaffold/templates/files/{skill,agent}.md.tmpl`, which emit a
+**generic** YAML frontmatter (`name`/`description`) consumed identically by all harnesses;
+per-harness divergence is applied later at link/render time, not at scaffold time. This
+corroborates D1's survey-gated stance: there is **no per-harness template fork to
+descriptorize** — the only proven dialect divergence remains agents→Codex-TOML (touchpoint
+#8), and every other asset ships verbatim (`resource_plan.go:342-343`).
+
