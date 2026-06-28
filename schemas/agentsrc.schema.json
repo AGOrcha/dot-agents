@@ -136,6 +136,59 @@
         "enum": ["org", "team", "repo", "user", "product", "public", "runtime", "project-local"]
       }
     },
+    "layering_policy": {
+      "type": "object",
+      "description": "Unified-config-profiles (L1) scope-attached layering policy: the Phase-1 governance a scope emits for the profile selector-merge engine. Its owning authority scope is SOURCE-derived (from the layer it lives in), never authored here. precedence orders scopes low->high for value resolution; locks are absolute deny/value pins (NO force-allow, Decision 4); override_permissions is the Decision-2 three-state cap (omitted=no opinion, {}=lockdown, non-empty=allowlist); mode is the Q4 replace-mode marker.",
+      "additionalProperties": false,
+      "properties": {
+        "precedence": {
+          "type": "array",
+          "description": "Scope ordering low->high for value resolution (later wins scalar conflicts). Empty falls back to the canonical AUTHORITY-RANK order.",
+          "items": {
+            "type": "string",
+            "enum": ["org", "team", "repo", "user", "product", "public", "runtime", "project-local"]
+          }
+        },
+        "mode": {
+          "type": "string",
+          "description": "Decision-3 / Q4 merge mode. 'narrow' (default) may only tighten lower grants; 'replace' supersedes the inherited precedence + override_permissions as a visible, named act. Locks always accumulate regardless.",
+          "enum": ["narrow", "replace"]
+        },
+        "override_permissions": {
+          "type": "object",
+          "description": "Decision-2 three-state cap, keyed by authority scope -> permitted field-paths ('*' = all). OMITTED (field absent) = no opinion / inherit-higher; explicit {} = lockdown (no scope may change anything); explicit non-empty = allowlist (a scope absent from the map may change nothing).",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        },
+        "locks": {
+          "type": "array",
+          "description": "Absolute layering locks (Decision 4): deny-lock (force members out of a set field, forbidding lower-scope re-grant) or value-lock (pin a scalar). There is NO force-allow lock; a force_allow key is a validation error.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field"],
+            "properties": {
+              "field": { "type": "string", "minLength": 1, "description": "Dot-path the lock governs (e.g. 'tools.allow', 'model')." },
+              "deny": { "type": "array", "items": { "type": "string" }, "description": "Set members forced out of field and forbidden from lower-scope re-grant. Mutually exclusive with value." },
+              "value": { "description": "Scalar pinned for field (value-lock). Mutually exclusive with deny." },
+              "selector": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Optional context scoping for the lock (empty = all contexts). Exact-match selector keys only.",
+                "properties": {
+                  "role": { "type": "string" },
+                  "app_type": { "type": "string" },
+                  "stage": { "type": "string" },
+                  "harness": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "verifier_profiles": {
       "$ref": "#/$defs/stageProfileMap",
       "deprecated": true,
