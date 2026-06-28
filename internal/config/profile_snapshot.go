@@ -79,6 +79,16 @@ func appendLayerProfiles(set *ProfileSet, raw map[string]any, scope AuthoritySco
 	set.Profiles = append(set.Profiles, profilesFromExecutionProfile(rc.ExecutionProfile, scope, source, order)...)
 	set.Profiles = append(set.Profiles, profilesFromStageProfiles(rc.StageProfiles, scope, source, order)...)
 
+	// A layer's `profiles` block carries AUTHORED kind:profile units (Authored=true)
+	// — the human-written fragments that sit beside the synthesized execution/stage
+	// profiles in the same engine. They are not an AgentsRC typed field (they route
+	// through ExtraFields), so they are read off the raw object here, fail-closed.
+	authored, err := decodeAuthoredProfiles(raw["profiles"], scope, source, order)
+	if err != nil {
+		return err
+	}
+	set.Profiles = append(set.Profiles, authored...)
+
 	if rawPolicy, ok := raw["layering_policy"]; ok {
 		// rawPolicy came from a decoded JSON object, so re-encoding cannot fail
 		// (same impossible-marshal convention as WriteUnitsLock).
