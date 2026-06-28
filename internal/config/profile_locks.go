@@ -104,7 +104,10 @@ func profileLockLayers(policy EffectivePolicy, ctx ProfileContext) []authorityLa
 func profileContribLayers(matched []ConfigProfile) []authorityLayer {
 	out := make([]authorityLayer, 0, len(matched))
 	for _, pr := range matched {
-		out = append(out, authorityLayer{id: pr.Ref, scope: pr.Scope, raw: pr.Bundle})
+		// id is the NAMESPACED key so two fragments sharing a raw ref (authored vs
+		// synthesized) are distinct contributors in the §15 lock/deny attribution,
+		// not collapsed under one id.
+		out = append(out, authorityLayer{id: pr.Key(), scope: pr.Scope, raw: pr.Bundle})
 	}
 	return out
 }
@@ -196,7 +199,10 @@ func detectConflicts(matched []ConfigProfile, _ EffectivePolicy) []ProfileConfli
 			if _, ok := seen[k]; !ok {
 				order = append(order, k)
 			}
-			seen[k] = append(seen[k], conflictEntry{ref: pr.Ref, value: lf.value})
+			// Surface the NAMESPACED key so a same-scope conflict between an authored
+			// and a synthesized fragment sharing a ref names two distinct contributors
+			// (Decision 6), not the same string twice.
+			seen[k] = append(seen[k], conflictEntry{ref: pr.Key(), value: lf.value})
 		}
 	}
 	return collectConflicts(order, seen)

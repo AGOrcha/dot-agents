@@ -98,8 +98,8 @@ func DetectProfileDriftFromSnapshot(projection ProfileProjection, snap *Snapshot
 // is added/removed, a path on both with unequal values is changed. The result is
 // sorted by path for deterministic rendering.
 func diffBundles(projected, resolved map[string]any) []ProfileFieldDrift {
-	projLeaves := leafMap(projected)
-	resLeaves := leafMap(resolved)
+	projLeaves := driftLeafMap(projected)
+	resLeaves := driftLeafMap(resolved)
 
 	seen := map[string]bool{}
 	var out []ProfileFieldDrift
@@ -123,13 +123,41 @@ func diffBundles(projected, resolved map[string]any) []ProfileFieldDrift {
 	return out
 }
 
-// leafMap flattens a bundle into a path→value map of its leaves, reusing the
-// resolver's flattenLeaves so the drift diff sees exactly the leaves the merge
-// produced.
-func leafMap(bundle map[string]any) map[string]any {
+// driftLeafMap flattens a bundle into a path→value map of its leaves FOR DRIFT —
+// like the resolver's flattenLeaves but it ALSO emits an empty-OBJECT node ({}) as
+// a leaf in its own right. flattenLeaves recurses into maps and emits only
+// scalar/array values, so an empty object contributes NO leaf and a structural
+// change like {"unit":{}} vs absent would slip past the field diff under an equal
+// digest — weakening the R7 safety net. Treating an empty object as a leaf (value
+// = the empty map, which valuesEqual compares as `{}`) makes its add/remove a
+// real, surfaced drift. Empty arrays are already leaves (an []any is not a map),
+// so they need no special case.
+func driftLeafMap(bundle map[string]any) map[string]any {
 	out := map[string]any{}
-	for _, lf := range flattenLeaves(bundle) {
-		out[lf.path] = lf.value
-	}
+	driftLeaves("", bundle, out)
 	return out
+}
+
+// driftLeaves walks node into out, emitting each scalar/array value at its
+// dot-path and each EMPTY object as a `{}` leaf (a non-root empty map is itself a
+// structural leaf). A non-empty object recurses. The root (prefix "") is never
+// emitted as a leaf — a wholly empty bundle simply yields no paths.
+func driftLeaves(prefix string, node map[string]any, out map[string]any) {
+	if len(node) == 0 {
+		if prefix != "" {
+			out[prefix] = map[string]any{}
+		}
+		return
+	}
+	for _, key := range sortedAnyKeys(node) {
+		path := key
+		if prefix != "" {
+			path = prefix + "." + key
+		}
+		if child, ok := node[key].(map[string]any); ok {
+			driftLeaves(path, child, out)
+			continue
+		}
+		out[path] = node[key]
+	}
 }

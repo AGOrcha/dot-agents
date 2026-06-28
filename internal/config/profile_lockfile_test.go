@@ -111,7 +111,7 @@ func TestProfileLockReproducibility(t *testing.T) {
 	deltas := ProfileLockReproducibility(locked, set)
 	got := map[string]ProfileLockStatus{}
 	for _, d := range deltas {
-		got[d.Ref] = d.Status
+		got[d.Key] = d.Status
 	}
 	want := map[string]ProfileLockStatus{
 		"repo:ok":      ProfileLockOK,
@@ -130,11 +130,125 @@ func TestProfileLockReproducibility(t *testing.T) {
 	if ProfileLockReproducible(deltas) {
 		t.Fatal("a set with stale/missing/extra units is not reproducible")
 	}
-	// Sorted by ref.
+	// Sorted by key.
 	for i := 1; i < len(deltas); i++ {
-		if deltas[i-1].Ref > deltas[i].Ref {
-			t.Fatalf("deltas not sorted by ref: %q before %q", deltas[i-1].Ref, deltas[i].Ref)
+		if deltas[i-1].Key > deltas[i].Key {
+			t.Fatalf("deltas not sorted by key: %q before %q", deltas[i-1].Key, deltas[i].Key)
 		}
+	}
+}
+
+// TestWriteUnitsLockEmitsProfileUnits drives the PRODUCTION lock IO funnel: derive
+// profile units from a resolved snapshot, fold them into a UnitsLock alongside a
+// layer unit, write the real .agentsrc.lock via WriteUnitsLock, and read it back —
+// asserting the kind:profile units actually landed in the written lock (R2). This
+// exercises the writer/serializer/reader, not just the in-memory map builder.
+func TestWriteUnitsLockEmitsProfileUnits(t *testing.T) {
+	dir := t.TempDir()
+	snap := mustResolveLayers(t, migrationLayers())
+	profileUnits, err := ProfileUnitsForSnapshot(snap, fixedFetchTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profileUnits) == 0 {
+		t.Fatal("expected the snapshot to derive at least one profile unit")
+	}
+
+	// Assemble the lock the way the production caller (resolver.writeUnitsLock) does:
+	// the layer units + inputs_digest, PLUS the profile contribution.
+	base := map[string]LockedUnit{"acme:org/base@v1": {Kind: UnitKindLayer, Digest: "sha256:layer"}}
+	lock := UnitsLock{Units: base, InputsDigest: "sha256:inputs", ProfileUnits: profileUnits}
+	if err := WriteUnitsLock(dir, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read the REAL on-disk lock back through the production reader.
+	locked, err := ReadLockedUnits(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if locked["acme:org/base@v1"].Kind != UnitKindLayer {
+		t.Fatal("the sibling layer unit must survive in the written lock")
+	}
+	landed := 0
+	for key, want := range profileUnits {
+		got, ok := locked[key]
+		if !ok {
+			t.Fatalf("profile unit %q missing from the written lock", key)
+		}
+		if got.Kind != UnitKindProfile {
+			t.Fatalf("unit %q landed with kind %q, want %q", key, got.Kind, UnitKindProfile)
+		}
+		if got.Digest != want.Digest {
+			t.Fatalf("unit %q digest = %q, want %q", key, got.Digest, want.Digest)
+		}
+		landed++
+	}
+	if landed != len(profileUnits) {
+		t.Fatalf("only %d/%d profile units landed in the lock", landed, len(profileUnits))
+	}
+	// inputs_digest round-trips through the same write.
+	ul, err := ReadUnits(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ul.InputsDigest != "sha256:inputs" {
+		t.Fatalf("inputs digest = %q, want sha256:inputs", ul.InputsDigest)
+	}
+}
+
+func TestProfileUnitsForSnapshotFailsClosed(t *testing.T) {
+	snap := mustResolveLayers(t, []ResolvedLayer{
+		{ID: LayerRepoLocal, Present: true, Raw: map[string]any{
+			"layering_policy": map[string]any{"mode": "merge"}, // invalid
+		}},
+	})
+	if _, err := ProfileUnitsForSnapshot(snap, fixedFetchTime); err == nil {
+		t.Fatal("a malformed policy must fail closed through the lock-unit derivation")
+	}
+}
+
+// TestSharedRefAuthoredSynthesizedDoNotCollapse is bug 2's identity guard: an
+// authored and a synthesized fragment sharing a raw ref must survive as TWO
+// distinct units BOTH through resolution (contributing keys) AND in the generated
+// lock (two map entries, distinct digests) — not collapse into one.
+func TestSharedRefAuthoredSynthesizedDoNotCollapse(t *testing.T) {
+	const ref = "repo:thing"
+	syn := ConfigProfile{
+		Ref: ref, Kind: ProfileKindAgentCapability, Scope: AuthRepo,
+		Selector: ProfileSelector{Role: "r"}, Bundle: map[string]any{"tools_allow": []any{"Edit"}},
+	}
+	auth := ConfigProfile{
+		Ref: ref, Kind: ProfileKindAgentCapability, Scope: AuthRepo,
+		Selector: ProfileSelector{Role: "r"}, Bundle: map[string]any{"skills_allow": []any{"plan-wave-picker"}},
+		Authored: true,
+	}
+	set := ProfileSet{Profiles: []ConfigProfile{syn, auth}}
+
+	// Resolution: both contribute, under DISTINCT namespaced keys.
+	got := mustResolveProfile(t, set, ProfileContext{Role: "r", ScopeChain: []AuthorityScope{AuthRepo}})
+	wantKeys := map[string]bool{ref: true, authoredKeyPrefix + ref: true}
+	if len(got.Contributing) != 2 {
+		t.Fatalf("want 2 distinct contributing keys, got %v", got.Contributing)
+	}
+	for _, k := range got.Contributing {
+		if !wantKeys[k] {
+			t.Fatalf("unexpected contributing key %q (want %v)", k, wantKeys)
+		}
+	}
+
+	// Lock: two distinct entries, not one collapsing the other.
+	units := ProfileLockUnits(set, fixedFetchTime)
+	if len(units) != 2 {
+		t.Fatalf("authored+synthesized sharing a ref must yield 2 lock units, got %d (%v)", len(units), units)
+	}
+	bare, hasBare := units[ref]
+	namespaced, hasNS := units[authoredKeyPrefix+ref]
+	if !hasBare || !hasNS {
+		t.Fatalf("both keys must be present; bare=%v namespaced=%v", hasBare, hasNS)
+	}
+	if bare.Digest == namespaced.Digest {
+		t.Fatal("the two shared-ref units must carry distinct content digests")
 	}
 }
 

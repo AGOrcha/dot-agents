@@ -86,6 +86,52 @@ func TestDetectProfileDriftFieldLevel(t *testing.T) {
 	}
 }
 
+// TestDetectProfileDriftEmptyObject is bug 3's guard: an added/removed empty
+// object ({}) is a real structural change the field diff must surface even when the
+// source digest was (artificially) left equal — the case flattenLeaves drops.
+func TestDetectProfileDriftEmptyObject(t *testing.T) {
+	const d = "equal-digest"
+
+	// Empty object present in the projection, absent in the resolution ⇒ removed.
+	removed := DetectProfileDrift(
+		ProfileProjection{SourceDigest: d, Bundle: map[string]any{"unit": map[string]any{}}},
+		ResolvedProfile{Digest: d, Bundle: map[string]any{}},
+	)
+	if !removed.HasDrift {
+		t.Fatal("a removed empty object must register as drift under an equal digest")
+	}
+	if len(removed.Changes) != 1 || removed.Changes[0].Path != "unit" || removed.Changes[0].Kind != DriftRemoved {
+		t.Fatalf("want one removed 'unit' change, got %+v", removed.Changes)
+	}
+
+	// Symmetric: empty object added on the resolved side ⇒ added.
+	added := DetectProfileDrift(
+		ProfileProjection{SourceDigest: d, Bundle: map[string]any{}},
+		ResolvedProfile{Digest: d, Bundle: map[string]any{"unit": map[string]any{}}},
+	)
+	if !added.HasDrift || len(added.Changes) != 1 || added.Changes[0].Kind != DriftAdded {
+		t.Fatalf("want one added 'unit' change, got %+v", added.Changes)
+	}
+
+	// Two identical empty objects at the same path do NOT drift.
+	same := DetectProfileDrift(
+		ProfileProjection{SourceDigest: d, Bundle: map[string]any{"unit": map[string]any{}}},
+		ResolvedProfile{Digest: d, Bundle: map[string]any{"unit": map[string]any{}}},
+	)
+	if same.HasDrift {
+		t.Fatalf("identical empty objects must not drift: %+v", same)
+	}
+
+	// Nested empty object is surfaced at its full dot-path.
+	nested := DetectProfileDrift(
+		ProfileProjection{SourceDigest: d, Bundle: map[string]any{"a": map[string]any{"b": map[string]any{}}}},
+		ResolvedProfile{Digest: d, Bundle: map[string]any{}},
+	)
+	if !nested.HasDrift || len(nested.Changes) != 1 || nested.Changes[0].Path != "a.b" {
+		t.Fatalf("want one removed 'a.b' change, got %+v", nested.Changes)
+	}
+}
+
 func TestDetectProfileDriftFromSnapshot(t *testing.T) {
 	snap := mustResolveLayers(t, migrationLayers())
 	resolved, err := ResolveProfileContext(snap, "", "go-cli", "", "")

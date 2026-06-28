@@ -76,17 +76,18 @@ func ProfileUnitDigest(p ConfigProfile) string {
 }
 
 // ProfileLockUnits projects a ProfileSet's profiles into §15 LockedUnit entries
-// (kind: profile), keyed by absolute ref, each carrying the unit content digest
-// and the fetch timestamp. The result is deterministic in content: the digest is
-// content-derived and the map is ref-keyed (a re-run over the same set yields
-// byte-identical entries). When two fragments share a ref (a duplicate), the
-// later-sorted ref's digest wins deterministically so the output never depends on
-// input order.
+// (kind: profile), keyed by the profile's NAMESPACED key, each carrying the unit
+// content digest and the fetch timestamp. Keying by Key() (not the raw Ref) keeps
+// an authored and a synthesized fragment that share a ref as TWO distinct lock
+// entries instead of one collapsing the other — the identity collision the
+// authored namespace exists to prevent. The result is deterministic in content:
+// the digest is content-derived and the map is key-stable, so a re-run over the
+// same set yields byte-identical entries regardless of input order.
 func ProfileLockUnits(set ProfileSet, fetchedAt time.Time) map[string]LockedUnit {
 	stamp := fetchedAt.UTC().Format(time.RFC3339)
 	out := make(map[string]LockedUnit, len(set.Profiles))
-	for _, p := range sortProfilesByRef(set.Profiles) {
-		out[p.Ref] = LockedUnit{
+	for _, p := range sortProfilesByKey(set.Profiles) {
+		out[p.Key()] = LockedUnit{
 			Kind:          UnitKindProfile,
 			Digest:        ProfileUnitDigest(p),
 			FetchedAt:     stamp,
@@ -111,6 +112,22 @@ func MergeProfileUnits(units map[string]LockedUnit, set ProfileSet, fetchedAt ti
 	return out
 }
 
+// ProfileUnitsForSnapshot derives the kind:profile lock contribution directly from
+// a resolved snapshot (R2): it re-derives the profile set the resolver already
+// produces (ProfileSetFromSnapshot, the same bridge da config explain uses) and
+// projects it to LockedUnit entries. It is the ONE call the lock-generation caller
+// makes to feed UnitsLock.ProfileUnits, so the profile units recorded in the lock
+// are exactly the fragments the engine resolves — never a re-derived divergence. A
+// malformed policy / authored profile fails closed (the same error the resolve
+// path raises), never a silent empty contribution.
+func ProfileUnitsForSnapshot(snap *Snapshot, fetchedAt time.Time) (map[string]LockedUnit, error) {
+	set, err := ProfileSetFromSnapshot(snap)
+	if err != nil {
+		return nil, err
+	}
+	return ProfileLockUnits(set, fetchedAt), nil
+}
+
 // ProfileLockStatus classifies one profile unit's reproducibility state against
 // the lock.
 type ProfileLockStatus string
@@ -130,10 +147,13 @@ const (
 	ProfileLockExtra ProfileLockStatus = "extra-in-lock"
 )
 
-// ProfileLockDelta is one profile unit's reproducibility record: its ref, the
-// classification, and the two digests so a caller renders a one-line diagnostic.
+// ProfileLockDelta is one profile unit's reproducibility record: its namespaced
+// key, the classification, and the two digests so a caller renders a one-line
+// diagnostic.
 type ProfileLockDelta struct {
-	Ref        string
+	// Key is the profile's namespaced addressable key (authored profiles carry the
+	// "authored:" prefix), matching how the lock units are keyed.
+	Key        string
 	Status     ProfileLockStatus
 	LockDigest string
 	LiveDigest string
@@ -144,39 +164,41 @@ type ProfileLockDelta struct {
 // the lock (R2). A lock whose profile units all report ProfileLockOK certifies
 // that the effective bundle is reproducible WITHOUT re-resolving — the §15
 // content-hash staleness model applied to profiles. Non-profile lock entries are
-// ignored. Records are returned sorted by ref for deterministic rendering.
+// ignored. Records are keyed by the profile's NAMESPACED key (so an authored and
+// a synthesized fragment sharing a ref are tracked independently, never aliased)
+// and returned sorted by key for deterministic rendering.
 func ProfileLockReproducibility(locked map[string]LockedUnit, set ProfileSet) []ProfileLockDelta {
 	live := map[string]string{}
 	for _, p := range set.Profiles {
-		live[p.Ref] = ProfileUnitDigest(p)
+		live[p.Key()] = ProfileUnitDigest(p)
 	}
 	lockedProfiles := map[string]string{}
-	for ref, u := range locked {
+	for key, u := range locked {
 		if u.Kind == UnitKindProfile {
-			lockedProfiles[ref] = u.Digest
+			lockedProfiles[key] = u.Digest
 		}
 	}
 
 	seen := map[string]bool{}
 	var out []ProfileLockDelta
-	for ref, liveDigest := range live {
-		seen[ref] = true
-		lockDigest, ok := lockedProfiles[ref]
+	for key, liveDigest := range live {
+		seen[key] = true
+		lockDigest, ok := lockedProfiles[key]
 		switch {
 		case !ok:
-			out = append(out, ProfileLockDelta{Ref: ref, Status: ProfileLockMissing, LiveDigest: liveDigest})
+			out = append(out, ProfileLockDelta{Key: key, Status: ProfileLockMissing, LiveDigest: liveDigest})
 		case lockDigest != liveDigest:
-			out = append(out, ProfileLockDelta{Ref: ref, Status: ProfileLockStale, LockDigest: lockDigest, LiveDigest: liveDigest})
+			out = append(out, ProfileLockDelta{Key: key, Status: ProfileLockStale, LockDigest: lockDigest, LiveDigest: liveDigest})
 		default:
-			out = append(out, ProfileLockDelta{Ref: ref, Status: ProfileLockOK, LockDigest: lockDigest, LiveDigest: liveDigest})
+			out = append(out, ProfileLockDelta{Key: key, Status: ProfileLockOK, LockDigest: lockDigest, LiveDigest: liveDigest})
 		}
 	}
-	for ref, lockDigest := range lockedProfiles {
-		if !seen[ref] {
-			out = append(out, ProfileLockDelta{Ref: ref, Status: ProfileLockExtra, LockDigest: lockDigest})
+	for key, lockDigest := range lockedProfiles {
+		if !seen[key] {
+			out = append(out, ProfileLockDelta{Key: key, Status: ProfileLockExtra, LockDigest: lockDigest})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }
 
@@ -192,10 +214,11 @@ func ProfileLockReproducible(deltas []ProfileLockDelta) bool {
 	return true
 }
 
-// sortProfilesByRef returns the profiles sorted by absolute ref so any ref-keyed
-// projection (the lock map, the digest set) is order-independent of the input.
-func sortProfilesByRef(profiles []ConfigProfile) []ConfigProfile {
+// sortProfilesByKey returns the profiles sorted by their NAMESPACED key so any
+// key-keyed projection (the lock map, the reproducibility report) is
+// order-independent of the input and keeps authored/synthesized refs distinct.
+func sortProfilesByKey(profiles []ConfigProfile) []ConfigProfile {
 	out := append([]ConfigProfile{}, profiles...)
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Ref < out[j].Ref })
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
 }

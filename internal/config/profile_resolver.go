@@ -222,7 +222,11 @@ func ResolveProfile(set ProfileSet, ctx ProfileContext) (ResolvedProfile, error)
 	conflicts := detectConflicts(matched, policy)
 	for _, pr := range matched {
 		mergeProfileInto(bundle, pr, policy)
-		refs = append(refs, pr.Ref)
+		// Record the NAMESPACED key, not the raw Ref: an authored and a synthesized
+		// fragment may share a ref, and the contributing set must keep them distinct
+		// (Key namespaces authored profiles under "authored:") rather than emitting
+		// the same string twice and aliasing two different units.
+		refs = append(refs, pr.Key())
 	}
 
 	// Authority/lock axis routed THROUGH §15 (FIX 2/3): the policy's
@@ -295,7 +299,10 @@ func orderProfiles(profiles []ConfigProfile, policy EffectivePolicy) {
 		if si != sj {
 			return si < sj
 		}
-		return profiles[i].Ref < profiles[j].Ref
+		// Final tie-break on the NAMESPACED key (Decision 6 determinism): two
+		// fragments sharing a raw ref but differing in provenance (authored vs
+		// synthesized) get a stable, distinct order instead of an arbitrary one.
+		return profiles[i].Key() < profiles[j].Key()
 	})
 }
 
