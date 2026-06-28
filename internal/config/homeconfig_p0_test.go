@@ -169,6 +169,29 @@ func TestSaveSplitsIdentityFromBinding(t *testing.T) {
 	}
 }
 
+// TestDropLocalBindings asserts DropLocalBindings clears every machine-local
+// binding (so a freshly-adopted home starts with all projects known-but-unbound)
+// without touching the synced identity registry — the bug-2 path: a v2 source's
+// tracked bindings must not be inherited on this machine.
+func TestDropLocalBindings(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	cfg := newEmptyConfig()
+	cfg.BindProject("alpha", filepath.FromSlash("/m/alpha"))
+	cfg.BindProject("beta", filepath.FromSlash("/m/beta"))
+	if !cfg.IsProjectBound("alpha") || !cfg.IsProjectBound("beta") {
+		t.Fatal("precondition: alpha and beta should be bound")
+	}
+
+	cfg.DropLocalBindings()
+
+	if cfg.IsProjectBound("alpha") || cfg.IsProjectBound("beta") {
+		t.Error("DropLocalBindings must clear all machine-local bindings")
+	}
+	if got := cfg.GetProjectPath("alpha"); got != "" {
+		t.Errorf("dropped binding should resolve to empty path, got %q", got)
+	}
+}
+
 // TestLoadMigratesLegacyV1Config asserts a legacy v1 config.json (paths inline)
 // is migrated in memory on Load (UpgradeNeeded, paths folded into the binding
 // table) without writing anything, and that the next Save persists the split
