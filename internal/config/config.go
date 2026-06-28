@@ -196,14 +196,20 @@ func loadBindings() (map[string]Binding, error) {
 }
 
 // Save persists the SYNCED identity registry (config.json) and the
-// MACHINE-LOCAL binding table (~/.agents/local/bindings.json) together, so a
-// mutation never leaves the two surfaces inconsistent. It also clears
+// MACHINE-LOCAL binding table (~/.agents/local/bindings.json), clearing
 // UpgradeNeeded once a migrated v1 config has been rewritten in the v2 shape.
+//
+// Ordering is load-bearing: the binding table is written FIRST, then the
+// path-free config.json. A legacy v1 config carries the project path INLINE; if
+// the path-free config.json were written first and the binding write then
+// failed, the path would be gone from BOTH files (data loss). Writing bindings
+// first means any failure leaves config.json untouched — the recoverable old
+// shape still carries the path, so a retried Save recovers cleanly.
 func (c *Config) Save() error {
-	if err := c.saveConfig(); err != nil {
+	if err := c.saveBindings(); err != nil {
 		return err
 	}
-	if err := c.saveBindings(); err != nil {
+	if err := c.saveConfig(); err != nil {
 		return err
 	}
 	c.upgradeNeeded = false

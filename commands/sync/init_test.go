@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/execabs"
 )
 
 func TestRunSyncInit_FreshRepo(t *testing.T) {
@@ -57,6 +59,80 @@ func TestRunSyncInit_ExistingRepoNoRemote(t *testing.T) {
 	for _, want := range []string{"local/", "cache/"} {
 		if !strings.Contains(string(gi), want) {
 			t.Errorf("existing-home .gitignore missing %q:\n%s", want, gi)
+		}
+	}
+}
+
+// TestRunSyncInit_ExistingRepoGitignoreError covers runSyncInit's error branch
+// when the in-place .gitignore repair fails (here: .gitignore is a directory).
+func TestRunSyncInit_ExistingRepoGitignoreError(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+	if err := os.Mkdir(filepath.Join(agentsHome, ".gitignore"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	if err := runSyncInit(deps); err == nil {
+		t.Error("expected error when .gitignore cannot be written")
+	}
+}
+
+// TestRunSyncInit_ExistingRepoDryRunSkipsRepair covers the existing-repo dry-run
+// branch: the in-place gitignore/untrack repair must be skipped, leaving the
+// repo untouched.
+func TestRunSyncInit_ExistingRepoDryRunSkipsRepair(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	if err := runSyncInit(deps); err != nil {
+		t.Fatalf("runSyncInit dry-run on existing repo: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not write .gitignore on existing repo: err=%v", err)
+	}
+}
+
+// TestRunSyncInit_UntracksAlreadyTrackedMachineLocal proves Fix 3: a home that
+// already committed local/ and cache/ (before the gitignore fix) must have those
+// paths UNTRACKED by `sync init` — the gitignore alone only stops new tracking,
+// so an in-place repair must `git rm --cached` the machine-local state. The
+// working-tree files are preserved; only the index entries are removed.
+func TestRunSyncInit_UntracksAlreadyTrackedMachineLocal(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+
+	// Simulate the pre-fix state: machine-local files committed into the repo.
+	for _, rel := range []string{"local/bindings.json", "cache/config/foo"} {
+		full := filepath.Join(agentsHome, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("machine-local"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, agentsHome, "add", "-A")
+	runGit(t, agentsHome, "commit", "-m", "pre-fix: tracked machine-local state")
+
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	if err := runSyncInit(deps); err != nil {
+		t.Fatalf("runSyncInit: %v", err)
+	}
+
+	tracked, err := execabs.Command("git", "-C", agentsHome, "ls-files").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"local/", "cache/"} {
+		if strings.Contains(string(tracked), leak) {
+			t.Errorf("%s still tracked after repair:\n%s", leak, tracked)
+		}
+	}
+	// The working-tree files must survive the untrack (--cached, not -f).
+	for _, rel := range []string{"local/bindings.json", "cache/config/foo"} {
+		if _, err := os.Stat(filepath.Join(agentsHome, rel)); err != nil {
+			t.Errorf("untrack deleted the working-tree file %s: %v", rel, err)
 		}
 	}
 }

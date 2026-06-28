@@ -2223,3 +2223,36 @@ func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 		t.Fatal("expected shared target projection error")
 	}
 }
+
+// TestRegisterInstallProject_RebindPreservesIdentity models the machine-B
+// rebind through `da install`: a project already in the SYNCED identity registry
+// but unbound on this machine must be rebound via the machine-local path only,
+// WITHOUT recomputing/overwriting the synced repo_id (Fix 1).
+func TestRegisterInstallProject_RebindPreservesIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	synced := `{"version":2,"projects":{"svc":{"repo_id":"github.com/acme/svc"}}}`
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(synced), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{}
+	defer func() { Flags = saved }()
+
+	projPath := filepath.Join(home, "checkout", "svc")
+	if err := RegisterInstallProject("svc", projPath, StdInstallDeps{}); err != nil {
+		t.Fatalf("RegisterInstallProject: %v", err)
+	}
+
+	reloaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.ProjectRepoID("svc"); got != "github.com/acme/svc" {
+		t.Errorf("install rebind OVERWROTE synced repo_id: got %q", got)
+	}
+	if got := reloaded.GetProjectPath("svc"); got != filepath.Clean(projPath) {
+		t.Errorf("install rebind did not set machine-local path: got %q", got)
+	}
+}

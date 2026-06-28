@@ -356,6 +356,51 @@ func TestSaveBindings_MkdirError(t *testing.T) {
 	}
 }
 
+// TestSaveAtomicity_BindingFailurePreservesPath proves Fix 2: when the binding
+// write fails mid-Save, the legacy path-bearing config.json on disk is left
+// UNTOUCHED (recoverable), not overwritten with the path-free shape — so the
+// project path is never lost between the two files. The binding table is written
+// first precisely so a failure cannot strand the path.
+func TestSaveAtomicity_BindingFailurePreservesPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	// A legacy v1 config.json carrying the path INLINE — the recoverable shape.
+	legacy := `{
+  "version": 1,
+  "projects": {"svc": {"path": "/old/machine/svc", "added": "2024-01-02T03:04:05Z"}}
+}`
+	cfgPath := filepath.Join(home, "config.json")
+	if err := os.WriteFile(cfgPath, []byte(legacy), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force saveBindings to fail: make ~/.agents/local a FILE so its MkdirAll
+	// errors. (We do not call Load here, so this does not interfere with reads.)
+	if err := os.WriteFile(filepath.Join(home, "local"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := newEmptyConfig()
+	cfg.Projects["svc"] = Project{RepoID: "github.com/acme/svc"}
+	cfg.BindProject("svc", "/old/machine/svc")
+
+	if err := cfg.Save(); err == nil {
+		t.Fatal("expected Save to fail when the binding table cannot be written")
+	}
+
+	after, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != legacy {
+		t.Errorf("config.json was mutated despite a failed Save (path may be lost):\n%s", after)
+	}
+	if !strings.Contains(string(after), "/old/machine/svc") {
+		t.Errorf("legacy path was lost from config.json:\n%s", after)
+	}
+}
+
 // TestBindingTableNotInConfigJSON guards that the unexported binding map can
 // never be marshaled into config.json even when populated.
 func TestBindingTableNotInConfigJSON(t *testing.T) {

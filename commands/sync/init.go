@@ -37,6 +37,11 @@ func runSyncInit(deps Deps) error {
 			if err := ensureSyncGitignore(agentsHome + "/.gitignore"); err != nil {
 				return fmt.Errorf("writing .gitignore: %w", err)
 			}
+			// A .gitignore only stops NEW tracking — a home that already
+			// committed local/ or cache/ would keep pushing them. Untrack them
+			// (without deleting the working-tree files) so machine-local state
+			// stops syncing on an already-initialized home.
+			untrackMachineLocalState(agentsHome)
 		}
 		return reportExistingSyncRepo(agentsHome)
 	}
@@ -144,6 +149,18 @@ func ensureSyncGitignore(path string) error {
 	}
 	content += strings.Join(missing, "\n") + "\n"
 	return os.WriteFile(path, []byte(content), 0644)
+}
+
+// untrackMachineLocalState removes already-tracked machine-local paths (the
+// binding table under local/ and the materialized caches under cache/) from the
+// git index WITHOUT deleting the working-tree files. `--ignore-unmatch` keeps it
+// a no-op when nothing is tracked, so it is safe to run on every `sync init`.
+// This is the in-place repair counterpart to ensureSyncGitignore: the gitignore
+// stops new tracking, this stops the already-tracked ones from continuing to
+// push (defects 2 & 5, R7).
+func untrackMachineLocalState(agentsHome string) {
+	_ = execabs.Command("git", "-C", agentsHome, "rm", "--cached", "-r",
+		"--ignore-unmatch", "--quiet", "local/", "cache/").Run()
 }
 
 // printSyncNextSteps writes the canonical "create remote and push" recipe.
