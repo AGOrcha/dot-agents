@@ -170,7 +170,7 @@ func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string,
 	if projectFilter == "" {
 		return cfg.ListProjects(), nil
 	}
-	if cfg.GetProjectPath(projectFilter) == "" {
+	if !cfg.IsProjectKnown(projectFilter) {
 		return nil, ErrorWithHints(
 			fmt.Sprintf("project not found: %s", projectFilter),
 			"Run `da status` to see the registered project names.",
@@ -183,7 +183,14 @@ func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string,
 // real, present directory. It emits the user-facing warn on skip so callers
 // just consult the bool.
 func checkRefreshProjectPath(name, path string) bool {
-	if path == "" || path == "." {
+	if path == "" {
+		// Known in the synced identity registry but with no machine-local
+		// binding — report it explicitly rather than silently skip-as-missing
+		// (R4). This is the expected machine-B state before `da add` rebinds it.
+		ui.Warn(name + ": known but unbound on this machine — run `da add <path>` to bind it")
+		return false
+	}
+	if path == "." {
 		ui.Warn("Skipping " + name + ": path not found")
 		return false
 	}

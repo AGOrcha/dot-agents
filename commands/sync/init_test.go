@@ -18,8 +18,16 @@ func TestRunSyncInit_FreshRepo(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(agentsHome, ".git")); err != nil {
 		t.Errorf("expected .git directory: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(agentsHome, ".gitignore")); err != nil {
-		t.Errorf("expected .gitignore created: %v", err)
+	gi, err := os.ReadFile(filepath.Join(agentsHome, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .gitignore created: %v", err)
+	}
+	// The machine-local sync boundary must exclude both the binding table
+	// (local/) and the materialized caches (cache/) — defects 2 & 5, R7.
+	for _, want := range []string{"local/", "cache/"} {
+		if !strings.Contains(string(gi), want) {
+			t.Errorf(".gitignore missing machine-local entry %q:\n%s", want, gi)
+		}
 	}
 }
 
@@ -40,6 +48,16 @@ func TestRunSyncInit_ExistingRepoNoRemote(t *testing.T) {
 	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit on existing repo: %v", err)
+	}
+	// An already-initialized home is upgraded with the machine-local boundary.
+	gi, err := os.ReadFile(filepath.Join(agentsHome, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .gitignore on existing repo: %v", err)
+	}
+	for _, want := range []string{"local/", "cache/"} {
+		if !strings.Contains(string(gi), want) {
+			t.Errorf("existing-home .gitignore missing %q:\n%s", want, gi)
+		}
 	}
 }
 

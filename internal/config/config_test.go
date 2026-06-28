@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -17,8 +18,8 @@ func TestConfigLoadSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Version != 1 {
-		t.Errorf("expected version 1, got %d", cfg.Version)
+	if cfg.Version != configSchemaVersion {
+		t.Errorf("expected version %d, got %d", configSchemaVersion, cfg.Version)
 	}
 	if cfg.Projects == nil {
 		t.Error("expected non-nil Projects map")
@@ -30,7 +31,20 @@ func TestConfigLoadSave(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	// Reload and verify
+	// The synced config.json must NOT carry the absolute path; it lives in the
+	// machine-local binding table under local/.
+	rawCfg, err := os.ReadFile(filepath.Join(tmp, "config.json"))
+	if err != nil {
+		t.Fatalf("read config.json: %v", err)
+	}
+	if strings.Contains(string(rawCfg), filepath.FromSlash("/home/user/myproject")) {
+		t.Errorf("synced config.json leaked an absolute path:\n%s", rawCfg)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "local", "bindings.json")); err != nil {
+		t.Errorf("expected machine-local binding table at local/bindings.json: %v", err)
+	}
+
+	// Reload and verify the path resolves through the binding table.
 	cfg2, err := Load()
 	if err != nil {
 		t.Fatalf("Load after save: %v", err)
@@ -59,17 +73,25 @@ func TestConfigAddRemoveProject(t *testing.T) {
 		t.Errorf("expected 2 projects, got %d", len(cfg.Projects))
 	}
 
-	// Verify Added timestamp is set
-	if cfg.Projects["alpha"].Added.IsZero() {
+	// Verify the machine-local binding (path + Added timestamp) is set; the
+	// synced identity registry row carries no path/timestamp.
+	alpha, ok := cfg.ProjectBinding("alpha")
+	if !ok {
+		t.Fatal("expected a machine-local binding for alpha")
+	}
+	if alpha.Added.IsZero() {
 		t.Error("expected non-zero Added time")
 	}
-	if cfg.Projects["alpha"].Added.After(time.Now().Add(time.Second)) {
+	if alpha.Added.After(time.Now().Add(time.Second)) {
 		t.Error("Added time is in the future")
 	}
 
 	cfg.RemoveProject("alpha")
 	if _, ok := cfg.Projects["alpha"]; ok {
-		t.Error("alpha should have been removed")
+		t.Error("alpha should have been removed from the identity registry")
+	}
+	if cfg.IsProjectBound("alpha") {
+		t.Error("alpha binding should have been removed")
 	}
 	if _, ok := cfg.Projects["beta"]; !ok {
 		t.Error("beta should still be present")
@@ -118,14 +140,8 @@ func TestExpandPath(t *testing.T) {
 }
 
 func TestConfigGetProjectPathCleansStoredPath(t *testing.T) {
-	cfg := &Config{
-		Version: 1,
-		Projects: map[string]Project{
-			"proj": {
-				Path: filepath.FromSlash("/tmp/example/."),
-			},
-		},
-	}
+	cfg := newEmptyConfig()
+	cfg.BindProject("proj", filepath.FromSlash("/tmp/example/."))
 	want := filepath.Clean(filepath.FromSlash("/tmp/example"))
 	if got := cfg.GetProjectPath("proj"); got != want {
 		t.Fatalf("GetProjectPath returned %q, want %q", got, want)
@@ -173,9 +189,9 @@ func TestConfigLoad_NilMapsBackfilled(t *testing.T) {
 func TestConfigListProjects(t *testing.T) {
 	cfg := &Config{
 		Projects: map[string]Project{
-			"a": {Path: "/a"},
-			"b": {Path: "/b"},
-			"c": {Path: "/c"},
+			"a": {},
+			"b": {},
+			"c": {},
 		},
 	}
 	got := cfg.ListProjects()
@@ -247,8 +263,11 @@ func TestAddProject_NilMap(t *testing.T) {
 	if cfg.Projects == nil {
 		t.Fatal("Projects nil after add")
 	}
-	if want := filepath.Clean(in); cfg.Projects["a"].Path != want {
-		t.Errorf("path: got %q want %q", cfg.Projects["a"].Path, want)
+	if !cfg.IsProjectKnown("a") {
+		t.Error("project not registered in identity registry after add")
+	}
+	if want := filepath.Clean(in); cfg.GetProjectPath("a") != want {
+		t.Errorf("path: got %q want %q", cfg.GetProjectPath("a"), want)
 	}
 }
 

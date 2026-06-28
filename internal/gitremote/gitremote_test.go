@@ -187,6 +187,51 @@ func initRepoWithOrigin(t *testing.T, originURL string) string {
 	return dir
 }
 
+func TestReadAllRemotes_MultiRemote(t *testing.T) {
+	dir := initRepoWithOrigin(t, "git@github.com:NikashPrakash/dot-agents.git")
+	repo, err := git.PlainOpen(dir)
+	if err != nil {
+		t.Fatalf("PlainOpen: %v", err)
+	}
+	if _, err := repo.CreateRemote(&config.RemoteConfig{
+		Name: "org",
+		URLs: []string{"git@github.com:AGOrcha/dot-agents.git"},
+	}); err != nil {
+		t.Fatalf("CreateRemote: %v", err)
+	}
+
+	remotes, err := ReadAllRemotes(dir)
+	if err != nil {
+		t.Fatalf("ReadAllRemotes err = %v", err)
+	}
+	if len(remotes) != 2 {
+		t.Fatalf("expected 2 remotes, got %d (%v)", len(remotes), remotes)
+	}
+	if got := remotes["origin"]; len(got) != 1 || got[0] != "git@github.com:NikashPrakash/dot-agents.git" {
+		t.Errorf("origin URLs = %v", got)
+	}
+	if got := remotes["org"]; len(got) != 1 || got[0] != "git@github.com:AGOrcha/dot-agents.git" {
+		t.Errorf("org URLs = %v", got)
+	}
+}
+
+func TestReadAllRemotes_NoRemotesEmptyMap(t *testing.T) {
+	dir := initRepoWithOrigin(t, "")
+	remotes, err := ReadAllRemotes(dir)
+	if err != nil {
+		t.Fatalf("ReadAllRemotes err = %v", err)
+	}
+	if remotes == nil || len(remotes) != 0 {
+		t.Errorf("expected empty non-nil map, got %v", remotes)
+	}
+}
+
+func TestReadAllRemotes_NotARepoErrors(t *testing.T) {
+	if _, err := ReadAllRemotes(t.TempDir()); err == nil {
+		t.Fatal("ReadAllRemotes on non-repo dir: want error, got nil")
+	}
+}
+
 func TestReadOriginURL_ReturnsConfiguredURL(t *testing.T) {
 	want := "git@github.com:AGOrcha/dot-agents.git"
 	dir := initRepoWithOrigin(t, want)

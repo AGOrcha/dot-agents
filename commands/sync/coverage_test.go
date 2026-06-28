@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -291,7 +292,10 @@ func TestInitSyncRepo_GitInitErrorReports(t *testing.T) {
 }
 
 // TestInitSyncRepo_PreservesExistingGitignore covers the branch where the
-// .gitignore already exists (so the write path is skipped).
+// .gitignore already exists: user-authored lines are preserved AND the missing
+// machine-local sync-boundary entries (local/, cache/) are appended so an
+// already-initialized home is upgraded to exclude the binding table + caches
+// (defects 2 & 5, R7).
 func TestInitSyncRepo_PreservesExistingGitignore(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	gi := filepath.Join(agentsHome, ".gitignore")
@@ -305,8 +309,67 @@ func TestInitSyncRepo_PreservesExistingGitignore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "custom\n" {
-		t.Errorf("existing .gitignore overwritten: %q", got)
+	g := string(got)
+	if !strings.HasPrefix(g, "custom\n") {
+		t.Errorf("user-authored line not preserved: %q", g)
+	}
+	for _, want := range []string{"local/", "cache/"} {
+		if !strings.Contains(g, "\n"+want+"\n") && !strings.HasSuffix(g, "\n"+want+"\n") {
+			t.Errorf(".gitignore missing machine-local entry %q: %q", want, g)
+		}
+	}
+}
+
+// TestEnsureSyncGitignore_NoChangeWhenComplete covers the len(missing)==0 branch:
+// an already-complete .gitignore is left byte-for-byte unchanged.
+func TestEnsureSyncGitignore_NoChangeWhenComplete(t *testing.T) {
+	dir := t.TempDir()
+	gi := filepath.Join(dir, ".gitignore")
+	complete := "local/\ncache/\n*.dot-agents-backup\n"
+	if err := os.WriteFile(gi, []byte(complete), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSyncGitignore(gi); err != nil {
+		t.Fatalf("ensureSyncGitignore: %v", err)
+	}
+	got, _ := os.ReadFile(gi)
+	if string(got) != complete {
+		t.Errorf("complete .gitignore was rewritten: %q", got)
+	}
+}
+
+// TestEnsureSyncGitignore_AppendsWithoutTrailingNewline covers the missing-final
+// -newline append branch.
+func TestEnsureSyncGitignore_AppendsWithoutTrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	gi := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(gi, []byte("custom"), 0o644); err != nil { // no trailing \n
+		t.Fatal(err)
+	}
+	if err := ensureSyncGitignore(gi); err != nil {
+		t.Fatalf("ensureSyncGitignore: %v", err)
+	}
+	got, _ := os.ReadFile(gi)
+	if !strings.HasPrefix(string(got), "custom\n") {
+		t.Errorf("expected newline inserted after custom: %q", got)
+	}
+	for _, want := range []string{"local/", "cache/"} {
+		if !strings.Contains(string(got), "\n"+want+"\n") {
+			t.Errorf("missing %q: %q", want, got)
+		}
+	}
+}
+
+// TestEnsureSyncGitignore_ReadErrorNotNotExist covers the non-NotExist read-error
+// branch: the path is a directory.
+func TestEnsureSyncGitignore_ReadErrorNotNotExist(t *testing.T) {
+	dir := t.TempDir()
+	gi := filepath.Join(dir, ".gitignore")
+	if err := os.Mkdir(gi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureSyncGitignore(gi); err == nil {
+		t.Error("expected read error when .gitignore is a directory")
 	}
 }
 
