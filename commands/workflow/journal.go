@@ -508,7 +508,10 @@ func pruneJournal(repoPath string, keep int, dryRun bool) (journalPruneResult, e
 // lock is held and the keep-set is computed, but BEFORE the atomic rewrite. It lets
 // a test prove that a concurrent append — which must wait for the same lock — cannot
 // slip between the read and the rewrite. Default no-op.
-var pruneAfterReadHook = func() {}
+var pruneAfterReadHook = func() {
+	// Intentionally empty: the default production hook does nothing. Tests
+	// replace it to interleave a concurrent append at this exact point.
+}
 
 // planPrune reads the log and computes the keep-set (the newest `keep` events)
 // without writing. A persisting caller MUST run it under the advisory lock (see

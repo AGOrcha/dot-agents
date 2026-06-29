@@ -2292,6 +2292,26 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 	return nil
 }
 
+// applyTaskFieldUpdates mutates task in place for any non-empty field value that
+// differs from the current one, and returns the set of changed fields keyed by
+// field name (the value being the new value, used for the journal delta).
+func applyTaskFieldUpdates(task *CanonicalTask, title, notes, writeScope string) map[string]string {
+	changed := map[string]string{}
+	if title != "" && title != task.Title {
+		task.Title = title
+		changed["title"] = title
+	}
+	if notes != "" && notes != task.Notes {
+		task.Notes = notes
+		changed["notes"] = notes
+	}
+	if ws := splitTrimmedCSV(writeScope); writeScope != "" && strings.Join(ws, ",") != strings.Join(task.WriteScope, ",") {
+		task.WriteScope = ws
+		changed["write_scope"] = writeScope
+	}
+	return changed
+}
+
 func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -2303,22 +2323,11 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 	}
 	found := false
 	changed := map[string]string{}
-	for i, t := range tf.Tasks {
-		if t.ID != taskID {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID != taskID {
 			continue
 		}
-		if title != "" && title != t.Title {
-			tf.Tasks[i].Title = title
-			changed["title"] = title
-		}
-		if notes != "" && notes != t.Notes {
-			tf.Tasks[i].Notes = notes
-			changed["notes"] = notes
-		}
-		if ws := splitTrimmedCSV(writeScope); writeScope != "" && strings.Join(ws, ",") != strings.Join(t.WriteScope, ",") {
-			tf.Tasks[i].WriteScope = ws
-			changed["write_scope"] = writeScope
-		}
+		changed = applyTaskFieldUpdates(&tf.Tasks[i], title, notes, writeScope)
 		found = true
 		break
 	}

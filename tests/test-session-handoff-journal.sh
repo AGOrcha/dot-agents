@@ -48,8 +48,8 @@ export AGENTS_HOME="$WORK/home/.agents"
 mkdir -p "$HOME" "$XDG_STATE_HOME" "$AGENTS_HOME"
 
 PASS=0
-ok()   { echo "  ok: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1" >&2; exit 1; }
+ok()   { local msg="$1"; echo "  ok: $msg"; PASS=$((PASS + 1)); }
+fail() { local msg="$1"; echo "FAIL: $msg" >&2; exit 1; }
 
 # da_in <repo> <args...> runs the binary inside a sandbox repo with output muted.
 da_in() { local repo="$1"; shift; (cd "$repo" && "$DA" "$@"); }
@@ -57,16 +57,19 @@ da_in() { local repo="$1"; shift; (cd "$repo" && "$DA" "$@"); }
 # events_path <repo> resolves the off-tree events.log for a sandbox repo via the
 # shipped CLI (no fingerprint math in the test).
 events_path() {
-  da_in "$1" --json workflow journal show 2>/dev/null \
+  local repo="$1"
+  da_in "$repo" --json workflow journal show 2>/dev/null \
     | python3 -c "import sys,json;print(json.load(sys.stdin)['events_path'])"
 }
 snapshot_path() {
-  da_in "$1" --json workflow journal show 2>/dev/null \
+  local repo="$1"
+  da_in "$repo" --json workflow journal show 2>/dev/null \
     | python3 -c "import sys,json;print(json.load(sys.stdin)['snapshot_path'])"
 }
 # event_count <repo> = number of NDJSON lines (one envelope per line).
 event_count() {
-  local log; log="$(events_path "$1")"
+  local repo="$1"
+  local log; log="$(events_path "$repo")"
   [[ -f "$log" ]] && grep -c '' "$log" || echo 0
 }
 
