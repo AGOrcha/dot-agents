@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -690,6 +691,17 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		return err
 	}
 
+	command := journal.CmdFoldBackCreate
+	action := "create"
+	if updateOnly {
+		command = journal.CmdFoldBackUpdate
+		action = "update"
+	}
+	input := &journal.FoldBackInput{Plan: in.planID, Task: in.taskID, Observation: in.observation, Slug: in.slug, Propose: in.propose}
+	observed := &journal.FoldBackObserved{Action: action}
+	ok := false
+	defer func() { journalTier1(project.Path, command, input, observed, ok) }()
+
 	if _, err := loadCanonicalPlan(project.Path, in.planID); err != nil {
 		return fmt.Errorf("plan %s not found: %w", in.planID, err)
 	}
@@ -726,6 +738,11 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	if err := writeFoldBackArtifact(project.Path, artifact); err != nil {
 		return err
 	}
+	observed.ArtifactID = artifact.ID
+	if artifact.RoutedTo != "" {
+		observed.RoutedTo = []string{artifact.RoutedTo}
+	}
+	ok = true
 
 	out := cmd.OutOrStdout()
 	if deps.Flags.JSON() {
@@ -1034,6 +1051,19 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	}
 	in := parseFanoutInputs(cmd)
 
+	delegateProfile, _ := cmd.Flags().GetString("delegate-profile")
+	baseBranchFlag, _ := cmd.Flags().GetString("base-branch")
+	verifierSeq, _ := cmd.Flags().GetString("verifier-sequence")
+	input := &journal.FanoutInput{
+		Plan:             in.planID,
+		DelegateProfile:  delegateProfile,
+		BaseBranch:       baseBranchFlag,
+		VerifierSequence: splitTrimmedCSV(verifierSeq),
+	}
+	observed := &journal.FanoutObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdFanout, input, observed, ok) }()
+
 	plan, err := loadCanonicalPlan(project.Path, in.planID)
 	if err != nil {
 		return fmt.Errorf("plan %s not found: %w", in.planID, err)
@@ -1043,6 +1073,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	input.Task = taskID
 
 	tf, err := loadCanonicalTasks(project.Path, in.planID)
 	if err != nil {
@@ -1058,6 +1089,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	}
 
 	writeScope = resolveFanoutWriteScope(writeScope, in.writeScopeCSV, in.writeScopeExplicit, targetTask.WriteScope)
+	input.WriteScope = writeScope
 
 	if err := ensureTaskVerificationDir(project.Path, taskID); err != nil {
 		return fmt.Errorf("prepare verification directory: %w", err)
@@ -1098,6 +1130,12 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 			ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
 		}
 	}
+
+	observed.DelegationPath = fmt.Sprintf(".agents/active/delegation/%s.yaml", taskID)
+	observed.BundlePath = fmt.Sprintf(".agents/active/delegation-bundles/%s.yaml", contract.ID)
+	observed.ResolvedBaseBranch = baseRes.BaseBranch
+	observed.ResolvedWriteScope = writeScope
+	ok = true
 
 	ui.SuccessBox(
 		fmt.Sprintf("Delegation created for task %s", taskID),
@@ -1176,6 +1214,15 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	summary, _ := cmd.Flags().GetString("summary")
 	verificationStatus, _ := cmd.Flags().GetString("verification-status")
 	integrationNotes, _ := cmd.Flags().GetString("integration-notes")
+	commitState, _ := cmd.Flags().GetBool(workflowFlagCommitState)
+
+	input := &journal.MergeBackInput{Task: taskID, Summary: summary, VerificationStatus: verificationStatus}
+	if commitState {
+		input.CommitState = "true"
+	}
+	observed := &journal.MergeBackObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdMergeBack, input, observed, ok) }()
 
 	if !isValidVerificationStatus(verificationStatus) {
 		return fmt.Errorf("invalid verification status %q (expected pass, fail, partial, or unknown)", verificationStatus)
@@ -1206,6 +1253,11 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	if err := saveDelegationContract(project.Path, contract); err != nil {
 		ui.Warn(fmt.Sprintf("merge-back created but failed to update delegation status: %v", err))
 	}
+
+	observed.ArtifactPath = fmt.Sprintf(".agents/active/merge-back/%s.md", taskID)
+	observed.FilesChanged = filesChanged
+	observed.Verdict = verificationStatus
+	ok = true
 
 	ui.SuccessBox(
 		fmt.Sprintf("Merge-back created for task %s", taskID),
@@ -1972,6 +2024,10 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	note, _ := cmd.Flags().GetString("note")
 
 	decision = strings.ToLower(strings.TrimSpace(decision))
+	input := &journal.DelegationCloseoutInput{Plan: planID, Task: taskID, Decision: decision, Note: strings.TrimSpace(note)}
+	observed := &journal.DelegationCloseoutObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdDelegationCloseout, input, observed, ok) }()
 	if decision != "accept" && decision != "reject" {
 		return fmt.Errorf(`--decision must be "accept" or "reject"`)
 	}
@@ -1995,7 +2051,7 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		ClosedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
 
-	_, dateStr, err := archiveCloseoutArtifacts(project.Path, taskID, planID, decision, contract, closeout)
+	archiveDir, dateStr, err := archiveCloseoutArtifacts(project.Path, taskID, planID, decision, contract, closeout)
 	if err != nil {
 		return err
 	}
@@ -2003,6 +2059,9 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	if err := applyCloseoutDecisionToTasks(project.Path, planID, taskID, closeout); err != nil {
 		return err
 	}
+	observed.ArchivedPaths = []string{config.DisplayPath(archiveDir)}
+	observed.ReconciledTaskStatus = closeoutReconciledStatus(decision)
+	ok = true
 
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(os.Stdout)
@@ -2015,4 +2074,14 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Archived under .agents/history/%s/delegate-merge-back-archive/%s/%s/", planID, dateStr, taskID),
 	)
 	return nil
+}
+
+// closeoutReconciledStatus maps a closeout decision to the task status
+// applyCloseoutDecisionToTasks lands it in, so the journal records the resolved
+// state without re-deriving it.
+func closeoutReconciledStatus(decision string) string {
+	if decision == "reject" {
+		return "blocked"
+	}
+	return "completed"
 }

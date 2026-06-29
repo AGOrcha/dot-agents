@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/sys/execabs"
@@ -192,6 +193,11 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 	}
 	projectPath := project.Path
 
+	input := &journal.DeriveScopeInput{Plan: planID, Task: taskID, SeedSymbols: seedSymbols, SeedPaths: seedPaths}
+	observed := &journal.DeriveScopeObserved{}
+	ok := false
+	defer func() { journalTier1(projectPath, journal.CmdPlanDeriveScope, input, observed, ok) }()
+
 	task, err := loadCanonicalTaskByID(projectPath, planID, taskID)
 	if err != nil {
 		return err
@@ -248,6 +254,12 @@ func runWorkflowPlanDeriveScope(planID, taskID string, seedSymbols, seedPaths []
 	if err != nil {
 		return err
 	}
+	observed.SidecarPath = config.DisplayPath(outPath)
+	observed.Mode = mode
+	observed.Confidence = ev.Confidence
+	observed.RequiredPaths = len(ev.RequiredPaths)
+	observed.Queries = len(ev.Queries)
+	ok = true
 
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(os.Stdout)
@@ -1990,10 +2002,16 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if err != nil {
 		return err
 	}
+	input := &journal.AdvanceInput{Plan: planID, Task: taskID, Status: newStatus}
+	observed := &journal.AdvanceObserved{ToStatus: newStatus}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdAdvance, input, observed, ok) }()
+
 	tf, err := loadCanonicalTasks(project.Path, planID)
 	if err != nil {
 		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
+	observed.FromStatus = canonicalTaskStatusByID(tf, taskID)
 	taskTitle, err := applyTaskStatusTransition(tf, planID, taskID, newStatus)
 	if err != nil {
 		return err
@@ -2014,8 +2032,20 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	if err := saveCanonicalPlan(project.Path, plan); err != nil {
 		return err
 	}
+	ok = true
 	ui.Success(fmt.Sprintf("Task %q advanced to %q", taskTitle, newStatus))
 	return nil
+}
+
+// canonicalTaskStatusByID returns the current status of taskID in tf, or "" when
+// the task is absent. Used to record a transition's from-status for the journal.
+func canonicalTaskStatusByID(tf *CanonicalTaskFile, taskID string) string {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == taskID {
+			return tf.Tasks[i].Status
+		}
+	}
+	return ""
 }
 
 func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verificationStrategy string) error {
@@ -2024,6 +2054,10 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 		return err
 	}
 	dir := filepath.Join(plansBaseDir(project.Path), planID)
+	input := &journal.PlanCreateInput{Plan: planID, Title: title, Owner: owner}
+	observed := &journal.PlanCreateObserved{PlanDir: config.DisplayPath(dir)}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdPlanCreate, input, observed, ok) }()
 	if _, err := os.Stat(dir); err == nil {
 		return fmt.Errorf("plan %q already exists at %s", planID, config.DisplayPath(dir))
 	}
@@ -2051,6 +2085,8 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err
 	}
+	observed.FilesCreated = []string{workflowPlanFileName, workflowTasksFileName}
+	ok = true
 	ui.Success(fmt.Sprintf("Created plan %q at %s", planID, config.DisplayPath(dir)))
 	return nil
 }
@@ -2064,13 +2100,27 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 // iteration continues.
 func runWorkflowPlanArchive(projectPath string, planIDs []string, force, dryRun bool) error {
 	var firstErr error
+	var archivePaths, activeDirsRemoved []string
 	for _, planID := range planIDs {
 		if err := archiveSinglePlan(projectPath, planID, force, dryRun); err != nil {
 			fmt.Fprintf(os.Stderr, "archive plan %q: %v\n", planID, err)
 			if firstErr == nil {
 				firstErr = err
 			}
+			continue
 		}
+		if !dryRun {
+			archivePaths = append(archivePaths, config.DisplayPath(filepath.Join(historyBaseDir(projectPath), planID)))
+			activeDirsRemoved = append(activeDirsRemoved, config.DisplayPath(filepath.Join(plansBaseDir(projectPath), planID)))
+		}
+	}
+	// Journal only the plans that were actually moved (dry-run mutates nothing).
+	// A failed plan within a bulk run is logged above; the success event records
+	// the subset that landed, which is what a recovering session needs to see.
+	if len(archivePaths) > 0 {
+		emitWorkflowSuccess(projectPath, journal.CmdPlanArchive,
+			&journal.PlanArchiveInput{Plans: planIDs, Force: force},
+			&journal.PlanArchiveObserved{ArchivePaths: archivePaths, ActiveDirsRemoved: activeDirsRemoved})
 	}
 	return firstErr
 }
@@ -2136,30 +2186,31 @@ func runWorkflowPlanUpdate(planID, status, title, summary, focus, successCriteri
 	if err != nil {
 		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
 	}
-	if status != "" {
-		plan.Status = status
-	}
-	if title != "" {
-		plan.Title = title
-	}
-	if summary != "" {
-		plan.Summary = summary
-	}
-	if successCriteria != "" {
-		plan.SuccessCriteria = successCriteria
-	}
-	if verificationStrategy != "" {
-		plan.VerificationStrategy = verificationStrategy
-	}
-	if focus != "" {
-		plan.CurrentFocusTask = focus
-	}
+	changed := map[string]string{}
+	applyPlanFieldUpdate(changed, "status", status, &plan.Status)
+	applyPlanFieldUpdate(changed, "title", title, &plan.Title)
+	applyPlanFieldUpdate(changed, "summary", summary, &plan.Summary)
+	applyPlanFieldUpdate(changed, "success_criteria", successCriteria, &plan.SuccessCriteria)
+	applyPlanFieldUpdate(changed, "verification_strategy", verificationStrategy, &plan.VerificationStrategy)
+	applyPlanFieldUpdate(changed, "current_focus_task", focus, &plan.CurrentFocusTask)
 	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	if err := saveCanonicalPlan(project.Path, plan); err != nil {
 		return err
 	}
+	emitWorkflowDelta(project.Path, journal.CmdPlanUpdate, planID, "", changed)
 	ui.Success(fmt.Sprintf("Updated plan %q", planID))
 	return nil
+}
+
+// applyPlanFieldUpdate sets *dst to newVal when newVal is a non-empty override
+// that differs from the current value, recording the replaced field's new value
+// in changed so the Tier-2 journal delta carries only fields that actually moved.
+func applyPlanFieldUpdate(changed map[string]string, field, newVal string, dst *string) {
+	if newVal == "" || newVal == *dst {
+		return
+	}
+	*dst = newVal
+	changed[field] = newVal
 }
 
 func splitTrimmedCSV(csv string) []string {
@@ -2221,6 +2272,16 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err
 	}
+	emitWorkflowSuccess(project.Path, journal.CmdTaskAdd,
+		&journal.TaskAddInput{
+			Plan:       in.PlanID,
+			TaskID:     in.TaskID,
+			Title:      in.Title,
+			DependsOn:  task.DependsOn,
+			WriteScope: task.WriteScope,
+			AppType:    in.AppType,
+		},
+		&journal.TaskAddObserved{Appended: true})
 	plan, err := loadCanonicalPlan(project.Path, in.PlanID)
 	if err != nil {
 		return err
@@ -2241,18 +2302,22 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
 	}
 	found := false
+	changed := map[string]string{}
 	for i, t := range tf.Tasks {
 		if t.ID != taskID {
 			continue
 		}
-		if title != "" {
+		if title != "" && title != t.Title {
 			tf.Tasks[i].Title = title
+			changed["title"] = title
 		}
-		if notes != "" {
+		if notes != "" && notes != t.Notes {
 			tf.Tasks[i].Notes = notes
+			changed["notes"] = notes
 		}
-		if writeScope != "" {
-			tf.Tasks[i].WriteScope = splitTrimmedCSV(writeScope)
+		if ws := splitTrimmedCSV(writeScope); writeScope != "" && strings.Join(ws, ",") != strings.Join(t.WriteScope, ",") {
+			tf.Tasks[i].WriteScope = ws
+			changed["write_scope"] = writeScope
 		}
 		found = true
 		break
@@ -2263,6 +2328,7 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 	if err := saveCanonicalTasks(project.Path, tf); err != nil {
 		return err
 	}
+	emitWorkflowDelta(project.Path, journal.CmdTaskUpdate, planID, taskID, changed)
 	plan, err := loadCanonicalPlan(project.Path, planID)
 	if err != nil {
 		return err

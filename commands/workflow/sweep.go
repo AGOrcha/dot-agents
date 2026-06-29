@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -205,12 +206,14 @@ func confirmSweepAction(action SweepActionItem, confirmer io.Reader) bool {
 // bufio-buffering edge case where a per-action bufio.Reader would gobble
 // the rest of the underlying io.Reader on the first call, the confirmer is
 // wrapped once here and reused across actions.
-func runSweepApply(plan SweepPlan, confirmer io.Reader) {
+// runSweepApply applies the confirmed sweep actions and returns the items that
+// landed successfully, so the caller can journal the durable fix set.
+func runSweepApply(plan SweepPlan, confirmer io.Reader) []SweepActionItem {
 	if confirmer == nil {
 		confirmer = workflowStdin
 	}
 	shared := bufio.NewReader(confirmer)
-	applied := 0
+	applied := make([]SweepActionItem, 0, len(plan.Actions))
 	for _, action := range plan.Actions {
 		if !confirmSweepActionFromReader(action, shared) {
 			continue
@@ -218,13 +221,14 @@ func runSweepApply(plan SweepPlan, confirmer io.Reader) {
 		if err := applySweepAction(action); err != nil {
 			ui.Warn(fmt.Sprintf("Failed: %s — %v", action.Description, err))
 		} else {
-			applied++
+			applied = append(applied, action)
 			ui.Success(fmt.Sprintf("Applied: %s", action.Description))
 		}
 		appendSweepLog(sweepLogEntry(action, true, false))
 	}
 	fmt.Fprintln(os.Stdout)
-	ui.Success(fmt.Sprintf("Sweep complete: %d/%d actions applied.", applied, len(plan.Actions)))
+	ui.Success(fmt.Sprintf("Sweep complete: %d/%d actions applied.", len(applied), len(plan.Actions)))
+	return applied
 }
 
 // confirmSweepActionFromReader is the inner form used by runSweepApply with
@@ -288,6 +292,28 @@ func runWorkflowSweepWithLister(cmd *cobra.Command, lister func() ([]ManagedProj
 		return nil
 	}
 
-	runSweepApply(plan, confirmer)
+	applied := runSweepApply(plan, confirmer)
+	emitSweepApplyJournal(checkpointDays, proposalDays, applied)
 	return nil
+}
+
+// emitSweepApplyJournal records the fixes a `sweep --apply` run actually landed.
+// sweep spans managed repos, so the event is keyed to the cwd repo (the journal
+// may span repos); an empty applied set (nothing confirmed/applied) journals
+// nothing.
+func emitSweepApplyJournal(staleDays, proposalDays int, applied []SweepActionItem) {
+	if len(applied) == 0 {
+		return
+	}
+	project, err := currentWorkflowProject()
+	if err != nil {
+		return
+	}
+	fixes := make([]journal.SweepFix, 0, len(applied))
+	for _, a := range applied {
+		fixes = append(fixes, journal.SweepFix{Project: a.Project.Name, Action: string(a.Action)})
+	}
+	emitWorkflowSuccess(project.Path, journal.CmdSweepApply,
+		&journal.SweepApplyInput{StaleDays: staleDays, ProposalDays: proposalDays},
+		&journal.SweepApplyObserved{FixesApplied: fixes})
 }
