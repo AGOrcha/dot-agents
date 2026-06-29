@@ -31,6 +31,16 @@ var (
 // so records sort lexicographically in true chronological order.
 const timeFormat = time.RFC3339Nano
 
+// maxEventBytes caps a single marshaled NDJSON event line. The journal is meant
+// to record short workflow metadata — a created id, a status transition, a
+// multi-paragraph summary/observation/note at most a few KB. 16 KiB comfortably
+// fits that legitimate free-text plus the typed fields, while a body dump (a KG
+// note body, file contents, or a payload smuggled past the typed schemas) runs
+// much larger and is rejected. This single cap is the SYSTEMIC no-bodies backstop:
+// it guards every append — including the raw Emit path, which skips the typed
+// NewEvent constructor — so no one event can ever become a body-dump.
+const maxEventBytes = 16 * 1024
+
 // Emit appends one event to the journal for the repository at repoPath. It is the
 // single append entrypoint commands call. The envelope's Schema, Version, TS,
 // Seq, and (when empty) CwdRepo are stamped here; the caller supplies Actor,
@@ -40,7 +50,8 @@ const timeFormat = time.RFC3339Nano
 // NDJSON line (record + trailing newline) under the package interprocess lock, so
 // concurrent da processes never interleave or tear lines. The journal directory
 // is created on first append. Per R1 a failed event never carries an observed
-// delta: Emit drops Observed when EventType is EventFailed.
+// delta: Emit drops Observed when EventType is EventFailed. An event whose
+// marshaled line exceeds maxEventBytes is rejected (the systemic no-bodies cap).
 func Emit(repoPath string, e Envelope) error {
 	e.Schema = Schema
 	e.Version = Version
@@ -58,6 +69,10 @@ func Emit(repoPath string, e Envelope) error {
 	line, err := e.MarshalLine()
 	if err != nil {
 		return fmt.Errorf("journal: marshal event: %w", err)
+	}
+	if len(line) > maxEventBytes {
+		return fmt.Errorf("journal: event for %q is %d bytes, exceeds the %d-byte cap (no body-dumps)",
+			e.Command, len(line), maxEventBytes)
 	}
 
 	dir := RepoDir(repoPath)

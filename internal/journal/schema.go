@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 )
 
@@ -804,10 +805,17 @@ func IsJournaled(command string) bool {
 // with the command. A nil (or typed-nil) payload is omitted. The remaining
 // envelope fields (schema, version, ts, seq, actor, cwd_repo) are stamped by Emit.
 //
-// It returns an error for a command that is not journaled, and for an observed
-// payload whose Locus is invalid (R8 sum-type: exactly one arm), so a miswired
-// caller fails loudly at construction rather than silently dropping the event or
-// persisting an ambiguous locus.
+// The typed registry is the CONTRACT, not a suggestion: input and observed must
+// be exactly the registered spec types for the command — *AdvanceInput /
+// *AdvanceObserved for "workflow advance", etc. (or nil to omit a payload). A
+// caller cannot hand NewEvent a json.RawMessage(arbitraryJSON) or a wrong struct
+// to bypass the schemas; a type mismatch is rejected. This is what makes the
+// per-command schemas the real shape of every typed event.
+//
+// It returns an error for a command that is not journaled, for a payload whose
+// type does not match the registered schema, and for an observed payload whose
+// Locus is invalid (R8 sum-type: exactly one arm) — so a miswired caller fails
+// loudly at construction rather than persisting an off-schema or ambiguous event.
 func NewEvent(command string, actor Actor, input, observed any) (Envelope, error) {
 	spec, ok := Lookup(command)
 	if !ok {
@@ -817,14 +825,20 @@ func NewEvent(command string, actor Actor, input, observed any) (Envelope, error
 	if err != nil {
 		return Envelope{}, fmt.Errorf("journal: marshal input for %q: %w", command, err)
 	}
+	if err := checkPayloadType(command, "input", input, spec.NewInput()); err != nil {
+		return Envelope{}, err
+	}
 	rawObserved, err := marshalPayload(observed)
 	if err != nil {
 		return Envelope{}, fmt.Errorf("journal: marshal observed for %q: %w", command, err)
 	}
+	if err := checkPayloadType(command, "observed", observed, spec.NewObserved()); err != nil {
+		return Envelope{}, err
+	}
 	// Validate the locus only for a present observed payload. marshalPayload has
 	// already collapsed a nil / typed-nil observed to a nil rawObserved, so gating
 	// here means the value-receiver ValidateLocus is never invoked on a nil pointer
-	// (which would panic) while a both-arms locus on a value OR pointer is rejected.
+	// (which would panic) while a both-arms locus slips through neither path.
 	if rawObserved != nil {
 		if lc, ok := observed.(locusCarrier); ok {
 			if err := lc.ValidateLocus(); err != nil {
@@ -841,16 +855,36 @@ func NewEvent(command string, actor Actor, input, observed any) (Envelope, error
 	}, nil
 }
 
+// checkPayloadType enforces that a non-nil payload is exactly the registered spec
+// type (prototype is a fresh *SpecType from spec.NewInput()/NewObserved()). A nil
+// payload is allowed — it omits that field. Marshaling happens before this check
+// so an unmarshalable value is reported as a marshal error and a wrong concrete
+// type (including a smuggled json.RawMessage) is reported here.
+func checkPayloadType(command, role string, payload, prototype any) error {
+	if payload == nil {
+		return nil
+	}
+	if got, want := reflect.TypeOf(payload), reflect.TypeOf(prototype); got != want {
+		return fmt.Errorf("journal: %s for %q must be %s, got %s", role, command, want, got)
+	}
+	return nil
+}
+
 // NewFailedEvent builds an EventFailed envelope for a journaled command that did
 // NOT succeed. Per R1 a failure never carries a fabricated observed delta, so
-// only the invoked input is recorded; observed is always absent.
+// only the invoked input is recorded; observed is always absent. The input is
+// schema-typed exactly as in NewEvent.
 func NewFailedEvent(command string, actor Actor, input any) (Envelope, error) {
-	if !IsJournaled(command) {
+	spec, ok := Lookup(command)
+	if !ok {
 		return Envelope{}, fmt.Errorf("journal: command %q is not journaled", command)
 	}
 	rawInput, err := marshalPayload(input)
 	if err != nil {
 		return Envelope{}, fmt.Errorf("journal: marshal input for %q: %w", command, err)
+	}
+	if err := checkPayloadType(command, "input", input, spec.NewInput()); err != nil {
+		return Envelope{}, err
 	}
 	return Envelope{
 		Actor:     actor,

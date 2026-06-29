@@ -2,6 +2,7 @@ package journal
 
 import (
 	"encoding/json"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -396,8 +397,9 @@ func TestNewEventRejectsInvalidLocus(t *testing.T) {
 		t.Fatal("NewEvent with both-arm locus (pointer): want error, got nil")
 	}
 
-	// Value receivers mean a BY-VALUE observed must also be validated — a both-arms
-	// locus passed without & cannot slip past.
+	// A bad-locus observed passed BY VALUE cannot slip past either — type
+	// enforcement (Fix 1) rejects the value form before it could be journaled, so a
+	// caller cannot dodge locus validation by dropping the &.
 	byValueBad := []any{
 		AdvanceObserved{Locus: badLocus},
 		CloseTaskObserved{Locus: badLocus},
@@ -406,7 +408,7 @@ func TestNewEventRejectsInvalidLocus(t *testing.T) {
 	byValueCmds := []string{CmdAdvance, CmdCloseTask, CmdMergeBack}
 	for i, obs := range byValueBad {
 		if _, err := NewEvent(byValueCmds[i], ActorMain, nil, obs); err == nil {
-			t.Errorf("NewEvent(%q) with by-value both-arm locus: want error, got nil", byValueCmds[i])
+			t.Errorf("NewEvent(%q) with by-value bad-locus observed: want error, got nil", byValueCmds[i])
 		}
 	}
 
@@ -629,4 +631,85 @@ func TestContractCreateRoundTrip(t *testing.T) {
 	if got.ContractID != "del-t-1" || got.Mode != "direct" || len(got.ResolvedWriteScope) != 1 {
 		t.Errorf("contract round-trip wrong: %+v", got)
 	}
+}
+
+// TestNewEventEnforcesSchemaTypes asserts the typed registry is the contract:
+// NewEvent accepts only the registered spec pointer types and rejects an
+// arbitrary json.RawMessage, a wrong struct type, or a by-value spec type — so no
+// caller can bypass the per-command schemas. NewFailedEvent enforces input too.
+func TestNewEventEnforcesSchemaTypes(t *testing.T) {
+	// Arbitrary RawMessage (the classic bypass) is rejected for both payloads.
+	huge := json.RawMessage(`{"x":"` + strings.Repeat("b", 4096) + `"}`)
+	if _, err := NewEvent(CmdAdvance, ActorMain, huge, nil); err == nil {
+		t.Error("NewEvent with raw input: want error, got nil")
+	}
+	if _, err := NewEvent(CmdAdvance, ActorMain, &AdvanceInput{}, huge); err == nil {
+		t.Error("NewEvent with raw observed: want error, got nil")
+	}
+
+	// A wrong (but valid) spec type for the command is rejected.
+	if _, err := NewEvent(CmdAdvance, ActorMain, &CommitInput{}, nil); err == nil {
+		t.Error("NewEvent with mismatched input type: want error, got nil")
+	}
+
+	// The spec type passed by value (not pointer) is rejected.
+	if _, err := NewEvent(CmdAdvance, ActorMain, AdvanceInput{}, nil); err == nil {
+		t.Error("NewEvent with by-value input: want error, got nil")
+	}
+
+	// The exact registered pointer types are accepted.
+	if _, err := NewEvent(CmdAdvance, ActorMain, &AdvanceInput{Plan: "p", Task: "t"},
+		&AdvanceObserved{ToStatus: "completed"}); err != nil {
+		t.Errorf("NewEvent with correct spec types: %v", err)
+	}
+
+	// NewFailedEvent enforces input type the same way.
+	if _, err := NewFailedEvent(CmdAdvance, ActorMain, huge); err == nil {
+		t.Error("NewFailedEvent with raw input: want error, got nil")
+	}
+	if _, err := NewFailedEvent(CmdAdvance, ActorMain, &AdvanceInput{Plan: "p"}); err != nil {
+		t.Errorf("NewFailedEvent with correct input type: %v", err)
+	}
+}
+
+// TestEmitRejectsOversizedEvent is the systemic no-bodies backstop: an event whose
+// marshaled line exceeds maxEventBytes is rejected at the append boundary,
+// regardless of which field is oversized or whether it went through NewEvent. A
+// realistic event with a multi-KB free-text summary still appends.
+func TestEmitRejectsOversizedEvent(t *testing.T) {
+	t.Run("oversized raw event rejected", func(t *testing.T) {
+		repo := t.TempDir()
+		// Build directly (the raw Emit path that skips NewEvent) with a body-dump.
+		oversized := Envelope{
+			Actor:     ActorMain,
+			Command:   CmdMergeBack,
+			EventType: EventDurableDelta,
+			Observed:  json.RawMessage(`{"artifact_path":"` + strings.Repeat("z", maxEventBytes) + `"}`),
+		}
+		if err := Emit(repo, oversized); err == nil {
+			t.Fatal("Emit of over-cap event: want error, got nil")
+		}
+		// Nothing should have been written (the cap short-circuits before any write).
+		if _, statErr := os.Stat(EventsLogPath(repo)); statErr == nil {
+			t.Error("over-cap event left a journal file")
+		}
+	})
+
+	t.Run("realistic multi-KB summary appends", func(t *testing.T) {
+		repo := t.TempDir()
+		summary := strings.Repeat("Implemented the staged review gate and verified it end to end. ", 30) // ~1.9KB
+		env, err := NewEvent(CmdMergeBack, ActorLoopWorker,
+			&MergeBackInput{Task: "p2", Summary: summary, VerificationStatus: "pass"},
+			&MergeBackObserved{ArtifactPath: "merge-back.md", Verdict: "accept", Committed: true})
+		if err != nil {
+			t.Fatalf("NewEvent: %v", err)
+		}
+		if err := Emit(repo, env); err != nil {
+			t.Fatalf("Emit of realistic event: %v", err)
+		}
+		events := readEvents(t, repo)
+		if len(events) != 1 {
+			t.Fatalf("got %d events, want 1", len(events))
+		}
+	})
 }
