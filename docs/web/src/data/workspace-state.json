@@ -1,44 +1,35 @@
 {
   "title": "Workspace state",
-  "description": "Representative snapshot of .agents/active/ — the active plans, the one in-flight (owner-gated) delegation, and the eligible queue. Autonomous drive is paused (owner-gated / net-new only); master is green. This is a committed snapshot, not a live feed.",
+  "description": "Representative snapshot (captured 2026-06-29) of .agents/ on the docs/architect-demo-deck branch — active/draft plans and the eligible (gated) queue. Autonomous drive is paused (owner-gated); master is green. graph-backend-adapter-contract's t5/t6/t9 are pending with all dependencies satisfied (eligible, not driven); a parked git worktree (dot-agents-t5) holds local work-in-progress for t5, but TASKS.yaml still has t5 pending with NO active delegation bundle. This is a committed snapshot, not a live feed.",
   "layout": "cose",
-  "captured_at": "2026-06-29T16:05:25Z",
+  "captured_at": "2026-06-29",
   "legend": [
     { "kind": "plan", "color": "#f59e0b", "description": "active / draft plan" },
-    { "kind": "delegation", "color": "#a855f7", "description": "in-flight delegation bundle" },
-    { "kind": "worktree", "color": "#0ea5e9", "description": "git worktree on a branch" },
-    { "kind": "eligible", "color": "#22c55e", "description": "task eligible to run (gated)" }
+    { "kind": "eligible", "color": "#22c55e", "description": "pending task, deps satisfied (gated)" },
+    { "kind": "worktree", "color": "#0ea5e9", "description": "parked git worktree on a branch" }
   ],
   "nodes": [
-    { "id": "plan:shj", "label": "session-handoff-journal", "kind": "plan",
-      "data": { "status": "active", "tasks": "11 completed (just archived)" } },
-    { "id": "plan:config-arch", "label": "config-architecture-impl", "kind": "plan",
-      "data": { "status": "active", "current_focus": "l4-multiharness", "tasks": "5 completed, 1 pending" } },
+    { "id": "plan:gbac", "label": "graph-backend-adapter-contract", "kind": "plan",
+      "data": { "status": "active", "tasks": "6 completed, 4 pending", "lives_in": ".agents/workflow/plans/graph-backend-adapter-contract/", "focus": "cross-adapter reads_from (t5) + bridge decommission (t6)" } },
     { "id": "plan:config-v2", "label": "config-v2-migration", "kind": "plan",
       "data": { "status": "active", "tasks": "18 completed, 2 cancelled, 1 ready" } },
     { "id": "plan:docs", "label": "docs-starlight-migration", "kind": "plan",
-      "data": { "status": "draft", "current_focus": "dm6-agent-internal-access", "tasks": "6 completed, 2 awaiting_agent_review, 1 in_progress, 1 pending" } },
-    { "id": "plan:gbac", "label": "graph-backend-adapter-contract", "kind": "plan",
-      "data": { "status": "active", "tasks": "6 completed, 1 in_progress, 3 pending" } },
+      "data": { "status": "draft", "tasks": "6 completed, 2 awaiting_agent_review, 1 in_progress, 1 pending", "focus": "dm6 agent-internal access (client half open)" } },
 
-    { "id": "d:t5", "label": "del-t5-cross-adapter-reads-from", "kind": "delegation",
-      "data": { "bundle": "del-t5-cross-adapter-reads-from-1782701404.yaml", "task": "graph-backend-adapter-contract/t5-cross-adapter-reads-from", "owner": "gbac-t5-worker", "status": "in_progress (owner-gated, PR #207)", "write_scope": ["internal/adapters/builtin/compliance-register/views/", "internal/kg/dsl/cross-namespace/", "testdata/cross-adapter/"] } },
+    { "id": "e:t5", "label": "t5-cross-adapter-reads-from", "kind": "eligible",
+      "data": { "plan": "graph-backend-adapter-contract", "status": "pending, deps (t2+t4) satisfied", "gate": "owner-gated (drive paused)", "note": "Parked worktree dot-agents-t5 holds local WIP; no active delegation bundle in .agents/active/" } },
+    { "id": "e:t6", "label": "t6-bridge-decommission", "kind": "eligible",
+      "data": { "plan": "graph-backend-adapter-contract", "status": "pending, dep (t4) satisfied", "gate": "owner-gated (multi-week CI parity gate before bridge removal)" } },
+    { "id": "e:t9", "label": "t9-sdk-materializeview-readsfrom-gate", "kind": "eligible",
+      "data": { "plan": "graph-backend-adapter-contract", "status": "pending, dep (t4) satisfied", "gate": "owner-gated (drive paused)" } },
 
     { "id": "wt:t5", "label": "dot-agents-t5", "kind": "worktree",
-      "data": { "branch": "impl/graph-backend-t5-cross-adapter", "path": "/Users/nikashp/proj-docs/dot-agents-t5" } },
-
-    { "id": "e:l4", "label": "l4-multiharness", "kind": "eligible",
-      "data": { "plan": "config-architecture-impl", "status": "pending, deps satisfied", "gate": "net-new (drive paused)" } },
-    { "id": "e:p8", "label": "p8-payout-wrk-v2-upgrade", "kind": "eligible",
-      "data": { "plan": "config-v2-migration", "status": "ready", "gate": "owner/operator-gated (Windows payout-wrk box)" } },
-    { "id": "e:dm6", "label": "dm6-agent-internal-access", "kind": "eligible",
-      "data": { "plan": "docs-starlight-migration", "status": "in_progress", "gate": "blocked on maintainer-provided scoped CF API token (client half PR #83)" } }
+      "data": { "branch": "impl/graph-backend-t5-cross-adapter", "path": "/Users/nikashp/proj-docs/dot-agents-t5", "note": "Parked worktree for t5 — NOT an in-flight delegation; TASKS.yaml t5 is pending" } }
   ],
   "edges": [
-    { "source": "plan:gbac", "target": "d:t5", "label": "delegates" },
-    { "source": "d:t5", "target": "wt:t5", "label": "runs in" },
-    { "source": "plan:config-arch", "target": "e:l4", "label": "eligible" },
-    { "source": "plan:config-v2", "target": "e:p8", "label": "eligible" },
-    { "source": "plan:docs", "target": "e:dm6", "label": "focus" }
+    { "source": "plan:gbac", "target": "e:t5", "label": "eligible" },
+    { "source": "plan:gbac", "target": "e:t6", "label": "eligible" },
+    { "source": "plan:gbac", "target": "e:t9", "label": "eligible" },
+    { "source": "e:t5", "target": "wt:t5", "label": "parked in" }
   ]
 }

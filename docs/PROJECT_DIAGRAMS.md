@@ -373,12 +373,13 @@ flowchart TB
     end
 
     subgraph RES["Resolution — da config sync / explain"]
-        layers["Layer units (kind layer)<br/>merged underneath repo config"]
-        artifacts["Artifact units (kind artifact)<br/>executable bundles"]
+        layers["Layer units (kind layer)<br/>resolved extends, SHA-pinned"]
+        profiles["Profile units (kind profile)<br/>resolved stage_profiles fragments"]
+        artifacts["packages[] -> artifacts<br/>resolved + materialized for projection<br/>(NOT written as lock units today)"]
         stack["Merge stack — low to high<br/>product-defaults, user-local,<br/>extends[] (at locked digest),<br/>repo-local, .agentsrc.local.json"]
     end
 
-    lock[".agentsrc.lock<br/>lock_version + inputs_digest<br/>units — key, kind, digest sha256, fetched_at"]
+    lock[".agentsrc.lock<br/>lock_version + inputs_digest<br/>units — extends to layer + resolved profile<br/>(key, kind, digest sha256, fetched_at)"]
 
     proj["Projection — da refresh / install<br/>per-platform outputs:<br/>Claude, Cursor, Codex, Copilot, OpenCode"]
 
@@ -391,19 +392,25 @@ flowchart TB
     extends --> layers
     packages --> artifacts
     layers --> stack
+    stack --> profiles
     repoid -. never overridden by imported layers .-> stack
-    stack --> lock
-    artifacts --> lock
+    layers --> lock
+    profiles --> lock
+    stack -. inputs_digest over local scopes .-> lock
+    artifacts -. materialized, not locked .-> proj
     lock --> proj
 ```
 
 ### Reading notes
 
-- **Two unit kinds from one source set.** Every `sources[]` entry has a stable `id`.
-  `extends[]` entries (`LayerRef`, form `source-id:layer-path@version`) resolve to
-  `kind: layer` units; `packages[]` entries (`PackageRef`,
-  `source-id:artifact-path@version`) resolve to `kind: artifact` units. The source kind
-  says *where to fetch*; the ref says *layer vs artifact*.
+- **What the lock records.** Every `sources[]` entry has a stable `id`. `extends[]`
+  entries (`LayerRef`, form `source-id:layer-path@version`) resolve to `kind: layer` units;
+  the resolver also records the merged `stage_profiles` fragments as `kind: profile` units.
+  `packages[]` entries (`PackageRef`, `source-id:artifact-path@version`) resolve to artifacts
+  that are materialized for projection — the `artifact` unit kind is reserved
+  (legacy-section upgrade / forward-compat) but the current `LayeredResolver.Resolve` writes
+  **no** artifact units into the lock. The source kind says *where to fetch*; the ref says
+  *layer vs artifact*.
 - **Merge stack, lowest precedence first:** product-defaults -> user-local
   (`~/.agents/.agentsrc.json`) -> imported `extends[]` (reconstructed from the lock at
   their locked digest) -> repo-local `.agentsrc.json` -> `.agentsrc.local.json`
@@ -411,11 +418,14 @@ flowchart TB
   layer can change it. Merge is per-field by category (scalar last-wins; set-union for
   `skills`/`agents`/`rules`; map-merge for `features`/`kg`/`stage_profiles`;
   ordered-replace for `sources`/`extends`/`packages`).
-- **The lock is content-addressed.** `da config sync` rewrites `.agentsrc.lock`:
-  `lock_version`, `inputs_digest`, and a `units` map keyed by
-  `source:path@resolved-version`, each `LockedUnit` carrying `kind` (`layer`|`artifact`),
-  `digest` (`sha256:…` pin), and `fetched_at`. Staleness is digest-driven, never
-  clock-driven; `da refresh` / `da install` re-resolve only when the digest is stale.
+- **The lock is content-addressed.** A single `LayeredResolver.Resolve` writes the
+  authoritative §7A lock via `writeUnitsLock` (`internal/config/resolver.go`): `lock_version`,
+  `inputs_digest` (hash of the local config scopes), and a `units` map keyed by
+  `source:path@resolved-version` — one `kind: layer` unit per resolved `extends` entry plus
+  the `kind: profile` units derived from the same snapshot. Each `LockedUnit` carries its
+  `kind`, `digest` (`sha256:…` pin), and `fetched_at`. A flat/local-only project still gets a
+  lock with a non-empty `inputs_digest` and an empty `units` map. Staleness is digest-driven,
+  never clock-driven; `da refresh` / `da install` re-resolve only when the digest is stale.
 - **OCI note (code vs doc drift):** `docs/LAYERED_CONFIG_GUIDE.md` still states `extends`
   rejects `oci` (git/http/local only). The current resolver (`resolver.go`, spec change
   "D13") allows **any** source kind — including `oci` — to supply a layer; an OCI layer is
@@ -429,8 +439,10 @@ flowchart TB
 home store holds the portable user scope (sources, layering policy/profiles, and a project
 *identity* registry that records each managed project's id + portable key but **not** its
 path). The id→absolute-path mapping is a per-machine binding table that is never synced or
-projected. `da init --from <home-source>` bootstraps the user scope onto a fresh machine;
-`da refresh` then re-binds every known project id to a local path. Derived from
+projected. `da init --from <home-source>` bootstraps the user scope onto a fresh machine and
+**drops every local binding** (each project is then known-but-unbound); `da add <path>` binds
+each known project id to its machine-local path. `da refresh` only re-detects/links platforms
+and skips any still-unbound project. Derived from
 `internal/config/homeconfig_init.go`, `internal/config/lock_units.go`
 (`UnitKindProjectSet`), and the `home-config-portability` spec.
 
@@ -443,14 +455,16 @@ flowchart LR
     end
 
     mB["Fresh machine B"]
-    init["da init --from &lt;home-source&gt;<br/>resolve user scope from remote home"]
-    refresh["da refresh<br/>re-bind project ids to local paths"]
+    init["da init --from &lt;home-source&gt;<br/>resolve user scope; drop ALL local bindings<br/>(every project known-but-UNBOUND)"]
+    add["da add &lt;path&gt;<br/>bind a known project id to its local path"]
+    refresh["da refresh<br/>re-detect + link platforms<br/>(skips unbound projects)"]
 
     portable --> init
     userlocal --> init
     mB --> init
-    init --> refresh
-    refresh --> binding
+    init -. known-but-unbound .-> add
+    add --> binding
+    binding --> refresh
 ```
 
 ### Reading notes
@@ -460,8 +474,11 @@ flowchart LR
   explicitly *not* a unit and never reaches sync/projection.
 - **Cross-machine bootstrap.** Plain `da init` scaffolds a fresh local home from embedded
   starters; `da init --from` adds the clone/adopt path that resolves an existing user scope
-  from a remote home source. After adoption, `da refresh` resolves each portable identity to
-  a machine-local path rather than trusting any synced absolute path.
+  from a remote home source. Adoption **drops every local binding** (`rebindProjectSet` →
+  `cfg.DropLocalBindings()` in `commands/internal/lifecycle/init_from.go`), so each project is
+  known-but-**unbound** — no synced absolute path is ever trusted. `da add <path>` is what
+  rebinds an id to its machine-local path; `da refresh` only re-detects/links platforms and
+  **skips** any still-unbound project (`commands/refresh.go` → "run `da add <path>` to bind it").
 
 ## 9. Session-Handoff Recovery Flow
 
@@ -628,18 +645,24 @@ flowchart TB
 
 ## 11. Platform-Projection Pipeline
 
-How canonical resource intents become repo-native files. Each platform in `platform.All()`
-emits `ResourceIntent`s; the command layer aggregates them into a single `ResourcePlan`
-(deduping shared targets and catching conflicts), then applies each intent's transport.
-**Cursor uses hard links** because `.cursor/rules/` does not follow symlinks; every other
-platform symlinks; rendered files get sha256 provenance via the render manifest. Derived
-from `internal/platform/platform.go` (`All()`), the per-platform adapters
+How canonical resources become repo-native files. There are **two projection paths**. Each
+platform's `CreateLinks` writes that platform's repo-native files directly — every platform
+**symlinks** except Cursor, which **hard-links** `.cursor/rules/` (its rule system does not
+follow symlinks) via `links.HardlinkReplacing`. Separately, every platform emits
+`SharedTargetIntents` for the shared `.agents/skills` / `.agents/agents` buckets; the command
+layer aggregates those into a single `ResourcePlan` that dedups shared targets and catches
+conflicts, then executes each intent's transport. The `ResourcePlan` executor
+(`executeResourceIntent`) supports **symlink** (dir/file) and **write/render** only —
+`hardlink` is a defined `ResourceTransport` enum value but the executor has no branch for it,
+so Cursor's hard links stay on the `CreateLinks` path, never the `ResourcePlan` transport.
+Rendered files get sha256 provenance via the render manifest. Derived from
+`internal/platform/platform.go` (`All()`), the per-platform adapters
 (`cursor.go`/`claude.go`/`codex.go`/`opencode.go`/`copilot.go`), `resource_intent.go`,
-`resource_plan.go`, `render_manifest.go`, and `internal/links/links.go`.
+`resource_plan.go` (`executeResourceIntent`), `render_manifest.go`, and `internal/links/links.go`.
 
 ```mermaid
 flowchart LR
-    subgraph INTENT["Resource intents — platform.All()"]
+    subgraph PLAT["Platforms — platform.All()"]
         cursor["Cursor"]
         claude["Claude"]
         codex["Codex"]
@@ -647,16 +670,21 @@ flowchart LR
         copilot["Copilot"]
     end
 
-    plan["ResourcePlan<br/>aggregate + dedup shared targets<br/>(.agents/skills, .agents/agents)<br/>+ conflict detection"]
+    subgraph CL["Path A — per-platform CreateLinks (direct projection)"]
+        clhard["Cursor: links.HardlinkReplacing<br/>.cursor/rules (no symlink follow)"]
+        clsym["all platforms: symlink rules + config<br/>links.SymlinkReplacing"]
+    end
 
-    subgraph TRANSPORT["Transport (per ResourceIntent.Transport)"]
-        hard["hardlink — links.HardlinkReplacing"]
-        sym["symlink — links.SymlinkReplacing"]
+    plan["Path B — ResourcePlan<br/>aggregate SharedTargetIntents +<br/>dedup shared targets + conflict detection<br/>(.agents/skills, .agents/agents)"]
+
+    subgraph TRANSPORT["ResourcePlan executor — executeResourceIntent"]
+        sym["symlink — dir/file<br/>links.SymlinkReplacing"]
         write["write/render — render-manifest.json sha256"]
+        hnote["hardlink — defined ResourceTransport enum,<br/>NOT executed here (no executor branch)"]
     end
 
     subgraph OUT["Repo-local outputs"]
-        ocursor[".cursor/rules, .cursor/{settings,mcp,hooks}.json,<br/>.cursor/agents, .cursorignore"]
+        ocursor[".cursor/rules (hard-linked),<br/>.cursor/{settings,mcp,hooks}.json,<br/>.cursor/agents, .cursorignore"]
         oclaude[".claude/rules, .claude/settings.local.json,<br/>.claude/{agents,skills}, .mcp.json"]
         ocodex["AGENTS.md, .codex/config.toml,<br/>.codex/hooks.json, .codex/agents/"]
         oopencode["opencode.json, .opencode/agent/"]
@@ -664,31 +692,44 @@ flowchart LR
         oshared[".agents/skills, .agents/agents (shared bucket)"]
     end
 
+    cursor --> clhard
+    cursor --> clsym
+    claude --> clsym
+    codex --> clsym
+    opencode --> clsym
+    copilot --> clsym
+    clhard --> ocursor
+    clsym --> ocursor
+    clsym --> oclaude
+    clsym --> ocodex
+    clsym --> oopencode
+    clsym --> ocopilot
+
     cursor --> plan
     claude --> plan
     codex --> plan
     opencode --> plan
     copilot --> plan
-    plan --> hard
     plan --> sym
     plan --> write
-    hard --> ocursor
-    sym --> oclaude
-    sym --> ocodex
-    sym --> oopencode
-    sym --> ocopilot
+    sym --> oshared
     write --> oshared
 ```
 
 ### Reading notes
 
-- **Why Cursor hard-links:** Cursor's rule system does not follow symlinks for
-  `.cursor/rules/`, so dot-agents hard-links (shared inode, edits sync automatically). All
-  other platforms symlink; on Windows the symlink path degrades to a junction (dirs) or hard
-  link (files).
-- **Shared buckets are deduped.** `.agents/skills` and `.agents/agents` are emitted by
-  several platforms; the `ResourcePlan` collapses compatible shared targets into one planned
-  resource before any write, so the same skill isn't projected five times.
+- **Why Cursor hard-links (and where):** Cursor's rule system does not follow symlinks for
+  `.cursor/rules/`, so `cursor.CreateLinks` hard-links them via `links.HardlinkReplacing`
+  (shared inode, edits sync automatically). This is the **CreateLinks** path, NOT a
+  `ResourcePlan` transport — `executeResourceIntent` (`resource_plan.go`) only executes
+  `symlink` (dir/file) and `write`/render; the `hardlink` `ResourceTransport` enum value is
+  defined and validated but has no executor branch. All other platforms symlink; on Windows
+  the symlink path degrades to a junction (dirs) or hard link (files).
+- **Shared buckets are deduped.** `.agents/skills` and `.agents/agents` are emitted as
+  `SharedTargetIntents` by several platforms; the `ResourcePlan` collapses compatible shared
+  targets into one planned resource before any write, so the same skill isn't projected five
+  times. Shared-target dedup is the `ResourcePlan`'s job today; per-platform rule/config files
+  are projected by each platform's `CreateLinks`.
 - **Render provenance protects user edits.** For `write`/render shapes, a per-destination
   sha256 in `render-manifest.json` (under XDG state) means a managed rendered file is
   overwritten only if it still matches the last render; otherwise the user's edit is backed

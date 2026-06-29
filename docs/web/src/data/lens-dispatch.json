@@ -15,7 +15,8 @@
         "entry": "Load .agents/prompts/review-agent.project.md",
         "contract": "spawn one reviewer per lens; each lens emits findings + pass/fail; parent aggregates",
         "lens_set_by_app_type": { "go-cli": 4, "ideation": 3, "docs": 2 },
-        "source": "internal/scaffold/home/starter/skills/global/isp/instructions/staged-runtime.md"
+        "source": ".agentsrc.json by_app_type.go-cli.lenses.lens_set — authoritative 4-lens dispatch (architecture-standards, acceptance-invariants, adversarial, cross-harness-adversarial). staged-runtime.md documents the base 3-lens contract; .agentsrc adds the 4th (cross-harness-adversarial) for go-cli.",
+        "lens_registry": ".agentsrc.json stage_profiles.reviewer (lens definitions)"
       } },
 
     { "id": "lens-arch", "label": "architecture-standards", "kind": "lens",

@@ -1,59 +1,55 @@
 {
   "title": "Workflow resources",
-  "description": "Representative snapshot (captured 2026-06-29) of the session-handoff-journal plan — an active, recently-completed 11-task plan with a clean dependency DAG, a cross-plan dependency into config-v2-migration, and a captured fold-back lesson. Eight of the eleven tasks are shown. Click any node to inspect.",
+  "description": "Representative snapshot (captured 2026-06-29, docs/architect-demo-deck branch) of the graph-backend-adapter-contract plan — an active 10-task plan that makes the KG backend a pluggable adapter. The DAG roots at the built-in `none` adapter (t1); six tasks are completed (merged), four are pending. t5/t6/t9 have all dependencies satisfied (eligible); release-minor is the release-gated tail. Click any node to inspect.",
   "layout": "breadthfirst",
   "captured_at": "2026-06-29",
   "legend": [
     { "kind": "plan", "color": "#0ea5e9", "description": "PLAN.yaml + TASKS.yaml" },
-    { "kind": "task-completed", "color": "#22c55e", "description": "merged + closed" },
-    { "kind": "task-external", "color": "#0891b2", "description": "cross-plan dependency" },
-    { "kind": "lesson", "color": "#ef4444", "description": "captured lesson / fold-back" }
+    { "kind": "task-completed", "color": "#22c55e", "description": "completed (merged)" },
+    { "kind": "task-pending", "color": "#f59e0b", "description": "pending (eligible if deps satisfied)" }
   ],
   "nodes": [
-    { "id": "plan:shj", "label": "session-handoff-journal", "kind": "plan",
-      "data": { "status": "active", "lives_in": ".agents/workflow/plans/session-handoff-journal/", "task_count": 11, "completed": 11, "purpose": "Append-only crash-survivable per-command event journal + PreCompact snapshot + verified recovery view", "archived": "history/session-handoff-journal/impl-results.md" } },
+    { "id": "plan:gbac", "label": "graph-backend-adapter-contract", "kind": "plan",
+      "data": { "status": "active", "lives_in": ".agents/workflow/plans/graph-backend-adapter-contract/", "task_count": 10, "completed": 6, "pending": 4, "purpose": "Make the KG graph backend a pluggable adapter (built-in none/compliance/crg + cross-adapter reads_from, OCI distribution, CRG migration)" } },
 
-    { "id": "t:p0", "label": "p0-extract-interprocess-lock", "kind": "task-completed",
-      "data": { "pr": "#205", "depends_on": ["config-v2-migration/p4h-agentslock-interprocess-lock"], "write_scope": ["internal/agentslock/lockfile.go", "internal/agentslock/lockfile_test.go"] } },
-    { "id": "t:p1", "label": "p1-journal-core", "kind": "task-completed",
-      "data": { "pr": "#206", "depends_on": ["p0-extract-interprocess-lock"], "write_scope": ["internal/journal/{journal,envelope,identity,append}.go"] } },
-    { "id": "t:p2", "label": "p2-command-schemas", "kind": "task-completed",
-      "data": { "pr": "#208", "depends_on": ["p1-journal-core"], "write_scope": ["internal/journal/schema.go"], "notes": "Journaled-command registry (tier-1 / tier-2 / kg / review)" } },
-    { "id": "t:p3a", "label": "p3a-emit-workflow-commands", "kind": "task-completed",
-      "data": { "pr": "#210", "depends_on": ["p1-journal-core", "p2-command-schemas"], "write_scope": ["commands/workflow/*.go"] } },
-    { "id": "t:p3b", "label": "p3b-emit-kg-review-commands", "kind": "task-completed",
-      "data": { "pr": "#212", "depends_on": ["p1-journal-core", "p2-command-schemas"], "write_scope": ["commands/kg/io.go", "commands/kg/sync_code_warm_link.go", "commands/review.go"] } },
-    { "id": "t:p4", "label": "p4-deterministic-snapshot", "kind": "task-completed",
-      "data": { "pr": "#209", "depends_on": ["p1-journal-core"], "write_scope": ["internal/journal/snapshot.go"] } },
-    { "id": "t:p5", "label": "p5-verified-recovery-view", "kind": "task-completed",
-      "data": { "pr": "#211", "depends_on": ["p4-deterministic-snapshot"], "notes": "Replay snapshot+events, re-verify vs gh/git, trust gradient verified|changed|missing|unverified" } },
-    { "id": "t:p9", "label": "p9-e2e-integration-test", "kind": "task-completed",
-      "data": { "pr": "#220", "write_scope": ["tests/test-session-handoff-journal.sh"], "notes": "Final e2e; tasks p6/p7/p8 (PRs #216/#218/#217) omitted for clarity" } },
+    { "id": "t:t1", "label": "t1-none-adapter-end-to-end", "kind": "task-completed",
+      "data": { "status": "completed", "pr": "#136 merge wave", "depends_on": [], "write_scope": ["internal/adapters/builtin/none/", "internal/kg/registry/", "internal/kg/lockfile/", "cmd/da/commands/kg/"], "notes": "Smallest adapter; exercises the whole pipeline (schema validation, namespace provisioning, lockfile init, query routing)" } },
+    { "id": "t:t2", "label": "t2-compliance-read-only", "kind": "task-completed",
+      "data": { "status": "completed", "depends_on": ["t1-none-adapter-end-to-end"], "write_scope": ["internal/adapters/builtin/compliance-register/", "internal/kg/dsl/", "testdata/compliance/"], "notes": "First real DSL parser (ref-joins, env_predicates, materialized views)" } },
+    { "id": "t:t3", "label": "t3-ttrpg-dogfood", "kind": "task-completed",
+      "data": { "status": "completed", "depends_on": ["t1-none-adapter-end-to-end"], "write_scope": [".agents/sandbox/ttrpg-adapter/", "oci ttrpg-campaign-bootstrap skill"], "notes": "First real adapter-author UX; Tier 2 OCI distribution + SDK contract" } },
+    { "id": "t:t4", "label": "t4-crg-dual-read", "kind": "task-completed",
+      "data": { "status": "completed", "depends_on": ["t1-none-adapter-end-to-end"], "write_scope": ["internal/adapters/builtin/crg/", "internal/adapters/builtin/crg-bridge/", "internal/graphstore/", "testdata/crg-parity/"], "notes": "Dual-read CRG migration; crg-bridge exposes legacy bridge as read-only mirror" } },
+    { "id": "t:t7", "label": "t7-app-type-profiles-wiring", "kind": "task-completed",
+      "data": { "status": "completed", "depends_on": ["t1-none-adapter-end-to-end"], "write_scope": [".agents/workflow/specs/app-type-profiles/design.md", "internal/config/", "cmd/da/commands/"], "notes": "graph_backend enum -> adapter-ref resolved via sources/extends, pinned in lockfile (O3)" } },
+    { "id": "t:t8", "label": "t8-tasks-schema-app-type-drift", "kind": "task-completed",
+      "data": { "status": "completed", "depends_on": [], "write_scope": ["schemas/workflow-tasks.schema.json"], "notes": "Add optional app_type to task schema (additionalProperties:false rejected a field code marshals). Independent of the adapter pipeline." } },
 
-    { "id": "x:p4h", "label": "config-v2-migration/p4h", "kind": "task-external",
-      "data": { "plan": "config-v2-migration", "task": "p4h-agentslock-interprocess-lock", "role": "cross-plan dependency that unblocked p0" } },
-
-    { "id": "l:lock-race", "label": "journal-lock-release-race", "kind": "lesson",
-      "data": { "type": "open fold-back", "lives_in": ".agents/active/fold-back/journal-lock-release-race.md", "rule": "Lock-RELEASE race (rmdir ENOTEMPTY / Windows sharing-violation); data integrity intact; fixes #219 #221" } }
+    { "id": "t:t5", "label": "t5-cross-adapter-reads-from", "kind": "task-pending",
+      "data": { "status": "pending", "eligible": "yes — depends_on (t2, t4) both completed", "depends_on": ["t2-compliance-read-only", "t4-crg-dual-read"], "write_scope": ["internal/adapters/builtin/compliance-register/views/", "internal/kg/dsl/cross-namespace/", "testdata/cross-adapter/"], "notes": "Compliance view reads from CRG; namespace-token set derivation, multi-namespace query plans, lockfile cross-adapter coordination" } },
+    { "id": "t:t6", "label": "t6-bridge-decommission", "kind": "task-pending",
+      "data": { "status": "pending", "eligible": "yes — depends_on (t4) completed", "depends_on": ["t4-crg-dual-read"], "write_scope": ["internal/graphstore/ (deletions)", "internal/adapters/builtin/crg/ (full parity)", ".github/workflows/ci.yml"], "notes": "Fenced behind a multi-week parity gate; keep bridge if any consumer still reads it" } },
+    { "id": "t:t9", "label": "t9-sdk-materializeview-readsfrom-gate", "kind": "task-pending",
+      "data": { "status": "pending", "eligible": "yes — depends_on (t4) completed", "depends_on": ["t4-crg-dual-read"], "write_scope": ["internal/adapters/sdk/"], "notes": "Codex review of t4 (#172): wire EnforceReadsFrom into SDK.MaterializeView so a migration_only adapter view is rejected" } },
+    { "id": "t:rel", "label": "release-minor", "kind": "task-pending",
+      "data": { "status": "pending", "eligible": "no — gated on t5 + t6 (pending)", "depends_on": ["t1", "t2", "t3", "t4", "t5", "t6", "t7"], "write_scope": ["VERSION", "CHANGELOG.md"], "notes": "Release-gated tail (MINOR). Next minor recomputed from live VERSION (0.4.0 shipped -> 0.5.0) at ready-time" } }
   ],
   "edges": [
-    { "source": "plan:shj", "target": "t:p0" },
-    { "source": "plan:shj", "target": "t:p1" },
-    { "source": "plan:shj", "target": "t:p2" },
-    { "source": "plan:shj", "target": "t:p3a" },
-    { "source": "plan:shj", "target": "t:p3b" },
-    { "source": "plan:shj", "target": "t:p4" },
-    { "source": "plan:shj", "target": "t:p5" },
-    { "source": "plan:shj", "target": "t:p9" },
+    { "source": "plan:gbac", "target": "t:t1" },
+    { "source": "plan:gbac", "target": "t:t8" },
 
-    { "source": "x:p4h", "target": "t:p0", "label": "blocks (cross-plan)" },
-    { "source": "t:p0", "target": "t:p1", "label": "blocks" },
-    { "source": "t:p1", "target": "t:p2", "label": "blocks" },
-    { "source": "t:p1", "target": "t:p4", "label": "blocks" },
-    { "source": "t:p2", "target": "t:p3a", "label": "blocks" },
-    { "source": "t:p2", "target": "t:p3b", "label": "blocks" },
-    { "source": "t:p4", "target": "t:p5", "label": "blocks" },
+    { "source": "t:t1", "target": "t:t2", "label": "blocks" },
+    { "source": "t:t1", "target": "t:t3", "label": "blocks" },
+    { "source": "t:t1", "target": "t:t4", "label": "blocks" },
+    { "source": "t:t1", "target": "t:t7", "label": "blocks" },
 
-    { "source": "t:p5", "target": "l:lock-race", "label": "surfaced" }
+    { "source": "t:t2", "target": "t:t5", "label": "blocks" },
+    { "source": "t:t4", "target": "t:t5", "label": "blocks" },
+    { "source": "t:t4", "target": "t:t6", "label": "blocks" },
+    { "source": "t:t4", "target": "t:t9", "label": "blocks" },
+
+    { "source": "t:t5", "target": "t:rel", "label": "blocks" },
+    { "source": "t:t6", "target": "t:rel", "label": "blocks" },
+    { "source": "t:t7", "target": "t:rel", "label": "blocks" }
   ]
 }
