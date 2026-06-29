@@ -179,8 +179,11 @@ type RecoveredItem struct {
 	Status VerificationStatus `json:"status"`
 	// Trust is the freshness/authority grade of the evidence (R7/D10).
 	Trust TrustGrade `json:"trust"`
-	// Reconstructed is the state replay rebuilt from snapshot+events (locus coords
-	// enriched in place from reality on a verified item).
+	// Reconstructed is the best current knowledge of the item's state: replay
+	// rebuilds it from snapshot+events, then verification corrects it — placeholder
+	// locus coords enriched in place on a verified item, and stale coords/status
+	// OVERWRITTEN with the source's current value on a changed item (so the view
+	// never surfaces a stale coordinate as fact; the divergence is recorded in Delta).
 	Reconstructed ItemState `json:"reconstructed"`
 	// Reality is what the source observed; nil when the item could not be verified.
 	Reality *ItemState `json:"reality,omitempty"`
@@ -191,12 +194,15 @@ type RecoveredItem struct {
 	Delta string `json:"delta,omitempty"`
 }
 
-// IdentityConflict is a surfaced D8 collision: an event pinned to an ambiguous
-// composite identity that could not be disambiguated, quarantined rather than
-// merged onto a guessed plan.
+// IdentityConflict is a surfaced D8 collision, quarantined rather than guessed.
+// Two shapes use it: (a) an event pinned to an ambiguous composite identity — a
+// merge-back whose task id lives in several plans (CandidatePlans lists them); and
+// (b) a malformed snapshot carrying two tasks under one (plan, task) key (Plan +
+// Task name the colliding key). Either way nothing is silently merged or dropped.
 type IdentityConflict struct {
+	Plan           string   `json:"plan,omitempty"`
 	Task           string   `json:"task"`
-	CandidatePlans []string `json:"candidate_plans"`
+	CandidatePlans []string `json:"candidate_plans,omitempty"`
 	Reason         string   `json:"reason"`
 }
 
@@ -345,14 +351,19 @@ type reconstruction struct {
 	order       []ItemKey
 	plansByTask map[string][]string
 	conflicts   []IdentityConflict
+	// quarantined keys were dropped because a duplicate identity collided on them;
+	// neither colliding item is presented as a fact, and an event must never
+	// resurrect a quarantined key (D8: a wrong handoff is worse than none).
+	quarantined map[ItemKey]bool
 }
 
 // reconstruct seeds the recovery from the snapshot watermark and replays the events
 // recorded AFTER it, so the result reflects deltas the snapshot does not yet carry.
 func reconstruct(snap SnapshotState, events []Envelope) *reconstruction {
 	r := seedFromSnapshot(snap)
+	watermark := parseTS(snap.CapturedAt)
 	for _, e := range events {
-		if e.EventType == EventFailed || !afterWatermark(e.TS, snap.CapturedAt) {
+		if e.EventType == EventFailed || !atOrAfterWatermark(e.TS, watermark) {
 			continue
 		}
 		if tr, ok := eventTransition(e); ok {
@@ -363,14 +374,42 @@ func reconstruct(snap SnapshotState, events []Envelope) *reconstruction {
 }
 
 // seedFromSnapshot builds the base reconstruction from the snapshot's task states.
+// A malformed snapshot may carry two tasks under one (plan, task) identity; rather
+// than letting the second silently overwrite the first (losing an item), the
+// collision is quarantined via seed (D8) so it is surfaced, never dropped.
 func seedFromSnapshot(snap SnapshotState) *reconstruction {
-	r := &reconstruction{items: map[ItemKey]*RecoveredItem{}, plansByTask: map[string][]string{}}
+	r := &reconstruction{
+		items:       map[ItemKey]*RecoveredItem{},
+		plansByTask: map[string][]string{},
+		quarantined: map[ItemKey]bool{},
+	}
 	for _, p := range snap.Plans {
 		for _, t := range p.Tasks {
-			r.put(ItemKey{Kind: KindTask, Plan: p.ID, Task: t.ID}, ItemState{Status: t.Status, Locus: t.Locus})
+			r.seed(ItemKey{Kind: KindTask, Plan: p.ID, Task: t.ID}, ItemState{Status: t.Status, Locus: t.Locus})
 		}
 	}
 	return r
+}
+
+// seed registers a snapshot task, fail-safe against duplicate identities: a second
+// task under an already-seeded key quarantines the key (dropping BOTH the existing
+// item and the duplicate) and records a conflict, so neither colliding item is ever
+// presented as a trusted fact. A key already quarantined stays quarantined.
+func (r *reconstruction) seed(key ItemKey, state ItemState) {
+	if r.quarantined[key] {
+		return
+	}
+	if _, exists := r.items[key]; exists {
+		delete(r.items, key)
+		r.quarantined[key] = true
+		r.conflicts = append(r.conflicts, IdentityConflict{
+			Plan:   key.Plan,
+			Task:   key.Task,
+			Reason: "duplicate (plan, task) identity in snapshot; both items quarantined rather than silently overwritten (D8)",
+		})
+		return
+	}
+	r.put(key, state)
 }
 
 // transition is the bounded effect a replayed task-transition command had: the
@@ -431,6 +470,9 @@ func (r *reconstruction) apply(tr transition) {
 		return
 	}
 	key := ItemKey{Kind: KindTask, Plan: plan, Task: tr.task}
+	if r.quarantined[key] {
+		return // never resurrect a quarantined (duplicate-identity) key
+	}
 	item := r.items[key]
 	if item == nil {
 		item = r.put(key, ItemState{})
@@ -485,6 +527,9 @@ func (r *reconstruction) verify(sources []VerificationSource) []RecoveredItem {
 	out := make([]RecoveredItem, 0, len(keys))
 	for _, key := range keys {
 		item := r.items[key]
+		if item == nil {
+			continue // key was quarantined (duplicate identity) — not a fact
+		}
 		verifyItem(item, sources)
 		out = append(out, *item)
 	}
@@ -529,6 +574,21 @@ func applyCheck(item *RecoveredItem, src VerificationSource, check RealityCheck)
 	}
 	item.Status = StatusChanged
 	item.Delta = fmt.Sprintf("journal recorded %s; %s says %s", describe(item.Reconstructed), src.Name(), describe(reality))
+	adoptReality(&item.Reconstructed, reality)
+}
+
+// adoptReality overwrites the reconstructed state with the source's current,
+// concrete values on a changed item, so the view never surfaces a stale coordinate
+// (a stale PR number / merge sha / status) as fact. The old value is already
+// captured in the item's Delta; here the item is moved to current truth. Empty
+// reality fields leave the corresponding reconstructed field untouched.
+func adoptReality(recon *ItemState, reality ItemState) {
+	if reality.Status != "" {
+		recon.Status = reality.Status
+	}
+	if reality.Locus != nil {
+		recon.Locus = reality.Locus
+	}
 }
 
 // trustFor grades evidence by source authority (R7): a store/service-backed source
@@ -540,19 +600,60 @@ func trustFor(src VerificationSource) TrustGrade {
 	return TrustMedium
 }
 
-// statesMatch reports whether reality matches the reconstructed claim. The locus
-// ARM is the load-bearing comparison (R8): an item that moved from in_open_pr to
-// canonical has MERGED — a change, not a match — even though both are "done". A
-// status mismatch is a change too; an empty reality status is "no opinion" and never
-// forces a change (it lets a placeholder-coord-only enrichment count as verified).
+// statesMatch reports whether reality matches the reconstructed claim — including
+// the locus COORDINATES, not just the arm (R8). A differing PR number (in_open_pr
+// #7 vs #8) or merge ref (canonical master@old vs master@new) is a CHANGE, never a
+// match, so a stale coordinate is never surfaced as verified. The status must also
+// agree.
 func statesMatch(recon, reality ItemState) bool {
-	return locusArm(recon.Locus) == locusArm(reality.Locus) && statusMatches(recon.Status, reality.Status)
+	return locusMatches(recon.Locus, reality.Locus) && statusMatches(recon.Status, reality.Status)
 }
 
 // statusMatches treats an empty reality status as agreement (the source had no
 // status opinion, only locus coords to enrich).
 func statusMatches(recon, reality string) bool {
 	return reality == "" || reality == recon
+}
+
+// locusMatches reports whether the reconstructed and reality loci agree on both arm
+// and coordinates. Differing arms never match (an in_open_pr that became canonical
+// has merged). Within an arm, a PLACEHOLDER reconstructed coordinate (PR 0, the
+// sentinel canonical ref) is "to be enriched", not a mismatch; an empty reality
+// coordinate is "no opinion". Only two concrete, differing coordinates are a change.
+func locusMatches(recon, reality *Locus) bool {
+	if locusArm(recon) != locusArm(reality) {
+		return false
+	}
+	switch locusArm(recon) {
+	case armCanonical:
+		return refMatches(recon.Canonical.Ref, reality.Canonical.Ref)
+	case armInOpenPR:
+		return prMatches(recon.InOpenPR, reality.InOpenPR)
+	default:
+		return true // both armNone
+	}
+}
+
+// refMatches compares canonical refs: a placeholder reconstructed ref or an empty
+// reality ref is agreement (enrichment, not change); otherwise the refs must equal.
+func refMatches(recon, reality string) bool {
+	if isPlaceholderRef(recon) || reality == "" {
+		return true
+	}
+	return recon == reality
+}
+
+// prMatches compares in-PR coordinates: a placeholder PR (0) or an empty/zero
+// reality field is agreement; two concrete differing PR numbers or statuses are a
+// change.
+func prMatches(recon, reality *InOpenPRRef) bool {
+	if recon.PR != 0 && reality.PR != 0 && recon.PR != reality.PR {
+		return false
+	}
+	if recon.Status != "" && reality.Status != "" && recon.Status != reality.Status {
+		return false
+	}
+	return true
 }
 
 // locusArm names which arm of the locus sum type is set (R8). A nil or malformed
@@ -681,12 +782,29 @@ func recoveryNotes(snapErr error, skipped int) []string {
 	return notes
 }
 
-// afterWatermark reports whether an event timestamp falls strictly after the
-// snapshot watermark. RFC3339Nano UTC sorts lexicographically in chronological
-// order, so a string compare is correct. An empty watermark (no snapshot) admits
-// every event.
-func afterWatermark(ts, watermark string) bool {
-	return watermark == "" || ts > watermark
+// atOrAfterWatermark reports whether an event should be replayed onto the snapshot
+// base — i.e. it is NOT strictly before the snapshot watermark. The comparison is
+// CHRONOLOGICAL, not lexical: timeFormat is RFC3339Nano, which is variable-width
+// (it trims trailing zeros in the fractional seconds), so "…:00.1Z" sorts BEFORE
+// "…:00Z" as a string even though it is later in time — a lexical compare silently
+// drops the just-after-snapshot event. We therefore parse both sides and compare.
+//
+// Boundary (equal ts): an event at EXACTLY captured_at is applied, not dropped. The
+// snapshot is built by reading the canonical files (which already reflect every
+// transition up to capture), and replay re-applies a transition as an idempotent
+// last-writer assignment, so re-applying an already-reflected equal-ts event
+// reproduces the same state — while NOT applying it would risk losing a transition
+// the file read happened to miss. An empty/zero watermark (no snapshot) admits
+// every event; an unparseable event ts is admitted rather than dropped (fail-safe).
+func atOrAfterWatermark(ts string, watermark time.Time) bool {
+	if watermark.IsZero() {
+		return true
+	}
+	te := parseTS(ts)
+	if te.IsZero() {
+		return true
+	}
+	return !te.Before(watermark)
 }
 
 // parseTS parses an RFC3339Nano timestamp, returning the zero time on any error.

@@ -274,9 +274,13 @@ func TestRecoveryLocusEnrichmentNoConflation(t *testing.T) {
 	if tmerged.Status != StatusChanged {
 		t.Fatalf("tmerged status = %s, want changed (merged out of PR)", tmerged.Status)
 	}
-	// The reconstructed arm must NOT have been flipped to canonical (no conflation).
-	if locusArm(tmerged.Reconstructed.Locus) != armInOpenPR {
-		t.Fatalf("tmerged reconstructed arm = %s, want in_open_pr preserved", locusArm(tmerged.Reconstructed.Locus))
+	if tmerged.Delta == "" {
+		t.Fatalf("tmerged must carry a delta recording the in-PR→merged transition")
+	}
+	// Not silently conflated: it is tagged changed WITH a delta. And the item is
+	// moved to current truth (canonical), never left asserting the stale in-PR state.
+	if locusArm(tmerged.Reconstructed.Locus) != armCanonical {
+		t.Fatalf("tmerged reconstructed arm = %s, want canonical (adopted current truth)", locusArm(tmerged.Reconstructed.Locus))
 	}
 	if tmerged.Reality == nil || locusArm(tmerged.Reality.Locus) != armCanonical {
 		t.Fatalf("tmerged reality arm not canonical: %+v", tmerged.Reality)
@@ -537,6 +541,231 @@ func TestRecoverySessionIdentityMatchNoQuarantine(t *testing.T) {
 	}
 	if res.Quarantined {
 		t.Fatalf("matching identity should not quarantine: %+v", res)
+	}
+}
+
+// TestRecoveryWatermarkChronologicalNotLexical is the BUG 1 regression: the
+// snapshot is captured at a whole-second instant ("…:00Z"), and an event fires
+// 0.1s later. RFC3339Nano is variable-width, so the event ts ("…:00.1Z") sorts
+// LEXICALLY BEFORE the watermark ('.' < 'Z') even though it is chronologically
+// AFTER. A lexical watermark compare would DROP it from replay; the chronological
+// compare must apply it.
+func TestRecoveryWatermarkChronologicalNotLexical(t *testing.T) {
+	repo := recTestRepo(t)
+	// Snapshot captured at exactly 12:00:00 (no fraction), task pending.
+	snap := snapWith(repo, "alpha", TaskState{ID: "t1", Status: statusPending})
+	snap.CapturedAt = "2026-06-29T12:00:00Z"
+	writeSnapshotFixture(t, repo, snap)
+	writeEventsFixture(t, repo,
+		// 0.1s after the snapshot — lexically "12:00:00.1Z" < "12:00:00Z".
+		event(t, CmdAdvance, "2026-06-29T12:00:00.1Z", 1,
+			&AdvanceInput{Plan: "alpha", Task: "t1"}, &AdvanceObserved{ToStatus: "in_progress"}),
+	)
+	res, err := RecoveryView(repo, Deps{})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+	it, _ := itemByTask(res.Items, "t1")
+	if it.Reconstructed.Status != "in_progress" {
+		t.Fatalf("sub-second just-after-snapshot event dropped: status = %q, want in_progress", it.Reconstructed.Status)
+	}
+}
+
+// TestRecoveryWatermarkBoundaryEqualTSApplied proves an event at EXACTLY the
+// snapshot timestamp is applied (not lost), and one strictly before is ignored.
+func TestRecoveryWatermarkBoundaryEqualTSApplied(t *testing.T) {
+	repo := recTestRepo(t)
+	snap := snapWith(repo, "alpha", TaskState{ID: "t1", Status: statusPending})
+	snap.CapturedAt = "2026-06-29T12:00:00Z"
+	writeSnapshotFixture(t, repo, snap)
+	writeEventsFixture(t, repo,
+		event(t, CmdAdvance, "2026-06-29T11:59:59Z", 1,
+			&AdvanceInput{Plan: "alpha", Task: "t1"}, &AdvanceObserved{ToStatus: "before"}),
+		event(t, CmdAdvance, "2026-06-29T12:00:00Z", 2,
+			&AdvanceInput{Plan: "alpha", Task: "t1"}, &AdvanceObserved{ToStatus: "at_boundary"}),
+	)
+	res, err := RecoveryView(repo, Deps{})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+	it, _ := itemByTask(res.Items, "t1")
+	if it.Reconstructed.Status != "at_boundary" {
+		t.Fatalf("equal-ts boundary event not applied: status = %q, want at_boundary", it.Reconstructed.Status)
+	}
+}
+
+// TestRecoveryStaleCoordinateIsChange is the BUG 2 regression: a same-arm locus
+// whose COORDINATE differs (PR #7→#8, or canonical master@old→master@new) must be
+// tagged changed and UPDATED to the source's current value, never kept stale and
+// labelled verified.
+func TestRecoveryStaleCoordinateIsChange(t *testing.T) {
+	repo := recTestRepo(t)
+	writeSnapshotFixture(t, repo, snapWith(repo, "alpha",
+		TaskState{ID: "tpr", Status: statusAwaitingOwnerReview,
+			Locus: &Locus{InOpenPR: &InOpenPRRef{PR: 7, Status: statusAwaitingOwnerReview}}},
+		TaskState{ID: "tsha", Status: statusCompleted,
+			Locus: &Locus{Canonical: &CanonicalRef{Ref: "master@old"}}},
+	))
+	src := fakeSource{name: "gh", auth: true, checks: map[string]RealityCheck{
+		// same arm, different PR number → changed + adopt #8.
+		"alpha/tpr": {Exists: true, Locus: &Locus{InOpenPR: &InOpenPRRef{PR: 8, Status: statusAwaitingOwnerReview}}},
+		// same arm, different merge sha → changed + adopt master@new.
+		"alpha/tsha": {Exists: true, Locus: &Locus{Canonical: &CanonicalRef{Ref: "master@new"}}},
+	}}
+	res, err := RecoveryView(repo, Deps{Sources: []VerificationSource{src}})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+
+	tpr, _ := itemByTask(res.Items, "tpr")
+	if tpr.Status != StatusChanged || tpr.Delta == "" {
+		t.Fatalf("tpr = %+v, want changed with delta (stale PR #7 vs #8)", tpr)
+	}
+	if tpr.Reconstructed.Locus.InOpenPR.PR != 8 {
+		t.Fatalf("tpr kept stale PR %d, want updated to 8", tpr.Reconstructed.Locus.InOpenPR.PR)
+	}
+
+	tsha, _ := itemByTask(res.Items, "tsha")
+	if tsha.Status != StatusChanged || tsha.Delta == "" {
+		t.Fatalf("tsha = %+v, want changed with delta (stale sha)", tsha)
+	}
+	if tsha.Reconstructed.Locus.Canonical.Ref != "master@new" {
+		t.Fatalf("tsha kept stale ref %q, want master@new", tsha.Reconstructed.Locus.Canonical.Ref)
+	}
+}
+
+// TestRecoveryDuplicateSnapshotKeyQuarantined is the BUG 3 regression: a malformed
+// snapshot carrying two tasks under one (plan, task) identity must surface a
+// conflict and present NEITHER item as a fact, rather than silently overwriting one.
+func TestRecoveryDuplicateSnapshotKeyQuarantined(t *testing.T) {
+	repo := recTestRepo(t)
+	snap := SnapshotState{
+		Schema:     SnapshotSchema,
+		Version:    SnapshotVersion,
+		CapturedAt: time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC).Format(timeFormat),
+		Identity:   ResolveIdentity(repo),
+		Plans: []PlanState{{ID: "alpha", Status: "active", Tasks: []TaskState{
+			{ID: "dup", Status: "completed"},
+			{ID: "dup", Status: "pending"}, // duplicate identity
+			{ID: "ok", Status: "in_progress"},
+		}}},
+	}
+	writeSnapshotFixture(t, repo, snap)
+
+	res, err := RecoveryView(repo, Deps{})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+	if _, present := itemByTask(res.Items, "dup"); present {
+		t.Fatalf("duplicate-identity item was presented as a fact (should be quarantined): %+v", res.Items)
+	}
+	if _, present := itemByTask(res.Items, "ok"); !present {
+		t.Fatalf("the non-colliding item must survive: %+v", res.Items)
+	}
+	found := false
+	for _, c := range res.Conflicts {
+		if c.Plan == "alpha" && c.Task == "dup" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("duplicate key not surfaced as a conflict: %+v", res.Conflicts)
+	}
+}
+
+// TestRecoveryQuarantinedKeyNotResurrectedByEvent proves an event targeting a
+// quarantined (duplicate-identity) key does not silently bring it back as a fact.
+func TestRecoveryQuarantinedKeyNotResurrectedByEvent(t *testing.T) {
+	repo := recTestRepo(t)
+	snap := SnapshotState{
+		Schema: SnapshotSchema, Version: SnapshotVersion,
+		CapturedAt: "2026-06-29T12:00:00Z",
+		Identity:   ResolveIdentity(repo),
+		Plans: []PlanState{{ID: "alpha", Status: "active", Tasks: []TaskState{
+			{ID: "dup", Status: "completed"},
+			{ID: "dup", Status: "pending"},
+		}}},
+	}
+	writeSnapshotFixture(t, repo, snap)
+	writeEventsFixture(t, repo,
+		event(t, CmdAdvance, "2026-06-29T13:00:00Z", 1,
+			&AdvanceInput{Plan: "alpha", Task: "dup"}, &AdvanceObserved{ToStatus: "in_progress"}),
+	)
+	res, err := RecoveryView(repo, Deps{})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+	if _, present := itemByTask(res.Items, "dup"); present {
+		t.Fatalf("quarantined key resurrected by a replayed event: %+v", res.Items)
+	}
+}
+
+// TestRecoveryTripleDuplicateKeyQuarantinedOnce proves a third task under an
+// already-quarantined key is dropped without a second conflict (idempotent
+// quarantine).
+func TestRecoveryTripleDuplicateKeyQuarantinedOnce(t *testing.T) {
+	repo := recTestRepo(t)
+	snap := SnapshotState{
+		Schema: SnapshotSchema, Version: SnapshotVersion,
+		CapturedAt: "2026-06-29T12:00:00Z", Identity: ResolveIdentity(repo),
+		Plans: []PlanState{{ID: "alpha", Status: "active", Tasks: []TaskState{
+			{ID: "dup", Status: "completed"},
+			{ID: "dup", Status: "pending"},
+			{ID: "dup", Status: "in_progress"},
+		}}},
+	}
+	writeSnapshotFixture(t, repo, snap)
+	res, err := RecoveryView(repo, Deps{})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+	if _, present := itemByTask(res.Items, "dup"); present {
+		t.Fatalf("triple-duplicate item presented as fact: %+v", res.Items)
+	}
+	n := 0
+	for _, c := range res.Conflicts {
+		if c.Task == "dup" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("triple duplicate recorded %d conflicts, want exactly 1", n)
+	}
+}
+
+// TestRecoveryUnparseableEventTSFailSafe proves an event whose ts cannot be parsed
+// is APPLIED (fail-safe) rather than silently dropped by the watermark filter.
+func TestRecoveryUnparseableEventTSFailSafe(t *testing.T) {
+	repo := recTestRepo(t)
+	snap := snapWith(repo, "alpha", TaskState{ID: "t1", Status: statusPending})
+	snap.CapturedAt = "2026-06-29T12:00:00Z"
+	writeSnapshotFixture(t, repo, snap)
+	bad := event(t, CmdAdvance, "not-a-timestamp", 1,
+		&AdvanceInput{Plan: "alpha", Task: "t1"}, &AdvanceObserved{ToStatus: "applied"})
+	writeEventsFixture(t, repo, bad)
+
+	res, err := RecoveryView(repo, Deps{})
+	if err != nil {
+		t.Fatalf("RecoveryView: %v", err)
+	}
+	it, _ := itemByTask(res.Items, "t1")
+	if it.Reconstructed.Status != "applied" {
+		t.Fatalf("unparseable-ts event dropped: status = %q, want applied", it.Reconstructed.Status)
+	}
+}
+
+func TestPRMatches(t *testing.T) {
+	// placeholder PR (0) matches anything; empty reality field is no opinion.
+	if !prMatches(&InOpenPRRef{PR: 0}, &InOpenPRRef{PR: 9, Status: "x"}) {
+		t.Fatalf("placeholder PR should match")
+	}
+	// same concrete PR, different status → mismatch.
+	if prMatches(&InOpenPRRef{PR: 5, Status: "open"}, &InOpenPRRef{PR: 5, Status: "merged"}) {
+		t.Fatalf("differing in-PR status should be a change")
+	}
+	// same PR, same status → match.
+	if !prMatches(&InOpenPRRef{PR: 5, Status: "open"}, &InOpenPRRef{PR: 5, Status: "open"}) {
+		t.Fatalf("identical coords should match")
 	}
 }
 
