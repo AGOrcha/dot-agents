@@ -193,7 +193,7 @@ func TestAllowed(t *testing.T) {
 		want             bool
 	}{
 		{"fsguard self is exempt", modulePath + "/tools/fsguard", "tools/fsguard/main.go", 999, true},
-		{"precise agentslock atomic mkdir", modulePath + "/internal/agentslock", "internal/agentslock/lockfile.go", 258, true},
+		{"precise agentslock atomic mkdir", modulePath + "/internal/agentslock", "internal/agentslock/lockfile.go", 317, true},
 		{"precise entry wrong line rejected", modulePath + "/internal/agentslock", "internal/agentslock/lockfile.go", 999, false},
 		{"grandfathered package", modulePath + "/internal/projectsync", "internal/projectsync/promote.go", 135, true},
 		{"unknown package rejected", modulePath + "/internal/brandnew", "internal/brandnew/x.go", 10, false},
