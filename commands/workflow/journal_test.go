@@ -330,7 +330,11 @@ func TestGHSourceVerifyTask(t *testing.T) {
 // only as a complete segment (task-002 must NOT bind feature/task-002-extra), and
 // when more than one PR resolves to the identity the source must NOT guess — it
 // defers (ErrSourceUnavailable) so recovery never asserts a wrong PR/sha.
-func TestGHSourceStrictMatchAndAmbiguity(t *testing.T) {
+// assertStrictBranchMatch exercises strictBranchMatch's complete-segment rule:
+// a task id binds a branch only as a whole segment, never as a prefix, interior
+// fragment, or a different plan's look-alike branch.
+func assertStrictBranchMatch(t *testing.T) {
+	t.Helper()
 	// strictBranchMatch: complete-segment only.
 	if strictBranchMatch("feature/task-002-extra", "", "task-002") {
 		t.Error("task-002 must NOT match feature/task-002-extra (prefix of a longer token)")
@@ -363,6 +367,11 @@ func TestGHSourceStrictMatchAndAmbiguity(t *testing.T) {
 			t.Errorf("plan=alpha task=task-002 must match its own branch %q", b)
 		}
 	}
+}
+
+func TestGHSourceStrictMatchAndAmbiguity(t *testing.T) {
+	assertStrictBranchMatch(t)
+
 	// ghSource with a real (plan, task) key binds only the qualified branch, never
 	// the look-alike bare-task branch of a different plan.
 	planned := &ghSource{open: []openPR{{Number: 11, Branch: "impl/alpha-task-002"}, {Number: 12, Branch: "bravo/task-002"}}}
@@ -826,16 +835,6 @@ func TestRecoverCoordVerifiedOnlyAuthoritative(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	findT2 := func(res journal.RecoveryResult) journal.RecoveredItem {
-		for _, it := range res.Items {
-			if it.Key.Task == "t2" {
-				return it
-			}
-		}
-		t.Fatalf("t2 not in recovery items: %+v", res.Items)
-		return journal.RecoveredItem{}
-	}
-
 	// (a) gh unavailable → local fallback confirms status + arm, NOT the coord.
 	local := &fakeVSource{name: journalSourceLocal, auth: false, checks: map[string]journal.RealityCheck{
 		"t2": {Exists: true, Status: TaskStatusAwaitingOwnerReview, Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}},
@@ -844,14 +843,10 @@ func TestRecoverCoordVerifiedOnlyAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if it := findT2(res); it.Status != journal.StatusVerified || it.CoordVerified {
+	if it := findRecoveredTask(t, res, "t2"); it.Status != journal.StatusVerified || it.CoordVerified {
 		t.Errorf("local-verified must NOT confirm coord: status=%s coordVerified=%v", it.Status, it.CoordVerified)
 	}
-	var buf bytes.Buffer
-	renderRecover(&buf, res)
-	if !strings.Contains(buf.String(), "in_open_pr (PR unconfirmed)") || strings.Contains(buf.String(), "#7") {
-		t.Errorf("stale #7 must render as unconfirmed, not a fact:\n%s", buf.String())
-	}
+	assertRendersStalePRUnconfirmed(t, res, "stale #7 must render as unconfirmed, not a fact")
 
 	// (b) authoritative gh confirms PR #7 → CoordVerified, rendered as the fact.
 	gh := &fakeVSource{name: journalSourceGH, auth: true, checks: map[string]journal.RealityCheck{
@@ -861,10 +856,10 @@ func TestRecoverCoordVerifiedOnlyAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if it := findT2(res2); !it.CoordVerified {
+	if it := findRecoveredTask(t, res2, "t2"); !it.CoordVerified {
 		t.Errorf("authoritative match must confirm coord: %+v", it)
 	}
-	buf.Reset()
+	var buf bytes.Buffer
 	renderRecover(&buf, res2)
 	if !strings.Contains(buf.String(), "in_open_pr #7") {
 		t.Errorf("authoritative coord must render as #7:\n%s", buf.String())
@@ -881,13 +876,33 @@ func TestRecoverCoordVerifiedOnlyAuthoritative(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if it := findT2(res3); it.CoordVerified {
+	if it := findRecoveredTask(t, res3, "t2"); it.CoordVerified {
 		t.Errorf("authoritative-but-no-coord must NOT confirm the stale #7: %+v", it)
 	}
-	buf.Reset()
-	renderRecover(&buf, res3)
+	assertRendersStalePRUnconfirmed(t, res3, "authoritative-no-coord must render stale #7 as unconfirmed")
+}
+
+// findRecoveredTask returns the recovered item for task, failing the test if the
+// recovery view does not carry it.
+func findRecoveredTask(t *testing.T, res journal.RecoveryResult, task string) journal.RecoveredItem {
+	t.Helper()
+	for _, it := range res.Items {
+		if it.Key.Task == task {
+			return it
+		}
+	}
+	t.Fatalf("%s not in recovery items: %+v", task, res.Items)
+	return journal.RecoveredItem{}
+}
+
+// assertRendersStalePRUnconfirmed asserts the rendered recovery view marks the
+// reconstructed in_open_pr arm as "(PR unconfirmed)" and never leaks the stale #7.
+func assertRendersStalePRUnconfirmed(t *testing.T, res journal.RecoveryResult, msg string) {
+	t.Helper()
+	var buf bytes.Buffer
+	renderRecover(&buf, res)
 	if !strings.Contains(buf.String(), "in_open_pr (PR unconfirmed)") || strings.Contains(buf.String(), "#7") {
-		t.Errorf("authoritative-no-coord must render stale #7 as unconfirmed:\n%s", buf.String())
+		t.Errorf("%s:\n%s", msg, buf.String())
 	}
 }
 

@@ -135,142 +135,156 @@ func TestExcludedCommandsNotRegistered(t *testing.T) {
 func TestSchemaRoundTripAllCommands(t *testing.T) {
 	for cmd, spec := range registry {
 		t.Run(cmd, func(t *testing.T) {
-			input := spec.NewInput()
-			observed := spec.NewObserved()
-
-			env, err := NewEvent(cmd, ActorMain, input, observed)
-			if err != nil {
-				t.Fatalf("NewEvent(%q): %v", cmd, err)
-			}
-			if env.Command != cmd {
-				t.Errorf("env.Command = %q, want %q", env.Command, cmd)
-			}
-			if env.EventType != spec.EventType() {
-				t.Errorf("env.EventType = %q, want %q", env.EventType, spec.EventType())
-			}
-
-			gotInput := spec.NewInput()
-			if err := json.Unmarshal(env.Input, gotInput); err != nil {
-				t.Fatalf("unmarshal input: %v", err)
-			}
-			if !reflect.DeepEqual(input, gotInput) {
-				t.Errorf("input round-trip drift: got %+v want %+v", gotInput, input)
-			}
-
-			gotObserved := spec.NewObserved()
-			if err := json.Unmarshal(env.Observed, gotObserved); err != nil {
-				t.Fatalf("unmarshal observed: %v", err)
-			}
-			if !reflect.DeepEqual(observed, gotObserved) {
-				t.Errorf("observed round-trip drift: got %+v want %+v", gotObserved, observed)
-			}
+			assertSchemaRoundTrip(t, cmd, spec)
 		})
+	}
+}
+
+// assertSchemaRoundTrip round-trips a single command's typed Input and Observed
+// through NewEvent and back, asserting the event type and that both payloads
+// survive the envelope's RawMessage hop losslessly.
+func assertSchemaRoundTrip(t *testing.T, cmd string, spec CommandSpec) {
+	t.Helper()
+	input := spec.NewInput()
+	observed := spec.NewObserved()
+
+	env, err := NewEvent(cmd, ActorMain, input, observed)
+	if err != nil {
+		t.Fatalf("NewEvent(%q): %v", cmd, err)
+	}
+	if env.Command != cmd {
+		t.Errorf("env.Command = %q, want %q", env.Command, cmd)
+	}
+	if env.EventType != spec.EventType() {
+		t.Errorf("env.EventType = %q, want %q", env.EventType, spec.EventType())
+	}
+
+	gotInput := spec.NewInput()
+	if err := json.Unmarshal(env.Input, gotInput); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if !reflect.DeepEqual(input, gotInput) {
+		t.Errorf("input round-trip drift: got %+v want %+v", gotInput, input)
+	}
+
+	gotObserved := spec.NewObserved()
+	if err := json.Unmarshal(env.Observed, gotObserved); err != nil {
+		t.Fatalf("unmarshal observed: %v", err)
+	}
+	if !reflect.DeepEqual(observed, gotObserved) {
+		t.Errorf("observed round-trip drift: got %+v want %+v", gotObserved, observed)
 	}
 }
 
 // TestNewEventPopulatedPayloads round-trips populated payloads for representative
 // commands, exercising the named JSON tags and the R8 locus split.
 func TestNewEventPopulatedPayloads(t *testing.T) {
-	t.Run("advance with in-open-pr locus", func(t *testing.T) {
-		in := &AdvanceInput{Plan: "p", Task: "p2", Status: "completed", CommitState: "committed"}
-		obs := &AdvanceObserved{
-			FromStatus: "in_progress",
-			ToStatus:   "completed",
-			Committed:  true,
-			HeadSHA:    "abc123",
-			Locus:      &Locus{InOpenPR: &InOpenPRRef{PR: 90, Status: "completed"}},
-		}
-		env, err := NewEvent(CmdAdvance, ActorMain, in, obs)
-		if err != nil {
-			t.Fatalf("NewEvent: %v", err)
-		}
-		if env.EventType != EventDurableDelta {
-			t.Errorf("EventType = %q, want durable_delta", env.EventType)
-		}
-		got := &AdvanceObserved{}
-		if err := json.Unmarshal(env.Observed, got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if got.Locus == nil || got.Locus.InOpenPR == nil {
-			t.Fatalf("locus.in_open_pr dropped: %+v", got.Locus)
-		}
-		if got.Locus.InOpenPR.PR != 90 || got.Locus.Canonical != nil {
-			t.Errorf("locus round-trip wrong: %+v", got.Locus)
-		}
-	})
+	t.Run("advance with in-open-pr locus", assertAdvanceInOpenPRLocus)
+	t.Run("merge-back with canonical locus", assertMergeBackCanonicalLocus)
+	t.Run("tier-2 task update is input_only with changed_fields", assertTier2TaskUpdateInputOnly)
+	t.Run("derive-scope records counts not bodies", assertDeriveScopeCounts)
+	t.Run("kg ingest records counts + ids", assertKGIngestCounts)
+}
 
-	t.Run("merge-back with canonical locus", func(t *testing.T) {
-		obs := &MergeBackObserved{
-			ArtifactPath: "merge-back.md",
-			Verdict:      "accept",
-			Committed:    true,
-			Locus:        &Locus{Canonical: &CanonicalRef{Ref: "master@deadbeef"}},
-		}
-		env, err := NewEvent(CmdMergeBack, ActorLoopWorker, &MergeBackInput{Task: "p2"}, obs)
-		if err != nil {
-			t.Fatalf("NewEvent: %v", err)
-		}
-		got := &MergeBackObserved{}
-		if err := json.Unmarshal(env.Observed, got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if got.Locus == nil || got.Locus.Canonical == nil || got.Locus.Canonical.Ref != "master@deadbeef" {
-			t.Errorf("canonical locus round-trip wrong: %+v", got.Locus)
-		}
-	})
+func assertAdvanceInOpenPRLocus(t *testing.T) {
+	in := &AdvanceInput{Plan: "p", Task: "p2", Status: "completed", CommitState: "committed"}
+	obs := &AdvanceObserved{
+		FromStatus: "in_progress",
+		ToStatus:   "completed",
+		Committed:  true,
+		HeadSHA:    "abc123",
+		Locus:      &Locus{InOpenPR: &InOpenPRRef{PR: 90, Status: "completed"}},
+	}
+	env, err := NewEvent(CmdAdvance, ActorMain, in, obs)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	if env.EventType != EventDurableDelta {
+		t.Errorf("EventType = %q, want durable_delta", env.EventType)
+	}
+	got := &AdvanceObserved{}
+	if err := json.Unmarshal(env.Observed, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Locus == nil || got.Locus.InOpenPR == nil {
+		t.Fatalf("locus.in_open_pr dropped: %+v", got.Locus)
+	}
+	if got.Locus.InOpenPR.PR != 90 || got.Locus.Canonical != nil {
+		t.Errorf("locus round-trip wrong: %+v", got.Locus)
+	}
+}
 
-	t.Run("tier-2 task update is input_only with changed_fields", func(t *testing.T) {
-		cf, err := NewChangedFields(map[string]string{"status": "in_progress"})
-		if err != nil {
-			t.Fatalf("NewChangedFields: %v", err)
-		}
-		in := &DeltaInput{Plan: "p", Task: "p2", ChangedFields: cf}
-		obs := &DeltaObserved{FieldsReplaced: []string{"status"}}
-		env, err := NewEvent(CmdTaskUpdate, ActorMain, in, obs)
-		if err != nil {
-			t.Fatalf("NewEvent: %v", err)
-		}
-		if env.EventType != EventInputOnly {
-			t.Errorf("EventType = %q, want input_only", env.EventType)
-		}
-		got := &DeltaObserved{}
-		if err := json.Unmarshal(env.Observed, got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if len(got.FieldsReplaced) != 1 || got.FieldsReplaced[0] != "status" {
-			t.Errorf("changed-fields delta wrong: %+v", got)
-		}
-	})
+func assertMergeBackCanonicalLocus(t *testing.T) {
+	obs := &MergeBackObserved{
+		ArtifactPath: "merge-back.md",
+		Verdict:      "accept",
+		Committed:    true,
+		Locus:        &Locus{Canonical: &CanonicalRef{Ref: "master@deadbeef"}},
+	}
+	env, err := NewEvent(CmdMergeBack, ActorLoopWorker, &MergeBackInput{Task: "p2"}, obs)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	got := &MergeBackObserved{}
+	if err := json.Unmarshal(env.Observed, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Locus == nil || got.Locus.Canonical == nil || got.Locus.Canonical.Ref != "master@deadbeef" {
+		t.Errorf("canonical locus round-trip wrong: %+v", got.Locus)
+	}
+}
 
-	t.Run("derive-scope records counts not bodies", func(t *testing.T) {
-		obs := &DeriveScopeObserved{SidecarPath: "scope.yaml", Mode: "code", Confidence: "high", RequiredPaths: 2, Queries: 5}
-		env, err := NewEvent(CmdPlanDeriveScope, ActorMain, &DeriveScopeInput{Plan: "p", Task: "p2", SeedSymbols: []string{"Foo"}}, obs)
-		if err != nil {
-			t.Fatalf("NewEvent: %v", err)
-		}
-		got := &DeriveScopeObserved{}
-		if err := json.Unmarshal(env.Observed, got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if got.RequiredPaths != 2 || got.Queries != 5 || got.Confidence != "high" {
-			t.Errorf("derive-scope summary wrong: %+v", got)
-		}
-	})
+func assertTier2TaskUpdateInputOnly(t *testing.T) {
+	cf, err := NewChangedFields(map[string]string{"status": "in_progress"})
+	if err != nil {
+		t.Fatalf("NewChangedFields: %v", err)
+	}
+	in := &DeltaInput{Plan: "p", Task: "p2", ChangedFields: cf}
+	obs := &DeltaObserved{FieldsReplaced: []string{"status"}}
+	env, err := NewEvent(CmdTaskUpdate, ActorMain, in, obs)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	if env.EventType != EventInputOnly {
+		t.Errorf("EventType = %q, want input_only", env.EventType)
+	}
+	got := &DeltaObserved{}
+	if err := json.Unmarshal(env.Observed, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(got.FieldsReplaced) != 1 || got.FieldsReplaced[0] != "status" {
+		t.Errorf("changed-fields delta wrong: %+v", got)
+	}
+}
 
-	t.Run("kg ingest records counts + ids", func(t *testing.T) {
-		obs := &KGIngestObserved{NotesCreated: 3, NotesUpdated: 1, NoteIDs: []string{"n1", "n2"}}
-		env, err := NewEvent(CmdKGIngest, ActorMain, &KGIngestInput{All: true}, obs)
-		if err != nil {
-			t.Fatalf("NewEvent: %v", err)
-		}
-		got := &KGIngestObserved{}
-		if err := json.Unmarshal(env.Observed, got); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if got.NotesCreated != 3 || got.NotesUpdated != 1 || len(got.NoteIDs) != 2 {
-			t.Errorf("kg ingest counts/ids wrong: %+v", got)
-		}
-	})
+func assertDeriveScopeCounts(t *testing.T) {
+	obs := &DeriveScopeObserved{SidecarPath: "scope.yaml", Mode: "code", Confidence: "high", RequiredPaths: 2, Queries: 5}
+	env, err := NewEvent(CmdPlanDeriveScope, ActorMain, &DeriveScopeInput{Plan: "p", Task: "p2", SeedSymbols: []string{"Foo"}}, obs)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	got := &DeriveScopeObserved{}
+	if err := json.Unmarshal(env.Observed, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.RequiredPaths != 2 || got.Queries != 5 || got.Confidence != "high" {
+		t.Errorf("derive-scope summary wrong: %+v", got)
+	}
+}
+
+func assertKGIngestCounts(t *testing.T) {
+	obs := &KGIngestObserved{NotesCreated: 3, NotesUpdated: 1, NoteIDs: []string{"n1", "n2"}}
+	env, err := NewEvent(CmdKGIngest, ActorMain, &KGIngestInput{All: true}, obs)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	got := &KGIngestObserved{}
+	if err := json.Unmarshal(env.Observed, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.NotesCreated != 3 || got.NotesUpdated != 1 || len(got.NoteIDs) != 2 {
+		t.Errorf("kg ingest counts/ids wrong: %+v", got)
+	}
 }
 
 // TestNewEventOmitsNilPayloads verifies that a nil interface and a typed-nil
@@ -483,9 +497,14 @@ func TestNewChangedFieldsBounded(t *testing.T) {
 		t.Fatalf("raw body leaked into journaled input: %s", env.Input)
 	}
 
-	// Wire format is unchanged (name/len/sha256) and round-trips through the custom
-	// marshaler back into the (unexported) fields.
-	wire, err := json.Marshal(cf[0])
+	assertFieldDeltaWire(t, cf[0])
+}
+
+// assertFieldDeltaWire asserts a FieldDelta serializes to the {name,len,sha256}
+// wire shape and round-trips back through its custom marshaler without drift.
+func assertFieldDeltaWire(t *testing.T, fd FieldDelta) {
+	t.Helper()
+	wire, err := json.Marshal(fd)
 	if err != nil {
 		t.Fatalf("marshal FieldDelta: %v", err)
 	}
@@ -502,8 +521,8 @@ func TestNewChangedFieldsBounded(t *testing.T) {
 	if err := json.Unmarshal(wire, &rt); err != nil {
 		t.Fatalf("unmarshal FieldDelta: %v", err)
 	}
-	if rt.Name() != cf[0].Name() || rt.Len() != cf[0].Len() || rt.SHA256() != cf[0].SHA256() {
-		t.Errorf("FieldDelta round-trip drift: got %+v want %+v", rt, cf[0])
+	if rt.Name() != fd.Name() || rt.Len() != fd.Len() || rt.SHA256() != fd.SHA256() {
+		t.Errorf("FieldDelta round-trip drift: got %+v want %+v", rt, fd)
 	}
 }
 

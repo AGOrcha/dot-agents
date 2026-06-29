@@ -60,32 +60,39 @@ func TestEnvelopeMarshalLineRoundTrip(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			line, err := tc.env.MarshalLine()
-			if err != nil {
-				t.Fatalf("MarshalLine: %v", err)
-			}
-			if !bytes.HasSuffix(line, []byte("\n")) {
-				t.Fatalf("line not newline-terminated: %q", line)
-			}
-			if n := bytes.Count(line, []byte("\n")); n != 1 {
-				t.Fatalf("line has %d newlines, want exactly 1: %q", n, line)
-			}
-			var got Envelope
-			if err := json.Unmarshal(line, &got); err != nil {
-				t.Fatalf("unmarshal round-trip: %v", err)
-			}
-			if got.Schema != tc.env.Schema || got.Seq != tc.env.Seq ||
-				got.Actor != tc.env.Actor || got.Command != tc.env.Command ||
-				got.EventType != tc.env.EventType || got.CwdRepo != tc.env.CwdRepo {
-				t.Fatalf("scalar drift after round-trip: got %+v want %+v", got, tc.env)
-			}
-			if !rawEqual(got.Input, tc.env.Input) {
-				t.Fatalf("input drift: got %s want %s", got.Input, tc.env.Input)
-			}
-			if !rawEqual(got.Observed, tc.env.Observed) {
-				t.Fatalf("observed drift: got %s want %s", got.Observed, tc.env.Observed)
-			}
+			assertEnvelopeRoundTrip(t, tc.env)
 		})
+	}
+}
+
+// assertEnvelopeRoundTrip marshals env to a single NDJSON line and asserts it
+// unmarshals back without scalar or raw-field drift.
+func assertEnvelopeRoundTrip(t *testing.T, env Envelope) {
+	t.Helper()
+	line, err := env.MarshalLine()
+	if err != nil {
+		t.Fatalf("MarshalLine: %v", err)
+	}
+	if !bytes.HasSuffix(line, []byte("\n")) {
+		t.Fatalf("line not newline-terminated: %q", line)
+	}
+	if n := bytes.Count(line, []byte("\n")); n != 1 {
+		t.Fatalf("line has %d newlines, want exactly 1: %q", n, line)
+	}
+	var got Envelope
+	if err := json.Unmarshal(line, &got); err != nil {
+		t.Fatalf("unmarshal round-trip: %v", err)
+	}
+	if got.Schema != env.Schema || got.Seq != env.Seq ||
+		got.Actor != env.Actor || got.Command != env.Command ||
+		got.EventType != env.EventType || got.CwdRepo != env.CwdRepo {
+		t.Fatalf("scalar drift after round-trip: got %+v want %+v", got, env)
+	}
+	if !rawEqual(got.Input, env.Input) {
+		t.Fatalf("input drift: got %s want %s", got.Input, env.Input)
+	}
+	if !rawEqual(got.Observed, env.Observed) {
+		t.Fatalf("observed drift: got %s want %s", got.Observed, env.Observed)
 	}
 }
 
@@ -113,7 +120,7 @@ func TestFingerprintStableAndDeterministic(t *testing.T) {
 	if len(a) != fingerprintLen {
 		t.Fatalf("fingerprint len = %d, want %d", len(a), fingerprintLen)
 	}
-	if other := Fingerprint(t.TempDir()); other == a {
+	if Fingerprint(t.TempDir()) == a {
 		t.Fatal("distinct paths produced identical fingerprints")
 	}
 }
