@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/spf13/cobra"
 )
 
@@ -105,6 +106,18 @@ type startTaskOpts struct {
 // runWorkflowStartTask drives the chain. Each step's failure surfaces as
 // "start-task: <step>: ..." so log triage maps to the chain position.
 func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
+	// start-task is a molecule: its constituent plan-update / derive-scope /
+	// commit calls journal their own typed events. This event records the
+	// molecule-level intent. The runner does not resolve a project itself, so we
+	// resolve it best-effort for the journal key (empty path skips emission).
+	repoPath := ""
+	if project, perr := currentWorkflowProject(); perr == nil {
+		repoPath = project.Path
+	}
+	input := &journal.StartTaskInput{Plan: opts.planID, Task: opts.taskID, SeedSymbols: opts.seedSymbols, SeedPaths: opts.seedPaths}
+	observed := &journal.StartTaskObserved{}
+	ok := false
+	defer func() { journalTier1(repoPath, journal.CmdStartTask, input, observed, ok) }()
 	if err := startTaskPlanUpdate(opts.planID, "active", "", "", "", "", ""); err != nil {
 		return fmt.Errorf("start-task: plan update --status active: %w", err)
 	}
@@ -128,6 +141,8 @@ func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
 		committed = true
 	}
 
+	observed.Committed = committed
+	ok = true
 	result := startTaskResult{
 		PlanID:         opts.planID,
 		TaskID:         opts.taskID,

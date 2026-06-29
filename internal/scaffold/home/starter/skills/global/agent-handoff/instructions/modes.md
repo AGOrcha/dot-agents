@@ -4,6 +4,7 @@ Parse the first word of `$ARGUMENTS` to determine which mode to run:
 
 | First word | Mode | Instruction file |
 |------------|------|-----------------|
+| `recover` | Read back verified state on resume (after a compaction/crash) | `instructions/verified-readback.md` |
 | `list` | List all handoffs | `instructions/list-mode.md` |
 | `update` | Append context to existing handoff | `instructions/update-mode.md` (slug = everything after "update") |
 | `view` | Read and summarize a handoff | `instructions/view-mode.md` (slug = everything after "view") |

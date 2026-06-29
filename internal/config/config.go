@@ -155,17 +155,23 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.bindings = bindings
-	// Fold any legacy inline paths the binding table does not already carry
-	// (first migration on this machine). In-memory only — persisted by Save.
+	foldLegacyBindings(cfg, legacy, wire.Version)
+	return cfg, nil
+}
+
+// foldLegacyBindings merges any legacy inline project paths the binding table
+// does not already carry (first migration on this machine) into cfg.bindings,
+// in memory only — persisted by Save. It also flags an upgrade when the config
+// predates the current schema version or any legacy path was folded.
+func foldLegacyBindings(cfg *Config, legacy map[string]Binding, wireVersion int) {
 	for name, b := range legacy {
 		if _, ok := cfg.bindings[name]; !ok {
 			cfg.bindings[name] = b
 		}
 	}
-	if wire.Version < configSchemaVersion || len(legacy) > 0 {
+	if wireVersion < configSchemaVersion || len(legacy) > 0 {
 		cfg.upgradeNeeded = true
 	}
-	return cfg, nil
 }
 
 // bindingsPath is the machine-local binding table file. It lives under

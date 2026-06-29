@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,19 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
+
+// isDeletePendingLockErr reports whether a failed lock-dir Mkdir is the Windows
+// "delete pending" transient — a contender's os.Mkdir racing the holder's
+// RemoveAll observes ERROR_ACCESS_DENIED (mapped to a permission error) while
+// the directory is mid-delete, rather than the portable ERROR_ALREADY_EXISTS.
+// It clears within a retry, so the acquisition loop treats it as retryable
+// contention. Gated on goos == "windows" so a genuine permission error stays a
+// fast failure on other platforms (where this race does not occur). goos is a
+// parameter rather than a direct runtime.GOOS read so the predicate is unit-
+// testable for the Windows branch from any host.
+func isDeletePendingLockErr(err error, goos string) bool {
+	return goos == "windows" && os.IsPermission(err)
+}
 
 // LockVersion is the current .agentsrc.lock schema version.
 const LockVersion = 1
@@ -229,7 +243,66 @@ func readDocument(path string) (map[string]json.RawMessage, error) {
 	return doc, nil
 }
 
+// AcquireFileLock takes the package's advisory, inter-process lock guarding the
+// file at path and returns a release function the caller MUST invoke to free it.
+// It is the reusable form of the primitive that serializes .agentsrc.lock writes
+// (see Flush); other cooperating da processes (e.g. an append-only NDJSON
+// writer) call it to serialize their own writes to a shared file.
+//
+// The lock is a sidecar directory at "<path>.lock". Acquisition is a single
+// atomic os.Mkdir: success is the mutual-exclusion signal, and EEXIST means
+// another holder currently owns it. The lock is therefore ADVISORY — it excludes
+// only other callers of this function that name the same path, not arbitrary
+// writers of the underlying file. The parent directory of path is created if it
+// does not yet exist.
+//
+// Acquisition blocks up to lockAcquireTimeout, retrying every lockRetryInterval,
+// and returns a timeout error if a live holder never releases. Because the mkdir
+// lock has no kernel-backed auto-release, a holder that crashed without releasing
+// (SIGKILL/OOM/power loss) is detected as stale once its recorded age exceeds
+// lockStaleTTL and is reclaimed at most once per call — so a slow but live holder
+// is never torn down out from under itself. The returned release removes the
+// sidecar directory exactly once and reports any removal error; it is
+// once-guarded (a second call returns the first call's cached error without
+// touching the filesystem).
+//
+// The once-guard is a correctness requirement, not a convenience: an unguarded
+// RemoveAll on every call would, after this caller released and another caller
+// re-acquired the same path, delete the new holder's live lock dir on a stray
+// second release — silently breaking its mutual exclusion. Removing at most once
+// guarantees a duplicate release can never delete a dir this caller no longer
+// owns.
+func AcquireFileLock(path string) (release func() error, err error) {
+	lockDir, err := acquireLockDir(path)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		once   sync.Once
+		relErr error
+	)
+	return func() error {
+		once.Do(func() { relErr = fsops.RemoveAll(lockDir) })
+		return relErr
+	}, nil
+}
+
+// acquireFileLock is the internal release-returning-nothing form used by Flush.
+// It shares acquireLockDir with the exported AcquireFileLock; the only
+// difference is that a release error is surfaced via the package debug channel
+// (Flush has no error path for the deferred unlock) rather than returned.
 func acquireFileLock(path string) (func(), error) {
+	lockDir, err := acquireLockDir(path)
+	if err != nil {
+		return nil, err
+	}
+	return func() { unlockFileLock(lockDir) }, nil
+}
+
+// acquireLockDir is the shared mkdir-as-lock acquisition core. It returns the
+// sidecar lock-dir path it created (held) on success; both AcquireFileLock and
+// acquireFileLock wrap it with their respective release shapes.
+func acquireLockDir(path string) (lockDir string, err error) {
 	// Build the sidecar lock-dir path through filepath so it carries the
 	// platform separator (backslashes on Windows) rather than whatever the
 	// caller's `path` happened to use, and ensure its parent exists before the
@@ -242,10 +315,10 @@ func acquireFileLock(path string) (func(), error) {
 	// single, atomic, EEXIST-distinguishable create — preserving the
 	// contention/stale-reclaim semantics below — while removing the
 	// missing-parent failure mode. A nil/empty parent (".") MkdirAll is a no-op.
-	lockDir := filepath.Clean(path) + ".lock"
+	lockDir = filepath.Clean(path) + ".lock"
 	if parent := filepath.Dir(lockDir); parent != "." && parent != "" {
 		if err := fsops.MkdirAll(parent, 0o700); err != nil {
-			return nil, fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
+			return "", fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
 		}
 	}
 	deadline := time.Now().Add(lockAcquireTimeout)
@@ -258,26 +331,34 @@ func acquireFileLock(path string) (func(), error) {
 		err := os.Mkdir(lockDir, 0o700)
 		if err == nil {
 			writeHolder(lockDir)
-			return func() { unlockFileLock(lockDir) }, nil
+			return lockDir, nil
 		}
-		if !os.IsExist(err) {
-			return nil, fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
-		}
-		// Contention: the lock dir already exists. Before waiting, decide whether
-		// the current holder is alive or stale (crashed without releasing). A
-		// stale lock is reclaimed at most once per call so a live holder racing
-		// us cannot be repeatedly torn down.
-		if !reclaimed && lockIsStale(lockDir) {
-			reclaimed = true
-			// Remove the whole lock dir (holder file included) so the next Mkdir
-			// can succeed. Ignore the error: if removal fails (e.g. another
-			// writer reclaimed first), we simply fall through to the retry/timeout
-			// path and try again.
-			_ = fsops.RemoveAll(lockDir)
-			continue
+		switch {
+		case os.IsExist(err):
+			// Contention: the lock dir already exists and is held. Before waiting,
+			// decide whether the current holder is alive or stale (crashed without
+			// releasing). A stale lock is reclaimed at most once per call so a live
+			// holder racing us cannot be repeatedly torn down.
+			if !reclaimed && lockIsStale(lockDir) {
+				reclaimed = true
+				// Remove the whole lock dir (holder file included) so the next Mkdir
+				// can succeed. Ignore the error: if removal fails (e.g. another
+				// writer reclaimed first), we simply fall through to the retry/timeout
+				// path and try again.
+				_ = fsops.RemoveAll(lockDir)
+				continue
+			}
+		case isDeletePendingLockErr(err, runtime.GOOS):
+			// Windows-only transient: a contender's Mkdir can race the holder's
+			// RemoveAll and observe ERROR_ACCESS_DENIED while the dir is in the
+			// "delete pending" state. It clears within a retry or two, so wait and
+			// retry rather than failing the whole acquisition. Skip the stale-
+			// reclaim path: there is no live holder to judge, just a dir mid-delete.
+		default:
+			return "", fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
+			return "", fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
 		}
 		time.Sleep(lockRetryInterval)
 	}

@@ -33,6 +33,23 @@ Ask both together (not sequentially):
 
 - After saving, confirm the file path and show a brief summary of what was captured.
 
+## Step 4: Anchor the handoff to the journal
+
+A prose handoff is the *why* layer; it is not crash-survivable on its own and goes stale the
+moment state changes. Before finishing:
+
+- **Capture a fresh deterministic snapshot** so the receiving session can re-verify live state:
+  `da workflow journal snapshot`.
+- **Append a reasoned delta** carrying the intent that the document distills — current mental
+  model, the in-flight decision and why, the next step, any active blocker — via
+  `da workflow journal append` (see `instructions/journal-cadence.md`).
+- In the handoff document, tell the receiving agent to **start with `da workflow journal recover`**
+  (or `/agent-handoff recover`) and trust that verified view over any claim written here, since
+  the journal is re-verified against reality and this prose is a point-in-time snapshot.
+
+This keeps the document and the journal consistent: the prose explains *why*, the journal proves
+*what is actually true now*.
+
 ## After Delivering
 
 Offer to:

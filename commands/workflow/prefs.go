@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
 )
@@ -450,6 +451,7 @@ func runWorkflowPrefsSetLocal(key, value string) error {
 	if err := setLocalPreference(project.Name, key, value); err != nil {
 		return err
 	}
+	emitWorkflowDelta(project.Path, journal.CmdPrefsSetLocal, "", "", map[string]string{key: value})
 	ui.Success(fmt.Sprintf("Set %s = %s  (local)", key, value))
 	return nil
 }
@@ -492,6 +494,12 @@ func runWorkflowPrefsSetShared(key, value string) error {
 	}
 	if err := config.SaveProposal(proposal, config.ProposalPath(id)); err != nil {
 		return fmt.Errorf("save proposal: %w", err)
+	}
+	// set-shared queues a proposal rather than replacing a resolved value, so the
+	// event records the proposed change as input changed_fields with no observed
+	// "fields_replaced" (review applies it later).
+	if cf, cfErr := journal.NewChangedFields(map[string]string{key: value}); cfErr == nil {
+		emitWorkflowSuccess(project.Path, journal.CmdPrefsSetShared, &journal.DeltaInput{ChangedFields: cf}, nil)
 	}
 	ui.Info(fmt.Sprintf("Proposal %s created for shared preference change.", id))
 	ui.Info("Run 'da review' to approve and apply.")

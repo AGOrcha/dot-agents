@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -257,6 +258,11 @@ func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string
 	}
 	if err := git.Commit(message); err != nil {
 		return fmt.Errorf(commitErrFmt, err)
+	}
+	if project, perr := currentWorkflowProject(); perr == nil {
+		emitWorkflowSuccess(project.Path, journal.CmdCommit,
+			&journal.CommitInput{Includes: includes, DryRun: dryRun},
+			&journal.CommitObserved{StagedPaths: paths})
 	}
 	fmt.Fprintf(out, "workflow commit: staged %d path(s) and committed\n", len(paths))
 	return nil
