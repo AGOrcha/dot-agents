@@ -18,6 +18,19 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+)
+
+const (
+	// removeAllAttempts bounds how many times the os.RemoveAll phase retries a
+	// transient Windows delete failure before the PowerShell fallback. Windows
+	// keeps brief directory handles open — a concurrent stat/Mkdir on the same
+	// dir (e.g. contenders spinning on a sidecar lock dir), an antivirus scan, or
+	// a still-closing handle — so a delete can fail with a sharing violation that
+	// clears within milliseconds. attempts*backoff (~300ms) absorbs that without
+	// surfacing a spurious error to the caller.
+	removeAllAttempts = 12
+	removeAllBackoff  = 25 * time.Millisecond
 )
 
 // systemExe resolves a Windows system executable to its absolute path under
@@ -138,9 +151,21 @@ func Remove(path string) error {
 // -LiteralPath (never on a shell command line), so shell metacharacters in
 // the path cannot be reinterpreted as commands.
 func RemoveAll(path string) error {
-	if err := os.RemoveAll(path); err == nil || os.IsNotExist(err) {
-		return nil
+	// Phase 1: retry the native remove to absorb a transient Windows sharing
+	// violation (a contender's brief handle on the dir clears within ms). This is
+	// what makes a concurrently-contended lock-dir release reliable.
+	var err error
+	for i := 0; i < removeAllAttempts; i++ {
+		if err = os.RemoveAll(path); err == nil || os.IsNotExist(err) {
+			return nil
+		}
+		if i < removeAllAttempts-1 {
+			time.Sleep(removeAllBackoff)
+		}
 	}
+	// Phase 2: native remove still failing after the transient-retry budget — fall
+	// back to PowerShell Remove-Item -Recurse, which traverses junction-containing
+	// trees the Go runtime can refuse (a structural, non-transient case).
 	cmd := exec.Command(
 		winPowerShell,
 		psNoProfile, psNonInteractive, psExecPolicy, "Bypass",
@@ -148,8 +173,9 @@ func RemoveAll(path string) error {
 		"if (Test-Path -LiteralPath $env:FSOPS_TARGET) { Remove-Item -LiteralPath $env:FSOPS_TARGET -Recurse -Force }",
 	)
 	cmd.Env = append(os.Environ(), fsopsTargetEnv+path)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("remove tree %s via powershell: %w: %s", path, err, strings.TrimSpace(string(out)))
+	if out, perr := cmd.CombinedOutput(); perr != nil {
+		return fmt.Errorf("remove tree %s via powershell: %w (after %d native retries, last: %v): %s",
+			path, perr, removeAllAttempts, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
