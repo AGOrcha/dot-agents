@@ -6,13 +6,17 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	complianceregister "github.com/AGOrcha/dot-agents/internal/adapters/builtin/compliance-register"
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/compliance-register/views"
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
+	"github.com/AGOrcha/dot-agents/internal/kg/dsl"
 	crossnamespace "github.com/AGOrcha/dot-agents/internal/kg/dsl/cross-namespace"
+	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
 )
 
 // corpus is the testdata fixture shape: a flat note + edge list per namespace.
@@ -97,7 +101,7 @@ func TestViewCompiles(t *testing.T) {
 // and testdata: the view surfaces exactly the controls whose cited evidence
 // references a source-stale CRG symbol.
 func TestViewMaterializesFromCRG(t *testing.T) {
-	store := sdk.NewMemStore()
+	store := crossnamespace.NewRebuildStore()
 	seed(t, store, complianceregister.Name, "compliance.json")
 	seed(t, store, crg.Name, "crg.json")
 
@@ -126,6 +130,94 @@ func TestViewCompatAgainstLiveCRG(t *testing.T) {
 	if state != crossnamespace.CompatOK || cerr != nil {
 		t.Fatalf("CheckCompat = (%s, %v), want (compatible, nil)", state, cerr)
 	}
+}
+
+// TestRunCutoverWiring proves the §10.3 wiring (bug-4): RunCutover ties the
+// mechanical CheckCompat gate into the lockfile state machine. A backward-
+// compatible CRG bump drives the view to pending-rebuild; an incompatible bump
+// (the referenced field's type changes) drives it to dsl-update-required and the
+// lockfile then BLOCKS CRG (re)activation.
+func TestRunCutoverWiring(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+
+	t.Run("compatible_bump_to_pending_rebuild", func(t *testing.T) {
+		v, lf := registeredView(t, now)
+		status, err := views.RunCutover(lf, v, bumpedCRG(t, "string"), now)
+		if err != nil {
+			t.Fatalf("RunCutover: %v", err)
+		}
+		if status != lockfile.StatusPendingRebuild {
+			t.Fatalf("status = %s, want pending-rebuild", status)
+		}
+		if b := lf.ActivationBlockers(crg.Name); len(b) != 0 {
+			t.Fatalf("ActivationBlockers = %v, want none", b)
+		}
+	})
+
+	t.Run("incompatible_bump_blocks_activation", func(t *testing.T) {
+		v, lf := registeredView(t, now)
+		// symbol.qualified_name string→int: parses but breaks the signature.
+		status, err := views.RunCutover(lf, v, bumpedCRG(t, "int"), now)
+		if err != nil {
+			t.Fatalf("RunCutover: %v", err)
+		}
+		if status != lockfile.StatusDSLUpdateRequired {
+			t.Fatalf("status = %s, want dsl-update-required", status)
+		}
+		if b := lf.ActivationBlockers(crg.Name); len(b) == 0 {
+			t.Fatal("ActivationBlockers = none, want the dependent view (activation must be blocked)")
+		}
+	})
+}
+
+// TestRunCutoverUnregisteredViewErrors covers RunCutover's error path: a view
+// that was never registered cannot resolve recompat.
+func TestRunCutoverUnregisteredViewErrors(t *testing.T) {
+	now := time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC)
+	v, err := views.ControlsWithChangedFunctionEvidenceView()
+	if err != nil {
+		t.Fatalf("compile view: %v", err)
+	}
+	if _, err := views.RunCutover(lockfile.New(), v, bumpedCRG(t, "string"), now); err == nil {
+		t.Fatal("RunCutover on an unregistered view: want error")
+	}
+}
+
+// TestApproximationNoticeFlagsBug2 asserts the BUG-2 caveat is surfaced loudly.
+func TestApproximationNoticeFlagsBug2(t *testing.T) {
+	if !strings.Contains(views.ApproximationNotice, "KNOWN-INCORRECT") {
+		t.Fatalf("ApproximationNotice = %q, want a loud BUG-2 caveat", views.ApproximationNotice)
+	}
+}
+
+// registeredView compiles the live view and registers it ready in a fresh
+// lockfile, depending on the CRG namespace.
+func registeredView(t *testing.T, now time.Time) (*crossnamespace.View, *lockfile.Lockfile) {
+	t.Helper()
+	v, err := views.ControlsWithChangedFunctionEvidenceView()
+	if err != nil {
+		t.Fatalf("compile view: %v", err)
+	}
+	lf := lockfile.New()
+	lf.RegisterView(v.Consumer(), v.Name(), "sha256:v0",
+		[]lockfile.ViewDependency{{Adapter: crg.Name, SchemaDigest: "sha256:d0"}}, now)
+	return v, lf
+}
+
+// bumpedCRG builds a CRG namespace whose symbol.qualified_name has the given
+// type (and an added field), modelling a dependee schema bump.
+func bumpedCRG(t *testing.T, qualifiedType string) crossnamespace.Namespace {
+	t.Helper()
+	info, err := dsl.NewSchemaInfo(
+		[]dsl.NoteTypeDecl{{Name: "symbol", Fields: []dsl.FieldDecl{
+			{Name: "qualified_name", Type: qualifiedType},
+			{Name: "visibility", Type: "string"},
+		}}},
+		[]dsl.EdgeTypeDecl{{Name: "CALLS", From: "symbol", To: "symbol"}}, 3)
+	if err != nil {
+		t.Fatalf("bumped crg schema: %v", err)
+	}
+	return crossnamespace.Namespace{Name: crg.Name, Info: info}
 }
 
 func assertToken(t *testing.T, tok sdk.Token, want map[string]sdk.Mode) {

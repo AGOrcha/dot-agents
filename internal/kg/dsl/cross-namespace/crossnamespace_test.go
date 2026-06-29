@@ -208,9 +208,11 @@ func TestCompileErrors(t *testing.T) {
 
 // TestMaterialize is the §8.3 hard test: the view surfaces exactly the controls
 // whose cited evidence references a source-stale CRG symbol, and re-running it
-// after a new stale symbol arrives refreshes the result (§8.3 refresh).
+// after a new stale symbol arrives REBUILDS the result (§8.3 refresh) — the
+// persisted derived set converges to the current rows, it does not accumulate
+// (BUG-1 regression: a second materialize must leave 3 derived notes, not 5).
 func TestMaterialize(t *testing.T) {
-	store := sdk.NewMemStore()
+	store := crossnamespace.NewRebuildStore()
 	seedConsumer(t, store)
 	seedDep(t, store)
 	v := buildView(t)
@@ -223,15 +225,7 @@ func TestMaterialize(t *testing.T) {
 		{acMfa, idEvMfa, qnLogin},
 		{drRetention, idEvRetain, qnRetain},
 	})
-
-	// The rows persist as derived notes in the CONSUMER namespace.
-	persisted, err := store.Notes(sdk.OwnReadToken(nsConsumer, viewName), nsConsumer)
-	if err != nil {
-		t.Fatalf("read persisted: %v", err)
-	}
-	if got := countType(persisted, viewName); got != len(rows) {
-		t.Errorf("persisted derived notes = %d, want %d", got, len(rows))
-	}
+	assertPersistedDerivedCount(t, store, len(rows)) // 2 persisted
 
 	// Refresh: a newly source-stale symbol cited by a control surfaces on the
 	// next Materialize.
@@ -246,6 +240,41 @@ func TestMaterialize(t *testing.T) {
 		{acMfa, "ev-net", "net.Call"},
 		{drRetention, idEvRetain, qnRetain},
 	})
+	// BUG-1: persisted state is REBUILT to exactly 3, not appended to 5.
+	assertPersistedDerivedCount(t, store, len(rows2))
+}
+
+// TestMaterializeConvergesOnShrink is the other half of the BUG-1 rebuild
+// contract: when a refresh yields FEWER rows (a symbol's stale tag cleared), the
+// orphaned derived notes are dropped, not left behind.
+func TestMaterializeConvergesOnShrink(t *testing.T) {
+	store := seededStore(t)
+	v := buildView(t)
+	if _, err := v.Materialize(store); err != nil {
+		t.Fatalf("Materialize: %v", err)
+	}
+	// Clear every CRG symbol's stale tag (re-write fresh symbols) so the next
+	// refresh produces zero rows; the prior derived notes must be removed.
+	clearDepStale(t, store)
+	rows, err := v.Materialize(store)
+	if err != nil {
+		t.Fatalf("Materialize refresh: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows after stale cleared = %d, want 0", len(rows))
+	}
+	assertPersistedDerivedCount(t, store, 0)
+}
+
+// TestMaterializeRequiresRebuildableStore covers the BUG-1 guard: an append-only
+// store (sdk.MemStore) is rejected rather than silently orphaning rows.
+func TestMaterializeRequiresRebuildableStore(t *testing.T) {
+	store := sdk.NewMemStore()
+	seedConsumer(t, store)
+	seedDep(t, store)
+	if _, err := buildView(t).Materialize(store); err == nil || !contains(err.Error(), "rebuild-capable store") {
+		t.Fatalf("Materialize on append-only store: want rebuild-capable rejection, got %v", err)
+	}
 }
 
 // TestMaterializeStoreErrors covers the read and write error branches via a
@@ -331,6 +360,128 @@ func TestCheckCompat(t *testing.T) {
 			t.Fatal("CheckCompat: expected a diagnostic compile error on dsl-update-required")
 		}
 	})
+
+	// BUG-3: a TYPE change on a referenced field still parses (the field exists)
+	// but is a breaking signature change — must be dsl-update-required, not
+	// compatible.
+	t.Run("referenced_field_type_changed_string_to_int", func(t *testing.T) {
+		retyped, err := dsl.NewSchemaInfo(
+			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: fQualified, Type: "int"}}}},
+			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
+		if err != nil {
+			t.Fatalf("retyped schema: %v", err)
+		}
+		state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: retyped}})
+		if state != crossnamespace.CompatDSLUpdateRequired {
+			t.Fatalf("CheckCompat state = %s, want dsl-update-required (string→int)", state)
+		}
+		if cerr == nil || !contains(cerr.Error(), "symbol.qualified_name") {
+			t.Fatalf("CheckCompat: want signature diagnostic naming symbol.qualified_name, got %v", cerr)
+		}
+	})
+
+	// BUG-3 sibling: an UNreferenced field changing type stays compatible.
+	t.Run("unreferenced_field_type_change_is_compatible", func(t *testing.T) {
+		bumped, err := dsl.NewSchemaInfo(
+			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{
+				{Name: fQualified, Type: typeString}, {Name: "line_start", Type: "string"}}}},
+			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
+		if err != nil {
+			t.Fatalf("bumped schema: %v", err)
+		}
+		state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: bumped}})
+		if state != crossnamespace.CompatOK || cerr != nil {
+			t.Fatalf("CheckCompat = (%s, %v), want (compatible, nil)", state, cerr)
+		}
+	})
+
+	// A removed REFERENCED field is caught by the re-parse stage.
+	t.Run("referenced_field_removed", func(t *testing.T) {
+		stripped, err := dsl.NewSchemaInfo(
+			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: "other", Type: typeString}}}},
+			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
+		if err != nil {
+			t.Fatalf("stripped schema: %v", err)
+		}
+		state, _ := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: stripped}})
+		if state != crossnamespace.CompatDSLUpdateRequired {
+			t.Fatalf("CheckCompat state = %s, want dsl-update-required (removed field)", state)
+		}
+	})
+}
+
+// TestRebuildStore exercises the rebuild-capable store directly: token-checked
+// reads/writes, the orphan-dropping ReplaceNotes, and every authorization
+// rejection branch.
+func TestRebuildStore(t *testing.T) {
+	store := crossnamespace.NewRebuildStore()
+	wtok := sdk.BootstrapToken(nsDep)     // {crg, write}
+	rtok := sdk.OwnReadToken(nsDep, "op") // {crg, read}
+
+	if err := store.WriteNotes(wtok, nsDep, []sdk.Note{
+		{ID: "a", Type: typeSymbol}, {ID: "b", Type: "other"}}); err != nil {
+		t.Fatalf("WriteNotes: %v", err)
+	}
+	if err := store.WriteEdges(wtok, nsDep, []sdk.Edge{{Type: eCalls, From: "a", To: "b"}}); err != nil {
+		t.Fatalf("WriteEdges: %v", err)
+	}
+	if got, _ := store.Notes(rtok, nsDep); len(got) != 2 {
+		t.Fatalf("Notes = %d, want 2", len(got))
+	}
+	if got, _ := store.Edges(rtok, nsDep); len(got) != 1 {
+		t.Fatalf("Edges = %d, want 1", len(got))
+	}
+
+	// ReplaceNotes rebuilds only the symbol type: drops "a", keeps "b" (other).
+	if err := store.ReplaceNotes(wtok, nsDep, typeSymbol, []sdk.Note{{ID: "c", Type: typeSymbol}}); err != nil {
+		t.Fatalf("ReplaceNotes: %v", err)
+	}
+	after, _ := store.Notes(rtok, nsDep)
+	if countType(after, typeSymbol) != 1 || countType(after, "other") != 1 || len(after) != 2 {
+		t.Fatalf("after replace = %v, want one symbol (c) + one other (b)", after)
+	}
+
+	// Every method rejects a token that does not authorize the namespace.
+	bad := sdk.BootstrapToken("elsewhere")
+	if err := store.WriteNotes(bad, nsDep, nil); err == nil {
+		t.Fatal("WriteNotes with unauthorized token: want rejection")
+	}
+	if err := store.WriteEdges(bad, nsDep, nil); err == nil {
+		t.Fatal("WriteEdges with unauthorized token: want rejection")
+	}
+	if _, err := store.Notes(bad, nsDep); err == nil {
+		t.Fatal("Notes with unauthorized token: want rejection")
+	}
+	if _, err := store.Edges(bad, nsDep); err == nil {
+		t.Fatal("Edges with unauthorized token: want rejection")
+	}
+	if err := store.ReplaceNotes(bad, nsDep, typeSymbol, nil); err == nil {
+		t.Fatal("ReplaceNotes with unauthorized token: want rejection")
+	}
+}
+
+// TestCheckCompatRefChainSignatures walks the signature comparison over a query
+// with a ref chain, a bare ref, and an aggregate over a ref-traversal field —
+// exercising the field-resolution paths (ref hop, terminal, bare alias, func
+// args). With the consumer schema unchanged, every referenced field keeps its
+// signature, so the gate reports compatible.
+func TestCheckCompatRefChainSignatures(t *testing.T) {
+	consumer := crossnamespace.Namespace{Name: "c-ns", Info: mustInfo(t,
+		[]dsl.NoteTypeDecl{
+			{Name: typeControl, Fields: []dsl.FieldDecl{
+				{Name: fControlID, Type: typeString}, {Name: "owner", Type: "ref<owner>"}}},
+			{Name: "owner", Fields: []dsl.FieldDecl{
+				{Name: "name", Type: typeString}, {Name: "team", Type: typeString}}},
+		}, nil, 2)}
+	q := "MATCH (c:control) RETURN c.control_id, c.owner.name, c.owner, min(c.owner.team)"
+	v, err := crossnamespace.Compile("v", consumer, nil, nil, q)
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	state, cerr := v.CheckCompat(nil)
+	if state != crossnamespace.CompatOK || cerr != nil {
+		t.Fatalf("CheckCompat = (%s, %v), want (compatible, nil)", state, cerr)
+	}
 }
 
 // --- helpers ------------------------------------------------------------------
@@ -368,9 +519,9 @@ func collidingEdgeDep(t *testing.T) crossnamespace.Namespace {
 		}, 3)}
 }
 
-func seededStore(t *testing.T) *sdk.MemStore {
+func seededStore(t *testing.T) *crossnamespace.RebuildStore {
 	t.Helper()
-	store := sdk.NewMemStore()
+	store := crossnamespace.NewRebuildStore()
 	seedConsumer(t, store)
 	seedDep(t, store)
 	return store
@@ -430,6 +581,30 @@ func addCitation(t *testing.T, store sdk.Store, ev, ctl, sym string) {
 		{Type: eCitedBy, From: ev, To: ctl},
 		{Type: eReferences, From: ev, To: sym},
 	}))
+}
+
+// clearDepStale re-writes the seeded CRG symbols WITHOUT a stale tag. Appended
+// last, they win on read-back (indexNotes keeps the last write per id), so the
+// view's source-stale filter matches nothing on the next refresh.
+func clearDepStale(t *testing.T, store sdk.Store) {
+	t.Helper()
+	must(t, sdk.For(nsDep, store).WriteNotes([]sdk.Note{
+		{ID: "sym:auth-login", Type: typeSymbol, Fields: map[string]any{fQualified: qnLogin}},
+		{ID: "sym:data-retain", Type: typeSymbol, Fields: map[string]any{fQualified: qnRetain}},
+	}))
+}
+
+// assertPersistedDerivedCount reads the consumer namespace back and asserts the
+// number of persisted derived (view-typed) notes — the BUG-1 convergence check.
+func assertPersistedDerivedCount(t *testing.T, store sdk.Store, want int) {
+	t.Helper()
+	persisted, err := store.Notes(sdk.OwnReadToken(nsConsumer, viewName), nsConsumer)
+	if err != nil {
+		t.Fatalf("read persisted: %v", err)
+	}
+	if got := countType(persisted, viewName); got != want {
+		t.Fatalf("persisted derived notes = %d, want %d", got, want)
+	}
 }
 
 func assertGrants(t *testing.T, tok sdk.Token, want []sdk.Grant) {
@@ -514,10 +689,11 @@ func must(t *testing.T, err error) {
 	}
 }
 
-// failStore wraps a MemStore and fails a chosen operation, to exercise
-// Materialize's error branches.
+// failStore wraps a rebuild-capable store and fails a chosen operation, to
+// exercise Materialize's error branches. It is a NoteReplacer (so Materialize's
+// capability assertion passes and the read/persist branches are reached).
 type failStore struct {
-	base        *sdk.MemStore
+	base        *crossnamespace.RebuildStore
 	failNotesNS string
 	failEdgesNS string
 	failWrite   bool
@@ -526,9 +702,6 @@ type failStore struct {
 var errInjected = errors.New("injected store failure")
 
 func (f *failStore) WriteNotes(tok sdk.Token, ns string, notes []sdk.Note) error {
-	if f.failWrite {
-		return errInjected
-	}
 	return f.base.WriteNotes(tok, ns, notes)
 }
 
@@ -548,4 +721,12 @@ func (f *failStore) Edges(tok sdk.Token, ns string) ([]sdk.Edge, error) {
 		return nil, errInjected
 	}
 	return f.base.Edges(tok, ns)
+}
+
+// ReplaceNotes is the persist path Materialize uses; failWrite faults it.
+func (f *failStore) ReplaceNotes(tok sdk.Token, ns, noteType string, notes []sdk.Note) error {
+	if f.failWrite {
+		return errInjected
+	}
+	return f.base.ReplaceNotes(tok, ns, noteType, notes)
 }

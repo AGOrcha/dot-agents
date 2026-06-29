@@ -68,7 +68,9 @@ type View struct {
 	deps       []string
 	query      *dsl.Query
 	touched    []string
+	combined   dsl.SchemaInfo
 	consumerNS Namespace
+	depNS      []Namespace
 	crossEdges []CrossEdge
 	querySrc   string
 }
@@ -102,7 +104,9 @@ func Compile(name string, consumer Namespace, deps []Namespace, crossEdges []Cro
 		deps:       depNames,
 		query:      q,
 		touched:    touchedNamespaces(q, nsOf),
+		combined:   combined,
 		consumerNS: consumer,
+		depNS:      append([]Namespace(nil), deps...),
 		crossEdges: crossEdges,
 		querySrc:   query,
 	}, nil
@@ -129,18 +133,41 @@ func (v *View) Token() sdk.Token {
 	return sdk.ViewToken(v.consumer, v.name, v.deps)
 }
 
+// NoteReplacer is the storage capability Materialize needs beyond the
+// append-only sdk.Store: it REBUILDS a view's derived rows in place rather than
+// accumulating them. A materialized view is a function of current source state,
+// so a refresh must converge the persisted derived notes to exactly the current
+// result set — re-appending (the bare sdk.Store behavior) would leave duplicate
+// and orphaned rows from prior refreshes. A production gcc-backed store provides
+// this through upsert/delete; the in-memory RebuildStore in this package does
+// too. Materialize requires it for the persist step and refuses to silently
+// corrupt persisted state through an append-only store.
+type NoteReplacer interface {
+	// ReplaceNotes removes every note of noteType in ns (token-checked write)
+	// and writes notes in their place, so the persisted set of that type equals
+	// notes exactly.
+	ReplaceNotes(token sdk.Token, ns, noteType string, notes []sdk.Note) error
+}
+
 // Materialize reads every authorized namespace through the token-checked Store,
-// merges them into one in-memory view, evaluates the view query, persists each
-// result row as a derived note (type = view name) in the CONSUMER namespace,
-// and returns the rows. Dependency reads and the derived-note write all carry
-// the §8.2 ViewToken, so a write to a dependency is rejected at the Store layer
-// (N8) and a read of an unauthorized namespace is rejected too (N9).
+// merges them into one in-memory view, evaluates the view query, and REBUILDS
+// the view's derived notes (type = view name) in the CONSUMER namespace,
+// returning the rows. Dependency reads and the derived-note write all carry the
+// §8.2 ViewToken, so a write to a dependency is rejected at the Store layer (N8)
+// and a read of an unauthorized namespace is rejected too (N9).
 //
-// Re-running Materialize recomputes the rows from current source state, which is
-// the §8.3 refresh semantics: when a dependency note becomes stale (e.g. CRG
-// fires source_mutation on a referenced symbol), the next Materialize surfaces
-// the newly-affected rows.
+// Re-running Materialize recomputes the rows from current source state and
+// replaces the prior derived set (§8.3 refresh): when a dependency note becomes
+// stale (e.g. CRG fires source_mutation on a referenced symbol), the next
+// Materialize surfaces the newly-affected rows and drops any that no longer
+// hold — the persisted state converges to the current result set, never
+// accumulates. The store MUST implement NoteReplacer; an append-only store is
+// rejected rather than silently orphaning rows.
 func (v *View) Materialize(store sdk.Store) ([]sdk.Row, error) {
+	rebuilder, ok := store.(NoteReplacer)
+	if !ok {
+		return nil, fmt.Errorf("%s: view %q requires a rebuild-capable store (NoteReplacer); an append-only store would orphan prior derived rows", errPrefix, v.name)
+	}
 	merged, err := v.readMerged(store)
 	if err != nil {
 		return nil, err
@@ -149,7 +176,7 @@ func (v *View) Materialize(store sdk.Store) ([]sdk.Row, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: evaluate view %q: %w", errPrefix, v.name, err)
 	}
-	if err := store.WriteNotes(v.Token(), v.consumer, rowsToNotes(v.name, rows)); err != nil {
+	if err := rebuilder.ReplaceNotes(v.Token(), v.consumer, v.name, rowsToNotes(v.name, rows)); err != nil {
 		return nil, fmt.Errorf("%s: persist view %q: %w", errPrefix, v.name, err)
 	}
 	return rows, nil
@@ -168,19 +195,131 @@ const (
 	CompatDSLUpdateRequired Compat = "dsl-update-required"
 )
 
-// CheckCompat re-validates the view's DSL query against an updated set of
-// dependency schemas — the mechanical cutover gate of §10.3. A dependee schema
-// bump that preserves every note/edge the query reads yields (CompatOK, nil). A
-// bump that removes or retypes something the query reads yields
-// (CompatDSLUpdateRequired, <the compile failure>): the error is the diagnostic
-// reason, NOT a fatal error — the caller transitions the lockfile state on the
-// returned Compat. The check is purely mechanical: the same ParseWithSchema the
-// view compiled under, re-run against the new schema; there is no operator ack.
+// CheckCompat validates the view's DSL query against an updated set of
+// dependency schemas — the mechanical cutover gate of §10.3. It returns
+// (CompatOK, nil) only when the bump preserves both the EXISTENCE and the
+// SIGNATURE of every note type, edge, and field the query reads; otherwise
+// (CompatDSLUpdateRequired, <diagnostic>). The error on the
+// dsl-update-required path is the reason, NOT a fatal error — the caller
+// transitions the lockfile state on the returned Compat. There is no operator
+// ack (O1).
+//
+// The gate is two-stage because re-parsing alone is insufficient (§10.3 requires
+// SIGNATURE compatibility, not just resolvability):
+//
+//  1. Re-parse the query against the new schema. This rejects a removed note
+//     type, a removed referenced field, or a changed edge direction — the parser
+//     only accepts a field that still exists.
+//  2. Compare the TYPE of every field the query references between the old and
+//     new schema. The parser accepts a field once it exists regardless of type,
+//     so a field whose type changed (e.g. symbol.qualified_name string→int)
+//     passes step 1 but is a breaking change — step 2 catches it.
 func (v *View) CheckCompat(updatedDeps []Namespace) (Compat, error) {
-	if _, err := Compile(v.name, v.consumerNS, updatedDeps, v.crossEdges, v.querySrc); err != nil {
+	updated, err := Compile(v.name, v.consumerNS, updatedDeps, v.crossEdges, v.querySrc)
+	if err != nil {
 		return CompatDSLUpdateRequired, err
 	}
+	if changed := signatureMismatch(v.query, v.combined, updated.combined); changed != "" {
+		return CompatDSLUpdateRequired, fmt.Errorf("%s: view %q field %s changed signature in the dependency bump", errPrefix, v.name, changed)
+	}
 	return CompatOK, nil
+}
+
+// signatureMismatch returns the first referenced field whose type differs (or
+// vanished) between the old and new combined schemas, or "" when every
+// referenced field keeps its signature. It is the §10.3 signature-compatibility
+// check the re-parse cannot perform (the parser accepts a field by existence,
+// not by type).
+func signatureMismatch(q *dsl.Query, oldInfo, newInfo dsl.SchemaInfo) string {
+	aliasType := queryAliasTypes(q)
+	for _, ref := range referencedFieldRefs(q) {
+		key, oldSig, ok := terminalFieldType(ref, aliasType, oldInfo)
+		if !ok {
+			continue // intrinsic id, stale selector, or bare ref — no schema field
+		}
+		_, newSig, ok := terminalFieldType(ref, aliasType, newInfo)
+		if !ok || newSig[1] != oldSig[1] {
+			return key
+		}
+	}
+	return ""
+}
+
+// queryAliasTypes maps each node alias to the note type fixed at its first typed
+// MATCH binding (an untyped re-reference inherits that type).
+func queryAliasTypes(q *dsl.Query) map[string]string {
+	aliasType := map[string]string{}
+	for _, m := range q.Matches {
+		for _, n := range m.Nodes {
+			if n.Type != "" {
+				aliasType[n.Alias] = n.Type
+			}
+		}
+	}
+	return aliasType
+}
+
+// referencedFieldRefs collects every field reference the query reads — WHERE
+// predicate left-hand sides and RETURN items (including nested function args) —
+// so each can be checked for signature drift.
+func referencedFieldRefs(q *dsl.Query) []dsl.FieldRef {
+	var refs []dsl.FieldRef
+	for _, pred := range q.Where {
+		refs = append(refs, pred.Left)
+	}
+	for _, item := range q.Returns {
+		refs = appendReturnRefs(refs, item)
+	}
+	return refs
+}
+
+// appendReturnRefs adds a RETURN item's field ref plus any refs nested in its
+// function args (e.g. min(c.field)).
+func appendReturnRefs(refs []dsl.FieldRef, item dsl.ReturnItem) []dsl.FieldRef {
+	if item.Ref.Alias != "" {
+		refs = append(refs, item.Ref)
+	}
+	for _, arg := range item.FuncArgs {
+		if arg.Ref.Alias != "" {
+			refs = append(refs, arg.Ref)
+		}
+	}
+	return refs
+}
+
+// terminalFieldType resolves a field ref to its terminal (noteType, field) and
+// that field's declared type in info, walking ref hops. It returns
+// (key, [noteType.field, type], true) for a real schema field, or ok=false for a
+// bare alias, an intrinsic id, a structured stale selector, or any path that
+// does not resolve to a declared field (the parser handles those cases). The
+// returned key is the stable "noteType.field" identity; sig[1] is the type.
+func terminalFieldType(ref dsl.FieldRef, aliasType map[string]string, info dsl.SchemaInfo) (string, [2]string, bool) {
+	cur, ok := aliasType[ref.Alias]
+	if !ok || len(ref.Path) == 0 {
+		return "", [2]string{}, false
+	}
+	for i, part := range ref.Path {
+		if part == "stale" {
+			return "", [2]string{}, false // structured stale selector, not a schema field
+		}
+		fields, ok := info.NoteFields[cur]
+		if !ok {
+			return "", [2]string{}, false
+		}
+		field, ok := fields[part]
+		if !ok {
+			return "", [2]string{}, false // intrinsic id terminal or unknown field
+		}
+		if i == len(ref.Path)-1 {
+			key := cur + "." + part
+			return key, [2]string{key, field.Type}, true
+		}
+		if field.RefType == "" {
+			return "", [2]string{}, false
+		}
+		cur = field.RefType
+	}
+	return "", [2]string{}, false
 }
 
 // readMerged reads the consumer namespace (own-read token) and each declared
@@ -316,4 +455,88 @@ func rowsToNotes(view string, rows []sdk.Row) []sdk.Note {
 		out = append(out, sdk.Note{ID: fmt.Sprintf("%s#%d", view, i), Type: view, Fields: fields})
 	}
 	return out
+}
+
+// RebuildStore is an in-memory sdk.Store that also implements NoteReplacer, so
+// a materialized view can REBUILD its derived rows on refresh instead of
+// accumulating them (the bug the bare append-only sdk.MemStore has). It enforces
+// the same §8.2 namespace-token contract as sdk.MemStore: every operation's
+// (namespace, mode) must be authorized by the supplied token. The zero value is
+// not usable; construct with NewRebuildStore. It is the cross-namespace view
+// substrate for tests and the reference replace-on-refresh semantics a
+// production gcc-backed store provides via upsert/delete.
+type RebuildStore struct {
+	notes map[string][]sdk.Note
+	edges map[string][]sdk.Edge
+}
+
+// NewRebuildStore returns an empty rebuild-capable store.
+func NewRebuildStore() *RebuildStore {
+	return &RebuildStore{notes: map[string][]sdk.Note{}, edges: map[string][]sdk.Edge{}}
+}
+
+// authorizeStore reports whether tok grants mode on ns (§8.2), shared by every
+// RebuildStore method so the rejection message is written once.
+func authorizeStore(tok sdk.Token, ns string, mode sdk.Mode) error {
+	for _, g := range tok.Authorized {
+		if g.Namespace == ns && g.Mode == mode {
+			return nil
+		}
+	}
+	return fmt.Errorf("storage: token issued_for %q does not authorize %s of namespace %q", tok.IssuedFor, mode, ns)
+}
+
+// WriteNotes appends notes to ns after write authorization (§8.2).
+func (s *RebuildStore) WriteNotes(tok sdk.Token, ns string, notes []sdk.Note) error {
+	if err := authorizeStore(tok, ns, sdk.ModeWrite); err != nil {
+		return err
+	}
+	s.notes[ns] = append(s.notes[ns], notes...)
+	return nil
+}
+
+// WriteEdges appends edges to ns after write authorization (§8.2).
+func (s *RebuildStore) WriteEdges(tok sdk.Token, ns string, edges []sdk.Edge) error {
+	if err := authorizeStore(tok, ns, sdk.ModeWrite); err != nil {
+		return err
+	}
+	s.edges[ns] = append(s.edges[ns], edges...)
+	return nil
+}
+
+// Notes returns a copy of ns's notes after read authorization (§8.2).
+func (s *RebuildStore) Notes(tok sdk.Token, ns string) ([]sdk.Note, error) {
+	if err := authorizeStore(tok, ns, sdk.ModeRead); err != nil {
+		return nil, err
+	}
+	out := make([]sdk.Note, len(s.notes[ns]))
+	copy(out, s.notes[ns])
+	return out, nil
+}
+
+// Edges returns a copy of ns's edges after read authorization (§8.2).
+func (s *RebuildStore) Edges(tok sdk.Token, ns string) ([]sdk.Edge, error) {
+	if err := authorizeStore(tok, ns, sdk.ModeRead); err != nil {
+		return nil, err
+	}
+	out := make([]sdk.Edge, len(s.edges[ns]))
+	copy(out, s.edges[ns])
+	return out, nil
+}
+
+// ReplaceNotes rebuilds the noteType slice of ns: it drops every existing note
+// of noteType and writes notes in their place (write-authorized), so the
+// persisted set of that type converges to notes exactly (NoteReplacer).
+func (s *RebuildStore) ReplaceNotes(tok sdk.Token, ns, noteType string, notes []sdk.Note) error {
+	if err := authorizeStore(tok, ns, sdk.ModeWrite); err != nil {
+		return err
+	}
+	kept := make([]sdk.Note, 0, len(s.notes[ns]))
+	for _, n := range s.notes[ns] {
+		if n.Type != noteType {
+			kept = append(kept, n)
+		}
+	}
+	s.notes[ns] = append(kept, notes...)
+	return nil
 }

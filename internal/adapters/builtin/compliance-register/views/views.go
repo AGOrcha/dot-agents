@@ -22,23 +22,44 @@
 //
 //   - `symbol` is used in place of `function` (the shipped CRG note type);
 //   - a `references` cross edge (evidence → symbol) is declared here, since it
-//     spans the two namespaces and appears in neither adapter's own schema;
-//   - "a function that has changed in CRG since the evidence was collected" is
-//     expressed as the symbol carrying the §7.3 source-stale tag — exactly the
-//     O5 source_mutation driver CRG fires on a content-hash change. The literal
-//     `f.last_changed > e.collected_at` form is NOT expressible in the v1 DSL
-//     (field-to-field comparison is forbidden, §5.1), so the stale tag is the
-//     contract-conformant expression of "changed". The time-window refinement
-//     ("since collected") is a §12 v1.5 budget candidate, flagged for review.
+//     spans the two namespaces and appears in neither adapter's own schema.
+//
+// ⚠️  KNOWN-INCORRECT APPROXIMATION (BUG-2) — PENDING OWNER DECISION  ⚠️
+//
+// The spec view means "evidence references a function that CHANGED SINCE the
+// evidence was collected" (design.md §8.3: `f.last_changed > e.collected_at`).
+// This implementation filters `s.stale.reason = 'source'`, which is a CURRENT
+// staleness marker, NOT a "changed since collected" predicate. It is therefore
+// semantically WRONG at the edges:
+//
+//   - FALSE POSITIVE: evidence collected AFTER the symbol changed (the symbol is
+//     source-stale but the evidence already reflects the change) still matches.
+//   - FALSE NEGATIVE: once the stale tag clears (the symbol is re-reviewed) the
+//     evidence stays old, but the view no longer flags it.
+//
+// The correct predicate is NOT expressible in the v1 DSL: it requires comparing
+// two note fields (`s.stale.fired_at > e.collected_at`), and §5.1 forbids
+// field-to-field comparison (WHERE compares a field to a param/literal only; the
+// sole field-side function is STARTS_WITH). A materialized view runs one query
+// with no per-row params, so a per-evidence cutoff param is not available
+// either. This needs a v1.5 temporal field-to-field comparison.
+//
+// ESCALATED as an owner decision (see PR / merge-back): (a) DEFER this view
+// until the v1.5 DSL lands the temporal comparison, or (b) extend the DSL now.
+// Until that is decided, the source-stale filter remains as a LOUDLY-MARKED
+// interim placeholder — it must NOT be treated as the correct contract behavior.
+// ApproximationNotice carries this caveat for any programmatic surface.
 package views
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/adapterkit"
 	complianceregister "github.com/AGOrcha/dot-agents/internal/adapters/builtin/compliance-register"
 	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/crg"
 	crossnamespace "github.com/AGOrcha/dot-agents/internal/kg/dsl/cross-namespace"
+	"github.com/AGOrcha/dot-agents/internal/kg/lockfile"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
 )
 
@@ -53,11 +74,22 @@ const (
 	noteTypeSymbol   = "symbol"
 )
 
+// ApproximationNotice is the machine-readable caveat for the BUG-2
+// known-incorrect predicate (see the package doc): the view filters a current
+// source-stale marker, not the spec's "changed since the evidence was collected"
+// temporal predicate, which the v1 DSL cannot express. Surfaces that present
+// this view's results SHOULD relay this notice until the owner decision lands.
+const ApproximationNotice = "KNOWN-INCORRECT (BUG-2): filters current source-staleness, NOT 'changed since evidence collected' (v1 DSL cannot compare two note fields); pending owner decision to defer to v1.5 or extend the DSL"
+
 // controlsWithChangedFnEvidenceQuery joins the compliance evidence→control
-// citation with the cross-namespace evidence→symbol reference, keeping only
-// controls whose cited evidence references a CRG symbol that has changed
-// (carries the §7.3 source-stale tag). It returns the control's external id,
-// the citing evidence id, and the changed symbol's qualified name.
+// citation with the cross-namespace evidence→symbol reference.
+//
+// ⚠️ BUG-2 KNOWN-INCORRECT PREDICATE: `s.stale.reason = 'source'` approximates
+// "the referenced symbol CHANGED SINCE the evidence was collected" with the
+// CURRENT source-stale marker. This over- and under-counts (see package doc).
+// The correct `s.stale.fired_at > e.collected_at` is field-to-field and is
+// forbidden in v1 (§5.1) — this stays as an escalated interim placeholder, NOT
+// the contract-correct query.
 const controlsWithChangedFnEvidenceQuery = `
 	MATCH (e:evidence)-[:cited_by]->(c:control)
 	MATCH (e)-[:references]->(s:symbol)
@@ -122,4 +154,30 @@ func ControlsWithChangedFunctionEvidenceView() (*crossnamespace.View, error) {
 		[]crossnamespace.CrossEdge{referencesEdge()},
 		controlsWithChangedFnEvidenceQuery,
 	)
+}
+
+// RunCutover drives the §10.3 cross-adapter cutover for view v against a bumped
+// CRG schema, WIRING the mechanical CheckCompat gate into the lockfile state
+// machine (this is the t5 §10.3 integration, bug-4 fix). Given a lockfile whose
+// view is ready, it:
+//
+//  1. freezes the view to pending-recompat-check (the CRG bump);
+//  2. runs the mechanical gate CheckCompat against the new CRG schema;
+//  3. applies the result — compatible → pending-rebuild (and, on a subsequent
+//     bootstrap, MarkViewRebuilt → ready); incompatible → dsl-update-required,
+//     which ActivationBlockers reports to BLOCK CRG (re)activation until the
+//     compliance adapter ships an updated query (O1: no ack opt-out).
+//
+// It returns the resulting view status. The view must already be registered in
+// the lockfile (RegisterView) as ready.
+func RunCutover(lf *lockfile.Lockfile, v *crossnamespace.View, updatedCRG crossnamespace.Namespace, now time.Time) (lockfile.ViewStatus, error) {
+	lf.MarkDependeeBumped(crg.Name, now)
+	compat, _ := v.CheckCompat([]crossnamespace.Namespace{updatedCRG})
+	deps := []lockfile.ViewDependency{{Adapter: crg.Name}}
+	if err := lf.ResolveRecompat(v.Consumer(), v.Name(), compat == crossnamespace.CompatOK, deps, now); err != nil {
+		return "", err
+	}
+	// ResolveRecompat just succeeded, so the view is present; read its new status.
+	status, _ := lf.ViewStatusOf(v.Consumer(), v.Name())
+	return status, nil
 }
