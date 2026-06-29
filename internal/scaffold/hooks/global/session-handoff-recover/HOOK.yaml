@@ -1,0 +1,12 @@
+name: session-handoff-recover
+description: Re-inject the verified session-handoff recovery view when a session resumes after compaction
+when: session_start
+match:
+  tools: []
+  expression: "compact"
+run:
+  command: ./recover.sh
+  timeout_ms: 10000
+enabled_on:
+  - claude
+  - codex
