@@ -28,3 +28,13 @@ Mistakes to avoid when handing off to the next session.
 - "Made progress on the feature" tells the next agent nothing.
 - "Implemented the API endpoint in `src/api/users.ts`, tests pass, still need to add pagination (see TODO on line 47)" gives them a starting point.
 - Be specific: file paths, function names, line numbers, commit hashes.
+
+## Trusting a stale prose summary instead of the verified view
+
+- A handoff document is the *why*; it goes stale the instant state changes (a PR merges, a branch moves). The most expensive recovery failure is acting on a remembered claim that is no longer true — e.g. re-doing work that already shipped.
+- On resume, always start with `da workflow journal recover` (or `/agent-handoff recover`) and trust the verified view over the prose. Never treat a `changed`, `missing`, or `unverified` item as still-true, and never auto-resume a `QUARANTINED` bundle. See `instructions/verified-readback.md`.
+
+## Letting un-recorded reasoning pile up before a crash
+
+- The deterministic journal captures *what changed* automatically, but your *reasoning* survives a force-kill only if it was already appended. Reasoning formed since your last append is lost.
+- Follow the cadence in `instructions/journal-cadence.md`: capture before risky operations, under context pressure, after a decision, and on the work-OR-time backstop — never carry more than one un-recorded decision.
