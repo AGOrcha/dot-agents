@@ -229,7 +229,51 @@ func readDocument(path string) (map[string]json.RawMessage, error) {
 	return doc, nil
 }
 
+// AcquireFileLock takes the package's advisory, inter-process lock guarding the
+// file at path and returns a release function the caller MUST invoke to free it.
+// It is the reusable form of the primitive that serializes .agentsrc.lock writes
+// (see Flush); other cooperating da processes (e.g. an append-only NDJSON
+// writer) call it to serialize their own writes to a shared file.
+//
+// The lock is a sidecar directory at "<path>.lock". Acquisition is a single
+// atomic os.Mkdir: success is the mutual-exclusion signal, and EEXIST means
+// another holder currently owns it. The lock is therefore ADVISORY — it excludes
+// only other callers of this function that name the same path, not arbitrary
+// writers of the underlying file. The parent directory of path is created if it
+// does not yet exist.
+//
+// Acquisition blocks up to lockAcquireTimeout, retrying every lockRetryInterval,
+// and returns a timeout error if a live holder never releases. Because the mkdir
+// lock has no kernel-backed auto-release, a holder that crashed without releasing
+// (SIGKILL/OOM/power loss) is detected as stale once its recorded age exceeds
+// lockStaleTTL and is reclaimed at most once per call — so a slow but live holder
+// is never torn down out from under itself. The returned release removes the
+// sidecar directory and reports any removal error; it is idempotent (a second
+// call after the dir is gone is a no-op returning nil).
+func AcquireFileLock(path string) (release func() error, err error) {
+	lockDir, err := acquireLockDir(path)
+	if err != nil {
+		return nil, err
+	}
+	return func() error { return fsops.RemoveAll(lockDir) }, nil
+}
+
+// acquireFileLock is the internal release-returning-nothing form used by Flush.
+// It shares acquireLockDir with the exported AcquireFileLock; the only
+// difference is that a release error is surfaced via the package debug channel
+// (Flush has no error path for the deferred unlock) rather than returned.
 func acquireFileLock(path string) (func(), error) {
+	lockDir, err := acquireLockDir(path)
+	if err != nil {
+		return nil, err
+	}
+	return func() { unlockFileLock(lockDir) }, nil
+}
+
+// acquireLockDir is the shared mkdir-as-lock acquisition core. It returns the
+// sidecar lock-dir path it created (held) on success; both AcquireFileLock and
+// acquireFileLock wrap it with their respective release shapes.
+func acquireLockDir(path string) (lockDir string, err error) {
 	// Build the sidecar lock-dir path through filepath so it carries the
 	// platform separator (backslashes on Windows) rather than whatever the
 	// caller's `path` happened to use, and ensure its parent exists before the
@@ -242,10 +286,10 @@ func acquireFileLock(path string) (func(), error) {
 	// single, atomic, EEXIST-distinguishable create — preserving the
 	// contention/stale-reclaim semantics below — while removing the
 	// missing-parent failure mode. A nil/empty parent (".") MkdirAll is a no-op.
-	lockDir := filepath.Clean(path) + ".lock"
+	lockDir = filepath.Clean(path) + ".lock"
 	if parent := filepath.Dir(lockDir); parent != "." && parent != "" {
 		if err := fsops.MkdirAll(parent, 0o700); err != nil {
-			return nil, fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
+			return "", fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
 		}
 	}
 	deadline := time.Now().Add(lockAcquireTimeout)
@@ -258,10 +302,10 @@ func acquireFileLock(path string) (func(), error) {
 		err := os.Mkdir(lockDir, 0o700)
 		if err == nil {
 			writeHolder(lockDir)
-			return func() { unlockFileLock(lockDir) }, nil
+			return lockDir, nil
 		}
 		if !os.IsExist(err) {
-			return nil, fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
+			return "", fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
 		}
 		// Contention: the lock dir already exists. Before waiting, decide whether
 		// the current holder is alive or stale (crashed without releasing). A
@@ -277,7 +321,7 @@ func acquireFileLock(path string) (func(), error) {
 			continue
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
+			return "", fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
 		}
 		time.Sleep(lockRetryInterval)
 	}

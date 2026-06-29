@@ -738,3 +738,174 @@ func TestConcurrentSetSection(t *testing.T) {
 		}
 	}
 }
+
+// TestAcquireFileLockRoundTrip exercises the exported primitive end-to-end: a
+// successful acquire creates the sidecar lock dir, and the returned release
+// removes it and reports no error.
+func TestAcquireFileLockRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("AcquireFileLock: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf("lock dir absent while held: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release returned an error: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock dir not removed by release: stat err=%v", err)
+	}
+	// Release is idempotent: a second call after the dir is gone is a no-op.
+	if err := release(); err != nil {
+		t.Fatalf("second release should be a no-op, got: %v", err)
+	}
+}
+
+// TestAcquireFileLockReleaseAllowsReAcquire proves that after release the same
+// path can be locked again immediately (no lingering held state).
+func TestAcquireFileLockReleaseAllowsReAcquire(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	release2, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("re-acquire after release must succeed: %v", err)
+	}
+	if err := release2(); err != nil {
+		t.Fatalf("second release: %v", err)
+	}
+}
+
+// TestAcquireFileLockBlocksWhileHeld proves a second acquire does not succeed
+// while the first holder is live: it blocks until the holder releases, then
+// acquires (rather than timing out). Mirrors the Flush-level contention test but
+// drives the exported API on both sides.
+func TestAcquireFileLockBlocksWhileHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = release()
+	}()
+
+	start := time.Now()
+	release2, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("second acquire should succeed after the holder releases: %v", err)
+	}
+	elapsed := time.Since(start)
+	if elapsed >= lockAcquireTimeout {
+		t.Fatalf("second acquire waited out the timeout instead of acquiring after release: %v", elapsed)
+	}
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("second acquire returned implausibly fast (%v); lock may not have been contended", elapsed)
+	}
+	if err := release2(); err != nil {
+		t.Fatalf("release2: %v", err)
+	}
+}
+
+// TestAcquireFileLockTimesOutWhileFreshHeld proves that a live (fresh) holder is
+// not reclaimed: the contender blocks for the full timeout and returns the
+// timeout error rather than stealing the lock.
+func TestAcquireFileLockTimesOutWhileFreshHeld(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	seedLockDir(t, path, 0, true) // fresh holder → not stale
+
+	start := time.Now()
+	release, err := AcquireFileLock(path)
+	elapsed := time.Since(start)
+	if err == nil {
+		_ = release()
+		t.Fatal("expected timeout error while a fresh lock is held")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("expected timeout error, got: %v", err)
+	}
+	if elapsed < lockAcquireTimeout {
+		t.Fatalf("acquire returned before the timeout: %v < %v", elapsed, lockAcquireTimeout)
+	}
+}
+
+// TestAcquireFileLockReclaimsStaleLock proves the exported API recovers from a
+// crashed holder: a lock dir whose recorded age exceeds the TTL is reclaimed and
+// acquisition succeeds quickly (before the acquire timeout).
+func TestAcquireFileLockReclaimsStaleLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	seedLockDir(t, path, lockStaleTTL+time.Second, true) // stale holder
+
+	start := time.Now()
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("expected stale lock to be reclaimed, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= lockAcquireTimeout {
+		t.Fatalf("reclaim took too long (%v); did it wait out the timeout?", elapsed)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release after reclaim: %v", err)
+	}
+}
+
+// TestAcquireFileLockReleaseSurfacesError proves the exported release returns the
+// underlying removal error (not just a debug log) when the sidecar dir cannot be
+// removed — here by stripping write permission from its parent. Skipped where the
+// FS does not enforce the perm bit (e.g. running as root).
+func TestAcquireFileLockReleaseSurfacesError(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "ro-parent")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(parent, "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700); _ = release() })
+	if err := os.Chmod(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	err = release()
+	if _, statErr := os.Stat(path + ".lock"); os.IsNotExist(statErr) {
+		t.Skip("filesystem removed the lock dir despite a read-only parent; cannot force a release error here")
+	}
+	if err == nil {
+		t.Fatal("expected release to surface the removal error")
+	}
+}
+
+// TestAcquireFileLockMissingParentCreated proves the exported API materializes an
+// absent parent chain before taking the lock (the Windows ENOENT/EFILE_NOT_FOUND
+// field bug), and surfaces an error when that parent cannot be created.
+func TestAcquireFileLockMissingParentCreated(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a", "b", "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire under missing parents must succeed: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf("lock dir not created under freshly-made parents: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AcquireFileLock(filepath.Join(blocker, "sub", "guarded.ndjson")); err == nil {
+		t.Fatal("expected acquire error when the lock parent cannot be created")
+	}
+}
