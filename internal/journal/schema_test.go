@@ -3,6 +3,7 @@ package journal
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +22,8 @@ var expectedCommands = map[string]Tier{
 	CmdFoldBackCreate:     TierUnconditional,
 	CmdFoldBackUpdate:     TierUnconditional,
 	CmdDelegationCloseout: TierUnconditional,
+	CmdContractCreate:     TierUnconditional,
+	CmdPlanDeriveScope:    TierUnconditional,
 	CmdVerifyRecord:       TierUnconditional,
 	CmdCheckpoint:         TierUnconditional,
 	CmdCommit:             TierUnconditional,
@@ -216,7 +219,7 @@ func TestNewEventPopulatedPayloads(t *testing.T) {
 	})
 
 	t.Run("tier-2 task update is input_only with changed_fields", func(t *testing.T) {
-		in := &DeltaInput{Plan: "p", Task: "p2", ChangedFields: ChangedFields{"status": "in_progress"}}
+		in := &DeltaInput{Plan: "p", Task: "p2", ChangedFields: NewChangedFields(map[string]string{"status": "in_progress"})}
 		obs := &DeltaObserved{FieldsReplaced: []string{"status"}}
 		env, err := NewEvent(CmdTaskUpdate, ActorMain, in, obs)
 		if err != nil {
@@ -231,6 +234,21 @@ func TestNewEventPopulatedPayloads(t *testing.T) {
 		}
 		if len(got.FieldsReplaced) != 1 || got.FieldsReplaced[0] != "status" {
 			t.Errorf("changed-fields delta wrong: %+v", got)
+		}
+	})
+
+	t.Run("derive-scope records counts not bodies", func(t *testing.T) {
+		obs := &DeriveScopeObserved{SidecarPath: "scope.yaml", Mode: "code", Confidence: "high", RequiredPaths: 2, Queries: 5}
+		env, err := NewEvent(CmdPlanDeriveScope, ActorMain, &DeriveScopeInput{Plan: "p", Task: "p2", SeedSymbols: []string{"Foo"}}, obs)
+		if err != nil {
+			t.Fatalf("NewEvent: %v", err)
+		}
+		got := &DeriveScopeObserved{}
+		if err := json.Unmarshal(env.Observed, got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.RequiredPaths != 2 || got.Queries != 5 || got.Confidence != "high" {
+			t.Errorf("derive-scope summary wrong: %+v", got)
 		}
 	})
 
@@ -338,5 +356,133 @@ func TestFailedEventDropsObservedThroughEmit(t *testing.T) {
 	}
 	if got.Observed != nil {
 		t.Errorf("persisted failed event carries observed: %s", got.Observed)
+	}
+}
+
+// TestLocusValidate enforces the R8 sum-type: exactly one arm set passes; both,
+// neither, or (for a present Locus) empty is rejected; a nil Locus is allowed.
+func TestLocusValidate(t *testing.T) {
+	cases := []struct {
+		name    string
+		locus   *Locus
+		wantErr bool
+	}{
+		{"nil locus is valid", nil, false},
+		{"canonical only", &Locus{Canonical: &CanonicalRef{Ref: "master@x"}}, false},
+		{"in-open-pr only", &Locus{InOpenPR: &InOpenPRRef{PR: 1, Status: "completed"}}, false},
+		{"both arms set", &Locus{Canonical: &CanonicalRef{Ref: "master@x"}, InOpenPR: &InOpenPRRef{PR: 1}}, true},
+		{"neither arm set", &Locus{}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.locus.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() err = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestNewEventRejectsInvalidLocus asserts NewEvent fails loudly when an observed
+// payload carries an invalid locus, rather than persisting an ambiguous record.
+func TestNewEventRejectsInvalidLocus(t *testing.T) {
+	bad := &AdvanceObserved{
+		ToStatus: "completed",
+		Locus:    &Locus{Canonical: &CanonicalRef{Ref: "master@x"}, InOpenPR: &InOpenPRRef{PR: 1}},
+	}
+	if _, err := NewEvent(CmdAdvance, ActorMain, &AdvanceInput{Plan: "p", Task: "t"}, bad); err == nil {
+		t.Fatal("NewEvent with both-arm locus: want error, got nil")
+	}
+
+	// A valid single-arm locus on every locus-carrying observed passes.
+	carriers := []any{
+		&AdvanceObserved{Locus: &Locus{Canonical: &CanonicalRef{Ref: "m@x"}}},
+		&CloseTaskObserved{Locus: &Locus{InOpenPR: &InOpenPRRef{PR: 2, Status: "completed"}}},
+		&MergeBackObserved{ArtifactPath: "a", Locus: &Locus{Canonical: &CanonicalRef{Ref: "m@y"}}},
+	}
+	cmds := []string{CmdAdvance, CmdCloseTask, CmdMergeBack}
+	for i, obs := range carriers {
+		if _, err := NewEvent(cmds[i], ActorMain, nil, obs); err != nil {
+			t.Errorf("NewEvent(%q) with valid locus: %v", cmds[i], err)
+		}
+	}
+
+	// A typed-nil locus carrier must not panic and must validate clean, for every
+	// carrier type (each has its own nil-receiver guard).
+	var nilAdvance *AdvanceObserved
+	var nilClose *CloseTaskObserved
+	var nilMerge *MergeBackObserved
+	nilCarriers := map[string]any{
+		CmdAdvance:   nilAdvance,
+		CmdCloseTask: nilClose,
+		CmdMergeBack: nilMerge,
+	}
+	for cmd, obs := range nilCarriers {
+		if _, err := NewEvent(cmd, ActorMain, nil, obs); err != nil {
+			t.Errorf("NewEvent(%q) with typed-nil observed: %v", cmd, err)
+		}
+	}
+}
+
+// TestNewChangedFieldsBounded asserts the Tier-2 input reduces a raw value to
+// {name, len, sha256-prefix} and never stores the value verbatim — even a large
+// body collapses to fixed-size metadata.
+func TestNewChangedFieldsBounded(t *testing.T) {
+	if got := NewChangedFields(nil); got != nil {
+		t.Errorf("empty input: got %v, want nil", got)
+	}
+
+	body := strings.Repeat("secret-note-body ", 1000) // ~17KB body
+	cf := NewChangedFields(map[string]string{
+		"notes":  body,
+		"status": "in_progress",
+	})
+	if len(cf) != 2 {
+		t.Fatalf("got %d field deltas, want 2", len(cf))
+	}
+	// Sorted by name: "notes" before "status".
+	if cf[0].Name != "notes" || cf[1].Name != "status" {
+		t.Errorf("not sorted by name: %+v", cf)
+	}
+	if cf[0].Len != len(body) {
+		t.Errorf("notes.len = %d, want %d", cf[0].Len, len(body))
+	}
+	if len(cf[0].SHA256) != changedFieldHashLen {
+		t.Errorf("sha256 prefix len = %d, want %d", len(cf[0].SHA256), changedFieldHashLen)
+	}
+
+	// The body must not survive anywhere in the serialized input.
+	in := &DeltaInput{Plan: "p", Task: "t", ChangedFields: cf}
+	env, err := NewEvent(CmdTaskUpdate, ActorMain, in, &DeltaObserved{FieldsReplaced: []string{"notes", "status"}})
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	if strings.Contains(string(env.Input), "secret-note-body") {
+		t.Fatalf("raw body leaked into journaled input: %s", env.Input)
+	}
+}
+
+// TestContractCreateRoundTrip covers the newly registered contract create schema.
+func TestContractCreateRoundTrip(t *testing.T) {
+	obs := &ContractCreateObserved{
+		ContractID:         "del-t-1",
+		Mode:               "direct",
+		Status:             "active",
+		ContractPath:       ".agents/active/contracts/del-t-1.yaml",
+		ResolvedWriteScope: []string{"internal/journal/"},
+	}
+	env, err := NewEvent(CmdContractCreate, ActorOrchestrator, &ContractCreateInput{Plan: "p", Task: "t", Mode: "direct"}, obs)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	if env.EventType != EventDurableDelta {
+		t.Errorf("EventType = %q, want durable_delta", env.EventType)
+	}
+	got := &ContractCreateObserved{}
+	if err := json.Unmarshal(env.Observed, got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.ContractID != "del-t-1" || got.Mode != "direct" || len(got.ResolvedWriteScope) != 1 {
+		t.Errorf("contract round-trip wrong: %+v", got)
 	}
 }

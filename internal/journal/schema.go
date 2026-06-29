@@ -1,8 +1,11 @@
 package journal
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 )
 
 // This file is the journal's command contract (spec D3/D4). It encodes, as typed
@@ -52,6 +55,8 @@ const (
 	CmdFoldBackCreate     = "workflow fold-back create"
 	CmdFoldBackUpdate     = "workflow fold-back update"
 	CmdDelegationCloseout = "workflow delegation closeout"
+	CmdContractCreate     = "workflow contract create"
+	CmdPlanDeriveScope    = "workflow plan derive-scope"
 	CmdVerifyRecord       = "workflow verify record"
 	CmdCheckpoint         = "workflow checkpoint"
 	CmdCommit             = "workflow commit"
@@ -103,6 +108,61 @@ type CanonicalRef struct {
 type InOpenPRRef struct {
 	PR     int    `json:"pr"`
 	Status string `json:"status"`
+}
+
+// Validate enforces Locus as a sum type: exactly one arm must be set. An absent
+// (nil) Locus is valid — many transitions carry no locus — but a present Locus
+// with both or neither arm set is rejected, so a caller can never produce a
+// record that conflates in-PR with done-on-master (spec R8). NewEvent calls this
+// at construction time, failing loudly rather than persisting an ambiguous locus.
+func (l *Locus) Validate() error {
+	if l == nil {
+		return nil
+	}
+	set := 0
+	if l.Canonical != nil {
+		set++
+	}
+	if l.InOpenPR != nil {
+		set++
+	}
+	if set != 1 {
+		return fmt.Errorf("journal: locus must set exactly one of {canonical, in_open_pr}, got %d", set)
+	}
+	return nil
+}
+
+// locusCarrier is implemented by every Observed struct that carries a Locus, so
+// NewEvent can validate the locus of any observed payload uniformly without a
+// type switch over the concrete observed types.
+type locusCarrier interface {
+	ValidateLocus() error
+}
+
+// ValidateLocus implements locusCarrier for the task-transition observed deltas.
+// A nil receiver (typed-nil observed) is valid; the embedded Locus is validated
+// otherwise.
+func (o *AdvanceObserved) ValidateLocus() error {
+	if o == nil {
+		return nil
+	}
+	return o.Locus.Validate()
+}
+
+// ValidateLocus implements locusCarrier for CloseTaskObserved.
+func (o *CloseTaskObserved) ValidateLocus() error {
+	if o == nil {
+		return nil
+	}
+	return o.Locus.Validate()
+}
+
+// ValidateLocus implements locusCarrier for MergeBackObserved.
+func (o *MergeBackObserved) ValidateLocus() error {
+	if o == nil {
+		return nil
+	}
+	return o.Locus.Validate()
 }
 
 // --- Tier 1: canonical transitions + irreversible FS moves -------------------
@@ -247,6 +307,47 @@ type DelegationCloseoutObserved struct {
 	ReconciledTaskStatus string   `json:"reconciled_task_status"`
 }
 
+// ContractCreateInput is `workflow contract create`'s invoked flags. Sibling of
+// fanout: it persists a delegation contract for direct/delegated orchestrator
+// work.
+type ContractCreateInput struct {
+	Plan       string   `json:"plan"`
+	Task       string   `json:"task"`
+	Owner      string   `json:"owner,omitempty"`
+	WriteScope []string `json:"write_scope,omitempty"`
+	Mode       string   `json:"mode,omitempty"`
+	Force      bool     `json:"force,omitempty"`
+}
+
+// ContractCreateObserved is `workflow contract create`'s durable delta: the
+// persisted contract's id/mode/status/path and the resolved write scope.
+type ContractCreateObserved struct {
+	ContractID         string   `json:"contract_id"`
+	Mode               string   `json:"mode"`
+	Status             string   `json:"status,omitempty"`
+	ContractPath       string   `json:"contract_path,omitempty"`
+	ResolvedWriteScope []string `json:"resolved_write_scope,omitempty"`
+}
+
+// DeriveScopeInput is `workflow plan derive-scope`'s invoked flags.
+type DeriveScopeInput struct {
+	Plan        string   `json:"plan"`
+	Task        string   `json:"task"`
+	SeedSymbols []string `json:"seed_symbols,omitempty"`
+	SeedPaths   []string `json:"seed_paths,omitempty"`
+}
+
+// DeriveScopeObserved is `workflow plan derive-scope`'s durable delta: where the
+// scope-evidence sidecar was written and a summary of what was derived — counts
+// and the confidence label, not the evidence bodies (D4).
+type DeriveScopeObserved struct {
+	SidecarPath   string `json:"sidecar_path"`
+	Mode          string `json:"mode,omitempty"`
+	Confidence    string `json:"confidence,omitempty"`
+	RequiredPaths int    `json:"required_paths"`
+	Queries       int    `json:"queries"`
+}
+
 // VerifyRecordInput is `workflow verify record`'s invoked flags.
 type VerifyRecordInput struct {
 	Kind    string `json:"kind"`
@@ -340,10 +441,53 @@ type TaskAddObserved struct {
 	Appended bool `json:"appended"`
 }
 
-// ChangedFields is a delta map of field-name to a short scalar representation of
-// the new value. Tier-2 commands record this rather than the full row (R6); large
-// or structured fields are recorded by name only (see DeltaObserved).
-type ChangedFields map[string]string
+// changedFieldHashLen is how many hex chars of the value SHA-256 a FieldDelta
+// keeps. 12 hex chars (48 bits) is enough for the recovery view to detect whether
+// a recorded change still matches the current file value, while never storing the
+// value itself.
+const changedFieldHashLen = 12
+
+// FieldDelta is the bounded record of one changed Tier-2 field: its name plus
+// metadata about the new value — its byte length and a short SHA-256 prefix —
+// but NEVER the value itself. This makes the input structurally incapable of
+// carrying a body (spec D4: Tier-2 journals the delta, not bodies). The recovery
+// view re-reads the canonical file (TASKS.yaml/PLAN.yaml/prefs) and uses the
+// hash to tell whether the journaled change is still the current value.
+type FieldDelta struct {
+	Name   string `json:"name"`
+	Len    int    `json:"len"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+// ChangedFields is the bounded set of fields a Tier-2 command changed. It is a
+// slice of FieldDelta (metadata only) rather than a name→value map, so a body
+// cannot be smuggled into the journal even by a careless emitter (R6/D4). Build
+// it only via NewChangedFields, which enforces the truncation in this layer.
+type ChangedFields []FieldDelta
+
+// NewChangedFields reduces a name→raw-value map to bounded per-field metadata
+// (length + SHA-256 prefix), discarding the raw values. Output is sorted by field
+// name for a deterministic record. An empty input yields a nil ChangedFields.
+func NewChangedFields(raw map[string]string) ChangedFields {
+	if len(raw) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(raw))
+	for name := range raw {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make(ChangedFields, 0, len(names))
+	for _, name := range names {
+		sum := sha256.Sum256([]byte(raw[name]))
+		out = append(out, FieldDelta{
+			Name:   name,
+			Len:    len(raw[name]),
+			SHA256: hex.EncodeToString(sum[:])[:changedFieldHashLen],
+		})
+	}
+	return out
+}
 
 // DeltaInput is the shared invoked-flags shape for the field-replacing Tier-2
 // commands (task update, plan update, prefs set-local/set-shared).
@@ -485,8 +629,23 @@ func newSpec[I, O any](command string, tier Tier) CommandSpec {
 }
 
 // registry is the single source of truth for the journaled command set. A command
-// absent here is not journaled — that is how the spec's Excluded set (config,
-// hook-sentinel/outcome, score) is expressed: by omission, asserted in tests.
+// absent here is not journaled — that is how the spec's Excluded set is expressed:
+// by omission, asserted in tests. The exclusions are intentional, not oversights:
+//
+//   - config (`refresh`, `config explain|verify|relevance`) — D4: the deterministic
+//     snapshot re-reads the `.agentsrc.lock` (inputs_digest + per-layer resolved
+//     sha), so config state is snapshot-redundant; recovery is "re-run da refresh".
+//   - hook-sentinel / hook-outcome and `workflow delegation gate` — intra-turn gate
+//     plumbing/telemetry with their own stores; not canonical workflow state.
+//   - score — recomputable from iter-logs.
+//   - `kg setup` — first-run provisioning, skipped after; not a routine mutation.
+//   - read-only commands (status, orient, log, drift, plan show|graph|schedule|
+//     check-scope, complete, bundle stages, kg lint|stats|query|…) mutate nothing.
+//
+// Two state-mutating commands beyond the spec's Representative block are journaled
+// here after a re-scan of the command trees: `workflow contract create` (persists a
+// delegation contract; Tier-1 sibling of fanout) and `workflow plan derive-scope`
+// (writes a scope-evidence sidecar; Tier-1, recording counts not bodies).
 var registry = buildRegistry()
 
 func buildRegistry() map[string]CommandSpec {
@@ -502,6 +661,8 @@ func buildRegistry() map[string]CommandSpec {
 		newSpec[FoldBackInput, FoldBackObserved](CmdFoldBackCreate, TierUnconditional),
 		newSpec[FoldBackInput, FoldBackObserved](CmdFoldBackUpdate, TierUnconditional),
 		newSpec[DelegationCloseoutInput, DelegationCloseoutObserved](CmdDelegationCloseout, TierUnconditional),
+		newSpec[ContractCreateInput, ContractCreateObserved](CmdContractCreate, TierUnconditional),
+		newSpec[DeriveScopeInput, DeriveScopeObserved](CmdPlanDeriveScope, TierUnconditional),
 		newSpec[VerifyRecordInput, VerifyRecordObserved](CmdVerifyRecord, TierUnconditional),
 		newSpec[CheckpointInput, CheckpointObserved](CmdCheckpoint, TierUnconditional),
 		newSpec[CommitInput, CommitObserved](CmdCommit, TierUnconditional),
@@ -559,12 +720,19 @@ func IsJournaled(command string) bool {
 // with the command. A nil (or typed-nil) payload is omitted. The remaining
 // envelope fields (schema, version, ts, seq, actor, cwd_repo) are stamped by Emit.
 //
-// It returns an error for a command that is not journaled, so a miswired caller
-// fails loudly rather than silently dropping the event.
+// It returns an error for a command that is not journaled, and for an observed
+// payload whose Locus is invalid (R8 sum-type: exactly one arm), so a miswired
+// caller fails loudly at construction rather than silently dropping the event or
+// persisting an ambiguous locus.
 func NewEvent(command string, actor Actor, input, observed any) (Envelope, error) {
 	spec, ok := Lookup(command)
 	if !ok {
 		return Envelope{}, fmt.Errorf("journal: command %q is not journaled", command)
+	}
+	if lc, ok := observed.(locusCarrier); ok {
+		if err := lc.ValidateLocus(); err != nil {
+			return Envelope{}, fmt.Errorf("journal: invalid observed for %q: %w", command, err)
+		}
 	}
 	rawInput, err := marshalPayload(input)
 	if err != nil {
