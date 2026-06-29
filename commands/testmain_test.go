@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/AGOrcha/dot-agents/internal/journal"
 )
 
 // TestMain installs a hermetic base PATH for the whole package test binary.
@@ -30,10 +32,28 @@ import (
 //
 // Windows is left untouched: the PATH/shim seeding helpers already t.Skip
 // there, and this POSIX base PATH is not meaningful on Windows.
+//
+// It also isolates the session-handoff journal under a throwaway XDG_STATE_HOME
+// for the whole package run: the review approve/reject commands now append typed
+// journal events (p3b), and every existing review test that drives those runners
+// would otherwise write events.log into the developer's real ~/.local/state.
 func TestMain(m *testing.M) {
 	if runtime.GOOS != "windows" {
 		sep := string(os.PathListSeparator)
 		os.Setenv("PATH", filepath.Join(runtime.GOROOT(), "bin")+sep+"/usr/bin"+sep+"/bin"+sep+"/usr/sbin"+sep+"/sbin")
 	}
-	os.Exit(m.Run())
+	dir, err := os.MkdirTemp("", "commands-journal-state-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("XDG_STATE_HOME", dir)
+	// Neuter the real journal append path for the package run: the review runners
+	// resolve a constant repoPath (the cwd), so the events.log interprocess lock
+	// would serialize across tests. The wiring still executes (build → NewEvent →
+	// reviewJournalEmit); only the disk write is a no-op. Capture tests override
+	// reviewJournalEmit with their own recorder.
+	reviewJournalEmit = func(string, journal.Envelope) error { return nil }
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }

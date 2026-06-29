@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
@@ -307,6 +308,10 @@ func runWorkflowVerifyRecord(in verifyRecordInputs) error {
 	if err != nil {
 		return err
 	}
+	input := &journal.VerifyRecordInput{Kind: in.Kind, Status: in.Status, Scope: in.Scope, Summary: in.Summary, Task: strings.TrimSpace(in.TaskID)}
+	observed := &journal.VerifyRecordObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdVerifyRecord, input, observed, ok) }()
 	now := time.Now().UTC().Format(time.RFC3339)
 	taskID := strings.TrimSpace(in.TaskID)
 
@@ -342,6 +347,9 @@ func runWorkflowVerifyRecord(in verifyRecordInputs) error {
 	if err := appendVerificationLog(project.Name, rec); err != nil {
 		return err
 	}
+	observed.VerificationLogID = now
+	observed.ResultArtifactPath = artifactRel
+	ok = true
 	ui.Success(fmt.Sprintf("Verification recorded: %s %s (%s)", in.Kind, in.Status, in.Summary))
 	return nil
 }

@@ -683,9 +683,12 @@ func TestWarmCodeLane_Success(t *testing.T) {
 	}
 	defer store.Close()
 	t.Chdir(repo)
-	got := warmCodeLane(store)
+	nodes, _, got := warmCodeLane(store)
 	if !strings.Contains(got, "code-lane") {
 		t.Errorf("expected non-empty code-lane summary, got %q", got)
+	}
+	if nodes != 1 {
+		t.Errorf("expected 1 code node imported, got %d", nodes)
 	}
 }
 

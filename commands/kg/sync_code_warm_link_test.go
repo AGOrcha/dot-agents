@@ -686,7 +686,7 @@ func TestWarmCodeLane_CRGUnavailable(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Chdir(t.TempDir())
 	out := captureStdout(t, func() {
-		if got := warmCodeLane(store); got != "" {
+		if _, _, got := warmCodeLane(store); got != "" {
 			t.Errorf("expected empty summary when CRG missing, got %q", got)
 		}
 	})
@@ -1750,7 +1750,7 @@ func TestWarmCodeLane_EmptyDB(t *testing.T) {
 		t.Fatalf("openKGStore: %v", err)
 	}
 	defer store.Close()
-	msg := warmCodeLane(store)
+	_, _, msg := warmCodeLane(store)
 	if !strings.Contains(msg, "code-lane") {
 		t.Errorf("expected code-lane summary, got %q", msg)
 	}

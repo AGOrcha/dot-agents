@@ -102,3 +102,49 @@ attendance: unattended
 ```
 
 The skill's body becomes: invoke `da workflow close-task --json` with the resolved plan/task, then render the returned `closeTaskResult` (iteration N, score value + band, sidecar path, next focus) back to the operator. The immediate-feedback loop closes inside the skill: the operator sees *"iteration N → score 0.7 fair → here is the breakdown"* the moment the iteration closes, while the context is still hot.
+
+## Session-handoff journal (`da workflow journal`)
+
+The session-handoff journal is an append-only, crash-survivable event log plus a
+deterministic live-state snapshot, kept **off** the git-tracked tree under the XDG
+state directory (`<XDG_STATE_HOME>/dot-agents/journal/<repo-fingerprint>/`). State-
+mutating `da workflow` commands append one typed event on success, so a session
+resumed after a context compaction or crash can re-inject state from durable file
+state — re-verified against current reality — instead of re-grounding from scratch.
+
+The engine lives in `internal/journal`; `da workflow journal` is its user-facing
+surface. Every subcommand operates on the current repository and supports `--json`.
+
+| Subcommand | What it does |
+|------------|--------------|
+| `journal snapshot` | Capture the deterministic live-state snapshot (active plans + task statuses, the pending-unblocked projection, in-flight delegations, pending merge-backs) to `snapshot.json`. |
+| `journal recover` | Build the **verified** recovery view: reconstruct from the snapshot watermark + event replay, then re-verify each item against current reality. Renders the verified / changed / missing / unverified items, the trust gradient, the canonical-vs-in-PR locus (with enriched coords), quarantined identity conflicts, and the bundle freshness label. |
+| `journal show` | Display the current snapshot summary plus the recent event log (`--limit N`, default 20; `--all` to lift the cap). |
+| `journal prune` | Drop events beyond a bounded retention (`--keep N`, default 1000); keeps the newest N. The rewrite is atomic (temp-then-rename) under the journal's advisory lock; honors the global `-n` dry-run. |
+| `journal append` | Low-level: append one raw event (`--command`, `--actor`, `--event-type`, `--input`/`--observed` JSON). Bypasses the typed per-command schemas (raw Emit path, still size-capped); intended for the reasoned-overlay and testing, not routine workflow mutation. |
+
+### Verification sources (how `recover` re-verifies)
+
+`journal recover` re-verifies each reconstructed item against an **ordered** list of
+sources — authoritative store/service-backed first, local fallback last — and
+enriches the snapshot's placeholder locus coordinates (PR `0`, the `canonical`
+sentinel ref) with the resolved reality:
+
+- **`gh` (authoritative)** — resolves PR state/number + merge sha. Open PRs flow
+  through the existing `event.pr.*` producer; a merged task's merge sha comes from a
+  narrow `gh pr list --state merged` read. A `gh`/network failure makes the source
+  unavailable, so recovery falls through to the local fallback.
+- **`local` (non-authoritative)** — confirms a task's existence + canonical status
+  from the live `TASKS.yaml` when `gh` is unavailable. It corroborates the locus arm
+  and status (medium trust) but never resolves authoritative coordinates.
+
+Task→PR matching reuses the bounded `branchMatchesTask` token rule, so a task id
+never resolves a sibling's PR.
+
+```text
+da workflow journal snapshot          # capture current live state
+da workflow journal recover           # verified resume view (re-grounded against reality)
+da --json workflow journal recover    # structured RecoveryResult for skills/scripts
+da workflow journal show --limit 50   # snapshot + recent events
+da workflow journal prune --keep 200  # bounded retention
+```

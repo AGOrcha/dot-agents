@@ -42,6 +42,7 @@ const PUBLIC_PAGES: { src: string; id: string; order: number }[] = [
   { src: 'README.md', id: 'index', order: 1 },
 
   // Guides
+  { src: 'docs/GETTING_STARTED.md', id: 'guides/getting-started', order: 0 },
   { src: 'docs/LAYERED_CONFIG_GUIDE.md', id: 'guides/layered-config', order: 1 },
   { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 2 },
   { src: 'docs/CONFIG_RELEVANCE.md', id: 'guides/config-relevance', order: 3 },

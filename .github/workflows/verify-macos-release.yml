@@ -1,0 +1,86 @@
+name: Verify macOS Release Signature
+
+# Post-publish gate: the darwin `da` binaries are Developer ID-signed (and
+# notarized) by quill on the *Linux* release runner, where Apple's own
+# `codesign`/`spctl` are unavailable — so a structurally-valid signature that a
+# real Mac rejects ships silently. This job downloads the published darwin
+# tarballs on an actual macOS runner and proves they (a) pass
+# `codesign --verify --strict` and (b) actually execute.
+#
+# Why this exists: v0.4.1 shipped a quill signature whose *designated
+# requirement* was unsatisfiable — quill emitted
+# `certificate root[field.1.2.840.113635.100.6.2.6]`, but that Developer ID
+# marker OID lives on the intermediate ("Developer ID Certification Authority"),
+# not on the Apple Root CA. `codesign --verify` failed with "does not satisfy
+# its designated Requirement" and macOS (Ventura+; hard on Apple Silicon /
+# macOS 26) SIGKILLed `da` on first exec. None of the Linux-side checks could
+# catch it. This job would have.
+on:
+  release:
+    types: [published]
+  # Manual re-verification of any already-published tag.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify (e.g. v0.4.1)
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify-macos:
+    name: Verify darwin Developer ID signature
+    runs-on: macos-latest
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${EVENT_TAG:-${INPUT_TAG}}"
+          [ -n "${tag}" ] || { echo "no tag to verify"; exit 1; }
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signed darwin binaries pass codesign + execute
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          host_arch="$(uname -m)"   # arm64 on macos-latest
+          for arch in arm64 amd64; do
+            asset="dot-agents_${VERSION}_darwin_${arch}.tar.gz"
+            echo "::group::${asset}"
+            work="$(mktemp -d)"
+            # gh download (not a browser) => no com.apple.quarantine, so this
+            # isolates signature validity from Gatekeeper quarantine handling.
+            gh release download "${TAG}" -R "${GITHUB_REPOSITORY}" -p "${asset}" -D "${work}"
+            tar -C "${work}" -xzf "${work}/${asset}"
+            bin="${work}/da"
+
+            # 1) Strict signature validation. A malformed designated requirement
+            #    (e.g. `certificate root[...6.2.6...]` instead of
+            #    `certificate 1[...]`) fails here with
+            #    "does not satisfy its designated Requirement".
+            codesign --verify --strict --verbose=2 "${bin}"
+
+            # 2) Confirm Developer ID identity + hardened runtime are present.
+            codesign -dvv "${bin}" 2>&1 | tee "${work}/cs.txt"
+            grep -q "Authority=Developer ID Application" "${work}/cs.txt"
+            grep -Eq "flags=0x[0-9a-f]*\(.*runtime.*\)" "${work}/cs.txt"
+
+            # 3) Decisive end-user check: a bad-signature binary is SIGKILLed
+            #    (exit 137) on exec. Only run the slice matching the runner's
+            #    native arch; the other arch is covered by codesign above.
+            if [ "${arch}" = "${host_arch}" ]; then
+              chmod +x "${bin}"
+              "${bin}" --version
+            fi
+            echo "::endgroup::"
+          done
+          echo "macOS signature verification passed for ${TAG}"

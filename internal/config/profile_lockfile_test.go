@@ -205,6 +205,27 @@ func TestWriteUnitsLockEmitsProfileUnits(t *testing.T) {
 // the GENERATED .agentsrc.lock is read back and asserted to carry kind:profile
 // units with the right kind + content digest. Unlike the WriteUnitsLock-in-isolation
 // test, this drives the resolver's own lock-generation assembly site.
+// collectWrittenProfileUnits returns the kind:profile units written into the
+// lock, failing the test if none were written or any lacks a content digest.
+func collectWrittenProfileUnits(t *testing.T, units UnitsLock) map[string]LockedUnit {
+	t.Helper()
+	written := map[string]LockedUnit{}
+	for key, u := range units.Units {
+		if u.Kind == UnitKindProfile {
+			written[key] = u
+		}
+	}
+	if len(written) == 0 {
+		t.Fatal("Resolve must write kind:profile units into .agentsrc.lock (R2)")
+	}
+	for key, u := range written {
+		if u.Digest == "" || !strings.HasPrefix(u.Digest, profileDigestPrefix) {
+			t.Fatalf("profile unit %q must carry a content digest, got %q", key, u.Digest)
+		}
+	}
+	return written
+}
+
 func TestResolveWritesProfileUnitsToLock(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	repo := t.TempDir()
@@ -233,20 +254,7 @@ func TestResolveWritesProfileUnitsToLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadUnits: %v", err)
 	}
-	written := map[string]LockedUnit{}
-	for key, u := range units.Units {
-		if u.Kind == UnitKindProfile {
-			written[key] = u
-		}
-	}
-	if len(written) == 0 {
-		t.Fatal("Resolve must write kind:profile units into .agentsrc.lock (R2)")
-	}
-	for key, u := range written {
-		if u.Digest == "" || !strings.HasPrefix(u.Digest, profileDigestPrefix) {
-			t.Fatalf("profile unit %q must carry a content digest, got %q", key, u.Digest)
-		}
-	}
+	written := collectWrittenProfileUnits(t, units)
 
 	// Every written profile unit's digest matches an independent derivation from the
 	// SAME snapshot Resolve returned — proving the lock records exactly the fragments
