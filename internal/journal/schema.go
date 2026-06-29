@@ -134,36 +134,23 @@ func (l *Locus) Validate() error {
 
 // locusCarrier is implemented by every Observed struct that carries a Locus, so
 // NewEvent can validate the locus of any observed payload uniformly without a
-// type switch over the concrete observed types.
+// type switch over the concrete observed types. The methods use VALUE receivers
+// so both a value (AdvanceObserved{...}) and a pointer (&AdvanceObserved{...})
+// satisfy the interface — a by-value observed cannot slip past validation.
 type locusCarrier interface {
 	ValidateLocus() error
 }
 
 // ValidateLocus implements locusCarrier for the task-transition observed deltas.
-// A nil receiver (typed-nil observed) is valid; the embedded Locus is validated
-// otherwise.
-func (o *AdvanceObserved) ValidateLocus() error {
-	if o == nil {
-		return nil
-	}
-	return o.Locus.Validate()
-}
+// A nil embedded Locus is valid (Locus.Validate handles it); a present Locus must
+// be a well-formed sum type.
+func (o AdvanceObserved) ValidateLocus() error { return o.Locus.Validate() }
 
 // ValidateLocus implements locusCarrier for CloseTaskObserved.
-func (o *CloseTaskObserved) ValidateLocus() error {
-	if o == nil {
-		return nil
-	}
-	return o.Locus.Validate()
-}
+func (o CloseTaskObserved) ValidateLocus() error { return o.Locus.Validate() }
 
 // ValidateLocus implements locusCarrier for MergeBackObserved.
-func (o *MergeBackObserved) ValidateLocus() error {
-	if o == nil {
-		return nil
-	}
-	return o.Locus.Validate()
-}
+func (o MergeBackObserved) ValidateLocus() error { return o.Locus.Validate() }
 
 // --- Tier 1: canonical transitions + irreversible FS moves -------------------
 
@@ -489,16 +476,52 @@ func (f FieldDelta) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON decodes the wire shape back into the unexported fields, so the
-// recovery view can read a journaled FieldDelta without a re-export.
+// recovery view can read a journaled FieldDelta without a re-export. Crucially it
+// VALIDATES the bounded shape on decode: the decode path is a second population
+// route that would otherwise let a raw body masquerade as the sha256 field, so a
+// decoded FieldDelta must look exactly like one NewChangedFields produces — a
+// fixed-length lowercase-hex digest, a non-negative length, and a present name —
+// or the unmarshal fails. This keeps the no-bodies invariant structural across
+// BOTH construction and deserialization.
 func (f *FieldDelta) UnmarshalJSON(data []byte) error {
 	var w fieldDeltaWire
 	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	if err := validateFieldDeltaWire(w); err != nil {
 		return err
 	}
 	f.name = w.Name
 	f.length = w.Len
 	f.sha = w.SHA256
 	return nil
+}
+
+// validateFieldDeltaWire enforces that a decoded FieldDelta matches the bounded
+// shape NewChangedFields emits, so the decode path cannot be used to smuggle a
+// body in via the sha256 field (D4).
+func validateFieldDeltaWire(w fieldDeltaWire) error {
+	if w.Name == "" {
+		return fmt.Errorf("journal: field delta missing name")
+	}
+	if w.Len < 0 {
+		return fmt.Errorf("journal: field delta %q has negative len %d", w.Name, w.Len)
+	}
+	if len(w.SHA256) != changedFieldHashLen || !isLowerHex(w.SHA256) {
+		return fmt.Errorf("journal: field delta %q sha256 must be %d lowercase-hex chars, got %q",
+			w.Name, changedFieldHashLen, w.SHA256)
+	}
+	return nil
+}
+
+// isLowerHex reports whether s consists solely of lowercase hex digits (0-9a-f).
+func isLowerHex(s string) bool {
+	for _, c := range s {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // ChangedFields is the bounded set of fields a Tier-2 command changed. It is a
@@ -774,11 +797,6 @@ func NewEvent(command string, actor Actor, input, observed any) (Envelope, error
 	if !ok {
 		return Envelope{}, fmt.Errorf("journal: command %q is not journaled", command)
 	}
-	if lc, ok := observed.(locusCarrier); ok {
-		if err := lc.ValidateLocus(); err != nil {
-			return Envelope{}, fmt.Errorf("journal: invalid observed for %q: %w", command, err)
-		}
-	}
 	rawInput, err := marshalPayload(input)
 	if err != nil {
 		return Envelope{}, fmt.Errorf("journal: marshal input for %q: %w", command, err)
@@ -786,6 +804,17 @@ func NewEvent(command string, actor Actor, input, observed any) (Envelope, error
 	rawObserved, err := marshalPayload(observed)
 	if err != nil {
 		return Envelope{}, fmt.Errorf("journal: marshal observed for %q: %w", command, err)
+	}
+	// Validate the locus only for a present observed payload. marshalPayload has
+	// already collapsed a nil / typed-nil observed to a nil rawObserved, so gating
+	// here means the value-receiver ValidateLocus is never invoked on a nil pointer
+	// (which would panic) while a both-arms locus on a value OR pointer is rejected.
+	if rawObserved != nil {
+		if lc, ok := observed.(locusCarrier); ok {
+			if err := lc.ValidateLocus(); err != nil {
+				return Envelope{}, fmt.Errorf("journal: invalid observed for %q: %w", command, err)
+			}
+		}
 	}
 	return Envelope{
 		Actor:     actor,

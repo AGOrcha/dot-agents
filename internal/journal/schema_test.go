@@ -386,12 +386,24 @@ func TestLocusValidate(t *testing.T) {
 // TestNewEventRejectsInvalidLocus asserts NewEvent fails loudly when an observed
 // payload carries an invalid locus, rather than persisting an ambiguous record.
 func TestNewEventRejectsInvalidLocus(t *testing.T) {
-	bad := &AdvanceObserved{
-		ToStatus: "completed",
-		Locus:    &Locus{Canonical: &CanonicalRef{Ref: "master@x"}, InOpenPR: &InOpenPRRef{PR: 1}},
+	badLocus := &Locus{Canonical: &CanonicalRef{Ref: "master@x"}, InOpenPR: &InOpenPRRef{PR: 1}}
+	if _, err := NewEvent(CmdAdvance, ActorMain, &AdvanceInput{Plan: "p", Task: "t"},
+		&AdvanceObserved{ToStatus: "completed", Locus: badLocus}); err == nil {
+		t.Fatal("NewEvent with both-arm locus (pointer): want error, got nil")
 	}
-	if _, err := NewEvent(CmdAdvance, ActorMain, &AdvanceInput{Plan: "p", Task: "t"}, bad); err == nil {
-		t.Fatal("NewEvent with both-arm locus: want error, got nil")
+
+	// Value receivers mean a BY-VALUE observed must also be validated — a both-arms
+	// locus passed without & cannot slip past.
+	byValueBad := []any{
+		AdvanceObserved{Locus: badLocus},
+		CloseTaskObserved{Locus: badLocus},
+		MergeBackObserved{ArtifactPath: "a", Locus: badLocus},
+	}
+	byValueCmds := []string{CmdAdvance, CmdCloseTask, CmdMergeBack}
+	for i, obs := range byValueBad {
+		if _, err := NewEvent(byValueCmds[i], ActorMain, nil, obs); err == nil {
+			t.Errorf("NewEvent(%q) with by-value both-arm locus: want error, got nil", byValueCmds[i])
+		}
 	}
 
 	// A valid single-arm locus on every locus-carrying observed passes.
@@ -407,8 +419,9 @@ func TestNewEventRejectsInvalidLocus(t *testing.T) {
 		}
 	}
 
-	// A typed-nil locus carrier must not panic and must validate clean, for every
-	// carrier type (each has its own nil-receiver guard).
+	// A typed-nil locus carrier must not panic: NewEvent gates validation on a
+	// non-nil marshaled observed, so the value-receiver ValidateLocus is never
+	// invoked on a nil pointer (which would dereference and panic).
 	var nilAdvance *AdvanceObserved
 	var nilClose *CloseTaskObserved
 	var nilMerge *MergeBackObserved
@@ -485,12 +498,43 @@ func TestNewChangedFieldsBounded(t *testing.T) {
 	}
 }
 
-// TestFieldDeltaUnmarshalError surfaces a malformed FieldDelta wire payload.
-func TestFieldDeltaUnmarshalError(t *testing.T) {
-	var f FieldDelta
-	if err := json.Unmarshal([]byte(`{"len":"not-an-int"}`), &f); err == nil {
-		t.Error("UnmarshalJSON of malformed wire: want error")
+// TestFieldDeltaUnmarshalValidates asserts the decode path is as body-proof as the
+// constructor: only the bounded shape NewChangedFields produces (12 lowercase-hex
+// sha256, non-negative len, present name) decodes; anything else — most
+// importantly a raw body smuggled into sha256 — is rejected.
+func TestFieldDeltaUnmarshalValidates(t *testing.T) {
+	validSHA := "0123456789ab" // 12 lowercase-hex chars
+	reject := []struct {
+		name string
+		wire string
+	}{
+		{"malformed json type", `{"len":"not-an-int"}`},
+		{"missing name", `{"len":3,"sha256":"` + validSHA + `"}`},
+		{"missing sha256", `{"name":"notes","len":3}`},
+		{"negative len", `{"name":"notes","len":-1,"sha256":"` + validSHA + `"}`},
+		{"non-hex sha256", `{"name":"notes","len":3,"sha256":"zzzzzzzzzzzz"}`},
+		{"uppercase sha256", `{"name":"notes","len":3,"sha256":"0123456789AB"}`},
+		{"short sha256", `{"name":"notes","len":3,"sha256":"0123"}`},
+		{"overlong sha256 is a body", `{"name":"notes","len":17000,"sha256":"` + strings.Repeat("a", 17000) + `"}`},
 	}
+	for _, tc := range reject {
+		t.Run(tc.name, func(t *testing.T) {
+			var f FieldDelta
+			if err := json.Unmarshal([]byte(tc.wire), &f); err == nil {
+				t.Errorf("UnmarshalJSON(%s): want error, got nil (decoded %+v)", tc.wire, f)
+			}
+		})
+	}
+
+	t.Run("valid 12-hex round-trips", func(t *testing.T) {
+		var f FieldDelta
+		if err := json.Unmarshal([]byte(`{"name":"notes","len":3,"sha256":"`+validSHA+`"}`), &f); err != nil {
+			t.Fatalf("UnmarshalJSON of valid wire: %v", err)
+		}
+		if f.Name() != "notes" || f.Len() != 3 || f.SHA256() != validSHA {
+			t.Errorf("decoded wrong: %+v", f)
+		}
+	})
 }
 
 // TestChangedFieldsCannotHoldBodyStructurally documents the structural guarantee:
