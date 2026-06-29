@@ -26,10 +26,12 @@ main() {
   # command, skip silently rather than warning about a command that is simply
   # not present yet.
   if command -v da >/dev/null 2>&1 && da workflow journal --help >/dev/null 2>&1; then
-    if (
-      cd "$project_dir" &&
-      da workflow journal recover
-    ); then
+    # Capture the view first; emit it on stdout ONLY after a clean exit. A
+    # partial/failed recover must never reach the SessionStart re-injection
+    # channel, so a non-zero exit stays stderr-only (recover's own stderr flows
+    # straight through and is never captured into the view).
+    if view=$(cd "$project_dir" && da workflow journal recover); then
+      printf '%s\n' "$view"
       return 0
     fi
     printf 'session-handoff-recover warning: da workflow journal recover failed; session start not blocked\n' >&2

@@ -180,10 +180,13 @@ func TestSessionHandoffScriptsBestEffort(t *testing.T) {
 			},
 		},
 		{
-			name: "recover failure never blocks session start",
+			name: "recover failure never blocks session start and never leaks a partial view",
 			sc: sessionHandoffScenario{
 				dir: "session-handoff-recover", script: "recover.sh",
 				daPresent: true, journalOK: false, verb: "recover",
+				// The shim prints a marker on stdout BEFORE its non-zero exit;
+				// the hook must NOT re-inject that partial/failed view.
+				skipStdout: []string{"DA-JOURNAL"},
 				wantStderr: []string{"recover failed", "session start not blocked"},
 			},
 		},
