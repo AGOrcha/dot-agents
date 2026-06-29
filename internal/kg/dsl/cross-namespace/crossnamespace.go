@@ -30,6 +30,7 @@ package crossnamespace
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 	"github.com/AGOrcha/dot-agents/internal/kg/dsl"
@@ -210,35 +211,39 @@ const (
 //  1. Re-parse the query against the new schema. This rejects a removed note
 //     type, a removed referenced field, or a changed edge direction — the parser
 //     only accepts a field that still exists.
-//  2. Compare the TYPE of every field the query references between the old and
-//     new schema. The parser accepts a field once it exists regardless of type,
-//     so a field whose type changed (e.g. symbol.qualified_name string→int)
-//     passes step 1 but is a breaking change — step 2 catches it.
+//  2. Compare the full SIGNATURE of every field reference the query reads
+//     between the old and new schema. The parser accepts a field once it exists
+//     regardless of type or ref target, so step 2 catches both a terminal type
+//     change (e.g. symbol.qualified_name string→int) AND a ref-chain retarget
+//     (e.g. s.owner.name where owner's ref target changes owner→principal even
+//     though the terminal `name` stays string) — both are breaking under §10.3,
+//     which requires referenced fields AND their ref targets to stay compatible.
 func (v *View) CheckCompat(updatedDeps []Namespace) (Compat, error) {
 	updated, err := Compile(v.name, v.consumerNS, updatedDeps, v.crossEdges, v.querySrc)
 	if err != nil {
 		return CompatDSLUpdateRequired, err
 	}
 	if changed := signatureMismatch(v.query, v.combined, updated.combined); changed != "" {
-		return CompatDSLUpdateRequired, fmt.Errorf("%s: view %q field %s changed signature in the dependency bump", errPrefix, v.name, changed)
+		return CompatDSLUpdateRequired, fmt.Errorf("%s: view %q reference %s changed signature in the dependency bump", errPrefix, v.name, changed)
 	}
 	return CompatOK, nil
 }
 
-// signatureMismatch returns the first referenced field whose type differs (or
-// vanished) between the old and new combined schemas, or "" when every
-// referenced field keeps its signature. It is the §10.3 signature-compatibility
-// check the re-parse cannot perform (the parser accepts a field by existence,
-// not by type).
+// signatureMismatch returns the first field reference whose FULL signature
+// differs (or vanished) between the old and new combined schemas, or "" when
+// every referenced field keeps its signature. It is the §10.3
+// signature-compatibility check the re-parse cannot perform: the parser accepts
+// a field by existence, ignoring both its type and the identity of the ref
+// targets traversed to reach it.
 func signatureMismatch(q *dsl.Query, oldInfo, newInfo dsl.SchemaInfo) string {
 	aliasType := queryAliasTypes(q)
 	for _, ref := range referencedFieldRefs(q) {
-		key, oldSig, ok := terminalFieldType(ref, aliasType, oldInfo)
+		key, oldSig, ok := refPathSignature(ref, aliasType, oldInfo)
 		if !ok {
 			continue // intrinsic id, stale selector, or bare ref — no schema field
 		}
-		_, newSig, ok := terminalFieldType(ref, aliasType, newInfo)
-		if !ok || newSig[1] != oldSig[1] {
+		_, newSig, ok := refPathSignature(ref, aliasType, newInfo)
+		if !ok || newSig != oldSig {
 			return key
 		}
 	}
@@ -287,39 +292,47 @@ func appendReturnRefs(refs []dsl.FieldRef, item dsl.ReturnItem) []dsl.FieldRef {
 	return refs
 }
 
-// terminalFieldType resolves a field ref to its terminal (noteType, field) and
-// that field's declared type in info, walking ref hops. It returns
-// (key, [noteType.field, type], true) for a real schema field, or ok=false for a
-// bare alias, an intrinsic id, a structured stale selector, or any path that
-// does not resolve to a declared field (the parser handles those cases). The
-// returned key is the stable "noteType.field" identity; sig[1] is the type.
-func terminalFieldType(ref dsl.FieldRef, aliasType map[string]string, info dsl.SchemaInfo) (string, [2]string, bool) {
-	cur, ok := aliasType[ref.Alias]
+// refPathSignature resolves a field ref to a FULL signature string that encodes
+// every ref-hop target type along the traversed path plus the terminal field's
+// type. Walking `s.owner.name` yields a signature like "ref<owner>>type<string>";
+// if owner's ref target changes (owner→principal) the signature changes even
+// though the terminal type is unchanged — so a chain retarget is detected as a
+// breaking change (§10.3). It returns (key, signature, true) for a real schema
+// field, or ok=false for a bare alias, an intrinsic id, a structured stale
+// selector, or any path that does not resolve to a declared field (the parser
+// handles those cases). key is the rooted "rootType.path" identity for
+// diagnostics.
+func refPathSignature(ref dsl.FieldRef, aliasType map[string]string, info dsl.SchemaInfo) (string, string, bool) {
+	root, ok := aliasType[ref.Alias]
 	if !ok || len(ref.Path) == 0 {
-		return "", [2]string{}, false
+		return "", "", false
 	}
+	cur := root
+	parts := make([]string, 0, len(ref.Path))
 	for i, part := range ref.Path {
 		if part == "stale" {
-			return "", [2]string{}, false // structured stale selector, not a schema field
+			return "", "", false // structured stale selector, not a schema field
 		}
 		fields, ok := info.NoteFields[cur]
 		if !ok {
-			return "", [2]string{}, false
+			return "", "", false
 		}
 		field, ok := fields[part]
 		if !ok {
-			return "", [2]string{}, false // intrinsic id terminal or unknown field
+			return "", "", false // intrinsic id terminal or unknown field
 		}
 		if i == len(ref.Path)-1 {
-			key := cur + "." + part
-			return key, [2]string{key, field.Type}, true
+			key := root + "." + strings.Join(ref.Path, ".")
+			parts = append(parts, "type<"+field.Type+">")
+			return key, strings.Join(parts, ">"), true
 		}
 		if field.RefType == "" {
-			return "", [2]string{}, false
+			return "", "", false // traverses a non-ref (parser rejects; defensive)
 		}
+		parts = append(parts, "ref<"+field.RefType+">")
 		cur = field.RefType
 	}
-	return "", [2]string{}, false
+	return "", "", false
 }
 
 // readMerged reads the consumer namespace (own-read token) and each declared

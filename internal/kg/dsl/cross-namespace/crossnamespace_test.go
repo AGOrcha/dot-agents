@@ -484,6 +484,97 @@ func TestCheckCompatRefChainSignatures(t *testing.T) {
 	}
 }
 
+// TestCheckCompatRefRetarget is the BUG (ref-chain retarget): a dependency bump
+// that changes a traversed ref's TARGET note type is breaking even when the
+// terminal field type is unchanged. Stage 2 must compare the full ref-path
+// signature (every hop target + terminal type), not just the terminal type.
+func TestCheckCompatRefRetarget(t *testing.T) {
+	consumer := crossnamespace.Namespace{Name: "c-ns", Info: mustInfo(t,
+		[]dsl.NoteTypeDecl{{Name: typeControl, Fields: []dsl.FieldDecl{{Name: fControlID, Type: typeString}}}}, nil, 2)}
+
+	// depSingle: symbol.owner -> <target>.name (single ref hop).
+	depSingle := func(target string) crossnamespace.Namespace {
+		return crossnamespace.Namespace{Name: nsDep, Info: mustInfo(t,
+			[]dsl.NoteTypeDecl{
+				{Name: typeSymbol, Fields: []dsl.FieldDecl{
+					{Name: fQualified, Type: typeString}, {Name: "owner", Type: "ref<" + target + ">"}}},
+				{Name: target, Fields: []dsl.FieldDecl{
+					{Name: "name", Type: typeString}, {Name: "team", Type: typeString}}},
+			},
+			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 2)}
+	}
+	vSingle, err := crossnamespace.Compile("v", consumer, []crossnamespace.Namespace{depSingle("owner")}, nil,
+		"MATCH (s:symbol) RETURN s.qualified_name, s.owner.name")
+	if err != nil {
+		t.Fatalf("Compile single-hop: %v", err)
+	}
+
+	t.Run("ref_target_retarget_owner_to_principal", func(t *testing.T) {
+		// Codex's exact example: owner→principal, terminal `name` stays string.
+		state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{depSingle("principal")})
+		if state != crossnamespace.CompatDSLUpdateRequired {
+			t.Fatalf("state = %s, want dsl-update-required (owner→principal)", state)
+		}
+		if cerr == nil || !contains(cerr.Error(), "symbol.owner.name") {
+			t.Fatalf("want diagnostic naming symbol.owner.name, got %v", cerr)
+		}
+	})
+
+	t.Run("same_target_is_compatible", func(t *testing.T) {
+		if state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{depSingle("owner")}); state != crossnamespace.CompatOK || cerr != nil {
+			t.Fatalf("CheckCompat = (%s, %v), want compatible", state, cerr)
+		}
+	})
+
+	t.Run("unreferenced_sibling_change_is_compatible", func(t *testing.T) {
+		// owner.team (NOT referenced) changes type; the referenced s.owner.name
+		// signature is unchanged → no false positive.
+		bumped := crossnamespace.Namespace{Name: nsDep, Info: mustInfo(t,
+			[]dsl.NoteTypeDecl{
+				{Name: typeSymbol, Fields: []dsl.FieldDecl{
+					{Name: fQualified, Type: typeString}, {Name: "owner", Type: "ref<owner>"}}},
+				{Name: "owner", Fields: []dsl.FieldDecl{
+					{Name: "name", Type: typeString}, {Name: "team", Type: "int"}}},
+			},
+			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 2)}
+		if state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{bumped}); state != crossnamespace.CompatOK || cerr != nil {
+			t.Fatalf("CheckCompat = (%s, %v), want compatible", state, cerr)
+		}
+	})
+
+	// depMulti: symbol.owner -> owner.dept -> <mid>.name (two ref hops).
+	depMulti := func(mid string) crossnamespace.Namespace {
+		return crossnamespace.Namespace{Name: nsDep, Info: mustInfo(t,
+			[]dsl.NoteTypeDecl{
+				{Name: typeSymbol, Fields: []dsl.FieldDecl{
+					{Name: fQualified, Type: typeString}, {Name: "owner", Type: "ref<owner>"}}},
+				{Name: "owner", Fields: []dsl.FieldDecl{{Name: "dept", Type: "ref<" + mid + ">"}}},
+				{Name: mid, Fields: []dsl.FieldDecl{{Name: "name", Type: typeString}}},
+			},
+			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 2)}
+	}
+	vMulti, err := crossnamespace.Compile("vm", consumer, []crossnamespace.Namespace{depMulti("dept")}, nil,
+		"MATCH (s:symbol) RETURN s.owner.dept.name")
+	if err != nil {
+		t.Fatalf("Compile multi-hop: %v", err)
+	}
+
+	t.Run("middle_hop_retarget", func(t *testing.T) {
+		// The MIDDLE hop (owner.dept) retargets dept→division; terminal name stays
+		// string.
+		state, _ := vMulti.CheckCompat([]crossnamespace.Namespace{depMulti("division")})
+		if state != crossnamespace.CompatDSLUpdateRequired {
+			t.Fatalf("state = %s, want dsl-update-required (middle hop dept→division)", state)
+		}
+	})
+
+	t.Run("multi_same_is_compatible", func(t *testing.T) {
+		if state, cerr := vMulti.CheckCompat([]crossnamespace.Namespace{depMulti("dept")}); state != crossnamespace.CompatOK || cerr != nil {
+			t.Fatalf("CheckCompat = (%s, %v), want compatible", state, cerr)
+		}
+	})
+}
+
 // --- helpers ------------------------------------------------------------------
 
 func mustInfo(t *testing.T, notes []dsl.NoteTypeDecl, edges []dsl.EdgeTypeDecl, maxDepth int) dsl.SchemaInfo {
