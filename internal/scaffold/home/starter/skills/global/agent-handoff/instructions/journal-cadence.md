@@ -6,12 +6,16 @@ the *write* side: when to capture, and what the agent is responsible for.
 
 ## Two layers, two writers
 
-1. **Deterministic layer — automatic, no action needed.** Every state-mutating `da` command
-   (`workflow advance`, `start-task`, `close-task`, `commit`, `verify record`, `checkpoint`,
-   `merge-back`, `fanout`, `fold-back`, `review approve/reject`, `kg ...`, …) **already appends a
-   typed event** as a side effect of running it. You do **not** hand-journal these — just running
-   the command records *what changed*. A `PreCompact` hook also auto-captures a live-state
-   snapshot before compaction. This layer is crash-survivable on its own.
+1. **Deterministic layer — automatic, no action needed.** The *journaled* workflow / KG / review
+   mutators (`workflow advance`, `start-task`, `close-task`, `commit`, `verify record`,
+   `checkpoint`, `merge-back`, `fanout`, `fold-back`, `review approve/reject`, `kg ...`, …)
+   **already append a typed event** as a side effect of running them. You do **not** hand-journal
+   these — just running the command records *what changed*. (Not every `da` command journals:
+   recomputable / idempotent surfaces such as config `refresh`, `workflow drift`, and `kg setup`
+   are intentionally excluded, since their state is re-derived rather than replayed.) If the
+   session-handoff hooks are installed, a `PreCompact` hook also auto-captures a live-state
+   snapshot before compaction; if they are not, snapshot manually at the cadence points below.
+   This layer is crash-survivable on its own.
 
 2. **Reasoned layer — your job.** The deterministic events capture *what changed* but not *why*.
    The reasoned layer is a short delta you append carrying only what a command cannot:
