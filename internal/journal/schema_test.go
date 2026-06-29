@@ -219,7 +219,11 @@ func TestNewEventPopulatedPayloads(t *testing.T) {
 	})
 
 	t.Run("tier-2 task update is input_only with changed_fields", func(t *testing.T) {
-		in := &DeltaInput{Plan: "p", Task: "p2", ChangedFields: NewChangedFields(map[string]string{"status": "in_progress"})}
+		cf, err := NewChangedFields(map[string]string{"status": "in_progress"})
+		if err != nil {
+			t.Fatalf("NewChangedFields: %v", err)
+		}
+		in := &DeltaInput{Plan: "p", Task: "p2", ChangedFields: cf}
 		obs := &DeltaObserved{FieldsReplaced: []string{"status"}}
 		env, err := NewEvent(CmdTaskUpdate, ActorMain, in, obs)
 		if err != nil {
@@ -441,15 +445,18 @@ func TestNewEventRejectsInvalidLocus(t *testing.T) {
 // {name, len, sha256-prefix} and never stores the value verbatim — even a large
 // body collapses to fixed-size metadata.
 func TestNewChangedFieldsBounded(t *testing.T) {
-	if got := NewChangedFields(nil); got != nil {
-		t.Errorf("empty input: got %v, want nil", got)
+	if got, err := NewChangedFields(nil); got != nil || err != nil {
+		t.Errorf("empty input: got %v, err %v, want nil, nil", got, err)
 	}
 
 	body := strings.Repeat("secret-note-body ", 1000) // ~17KB body
-	cf := NewChangedFields(map[string]string{
+	cf, err := NewChangedFields(map[string]string{
 		"notes":  body,
 		"status": "in_progress",
 	})
+	if err != nil {
+		t.Fatalf("NewChangedFields: %v", err)
+	}
 	if len(cf) != 2 {
 		t.Fatalf("got %d field deltas, want 2", len(cf))
 	}
@@ -516,6 +523,7 @@ func TestFieldDeltaUnmarshalValidates(t *testing.T) {
 		{"uppercase sha256", `{"name":"notes","len":3,"sha256":"0123456789AB"}`},
 		{"short sha256", `{"name":"notes","len":3,"sha256":"0123"}`},
 		{"overlong sha256 is a body", `{"name":"notes","len":17000,"sha256":"` + strings.Repeat("a", 17000) + `"}`},
+		{"overlong name is a body", `{"name":"` + strings.Repeat("x", 17000) + `","len":17000,"sha256":"` + validSHA + `"}`},
 	}
 	for _, tc := range reject {
 		t.Run(tc.name, func(t *testing.T) {
@@ -553,6 +561,48 @@ func TestChangedFieldsCannotHoldBodyStructurally(t *testing.T) {
 	}
 	if strings.Contains(string(wire), "body") {
 		t.Errorf("zero FieldDelta serialized a value: %s", wire)
+	}
+}
+
+// TestNewChangedFieldsRejectsOverlongName closes the last body-leak vector: a body
+// cannot ride in as a field NAME (the only remaining unbounded string). An
+// over-long or empty key is rejected by the constructor; a normal short name
+// passes; and no FieldDelta in a journaled envelope ever holds a string longer
+// than its bound.
+func TestNewChangedFieldsRejectsOverlongName(t *testing.T) {
+	bodyName := strings.Repeat("x", 17000)
+	if _, err := NewChangedFields(map[string]string{bodyName: "v"}); err == nil {
+		t.Error("NewChangedFields with 17KB key (a body): want error, got nil")
+	}
+	if _, err := NewChangedFields(map[string]string{"": "v"}); err == nil {
+		t.Error("NewChangedFields with empty key: want error, got nil")
+	}
+	if _, err := NewChangedFields(map[string]string{strings.Repeat("x", maxFieldNameLen+1): "v"}); err == nil {
+		t.Errorf("NewChangedFields with %d-char key: want error, got nil", maxFieldNameLen+1)
+	}
+
+	// A name exactly at the bound is accepted (boundary), and journals bounded.
+	atBound := strings.Repeat("x", maxFieldNameLen)
+	cf, err := NewChangedFields(map[string]string{atBound: "in_progress"})
+	if err != nil {
+		t.Fatalf("NewChangedFields at bound: %v", err)
+	}
+	env, err := NewEvent(CmdTaskUpdate, ActorMain, &DeltaInput{Plan: "p", Task: "t", ChangedFields: cf}, nil)
+	if err != nil {
+		t.Fatalf("NewEvent: %v", err)
+	}
+	// Witness: every FieldDelta string in the journaled input is within bounds.
+	var decoded DeltaInput
+	if err := json.Unmarshal(env.Input, &decoded); err != nil {
+		t.Fatalf("decode journaled input: %v", err)
+	}
+	for _, fd := range decoded.ChangedFields {
+		if len(fd.Name()) > maxFieldNameLen {
+			t.Errorf("journaled name exceeds bound: %d", len(fd.Name()))
+		}
+		if len(fd.SHA256()) != changedFieldHashLen {
+			t.Errorf("journaled sha256 not %d chars: %d", changedFieldHashLen, len(fd.SHA256()))
+		}
 	}
 }
 

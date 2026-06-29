@@ -434,6 +434,13 @@ type TaskAddObserved struct {
 // value itself.
 const changedFieldHashLen = 12
 
+// maxFieldNameLen bounds a FieldDelta's name. A Tier-2 field name is always a
+// short identifier (a YAML key / CLI flag like "notes" or "success_criteria"),
+// so 128 is generous; the bound exists so the name can never become the channel a
+// body rides in on — with sha256 fixed at changedFieldHashLen and len an int,
+// name is the only remaining string, and this caps it.
+const maxFieldNameLen = 128
+
 // FieldDelta is the bounded record of one changed Tier-2 field: its name plus
 // metadata about the new value — its byte length and a short SHA-256 prefix —
 // but NEVER the value itself (spec D4: Tier-2 journals the delta, not bodies).
@@ -501,8 +508,8 @@ func (f *FieldDelta) UnmarshalJSON(data []byte) error {
 // shape NewChangedFields emits, so the decode path cannot be used to smuggle a
 // body in via the sha256 field (D4).
 func validateFieldDeltaWire(w fieldDeltaWire) error {
-	if w.Name == "" {
-		return fmt.Errorf("journal: field delta missing name")
+	if w.Name == "" || len(w.Name) > maxFieldNameLen {
+		return fmt.Errorf("journal: field delta name must be 1..%d chars, got %d", maxFieldNameLen, len(w.Name))
 	}
 	if w.Len < 0 {
 		return fmt.Errorf("journal: field delta %q has negative len %d", w.Name, w.Len)
@@ -533,12 +540,21 @@ type ChangedFields []FieldDelta
 // NewChangedFields reduces a name→raw-value map to bounded per-field metadata
 // (length + SHA-256 prefix), discarding the raw values. Output is sorted by field
 // name for a deterministic record. An empty input yields a nil ChangedFields.
-func NewChangedFields(raw map[string]string) ChangedFields {
+//
+// It returns an error if any key is empty or longer than maxFieldNameLen: a
+// Tier-2 field name is always a short identifier, so an over-long key is invalid
+// input, not something to record — truncating it would corrupt the field name and
+// silently dropping it would hide a body, so the only correct response is to fail.
+// This makes name as un-stuffable as sha256 (every FieldDelta string is bounded).
+func NewChangedFields(raw map[string]string) (ChangedFields, error) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	names := make([]string, 0, len(raw))
 	for name := range raw {
+		if name == "" || len(name) > maxFieldNameLen {
+			return nil, fmt.Errorf("journal: changed field name must be 1..%d chars, got %d", maxFieldNameLen, len(name))
+		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -551,7 +567,7 @@ func NewChangedFields(raw map[string]string) ChangedFields {
 			sha:    hex.EncodeToString(sum[:])[:changedFieldHashLen],
 		})
 	}
-	return out
+	return out, nil
 }
 
 // DeltaInput is the shared invoked-flags shape for the field-replacing Tier-2
