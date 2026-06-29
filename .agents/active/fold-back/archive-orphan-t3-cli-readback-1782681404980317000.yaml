@@ -1,0 +1,8 @@
+schema_version: 1
+id: archive-orphan-t3-cli-readback-1782681404980317000
+plan_id: r1-5-hook-enforcement-telemetry
+task_id: t3-cli-readback
+observation: 'archive-orphan-sweep: t3-cli-readback — both delegation and merge-back present; not an archive orphan'
+classification: small
+routed_to: active/fold-back
+created_at: "2026-06-28T21:16:44Z"

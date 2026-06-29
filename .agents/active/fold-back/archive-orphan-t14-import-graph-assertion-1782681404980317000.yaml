@@ -1,0 +1,8 @@
+schema_version: 1
+id: archive-orphan-t14-import-graph-assertion-1782681404980317000
+plan_id: root-command-decomposition
+task_id: t14-import-graph-assertion
+observation: 'archive-orphan-sweep: t14-import-graph-assertion — task root-command-decomposition/t14-import-graph-assertion is completed in active plan (not a sweep candidate)'
+classification: small
+routed_to: active/fold-back
+created_at: "2026-06-28T21:16:44Z"

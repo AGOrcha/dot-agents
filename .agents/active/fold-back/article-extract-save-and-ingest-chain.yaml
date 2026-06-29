@@ -1,0 +1,8 @@
+schema_version: 1
+id: article-extract-save-and-ingest-chain
+plan_id: kg-ideate-skill
+task_id: ""
+observation: 'article-extract today only RENDERS a research block; it should also SAVE the extract to research/articles/<slug>.md as its terminal step (fetch + clean + save = extract). A SEPARATE article-ingest skill should chain after it to do analysis + fold the saved article into the KG (the warm/semantic view). Chained, extract -> ingest = the full loop ending in the article being queryable in the KG, not just a markdown file. Refinement: (1) add a save step (+ optional --no-save) to article-extract; (2) author article-ingest (analyze + KG fold, dedup against existing research/articles + KG nodes); (3) wire the chain so one invocation can run extract->ingest end-to-end. Surfaced 2026-06-26 dogfooding article-extract on the Aleph formal-reasoning-benchmarks article (saved manually this run).'
+classification: proposal
+routed_to: proposal:obs-article-extract-save-and-ingest-chain.md
+created_at: "2026-06-26T22:03:06Z"

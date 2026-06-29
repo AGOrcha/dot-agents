@@ -1,0 +1,8 @@
+schema_version: 1
+id: foldback-create-dryrun-has-side-effects
+plan_id: workflow-client-commands
+task_id: ""
+observation: 'BUG: `da workflow fold-back create --dry-run` is NOT side-effect-free. Running it with --dry-run wrote BOTH the ~/.agents proposal file (obs-<slug>.md) AND the .agents/active/fold-back/<slug>.yaml tracking record. Repro 2026-06-26: a --dry-run preview of slug article-extract-save-and-ingest-chain created the files; the subsequent real --yes run then failed with "--propose is not valid when updating an existing slug-scoped fold-back" because the slug already existed. Expected: --dry-run prints the routing decision and writes nothing. Fix: gate all writes (proposal file, fold-back yaml, TASKS/plan-note edits) behind a !dryRun check in the fold-back create path; add a test asserting no files change under --dry-run.'
+classification: proposal
+routed_to: proposal:obs-foldback-create-dryrun-has-side-effects.md
+created_at: "2026-06-26T22:03:57Z"

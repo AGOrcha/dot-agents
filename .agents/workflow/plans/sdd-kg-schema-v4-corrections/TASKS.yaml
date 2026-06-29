@@ -1,0 +1,83 @@
+schema_version: 1
+plan_id: sdd-kg-schema-v4-corrections
+tasks:
+    - id: g1-node-id-type-namespacing
+      title: Type-prefix node ids for spec/plan/task (close plan/spec bare-id collision)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+      verification_required: true
+      notes: 'GAP 1 (dogfood, PR #179). The v4 composite-key rule covers TASK identity (task_key = plan_id + slash + task_id, draft S1.1 ~line 151-159) but NOT the plan/spec id-namespace overlap. A plan and a spec share a bare id by the dir-name convention (e.g. docs-starlight-migration exists as BOTH a plan and a spec); the DSL evaluator indexes notes by id, so a bare-id spec node and plan node overwrite each other in the id map, silently breaking type-checked edge traversal. FIX (already proven in PR #179 ingest.go specNodeID/planNodeID/taskNodeID): every graph NODE id is type-prefixed so ids are unique ACROSS types; unprefixed business keys (spec_id/plan_id/task_key) stay on FIELDS, which is what WHERE clauses match. Make this a NORMATIVE node-id rule in the draft identity section, not just the task composite-key note. Cross-ref PR #179 as grounding evidence.'
+      app_type: docs
+    - id: g2-on-disk-plan-spec-field
+      title: Specify on-disk plan->spec linkage field (replace dir-name convention)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+      verification_required: true
+      notes: 'GAP 2 (dogfood, PR #179). plan->spec linkage today relies ONLY on the dir-name convention (plan_id == spec_id). The dogfood found 11/35 plans have NO matching spec, so plan_for_spec/implements_spec edges UNDER-LINK the real corpus (edge only fires when a same-named spec exists; see ingest.go linkedSpec). Specify a NORMATIVE on-disk field (e.g. PLAN.yaml spec_id / owning_spec) so linkage is explicit, not inference-by-dirname. Decide + document whether this is a PROPOSED field add to schemas/workflow-plan.schema.json and how the plan_for_spec derivation changes. This task is the DRAFT spec change; the on-disk schema change is a follow-up.'
+      app_type: docs
+    - id: g3-spec-plan-frontmatter-parse
+      title: Normalize spec frontmatter Plan-line (4 formats across 9 specs)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+      verification_required: true
+      notes: 'GAP 3 (dogfood, PR #179). The spec frontmatter Plan reference is unparseable: 4 different formats appear across 9 specs. Specify a SINGLE normative frontmatter format for the spec->plan back-reference (or drop it in favor of the gap-2 forward PLAN.yaml field). Document the canonical format in the draft and enumerate the 4 current variants as the evidence ledger. Mechanical reconcile of the 9 on-disk specs is a follow-up once the format is ratified.'
+      app_type: docs
+    - id: g4-spec-schema-and-status-enum
+      title: Spec frontmatter schema + spec_id; reconcile status enum to freeform reality
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+      verification_required: true
+      notes: 'GAP 4 (dogfood, PR #179). Spec frontmatter is freeform: no spec JSON Schema, no schema-d spec_id (identity is the dir name only), and **Status:** is free text. The draft (S1.2 ~line 204-206) currently models spec.status as a CLOSED enum [draft, ratified, superseded], but ingest.go parseSpecFrontmatter shows only freeform draft is attested on disk; ratified/superseded are INVENTED. Either (a) define a spec frontmatter contract + spec_id and a real status enum and mark them PROPOSED (not on disk), or (b) keep status as freeform string and drop the closed-enum claim. Make the draft internally consistent: a v4 status enum that does not hold against the corpus is the bug. This is the highest-value gap (formalizes spec identity + the schema-v4 status contract).'
+      app_type: docs
+    - id: g5-depends-on-dangling-policy
+      title: Document depends_on dangling/cross-plan-ref emission policy (529 edges)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+      verification_required: true
+      notes: 'GAP 5 (dogfood, PR #179). depends_on targets dangle: cross-plan and stale refs are real (529 depends_on edges over the corpus; ingest.go addDeps emits a depends_on edge whose to-node may not exist as a projected node). Document the NORMATIVE policy in the draft: a depends_on edge records a DECLARED dependency even when the target is unresolved (stale/cross-plan), vs. requiring referential integrity. Specify how a consumer distinguishes resolved vs dangling (e.g. a derived view / health query). Decide whether dangling refs are a data-quality signal worth a separate lint, and note it.'
+      app_type: docs
+    - id: g6-app-type-drift-recheck
+      title: Re-check app_type schema drift against t8/#166 (likely no-op)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - .agents/workflow/specs/work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md
+      verification_required: false
+      notes: 'GAP 6 (dogfood, PR #179) — VERIFIED LIKELY NO-OP by orchestrator. The worker reported app_type schema-drift, but PR #166 (commit f0b60cd7, merged) ALREADY added the open-vocab app_type property to schemas/workflow-tasks.schema.json (additionalProperties:false was rejecting a field CanonicalTask emits). Confirmed present: schema line 66-69 defines app_type as open-vocabulary (e.g. go-cli, docs, http-service, meta), matching CanonicalTask.AppType. ACTION: confirm the draft text does not still claim app_type is missing/drifted; if it does, correct the stale claim and cite #166. Otherwise close as no-op. Do NOT re-add a field that already exists.'
+      app_type: docs
+    - id: g7-task-planid-source-mismatch
+      title: 'ingest task plan_id sourced from PLAN.yaml id, not TASKS.yaml header (codex review #179)'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: Nikash Prakash
+      write_scope:
+        - internal/adapters/builtin/sdd-register/ingest.go
+        - internal/adapters/builtin/sdd-register/ingest_internal_test.go
+      verification_required: true
+      notes: |-
+        Found by codex adversarial review of PR #179 (point 5). schema.yaml:32 documents task.plan_id as [mirror: TASKS.yaml file-header plan_id], and CanonicalTaskFile exposes that header (commands/workflow/types.go:112). But ingest.go ignores tf.PlanID and materializes the EFFECTIVE PLAN.yaml id (effectivePlanID) onto every task (ingest.go addPlan line ~147/151/157, addTask ~184). On the current corpus PLAN.yaml id == TASKS.yaml plan_id so tests pass, but a mismatch silently projects the WRONG task_key with no failure. FIX: either (a) source task plan_id from tf.PlanID to match the schema mirror, with a consistency assertion when PLAN.yaml id != TASKS.yaml plan_id, or (b) correct schema.yaml to document plan_id as derived-from-PLAN.yaml. Add a test asserting the chosen source on a fixture where the two headers DISAGREE (tests-must-drive-the-production-path: the test must fail if the wrong source is used). Secondary: harden the unchecked type assertion at sddregister_test.go:184 (impl[0][colTaskKey].(string)) to the checked form. NOTE: a corpus-shape coverage tightening (codex point 3: trace-edge >0 floors, NodeCount as unique-id count) and an intra-type duplicate-id guard (point 2) are RELATED but lower priority — fold into g1/g5 or a follow-up, do not expand this task scope.
+        - (fb:codex-179-adapter-findings) Codex adversarial review of PR #179 (orchestrator stream B) corroborated #179 as NOT tautological (real disk walk + mutation-test anti-tautology) and merge-ready, but surfaced adapter bugs beyond the 6 reported gaps: (1) STRONGEST: task.plan_id is documented [mirror: TASKS.yaml header plan_id] but ingest sources it from PLAN.yaml effectivePlanID — silent wrong-key on a mismatch (-> task g7). (2) intra-type duplicate-id collision still possible (two plan dirs same PLAN.yaml id, or dup task ids) — prefix fix only closes CROSS-type collision. (3) coverage floors reject empty graph but not a materially under-linked one (trace-edge checks are >0 only; NodeCount is len(notes) not unique ids). (4) dangling depends_on edges are deliberate but conflict with the SDK edge-between-two-notes model — gap 5 should make the policy normative. Full review: scratchpad/codex-review-179.txt.
+      app_type: go-cli

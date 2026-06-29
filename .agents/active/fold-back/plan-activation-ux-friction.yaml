@@ -1,0 +1,8 @@
+schema_version: 1
+id: plan-activation-ux-friction
+plan_id: workflow-client-commands
+task_id: ""
+observation: 'Dogfooding da workflow to drive the config-architecture loop surfaced 3 plan-activation UX issues: (1) bare "plan create <id>" errors but the hint does not name the missing required --title flag; (2) plan create defaults to status=draft and eligible/next SILENTLY skip draft plans (no auto-activate, easy to miss that the queue is invisible); (3) the "next" command remediation hint prints "da workflow plan update --status active --plan <id>" but plan update takes a POSITIONAL <plan-id>, not a --plan flag, so the suggested command FAILS. Found 2026-06-28 driving the config-architecture-impl plan.'
+classification: small
+routed_to: plan_summary:workflow-client-commands
+created_at: "2026-06-28T16:15:58Z"
