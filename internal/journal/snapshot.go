@@ -170,9 +170,16 @@ type SnapshotState struct {
 	Identity Identity `json:"identity"`
 	// Plans is the captured active plans, sorted by id.
 	Plans []PlanState `json:"plans"`
-	// Eligible is the next/eligible task set: pending tasks whose dependencies
-	// are all satisfied, sorted by (plan, task).
-	Eligible []TaskRef `json:"eligible"`
+	// PendingUnblocked is a deterministic, filesystem-only PROJECTION: pending
+	// tasks whose declared dependencies are all satisfied, sorted by (plan,
+	// task). It is deliberately weaker than — and NOT a substitute for — the
+	// authoritative `da workflow eligible` engine, which additionally considers
+	// in_progress tasks, filters to active plans, excludes tasks under an active
+	// delegation lock, and falls back to .agents/history for cross-plan deps.
+	// Re-implementing that here would duplicate the engine and drift, so the
+	// snapshot records only this cheap, byte-stable hint; p5 recovery should
+	// call `da workflow eligible` directly for authoritative eligibility.
+	PendingUnblocked []TaskRef `json:"pending_unblocked"`
 	// Delegations is the in-flight delegations (pending/active), sorted by id.
 	Delegations []DelegationState `json:"delegations"`
 	// PendingMergeBacks is the task ids with a merge-back awaiting integration,
@@ -219,7 +226,7 @@ func buildSnapshot(repoPath string) SnapshotState {
 		CapturedAt:        now().UTC().Format(timeFormat),
 		Identity:          ResolveIdentity(repoPath),
 		Plans:             plans,
-		Eligible:          computeEligible(plans),
+		PendingUnblocked:  computePendingUnblocked(plans),
 		Delegations:       captureDelegations(repoPath),
 		PendingMergeBacks: capturePendingMergeBacks(repoPath),
 	}
@@ -293,13 +300,28 @@ func readPlan(planDir string) (PlanState, bool) {
 			plan.Tasks = append(plan.Tasks, TaskState{
 				ID:        t.ID,
 				Status:    t.Status,
-				DependsOn: t.DependsOn,
+				DependsOn: sortedDeps(t.DependsOn),
 				Locus:     locusForStatus(t.Status),
 			})
 		}
 		sort.Slice(plan.Tasks, func(i, j int) bool { return plan.Tasks[i].ID < plan.Tasks[j].ID })
 	}
 	return plan, true
+}
+
+// sortedDeps returns a sorted copy of a task's declared dependency ids so the
+// capture is canonical: reordering depends_on in the source YAML (which is
+// semantically irrelevant) must not change snapshot.json, preserving the
+// byte-identical determinism guarantee. A nil/empty input returns nil so the
+// field omitempty's out rather than serializing as an empty array. The copy
+// avoids mutating the decoded YAML slice in place.
+func sortedDeps(deps []string) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	out := append([]string(nil), deps...)
+	sort.Strings(out)
+	return out
 }
 
 // readYAML reads and unmarshals a YAML file into out, returning false when the
@@ -330,34 +352,38 @@ func locusForStatus(status string) *Locus {
 	}
 }
 
-// computeEligible returns the next/eligible task set across the captured plans: a
-// pending task whose every dependency is satisfied. A dependency is satisfied
-// when the upstream task is completed or awaiting_owner_review (an open,
-// lens-accepted PR unblocks its dependents before the maintainer merges). Deps
-// are resolved within the captured set; an unknown dep is treated as unsatisfied.
-// The result is sorted by (plan, task) for a deterministic capture.
-func computeEligible(plans []PlanState) []TaskRef {
+// computePendingUnblocked returns the deterministic, filesystem-only projection
+// described on SnapshotState.PendingUnblocked: a pending task whose every
+// declared dependency is satisfied. A dependency is satisfied when the upstream
+// task is completed or awaiting_owner_review (an open, lens-accepted PR unblocks
+// its dependents before the maintainer merges) — the same predicate the
+// authoritative engine uses (eligible_accounting.go). Deps are resolved within
+// the captured set; an unknown dep is treated as unsatisfied. This is NOT the
+// full `da workflow eligible` computation (no in_progress/active-plan/delegation
+// awareness, no history fallback); the result is sorted by (plan, task) for a
+// byte-stable capture.
+func computePendingUnblocked(plans []PlanState) []TaskRef {
 	statusByKey := make(map[string]string)
 	for _, p := range plans {
 		for _, t := range p.Tasks {
 			statusByKey[p.ID+"/"+t.ID] = t.Status
 		}
 	}
-	eligible := []TaskRef{}
+	pending := []TaskRef{}
 	for _, p := range plans {
 		for _, t := range p.Tasks {
 			if t.Status == statusPending && depsSatisfied(t.DependsOn, p.ID, statusByKey) {
-				eligible = append(eligible, TaskRef{Plan: p.ID, Task: t.ID})
+				pending = append(pending, TaskRef{Plan: p.ID, Task: t.ID})
 			}
 		}
 	}
-	sort.Slice(eligible, func(i, j int) bool {
-		if eligible[i].Plan != eligible[j].Plan {
-			return eligible[i].Plan < eligible[j].Plan
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].Plan != pending[j].Plan {
+			return pending[i].Plan < pending[j].Plan
 		}
-		return eligible[i].Task < eligible[j].Task
+		return pending[i].Task < pending[j].Task
 	})
-	return eligible
+	return pending
 }
 
 // depsSatisfied reports whether every dependency of a task in plan planID is

@@ -195,7 +195,7 @@ func TestSnapshotEligibleSet(t *testing.T) {
 	// t5: deps t1 completed + t3 pending → NOT eligible.
 	// b1: in_progress, not pending → NOT eligible.
 	got := []string{}
-	for _, e := range snap.Eligible {
+	for _, e := range snap.PendingUnblocked {
 		got = append(got, e.Plan+"/"+e.Task)
 	}
 	if strings.Join(got, ",") != "alpha/t3" {
@@ -222,8 +222,8 @@ tasks:
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	if len(snap.Eligible) != 1 || snap.Eligible[0].Task != "t4" {
-		t.Fatalf("eligible = %+v, want [alpha/t4]", snap.Eligible)
+	if len(snap.PendingUnblocked) != 1 || snap.PendingUnblocked[0].Task != "t4" {
+		t.Fatalf("eligible = %+v, want [alpha/t4]", snap.PendingUnblocked)
 	}
 }
 
@@ -241,7 +241,7 @@ func TestSnapshotEligibleSortedAcrossAndWithinPlans(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	got := []string{}
-	for _, e := range snap.Eligible {
+	for _, e := range snap.PendingUnblocked {
 		got = append(got, e.Plan+"/"+e.Task)
 	}
 	want := "alpha/a1,alpha/a2,zeta/z1,zeta/z2"
@@ -331,6 +331,56 @@ func TestSnapshotDeterministicByteIdentical(t *testing.T) {
 	}
 }
 
+// TestSnapshotDependsOnOrderCanonicalized proves the determinism guarantee holds
+// across a semantically-irrelevant reordering of a task's depends_on: the same
+// dependency set in a different source order must yield byte-identical snapshots.
+func TestSnapshotDependsOnOrderCanonicalized(t *testing.T) {
+	capture := func(t *testing.T, depOrder string) []byte {
+		t.Helper()
+		repo := snapTestRepo(t)
+		writeFixture(t, repo, "workflow/plans/alpha/PLAN.yaml", "id: alpha\nstatus: active\n")
+		writeFixture(t, repo, "workflow/plans/alpha/TASKS.yaml",
+			"tasks:\n  - id: a\n    status: completed\n  - id: b\n    status: completed\n  - id: c\n    status: pending\n    depends_on: "+depOrder+"\n")
+		if _, err := Snapshot(repo); err != nil {
+			t.Fatalf("Snapshot: %v", err)
+		}
+		// Identity carries the repo's absolute worktree path, which differs per
+		// t.TempDir(); strip it so the comparison isolates the depends_on order.
+		data, err := os.ReadFile(SnapshotPath(repo))
+		if err != nil {
+			t.Fatalf("read snapshot: %v", err)
+		}
+		return data
+	}
+
+	forward := capture(t, "[a, b]")
+	reversed := capture(t, "[b, a]")
+
+	// Compare just the alpha plan's task block (the only state that differs is
+	// the per-repo Identity path, which we exclude by decoding and re-checking
+	// the task's canonicalized DependsOn instead of raw bytes).
+	var fSnap, rSnap SnapshotState
+	if err := json.Unmarshal(forward, &fSnap); err != nil {
+		t.Fatalf("decode forward: %v", err)
+	}
+	if err := json.Unmarshal(reversed, &rSnap); err != nil {
+		t.Fatalf("decode reversed: %v", err)
+	}
+	fDeps := fSnap.Plans[0].Tasks[2].DependsOn
+	rDeps := rSnap.Plans[0].Tasks[2].DependsOn
+	if strings.Join(fDeps, ",") != "a,b" || strings.Join(rDeps, ",") != "a,b" {
+		t.Fatalf("depends_on not canonicalized: forward=%v reversed=%v", fDeps, rDeps)
+	}
+
+	// Re-marshal each plan slice: the plans block (which holds depends_on) must
+	// be byte-identical regardless of the source order.
+	fPlans, _ := json.Marshal(fSnap.Plans)
+	rPlans, _ := json.Marshal(rSnap.Plans)
+	if !bytes.Equal(fPlans, rPlans) {
+		t.Fatalf("plan bytes differ under depends_on reorder:\nforward=%s\nreversed=%s", fPlans, rPlans)
+	}
+}
+
 func TestSnapshotAtomicWriteFullFile(t *testing.T) {
 	repo := snapTestRepo(t)
 	writePlanFixture(t, repo)
@@ -395,12 +445,12 @@ func TestSnapshotEmptyWorkflowTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read snapshot: %v", err)
 	}
-	for _, key := range []string{`"plans": []`, `"eligible": []`, `"delegations": []`, `"pending_merge_backs": []`} {
+	for _, key := range []string{`"plans": []`, `"pending_unblocked": []`, `"delegations": []`, `"pending_merge_backs": []`} {
 		if !strings.Contains(string(data), key) {
 			t.Fatalf("empty snapshot missing %s in:\n%s", key, data)
 		}
 	}
-	if len(snap.Plans) != 0 || len(snap.Eligible) != 0 {
+	if len(snap.Plans) != 0 || len(snap.PendingUnblocked) != 0 {
 		t.Fatalf("empty snapshot has state: %+v", snap)
 	}
 }
