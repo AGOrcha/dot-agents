@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -924,11 +926,20 @@ func renderLintReportText(report *LintReport) {
 // ── Phase 4: Maintenance operations ──────────────────────────────────────────
 
 func runKGReweave(io kgIO, kgHomeDir string) error {
+	// Content-delta event: record link repair counts + the ids of the notes whose
+	// frontmatter changed — counts/ids only, never note bodies (D4).
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "maintain reweave"}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGMaintainReweave, input, observed, ok) }()
+
 	adj, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
 	removed, added := 0, 0
+	var changedIDs []string
 	for id, note := range notes {
 		validLinks, removedHere, addedHere, changed := repairNoteLinks(adj[id], note, notes)
 		removed += removedHere
@@ -939,7 +950,12 @@ func runKGReweave(io kgIO, kgHomeDir string) error {
 		note.Links = validLinks
 		note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		persistReweavedNote(io, kgHomeDir, id, note)
+		changedIDs = append(changedIDs, id)
 	}
+	sort.Strings(changedIDs)
+	observed.Counts = map[string]int{"links_removed": removed, "links_added": added}
+	observed.IDs = changedIDs
+	ok = true
 	ui.Success(fmt.Sprintf("Reweave complete: %d broken links removed, %d source_ref links added", removed, added))
 	return nil
 }
@@ -1001,19 +1017,31 @@ func persistReweavedNote(io kgIO, kgHomeDir, id string, note *GraphNote) {
 }
 
 func runKGMarkStale(io kgIO, kgHomeDir string, threshold time.Duration) error {
+	// Content-delta event: record how many notes were marked stale + their ids —
+	// counts/ids only, never note bodies (D4).
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "maintain mark-stale"}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGMaintainStale, input, observed, ok) }()
+
 	_, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
 
 	cutoff := time.Now().UTC().Add(-threshold)
-	count := 0
+	var staleIDs []string
 	for id, note := range notes {
 		if markNoteStale(io, kgHomeDir, id, note, cutoff) {
-			count++
+			staleIDs = append(staleIDs, id)
 		}
 	}
-	ui.Success(fmt.Sprintf("Marked %d notes as stale", count))
+	sort.Strings(staleIDs)
+	observed.Counts = map[string]int{"marked_stale": len(staleIDs)}
+	observed.IDs = staleIDs
+	ok = true
+	ui.Success(fmt.Sprintf("Marked %d notes as stale", len(staleIDs)))
 	return nil
 }
 
@@ -1043,6 +1071,14 @@ func markNoteStale(io kgIO, kgHomeDir, id string, note *GraphNote, cutoff time.T
 }
 
 func runKGCompact(io kgIO, kgHomeDir string) error {
+	// Content-delta event: record how many notes were archived + their ids —
+	// counts/ids only, never note bodies (D4).
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "maintain compact"}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGMaintainCompact, input, observed, ok) }()
+
 	archiveDir := filepath.Join(kgHomeDir, "notes", "_archived")
 	if err := io.MkdirAll(archiveDir, 0755); err != nil {
 		return err
@@ -1053,12 +1089,17 @@ func runKGCompact(io kgIO, kgHomeDir string) error {
 		return err
 	}
 
-	count := 0
+	var archivedIDs []string
 	for id, note := range notes {
 		if archiveCompactedNote(kgHomeDir, archiveDir, id, note) {
-			count++
+			archivedIDs = append(archivedIDs, id)
 		}
 	}
+	sort.Strings(archivedIDs)
+	count := len(archivedIDs)
+	observed.Counts = map[string]int{"archived": count}
+	observed.IDs = archivedIDs
+	ok = true
 	_ = appendLogEntry(io, kgHomeDir, fmt.Sprintf("compact | archived %d notes", count))
 	ui.Success(fmt.Sprintf("Compacted %d notes to %s", count, archiveDir))
 	return nil

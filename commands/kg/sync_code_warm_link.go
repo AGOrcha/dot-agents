@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/execabs"
@@ -48,6 +49,16 @@ func runKGSyncIO(io kgIO, cmd *cobra.Command, _ []string) error {
 
 	push, _ := cmd.Flags().GetBool("push")
 
+	// kg sync moves a git remote and is not locally snapshot-recoverable, so it
+	// is journaled fully (KGSyncObserved). ok flips true the moment the git op
+	// lands; a post-pull lint error is reported to the operator but does not undo
+	// the pull, so it still records success (mirrors p3a's ok-after-mutation).
+	repoPath := crgRepoRoot()
+	input := &journal.KGSyncInput{Push: push}
+	observed := &journal.KGSyncObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGSync, input, observed, ok) }()
+
 	var gitArgs []string
 	if push {
 		gitArgs = []string{"-C", home, "push"}
@@ -69,9 +80,13 @@ func runKGSyncIO(io kgIO, cmd *cobra.Command, _ []string) error {
 	}
 
 	if push {
+		observed.PushStatus = "ok"
+		ok = true
 		ui.Success("Graph pushed.")
 		return nil
 	}
+	observed.PullStatus = "ok"
+	ok = true
 
 	// After pull, run lint to surface any content drift
 	ui.Info("Running kg lint after pull ...")
@@ -121,6 +136,14 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
+	// KG decision event: record the build outcome + resulting graph counts
+	// (KGDecisionObserved), never node/edge bodies (D4). repoPath is the graphed
+	// repo itself.
+	input := &journal.KGDecisionInput{Repo: root}
+	observed := &journal.KGDecisionObserved{}
+	ok := false
+	defer func() { journalKG(root, journal.CmdKGBuild, input, observed, ok) }()
+
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
 		return err
@@ -135,6 +158,9 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	observed.Outcome = report.Outcome
+	setDecisionGraphCounts(observed, report.Status)
+	ok = true
 	if commandJSON(cmd) {
 		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -156,6 +182,19 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// setDecisionGraphCounts copies the post-operation node/edge/file counts from a
+// CRG status onto a KG decision-event observed payload (pointer fields so an
+// absent status omits them). It records counts only — never node/edge bodies (D4).
+func setDecisionGraphCounts(observed *journal.KGDecisionObserved, status *graphstore.CRGStatus) {
+	if status == nil {
+		return
+	}
+	nodes, edges, files := status.Nodes, status.Edges, status.Files
+	observed.Nodes = &nodes
+	observed.Edges = &edges
+	observed.Files = &files
+}
+
 func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	root, _ := cmd.Flags().GetString("repo")
 	if root == "" {
@@ -175,6 +214,13 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
+	// Journal only once we know the tool is present (the graceful no-op above
+	// mutates nothing). Decision event: outcome + graph counts, never bodies (D4).
+	input := &journal.KGDecisionInput{Repo: root, Base: base}
+	observed := &journal.KGDecisionObserved{}
+	ok := false
+	defer func() { journalKG(root, journal.CmdKGUpdate, input, observed, ok) }()
+
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
 		return err
@@ -190,6 +236,9 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	observed.Outcome = report.Outcome
+	setDecisionGraphCounts(observed, report.Status)
+	ok = true
 	if commandJSON(cmd) {
 		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -437,16 +486,27 @@ func runKGPostprocess(cmd *cobra.Command, _ []string) error {
 	noCommunities, _ := cmd.Flags().GetBool("no-communities")
 	noFTS, _ := cmd.Flags().GetBool("no-fts")
 
+	// Decision event: postprocess rebuilds derived data; record the outcome, not
+	// the rebuilt flow/community bodies (D4).
+	input := &journal.KGDecisionInput{Repo: root}
+	observed := &journal.KGDecisionObserved{Outcome: "postprocessed"}
+	ok := false
+	defer func() { journalKG(root, journal.CmdKGPostprocess, input, observed, ok) }()
+
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
 		return err
 	}
 	ui.Info(fmt.Sprintf("Running post-processing on %s ...", root))
-	return bridge.Postprocess(graphstore.PostprocessOptions{
+	if err := bridge.Postprocess(graphstore.PostprocessOptions{
 		NoFlows:       noFlows,
 		NoCommunities: noCommunities,
 		NoFTS:         noFTS,
-	})
+	}); err != nil {
+		return err
+	}
+	ok = true
+	return nil
 }
 
 func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
@@ -607,6 +667,17 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	noteTypeFilter, _ := cmd.Flags().GetString("type")
 	includeCode, _ := cmd.Flags().GetBool("include-code")
 
+	// Content-delta event: record how many notes were indexed/skipped (counts
+	// only, never note bodies — D4). The optional type filter is the only target.
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "warm"}
+	if noteTypeFilter != "" {
+		input.Targets = []string{noteTypeFilter}
+	}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGWarm, input, observed, ok) }()
+
 	store, err := openKGStore(home)
 	if err != nil {
 		return fmt.Errorf(warmStoreOpenErrFmt, err)
@@ -622,6 +693,8 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	archIndexed, archSkipped := warmArchivedNotes(io, store, home)
 	indexed += archIndexed
 	skipped += archSkipped
+	observed.Counts = map[string]int{"indexed": indexed, "skipped": skipped}
+	ok = true
 
 	_ = store.SetMetadata("last_warm_sync", time.Now().UTC().Format(time.RFC3339))
 
@@ -758,6 +831,15 @@ func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 			"Pass one of: mentions, implements, documents, decides, references.")
 	}
 
+	// Content-delta event: record the link add as a count + the affected ids
+	// (note id, symbol, link id) — never bodies (D4). Armed after flag validation
+	// so a usage error is a pre-mutation rejection, not a journaled attempt.
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "link add", Targets: []string{args[0], args[1]}}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGLinkAdd, input, observed, ok) }()
+
 	store, err := openKGStore(kgHome())
 	if err != nil {
 		return fmt.Errorf(warmStoreOpenErrFmt, err)
@@ -773,6 +855,9 @@ func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create link: %w", err)
 	}
+	observed.Counts = map[string]int{"links_added": 1}
+	observed.IDs = []string{fmt.Sprintf("%d", id)}
+	ok = true
 	ui.Success(fmt.Sprintf("Link created (id=%d): %s -[%s]-> %s", id, args[0], kind, args[1]))
 	return nil
 }
@@ -815,6 +900,14 @@ func runKGLinkRemove(deps Deps, _ *cobra.Command, args []string) error {
 			fmt.Sprintf("invalid link ID %q: expected an integer", args[0]),
 			"Pass the numeric link ID shown by `da kg link list`.")
 	}
+	// Content-delta event: record the link removal as a count + the removed link
+	// id — never bodies (D4). Armed after the id-parse validation.
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "link remove", Targets: []string{args[0]}}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGLinkRemove, input, observed, ok) }()
+
 	store, err := openKGStore(kgHome())
 	if err != nil {
 		return fmt.Errorf(warmStoreOpenErrFmt, err)
@@ -824,6 +917,9 @@ func runKGLinkRemove(deps Deps, _ *cobra.Command, args []string) error {
 	if err := store.DeleteNoteSymbolLink(id); err != nil {
 		return fmt.Errorf("remove link: %w", err)
 	}
+	observed.Counts = map[string]int{"links_removed": 1}
+	observed.IDs = []string{args[0]}
+	ok = true
 	ui.Success(fmt.Sprintf("Link %d removed", id))
 	return nil
 }

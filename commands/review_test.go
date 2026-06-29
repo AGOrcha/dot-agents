@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 )
 
 // fakeReviewDeps is the interface-DI test double for reviewDeps (mirrors
@@ -488,6 +490,146 @@ func TestCaptureProposalRollback_RemovesIfMissingBefore(t *testing.T) {
 	// Calling restore again should be a no-op (file already gone).
 	if err := restore(); err != nil {
 		t.Errorf("second restore returned %v", err)
+	}
+}
+
+// ─── session-handoff journal wiring (p3b) ────────────────────────────────────
+
+// captureReviewJournal swaps reviewJournalEmit for an in-memory recorder
+// restored via t.Cleanup, so a test can assert the typed event a review command
+// produced without reading the log file.
+func captureReviewJournal(t *testing.T) *[]journal.Envelope {
+	t.Helper()
+	prev := reviewJournalEmit
+	var got []journal.Envelope
+	reviewJournalEmit = func(_ string, e journal.Envelope) error {
+		got = append(got, e)
+		return nil
+	}
+	t.Cleanup(func() { reviewJournalEmit = prev })
+	return &got
+}
+
+func findReviewEvent(t *testing.T, got []journal.Envelope, command string) journal.Envelope {
+	t.Helper()
+	for _, e := range got {
+		if e.Command == command {
+			return e
+		}
+	}
+	t.Fatalf("no journal event for %q in %d captured events", command, len(got))
+	return journal.Envelope{}
+}
+
+func TestRunReviewApprove_EmitsApprovedEvent(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "approve-journal", validProposalYAML("approve-journal", "pending"))
+
+	got := captureReviewJournal(t)
+	if err := runReviewApprove("approve-journal", stdReviewDeps{}); err != nil {
+		t.Fatalf("runReviewApprove: %v", err)
+	}
+	e := findReviewEvent(t, *got, journal.CmdReviewApprove)
+	if e.EventType != journal.EventDurableDelta || e.Actor != journal.ActorMain {
+		t.Fatalf("unexpected envelope: %+v", e)
+	}
+	var obs journal.ReviewObserved
+	if err := json.Unmarshal(e.Observed, &obs); err != nil {
+		t.Fatal(err)
+	}
+	if obs.Decision != "approved" || !obs.Applied || !obs.RefreshTriggered {
+		t.Fatalf("observed = %+v, want approved/applied/refreshed", obs)
+	}
+	var in journal.ReviewInput
+	if err := json.Unmarshal(e.Input, &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.ProposalID != "approve-journal" {
+		t.Fatalf("input = %+v", in)
+	}
+}
+
+func TestRunReviewReject_EmitsRejectedEvent(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	writeProposal(t, agentsHome, "reject-journal", validProposalYAML("reject-journal", "pending"))
+
+	got := captureReviewJournal(t)
+	if err := runReviewReject("reject-journal", "not ready", stdReviewDeps{}); err != nil {
+		t.Fatalf("runReviewReject: %v", err)
+	}
+	e := findReviewEvent(t, *got, journal.CmdReviewReject)
+	var obs journal.ReviewObserved
+	if err := json.Unmarshal(e.Observed, &obs); err != nil {
+		t.Fatal(err)
+	}
+	if obs.Decision != "rejected" || obs.Applied || obs.RefreshTriggered {
+		t.Fatalf("observed = %+v, want rejected/not-applied/not-refreshed", obs)
+	}
+	var in journal.ReviewInput
+	if err := json.Unmarshal(e.Input, &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Reason != "not ready" {
+		t.Fatalf("input should carry the reject reason, got %+v", in)
+	}
+}
+
+func TestRunReviewApprove_FailureEmitsFailedEvent(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(filepath.Join(agentsHome, "proposals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	got := captureReviewJournal(t)
+	// A missing proposal fails before any mutation → an input-only failed event.
+	if err := runReviewApprove("ghost", stdReviewDeps{}); err == nil {
+		t.Fatal("expected approve to fail for missing proposal")
+	}
+	e := findReviewEvent(t, *got, journal.CmdReviewApprove)
+	if e.EventType != journal.EventFailed || e.Observed != nil {
+		t.Fatalf("want failed event with no observed, got type=%q observed=%s", e.EventType, string(e.Observed))
+	}
+}
+
+func TestEmitReviewEvent_BlankRepoSkips(t *testing.T) {
+	got := captureReviewJournal(t)
+	emitReviewEvent("", journal.CmdReviewApprove, func() (journal.Envelope, error) {
+		return journal.NewEvent(journal.CmdReviewApprove, journal.ActorMain, &journal.ReviewInput{ProposalID: "x"}, nil)
+	})
+	if len(*got) != 0 {
+		t.Fatalf("blank repoPath should skip emission, got %d", len(*got))
+	}
+}
+
+func TestEmitReviewEvent_AppendErrorNotFatal(t *testing.T) {
+	prev := reviewJournalEmit
+	reviewJournalEmit = func(string, journal.Envelope) error { return errors.New("disk full") }
+	t.Cleanup(func() { reviewJournalEmit = prev })
+	// Must not panic or propagate — a journal append failure cannot fail review.
+	journalReview("/repo", journal.CmdReviewReject,
+		&journal.ReviewInput{ProposalID: "x"}, &journal.ReviewObserved{Decision: "rejected"}, true)
+}
+
+func TestEmitReviewEvent_BuildErrorNotFatal(t *testing.T) {
+	got := captureReviewJournal(t)
+	// An unregistered command makes NewEvent fail; the helper must warn + swallow.
+	emitReviewEvent("/repo", "review not-a-command", func() (journal.Envelope, error) {
+		return journal.NewEvent("review not-a-command", journal.ActorMain, nil, nil)
+	})
+	if len(*got) != 0 {
+		t.Fatalf("build error should not append, got %d", len(*got))
+	}
+}
+
+func TestReviewJournalRepo_ResolvesCwd(t *testing.T) {
+	if reviewJournalRepo() == "" {
+		t.Fatal("reviewJournalRepo should resolve the cwd, got empty")
 	}
 }
 
