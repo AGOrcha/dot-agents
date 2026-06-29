@@ -199,6 +199,35 @@ contract (gate-script wiring lands in plan task `p2-hook-scripts`).
 Terminal events — `Stop`, `SubagentStop`, Copilot's `agentStop` — remain
 the authoritative artifact-validation point.
 
+### Session-handoff: crash-survivable compaction recovery
+
+Two bundles wire the session-handoff journal (`da workflow journal`) into the
+compaction lifecycle so a context compaction is survivable: the verifiable
+*live state* (task↔PR↔merge, locks, recent durable deltas) that the
+auto-summary drops is captured before compaction and re-injected, re-verified,
+after it.
+
+- **`session-handoff-snapshot`** fires on `PreCompact` (no matcher — every
+  compaction) and runs `da workflow journal snapshot`, capturing a fresh
+  deterministic snapshot to durable, non-git-tracked state that *survives*
+  compaction. It writes nothing into the context (that context is about to be
+  discarded). Enabled on `claude`, `codex`, `cursor` — every platform that
+  maps `pre_compact`.
+- **`session-handoff-recover`** fires on `SessionStart` narrowed to the
+  `compact` start source (the manifest's `match.expression: compact`) and runs
+  `da workflow journal recover`, printing the **verified recovery view** on
+  stdout. A `SessionStart` hook's stdout re-enters the fresh post-compaction
+  context, which is exactly how the recovered state comes back. A normal
+  `startup` / `resume` / `clear` session start is untouched. Enabled on
+  `claude` and `codex` — the two platforms whose `SessionStart` surface
+  documents the `compact` source (see the [start-source matcher table](#matcher-support-which-renderer-emits-a-non-empty-matcher)).
+
+Both hooks are **strictly best-effort**: a journal failure (or a `da` binary
+that predates the journal surface) must never block compaction or session
+start. Each script reports failures on stderr only and always exits 0. They
+reuse the existing `pre_compact` / `session_start` event model — no new
+canonical event was required.
+
 ### `PostToolUse` and `PostToolUseFailure` are observation candidates
 
 Per [decision D9 in the design spec][d9], `post_tool_use` and
