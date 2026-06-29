@@ -378,6 +378,151 @@ func TestRunKGWarm_RecordsCounts(t *testing.T) {
 	}
 }
 
+// TestRunKGReweave_FailedWriteNotJournaledAsSuccess is the Bug-1 regression:
+// when the repaired note cannot be written, the journal must NOT record a
+// successful repair for that note. With every write failing, the whole pass
+// persists nothing, so the runner errors and the deferred tail records a FAILED
+// event (input only) — never a durable_delta claiming the un-happened repair.
+func TestRunKGReweave_FailedWriteNotJournaledAsSuccess(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(testIO()); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	_ = createGraphNote(testIO(), home, &GraphNote{
+		SchemaVersion: 1, ID: "dec-wfail", Type: "decision", Title: "T", Summary: "S",
+		Status: "active", Links: []string{"does-not-exist"}, CreatedAt: now, UpdatedAt: now,
+	}, "body")
+
+	got := captureJournal(t)
+	failIO := withWriteFileError(t, "") // every write fails → no repair can persist
+	err := runKGReweave(failIO, home)
+	if err == nil {
+		t.Fatal("expected reweave to error when no repair persisted")
+	}
+	e := findEvent(t, *got, journal.CmdKGMaintainReweave)
+	if e.EventType != journal.EventFailed {
+		t.Fatalf("a failed reweave write must journal a FAILED event, got %q", e.EventType)
+	}
+	if e.Observed != nil {
+		t.Fatalf("failed event must carry no observed (no claimed repair), got %s", string(e.Observed))
+	}
+	for _, ev := range *got {
+		if ev.Command == journal.CmdKGMaintainReweave && ev.EventType == journal.EventDurableDelta {
+			t.Fatalf("no durable_delta should be emitted when nothing persisted, got %+v", ev)
+		}
+	}
+}
+
+// TestRunKGReweave_PartialFailureJournalsOnlyPersisted proves a per-note write
+// failure does not contribute to the journaled ids/counts while the notes that
+// DID persist are still recorded.
+func TestRunKGReweave_PartialFailureJournalsOnlyPersisted(t *testing.T) {
+	home := newTempKG(t)
+	if err := runKGSetup(testIO()); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	now := "2026-01-01T00:00:00Z"
+	_ = createGraphNote(testIO(), home, &GraphNote{
+		SchemaVersion: 1, ID: "dec-good", Type: "decision", Title: "T", Summary: "S",
+		Status: "active", Links: []string{"does-not-exist"}, CreatedAt: now, UpdatedAt: now,
+	}, "body")
+	_ = createGraphNote(testIO(), home, &GraphNote{
+		SchemaVersion: 1, ID: "ent-bad", Type: "entity", Title: "T", Summary: "S",
+		Status: "active", Links: []string{"does-not-exist"}, CreatedAt: now, UpdatedAt: now,
+	}, "body")
+
+	got := captureJournal(t)
+	// Only writes under notes/entities fail, so ent-bad cannot persist while
+	// dec-good does.
+	failIO := withWriteFileError(t, "/entities/")
+	if err := runKGReweave(failIO, home); err != nil {
+		t.Fatalf("partial-failure reweave should still succeed: %v", err)
+	}
+	e := findEvent(t, *got, journal.CmdKGMaintainReweave)
+	var obs journal.KGContentDeltaObserved
+	if err := json.Unmarshal(e.Observed, &obs); err != nil {
+		t.Fatal(err)
+	}
+	if len(obs.IDs) != 1 || obs.IDs[0] != "dec-good" {
+		t.Fatalf("only the persisted note must be journaled, got ids %v", obs.IDs)
+	}
+	if obs.Counts["links_removed"] != 1 {
+		t.Fatalf("links_removed must count only the persisted repair, got %+v", obs.Counts)
+	}
+}
+
+// TestRunKGPostprocess_RecordsGraphCounts is the Bug-2 regression: postprocess
+// is a KGDecisionObserved command, so it must record the resulting node/edge/
+// file counts (like build/update), not just an outcome label.
+func TestRunKGPostprocess_RecordsGraphCounts(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+	writeCRGStatusFixture(t, repo, []crgNodeFixture{
+		{FilePath: "a.go", Language: "go", UpdatedAt: "2026-04-19T18:03:45Z"},
+	})
+	cmd := &cobra.Command{}
+	cmd.Flags().String("repo", repo, "")
+	cmd.Flags().Bool("no-flows", true, "")
+	cmd.Flags().Bool("no-communities", true, "")
+	cmd.Flags().Bool("no-fts", true, "")
+
+	got := captureJournal(t)
+	captureStdout(t, func() {
+		if err := runKGPostprocess(cmd, nil); err != nil {
+			t.Fatalf("runKGPostprocess: %v", err)
+		}
+	})
+	e := findEvent(t, *got, journal.CmdKGPostprocess)
+	var obs journal.KGDecisionObserved
+	if err := json.Unmarshal(e.Observed, &obs); err != nil {
+		t.Fatal(err)
+	}
+	if obs.Outcome != "postprocessed" {
+		t.Fatalf("outcome = %q, want postprocessed", obs.Outcome)
+	}
+	if obs.Nodes == nil || *obs.Nodes != 1 {
+		t.Fatalf("postprocess must record the graph node count, got %+v", obs)
+	}
+}
+
+// TestRunKGWarm_IncludeCodeRecordsCodeCounts is the Bug-3 regression: the warm
+// event must reflect the FULL mutation — the code-lane node/edge upserts under
+// --include-code, not just the note lane.
+func TestRunKGWarm_IncludeCodeRecordsCodeCounts(t *testing.T) {
+	repo := t.TempDir()
+	writeFakeCRGBinary(t, repo, "exit 0")
+	writeCRGFullSchema(t, repo,
+		[][3]string{{"Foo", "pkg.Foo", "pkg/a.go"}},
+		[][2]string{},
+	)
+	setupKGWithNotes(t) // KG_HOME + 5 notes
+	t.Chdir(repo)       // warmCodeLane imports from the cwd repo
+
+	cmd := newKGWarmCmdForTest()
+	if err := cmd.Flags().Set("include-code", "true"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := captureJournal(t)
+	captureStdout(t, func() {
+		if err := runKGWarm(cmd, nil); err != nil {
+			t.Fatalf("runKGWarm: %v", err)
+		}
+	})
+	e := findEvent(t, *got, journal.CmdKGWarm)
+	var obs journal.KGContentDeltaObserved
+	if err := json.Unmarshal(e.Observed, &obs); err != nil {
+		t.Fatal(err)
+	}
+	if obs.Counts["indexed"] != 5 {
+		t.Fatalf("indexed = %d, want 5", obs.Counts["indexed"])
+	}
+	if obs.Counts["code_nodes"] != 1 {
+		t.Fatalf("code-lane node upsert must be journaled, got code_nodes=%d (%+v)", obs.Counts["code_nodes"], obs.Counts)
+	}
+}
+
 // TestRunKGUpdate_EmitsDecisionEvent proves a KG decision command records the
 // outcome + graph counts (KGDecisionObserved) — never node/edge bodies (D4).
 func TestRunKGUpdate_EmitsDecisionEvent(t *testing.T) {

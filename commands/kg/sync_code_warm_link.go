@@ -505,6 +505,13 @@ func runKGPostprocess(cmd *cobra.Command, _ []string) error {
 	}); err != nil {
 		return err
 	}
+	// Postprocess returns no report, so read the resulting graph status to record
+	// the same node/edge/file counts build/update journal (the KGDecisionObserved
+	// contract). Status is best-effort: if it fails the postprocess still landed,
+	// so we keep Outcome and just omit the counts rather than fail the command.
+	if status, serr := bridge.Status(); serr == nil {
+		setDecisionGraphCounts(observed, status)
+	}
 	ok = true
 	return nil
 }
@@ -693,15 +700,23 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	archIndexed, archSkipped := warmArchivedNotes(io, store, home)
 	indexed += archIndexed
 	skipped += archSkipped
-	observed.Counts = map[string]int{"indexed": indexed, "skipped": skipped}
-	ok = true
 
 	_ = store.SetMetadata("last_warm_sync", time.Now().UTC().Format(time.RFC3339))
 
+	// Build the observed counts AFTER the code lane so the event reflects the
+	// full mutation: --include-code upserts code nodes/edges into the warm store,
+	// and even a partial import (nodes before an edge-read error) is a real
+	// change that must be journaled, not just the note lane (D4: counts, no bodies).
+	counts := map[string]int{"indexed": indexed, "skipped": skipped}
 	codeMsg := ""
 	if includeCode {
-		codeMsg = warmCodeLane(store)
+		codeNodes, codeEdges, msg := warmCodeLane(store)
+		codeMsg = msg
+		counts["code_nodes"] = codeNodes
+		counts["code_edges"] = codeEdges
 	}
+	observed.Counts = counts
+	ok = true
 
 	lines := []string{
 		"da kg link add <note-id> <symbol> — link a note to a code symbol",
@@ -797,18 +812,24 @@ func warmNotesInDir(io kgIO, store graphstore.Store, dir string, adjust func(*gr
 	return indexed, skipped
 }
 
-// warmCodeLane runs the optional code-lane import from CRG and returns a
-// summary line for inclusion in the SuccessBox body, or "" on failure.
-// store is the published contract (gcc3 binding).
-func warmCodeLane(store graphstore.Store) string {
+// warmCodeLane runs the optional code-lane import from CRG and returns the
+// number of code nodes/edges actually upserted plus a summary line for the
+// SuccessBox body (empty on failure). store is the published contract (gcc3
+// binding).
+//
+// The counts are returned even when the import errors: runKGWarmCodeImport
+// upserts nodes before reading edges, so an edge-read failure still leaves real
+// node mutations behind. The caller journals these so the warm event reflects
+// the FULL mutation (note lane + code lane), not just the note lane.
+func warmCodeLane(store graphstore.Store) (nodes, edges int, summary string) {
 	repoRoot, _ := os.Getwd()
 	nodesIn, edgesIn, cerr := runKGWarmCodeImport(store, repoRoot)
 	if cerr != nil {
 		ui.Warn(fmt.Sprintf("code-lane import skipped: %v", cerr))
-		return ""
+		return nodesIn, edgesIn, ""
 	}
 	_ = store.SetMetadata("last_code_import", time.Now().UTC().Format(time.RFC3339))
-	return fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
+	return nodesIn, edgesIn, fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
 }
 
 // runKGLinkAdd creates a note→symbol link.
