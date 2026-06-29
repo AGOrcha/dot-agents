@@ -343,3 +343,402 @@ stateDiagram-v2
 - **Plan verbs:** plans move via `plan update --status` (`draft`, `active`, `paused`,
   `completed`, `archived`); `plan archive` performs the final `completed -> archived`
   step and bundles the history record.
+
+## 7. Layered Config Distribution Model
+
+This is the core architecture story: how a project declares what it needs, where that
+content comes from, and how it gets pinned and projected. A project's `.agentsrc.json`
+names a set of `sources[]` (by kind: `local`, `git`, `http`, `oci`), then pulls config
+**layers** through `extends[]` and executable **packages** through `packages[]`.
+Resolution merges those layers into an effective config, writes a SHA-pinned
+`.agentsrc.lock`, and projects the result into each platform's repo-local files. Derived
+from `internal/config/agentsrc.go` (`Source`, `LayerRef`, `PackageRef`),
+`internal/config/resolver.go`, `internal/agentslock/lockfile.go`,
+`internal/config/lock_units.go`, and `docs/LAYERED_CONFIG_GUIDE.md`.
+
+```mermaid
+flowchart TB
+    subgraph SRC["Config sources — sources[] (by kind)"]
+        local["local<br/>path on disk"]
+        git["git<br/>url + ref"]
+        http["http<br/>url"]
+        oci["oci<br/>registry url + ref"]
+    end
+
+    subgraph RC["Project manifest — .agentsrc.json"]
+        sources["sources[]<br/>named, stable id per source"]
+        extends["extends[]<br/>LayerRef — source-id:layer-path@version"]
+        packages["packages[]<br/>PackageRef — source-id:artifact-path@version"]
+        repoid["repo_id — protected identity"]
+    end
+
+    subgraph RES["Resolution — da config sync / explain"]
+        layers["Layer units (kind layer)<br/>merged underneath repo config"]
+        artifacts["Artifact units (kind artifact)<br/>executable bundles"]
+        stack["Merge stack — low to high<br/>product-defaults, user-local,<br/>extends[] (at locked digest),<br/>repo-local, .agentsrc.local.json"]
+    end
+
+    lock[".agentsrc.lock<br/>lock_version + inputs_digest<br/>units — key, kind, digest sha256, fetched_at"]
+
+    proj["Projection — da refresh / install<br/>per-platform outputs:<br/>Claude, Cursor, Codex, Copilot, OpenCode"]
+
+    local --> sources
+    git --> sources
+    http --> sources
+    oci --> sources
+    sources --> extends
+    sources --> packages
+    extends --> layers
+    packages --> artifacts
+    layers --> stack
+    repoid -. never overridden by imported layers .-> stack
+    stack --> lock
+    artifacts --> lock
+    lock --> proj
+```
+
+### Reading notes
+
+- **Two unit kinds from one source set.** Every `sources[]` entry has a stable `id`.
+  `extends[]` entries (`LayerRef`, form `source-id:layer-path@version`) resolve to
+  `kind: layer` units; `packages[]` entries (`PackageRef`,
+  `source-id:artifact-path@version`) resolve to `kind: artifact` units. The source kind
+  says *where to fetch*; the ref says *layer vs artifact*.
+- **Merge stack, lowest precedence first:** product-defaults -> user-local
+  (`~/.agents/.agentsrc.json`) -> imported `extends[]` (reconstructed from the lock at
+  their locked digest) -> repo-local `.agentsrc.json` -> `.agentsrc.local.json`
+  (uncommitted machine overlay). Higher layers win; `repo_id` is protected and no imported
+  layer can change it. Merge is per-field by category (scalar last-wins; set-union for
+  `skills`/`agents`/`rules`; map-merge for `features`/`kg`/`stage_profiles`;
+  ordered-replace for `sources`/`extends`/`packages`).
+- **The lock is content-addressed.** `da config sync` rewrites `.agentsrc.lock`:
+  `lock_version`, `inputs_digest`, and a `units` map keyed by
+  `source:path@resolved-version`, each `LockedUnit` carrying `kind` (`layer`|`artifact`),
+  `digest` (`sha256:…` pin), and `fetched_at`. Staleness is digest-driven, never
+  clock-driven; `da refresh` / `da install` re-resolve only when the digest is stale.
+- **OCI note (code vs doc drift):** `docs/LAYERED_CONFIG_GUIDE.md` still states `extends`
+  rejects `oci` (git/http/local only). The current resolver (`resolver.go`, spec change
+  "D13") allows **any** source kind — including `oci` — to supply a layer; an OCI layer is
+  guarded by the config-layer media type inside its fetcher rather than rejected at the
+  `extends` boundary. The diagram reflects the **code**; this drift is flagged for the doc
+  owner.
+
+## 8. Home Store, Portable User Scope, and Per-Machine Bindings
+
+`dot-agents` separates **what travels** from **what is machine-local**. The `~/.agents`
+home store holds the portable user scope (sources, layering policy/profiles, and a project
+*identity* registry that records each managed project's id + portable key but **not** its
+path). The id→absolute-path mapping is a per-machine binding table that is never synced or
+projected. `da init --from <home-source>` bootstraps the user scope onto a fresh machine;
+`da refresh` then re-binds every known project id to a local path. Derived from
+`internal/config/homeconfig_init.go`, `internal/config/lock_units.go`
+(`UnitKindProjectSet`), and the `home-config-portability` spec.
+
+```mermaid
+flowchart LR
+    subgraph HOME["~/.agents — home store"]
+        portable["Portable user scope (synced)<br/>sources, layering policy / profiles,<br/>project-set identity registry<br/>(id + portable key, NO path)"]
+        userlocal["user-local layer<br/>~/.agents/.agentsrc.json"]
+        binding["Per-machine binding table<br/>id to absolute path<br/>(never synced / projected)"]
+    end
+
+    mB["Fresh machine B"]
+    init["da init --from &lt;home-source&gt;<br/>resolve user scope from remote home"]
+    refresh["da refresh<br/>re-bind project ids to local paths"]
+
+    portable --> init
+    userlocal --> init
+    mB --> init
+    init --> refresh
+    refresh --> binding
+```
+
+### Reading notes
+
+- **Identity travels, paths do not.** `UnitKindProjectSet` is a first-class synced unit
+  carrying portable project identity; the binding table (`id → absolute path`) is
+  explicitly *not* a unit and never reaches sync/projection.
+- **Cross-machine bootstrap.** Plain `da init` scaffolds a fresh local home from embedded
+  starters; `da init --from` adds the clone/adopt path that resolves an existing user scope
+  from a remote home source. After adoption, `da refresh` resolves each portable identity to
+  a machine-local path rather than trusting any synced absolute path.
+
+## 9. Session-Handoff Recovery Flow
+
+The journal layer makes a session crash-survivable. State-mutating `da workflow` / `kg` /
+`review` commands append typed events to an off-tree, per-repo log. A `PreCompact` hook
+captures a deterministic snapshot before the context window is compacted; a
+`SessionStart(source=compact)` hook then replays snapshot+events and **re-verifies each item
+against live reality** (gh, then git), tagging every fact on a trust gradient. The
+`agent-handoff` skill consumes the verified view so the fresh session resumes on facts, not
+prose. Derived from `internal/journal/` (`append.go`, `envelope.go`, `schema.go`,
+`identity.go`, `snapshot.go`), `commands/workflow/journal.go`, the
+`session-handoff-snapshot` / `session-handoff-recover` hooks, and the `session-handoff-journal`
+spec.
+
+```mermaid
+flowchart TB
+    subgraph EMIT["1 - Emit (state-mutating commands)"]
+        wf["da workflow advance / start-task /<br/>merge-back / fanout / verify record /<br/>checkpoint / commit ..."]
+        kg["da kg ingest / build / link /<br/>maintain / sync"]
+        rv["da review approve / reject"]
+    end
+
+    log["events.log — append-only NDJSON, off-tree<br/>$XDG_STATE_HOME/dot-agents/journal/&lt;fingerprint&gt;/<br/>Envelope — ts, seq, command, event_type, input, observed"]
+
+    subgraph COMPACT["2 - Compaction boundary"]
+        pre["PreCompact hook — session-handoff-snapshot<br/>da workflow journal snapshot"]
+        snap["snapshot.json — deterministic watermark<br/>identity, plans+tasks, pending-unblocked,<br/>delegations, pending merge-backs"]
+        comp(("context<br/>compaction"))
+        start["SessionStart(source=compact) hook<br/>session-handoff-recover<br/>da workflow journal recover"]
+    end
+
+    subgraph RECOVER["3 - Verified recovery view"]
+        replay["reconstruct = snapshot + replay events.log"]
+        reverify["re-verify each item vs live reality<br/>gh (authoritative) then local TASKS.yaml"]
+        tags{"trust gradient"}
+        verified["verified — reality matches"]
+        changed["changed — reality differs (+ delta)"]
+        missing["missing — no longer exists"]
+        unverified["unverified — no source could confirm"]
+        quarantine["quarantine — snapshot identity != session<br/>(fingerprint mismatch, D8)"]
+    end
+
+    handoff["agent-handoff skill (verified-readback)<br/>folds verified facts into the fresh session"]
+
+    wf --> log
+    kg --> log
+    rv --> log
+    log --> pre
+    pre --> snap
+    snap --> comp
+    comp --> start
+    start --> replay
+    replay --> reverify
+    reverify --> tags
+    tags --> verified
+    tags --> changed
+    tags --> missing
+    tags --> unverified
+    snap -. identity check .-> quarantine
+    verified --> handoff
+    changed --> handoff
+    missing --> handoff
+    unverified --> handoff
+```
+
+### Reading notes
+
+- **Off-tree, per-repo, no bodies.** `events.log` lives under the XDG state dir keyed by a
+  repo *fingerprint* (the trusted canonical repo id, else a path hash) — never in the git
+  tree. Each `Envelope` records ids/statuses/dep edges and a 16 KiB-capped input/observed
+  payload, never notes or summaries. Event types are `durable_delta`, `input_only`, and
+  `failed`.
+- **Snapshot is the watermark; events are the delta.** The `PreCompact` snapshot is built
+  deterministically (sorted slices, byte-identical for identical state). `recover`
+  reconstructs by replaying the log over the snapshot, then re-verifies.
+- **Trust gradient (exact tags):** `verified` (reality matches), `changed` (differs, with an
+  explicit `delta:`), `missing` (gone), `unverified` (no source could confirm — a
+  hypothesis, never injected as fact). A parallel `trust=high|medium|low` records whether an
+  authoritative (`gh`) or fallback (`local`) source answered, and a bundle-level
+  `fresh|stale|orphaned` freshness label drives the D10 orphan quarantine.
+- **Quarantine on identity mismatch.** If the snapshot's fingerprint differs from the
+  resuming session's, the whole bundle is quarantined (D8) — identity mismatch takes
+  precedence over freshness. This prevents resuming another repo's state into this one.
+
+## 10. Full System Component Map
+
+A maintainer-oriented map from the binary entrypoint down to filesystem state. The command
+layer (`commands/`) is thin orchestration; reusable behavior lives in `internal/` services;
+everything resolves into the home store, the project manifest/lock, platform repo dirs, and
+off-tree state. Verified against the actual `internal/` tree.
+
+```mermaid
+flowchart TB
+    main["cmd/da/main.go — Cobra entrypoint"]
+    root["commands/root.go — global flags + registration"]
+
+    subgraph CMD["commands/ (by area)"]
+        lifecycle["lifecycle — init, add, remove, refresh, import, install"]
+        inspect["inspect/ops — status, doctor, explain, sync, session, score"]
+        wfcmd["workflow/ — plan, task, fanout, merge-back, verify, journal"]
+        kgcmd["kg/ — ingest, query, serve, warm, build, impact"]
+        authoring["authoring — skills, agents, hooks, rules, mcp, settings"]
+        reviewcmd["review — proposal approve / reject"]
+    end
+
+    subgraph INT["internal/ services"]
+        config["config — .agentsrc.json, layers, lock, paths"]
+        platform["platform — adapters, intents, renderers"]
+        links["links — symlink / hardlink helpers"]
+        fsops["fsops — OS-aware fs ops, atomic writes"]
+        projectsync["projectsync — scaffold/restore/refresh metadata"]
+        scaffold["scaffold — embedded home/hooks/starter assets"]
+        agentslock["agentslock — .agentsrc.lock + interprocess lock"]
+        journal["journal — events.log + snapshot + recovery"]
+        graphstore["graphstore — SQLite warm graph + MCP bridge"]
+        kgsvc["kg — note model, dsl, registry"]
+        ui["ui — terminal formatting + prompts"]
+    end
+
+    subgraph FS["Filesystem & state"]
+        home["~/.agents — canonical home store"]
+        rc[".agentsrc.json / .agentsrc.lock"]
+        platdirs["platform repo dirs — .claude/ .cursor/<br/>.codex/ .opencode/ .github/ AGENTS.md"]
+        state["XDG state — journal, render-manifest, KG warm db"]
+        wfart[".agents/ — active, history, lessons, workflow plans"]
+    end
+
+    main --> root
+    root --> lifecycle
+    root --> inspect
+    root --> wfcmd
+    root --> kgcmd
+    root --> authoring
+    root --> reviewcmd
+
+    lifecycle --> config
+    lifecycle --> platform
+    lifecycle --> projectsync
+    lifecycle --> scaffold
+    config --> agentslock
+    platform --> links
+    links --> fsops
+    wfcmd --> journal
+    wfcmd --> wfart
+    kgcmd --> graphstore
+    kgcmd --> kgsvc
+    reviewcmd --> journal
+    config --> rc
+    config --> home
+    platform --> platdirs
+    journal --> state
+    graphstore --> state
+    inspect --> ui
+```
+
+### Reading notes
+
+- **Featured services only.** The `internal/` tree also ships `adapters`, `credstore`,
+  `docsaccess`, `eval`, `events`, `gitremote`, `gitwt`, `review`, `scoring`, `service`, and
+  test-infra packages (`globalflagcov`, `linktest`, `testutil`) — omitted here for clarity.
+- **State is split three ways:** the canonical home store (`~/.agents`), the per-project
+  manifest + lock (`.agentsrc.json` / `.agentsrc.lock`) and platform repo dirs, and off-tree
+  XDG state (the journal log/snapshot, the render manifest, and the KG warm SQLite db).
+
+## 11. Platform-Projection Pipeline
+
+How canonical resource intents become repo-native files. Each platform in `platform.All()`
+emits `ResourceIntent`s; the command layer aggregates them into a single `ResourcePlan`
+(deduping shared targets and catching conflicts), then applies each intent's transport.
+**Cursor uses hard links** because `.cursor/rules/` does not follow symlinks; every other
+platform symlinks; rendered files get sha256 provenance via the render manifest. Derived
+from `internal/platform/platform.go` (`All()`), the per-platform adapters
+(`cursor.go`/`claude.go`/`codex.go`/`opencode.go`/`copilot.go`), `resource_intent.go`,
+`resource_plan.go`, `render_manifest.go`, and `internal/links/links.go`.
+
+```mermaid
+flowchart LR
+    subgraph INTENT["Resource intents — platform.All()"]
+        cursor["Cursor"]
+        claude["Claude"]
+        codex["Codex"]
+        opencode["OpenCode"]
+        copilot["Copilot"]
+    end
+
+    plan["ResourcePlan<br/>aggregate + dedup shared targets<br/>(.agents/skills, .agents/agents)<br/>+ conflict detection"]
+
+    subgraph TRANSPORT["Transport (per ResourceIntent.Transport)"]
+        hard["hardlink — links.HardlinkReplacing"]
+        sym["symlink — links.SymlinkReplacing"]
+        write["write/render — render-manifest.json sha256"]
+    end
+
+    subgraph OUT["Repo-local outputs"]
+        ocursor[".cursor/rules, .cursor/{settings,mcp,hooks}.json,<br/>.cursor/agents, .cursorignore"]
+        oclaude[".claude/rules, .claude/settings.local.json,<br/>.claude/{agents,skills}, .mcp.json"]
+        ocodex["AGENTS.md, .codex/config.toml,<br/>.codex/hooks.json, .codex/agents/"]
+        oopencode["opencode.json, .opencode/agent/"]
+        ocopilot[".github/copilot-instructions.md,<br/>.github/{agents,hooks}, .vscode/mcp.json"]
+        oshared[".agents/skills, .agents/agents (shared bucket)"]
+    end
+
+    cursor --> plan
+    claude --> plan
+    codex --> plan
+    opencode --> plan
+    copilot --> plan
+    plan --> hard
+    plan --> sym
+    plan --> write
+    hard --> ocursor
+    sym --> oclaude
+    sym --> ocodex
+    sym --> oopencode
+    sym --> ocopilot
+    write --> oshared
+```
+
+### Reading notes
+
+- **Why Cursor hard-links:** Cursor's rule system does not follow symlinks for
+  `.cursor/rules/`, so dot-agents hard-links (shared inode, edits sync automatically). All
+  other platforms symlink; on Windows the symlink path degrades to a junction (dirs) or hard
+  link (files).
+- **Shared buckets are deduped.** `.agents/skills` and `.agents/agents` are emitted by
+  several platforms; the `ResourcePlan` collapses compatible shared targets into one planned
+  resource before any write, so the same skill isn't projected five times.
+- **Render provenance protects user edits.** For `write`/render shapes, a per-destination
+  sha256 in `render-manifest.json` (under XDG state) means a managed rendered file is
+  overwritten only if it still matches the last render; otherwise the user's edit is backed
+  up first.
+
+## 12. KG / Graphstore Architecture
+
+Two distinct graph layers. `code-review-graph` is a separate Python, Tree-sitter tool that
+parses the codebase into `.code-review-graph/graph.db` — the structural source of truth.
+`internal/graphstore` is a Go SQLite **warm store** (a port of the CRG storage layer extended
+with KG note tables) that holds both the imported code graph and the knowledge notes from
+`internal/kg`. `CRGBridge` shells out to the Python CLI; `da kg serve` exposes the surface
+over MCP (stdio JSON-RPC) for agents. Derived from `internal/graphstore/` (`store.go`,
+`migrations.go`, `crg.go`, `mcp_server.go`), `internal/kg/`, and `commands/kg/`.
+
+```mermaid
+flowchart TB
+    kgcli["da kg — setup, ingest, query, warm, build,<br/>update, impact, link, maintain, serve"]
+
+    subgraph CRG["code-review-graph (Python, Tree-sitter)"]
+        treesit["Tree-sitter parse of the codebase"]
+        crgdb[".code-review-graph/graph.db<br/>structural graph — source of truth"]
+    end
+
+    bridge["CRGBridge — shells out to code-review-graph CLI<br/>(internal/graphstore/crg.go)"]
+
+    warmdb["internal/graphstore — Go warm store (SQLite)<br/>&lt;KG_HOME&gt;/ops/graphstore.db<br/>tables — nodes, edges, metadata,<br/>kg_notes, note_symbol_links"]
+
+    notes["internal/kg — note model, dsl, registry<br/>(hot filesystem notes)"]
+    mcp["da kg serve — MCP server (stdio JSON-RPC)<br/>impact / query surface for agents"]
+
+    kgcli --> bridge
+    kgcli --> notes
+    treesit --> crgdb
+    crgdb --> bridge
+    bridge --> warmdb
+    notes -->|warm import| warmdb
+    bridge --> mcp
+    warmdb -. impact resolve .-> mcp
+```
+
+### Reading notes
+
+- **Producer vs warm store.** `code-review-graph` (Python/Tree-sitter) *produces* the
+  structural graph at `.code-review-graph/graph.db`. `internal/graphstore` is the Go warm
+  store at `<KG_HOME>/ops/graphstore.db`; `da kg warm` imports code nodes/edges from CRG and
+  also holds the KG knowledge notes (`kg_notes`, `note_symbol_links`).
+- **One bridge, two consumers.** `CRGBridge` is the single seam to the Python CLI; both the
+  warm-import path and the `da kg serve` MCP server go through it. The warm SQLite store
+  resolves impact files for MCP queries and degrades to raw symbol lookup when unavailable.
+- **Backend reality:** SQLite (`modernc.org/sqlite`, pure Go) is the operative warm backend
+  today; a `PostgresStore` satisfies the same `Store` contract but the pooled-daemon path is
+  not yet active.

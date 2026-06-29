@@ -1,0 +1,66 @@
+{
+  "title": "Verifier profile registry & app_type dispatch",
+  "description": "An app_type selects an ordered verifier_sequence (execution_profile.by_app_type.<type>.topology.verifier_sequence); each verifier slug composes its prompt base-first from stage_profiles.verifier.<slug>.prompt_files. The legacy app_type_verifier_map is deprecated and folded into execution_profile on load. Profiles shown live = registered in this repo; starter = shipped for consuming projects but not wired here; design-stage = proposed only. Click any node to inspect.",
+  "layout": "breadthfirst",
+  "legend": [
+    { "kind": "app-type", "color": "#0ea5e9", "description": "execution_profile.by_app_type.<type>" },
+    { "kind": "verifier", "color": "#22c55e", "description": "registered in this repo (stage_profiles.verifier)" },
+    { "kind": "starter", "color": "#64748b", "description": "shipped to consumers, not wired in this repo" },
+    { "kind": "registry", "color": "#a855f7", "description": "profile registry / library" },
+    { "kind": "design", "color": "#f59e0b", "description": "design-stage (proposal + lesson only)" }
+  ],
+  "nodes": [
+    { "id": "at-gocli", "label": "go-cli", "kind": "app-type",
+      "data": { "verifier_sequence": ["unit", "cli-runner"], "lens_set": 4 } },
+    { "id": "at-ideation", "label": "ideation", "kind": "app-type",
+      "data": { "verifier_sequence": ["schema-check", "citation-check", "task-schedule"], "lens_set": 3 } },
+    { "id": "at-docs", "label": "docs", "kind": "app-type",
+      "data": { "verifier_sequence": ["schema-check", "citation-check", "cli-runner"], "lens_set": 2 } },
+
+    { "id": "reg", "label": "stage_profiles.verifier", "kind": "registry",
+      "data": { "scope": "this repo (.agentsrc.json lines 178-219)", "composition": "prompt_files base-first: verifier.base.md -> <slug>.md -> <slug>.project.md" } },
+
+    { "id": "v-unit", "label": "unit", "kind": "verifier",
+      "data": { "label_text": "Unit (Go)", "verifies": "changed code correct at unit level" } },
+    { "id": "v-cli", "label": "cli-runner", "kind": "verifier",
+      "data": { "label_text": "CLI runner (built-binary smoke)", "verifies": "built binary smoke test" } },
+    { "id": "v-schema", "label": "schema-check", "kind": "verifier",
+      "data": { "label_text": "Schema check (artifacts validate)", "verifies": "artifacts validate against schemas" } },
+    { "id": "v-citation", "label": "citation-check", "kind": "verifier",
+      "data": { "label_text": "Citation check (references resolve)", "verifies": "references / citations resolve" } },
+    { "id": "v-schedule", "label": "task-schedule", "kind": "verifier",
+      "data": { "label_text": "Task schedule (DAG sound)", "verifies": "task DAG / schedule is sound" } },
+
+    { "id": "starter", "label": "Starter verifier prompts", "kind": "registry",
+      "data": { "scope": "internal/scaffold/home/starter/prompts/verifiers/", "note": "shipped for consuming projects; not in this repo's registry" } },
+    { "id": "s-api", "label": "api", "kind": "starter", "data": { "verifies": "HTTP / contract verification" } },
+    { "id": "s-batch", "label": "batch", "kind": "starter", "data": { "verifies": "fixture / golden / multi-record" } },
+    { "id": "s-streaming", "label": "streaming", "kind": "starter", "data": { "verifies": "event-driven / duplex transport" } },
+    { "id": "s-uie2e", "label": "ui-e2e", "kind": "starter", "data": { "verifies": "browser / DOM end-to-end" } },
+
+    { "id": "prci", "label": "pr-ci", "kind": "design",
+      "data": { "status": "design-stage only (NOT shipped here)", "source": ".agents/proposals/pr-ci-verifier-integration-audit.md + lesson verifier-owns-ci-watch-shift-left", "intent": "post-merge-back CI watch loop: poll gh pr checks + Sonar, auto-fix mechanical issues, else fix-up brief" } }
+  ],
+  "edges": [
+    { "source": "at-gocli", "target": "v-unit", "label": "1" },
+    { "source": "at-gocli", "target": "v-cli", "label": "2" },
+    { "source": "at-ideation", "target": "v-schema", "label": "1" },
+    { "source": "at-ideation", "target": "v-citation", "label": "2" },
+    { "source": "at-ideation", "target": "v-schedule", "label": "3" },
+    { "source": "at-docs", "target": "v-schema", "label": "1" },
+    { "source": "at-docs", "target": "v-citation", "label": "2" },
+    { "source": "at-docs", "target": "v-cli", "label": "3" },
+
+    { "source": "reg", "target": "v-unit", "label": "composes" },
+    { "source": "reg", "target": "v-cli", "label": "composes" },
+    { "source": "reg", "target": "v-schema", "label": "composes" },
+    { "source": "reg", "target": "v-citation", "label": "composes" },
+    { "source": "reg", "target": "v-schedule", "label": "composes" },
+
+    { "source": "starter", "target": "s-api" },
+    { "source": "starter", "target": "s-batch" },
+    { "source": "starter", "target": "s-streaming" },
+    { "source": "starter", "target": "s-uie2e" },
+    { "source": "starter", "target": "prci", "label": "proposed" }
+  ]
+}
