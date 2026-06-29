@@ -14,9 +14,26 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// seamPathMatches reports whether any of the given paths contains want, after
+// normalizing OS path separators to forward slashes. This lets callers pass
+// forward-slash fragments (e.g. "/entities/") and still match on Windows,
+// where the real paths use backslashes. An empty want matches every path.
+func seamPathMatches(want string, paths ...string) bool {
+	if want == "" {
+		return true
+	}
+	for _, p := range paths {
+		if strings.Contains(filepath.ToSlash(p), want) {
+			return true
+		}
+	}
+	return false
+}
 
 // errSeam is the sentinel error returned from injected kgIO stubs. It is the
 // drop-in replacement for the package-level errSeam previously declared in
@@ -94,7 +111,7 @@ func withMkdirAllError(t *testing.T, want string) *fakeKGIO {
 	t.Helper()
 	return &fakeKGIO{
 		mkdirAll: func(path string, _ fs.FileMode) error {
-			if want == "" || strings.Contains(path, want) {
+			if seamPathMatches(want, path) {
 				return errSeam
 			}
 			return os.MkdirAll(path, 0755)
@@ -108,7 +125,7 @@ func withWriteFileError(t *testing.T, want string) *fakeKGIO {
 	t.Helper()
 	return &fakeKGIO{
 		writeFile: func(name string, data []byte, perm fs.FileMode) error {
-			if want == "" || strings.Contains(name, want) {
+			if seamPathMatches(want, name) {
 				return errSeam
 			}
 			return os.WriteFile(name, data, perm)
@@ -122,7 +139,7 @@ func withReadFileError(t *testing.T, want string) *fakeKGIO {
 	t.Helper()
 	return &fakeKGIO{
 		readFile: func(name string) ([]byte, error) {
-			if want == "" || strings.Contains(name, want) {
+			if seamPathMatches(want, name) {
 				return nil, errSeam
 			}
 			return os.ReadFile(name)
@@ -136,7 +153,7 @@ func withOpenFileError(t *testing.T, want string) *fakeKGIO {
 	t.Helper()
 	return &fakeKGIO{
 		openFile: func(name string, flag int, perm fs.FileMode) (*os.File, error) {
-			if want == "" || strings.Contains(name, want) {
+			if seamPathMatches(want, name) {
 				return nil, errSeam
 			}
 			return os.OpenFile(name, flag, perm)
@@ -150,7 +167,7 @@ func withRenameError(t *testing.T, want string) *fakeKGIO {
 	t.Helper()
 	return &fakeKGIO{
 		rename: func(oldpath, newpath string) error {
-			if want == "" || strings.Contains(oldpath, want) || strings.Contains(newpath, want) {
+			if seamPathMatches(want, oldpath, newpath) {
 				return errSeam
 			}
 			return os.Rename(oldpath, newpath)
@@ -164,7 +181,7 @@ func withReadDirError(t *testing.T, want string) *fakeKGIO {
 	t.Helper()
 	return &fakeKGIO{
 		readDir: func(name string) ([]os.DirEntry, error) {
-			if want == "" || strings.Contains(name, want) {
+			if seamPathMatches(want, name) {
 				return nil, errSeam
 			}
 			return os.ReadDir(name)

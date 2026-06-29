@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,19 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
+
+// isDeletePendingLockErr reports whether a failed lock-dir Mkdir is the Windows
+// "delete pending" transient — a contender's os.Mkdir racing the holder's
+// RemoveAll observes ERROR_ACCESS_DENIED (mapped to a permission error) while
+// the directory is mid-delete, rather than the portable ERROR_ALREADY_EXISTS.
+// It clears within a retry, so the acquisition loop treats it as retryable
+// contention. Gated on goos == "windows" so a genuine permission error stays a
+// fast failure on other platforms (where this race does not occur). goos is a
+// parameter rather than a direct runtime.GOOS read so the predicate is unit-
+// testable for the Windows branch from any host.
+func isDeletePendingLockErr(err error, goos string) bool {
+	return goos == "windows" && os.IsPermission(err)
+}
 
 // LockVersion is the current .agentsrc.lock schema version.
 const LockVersion = 1
@@ -319,21 +333,29 @@ func acquireLockDir(path string) (lockDir string, err error) {
 			writeHolder(lockDir)
 			return lockDir, nil
 		}
-		if !os.IsExist(err) {
+		switch {
+		case os.IsExist(err):
+			// Contention: the lock dir already exists and is held. Before waiting,
+			// decide whether the current holder is alive or stale (crashed without
+			// releasing). A stale lock is reclaimed at most once per call so a live
+			// holder racing us cannot be repeatedly torn down.
+			if !reclaimed && lockIsStale(lockDir) {
+				reclaimed = true
+				// Remove the whole lock dir (holder file included) so the next Mkdir
+				// can succeed. Ignore the error: if removal fails (e.g. another
+				// writer reclaimed first), we simply fall through to the retry/timeout
+				// path and try again.
+				_ = fsops.RemoveAll(lockDir)
+				continue
+			}
+		case isDeletePendingLockErr(err, runtime.GOOS):
+			// Windows-only transient: a contender's Mkdir can race the holder's
+			// RemoveAll and observe ERROR_ACCESS_DENIED while the dir is in the
+			// "delete pending" state. It clears within a retry or two, so wait and
+			// retry rather than failing the whole acquisition. Skip the stale-
+			// reclaim path: there is no live holder to judge, just a dir mid-delete.
+		default:
 			return "", fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
-		}
-		// Contention: the lock dir already exists. Before waiting, decide whether
-		// the current holder is alive or stale (crashed without releasing). A
-		// stale lock is reclaimed at most once per call so a live holder racing
-		// us cannot be repeatedly torn down.
-		if !reclaimed && lockIsStale(lockDir) {
-			reclaimed = true
-			// Remove the whole lock dir (holder file included) so the next Mkdir
-			// can succeed. Ignore the error: if removal fails (e.g. another
-			// writer reclaimed first), we simply fall through to the retry/timeout
-			// path and try again.
-			_ = fsops.RemoveAll(lockDir)
-			continue
 		}
 		if time.Now().After(deadline) {
 			return "", fmt.Errorf("agentslock: acquire lock %s: timed out", lockDir)
