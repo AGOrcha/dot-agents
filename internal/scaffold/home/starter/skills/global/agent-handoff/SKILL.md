@@ -23,6 +23,6 @@ Package shaped context — plans, decisions, project state — into a structured
 
 4. **Cleanup** (create mode only) — Before generating the handoff doc, reference `instructions/commit-cleanup.md` to ensure in-progress work is committed.
 
-5. **Capture cadence** — Read `instructions/journal-cadence.md` for *when* to capture state so a future session can recover it. The deterministic layer is automatic (every state-mutating `da` command appends an event); the reasoned *why* is your job, at the adaptive cadence described there. This is the write side that makes recover (step 3) work.
+5. **Capture cadence** — Read `instructions/journal-cadence.md` for *when* to capture state so a future session can recover it. The deterministic layer is automatic (the journaled `da workflow`/`kg`/`review` mutators append an event; recomputable surfaces like config `refresh` are excluded); the reasoned *why* is your job, at the adaptive cadence described there. This is the write side that makes recover (step 3) work.
 
 6. **Gotchas** — Read `instructions/gotchas.md` if anything seems unclear or output feels thin.
