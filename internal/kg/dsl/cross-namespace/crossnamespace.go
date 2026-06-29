@@ -28,6 +28,7 @@
 package crossnamespace
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -292,23 +293,40 @@ func appendReturnRefs(refs []dsl.FieldRef, item dsl.ReturnItem) []dsl.FieldRef {
 	return refs
 }
 
-// refPathSignature resolves a field ref to a FULL signature string that encodes
-// every ref-hop target type along the traversed path plus the terminal field's
-// type. Walking `s.owner.name` yields a signature like "ref<owner>>type<string>";
-// if owner's ref target changes (owner→principal) the signature changes even
-// though the terminal type is unchanged — so a chain retarget is detected as a
-// breaking change (§10.3). It returns (key, signature, true) for a real schema
-// field, or ok=false for a bare alias, an intrinsic id, a structured stale
-// selector, or any path that does not resolve to a declared field (the parser
-// handles those cases). key is the rooted "rootType.path" identity for
-// diagnostics.
+// sigHop is one component of a field reference's structured signature: a ref hop
+// to a target note type (Kind "ref", Value = target note-type) or the terminal
+// field's declared type (Kind "type", Value = field type). The signature is the
+// ordered slice of these, compared via its JSON encoding (encodeSig).
+type sigHop struct {
+	Kind  string `json:"k"`
+	Value string `json:"v"`
+}
+
+// refPathSignature resolves a field ref to a FULL, collision-proof signature
+// that encodes every ref-hop target type along the traversed path plus the
+// terminal field's type. Walking `s.owner.name` yields hops
+// [{ref, owner}, {type, string}]; if owner's ref target changes (owner→principal)
+// the signature changes even though the terminal type is unchanged — so a chain
+// retarget is detected as a breaking change (§10.3).
+//
+// The signature is encoded structurally (encodeSig), NOT by concatenating into a
+// delimited string: note-type and field-type names are not identifier-validated
+// (registry loader only checks non-empty/unique), so a name containing a
+// delimiter could otherwise merge two distinct signatures into one and hide a
+// real change. The structured/JSON encoding is injective regardless of name
+// contents.
+//
+// It returns (key, signature, true) for a real schema field, or ok=false for a
+// bare alias, an intrinsic id, a structured stale selector, or any path that
+// does not resolve to a declared field (the parser handles those cases). key is
+// the rooted "rootType.path" identity for diagnostics.
 func refPathSignature(ref dsl.FieldRef, aliasType map[string]string, info dsl.SchemaInfo) (string, string, bool) {
 	root, ok := aliasType[ref.Alias]
 	if !ok || len(ref.Path) == 0 {
 		return "", "", false
 	}
 	cur := root
-	parts := make([]string, 0, len(ref.Path))
+	hops := make([]sigHop, 0, len(ref.Path))
 	for i, part := range ref.Path {
 		if part == "stale" {
 			return "", "", false // structured stale selector, not a schema field
@@ -323,16 +341,25 @@ func refPathSignature(ref dsl.FieldRef, aliasType map[string]string, info dsl.Sc
 		}
 		if i == len(ref.Path)-1 {
 			key := root + "." + strings.Join(ref.Path, ".")
-			parts = append(parts, "type<"+field.Type+">")
-			return key, strings.Join(parts, ">"), true
+			hops = append(hops, sigHop{Kind: "type", Value: field.Type})
+			return key, encodeSig(hops), true
 		}
 		if field.RefType == "" {
 			return "", "", false // traverses a non-ref (parser rejects; defensive)
 		}
-		parts = append(parts, "ref<"+field.RefType+">")
+		hops = append(hops, sigHop{Kind: "ref", Value: field.RefType})
 		cur = field.RefType
 	}
 	return "", "", false
+}
+
+// encodeSig serializes a structured signature injectively via JSON: string
+// contents are escaped, so no delimiter inside a note-type or field-type name
+// can merge two distinct signatures (the unescaped-concat collision class).
+// Marshaling a []sigHop of plain strings cannot fail.
+func encodeSig(hops []sigHop) string {
+	b, _ := json.Marshal(hops)
+	return string(b)
 }
 
 // readMerged reads the consumer namespace (own-read token) and each declared

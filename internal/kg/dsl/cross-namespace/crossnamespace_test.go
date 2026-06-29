@@ -575,6 +575,46 @@ func TestCheckCompatRefRetarget(t *testing.T) {
 	})
 }
 
+// TestCheckCompatSignatureCollision is the adversarial case: note-type and
+// field-type names are not identifier-validated, so an UNESCAPED delimited
+// signature could merge two distinct changes. Here the bump changes BOTH the ref
+// target and the terminal type, chosen so the old "ref<X>>type<Y>" concat would
+// encode both schemas identically to "ref<a>>type<b>>type<c>" — hiding a real
+// change as compatible. The structured (JSON) encoding keeps them distinct, so
+// this is correctly dsl-update-required.
+func TestCheckCompatSignatureCollision(t *testing.T) {
+	consumer := crossnamespace.Namespace{Name: "c-ns", Info: mustInfo(t,
+		[]dsl.NoteTypeDecl{{Name: typeControl, Fields: []dsl.FieldDecl{{Name: fControlID, Type: typeString}}}}, nil, 2)}
+
+	// OLD: symbol.owner -> a.name, where a.name's type is "b>>type<c".
+	old := crossnamespace.Namespace{Name: nsDep, Info: mustInfo(t,
+		[]dsl.NoteTypeDecl{
+			{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: "owner", Type: "ref<a>"}}},
+			{Name: "a", Fields: []dsl.FieldDecl{{Name: "name", Type: "b>>type<c"}}},
+		}, nil, 2)}
+	v, err := crossnamespace.Compile("v", consumer, []crossnamespace.Namespace{old}, nil,
+		"MATCH (s:symbol) RETURN s.owner.name")
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	// NEW: symbol.owner -> "a>>type<b".name, where name's type is "c". The old
+	// concat of BOTH old and new = "ref<a>>type<b>>type<c>" (a collision); the
+	// structured encoding distinguishes them.
+	bumped := crossnamespace.Namespace{Name: nsDep, Info: mustInfo(t,
+		[]dsl.NoteTypeDecl{
+			{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: "owner", Type: "ref<a>>type<b>"}}},
+			{Name: "a>>type<b", Fields: []dsl.FieldDecl{{Name: "name", Type: "c"}}},
+		}, nil, 2)}
+	state, cerr := v.CheckCompat([]crossnamespace.Namespace{bumped})
+	if state != crossnamespace.CompatDSLUpdateRequired {
+		t.Fatalf("state = %s, want dsl-update-required (collision must not hide the change)", state)
+	}
+	if cerr == nil || !contains(cerr.Error(), "symbol.owner.name") {
+		t.Fatalf("want diagnostic naming symbol.owner.name, got %v", cerr)
+	}
+}
+
 // --- helpers ------------------------------------------------------------------
 
 func mustInfo(t *testing.T, notes []dsl.NoteTypeDecl, edges []dsl.EdgeTypeDecl, maxDepth int) dsl.SchemaInfo {
