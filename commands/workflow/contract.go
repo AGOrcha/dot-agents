@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -48,6 +49,18 @@ func runWorkflowContractCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	input := &journal.ContractCreateInput{
+		Plan:       planID,
+		Task:       taskID,
+		Owner:      owner,
+		WriteScope: splitTrimmedCSV(writeScopeCSV),
+		Mode:       string(mode),
+		Force:      force,
+	}
+	observed := &journal.ContractCreateObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdContractCreate, input, observed, ok) }()
 
 	if _, err := loadCanonicalPlan(project.Path, planID); err != nil {
 		return fmt.Errorf("plan %s not found: %w", planID, err)
@@ -95,6 +108,12 @@ func runWorkflowContractCreate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	observed.ContractID = contract.ID
+	observed.Mode = string(contract.Mode)
+	observed.Status = contract.Status
+	observed.ContractPath = fmt.Sprintf(".agents/active/delegation/%s.yaml", taskID)
+	observed.ResolvedWriteScope = writeScope
+	ok = true
 
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(os.Stdout)
