@@ -418,8 +418,8 @@ func TestRunStatus_JSONFlagEndToEnd(t *testing.T) {
 func TestCollectProjectPlatforms_StableLength(t *testing.T) {
 	tmp := t.TempDir()
 	got := collectProjectPlatforms("proj", tmp, t.TempDir())
-	if len(got) != 5 {
-		t.Errorf("expected 5 platforms (cursor/claude/codex/opencode/copilot), got %d", len(got))
+	if len(got) != 6 {
+		t.Errorf("expected 6 platforms (cursor/claude/codex/opencode/copilot/antigravity), got %d", len(got))
 	}
 }
 
@@ -456,8 +456,8 @@ func TestCollectProjectTextBadges_EmptyProject(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	got := collectProjectTextBadges("proj", tmp, agentsHome, nil)
-	if len(got) != 5 {
-		t.Fatalf("expected 5 badges, got %d (%+v)", len(got), got)
+	if len(got) != 6 {
+		t.Fatalf("expected 6 badges, got %d (%+v)", len(got), got)
 	}
 	for _, b := range got {
 		if b.present {

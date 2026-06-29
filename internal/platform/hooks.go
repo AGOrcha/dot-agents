@@ -614,7 +614,7 @@ func validateHookWhenEvents(manifestPath string, manifest hookManifest) ([]strin
 // render the event, the load must fail loudly rather than silently emit
 // nothing on every platform.
 func isKnownCanonicalEvent(name string) bool {
-	for _, table := range []map[string]string{claudeEventTable, codexEventTable, cursorEventTable, copilotEventTable} {
+	for _, table := range []map[string]string{claudeEventTable, codexEventTable, cursorEventTable, copilotEventTable, antigravityEventTable} {
 		if _, ok := table[name]; ok {
 			return true
 		}
