@@ -11,6 +11,30 @@ import (
 	"time"
 )
 
+func TestIsDeletePendingLockErr(t *testing.T) {
+	permErr := &os.PathError{Op: "mkdir", Path: "x.lock", Err: os.ErrPermission}
+	existErr := &os.PathError{Op: "mkdir", Path: "x.lock", Err: os.ErrExist}
+	cases := []struct {
+		name string
+		err  error
+		goos string
+		want bool
+	}{
+		{"windows permission is delete-pending transient", permErr, "windows", true},
+		{"unix permission is fatal, not transient", permErr, "linux", false},
+		{"darwin permission is fatal, not transient", permErr, "darwin", false},
+		{"windows exist is not this predicate", existErr, "windows", false},
+		{"windows nil is not transient", nil, "windows", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isDeletePendingLockErr(tc.err, tc.goos); got != tc.want {
+				t.Fatalf("isDeletePendingLockErr(%v, %q) = %v, want %v", tc.err, tc.goos, got, tc.want)
+			}
+		})
+	}
+}
+
 // seedLockDir pre-creates the sidecar lock dir for path. When writeHolder is
 // true it writes a holder file whose acquisition timestamp is age in the past
 // (age 0 = a brand-new, live holder). When writeHolder is false it simulates a
