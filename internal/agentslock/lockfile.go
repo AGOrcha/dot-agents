@@ -248,14 +248,29 @@ func readDocument(path string) (map[string]json.RawMessage, error) {
 // (SIGKILL/OOM/power loss) is detected as stale once its recorded age exceeds
 // lockStaleTTL and is reclaimed at most once per call — so a slow but live holder
 // is never torn down out from under itself. The returned release removes the
-// sidecar directory and reports any removal error; it is idempotent (a second
-// call after the dir is gone is a no-op returning nil).
+// sidecar directory exactly once and reports any removal error; it is
+// once-guarded (a second call returns the first call's cached error without
+// touching the filesystem).
+//
+// The once-guard is a correctness requirement, not a convenience: an unguarded
+// RemoveAll on every call would, after this caller released and another caller
+// re-acquired the same path, delete the new holder's live lock dir on a stray
+// second release — silently breaking its mutual exclusion. Removing at most once
+// guarantees a duplicate release can never delete a dir this caller no longer
+// owns.
 func AcquireFileLock(path string) (release func() error, err error) {
 	lockDir, err := acquireLockDir(path)
 	if err != nil {
 		return nil, err
 	}
-	return func() error { return fsops.RemoveAll(lockDir) }, nil
+	var (
+		once   sync.Once
+		relErr error
+	)
+	return func() error {
+		once.Do(func() { relErr = fsops.RemoveAll(lockDir) })
+		return relErr
+	}, nil
 }
 
 // acquireFileLock is the internal release-returning-nothing form used by Flush.

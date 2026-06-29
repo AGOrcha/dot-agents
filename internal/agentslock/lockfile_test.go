@@ -763,6 +763,47 @@ func TestAcquireFileLockRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAcquireFileLockStaleReleaseDoesNotClobberNewHolder is the regression guard
+// for the once-guard fix: a stray second release from a caller that already let
+// go must NOT delete a different caller's live lock dir for the same path. The
+// dangerous sequence is A acquire → A release → B acquire (fresh live lock) →
+// A release AGAIN. Without the once-guard, A's second release RemoveAll's B's
+// lock dir, silently breaking B's mutual exclusion.
+func TestAcquireFileLockStaleReleaseDoesNotClobberNewHolder(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	releaseA, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("A acquire: %v", err)
+	}
+	if err := releaseA(); err != nil {
+		t.Fatalf("A release: %v", err)
+	}
+
+	releaseB, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("B acquire after A released must succeed: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf("B's lock dir should exist while held: %v", err)
+	}
+
+	// A's stray second release must be a no-op: it must not touch B's live dir.
+	if err := releaseA(); err != nil {
+		t.Fatalf("A's stale second release should be a cached no-op, got: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); err != nil {
+		t.Fatalf("A's stale release clobbered B's live lock dir: %v", err)
+	}
+
+	// B still owns the lock and can release it cleanly.
+	if err := releaseB(); err != nil {
+		t.Fatalf("B release: %v", err)
+	}
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("B's release should remove the lock dir: stat err=%v", err)
+	}
+}
+
 // TestAcquireFileLockReleaseAllowsReAcquire proves that after release the same
 // path can be locked again immediately (no lingering held state).
 func TestAcquireFileLockReleaseAllowsReAcquire(t *testing.T) {
@@ -794,12 +835,15 @@ func TestAcquireFileLockBlocksWhileHeld(t *testing.T) {
 		t.Fatalf("first acquire: %v", err)
 	}
 
+	// Capture start BEFORE launching the releaser so the full 200ms sleep is
+	// inside the measured window — otherwise scheduler delay before start could
+	// shrink the observed contention and make the lower-bound assertion flaky.
+	start := time.Now()
 	go func() {
 		time.Sleep(200 * time.Millisecond)
 		_ = release()
 	}()
 
-	start := time.Now()
 	release2, err := AcquireFileLock(path)
 	if err != nil {
 		t.Fatalf("second acquire should succeed after the holder releases: %v", err)
