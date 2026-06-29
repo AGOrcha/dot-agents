@@ -315,9 +315,21 @@ func (d Deps) withDefaults(repoPath string) Deps {
 }
 
 // replayEvents reads events.log and decodes each NDJSON line into an Envelope,
-// sorted by (ts, seq) — the spec's replay ordering. A crash can leave a torn final
-// line; malformed lines are skipped and counted (returned as skipped) rather than
-// failing the whole recovery. A missing log is an empty replay, not an error.
+// ordered for replay. A crash can leave a torn final line; malformed lines are
+// skipped and counted (returned as skipped) rather than failing the whole recovery.
+// A missing log is an empty replay, not an error.
+//
+// Ordering is CHRONOLOGICAL, not lexical: timeFormat is RFC3339Nano, which is
+// variable-width (trims trailing fractional zeros), so a raw TS string compare
+// mis-orders "…:00.1Z" before "…:00Z" — the exact bug the watermark filter avoids.
+// Applying events in lexical order would let an older event overwrite a newer one
+// via the last-writer assignment in apply. We therefore parse each TS to time.Time
+// and order by it. Tiebreaks, all via a STABLE sort so they are reproducible:
+//   - equal parsed times → by Seq (the process-monotonic append counter), the
+//     spec's within-ts tiebreaker;
+//   - an unparseable TS sorts LAST (fail-safe: it still replays — see the watermark
+//     filter — but never reorders a well-formed event ahead of itself);
+//   - any residual ties keep original file/append order (stable sort).
 func replayEvents(repoPath string) (events []Envelope, skipped int, err error) {
 	data, err := readEventsLog(repoPath)
 	if err != nil {
@@ -334,13 +346,21 @@ func replayEvents(repoPath string) (events []Envelope, skipped int, err error) {
 		}
 		events = append(events, e)
 	}
-	sort.SliceStable(events, func(i, j int) bool {
-		if events[i].TS != events[j].TS {
-			return events[i].TS < events[j].TS
-		}
-		return events[i].Seq < events[j].Seq
-	})
+	sort.SliceStable(events, func(i, j int) bool { return lessEvent(events[i], events[j]) })
 	return events, skipped, nil
+}
+
+// lessEvent orders two events for chronological replay: by parsed timestamp
+// (unparseable sorts last), then by the monotonic Seq within an equal timestamp.
+func lessEvent(a, b Envelope) bool {
+	ta, tb := parseTS(a.TS), parseTS(b.TS)
+	if ta.IsZero() != tb.IsZero() {
+		return tb.IsZero() // a well-formed ts sorts before an unparseable one
+	}
+	if !ta.IsZero() && !ta.Equal(tb) {
+		return ta.Before(tb)
+	}
+	return a.Seq < b.Seq
 }
 
 // reconstruction is the in-progress recovery state: items keyed by composite

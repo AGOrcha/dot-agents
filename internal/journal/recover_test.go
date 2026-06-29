@@ -594,6 +594,63 @@ func TestRecoveryWatermarkBoundaryEqualTSApplied(t *testing.T) {
 	}
 }
 
+// TestRecoveryChronologicalReplayOrder is the BUG 1 (sort half) regression: two
+// events whose timestamps differ only in sub-second width — A at "…:00Z" and B at
+// "…:00.1Z" (B is chronologically newer but sorts LEXICALLY before A, '.' < 'Z') —
+// must replay in chronological order regardless of input/append order, so the
+// NEWER event B wins the last-writer assignment. A lexical sort would let the older
+// A overwrite B.
+func TestRecoveryChronologicalReplayOrder(t *testing.T) {
+	older := func(t *testing.T) Envelope {
+		return event(t, CmdAdvance, "2026-06-29T12:00:00Z", 1,
+			&AdvanceInput{Plan: "alpha", Task: "t1"}, &AdvanceObserved{ToStatus: "older"})
+	}
+	newer := func(t *testing.T) Envelope {
+		return event(t, CmdAdvance, "2026-06-29T12:00:00.1Z", 2,
+			&AdvanceInput{Plan: "alpha", Task: "t1"}, &AdvanceObserved{ToStatus: "newer"})
+	}
+
+	for _, order := range []string{"older-first", "newer-first"} {
+		t.Run(order, func(t *testing.T) {
+			repo := recTestRepo(t)
+			writeSnapshotFixture(t, repo, snapWith(repo, "alpha", TaskState{ID: "t1", Status: statusPending}))
+			if order == "older-first" {
+				writeEventsFixture(t, repo, older(t), newer(t))
+			} else {
+				writeEventsFixture(t, repo, newer(t), older(t))
+			}
+			res, err := RecoveryView(repo, Deps{})
+			if err != nil {
+				t.Fatalf("RecoveryView: %v", err)
+			}
+			it, _ := itemByTask(res.Items, "t1")
+			if it.Reconstructed.Status != "newer" {
+				t.Fatalf("input %s: final status = %q, want newer (chronological last-writer)", order, it.Reconstructed.Status)
+			}
+		})
+	}
+}
+
+// TestLessEventTiebreaks proves the deterministic ordering rules directly: equal
+// parsed times tiebreak by Seq, and an unparseable ts sorts last (fail-safe).
+func TestLessEventTiebreaks(t *testing.T) {
+	a := Envelope{TS: "2026-06-29T12:00:00Z", Seq: 1}
+	b := Envelope{TS: "2026-06-29T12:00:00Z", Seq: 2}
+	if !lessEvent(a, b) || lessEvent(b, a) {
+		t.Fatalf("equal-ts events must order by seq")
+	}
+	good := Envelope{TS: "2026-06-29T12:00:00Z", Seq: 9}
+	bad := Envelope{TS: "garbage", Seq: 1}
+	if !lessEvent(good, bad) || lessEvent(bad, good) {
+		t.Fatalf("unparseable ts must sort after a well-formed one")
+	}
+	// two unparseable timestamps fall back to seq.
+	bad2 := Envelope{TS: "also-bad", Seq: 5}
+	if !lessEvent(bad, bad2) {
+		t.Fatalf("two unparseable ts should tiebreak by seq")
+	}
+}
+
 // TestRecoveryStaleCoordinateIsChange is the BUG 2 regression: a same-arm locus
 // whose COORDINATE differs (PR #7→#8, or canonical master@old→master@new) must be
 // tagged changed and UPDATED to the source's current value, never kept stale and
