@@ -53,3 +53,26 @@ that cask hook** (tracked alongside this setup).
 > Note: quill does not staple the notarization ticket to a bare Mach-O binary
 > (stapling targets `.app`/`.dmg`/`.pkg`); Gatekeeper verifies notarized bare
 > binaries online on first run, which is fine for a CLI distributed via tarball.
+
+## 4. Pitfall: the `.p12` MUST contain the full chain (incl. Apple Root CA)
+
+quill derives the signature's *designated requirement* from the cert chain inside
+`QUILL_SIGN_P12`. If the p12 holds only the leaf + the Developer ID intermediate
+(no Apple Root CA), quill puts the intermediate at chain-index 0 and emits an
+**unsatisfiable** DR — `certificate root[field.1.2.840.113635.100.6.2.6]` — because
+that Developer-ID marker OID lives on the *intermediate*, not the anchor. `codesign
+--verify --strict` then fails and macOS (Ventura+, hard on macOS 26 / Apple Silicon)
+SIGKILLs the binary on first exec. This shipped in **v0.4.1**.
+
+**Fix:** the p12 must carry the full chain — leaf + key + `Developer ID Certification
+Authority` (intermediate, `DeveloperIDG2CA`) + `Apple Root CA` — so quill emits the
+correct `certificate 1[...6.2.6]`. Build it from PEM components:
+
+    cat DeveloperIDG2CA.pem AppleIncRootCertificate.pem > chain.pem
+    openssl pkcs12 -export -out devid-fullchain.p12 \
+      -inkey devid_signing.key -in devid_cert.pem -certfile chain.pem -passout pass:<pw>
+
+Verify before shipping: sign a Mach-O with `quill sign --p12 devid-fullchain.p12`, then
+`codesign -d -r- <bin>` must show `certificate 1[` (not `certificate root[`) and
+`codesign --verify --strict <bin>` must pass. `verify-macos-release.yml`
+(release:published → macos-latest) is the CI regression guard.
