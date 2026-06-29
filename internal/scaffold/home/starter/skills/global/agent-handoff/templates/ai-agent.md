@@ -12,6 +12,11 @@ Use when the audience is another AI agent or coding-agent session. Optimize for 
 
 ---
 
+> **Before you trust anything below: run `da workflow journal recover`** (or `/agent-handoff recover`).
+> This document is a point-in-time snapshot of the *why*; the journal re-verifies the live state
+> against reality. Where they disagree, the verified recovery view wins — never treat a `changed`,
+> `missing`, or `unverified` item here as still-true, and do not resume a `QUARANTINED` bundle.
+
 ## Summary
 
 [2-3 sentences: what this project/task is, current state, what needs to happen next. An agent reading only this section should understand the mission.]

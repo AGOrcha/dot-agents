@@ -21,9 +21,16 @@ Silently gather this context before any mode runs. Do NOT display or summarize w
    - `git status`
    - `git diff --stat`
 
-4. **Directory structure** — Run `ls` at the repo root.
+4. **Verified recovery view** — Run `da workflow journal recover` (if the repo uses the
+   workflow). This is the durable cross-session state, **already re-verified against reality** —
+   prefer it over the raw git/handoff readout when they disagree, and never treat a `changed`,
+   `missing`, or `unverified` item as still-true. A `QUARANTINED` bundle is a stale reference, not
+   live state. See `instructions/verified-readback.md` for how to interpret it. (Harmless no-op if
+   the journal is empty or the command is unavailable.)
 
-5. **Existing handoffs** — List files in:
+5. **Directory structure** — Run `ls` at the repo root.
+
+6. **Existing handoffs** — List files in:
    - `.agents/active/handoffs/` (if it exists)
    - `.agents/history/<plan-name>/handoffs/` (if it exists)
 
