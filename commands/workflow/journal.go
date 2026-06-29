@@ -346,7 +346,7 @@ func renderRecoverItem(out io.Writer, it journal.RecoveredItem) {
 		fmt.Fprintf(out, " via %s", it.VerifiedBy)
 	}
 	fmt.Fprint(out, "]")
-	if loc := describeItemLocus(it.Reconstructed.Locus); loc != "" {
+	if loc := describeRecoveredLocus(it.Reconstructed.Locus, it.CoordVerified); loc != "" {
 		fmt.Fprintf(out, " %s", loc)
 	}
 	fmt.Fprintln(out)
@@ -355,16 +355,26 @@ func renderRecoverItem(out io.Writer, it journal.RecoveredItem) {
 	}
 }
 
-// describeItemLocus renders the canonical-vs-in-PR locus (with the coords the
-// verification layer enriched) for the text view.
-func describeItemLocus(l *journal.Locus) string {
+// describeRecoveredLocus renders the canonical-vs-in-PR locus for the text view. A
+// concrete coordinate (PR number / merge sha) is shown as fact ONLY when
+// coordVerified — i.e. an authoritative source confirmed it (BUG 3). Otherwise the
+// arm is shown with the coordinate marked unconfirmed, so a reconstructed-but-
+// unverified coordinate (e.g. a stale in_open_pr #7 that only a local fallback
+// corroborated by arm) is never surfaced as a verified fact.
+func describeRecoveredLocus(l *journal.Locus, coordVerified bool) string {
 	switch {
 	case l == nil:
 		return ""
 	case l.Canonical != nil:
-		return "canonical " + l.Canonical.Ref
+		if coordVerified && l.Canonical.Ref != "" {
+			return "canonical " + l.Canonical.Ref
+		}
+		return "canonical (sha unconfirmed)"
 	case l.InOpenPR != nil:
-		return fmt.Sprintf("in_open_pr #%d", l.InOpenPR.PR)
+		if coordVerified && l.InOpenPR.PR != 0 {
+			return fmt.Sprintf("in_open_pr #%d", l.InOpenPR.PR)
+		}
+		return "in_open_pr (PR unconfirmed)"
 	default:
 		return ""
 	}
@@ -482,9 +492,31 @@ func runWorkflowJournalPrune(out io.Writer, keep int) error {
 // result without touching the file.
 func pruneJournal(repoPath string, keep int, dryRun bool) (journalPruneResult, error) {
 	path := journal.EventsLogPath(repoPath)
+	if dryRun {
+		// Read-only: no rewrite, so there is no read-modify-write window to protect.
+		res, _, err := planPrune(repoPath, path, keep)
+		if err != nil {
+			return journalPruneResult{}, err
+		}
+		res.DryRun = true
+		return res, nil
+	}
+	return prunePersist(repoPath, path, keep)
+}
+
+// pruneAfterReadHook is a test seam fired inside prunePersist AFTER the advisory
+// lock is held and the keep-set is computed, but BEFORE the atomic rewrite. It lets
+// a test prove that a concurrent append — which must wait for the same lock — cannot
+// slip between the read and the rewrite. Default no-op.
+var pruneAfterReadHook = func() {}
+
+// planPrune reads the log and computes the keep-set (the newest `keep` events)
+// without writing. A persisting caller MUST run it under the advisory lock (see
+// prunePersist) so the read and the rewrite are one critical section.
+func planPrune(repoPath, path string, keep int) (journalPruneResult, []journal.Envelope, error) {
 	events, err := readJournalEvents(repoPath)
 	if err != nil {
-		return journalPruneResult{}, fmt.Errorf("journal prune: read events: %w", err)
+		return journalPruneResult{}, nil, fmt.Errorf("journal prune: read events: %w", err)
 	}
 	sortEventsChrono(events)
 	removed := 0
@@ -493,28 +525,41 @@ func pruneJournal(repoPath string, keep int, dryRun bool) (journalPruneResult, e
 		removed = len(events) - keep
 		kept = events[removed:]
 	}
-	result := journalPruneResult{Path: path, Total: len(events), Kept: len(kept), Removed: removed, DryRun: dryRun}
-	if removed == 0 || dryRun {
-		return result, nil
-	}
-	if err := rewriteJournalEvents(path, kept); err != nil {
-		return journalPruneResult{}, err
-	}
-	return result, nil
+	return journalPruneResult{Path: path, Total: len(events), Kept: len(kept), Removed: removed}, kept, nil
 }
 
-// rewriteJournalEvents replaces the event log with exactly events, atomically and
-// under the package advisory lock (mirrors internal/journal's write discipline).
-func rewriteJournalEvents(path string, events []journal.Envelope) (err error) {
-	release, err := agentslock.AcquireFileLock(path)
-	if err != nil {
-		return fmt.Errorf("journal prune: lock %s: %w", path, err)
+// prunePersist runs the ENTIRE read → compute-keep-set → atomic-rewrite under the
+// journal's interprocess advisory lock — the same lock journal.Emit takes to append
+// a line. Holding it across the whole critical section closes the lost-update window
+// (BUG 2): an append that races the prune is forced to wait until after the rewrite,
+// so it lands on the pruned log instead of being renamed away by a stale keep-set.
+func prunePersist(repoPath, path string, keep int) (res journalPruneResult, err error) {
+	release, lockErr := agentslock.AcquireFileLock(path)
+	if lockErr != nil {
+		return journalPruneResult{}, fmt.Errorf("journal prune: lock %s: %w", path, lockErr)
 	}
 	defer func() {
 		if relErr := release(); relErr != nil && err == nil {
 			err = fmt.Errorf("journal prune: release lock %s: %w", path, relErr)
 		}
 	}()
+	res, kept, err := planPrune(repoPath, path, keep)
+	if err != nil {
+		return journalPruneResult{}, err
+	}
+	pruneAfterReadHook()
+	if res.Removed == 0 {
+		return res, nil
+	}
+	if err := writeEventsAtomic(path, kept); err != nil {
+		return journalPruneResult{}, err
+	}
+	return res, nil
+}
+
+// writeEventsAtomic marshals events to NDJSON and replaces path atomically
+// (temp-then-rename). The caller holds the advisory lock.
+func writeEventsAtomic(path string, events []journal.Envelope) error {
 	var buf bytes.Buffer
 	for _, e := range events {
 		line, merr := e.MarshalLine()
@@ -749,7 +794,7 @@ func (g *ghSource) VerifyTask(key journal.ItemKey, recon journal.ItemState) (jou
 	case recon.Locus == nil:
 		return journal.RealityCheck{}, journal.ErrSourceUnavailable
 	case recon.Locus.InOpenPR != nil:
-		return g.verifyInOpenPR(key), nil
+		return g.verifyInOpenPR(key)
 	case recon.Locus.Canonical != nil:
 		return g.verifyCanonical(key)
 	default:
@@ -757,46 +802,132 @@ func (g *ghSource) VerifyTask(key journal.ItemKey, recon journal.ItemState) (jou
 	}
 }
 
-// verifyInOpenPR confirms an in-PR item: a matching open PR enriches the real PR
-// number (verified); a matching merged PR means it landed since (the item changed
-// to a canonical locus carrying the merge sha); neither means the PR is gone.
-func (g *ghSource) verifyInOpenPR(key journal.ItemKey) journal.RealityCheck {
-	if pr, ok := g.matchOpen(key.Task); ok {
-		return journal.RealityCheck{Exists: true, Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{PR: pr.Number}}}
+// verifyInOpenPR confirms an in-PR item: a single matching open PR enriches the
+// real PR number (verified); a single matching merged PR means it landed since
+// (the item changed to a canonical locus carrying the merge sha); no match means
+// the PR is gone. An AMBIGUOUS match (more than one PR resolves to the identity) is
+// never collapsed to a guess — it is deferred via ErrSourceUnavailable so recovery
+// asserts no wrong PR/sha (the fallback then reports the arm without a coord).
+func (g *ghSource) verifyInOpenPR(key journal.ItemKey) (journal.RealityCheck, error) {
+	pr, ambiguous := g.matchOpen(key)
+	if ambiguous {
+		return journal.RealityCheck{}, journal.ErrSourceUnavailable
 	}
-	if m, ok := g.matchMerged(key.Task); ok {
-		return journal.RealityCheck{Exists: true, Locus: &journal.Locus{Canonical: &journal.CanonicalRef{Ref: m.MergeSHA}}}
+	if pr != nil {
+		return journal.RealityCheck{Exists: true, Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{PR: pr.Number}}}, nil
 	}
-	return journal.RealityCheck{Exists: false}
+	m, mergedAmbiguous := g.matchMerged(key)
+	if mergedAmbiguous {
+		return journal.RealityCheck{}, journal.ErrSourceUnavailable
+	}
+	if m != nil {
+		return journal.RealityCheck{Exists: true, Locus: &journal.Locus{Canonical: &journal.CanonicalRef{Ref: m.MergeSHA}}}, nil
+	}
+	return journal.RealityCheck{Exists: false}, nil
 }
 
 // verifyCanonical confirms a done-on-canonical item by resolving its merge sha
-// from the merged PR set. A merge that has aged out of the gh window is not
-// "missing" — gh simply cannot see it, so the item is deferred to the local
-// fallback via ErrSourceUnavailable.
+// from the merged PR set. A merge that has aged out of the gh window — or an
+// ambiguous match — is not "missing"; gh simply cannot assert it, so the item is
+// deferred to the local fallback via ErrSourceUnavailable.
 func (g *ghSource) verifyCanonical(key journal.ItemKey) (journal.RealityCheck, error) {
-	if m, ok := g.matchMerged(key.Task); ok {
-		return journal.RealityCheck{Exists: true, Locus: &journal.Locus{Canonical: &journal.CanonicalRef{Ref: m.MergeSHA}}}, nil
+	m, ambiguous := g.matchMerged(key)
+	if ambiguous || m == nil {
+		return journal.RealityCheck{}, journal.ErrSourceUnavailable
 	}
-	return journal.RealityCheck{}, journal.ErrSourceUnavailable
+	return journal.RealityCheck{Exists: true, Locus: &journal.Locus{Canonical: &journal.CanonicalRef{Ref: m.MergeSHA}}}, nil
 }
 
-func (g *ghSource) matchOpen(task string) (openPR, bool) {
-	for _, pr := range g.open {
-		if pr.Branch != "" && branchMatchesTask(pr.Branch, task) {
-			return pr, true
+// matchOpen returns the single open PR whose head branch references the FULL
+// (plan, task) identity, or ambiguous=true (match nil-or-last) when more than one
+// distinct PR matches. It binds on the qualified identity and requires a
+// complete-segment branch token, so a wrong PR is never bound (BUG 1).
+func (g *ghSource) matchOpen(key journal.ItemKey) (match *openPR, ambiguous bool) {
+	for i := range g.open {
+		if g.open[i].Branch != "" && strictBranchMatch(g.open[i].Branch, key.Plan, key.Task) {
+			if match != nil && match.Number != g.open[i].Number {
+				ambiguous = true
+			}
+			match = &g.open[i]
 		}
 	}
-	return openPR{}, false
+	if ambiguous {
+		return nil, true
+	}
+	return match, false
 }
 
-func (g *ghSource) matchMerged(task string) (mergedPR, bool) {
-	for _, pr := range g.merged {
-		if pr.Branch != "" && branchMatchesTask(pr.Branch, task) {
-			return pr, true
+// matchMerged is matchOpen's merged-PR sibling.
+func (g *ghSource) matchMerged(key journal.ItemKey) (match *mergedPR, ambiguous bool) {
+	for i := range g.merged {
+		if g.merged[i].Branch != "" && strictBranchMatch(g.merged[i].Branch, key.Plan, key.Task) {
+			if match != nil && match.Number != g.merged[i].Number {
+				ambiguous = true
+			}
+			match = &g.merged[i]
 		}
 	}
-	return mergedPR{}, false
+	if ambiguous {
+		return nil, true
+	}
+	return match, false
+}
+
+// strictBranchMatch reports whether branch references the (plan, task) identity as
+// a COMPLETE, bounded token. It is deliberately stricter than the shared
+// branchMatchesTask (which treats '-' as a boundary on BOTH sides, so task-002
+// matches feature/task-002-extra): here the matched token's RIGHT edge must be a
+// path separator or the string end, so a trailing '-<suffix>' disqualifies. The
+// qualified "<plan>-<task>" / "<plan>/<task>" forms are tried first (full
+// identity), then the bare task as a complete trailing segment. branchMatchesTask
+// is left untouched so its other (loose) callers keep their behavior, while gh
+// enrichment never binds a wrong PR/sha.
+func strictBranchMatch(branch, plan, task string) bool {
+	if task == "" {
+		return false
+	}
+	candidates := []string{task}
+	if plan != "" {
+		candidates = append(candidates, plan+"-"+task, plan+"/"+task)
+	}
+	for _, c := range candidates {
+		if completeSegmentMatch(branch, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// completeSegmentMatch reports whether token occurs in branch with a left edge of
+// start/'/'/'-' and a right edge of end-or-'/'.
+func completeSegmentMatch(branch, token string) bool {
+	for from := 0; from+len(token) <= len(branch); {
+		i := strings.Index(branch[from:], token)
+		if i < 0 {
+			return false
+		}
+		start := from + i
+		if leftSegmentBoundary(branch, start) && rightSegmentBoundary(branch, start+len(token)) {
+			return true
+		}
+		from = start + 1
+	}
+	return false
+}
+
+// leftSegmentBoundary allows the start of string, a path separator, or a '-' (the
+// bare task token may sit immediately after a "<plan>-" prefix).
+func leftSegmentBoundary(s string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	return s[i-1] == '/' || s[i-1] == '-'
+}
+
+// rightSegmentBoundary requires the string end or a path separator — crucially NOT
+// a '-', so task-002 never matches inside task-002-extra.
+func rightSegmentBoundary(s string, i int) bool {
+	return i == len(s) || s[i] == '/'
 }
 
 // --- local verification source (non-authoritative fallback) ------------------

@@ -192,9 +192,9 @@ func TestRenderRecover(t *testing.T) {
 		Quarantined:      true,
 		QuarantineReason: "identity mismatch",
 		Items: []journal.RecoveredItem{
-			{Key: journal.ItemKey{Plan: "p", Task: "a"}, Status: journal.StatusVerified, Trust: journal.TrustHigh, VerifiedBy: "gh",
+			{Key: journal.ItemKey{Plan: "p", Task: "a"}, Status: journal.StatusVerified, Trust: journal.TrustHigh, VerifiedBy: "gh", CoordVerified: true,
 				Reconstructed: journal.ItemState{Locus: &journal.Locus{Canonical: &journal.CanonicalRef{Ref: "sha"}}}},
-			{Key: journal.ItemKey{Plan: "p", Task: "b"}, Status: journal.StatusChanged, Trust: journal.TrustHigh, VerifiedBy: "gh", Delta: "x→y",
+			{Key: journal.ItemKey{Plan: "p", Task: "b"}, Status: journal.StatusChanged, Trust: journal.TrustHigh, VerifiedBy: "gh", Delta: "x→y", CoordVerified: true,
 				Reconstructed: journal.ItemState{Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{PR: 9}}}},
 			{Key: journal.ItemKey{Plan: "p", Task: "c"}, Status: journal.StatusMissing, Trust: journal.TrustMedium},
 			{Key: journal.ItemKey{Plan: "p", Task: "d"}, Status: journal.StatusUnverified, Trust: journal.TrustLow,
@@ -323,6 +323,63 @@ func TestGHSourceVerifyTask(t *testing.T) {
 	// locus with neither arm → defer to local.
 	if _, err := g.VerifyTask(key("t1"), journal.ItemState{Locus: &journal.Locus{}}); !errors.Is(err, journal.ErrSourceUnavailable) {
 		t.Errorf("empty locus want unavailable, got %v", err)
+	}
+}
+
+// TestGHSourceStrictMatchAndAmbiguity covers BUG 1: a task id must match a branch
+// only as a complete segment (task-002 must NOT bind feature/task-002-extra), and
+// when more than one PR resolves to the identity the source must NOT guess — it
+// defers (ErrSourceUnavailable) so recovery never asserts a wrong PR/sha.
+func TestGHSourceStrictMatchAndAmbiguity(t *testing.T) {
+	// strictBranchMatch: complete-segment only.
+	if strictBranchMatch("feature/task-002-extra", "", "task-002") {
+		t.Error("task-002 must NOT match feature/task-002-extra (prefix of a longer token)")
+	}
+	if !strictBranchMatch("feature/task-002", "", "task-002") {
+		t.Error("task-002 must match feature/task-002 (complete trailing segment)")
+	}
+	// full-identity qualified form: <plan>-<task> embedded in the branch.
+	if !strictBranchMatch("impl/session-handoff-journal-p6", "session-handoff-journal", "p6") {
+		t.Error("qualified <plan>-<task> must match")
+	}
+	// a bare token in the interior with a trailing '-' must not match.
+	if strictBranchMatch("impl/p6-followup", "", "p6") {
+		t.Error("p6 must NOT match impl/p6-followup (interior, trailing '-')")
+	}
+	// Repeated token where no occurrence is a complete segment (loop runs off the end).
+	if strictBranchMatch("t1t1", "", "t1") {
+		t.Error("t1 must NOT match t1t1 (no bounded segment)")
+	}
+
+	// Ambiguity: two distinct open PRs both resolve to t1 → no enrichment.
+	amb := &ghSource{open: []openPR{{Number: 1, Branch: "a/t1"}, {Number: 2, Branch: "b/t1"}}}
+	if _, err := amb.VerifyTask(
+		journal.ItemKey{Task: "t1"},
+		journal.ItemState{Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}},
+	); !errors.Is(err, journal.ErrSourceUnavailable) {
+		t.Errorf("ambiguous open match must defer, got %v", err)
+	}
+	// Ambiguity on the merged side, canonical arm → defer.
+	ambM := &ghSource{merged: []mergedPR{{Number: 3, Branch: "a/t1", MergeSHA: "x"}, {Number: 4, Branch: "b/t1", MergeSHA: "y"}}}
+	if _, err := ambM.VerifyTask(
+		journal.ItemKey{Task: "t1"},
+		journal.ItemState{Locus: &journal.Locus{Canonical: &journal.CanonicalRef{Ref: "canonical"}}},
+	); !errors.Is(err, journal.ErrSourceUnavailable) {
+		t.Errorf("ambiguous merged match must defer, got %v", err)
+	}
+	// in_open_pr item, no open match, but the merged side is ambiguous → defer.
+	ambMixed := &ghSource{merged: []mergedPR{{Number: 5, Branch: "a/t1", MergeSHA: "p"}, {Number: 6, Branch: "b/t1", MergeSHA: "q"}}}
+	if _, err := ambMixed.VerifyTask(
+		journal.ItemKey{Task: "t1"},
+		journal.ItemState{Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}},
+	); !errors.Is(err, journal.ErrSourceUnavailable) {
+		t.Errorf("in_open_pr with ambiguous merged fallback must defer, got %v", err)
+	}
+	// Same PR number listed twice is NOT ambiguous (one logical PR).
+	dup := &ghSource{open: []openPR{{Number: 9, Branch: "a/t1"}, {Number: 9, Branch: "a/t1"}}}
+	rc, err := dup.VerifyTask(journal.ItemKey{Task: "t1"}, journal.ItemState{Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}})
+	if err != nil || rc.Locus.InOpenPR.PR != 9 {
+		t.Errorf("duplicate same-number PR should resolve to #9, got %+v err=%v", rc, err)
 	}
 }
 
@@ -671,7 +728,10 @@ func TestReadJournalEventsReadError(t *testing.T) {
 	if got := latestJournalEventTS(proj); !got.IsZero() {
 		t.Error("want zero ts on read error")
 	}
-	// prune surfaces the same read error (runner + helper).
+	// prune surfaces the same read error (runner + helper, both prune paths).
+	if _, err := pruneJournal(proj, 1, true); err == nil {
+		t.Error("pruneJournal dry-run want read error")
+	}
 	if _, err := pruneJournal(proj, 1, false); err == nil {
 		t.Error("pruneJournal want read error")
 	}
@@ -712,11 +772,140 @@ func TestLocalLocusForStatusAndMisc(t *testing.T) {
 	if localLocusForStatus("in_progress") != nil {
 		t.Error("other → nil")
 	}
-	if describeItemLocus(nil) != "" || describeItemLocus(&journal.Locus{}) != "" {
+	if describeRecoveredLocus(nil, false) != "" || describeRecoveredLocus(&journal.Locus{}, false) != "" {
 		t.Error("nil/empty locus should describe as empty")
 	}
 	if safeDryRun() { // deps.Flags.DryRun is unset in tests → false
 		t.Error("safeDryRun must tolerate an unset DryRun seam")
+	}
+}
+
+// TestRecoverCoordVerifiedOnlyAuthoritative covers BUG 3: a concrete locus coord
+// (a reconstructed in_open_pr #7) is rendered as a confirmed fact ONLY when an
+// AUTHORITATIVE source confirmed it. A non-authoritative (local) verification that
+// agrees on the arm but has no coord opinion must render it as "PR unconfirmed".
+func TestRecoverCoordVerifiedOnlyAuthoritative(t *testing.T) {
+	repo := setupJournalTestRepo(t)
+	proj := chdirProject(t, repo)
+	if _, err := journal.Snapshot(proj); err != nil {
+		t.Fatalf("seed snapshot: %v", err)
+	}
+	// Replay an event that reconstructs wave-2/t2 as in_open_pr carrying a CONCRETE
+	// PR #7 (the snapshot itself only records a placeholder PR 0).
+	ev, err := journal.NewEvent("workflow advance", journal.ActorMain,
+		&journal.AdvanceInput{Plan: "wave-2", Task: "t2"},
+		&journal.AdvanceObserved{ToStatus: TaskStatusAwaitingOwnerReview,
+			Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{PR: 7, Status: TaskStatusAwaitingOwnerReview}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Emit(proj, ev); err != nil {
+		t.Fatal(err)
+	}
+
+	findT2 := func(res journal.RecoveryResult) journal.RecoveredItem {
+		for _, it := range res.Items {
+			if it.Key.Task == "t2" {
+				return it
+			}
+		}
+		t.Fatalf("t2 not in recovery items: %+v", res.Items)
+		return journal.RecoveredItem{}
+	}
+
+	// (a) gh unavailable → local fallback confirms status + arm, NOT the coord.
+	local := &fakeVSource{name: journalSourceLocal, auth: false, checks: map[string]journal.RealityCheck{
+		"t2": {Exists: true, Status: TaskStatusAwaitingOwnerReview, Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}},
+	}}
+	res, err := journal.RecoveryView(proj, journal.Deps{Sources: []journal.VerificationSource{local}, LastReasonedWrite: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := findT2(res); it.Status != journal.StatusVerified || it.CoordVerified {
+		t.Errorf("local-verified must NOT confirm coord: status=%s coordVerified=%v", it.Status, it.CoordVerified)
+	}
+	var buf bytes.Buffer
+	renderRecover(&buf, res)
+	if !strings.Contains(buf.String(), "in_open_pr (PR unconfirmed)") || strings.Contains(buf.String(), "#7") {
+		t.Errorf("stale #7 must render as unconfirmed, not a fact:\n%s", buf.String())
+	}
+
+	// (b) authoritative gh confirms PR #7 → CoordVerified, rendered as the fact.
+	gh := &fakeVSource{name: journalSourceGH, auth: true, checks: map[string]journal.RealityCheck{
+		"t2": {Exists: true, Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{PR: 7}}},
+	}}
+	res2, err := journal.RecoveryView(proj, journal.Deps{Sources: []journal.VerificationSource{gh}, LastReasonedWrite: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := findT2(res2); !it.CoordVerified {
+		t.Errorf("authoritative match must confirm coord: %+v", it)
+	}
+	buf.Reset()
+	renderRecover(&buf, res2)
+	if !strings.Contains(buf.String(), "in_open_pr #7") {
+		t.Errorf("authoritative coord must render as #7:\n%s", buf.String())
+	}
+}
+
+// TestPruneLockFirstNoLostUpdate covers BUG 2: an append that races a prune is not
+// lost. prunePersist now holds the advisory lock across the whole read→rewrite, so
+// a concurrent append blocks on the same lock until after the rewrite and lands on
+// the pruned log. The hook fires after the locked read but before the rewrite; a
+// goroutine started there appends a marker that must survive.
+func TestPruneLockFirstNoLostUpdate(t *testing.T) {
+	repo := setupJournalTestRepo(t)
+	proj := chdirProject(t, repo)
+	for i := 0; i < 4; i++ {
+		emitTestEvent(t, proj)
+	}
+
+	appendStarted := make(chan struct{})
+	appendDone := make(chan error, 1)
+	prev := pruneAfterReadHook
+	pruneAfterReadHook = func() {
+		go func() {
+			close(appendStarted)
+			// This Emit must block on the advisory lock prunePersist holds, and only
+			// complete after the rewrite — proving no lost update.
+			ev, _ := journal.NewEvent("workflow commit", journal.ActorMain,
+				&journal.CommitInput{}, &journal.CommitObserved{Noop: true})
+			appendDone <- journal.Emit(proj, ev)
+		}()
+		<-appendStarted
+		time.Sleep(30 * time.Millisecond) // let the goroutine reach the blocking lock
+		pruneAfterReadHook = prev         // fire once
+	}
+	t.Cleanup(func() { pruneAfterReadHook = prev })
+
+	res, err := pruneJournal(proj, 1, false)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if res.Removed != 3 {
+		t.Fatalf("want removed 3 from the read-snapshot, got %+v", res)
+	}
+	if err := <-appendDone; err != nil {
+		t.Fatalf("concurrent append: %v", err)
+	}
+
+	events, err := readJournalEvents(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The pruned log keeps 1 of the original 4, plus the concurrent append = 2; the
+	// marker append is NOT lost.
+	if len(events) != 2 {
+		t.Fatalf("want 2 events (1 kept + 1 raced append), got %d", len(events))
+	}
+	hasMarker := false
+	for _, e := range events {
+		if e.Command == "workflow commit" {
+			hasMarker = true
+		}
+	}
+	if !hasMarker {
+		t.Errorf("raced append was lost: %+v", events)
 	}
 }
 
