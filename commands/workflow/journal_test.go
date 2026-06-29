@@ -350,6 +350,29 @@ func TestGHSourceStrictMatchAndAmbiguity(t *testing.T) {
 	if strictBranchMatch("t1t1", "", "t1") {
 		t.Error("t1 must NOT match t1t1 (no bounded segment)")
 	}
+	// Cross-plan leak: when the plan is KNOWN the bare task must never bind a
+	// different plan's branch, and a leading "<other>-" prefix must not bind either.
+	for _, b := range []string{"bravo/task-002", "bravo-task-002", "impl/xbravo-alpha-task-002"} {
+		if strictBranchMatch(b, "alpha", "task-002") {
+			t.Errorf("plan=alpha task=task-002 must NOT match a different-plan branch %q", b)
+		}
+	}
+	// Qualified full-identity branches for the known plan DO match.
+	for _, b := range []string{"impl/alpha-task-002", "alpha/task-002"} {
+		if !strictBranchMatch(b, "alpha", "task-002") {
+			t.Errorf("plan=alpha task=task-002 must match its own branch %q", b)
+		}
+	}
+	// ghSource with a real (plan, task) key binds only the qualified branch, never
+	// the look-alike bare-task branch of a different plan.
+	planned := &ghSource{open: []openPR{{Number: 11, Branch: "impl/alpha-task-002"}, {Number: 12, Branch: "bravo/task-002"}}}
+	planRC, err := planned.VerifyTask(
+		journal.ItemKey{Plan: "alpha", Task: "task-002"},
+		journal.ItemState{Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}},
+	)
+	if err != nil || planRC.Locus.InOpenPR == nil || planRC.Locus.InOpenPR.PR != 11 {
+		t.Errorf("qualified key must bind only alpha's PR #11, got %+v err=%v", planRC, err)
+	}
 
 	// Ambiguity: two distinct open PRs both resolve to t1 → no enrichment.
 	amb := &ghSource{open: []openPR{{Number: 1, Branch: "a/t1"}, {Number: 2, Branch: "b/t1"}}}
@@ -845,6 +868,26 @@ func TestRecoverCoordVerifiedOnlyAuthoritative(t *testing.T) {
 	renderRecover(&buf, res2)
 	if !strings.Contains(buf.String(), "in_open_pr #7") {
 		t.Errorf("authoritative coord must render as #7:\n%s", buf.String())
+	}
+
+	// (c) The leak the gate flagged: an AUTHORITATIVE source that answers with NO
+	// concrete coordinate (in_open_pr PR 0) must NOT confirm the stale reconstructed
+	// #7 just because the item carries one. CoordVerified comes from the reality
+	// check, not the reconstructed item, so it stays false → rendered unconfirmed.
+	ghNoCoord := &fakeVSource{name: journalSourceGH, auth: true, checks: map[string]journal.RealityCheck{
+		"t2": {Exists: true, Locus: &journal.Locus{InOpenPR: &journal.InOpenPRRef{}}},
+	}}
+	res3, err := journal.RecoveryView(proj, journal.Deps{Sources: []journal.VerificationSource{ghNoCoord}, LastReasonedWrite: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it := findT2(res3); it.CoordVerified {
+		t.Errorf("authoritative-but-no-coord must NOT confirm the stale #7: %+v", it)
+	}
+	buf.Reset()
+	renderRecover(&buf, res3)
+	if !strings.Contains(buf.String(), "in_open_pr (PR unconfirmed)") || strings.Contains(buf.String(), "#7") {
+		t.Errorf("authoritative-no-coord must render stale #7 as unconfirmed:\n%s", buf.String())
 	}
 }
 

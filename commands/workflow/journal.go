@@ -876,19 +876,31 @@ func (g *ghSource) matchMerged(key journal.ItemKey) (match *mergedPR, ambiguous 
 // strictBranchMatch reports whether branch references the (plan, task) identity as
 // a COMPLETE, bounded token. It is deliberately stricter than the shared
 // branchMatchesTask (which treats '-' as a boundary on BOTH sides, so task-002
-// matches feature/task-002-extra): here the matched token's RIGHT edge must be a
-// path separator or the string end, so a trailing '-<suffix>' disqualifies. The
-// qualified "<plan>-<task>" / "<plan>/<task>" forms are tried first (full
-// identity), then the bare task as a complete trailing segment. branchMatchesTask
-// is left untouched so its other (loose) callers keep their behavior, while gh
-// enrichment never binds a wrong PR/sha.
+// matches feature/task-002-extra) on two axes:
+//
+//   - Full identity when the plan is known. For a real journal item the plan is
+//     always set, so matching requires the QUALIFIED "<plan>-<task>" / "<plan>/<task>"
+//     form — the bare-task fallback is dropped entirely. The bare task is what
+//     ignores the plan; keeping it would let alpha/task-002 bind a DIFFERENT plan's
+//     branch (bravo/task-002, bravo-task-002). The bare form is used ONLY when no
+//     plan is supplied (the plan-empty edge case).
+//   - Complete segment on BOTH edges. The matched token's left edge must be the
+//     string start or a path separator, and its right edge the string end or a path
+//     separator — so neither a leading "<other>-" prefix nor a trailing "-<suffix>"
+//     can let a partial token bind a wrong PR/sha.
+//
+// branchMatchesTask is left untouched so its other (loose) callers keep their
+// behavior, while gh enrichment never binds a wrong (or cross-plan) PR/sha.
 func strictBranchMatch(branch, plan, task string) bool {
 	if task == "" {
 		return false
 	}
-	candidates := []string{task}
+	var candidates []string
 	if plan != "" {
-		candidates = append(candidates, plan+"-"+task, plan+"/"+task)
+		// Plan known → require the full identity; never fall back to the bare task.
+		candidates = []string{plan + "-" + task, plan + "/" + task}
+	} else {
+		candidates = []string{task}
 	}
 	for _, c := range candidates {
 		if completeSegmentMatch(branch, c) {
@@ -898,8 +910,8 @@ func strictBranchMatch(branch, plan, task string) bool {
 	return false
 }
 
-// completeSegmentMatch reports whether token occurs in branch with a left edge of
-// start/'/'/'-' and a right edge of end-or-'/'.
+// completeSegmentMatch reports whether token occurs in branch as a complete
+// segment — left edge of start-or-'/', right edge of end-or-'/'.
 func completeSegmentMatch(branch, token string) bool {
 	for from := 0; from+len(token) <= len(branch); {
 		i := strings.Index(branch[from:], token)
@@ -915,13 +927,10 @@ func completeSegmentMatch(branch, token string) bool {
 	return false
 }
 
-// leftSegmentBoundary allows the start of string, a path separator, or a '-' (the
-// bare task token may sit immediately after a "<plan>-" prefix).
+// leftSegmentBoundary requires the start of string or a path separator — NOT a
+// '-', so a "<other-plan>-<plan>-<task>" prefix can never bind the qualified token.
 func leftSegmentBoundary(s string, i int) bool {
-	if i == 0 {
-		return true
-	}
-	return s[i-1] == '/' || s[i-1] == '-'
+	return i == 0 || s[i-1] == '/'
 }
 
 // rightSegmentBoundary requires the string end or a path separator — crucially NOT

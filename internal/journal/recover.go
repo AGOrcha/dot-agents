@@ -596,16 +596,23 @@ func applyCheck(item *RecoveredItem, src VerificationSource, check RealityCheck)
 	}
 	reality := ItemState{Status: check.Status, Locus: check.Locus}
 	item.Reality = &reality
+	// CoordVerified is driven by whether the AUTHORITATIVE SOURCE actually SUPPLIED a
+	// concrete coordinate — NOT by whether the reconstructed item happens to carry
+	// one. A reconstructed item may hold a stale concrete coord (e.g. in_open_pr #7
+	// from a replayed event); an authoritative source that answers with no coord
+	// (prMatches treats reality PR 0 as "no opinion") must NOT confirm that stale
+	// coord. So the flag tracks check.Locus, which the renderer then gates on.
+	coordConfirmed := src.Authoritative() && hasConcreteCoord(check.Locus)
 	if statesMatch(item.Reconstructed, reality) {
 		item.Status = StatusVerified
 		enrichLocus(&item.Reconstructed, check.Locus)
-		item.CoordVerified = src.Authoritative() && hasConcreteCoord(item.Reconstructed.Locus)
+		item.CoordVerified = coordConfirmed
 		return
 	}
 	item.Status = StatusChanged
 	item.Delta = fmt.Sprintf("journal recorded %s; %s says %s", describe(item.Reconstructed), src.Name(), describe(reality))
 	adoptReality(&item.Reconstructed, reality)
-	item.CoordVerified = src.Authoritative() && hasConcreteCoord(item.Reconstructed.Locus)
+	item.CoordVerified = coordConfirmed
 }
 
 // hasConcreteCoord reports whether a locus carries a real, non-placeholder
