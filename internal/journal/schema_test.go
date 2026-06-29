@@ -114,7 +114,7 @@ func TestExcludedCommandsNotRegistered(t *testing.T) {
 		"workflow hook-outcome",
 		"workflow score",
 		"workflow status",
-		"workflow drift", // read-only; only sweep --apply journals
+		"workflow drift", // writes only drift-report.json (recomputable derived cache); excluded like score
 		"",
 		"not a real command",
 	}
@@ -441,14 +441,14 @@ func TestNewChangedFieldsBounded(t *testing.T) {
 		t.Fatalf("got %d field deltas, want 2", len(cf))
 	}
 	// Sorted by name: "notes" before "status".
-	if cf[0].Name != "notes" || cf[1].Name != "status" {
+	if cf[0].Name() != "notes" || cf[1].Name() != "status" {
 		t.Errorf("not sorted by name: %+v", cf)
 	}
-	if cf[0].Len != len(body) {
-		t.Errorf("notes.len = %d, want %d", cf[0].Len, len(body))
+	if cf[0].Len() != len(body) {
+		t.Errorf("notes.len = %d, want %d", cf[0].Len(), len(body))
 	}
-	if len(cf[0].SHA256) != changedFieldHashLen {
-		t.Errorf("sha256 prefix len = %d, want %d", len(cf[0].SHA256), changedFieldHashLen)
+	if len(cf[0].SHA256()) != changedFieldHashLen {
+		t.Errorf("sha256 prefix len = %d, want %d", len(cf[0].SHA256()), changedFieldHashLen)
 	}
 
 	// The body must not survive anywhere in the serialized input.
@@ -459,6 +459,56 @@ func TestNewChangedFieldsBounded(t *testing.T) {
 	}
 	if strings.Contains(string(env.Input), "secret-note-body") {
 		t.Fatalf("raw body leaked into journaled input: %s", env.Input)
+	}
+
+	// Wire format is unchanged (name/len/sha256) and round-trips through the custom
+	// marshaler back into the (unexported) fields.
+	wire, err := json.Marshal(cf[0])
+	if err != nil {
+		t.Fatalf("marshal FieldDelta: %v", err)
+	}
+	var asMap map[string]any
+	if err := json.Unmarshal(wire, &asMap); err != nil {
+		t.Fatalf("unmarshal wire: %v", err)
+	}
+	for _, key := range []string{"name", "len", "sha256"} {
+		if _, ok := asMap[key]; !ok {
+			t.Errorf("wire missing %q key: %s", key, wire)
+		}
+	}
+	var rt FieldDelta
+	if err := json.Unmarshal(wire, &rt); err != nil {
+		t.Fatalf("unmarshal FieldDelta: %v", err)
+	}
+	if rt.Name() != cf[0].Name() || rt.Len() != cf[0].Len() || rt.SHA256() != cf[0].SHA256() {
+		t.Errorf("FieldDelta round-trip drift: got %+v want %+v", rt, cf[0])
+	}
+}
+
+// TestFieldDeltaUnmarshalError surfaces a malformed FieldDelta wire payload.
+func TestFieldDeltaUnmarshalError(t *testing.T) {
+	var f FieldDelta
+	if err := json.Unmarshal([]byte(`{"len":"not-an-int"}`), &f); err == nil {
+		t.Error("UnmarshalJSON of malformed wire: want error")
+	}
+}
+
+// TestChangedFieldsCannotHoldBodyStructurally documents the structural guarantee:
+// a zero-value FieldDelta (the only literal an external caller could construct,
+// since every field is unexported) carries no value, and the only path that
+// populates one is the hashing constructor. This is a compile-time + behavioral
+// witness that there is no exported field a body can be stuffed into.
+func TestChangedFieldsCannotHoldBodyStructurally(t *testing.T) {
+	var empty ChangedFields = []FieldDelta{{}} // external callers can only do this
+	if empty[0].Name() != "" || empty[0].Len() != 0 || empty[0].SHA256() != "" {
+		t.Errorf("zero FieldDelta should be empty, got %+v", empty[0])
+	}
+	wire, err := json.Marshal(empty[0])
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(wire), "body") {
+		t.Errorf("zero FieldDelta serialized a value: %s", wire)
 	}
 }
 

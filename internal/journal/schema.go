@@ -449,20 +449,62 @@ const changedFieldHashLen = 12
 
 // FieldDelta is the bounded record of one changed Tier-2 field: its name plus
 // metadata about the new value — its byte length and a short SHA-256 prefix —
-// but NEVER the value itself. This makes the input structurally incapable of
-// carrying a body (spec D4: Tier-2 journals the delta, not bodies). The recovery
-// view re-reads the canonical file (TASKS.yaml/PLAN.yaml/prefs) and uses the
-// hash to tell whether the journaled change is still the current value.
+// but NEVER the value itself (spec D4: Tier-2 journals the delta, not bodies).
+//
+// Its fields are UNEXPORTED so the no-bodies invariant is structural, not by
+// convention: no caller in any other package can construct a FieldDelta literal
+// and stuff a raw value into it. The only populating path is NewChangedFields,
+// which hashes and discards the raw value. The wire format (name/len/sha256) is
+// preserved by the custom Marshal/UnmarshalJSON, and the values are exposed
+// read-only via Name/Len/SHA256 so the recovery view can re-verify against the
+// canonical file (TASKS.yaml/PLAN.yaml/prefs).
 type FieldDelta struct {
+	name   string
+	length int
+	sha    string
+}
+
+// Name is the changed field's name.
+func (f FieldDelta) Name() string { return f.name }
+
+// Len is the byte length of the new value.
+func (f FieldDelta) Len() int { return f.length }
+
+// SHA256 is the short SHA-256 prefix of the new value (changedFieldHashLen hex
+// chars), used to detect whether the journaled change is still the current value.
+func (f FieldDelta) SHA256() string { return f.sha }
+
+// fieldDeltaWire is the stable JSON shape for FieldDelta. It mirrors the (now
+// unexported) struct fields so the wire format is unchanged while the in-memory
+// type stays un-stuffable.
+type fieldDeltaWire struct {
 	Name   string `json:"name"`
 	Len    int    `json:"len"`
 	SHA256 string `json:"sha256,omitempty"`
 }
 
+// MarshalJSON emits the stable name/len/sha256 wire shape.
+func (f FieldDelta) MarshalJSON() ([]byte, error) {
+	return json.Marshal(fieldDeltaWire{Name: f.name, Len: f.length, SHA256: f.sha})
+}
+
+// UnmarshalJSON decodes the wire shape back into the unexported fields, so the
+// recovery view can read a journaled FieldDelta without a re-export.
+func (f *FieldDelta) UnmarshalJSON(data []byte) error {
+	var w fieldDeltaWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+	f.name = w.Name
+	f.length = w.Len
+	f.sha = w.SHA256
+	return nil
+}
+
 // ChangedFields is the bounded set of fields a Tier-2 command changed. It is a
-// slice of FieldDelta (metadata only) rather than a name→value map, so a body
-// cannot be smuggled into the journal even by a careless emitter (R6/D4). Build
-// it only via NewChangedFields, which enforces the truncation in this layer.
+// slice of FieldDelta (metadata only) rather than a name→value map, and FieldDelta
+// has no exported field, so a body cannot be smuggled into the journal even by a
+// careless emitter (R6/D4). Build it only via NewChangedFields.
 type ChangedFields []FieldDelta
 
 // NewChangedFields reduces a name→raw-value map to bounded per-field metadata
@@ -481,9 +523,9 @@ func NewChangedFields(raw map[string]string) ChangedFields {
 	for _, name := range names {
 		sum := sha256.Sum256([]byte(raw[name]))
 		out = append(out, FieldDelta{
-			Name:   name,
-			Len:    len(raw[name]),
-			SHA256: hex.EncodeToString(sum[:])[:changedFieldHashLen],
+			name:   name,
+			length: len(raw[name]),
+			sha:    hex.EncodeToString(sum[:])[:changedFieldHashLen],
 		})
 	}
 	return out
@@ -638,8 +680,11 @@ func newSpec[I, O any](command string, tier Tier) CommandSpec {
 //   - hook-sentinel / hook-outcome and `workflow delegation gate` — intra-turn gate
 //     plumbing/telemetry with their own stores; not canonical workflow state.
 //   - score — recomputable from iter-logs.
+//   - `workflow drift` — writes only drift-report.json, a recomputable DERIVED
+//     cache (re-run drift to regenerate), not canonical workflow state; excluded
+//     for the same reason as score, not because it mutates nothing.
 //   - `kg setup` — first-run provisioning, skipped after; not a routine mutation.
-//   - read-only commands (status, orient, log, drift, plan show|graph|schedule|
+//   - read-only commands (status, orient, log, plan show|graph|schedule|
 //     check-scope, complete, bundle stages, kg lint|stats|query|…) mutate nothing.
 //
 // Two state-mutating commands beyond the spec's Representative block are journaled
