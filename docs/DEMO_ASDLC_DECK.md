@@ -4,6 +4,23 @@ title: "dot-agents — The Agentic SDLC (ASDLC)"
 description: "Architect demo deck — an agentic SDLC with an absolute-correctness, no-partial-credit, auditable verification spine. Diagrams, concepts, and a config-v2 worked example shown end-to-end through the verification audit trail."
 theme: default
 paginate: true
+style: |
+  section { font-size: 22px; padding: 38px 50px; line-height: 1.34; }
+  section.lead { font-size: 25px; }
+  section.lead h1 { font-size: 40px; }
+  h1 { font-size: 33px; margin: 0 0 0.35em; }
+  h2 { font-size: 27px; }
+  ul, ol { margin: 0.25em 0 0.25em 1em; }
+  li { margin: 0.16em 0; }
+  p { margin: 0.4em 0; }
+  table { font-size: 0.78em; border-collapse: collapse; margin: 0.3em 0; }
+  th, td { padding: 3px 9px; vertical-align: top; }
+  blockquote { font-size: 0.92em; margin: 0.4em 0; }
+  pre { font-size: 0.74em; line-height: 1.3; }
+  /* Cap every rendered mermaid diagram to the fold; preserve aspect ratio. */
+  section img { display: block; margin: 0.25em auto; max-width: 100%; max-height: 452px; height: auto; }
+  /* Slides with two stacked diagrams need a tighter per-diagram cap. */
+  section.twodiagram img { max-height: 226px; }
 ---
 
 <!-- _class: lead -->
@@ -69,7 +86,7 @@ flowchart LR
 # The workflow engine lifecycle
 
 ```mermaid
-flowchart TD
+flowchart LR
     idea([Idea])
 
     subgraph AUTHOR["1 - Authoring tier"]
@@ -113,6 +130,8 @@ Four tiers, each box names the `da workflow` verb that produces or mutates it. F
 
 ---
 
+<!-- _class: twodiagram -->
+
 # Task + plan state machines
 
 ```mermaid
@@ -147,7 +166,7 @@ Status is **never edited by hand** — every transition goes through the CLI, so
 # The artifact tier model — spec → plan → tasks → history
 
 ```mermaid
-flowchart TB
+flowchart LR
     idea([idea])
     subgraph T1["Tier 1 · SPEC — what & why"]
         spec["workflow/specs/&lt;id&gt;/design.md<br/>decisions · requirements · done-criteria"]
@@ -216,7 +235,7 @@ Four merged concept references. One slide each; the signal, then the link.
 # Concept 3 — Verification & Scoring — **the aleph slide**
 
 ```mermaid
-flowchart TD
+flowchart LR
     spec["Spec done-criteria"] --> plan["Plan per-task verification<br/>(app_type, verification_required)"]
     plan --> impl["Implementation"]
     impl --> verify{"Verifier sequence<br/>(by app_type)"}
@@ -317,20 +336,31 @@ Representative tasks (`TASKS.yaml`) for the lock / cross-machine slice:
 
 ---
 
-# The audit trail — defense in depth, honestly labeled
+# The audit trail — defense in depth (1/2)
 
-**The regulated-industry beat is not "we catch everything" — it is _layered_ defense, each layer honest about its reach.** Binary CI gates block only what they can **detect**; the adversarial **cross-brain** review catches correctness bugs green tests miss; and a defect that **escapes** a green gate is caught downstream by the **process** — next CI run, a sibling PR, or the RCA loop — which then hardens the gate so the class can't recur. All rows are **real, merged** fixes, labeled by the layer that actually caught each:
+**The beat is not "we catch everything" — it is _layered_ defense, each layer honest about its reach.** Binary CI gates block only what they can **detect**; the adversarial **cross-brain** review catches correctness bugs green tests miss. All rows are **real, merged** fixes, labeled by the layer that actually caught each:
 
 | Defect (factual) | Caught by (layer) | Fix |
 |---|---|---|
 | Windows **delete-pending** lock race — a contender's `os.Mkdir` races the holder's `RemoveAll`, sees "Access is denied" | **CI gate (multi-OS)** — `TestEmitConcurrentNoTornLines` went red on windows-latest while mac/linux were green | `cb4cbd0a` (direct-to-master; PR# not cleanly resolvable) |
 | Windows transient **sharing-violation** on native remove | **CI gate (multi-OS)** — same test flaked red on windows-latest only | `e4ac3872` (**PR #221**, `77446b37`) |
 | **False-green** e2e assertions that asserted nothing real | **Cross-brain review** — a green gate can't catch a test that passes by asserting nothing; the adversarial lens did | `c9b16a98` (**PR #220**, `9ac935a6`) |
+
+<!-- Talk track: the multi-OS matrix DOES catch Windows races a mac/linux-green run hides — but only when a test exercises the path (delete-pending, sharing-violation went red on windows-latest). The adversarial cross-brain lens catches the false-greens that green tests structurally can't. Continues on the next slide. -->
+
+---
+
+# The audit trail (2/2) — and the one that **ESCAPED**
+
+Cross-brain review keeps catching what green tests can't — and when a defect **escapes** a green gate, the **process** catches it downstream (next CI run, a sibling PR, or the RCA loop), which then **hardens the gate** so the class can't recur:
+
+| Defect (factual) | Caught by (layer) | Fix |
+|---|---|---|
 | **Doc overclaims** about packages/lock/portability | **Cross-brain review** | `95279a0b` (**PR #228**, `b51aeeaf`) |
 | **Non-atomic** home bootstrap + missing binding-drop + missing ambient-auth refusal | **Cross-brain (codex) adversarial gate** | `614904af` (**PR #198**, `a6831662`) |
-| Windows `agentslock` acquire failed for **every** Windows user (single-level `os.Mkdir`, parent absent on first run) — `da config explain`/`install` broke at runtime | **ESCAPED** — the multi-OS gate was "green, and structurally incapable of catching it" (RCA); caught downstream by the process, then the RCA hardened the `verify.sh` smoke (P0) to run a real-first-run scenario so the class is caught going forward | RCA `.agents/history/rca-windows-agentslock-escape.md` (**PR #147**, `bed485af`); 0.4.1 (`57a52fe4`) |
+| Windows `agentslock` acquire failed for **every** Windows user (single-level `os.Mkdir`, parent absent on first run) — `da config explain`/`install` broke at runtime | **ESCAPED** — multi-OS gate was "green, and structurally incapable of catching it" (RCA); caught downstream by the process, then the RCA hardened the `verify.sh` smoke (P0) to run a real-first-run scenario so the class is caught going forward | RCA `.agents/history/rca-windows-agentslock-escape.md` (**PR #147**, `bed485af`); 0.4.1 (`57a52fe4`) |
 
-<!-- Talk track: the honest story is stronger than "we catch everything." The multi-OS matrix DOES catch Windows races a mac/linux-green run hides — but only when a test exercises the path (delete-pending, sharing-violation went red on windows-latest). The agentslock acquire race had NO test hitting its first-run precondition, so it passed a green multi-OS gate and ESCAPED — caught later by the process, after which the RCA hardened the smoke to catch the class. The adversarial cross-brain lens caught the false-greens, doc overclaims, and non-atomic bootstrap that green tests structurally can't. "Green tests" was necessary, never sufficient; defense in depth is what makes the chain auditable. -->
+<!-- Talk track: the agentslock acquire race had NO test hitting its first-run precondition, so it passed a green multi-OS gate and ESCAPED — caught later by the process, after which the RCA hardened the smoke to catch the class. "Green tests" was necessary, never sufficient; defense in depth is what makes the chain auditable. -->
 
 ---
 
