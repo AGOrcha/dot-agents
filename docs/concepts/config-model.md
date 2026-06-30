@@ -119,7 +119,7 @@ different **kinds of resource** (and, in the lock model, two different unit kind
   form `{ "ref": "...", "optional": true }` to make a failed fetch non-fatal.
 - **`packages` → executable artifacts** (model unit kind `artifact`). A package is an executable
   bundle (agents/skills) meant to be **installed discretely** into the asset store and invoked — it
-  does **not** merge into config. Ref form: `source-id:layer-path@version`. **Current shipped state:**
+  does **not** merge into config. Ref form: `source-id:artifact-path@version-spec`. **Current shipped state:**
   `packages` are *declared* in the manifest, but the shipped resolver does **not** resolve them into
   lock units. The `artifact` kind exists in the lock model (`internal/config/lock_units.go`) — it is
   produced only by the legacy-v1-lock migration path (a pre-existing `packages` lock section) — but
