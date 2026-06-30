@@ -20,13 +20,13 @@ export const PUBLIC_PAGES = [
   { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 2 },
   { src: 'docs/CONFIG_RELEVANCE.md', id: 'guides/config-relevance', order: 3 },
   { src: 'docs/DEMO_README.md', id: 'guides/demo-overview', order: 4 },
-  { src: 'docs/DEMO_INDEX.md', id: 'guides/demo-index', order: 5 },
   { src: 'docs/DEMO_WORKFLOW_WALKTHROUGH.md', id: 'guides/demo-workflow-walkthrough', order: 6 },
-  { src: 'docs/DEMO_DIAGRAM.md', id: 'guides/demo-diagram', order: 7 },
-  { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 8 },
   { src: 'docs/RESOURCE_MANAGEMENT_GUIDE.md', id: 'guides/resource-management', order: 9 },
   { src: 'docs/SCORE_GUIDE.md', id: 'guides/score', order: 10 },
-  { src: 'docs/DEMO_ASDLC_DECK.md', id: 'guides/demo-asdlc-deck', order: 11 },
+  // Presenter-only material (the deck, run-of-show, talk-tracks, Q&A backup) is
+  // kept as repo files + the .pptx, NOT published on the public site:
+  //   DEMO_ASDLC_DECK.md (the deck), DEMO_INDEX.md (run-of-show),
+  //   DEMO_DIAGRAM.md (talk-tracks + live-demo script), DEMO_LESSONS_NARRATIVE.md (Q&A backup).
 
   // Reference
   { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },
