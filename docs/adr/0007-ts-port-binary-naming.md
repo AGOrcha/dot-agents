@@ -3,7 +3,7 @@
 **Status:** accepted
 **Date:** 2026-05-03
 **Owners:** dot-agents
-**Related:** [ADR-0006](0006-da-rename-strategy.md) (Go binary rename strategy); the TypeScript port boundary contract (Phase 4); [`binary-rename-da-sweep` plan](../../.agents/workflow/plans/binary-rename-da-sweep/) t6
+**Related:** [ADR-0006](0006-da-rename-strategy.md) (Go binary rename strategy); the TypeScript port boundary contract (Phase 4); [`binary-rename-da-sweep` plan](../../.agents/history/binary-rename-da-sweep/) t6
 
 ## Context
 
