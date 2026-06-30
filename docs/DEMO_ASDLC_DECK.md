@@ -25,7 +25,7 @@ Built for architects in regulated contexts — PCI, PHI/HIPAA, CUI/FIPS/CMMC —
 
 - **Agents do the work; humans steer and review.** Every decision leaves a durable, inspectable artifact on disk — not transient chat context.
 - **Three pillars, all shipping today** (`README.md`): config management (one source of truth at `~/.agents/`, layered + lock-pinned), workflow management (`da workflow` / `da review`), and a knowledge graph (`da kg`).
-- **The differentiator is the verification spine** — binary, no-partial-credit merge gates with a schema-validated, retained audit trail.
+- **The differentiator is the verification spine** — binary, no-partial-credit merge gates with schema-validated decision records and a durable, retained audit trail.
 
 > Sources for this deck are merged, accuracy-verified docs: `docs/PROJECT_DIAGRAMS.md` and `docs/concepts/{workflow-artifact-model,config-model,verification-and-scoring,platform-projection}.md`, plus the real `config-distribution-model` spec, `config-v2-migration` plan, and shipped code/tests.
 
@@ -226,7 +226,7 @@ flowchart TD
     review -->|all pass| ci{"CI gates (PR)"}
     ci -->|any red| block
     ci -->|all green| merge["Merges to master"]
-    verify -.writes.-> trail["Durable, schema-validated trail"]
+    verify -.writes.-> trail["Durable, typed audit trail"]
     review -.writes.-> trail
     trail --> score["Outcome score (rubric 2.1.0)"]
 ```
@@ -385,7 +385,7 @@ da add <project-path>      # bind a project
 
 ## _Correct-and-merges, or it does not merge._
 
-Binary gates · no partial credit · a schema-validated, retained audit trail · every artifact traced from requirement → bounded change → recorded evidence.
+Binary gates · no partial credit · schema-validated decisions + a durable, retained audit trail · every artifact traced from requirement → bounded change → recorded evidence.
 
 **Where to go on the docs site:**
 - Concepts → Workflow Artifact Model · Config Model · **Verification & Scoring** · Platform Projection
