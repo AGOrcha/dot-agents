@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -1213,5 +1214,137 @@ func TestEnsureLockFreshForRefresh_ResolveErrorWarnsNotFatal(t *testing.T) {
 	ensureLockFreshForRefresh(projectPath)
 	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(err) {
 		t.Fatalf("a failed resolve must not leave a lock, stat err = %v", err)
+	}
+}
+
+// ─── p4b regression: refresh dispatch wires copilot user-home hooks ────────────
+//
+// These helpers + test close the end-to-end confidence gap for the copilot
+// user-home hooks feature (platform-driven-diagnostics / p4b-copilot-user-config,
+// commit 477ac596). The platform-package tests prove createUserHomeHookFiles in
+// isolation; this drives the real `da refresh` dispatch so the command path that
+// actually reaches copilot.CreateLinks is covered.
+
+// seedCopilotGlobalHookForRefresh writes the global-scope canonical HOOK.yaml
+// that copilot's user-home fanout renders into ~/.copilot/hooks/<name>.json.
+// Mirrors seedCopilotGlobalHook in internal/platform/copilot_test.go (test
+// helpers don't cross packages, so the shape is replicated, not imported).
+func seedCopilotGlobalHookForRefresh(t *testing.T, agentsHome string) {
+	t.Helper()
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"
+	if err := os.WriteFile(manifest, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeStaleCopilotUserHook pre-seeds a plausible rendered copilot hook under
+// ~/.copilot/hooks/, mirroring writeCopilotUserHook in copilot_test.go. Used to
+// prove refresh's exact-refresh prune removes an unmanaged-name hook file.
+func writeStaleCopilotUserHook(t *testing.T, home, name string) {
+	t.Helper()
+	dir := filepath.Join(home, ".copilot", "hooks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"x"}]}}`)
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunRefresh_MaterializesCopilotUserHomeHooks drives the real `da refresh`
+// dispatch end-to-end and asserts copilot's user-home hook (a) materializes at
+// $HOME/.copilot/hooks/prompt-log.json with the correct rendered CONTENT, (b)
+// prunes a pre-seeded stale $HOME/.copilot/hooks/ghost.json (exact-refresh), and
+// (c) is reported Present/clean by the copilot user-config badge. This is the
+// command-dispatch coverage the platform-package tests cannot give: those call
+// createUserHomeHookFiles directly; this proves refresh → CreateLinks reaches it.
+func TestRunRefresh_MaterializesCopilotUserHomeHooks(t *testing.T) {
+	// seedAllPlatformInstallSignals sets HOME and seeds copilot's install signal
+	// (~/.vscode/extensions/github.copilot-*) so it passes the installed+enabled
+	// filter in enabledPlatforms. Returns the temp HOME.
+	home := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Global canonical hook → copilot renders it into ~/.copilot/hooks/.
+	seedCopilotGlobalHookForRefresh(t, agentsHome)
+
+	// Pre-seed a stale rendered hook with an unmanaged name; exact-refresh prune
+	// must remove it.
+	writeStaleCopilotUserHook(t, home, "ghost.json")
+
+	projectPath := filepath.Join(home, "rp")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rp", projectPath)
+	cfg.SetPlatformState("copilot", true, "")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	hooksDir := filepath.Join(home, ".copilot", "hooks")
+
+	// (a) the global hook materialized at ~/.copilot/hooks/prompt-log.json with
+	// the correct rendered shape (assert decoded content, not just os.Stat).
+	out := filepath.Join(hooksDir, "prompt-log.json")
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected refresh to materialize copilot user-home hook %s: %v", out, err)
+	}
+	var payload struct {
+		Version int `json:"version"`
+		Hooks   map[string][]struct {
+			Type string `json:"type"`
+			Bash string `json:"bash"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(b, &payload); err != nil {
+		t.Fatalf("rendered copilot hook is not valid JSON: %v\n%s", err, b)
+	}
+	if payload.Version != 1 {
+		t.Errorf("rendered hook version = %d, want 1", payload.Version)
+	}
+	// user_prompt_submit maps to copilot's "userPromptSubmitted" event.
+	actions, ok := payload.Hooks["userPromptSubmitted"]
+	if !ok || len(actions) != 1 {
+		t.Fatalf("rendered hook missing single userPromptSubmitted action: %s", b)
+	}
+	if actions[0].Type != "command" || actions[0].Bash != "/bin/echo" {
+		t.Errorf("rendered action = %+v, want {Type:command Bash:/bin/echo}", actions[0])
+	}
+
+	// (b) the stale, unmanaged hook is pruned by exact-refresh.
+	ghost := filepath.Join(hooksDir, "ghost.json")
+	if _, err := os.Stat(ghost); !os.IsNotExist(err) {
+		t.Errorf("expected stale %s pruned by exact-refresh, stat err = %v", ghost, err)
+	}
+
+	// (c) the copilot user-config badge reports Present/clean.
+	reporter, ok := platform.NewCopilot().(platform.UserConfigReporter)
+	if !ok {
+		t.Fatal("copilot platform does not implement UserConfigReporter")
+	}
+	badge := reporter.UserBadge(home)
+	if !badge.Present || badge.Broken {
+		t.Errorf("UserBadge = %+v, want Present=true Broken=false", badge)
 	}
 }
