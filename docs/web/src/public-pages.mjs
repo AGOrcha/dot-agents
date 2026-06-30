@@ -26,6 +26,7 @@ export const PUBLIC_PAGES = [
   { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 8 },
   { src: 'docs/RESOURCE_MANAGEMENT_GUIDE.md', id: 'guides/resource-management', order: 9 },
   { src: 'docs/SCORE_GUIDE.md', id: 'guides/score', order: 10 },
+  { src: 'docs/DEMO_ASDLC_DECK.md', id: 'guides/demo-asdlc-deck', order: 11 },
 
   // Reference
   { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },
