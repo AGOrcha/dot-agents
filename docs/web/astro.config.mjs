@@ -3,7 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from 'astro-mermaid';
 import { visit } from 'unist-util-visit';
-import { PUBLIC_SLUG_BY_SRC } from './src/public-pages.mjs';
+import { PUBLIC_PAGES, PUBLIC_SLUG_BY_SRC } from './src/public-pages.mjs';
 
 // SITE_BASE / SITE_URL switch between the two supported hosts:
 //   * Cloudflare Workers @ agorcha.dev (root)   — set DEPLOY_TARGET=cloudflare
@@ -80,20 +80,33 @@ function rewriteRelativeLinks() {
 }
 
 // Public information architecture — four curated sections (D3). Entries are
-// sourced live from docs/** by src/content.config.ts; their section-prefixed
-// ids feed these autogenerate groups. Internal artifacts (.agents/**) are
-// absent from the public loader pass and so never appear here.
+// sourced live from docs/** by src/content.config.ts's custom external-file
+// loader, so their entry `filePath` points back into the repo (docs/**), NOT
+// under src/content/docs/. Starlight's `autogenerate` only scans entries whose
+// filePath is under src/content/docs/, so it finds NONE of these pages and the
+// groups render EMPTY. Instead we build the items explicitly from the SAME
+// allowlist the loader consumes (src/public-pages.mjs) — grouped by each id's
+// section prefix and ordered by the allowlist `order` — so every public page is
+// reachable from the nav and the sidebar stays in sync with the allowlist.
+// `{ slug }` items carry no label, so Starlight uses each page's own
+// loader-derived title (its H1) as the nav label.
+function sectionItems(prefix) {
+  return PUBLIC_PAGES.filter((p) => p.id.startsWith(`${prefix}/`))
+    .sort((a, b) => a.order - b.order)
+    .map((p) => ({ slug: p.id }));
+}
+
 const sidebar = [
   {
     label: 'Getting Started',
     items: [{ label: 'Getting Started', slug: '' }],
   },
-  { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
-  { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
+  { label: 'Guides', items: sectionItems('guides') },
+  { label: 'Reference', items: sectionItems('reference') },
   {
     label: 'Concepts',
     items: [
-      { autogenerate: { directory: 'concepts' } },
+      ...sectionItems('concepts'),
       // Bespoke interactive routes (custom Astro pages, base-aware via link:).
       { label: 'Resource graph: da', link: '/graphs/da-resources' },
       { label: 'Resource graph: workflow', link: '/graphs/workflow-resources' },
