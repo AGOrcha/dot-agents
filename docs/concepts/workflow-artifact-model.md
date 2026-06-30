@@ -82,17 +82,26 @@ is the load-bearing audit link.
 verification flags. Dependencies may be **cross-plan** — a dep string containing `/` (e.g.
 `plan-archive-command/p0-extract-fs-helpers`) refers to a task in another plan.
 
-Task status is **not edited by hand.** It is mutated only through the CLI (`advance`,
-`merge-back`, `complete`), so the transition is always attributable and the journal can record it.
+Task status is **not edited by hand** — it changes only through the CLI, so every transition is
+attributable and the journal can record it. The path differs by work mode. For **direct**
+(non-delegated) work, `da workflow advance` moves the canonical task status. For **delegated**
+work the steps are split: `merge-back` records the worker's return artifact and marks the
+*delegation contract* completed — **not** the canonical task — and `delegation closeout` is what
+reconciles the canonical task to `completed` on accept. `complete` is a read-only **probe** of
+plan-completion state; it mutates nothing.
 
 ### 4 · History — the permanent record
 
-When a plan completes, it is **archived** out of the active tree into `.agents/history/<id>/`. The
-archive bundles the final `PLAN.yaml` + `TASKS.yaml`, the `<id>.plan.md` narrative, the linked
-**spec** document, and all delegation **merge-back** artifacts (under
-`delegate-merge-back-archive/<date>/<task>/`). An `impl-results.md` is written when the plan was
-implemented as direct work (no delegation merge-backs), or when a single cross-task narrative adds
-context the per-task records miss.
+When a plan completes, it is **archived** out of the active tree into `.agents/history/<id>/`.
+`da workflow plan archive` moves (or merges, when a history dir already exists) the plan
+directory — `.agents/workflow/plans/<id>/` — into `.agents/history/<id>/`: the final `PLAN.yaml`
++ `TASKS.yaml` and the `<id>.plan.md` narrative. That is all archive itself does — it does **not**
+copy the spec and does **not** generate a results file. Two related artifacts reach history by
+other means: delegation **merge-back** archives are deposited under
+`delegate-merge-back-archive/<date>/<task>/` earlier, by `delegation closeout` (not by archive);
+and `impl-results.md`, when present, is written by the agent per the workflow rules — for direct
+work with no merge-backs, or when a single cross-task narrative adds context the per-task records
+miss — never produced by the archive command.
 
 This keeps `.agents/workflow/plans/` reserved for **live** plans and makes
 `.agents/history/<id>/` the durable record of completed work — the thing an auditor reads.
@@ -101,8 +110,10 @@ This keeps `.agents/workflow/plans/` reserved for **live** plans and makes
 
 ## The Lifecycle
 
-The artifacts are not static documents; they advance through a defined lifecycle, and **each arrow
-is a `da workflow` command** — there is no off-the-books transition.
+The artifacts are not static documents; they advance through a defined lifecycle. The **solid**
+arrows below are each driven by a `da workflow` command; the **dashed** ones (idea → spec → plan)
+are manual, human-authored steps — there is no single command that consumes the prior artifact to
+emit the next, so they are not labeled with one.
 
 ```mermaid
 flowchart TB
@@ -121,8 +132,8 @@ flowchart TB
         hist["history/&lt;id&gt;/<br/>final PLAN+TASKS · impl-results · merge-backs · spec"]
     end
 
-    idea --> spec
-    spec -->|"plan create"| plan
+    idea -.->|"manual authoring"| spec
+    spec -.->|"manual authoring<br/>(plan create scaffolds the stub;<br/>it does not read the spec)"| plan
     plan -->|"task add"| tasks
     tasks -->|"next → fanout / advance → merge-back"| impl["implementation + verification"]
     impl -->|"checkpoint · verify record"| tasks
@@ -194,12 +205,13 @@ written by the CLI, not narrated by the agent.
 ### Fold-back — routing stray observations to a durable tier
 
 Loop agents surface observations that should not stay stranded in chat. `da workflow fold-back
-create` writes `.agents/active/fold-back/<id>.yaml` to route a low-risk observation into the right
-durable tier — a plan-note clarification, a lesson, a testing-matrix addition. Larger or
-shared-behavior changes (rule, skill, hook, or cross-repo conventions) instead become **proposals**
-in the review queue (`da review`), which require explicit human approval before they become
-durable. The discipline the walkthrough demonstrates: when a worker notices work beyond its bundle
-scope, it **folds it back** as a new task rather than silently expanding scope.
+create` writes a staging artifact (`.agents/active/fold-back/<id>.yaml`) and routes the observation
+into one of three durable destinations: an inline **`TASKS.yaml` note** (when `--task` is given),
+the **plan summary** (a plan-level note, when no task is named), or — with `--propose` — a
+**proposal file** under `~/.agents/proposals/*.md` for the review queue (`da review`), which
+requires explicit human approval before it becomes durable. The discipline the walkthrough
+demonstrates: when a worker notices work beyond its bundle scope, it **folds it back** rather than
+silently expanding scope.
 
 ---
 
@@ -213,7 +225,7 @@ plain CLI call you can run by hand.
 ### Authoring (Tier 1 → Tier 3)
 
 ```bash
-da workflow plan create <plan-id>          # scaffold PLAN.yaml + TASKS.yaml from a stable spec
+da workflow plan create <plan-id> --title "…"   # scaffold PLAN.yaml + TASKS.yaml stubs
 da workflow plan update <plan-id> --status active --focus <task>
 da workflow task add <plan-id> --id <task-id> --title "…" [--app-type go-http-service]
 ```
@@ -239,7 +251,7 @@ delegations and tasks whose dependencies are unmet, and prefers canonical tasks 
 ### Delegation and verification (Tier 3 → implementation)
 
 ```bash
-da workflow contract create --task <task-id>          # bounded write-scope contract for direct work
+da workflow contract create --plan <plan-id> --task <task-id>   # bounded write-scope contract for direct work
 da workflow fanout --plan <id> --task <task-id> \      # delegate a bounded slice to a sub-agent
   --owner <name> --write-scope "commands/,internal/platform/"
 da workflow verify record --kind test --status pass --summary "go test ./..."
@@ -254,8 +266,8 @@ job (a deliberate shift-left).
 
 ```bash
 # Delegated work — the worker returns, the parent gate decides:
-da workflow merge-back --task <task-id>                       # worker's return artifact
-da workflow delegation closeout --task <task-id> --decision accept   # parent: accept → completes the task
+da workflow merge-back --task <task-id> --summary "…"         # worker's return artifact
+da workflow delegation closeout --plan <plan-id> --task <task-id> --decision accept   # parent: accept → completes the task
 
 # Direct (orchestrator-owned) work:
 da workflow advance <plan-id> --task <task-id> --status completed
@@ -274,8 +286,8 @@ Two **client commands** wrap the start-of-iteration and end-of-iteration sequenc
 (and skills) don't re-type the primitive pipeline each cycle:
 
 ```bash
-da workflow start-task <plan-id>     # = plan update --status active → --focus → derive-scope → commit
-da workflow close-task <plan-id>     # = checkpoint --log-to-iter → score → advance → next-focus → commit
+da workflow start-task <plan-id> --task <task-id>   # = plan update --status active → --focus → derive-scope → commit
+da workflow close-task <plan-id> --task <task-id>   # = checkpoint --log-to-iter → score → advance → next-focus → commit
 ```
 
 These are convenience molecules over the atoms above; see
