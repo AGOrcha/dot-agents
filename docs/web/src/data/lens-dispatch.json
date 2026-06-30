@@ -1,0 +1,76 @@
+{
+  "title": "Lens reviewer dispatch",
+  "description": "How the review stage fans a reviewable task out to one bounded reviewer per lens, composes a per-lens prompt overlay, then aggregates the verdicts at the parent gate. Lenses are registered in stage_profiles.reviewer; the active set is app_type-dependent (go-cli uses all four, ideation three, docs two). Click any node to inspect.",
+  "layout": "breadthfirst",
+  "legend": [
+    { "kind": "input", "color": "#0ea5e9", "description": "review stage entry" },
+    { "kind": "lens", "color": "#a855f7", "description": "one reviewer lens (1 bounded subagent)" },
+    { "kind": "consolidate", "color": "#22c55e", "description": "parent aggregates merge-backs" },
+    { "kind": "gate", "color": "#f59e0b", "description": "parent gate decision" }
+  ],
+  "nodes": [
+    { "id": "task", "label": "Reviewable task", "kind": "input",
+      "data": {
+        "stage": "review (staged-runtime.md)",
+        "entry": "Load .agents/prompts/review-agent.project.md",
+        "contract": "spawn one reviewer per lens; each lens emits findings + pass/fail; parent aggregates",
+        "lens_set_by_app_type": { "go-cli": 4, "ideation": 3, "docs": 2 },
+        "source": ".agentsrc.json by_app_type.go-cli.lenses.lens_set — authoritative 4-lens dispatch (architecture-standards, acceptance-invariants, adversarial, cross-harness-adversarial). staged-runtime.md documents the base 3-lens contract; .agentsrc adds the 4th (cross-harness-adversarial) for go-cli.",
+        "lens_registry": ".agentsrc.json stage_profiles.reviewer (lens definitions)"
+      } },
+
+    { "id": "lens-arch", "label": "architecture-standards", "kind": "lens",
+      "data": {
+        "agent": "architecture-standards-reviewer",
+        "scope": "design coherence, module/package boundaries, interfaces, separation of concerns, rule adherence",
+        "prompt_files": ["reviewers/reviewer.base.md", "reviewers/architecture-standards.md", "reviewers/architecture-standards.project.md"],
+        "writes": ".agents/active/review/<task>-architecture-standards.md"
+      } },
+    { "id": "lens-accept", "label": "acceptance-invariants", "kind": "lens",
+      "data": {
+        "agent": "acceptance-invariants-reviewer",
+        "scope": "does the work satisfy business intent + acceptance criteria (not just tests green); preserves platform invariants",
+        "prompt_files": ["reviewers/reviewer.base.md", "reviewers/acceptance-invariants.md", "reviewers/acceptance-invariants.project.md"],
+        "writes": ".agents/active/review/<task>-acceptance-invariants.md"
+      } },
+    { "id": "lens-adv", "label": "adversarial", "kind": "lens",
+      "data": {
+        "agent": "adversarial-reviewer",
+        "scope": "red-team: injection/secret-leak, broken invariants, race/TOCTOU, swallowed errors, data-loss, POSIX/Windows divergence",
+        "prompt_files": ["reviewers/reviewer.base.md", "reviewers/adversarial.md", "reviewers/adversarial.project.md"],
+        "writes": ".agents/active/review/<task>-adversarial.md"
+      } },
+    { "id": "lens-xharness", "label": "cross-harness-adversarial", "kind": "lens",
+      "data": {
+        "agent": "cross-harness-adversarial-reviewer",
+        "scope": "runs adversarial checklist on a different harness/model family (codex>cursor>opencode>copilot>claude); graceful skip if no alternate harness on PATH",
+        "prompt_files": ["reviewers/reviewer.base.md", "reviewers/cross-harness-adversarial.md", "reviewers/cross-harness-adversarial.project.md"],
+        "active_for": "go-cli (dropped for ideation/docs)"
+      } },
+
+    { "id": "consolidate", "label": "Parent aggregates", "kind": "consolidate",
+      "data": {
+        "mechanism": "each lens runs verify record --kind review -> checkpoint -> merge-back",
+        "verdict_rule": "a lens fails if any BLOCKER or HIGH finding is present",
+        "note": "reviewers never call closeout/advance themselves"
+      } },
+    { "id": "gate", "label": "Parent gate", "kind": "gate",
+      "data": {
+        "owner": "parent orchestrator",
+        "decision": "accept / reject / escalate",
+        "closeout": "workflow delegation closeout",
+        "reject": "re-runs the staged runtime"
+      } }
+  ],
+  "edges": [
+    { "source": "task", "target": "lens-arch", "label": "resolve-prompt" },
+    { "source": "task", "target": "lens-accept", "label": "resolve-prompt" },
+    { "source": "task", "target": "lens-adv", "label": "resolve-prompt" },
+    { "source": "task", "target": "lens-xharness", "label": "resolve-prompt" },
+    { "source": "lens-arch", "target": "consolidate", "label": "merge-back" },
+    { "source": "lens-accept", "target": "consolidate", "label": "merge-back" },
+    { "source": "lens-adv", "target": "consolidate", "label": "merge-back" },
+    { "source": "lens-xharness", "target": "consolidate", "label": "merge-back" },
+    { "source": "consolidate", "target": "gate", "label": "aggregate" }
+  ]
+}
