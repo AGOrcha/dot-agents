@@ -39,7 +39,7 @@ plan is archived.
 | **1 · Spec** | `.agents/workflow/specs/<id>/design.md` | The **what and why** — decisions, requirements, done-criteria. | Authored before implementation; frozen as the contract the plan answers to. |
 | **2 · Plan** | `.agents/workflow/plans/<id>/PLAN.yaml` + `<id>.plan.md` | The **how and in what order** — file scopes, task ordering, verification strategy. | Written once the spec is stable enough to implement. |
 | **3 · Tasks** | `.agents/workflow/plans/<id>/TASKS.yaml` | The **work queue** — bounded units, dependencies, status. | Generated from the plan; mutated by the CLI as work progresses. |
-| **4 · History** | `.agents/history/<id>/` | The **permanent record** — final plan + tasks, results, merge-backs, the spec. | Written at archive time; durable and immutable thereafter. |
+| **4 · History** | `.agents/history/<id>/` | The **permanent record** — the plan dir (`PLAN.yaml` + `TASKS.yaml` + `<id>.plan.md`) *moved* by `plan archive`, **plus** artifacts deposited *separately*: merge-back archives (by `delegation closeout`) and `impl-results.md` (written by the agent). The spec is **not** copied in. | Plan dir moves on `plan archive`; the other artifacts land earlier, each by its own command. |
 
 The cardinal rule: **do not collapse the tiers.** A spec that grows file paths and task lists has
 become a plan; a plan that carries open questions has skipped its spec. Keeping the boundary sharp
@@ -129,7 +129,7 @@ flowchart TB
         tasks["TASKS.yaml<br/>bounded units · depends_on · status"]
     end
     subgraph T4["Tier 4 · HISTORY — permanent record"]
-        hist["history/&lt;id&gt;/<br/>final PLAN+TASKS · impl-results · merge-backs · spec"]
+        hist["history/&lt;id&gt;/<br/>moved by archive: PLAN+TASKS+.plan.md<br/>deposited separately: merge-backs · impl-results"]
     end
 
     idea -.->|"manual authoring"| spec
@@ -251,7 +251,7 @@ delegations and tasks whose dependencies are unmet, and prefers canonical tasks 
 ### Delegation and verification (Tier 3 → implementation)
 
 ```bash
-da workflow contract create --plan <plan-id> --task <task-id>   # bounded write-scope contract for direct work
+da workflow contract create --plan <plan-id> --task <task-id>   # direct-mode contract (orchestrator owns the work); same merge-back → closeout → auto-advance pipeline as fanout
 da workflow fanout --plan <id> --task <task-id> \      # delegate a bounded slice to a sub-agent
   --owner <name> --write-scope "commands/,internal/platform/"
 da workflow verify record --kind test --status pass --summary "go test ./..."
@@ -269,16 +269,19 @@ job (a deliberate shift-left).
 da workflow merge-back --task <task-id> --summary "…"         # worker's return artifact
 da workflow delegation closeout --plan <plan-id> --task <task-id> --decision accept   # parent: accept → completes the task
 
-# Direct (orchestrator-owned) work:
+# Direct work with NO contract — move the canonical task status directly:
 da workflow advance <plan-id> --task <task-id> --status completed
 
 # Plan is fully complete:
-da workflow plan archive --plan <plan-id>                     # bundle into history/<plan-id>/
+da workflow plan archive --plan <plan-id>                     # move the plan dir → history/<plan-id>/ (does not copy the spec or generate results)
 ```
 
-Accepted delegated work is completed by the **parent-run** `delegation closeout` — there is no
-second `advance`. `advance` is for direct, non-delegated work only. Mixing them is the classic
-double-completion bug the contract is designed to prevent.
+Accepted delegated work — **and** any **direct-mode contract** (`contract create`) — is completed
+by the **parent-run** `delegation closeout`, which auto-advances the canonical task; there is no
+second `advance`. Plain `advance` is for **direct work with no contract** only. The dividing line
+is the *contract*, not delegated-vs-direct: anything carrying a contract closes through
+merge-back → closeout. Mixing a contract with a manual `advance` is the classic double-completion
+bug the contract is designed to prevent.
 
 ### The composed sequences
 
@@ -338,7 +341,7 @@ human auditor can stand behind:
 | Merge-back | `.agents/active/merge-back/<task-id>.md` |
 | Iteration-log | `.agents/active/iteration-log/iter-N.yaml` (+ `iter-N.score.yaml`) |
 | Fold-back | `.agents/active/fold-back/<id>.yaml` |
-| History | `.agents/history/<id>/` (final plan/tasks + spec + `impl-results.md` + archived merge-backs) |
+| History | `.agents/history/<id>/` — plan/tasks/`.plan.md` *moved* by `plan archive`; archived merge-backs (by `delegation closeout`) + `impl-results.md` (by the agent) deposited *separately*; spec **not** copied |
 
 ### Command quick reference
 
