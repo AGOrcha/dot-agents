@@ -184,7 +184,7 @@ concrete.
 
 - **Skills** — **verbatim directory symlink mirror.** A skill is a `SKILL.md`-rooted directory in
   the same format on every platform, so it is projected as a plain `direct_dir`/`symlink` intent
-  into `.agents/skills/` (all five) and `.claude/skills/` (Claude). No transform. One canonical
+  into `.agents/skills/` (Claude, Codex, OpenCode, Copilot — not Cursor) and `.claude/skills/` (Claude). No transform. One canonical
   skill dedups to one planned output per distinct target.
 - **Agents** — **symlink mirror, with one rendered exception.** `.claude/agents/` (Claude, Cursor)
   is a verbatim `direct_dir` symlink; `.opencode/agent/*.md` and `.github/agents/*.agent.md` are
