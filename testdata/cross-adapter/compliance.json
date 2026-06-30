@@ -1,0 +1,22 @@
+{
+  "notes": [
+    { "id": "owner-alice", "type": "owner", "fields": { "name": "Alice Stone", "team": "Security", "role": "Control Owner" } },
+
+    { "id": "ctl-mfa", "type": "control", "fields": { "control_id": "AC-2-MFA", "framework": "SOC2", "status": "effective", "owner": "owner-alice", "derives_from": "pol-access" } },
+    { "id": "ctl-rbac", "type": "control", "fields": { "control_id": "AC-3-RBAC", "framework": "NIST", "status": "effective", "owner": "owner-alice", "derives_from": "pol-access" } },
+    { "id": "ctl-retention", "type": "control", "fields": { "control_id": "DR-1-RETENTION", "framework": "SOC2", "status": "effective", "owner": "owner-alice", "derives_from": "pol-retention" } },
+
+    { "id": "ev-mfa", "type": "evidence", "fields": { "artifact_url": "s3://ev/mfa.png", "collected_at": "2025-02-01", "expires_at": "2026-02-01", "type": "screenshot" } },
+    { "id": "ev-rbac", "type": "evidence", "fields": { "artifact_url": "s3://ev/rbac.log", "collected_at": "2025-03-01", "expires_at": "2027-03-01", "type": "log" } },
+    { "id": "ev-retain", "type": "evidence", "fields": { "artifact_url": "s3://ev/retain.log", "collected_at": "2025-04-01", "expires_at": "2027-04-01", "type": "log" } }
+  ],
+  "edges": [
+    { "type": "cited_by", "from": "ev-mfa", "to": "ctl-mfa" },
+    { "type": "cited_by", "from": "ev-rbac", "to": "ctl-rbac" },
+    { "type": "cited_by", "from": "ev-retain", "to": "ctl-retention" },
+
+    { "type": "references", "from": "ev-mfa", "to": "sym:auth-login" },
+    { "type": "references", "from": "ev-rbac", "to": "sym:auth-logout" },
+    { "type": "references", "from": "ev-retain", "to": "sym:data-retain" }
+  ]
+}
