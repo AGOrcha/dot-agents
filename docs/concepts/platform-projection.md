@@ -58,11 +58,14 @@ distinct set of repo-local (and some user-home) outputs:
 | **OpenCode** (`opencode.go`) | `opencode.json`, `.opencode/agent/*.md` (file symlink, extension rename), `.opencode/plugins/`, `.agents/skills/` |
 | **GitHub Copilot** (`copilot.go`) | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.github/hooks/*.json`, `.vscode/mcp.json`, `.claude/settings.local.json` (hooks compat), `.agents/skills/`; user-home `~/.copilot/hooks/` |
 
-Note the **shared compatibility buckets**: all five platforms mirror skills into `.agents/skills/`
-(`codexAgentsDir` / `opencodeAgentsDir` / `copilotAgentsDir` all resolve to `.agents`), and Claude
-additionally mirrors into `.claude/skills/`. Cursor reuses Claude's `.claude/agents/` rather than
-emitting `.cursor/agents/`. These overlaps are deliberate — one canonical skill becomes one
-deduped planned output, not five copies (see [the two paths](#the-two-projection-paths)).
+Note the **shared compatibility buckets**: **four** platforms — Claude, Codex, OpenCode, and
+Copilot — mirror skills into `.agents/skills/` (each calls `BuildSharedSkillMirrorIntents`; their
+`claudeAgentsBucketDir` / `codexAgentsDir` / `opencodeAgentsDir` / `copilotAgentsDir` all resolve to
+`.agents`), and Claude additionally mirrors into `.claude/skills/`. **Cursor does not mirror skills
+at all** — its `SharedTargetIntents` returns only `BuildSharedAgentMirrorIntents(.claude/agents)`, so
+it reuses Claude's `.claude/agents/` rather than emitting `.cursor/agents/` or a `.agents/skills/`
+mirror of its own. These overlaps are deliberate — one canonical skill becomes one deduped planned
+output, not four copies (see [the two paths](#the-two-projection-paths)).
 
 > **Antigravity is not a projection target today.** It is **not** in `platform.All()`, has no
 > `internal/platform/antigravity.go` adapter, and is **not** in `PLATFORM_DIRS_DOCS.md` on
@@ -82,9 +85,11 @@ Each platform's `CreateLinks(project, repoPath)` writes that platform's own repo
 rules, settings, MCP config, hooks, ignore files, user-home links. The transport is chosen by the
 platform:
 
-- **Cursor hard-links** `.cursor/rules/*.mdc` (and its `.cursor/*.json`, `.cursorignore`) via
-  `links.HardlinkReplacing` — Cursor's rule loader does not follow symlinks, so a shared inode is
-  required for edits to propagate.
+- **Cursor hard-links** `.cursor/rules/*.mdc` (and `.cursor/settings.json`, `.cursor/mcp.json`,
+  `.cursorignore`) via `links.HardlinkReplacing` — Cursor's rule loader does not follow symlinks, so
+  a shared inode is required for edits to propagate. Its `.cursor/hooks.json` is the exception: that
+  file is **rendered** through `renderCursorHookConfig` (a managed write, via `emitPreferredHookFile`),
+  with a hard link used only as the legacy single-file-spec fallback.
 - **Every other platform symlinks** its direct outputs via `links.SymlinkReplacing` (on Windows
   the symlink degrades to a junction for dirs / hard link for files).
 
@@ -105,7 +110,7 @@ The executor supports exactly these shape/transport combinations:
 
 | Shape | Transport | Executor branch | Used for |
 |---|---|---|---|
-| `direct_dir` | `symlink` | `ensureDirSymlinkIntent` | skill dirs, agent dirs (`.claude/agents`, `.agents/skills`) |
+| `direct_dir` | `symlink` | `ensureDirSymlinkIntent` | skill dirs, agent dirs, and OpenCode plugin dirs (`.agents/skills`, `.claude/agents`, `.opencode/plugins` via `BuildSharedPluginBundleIntents`) |
 | `direct_file` | `symlink` | `ensureFileSymlinkIntent` | per-file agent symlinks (`.opencode/agent/*.md`, `.github/agents/*.agent.md`) |
 | `render_single` | `write` | `executeRenderSingleWrite` | rendered files (`.codex/agents/*.toml`) |
 | *anything else* | — | **error** (`unsupported intent shape/transport`) | — |
@@ -197,9 +202,13 @@ concrete.
   (`claudeEventTable`, `codexEventTable`, `cursorEventTable`, `copilotEventTable`). A single
   canonical `HookSpec.When` value like `stop` maps to `Stop` (Claude/Codex), `stop` (Cursor), and
   `agentStop` (Copilot). See [Hooks](../HOOKS.md) for the full model.
-- **Settings / MCP** — **managed-replace JSON.** MCP config is a managed-replace link to the
-  canonical `mcp.json` (Claude symlinks `.mcp.json`; Cursor hard-links `.cursor/mcp.json`; Copilot
-  targets `.vscode/mcp.json`). Claude's `settings.local.json` is the hook-rendered settings file.
+- **Settings / MCP** — **managed-replace JSON.** MCP config is a managed-replace link, and each
+  platform resolves its **own preferred canonical source name first, falling back to the shared
+  `mcp.json`** (`resolveScopedFile` tries the names in order, per scope): Claude resolves
+  `claude.json` → `mcp.json`, Cursor resolves `cursor.json` → `mcp.json`, Copilot resolves
+  `copilot.json` → `mcp.json`. The repo-local target differs per platform too — Claude symlinks
+  `.mcp.json`, Cursor hard-links `.cursor/mcp.json`, Copilot targets `.vscode/mcp.json`. Claude's
+  `settings.local.json` is the hook-rendered settings file.
 
 ### The key design principle
 
