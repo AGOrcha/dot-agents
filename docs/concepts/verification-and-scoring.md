@@ -301,7 +301,8 @@ The verification and scoring surface, end to end:
 
 ```
 da workflow resolve-prompt --kind verifier --slug <kind>   Show a profile's composed prompt + scope
-da workflow verify record --kind <kind> --status <s> ...    Record a verifier/review outcome (durable)
+da workflow verify record --kind <test|lint|build|...> --status <s>   Record a verifier outcome (durable)
+da workflow verify record --kind review --phase1-decision <accept|reject|escalate> ...   Record the consolidated review decision
 da workflow verify log [--all]                              Read back the verification log
 da score run                                                Compute + persist per-iter/per-session scores
 da score iteration <N> [--recompute]                        Read (or recompute) one iteration's breakdown
