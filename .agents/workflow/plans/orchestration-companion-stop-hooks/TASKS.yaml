@@ -3,7 +3,7 @@ plan_id: orchestration-companion-stop-hooks
 tasks:
     - id: t0-upstream-readback-and-starter-assets
       title: Align wave-picker canonical guidance (skill promotion already shipped)
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -14,7 +14,7 @@ tasks:
       notes: 'COHERENCE 2026-06-25: orchestrator-session-start, delegation-lifecycle, and plan-wave-picker ALL already ship in internal/scaffold/home/starter/skills/global/ (PR #134 + loop-discipline P3b). The original "promote missing skill trees" obligation is satisfied — write_scope reduced to wave-picker guidance only. Remaining work: update plan-wave-picker guidance to prefer canonical workflow eligible/PLAN.yaml/TASKS.yaml state over legacy active *.plan.md markdown (spec R1.4/D3). The new sentinel-write wiring for orchestrator-session-start moves to t2; for delegation-lifecycle to t3. Contract: tasks/t0-upstream-readback-and-starter-assets.contract.md.'
     - id: t1-companion-sentinel-operations
       title: Extend upstream sentinel protocol for delegated handoff and parent closeout operations
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -79,13 +79,6 @@ tasks:
         - internal/scaffold/hooks/global/delegation-closeout-gate/
       verification_required: true
       notes: 'External coordination: consume R1.5 structured outcome capture if it has shipped; hand off PostToolUse/PostToolUseFailure observation fixtures to R1.5 T1b and add no private telemetry format. Contract: tasks/t5-integration-and-outcome-compatibility.contract.md.'
-
-    # Added 2026-05-25 via Plan-agent review pass. The planner recommended
-    # splitting T0/T2/T3/T5 into 13-15 sub-tasks but that's deferred to a
-    # follow-up rewrite to keep this commit additive + reviewable.
-    # The two new tasks below address the most critical gaps surfaced:
-    # the missing cross-plan readback primitive and operator-facing docs.
-
     - id: t-cross-plan-readback
       title: Verify upstream loop-discipline P0/P1c/P2/P3/P3b have shipped before companion gates start
       status: pending
@@ -117,7 +110,6 @@ tasks:
         (no longer blocked on undone upstream work) — the task is to record the
         SHAs, not to wait.
       app_type: research
-
     - id: t-operator-docs
       title: Document orchestration-companion hook surface in docs/HOOKS.md and skill READMEs
       status: pending
@@ -141,7 +133,6 @@ tasks:
         loop-discipline p1b/p1c/p1d. Does not duplicate
         loop-discipline-owned hook docs.
       app_type: research
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the companion-hooks minor'
       status: pending

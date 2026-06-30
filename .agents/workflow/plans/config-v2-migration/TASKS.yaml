@@ -698,7 +698,7 @@ tasks:
         Landed: merged to master via PR #127 (wave-2 state sync).
       app_type: go-cli
     - id: p8-payout-wrk-v2-upgrade
-      title: 'Payout-wrk v1->v2 upgrade + fresh install-from-git validation (0.4.1)'
+      title: Payout-wrk v1->v2 upgrade + fresh install-from-git validation (0.4.1)
       status: ready
       depends_on:
         - p7b-v1-auto-migrator

@@ -26,7 +26,6 @@ tasks:
         D5.5 5-route HTTP mount surface into R3; D5.6 only R2 base
         shell needed (not real-time push).
       app_type: research
-
     - id: rbac-identity
       title: RBAC identity layer (users file, token issuance, Authenticator interface)
       status: completed
@@ -57,7 +56,6 @@ tasks:
         completed. Earlier ~/.agents/review + bcrypt note was stale;
         spec D5.3 + shipped code are the single source.
       app_type: go-cli
-
     - id: label-model
       title: Label data model + persistence (iter-N.labels.yaml sidecars)
       status: completed
@@ -84,7 +82,6 @@ tasks:
         atomic writer was later extracted to internal/fsops
         (WriteFileAtomic, commit ed978961). Marked completed.
       app_type: go-cli
-
     - id: audit-log
       title: Append-only chained JSON-lines audit log + verifier
       status: pending
@@ -103,7 +100,6 @@ tasks:
         (SHA-256). Append + Verify. Yearly rotation hook. Pure file
         IO; no HTTP yet.
       app_type: go-cli
-
     - id: collection-endpoint
       title: HTTP route handlers + auth/audit middleware (mounts into R3 server)
       status: pending
@@ -133,7 +129,6 @@ tasks:
         ship before this can be wired in-process. Until then, this
         package ships a standalone http.Handler usable in tests.
       app_type: go-cli
-
     - id: r1-integration
       title: Human-label signal + RubricVersion major/minor bump (resolve at task time)
       status: pending
@@ -176,7 +171,6 @@ tasks:
         (RubricVersion is global). Coordinate via the umbrella spec
         and the R1.5 ordering policy before opening.
       app_type: go-cli
-
     - id: review-ui
       title: Review surface in R2 (list, inspect, label form, role-aware controls)
       status: pending
@@ -200,7 +194,6 @@ tasks:
         The exact write_scope path is locked once R2's frontend
         layout exists.
       app_type: web
-
     - id: admin-cli
       title: '`da review` CLI for user/audit administration'
       status: pending
@@ -232,7 +225,6 @@ tasks:
         if a new group). Admin-only; operates on local YAML/JSONL —
         no network.
       app_type: go-cli
-
     - id: e2e-smoke
       title: End-to-end test — reviewer labels run, label feeds R1 on next recompute
       status: pending
@@ -254,7 +246,6 @@ tasks:
         tamper with the audit log → `da review audit verify` reports
         it.
       app_type: go-cli
-
     - id: docs
       title: Documentation — REVIEW_LABELING_GUIDE.md, RBAC_AND_AUDIT.md, rubric v3 changelog
       status: pending
@@ -275,7 +266,6 @@ tasks:
         verify the audit chain. Cross-reference from the umbrella
         spec.
       app_type: docs
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the review/labeling minor'
       status: pending

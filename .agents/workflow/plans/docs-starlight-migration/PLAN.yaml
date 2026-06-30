@@ -4,8 +4,8 @@ title: 'Docs: full Starlight migration (hybrid) + public/internal gating + agent
 status: draft
 summary: 'Replace the custom docs/web Astro site with Starlight (hybrid: Starlight docs + ported interactive graph/diagram pages + astro-mermaid). Curated public IA (Getting Started/Guides/Reference/Concepts); internal artifacts (.agents lessons/specs/proposals) gated behind CF Access at /internal/* per the agorcha-public-vs-internal-and-obs-deploy proposal §1. Serve every public page as raw .md + an llms.txt index for web-searching agents. Content stays in sync from docs/** via an Astro glob loader (no duplication).'
 created_at: "2026-06-22T17:43:17Z"
-updated_at: "2026-06-22T23:56:40Z"
+updated_at: "2026-06-30T18:36:47Z"
 owner: dot-agents
 success_criteria: docs/web is a Starlight site; public docs render under the 4-section IA sourced from docs/** via glob loader (no content fork); the Cytoscape /graphs/* and JSON-driven /diagrams/* pages are ported and reachable; Mermaid fences render (astro-mermaid); every public page is fetchable at <path>.md + an llms.txt index lists them; visibility:public|internal (default internal) partitions dist/ vs dist-internal/; the CF Worker serves /internal/* from dist-internal only behind CF Access; /schemas/* stays unauth; deploy-docs.yml builds+deploys both.
 verification_strategy: 'Local: npm run build green; curl public routes + a sample .md endpoint + /llms.txt; confirm internal pages absent from dist/ and present in dist-internal/. CI: deploy-docs preview Worker builds. Manual: maintainer hits agorcha.dev/internal/* and confirms CF Access challenge, and a public page + its .md load unauthenticated.'
-current_focus_task: Agent internal-docs access via service token (da CLI, auth-proxy-ready, auto-wired)
+current_focus_task: Browser-through-Worker e2e for the docs site (Playwright over Miniflare)

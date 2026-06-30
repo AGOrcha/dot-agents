@@ -18,7 +18,6 @@ tasks:
         TaskSpec; D5 eval outcomes feed R1 unchanged; D6 sibling
         sidecar persistence; D7 CLI-first.
       app_type: research
-
     - id: taskspec-and-registry
       title: Define versioned TaskSpec, generator interface, language registry
       status: completed
@@ -47,7 +46,6 @@ tasks:
         versioned TaskSpec + generator interface + language registry").
         Marked completed; kg-query-layer and the generators build on it.
       app_type: go-cli
-
     - id: kg-query-layer
       title: KG query helpers for the task generator
       status: pending
@@ -69,7 +67,6 @@ tasks:
         contract; no writes. Mock-backed unit tests using a tiny
         in-memory fake (existing testutil patterns).
       app_type: go-cli
-
     - id: difficulty-derivation
       title: KG-derived difficulty signals + bucketing
       status: pending
@@ -89,9 +86,8 @@ tasks:
         is a deliberate diff. Documented as the canonical difficulty
         contract.
       app_type: go-cli
-
     - id: generator-go
-      title: Go task generator (per-language adapter #1)
+      title: Go task generator (per-language adapter
       status: pending
       depends_on:
         - kg-query-layer
@@ -110,9 +106,8 @@ tasks:
         cmd, returns a TaskSpec. Registers in the language registry.
         Fixture-driven tests against a tiny seed KG.
       app_type: go-cli
-
     - id: generator-python
-      title: Python task generator (per-language adapter #2)
+      title: Python task generator (per-language adapter
       status: pending
       depends_on:
         - kg-query-layer
@@ -131,9 +126,8 @@ tasks:
         The "Go-first then port" sequencing means a stable interface
         and avoids retroactive churn on the registry.
       app_type: go-cli
-
     - id: generator-typescript
-      title: TypeScript task generator (per-language adapter #3)
+      title: TypeScript task generator (per-language adapter
       status: pending
       depends_on:
         - kg-query-layer
@@ -151,7 +145,6 @@ tasks:
         node --test or vitest invocation pattern. Same template
         surface. Closes the spec's "≥3 languages" gate.
       app_type: go-cli
-
     - id: sandbox-worktree
       title: Worktree sandbox primitive (Sandbox interface + v1 impl)
       status: pending
@@ -171,7 +164,6 @@ tasks:
         point; DockerSandbox + worktree-platform managed-worktree
         provider can land later without caller change.
       app_type: go-cli
-
     - id: verifier-go
       title: Go verifier (build + test) inside sandbox
       status: pending
@@ -189,7 +181,6 @@ tasks:
         workdir, captures pass/fail + stdout/stderr + duration, returns
         a typed VerifyResult. Timeout enforced via context.
       app_type: go-cli
-
     - id: verifier-python
       title: Python verifier
       status: pending
@@ -207,7 +198,6 @@ tasks:
         Mirrors verifier-go for pytest/unittest. Sequenced after
         verifier-go so the VerifyResult shape stabilizes first.
       app_type: go-cli
-
     - id: verifier-typescript
       title: TypeScript verifier
       status: pending
@@ -225,7 +215,6 @@ tasks:
         tsc --noEmit + node --test / vitest. Closes the per-language
         verifier trio.
       app_type: go-cli
-
     - id: agent-runner
       title: AgentRunner interface + claude / codex bindings
       status: pending
@@ -245,7 +234,6 @@ tasks:
         codexrunner that shells out; the per-platform binding mirrors
         commands/agents/ conventions.
       app_type: go-cli
-
     - id: scoring-bridge
       title: Emit R1-shaped iteration record + invoke scoring pipeline
       status: pending
@@ -266,7 +254,6 @@ tasks:
         iter-log dir. Does NOT introduce a new rubric path or version.
         Unit-tested via a tiny EvalRun fixture.
       app_type: go-cli
-
     - id: harness-driver
       title: End-to-end harness wiring (gen → sandbox → run → verify → score)
       status: pending
@@ -289,7 +276,6 @@ tasks:
         all heavy lifting lives in the seam packages. Integration test
         against fakeRunner + verifier-go on a fixture KG.
       app_type: go-cli
-
     - id: persistence
       title: EvalRun + TaskSpec sidecar persistence
       status: pending
@@ -309,7 +295,6 @@ tasks:
         atomic-rename. Tests pin the layout so R2 has a stable
         contract.
       app_type: go-cli
-
     - id: cli-eval
       title: '`da eval` CLI command tree'
       status: pending
@@ -331,7 +316,6 @@ tasks:
         line (`da eval run --language go produces an R1-scored
         outcome`) is the Hard Test.
       app_type: go-cli
-
     - id: r2-visibility-contract
       title: R2 visibility contract — documented join + fixture
       status: pending
@@ -350,9 +334,8 @@ tasks:
         frozen fixture run R2 can build against without re-running
         the harness. No code in R2 itself — that's R2's plan.
       app_type: go-cli
-
     - id: docs
-      title: 'docs/EVAL_HARNESS.md + rubric-cross-link'
+      title: docs/EVAL_HARNESS.md + rubric-cross-link
       status: pending
       depends_on:
         - cli-eval
@@ -369,7 +352,6 @@ tasks:
         feed R1. Cross-link from OUTCOME_SCORING_RUBRIC.md noting
         "eval-source" iterations are scored under the same rubric.
       app_type: go-cli
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the eval-harness minor'
       status: pending

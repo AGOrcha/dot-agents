@@ -127,7 +127,7 @@ tasks:
       app_type: go-cli
     - id: release-record-0.3.3-fold
       title: 'Release record: capability folds into 0.3.3 (no separate bump)'
-      status: pending
+      status: completed
       depends_on:
         - p0-types-and-helpers
         - p1-broken-links-cursor-claude

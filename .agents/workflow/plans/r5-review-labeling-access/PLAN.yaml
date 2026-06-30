@@ -4,8 +4,8 @@ title: 'R5: Human-in-the-loop review, labeling, and access layer'
 status: draft
 summary: Review surface in the R2 dashboard for inspecting runs, labeling outcomes, and supplying feedback that becomes a reward signal feeding R1; plus role-based access (reviewer/admin/read-only) with audit trail.
 created_at: "2026-05-25T19:12:51Z"
-updated_at: "2026-06-25T00:00:00Z"
+updated_at: "2026-06-30T18:37:04Z"
 owner: dot-agents
 success_criteria: Reviewer can list runs, inspect evidence, record structured label + free-text feedback; labels persist and feed R1 as a reward/quality signal; RBAC enforces who can label vs. administer; label/edit actions audit-logged.
 verification_strategy: 'End-to-end test: reviewer account labels a run via UI -> label appears in R1 signal mix on next score recomputation; admin-only endpoint denies reviewer access; audit log captures every label/edit with actor + timestamp.'
-current_focus_task: audit-log
+current_focus_task: Append-only chained JSON-lines audit log + verifier
