@@ -208,7 +208,7 @@ tasks:
         exist anywhere shippable.
     - id: pr6-typescript-port
       title: 'PR 6: TypeScript port (PARKED — carve-out only, frozen)'
-      status: pending
+      status: cancelled
       depends_on:
         - pr1-foundation
       blocks: []
@@ -222,6 +222,9 @@ tasks:
         - docs/TYPESCRIPT_PORT_TDD_PLAN.md
       verification_required: true
       notes: |-
+        DISPOSITION 2026-06-30 (owner: "mostly done / outdated now") → status=cancelled.
+        Superseded by the shipped Go binary; not resuming. Original context preserved below.
+
         AMENDMENT 2026-05-18 (user): PARKED. The TS port is no longer
         deemed necessary — the constrained environment that motivated it
         is getting the (under-review) Go binary, so the Go path covers
@@ -262,7 +265,7 @@ tasks:
         Not gitignored; Sonar excludes .agents; zero CI impact.
     - id: retire-old-branches
       title: Close PR#10, PR#14, retire stale branches
-      status: in_progress
+      status: completed
       depends_on:
         - pr3a-base-commands
         - pr3b-workflow
@@ -338,7 +341,7 @@ tasks:
         NON-TRIVIAL — plan/confirm with maintainer before implementation.
     - id: pr5-followup
       title: PR5 follow-up — scaffold prompt/skill distribution + swallowed TODOs
-      status: pending
+      status: cancelled
       depends_on:
         - pr5-scaffold-rehome
       blocks: []
@@ -349,4 +352,8 @@ tasks:
         - .agents/workflow/specs/
         - internal/scaffold/
       verification_required: true
-      notes: Swallowed-TODO recovery from session 0384c739. (1) HIGH design how recovered .agents/prompts/ (3 overlays + 5 verifier surfaces from PR#27) reach managed projects — confirm ISP runtime resolves repo/global-locally vs needs Tier-1 overlays; link config-distribution-model. (2) HIGH da skills promote the generic orchestration skills (loop-worker, orchestrator-session-start, isp, delegation-lifecycle, iteration-close, plan-wave-picker, provider-consumer-pair) to global as interim so scaffolded projects get the consuming skills. (3) verify the 6 scaffold starter skills match canonical ~/.agents/skills (not stale pr3a snapshot). (4) add an isp.prompt.md to verifier-surface cross-reference check so scaffold changes cannot strand verifier_sequence refs again. Blockers escalated to maintainer and tracked in pending-decisions memory — skill-tiering-contract D1 vocab lock, config-distribution-model §13 surface ratification.
+      notes: |-
+        DISPOSITION 2026-06-30 (owner: "mostly done / outdated now") → status=cancelled.
+        Re-file any still-relevant item below as a fresh task if needed. Original below.
+
+        Swallowed-TODO recovery from session 0384c739. (1) HIGH design how recovered .agents/prompts/ (3 overlays + 5 verifier surfaces from PR#27) reach managed projects — confirm ISP runtime resolves repo/global-locally vs needs Tier-1 overlays; link config-distribution-model. (2) HIGH da skills promote the generic orchestration skills (loop-worker, orchestrator-session-start, isp, delegation-lifecycle, iteration-close, plan-wave-picker, provider-consumer-pair) to global as interim so scaffolded projects get the consuming skills. (3) verify the 6 scaffold starter skills match canonical ~/.agents/skills (not stale pr3a snapshot). (4) add an isp.prompt.md to verifier-surface cross-reference check so scaffold changes cannot strand verifier_sequence refs again. Blockers escalated to maintainer and tracked in pending-decisions memory — skill-tiering-contract D1 vocab lock, config-distribution-model §13 surface ratification.

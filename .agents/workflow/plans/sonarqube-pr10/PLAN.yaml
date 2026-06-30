@@ -18,7 +18,7 @@ summary: |-
     note) to canonical plan so eligible/orient surface it correctly while
     PR #10 is open. Closes when PR merges.
 created_at: "2026-05-03T22:30:00Z"
-updated_at: "2026-05-04T06:01:11Z"
+updated_at: "2026-06-30T23:39:34Z"
 owner: dot-agents
 success_criteria: |-
     Hard test: SonarCloud quality gate on PR #10 passes (or, if not
