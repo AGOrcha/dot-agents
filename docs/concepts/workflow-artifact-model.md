@@ -83,9 +83,9 @@ verification flags. Dependencies may be **cross-plan** — a dep string containi
 `plan-archive-command/p0-extract-fs-helpers`) refers to a task in another plan.
 
 Task status is **not edited by hand** — it changes only through the CLI, so every transition is
-attributable and the journal can record it. The path differs by work mode. For **direct**
-(non-delegated) work, `da workflow advance` moves the canonical task status. For **delegated**
-work the steps are split: `merge-back` records the worker's return artifact and marks the
+attributable and the journal can record it. The path differs by work mode. For **plain direct
+work with no contract**, `da workflow advance` moves the canonical task status. For **delegated**
+work (and any direct-mode *contract*) the steps are split: `merge-back` records the worker's return artifact and marks the
 *delegation contract* completed — **not** the canonical task — and `delegation closeout` is what
 reconciles the canonical task to `completed` on accept. `complete` is a read-only **probe** of
 plan-completion state; it mutates nothing.
