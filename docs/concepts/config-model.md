@@ -69,21 +69,23 @@ flowchart LR
   SRC -->|"source-id:path@version"| PKG
 
   EXT -->|"fetch + SHA-pin"| RESOLVE
-  PKG -->|"fetch + SHA-pin"| RESOLVE
+  PKG -.->|"declared only<br/>(not resolved into the lock today)"| RESOLVE
 
   subgraph RESOLVE["LayeredResolver.Resolve"]
     MERGE["merge layer stack<br/>by category"]
     PROF["resolve profiles<br/>(kind: profile)"]
   end
 
-  RESOLVE -->|"writeUnitsLock"| LOCK[".agentsrc.lock<br/>units{} + profile units<br/>+ inputs_digest"]
+  RESOLVE -->|"writeUnitsLock"| LOCK[".agentsrc.lock<br/>layer units + profile units<br/>+ inputs_digest"]
   LOCK -->|"da refresh / da install"| OUT["platform projection<br/>(Claude · Cursor · Codex · Copilot)"]
 ```
 
 `sources` name *where* content comes from; `extends` and `packages` reference content *inside* those
-sources; the resolver fetches, SHA-pins, merges, and writes the lock; `da refresh` / `da install`
-project the locked config into each platform's native files. Nothing downstream re-decides — it all
-flows from the pinned lock.
+sources. The shipped resolver (`LayeredResolver.Resolve`) fetches and SHA-pins the `extends` layers,
+merges them, and writes the lock; `packages` are *declared* in the manifest but are **not** resolved
+into the lock by the resolver today (the packages-to-lock path is not wired — see *Extends vs
+packages*). `da refresh` / `da install` project the locked config into each platform's native files.
+Nothing downstream re-decides — it all flows from the pinned lock.
 
 ---
 
@@ -108,16 +110,20 @@ single unit to re-validate upstream regardless of its cached digest.
 
 ## Extends vs packages
 
-Both `extends` and `packages` reference content inside a declared source, but they resolve to two
-different **unit kinds**:
+Both `extends` and `packages` reference content inside a declared source, but they denote two
+different **kinds of resource** (and, in the lock model, two different unit kinds):
 
 - **`extends` → `layer` units** (`kind: layer`). A layer is a JSON field-bundle that **merges** into
   the effective config underneath the repo's own settings. A layer may itself declare further
   `extends` (transitive). Ref form: `source-id:layer-path[@version]`. An entry may be the object
   form `{ "ref": "...", "optional": true }` to make a failed fetch non-fatal.
-- **`packages` → `artifact` units** (`kind: artifact`). An artifact is an executable bundle
-  (agents/skills) **installed discretely** into the asset store and invoked — it does **not** merge
-  into config. Ref form: `source-id:layer-path@version`.
+- **`packages` → executable artifacts** (model unit kind `artifact`). A package is an executable
+  bundle (agents/skills) meant to be **installed discretely** into the asset store and invoked — it
+  does **not** merge into config. Ref form: `source-id:layer-path@version`. **Current shipped state:**
+  `packages` are *declared* in the manifest, but the shipped resolver does **not** resolve them into
+  lock units. The `artifact` kind exists in the lock model (`internal/config/lock_units.go`) — it is
+  produced only by the legacy-v1-lock migration path (a pre-existing `packages` lock section) — but
+  no resolver path writes manifest `packages` → `artifact` units today.
 
 ### Every source type is valid for both — including `oci` for extends
 
@@ -168,8 +174,10 @@ cares about (`internal/agentslock/lockfile.go`, `internal/config` resolver `writ
   detected without a network call.
 - **`units`** — one unified map keyed by `source:path@version`. Each value pins the resolved
   **content `digest`** (`sha256:…`), `fetched_at`, `last_checked_at`, `cache_key`, and the unit
-  `kind`. Both `layer` units (from `extends`) and `artifact` units (from `packages`) live here,
-  distinguished by `kind` — there is no separate config/packages section.
+  `kind`. The shipped resolver (`writeUnitsLock`) writes `layer` units (from `extends`) here; the
+  `kind: profile` units (below) fold into the same map. The model reserves an `artifact` kind for
+  packages, but the resolver does not populate it (see *Extends vs packages*) — so in practice this
+  map holds layer + profile units, in one section rather than a split config/packages shape.
 - **profile units** (`kind: profile`) — the resolved `execution_profile` fragments are recorded as
   first-class lock units alongside the layers, derived from the *same* snapshot the resolve produced,
   so a profile resolution reproduces from the lock without re-resolving.
@@ -235,9 +243,11 @@ synced portable identity registry to *this* machine's binding table **starting f
 every project is known-but-unbound, because **identity travels, paths don't.**
 
 **`da add <path>`** then rebinds a project on the new machine — registering it with `da` and setting
-up its configuration links against this host's paths. This portability was dogfooded end-to-end on a
-fresh second machine (a clean `init --from` followed by per-project `da add`), so the
-reproducible-setup path is exercised, not aspirational.
+up its configuration links against this host's paths. Together these are the code-level mechanism
+that keeps portable identity separate from machine-local paths: `init --from` imports zero bindings,
+refuses a non-empty home, and refuses a credential-bearing URL; `da add` performs the per-host
+rebind. (Each of those behaviors is exercised by tests against
+`commands/internal/lifecycle/init_from.go`.)
 
 ---
 
