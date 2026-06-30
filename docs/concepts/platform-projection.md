@@ -13,11 +13,11 @@ layout each AI coding platform expects to read. You author a skill once; `da ref
 into Claude Code's tree, Cursor's tree, Codex's tree, and the shared compatibility buckets the
 rest of the ecosystem reads. **Write once, refresh everywhere.**
 
-This is the resource-distribution complement to [Layered Configuration](../LAYERED_CONFIG_GUIDE.md):
+This is the resource-distribution complement to [Layered Configuration](./LAYERED_CONFIG_GUIDE.md):
 that guide explains how the *config* (`.agentsrc.json`) resolves down a layer stack into one
 effective value; this guide explains how *resources* fan out from one canonical store into N
 platform renderings. The authoritative per-platform path table is
-[Platform Resource Locations](../PLATFORM_DIRS_DOCS.md) — this concept doc complements that matrix
+[Platform Resource Locations](./PLATFORM_DIRS_DOCS.md) — this concept doc complements that matrix
 with the model and the why, and does not restate every path.
 
 ---
@@ -201,7 +201,7 @@ concrete.
   `renderCursorHookConfig`, `renderCopilotHookFile`) and its own canonical→native event-name table
   (`claudeEventTable`, `codexEventTable`, `cursorEventTable`, `copilotEventTable`). A single
   canonical `HookSpec.When` value like `stop` maps to `Stop` (Claude/Codex), `stop` (Cursor), and
-  `agentStop` (Copilot). See [Hooks](../HOOKS.md) for the full model.
+  `agentStop` (Copilot). See [Hooks](./HOOKS.md) for the full model.
 - **Settings / MCP** — **managed-replace JSON.** MCP config is a managed-replace link, and each
   platform resolves its **own preferred canonical source name first, falling back to the shared
   `mcp.json`** (`resolveScopedFile` tries the names in order, per scope): Claude resolves
@@ -229,8 +229,8 @@ lowest-common-denominator format.
 
 ## See also
 
-- [Platform Resource Locations](../PLATFORM_DIRS_DOCS.md) — the authoritative per-platform path
+- [Platform Resource Locations](./PLATFORM_DIRS_DOCS.md) — the authoritative per-platform path
   matrix (official vendor locations + the current `dot-agents` implementation audit).
-- [Hooks](../HOOKS.md) — the canonical hook model and the per-platform event tables.
-- [Layered Configuration](../LAYERED_CONFIG_GUIDE.md) — the config-layer complement: how
+- [Hooks](./HOOKS.md) — the canonical hook model and the per-platform event tables.
+- [Layered Configuration](./LAYERED_CONFIG_GUIDE.md) — the config-layer complement: how
   `.agentsrc.json` resolves down a layer stack.

@@ -16,8 +16,15 @@ accept = ["200..=299", "429"]
 
 # Hosts/paths that cannot be resolved from CI.
 exclude = [
-  # Internal docs section is Cloudflare-Access gated → 401 to the checker.
-  "^https://agorcha\\.dev/internal",
+  # The site's OWN origin. A page's canonical/og self-URL (and any absolute
+  # in-site link) points at https://agorcha.dev/<route>, which 404s for any page
+  # not yet DEPLOYED — every new-page PR adds routes that exist in dist/ but not
+  # on the live site until this PR merges + deploys (a deploy-lagging chicken-and-
+  # egg). In-site links are already validated offline against dist/ via the
+  # rewriter's relative paths, and the routes are proven by the build, so the
+  # live-deployment check is the wrong tool for the site's own pages. (Subsumes
+  # the Cloudflare-Access-gated /internal section, which also 401s the checker.)
+  "^https://agorcha\\.dev",
   # Placeholder / loopback hosts that appear in prose examples.
   "^https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|example\\.(com|org|net))",
   # Vendor doc rot: OpenCode removed /docs/modes/ (folded into /docs/agents/).
