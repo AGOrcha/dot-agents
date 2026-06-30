@@ -9,7 +9,7 @@ sidebar:
 
 This document is the **canonical reference** for the execution-profile layer and the
 `da config relevance` command family. It is the user-facing companion to the
-[`config-relevance-profiles`](../.agents/workflow/plans/config-relevance-profiles/) plan and the
+[`config-relevance-profiles`](../.agents/history/config-relevance-profiles/) plan and the
 [design proposal](../.agents/proposals/skill-relevance-filter.md); cite this file rather than
 duplicating the facet contract.
 
@@ -115,7 +115,7 @@ topology
   binary and exercises real CLI invocations — proves the wired-up command actually runs). The two
   entries match `verifiers_per_executor: 2`, one pass per profile. Each id resolves to a layered,
   scope-composed prompt via `verifier_profiles` — see
-  [VERIFIER_REVIEWER_TEMPLATES.md](VERIFIER_REVIEWER_TEMPLATES.md).
+  [VERIFIER_REVIEWER_TEMPLATES.md](./VERIFIER_REVIEWER_TEMPLATES.md).
 
 `ideation` keeps the wide divergence but gates it — three executors, each artifact verified for
 integrity and reviewed by the full lens panel:

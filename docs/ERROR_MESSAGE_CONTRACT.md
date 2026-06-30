@@ -7,7 +7,7 @@ sidebar:
 
 # Error message contract (dot-agents CLI)
 
-**Status:** Contract draft updated from the 2026-04-19 inventory in [`docs/research/error-message-inventory.md`](./research/error-message-inventory.md).  
+**Status:** Contract draft updated from the 2026-04-19 error-message inventory.  
 **Scope:** Defines the supported contract for human-facing CLI failures: primary message shape, hints, usage rendering, finite-domain validation, and the current limitation that most error paths are not machine-readable.
 
 ## Shared error UX surface
@@ -212,5 +212,5 @@ The strongest current examples to preserve are:
 
 ## Related documents
 
-- [Error Message Compliance plan](../.agents/workflow/plans/error-message-compliance/error-message-compliance.plan.md)
+- [Error Message Compliance plan](../.agents/history/error-message-compliance/)
 - [Global Flag Contract](./GLOBAL_FLAG_CONTRACT.md)

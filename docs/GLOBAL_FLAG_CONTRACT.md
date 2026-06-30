@@ -7,7 +7,7 @@ sidebar:
 
 # Global flag contract (dot-agents CLI)
 
-**Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md).  
+**Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md).  
 **Scope:** Describes **observed** semantics of persistent root flags and known footguns. Implementation and help-text changes are tracked under the global-flag-compliance plan.
 
 ## Persistent globals
@@ -175,5 +175,5 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 ## Related documents
 
 - **Generated coverage matrix** — `docs/generated/GLOBAL_FLAG_COVERAGE.md` is **not checked in**; it is generated on demand by the `cmd/globalflag-coverage` tool, which emits a per-command `commands.Flags` reads matrix. Generate it with `go run ./cmd/globalflag-coverage -markdown -o docs/generated/GLOBAL_FLAG_COVERAGE.md`.
-- [Global Flag Compliance plan (inventory)](../.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md) — source matrices for this contract
+- [Global Flag Compliance plan (inventory)](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md) — source matrices for this contract
 - [Loop Orchestration Spec](./LOOP_ORCHESTRATION_SPEC.md) — delegation bundles, `workflow graph query` + `--json` forwarding to `kg bridge query`

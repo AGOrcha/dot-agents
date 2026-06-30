@@ -1,64 +1,35 @@
 {
   "title": "Workspace state",
-  "description": "Snapshot of .agents/active/ at the time of this build — worktrees, in-flight delegations, and the eligible queue. A follow-up will wire this to live JSON dumps; for now it's a committed snapshot.",
+  "description": "Representative snapshot (captured 2026-06-29) of .agents/ on the docs/architect-demo-deck branch — active/draft plans and the eligible (gated) queue. Autonomous drive is paused (owner-gated); master is green. graph-backend-adapter-contract's t5/t6/t9 are pending with all dependencies satisfied (eligible, not driven); a parked git worktree (dot-agents-t5) holds local work-in-progress for t5, but TASKS.yaml still has t5 pending with NO active delegation bundle. This is a committed snapshot, not a live feed.",
   "layout": "cose",
-  "captured_at": "2026-05-28",
+  "captured_at": "2026-06-29",
   "legend": [
-    { "kind": "worktree", "color": "#0ea5e9", "description": "git worktree on a branch" },
-    { "kind": "delegation", "color": "#a855f7", "description": "in-flight delegation bundle" },
-    { "kind": "eligible", "color": "#22c55e", "description": "task eligible to run" },
-    { "kind": "plan", "color": "#f59e0b", "description": "active plan" }
+    { "kind": "plan", "color": "#f59e0b", "description": "active / draft plan" },
+    { "kind": "eligible", "color": "#22c55e", "description": "pending task, deps satisfied (gated)" },
+    { "kind": "worktree", "color": "#0ea5e9", "description": "parked git worktree on a branch" }
   ],
   "nodes": [
-    { "id": "plan:pr10", "label": "pr10-branch-split", "kind": "plan",
-      "data": { "active_tasks": 6, "completed_tasks": 11 } },
-    { "id": "plan:platform-driven", "label": "platform-driven-diagnostics", "kind": "plan",
-      "data": { "phases": "P0/P1/P2 merged; P3 in PR #135" } },
-    { "id": "plan:seam-interface-di", "label": "seam-interface-di-migration", "kind": "plan",
-      "data": { "notes": "Func-var seams → interface-DI; #35 folded in as rework" } },
+    { "id": "plan:gbac", "label": "graph-backend-adapter-contract", "kind": "plan",
+      "data": { "status": "active", "tasks": "6 completed, 4 pending", "lives_in": ".agents/workflow/plans/graph-backend-adapter-contract/", "focus": "cross-adapter reads_from (t5) + bridge decommission (t6)" } },
+    { "id": "plan:config-v2", "label": "config-v2-migration", "kind": "plan",
+      "data": { "status": "active", "tasks": "18 completed, 2 cancelled, 1 ready" } },
+    { "id": "plan:docs", "label": "docs-starlight-migration", "kind": "plan",
+      "data": { "status": "draft", "tasks": "6 completed, 2 awaiting_agent_review, 1 in_progress, 1 pending", "focus": "dm6 agent-internal access (client half open)" } },
 
-    { "id": "wt:docs-interactive-html", "label": "docs-interactive-html", "kind": "worktree",
-      "data": { "branch": "feature/docs-interactive-html", "path": ".agents/worktrees/docs-interactive-html" } },
-    { "id": "wt:pr8a-stale-refs", "label": "pr8a-stale-refs", "kind": "worktree",
-      "data": { "branch": "feature/pr8a-stale-refs" } },
-    { "id": "wt:signing", "label": "goreleaser-signing", "kind": "worktree",
-      "data": { "branch": "feature/signing-native-mac-windows" } },
-    { "id": "wt:pr5-skills", "label": "pr5-skills-promote", "kind": "worktree",
-      "data": { "branch": "feature/pr5-skills-promote", "notes": "Recently merged (PR #141)" } },
-    { "id": "wt:pr-a-lens", "label": "pr-a-lens-agents", "kind": "worktree",
-      "data": { "branch": "feature/pr-a-lens-agents" } },
-    { "id": "wt:pr-b-direct", "label": "pr-b-direct-contract", "kind": "worktree", "data": {} },
-    { "id": "wt:tier4-shell", "label": "tier4-shell", "kind": "worktree", "data": {} },
-    { "id": "wt:verifier-generic-default", "label": "verifier-generic-default", "kind": "worktree", "data": {} },
+    { "id": "e:t5", "label": "t5-cross-adapter-reads-from", "kind": "eligible",
+      "data": { "plan": "graph-backend-adapter-contract", "status": "pending, deps (t2+t4) satisfied", "gate": "owner-gated (drive paused)", "note": "Parked worktree dot-agents-t5 holds local WIP; no active delegation bundle in .agents/active/" } },
+    { "id": "e:t6", "label": "t6-bridge-decommission", "kind": "eligible",
+      "data": { "plan": "graph-backend-adapter-contract", "status": "pending, dep (t4) satisfied", "gate": "owner-gated (multi-week CI parity gate before bridge removal)" } },
+    { "id": "e:t9", "label": "t9-sdk-materializeview-readsfrom-gate", "kind": "eligible",
+      "data": { "plan": "graph-backend-adapter-contract", "status": "pending, dep (t4) satisfied", "gate": "owner-gated (drive paused)" } },
 
-    { "id": "d:docs-html", "label": "docs-interactive-html", "kind": "delegation",
-      "data": { "bundle": "del-docs-interactive-html-1779944559.yaml", "scope": ["docs/web/"] } },
-    { "id": "d:signing", "label": "signing-native-mac-windows", "kind": "delegation",
-      "data": { "bundle": "del-signing-native-mac-windows-1779944529.yaml" } },
-    { "id": "d:pr8a-stale", "label": "pr8a-stale-refs-sweep", "kind": "delegation",
-      "data": { "bundle": "del-pr8a-stale-refs-sweep-1779944616.yaml" } },
-    { "id": "d:cg6b", "label": "cg6b-b3a-globalflagcov-lift", "kind": "delegation",
-      "data": { "bundle": "del-cg6b-b3a-globalflagcov-lift-1779928730.yaml" } },
-    { "id": "d:gcc5", "label": "gcc5-verify-close-unblock", "kind": "delegation",
-      "data": { "bundle": "del-gcc5-verify-close-unblock-1779848143.yaml" } },
-    { "id": "d:p3-badge", "label": "p3-badge-and-countlinks", "kind": "delegation",
-      "data": { "bundle": "del-p3-badge-and-countlinks-1779923836.yaml" } },
-
-    { "id": "e:pr5-followup", "label": "pr5-followup", "kind": "eligible",
-      "data": { "plan": "pr10-branch-split" } },
-    { "id": "e:pr8b-org-migration", "label": "pr8b-org-migration", "kind": "eligible",
-      "data": { "plan": "pr10-branch-split" } }
+    { "id": "wt:t5", "label": "dot-agents-t5", "kind": "worktree",
+      "data": { "branch": "impl/graph-backend-t5-cross-adapter", "path": "/Users/nikashp/proj-docs/dot-agents-t5", "note": "Parked worktree for t5 — NOT an in-flight delegation; TASKS.yaml t5 is pending" } }
   ],
   "edges": [
-    { "source": "plan:pr10", "target": "d:docs-html" },
-    { "source": "plan:pr10", "target": "d:signing" },
-    { "source": "plan:pr10", "target": "d:pr8a-stale" },
-    { "source": "plan:pr10", "target": "e:pr5-followup" },
-    { "source": "plan:pr10", "target": "e:pr8b-org-migration" },
-    { "source": "plan:platform-driven", "target": "d:p3-badge" },
-
-    { "source": "d:docs-html", "target": "wt:docs-interactive-html", "label": "runs in" },
-    { "source": "d:signing", "target": "wt:signing", "label": "runs in" },
-    { "source": "d:pr8a-stale", "target": "wt:pr8a-stale-refs", "label": "runs in" }
+    { "source": "plan:gbac", "target": "e:t5", "label": "eligible" },
+    { "source": "plan:gbac", "target": "e:t6", "label": "eligible" },
+    { "source": "plan:gbac", "target": "e:t9", "label": "eligible" },
+    { "source": "e:t5", "target": "wt:t5", "label": "parked in" }
   ]
 }

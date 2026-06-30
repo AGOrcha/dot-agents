@@ -8,7 +8,7 @@ sidebar:
 # Resource command contract (hooks, rules, MCP, settings)
 
 This document is the **canonical contract** for the
-[`resource-command-parity`](../.agents/workflow/plans/resource-command-parity/resource-command-parity.plan.md)
+[`resource-command-parity`](../.agents/history/resource-command-parity/resource-command-parity.plan.md)
 plan. Phases 2–5 and future work should cite this file (and the plan) instead of duplicating scope
 rules.
 

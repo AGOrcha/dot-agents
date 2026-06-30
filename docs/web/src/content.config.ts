@@ -3,6 +3,7 @@ import { docsSchema } from '@astrojs/starlight/schema';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PUBLIC_PAGES } from './public-pages.mjs';
 
 // Visibility partition (dm3 / D4): every content entry is `public` or `internal`,
 // defaulting to `internal` (fail-safe — anything we forget to classify stays
@@ -34,38 +35,11 @@ const INTERNAL_BUILD = process.env.INTERNAL_BUILD === '1';
 // This file lives at docs/web/src/content.config.ts → repo root is three up.
 const REPO_ROOT = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../../..');
 
-// PUBLIC allowlist: { src (repo-relative), id (section-prefixed slug), order }.
-// `id` doubles as the route slug and the sidebar-group bucket. The empty/`index`
-// id is the site root + Getting Started entry.
-const PUBLIC_PAGES: { src: string; id: string; order: number }[] = [
-  // Getting Started ← README (install → init → first project).
-  { src: 'README.md', id: 'index', order: 1 },
-
-  // Guides
-  { src: 'docs/GETTING_STARTED.md', id: 'guides/getting-started', order: 0 },
-  { src: 'docs/LAYERED_CONFIG_GUIDE.md', id: 'guides/layered-config', order: 1 },
-  { src: 'docs/HOOKS.md', id: 'guides/hooks', order: 2 },
-  { src: 'docs/CONFIG_RELEVANCE.md', id: 'guides/config-relevance', order: 3 },
-  { src: 'docs/DEMO_README.md', id: 'guides/demo-overview', order: 4 },
-  { src: 'docs/DEMO_INDEX.md', id: 'guides/demo-index', order: 5 },
-  { src: 'docs/DEMO_WORKFLOW_WALKTHROUGH.md', id: 'guides/demo-workflow-walkthrough', order: 6 },
-  { src: 'docs/DEMO_DIAGRAM.md', id: 'guides/demo-diagram', order: 7 },
-  { src: 'docs/DEMO_LESSONS_NARRATIVE.md', id: 'guides/demo-lessons', order: 8 },
-  { src: 'docs/RESOURCE_MANAGEMENT_GUIDE.md', id: 'guides/resource-management', order: 9 },
-  { src: 'docs/SCORE_GUIDE.md', id: 'guides/score', order: 10 },
-
-  // Reference
-  { src: 'docs/PLATFORM_DIRS_DOCS.md', id: 'reference/platform-dirs', order: 1 },
-  { src: 'docs/GLOBAL_FLAG_CONTRACT.md', id: 'reference/global-flag-contract', order: 2 },
-  { src: 'docs/ERROR_MESSAGE_CONTRACT.md', id: 'reference/error-message-contract', order: 3 },
-  { src: 'docs/RESOURCE_COMMAND_CONTRACT.md', id: 'reference/resource-command-contract', order: 4 },
-  { src: 'docs/PLUGIN_CONTRACT.md', id: 'reference/plugin-contract', order: 5 },
-  { src: 'docs/WORKFLOW_CLIENT_COMMANDS.md', id: 'reference/workflow-client-commands', order: 6 },
-  { src: 'docs/RELEASE_VERIFICATION.md', id: 'reference/release-verification', order: 7 },
-
-  // Concepts
-  { src: 'docs/PROJECT_DIAGRAMS.md', id: 'concepts/project-diagrams', order: 1 },
-];
+// PUBLIC allowlist (PUBLIC_PAGES) is imported from ./public-pages.mjs above:
+// { src (repo-relative), id (section-prefixed slug), order }. `id` doubles as
+// the route slug and the sidebar-group bucket; the empty/`index` id is the site
+// root + Getting Started entry. The list is shared with the link-rewrite rehype
+// plugin (astro.config.mjs) so in-site slug resolution has one source of truth.
 
 /**
  * Split a leading YAML frontmatter block off a markdown string. The raw repo
