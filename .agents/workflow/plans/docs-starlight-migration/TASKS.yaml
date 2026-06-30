@@ -70,7 +70,7 @@ tasks:
       app_type: docs
     - id: dm5-worker-cf-access
       title: 'Worker: gate /internal/* behind CF Access (2nd asset binding) + deploy both outputs'
-      status: awaiting_agent_review
+      status: completed
       depends_on:
         - dm3-visibility-gating
         - dm0-cf-access-bootstrap
@@ -85,7 +85,7 @@ tasks:
       app_type: docs
     - id: dm6-agent-internal-access
       title: Agent internal-docs access via service token (da CLI, auth-proxy-ready, auto-wired)
-      status: in_progress
+      status: completed
       depends_on:
         - dm0-cf-access-bootstrap
       blocks: []

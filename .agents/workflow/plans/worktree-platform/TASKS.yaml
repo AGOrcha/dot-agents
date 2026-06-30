@@ -1,147 +1,149 @@
 schema_version: 1
 plan_id: worktree-platform
 tasks:
-  - id: wt0-spike-git-mechanism
-    title: 'Spike: VERIFY go-git v6 x/plumbing/worktree (+ mine swarm-cd)'
-    status: completed
-    depends_on: []
-    blocks:
-      - wt1-typed-git-iface
-    owner: dot-agents
-    write_scope:
-      - .agents/workflow/specs/worktree-platform/design.md
-    verification_required: true
-    notes: |-
-      DONE — MERGED via #171 (spec design.md: "VERIFIED 2026-05-28, all 4
-      residuals confirmed"). Decision A is pure go-git v6; all 4 residuals
-      confirmed PASS against the pinned version: (1) branch-mode worktree
-      create/branch creation PASS; (2) per-worktree index isolation via
-      mgr.Open(...).Worktree() PASS; (3) List support native PASS; (4)
-      version pinned go-git/v6 v6.0.0-alpha.4 (go-billy/v6 v6.0.0-alpha.1).
-      No hybrid fallback needed — pure go-git v6, zero shell-git. The
-      typed Manager seam derived from the verified API landed in wt1 (#181).
-  - id: wt1-typed-git-iface
-    title: 'Typed git/worktree interface (the contract callers bind to)'
-    status: pending
-    depends_on:
-      - wt0-spike-git-mechanism
-    blocks:
-      - wt2-worktree-registry
-      - wt4-index-isolation
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-    verification_required: true
-    notes: |-
-      One typed Go interface: worktree create/list/remove/prune, branch
-      ops, base-ref record/read, index/status/commit. Implementation
-      behind it per the wt0 decision. Callers/skills bind to the
-      interface only (so a later mechanism swap is invisible).
-  - id: wt2-worktree-registry
-    title: 'Managed registry + deterministic prune-if-unchanged'
-    status: pending
-    depends_on:
-      - wt1-typed-git-iface
-    blocks:
-      - wt3-subbranch-mergeback
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-    verification_required: true
-    notes: |-
-      Registry record per worktree: branch, TRUE base ref, parent PR,
-      purpose, created-at. Deterministic cleanup mirroring the harness
-      isolation:worktree auto-prune-if-unchanged. Registry is the
-      single source of truth for a worktree's base.
-  - id: wt3-subbranch-mergeback
-    title: 'Sub-branch -> merge-back/rebase using the recorded base'
-    status: pending
-    depends_on:
-      - wt2-worktree-registry
-    blocks:
-      - wt5-skills-integration
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-      - commands/
-    verification_required: true
-    notes: |-
-      First-class create-sub-branch and merge-back/rebase that use the
-      registry's recorded base — never re-derive via git merge-base.
-      Regression test: a force-pushed parent + a deliberate stale-base
-      scenario must be caught/handled (the recurring trap this kills).
-  - id: wt4-index-isolation
-    title: 'Per-worktree index isolation contract (unblocks workflow-commit-command)'
-    status: pending
-    depends_on:
-      - wt1-typed-git-iface
-    blocks:
-      - wt5-skills-integration
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-    verification_required: true
-    notes: |-
-      Expose/prove that each managed worktree has its own index so a
-      commit in one cannot stage another's tree. This is the seam the
-      workflow-commit-command plan binds to (closes its adversarial
-      finding #3). Concurrent-agent isolation test.
-  - id: wt5-skills-integration
-    title: 'delegation-lifecycle / isp / loop-worker consume the platform'
-    status: pending
-    depends_on:
-      - wt3-subbranch-mergeback
-      - wt4-index-isolation
-    owner: dot-agents
-    write_scope:
-      - .agents/skills/
-    verification_required: true
-    notes: |-
-      Orchestration skills create/track/merge-back delegated slices via
-      the platform so isolation + recorded-base are automatic, not
-      manual. No raw git in the delegation skill paths.
-  - id: wt6-verify-close
-    title: 'Verify done-criteria + close'
-    status: pending
-    depends_on:
-      - wt5-skills-integration
-    owner: dot-agents
-    write_scope: []
-    verification_required: true
-    notes: |-
-      All spec done-criteria: stale-base catch, concurrent-agent index
-      isolation, deterministic prune, single typed interface. go
-      build/test/gate green. Archive plan; notify workflow-commit-command
-      its blocker (finding #3) is cleared.
-  - id: release-minor
-    title: 'Release: bump VERSION + finalize CHANGELOG for the worktree-platform minor'
-    status: pending
-    depends_on:
-      - wt0-spike-git-mechanism
-      - wt1-typed-git-iface
-      - wt2-worktree-registry
-      - wt3-subbranch-mergeback
-      - wt4-index-isolation
-      - wt5-skills-integration
-      - wt6-verify-close
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - VERSION
-      - CHANGELOG.md
-    verification_required: true
-    notes: |-
-      Release-gated tail task (hybrid convention, MINOR path; see
-      [[release-gated-plans-convention]]). This plan delivers user-visible
-      delegated-work isolation — managed git worktrees with recorded-base
-      sub-branch/merge-back and per-worktree index isolation consumed by the
-      orchestration skills. New user-visible capability = MINOR (no public
-      surface removed or incompatibly changed).
-      Target version = next minor computed from current VERSION at ready-time
-      (do NOT hardcode). Resolve from VERSION when this task becomes ready;
-      if another minor ships first, a rebase recomputes the number.
-      Action: bump VERSION to the resolved next minor and finalize the
-      CHANGELOG "## [<target>]" section, moving the worktree-platform entries
-      out of Unreleased, plus the required docs-accuracy pass. Merge to master
-      fires auto-release.yml (tag + publish).
-    app_type: release
+    - id: wt0-spike-git-mechanism
+      title: 'Spike: VERIFY go-git v6 x/plumbing/worktree (+ mine swarm-cd)'
+      status: completed
+      depends_on: []
+      blocks:
+        - wt1-typed-git-iface
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/worktree-platform/design.md
+      verification_required: true
+      notes: |-
+        DONE — MERGED via #171 (spec design.md: "VERIFIED 2026-05-28, all 4
+        residuals confirmed"). Decision A is pure go-git v6; all 4 residuals
+        confirmed PASS against the pinned version: (1) branch-mode worktree
+        create/branch creation PASS; (2) per-worktree index isolation via
+        mgr.Open(...).Worktree() PASS; (3) List support native PASS; (4)
+        version pinned go-git/v6 v6.0.0-alpha.4 (go-billy/v6 v6.0.0-alpha.1).
+        No hybrid fallback needed — pure go-git v6, zero shell-git. The
+        typed Manager seam derived from the verified API landed in wt1 (#181).
+    - id: wt1-typed-git-iface
+      title: Typed git/worktree interface (the contract callers bind to)
+      status: completed
+      depends_on:
+        - wt0-spike-git-mechanism
+      blocks:
+        - wt2-worktree-registry
+        - wt4-index-isolation
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/
+      verification_required: true
+      notes: |-
+        One typed Go interface: worktree create/list/remove/prune, branch
+        ops, base-ref record/read, index/status/commit. Implementation
+        behind it per the wt0 decision. Callers/skills bind to the
+        interface only (so a later mechanism swap is invisible).
+    - id: wt2-worktree-registry
+      title: Managed registry + deterministic prune-if-unchanged
+      status: pending
+      depends_on:
+        - wt1-typed-git-iface
+      blocks:
+        - wt3-subbranch-mergeback
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/
+      verification_required: true
+      notes: |-
+        Registry record per worktree: branch, TRUE base ref, parent PR,
+        purpose, created-at. Deterministic cleanup mirroring the harness
+        isolation:worktree auto-prune-if-unchanged. Registry is the
+        single source of truth for a worktree's base.
+    - id: wt3-subbranch-mergeback
+      title: Sub-branch -> merge-back/rebase using the recorded base
+      status: pending
+      depends_on:
+        - wt2-worktree-registry
+      blocks:
+        - wt5-skills-integration
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/
+        - commands/
+      verification_required: true
+      notes: |-
+        First-class create-sub-branch and merge-back/rebase that use the
+        registry's recorded base — never re-derive via git merge-base.
+        Regression test: a force-pushed parent + a deliberate stale-base
+        scenario must be caught/handled (the recurring trap this kills).
+    - id: wt4-index-isolation
+      title: Per-worktree index isolation contract (unblocks workflow-commit-command)
+      status: pending
+      depends_on:
+        - wt1-typed-git-iface
+      blocks:
+        - wt5-skills-integration
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/
+      verification_required: true
+      notes: |-
+        Expose/prove that each managed worktree has its own index so a
+        commit in one cannot stage another's tree. This is the seam the
+        workflow-commit-command plan binds to (closes its adversarial
+        finding #3). Concurrent-agent isolation test.
+    - id: wt5-skills-integration
+      title: delegation-lifecycle / isp / loop-worker consume the platform
+      status: pending
+      depends_on:
+        - wt3-subbranch-mergeback
+        - wt4-index-isolation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/
+      verification_required: true
+      notes: |-
+        Orchestration skills create/track/merge-back delegated slices via
+        the platform so isolation + recorded-base are automatic, not
+        manual. No raw git in the delegation skill paths.
+    - id: wt6-verify-close
+      title: Verify done-criteria + close
+      status: pending
+      depends_on:
+        - wt5-skills-integration
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: |-
+        All spec done-criteria: stale-base catch, concurrent-agent index
+        isolation, deterministic prune, single typed interface. go
+        build/test/gate green. Archive plan; notify workflow-commit-command
+        its blocker (finding #3) is cleared.
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the worktree-platform minor'
+      status: pending
+      depends_on:
+        - wt0-spike-git-mechanism
+        - wt1-typed-git-iface
+        - wt2-worktree-registry
+        - wt3-subbranch-mergeback
+        - wt4-index-isolation
+        - wt5-skills-integration
+        - wt6-verify-close
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path; see
+        [[release-gated-plans-convention]]). This plan delivers user-visible
+        delegated-work isolation — managed git worktrees with recorded-base
+        sub-branch/merge-back and per-worktree index isolation consumed by the
+        orchestration skills. New user-visible capability = MINOR (no public
+        surface removed or incompatibly changed).
+        Target version = next minor computed from current VERSION at ready-time
+        (do NOT hardcode). Resolve from VERSION when this task becomes ready;
+        if another minor ships first, a rebase recomputes the number.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the worktree-platform entries
+        out of Unreleased, plus the required docs-accuracy pass. Merge to master
+        fires auto-release.yml (tag + publish).
+      app_type: release

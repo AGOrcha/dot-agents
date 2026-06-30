@@ -210,7 +210,7 @@ tasks:
         (go-native-code-graph-analysis is superseded-in-part by §11).
     - id: t5-cross-adapter-reads-from
       title: Cross-adapter `reads_from` — compliance view from CRG
-      status: pending
+      status: completed
       depends_on:
         - t2-compliance-read-only
         - t4-crg-dual-read

@@ -22,7 +22,6 @@ tasks:
         (asynq/river/cron-only/standalone-binary/sidecar) and the
         per-task watermark protocol for restart-safe state.
       app_type: research
-
     - id: scheduler-core
       title: In-process scheduler with interval + fsnotify triggers
       status: completed
@@ -57,7 +56,6 @@ tasks:
         ("feat(service): in-process scheduler core") with the SonarCloud
         follow-up f9ea6632. Marked completed.
       app_type: go-cli
-
     - id: event-bus
       title: In-process pub/sub bus for task → consumer events
       status: completed
@@ -94,7 +92,6 @@ tasks:
         Subscribe(topic) (<-chan Event, func()) per D4; R2 t04-sse-broker
         and R5 collection-endpoint bind to it. Marked completed.
       app_type: go-cli
-
     - id: http-server
       title: HTTP server with mount points for R2/R5 + /healthz + /api/tasks
       status: pending
@@ -124,7 +121,6 @@ tasks:
         prefixes errors deterministically, graceful shutdown completes
         within ctx deadline.
       app_type: go-cli
-
     - id: tasks-iterlog-ingester
       title: Iter-log ingester task — fsnotify trigger, calls R1 scorer, publishes event
       status: pending
@@ -163,7 +159,6 @@ tasks:
         and coalesce of rapid fsnotify events; absent watermark on
         first run.
       app_type: go-cli
-
     - id: tasks-rescore
       title: Rescore-on-rubric-bump task — interval trigger, rescores when RubricVersion changes
       status: pending
@@ -193,7 +188,6 @@ tasks:
         before event publish to keep the bus eventually-consistent
         with disk.
       app_type: go-cli
-
     - id: service-runtime
       title: Service runtime that composes scheduler + http + bus + tasks
       status: pending
@@ -228,7 +222,6 @@ tasks:
         Reviewer verifies: clean shutdown, integration test green,
         all goroutines exit (use goleak or manual wait).
       app_type: go-cli
-
     - id: cobra-surface
       title: '`da service run|status|stop` cobra subcommand'
       status: pending
@@ -261,7 +254,6 @@ tasks:
         SIGINT triggers graceful shutdown in <5s; root.go test still
         passes.
       app_type: go-cli
-
     - id: docs-and-verification
       title: Operator docs + umbrella verification (status, restart-preserves-state)
       status: pending
@@ -293,7 +285,6 @@ tasks:
         verification clauses are proven by test assertions, not
         just prose.
       app_type: go-cli
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the da service minor'
       status: pending
