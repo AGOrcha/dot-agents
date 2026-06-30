@@ -29,7 +29,7 @@ with the model and the why, and does not restate every path.
         │
         │  da install / da add / da refresh   (projection)
         ▼
-   per-platform repo-local outputs  ×  5 platforms
+   per-platform repo-local outputs  ×  6 platforms
 ```
 
 The canonical store is scoped — `~/.agents/<bucket>/<scope>/...`, where `<scope>` is a project
@@ -47,7 +47,7 @@ distinction is the whole design — see [the key principle](#the-key-design-prin
 
 ## The platforms and their real targets
 
-`platform.All()` (`internal/platform/platform.go`) returns **five** platforms today. Each owns a
+`platform.All()` (`internal/platform/platform.go`) returns **six** platforms today. Each owns a
 distinct set of repo-local (and some user-home) outputs:
 
 | Platform | Key repo-local outputs (verified against the adapter) |
@@ -57,20 +57,31 @@ distinct set of repo-local (and some user-home) outputs:
 | **Codex** (`codex.go`) | `AGENTS.md`, `.codex/config.toml`, `.codex/agents/*.toml` (**rendered** from `AGENT.md`), `.codex/hooks.json`, `.agents/skills/`; user-home `~/.codex/hooks.json` |
 | **OpenCode** (`opencode.go`) | `opencode.json`, `.opencode/agent/*.md` (file symlink, extension rename), `.opencode/plugins/`, `.agents/skills/` |
 | **GitHub Copilot** (`copilot.go`) | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.github/hooks/*.json`, `.vscode/mcp.json`, `.claude/settings.local.json` (hooks compat), `.agents/skills/`; user-home `~/.copilot/hooks/` |
+| **Antigravity** (`antigravity.go`) | `.antigravity/settings.json` and `.antigravity/mcp_config.json` (**hard-linked**, managed-replace), `.antigravity/hooks.json` (**rendered**), `.antigravity/skills/`, `.antigravity/agents/`; user-home `~/.antigravity/hooks.json` |
 
-Note the **shared compatibility buckets**: **four** platforms — Claude, Codex, OpenCode, and
-Copilot — mirror skills into `.agents/skills/` (each calls `BuildSharedSkillMirrorIntents`; their
-`claudeAgentsBucketDir` / `codexAgentsDir` / `opencodeAgentsDir` / `copilotAgentsDir` all resolve to
-`.agents`), and Claude additionally mirrors into `.claude/skills/`. **Cursor does not mirror skills
-at all** — its `SharedTargetIntents` returns only `BuildSharedAgentMirrorIntents(.claude/agents)`, so
-it reuses Claude's `.claude/agents/` rather than emitting `.cursor/agents/` or a `.agents/skills/`
-mirror of its own. These overlaps are deliberate — one canonical skill becomes one deduped planned
-output, not four copies (see [the two paths](#the-two-projection-paths)).
+Note the **shared compatibility buckets**: **five** platforms mirror skills via
+`BuildSharedSkillMirrorIntents`. Four of them — Claude, Codex, OpenCode, and Copilot — mirror into
+`.agents/skills/` (their `claudeAgentsBucketDir` / `codexAgentsDir` / `opencodeAgentsDir` /
+`copilotAgentsDir` all resolve to `.agents`), and Claude additionally mirrors into `.claude/skills/`;
+**Antigravity** mirrors into its own dedicated `.antigravity/skills/` (its `SharedTargetIntents`
+calls `BuildSharedSkillMirrorIntents(project, ".antigravity/skills")`). **Cursor is the only
+platform that does not mirror skills at all** — its `SharedTargetIntents` returns only
+`BuildSharedAgentMirrorIntents(.claude/agents)`, so it reuses Claude's `.claude/agents/` rather than
+emitting a skills mirror of its own. These overlaps are deliberate — one canonical skill becomes one
+deduped planned output per distinct target, not a copy per platform (see
+[the two paths](#the-two-projection-paths)).
 
-> **Antigravity is not a projection target today.** It is **not** in `platform.All()`, has no
-> `internal/platform/antigravity.go` adapter, and is **not** in `PLATFORM_DIRS_DOCS.md` on
-> `master`. Treat "six platforms" as forward-looking, not shipped — when the adapter lands it joins
-> `All()` and gains rows in the path matrix. Until then this doc describes the five real ones.
+> **Antigravity is the sixth shipped projection target.** Added in
+> `internal/platform/antigravity.go` (merged 2026-06-29 as the F4/DC0 "real harness" probe for the
+> multi-harness-extensibility spec), it is in `platform.All()` and carries rows in
+> `PLATFORM_DIRS_DOCS.md`. It projects into a dedicated `.antigravity/` repo-local root — rather than
+> the vendor-adjacent `~/.gemini/` home tree or the `.agents/` umbrella, since `.agents/` is also
+> dot-agents' own canonical source root and would collide with it. The probe follows the same model
+> as the other harnesses: `.antigravity/settings.json` and `.antigravity/mcp_config.json` are
+> managed-replace hard links, `.antigravity/hooks.json` is rendered, and `.antigravity/skills/` /
+> `.antigravity/agents/` are verbatim symlink mirrors. Its native on-disk layout is still sparsely
+> documented by the vendor, so those paths describe the `dot-agents` probe projection rather than
+> confirmed official locations.
 
 ---
 
@@ -140,12 +151,12 @@ flowchart TB
 
     plan["Path B — ResourcePlan<br/>aggregate SharedTargetIntents<br/>dedup + conflict-check<br/>then executeResourceIntent"]
 
-    subgraph OUT["Repo-local outputs (x5 platforms)"]
-        o_skills[".agents/skills · .claude/skills<br/>(dir symlink, verbatim)"]
-        o_agents[".claude/agents (dir symlink)<br/>.opencode/agent · .github/agents (file symlink)<br/>.codex/agents/*.toml (rendered)"]
+    subgraph OUT["Repo-local outputs (x6 platforms)"]
+        o_skills[".agents/skills · .claude/skills · .antigravity/skills<br/>(dir symlink, verbatim)"]
+        o_agents[".claude/agents · .antigravity/agents (dir symlink)<br/>.opencode/agent · .github/agents (file symlink)<br/>.codex/agents/*.toml (rendered)"]
         o_rules[".claude/rules (symlink)<br/>.cursor/rules/*.mdc (hardlink, .md to .mdc)"]
-        o_hooks[".claude/settings.local.json · .cursor/hooks.json<br/>.codex/hooks.json · .github/hooks/*.json<br/>(each rendered to its own format)"]
-        o_mcp[".mcp.json · .cursor/mcp.json · .vscode/mcp.json<br/>(managed-replace JSON)"]
+        o_hooks[".claude/settings.local.json · .cursor/hooks.json<br/>.codex/hooks.json · .github/hooks/*.json · .antigravity/hooks.json<br/>(each rendered to its own format)"]
+        o_mcp[".mcp.json · .cursor/mcp.json · .vscode/mcp.json · .antigravity/mcp_config.json<br/>(managed-replace JSON)"]
     end
 
     skills --> plan --> o_skills
@@ -184,12 +195,14 @@ concrete.
 
 - **Skills** — **verbatim directory symlink mirror.** A skill is a `SKILL.md`-rooted directory in
   the same format on every platform, so it is projected as a plain `direct_dir`/`symlink` intent
-  into `.agents/skills/` (Claude, Codex, OpenCode, Copilot — not Cursor) and `.claude/skills/` (Claude). No transform. One canonical
-  skill dedups to one planned output per distinct target.
+  into `.agents/skills/` (Claude, Codex, OpenCode, Copilot — not Cursor), `.claude/skills/` (Claude),
+  and `.antigravity/skills/` (Antigravity). No transform. One canonical skill dedups to one planned
+  output per distinct target.
 - **Agents** — **symlink mirror, with one rendered exception.** `.claude/agents/` (Claude, Cursor)
-  is a verbatim `direct_dir` symlink; `.opencode/agent/*.md` and `.github/agents/*.agent.md` are
-  verbatim `direct_file` symlinks of the canonical `AGENT.md` (only the filename/extension
-  differs). **Codex is the exception:** it has no markdown agent format, so `AGENT.md` is
+  and `.antigravity/agents/` (Antigravity) are verbatim `direct_dir` symlinks; `.opencode/agent/*.md`
+  and `.github/agents/*.agent.md` are verbatim `direct_file` symlinks of the canonical `AGENT.md`
+  (only the filename/extension differs). **Codex is the exception:** it has no markdown agent format,
+  so `AGENT.md` is
   **rendered** into `.codex/agents/*.toml` (`render_single`/`write`, the `codex-agent-toml`
   materializer).
 - **Rules** — **at most an extension rename.** Claude links `~/.agents/rules/<scope>/<name>` into
@@ -198,10 +211,11 @@ concrete.
   never transformed.
 - **Hooks** — **rendered per platform, because the hook format genuinely differs.** Each platform
   has its own renderer (`renderClaudeHookSettings`, `renderCodexHookConfig`,
-  `renderCursorHookConfig`, `renderCopilotHookFile`) and its own canonical→native event-name table
-  (`claudeEventTable`, `codexEventTable`, `cursorEventTable`, `copilotEventTable`). A single
-  canonical `HookSpec.When` value like `stop` maps to `Stop` (Claude/Codex), `stop` (Cursor), and
-  `agentStop` (Copilot). See [Hooks](./HOOKS.md) for the full model.
+  `renderCursorHookConfig`, `renderCopilotHookFile`, `renderAntigravityHookConfig`) and its own
+  canonical→native event-name table (`claudeEventTable`, `codexEventTable`, `cursorEventTable`,
+  `copilotEventTable`, `antigravityEventTable`). A single canonical `HookSpec.When` value like `stop`
+  maps to `Stop` (Claude/Codex/Antigravity), `stop` (Cursor), and `agentStop` (Copilot). See
+  [Hooks](./HOOKS.md) for the full model.
 - **Settings / MCP** — **managed-replace JSON.** MCP config is a managed-replace link, and each
   platform resolves its **own preferred canonical source name first, falling back to the shared
   `mcp.json`** (`resolveScopedFile` tries the names in order, per scope): Claude resolves
