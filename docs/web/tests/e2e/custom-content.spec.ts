@@ -17,16 +17,15 @@ const GRAPH_ROUTES = [
   '/graphs/da-resources/',
   '/graphs/workflow-resources/',
   '/graphs/workspace-state/',
+  // lens-dispatch and verifier-registry were stubs; they now render the same
+  // JSON-driven ResourceGraph (.graph-canvas) as the /graphs/* routes, so they
+  // are exercised by the graph-route assertions below.
+  '/diagrams/lens-dispatch/',
+  '/diagrams/verifier-registry/',
 ] as const;
 
 // Diagram routes that render a JSON-driven tier card grid.
 const TIER_DIAGRAM_ROUTE = '/diagrams/tier-model/';
-
-// Stubbed diagram routes: assert the page heading renders, nothing more.
-const STUB_DIAGRAM_ROUTES = [
-  { path: '/diagrams/lens-dispatch/', heading: 'Lens reviewer dispatch flow' },
-  { path: '/diagrams/verifier-registry/', heading: 'Verifier profile registry' },
-] as const;
 
 // Attach console-error / pageerror / >=400-response collectors to a page and
 // return getters that assert the route loaded cleanly. Astro/Cytoscape emit no
@@ -98,20 +97,3 @@ test(`diagram route renders tier cards: ${TIER_DIAGRAM_ROUTE}`, async ({ page })
 
   collectors.assertClean();
 });
-
-for (const { path, heading } of STUB_DIAGRAM_ROUTES) {
-  test(`stub diagram route renders heading: ${path}`, async ({ page }) => {
-    const collectors = attachErrorCollectors(page);
-
-    const response = await page.goto(path, { waitUntil: 'networkidle' });
-    expect(response, `no response for ${path}`).not.toBeNull();
-    expect(response!.status(), `expected 200 for ${path}`).toBe(200);
-
-    await expect(
-      page.getByRole('heading', { name: new RegExp(heading, 'i') }),
-      `heading "${heading}" not visible on ${path}`,
-    ).toBeVisible();
-
-    collectors.assertClean();
-  });
-}
