@@ -137,13 +137,27 @@ export default defineConfig({
   // astro-mermaid must run before Starlight so its ```mermaid → <pre class="mermaid">
   // transform happens ahead of Starlight's expressive-code / shiki pass.
   integrations: [
-    mermaid({ theme: 'default', autoTheme: true }),
+    // useMaxWidth:false makes Mermaid emit native pixel dimensions instead of
+    // scaling SVGs down to the ~700px content column (which renders wide
+    // flowcharts at ~0.15x — illegible). Paired with the overflow-x rules in
+    // src/styles/custom.css so wide diagrams render full-size and scroll.
+    mermaid({
+      theme: 'default',
+      autoTheme: true,
+      mermaidConfig: {
+        flowchart: { useMaxWidth: false },
+        state: { useMaxWidth: false },
+      },
+    }),
     starlight({
       title: 'dot-agents',
       tagline: 'The operational layer for AI coding agents',
       // Brand favicon (agorcha ouroboros) — overrides Astro's default mark.
       // Derived from .agents/branding/agorcha-ouroboros into public/favicon.png.
       favicon: '/favicon.png',
+      // Readability overrides for content wider than the column (wide Mermaid
+      // diagrams + tables). See the file header for the rationale.
+      customCss: ['./src/styles/custom.css'],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/AGOrcha/dot-agents' },
       ],
