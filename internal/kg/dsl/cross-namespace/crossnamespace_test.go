@@ -328,86 +328,88 @@ func TestDefenseInDepthReadRejected(t *testing.T) {
 func TestCheckCompat(t *testing.T) {
 	v := buildView(t)
 
-	t.Run("compatible_bump", func(t *testing.T) {
-		// Adds a field to symbol — the query's reads still resolve.
-		bumped, err := dsl.NewSchemaInfo(
-			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{
-				{Name: fQualified, Type: typeString}, {Name: "visibility", Type: typeString}}}},
-			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
-		if err != nil {
-			t.Fatalf("bumped schema: %v", err)
-		}
-		state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: bumped}})
-		if state != crossnamespace.CompatOK || cerr != nil {
-			t.Fatalf("CheckCompat = (%s, %v), want (compatible, nil)", state, cerr)
-		}
-	})
+	symbolCalls := []dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}
+	cases := []struct {
+		name        string
+		notes       []dsl.NoteTypeDecl
+		edges       []dsl.EdgeTypeDecl
+		want        crossnamespace.Compat
+		wantErr     bool   // a non-nil diagnostic is expected
+		errContains string // substring the diagnostic must name (optional)
+	}{
+		{
+			// Adds a field to symbol — the query's reads still resolve.
+			name:  "compatible_bump",
+			notes: []dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: fQualified, Type: typeString}, {Name: "visibility", Type: typeString}}}},
+			edges: symbolCalls,
+			want:  crossnamespace.CompatOK,
+		},
+		{
+			// Renames symbol → node: the cross edge endpoint and the MATCH no
+			// longer resolve, so the view query fails to validate.
+			name:    "incompatible_bump",
+			notes:   []dsl.NoteTypeDecl{{Name: "node", Fields: []dsl.FieldDecl{{Name: fQualified, Type: typeString}}}},
+			edges:   []dsl.EdgeTypeDecl{{Name: eCalls, From: "node", To: "node"}},
+			want:    crossnamespace.CompatDSLUpdateRequired,
+			wantErr: true,
+		},
+		{
+			// BUG-3: a TYPE change on a referenced field still parses (the field
+			// exists) but is a breaking signature change — must be
+			// dsl-update-required, not compatible.
+			name:        "referenced_field_type_changed_string_to_int",
+			notes:       []dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: fQualified, Type: "int"}}}},
+			edges:       symbolCalls,
+			want:        crossnamespace.CompatDSLUpdateRequired,
+			wantErr:     true,
+			errContains: "symbol.qualified_name",
+		},
+		{
+			// BUG-3 sibling: an UNreferenced field changing type stays compatible.
+			name:  "unreferenced_field_type_change_is_compatible",
+			notes: []dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: fQualified, Type: typeString}, {Name: "line_start", Type: "string"}}}},
+			edges: symbolCalls,
+			want:  crossnamespace.CompatOK,
+		},
+		{
+			// A removed REFERENCED field is caught by the re-parse stage.
+			name:  "referenced_field_removed",
+			notes: []dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: "other", Type: typeString}}}},
+			edges: symbolCalls,
+			want:  crossnamespace.CompatDSLUpdateRequired,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			info := mustInfo(t, tc.notes, tc.edges, 3)
+			state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: info}})
+			assertCompat(t, state, cerr, tc.want, tc.wantErr, tc.errContains)
+		})
+	}
+}
 
-	t.Run("incompatible_bump", func(t *testing.T) {
-		// Renames symbol → node: the cross edge endpoint and the MATCH no longer
-		// resolve, so the view query fails to validate.
-		renamed, err := dsl.NewSchemaInfo(
-			[]dsl.NoteTypeDecl{{Name: "node", Fields: []dsl.FieldDecl{{Name: fQualified, Type: typeString}}}},
-			[]dsl.EdgeTypeDecl{{Name: eCalls, From: "node", To: "node"}}, 3)
-		if err != nil {
-			t.Fatalf("renamed schema: %v", err)
+// assertCompat checks a CheckCompat result against an expected state and
+// optional diagnostic expectations. A want of CompatOK additionally requires a
+// nil diagnostic; otherwise wantErr asserts a non-nil diagnostic and errContains
+// (when set) asserts the diagnostic names a given substring.
+func assertCompat(t *testing.T, state crossnamespace.Compat, cerr error,
+	want crossnamespace.Compat, wantErr bool, errContains string) {
+	t.Helper()
+	if state != want {
+		t.Fatalf("CheckCompat state = %s, want %s", state, want)
+	}
+	if want == crossnamespace.CompatOK {
+		if cerr != nil {
+			t.Fatalf("CheckCompat: want nil diagnostic on compatible, got %v", cerr)
 		}
-		state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: renamed}})
-		if state != crossnamespace.CompatDSLUpdateRequired {
-			t.Fatalf("CheckCompat state = %s, want dsl-update-required", state)
-		}
-		if cerr == nil {
-			t.Fatal("CheckCompat: expected a diagnostic compile error on dsl-update-required")
-		}
-	})
-
-	// BUG-3: a TYPE change on a referenced field still parses (the field exists)
-	// but is a breaking signature change — must be dsl-update-required, not
-	// compatible.
-	t.Run("referenced_field_type_changed_string_to_int", func(t *testing.T) {
-		retyped, err := dsl.NewSchemaInfo(
-			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: fQualified, Type: "int"}}}},
-			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
-		if err != nil {
-			t.Fatalf("retyped schema: %v", err)
-		}
-		state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: retyped}})
-		if state != crossnamespace.CompatDSLUpdateRequired {
-			t.Fatalf("CheckCompat state = %s, want dsl-update-required (string→int)", state)
-		}
-		if cerr == nil || !contains(cerr.Error(), "symbol.qualified_name") {
-			t.Fatalf("CheckCompat: want signature diagnostic naming symbol.qualified_name, got %v", cerr)
-		}
-	})
-
-	// BUG-3 sibling: an UNreferenced field changing type stays compatible.
-	t.Run("unreferenced_field_type_change_is_compatible", func(t *testing.T) {
-		bumped, err := dsl.NewSchemaInfo(
-			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{
-				{Name: fQualified, Type: typeString}, {Name: "line_start", Type: "string"}}}},
-			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
-		if err != nil {
-			t.Fatalf("bumped schema: %v", err)
-		}
-		state, cerr := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: bumped}})
-		if state != crossnamespace.CompatOK || cerr != nil {
-			t.Fatalf("CheckCompat = (%s, %v), want (compatible, nil)", state, cerr)
-		}
-	})
-
-	// A removed REFERENCED field is caught by the re-parse stage.
-	t.Run("referenced_field_removed", func(t *testing.T) {
-		stripped, err := dsl.NewSchemaInfo(
-			[]dsl.NoteTypeDecl{{Name: typeSymbol, Fields: []dsl.FieldDecl{{Name: "other", Type: typeString}}}},
-			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 3)
-		if err != nil {
-			t.Fatalf("stripped schema: %v", err)
-		}
-		state, _ := v.CheckCompat([]crossnamespace.Namespace{{Name: nsDep, Info: stripped}})
-		if state != crossnamespace.CompatDSLUpdateRequired {
-			t.Fatalf("CheckCompat state = %s, want dsl-update-required (removed field)", state)
-		}
-	})
+		return
+	}
+	if wantErr && cerr == nil {
+		t.Fatal("CheckCompat: expected a diagnostic compile error on dsl-update-required")
+	}
+	if errContains != "" && (cerr == nil || !contains(cerr.Error(), errContains)) {
+		t.Fatalf("CheckCompat: want signature diagnostic naming %s, got %v", errContains, cerr)
+	}
 }
 
 // TestRebuildStore exercises the rebuild-capable store directly: token-checked
@@ -503,27 +505,18 @@ func TestCheckCompatRefRetarget(t *testing.T) {
 			},
 			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 2)}
 	}
-	vSingle, err := crossnamespace.Compile("v", consumer, []crossnamespace.Namespace{depSingle("owner")}, nil,
+	vSingle := mustCompile(t, "v", consumer, []crossnamespace.Namespace{depSingle("owner")},
 		"MATCH (s:symbol) RETURN s.qualified_name, s.owner.name")
-	if err != nil {
-		t.Fatalf("Compile single-hop: %v", err)
-	}
 
 	t.Run("ref_target_retarget_owner_to_principal", func(t *testing.T) {
 		// Codex's exact example: owner→principal, terminal `name` stays string.
 		state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{depSingle("principal")})
-		if state != crossnamespace.CompatDSLUpdateRequired {
-			t.Fatalf("state = %s, want dsl-update-required (owner→principal)", state)
-		}
-		if cerr == nil || !contains(cerr.Error(), "symbol.owner.name") {
-			t.Fatalf("want diagnostic naming symbol.owner.name, got %v", cerr)
-		}
+		assertCompat(t, state, cerr, crossnamespace.CompatDSLUpdateRequired, true, "symbol.owner.name")
 	})
 
 	t.Run("same_target_is_compatible", func(t *testing.T) {
-		if state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{depSingle("owner")}); state != crossnamespace.CompatOK || cerr != nil {
-			t.Fatalf("CheckCompat = (%s, %v), want compatible", state, cerr)
-		}
+		state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{depSingle("owner")})
+		assertCompat(t, state, cerr, crossnamespace.CompatOK, false, "")
 	})
 
 	t.Run("unreferenced_sibling_change_is_compatible", func(t *testing.T) {
@@ -537,9 +530,8 @@ func TestCheckCompatRefRetarget(t *testing.T) {
 					{Name: "name", Type: typeString}, {Name: "team", Type: "int"}}},
 			},
 			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 2)}
-		if state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{bumped}); state != crossnamespace.CompatOK || cerr != nil {
-			t.Fatalf("CheckCompat = (%s, %v), want compatible", state, cerr)
-		}
+		state, cerr := vSingle.CheckCompat([]crossnamespace.Namespace{bumped})
+		assertCompat(t, state, cerr, crossnamespace.CompatOK, false, "")
 	})
 
 	// depMulti: symbol.owner -> owner.dept -> <mid>.name (two ref hops).
@@ -553,26 +545,32 @@ func TestCheckCompatRefRetarget(t *testing.T) {
 			},
 			[]dsl.EdgeTypeDecl{{Name: eCalls, From: typeSymbol, To: typeSymbol}}, 2)}
 	}
-	vMulti, err := crossnamespace.Compile("vm", consumer, []crossnamespace.Namespace{depMulti("dept")}, nil,
+	vMulti := mustCompile(t, "vm", consumer, []crossnamespace.Namespace{depMulti("dept")},
 		"MATCH (s:symbol) RETURN s.owner.dept.name")
-	if err != nil {
-		t.Fatalf("Compile multi-hop: %v", err)
-	}
 
 	t.Run("middle_hop_retarget", func(t *testing.T) {
 		// The MIDDLE hop (owner.dept) retargets dept→division; terminal name stays
 		// string.
-		state, _ := vMulti.CheckCompat([]crossnamespace.Namespace{depMulti("division")})
-		if state != crossnamespace.CompatDSLUpdateRequired {
-			t.Fatalf("state = %s, want dsl-update-required (middle hop dept→division)", state)
-		}
+		state, cerr := vMulti.CheckCompat([]crossnamespace.Namespace{depMulti("division")})
+		assertCompat(t, state, cerr, crossnamespace.CompatDSLUpdateRequired, false, "")
 	})
 
 	t.Run("multi_same_is_compatible", func(t *testing.T) {
-		if state, cerr := vMulti.CheckCompat([]crossnamespace.Namespace{depMulti("dept")}); state != crossnamespace.CompatOK || cerr != nil {
-			t.Fatalf("CheckCompat = (%s, %v), want compatible", state, cerr)
-		}
+		state, cerr := vMulti.CheckCompat([]crossnamespace.Namespace{depMulti("dept")})
+		assertCompat(t, state, cerr, crossnamespace.CompatOK, false, "")
 	})
+}
+
+// mustCompile compiles a cross-namespace view (no cross edges) and fails the
+// test on a compile error.
+func mustCompile(t *testing.T, name string, consumer crossnamespace.Namespace,
+	deps []crossnamespace.Namespace, query string) *crossnamespace.View {
+	t.Helper()
+	v, err := crossnamespace.Compile(name, consumer, deps, nil, query)
+	if err != nil {
+		t.Fatalf("Compile %s: %v", name, err)
+	}
+	return v
 }
 
 // TestCheckCompatSignatureCollision is the adversarial case: note-type and
