@@ -34,7 +34,7 @@ No partial credit. Every gate is binary, every decision is recorded on disk, eve
 
 Built for architects in regulated contexts — PCI, PHI/HIPAA, CUI/FIPS/CMMC — where "the build went green" is not an audit answer.
 
-<!-- Talk track: One CLI (`da`) projects one canonical config to five AI platforms AND runs a bounded, gated, durable workflow over the work agents produce. This deck shows the spine and walks one real feature through it. -->
+<!-- Talk track: One CLI (`da`) projects one canonical config to six AI platforms AND runs a bounded, gated, durable workflow over the work agents produce. This deck shows the spine and walks one real feature through it. -->
 
 ---
 
@@ -52,7 +52,7 @@ Built for architects in regulated contexts — PCI, PHI/HIPAA, CUI/FIPS/CMMC —
 
 # Part 1 — The shape, in four diagrams
 
-(reused and condensed from `docs/PROJECT_DIAGRAMS.md` and the merged concept docs — already accuracy-verified, adapted not re-derived; the source diagrams carry more detail than these slides show)
+(condensed from `docs/PROJECT_DIAGRAMS.md` and the merged concept docs — the sources carry more detail)
 
 ---
 
@@ -198,20 +198,13 @@ Each tier has a distinct owner and answers exactly one class of question. The ca
 
 # Part 2 — The concepts an architect needs
 
-Four merged concept references. One slide each; the signal, then the link.
+Four merged concept references — the signal, then the link. The verification spine gets two slides; it's the differentiator.
 
 ---
 
 # Concept 1 — The Workflow Artifact Model
 
-**Four durable tiers between an idea and shipped code**, each a committed file with a stable path and schema (`concepts/workflow-artifact-model.md`):
-
-| Tier | Path | Owns |
-|---|---|---|
-| Spec | `.agents/workflow/specs/<id>/design.md` | the **what & why** — decisions, done-criteria |
-| Plan | `.agents/workflow/plans/<id>/PLAN.yaml` | the **how & in what order** — write scopes |
-| Tasks | `TASKS.yaml` | the **work queue** — bounded units, `depends_on` |
-| History | `.agents/history/<id>/` | the **permanent record** an auditor reads |
+**Four durable tiers between an idea and shipped code** — Spec → Plan → Tasks → History (the tier diagram in Part 1), each a committed file with a stable path and schema (`concepts/workflow-artifact-model.md`). Two properties make the chain auditable:
 
 - **Bounded autonomy:** a delegation contract caps each sub-agent to a declared `write_scope`; the **parent gate** — not the worker — accepts the result.
 - **Attributable state:** task status changes only through the CLI, and state-mutating commands append a typed event to a crash-survivable journal.
@@ -224,7 +217,7 @@ Four merged concept references. One slide each; the signal, then the link.
 **Declared manifest + resolved, content-pinned lock** — the same shape as `uv` / `cargo` / `npm` (`concepts/config-model.md`):
 
 - A project `.agentsrc.json` *declares* identity, named **sources** (`local · git · http · oci`), the layers it `extends`, and the `packages` it installs.
-- `LayeredResolver.Resolve` fetches + **SHA-pins** each layer and writes `.agentsrc.lock` — `lock_version`, an `inputs_digest` over local scopes, and one `units` map, each entry pinned to a `sha256:` digest. That map holds **two unit shapes**: extends-layer units keyed by `source:path@version`, and `kind: profile` units keyed by a namespaced **profile** key (not `source:path@version`).
+- `LayeredResolver.Resolve` fetches + **SHA-pins** each layer and writes `.agentsrc.lock` — `lock_version`, an `inputs_digest` over local scopes, and one `units` map, each entry pinned to a `sha256:` digest. The shipped lock holds **two unit kinds**: `layer` units (from `extends`, keyed by `source:path@version`) and `profile` units (keyed by a namespaced profile key). *(A third kind, `artifact`, is reserved in the model but not yet written — see Maturity.)*
 
 > **The split that matters for audit: the manifest is _intent_, the lock is _fact_.** Staleness is **content-driven, never clock-driven** — a locked checkout re-resolves to the same bytes offline. `da config explain <field>` prints the winning layer + its locked digest.
 
@@ -274,7 +267,7 @@ Four planes compose into one pipeline; **correctness is the conjunction** — pa
 
 # Concept 4 — Platform Projection
 
-**Write once, refresh everywhere** (`concepts/platform-projection.md`). One canonical resource under `~/.agents/`; `da refresh` projects it into the layout **five** platforms expect (`platform.All()`): Claude Code, Cursor, Codex, OpenCode, GitHub Copilot.
+**Write once, refresh everywhere** (`concepts/platform-projection.md`). One canonical resource under `~/.agents/`; `da refresh` projects it into the layout **six** platforms expect (`platform.All()`): Claude Code, Cursor, Codex, OpenCode, GitHub Copilot, Antigravity.
 
 > **The key design principle: _project where the format is uniform; render where it differs._**
 
@@ -311,6 +304,8 @@ The layered config distribution model, end-to-end **through the verification aud
 
 `.agents/workflow/plans/config-v2-migration/PLAN.yaml` — *"v1→v2 config-distribution-model migration"*. `success_criteria` (3): *".agentsrc.lock carries ONE units section keyed by `source:path@version` with a per-unit kind (layer|artifact) plus a top-level `inputs_digest`."*
 
+> **Plan vs. shipped — read honestly:** the criterion reserves an `artifact` kind, but the lock that ships today pairs `layer` (from `extends`) + `profile` units; `artifact`/`packages[]` remain declared-not-written (see **Maturity**). The deck traces the *shipped* slice below, not the reserved one.
+
 Representative tasks (`TASKS.yaml`) for the lock / cross-machine slice:
 
 | Task id | Title |
@@ -330,21 +325,23 @@ Representative tasks (`TASKS.yaml`) for the lock / cross-machine slice:
 |---|---|
 | **Spec criterion** | §15.5 R1/R2 — flat project gets a lock with `inputs_digest` + `units`; digests only, no clock |
 | **Plan task** | `p4f-units-lock-7a-wiring`, `p4h-agentslock-interprocess-lock` |
-| **Code** | `internal/config/resolver.go` (`LayeredResolver.Resolve` → `writeUnitsLock`, resolver.go:682) · `internal/config/lock_units.go` (`UnitKindLayer/Artifact/ProjectSet`, `LockedUnit`, `WriteUnitsLock`) · `internal/agentslock/lockfile.go` (`Lockfile`, `AcquireFileLock`, `isDeletePendingLockErr`) |
-| **Test** | `lockfile_test.go`: `TestConcurrentFlushPreservesSiblingSectionsAndInputsDigest`, `TestAcquireFileLockStaleReleaseDoesNotClobberNewHolder`, `TestFlushSucceedsAfterContendingReleaseMidWait`, `TestIsDeletePendingLockErr` |
-| **Gates cleared** | per-file coverage ≥95% · Sonar `new_violations==0` · fsguard · `go test` on `[windows-latest, macos-latest, ubuntu-latest]` (`.github/workflows/test.yml:126`) |
+| **Code** | `resolver.go` (`LayeredResolver.Resolve` → `writeUnitsLock`) · `lock_units.go` (`LockedUnit`, `WriteUnitsLock`, `UnitKindLayer/Profile`) · `agentslock/lockfile.go` (`AcquireFileLock`, `isDeletePendingLockErr`) |
+| **Test** | `lockfile_test.go` — `TestConcurrentFlushPreservesSiblingSectionsAndInputsDigest`, `TestAcquireFileLockStaleReleaseDoesNotClobberNewHolder`, `TestFlushSucceedsAfterContendingReleaseMidWait` |
+| **Gates cleared** | per-file coverage ≥95% · Sonar `new_violations==0` · fsguard · `go test` green on `[windows, macos, ubuntu]` |
 
 ---
 
 # The audit trail — defense in depth (1/2)
 
-**The beat is not "we catch everything" — it is _layered_ defense, each layer honest about its reach.** Binary CI gates block only what they can **detect**; the adversarial **cross-brain** review catches correctness bugs green tests miss. All rows are **real, merged** fixes, labeled by the layer that actually caught each:
+Those gates cleared on the slice above — but "all gates green" is only as strong as what each gate can *see*. So here is the defense record across the whole config-v2 feature, each defect labeled by the layer that caught it.
 
-| Defect (factual) | Caught by (layer) | Fix |
+**The beat is not "we catch everything" — it is _layered_ defense, each layer honest about its reach.** Binary CI gates block only what they can **detect**; the adversarial **cross-brain** review (a second model audits the diff) catches correctness bugs green tests miss. All rows are **real, merged** fixes:
+
+| Defect (factual) | Caught by | Fix |
 |---|---|---|
-| Windows **delete-pending** lock race — a contender's `os.Mkdir` races the holder's `RemoveAll`, sees "Access is denied" | **CI gate (multi-OS)** — `TestEmitConcurrentNoTornLines` went red on windows-latest while mac/linux were green | `cb4cbd0a` (direct-to-master; PR# not cleanly resolvable) |
-| Windows transient **sharing-violation** on native remove | **CI gate (multi-OS)** — same test flaked red on windows-latest only | `e4ac3872` (**PR #221**, `77446b37`) |
-| **False-green** e2e assertions that asserted nothing real | **Cross-brain review** — a green gate can't catch a test that passes by asserting nothing; the adversarial lens did | `c9b16a98` (**PR #220**, `9ac935a6`) |
+| Windows **delete-pending** lock race (a contender's `os.Mkdir` races the holder's `RemoveAll` → "Access is denied") | **CI gate (multi-OS)** — `TestEmitConcurrentNoTornLines` red on windows, green on mac/linux | `cb4cbd0a` (direct-to-master) |
+| Windows transient **sharing-violation** on native remove | **CI gate (multi-OS)** — same test flaked red on windows only | `e4ac3872` (**PR #221**) |
+| **False-green** e2e assertions that asserted nothing real | **Cross-brain review** — a green gate can't catch a test that passes by asserting nothing | `c9b16a98` (**PR #220**) |
 
 <!-- Talk track: the multi-OS matrix DOES catch Windows races a mac/linux-green run hides — but only when a test exercises the path (delete-pending, sharing-violation went red on windows-latest). The adversarial cross-brain lens catches the false-greens that green tests structurally can't. Continues on the next slide. -->
 
@@ -352,13 +349,15 @@ Representative tasks (`TASKS.yaml`) for the lock / cross-machine slice:
 
 # The audit trail (2/2) — and the one that **ESCAPED**
 
-Cross-brain review keeps catching what green tests can't — and when a defect **escapes** a green gate, the **process** catches it downstream (next CI run, a sibling PR, or the RCA loop), which then **hardens the gate** so the class can't recur:
+Two more the adversarial **cross-brain** lens caught that green gates structurally can't:
 
-| Defect (factual) | Caught by (layer) | Fix |
+| Defect (factual) | Caught by | Fix |
 |---|---|---|
-| **Doc overclaims** about packages/lock/portability | **Cross-brain review** | `95279a0b` (**PR #228**, `b51aeeaf`) |
-| **Non-atomic** home bootstrap + missing binding-drop + missing ambient-auth refusal | **Cross-brain (codex) adversarial gate** | `614904af` (**PR #198**, `a6831662`) |
-| Windows `agentslock` acquire failed for **every** Windows user (single-level `os.Mkdir`, parent absent on first run) — `da config explain`/`install` broke at runtime | **ESCAPED** — multi-OS gate was "green, and structurally incapable of catching it" (RCA); caught downstream by the process, then the RCA hardened the `verify.sh` smoke (P0) to run a real-first-run scenario so the class is caught going forward | RCA `.agents/history/rca-windows-agentslock-escape.md` (**PR #147**, `bed485af`); 0.4.1 (`57a52fe4`) |
+| **Doc overclaims** about packages/lock/portability | Cross-brain review | `95279a0b` (**PR #228**) |
+| **Non-atomic** home bootstrap + missing binding-drop + missing ambient-auth refusal | Cross-brain (codex) adversarial gate | `614904af` (**PR #198**) |
+
+**The one that ESCAPED — the credibility moment.** Windows `agentslock` acquire failed for **every** Windows user (single-level `os.Mkdir`, parent absent on first run); `da config explain` / `install` broke at runtime. The multi-OS gate was **green and structurally incapable of catching it** — no test exercised the first-run precondition (RCA). The **process** caught it downstream, and the RCA then **hardened** the `verify.sh` P0 smoke to run a real first-run scenario, so the whole class is caught going forward.
+→ RCA `.agents/history/rca-windows-agentslock-escape.md` · **PR #147** · shipped in 0.4.1
 
 <!-- Talk track: the agentslock acquire race had NO test hitting its first-run precondition, so it passed a green multi-OS gate and ESCAPED — caught later by the process, after which the RCA hardened the smoke to catch the class. "Green tests" was necessary, never sufficient; defense in depth is what makes the chain auditable. -->
 
