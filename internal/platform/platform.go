@@ -79,6 +79,7 @@ func All() []Platform {
 		NewCodex(),
 		NewOpenCode(),
 		NewCopilot(),
+		NewAntigravity(),
 	}
 }
 

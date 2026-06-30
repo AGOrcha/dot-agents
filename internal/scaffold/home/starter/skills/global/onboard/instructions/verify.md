@@ -11,6 +11,7 @@ detects, so install your editor **before** the link pass.
    - Codex
    - GitHub Copilot
    - OpenCode
+   - Antigravity (Google; F4/DC0 "real harness" probe — config projected into `.antigravity/`)
 
 2. **Re-link** — `da refresh` re-detects installed platforms and auto-enables any
    harness you just installed, projecting config into each managed project:

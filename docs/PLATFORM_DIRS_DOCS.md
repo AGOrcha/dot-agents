@@ -33,6 +33,8 @@ Partial refresh on 2026-05-25 (hooks topic only — Claude Code, Codex, Cursor, 
 
 Release-docs re-verification 2026-06-23 (all five platforms): locations confirmed current; added Claude `MessageDisplay` to the documented event surface; Cursor compatibility skill/subagent paths are now directly vendor-verified.
 
+Antigravity (Google) added 2026-06-29 as a sixth, F4/DC0 "real harness" probe platform (`internal/platform/antigravity.go`). Its on-disk layout is sparsely documented by the vendor, so its entries below describe the `dot-agents` probe projection rather than confirmed official paths; references elsewhere in this doc to "five platforms" predate this addition and cover the five vendor-verified harnesses.
+
 ### Cursor
 
 - [Rules](https://cursor.com/docs/rules): project rules live in `.cursor/rules/`. Cursor also documents `AGENTS.md` as a markdown instructions alternative. User rules and team rules exist, but those are settings or dashboard scopes rather than shared repo files.
@@ -81,6 +83,15 @@ Release-docs re-verification 2026-06-23 (all five platforms): locations confirme
 - [Hooks](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/use-hooks) and [Hooks configuration reference](https://docs.github.com/en/copilot/reference/hooks-configuration): hook files live in `.github/hooks/*.json` (project) and `~/.copilot/hooks/` (user; or `$COPILOT_HOME/hooks/` when set). Repo settings can also configure hooks via `.github/copilot/settings.json` and `.github/copilot/settings.local.json`; cross-tool settings via `.claude/settings.json` / `.claude/settings.local.json` are also documented. The Copilot CLI loads hooks from the current working directory. The documented event surface (camelCase) is `sessionStart`, `sessionEnd`, `userPromptSubmitted`, `preToolUse`, `postToolUse`, `postToolUseFailure`, `preCompact`, **`agentStop`** (NOT `stop` — the main-agent stop equivalent), `errorOccurred`, `notification`, `permissionRequest`, `subagentStart`, and `subagentStop`. The `agentStop` naming is a cross-platform footgun for any mapper that assumes `stop` is the universal name.
 - [Coding-agent MCP](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/extend-coding-agent-with-mcp), [Copilot CLI MCP](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers), and the [Copilot CLI command reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference): coding-agent MCP can be configured in repository settings on GitHub.com. Copilot CLI also documents repository `.github/mcp.json`, workspace `.mcp.json` and `.vscode/mcp.json`, devcontainer `.devcontainer/devcontainer.json`, and user-level `~/.copilot/mcp-config.json`.
 - [Copilot CLI plugins overview](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/about-cli-plugins), [find/install plugins](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/plugins-finding-installing), [create plugins](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/plugins-creating), and [create marketplaces](https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/plugins-marketplace): Copilot CLI now has installable plugins and plugin marketplaces. Plugins can be installed from marketplaces, repositories, or local paths; installed copies live under `~/.copilot/state/installed-plugins/`. A plugin package requires a root `plugin.json` manifest and can contain `agents/`, `skills/`, `hooks.json`, and `.mcp.json`. GitHub also documents direct repository installs when `plugin.json` is at the repository root, in `.github/plugin/`, or in `.claude-plugin/`. Marketplaces use `marketplace.json` as the required file and can live on GitHub, other git hosts, or local/shared filesystems.
+
+### Antigravity (Google)
+
+[Antigravity](https://antigravity.google/) (docs: [antigravity.google/docs](https://antigravity.google/docs/home)) is Google's Gemini-based agentic IDE/CLI, the successor to the Gemini CLI. It was hand-added to `dot-agents` as the F4/DC0 "real harness" probe for the multi-harness-extensibility spec. Antigravity's authoritative on-disk layout is still sparsely documented by the vendor, so the locations below reflect the **`dot-agents` probe projection** rather than confirmed official paths. Vendor-adjacent sources point at a shared `~/.gemini/` user-home tree and a project-local `.agents/` umbrella, but `.agents/` is also dot-agents' own canonical source root, so the probe deliberately projects into a dedicated `.antigravity/` repo-local root to avoid colliding with the source of truth (the collision and the `~/.gemini/` home reuse are recorded as the headline descriptor-schema finding).
+
+- Settings and MCP: the probe writes repo-local `.antigravity/settings.json` and `.antigravity/mcp_config.json`, hard-linked from the canonical scoped sources `~/.agents/settings/{scope}/antigravity.json` and `~/.agents/mcp/{scope}/antigravity.json`.
+- Skills and subagents: project skills and subagents are symlink mirrors under `.antigravity/skills/<name>/` and `.antigravity/agents/<name>/`, projected from the shared canonical skill/agent sources.
+- Hooks: repo `.antigravity/hooks.json` and user-scope `~/.antigravity/hooks.json`, rendered from `~/.agents/hooks/{scope}/antigravity.json`. The hooks file follows the Claude-shaped per-event `{matcher, hooks:[{type, command, timeout}]}` schema. The probe's canonical→native event map covers `pre_tool_use`→`PreToolUse`, `post_tool_use`→`PostToolUse`, and `stop`→`Stop`; Antigravity's native `PreInvocation`/`PostInvocation` lifecycle events have no canonical analog yet and are intentionally omitted.
+- Detection: `dot-agents` probes the `antigravity` CLI for install/version. The session env-var contract is not yet vendor-confirmed; `ANTIGRAVITY_SESSION_ID` is the inferred analog of the other harnesses' `<HARNESS>_SESSION_ID` convention.
 
 ## Platform Session Storage
 
@@ -159,6 +170,7 @@ This section covers where each platform stores active session data and whether t
 | Cursor | `~/.cursor/projects/<slug>/agent-tools/*.txt` (`cursor agent` CLI) | Yes (`cursor agent` only; IDE chat = none) | Per agent run (`type=result` line) | None documented |
 | OpenCode | `~/.local/share/opencode/opencode.db` (`part` table) | Yes | Per LLM turn (`step-finish` parts) | None |
 | GitHub Copilot | `~/.copilot/session-state/<id>/events.jsonl` | Partial (session aggregate only) | Session-level (`session.shutdown`) | None |
+| Antigravity | Not yet confirmed (probe stub) | Unknown | Unknown | `ANTIGRAVITY_SESSION_ID` (inferred, unconfirmed) |
 
 ## Canonical `~/.agents` Storage Policy
 
@@ -233,6 +245,7 @@ now the sole implementation. Audit notes below describe the Go implementation.
 | Codex | `AGENTS.md`, `.codex/config.toml`, `~/.codex/agents/*.toml` (user scope), repo `.codex/agents/*.toml`, `~/.codex/hooks.json` + repo `.codex/hooks.json`, `.agents/skills/` | Codex-native subagents are rendered as `.codex/agents/*.toml` (not `.claude/agents/`). Repo-level `.codex/agents/*.toml` and the Claude shared-skills projection ARE produced by `da refresh` / `install` / `add` (they invoke the shared-target projection before per-platform linking). Known narrow gap: the import-relink path (`relinkImportedProjects`) and the `doctor` broken-link repair path call `CreateLinks` without first running the projection — tracked in `.agents/proposals/codex-hooks-agents-linking-gap.md` and the `shared-target-projection-wiring` plan. |
 | OpenCode | `opencode.json`, `.opencode/agent/`, `.agents/skills/` | OpenCode-native skills are documented under `.opencode/skills/`, but the current implementation relies on the `.agents/skills/` compatibility path instead. |
 | GitHub Copilot | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.agents/skills/`, `.vscode/mcp.json`, `.claude/settings.local.json`, `.github/hooks/*.json` | `.agents/skills/` and `.vscode/mcp.json` are officially documented Copilot CLI locations, but this repo still skips other official Copilot locations such as `.github/skills/`, `.claude/skills/`, `.github/mcp.json`, and `.mcp.json`. |
+| Antigravity | `.antigravity/settings.json`, `.antigravity/mcp_config.json`, `.antigravity/hooks.json`, `.antigravity/skills/`, `.antigravity/agents/`; user-scope `~/.antigravity/hooks.json` | Hand-added F4/DC0 "real harness" probe (Google's Gemini-based agentic IDE). The vendor on-disk layout is sparsely documented, so the probe projects into a dedicated `.antigravity/` repo-local root rather than the vendor-adjacent `~/.gemini/` home tree or the `.agents/` umbrella (the latter collides with dot-agents' own canonical source root). The three config files are hard-linked from `~/.agents/{settings,mcp,hooks}/{scope}/antigravity.json`; `.antigravity/skills/` and `.antigravity/agents/` are symlink mirrors of the shared skill/agent sources. |
 
 ### Hook Wiring Audit
 
@@ -247,26 +260,27 @@ Validated from the current Go implementation.
 | Codex | `.codex/hooks.json` | Yes | Renders and writes repo `.codex/hooks.json` and user `~/.codex/hooks.json` via `renderCodexHookConfig` (`internal/platform/codex.go`, `internal/platform/hooks.go`); managed regular file, not a symlink. |
 | GitHub Copilot | `.github/hooks/*.json` and CLI current-working-directory hooks | Partial | Links project `.github/hooks/*.json` and also wires Claude-compatible settings. Repo-scope `.github/copilot/settings*.json` (documented 2026-05-25) and user-scope `~/.copilot/hooks/` directory are NOT yet wired. |
 | OpenCode | No dedicated hook file documented | No | No OpenCode-specific hook handling is implemented here. |
+| Antigravity | Probe projection: `.antigravity/hooks.json` (project) and `~/.antigravity/hooks.json` (user) | Yes | Renders repo and user `hooks.json` from `~/.agents/hooks/{scope}/antigravity.json` via `renderAntigravityHookConfig` (`internal/platform/antigravity.go`); managed regular file (hard link), not a symlink. Claude-shaped per-event schema with a `timeout` field. |
 
 #### Event coverage (re-verified 2026-06-23 against current code)
 
-Comparison of documented vendor events vs. the per-platform event tables in `internal/platform/hooks.go` (`claudeEventTable`, `codexEventTable`, `cursorEventTable`, `copilotEventTable`). A `dot-agents` `HookSpec.When:` value is "wired" for a platform if that platform's table maps it to the platform's documented event name today. The earlier 2026-05-25 audit's ❌ cells for Codex, Cursor, and Copilot are now **stale** — the current tables map most of those events (Copilot now maps 13 of the canonical events, not 3).
+Comparison of documented vendor events vs. the per-platform event tables in `internal/platform/hooks.go` (`claudeEventTable`, `codexEventTable`, `cursorEventTable`, `copilotEventTable`) and `internal/platform/antigravity.go` (`antigravityEventTable`). A `dot-agents` `HookSpec.When:` value is "wired" for a platform if that platform's table maps it to the platform's documented event name today. The earlier 2026-05-25 audit's ❌ cells for Codex, Cursor, and Copilot are now **stale** — the current tables map most of those events (Copilot now maps 13 of the canonical events, not 3).
 
-| `HookSpec.When` | Claude (`claudeEventTable`) | Codex (`codexEventTable`) | Cursor (`cursorEventTable`) | Copilot (`copilotEventTable`) |
-|------------------|---------------------------|--------------------------|----------------------------|-------------------------------|
-| `session_start` | `SessionStart` ✅ | `SessionStart` ✅ | `sessionStart` ✅ | `sessionStart` ✅ |
-| `session_end` | `SessionEnd` ✅ | — (vendor event missing) | `sessionEnd` ✅ | `sessionEnd` ✅ |
-| `user_prompt_submit` | `UserPromptSubmit` ✅ | `UserPromptSubmit` ✅ | `beforeSubmitPrompt` ✅ | `userPromptSubmitted` ✅ |
-| `pre_tool_use` | `PreToolUse` ✅ | `PreToolUse` ✅ | `preToolUse` ✅ | `preToolUse` ✅ |
-| `post_tool_use` | `PostToolUse` ✅ | `PostToolUse` ✅ | `postToolUse` ✅ | `postToolUse` ✅ |
-| `post_tool_use_failure` | `PostToolUseFailure` ✅ | — (vendor event missing) | `postToolUseFailure` ✅ | `postToolUseFailure` ✅ |
-| `notification` | `Notification` ✅ | — | — | `notification` ✅ |
-| `permission_request` | `PermissionRequest` ✅ | `PermissionRequest` ✅ | — | `permissionRequest` ✅ |
-| `pre_compact` | `PreCompact` ✅ | `PreCompact` ✅ | `preCompact` ✅ | `preCompact` ✅ |
-| `stop` | `Stop` ✅ | `Stop` ✅ | `stop` ✅ | `agentStop` ✅ (camelCase, not `stop`) |
-| `subagent_start` | `SubagentStart` ✅ | `SubagentStart` ✅ | `subagentStart` ✅ | `subagentStart` ✅ |
-| `subagent_stop` | `SubagentStop` ✅ | `SubagentStop` ✅ | `subagentStop` ✅ | `subagentStop` ✅ |
-| `message_display` | ❌ (not in `claudeEventTable`) | — | — | — |
+| `HookSpec.When` | Claude (`claudeEventTable`) | Codex (`codexEventTable`) | Cursor (`cursorEventTable`) | Copilot (`copilotEventTable`) | Antigravity (`antigravityEventTable`) |
+|------------------|---------------------------|--------------------------|----------------------------|-------------------------------|---------------------------------------|
+| `session_start` | `SessionStart` ✅ | `SessionStart` ✅ | `sessionStart` ✅ | `sessionStart` ✅ | — |
+| `session_end` | `SessionEnd` ✅ | — (vendor event missing) | `sessionEnd` ✅ | `sessionEnd` ✅ | — |
+| `user_prompt_submit` | `UserPromptSubmit` ✅ | `UserPromptSubmit` ✅ | `beforeSubmitPrompt` ✅ | `userPromptSubmitted` ✅ | — |
+| `pre_tool_use` | `PreToolUse` ✅ | `PreToolUse` ✅ | `preToolUse` ✅ | `preToolUse` ✅ | `PreToolUse` ✅ |
+| `post_tool_use` | `PostToolUse` ✅ | `PostToolUse` ✅ | `postToolUse` ✅ | `postToolUse` ✅ | `PostToolUse` ✅ |
+| `post_tool_use_failure` | `PostToolUseFailure` ✅ | — (vendor event missing) | `postToolUseFailure` ✅ | `postToolUseFailure` ✅ | — |
+| `notification` | `Notification` ✅ | — | — | `notification` ✅ | — |
+| `permission_request` | `PermissionRequest` ✅ | `PermissionRequest` ✅ | — | `permissionRequest` ✅ | — |
+| `pre_compact` | `PreCompact` ✅ | `PreCompact` ✅ | `preCompact` ✅ | `preCompact` ✅ | — |
+| `stop` | `Stop` ✅ | `Stop` ✅ | `stop` ✅ | `agentStop` ✅ (camelCase, not `stop`) | `Stop` ✅ |
+| `subagent_start` | `SubagentStart` ✅ | `SubagentStart` ✅ | `subagentStart` ✅ | `subagentStart` ✅ | — |
+| `subagent_stop` | `SubagentStop` ✅ | `SubagentStop` ✅ | `subagentStop` ✅ | `subagentStop` ✅ | — |
+| `message_display` | ❌ (not in `claudeEventTable`) | — | — | — | — |
 
 Cells: ✅ = mapped today; ❌ = vendor documents the event but the platform's table does not yet map it; — = vendor does not document the event for that platform.
 
@@ -277,3 +291,4 @@ Remaining gaps as of 2026-06-23:
 - **Cursor** has the widest surface (shell/MCP/file-edit/tab events in `cursorEventTable`) but does not document `notification` or `permission_request`.
 - **Copilot** uniquely exposes `error_occurred` → `errorOccurred`. Its terminal event is `agentStop` (camelCase), correctly mapped today.
 - **OpenCode**: still has no event table; OpenCode's hook surface is not addressed by `internal/platform/hooks.go` at all.
+- **Antigravity**: the F4/DC0 probe maps only the three events with a confirmed canonical analog (`pre_tool_use`, `post_tool_use`, `stop`); Antigravity's native `PreInvocation`/`PostInvocation` lifecycle events have no canonical equivalent yet and are intentionally omitted (recorded as a descriptor finding — a new harness can introduce event vocabulary the canonical set does not yet name).

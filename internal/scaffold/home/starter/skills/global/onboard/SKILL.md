@@ -46,5 +46,5 @@ paths; this skill detects which one applies, runs it, then always verifies.
 - Never invent flags. Every command in the instruction files is real — if you
   need options, run `da <command> --help`.
 - The editor/harness link step (`da refresh`) is what writes Claude Code, Cursor,
-  Codex, Copilot, and OpenCode config into your projects. Install your editor
-  first, then refresh so `da` auto-enables it.
+  Codex, Copilot, OpenCode, and Antigravity config into your projects. Install your
+  editor first, then refresh so `da` auto-enables it.

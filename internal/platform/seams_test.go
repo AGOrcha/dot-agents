@@ -1483,6 +1483,29 @@ func TestListHookSpecs_MalformedManifestSurfacesError(t *testing.T) {
 	}
 }
 
+// TestListHookSpecs_BucketNotDirectorySurfacesError covers the Lstat guard:
+// when the hooks/<scope> bucket exists but is a regular file, ReadDir fails.
+// On Unix that is ENOTDIR; on Windows it maps to a NotExist-class error that
+// callers swallow via os.IsNotExist. The guard must surface a real error on
+// every OS instead of silently returning no specs.
+func TestListHookSpecs_BucketNotDirectorySurfacesError(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmp, "hooks"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "hooks", "global"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ListHookSpecs(tmp, "global")
+	if err == nil {
+		t.Fatal("expected error when hooks bucket is a regular file")
+	}
+	// The error must not satisfy os.IsNotExist, or callers would swallow it.
+	if os.IsNotExist(err) {
+		t.Fatalf("error must not be NotExist-class, got: %v", err)
+	}
+}
+
 // TestEmitHookFile_UnknownTransportError covers the default error branch.
 func TestEmitHookFile_UnknownTransportError(t *testing.T) {
 	err := emitHookFile(stdPlatformIO{}, "/x", "/y", HookTransport("bogus"))

@@ -272,7 +272,9 @@ func isAllowlistedSharedMirrorTarget(targetPath string) bool {
 		strings.HasPrefix(normalized, ".codex/agents/") ||
 		strings.HasPrefix(normalized, ".opencode/plugins/") ||
 		strings.HasPrefix(normalized, ".opencode/agent/") ||
-		strings.HasPrefix(normalized, ".github/agents/")
+		strings.HasPrefix(normalized, ".github/agents/") ||
+		strings.HasPrefix(normalized, ".antigravity/skills/") ||
+		strings.HasPrefix(normalized, ".antigravity/agents/")
 }
 
 func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]ResourceIntent, error) {
