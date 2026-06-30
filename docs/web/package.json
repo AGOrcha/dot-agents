@@ -19,9 +19,9 @@
     "test:e2e:install": "playwright install --with-deps chromium"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.40.0",
+    "@astrojs/starlight": "^0.41.1",
     "@mermaid-js/layout-elk": "^0.2.0",
-    "astro": "^6.4.0",
+    "astro": "^7.0.4",
     "astro-mermaid": "^2.0.4",
     "cytoscape": "^3.30.2",
     "mermaid": "^11.4.1",
