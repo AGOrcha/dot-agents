@@ -19,7 +19,7 @@ import (
 // findings live in
 // .agents/workflow/specs/multi-harness-extensibility/evidence/dc0-antigravity-handadd.md.
 //
-// OWNER-TODO (research assumptions, see the DC0 evidence file): Antigravity's
+// Deferred (owner research assumptions, see the DC0 evidence file): Antigravity's
 // authoritative on-disk layout is still sparsely documented. The native roots
 // reported by vendor-adjacent sources are the shared `~/.gemini/` home tree and
 // a project-local `.agents/` umbrella — but `.agents/` is ALSO dot-agents'
@@ -53,7 +53,7 @@ func (a *antigravity) ID() string          { return "antigravity" }
 func (a *antigravity) DisplayName() string { return antigravityDisplayName }
 
 // SessionReader — Antigravity's session env-var contract is not yet confirmed
-// (OWNER-TODO). Stubs are valid per the SessionReader doc until the contract is
+// (deferred, owner-tracked). Stubs are valid per the SessionReader doc until the contract is
 // known; ANTIGRAVITY_SESSION_ID is the inferred analog of the other harnesses'
 // <HARNESS>_SESSION_ID convention.
 func (a *antigravity) AIAgentPrefix() string              { return "antigravity" }
@@ -261,7 +261,7 @@ func (a *antigravity) Badge(project, repoPath, agentsHome string) PlatformBadge 
 // antigravity maintains under the user's home: ~/.antigravity/hooks.json (the
 // only user-scope target writeUserHomeHooks emits). The vendor's broader
 // documented user-home layout (~/.gemini/...) is NOT wired by dot-agents yet
-// (OWNER-TODO), so only the hooks file is reported today — paralleling cursor's
+// (deferred, owner-tracked), so only the hooks file is reported today — paralleling cursor's
 // ~/.cursor/hooks.json-only user surface.
 func antigravityUserConfigFiles(home string) []string {
 	return []string{filepath.Join(home, antigravityDir, antigravityHooksFile)}
@@ -302,7 +302,7 @@ func (a *antigravity) PrintAudit(w io.Writer, _, repoPath, _ string) {
 // (rather than reusing claudeRenderedHooks) to match the per-harness pattern and
 // because the timeout field diverges from Claude's action shape.
 //
-// OWNER-TODO: one source reports antigravity nests events under a top-level
+// Deferred (owner-tracked): one source reports antigravity nests events under a top-level
 // hook-name key (`{"<name>":{"PreToolUse":[...]}}`). If confirmed, only this
 // render struct + detector change — the event table and dispatch are unaffected.
 
