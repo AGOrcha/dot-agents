@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from 'astro-mermaid';
 import { visit } from 'unist-util-visit';
+import { PUBLIC_SLUG_BY_SRC } from './src/public-pages.mjs';
 
 // SITE_BASE / SITE_URL switch between the two supported hosts:
 //   * Cloudflare Workers @ agorcha.dev (root)   — set DEPLOY_TARGET=cloudflare
@@ -23,48 +24,55 @@ const SITE_URL = IS_CLOUDFLARE
   : 'https://nikashprakash.github.io';
 const GITHUB_BLOB = 'https://github.com/AGOrcha/dot-agents/blob/master';
 
-// DEMO_<NAME>.md source docs are surfaced under Guides as /guides/demo-<name>.
-// Maps the repo filename to its Starlight slug so intra-doc links resolve
-// in-site instead of going to GitHub.
-const DEMO_SLUGS = new Map([
-  ['DEMO_README', 'guides/demo-overview'],
-  ['DEMO_INDEX', 'guides/demo-index'],
-  ['DEMO_WORKFLOW_WALKTHROUGH', 'guides/demo-workflow-walkthrough'],
-  ['DEMO_DIAGRAM', 'guides/demo-diagram'],
-  ['DEMO_LESSONS_NARRATIVE', 'guides/demo-lessons'],
-]);
-
-// Rewrite intra-doc markdown links so that:
-//   - ./DEMO_<NAME>.md   → in-site Starlight guide page (when it's a public guide)
-//   - ./<other>.md       → GitHub blob URL (docs not surfaced in this site)
-//   - ../.agents/<path>  → GitHub blob URL
+// Rewrite intra-doc markdown links. Every relative link is first resolved to a
+// repo-relative path (public docs live under docs/, so a bare or `./` name is
+// under docs/; `../` climbs to the repo root; an already-rooted `docs/X.md`
+// stays as-is), then:
+//   - a path that matches a PUBLIC page → its in-site Starlight slug, so the
+//     reader stays on this site (covers `./X.md`, bare `X.md`, `../README.md`
+//     and README's own `docs/X.md` links — including the DEMO_*.md guides)
+//   - anything else → a github.com blob URL for the canonical repo doc
+//
+// PUBLIC_SLUG_BY_SRC is derived from the same PUBLIC_PAGES allowlist the content
+// loader uses (src/public-pages.mjs) — one source of truth. Resolving to the
+// repo-relative path also fixes the bare-filename 404: a bare `<name>.md` under
+// docs/ no longer loses its `docs/` prefix.
 function rewriteRelativeLinks() {
   return (/** @type {import('hast').Root} */ tree) => {
     visit(tree, 'element', (node) => {
       if (node.tagName !== 'a' || !node.properties?.href) return;
       const href = String(node.properties.href);
-      // Skip absolute URLs, anchors, root-relative paths.
+      // Skip absolute URLs, mailto, anchors, root-relative paths.
       if (/^(https?:|mailto:|#|\/)/i.test(href)) return;
-      const demoMatch = href.match(/^\.\/DEMO_([A-Z_]+)\.md(#.*)?$/);
-      if (demoMatch) {
-        const key = `DEMO_${demoMatch[1]}`;
-        const anchor = demoMatch[2] ?? '';
-        const slug = DEMO_SLUGS.get(key);
-        if (slug) {
-          // Starlight prepends `base`; use a root-relative in-site link.
-          node.properties.href = `/${slug}/${anchor}`;
-          return;
-        }
+
+      // Split off any #anchor, then resolve the path to a repo-relative form.
+      const hashIdx = href.indexOf('#');
+      const anchor = hashIdx >= 0 ? href.slice(hashIdx) : '';
+      const pathPart = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+
+      let repoPath = pathPart;
+      if (repoPath.startsWith('./')) {
+        repoPath = `docs/${repoPath.slice(2)}`;
+      } else if (repoPath.startsWith('../')) {
+        repoPath = repoPath.slice(3);
+      } else if (!repoPath.includes('/') && repoPath.endsWith('.md')) {
+        // Bare sibling .md filename on a docs/ page (the 404 bug class). Scoped
+        // to .md so a bare repo-root file (LICENSE, NOTICE) on the README/index
+        // page is NOT wrongly pushed under docs/.
+        repoPath = `docs/${repoPath}`;
       }
-      // Anything else relative: send to GitHub blob URL.
-      // ./X.md -> docs/X.md ; ../.agents/foo -> .agents/foo
-      let p = href;
-      if (p.startsWith('./')) {
-        p = `docs/${p.slice(2)}`;
-      } else if (p.startsWith('../')) {
-        p = p.slice(3);
+      // else: already repo-relative (e.g. docs/X.md, .agents/foo, LICENSE) — leave as-is.
+
+      // Public target → in-site link. Starlight prepends `base`; use a
+      // root-relative path. The `index` page is the site root (`/`).
+      const slug = PUBLIC_SLUG_BY_SRC.get(repoPath);
+      if (slug) {
+        node.properties.href = slug === 'index' ? `/${anchor}` : `/${slug}/${anchor}`;
+        return;
       }
-      node.properties.href = `${GITHUB_BLOB}/${p}`;
+
+      // Non-public relative target → canonical GitHub blob URL.
+      node.properties.href = `${GITHUB_BLOB}/${repoPath}${anchor}`;
       node.properties.target = '_blank';
       node.properties.rel = 'noopener';
     });

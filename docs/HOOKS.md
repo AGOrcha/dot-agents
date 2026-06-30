@@ -50,7 +50,7 @@ hook content into this same layout.
 
 Hooks are distributed only to platforms that can represent them. Coverage
 today (consistent with the Hook Wiring Audit in
-[PLATFORM_DIRS_DOCS.md](PLATFORM_DIRS_DOCS.md)):
+[PLATFORM_DIRS_DOCS.md](./PLATFORM_DIRS_DOCS.md)):
 
 | Platform | Where hooks land | Status |
 |----------|------------------|--------|
@@ -238,7 +238,7 @@ scored signal was **evaluated and deferred to R1.5.1** in
 (PR #97): the four boundary criteria (payload stability, workflow-command
 filter, redaction, dedup) did not all clear v1. As a result, no
 `observe_tool_result` records contribute to the v1 `hook_outcomes`
-sub-score — see [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b).
+sub-score — see [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](./OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b).
 These events are also **not** implicit blocking hooks: a failed workflow
 command produces useful improvement evidence, but recording an error is
 not by itself proof that the session should be blocked. Any future
@@ -277,14 +277,14 @@ deduplicate to the more severe result, and which rule-ID families
 contribute to v1 scoring versus which are persisted as audit-only
 observation. See:
 
-- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](OUTCOME_SCORING_RUBRIC.md#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
+- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](./OUTCOME_SCORING_RUBRIC.md#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
   for the sub-score mapping and dedup rule.
-- [`OUTCOME_SCORING_RUBRIC.md` — approved rules](OUTCOME_SCORING_RUBRIC.md#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6)
+- [`OUTCOME_SCORING_RUBRIC.md` — approved rules](./OUTCOME_SCORING_RUBRIC.md#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6)
   for the rule-ID families that vote in v1.
-- [`OUTCOME_SCORING_RUBRIC.md` — sidecar retention](OUTCOME_SCORING_RUBRIC.md#hook-outcome-sidecar-retention-r15)
+- [`OUTCOME_SCORING_RUBRIC.md` — sidecar retention](./OUTCOME_SCORING_RUBRIC.md#hook-outcome-sidecar-retention-r15)
   for the indefinite-retention policy and the deferred admin-only prune
   command spec.
-- [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b)
+- [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](./OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b)
   for why `post_tool_use` records do not contribute to v1 scoring.
 
 ## `when_events` — multi-event hook bundles
@@ -478,5 +478,5 @@ every platform that supports them.
 ## See also
 
 - [README — Hooks](../README.md#hooks) — quick command summary
-- [PLATFORM_DIRS_DOCS.md](PLATFORM_DIRS_DOCS.md) — full per-platform resource
+- [PLATFORM_DIRS_DOCS.md](./PLATFORM_DIRS_DOCS.md) — full per-platform resource
   locations and the Hook Wiring Audit
