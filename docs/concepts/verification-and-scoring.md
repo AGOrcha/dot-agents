@@ -39,7 +39,11 @@ The model has four planes, and they compose into one pipeline:
 ## Overview
 
 A change reaches `master` only after **every** gate below is green. The table is the whole thesis
-in one view: each row is binary, each blocks the merge, and each leaves an auditable record.
+in one view: each row is binary, each leaves an auditable record, and each blocks the merge on
+failure. One honest caveat the table cannot show: most gates block unconditionally, but the Sonar
+new-issues gate **fails open** — it passes when its token, API, or response parse is unavailable
+(a SonarCloud outage degrades it to a pass, not a block). The other three CI gates have no
+fail-open path. See the limitation note under Plane 1.
 
 | Plane | Gate | Pass condition (no partial credit) | Where enforced | Record |
 |---|---|---|---|---|
@@ -67,7 +71,7 @@ flowchart TD
     review -->|any lens fail| block
     review -->|all pass| ci{"CI gates (PR)"}
 
-    subgraph ci_gates["GitHub Actions — every check blocking"]
+    subgraph ci_gates["GitHub Actions — gates block on failure (Sonar fails open)"]
       cov["per-file coverage ≥ 95%"]
       sonar["sonar new_violations == 0"]
       fsg["fsguard: no raw os.* mutators"]
@@ -91,7 +95,10 @@ flowchart TD
 ### Plane 1 — the mechanical CI gates
 
 These run in `.github/workflows/test.yml`, which triggers on every pull request. None of the four
-gate steps carry `continue-on-error`: a red gate fails the job and blocks the merge.
+gate steps carry `continue-on-error`, so a gate that *exits red* fails the job and blocks the
+merge. The caveat is internal to one gate: the Sonar new-issues script can itself exit green under
+degradation (its fail-open path, detailed below), so it blocks only when it actually runs and finds
+new issues — the other three have no such path.
 
 **Per-file coverage (`scripts/coverage-gate.sh`).** Every non-exempt Go file must hit **95%**
 statement coverage (the comparison allows a 0.05pp tolerance, so a file fails below 94.95%). It is
@@ -187,8 +194,14 @@ lenses in one pass). The lens set is selected by app_type via
 
 Each lens emits a single verdict line — **`verdict: pass | fail`** — and `fail` is *required* if
 any BLOCKER or HIGH finding is present. The lens writes its findings to
-`.agents/active/review/<task_id>-<lens>.md` and records the verdict for the audit trail with
-`da workflow verify record --kind review`. As shipped:
+`.agents/active/review/<task_id>-<lens>.md`. Those per-lens `pass | fail` verdicts are what the
+review *output* carries. The durable record written by `da workflow verify record --kind review`
+is a different shape: it does **not** store a per-lens identity-and-verdict log. It takes
+`--phase1-decision` / `--phase2-decision` as `accept | reject | escalate` (it rejects `--status`
+for review), and writes a single *consolidated* phase-decision artifact — `phase_1_decision`,
+`phase_2_decision`, and a derived `overall_decision` (schema below). So the lenses produce
+`pass | fail`; the recorded decision is one accept/reject/escalate record per phase plus an
+overall. As shipped:
 
 | app_type | lens_set | lens_concurrency |
 |---|---|---|
@@ -231,7 +244,7 @@ pinned (`const: 1`) and `additionalProperties: false` — so a malformed or exte
 task's review, on disk, schema-enforced.
 
 **Seeded, not yet shipped — the universal execution-telemetry envelope.**
-[ADR-0004](./adr/0004-execution-telemetry-schema-seed.md) *designates* `review-decision.yaml` as
+[ADR-0004](../adr/0004-execution-telemetry-schema-seed.md) *designates* `review-decision.yaml` as
 the first concrete instance of a broader per-resource trace envelope (`resource_type` /
 `resource_id` / `invoked_at` / `invoked_by` / `outcome` / `post_invocation` /
 `improvement_signals`) that hooks, subagents, rules, and skills would each emit on invocation —
@@ -378,5 +391,5 @@ at the gates that ran and what each decided — every step binary, every decisio
 - [Scoring Guide](./SCORE_GUIDE.md) — the task-oriented `da score` walkthrough.
 - [Release Verification](./RELEASE_VERIFICATION.md) — Cosign keyless signing + Rekor transparency
   log for verifying a release *binary* before install (the supply-chain bookend to this pipeline).
-- [ADR-0004](./adr/0004-execution-telemetry-schema-seed.md) — the execution-telemetry envelope
+- [ADR-0004](../adr/0004-execution-telemetry-schema-seed.md) — the execution-telemetry envelope
   designation that `review-decision.yaml` seeds.
