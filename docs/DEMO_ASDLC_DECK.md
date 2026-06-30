@@ -35,7 +35,7 @@ Built for architects in regulated contexts — PCI, PHI/HIPAA, CUI/FIPS/CMMC —
 
 # Part 1 — The shape, in four diagrams
 
-(reused verbatim from `docs/PROJECT_DIAGRAMS.md` and the merged concept docs — already accuracy-verified, not re-derived here)
+(reused and condensed from `docs/PROJECT_DIAGRAMS.md` and the merged concept docs — already accuracy-verified, adapted not re-derived; the source diagrams carry more detail than these slides show)
 
 ---
 
@@ -205,7 +205,7 @@ Four merged concept references. One slide each; the signal, then the link.
 **Declared manifest + resolved, content-pinned lock** — the same shape as `uv` / `cargo` / `npm` (`concepts/config-model.md`):
 
 - A project `.agentsrc.json` *declares* identity, named **sources** (`local · git · http · oci`), the layers it `extends`, and the `packages` it installs.
-- `LayeredResolver.Resolve` fetches + **SHA-pins** each layer and writes `.agentsrc.lock` — `lock_version`, an `inputs_digest` over local scopes, and `units` keyed by `source:path@version`, each pinned to a `sha256:` digest.
+- `LayeredResolver.Resolve` fetches + **SHA-pins** each layer and writes `.agentsrc.lock` — `lock_version`, an `inputs_digest` over local scopes, and one `units` map, each entry pinned to a `sha256:` digest. That map holds **two unit shapes**: extends-layer units keyed by `source:path@version`, and `kind: profile` units keyed by a namespaced **profile** key (not `source:path@version`).
 
 > **The split that matters for audit: the manifest is _intent_, the lock is _fact_.** Staleness is **content-driven, never clock-driven** — a locked checkout re-resolves to the same bytes offline. `da config explain <field>` prints the winning layer + its locked digest.
 
@@ -317,20 +317,20 @@ Representative tasks (`TASKS.yaml`) for the lock / cross-machine slice:
 
 ---
 
-# The audit trail — verification caught what testing missed
+# The audit trail — defense in depth, honestly labeled
 
-**The strongest regulated-industry beat:** every gate stayed **green** while real defects shipped — and the no-partial-credit gates (cross-platform matrix, cross-brain review, codex gate) caught them. All are **real, merged** fixes:
+**The regulated-industry beat is not "we catch everything" — it is _layered_ defense, each layer honest about its reach.** Binary CI gates block only what they can **detect**; the adversarial **cross-brain** review catches correctness bugs green tests miss; and a defect that **escapes** a green gate is caught downstream by the **process** — next CI run, a sibling PR, or the RCA loop — which then hardens the gate so the class can't recur. All rows are **real, merged** fixes, labeled by the layer that actually caught each:
 
-| Defect (factual) | Fix |
-|---|---|
-| Windows `agentslock` acquire failed for **every Windows user** (single-level `os.Mkdir`, no parent guarantee) — `da config explain`/`install` broke at runtime while all gates were green | RCA `.agents/history/rca-windows-agentslock-escape.md` (**PR #147**, `bed485af`); released in 0.4.1 (`57a52fe4`) |
-| Windows **delete-pending** lock race — acquire fails while the lock dir is mid-delete | `cb4cbd0a` (direct-to-master; PR# not cleanly resolvable) |
-| Windows transient **sharing-violation** on native remove | `e4ac3872` (**PR #221**, `77446b37`) |
-| **False-green** e2e assertions that asserted nothing real | `c9b16a98` (**PR #220**, `9ac935a6`) |
-| **Doc overclaims** about packages/lock/portability, caught by review | `95279a0b` (**PR #228**, `b51aeeaf`) |
-| Cross-brain gate caught **non-atomic** home bootstrap + missing binding-drop + missing ambient-auth refusal | `614904af` (**PR #198**, `a6831662`) |
+| Defect (factual) | Caught by (layer) | Fix |
+|---|---|---|
+| Windows **delete-pending** lock race — a contender's `os.Mkdir` races the holder's `RemoveAll`, sees "Access is denied" | **CI gate (multi-OS)** — `TestEmitConcurrentNoTornLines` went red on windows-latest while mac/linux were green | `cb4cbd0a` (direct-to-master; PR# not cleanly resolvable) |
+| Windows transient **sharing-violation** on native remove | **CI gate (multi-OS)** — same test flaked red on windows-latest only | `e4ac3872` (**PR #221**, `77446b37`) |
+| **False-green** e2e assertions that asserted nothing real | **Cross-brain review** — a green gate can't catch a test that passes by asserting nothing; the adversarial lens did | `c9b16a98` (**PR #220**, `9ac935a6`) |
+| **Doc overclaims** about packages/lock/portability | **Cross-brain review** | `95279a0b` (**PR #228**, `b51aeeaf`) |
+| **Non-atomic** home bootstrap + missing binding-drop + missing ambient-auth refusal | **Cross-brain (codex) adversarial gate** | `614904af` (**PR #198**, `a6831662`) |
+| Windows `agentslock` acquire failed for **every** Windows user (single-level `os.Mkdir`, parent absent on first run) — `da config explain`/`install` broke at runtime | **ESCAPED** — the multi-OS gate was "green, and structurally incapable of catching it" (RCA); caught downstream by the process, then the RCA hardened the `verify.sh` smoke (P0) to run a real-first-run scenario so the class is caught going forward | RCA `.agents/history/rca-windows-agentslock-escape.md` (**PR #147**, `bed485af`); 0.4.1 (`57a52fe4`) |
 
-<!-- Talk track: multi-OS matrix caught the Windows races a mac/linux-green run hid; the codex/cross-harness adversarial lens caught the false-greens and the non-atomic bootstrap; review caught the doc overclaims. "Green tests" was necessary, never sufficient. -->
+<!-- Talk track: the honest story is stronger than "we catch everything." The multi-OS matrix DOES catch Windows races a mac/linux-green run hides — but only when a test exercises the path (delete-pending, sharing-violation went red on windows-latest). The agentslock acquire race had NO test hitting its first-run precondition, so it passed a green multi-OS gate and ESCAPED — caught later by the process, after which the RCA hardened the smoke to catch the class. The adversarial cross-brain lens caught the false-greens, doc overclaims, and non-atomic bootstrap that green tests structurally can't. "Green tests" was necessary, never sufficient; defense in depth is what makes the chain auditable. -->
 
 ---
 
@@ -338,7 +338,7 @@ Representative tasks (`TASKS.yaml`) for the lock / cross-machine slice:
 
 Regulated auditors trust accurate scope more than a bigger claim. What is real **today**:
 
-- **Shipped & CI-enforced:** per-file coverage gate, Sonar new-issues gate (fail-open on API error), fsguard, multi-OS matrix; verifier routing + 5 wired verifier kinds; 4 review lenses incl. cross-harness-adversarial; `review-decision.yaml` + `verification-log.jsonl` (schema-validated); outcome score (rubric 2.1.0, 7 signals).
+- **Shipped & CI-enforced:** per-file coverage gate, Sonar new-issues gate (fail-open on API error), fsguard, multi-OS matrix; verifier routing + 5 wired verifier kinds; 4 review lenses incl. cross-harness-adversarial; the per-kind `.result.yaml` and `review-decision.yaml` are schema-validated, while `verification-log.jsonl` is a typed, durable append log (not schema-validated at write time); outcome score (rubric 2.1.0, 7 signals).
 - **Shipped, not wired here:** verifier kinds `api`/`batch`/`streaming`/`ui-e2e` ship as starter templates.
 - **Design-stage only:** the `pr-ci` verifier; the universal §1.6 execution-telemetry envelope (ADR-0004 schema-seed). `packages[]` are *declared* but the shipped resolver does **not** write them into lock units today.
 - **Known doc-vs-code drift, flagged in-doc:** older guidance says `extends` rejects `oci`; the shipped resolver accepts it.
