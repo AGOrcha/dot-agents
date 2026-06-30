@@ -244,7 +244,7 @@ pinned (`const: 1`) and `additionalProperties: false` — so a malformed or exte
 task's review, on disk, schema-enforced.
 
 **Seeded, not yet shipped — the universal execution-telemetry envelope.**
-[ADR-0004](../adr/0004-execution-telemetry-schema-seed.md) *designates* `review-decision.yaml` as
+[ADR-0004](./adr/0004-execution-telemetry-schema-seed.md) *designates* `review-decision.yaml` as
 the first concrete instance of a broader per-resource trace envelope (`resource_type` /
 `resource_id` / `invoked_at` / `invoked_by` / `outcome` / `post_invocation` /
 `improvement_signals`) that hooks, subagents, rules, and skills would each emit on invocation —
@@ -392,5 +392,5 @@ at the gates that ran and what each decided — every step binary, every decisio
 - [Scoring Guide](./SCORE_GUIDE.md) — the task-oriented `da score` walkthrough.
 - [Release Verification](./RELEASE_VERIFICATION.md) — Cosign keyless signing + Rekor transparency
   log for verifying a release *binary* before install (the supply-chain bookend to this pipeline).
-- [ADR-0004](../adr/0004-execution-telemetry-schema-seed.md) — the execution-telemetry envelope
+- [ADR-0004](./adr/0004-execution-telemetry-schema-seed.md) — the execution-telemetry envelope
   designation that `review-decision.yaml` seeds.

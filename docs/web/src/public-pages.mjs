@@ -35,9 +35,15 @@ export const PUBLIC_PAGES = [
   { src: 'docs/PLUGIN_CONTRACT.md', id: 'reference/plugin-contract', order: 5 },
   { src: 'docs/WORKFLOW_CLIENT_COMMANDS.md', id: 'reference/workflow-client-commands', order: 6 },
   { src: 'docs/RELEASE_VERIFICATION.md', id: 'reference/release-verification', order: 7 },
+  { src: 'docs/OUTCOME_SCORING_RUBRIC.md', id: 'reference/outcome-scoring-rubric', order: 8 },
+  { src: 'docs/VERIFIER_REVIEWER_TEMPLATES.md', id: 'reference/verifier-reviewer-templates', order: 9 },
 
   // Concepts
   { src: 'docs/PROJECT_DIAGRAMS.md', id: 'concepts/project-diagrams', order: 1 },
+  { src: 'docs/concepts/workflow-artifact-model.md', id: 'concepts/workflow-artifact-model', order: 2 },
+  { src: 'docs/concepts/config-model.md', id: 'concepts/config-model', order: 3 },
+  { src: 'docs/concepts/verification-and-scoring.md', id: 'concepts/verification-and-scoring', order: 4 },
+  { src: 'docs/concepts/platform-projection.md', id: 'concepts/platform-projection', order: 5 },
 ];
 
 /**
