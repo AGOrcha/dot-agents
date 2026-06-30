@@ -225,6 +225,16 @@ tasks:
         - .agents/history/sonarqube-pr10/
       verification_required: false
       notes: |-
+        STATUS 2026-06-30: PR#10 disposition is now DONE (PR#10/#14 retired,
+        pr6-typescript-port + pr5-followup cancelled, pr10-branch-split plan
+        completed). The remaining blocker is NOT the PR state any more — it is the
+        `da workflow plan archive` non-persistence bug (diagnosed 2026-06-30):
+        archive moves the plan dir to history/ in the working tree but never
+        git-commits it (no --commit-state path, unlike advance/merge-back), so in
+        the fresh-clone/worktree loop model the move is discarded before it lands on
+        master. This task unblocks once archive gains a commit step. The stale
+        "(gate:pr-open-2026-05-04) PR#10 is still OPEN" note below is superseded.
+
         Tier: T1 (molecule — archival + outcome note).
 
         This task is gated on PR#10 transitioning state.
@@ -242,9 +252,6 @@ tasks:
         Common false positive:
           Plan archived prematurely while PR is still open and reviewing.
           Verify PR state via `gh pr view 10` before archiving.
-        - (gate:pr-open-2026-05-04) PR#10 is still OPEN at head 85266c0, so
-          sq5 is blocked. Do not archive sonarqube-pr10 until `gh pr view 10`
-          reports MERGED or CLOSED.
 
         ISP routing:
           mode: direct (CLI commands + small note; not implementation)

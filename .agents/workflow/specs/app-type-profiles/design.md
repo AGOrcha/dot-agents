@@ -1,8 +1,27 @@
 # App Type and Verifier Profiles — Design Spec
 
-**Status:** draft; staged-dispatch review inputs added 2026-05-26
+**Status:** draft; staged-dispatch review inputs added 2026-05-26; config-architecture readiness revised 2026-06-30 (see note below)
 **Written:** 2026-04-22
-**Plan:** (not yet created)
+**Plan:** (not yet created — plan-ready once the §12 owner rulings clear)
+
+> **Config-architecture readiness (revised 2026-06-30).** This spec's foundation
+> has now SHIPPED. `config-architecture-impl` L1 (`unified-config-profiles`,
+> selector-merge through §15) + L1 follow-ups (R2 lock-file profile units, R7/R8
+> projection+drift, authored-profiles key) are merged — so the **profile model and
+> selector-merge resolution** this spec assumes (§3 schema, §4 composite
+> resolution) exist in the resolver today, not just on paper. L2
+> (`distributable-config-manifest`, `init --from`) and L3 (home-config
+> machine-local split + `kind:project-set` identity registry) are merged too, so a
+> `verifier_profiles` package can ride the same distribution + lock path.
+> **Still gating:** the §12 owner rulings (seed-profile naming/shape OR-1, and the
+> public-source-runs-private-corpus privacy confirm OR-2) before the plan is
+> created. **Upcoming dependency:** L4 multi-harness (descriptor schema,
+> owner-gated) is the natural home for the multi-profile-app case in §1.2 — payout's
+> `po-core-api-se` (API/batch/streaming modes). Mirror the payout backfill framing:
+> consume the shipped L1-L3 substrate now; design for L4 without blocking on it.
+> NOTE: a newer copy of this spec in the working tree carries the 2026-06-28
+> ideation fork-resolution (§12 D2.7-D2.10); reconcile this readiness note into it
+> when that lands.
 
 **Related:**
 - [config-distribution-model](../config-distribution-model/design.md) — `app_type_verifier_map` field surface (§10), command gating (§13.6). This spec defines the schema and lifecycle behind the `app_type` name.
