@@ -10,14 +10,6 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
-// seedSearchFetch is the internal ceiling requested from the reader's
-// SearchNodes when gathering seed candidates. It is generous relative to the
-// caller-facing limit because the raw search set includes files, tests, and
-// other languages that SeedSymbols filters out before applying the limit. The
-// provider clamps this to its own hard cap (graphstore CONTRACT.md guarantee
-// #1), which bounds seeding on very large graphs — acceptable for v1.
-const seedSearchFetch = 500
-
 // symbolKinds are the node kinds SeedSymbols considers a candidate code site.
 // Files and tests are never seeds: a task is framed around a function or a
 // type, and tests are hidden from the agent (R4 decision D4.7).
@@ -69,10 +61,17 @@ type Complexity struct {
 }
 
 // SeedSymbols returns up to limit candidate seed symbols for lang, sorted by
-// qualified name for determinism. Only function/class/type nodes in the
-// requested language are considered; files and test nodes are excluded. The
-// language match is case-insensitive against the node's stored language, which
-// is expected to be the canonical lowercase form (e.g. "go", "python").
+// qualified name. Only function/class/type nodes in the requested language are
+// considered; files and test nodes are excluded. The language match is
+// case-insensitive against the node's stored language, which is expected to be
+// the canonical lowercase form (e.g. "go", "python").
+//
+// The result is fully reproducible for a fixed graph state: the candidate set
+// is the COMPLETE node population, enumerated file-by-file via GetAllFiles +
+// GetNodesByFile (neither of which imposes a LIMIT), then deduped by qualified
+// name and put into a total order BEFORE the cap. There is no bounded,
+// unordered pre-filter step, so no valid seed can be silently dropped by
+// truncation and repeated runs (or a different backend) yield the same list.
 func (q *Querier) SeedSymbols(ctx context.Context, lang eval.Language, limit int) ([]graphstore.GraphNode, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -83,21 +82,40 @@ func (q *Querier) SeedSymbols(ctx context.Context, lang eval.Language, limit int
 	if limit <= 0 {
 		return nil, fmt.Errorf("kgquery: limit must be positive, got %d", limit)
 	}
-	// Empty query matches every node name; we filter to language + symbol
-	// kind ourselves rather than push it into the search predicate.
-	nodes, err := q.reader.SearchNodes("", seedSearchFetch)
+	files, err := q.reader.GetAllFiles()
 	if err != nil {
-		return nil, fmt.Errorf("kgquery: search seed candidates: %w", err)
+		return nil, fmt.Errorf("kgquery: list files: %w", err)
 	}
+	// Iterate files in a stable order; the final sort makes iteration order
+	// irrelevant to the output, but a deterministic sweep keeps behavior
+	// obvious and independent of the reader's file enumeration order.
+	sort.Strings(files)
+
 	want := strings.ToLower(string(lang))
-	seeds := make([]graphstore.GraphNode, 0, len(nodes))
-	for _, n := range nodes {
-		if n.IsTest || !symbolKinds[n.Kind] {
-			continue
+	// Key by qualified name so a symbol that appears under more than one file
+	// path collapses to a single, deterministically chosen candidate.
+	candidates := map[string]graphstore.GraphNode{}
+	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		if strings.ToLower(n.Language) != want {
-			continue
+		nodes, err := q.reader.GetNodesByFile(f)
+		if err != nil {
+			return nil, fmt.Errorf("kgquery: nodes in file %q: %w", f, err)
 		}
+		for _, n := range nodes {
+			if n.IsTest || !symbolKinds[n.Kind] {
+				continue
+			}
+			if strings.ToLower(n.Language) != want {
+				continue
+			}
+			candidates[n.QualifiedName] = n
+		}
+	}
+
+	seeds := make([]graphstore.GraphNode, 0, len(candidates))
+	for _, n := range candidates {
 		seeds = append(seeds, n)
 	}
 	sort.Slice(seeds, func(i, j int) bool { return seeds[i].QualifiedName < seeds[j].QualifiedName })
@@ -136,10 +154,7 @@ func (q *Querier) NeighborhoodFor(ctx context.Context, qualifiedName string, dep
 	}
 	frontier := []string{qualifiedName}
 	for hop := 0; hop < depth && len(frontier) > 0; hop++ {
-		if err := ctx.Err(); err != nil {
-			return Neighborhood{}, err
-		}
-		next, err := q.stepFrontier(frontier, tr)
+		next, err := q.stepFrontier(ctx, frontier, tr)
 		if err != nil {
 			return Neighborhood{}, err
 		}
@@ -162,11 +177,16 @@ type traversal struct {
 }
 
 // stepFrontier expands every name in the current frontier by one hop and
-// returns the next frontier (the newly discovered, resolvable neighbors).
-func (q *Querier) stepFrontier(frontier []string, tr *traversal) ([]string, error) {
+// returns the next frontier (the newly discovered, resolvable neighbors). It
+// honors ctx cancellation before each name so a cancel during the current
+// (including the final) hop is observed rather than swallowed.
+func (q *Querier) stepFrontier(ctx context.Context, frontier []string, tr *traversal) ([]string, error) {
 	var next []string
 	for _, name := range frontier {
-		discovered, err := q.visitNeighbors(name, tr)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		discovered, err := q.visitNeighbors(ctx, name, tr)
 		if err != nil {
 			return nil, err
 		}
@@ -178,14 +198,22 @@ func (q *Querier) stepFrontier(frontier []string, tr *traversal) ([]string, erro
 // visitNeighbors records name's edges into tr, resolves each not-yet-seen
 // adjacent symbol, and returns the ones that resolved to a real node.
 // Dangling edge targets are marked visited (via a zero-value placeholder) so
-// they are neither re-resolved nor emitted as phantom nodes.
-func (q *Querier) visitNeighbors(name string, tr *traversal) ([]string, error) {
+// they are neither re-resolved nor emitted as phantom nodes. ctx is checked
+// after the edge fetch and before each neighbor lookup so cancellation is
+// observed even within a single hop's work.
+func (q *Querier) visitNeighbors(ctx context.Context, name string, tr *traversal) ([]string, error) {
 	neighbors, err := q.expand(name, tr.edges)
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	var discovered []string
 	for _, nb := range neighbors {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if _, seen := tr.visited[nb]; seen {
 			continue
 		}

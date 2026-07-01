@@ -11,39 +11,60 @@ import (
 
 // fakeReader is a tiny in-memory CodeGraphReader used to back the Querier in
 // unit tests. It stubs only the read role (the narrow contract kgquery
-// depends on); the mutation/note/link/closer methods return zero values and
-// are never exercised by this package.
+// depends on); the mutation/note/link/closer methods are absent because the
+// Querier binds to CodeGraphReader, not the whole Store.
 type fakeReader struct {
 	nodes    map[string]graphstore.GraphNode
 	outEdges map[string][]graphstore.GraphEdge
 	inEdges  map[string][]graphstore.GraphEdge
 
-	searchResult []graphstore.GraphNode
-	searchErr    error
-	getNodeErr   map[string]error
-	outErr       map[string]error
-	inErr        map[string]error
+	files          []string
+	nodesByFile    map[string][]graphstore.GraphNode
+	filesErr       error
+	nodesByFileErr map[string]error
+
+	getNodeErr map[string]error
+	outErr     map[string]error
+	inErr      map[string]error
 
 	// cancelOnSource fires cancel the first time GetEdgesBySource is asked
-	// for the named symbol, to exercise mid-traversal context cancellation.
-	cancelOnSource string
-	cancel         context.CancelFunc
+	// for the named symbol; cancelOnGetNode fires cancel when GetNode is
+	// asked for the named symbol; cancelOnListFiles fires cancel when
+	// GetAllFiles is called. Each exercises a distinct mid-work cancellation
+	// window after the top-level guard has already passed.
+	cancelOnSource    string
+	cancelOnGetNode   string
+	cancelOnListFiles bool
+	cancel            context.CancelFunc
 }
 
 func newFake() *fakeReader {
 	return &fakeReader{
-		nodes:      map[string]graphstore.GraphNode{},
-		outEdges:   map[string][]graphstore.GraphEdge{},
-		inEdges:    map[string][]graphstore.GraphEdge{},
-		getNodeErr: map[string]error{},
-		outErr:     map[string]error{},
-		inErr:      map[string]error{},
+		nodes:          map[string]graphstore.GraphNode{},
+		outEdges:       map[string][]graphstore.GraphEdge{},
+		inEdges:        map[string][]graphstore.GraphEdge{},
+		nodesByFile:    map[string][]graphstore.GraphNode{},
+		nodesByFileErr: map[string]error{},
+		getNodeErr:     map[string]error{},
+		outErr:         map[string]error{},
+		inErr:          map[string]error{},
 	}
 }
 
-// --- CodeGraphReader (only these are used) ---
+// addFileNode registers n under file f for the SeedSymbols enumeration path.
+func (f *fakeReader) addFileNode(file string, n graphstore.GraphNode) {
+	if _, ok := f.nodesByFile[file]; !ok {
+		f.files = append(f.files, file)
+	}
+	f.nodesByFile[file] = append(f.nodesByFile[file], n)
+}
+
+// --- CodeGraphReader ---
 
 func (f *fakeReader) GetNode(qn string) (*graphstore.GraphNode, error) {
+	if f.cancelOnGetNode != "" && qn == f.cancelOnGetNode && f.cancel != nil {
+		f.cancel()
+	}
 	if err := f.getNodeErr[qn]; err != nil {
 		return nil, err
 	}
@@ -53,6 +74,20 @@ func (f *fakeReader) GetNode(qn string) (*graphstore.GraphNode, error) {
 	}
 	cp := n
 	return &cp, nil
+}
+
+func (f *fakeReader) GetNodesByFile(file string) ([]graphstore.GraphNode, error) {
+	if err := f.nodesByFileErr[file]; err != nil {
+		return nil, err
+	}
+	return f.nodesByFile[file], nil
+}
+
+func (f *fakeReader) GetAllFiles() ([]string, error) {
+	if f.cancelOnListFiles && f.cancel != nil {
+		f.cancel()
+	}
+	return f.files, f.filesErr
 }
 
 func (f *fakeReader) GetEdgesBySource(qn string) ([]graphstore.GraphEdge, error) {
@@ -72,17 +107,14 @@ func (f *fakeReader) GetEdgesByTarget(qn string) ([]graphstore.GraphEdge, error)
 	return f.inEdges[qn], nil
 }
 
-func (f *fakeReader) SearchNodes(string, int) ([]graphstore.GraphNode, error) {
-	return f.searchResult, f.searchErr
-}
-
 // --- unused reader methods ---
 
-func (f *fakeReader) GetNodesByFile(string) ([]graphstore.GraphNode, error)  { return nil, nil }
-func (f *fakeReader) GetEdgesAmong([]string) ([]graphstore.GraphEdge, error) { return nil, nil }
-func (f *fakeReader) GetAllFiles() ([]string, error)                         { return nil, nil }
-func (f *fakeReader) GetMetadata(string) (string, error)                     { return "", nil }
-func (f *fakeReader) GetStats() (graphstore.GraphStats, error)               { return graphstore.GraphStats{}, nil }
+func (f *fakeReader) GetEdgesAmong([]string) ([]graphstore.GraphEdge, error)  { return nil, nil }
+func (f *fakeReader) SearchNodes(string, int) ([]graphstore.GraphNode, error) { return nil, nil }
+func (f *fakeReader) GetMetadata(string) (string, error)                      { return "", nil }
+func (f *fakeReader) GetStats() (graphstore.GraphStats, error) {
+	return graphstore.GraphStats{}, nil
+}
 func (f *fakeReader) GetImpactRadius([]string, int, int) (graphstore.ImpactResult, error) {
 	return graphstore.ImpactResult{}, nil
 }
@@ -124,43 +156,71 @@ func TestNew(t *testing.T) {
 
 func TestSeedSymbols(t *testing.T) {
 	f := newFake()
-	f.searchResult = []graphstore.GraphNode{
-		fn("pkg.Zebra", "go", 1, 10),
-		fn("pkg.Alpha", "go", 1, 5),
-		fn("pkg.PyThing", "python", 1, 5),
-		{Kind: graphstore.NodeKindFile, QualifiedName: "pkg/file.go", Language: "go"},
-		{Kind: graphstore.NodeKindFunction, QualifiedName: "pkg.TestX", Language: "go", IsTest: true},
-		{Kind: graphstore.NodeKindType, Name: "T", QualifiedName: "pkg.T", Language: "GO"}, // case-insensitive lang
-	}
-	q := mustNew(t, f)
+	// Spread candidates across multiple files, deliberately out of qualified-
+	// name order relative to file order, plus non-seed noise per file.
+	f.addFileNode("z.go", fn("pkg.Zebra", "go", 1, 10))
+	f.addFileNode("z.go", graphstore.GraphNode{Kind: graphstore.NodeKindFile, QualifiedName: "z.go", Language: "go"})
+	f.addFileNode("a.go", fn("pkg.Alpha", "go", 1, 5))
+	f.addFileNode("a.go", graphstore.GraphNode{Kind: graphstore.NodeKindFunction, QualifiedName: "pkg.TestX", Language: "go", IsTest: true})
+	f.addFileNode("m.py", fn("pkg.PyThing", "python", 1, 5))
+	f.addFileNode("t.go", graphstore.GraphNode{Kind: graphstore.NodeKindType, Name: "T", QualifiedName: "pkg.T", Language: "GO"}) // case-insensitive lang
 
+	q := mustNew(t, f)
 	seeds, err := q.SeedSymbols(context.Background(), eval.LanguageGo, 10)
 	if err != nil {
 		t.Fatalf("SeedSymbols: %v", err)
 	}
-	// Expect Alpha, T, Zebra (go functions/types, no file/test/python), sorted.
+	// Alpha, T, Zebra: go functions/types only, sorted by qualified name.
 	want := []string{"pkg.Alpha", "pkg.T", "pkg.Zebra"}
-	if len(seeds) != len(want) {
-		t.Fatalf("got %d seeds, want %d: %+v", len(seeds), len(want), seeds)
+	if got := nodeNames(seeds); !equalSet(got, want) {
+		t.Fatalf("seeds = %v, want %v", got, want)
 	}
-	for i, w := range want {
-		if seeds[i].QualifiedName != w {
-			t.Errorf("seed[%d] = %q, want %q", i, seeds[i].QualifiedName, w)
+}
+
+// TestSeedSymbolsDeterministic proves the same (lang, limit) on a fixed graph
+// yields the same ordered list across repeated runs (R4 reproducibility), and
+// that a valid seed in a lexically-late file is NOT dropped by any pre-filter
+// truncation — the cap is applied after a total order over the COMPLETE set.
+func TestSeedSymbolsDeterministic(t *testing.T) {
+	f := newFake()
+	// Many files; the lexically-smallest qualified names live in the
+	// lexically-largest files, so a truncating pre-filter would drop them.
+	f.addFileNode("zzz.go", fn("pkg.Aaa", "go", 1, 2))
+	f.addFileNode("yyy.go", fn("pkg.Bbb", "go", 1, 2))
+	f.addFileNode("aaa.go", fn("pkg.Yyy", "go", 1, 2))
+	f.addFileNode("bbb.go", fn("pkg.Zzz", "go", 1, 2))
+	q := mustNew(t, f)
+
+	first, err := q.SeedSymbols(context.Background(), eval.LanguageGo, 2)
+	if err != nil {
+		t.Fatalf("SeedSymbols: %v", err)
+	}
+	// The two smallest qualified names win regardless of file order.
+	if got := nodeNames(first); !equalSet(got, []string{"pkg.Aaa", "pkg.Bbb"}) {
+		t.Fatalf("cap picked wrong seeds (truncation defeated filtering?): %v", got)
+	}
+	for i := 0; i < 5; i++ {
+		again, err := q.SeedSymbols(context.Background(), eval.LanguageGo, 2)
+		if err != nil {
+			t.Fatalf("SeedSymbols run %d: %v", i, err)
+		}
+		if !equalSet(nodeNames(again), nodeNames(first)) {
+			t.Fatalf("non-deterministic: run %d = %v, first = %v", i, nodeNames(again), nodeNames(first))
 		}
 	}
 }
 
-func TestSeedSymbolsLimitTruncates(t *testing.T) {
+func TestSeedSymbolsDedupesByQualifiedName(t *testing.T) {
 	f := newFake()
-	f.searchResult = []graphstore.GraphNode{
-		fn("pkg.C", "go", 1, 2), fn("pkg.A", "go", 1, 2), fn("pkg.B", "go", 1, 2),
-	}
-	seeds, err := mustNew(t, f).SeedSymbols(context.Background(), eval.LanguageGo, 2)
+	// Same qualified name reported under two files collapses to one seed.
+	f.addFileNode("a.go", fn("pkg.Dup", "go", 1, 2))
+	f.addFileNode("b.go", fn("pkg.Dup", "go", 1, 2))
+	seeds, err := mustNew(t, f).SeedSymbols(context.Background(), eval.LanguageGo, 10)
 	if err != nil {
 		t.Fatalf("SeedSymbols: %v", err)
 	}
-	if len(seeds) != 2 || seeds[0].QualifiedName != "pkg.A" || seeds[1].QualifiedName != "pkg.B" {
-		t.Fatalf("limit truncation wrong: %+v", seeds)
+	if len(seeds) != 1 {
+		t.Fatalf("duplicate qualified name should collapse, got %d: %v", len(seeds), nodeNames(seeds))
 	}
 }
 
@@ -179,10 +239,28 @@ func TestSeedSymbolsErrors(t *testing.T) {
 		t.Errorf("cancelled ctx: got %v", err)
 	}
 
-	fErr := newFake()
-	fErr.searchErr = errors.New("boom")
-	if _, err := mustNew(t, fErr).SeedSymbols(context.Background(), eval.LanguageGo, 5); err == nil {
-		t.Error("search error should propagate")
+	fFiles := newFake()
+	fFiles.filesErr = errors.New("files boom")
+	if _, err := mustNew(t, fFiles).SeedSymbols(context.Background(), eval.LanguageGo, 5); err == nil {
+		t.Error("GetAllFiles error should propagate")
+	}
+
+	fNodes := newFake()
+	fNodes.files = []string{"a.go"}
+	fNodes.nodesByFileErr["a.go"] = errors.New("nodes boom")
+	if _, err := mustNew(t, fNodes).SeedSymbols(context.Background(), eval.LanguageGo, 5); err == nil {
+		t.Error("GetNodesByFile error should propagate")
+	}
+
+	// Cancellation observed mid-enumeration: the top guard passes, then
+	// GetAllFiles fires cancel, so the per-file loop check catches it.
+	ctx, cancelMid := context.WithCancel(context.Background())
+	fMid := newFake()
+	fMid.cancel = cancelMid
+	fMid.cancelOnListFiles = true
+	fMid.files = []string{"a.go"}
+	if _, err := mustNew(t, fMid).SeedSymbols(ctx, eval.LanguageGo, 5); !errors.Is(err, context.Canceled) {
+		t.Errorf("mid-enumeration cancel: got %v", err)
 	}
 }
 
@@ -239,7 +317,6 @@ func TestNeighborhoodForDepthOneAndTwo(t *testing.T) {
 	if len(d2.Edges) != 4 {
 		t.Errorf("depth 2 edges = %d, want 4", len(d2.Edges))
 	}
-	// edges must be sorted deterministically.
 	for i := 1; i < len(d2.Edges); i++ {
 		if edgeKey(d2.Edges[i-1]) > edgeKey(d2.Edges[i]) {
 			t.Errorf("edges not sorted at %d", i)
@@ -281,14 +358,12 @@ func TestNeighborhoodForErrors(t *testing.T) {
 		t.Errorf("cancelled ctx: %v", err)
 	}
 
-	// GetNode error on root.
 	fRoot := newFake()
 	fRoot.getNodeErr["root"] = errors.New("db down")
 	if _, err := mustNew(t, fRoot).NeighborhoodFor(context.Background(), "root", 1); err == nil {
 		t.Error("root GetNode error should propagate")
 	}
 
-	// Outbound edge error during expand.
 	fOut := newFake()
 	fOut.nodes["root"] = fn("root", "go", 1, 2)
 	fOut.outErr["root"] = errors.New("out boom")
@@ -296,7 +371,6 @@ func TestNeighborhoodForErrors(t *testing.T) {
 		t.Error("outbound edge error should propagate")
 	}
 
-	// Inbound edge error during expand.
 	fIn := newFake()
 	fIn.nodes["root"] = fn("root", "go", 1, 2)
 	fIn.inErr["root"] = errors.New("in boom")
@@ -304,7 +378,6 @@ func TestNeighborhoodForErrors(t *testing.T) {
 		t.Error("inbound edge error should propagate")
 	}
 
-	// Neighbor GetNode error.
 	fNb := newFake()
 	fNb.nodes["root"] = fn("root", "go", 1, 2)
 	fNb.outEdges["root"] = []graphstore.GraphEdge{callEdge("root", "n")}
@@ -314,16 +387,55 @@ func TestNeighborhoodForErrors(t *testing.T) {
 	}
 }
 
-func TestNeighborhoodForCancelMidTraversal(t *testing.T) {
+// TestNeighborhoodForCancelDuringExpand exercises the post-expand ctx check:
+// depth 1 (the final and only hop), cancellation fires while fetching the
+// root's edges, and must be observed rather than swallowed.
+func TestNeighborhoodForCancelDuringExpand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	f := newFake()
 	f.cancel = cancel
-	f.cancelOnSource = "root" // cancel fires while expanding hop 0
+	f.cancelOnSource = "root"
 	f.nodes["root"] = fn("root", "go", 1, 2)
 	f.nodes["a"] = fn("a", "go", 1, 2)
 	f.outEdges["root"] = []graphstore.GraphEdge{callEdge("root", "a")}
+	if _, err := mustNew(t, f).NeighborhoodFor(ctx, "root", 1); !errors.Is(err, context.Canceled) {
+		t.Errorf("final-hop cancel during expand: got %v", err)
+	}
+}
+
+// TestNeighborhoodForCancelBetweenNeighbors exercises the per-neighbor ctx
+// check: depth 1, cancellation fires resolving the first neighbor, so the
+// second neighbor's check catches it within the same (final) hop.
+func TestNeighborhoodForCancelBetweenNeighbors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := newFake()
+	f.cancel = cancel
+	f.cancelOnGetNode = "a"
+	for _, n := range []string{"root", "a", "b"} {
+		f.nodes[n] = fn(n, "go", 1, 2)
+	}
+	f.outEdges["root"] = []graphstore.GraphEdge{callEdge("root", "a"), callEdge("root", "b")}
+	if _, err := mustNew(t, f).NeighborhoodFor(ctx, "root", 1); !errors.Is(err, context.Canceled) {
+		t.Errorf("final-hop cancel between neighbors: got %v", err)
+	}
+}
+
+// TestNeighborhoodForCancelBetweenFrontierNames exercises the per-name ctx
+// check in stepFrontier: at depth 2, cancellation becomes pending while the
+// first frontier name is processed successfully, so the next name's check
+// catches it at the start of the following hop's work.
+func TestNeighborhoodForCancelBetweenFrontierNames(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	f := newFake()
+	f.cancel = cancel
+	f.cancelOnGetNode = "c" // fires on c's resolution during hop 1, name "a"
+	for _, n := range []string{"root", "a", "b", "c"} {
+		f.nodes[n] = fn(n, "go", 1, 2)
+	}
+	f.outEdges["root"] = []graphstore.GraphEdge{callEdge("root", "a"), callEdge("root", "b")}
+	f.outEdges["a"] = []graphstore.GraphEdge{callEdge("a", "c")}
 	if _, err := mustNew(t, f).NeighborhoodFor(ctx, "root", 2); !errors.Is(err, context.Canceled) {
-		t.Errorf("mid-traversal cancel: got %v", err)
+		t.Errorf("cancel between frontier names: got %v", err)
 	}
 }
 
