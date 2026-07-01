@@ -371,6 +371,43 @@ func TestDecodeRejectsUnknownField(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsTrailingData(t *testing.T) {
+	var r Record
+	for _, raw := range []string{
+		`{"actor":"a"}{"garbage":true}`, // second object on the line
+		`{"actor":"a"}junk`,             // raw bytes after the object
+		`{"actor":"a"} x`,               // interior space then junk
+	} {
+		if err := decode([]byte(raw), &r); !errors.Is(err, ErrTrailingData) {
+			t.Errorf("decode(%q) = %v, want ErrTrailingData", raw, err)
+		}
+	}
+	// A clean object still decodes.
+	if err := decode([]byte(`{"actor":"a"}`), &r); err != nil {
+		t.Errorf("clean line rejected: %v", err)
+	}
+}
+
+func TestVerifyDetectsTrailingJunkTamper(t *testing.T) {
+	// Tamper-evidence hole: junk appended after a mid-chain record's JSON on
+	// the SAME line changes the file, but the chain hashes canonical
+	// re-marshaled bytes, so neither parsing nor Verify caught it before
+	// decode enforced full-line consumption.
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	lines := readLogLines(t, l)
+	lines[1] += `{"garbage":true}`
+	writeLogLines(t, l, lines)
+
+	if _, err := l.Records(); !errors.Is(err, ErrTrailingData) || !strings.Contains(err.Error(), "line 2") {
+		t.Fatalf("Records() must reject trailing junk on line 2, got %v", err)
+	}
+	if _, err := l.Verify(); !errors.Is(err, ErrTrailingData) {
+		t.Fatalf("Verify() must fail on trailing junk, got %v", err)
+	}
+}
+
 func TestVerifyEmptyAndValidChain(t *testing.T) {
 	restoreSeams(t)
 	l := tempLog(t)

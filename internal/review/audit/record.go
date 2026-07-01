@@ -126,12 +126,31 @@ func (e Event) validate() error {
 // error branch is coverable in tests.
 var marshal = json.Marshal
 
+// ErrTrailingData is returned when a log line carries bytes after the record's
+// JSON object. Decoder.Decode alone stops at the end of the first value and
+// would silently ignore appended garbage — but the chain hashes canonical
+// re-marshaled bytes, so junk smuggled onto a line would otherwise change the
+// file without tripping Verify. Rejecting it at parse time closes that
+// tamper-evidence hole.
+var ErrTrailingData = errors.New("audit: trailing data after record JSON")
+
 // decode parses one JSON-lines record. Unknown fields are rejected so a
-// silently reshaped log line is caught rather than dropped.
+// silently reshaped log line is caught rather than dropped, and the record's
+// JSON must consume the entire (pre-trimmed) line — any trailing bytes are a
+// parse error, not ignorable noise.
 func decode(raw []byte, r *Record) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
-	return dec.Decode(r)
+	if err := dec.Decode(r); err != nil {
+		return err
+	}
+	// raw is whitespace-trimmed by the caller, so a fully-consumed line means
+	// the decoder's offset reached its end; anything short of that is data
+	// hiding after the object.
+	if dec.InputOffset() != int64(len(raw)) {
+		return ErrTrailingData
+	}
+	return nil
 }
 
 // canonicalBytes returns the deterministic JSON encoding of a record. Because
