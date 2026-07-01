@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
 // DefaultLogName is the audit log filename under the review state directory.
@@ -35,7 +37,10 @@ var (
 	// convention. It is a seam so writeLine's write/close error branches are
 	// coverable with an injected failing file.
 	openAppend = func(path string) (appendFile, error) {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		// fsops.MkdirAll (not os.MkdirAll) so the Windows fallback + hardening
+		// apply uniformly — the FS-helpers guard forbids raw os.* mutators
+		// outside internal/fsops.
+		if err := fsops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return nil, fmt.Errorf("audit: create log dir: %w", err)
 		}
 		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
