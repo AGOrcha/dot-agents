@@ -210,6 +210,32 @@ func TestApplySweepAction_CreatePlanStructure(t *testing.T) {
 	}
 }
 
+// Covers the SweepActionArchiveCompletedPlans branch: the sweep performs the
+// on-disk plans/->history/ move but passes noCommit=true (the archive commit
+// helper is cwd-bound and would target the wrong repo cross-project), so the
+// move lands uncommitted. Asserts the plan is archived without a git commit.
+func TestApplySweepAction_ArchiveCompletedPlan(t *testing.T) {
+	repo := t.TempDir()
+	setupArchivePlan(t, repo, "sweepable", "completed")
+	srcDir := filepath.Join(repo, ".agents", "workflow", "plans", "sweepable")
+	dstDir := filepath.Join(repo, ".agents", "history", "sweepable")
+
+	action := SweepActionItem{
+		Project: ManagedProject{Name: "p", Path: repo},
+		Action:  SweepActionArchiveCompletedPlans,
+		PlanID:  "sweepable",
+	}
+	if err := applySweepAction(action); err != nil {
+		t.Fatalf("applySweepAction(archive): %v", err)
+	}
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Error("source plan dir should be removed after sweep archive")
+	}
+	if _, err := os.Stat(dstDir); err != nil {
+		t.Errorf("history dir should exist after sweep archive: %v", err)
+	}
+}
+
 func TestApplySweepAction_InformationalNoOp(t *testing.T) {
 	for _, kind := range []SweepActionType{SweepActionCreateCheckpointReminder, SweepActionFlagStaleProposals} {
 		action := SweepActionItem{
