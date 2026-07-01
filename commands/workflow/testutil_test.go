@@ -28,8 +28,9 @@ func init() {
 	InitTestDeps(Deps{
 		ErrNoProject: errors.New("workflow commands must run inside a project directory"),
 		Flags: GlobalFlags{
-			JSON: func() bool { return workflowTestJSON },
-			Yes:  func() bool { return false },
+			JSON:   func() bool { return workflowTestJSON },
+			Yes:    func() bool { return false },
+			DryRun: func() bool { return false },
 		},
 		ErrorWithHints: func(msg string, hints ...string) error {
 			return errors.New(strings.TrimSpace(msg))
