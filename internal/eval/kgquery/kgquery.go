@@ -130,46 +130,77 @@ func (q *Querier) NeighborhoodFor(ctx context.Context, qualifiedName string, dep
 		return Neighborhood{}, fmt.Errorf("kgquery: symbol %q not found", qualifiedName)
 	}
 
-	visitedNodes := map[string]graphstore.GraphNode{qualifiedName: *root}
-	edgeSet := map[string]graphstore.GraphEdge{}
+	tr := &traversal{
+		visited: map[string]graphstore.GraphNode{qualifiedName: *root},
+		edges:   map[string]graphstore.GraphEdge{},
+	}
 	frontier := []string{qualifiedName}
-
 	for hop := 0; hop < depth && len(frontier) > 0; hop++ {
 		if err := ctx.Err(); err != nil {
 			return Neighborhood{}, err
 		}
-		var next []string
-		for _, name := range frontier {
-			neighbors, err := q.expand(name, edgeSet)
-			if err != nil {
-				return Neighborhood{}, err
-			}
-			for _, nb := range neighbors {
-				if _, seen := visitedNodes[nb]; seen {
-					continue
-				}
-				node, err := q.reader.GetNode(nb)
-				if err != nil {
-					return Neighborhood{}, fmt.Errorf("kgquery: get neighbor %q: %w", nb, err)
-				}
-				if node == nil {
-					// Dangling edge target: record it visited so we do not
-					// re-resolve it, but it contributes no node.
-					visitedNodes[nb] = graphstore.GraphNode{}
-					continue
-				}
-				visitedNodes[nb] = *node
-				next = append(next, nb)
-			}
+		next, err := q.stepFrontier(frontier, tr)
+		if err != nil {
+			return Neighborhood{}, err
 		}
 		frontier = next
 	}
 
 	return Neighborhood{
 		Root:  *root,
-		Nodes: sortedNodes(visitedNodes),
-		Edges: sortedEdges(edgeSet),
+		Nodes: sortedNodes(tr.visited),
+		Edges: sortedEdges(tr.edges),
 	}, nil
+}
+
+// traversal is the mutable working state of a NeighborhoodFor BFS: the nodes
+// already resolved (keyed by qualified name) and the edges gathered so far
+// (keyed by edge identity for dedupe).
+type traversal struct {
+	visited map[string]graphstore.GraphNode
+	edges   map[string]graphstore.GraphEdge
+}
+
+// stepFrontier expands every name in the current frontier by one hop and
+// returns the next frontier (the newly discovered, resolvable neighbors).
+func (q *Querier) stepFrontier(frontier []string, tr *traversal) ([]string, error) {
+	var next []string
+	for _, name := range frontier {
+		discovered, err := q.visitNeighbors(name, tr)
+		if err != nil {
+			return nil, err
+		}
+		next = append(next, discovered...)
+	}
+	return next, nil
+}
+
+// visitNeighbors records name's edges into tr, resolves each not-yet-seen
+// adjacent symbol, and returns the ones that resolved to a real node.
+// Dangling edge targets are marked visited (via a zero-value placeholder) so
+// they are neither re-resolved nor emitted as phantom nodes.
+func (q *Querier) visitNeighbors(name string, tr *traversal) ([]string, error) {
+	neighbors, err := q.expand(name, tr.edges)
+	if err != nil {
+		return nil, err
+	}
+	var discovered []string
+	for _, nb := range neighbors {
+		if _, seen := tr.visited[nb]; seen {
+			continue
+		}
+		node, err := q.reader.GetNode(nb)
+		if err != nil {
+			return nil, fmt.Errorf("kgquery: get neighbor %q: %w", nb, err)
+		}
+		if node == nil {
+			tr.visited[nb] = graphstore.GraphNode{}
+			continue
+		}
+		tr.visited[nb] = *node
+		discovered = append(discovered, nb)
+	}
+	return discovered, nil
 }
 
 // expand loads the outbound and inbound edges of name, records them in
