@@ -132,7 +132,9 @@ func applySweepAction(item SweepActionItem) error {
 		// These are informational; logged but no filesystem mutation
 		return nil
 	case SweepActionArchiveCompletedPlans:
-		return runWorkflowPlanArchive(item.Project.Path, []string{item.PlanID}, false, false)
+		// Commit-by-default (noCommit=false): a swept archive must persist the
+		// move for the same reason a manual archive does.
+		return runWorkflowPlanArchive(item.Project.Path, []string{item.PlanID}, false, false, false)
 	default:
 		return fmt.Errorf("unknown sweep action %q", item.Action)
 	}

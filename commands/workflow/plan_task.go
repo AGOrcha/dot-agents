@@ -2098,11 +2098,16 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 // Guard: plan status must be "completed" unless --force is set.
 // Bulk: each plan is archived in sequence; a failure for one plan is logged and
 // iteration continues.
-func runWorkflowPlanArchive(projectPath string, planIDs []string, force, dryRun bool) error {
+//
+// noCommit suppresses the per-plan workflow-state commit that otherwise persists
+// each archive move (see archiveSinglePlan). Commit-by-default is the intent:
+// the fresh-clone / worktree loop model discards an uncommitted move, so a
+// half-archived working tree is the failure mode this command exists to avoid.
+func runWorkflowPlanArchive(projectPath string, planIDs []string, force, dryRun, noCommit bool) error {
 	var firstErr error
 	var archivePaths, activeDirsRemoved []string
 	for _, planID := range planIDs {
-		if err := archiveSinglePlan(projectPath, planID, force, dryRun); err != nil {
+		if err := archiveSinglePlan(projectPath, planID, force, dryRun, noCommit); err != nil {
 			fmt.Fprintf(os.Stderr, "archive plan %q: %v\n", planID, err)
 			if firstErr == nil {
 				firstErr = err
@@ -2125,7 +2130,7 @@ func runWorkflowPlanArchive(projectPath string, planIDs []string, force, dryRun 
 	return firstErr
 }
 
-func archiveSinglePlan(projectPath, planID string, force, dryRun bool) error {
+func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool) error {
 	plan, err := loadCanonicalPlan(projectPath, planID)
 	if err != nil {
 		return fmt.Errorf(errPlanNotFoundWithCause, planID, err)
@@ -2164,6 +2169,23 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun bool) error {
 			return fmt.Errorf("remove source dir %s: %w", srcDir, err)
 		}
 		ui.Success(fmt.Sprintf("Archived plan %q to %s", planID, config.DisplayPath(dstDir)))
+
+		// Persist the archive move by default. At this point the working tree is
+		// in its final archived state — plans/<id> is gone (tracked deletions),
+		// history/<id> is populated (untracked additions), and PLAN.yaml is
+		// stamped archived. iterationCloseCommit stages the workflow-managed
+		// path set (DerivePathSet covers both .agents/workflow/ and
+		// .agents/history/, so the deletion AND the addition land as ONE commit)
+		// and commits, exactly like advance --commit-state. Without this the
+		// fresh-clone / worktree loop model discards the uncommitted move and the
+		// plan never actually archives. runWorkflowCommit honors the
+		// commit.disable opt-out internally; --no-commit is the explicit operator
+		// opt-out for batching several archives into one manual commit.
+		if noCommit {
+			fmt.Printf("  archive: --no-commit set; skipping workflow-state commit for %q\n", planID)
+		} else if err := iterationCloseCommit(os.Stdout); err != nil {
+			return fmt.Errorf("commit archive move for %q: %w", planID, err)
+		}
 	} else {
 		fmt.Printf("  [dry-run] remove source dir %s\n", srcDir)
 	}

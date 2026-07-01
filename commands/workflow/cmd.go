@@ -275,12 +275,21 @@ func newWorkflowPlanUpdateCmd() *cobra.Command {
 func newWorkflowPlanArchiveCmd() *cobra.Command {
 	var planArchivePlanIDs string
 	var planArchiveForce bool
+	var planArchiveNoCommit bool
 	planArchiveCmd := &cobra.Command{
 		Use:   "archive",
 		Short: "Archive one or more completed canonical plans",
+		Long: "Moves each completed plan from .agents/workflow/plans/<id> into\n" +
+			".agents/history/<id>, stamps status=archived, and — by default —\n" +
+			"commits the move as a single workflow-state commit so it survives the\n" +
+			"fresh-clone / worktree loop model (an uncommitted move is discarded\n" +
+			"before it lands on master). Pass --no-commit to leave the archived tree\n" +
+			"uncommitted (for batching); the commit.disable workflow preference is\n" +
+			"honored regardless.",
 		Example: deps.ExampleBlock(
 			"  da workflow plan archive --plan repo-cleanup",
 			"  da workflow plan archive --plan plan-a,plan-b --force",
+			"  da workflow plan archive --plan repo-cleanup --no-commit",
 			"  da -n workflow plan archive --plan repo-cleanup",
 		),
 		Args: deps.NoArgsWithHints("Use --plan to specify one or more plan IDs (comma-separated)."),
@@ -302,11 +311,12 @@ func newWorkflowPlanArchiveCmd() *cobra.Command {
 					"Pass --plan with one or more comma-separated plan IDs, for example --plan my-plan.",
 				)
 			}
-			return runWorkflowPlanArchive(project.Path, cleaned, planArchiveForce, deps.Flags.DryRun())
+			return runWorkflowPlanArchive(project.Path, cleaned, planArchiveForce, deps.Flags.DryRun(), planArchiveNoCommit)
 		},
 	}
 	planArchiveCmd.Flags().StringVar(&planArchivePlanIDs, "plan", "", "Comma-separated plan IDs to archive (required)")
 	planArchiveCmd.Flags().BoolVar(&planArchiveForce, "force", false, "Skip completed-status guard and archive regardless of plan status")
+	planArchiveCmd.Flags().BoolVar(&planArchiveNoCommit, "no-commit", false, "Do not commit the archive move (leave the archived tree staged for a manual/batched commit)")
 	_ = planArchiveCmd.MarkFlagRequired("plan")
 	return planArchiveCmd
 }

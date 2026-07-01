@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -63,7 +65,7 @@ func TestArchiveSinglePlan_RenameWhenNoHistory(t *testing.T) {
 	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Source should be gone, destination should exist
@@ -100,7 +102,7 @@ func TestArchiveSinglePlan_MergeWithDMASkip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -148,7 +150,7 @@ func TestArchiveSinglePlan_IdenticalHashSkipped(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 	_ = os.Chtimes(dstExtra, future, future)
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -189,7 +191,7 @@ func TestArchiveSinglePlan_DifferingFileOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -230,7 +232,7 @@ func TestArchiveSinglePlan_HistoryNewerSkipped(t *testing.T) {
 	}
 	// dst mtime is now (newer than src)
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -251,7 +253,7 @@ func TestArchiveSinglePlan_DryRun(t *testing.T) {
 	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
 
-	if err := archiveSinglePlan(proj, "myplan", false, true); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, true, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -278,7 +280,7 @@ func TestArchiveSinglePlan_NonCompletedGuard(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "myplan", "active")
 
-	err := archiveSinglePlan(proj, "myplan", false, false)
+	err := archiveSinglePlan(proj, "myplan", false, false, true)
 	if err == nil {
 		t.Fatal("expected error for non-completed plan without --force")
 	}
@@ -292,7 +294,7 @@ func TestArchiveSinglePlan_ForceBypassesGuard(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "myplan", "active")
 
-	if err := archiveSinglePlan(proj, "myplan", true, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", true, false, true); err != nil {
 		t.Fatalf("--force should bypass status guard; got: %v", err)
 	}
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
@@ -338,7 +340,7 @@ func TestRunWorkflowPlanArchive_Bulk(t *testing.T) {
 	setupArchivePlan(t, proj, "plan-a", "completed")
 	setupArchivePlan(t, proj, "plan-b", "completed")
 
-	err := runWorkflowPlanArchive(proj, []string{"plan-a", "plan-b"}, false, false)
+	err := runWorkflowPlanArchive(proj, []string{"plan-a", "plan-b"}, false, false, true)
 	if err != nil {
 		t.Fatalf("bulk archive should succeed for both: %v", err)
 	}
@@ -357,7 +359,7 @@ func TestRunWorkflowPlanArchive_BulkPartialFailure(t *testing.T) {
 	// plan-ok is good, plan-bad does not exist
 	setupArchivePlan(t, proj, "plan-ok", "completed")
 
-	err := runWorkflowPlanArchive(proj, []string{"plan-bad", "plan-ok"}, false, false)
+	err := runWorkflowPlanArchive(proj, []string{"plan-bad", "plan-ok"}, false, false, true)
 	// Should return the first error
 	if err == nil {
 		t.Fatal("expected error from missing plan-bad")
@@ -368,6 +370,180 @@ func TestRunWorkflowPlanArchive_BulkPartialFailure(t *testing.T) {
 	if _, err := os.Stat(dstDir); err != nil {
 		t.Errorf("plan-ok should still be archived after plan-bad failure: %v", err)
 	}
+}
+
+// ── archive-commit (non-persistence fix) tests ─────────────────────────────────
+
+// Commit-by-default: archiveSinglePlan invokes iterationCloseCommit once, and
+// only AFTER the working tree is in its final archived state (source dir gone,
+// history dir populated) so the deletion + addition are staged together as one
+// commit. Uses the iterationCloseCommit test seam — the same seam advance /
+// merge-back tests rebind — so no real git repo is needed to prove invocation.
+func TestArchiveSinglePlan_InvokesCommitByDefault(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+
+	var calls int
+	var srcGoneAtCommit, dstPresentAtCommit bool
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error {
+		calls++
+		// The commit hook must fire with the tree already in its final state.
+		if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+			srcGoneAtCommit = true
+		}
+		if _, err := os.Stat(filepath.Join(dstDir, "PLAN.yaml")); err == nil {
+			dstPresentAtCommit = true
+		}
+		return nil
+	}
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	if err := archiveSinglePlan(proj, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected commit hook invoked exactly once, got %d", calls)
+	}
+	if !srcGoneAtCommit {
+		t.Error("commit hook fired before the source plan dir was removed")
+	}
+	if !dstPresentAtCommit {
+		t.Error("commit hook fired before the history dir was populated")
+	}
+}
+
+// A commit-hook failure aborts the archive with a wrapped error so the operator
+// learns the move did not persist.
+func TestArchiveSinglePlan_CommitFailurePropagates(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	err := archiveSinglePlan(proj, "myplan", false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "commit archive move") {
+		t.Fatalf("expected wrapped commit error, got %v", err)
+	}
+}
+
+// --no-commit suppresses the commit hook entirely while still performing the
+// filesystem move.
+func TestArchiveSinglePlan_NoCommitSkipsCommit(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+
+	var calls int
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { calls++; return nil }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("--no-commit must not invoke the commit hook, got %d calls", calls)
+	}
+	// The move still happens; only the commit is suppressed.
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Error("source dir should be removed even with --no-commit")
+	}
+	if _, err := os.Stat(dstDir); err != nil {
+		t.Errorf("history dir should exist even with --no-commit: %v", err)
+	}
+}
+
+// End-to-end proof of the fix: in a real git repo where the plan dir is tracked,
+// a default (commit-enabled) archive stages the deletion of plans/<id> AND the
+// addition of history/<id> as one real commit, leaving `git status` CLEAN. This
+// is the exact scenario the fresh-clone / worktree loop model requires: without
+// the commit the move is discarded before it lands on master.
+func TestArchiveSinglePlan_RealGitCommitLeavesCleanTree(t *testing.T) {
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
+
+	setupArchivePlan(t, dir, "myplan", "completed")
+	// Track the plan dir so the archive produces a real deletion side.
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "seed plan")
+	headBefore := gitOut(t, dir, "rev-parse", "HEAD")
+
+	if err := archiveSinglePlan(dir, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+
+	// The move landed on disk.
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "workflow", "plans", "myplan")); !os.IsNotExist(err) {
+		t.Error("source plan dir should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "history", "myplan", "PLAN.yaml")); err != nil {
+		t.Errorf("history PLAN.yaml should exist: %v", err)
+	}
+	// The key assertion: a new commit landed AND the tree is clean, so the move
+	// would persist through a push (no uncommitted residue to be discarded).
+	if got := gitOut(t, dir, "rev-parse", "HEAD"); got == headBefore {
+		t.Error("expected a new commit for the archive move; HEAD did not advance")
+	}
+	if status := gitOut(t, dir, "status", "--porcelain"); status != "" {
+		t.Errorf("working tree should be clean after archive commit, got:\n%s", status)
+	}
+}
+
+// commit.disable=true flows through to the real commit hook: the move happens
+// but no commit lands, leaving the tree dirty (the operator opted out).
+func TestArchiveSinglePlan_CommitDisabledLeavesUncommitted(t *testing.T) {
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
+
+	setupArchivePlan(t, dir, "myplan", "completed")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "seed plan")
+	headBefore := gitOut(t, dir, "rev-parse", "HEAD")
+
+	priorDisabled := commitDisabled
+	commitDisabled = func() (bool, string) { return true, "commit.disable=true in workflow preferences" }
+	t.Cleanup(func() { commitDisabled = priorDisabled })
+
+	if err := archiveSinglePlan(dir, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	// No commit landed (opt-out honored inside runWorkflowCommit).
+	if got := gitOut(t, dir, "rev-parse", "HEAD"); got != headBefore {
+		t.Error("commit.disable=true should not advance HEAD")
+	}
+	// Move still happened, so the tree is dirty (uncommitted).
+	if status := gitOut(t, dir, "status", "--porcelain"); status == "" {
+		t.Error("expected dirty tree when commit is disabled (move uncommitted)")
+	}
+}
+
+// gitRun runs a git command in dir, failing the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE=2026-05-23T00:00:00Z", "GIT_COMMITTER_DATE=2026-05-23T00:00:00Z",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// gitOut runs a git command in dir and returns trimmed stdout, failing on error.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ── selectAllEligibleTasks tests ───────────────────────────────────────────────
@@ -2989,7 +3165,7 @@ func TestRunWorkflowPlanGraph_LoadError(t *testing.T) {
 func TestRunWorkflowPlanArchive_PlanNotFound(t *testing.T) {
 	repo := t.TempDir()
 	chdirForCov(t, repo)
-	err := runWorkflowPlanArchive(repo, []string{"no-such"}, false, true)
+	err := runWorkflowPlanArchive(repo, []string{"no-such"}, false, true, true)
 	if err == nil {
 		t.Fatal("expected plan-not-found error")
 	}
@@ -3761,7 +3937,7 @@ func TestRunWorkflowTaskUpdate_UpdatesNotesAndWriteScope(t *testing.T) {
 
 func TestArchiveSinglePlan_RefusesNonCompletedWithoutForce(t *testing.T) {
 	repo := setupTestProject(t)
-	err := archiveSinglePlan(repo, "plan-001", false, false)
+	err := archiveSinglePlan(repo, "plan-001", false, false, true)
 	if err == nil || !strings.Contains(err.Error(), "completed") {
 		t.Fatalf("expected non-completed guard error, got %v", err)
 	}
@@ -3899,7 +4075,7 @@ func TestRunWorkflowTaskAdd_WithFullCSVFields(t *testing.T) {
 func TestRunWorkflowPlanArchive_EmptyList(t *testing.T) {
 	repo := setupTestProject(t)
 
-	if err := runWorkflowPlanArchive(repo, nil, false, false); err != nil {
+	if err := runWorkflowPlanArchive(repo, nil, false, false, true); err != nil {
 		t.Fatalf("empty plan archive should be a no-op, got %v", err)
 	}
 }
