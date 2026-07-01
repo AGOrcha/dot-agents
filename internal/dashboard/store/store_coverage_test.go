@@ -62,8 +62,8 @@ func TestMapBreakdownAndVerifiersEmpty(t *testing.T) {
 
 func TestPerIterationRefUnscoredInSessionSidecar(t *testing.T) {
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-x", "h", 0, false, false)
-	writeV2Iter(t, dir, 2, "sess-x", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-x", "h")
+	plainIter(t, dir, 2, "sess-x", "h")
 	// Session sidecar present with one scored + one UNSCORED per-iteration ref.
 	writeSessionScore(t, dir, "sess-x", []int{1, 2}, 0.7, "good", []scoring.SessionIterRef{
 		{Iteration: 1, Scored: true, Value: 0.7, Band: "good"},
@@ -84,7 +84,7 @@ func TestPerIterationRefUnscoredInSessionSidecar(t *testing.T) {
 
 func TestReadDirMtimeSkipsSubdirs(t *testing.T) {
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-a", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-a", "h")
 	if err := os.Mkdir(filepath.Join(dir, "iter-2.yaml"), 0o755); err != nil {
 		t.Fatal(err) // a directory that name-matches must be ignored
 	}
@@ -103,7 +103,7 @@ func TestReadErrorBranches(t *testing.T) {
 		t.Skip("symlink creation is privileged on Windows")
 	}
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-a", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-a", "h")
 	// Dangling symlink sidecar -> decodeYAML ReadFile error branch.
 	if err := os.Symlink(filepath.Join(dir, "nope-score"), filepath.Join(dir, "iter-1.score.yaml")); err != nil {
 		t.Skipf("symlink unsupported: %v", err)

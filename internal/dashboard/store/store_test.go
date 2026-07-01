@@ -32,21 +32,39 @@ func writeFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// v2Iter writes a v2 iteration record. withTokens adds a session_tokens block
-// carrying the given cache hit rate; withVerifier adds one passing verifier.
-func writeV2Iter(t *testing.T, dir string, n int, sid, harness string, cacheHit float64, withTokens, withVerifier bool) {
+// iterOpts describes a v2 iteration-record fixture. withTokens adds a
+// session_tokens block carrying cacheHitRate; withVerifier adds one passing
+// verifier. Bundled into a struct so the writer stays under the argument limit.
+type iterOpts struct {
+	n            int
+	sid          string
+	harness      string
+	cacheHitRate float64
+	withTokens   bool
+	withVerifier bool
+}
+
+// writeV2Iter writes a v2 iteration record described by o.
+func writeV2Iter(t *testing.T, dir string, o iterOpts) {
 	t.Helper()
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "schema_version: 2\niteration: %d\ndate: \"2026-05-01\"\nwave: \"w1\"\ntask_id: \"task-%d\"\ncommit: \"commit%d\"\nfiles_changed: %d\nlines_added: %d\nlines_removed: %d\n", n, n, n, n, n*10, n*2)
-	fmt.Fprintf(&b, "agent:\n  session_id: \"%s\"\n  harness: \"%s\"\n  model: \"m-%s\"\n", sid, harness, harness)
-	fmt.Fprintf(&b, "impl:\n  summary: \"impl %d\"\n  retries: %d\n", n, n)
-	if withTokens {
-		fmt.Fprintf(&b, "session_tokens:\n  input_tokens: 100\n  output_tokens: 200\n  cache_read_tokens: 900\n  cache_creation_tokens: 100\n  cache_hit_rate: %g\n", cacheHit)
+	fmt.Fprintf(&b, "schema_version: 2\niteration: %d\ndate: \"2026-05-01\"\nwave: \"w1\"\ntask_id: \"task-%d\"\ncommit: \"commit%d\"\nfiles_changed: %d\nlines_added: %d\nlines_removed: %d\n", o.n, o.n, o.n, o.n, o.n*10, o.n*2)
+	fmt.Fprintf(&b, "agent:\n  session_id: \"%s\"\n  harness: \"%s\"\n  model: \"m-%s\"\n", o.sid, o.harness, o.harness)
+	fmt.Fprintf(&b, "impl:\n  summary: \"impl %d\"\n  retries: %d\n", o.n, o.n)
+	if o.withTokens {
+		fmt.Fprintf(&b, "session_tokens:\n  input_tokens: 100\n  output_tokens: 200\n  cache_read_tokens: 900\n  cache_creation_tokens: 100\n  cache_hit_rate: %g\n", o.cacheHitRate)
 	}
-	if withVerifier {
+	if o.withVerifier {
 		b.WriteString("verifiers:\n  - type: test\n    status: pass\n    gate_passed: true\n    tests_added: 3\n    retries: 0\n")
 	}
-	writeFile(t, dir, fmt.Sprintf("iter-%d.yaml", n), b.String())
+	writeFile(t, dir, fmt.Sprintf("iter-%d.yaml", o.n), b.String())
+}
+
+// plainIter writes a minimal v2 record (no tokens, no verifier) — the common
+// fixture shape across the tests.
+func plainIter(t *testing.T, dir string, n int, sid, harness string) {
+	t.Helper()
+	writeV2Iter(t, dir, iterOpts{n: n, sid: sid, harness: harness})
 }
 
 func writeIterScore(t *testing.T, dir string, n int, value float64, band string) {
@@ -96,9 +114,9 @@ func writeSessionScore(t *testing.T, dir, sid string, iters []int, value float64
 func standardRoot(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-a", "claude-code", 0, false, false)
-	writeV2Iter(t, dir, 2, "sess-a", "claude-code", 0.8, true, true)
-	writeV2Iter(t, dir, 3, "sess-a", "claude-code", 0.6, true, false)
+	plainIter(t, dir, 1, "sess-a", "claude-code")
+	writeV2Iter(t, dir, iterOpts{n: 2, sid: "sess-a", harness: "claude-code", cacheHitRate: 0.8, withTokens: true, withVerifier: true})
+	writeV2Iter(t, dir, iterOpts{n: 3, sid: "sess-a", harness: "claude-code", cacheHitRate: 0.6, withTokens: true})
 	writeIterScore(t, dir, 1, 0.9, "excellent")
 	writeIterScore(t, dir, 2, 0.8, "good")
 	writeIterScore(t, dir, 3, 0.7, "good")
@@ -107,30 +125,30 @@ func standardRoot(t *testing.T) string {
 		{Iteration: 2, Scored: true, Value: 0.8, Band: "good"},
 		{Iteration: 3, Scored: true, Value: 0.7, Band: "good"},
 	})
-	writeV2Iter(t, dir, 5, "sess-b", "codex", 0, false, false)
+	plainIter(t, dir, 5, "sess-b", "codex")
 	writeFile(t, dir, "iter-9.yaml", "schema_version: 1\niteration: 9\ndate: \"2026-05-09\"\ncommit: \"flat9\"\ntests_total_pass: true\n")
 	return dir
 }
 
 // --- ListRuns --------------------------------------------------------------
 
-func TestListRunsBasic(t *testing.T) {
-	s := testStore(t, standardRoot(t))
-	runs, err := s.ListRuns(context.Background(), RunFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runs) != 2 {
-		t.Fatalf("want 2 addressable runs, got %d", len(runs))
-	}
-	byID := map[string]Run{}
+// runsByID indexes runs by session id and asserts each summary omits the
+// detail-only per_iteration array.
+func runsByID(t *testing.T, runs []Run) map[string]Run {
+	t.Helper()
+	byID := make(map[string]Run, len(runs))
 	for _, r := range runs {
 		byID[r.SessionID] = r
 		if r.PerIteration != nil {
 			t.Errorf("summary must omit per_iteration for %s", r.SessionID)
 		}
 	}
-	a := byID["sess-a"]
+	return byID
+}
+
+// assertScoredRunA checks the fully-scored sess-a projection.
+func assertScoredRunA(t *testing.T, a Run) {
+	t.Helper()
 	if !a.Scored || a.Score == nil || *a.Score != 0.8 || a.Band != "good" {
 		t.Errorf("sess-a score projection wrong: %+v", a)
 	}
@@ -146,13 +164,31 @@ func TestListRunsBasic(t *testing.T) {
 	if a.LastUpdate == nil {
 		t.Error("sess-a last_update should be set")
 	}
-	b := byID["sess-b"]
+}
+
+// assertUnscoredRunB checks the staleness-window sess-b projection.
+func assertUnscoredRunB(t *testing.T, b Run) {
+	t.Helper()
 	if b.Scored || b.Score != nil || b.Band != bandUnscored || b.RubricVersion != "" {
 		t.Errorf("sess-b should be unscored: %+v", b)
 	}
 	if b.MeanCacheHitRate != nil {
 		t.Errorf("sess-b has no token telemetry, want nil cache rate: %v", b.MeanCacheHitRate)
 	}
+}
+
+func TestListRunsBasic(t *testing.T) {
+	s := testStore(t, standardRoot(t))
+	runs, err := s.ListRuns(context.Background(), RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("want 2 addressable runs, got %d", len(runs))
+	}
+	byID := runsByID(t, runs)
+	assertScoredRunA(t, byID["sess-a"])
+	assertUnscoredRunB(t, byID["sess-b"])
 }
 
 func TestListRunsFilterBandAndHarness(t *testing.T) {
@@ -200,8 +236,8 @@ func TestListRunsSortTieBreak(t *testing.T) {
 	// Two sessions with identical iteration_count -> tie broken by session_id asc
 	// regardless of order direction.
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "zeta", "h", 0, false, false)
-	writeV2Iter(t, dir, 2, "alpha", "h", 0, false, false)
+	plainIter(t, dir, 1, "zeta", "h")
+	plainIter(t, dir, 2, "alpha", "h")
 	s := testStore(t, dir)
 	runs, _ := s.ListRuns(context.Background(), RunFilter{Sort: "iteration_count", Order: "desc"})
 	if runs[0].SessionID != "alpha" || runs[1].SessionID != "zeta" {
@@ -273,8 +309,8 @@ func TestGetRunPerIterationDerivedWhenNoSessionSidecar(t *testing.T) {
 	// sess-c has per-iteration sidecars but NO session sidecar -> refs derived
 	// from the iter score sidecars (and unscored where absent).
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-c", "h", 0, false, false)
-	writeV2Iter(t, dir, 2, "sess-c", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-c", "h")
+	plainIter(t, dir, 2, "sess-c", "h")
 	writeIterScore(t, dir, 1, 0.75, "good")
 	// iter-2 has no score sidecar -> unscored ref.
 	s := testStore(t, dir)
@@ -463,9 +499,9 @@ func TestHealthEmpty(t *testing.T) {
 
 func TestResilientCorruptIterFile(t *testing.T) {
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-a", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-a", "h")
 	writeFile(t, dir, "iter-2.yaml", "this: [is not: valid yaml\n") // breaks LoadIterationLog
-	writeV2Iter(t, dir, 3, "sess-a", "h", 0, false, false)
+	plainIter(t, dir, 3, "sess-a", "h")
 	s := testStore(t, dir)
 	its, err := s.ListIterations(context.Background(), "sess-a")
 	if err != nil {
@@ -478,7 +514,7 @@ func TestResilientCorruptIterFile(t *testing.T) {
 
 func TestResilientCorruptSidecar(t *testing.T) {
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-a", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-a", "h")
 	writeFile(t, dir, "iter-1.score.yaml", "{{{ not yaml") // corrupt sidecar -> skipped
 	s := testStore(t, dir)
 	its, err := s.ListIterations(context.Background(), "sess-a")
@@ -492,7 +528,7 @@ func TestResilientCorruptSidecar(t *testing.T) {
 
 func TestResilientCorruptSessionSidecar(t *testing.T) {
 	dir := t.TempDir()
-	writeV2Iter(t, dir, 1, "sess-a", "h", 0, false, false)
+	plainIter(t, dir, 1, "sess-a", "h")
 	writeFile(t, dir, "session-sess-a.score.yaml", ":\n  bad") // corrupt session sidecar
 	s := testStore(t, dir)
 	run, err := s.GetRun(context.Background(), "sess-a")
@@ -509,8 +545,8 @@ func TestResilientCorruptSessionSidecar(t *testing.T) {
 func TestDuplicateSessionAcrossRoots(t *testing.T) {
 	r1 := t.TempDir()
 	r2 := t.TempDir()
-	writeV2Iter(t, r1, 1, "dup", "h", 0, false, false)
-	writeV2Iter(t, r2, 2, "dup", "h", 0, false, false)
+	plainIter(t, r1, 1, "dup", "h")
+	plainIter(t, r2, 2, "dup", "h")
 	s := testStore(t, r1, r2)
 	runs, _ := s.ListRuns(context.Background(), RunFilter{})
 	if len(runs) != 1 || runs[0].IterLogDir != r1 {
@@ -550,7 +586,7 @@ func TestStoreCacheHitThenMtimeInvalidation(t *testing.T) {
 		t.Fatalf("expected cache hits on repeat read, metrics=%+v", m)
 	}
 	// Add a brand-new session with a distinctly newer mtime -> snapshot invalidates.
-	writeV2Iter(t, root, 20, "sess-new", "h", 0, false, false)
+	plainIter(t, root, 20, "sess-new", "h")
 	future := time.Now().Add(2 * time.Hour)
 	if err := os.Chtimes(filepath.Join(root, "iter-20.yaml"), future, future); err != nil {
 		t.Fatal(err)
