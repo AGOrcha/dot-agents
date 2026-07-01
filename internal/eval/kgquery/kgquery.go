@@ -91,9 +91,19 @@ func (q *Querier) SeedSymbols(ctx context.Context, lang eval.Language, limit int
 	// obvious and independent of the reader's file enumeration order.
 	sort.Strings(files)
 
-	want := strings.ToLower(string(lang))
-	// Key by qualified name so a symbol that appears under more than one file
-	// path collapses to a single, deterministically chosen candidate.
+	candidates, err := q.collectSeedCandidates(ctx, files, strings.ToLower(string(lang)))
+	if err != nil {
+		return nil, err
+	}
+	return rankSeeds(candidates, limit), nil
+}
+
+// collectSeedCandidates enumerates every node under files and keeps the ones
+// that are seed candidates for want (the lowercased language). It is keyed by
+// qualified name so a symbol reported under more than one file path collapses
+// to a single, deterministically chosen candidate. ctx is honored per file so
+// a long enumeration is cancellable.
+func (q *Querier) collectSeedCandidates(ctx context.Context, files []string, want string) (map[string]graphstore.GraphNode, error) {
 	candidates := map[string]graphstore.GraphNode{}
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
@@ -104,16 +114,27 @@ func (q *Querier) SeedSymbols(ctx context.Context, lang eval.Language, limit int
 			return nil, fmt.Errorf("kgquery: nodes in file %q: %w", f, err)
 		}
 		for _, n := range nodes {
-			if n.IsTest || !symbolKinds[n.Kind] {
-				continue
+			if isSeedCandidate(n, want) {
+				candidates[n.QualifiedName] = n
 			}
-			if strings.ToLower(n.Language) != want {
-				continue
-			}
-			candidates[n.QualifiedName] = n
 		}
 	}
+	return candidates, nil
+}
 
+// isSeedCandidate reports whether n is an eligible seed for the lowercased
+// language want: a non-test function/class/type node in that language.
+func isSeedCandidate(n graphstore.GraphNode, want string) bool {
+	if n.IsTest || !symbolKinds[n.Kind] {
+		return false
+	}
+	return strings.ToLower(n.Language) == want
+}
+
+// rankSeeds puts the candidate set into a total order by qualified name and
+// applies the cap. The order is imposed over the COMPLETE set before the cap
+// so the cap never silently drops a valid seed via truncation.
+func rankSeeds(candidates map[string]graphstore.GraphNode, limit int) []graphstore.GraphNode {
 	seeds := make([]graphstore.GraphNode, 0, len(candidates))
 	for _, n := range candidates {
 		seeds = append(seeds, n)
@@ -122,7 +143,7 @@ func (q *Querier) SeedSymbols(ctx context.Context, lang eval.Language, limit int
 	if len(seeds) > limit {
 		seeds = seeds[:limit]
 	}
-	return seeds, nil
+	return seeds
 }
 
 // NeighborhoodFor returns the neighborhood of qualifiedName out to depth hops,
