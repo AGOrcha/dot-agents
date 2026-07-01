@@ -642,6 +642,79 @@ func TestStoreCacheHitThenMtimeInvalidation(t *testing.T) {
 	}
 }
 
+// TestStoreInvalidatesOnOldFileChange is the regression for the fingerprint
+// invalidation: a score-sidecar backfill on an OLD iteration whose mtime is
+// BACKDATED strictly below the root's newest file must still invalidate the
+// cached snapshot. A max-mtime cache key would miss this (the directory's
+// newest mtime never changes); the per-file (name, mtime) fingerprint catches it.
+func TestStoreInvalidatesOnOldFileChange(t *testing.T) {
+	root := standardRoot(t)
+	// Pin iter-5's record file far in the future so it is decisively the newest
+	// file before AND after the backfill below.
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "iter-5.yaml"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	s := testStore(t, root)
+	ctx := context.Background()
+
+	// Warm the cache: iter-5 (sess-b) is unscored.
+	before, err := s.ListIterations(ctx, "sess-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before[0].Scored {
+		t.Fatalf("precondition: iter-5 should start unscored, got %+v", before[0])
+	}
+	_, _ = s.ListIterations(ctx, "sess-b") // ensure a cached read happened
+	if m := s.CacheMetrics(); m.Hits == 0 {
+		t.Fatalf("precondition: expected a cache hit, metrics=%+v", m)
+	}
+
+	// Backfill iter-5's score sidecar, then BACKDATE its mtime below the newest
+	// file so the directory's max mtime is unchanged.
+	writeIterScore(t, root, 5, 0.9, "excellent")
+	past := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "iter-5.score.yaml"), past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := s.ListIterations(ctx, "sess-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after[0].Scored || after[0].Score == nil || *after[0].Score != 0.9 {
+		t.Fatalf("backdated sidecar backfill must invalidate the cache and surface the score, got %+v", after[0])
+	}
+}
+
+// TestStoreInvalidatesOnFileDeletion: deleting a non-newest file must also
+// invalidate (the max mtime is unchanged; the fingerprint is not).
+func TestStoreInvalidatesOnFileDeletion(t *testing.T) {
+	root := standardRoot(t)
+	future := time.Now().Add(2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "iter-5.yaml"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	s := testStore(t, root)
+	ctx := context.Background()
+	before, err := s.ListIterations(ctx, "sess-a")
+	if err != nil || len(before) != 3 || !before[0].Scored {
+		t.Fatalf("precondition: sess-a has 3 iters with iter-1 scored, got %v err=%v", before, err)
+	}
+	// Delete iter-1's score sidecar (not the newest file).
+	if err := os.Remove(filepath.Join(root, "iter-1.score.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.ListIterations(ctx, "sess-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after[0].Scored {
+		t.Fatalf("deleting a non-newest sidecar must invalidate the cache, got %+v", after[0])
+	}
+}
+
 func TestStoreEvictHooks(t *testing.T) {
 	root := standardRoot(t)
 	s := testStore(t, root)

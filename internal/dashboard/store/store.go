@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"os"
@@ -110,28 +112,37 @@ type sessionCtx struct {
 	records []scoring.IterationRecord
 }
 
-// snapshot returns the parsed view of root, served from cache when the root's
-// newest mtime is unchanged.
+// snapshot returns the parsed view of root, served from cache while the root's
+// directory fingerprint is unchanged. The fingerprint covers EVERY file's name
+// and mtime — not just the newest — so a backfilled score sidecar on an old
+// iteration, a same-timestamp rewrite with a preserved (backdated) mtime, or a
+// deletion of a non-newest file all invalidate, where a max-mtime key would
+// serve stale data.
 func (s *DiskStore) snapshot(root string) rootSnapshot {
-	mtimes, newest := readDirMtime(root)
-	if v, ok := s.cache.get(rootKey(root), newest.UnixNano()); ok {
+	mtimes, newest, fp := readDirState(root)
+	if v, ok := s.cache.get(rootKey(root), fp); ok {
 		return v.(rootSnapshot)
 	}
 	snap := s.loadRoot(root, mtimes)
 	snap.newestMtime = newest
-	s.cache.put(rootKey(root), snap, newest.UnixNano())
+	s.cache.put(rootKey(root), snap, fp)
 	return snap
 }
 
-// readDirMtime lists root once, returning per-file mtimes and the newest. A
-// missing/unreadable root yields an empty map and the zero time.
-func readDirMtime(root string) (map[string]time.Time, time.Time) {
+// readDirState lists root once, returning per-file mtimes, the newest mtime
+// (for last_update / health), and an FNV-1a fingerprint over every (name,
+// mtime) pair. os.ReadDir returns entries sorted by filename, so the hash is
+// deterministic. A missing/unreadable root yields an empty map, the zero time,
+// and a zero fingerprint.
+func readDirState(root string) (map[string]time.Time, time.Time, int64) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return map[string]time.Time{}, time.Time{}
+		return map[string]time.Time{}, time.Time{}, 0
 	}
 	m := make(map[string]time.Time, len(entries))
 	var newest time.Time
+	h := fnv.New64a()
+	var buf [8]byte
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -145,8 +156,11 @@ func readDirMtime(root string) (map[string]time.Time, time.Time) {
 		if mt.After(newest) {
 			newest = mt
 		}
+		_, _ = h.Write([]byte(e.Name()))
+		binary.LittleEndian.PutUint64(buf[:], uint64(mt.UnixNano()))
+		_, _ = h.Write(buf[:])
 	}
-	return m, newest
+	return m, newest, int64(h.Sum64())
 }
 
 // loadRoot parses every sidecar and iteration record in root. Corrupt files are

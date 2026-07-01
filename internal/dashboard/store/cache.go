@@ -17,21 +17,22 @@ type CacheMetrics struct {
 	Capacity  int   `json:"capacity"`
 }
 
-// cacheEntry is one LRU slot. mtime is the newest contributing-file mtime the
-// value was built from (UnixNano); a get whose current mtime differs treats the
-// entry as stale so the store re-reads disk (mtime-change invalidation).
+// cacheEntry is one LRU slot. version is the source-state fingerprint the value
+// was built from (for the store: a hash over every contributing file's name and
+// mtime); a get whose current version differs treats the entry as stale so the
+// store re-reads disk (source-change invalidation).
 type cacheEntry struct {
 	key      string
 	value    any
-	mtime    int64
+	version  int64
 	storedAt time.Time
 }
 
-// lruCache is a small mutex-protected LRU with a TTL and mtime-change
+// lruCache is a small mutex-protected LRU with a TTL and source-version
 // invalidation. It backs the store's read-through path: the expensive unit is a
 // single iter-log root's parsed snapshot, keyed by root, so one entry serves
-// every session/iteration query for that root and all invalidate together on
-// the root's newest mtime.
+// every session/iteration query for that root and all invalidate together when
+// the root's directory fingerprint changes.
 type lruCache struct {
 	mu        sync.Mutex
 	capacity  int
@@ -45,7 +46,7 @@ type lruCache struct {
 }
 
 // newLRUCache builds an LRU with the given capacity and TTL. A capacity below 1
-// is clamped to 1; a non-positive TTL disables TTL expiry (mtime invalidation
+// is clamped to 1; a non-positive TTL disables TTL expiry (version invalidation
 // still applies).
 func newLRUCache(capacity int, ttl time.Duration) *lruCache {
 	if capacity < 1 {
@@ -61,9 +62,9 @@ func newLRUCache(capacity int, ttl time.Duration) *lruCache {
 }
 
 // get returns the cached value for key when it is present, not TTL-expired, and
-// built from the same mtime. A stale entry (mtime mismatch or expired) is
+// built from the same source version. A stale entry (version mismatch or expired) is
 // dropped and reported as a miss so the caller re-reads.
-func (c *lruCache) get(key string, mtime int64) (any, bool) {
+func (c *lruCache) get(key string, version int64) (any, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	el, ok := c.items[key]
@@ -72,7 +73,7 @@ func (c *lruCache) get(key string, mtime int64) (any, bool) {
 		return nil, false
 	}
 	ent := el.Value.(*cacheEntry)
-	if ent.mtime != mtime || (c.ttl > 0 && c.now().Sub(ent.storedAt) > c.ttl) {
+	if ent.version != version || (c.ttl > 0 && c.now().Sub(ent.storedAt) > c.ttl) {
 		c.removeElement(el)
 		c.misses++
 		return nil, false
@@ -82,20 +83,20 @@ func (c *lruCache) get(key string, mtime int64) (any, bool) {
 	return ent.value, true
 }
 
-// put inserts or refreshes key with value and its source mtime, evicting the
+// put inserts or refreshes key with value and its source version, evicting the
 // least-recently-used entry when capacity is exceeded.
-func (c *lruCache) put(key string, value any, mtime int64) {
+func (c *lruCache) put(key string, value any, version int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if el, ok := c.items[key]; ok {
 		ent := el.Value.(*cacheEntry)
 		ent.value = value
-		ent.mtime = mtime
+		ent.version = version
 		ent.storedAt = c.now()
 		c.ll.MoveToFront(el)
 		return
 	}
-	ent := &cacheEntry{key: key, value: value, mtime: mtime, storedAt: c.now()}
+	ent := &cacheEntry{key: key, value: value, version: version, storedAt: c.now()}
 	c.items[key] = c.ll.PushFront(ent)
 	if c.ll.Len() > c.capacity {
 		if back := c.ll.Back(); back != nil {
