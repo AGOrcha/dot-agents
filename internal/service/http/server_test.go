@@ -163,14 +163,20 @@ func TestRegisterMountOverlapErrors(t *testing.T) {
 		prefix  string
 		wantErr error
 	}{
-		{name: "shadows built-in tasks", prefix: "/api/tasks", wantErr: ErrOverlappingMount},
-		{name: "parent of built-in tasks", prefix: "/api", wantErr: ErrOverlappingMount},
-		{name: "equals built-in healthz", prefix: "/healthz", wantErr: ErrOverlappingMount},
+		// Duplicating a built-in exact path (which the mux itself would reject).
+		{name: "duplicates built-in tasks", prefix: "/api/tasks", wantErr: ErrOverlappingMount},
+		{name: "duplicates built-in healthz", prefix: "/healthz", wantErr: ErrOverlappingMount},
+		// Duplicating a prior mount's exact path.
 		{name: "duplicate mount", setup: []string{"/dash"}, prefix: "/dash", wantErr: ErrOverlappingMount},
-		{name: "child of existing mount", setup: []string{"/dash"}, prefix: "/dash/sub", wantErr: ErrOverlappingMount},
-		{name: "parent of existing mount", setup: []string{"/dash/sub"}, prefix: "/dash", wantErr: ErrOverlappingMount},
+		{name: "duplicate mount trailing slash", setup: []string{"/dash"}, prefix: "/dash/", wantErr: ErrOverlappingMount},
+		// Invalid prefixes.
 		{name: "empty prefix", prefix: "", wantErr: ErrInvalidMountPrefix},
 		{name: "unrooted prefix", prefix: "api", wantErr: ErrInvalidMountPrefix},
+		// Coexisting prefixes (the contract R2/R5 depend on): a parent mount, a
+		// nested mount, siblings, and lookalikes all succeed.
+		{name: "parent of built-in tasks (R2 /api)", prefix: "/api", wantErr: nil},
+		{name: "nested under a mount (R5 /api/reviews)", setup: []string{"/api"}, prefix: "/api/reviews", wantErr: nil},
+		{name: "parent of existing mount", setup: []string{"/dash/sub"}, prefix: "/dash", wantErr: nil},
 		{name: "sibling prefix ok", setup: []string{"/dash"}, prefix: "/reviews", wantErr: nil},
 		{name: "non-segment lookalike ok", setup: []string{"/api/test"}, prefix: "/api/testing", wantErr: nil},
 	}
@@ -216,6 +222,56 @@ func TestRegisterMountNilHandler(t *testing.T) {
 	}
 }
 
+// TestApiMountCoexistsWithBuiltinTasks is the R2 contract: a dashboard mounted
+// at "/api" must succeed and coexist with the built-in "/api/tasks" — the
+// built-in exact route wins for its own path, the mount serves the rest of the
+// subtree.
+func TestApiMountCoexistsWithBuiltinTasks(t *testing.T) {
+	now := time.Date(2026, 5, 27, 10, 0, 0, 0, time.UTC)
+	sched := fakeState{states: []scheduler.TaskState{{Name: "ingest", LastRunAt: &now, Runs: 1}}}
+	srv := newTestServer(sched)
+
+	dashboard := nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
+		_, _ = io.WriteString(w, "dashboard:"+r.URL.Path)
+	})
+	if err := srv.RegisterMount("/api", dashboard); err != nil {
+		t.Fatalf(`RegisterMount("/api") = %v, want nil (R2 contract)`, err)
+	}
+
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	// /api/tasks still resolves to the built-in scheduler projection.
+	resp, err := nethttp.Get(ts.URL + "/api/tasks")
+	if err != nil {
+		t.Fatalf("GET /api/tasks: %v", err)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/json" {
+		resp.Body.Close()
+		t.Fatalf("/api/tasks Content-Type = %q, want application/json (built-in shadowed by mount)", got)
+	}
+	var tasks []scheduler.TaskState
+	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode /api/tasks: %v", err)
+	}
+	resp.Body.Close()
+	if len(tasks) != 1 || tasks[0].Name != "ingest" {
+		t.Fatalf("/api/tasks = %+v, want the built-in scheduler state", tasks)
+	}
+
+	// Any other path under /api routes to the mounted dashboard.
+	resp2, err := nethttp.Get(ts.URL + "/api/foo")
+	if err != nil {
+		t.Fatalf("GET /api/foo: %v", err)
+	}
+	body, _ := io.ReadAll(resp2.Body)
+	resp2.Body.Close()
+	if want := "dashboard:/api/foo"; string(body) != want {
+		t.Fatalf("GET /api/foo body = %q, want %q (mount not reached)", body, want)
+	}
+}
+
 func TestBusAccessor(t *testing.T) {
 	bus := events.NewBus()
 	srv := New("127.0.0.1:0", fakeState{}, bus)
@@ -247,6 +303,31 @@ func TestServeGracefulShutdownWithinDeadline(t *testing.T) {
 		}
 	case <-time.After(defaultShutdownTimeout + 2*time.Second):
 		t.Fatal("Serve did not return within the shutdown deadline")
+	}
+}
+
+// TestServeHonorsShortCallerDeadline asserts that when the caller's ctx carries
+// a deadline shorter than the default shutdown timeout, Serve returns within
+// that shorter deadline rather than waiting the full 5s — the drain is bounded
+// by min(remaining deadline, shutdownTimeout).
+func TestServeHonorsShortCallerDeadline(t *testing.T) {
+	srv := newTestServer(fakeState{}) // defaultShutdownTimeout (5s)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- srv.Serve(ctx) }()
+	waitForAddr(t, srv)
+
+	select {
+	case <-done:
+		if elapsed := time.Since(start); elapsed >= defaultShutdownTimeout {
+			t.Fatalf("Serve took %v; the caller's 300ms deadline was ignored for the %v default",
+				elapsed, defaultShutdownTimeout)
+		}
+	case <-time.After(defaultShutdownTimeout - time.Second):
+		t.Fatal("Serve did not return well within the default shutdown timeout")
 	}
 }
 

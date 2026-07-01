@@ -46,10 +46,14 @@ var (
 	ErrInvalidMountPrefix = errors.New("service/http: mount prefix must be a non-empty rooted path")
 	// ErrNilMountHandler is returned when RegisterMount is given a nil handler.
 	ErrNilMountHandler = errors.New("service/http: mount handler must not be nil")
-	// ErrOverlappingMount is returned when a mount prefix overlaps a built-in
-	// route or a previously registered mount. Two prefixes overlap when they
-	// are equal or one is a path-segment prefix of the other.
-	ErrOverlappingMount = errors.New("service/http: mount prefix overlaps an existing route")
+	// ErrOverlappingMount is returned when a mount prefix exactly matches a
+	// path already claimed as an exact route — a built-in (/healthz,
+	// /api/tasks) or a previously registered mount. Nested and sibling mounts
+	// are NOT rejected: net/http's most-specific-wins routing lets a parent
+	// mount (e.g. "/api") coexist with a built-in sub-route ("/api/tasks") and
+	// with a nested mount ("/api/reviews"). Only a duplicate exact claim, which
+	// the mux itself would reject, is refused here.
+	ErrOverlappingMount = errors.New("service/http: mount prefix already claimed by an existing route")
 )
 
 // StateProvider is the read-only slice of the scheduler the HTTP surface needs:
@@ -74,7 +78,7 @@ type Server struct {
 	shutdownTimeout time.Duration
 
 	mu         sync.Mutex
-	mounts     []string // reserved prefixes (built-ins + registered mounts)
+	mounts     []string // exact paths already claimed (built-in routes + mounts)
 	actualAddr string   // bound address, resolved after Serve begins listening
 }
 
@@ -89,7 +93,8 @@ func New(addr string, sched StateProvider, bus *events.Bus) *Server {
 		scheduler:       sched,
 		bus:             bus,
 		shutdownTimeout: defaultShutdownTimeout,
-		// Built-in routes are reserved so mounts can't shadow them.
+		// Built-in exact routes are claimed so a mount can't duplicate their
+		// exact path (a parent-prefix mount is still allowed and coexists).
 		mounts: []string{routeHealthz, routeTasks},
 	}
 	s.httpSrv = &nethttp.Server{Handler: mux}
@@ -132,11 +137,17 @@ func (s *Server) handleTasks(w nethttp.ResponseWriter, _ *nethttp.Request) {
 }
 
 // RegisterMount stitches handler under prefix, serving both the exact prefix
-// path and its subtree. R2 mounts its dashboard, R5 its review queue, through
-// this call. The prefix must be rooted (start with "/"); a trailing slash is
-// normalized away. Overlapping prefixes — equal to, or a path-segment prefix
-// of, an existing route (built-in or previously mounted) — are rejected with
-// ErrOverlappingMount so registration order never silently shadows a route.
+// path and its subtree. R2 mounts its dashboard at "/api", R5 its review queue
+// at "/api/reviews", through this call. The prefix must be rooted (start with
+// "/"); a trailing slash is normalized away.
+//
+// Coexistence is by design: net/http's most-specific-wins routing means a
+// mount at "/api" and the built-in "/api/tasks" (and a nested mount at
+// "/api/reviews") all live together — the more specific pattern serves each
+// request, so "/api/tasks" hits the built-in while "/api/foo" hits the mount.
+// The only rejected case is a duplicate exact claim on a path already owned by
+// a built-in or a prior mount (which the mux itself would reject), returned as
+// ErrOverlappingMount.
 func (s *Server) RegisterMount(prefix string, handler nethttp.Handler) error {
 	if handler == nil {
 		return ErrNilMountHandler
@@ -149,12 +160,13 @@ func (s *Server) RegisterMount(prefix string, handler nethttp.Handler) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, existing := range s.mounts {
-		if prefixesOverlap(clean, existing) {
-			return fmt.Errorf("%w: %q vs %q", ErrOverlappingMount, clean, existing)
+		if clean == existing {
+			return fmt.Errorf("%w: %q", ErrOverlappingMount, clean)
 		}
 	}
 	// Register the exact path and the subtree so both /api/x and /api/x/y route
-	// to handler without net/http's trailing-slash redirect.
+	// to handler without net/http's trailing-slash redirect. A built-in exact
+	// route nested under this prefix keeps precedence via most-specific-wins.
 	s.mux.Handle(clean, handler)
 	s.mux.Handle(clean+"/", handler)
 	s.mounts = append(s.mounts, clean)
@@ -162,8 +174,7 @@ func (s *Server) RegisterMount(prefix string, handler nethttp.Handler) error {
 }
 
 // normalizeMountPrefix validates a rooted path and strips a trailing slash
-// (except for the root "/" itself, which any caller-supplied prefix will still
-// overlap the built-ins and thus be rejected downstream).
+// (except for the root "/" itself).
 func normalizeMountPrefix(prefix string) (string, error) {
 	if prefix == "" || !strings.HasPrefix(prefix, "/") {
 		return "", fmt.Errorf("%w: %q", ErrInvalidMountPrefix, prefix)
@@ -174,26 +185,26 @@ func normalizeMountPrefix(prefix string) (string, error) {
 	return prefix, nil
 }
 
-// prefixesOverlap reports whether a and b collide as route prefixes: equal, or
-// one a path-segment prefix of the other ("/api" overlaps "/api/tasks" but not
-// "/apiv2").
-func prefixesOverlap(a, b string) bool {
-	return segmentPrefix(a, b) || segmentPrefix(b, a)
-}
-
-// segmentPrefix reports whether a is a path-segment prefix of b. The root "/"
-// is a prefix of everything.
-func segmentPrefix(a, b string) bool {
-	if a == b || a == "/" {
-		return true
-	}
-	return strings.HasPrefix(b, a+"/")
-}
-
 // Shutdown gracefully drains the underlying net/http server, honouring ctx as
 // the deadline. It is the mechanism the runtime wires to context cancellation.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpSrv.Shutdown(ctx)
+}
+
+// shutdownContext derives the graceful-drain context used when the run context
+// is cancelled. It keeps ctx's values (via WithoutCancel — ctx itself is
+// already Done, so we must not inherit its cancellation) and bounds the drain
+// by the smaller of the configured shutdown timeout and the caller's remaining
+// deadline, so a caller that set a deadline shorter than shutdownTimeout is
+// honoured rather than ignored.
+func (s *Server) shutdownContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := s.shutdownTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < timeout {
+			timeout = remaining
+		}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout)
 }
 
 // Serve binds the configured address and serves until ctx is cancelled, at
@@ -214,11 +225,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		// Derive the drain deadline from ctx so its values propagate, but detach
-		// it from ctx's cancellation (ctx is already Done here) via WithoutCancel
-		// — otherwise the shutdown context would start cancelled and skip the
-		// graceful drain.
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
+		shutdownCtx, cancel := s.shutdownContext(ctx)
 		defer cancel()
 		shutdownErr := s.Shutdown(shutdownCtx)
 		// Serve returns ErrServerClosed once Shutdown completes; drain it so the
