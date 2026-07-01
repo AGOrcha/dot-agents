@@ -132,9 +132,16 @@ func applySweepAction(item SweepActionItem) error {
 		// These are informational; logged but no filesystem mutation
 		return nil
 	case SweepActionArchiveCompletedPlans:
-		// Commit-by-default (noCommit=false): a swept archive must persist the
-		// move for the same reason a manual archive does.
-		return runWorkflowPlanArchive(item.Project.Path, []string{item.PlanID}, false, false, false)
+		// noCommit=true here on purpose: the sweep runs cross-project (each item
+		// carries its own Project.Path), but the archive commit helper
+		// (iterationCloseCommit -> runWorkflowCommit) is CWD-bound — committing
+		// here would target whatever repo the sweep process is in, not
+		// item.Project.Path, and would consult the wrong project's commit.disable.
+		// So a swept archive performs the on-disk move but leaves it uncommitted;
+		// the direct `da workflow plan archive` command (where cwd == the project)
+		// commits by default. Persisting swept archives needs a path-aware commit
+		// (future work) rather than the cwd-bound helper.
+		return runWorkflowPlanArchive(item.Project.Path, []string{item.PlanID}, false, false, true)
 	default:
 		return fmt.Errorf("unknown sweep action %q", item.Action)
 	}
