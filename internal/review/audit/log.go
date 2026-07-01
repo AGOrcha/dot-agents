@@ -3,13 +3,16 @@ package audit
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
@@ -53,7 +56,23 @@ var (
 	// appendLine appends one JSON line (plus a trailing newline) to path. It is
 	// a package var so Append's callers can stub the whole write in tests.
 	appendLine = writeLine
+
+	// acquireFileLock takes the advisory inter-process lock guarding the log
+	// file and returns a release func the caller must invoke. It defaults to the
+	// shared agentslock primitive (a "<path>.lock" mkdir lock with stale
+	// reclaim) so concurrent da processes serialize their read-prev+append
+	// critical sections against each other, not just goroutines in one process.
+	acquireFileLock = agentslock.AcquireFileLock
+
+	// writeHeadFile persists the head-anchor sidecar atomically. It is a seam so
+	// the head write-error branch is coverable.
+	writeHeadFile = fsops.WriteFileAtomic
 )
+
+// headSuffix names the head-anchor sidecar that pins the tail record's hash so
+// tail modification, tail truncation, and out-of-band appends are detectable
+// (the bare hash chain alone cannot attest its own last link).
+const headSuffix = ".head"
 
 // appendFile is the subset of *os.File that writeLine uses. Modeling it as an
 // interface lets tests drive the write- and close-error paths deterministically
@@ -80,12 +99,14 @@ func writeLine(path string, line []byte) error {
 	return nil
 }
 
-// Log is a handle to one audit log file. It is cheap to construct; all state
-// lives on disk so out-of-band edits (rotation, prune) are observed on the next
-// call.
+// Log is a handle to one audit log file. It is cheap to construct; all durable
+// state lives on disk so out-of-band edits (rotation, prune) are observed on the
+// next call. The mutex serializes Append against other goroutines sharing this
+// handle; cross-process serialization is the file lock Append takes.
 type Log struct {
 	path    string
 	sizeCap int64
+	mu      sync.Mutex
 }
 
 // Open returns a Log backed by the file at path (typically
@@ -148,11 +169,21 @@ func parseRecords(data []byte) ([]Record, error) {
 }
 
 // Append chains and writes one record for the given event and returns the
-// written record. Before writing it applies the rotation policy (yearly or
-// size cap), so a year boundary or an oversized file starts a fresh chain in a
-// dated archive. The new record's prev_hash is the SHA-256 of the last record
-// in the (post-rotation) active file, or GenesisPrevHash when the file is
-// empty.
+// written record.
+//
+// Concurrency: reading the current tail to compute prev_hash and writing the new
+// record MUST be one indivisible step — two callers that both read tail N and
+// both chain to it would fork the chain and later fail Verify. Append therefore
+// holds the handle's in-process mutex AND the inter-process file lock across the
+// whole read-prev → rotate → append → head-update section, so concurrent
+// appenders (goroutines or separate da processes) are strictly serialized.
+//
+// Before writing it applies the rotation policy (yearly or size cap), so a year
+// boundary or an oversized file starts a fresh chain in a dated archive. The new
+// record's prev_hash is the SHA-256 of the last record in the (post-rotation)
+// active file, or GenesisPrevHash when the file is empty. After the line lands,
+// the head anchor is advanced to the new tail so the tail record stays
+// attestable.
 func (l *Log) Append(e Event) (Record, error) {
 	if err := e.validate(); err != nil {
 		return Record{}, err
@@ -161,6 +192,15 @@ func (l *Log) Append(e Event) (Record, error) {
 	if now.IsZero() {
 		now = timeNow()
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	release, err := acquireFileLock(l.path)
+	if err != nil {
+		return Record{}, err
+	}
+	defer func() { _ = release() }()
+
 	recs, err := l.Records()
 	if err != nil {
 		return Record{}, err
@@ -198,7 +238,51 @@ func (l *Log) Append(e Event) (Record, error) {
 	if err := appendLine(l.path, line); err != nil {
 		return Record{}, err
 	}
+	if err := l.writeHead(len(recs)+1, hashBytes(line)); err != nil {
+		return Record{}, err
+	}
 	return rec, nil
+}
+
+// headAnchor pins the active log's tail: the count of records and the hash of
+// the last one. Verify recomputes the on-disk tail and compares, catching tail
+// modification, tail truncation, and forged out-of-band appends — none of which
+// the forward hash chain can detect on its own last link.
+type headAnchor struct {
+	Count    int    `json:"count"`
+	TailHash string `json:"tail_hash"`
+}
+
+// headPathFor returns the head-anchor sidecar path for a log file.
+func headPathFor(logPath string) string { return logPath + headSuffix }
+
+// writeHead persists the head anchor for the active log atomically. The tiny
+// JSON is built by hand (count is an int, tail hash is fixed hex) so there is no
+// marshal error path to smuggle in.
+func (l *Log) writeHead(count int, tailHash string) error {
+	data := []byte(fmt.Sprintf("{\"count\":%d,\"tail_hash\":%q}\n", count, tailHash))
+	if err := writeHeadFile(headPathFor(l.path), data); err != nil {
+		return fmt.Errorf("audit: write head: %w", err)
+	}
+	return nil
+}
+
+// readHead loads the head anchor. A missing sidecar reports (_, false, nil) so
+// Verify can distinguish "never anchored" from "anchor removed with records
+// still present".
+func (l *Log) readHead() (headAnchor, bool, error) {
+	data, err := readFile(headPathFor(l.path))
+	if errors.Is(err, os.ErrNotExist) {
+		return headAnchor{}, false, nil
+	}
+	if err != nil {
+		return headAnchor{}, false, fmt.Errorf("audit: read head: %w", err)
+	}
+	var h headAnchor
+	if err := json.Unmarshal(data, &h); err != nil {
+		return headAnchor{}, false, fmt.Errorf("audit: parse head: %w", err)
+	}
+	return h, true, nil
 }
 
 // shouldRotate reports whether the active file must be rotated before appending
@@ -241,7 +325,27 @@ func (l *Log) maybeRotate(recs []Record, now time.Time) (bool, error) {
 	if err := renameFunc(l.path, dest); err != nil {
 		return false, fmt.Errorf("audit: rotate log: %w", err)
 	}
+	if err := l.rotateHead(dest); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+// rotateHead moves the active log's head anchor alongside its archived file so
+// the frozen archive keeps its tail attestation; the active head path is then
+// free for the fresh chain's first Append to recreate. A log that has no head
+// yet (rotation before any successful head write) is a no-op.
+func (l *Log) rotateHead(dest string) error {
+	src := headPathFor(l.path)
+	if _, err := statFunc(src); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("audit: stat head: %w", err)
+	}
+	if err := renameFunc(src, headPathFor(dest)); err != nil {
+		return fmt.Errorf("audit: rotate head: %w", err)
+	}
+	return nil
 }
 
 // nextArchivePath returns the archive destination for a rotation closing the

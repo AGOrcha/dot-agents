@@ -6,20 +6,23 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 // restoreSeams snapshots the package filesystem/clock/marshal seams and returns
-// a function that restores them, so a test that injects a fault cannot leak it
-// into the next test.
+// a function that restores them, so a test that injects a fault cannot leak into
+// the next test.
 func restoreSeams(t *testing.T) {
 	t.Helper()
-	origRead, origStat, origRename, origNow, origAppend, origMarshal, origOpen :=
-		readFile, statFunc, renameFunc, timeNow, appendLine, marshal, openAppend
+	origRead, origStat, origRename, origNow := readFile, statFunc, renameFunc, timeNow
+	origAppend, origMarshal, origOpen := appendLine, marshal, openAppend
+	origLock, origHead := acquireFileLock, writeHeadFile
 	t.Cleanup(func() {
-		readFile, statFunc, renameFunc, timeNow, appendLine, marshal, openAppend =
-			origRead, origStat, origRename, origNow, origAppend, origMarshal, origOpen
+		readFile, statFunc, renameFunc, timeNow = origRead, origStat, origRename, origNow
+		appendLine, marshal, openAppend = origAppend, origMarshal, origOpen
+		acquireFileLock, writeHeadFile = origLock, origHead
 	})
 }
 
@@ -394,15 +397,24 @@ func TestVerifyEmptyAndValidChain(t *testing.T) {
 	}
 }
 
-func TestVerifyDetectsTamper(t *testing.T) {
-	restoreSeams(t)
-	l := tempLog(t)
+// seedLog appends n valid records stamped in the same year and returns the log.
+func seedLog(t *testing.T, l *Log, n int) {
+	t.Helper()
 	ts := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < n; i++ {
 		if _, err := l.Append(sampleEvent(ts.Add(time.Duration(i) * time.Minute))); err != nil {
-			t.Fatal(err)
+			t.Fatalf("seed append %d: %v", i, err)
 		}
 	}
+}
+
+func TestVerifyDetectsTamper(t *testing.T) {
+	// A MIDDLE (non-tail) record: the chain stage catches it because the
+	// altered record's hash no longer matches its successor's prev_hash. Tail
+	// records are covered separately by the head-anchor tests below.
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 5)
 	// Flip content in record 3 (index 2): rewrite its actor. The line stays
 	// valid JSON, so parsing succeeds but the chain hash no longer matches.
 	data, err := os.ReadFile(l.Path())
@@ -439,6 +451,389 @@ func TestVerifyDetectsTamper(t *testing.T) {
 	}
 	if !strings.Contains(res.Reason, "record 3") {
 		t.Errorf("reason should implicate record 3: %q", res.Reason)
+	}
+}
+
+// readLogLines returns the active log's non-empty lines.
+func readLogLines(t *testing.T, l *Log) []string {
+	t.Helper()
+	data, err := os.ReadFile(l.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
+}
+
+// writeLogLines overwrites the active log with the given lines (head untouched),
+// simulating an out-of-band editor.
+func writeLogLines(t *testing.T, l *Log, lines []string) {
+	t.Helper()
+	body := ""
+	if len(lines) > 0 {
+		body = strings.Join(lines, "\n") + "\n"
+	}
+	if err := os.WriteFile(l.Path(), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConcurrentAppendKeepsChainIntact(t *testing.T) {
+	// The core correctness fix: with read-prev+append serialized under the
+	// in-process mutex AND the inter-process file lock, N concurrent appenders
+	// cannot fork the chain. Run under `-race` for it to be meaningful.
+	restoreSeams(t)
+	l := tempLog(t)
+	const n = 25
+	base := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := l.Append(sampleEvent(base.Add(time.Duration(i) * time.Second))); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent append: %v", err)
+	}
+	recs, err := l.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != n {
+		t.Fatalf("want %d records after concurrent appends, got %d", n, len(recs))
+	}
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK {
+		t.Fatalf("chain broke under concurrent appends: %+v", res)
+	}
+}
+
+func TestAppendLockError(t *testing.T) {
+	restoreSeams(t)
+	boom := errors.New("lock")
+	acquireFileLock = func(string) (func() error, error) { return nil, boom }
+	if _, err := tempLog(t).Append(sampleEvent(time.Now().UTC())); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want lock", err)
+	}
+}
+
+func TestAppendReleasesLock(t *testing.T) {
+	restoreSeams(t)
+	released := false
+	acquireFileLock = func(string) (func() error, error) {
+		return func() error { released = true; return nil }, nil
+	}
+	if _, err := tempLog(t).Append(sampleEvent(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	if !released {
+		t.Error("Append must release the file lock")
+	}
+}
+
+func TestAppendWriteHeadError(t *testing.T) {
+	restoreSeams(t)
+	boom := errors.New("head")
+	writeHeadFile = func(string, []byte) error { return boom }
+	if _, err := tempLog(t).Append(sampleEvent(time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "write head") {
+		t.Fatalf("got %v, want write head", err)
+	}
+}
+
+func TestAppendWritesHeadAnchor(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	head, ok, err := l.readHead()
+	if err != nil || !ok {
+		t.Fatalf("head anchor missing after append: ok=%v err=%v", ok, err)
+	}
+	if head.Count != 1 || len(head.TailHash) != 64 {
+		t.Fatalf("unexpected head anchor: %+v", head)
+	}
+}
+
+func TestVerifyDetectsTailModification(t *testing.T) {
+	// The gap the cross-brain gate flagged: modifying the LAST record passed the
+	// old chain-only Verify. The head anchor now catches it.
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	lines := readLogLines(t, l)
+	var last Record
+	if err := json.Unmarshal([]byte(lines[2]), &last); err != nil {
+		t.Fatal(err)
+	}
+	last.Actor = "attacker@example.com" // prev_hash unchanged -> chain still passes
+	tampered, err := json.Marshal(last)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines[2] = string(tampered)
+	writeLogLines(t, l, lines)
+
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || res.BrokenAt != 3 {
+		t.Fatalf("tail modification not caught: %+v", res)
+	}
+	if !strings.Contains(res.Reason, "modified") {
+		t.Errorf("reason should mention modification: %q", res.Reason)
+	}
+}
+
+func TestVerifyDetectsTailTruncation(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	lines := readLogLines(t, l)
+	writeLogLines(t, l, lines[:2]) // drop the last record; head still says count=3
+
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !strings.Contains(res.Reason, "count") {
+		t.Fatalf("tail truncation not caught: %+v", res)
+	}
+}
+
+func TestVerifyDetectsForgedAppend(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	recs, err := l.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev, err := hashRecord(recs[2])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A correctly-chained forged record: the chain accepts it, but the head
+	// anchor (still count=3) does not.
+	forged := Record{
+		SchemaVersion: SchemaVersion,
+		Ts:            time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC),
+		Actor:         "attacker@example.com",
+		Role:          "admin",
+		Action:        ActionRoleChange,
+		Target:        "user/victim",
+		PrevHash:      prev,
+	}
+	line, err := json.Marshal(forged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := append(readLogLines(t, l), string(line))
+	writeLogLines(t, l, lines)
+
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("forged append not caught: %+v", res)
+	}
+}
+
+func TestVerifyHeadMissing(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 2)
+	if err := os.Remove(headPathFor(l.Path())); err != nil {
+		t.Fatal(err)
+	}
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !strings.Contains(res.Reason, "missing") {
+		t.Fatalf("removed head anchor not caught: %+v", res)
+	}
+}
+
+func TestVerifyHeadOrphaned(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 1)
+	writeLogLines(t, l, nil) // empty the log but leave the head
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !strings.Contains(res.Reason, "no records") {
+		t.Fatalf("orphaned head not caught: %+v", res)
+	}
+}
+
+func TestVerifyHeadParseError(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 1)
+	if err := os.WriteFile(headPathFor(l.Path()), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Verify(); err == nil || !strings.Contains(err.Error(), "parse head") {
+		t.Fatalf("got %v, want parse head", err)
+	}
+}
+
+func TestVerifyHeadReadError(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 1)
+	boom := errors.New("head io")
+	readFile = func(p string) ([]byte, error) {
+		if strings.HasSuffix(p, headSuffix) {
+			return nil, boom
+		}
+		return os.ReadFile(p)
+	}
+	if _, err := l.Verify(); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want head io", err)
+	}
+}
+
+func TestVerifyHeadAnchorDirect(t *testing.T) {
+	restoreSeams(t)
+	rec := Record{SchemaVersion: SchemaVersion, PrevHash: GenesisPrevHash, Actor: "a", Action: ActionLabelSubmit, Target: "t"}
+	tail, err := hashRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		recs    []Record
+		head    headAnchor
+		hasHead bool
+		wantOK  bool
+	}{
+		{"empty no head", nil, headAnchor{}, false, true},
+		{"empty with head", nil, headAnchor{Count: 1, TailHash: "x"}, true, false},
+		{"records no head", []Record{rec}, headAnchor{}, false, false},
+		{"count mismatch", []Record{rec}, headAnchor{Count: 2, TailHash: tail}, true, false},
+		{"tail hash mismatch", []Record{rec}, headAnchor{Count: 1, TailHash: "nope"}, true, false},
+		{"all good", []Record{rec}, headAnchor{Count: 1, TailHash: tail}, true, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := verifyHeadAnchor(tc.recs, tc.head, tc.hasHead)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.OK != tc.wantOK {
+				t.Fatalf("OK = %v, want %v (%+v)", res.OK, tc.wantOK, res)
+			}
+		})
+	}
+}
+
+func TestVerifyHeadAnchorHashError(t *testing.T) {
+	restoreSeams(t)
+	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
+	_, err := verifyHeadAnchor(
+		[]Record{{PrevHash: GenesisPrevHash}},
+		headAnchor{Count: 1, TailHash: "x"}, true)
+	if !errors.Is(err, ErrMarshal) {
+		t.Fatalf("got %v, want ErrMarshal", err)
+	}
+}
+
+func TestRotateHeadMovesAnchor(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	if _, err := l.Append(sampleEvent(time.Date(2025, 12, 31, 0, 0, 0, 0, time.UTC))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Append(sampleEvent(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))); err != nil {
+		t.Fatal(err)
+	}
+	// The 2025 chain's head anchor followed it into the archive.
+	if _, err := os.Stat(archiveBase(l.Path()) + ".2025.jsonl" + headSuffix); err != nil {
+		t.Fatalf("archived head anchor missing: %v", err)
+	}
+	// The active file's fresh chain re-verifies with its own anchor.
+	res, err := l.Verify()
+	if err != nil || !res.OK {
+		t.Fatalf("post-rotation verify: %+v %v", res, err)
+	}
+}
+
+func TestRotateHeadNoHeadIsNoop(t *testing.T) {
+	restoreSeams(t)
+	if err := tempLog(t).rotateHead("/some/dest.jsonl"); err != nil {
+		t.Fatalf("no-head rotate should be a no-op, got %v", err)
+	}
+}
+
+func TestRotateHeadStatError(t *testing.T) {
+	restoreSeams(t)
+	boom := errors.New("stat")
+	statFunc = func(string) (os.FileInfo, error) { return nil, boom }
+	if err := tempLog(t).rotateHead("/dest.jsonl"); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want stat", err)
+	}
+}
+
+func TestRotateHeadRenameError(t *testing.T) {
+	restoreSeams(t)
+	statFunc = func(string) (os.FileInfo, error) { return nil, nil } // head "exists"
+	boom := errors.New("rename")
+	renameFunc = func(string, string) error { return boom }
+	if err := tempLog(t).rotateHead("/dest.jsonl"); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want rename", err)
+	}
+}
+
+func TestMaybeRotateHeadRenameError(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	statFunc = func(p string) (os.FileInfo, error) {
+		if strings.HasSuffix(p, headSuffix) {
+			return nil, nil // head sidecar "exists"
+		}
+		return nil, os.ErrNotExist // archive slot is free
+	}
+	boom := errors.New("head rename")
+	renameFunc = func(src, _ string) error {
+		if strings.HasSuffix(src, headSuffix) {
+			return boom // the log rename succeeds; the head rename fails
+		}
+		return nil
+	}
+	recs := []Record{{Ts: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)}}
+	if _, err := l.maybeRotate(recs, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want head rename", err)
+	}
+}
+
+func TestVerifyChainHashError(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 1)
+	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
+	if _, err := l.Verify(); !errors.Is(err, ErrMarshal) {
+		t.Fatalf("got %v, want ErrMarshal", err)
+	}
+}
+
+func TestHeadPathFor(t *testing.T) {
+	if got := headPathFor("/x/audit.log.jsonl"); got != "/x/audit.log.jsonl.head" {
+		t.Errorf("headPathFor = %q", got)
 	}
 }
 

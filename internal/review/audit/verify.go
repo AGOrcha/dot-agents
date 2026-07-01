@@ -14,18 +14,72 @@ type VerifyResult struct {
 	Reason   string
 }
 
-// Verify walks the active log's hash chain from the genesis record and reports
-// the first integrity break, if any. A record whose content was altered changes
-// its recomputed hash, so the break surfaces at the link that stored the old
-// hash — the tamper is caught even though no record carries a self-hash.
+// Verify attests the active log in two stages.
 //
-// An empty log verifies OK (a chain of zero records has no broken links).
+//  1. Chain walk (verifyRecords): every record's prev_hash must equal the
+//     recomputed hash of its predecessor. This catches modification of any
+//     non-tail record and any reordering, because an altered record changes its
+//     hash and breaks the successor's link.
+//
+//  2. Head anchor (verifyHeadAnchor): the chain alone cannot attest its own last
+//     link — the tail record has no successor storing its hash, so modifying,
+//     truncating, or forging an extra tail record would pass stage 1. The head
+//     sidecar pins the tail's count and hash, closing that gap. Every Append
+//     advances it under the same lock that writes the record.
+//
+// A chain break takes precedence over a head mismatch. An empty log with no head
+// verifies OK (a fresh, never-written log).
 func (l *Log) Verify() (VerifyResult, error) {
 	recs, err := l.Records()
 	if err != nil {
 		return VerifyResult{}, err
 	}
-	return verifyRecords(recs)
+	res, err := verifyRecords(recs)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if !res.OK {
+		return res, nil
+	}
+	head, hasHead, err := l.readHead()
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	return verifyHeadAnchor(recs, head, hasHead)
+}
+
+// verifyHeadAnchor checks the tail record against the head sidecar. It runs only
+// after the chain has verified, so any failure here is specifically a tail-level
+// tamper the chain could not see.
+func verifyHeadAnchor(recs []Record, head headAnchor, hasHead bool) (VerifyResult, error) {
+	n := len(recs)
+	if n == 0 {
+		if hasHead {
+			return brokenHead(0, 0, "head anchor is present but the log has no records (all records were truncated)"), nil
+		}
+		return VerifyResult{OK: true, Count: 0}, nil
+	}
+	if !hasHead {
+		return brokenHead(n, n, "head anchor is missing; the tail record is unattested (anchor removed)"), nil
+	}
+	if head.Count != n {
+		return brokenHead(n, n, fmt.Sprintf(
+			"head anchor count %d does not match %d record(s) on disk (records were added or removed at the tail)",
+			head.Count, n)), nil
+	}
+	tailHash, err := hashRecord(recs[n-1])
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if head.TailHash != tailHash {
+		return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n)), nil
+	}
+	return VerifyResult{OK: true, Count: n}, nil
+}
+
+// brokenHead renders a head-anchor verification failure.
+func brokenHead(count, brokenAt int, reason string) VerifyResult {
+	return VerifyResult{OK: false, Count: count, BrokenAt: brokenAt, Reason: reason}
 }
 
 // verifyRecords is the pure core of Verify, separated so it can be unit-tested

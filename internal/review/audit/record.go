@@ -146,6 +146,14 @@ func canonicalBytes(r Record) ([]byte, error) {
 	return b, nil
 }
 
+// hashBytes returns the hex-encoded SHA-256 of b. It is the single hashing
+// primitive shared by the chain (hashRecord) and the head anchor, so both attest
+// records with the identical digest.
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
 // hashRecord returns the hex-encoded SHA-256 of a record's canonical bytes.
 // This is the value the next record stores in prev_hash, linking the chain.
 func hashRecord(r Record) (string, error) {
@@ -153,6 +161,5 @@ func hashRecord(r Record) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
+	return hashBytes(b), nil
 }
