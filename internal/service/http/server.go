@@ -214,7 +214,11 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.shutdownTimeout)
+		// Derive the drain deadline from ctx so its values propagate, but detach
+		// it from ctx's cancellation (ctx is already Done here) via WithoutCancel
+		// — otherwise the shutdown context would start cancelled and skip the
+		// graceful drain.
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.shutdownTimeout)
 		defer cancel()
 		shutdownErr := s.Shutdown(shutdownCtx)
 		// Serve returns ErrServerClosed once Shutdown completes; drain it so the

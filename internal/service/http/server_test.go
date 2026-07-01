@@ -177,22 +177,35 @@ func TestRegisterMountOverlapErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := newTestServer(fakeState{})
-			for _, p := range tc.setup {
-				if err := srv.RegisterMount(p, h); err != nil {
-					t.Fatalf("setup RegisterMount(%q): %v", p, err)
-				}
-			}
-			err := srv.RegisterMount(tc.prefix, h)
-			if tc.wantErr == nil {
-				if err != nil {
-					t.Fatalf("RegisterMount(%q) = %v, want nil", tc.prefix, err)
-				}
-				return
-			}
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("RegisterMount(%q) = %v, want %v", tc.prefix, err, tc.wantErr)
-			}
+			mountAll(t, srv, h, tc.setup)
+			assertMountErr(t, srv.RegisterMount(tc.prefix, h), tc.prefix, tc.wantErr)
 		})
+	}
+}
+
+// mountAll registers each setup prefix, failing the test if any does not
+// succeed (setup mounts are preconditions, never the assertion under test).
+func mountAll(t *testing.T, srv *Server, h nethttp.Handler, prefixes []string) {
+	t.Helper()
+	for _, p := range prefixes {
+		if err := srv.RegisterMount(p, h); err != nil {
+			t.Fatalf("setup RegisterMount(%q): %v", p, err)
+		}
+	}
+}
+
+// assertMountErr checks a RegisterMount result against the expected sentinel
+// (nil meaning the mount was expected to succeed).
+func assertMountErr(t *testing.T, err error, prefix string, want error) {
+	t.Helper()
+	if want == nil {
+		if err != nil {
+			t.Fatalf("RegisterMount(%q) = %v, want nil", prefix, err)
+		}
+		return
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("RegisterMount(%q) = %v, want %v", prefix, err, want)
 	}
 }
 
