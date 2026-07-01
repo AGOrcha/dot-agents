@@ -487,7 +487,7 @@ func TestArchiveSinglePlan_RealGitCommitLeavesCleanTree(t *testing.T) {
 	}
 	// The key assertion: a new commit landed AND the tree is clean, so the move
 	// would persist through a push (no uncommitted residue to be discarded).
-	if got := gitOut(t, dir, "rev-parse", "HEAD"); got == headBefore {
+	if gitOut(t, dir, "rev-parse", "HEAD") == headBefore {
 		t.Error("expected a new commit for the archive move; HEAD did not advance")
 	}
 	if status := gitOut(t, dir, "status", "--porcelain"); status != "" {
@@ -514,11 +514,11 @@ func TestArchiveSinglePlan_CommitDisabledLeavesUncommitted(t *testing.T) {
 		t.Fatalf("archiveSinglePlan: %v", err)
 	}
 	// No commit landed (opt-out honored inside runWorkflowCommit).
-	if got := gitOut(t, dir, "rev-parse", "HEAD"); got != headBefore {
+	if gitOut(t, dir, "rev-parse", "HEAD") != headBefore {
 		t.Error("commit.disable=true should not advance HEAD")
 	}
 	// Move still happened, so the tree is dirty (uncommitted).
-	if status := gitOut(t, dir, "status", "--porcelain"); status == "" {
+	if gitOut(t, dir, "status", "--porcelain") == "" {
 		t.Error("expected dirty tree when commit is disabled (move uncommitted)")
 	}
 }
