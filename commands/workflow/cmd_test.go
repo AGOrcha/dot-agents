@@ -157,6 +157,35 @@ func TestNewWorkflowPlanArchiveCmd_EmptyAfterTrim(t *testing.T) {
 	}
 }
 
+// Drives the cobra `plan archive` command end-to-end through its RunE with a
+// valid completed plan and --no-commit, covering the success path that hands off
+// to runWorkflowPlanArchive (the earlier archive-cmd tests only exercise the
+// missing/empty --plan guard). --no-commit keeps the archive move on disk but
+// uncommitted, so the test stays deterministic without a real git commit.
+func TestNewWorkflowPlanArchiveCmd_NoCommitArchivesPlan(t *testing.T) {
+	dir := initWorkflowTestRepo(t)
+	setupArchivePlan(t, dir, "myplan", "completed")
+	srcDir := filepath.Join(dir, ".agents", "workflow", "plans", "myplan")
+	dstDir := filepath.Join(dir, ".agents", "history", "myplan")
+
+	if err := executeWorkflowCommand(t, dir, "plan", "archive", "--plan", "myplan", "--no-commit"); err != nil {
+		t.Fatalf("plan archive --no-commit: %v", err)
+	}
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Error("source plan dir should be removed after archive")
+	}
+	if _, err := os.Stat(dstDir); err != nil {
+		t.Errorf("history dir should exist after archive: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dstDir, "PLAN.yaml"))
+	if err != nil {
+		t.Fatalf("read archived PLAN.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "archived") {
+		t.Error("archived PLAN.yaml should have status=archived")
+	}
+}
+
 func TestNewWorkflowPlanShowCmd_Invokes(t *testing.T) {
 	dir := setupTestProject(t)
 	chdirForCov(t, dir)
