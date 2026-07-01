@@ -291,11 +291,13 @@ func (s *DiskStore) ListIterations(_ context.Context, sessionID string) ([]Itera
 	return out, nil
 }
 
-// GetIteration implements Store. iterLogDir defaults to the active (first) root.
+// GetIteration implements Store. iterLogDir defaults to the active (first) root
+// and, when non-empty, must resolve to one of the configured roots (see
+// resolveRoot) — an unlisted path is rejected with ErrRootNotAllowed.
 func (s *DiskStore) GetIteration(_ context.Context, iterLogDir string, n int) (IterationDetail, error) {
-	root := iterLogDir
-	if root == "" && len(s.roots) > 0 {
-		root = s.roots[0]
+	root, err := s.resolveRoot(iterLogDir)
+	if err != nil {
+		return IterationDetail{}, err
 	}
 	snap := s.snapshot(root)
 	for _, rec := range snap.records {
@@ -304,6 +306,27 @@ func (s *DiskStore) GetIteration(_ context.Context, iterLogDir string, n int) (I
 		}
 	}
 	return IterationDetail{}, ErrNotFound
+}
+
+// resolveRoot maps a requested iter_log_dir to one of the store's configured
+// roots. An empty value selects the active (first) root. A non-empty value MUST
+// match a configured root after path normalization (filepath.Clean collapses
+// any ".." traversal), so a handler cannot coax the store into reading an
+// arbitrary iteration-log-shaped directory outside its resolved roots.
+func (s *DiskStore) resolveRoot(iterLogDir string) (string, error) {
+	if iterLogDir == "" {
+		if len(s.roots) == 0 {
+			return "", ErrNotFound
+		}
+		return s.roots[0], nil
+	}
+	req := filepath.Clean(iterLogDir)
+	for _, root := range s.roots {
+		if filepath.Clean(root) == req {
+			return root, nil
+		}
+	}
+	return "", ErrRootNotAllowed
 }
 
 // Rubric implements Store.

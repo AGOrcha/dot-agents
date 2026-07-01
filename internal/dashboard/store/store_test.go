@@ -400,12 +400,51 @@ func TestGetIterationDetailDefaultRoot(t *testing.T) {
 	if len(it.Verifiers) != 1 || it.Verifiers[0].Type != "test" || !it.Verifiers[0].GatePassed {
 		t.Errorf("iter-2 verifiers wrong: %+v", it.Verifiers)
 	}
-	// recompute-sourced fields stay empty in the read-through store (t06 owns).
-	if it.Integrity != nil || it.Objective != nil || it.IntegrityObservationCount != 0 || it.TranscriptTurnCount != nil {
-		t.Errorf("recompute-sourced fields must be empty: %+v", it)
-	}
 	if it.Retries != 2 { // impl.retries == iteration number in fixture
 		t.Errorf("retries projection wrong: %d", it.Retries)
+	}
+}
+
+// TestIterationDetailRecomputeFieldsPendingT06 pins the t02 read-layer boundary:
+// IterationDetail DECLARES the recompute-derived fields (integrity, objective,
+// integrity_observation_count, transcript_turn_count) so the payload is
+// shape-complete per API.md, but the raw read layer leaves them empty/null. They
+// are populated by t06's recompute-on-miss path — this asserts the t02 boundary,
+// NOT that the fields are permanently empty or non-conformant.
+func TestIterationDetailRecomputeFieldsPendingT06(t *testing.T) {
+	s := testStore(t, standardRoot(t))
+	it, err := s.GetIteration(context.Background(), "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Integrity != nil || it.Objective != nil || it.IntegrityObservationCount != 0 || it.TranscriptTurnCount != nil {
+		t.Errorf("t02 read layer must leave recompute-derived fields empty pending t06, got: %+v", it)
+	}
+}
+
+// TestGetIterationRejectsUnlistedRoot proves iter_log_dir cannot widen the
+// store beyond its configured roots: a well-formed but unlisted directory
+// (even one that is itself a valid iter-log) is rejected, and a traversal that
+// escapes the configured root is rejected too.
+func TestGetIterationRejectsUnlistedRoot(t *testing.T) {
+	configured := standardRoot(t)
+	// A separate directory that IS a valid iter-log but was not configured.
+	outside := t.TempDir()
+	plainIter(t, outside, 1, "sneaky", "h")
+
+	s := testStore(t, configured)
+	if _, err := s.GetIteration(context.Background(), outside, 1); !errors.Is(err, ErrRootNotAllowed) {
+		t.Fatalf("unlisted root must be rejected with ErrRootNotAllowed, got %v", err)
+	}
+	// A traversal that normalizes outside the configured root is also rejected.
+	escape := filepath.Join(configured, "..", filepath.Base(outside))
+	if _, err := s.GetIteration(context.Background(), escape, 1); !errors.Is(err, ErrRootNotAllowed) {
+		t.Fatalf("traversal escaping the root must be rejected, got %v", err)
+	}
+	// A ".."-containing path that normalizes back TO the configured root is allowed.
+	viaDotDot := filepath.Join(configured, "..", filepath.Base(configured))
+	if _, err := s.GetIteration(context.Background(), viaDotDot, 2); err != nil {
+		t.Fatalf("normalized-to-root path should resolve, got %v", err)
 	}
 }
 

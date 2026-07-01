@@ -35,6 +35,13 @@ import (
 // to a 404 not_found envelope.
 var ErrNotFound = errors.New("dashboard/store: not found")
 
+// ErrRootNotAllowed is returned by GetIteration when the requested iter_log_dir
+// is not one of the store's configured roots. It guards against a handler
+// snapshotting an arbitrary local directory (path-traversal / info-leak):
+// iter_log_dir may only disambiguate among the resolved roots, never widen
+// them. Handlers (t03) map it to a 400 bad_request envelope.
+var ErrRootNotAllowed = errors.New("dashboard/store: iter_log_dir is not a configured root")
+
 // bandUnscored is the band reported for a session or iteration that has no
 // numeric score (no sidecar, or a sidecar whose Scored flag is false).
 const bandUnscored = scoring.BandUnscored
@@ -115,28 +122,32 @@ type IterScoreRef struct {
 // fields (breakdown / integrity / objective / verifiers); IterationDetail
 // includes those the store can source from disk.
 type Iteration struct {
-	Iteration                 int            `json:"iteration"`
-	SessionID                 string         `json:"session_id"`
-	SchemaVersion             int            `json:"schema_version"`
-	Date                      string         `json:"date"`
-	Wave                      string         `json:"wave"`
-	TaskID                    string         `json:"task_id"`
-	Commit                    string         `json:"commit"`
-	RubricVersion             string         `json:"rubric_version"`
-	Scored                    bool           `json:"scored"`
-	Score                     *float64       `json:"score"`
-	Band                      string         `json:"band"`
-	FilesChanged              int            `json:"files_changed"`
-	LinesAdded                int            `json:"lines_added"`
-	LinesRemoved              int            `json:"lines_removed"`
-	Retries                   int            `json:"retries"`
-	IntegrityObservationCount int            `json:"integrity_observation_count"`
-	TranscriptTurnCount       *int           `json:"transcript_turn_count"`
-	TokenUsage                *TokenUsage    `json:"token_usage"`
-	Verifiers                 []Verifier     `json:"verifiers,omitempty"`
-	Breakdown                 []BreakdownRow `json:"breakdown,omitempty"`
-	Integrity                 []IntegrityRow `json:"integrity,omitempty"`
-	Objective                 *Objective     `json:"objective,omitempty"`
+	Iteration     int      `json:"iteration"`
+	SessionID     string   `json:"session_id"`
+	SchemaVersion int      `json:"schema_version"`
+	Date          string   `json:"date"`
+	Wave          string   `json:"wave"`
+	TaskID        string   `json:"task_id"`
+	Commit        string   `json:"commit"`
+	RubricVersion string   `json:"rubric_version"`
+	Scored        bool     `json:"scored"`
+	Score         *float64 `json:"score"`
+	Band          string   `json:"band"`
+	FilesChanged  int      `json:"files_changed"`
+	LinesAdded    int      `json:"lines_added"`
+	LinesRemoved  int      `json:"lines_removed"`
+	Retries       int      `json:"retries"`
+	// IntegrityObservationCount is populated by t06 recompute-on-miss; empty (0) from the raw read layer.
+	IntegrityObservationCount int `json:"integrity_observation_count"`
+	// TranscriptTurnCount is populated by t06 recompute-on-miss; empty (null) from the raw read layer.
+	TranscriptTurnCount *int           `json:"transcript_turn_count"`
+	TokenUsage          *TokenUsage    `json:"token_usage"`
+	Verifiers           []Verifier     `json:"verifiers,omitempty"`
+	Breakdown           []BreakdownRow `json:"breakdown,omitempty"`
+	// Integrity is populated by t06 recompute-on-miss; empty (null) from the raw read layer.
+	Integrity []IntegrityRow `json:"integrity,omitempty"`
+	// Objective is populated by t06 recompute-on-miss; empty (null) from the raw read layer.
+	Objective *Objective `json:"objective,omitempty"`
 }
 
 // IterationSummary is the row shape inside the iteration list.
