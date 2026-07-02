@@ -120,6 +120,17 @@ const (
 // already free regardless; production always uses fsops.RemoveAll.
 var removeTrashFn = fsops.RemoveAll
 
+// renameLockDirFn is the seam over fsops.Rename for the release/reclaim
+// lifecycle so tests can pin rename-failure interleavings deterministically;
+// production always uses fsops.Rename.
+var renameLockDirFn = fsops.Rename
+
+// testHookAfterLockDirCreated, when non-nil, runs between the winning Mkdir
+// and the holder claim in acquireLockDir. Tests use it to inject the
+// mid-acquire stall interleaving (grace reclaim + successor acquisition)
+// deterministically; production leaves it nil.
+var testHookAfterLockDirCreated func(lockDir string)
+
 // reservedKeys are the top-level scalar keys the writer manages itself. They are
 // never valid section names — SetSection rejects them so a caller cannot
 // accidentally overwrite a reserved field with an opaque section value.
@@ -380,10 +391,23 @@ func acquireLockDir(path string) (lockDir, holderID string, err error) {
 		// success/EEXIST result is the mutual-exclusion signal. fsops has no
 		// atomic-mkdir-lock equivalent, so this one call stays on raw os.Mkdir.
 		err := os.Mkdir(lockDir, 0o700)
-		if err == nil {
-			return lockDir, writeHolder(lockDir), nil
-		}
 		switch {
+		case err == nil:
+			if testHookAfterLockDirCreated != nil {
+				testHookAfterLockDirCreated(lockDir)
+			}
+			if holderID := writeHolder(lockDir); holderID != "" {
+				return lockDir, holderID, nil
+			}
+			// Winning the Mkdir is only HALF the acquisition: the O_EXCL holder
+			// claim is the other half, and it just failed. Either we lost the dir
+			// mid-stall (a contender grace-reclaimed it and a successor already
+			// claimed it, or it was renamed away), or the ownership token could
+			// not be recorded. NEVER proceed identity-less — an unverifiable
+			// holder could later release a successor's live lock. Rejoin the
+			// contention loop (the deadline still bounds us); an abandoned
+			// holderless dir of ours self-clears via lockNoHolderGrace.
+			denied = 0
 		case os.IsExist(err):
 			denied = 0 // the name exists; any prior denials were the transient
 			// Contention: the lock dir already exists and is held. Before waiting,
@@ -468,7 +492,7 @@ func lockTrashName(lockDir string) string {
 // pass will refuse to judge stale; either way the caller just keeps waiting.
 func reclaimStaleLockDir(lockDir string) bool {
 	trash := lockTrashName(lockDir)
-	if err := fsops.Rename(lockDir, trash); err != nil {
+	if err := renameLockDirFn(lockDir, trash); err != nil {
 		return false
 	}
 	if err := removeTrashFn(trash); err != nil {
@@ -490,11 +514,12 @@ func reclaimStaleLockDir(lockDir string) bool {
 // leftover (swept by later releases), never lock availability.
 //
 // Before touching anything the release verifies identity: if the holder file no
-// longer carries the contents this acquisition recorded (a contender
+// longer carries the contents this acquisition claimed (a contender
 // TTL-reclaimed the lock — e.g. after this process sat suspended past the TTL —
 // and re-acquired), the release is a no-op instead of stealing the new holder's
-// lock. An empty holderID (best-effort holder write failed at acquire) skips
-// the check, matching the lock's degraded-but-functional contract.
+// lock. An empty holderID never passes the check: acquisition fails rather
+// than proceed identity-less, so a legitimate release always carries the
+// O_EXCL-claimed identity.
 //
 // The rename is retried briefly (releaseRenameAttempts x releaseRenameBackoff)
 // because on Windows a contender's probe handle or an AV scan can transiently
@@ -512,7 +537,7 @@ func releaseLockDir(lockDir, holderID string) error {
 		if attempt > 0 {
 			time.Sleep(releaseRenameBackoff)
 		}
-		err = fsops.Rename(lockDir, lockTrashName(lockDir))
+		err = renameLockDirFn(lockDir, lockTrashName(lockDir))
 		if err == nil {
 			sweepLockTrash(lockDir)
 			return nil
@@ -525,15 +550,17 @@ func releaseLockDir(lockDir, holderID string) error {
 }
 
 // holderStillOurs reports whether the lock dir's holder file still carries the
-// identity this acquisition wrote. An empty holderID means the holder write
-// failed at acquire time (no identity to verify) and releases unconditionally.
-// An unreadable or mismatched holder means the lock was reclaimed or is mid-
-// teardown by someone else — without proof of ownership the release must not
-// touch the name (a wrongly-skipped release only leaves a remnant that the
-// grace/TTL reclaim clears; a wrongly-performed release steals a live lock).
+// identity this acquisition claimed. An empty holderID can NEVER prove
+// ownership: acquireLockDir no longer hands out empty identities (a failed
+// O_EXCL claim fails the acquisition), so refusing here keeps any stray legacy
+// or test caller from releasing a lock it cannot show it holds. An unreadable
+// or mismatched holder means the lock was reclaimed or is mid-teardown by
+// someone else — without proof of ownership the release must not touch the
+// name (a wrongly-skipped release only leaves a remnant that the grace/TTL
+// reclaim clears; a wrongly-performed release steals a live lock).
 func holderStillOurs(lockDir, holderID string) bool {
 	if holderID == "" {
-		return true
+		return false
 	}
 	data, err := os.ReadFile(filepath.Join(lockDir, holderFile))
 	if err != nil {
@@ -596,17 +623,44 @@ func debugf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
-// writeHolder records the acquiring PID and acquisition time inside the lock dir
-// so a later contender can detect a crashed holder, and returns the recorded
-// contents as this acquisition's identity for the release-time ownership check.
-// Best-effort: a write failure returns "" — the lock still functions, but
-// forfeits recorded-age stale detection and the identity check, and becomes
-// reclaimable once the dir outlives lockNoHolderGrace (holds are sub-second, so
-// the grace still comfortably covers a live holder).
+// writeHolder atomically claims ownership of the lock dir at lockDir by
+// creating the holder file with O_CREATE|O_EXCL and returns the recorded
+// contents (PID + acquisition time) as this acquisition's identity. "" means
+// the claim was LOST or unprovable — the caller must treat the acquisition as
+// failed and must never proceed identity-less.
+//
+// The exclusive create is the second half of the two-step acquisition
+// (mkdir-as-lock, then holder-as-claim) and closes the mid-acquire steal
+// window: if the Mkdir winner stalls past lockNoHolderGrace, a contender may
+// legitimately grace-reclaim (rename away) the holderless dir and a successor
+// may re-create and claim it. O_EXCL guarantees at most ONE process ever
+// records ownership of whatever dir sits at the lock name — the stalled
+// winner's late claim hits EEXIST (a successor already holds) or ENOENT (the
+// dir was renamed away) and correctly reports the loss instead of overwriting
+// the successor's token or proceeding unverified.
+//
+// Raw os.OpenFile on purpose (os.OpenFile is not an fsguard-policed mutator,
+// and no fsops helper fits): fsops.WriteFile is actively UNSAFE here — its
+// Windows fallback MkdirAll-then-PowerShell "heals" a missing parent, which
+// would RESURRECT a lock dir that a reclaimer just renamed away and silently
+// convert a lost claim into a phantom acquisition. The claim must observe the
+// dir's true state, never repair it.
 func writeHolder(lockDir string) string {
 	contents := fmt.Sprintf("%d\n%d\n", os.Getpid(), time.Now().UnixNano())
-	if err := fsops.WriteFile(filepath.Join(lockDir, holderFile), []byte(contents), 0o600); err != nil {
-		debugf("agentslock: write holder in %s: %v", lockDir, err)
+	holderPath := filepath.Join(lockDir, holderFile)
+	f, err := os.OpenFile(holderPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		debugf("agentslock: claim holder in %s: %v", lockDir, err)
+		return ""
+	}
+	_, werr := f.WriteString(contents)
+	cerr := f.Close()
+	if werr != nil || cerr != nil {
+		// A half-written token is worse than none: retract it (provably ours —
+		// the O_EXCL create succeeded) so the dir reads as holderless and clears
+		// via the short grace instead of lingering as garbage under the TTL.
+		_ = fsops.Remove(holderPath)
+		debugf("agentslock: write holder in %s: %v / %v", lockDir, werr, cerr)
 		return ""
 	}
 	return contents

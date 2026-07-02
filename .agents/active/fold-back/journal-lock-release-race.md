@@ -27,7 +27,15 @@ every fresh `da` process into a guaranteed timeout.
   fs ops; remnants must clear inside the 5s acquire budget).
 - Release verifies holder identity before touching the name, so an overdue
   release (e.g. post-suspend, after a TTL reclaim) cannot steal a successor's
-  live lock.
+  live lock. Empty identities never pass the check.
+- The holder write is an atomic O_EXCL CLAIM (the second half of the two-step
+  acquisition): a Mkdir winner that stalls past the grace and gets reclaimed
+  loses its late claim (EEXIST/ENOENT) and FAILS the acquisition instead of
+  proceeding identity-less or overwriting the successor's token — closes the
+  mid-acquire steal window the review gate found in the first cut. The claim
+  deliberately avoids fsops.WriteFile, whose Windows MkdirAll+PowerShell
+  fallback resurrected renamed-away lock dirs (the windows-latest
+  TestWriteHolderFailureReturnsEmpty red).
 - The acquire-timeout error now names the blocking holder (pid, hold age, TTL).
 
 ## Owner work-PC note (separate cause, related fix)

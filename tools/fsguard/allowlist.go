@@ -30,7 +30,7 @@ type allowEntry struct {
 var preciseAllow = []allowEntry{
 	{
 		relPath: "internal/agentslock/lockfile.go",
-		line:    382,
+		line:    393,
 		reason: "atomic mkdir-as-lock: os.Mkdir of the sidecar lock dir IS the " +
 			"mutual-exclusion primitive (its EEXIST result is the contention " +
 			"signal). fsops has no atomic-mkdir-lock equivalent. The PARENT " +
