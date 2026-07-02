@@ -261,8 +261,9 @@ extractor lives in `internal/scoring/signal_human_label.go`.
   supersedes the reviewer mean entirely; an admin *edit* of a reviewer's
   label remains attributed to the reviewer (the audit log captures who
   edited) and participates as that reviewer's latest state.
-- **Schema versioning (spec OQ3):** every label and sidecar records
-  `label_schema_version`. The extractor scores schema major 1 only; a
+- **Schema versioning (spec OQ3):** every label and sidecar records the
+  label-schema version, persisted as the `schema_version` field of
+  `iter-N.labels.yaml`. The extractor scores schema major 1 only; a
   sidecar or label at any other major degrades to absent rather than
   silently misreading a future field layout.
 - **Absent when:** no sidecar exists, the sidecar holds no labels, it is
@@ -630,8 +631,9 @@ the code change required is a single new case in
   major). Per-label sub-score = mean of the three normalized structured
   dimensions (correctness / scope_judgement / hallucination, spec D5.7);
   aggregation = mean of latest-per-reviewer with admin-override
-  precedence (spec D5.8 + OQ2); labels at an unsupported
-  `label_schema_version` major degrade to absent (OQ3). The seven
+  precedence (spec D5.8 + OQ2); labels at an unsupported label-schema
+  major (the sidecar's `schema_version` field) degrade to absent (OQ3).
+  The seven
   existing weights scale proportionally (×0.85, rounded): `landed`
   0.20→0.17, `verifier` 0.18→0.15, `tests` 0.17→0.14,
   `correction_pressure` 0.13→0.11, `scope` 0.13→0.11, `hook_outcomes`

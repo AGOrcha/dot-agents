@@ -2,6 +2,7 @@ package scoring
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -342,5 +343,91 @@ func TestHumanLabelAbsentDoesNotVote(t *testing.T) {
 		if row.Present || row.EffectiveWeight != 0 || row.Contribution != 0 {
 			t.Errorf("human_label row = %+v, want absent with zero weight and contribution", row)
 		}
+	}
+}
+
+// --- end-to-end: a real labels sidecar flows into the scored breakdown -----
+
+// copyIterlogFixture stages the shared testdata/iterlog fixture into a temp
+// directory so a test can add a labels sidecar next to real iter-N.yaml
+// records without mutating committed testdata.
+func copyIterlogFixture(t *testing.T) string {
+	t.Helper()
+	src := filepath.Join("testdata", "iterlog")
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("iter-log fixture not present: %v", err)
+	}
+	dst := t.TempDir()
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dst
+}
+
+// humanLabelRow returns the human_label breakdown row of a Score.
+func humanLabelRow(t *testing.T, s Score) SignalContribution {
+	t.Helper()
+	for _, r := range s.Breakdown {
+		if r.Signal == SignalHumanLabel {
+			return r
+		}
+	}
+	t.Fatal("breakdown has no human_label row")
+	return SignalContribution{}
+}
+
+// TestScoreIterationEmitsHumanLabelRow is the slice's end-to-end proof (spec
+// done-criteria 1 and 4): a REAL iter-N.labels.yaml written by the labels
+// package next to a real iter-N.yaml flows through ScoreIteration →
+// BuildSignalSets → ExtractHumanLabelSignals → the rubric, and the scored
+// breakdown carries a present human_label row with the expected sub-score —
+// while a sibling iteration with no labels keeps an absent row on the same
+// recompute.
+func TestScoreIterationEmitsHumanLabelRow(t *testing.T) {
+	iterLogDir := copyIterlogFixture(t)
+	repoDir := filepath.Join("..", "..")
+
+	// correctness 2/3, on-target, minor hallucination → (2/3 + 1.0 + 0.5) / 3.
+	addLabel(t, iterLogDir, 1, labels.AddInput{
+		Actor: "rev@example.com", Role: labels.RoleReviewer,
+		Structured: structured(2, labels.ScopeOnTarget, labels.HallucinationMinor),
+		Now:        labelTime(0),
+	})
+
+	score, _, err := ScoreIteration(iterLogDir, repoDir, 1)
+	if err != nil {
+		t.Fatalf("ScoreIteration() = %v, want nil", err)
+	}
+	row := humanLabelRow(t, score)
+	if !row.Present {
+		t.Fatalf("human_label row = %+v, want Present=true", row)
+	}
+	want := (2.0/3.0 + 1.0 + 0.5) / 3.0
+	if !approxEq(row.SubScore, want) {
+		t.Errorf("human_label SubScore = %g, want %g", row.SubScore, want)
+	}
+	if row.EffectiveWeight <= 0 || !approxEq(row.Contribution, row.EffectiveWeight*row.SubScore) {
+		t.Errorf("human_label row = %+v, want a voting contribution (eff_weight × sub_score)", row)
+	}
+	if !strings.Contains(row.Detail, "rev@example.com") {
+		t.Errorf("Detail = %q, want it to name the reviewer", row.Detail)
+	}
+
+	score2, _, err := ScoreIteration(iterLogDir, repoDir, 2)
+	if err != nil {
+		t.Fatalf("ScoreIteration(iter 2) = %v, want nil", err)
+	}
+	if row2 := humanLabelRow(t, score2); row2.Present || row2.EffectiveWeight != 0 || row2.Contribution != 0 {
+		t.Errorf("iter-2 human_label row = %+v, want absent with zero weight (no labels)", row2)
 	}
 }

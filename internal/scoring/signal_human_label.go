@@ -19,9 +19,11 @@
 //     therefore stay in the reviewer pool — the audit log captures who edited.
 //   - the aggregate is the mean over the surviving pool.
 //
-// Schema versioning (spec OQ3): every label carries label_schema_version;
-// this extractor scores major version 1 only. A sidecar or label at a
-// different major degrades to absent rather than silently misreading fields.
+// Schema versioning (spec OQ3): every label and sidecar carries the
+// label-schema version, persisted as the `schema_version` YAML field
+// (labels.Label.SchemaVersion / labels.Sidecar.SchemaVersion); this extractor
+// scores major version 1 only. A sidecar or label at a different major
+// degrades to absent rather than silently misreading fields.
 //
 // Absent-safety (spec D5.2 / R4-R5): an iteration with no sidecar, no labels,
 // an unreadable sidecar, or an unsupported schema yields an absent signal.
@@ -36,8 +38,9 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/review/labels"
 )
 
-// humanLabelSchemaMajor is the label_schema_version major this extractor
-// understands (labels.LabelSchemaVersion is 1.x.y). A different major means
+// humanLabelSchemaMajor is the label-schema major — read from the sidecar's
+// `schema_version` YAML field — that this extractor understands
+// (labels.LabelSchemaVersion is 1.x.y). A different major means
 // the structured dimensions may have changed shape, so the signal degrades to
 // absent instead of guessing.
 const humanLabelSchemaMajor = "1"
