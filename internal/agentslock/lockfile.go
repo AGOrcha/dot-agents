@@ -383,74 +383,111 @@ func acquireLockDir(path string) (lockDir, holderID string, err error) {
 		}
 	}
 	deadline := time.Now().Add(lockAcquireTimeout)
-	reclaimed := false
-	denied := 0
+	st := acquireLoopState{}
 	for {
-		// fsguard:allow os.Mkdir — atomic mkdir-as-lock primitive; see allowlist.go.
-		// The single-component create here is the lock acquisition itself: its
-		// success/EEXIST result is the mutual-exclusion signal. fsops has no
-		// atomic-mkdir-lock equivalent, so this one call stays on raw os.Mkdir.
-		err := os.Mkdir(lockDir, 0o700)
-		switch {
-		case err == nil:
-			if testHookAfterLockDirCreated != nil {
-				testHookAfterLockDirCreated(lockDir)
-			}
-			if holderID := writeHolder(lockDir); holderID != "" {
-				return lockDir, holderID, nil
-			}
-			// Winning the Mkdir is only HALF the acquisition: the O_EXCL holder
-			// claim is the other half, and it just failed. Either we lost the dir
-			// mid-stall (a contender grace-reclaimed it and a successor already
-			// claimed it, or it was renamed away), or the ownership token could
-			// not be recorded. NEVER proceed identity-less — an unverifiable
-			// holder could later release a successor's live lock. Rejoin the
-			// contention loop (the deadline still bounds us); an abandoned
-			// holderless dir of ours self-clears via lockNoHolderGrace.
-			denied = 0
-		case os.IsExist(err):
-			denied = 0 // the name exists; any prior denials were the transient
-			// Contention: the lock dir already exists and is held. Before waiting,
-			// decide whether the current holder is alive or stale (crashed without
-			// releasing). A stale lock is reclaimed at most once per call — the
-			// flag is set only when the reclaim RENAME actually lands, so a rename
-			// lost to a rival reclaimer (or a transient Windows pin) does not burn
-			// the budget, while a live holder racing us can still be torn down at
-			// most once.
-			if !reclaimed && lockIsStale(lockDir) && reclaimStaleLockDir(lockDir) {
-				reclaimed = true
-				continue
-			}
-		case isDeletePendingLockErr(err, lockGOOS):
-			// Windows-only transient: a contender's Mkdir can observe
-			// ERROR_ACCESS_DENIED while the dir is in the "delete pending" state
-			// (an older release deleting in place, or trash churn in the parent).
-			// It clears within a retry or two, so wait and retry rather than
-			// failing the whole acquisition. Skip the stale-reclaim path: there is
-			// no live holder to judge, just a dir mid-delete. A denial that
-			// SURVIVES the transient window is not this race at all — it is a real
-			// permission denial (folder protection / AV) and must fail fast with
-			// the actual cause instead of a misleading contention timeout.
-			denied++
-			if denied >= deniedTransientAttempts {
-				return "", "", deniedLockDirError(lockDir, err)
-			}
-		case os.IsPermission(err):
-			// Non-Windows permission denial: never a delete-pending transient, so
-			// classify immediately with the actionable message.
-			return "", "", deniedLockDirError(lockDir, err)
-		default:
-			return "", "", fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, err)
+		holderID, acquired, err := acquireTick(lockDir, &st)
+		if err != nil {
+			return "", "", err
+		}
+		if acquired {
+			return lockDir, holderID, nil
+		}
+		if st.retryNow {
+			st.retryNow = false
+			continue
 		}
 		if time.Now().After(deadline) {
-			msg := "timed out"
-			if held := describeHolder(lockDir); held != "" {
-				msg += " (" + held + ")"
-			}
-			return "", "", fmt.Errorf("agentslock: acquire lock %s: %s", lockDir, msg)
+			return "", "", lockTimeoutError(lockDir)
 		}
 		time.Sleep(lockRetryInterval)
 	}
+}
+
+// acquireLoopState carries the per-call bookkeeping across acquireTick
+// iterations: the once-per-call stale-reclaim budget, the consecutive
+// permission-denied streak, and whether the next retry should skip the sleep
+// (a reclaim just freed the name).
+type acquireLoopState struct {
+	reclaimed bool
+	denied    int
+	retryNow  bool
+}
+
+// acquireTick performs one iteration of the acquisition loop: attempt the
+// atomic Mkdir, then either complete the two-step acquisition (holder claim)
+// or classify the failure. It returns the claimed holder identity with
+// acquired=true, a fatal error, or neither (the caller waits and retries).
+func acquireTick(lockDir string, st *acquireLoopState) (holderID string, acquired bool, err error) {
+	// fsguard:allow os.Mkdir — atomic mkdir-as-lock primitive; see allowlist.go.
+	// The single-component create here is the lock acquisition itself: its
+	// success/EEXIST result is the mutual-exclusion signal. fsops has no
+	// atomic-mkdir-lock equivalent, so this one call stays on raw os.Mkdir.
+	mkdirErr := os.Mkdir(lockDir, 0o700)
+	switch {
+	case mkdirErr == nil:
+		st.denied = 0
+		if testHookAfterLockDirCreated != nil {
+			testHookAfterLockDirCreated(lockDir)
+		}
+		if id := writeHolder(lockDir); id != "" {
+			return id, true, nil
+		}
+		// Winning the Mkdir is only HALF the acquisition: the O_EXCL holder
+		// claim is the other half, and it just failed. Either we lost the dir
+		// mid-stall (a contender grace-reclaimed it and a successor already
+		// claimed it, or it was renamed away), or the ownership token could not
+		// be recorded. NEVER proceed identity-less — an unverifiable holder
+		// could later release a successor's live lock. Rejoin the contention
+		// loop (the deadline still bounds the caller); an abandoned holderless
+		// dir of ours self-clears via lockNoHolderGrace.
+		return "", false, nil
+	case os.IsExist(mkdirErr):
+		st.denied = 0 // the name exists; any prior denials were the transient
+		// Contention: the lock dir already exists and is held. Before waiting,
+		// decide whether the current holder is alive or stale (crashed without
+		// releasing). A stale lock is reclaimed at most once per call — the
+		// flag is set only when the reclaim RENAME actually lands, so a rename
+		// lost to a rival reclaimer (or a transient Windows pin) does not burn
+		// the budget, while a live holder racing us can still be torn down at
+		// most once.
+		if !st.reclaimed && lockIsStale(lockDir) && reclaimStaleLockDir(lockDir) {
+			st.reclaimed = true
+			st.retryNow = true
+		}
+		return "", false, nil
+	case isDeletePendingLockErr(mkdirErr, lockGOOS):
+		// Windows-only transient: a contender's Mkdir can observe
+		// ERROR_ACCESS_DENIED while the dir is in the "delete pending" state
+		// (an older release deleting in place, or trash churn in the parent).
+		// It clears within a retry or two, so wait and retry rather than
+		// failing the whole acquisition. Skip the stale-reclaim path: there is
+		// no live holder to judge, just a dir mid-delete. A denial that
+		// SURVIVES the transient window is not this race at all — it is a real
+		// permission denial (folder protection / AV) and must fail fast with
+		// the actual cause instead of a misleading contention timeout.
+		st.denied++
+		if st.denied >= deniedTransientAttempts {
+			return "", false, deniedLockDirError(lockDir, mkdirErr)
+		}
+		return "", false, nil
+	case os.IsPermission(mkdirErr):
+		// Non-Windows permission denial: never a delete-pending transient, so
+		// classify immediately with the actionable message.
+		return "", false, deniedLockDirError(lockDir, mkdirErr)
+	default:
+		return "", false, fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, mkdirErr)
+	}
+}
+
+// lockTimeoutError renders the acquire-timeout failure, naming the blocking
+// holder when its record is readable so a stranded invocation reports WHO
+// holds the lock and when the TTL will self-heal it.
+func lockTimeoutError(lockDir string) error {
+	msg := "timed out"
+	if held := describeHolder(lockDir); held != "" {
+		msg += " (" + held + ")"
+	}
+	return fmt.Errorf("agentslock: acquire lock %s: %s", lockDir, msg)
 }
 
 // deniedLockDirError classifies a PERSISTENT access-denied on the lock-dir

@@ -65,6 +65,30 @@ type configSection struct {
 	Layers map[string]string `json:"layers,omitempty"`
 }
 
+// mustMkdir / mustWriteFile / backdateDir are fatal-on-error fixture helpers
+// shared by the lock-lifecycle tests.
+func mustMkdir(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path, data string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func backdateDir(t *testing.T, dir string, age time.Duration) {
+	t.Helper()
+	old := time.Now().Add(-age)
+	if err := os.Chtimes(dir, old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpenMissingFileIsFresh(t *testing.T) {
 	lf, err := Open(filepath.Join(t.TempDir(), ".agentsrc.lock"))
 	if err != nil {
@@ -1028,29 +1052,37 @@ func TestAcquireFileLockRecoversFromPartialReleaseRemnants(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), ".agentsrc.lock")
-			seedLockDir(t, path, tc.age, false) // dir, NO holder file
-
-			start := time.Now()
-			release, err := AcquireFileLock(path)
-			elapsed := time.Since(start)
-			if err != nil {
-				t.Fatalf("acquire over a partial-release remnant must succeed, got: %v", err)
-			}
-			if elapsed >= lockAcquireTimeout {
-				t.Fatalf("acquire waited out the timeout (%v); remnant not reclaimed within budget", elapsed)
-			}
-			if elapsed < tc.minElapsed {
-				t.Fatalf("acquire returned before the no-holder grace could elapse: %v < %v", elapsed, tc.minElapsed)
-			}
-			// We are now the recorded holder.
-			if _, err := os.Stat(filepath.Join(path+".lock", holderFile)); err != nil {
-				t.Fatalf("holder file absent after reclaim+acquire: %v", err)
-			}
-			if err := release(); err != nil {
-				t.Fatalf("release: %v", err)
-			}
+			assertAcquireRecoversFromRemnant(t, tc.age, tc.minElapsed)
 		})
+	}
+}
+
+// assertAcquireRecoversFromRemnant seeds a holderless remnant of the given age
+// and asserts a fresh acquire succeeds within the budget while honoring the
+// no-holder grace (no instant theft), ending as the recorded holder.
+func assertAcquireRecoversFromRemnant(t *testing.T, age, minElapsed time.Duration) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
+	seedLockDir(t, path, age, false) // dir, NO holder file
+
+	start := time.Now()
+	release, err := AcquireFileLock(path)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("acquire over a partial-release remnant must succeed, got: %v", err)
+	}
+	if elapsed >= lockAcquireTimeout {
+		t.Fatalf("acquire waited out the timeout (%v); remnant not reclaimed within budget", elapsed)
+	}
+	if elapsed < minElapsed {
+		t.Fatalf("acquire returned before the no-holder grace could elapse: %v < %v", elapsed, minElapsed)
+	}
+	// We are now the recorded holder.
+	if _, err := os.Stat(filepath.Join(path+".lock", holderFile)); err != nil {
+		t.Fatalf("holder file absent after reclaim+acquire: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }
 
@@ -1359,25 +1391,10 @@ func TestAcquireClaimLostToMidStallGraceReclaim(t *testing.T) {
 			return
 		}
 		fired = true
-		// A (the caller) has just won the Mkdir and now "stalls": age the
-		// holderless dir past the grace and run B's whole sequence — grace
-		// reclaim, re-create, claim — before A's writeHolder runs.
-		old := time.Now().Add(-(lockNoHolderGrace + time.Second))
-		if err := os.Chtimes(dir, old, old); err != nil {
-			t.Fatal(err)
-		}
-		if !lockIsStale(dir) {
-			t.Fatal("aged holderless dir must be reclaimable by the grace")
-		}
-		if !reclaimStaleLockDir(dir) {
-			t.Fatal("B's grace reclaim must land")
-		}
-		if err := os.Mkdir(dir, 0o700); err != nil {
-			t.Fatalf("B re-create: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, holderFile), []byte(bID), 0o600); err != nil {
-			t.Fatalf("B claim: %v", err)
-		}
+		// A (the caller) has just won the Mkdir and now "stalls": run B's whole
+		// takeover — grace reclaim, re-create, claim — before A's writeHolder,
+		// then release B's lock shortly after from a joined goroutine.
+		simulateMidStallSuccessorTakeover(t, dir, bID)
 		go func() {
 			defer close(bDone)
 			time.Sleep(400 * time.Millisecond)
@@ -1407,6 +1424,22 @@ func TestAcquireClaimLostToMidStallGraceReclaim(t *testing.T) {
 	if err := release(); err != nil {
 		t.Fatalf("A's release: %v", err)
 	}
+}
+
+// simulateMidStallSuccessorTakeover ages the caller's freshly-created
+// holderless lock dir past the no-holder grace and performs contender B's
+// full takeover: grace reclaim (rename-away), re-create, claim with bID.
+func simulateMidStallSuccessorTakeover(t *testing.T, dir, bID string) {
+	t.Helper()
+	backdateDir(t, dir, lockNoHolderGrace+time.Second)
+	if !lockIsStale(dir) {
+		t.Fatal("aged holderless dir must be reclaimable by the grace")
+	}
+	if !reclaimStaleLockDir(dir) {
+		t.Fatal("B's grace reclaim must land")
+	}
+	mustMkdir(t, dir)
+	mustWriteFile(t, filepath.Join(dir, holderFile), bID)
 }
 
 // TestAcquireReclaimsCleanlyAfterRenameAwayMidStall pins the other loss shape:
@@ -1510,30 +1543,38 @@ func TestAcquireDeniedMkdirFailsFastWithActionableError(t *testing.T) {
 
 	for _, goos := range []string{runtime.GOOS, "windows"} {
 		t.Run(goos, func(t *testing.T) {
-			realGOOS := lockGOOS
-			t.Cleanup(func() { lockGOOS = realGOOS })
-			lockGOOS = goos
-
-			start := time.Now()
-			_, err := AcquireFileLock(path)
-			elapsed := time.Since(start)
-			if err == nil {
-				t.Fatal("expected a denied error acquiring under a write-protected parent")
-			}
-			if !strings.Contains(err.Error(), "persistently denied") ||
-				!strings.Contains(err.Error(), "Controlled Folder Access") ||
-				!strings.Contains(err.Error(), parent) {
-				t.Fatalf("denied error must name the cause, the protected parent, and a next step, got: %v", err)
-			}
-			if strings.Contains(err.Error(), "timed out") {
-				t.Fatalf("denial must not be misreported as a contention timeout: %v", err)
-			}
-			// Fast fail: well under the 5s acquire budget (windows branch pays
-			// only the ~300ms transient window; unix is immediate).
-			if elapsed >= 2*time.Second {
-				t.Fatalf("denied classification took %v; must fail fast, not burn the acquire budget", elapsed)
-			}
+			assertDeniedMkdirFailsFast(t, path, parent, goos)
 		})
+	}
+}
+
+// assertDeniedMkdirFailsFast acquires under a write-protected parent with the
+// lock loop classifying failures as the given GOOS, and asserts the actionable
+// denied error arrives well inside the acquire budget.
+func assertDeniedMkdirFailsFast(t *testing.T, path, parent, goos string) {
+	t.Helper()
+	realGOOS := lockGOOS
+	t.Cleanup(func() { lockGOOS = realGOOS })
+	lockGOOS = goos
+
+	start := time.Now()
+	_, err := AcquireFileLock(path)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a denied error acquiring under a write-protected parent")
+	}
+	if !strings.Contains(err.Error(), "persistently denied") ||
+		!strings.Contains(err.Error(), "Controlled Folder Access") ||
+		!strings.Contains(err.Error(), parent) {
+		t.Fatalf("denied error must name the cause, the protected parent, and a next step, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("denial must not be misreported as a contention timeout: %v", err)
+	}
+	// Fast fail: well under the 5s acquire budget (windows branch pays only
+	// the ~300ms transient window; unix is immediate).
+	if elapsed >= 2*time.Second {
+		t.Fatalf("denied classification took %v; must fail fast, not burn the acquire budget", elapsed)
 	}
 }
 
