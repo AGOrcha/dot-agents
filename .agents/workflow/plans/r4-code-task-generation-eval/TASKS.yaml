@@ -85,7 +85,7 @@ tasks:
       app_type: go-cli
     - id: difficulty-derivation
       title: KG-derived difficulty signals + bucketing
-      status: pending
+      status: completed
       depends_on:
         - kg-query-layer
       blocks:

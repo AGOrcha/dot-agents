@@ -137,7 +137,7 @@ tasks:
       app_type: go-cli
     - id: t04-sse-broker
       title: Build SSE event broker (subscribe / publish / fan-out)
-      status: pending
+      status: completed
       depends_on:
         - t01-api-contract-design
       blocks:

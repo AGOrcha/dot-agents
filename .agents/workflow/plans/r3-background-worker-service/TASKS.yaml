@@ -152,7 +152,7 @@ tasks:
       app_type: go-cli
     - id: tasks-iterlog-ingester
       title: Iter-log ingester task — fsnotify trigger, calls R1 scorer, publishes event
-      status: pending
+      status: completed
       depends_on:
         - scheduler-core
         - event-bus
