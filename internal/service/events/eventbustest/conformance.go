@@ -217,17 +217,18 @@ func checkTopicRouting(tb TB, bus events.EventBus) {
 func checkFanOut(tb TB, bus events.EventBus) {
 	tb.Helper()
 	const n = 3
+	const fanOutPayload = "fan-out"
 	streams := make([]<-chan events.Event, 0, n)
 	for i := 0; i < n; i++ {
 		ch, unsub := subscribe(tb, bus, topicAlpha)
 		defer unsub()
 		streams = append(streams, ch)
 	}
-	publish(tb, bus, topicAlpha, "fan-out")
+	publish(tb, bus, topicAlpha, fanOutPayload)
 	for i, ch := range streams {
 		evt := recvEvent(tb, ch, fmt.Sprintf("fan-out subscriber %d", i))
-		if evt.Payload != "fan-out" {
-			tb.Errorf("subscriber %d payload = %v, want %q", i, evt.Payload, "fan-out")
+		if evt.Payload != fanOutPayload {
+			tb.Errorf("subscriber %d payload = %v, want %q", i, evt.Payload, fanOutPayload)
 		}
 	}
 }
