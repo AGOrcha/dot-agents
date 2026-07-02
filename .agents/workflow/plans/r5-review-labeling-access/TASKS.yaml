@@ -102,7 +102,7 @@ tasks:
       app_type: go-cli
     - id: collection-endpoint
       title: HTTP route handlers + auth/audit middleware (mounts into R3 server)
-      status: pending
+      status: completed
       depends_on:
         - rbac-identity
         - label-model
