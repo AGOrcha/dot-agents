@@ -421,8 +421,11 @@ func TestCtlSecondBind(t *testing.T) {
 func TestCtlBadDir(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing", "ctl.sock")
 	err := NewControl(path, fakeState{}, func() {}).Serve(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "stale-file removal failed") {
-		t.Fatalf("Serve = %v, want bind failure with removal detail", err)
+	// A missing parent is NOT EADDRINUSE: the raw bind error must propagate
+	// untouched, never routed through takeover (see listenControl guard).
+	if err == nil || strings.Contains(err.Error(), "stale-file removal") ||
+		strings.Contains(err.Error(), "refusing takeover") {
+		t.Fatalf("Serve = %v, want raw bind failure without takeover", err)
 	}
 }
 
