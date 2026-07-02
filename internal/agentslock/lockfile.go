@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -679,11 +680,25 @@ func pathOlderThan(path string, limit time.Duration) bool {
 	return time.Since(info.ModTime()) > limit
 }
 
-// lockTrashName returns a unique trash sibling for lockPath. Uniqueness (pid +
-// nanos) means trash names are never contended or re-acquired: deleting trash
-// can only ever race other deleters of the same garbage, never a live lock.
+// lockTrashSeq disambiguates trash names minted within the same nanosecond by
+// the same process. pid+nanos alone is NOT unique in-process: dozens of
+// concurrent claimants on a coarse-clock CI runner can mint the same
+// pid+nanos, and a collided CLAIM TEMP is catastrophic — two claimants write
+// the same temp path (O_TRUNC), one links it to the lock name after the other
+// overwrote it, and the "winner" holds a lock recording the LOSER's identity;
+// its own release then self-refuses on the identity check and the lock wedges
+// until the TTL. That was the windows/macos-latest
+// TestEmitConcurrentNoTornLines wedge ("held by pid <self> for 5s").
+var lockTrashSeq atomic.Int64
+
+// lockTrashName returns a trash sibling for lockPath that is unique across
+// processes (pid) and within a process (atomic sequence; nanos kept for
+// human-readable ordering). Trash names are never contended or re-acquired:
+// deleting trash can only ever race other deleters of the same garbage, never
+// a live lock — and claim temps minted here can never collide.
 func lockTrashName(lockPath string) string {
-	return fmt.Sprintf("%s%s%d-%d", lockPath, lockTrashInfix, os.Getpid(), time.Now().UnixNano())
+	return fmt.Sprintf("%s%s%d-%d-%d",
+		lockPath, lockTrashInfix, os.Getpid(), time.Now().UnixNano(), lockTrashSeq.Add(1))
 }
 
 // reclaimStaleLock takes a stale occupant out of the way with a SINGLE atomic

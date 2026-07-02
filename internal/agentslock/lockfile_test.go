@@ -1827,3 +1827,67 @@ func TestClassifyClaimErrorTempVanishedIsRetryable(t *testing.T) {
 		t.Fatalf("swept temp must be retryable, got: %v", err)
 	}
 }
+
+// TestLockTrashNamesUniqueUnderConcurrency pins the invariant that broke the
+// windows/macos-latest concurrent-Emit test: trash/claim-temp names must be
+// unique even when many goroutines mint them within the same clock tick
+// (pid+nanos alone collided; a collided claim temp made a winner hold a lock
+// carrying the loser's identity, wedging the lock until the TTL).
+func TestLockTrashNamesUniqueUnderConcurrency(t *testing.T) {
+	const goroutines, perG = 32, 64
+	names := make(chan string, goroutines*perG)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < perG; j++ {
+				names <- lockTrashName("/x/guarded.lock")
+			}
+		}()
+	}
+	wg.Wait()
+	close(names)
+	seen := make(map[string]bool, goroutines*perG)
+	for n := range names {
+		if seen[n] {
+			t.Fatalf("duplicate trash name minted: %s", n)
+		}
+		seen[n] = true
+	}
+}
+
+// TestAcquireReleaseConcurrentChurn drives the journal-shaped workload at the
+// lock layer: many goroutines cycling acquire→release on one path. Every
+// acquire must succeed within budget (no identity wedges, no starvation) and
+// every release must verify cleanly.
+func TestAcquireReleaseConcurrentChurn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "churn.ndjson")
+	const goroutines, cycles = 16, 4
+	errs := make(chan error, goroutines*cycles)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < cycles; j++ {
+				release, err := AcquireFileLock(path)
+				if err != nil {
+					errs <- err
+					return
+				}
+				errs <- release()
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent churn: %v", err)
+		}
+	}
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock name must be free after the churn: stat err=%v", err)
+	}
+}
