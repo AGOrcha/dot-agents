@@ -198,7 +198,7 @@ tasks:
       app_type: go-cli
     - id: tasks-rescore
       title: Rescore-on-rubric-bump task — interval trigger, rescores when RubricVersion changes
-      status: pending
+      status: completed
       depends_on:
         - scheduler-core
         - event-bus

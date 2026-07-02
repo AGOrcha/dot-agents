@@ -163,7 +163,7 @@ tasks:
       app_type: go-cli
     - id: sandbox-worktree
       title: Worktree sandbox primitive (Sandbox interface + v1 impl)
-      status: pending
+      status: completed
       depends_on:
         - taskspec-and-registry
       blocks:

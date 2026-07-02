@@ -209,7 +209,7 @@ tasks:
       app_type: go-cli
     - id: t06-recompute-on-miss-and-fswatch
       title: Score-recompute-on-miss + iter-log filesystem watcher → broker bridge
-      status: pending
+      status: completed
       depends_on:
         - t02-storage-read-layer
         - t04-sse-broker
