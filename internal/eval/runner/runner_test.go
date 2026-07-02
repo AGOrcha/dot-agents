@@ -5,13 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
+
+// sleepEnvVar makes the test binary re-enter as a subprocess that sleeps for
+// the given number of milliseconds, giving realExec a portable long-running
+// process to cancel/time-out under -race (the stdlib subprocess-helper
+// pattern). TestMain intercepts it before running the suite.
+const sleepEnvVar = "RUNNER_TEST_SLEEP_MS"
+
+func TestMain(m *testing.M) {
+	if ms := os.Getenv(sleepEnvVar); ms != "" {
+		d, _ := strconv.Atoi(ms)
+		time.Sleep(time.Duration(d) * time.Millisecond)
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 // --- fixtures ----------------------------------------------------------------
 
@@ -53,8 +70,7 @@ func fixedCmdFn(stdout []byte, stderr []byte, exitCode int, err error) cmdFn {
 	}
 }
 
-// recordingCmdFn returns a cmdFn that records each invocation and returns
-// fixed values. The returned slice pointer accumulates calls for assertion.
+// call records one exec-seam invocation for assertion.
 type call struct {
 	name string
 	args []string
@@ -62,6 +78,8 @@ type call struct {
 	env  []string
 }
 
+// recordingCmdFn returns a cmdFn that records each invocation and returns
+// fixed values. The returned slice pointer accumulates calls.
 func recordingCmdFn(
 	stdout []byte,
 	stderr []byte,
@@ -80,6 +98,16 @@ func recordingCmdFn(
 		return stdout, stderr, exitCode, err
 	}
 	return fn, calls
+}
+
+// emptyScan is a token-scanner seam that always reports no telemetry.
+func emptyScan(_, _, _, _ string) platform.SessionTokenMetrics {
+	return platform.SessionTokenMetrics{}
+}
+
+// fakeScan returns a token-scanner seam that always reports m.
+func fakeScan(m platform.SessionTokenMetrics) scanFn {
+	return func(_, _, _, _ string) platform.SessionTokenMetrics { return m }
 }
 
 // --- New / factory -----------------------------------------------------------
@@ -112,7 +140,7 @@ func TestClaudeRunner_HappyPath(t *testing.T) {
 	const fakeOutput = `{"session_id":"sess-abc","model":"claude-test","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":80,"cache_creation_input_tokens":20}}`
 
 	fn, calls := recordingCmdFn([]byte(fakeOutput), nil, 0, nil)
-	r := &claudeRunner{run: fn}
+	r := &claudeRunner{run: fn, scan: emptyScan}
 
 	spec := minimalSpec()
 	inst := minimalInstance(t)
@@ -153,7 +181,7 @@ func TestClaudeRunner_HappyPath(t *testing.T) {
 
 func TestClaudeRunner_NonZeroExit(t *testing.T) {
 	t.Parallel()
-	r := &claudeRunner{run: fixedCmdFn([]byte("error output"), nil, 1, nil)}
+	r := &claudeRunner{run: fixedCmdFn([]byte("error output"), nil, 1, nil), scan: emptyScan}
 
 	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	if err != nil {
@@ -166,7 +194,7 @@ func TestClaudeRunner_NonZeroExit(t *testing.T) {
 
 func TestClaudeRunner_NilSpec(t *testing.T) {
 	t.Parallel()
-	r := &claudeRunner{run: fixedCmdFn(nil, nil, 0, nil)}
+	r := &claudeRunner{run: fixedCmdFn(nil, nil, 0, nil), scan: emptyScan}
 	_, err := r.Run(context.Background(), nil, minimalInstance(t))
 	if err == nil {
 		t.Error("Run(nil spec): want error, got nil")
@@ -175,7 +203,7 @@ func TestClaudeRunner_NilSpec(t *testing.T) {
 
 func TestClaudeRunner_NilInstance(t *testing.T) {
 	t.Parallel()
-	r := &claudeRunner{run: fixedCmdFn(nil, nil, 0, nil)}
+	r := &claudeRunner{run: fixedCmdFn(nil, nil, 0, nil), scan: emptyScan}
 	_, err := r.Run(context.Background(), minimalSpec(), nil)
 	if err == nil {
 		t.Error("Run(nil instance): want error, got nil")
@@ -185,7 +213,7 @@ func TestClaudeRunner_NilInstance(t *testing.T) {
 func TestClaudeRunner_ExecError(t *testing.T) {
 	t.Parallel()
 	execErr := errors.New("binary not found")
-	r := &claudeRunner{run: fixedCmdFn(nil, nil, 0, execErr)}
+	r := &claudeRunner{run: fixedCmdFn(nil, nil, 0, execErr), scan: emptyScan}
 
 	_, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	if err == nil {
@@ -199,7 +227,7 @@ func TestClaudeRunner_ExecError(t *testing.T) {
 func TestClaudeRunner_PromptPassedAsArg(t *testing.T) {
 	t.Parallel()
 	fn, calls := recordingCmdFn(nil, nil, 0, nil)
-	r := &claudeRunner{run: fn}
+	r := &claudeRunner{run: fn, scan: emptyScan}
 
 	spec := minimalSpec()
 	spec.Prompt = "Write a function that reverses a string."
@@ -209,22 +237,19 @@ func TestClaudeRunner_PromptPassedAsArg(t *testing.T) {
 	}
 
 	c := (*calls)[0]
-	found := false
-	for _, arg := range c.args {
-		if arg == spec.Prompt {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !argsContain(c.args, spec.Prompt) {
 		t.Errorf("prompt not found in exec args: %v", c.args)
+	}
+	// Headless flag must be present so claude does not open an interactive TUI.
+	if !argsContain(c.args, "--print") {
+		t.Errorf("--print headless flag not found in exec args: %v", c.args)
 	}
 }
 
 func TestClaudeRunner_SandboxEnvAppended(t *testing.T) {
 	t.Parallel()
 	fn, calls := recordingCmdFn(nil, nil, 0, nil)
-	r := &claudeRunner{run: fn}
+	r := &claudeRunner{run: fn, scan: emptyScan}
 
 	inst := minimalInstance(t)
 	inst.Env = []string{"HOME=/sandbox-home", "MY_VAR=sentinel"}
@@ -233,23 +258,15 @@ func TestClaudeRunner_SandboxEnvAppended(t *testing.T) {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
 
-	c := (*calls)[0]
-	hasSentinel := false
-	for _, kv := range c.env {
-		if kv == "MY_VAR=sentinel" {
-			hasSentinel = true
-		}
-	}
-	if !hasSentinel {
+	if !argsContain((*calls)[0].env, "MY_VAR=sentinel") {
 		t.Error("sandbox env sentinel not found in exec env")
 	}
 }
 
 func TestClaudeRunner_PartialJSON(t *testing.T) {
 	t.Parallel()
-	// Partial/non-JSON output should not cause errors; telemetry falls back
-	// to the Harness-only baseline.
-	r := &claudeRunner{run: fixedCmdFn([]byte("not json at all"), nil, 0, nil)}
+	// Non-JSON output should not error; telemetry falls back to Harness-only.
+	r := &claudeRunner{run: fixedCmdFn([]byte("not json at all"), nil, 0, nil), scan: emptyScan}
 
 	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	if err != nil {
@@ -263,13 +280,61 @@ func TestClaudeRunner_PartialJSON(t *testing.T) {
 	}
 }
 
+// TestClaudeRunner_ScannerBackfill exercises the fallback: the inline JSON
+// carried a session id but no usage block, so the platform claude scanner is
+// consulted and its metrics populate Telemetry.Tokens.
+func TestClaudeRunner_ScannerBackfill(t *testing.T) {
+	t.Parallel()
+	const idOnly = `{"session_id":"sess-xyz","model":"claude-test"}`
+	scan := fakeScan(platform.SessionTokenMetrics{
+		InputTokens:  200,
+		OutputTokens: 60,
+	})
+	r := &claudeRunner{run: fixedCmdFn([]byte(idOnly), nil, 0, nil), scan: scan}
+
+	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if result.Telemetry.Tokens == nil {
+		t.Fatal("Tokens: want non-nil from scanner backfill, got nil")
+	}
+	if result.Telemetry.Tokens.InputTokens != 200 {
+		t.Errorf("InputTokens: want 200, got %d", result.Telemetry.Tokens.InputTokens)
+	}
+}
+
+// TestClaudeRunner_NoBackfillWhenInlineTokens verifies the scanner is NOT
+// consulted when the inline JSON already carried usage.
+func TestClaudeRunner_NoBackfillWhenInlineTokens(t *testing.T) {
+	t.Parallel()
+	const withUsage = `{"session_id":"sess-1","usage":{"input_tokens":5,"output_tokens":1}}`
+	called := false
+	scan := func(_, _, _, _ string) platform.SessionTokenMetrics {
+		called = true
+		return platform.SessionTokenMetrics{InputTokens: 999}
+	}
+	r := &claudeRunner{run: fixedCmdFn([]byte(withUsage), nil, 0, nil), scan: scan}
+
+	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if called {
+		t.Error("scanner should not be consulted when inline usage is present")
+	}
+	if result.Telemetry.Tokens.InputTokens != 5 {
+		t.Errorf("InputTokens: want inline 5, got %d", result.Telemetry.Tokens.InputTokens)
+	}
+}
+
 func TestClaudeRunner_DurationMeasured(t *testing.T) {
 	t.Parallel()
 	delay := 10 * time.Millisecond
 	r := &claudeRunner{run: func(_ context.Context, _ string, _ []string, _ string, _ []string) ([]byte, []byte, int, error) {
 		time.Sleep(delay)
 		return nil, nil, 0, nil
-	}}
+	}, scan: emptyScan}
 
 	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	if err != nil {
@@ -295,14 +360,23 @@ func TestCodexRunner_HappyPath(t *testing.T) {
 	if len(*calls) != 1 {
 		t.Fatalf("expected 1 exec call, got %d", len(*calls))
 	}
-	if (*calls)[0].name != codexBin {
-		t.Errorf("exec name: want %q, got %q", codexBin, (*calls)[0].name)
+	c := (*calls)[0]
+	if c.name != codexBin {
+		t.Errorf("exec name: want %q, got %q", codexBin, c.name)
+	}
+	// FIX 1: the canonical headless invocation is `codex exec <prompt>`.
+	if len(c.args) < 2 || c.args[0] != codexExecSub {
+		t.Errorf("codex args: want [exec <prompt>], got %v", c.args)
+	}
+	if !argsContain(c.args, minimalSpec().Prompt) {
+		t.Errorf("prompt not found in codex args: %v", c.args)
 	}
 	if result.Telemetry.Harness != "codex" {
 		t.Errorf("Harness: want %q, got %q", "codex", result.Telemetry.Harness)
 	}
+	// Documented gap: codex token telemetry stays nil in v1.
 	if result.Telemetry.Tokens != nil {
-		t.Error("Tokens: want nil for codex adapter, got non-nil")
+		t.Error("Tokens: want nil for codex adapter (documented gap), got non-nil")
 	}
 }
 
@@ -353,7 +427,7 @@ func TestCodexRunner_ExecError(t *testing.T) {
 func TestCopilotRunner_HappyPath(t *testing.T) {
 	t.Parallel()
 	fn, calls := recordingCmdFn([]byte("copilot suggestion"), nil, 0, nil)
-	r := &copilotRunner{run: fn}
+	r := &copilotRunner{run: fn, scan: emptyScan}
 
 	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	if err != nil {
@@ -367,17 +441,49 @@ func TestCopilotRunner_HappyPath(t *testing.T) {
 	if c.name != copilotBin {
 		t.Errorf("exec name: want %q, got %q", copilotBin, c.name)
 	}
+	if len(c.args) == 0 || c.args[0] != copilotSubCmd {
+		t.Errorf("copilot args: want [copilot suggest ...], got %v", c.args)
+	}
 	if result.Telemetry.Harness != "gh-copilot" {
 		t.Errorf("Harness: want %q, got %q", "gh-copilot", result.Telemetry.Harness)
 	}
+	// Empty scan → no telemetry recovered → nil (first-class absent).
 	if result.Telemetry.Tokens != nil {
-		t.Error("Tokens: want nil for copilot adapter, got non-nil")
+		t.Error("Tokens: want nil when scan finds nothing, got non-nil")
+	}
+}
+
+// TestCopilotRunner_TokenScan wires a non-empty scanner and asserts its
+// metrics are mapped onto Telemetry.Tokens (FIX 3).
+func TestCopilotRunner_TokenScan(t *testing.T) {
+	t.Parallel()
+	scan := fakeScan(platform.SessionTokenMetrics{
+		InputTokens:         300,
+		OutputTokens:        90,
+		CacheReadTokens:     150,
+		CacheCreationTokens: 50,
+	})
+	r := &copilotRunner{run: fixedCmdFn([]byte("ok"), nil, 0, nil), scan: scan}
+
+	result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if result.Telemetry.Tokens == nil {
+		t.Fatal("Tokens: want non-nil from scanner, got nil")
+	}
+	if result.Telemetry.Tokens.InputTokens != 300 {
+		t.Errorf("InputTokens: want 300, got %d", result.Telemetry.Tokens.InputTokens)
+	}
+	// CacheHitRate derived from 150 / (150 + 50) = 0.75.
+	if hit := result.Telemetry.Tokens.CacheHitRate; hit < 0.749 || hit > 0.751 {
+		t.Errorf("CacheHitRate: want ~0.75, got %.3f", hit)
 	}
 }
 
 func TestCopilotRunner_NilSpec(t *testing.T) {
 	t.Parallel()
-	r := &copilotRunner{run: fixedCmdFn(nil, nil, 0, nil)}
+	r := &copilotRunner{run: fixedCmdFn(nil, nil, 0, nil), scan: emptyScan}
 	_, err := r.Run(context.Background(), nil, minimalInstance(t))
 	if err == nil {
 		t.Error("Run(nil spec): want error, got nil")
@@ -386,7 +492,7 @@ func TestCopilotRunner_NilSpec(t *testing.T) {
 
 func TestCopilotRunner_NilInstance(t *testing.T) {
 	t.Parallel()
-	r := &copilotRunner{run: fixedCmdFn(nil, nil, 0, nil)}
+	r := &copilotRunner{run: fixedCmdFn(nil, nil, 0, nil), scan: emptyScan}
 	_, err := r.Run(context.Background(), minimalSpec(), nil)
 	if err == nil {
 		t.Error("Run(nil instance): want error, got nil")
@@ -396,7 +502,7 @@ func TestCopilotRunner_NilInstance(t *testing.T) {
 func TestCopilotRunner_ExecError(t *testing.T) {
 	t.Parallel()
 	execErr := errors.New("gh not found")
-	r := &copilotRunner{run: fixedCmdFn(nil, nil, 0, execErr)}
+	r := &copilotRunner{run: fixedCmdFn(nil, nil, 0, execErr), scan: emptyScan}
 
 	_, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	if !errors.Is(err, execErr) {
@@ -407,8 +513,8 @@ func TestCopilotRunner_ExecError(t *testing.T) {
 // --- cancel / timeout (race-safe) -------------------------------------------
 
 // TestClaudeRunner_Cancellation verifies that a cancelled context propagates
-// to the exec seam. The test is -race safe because each adapter instance owns
-// its seam field; there is no shared package-level state.
+// to the exec seam. Each adapter instance owns its seam field, so this is
+// -race safe with no shared package-level state.
 func TestClaudeRunner_Cancellation(t *testing.T) {
 	t.Parallel()
 
@@ -418,17 +524,17 @@ func TestClaudeRunner_Cancellation(t *testing.T) {
 	cancelled := false
 	r := &claudeRunner{run: func(
 		c context.Context,
-		name string,
-		args []string,
-		dir string,
-		env []string,
+		_ string,
+		_ []string,
+		_ string,
+		_ []string,
 	) ([]byte, []byte, int, error) {
 		if c.Err() != nil {
 			cancelled = true
 			return nil, nil, 0, c.Err()
 		}
 		return nil, nil, 0, nil
-	}}
+	}, scan: emptyScan}
 
 	_, err := r.Run(ctx, minimalSpec(), minimalInstance(t))
 	if !cancelled {
@@ -439,36 +545,96 @@ func TestClaudeRunner_Cancellation(t *testing.T) {
 	}
 }
 
-// TestClaudeRunner_Timeout verifies that a timed-out context propagates to
-// the exec seam and returns an error.
-func TestClaudeRunner_Timeout(t *testing.T) {
+// --- realExec integration (requires go on PATH) -----------------------------
+
+func TestRealExec_SuccessPath(t *testing.T) {
 	t.Parallel()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
-	defer cancel()
-	// Ensure the deadline has passed before Run is called.
-	time.Sleep(time.Millisecond)
-
-	r := &claudeRunner{run: func(
-		c context.Context,
-		_ string,
-		_ []string,
-		_ string,
-		_ []string,
-	) ([]byte, []byte, int, error) {
-		return nil, nil, 0, c.Err()
-	}}
-
-	_, err := r.Run(ctx, minimalSpec(), minimalInstance(t))
-	if err == nil {
-		t.Error("Run with expired timeout: want error, got nil")
+	stdout, _, code, err := realExec(
+		context.Background(), "go", []string{"version"},
+		t.TempDir(), os.Environ(),
+	)
+	if err != nil {
+		t.Fatalf("realExec: unexpected error: %v", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code: want 0, got %d", code)
+	}
+	if len(stdout) == 0 {
+		t.Error("stdout: want non-empty for go version")
 	}
 }
 
-// TestConcurrentRunners verifies that two runner instances with distinct
-// seams do not share state under -race. Each goroutine operates on its own
-// adapter instance; the test fails under the race detector if any shared
-// variable is written concurrently.
+// TestRealExec_NonZeroExit verifies a non-zero exit is reported in the return
+// value, not as a Go error. `go build` in an empty dir exits non-zero.
+func TestRealExec_NonZeroExit(t *testing.T) {
+	t.Parallel()
+	_, _, code, err := realExec(
+		context.Background(), "go", []string{"build", "./..."},
+		t.TempDir(), os.Environ(),
+	)
+	if err != nil {
+		t.Fatalf("realExec: non-zero exit must not produce a Go error, got: %v", err)
+	}
+	if code == 0 {
+		t.Error("exit code: want non-zero for go build in empty dir, got 0")
+	}
+}
+
+// TestRealExec_BinaryNotFound verifies a missing binary produces a Go error
+// (not a non-zero exit code), which callers treat as a launch failure.
+func TestRealExec_BinaryNotFound(t *testing.T) {
+	t.Parallel()
+	_, _, _, err := realExec(
+		context.Background(),
+		"no-such-binary-runner-xyz-abc-42",
+		nil,
+		t.TempDir(),
+		os.Environ(),
+	)
+	if err == nil {
+		t.Error("want error for missing binary, got nil")
+	}
+}
+
+// TestRealExec_CancelledContext verifies that a context already cancelled
+// before exec returns an error that unwraps to context.Canceled — an infra
+// failure, NOT a normal non-zero-exit Result (FIX 2).
+func TestRealExec_CancelledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, code, err := realExec(ctx, "go", []string{"version"}, t.TempDir(), os.Environ())
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("want error unwrapping to context.Canceled, got: %v", err)
+	}
+	if code != -1 {
+		t.Errorf("exit code: want -1 (infra), got %d", code)
+	}
+}
+
+// TestRealExec_TimeoutKilledMidRun is the -race regression for FIX 2: a
+// subprocess that outlives a short context deadline is killed mid-run, and
+// realExec must surface context.DeadlineExceeded rather than a normal
+// non-zero-exit Result. Uses the TestMain sleep-helper subprocess so the test
+// is portable across the macos/windows/ubuntu matrix.
+func TestRealExec_TimeoutKilledMidRun(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	env := append(os.Environ(), sleepEnvVar+"=5000")
+	_, _, code, err := realExec(ctx, os.Args[0], nil, t.TempDir(), env)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("want error unwrapping to context.DeadlineExceeded, got: %v", err)
+	}
+	if code != -1 {
+		t.Errorf("exit code: want -1 (infra kill), got %d", code)
+	}
+}
+
+// TestConcurrentRunners verifies that four runner instances with distinct
+// seams do not share state under -race.
 func TestConcurrentRunners(t *testing.T) {
 	t.Parallel()
 
@@ -482,9 +648,7 @@ func TestConcurrentRunners(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			tag := fmt.Sprintf("worker-%d", idx)
-			r := &claudeRunner{
-				run: fixedCmdFn([]byte(tag), nil, 0, nil),
-			}
+			r := &claudeRunner{run: fixedCmdFn([]byte(tag), nil, 0, nil), scan: emptyScan}
 			result, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 			if err != nil {
 				errs[idx] = err
@@ -531,7 +695,6 @@ func TestParseClaudeTelemetry_ValidJSON(t *testing.T) {
 
 func TestParseClaudeTelemetry_LastUsageWins(t *testing.T) {
 	t.Parallel()
-	// Multiple JSON lines; the last one with a usage block should win.
 	input := `{"session_id":"first"}
 {"session_id":"second","usage":{"input_tokens":5,"output_tokens":1}}`
 	tel := parseClaudeTelemetry([]byte(input))
@@ -556,8 +719,6 @@ func TestParseClaudeTelemetry_NonJSON(t *testing.T) {
 
 func TestParseClaudeTelemetry_InvalidJSONLine(t *testing.T) {
 	t.Parallel()
-	// A line that starts with '{' but is malformed JSON; the parser must
-	// skip it gracefully and still produce a valid baseline AgentTelemetry.
 	tel := parseClaudeTelemetry([]byte("{not-valid-json!!!}"))
 	if tel.Harness != "claude-code" {
 		t.Errorf("Harness: want %q, got %q", "claude-code", tel.Harness)
@@ -583,9 +744,8 @@ func TestParseClaudeTelemetry_ExplicitHitRate(t *testing.T) {
 
 func TestBuildEnv_SandboxEnvAppendedLast(t *testing.T) {
 	t.Parallel()
-	// Sandbox overrides must appear after os.Environ() entries.
-	sandbox := []string{"HOME=/sandbox", "CUSTOM=yes"}
-	env := buildEnv(sandbox)
+	sandboxEnv := []string{"HOME=/sandbox", "CUSTOM=yes"}
+	env := buildEnv(sandboxEnv)
 
 	lastHome := ""
 	for _, kv := range env {
@@ -615,7 +775,6 @@ func TestComputeHitRate_Derived(t *testing.T) {
 		CacheReadTokens:     8,
 		CacheCreationTokens: 2,
 	}
-	// 8 / (10 + 8 + 2) = 0.4
 	got := computeHitRate(u)
 	if got < 0.399 || got > 0.401 {
 		t.Errorf("want ~0.4, got %f", got)
@@ -630,69 +789,75 @@ func TestComputeHitRate_ZeroTotal(t *testing.T) {
 	}
 }
 
-// --- realExec (integration tests; requires go on PATH) ----------------------
+// --- tokens helpers ----------------------------------------------------------
 
-// TestRealExec_SuccessPath verifies the happy path of realExec using the go
-// binary, which is guaranteed to be present in any Go test environment.
-func TestRealExec_SuccessPath(t *testing.T) {
+func TestScratchHomeFromEnv(t *testing.T) {
 	t.Parallel()
-	stdout, _, code, err := realExec(
-		context.Background(), "go", []string{"version"},
-		t.TempDir(), os.Environ(),
-	)
-	if err != nil {
-		t.Fatalf("realExec: unexpected error: %v", err)
+	cases := []struct {
+		name string
+		env  []string
+		want string
+	}{
+		{"home wins", []string{"HOME=/a", "USERPROFILE=/b"}, "/a"},
+		{"userprofile fallback", []string{"USERPROFILE=/only"}, "/only"},
+		{"last home wins", []string{"HOME=/first", "HOME=/second"}, "/second"},
+		{"none", []string{"PATH=/usr/bin"}, ""},
+		{"empty", nil, ""},
 	}
-	if code != 0 {
-		t.Errorf("exit code: want 0, got %d", code)
-	}
-	if len(stdout) == 0 {
-		t.Error("stdout: want non-empty for go version")
+	for _, tc := range cases {
+		if got := scratchHomeFromEnv(tc.env); got != tc.want {
+			t.Errorf("%s: want %q, got %q", tc.name, tc.want, got)
+		}
 	}
 }
 
-// TestRealExec_NonZeroExit verifies that a non-zero exit code is reported in
-// the return value, not as a Go error. `go build` in an empty directory exits
-// non-zero because there are no Go files.
-func TestRealExec_NonZeroExit(t *testing.T) {
+func TestTokensFromMetrics_Empty(t *testing.T) {
 	t.Parallel()
-	_, _, code, err := realExec(
-		context.Background(), "go", []string{"build", "./..."},
-		t.TempDir(), os.Environ(),
-	)
-	if err != nil {
-		t.Fatalf("realExec: non-zero exit must not produce a Go error, got: %v", err)
-	}
-	if code == 0 {
-		t.Error("exit code: want non-zero for go build in empty dir, got 0")
+	if got := tokensFromMetrics(platform.SessionTokenMetrics{}); got != nil {
+		t.Errorf("want nil for empty metrics, got %+v", got)
 	}
 }
 
-// TestRealExec_BinaryNotFound verifies that a missing binary produces a Go
-// error (not a non-zero exit code), which callers treat as a launch failure.
-func TestRealExec_BinaryNotFound(t *testing.T) {
+func TestTokensFromMetrics_Mapped(t *testing.T) {
 	t.Parallel()
-	_, _, _, err := realExec(
-		context.Background(),
-		"no-such-binary-runner-xyz-abc-42",
-		nil,
-		t.TempDir(),
-		os.Environ(),
-	)
-	if err == nil {
-		t.Error("want error for missing binary, got nil")
+	m := platform.SessionTokenMetrics{
+		InputTokens:         100,
+		OutputTokens:        40,
+		CacheReadTokens:     30,
+		CacheCreationTokens: 10,
+	}
+	got := tokensFromMetrics(m)
+	if got == nil {
+		t.Fatal("want non-nil, got nil")
+	}
+	if got.InputTokens != 100 || got.OutputTokens != 40 {
+		t.Errorf("token mapping mismatch: %+v", got)
+	}
+	// derived hit rate = 30 / (30 + 10) = 0.75
+	if got.CacheHitRate < 0.749 || got.CacheHitRate > 0.751 {
+		t.Errorf("CacheHitRate: want ~0.75, got %.3f", got.CacheHitRate)
 	}
 }
 
-// TestRealExec_CancelledContext verifies that a context already cancelled
-// before exec returns an error from realExec.
-func TestRealExec_CancelledContext(t *testing.T) {
+func TestTokensFromMetrics_ExplicitHitRate(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, _, _, err := realExec(ctx, "go", []string{"version"}, t.TempDir(), os.Environ())
-	if err == nil {
-		t.Error("want error for cancelled context, got nil")
+	m := platform.SessionTokenMetrics{OutputTokens: 5, CacheHitRate: 0.9}
+	got := tokensFromMetrics(m)
+	if got == nil {
+		t.Fatal("want non-nil, got nil")
 	}
+	if got.CacheHitRate != 0.9 {
+		t.Errorf("CacheHitRate: want 0.9, got %.3f", got.CacheHitRate)
+	}
+}
+
+// --- helpers -----------------------------------------------------------------
+
+func argsContain(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }

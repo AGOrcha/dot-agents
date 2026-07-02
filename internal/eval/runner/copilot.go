@@ -7,6 +7,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
 // copilotBin and copilotSubCmd are the GitHub CLI binary and the subcommand
@@ -17,23 +18,33 @@ const (
 )
 
 // copilotRunner invokes the GitHub Copilot CLI (via `gh copilot suggest`)
-// against a sandbox workdir. Like the Codex adapter, token counts are not
-// available from the `gh copilot` CLI surface; Telemetry.Tokens is nil.
+// against a sandbox workdir. After the run it recovers token telemetry from the
+// Copilot CLI's on-disk session store via the platform copilot scanner (see
+// the run field docs).
 type copilotRunner struct {
 	// run is the exec seam; production code uses realExec, tests inject a fake.
 	run cmdFn
+	// scan is the token-scanner seam wired to platform copilot's
+	// ScanSessionTokens, which walks <home>/.copilot/session-state/*/
+	// events.jsonl for session.shutdown token totals by mtime. It is a struct
+	// field (not a package var) so tests inject a deterministic fake without
+	// touching a real ~/.copilot. The store is populated by the Copilot CLI;
+	// when a run writes none (e.g. gh copilot suggest short-circuits), the scan
+	// returns empty and Telemetry.Tokens stays nil — a first-class absent
+	// signal, not a silent drop.
+	scan scanFn
 }
 
 func newCopilotRunner() *copilotRunner {
-	return &copilotRunner{run: realExec}
+	return &copilotRunner{run: realExec, scan: asScanner(platform.NewCopilot())}
 }
 
 var _ Runner = (*copilotRunner)(nil)
 
-// Run implements Runner. It invokes `gh copilot suggest -t code <prompt>` in
-// instance.Workdir with instance.Env appended to the process environment.
-// The `-t code` flag requests code-oriented suggestions. stdout/stderr are
-// captured verbatim; token telemetry is absent in v1.
+// Run implements Runner. It invokes `gh copilot suggest -t code -y <prompt>` in
+// instance.Workdir with instance.Env appended to the process environment, then
+// scans the scratch HOME's Copilot session store for token telemetry emitted
+// after the run started.
 func (r *copilotRunner) Run(
 	ctx context.Context,
 	spec *eval.TaskSpec,
@@ -53,11 +64,18 @@ func (r *copilotRunner) Run(
 	args := []string{copilotSubCmd, "suggest", "-t", "code", "-y", spec.Prompt}
 
 	start := time.Now()
+	after := start.UTC().Format(time.RFC3339)
 	stdout, stderr, code, err := r.run(ctx, copilotBin, args, instance.Workdir, env)
 	dur := time.Since(start)
 	if err != nil {
 		return Result{}, fmt.Errorf("runner/copilot: exec: %w", err)
 	}
+
+	// Copilot publishes no session-id env var, so the scanner filters by
+	// events.jsonl mtime > after; the fresh scratch HOME scopes the walk to
+	// this run alone.
+	home := scratchHomeFromEnv(instance.Env)
+	tokens := tokensFromMetrics(r.scan(home, "", "", after))
 
 	return Result{
 		Stdout:   stdout,
@@ -66,8 +84,7 @@ func (r *copilotRunner) Run(
 		Duration: dur,
 		Telemetry: AgentTelemetry{
 			Harness: "gh-copilot",
-			// Tokens is nil: gh copilot CLI does not expose machine-readable
-			// usage data; the rubric renormalises over absent signals.
+			Tokens:  tokens,
 		},
 	}, nil
 }

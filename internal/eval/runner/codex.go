@@ -9,13 +9,29 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
 )
 
-// codexBin is the Codex CLI binary name resolved via PATH.
-const codexBin = "codex"
+// codexBin is the Codex CLI binary name resolved via PATH; codexExecSub is its
+// headless run subcommand (`codex exec <prompt>`, arg-delivered prompt) — the
+// repo's canonical non-interactive invocation (see the cross-harness reviewer
+// dispatch table in prompts/reviewers/cross-harness-adversarial.md). The
+// read-only `-s read-only` sandbox flag is deliberately NOT set: this is a
+// code-writing task, not the read-only reviewer-dispatch pattern.
+const (
+	codexBin     = "codex"
+	codexExecSub = "exec"
+)
 
 // codexRunner invokes the OpenAI Codex CLI against a sandbox workdir.
-// The Codex CLI does not expose machine-readable token counts in its v1 CLI
-// surface, so Telemetry.Tokens is always nil; the rubric renormalises over
-// the absent signal.
+//
+// Token telemetry gap (documented, not silent): Codex DOES persist per-turn
+// token counts — the platform layer scans them via codexScanSessionTokens over
+// ~/.codex/sessions/YYYY/MM/DD/*-<sessionID>.jsonl. That scanner is keyed by
+// the Codex session id, and `codex exec`'s plain (non-JSON) stdout does not
+// surface one, so this package cannot locate the session file without
+// reimplementing Codex's session-dir layout. v1 therefore leaves
+// Telemetry.Tokens nil for codex; the follow-up is to invoke `codex exec
+// --json` and capture the session id from its session-configured event (or to
+// expose an id-less, mtime-scoped scan on the platform codex type), after
+// which the same scanFn seam the claude/copilot adapters use can be wired here.
 type codexRunner struct {
 	// run is the exec seam; production code uses realExec, tests inject a fake.
 	run cmdFn
@@ -27,10 +43,10 @@ func newCodexRunner() *codexRunner {
 
 var _ Runner = (*codexRunner)(nil)
 
-// Run implements Runner. It invokes `codex <prompt>` in instance.Workdir with
-// instance.Env appended to the process environment. stdout/stderr are
-// captured verbatim; token telemetry is absent in v1 (Codex CLI does not
-// emit machine-readable usage data).
+// Run implements Runner. It invokes `codex exec <prompt>` in instance.Workdir
+// with instance.Env appended to the process environment. stdout/stderr are
+// captured verbatim. See the type doc for why token telemetry is a documented
+// v1 gap rather than a wired scan.
 func (r *codexRunner) Run(
 	ctx context.Context,
 	spec *eval.TaskSpec,
@@ -44,7 +60,7 @@ func (r *codexRunner) Run(
 	}
 
 	env := buildEnv(instance.Env)
-	args := []string{spec.Prompt}
+	args := []string{codexExecSub, spec.Prompt}
 
 	start := time.Now()
 	stdout, stderr, code, err := r.run(ctx, codexBin, args, instance.Workdir, env)
@@ -60,9 +76,8 @@ func (r *codexRunner) Run(
 		Duration: dur,
 		Telemetry: AgentTelemetry{
 			Harness: "codex",
-			// Tokens is nil: Codex CLI does not surface machine-readable usage
-			// in v1; the rubric treats absent token data as a renormalisable
-			// signal rather than a zero score.
+			// Tokens is nil — see the codexRunner type doc for the documented
+			// session-id gap. The rubric renormalises over the absent signal.
 		},
 	}, nil
 }

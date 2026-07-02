@@ -10,6 +10,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
@@ -23,10 +24,17 @@ const claudeBin = "claude"
 type claudeRunner struct {
 	// run is the exec seam; production code uses realExec, tests inject a fake.
 	run cmdFn
+	// scan is the token-scanner fallback wired to platform claude's
+	// ScanSessionTokens (walks <home>/.claude/projects/<cwd-hash>/
+	// <sessionID>.jsonl). It is only consulted when the inline JSON envelope
+	// carried a session id but no usage block, so a run whose stdout was
+	// captured without --output-format json still recovers telemetry. A struct
+	// field (not a package var) keeps tests off a real ~/.claude.
+	scan scanFn
 }
 
 func newClaudeRunner() *claudeRunner {
-	return &claudeRunner{run: realExec}
+	return &claudeRunner{run: realExec, scan: asScanner(platform.NewClaude())}
 }
 
 var _ Runner = (*claudeRunner)(nil)
@@ -51,6 +59,7 @@ func (r *claudeRunner) Run(
 	args := []string{"--print", "--output-format", "json", spec.Prompt}
 
 	start := time.Now()
+	after := start.UTC().Format(time.RFC3339)
 	stdout, stderr, code, err := r.run(ctx, claudeBin, args, instance.Workdir, env)
 	dur := time.Since(start)
 	if err != nil {
@@ -58,6 +67,7 @@ func (r *claudeRunner) Run(
 	}
 
 	telemetry := parseClaudeTelemetry(stdout)
+	r.backfillTokens(&telemetry, instance, after)
 	return Result{
 		Stdout:    stdout,
 		Stderr:    stderr,
@@ -65,6 +75,20 @@ func (r *claudeRunner) Run(
 		Duration:  dur,
 		Telemetry: telemetry,
 	}, nil
+}
+
+// backfillTokens recovers token telemetry from the on-disk Claude session
+// store when the inline JSON envelope reported a session id but no usage
+// block. The session JSONL lives under the scratch HOME keyed by the working
+// directory (the run cwd) and the session id; the mtime/timestamp filter is
+// scoped to this run via after. When the inline usage was already present or
+// no session id was captured, this is a no-op.
+func (r *claudeRunner) backfillTokens(t *AgentTelemetry, instance *sandbox.Instance, after string) {
+	if t.Tokens != nil || t.SessionID == "" {
+		return
+	}
+	home := scratchHomeFromEnv(instance.Env)
+	t.Tokens = tokensFromMetrics(r.scan(home, instance.Workdir, t.SessionID, after))
 }
 
 // claudeJSONResponse is the subset of Claude Code's JSON output envelope that

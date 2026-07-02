@@ -104,8 +104,19 @@ type cmdFn func(
 ) (stdout []byte, stderr []byte, exitCode int, err error)
 
 // realExec is the production cmdFn. It builds an exec.Cmd, sets Dir and Env,
-// runs it, and collects stdout/stderr. A non-zero exit is reported in
-// exitCode, not err — a failed process is a completed run, not a Go error.
+// runs it, and collects stdout/stderr.
+//
+// Two exit conditions are deliberately kept distinct:
+//
+//   - Context cancel/timeout (infrastructure failure). If ctx ends during the
+//     run, the process is killed and cmd.Run reports a "signal: killed"
+//     *exec.ExitError that is indistinguishable from a genuine agent
+//     non-zero exit. realExec checks ctx.Err() FIRST and returns it wrapped,
+//     so callers see context.Canceled / context.DeadlineExceeded via
+//     errors.Is and treat it as infra failure, not an agent result.
+//   - Agent non-zero exit (a completed run). Reported in exitCode with a nil
+//     error, so the harness scores it as "the agent ran but the output was
+//     wrong".
 func realExec(
 	ctx context.Context,
 	name string,
@@ -116,6 +127,9 @@ func realExec(
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = env
+	// Drive stdin from an empty reader so no adapter can hang waiting on
+	// interactive TTY input (codex exec in particular reads stdin).
+	cmd.Stdin = bytes.NewReader(nil)
 	// WaitDelay unblocks pipe-copy goroutines after context cancellation,
 	// matching the cliprobe.go pattern for bounded subprocess execution.
 	cmd.WaitDelay = 5 * time.Second
@@ -125,6 +139,13 @@ func realExec(
 	cmd.Stderr = &errBuf
 
 	runErr := cmd.Run()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		// The context cancelled/timed out and killed the process mid-run: an
+		// infrastructure failure, NOT a normal agent non-zero exit.
+		return outBuf.Bytes(), errBuf.Bytes(), -1,
+			fmt.Errorf("runner: context ended during exec: %w", ctxErr)
+	}
+
 	code := 0
 	if runErr != nil {
 		var exitErr *exec.ExitError
