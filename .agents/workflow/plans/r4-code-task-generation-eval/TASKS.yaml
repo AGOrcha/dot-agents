@@ -48,7 +48,7 @@ tasks:
       app_type: go-cli
     - id: kg-query-layer
       title: KG query helpers for the task generator
-      status: pending
+      status: completed
       depends_on:
         - taskspec-and-registry
       blocks:

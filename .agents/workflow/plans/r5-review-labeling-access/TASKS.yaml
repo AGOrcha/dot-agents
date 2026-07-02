@@ -84,7 +84,7 @@ tasks:
       app_type: go-cli
     - id: audit-log
       title: Append-only chained JSON-lines audit log + verifier
-      status: pending
+      status: completed
       depends_on:
         - rbac-identity
       blocks:
