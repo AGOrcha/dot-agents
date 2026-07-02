@@ -1,15 +1,22 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	nethttp "net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/review/audit"
 	"github.com/AGOrcha/dot-agents/internal/review/auth"
+	"github.com/AGOrcha/dot-agents/internal/review/labels"
 )
 
 // TestAuthMiddleware covers spec R8: missing/invalid token → 401, wrong role →
@@ -104,55 +111,258 @@ func TestAuditMiddlewareRequestID(t *testing.T) {
 	}
 }
 
-// TestAuditMiddlewareAppendFailure covers the at-least-once contract: when the
-// audit append fails after the mutation persisted, the client gets a 500
-// carrying the request id and a do-not-blind-retry warning — and the label IS
-// on disk.
-func TestAuditMiddlewareAppendFailure(t *testing.T) {
+// TestAuditFailClosedRollback pins the fail-closed contract: when the audit
+// append fails, the mutation is rolled back to the target's byte-exact
+// pre-image and the client gets a 500 carrying the request id — no
+// persisted-but-unaudited mutation survives.
+func TestAuditFailClosedRollback(t *testing.T) {
 	dir := t.TempDir()
+	usersPath := filepath.Join(dir, "users.yaml")
 	m, err := New(DefaultPrefix, Deps{
 		Auth:   newStubAuth(),
 		Labels: SidecarLabelStore{Dir: dir},
-		Users:  failUserStore{},
+		Users:  FileUserStore{Path: usersPath},
 		Audit:  failAudit{appendErr: errors.New("audit disk full")},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	req := httptest.NewRequest(nethttp.MethodPost, labelsPath(6), strings.NewReader(validLabelBody))
-	req.Header.Set("Authorization", bearerScheme+tokReviewer)
-	rr := httptest.NewRecorder()
-	m.ServeHTTP(rr, req)
+	post := func(path, token, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(nethttp.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", bearerScheme+token)
+		rr := httptest.NewRecorder()
+		m.ServeHTTP(rr, req)
+		return rr
+	}
 
+	// Case 1: no pre-existing sidecar — rollback restores absence.
+	rr := post(labelsPath(6), tokReviewer, validLabelBody)
 	wantStatus(t, rr, nethttp.StatusInternalServerError)
 	var body errorBody
 	decodeBody(t, rr, &body)
-	if body.RequestID == "" || !strings.Contains(body.Error, "may have persisted") {
-		t.Fatalf("append-failure response must carry request id + warning: %+v", body)
+	if body.RequestID == "" || !strings.Contains(body.Error, "rolled back") {
+		t.Fatalf("fail-closed response must carry request id + rollback note: %+v", body)
 	}
-	// The mutation persisted (at-least-once semantics, documented).
-	ls, err := SidecarLabelStore{Dir: dir}.List(6)
-	if err != nil || len(ls) != 1 {
-		t.Fatalf("label should have persisted despite audit failure: %v, %d", err, len(ls))
+	if _, err := os.Stat(labels.IterationLabelsPath(dir, 6)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("sidecar must not survive a failed audit append: %v", err)
+	}
+
+	// Case 2: pre-existing sidecar — rollback restores the exact prior bytes.
+	if _, err := labels.Add(dir, 7, labels.AddInput{
+		Actor: "seed@example.com", Role: labels.RoleReviewer,
+		Structured: labels.Structured{Correctness: 1, ScopeJudgement: labels.ScopePartial, Hallucination: labels.HallucinationNone},
+	}); err != nil {
+		t.Fatalf("seed label: %v", err)
+	}
+	preBytes, err := os.ReadFile(labels.IterationLabelsPath(dir, 7))
+	if err != nil {
+		t.Fatalf("read pre-image: %v", err)
+	}
+	rr = post(labelsPath(7), tokReviewer, validLabelBody)
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	postBytes, err := os.ReadFile(labels.IterationLabelsPath(dir, 7))
+	if err != nil || !bytes.Equal(preBytes, postBytes) {
+		t.Fatalf("sidecar must be byte-identical to its pre-image after rollback (err=%v)", err)
+	}
+
+	// Case 3: users file — a failed user creation leaves no users file behind.
+	rr = post(DefaultPrefix+"/users", tokAdmin, `{"email":"ghost@example.com","role":"reviewer"}`)
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	if _, err := os.Stat(usersPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("users file must not survive a failed audit append: %v", err)
+	}
+}
+
+// TestAuditRollbackResidual covers the doubly-degraded environment: the audit
+// append fails AND the rollback fails — the mutation survives unaudited, the
+// client is told so, and the incident is reported loudly with the request id.
+func TestAuditRollbackResidual(t *testing.T) {
+	origRemove, origRestore, origLog := removeTargetFile, restoreTargetFile, criticalLog
+	defer func() {
+		removeTargetFile, restoreTargetFile, criticalLog = origRemove, origRestore, origLog
+	}()
+	removeTargetFile = func(string) error { return errors.New("rm blocked") }
+	restoreTargetFile = func(string, []byte) error { return errors.New("write blocked") }
+	var logBuf bytes.Buffer
+	criticalLog = &logBuf
+
+	dir := t.TempDir()
+	m, err := New(DefaultPrefix, Deps{
+		Auth:   newStubAuth(),
+		Labels: SidecarLabelStore{Dir: dir},
+		Users:  FileUserStore{Path: filepath.Join(dir, "users.yaml")},
+		Audit:  failAudit{appendErr: errors.New("audit disk full")},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// No pre-image → remove path fails.
+	req := httptest.NewRequest(nethttp.MethodPost, labelsPath(1), strings.NewReader(validLabelBody))
+	req.Header.Set("Authorization", bearerScheme+tokReviewer)
+	req.Header.Set(HeaderRequestID, "residual-req-1")
+	rr := httptest.NewRecorder()
+	m.ServeHTTP(rr, req)
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	var body errorBody
+	decodeBody(t, rr, &body)
+	if !strings.Contains(body.Error, "UNAUDITED") || body.RequestID != "residual-req-1" {
+		t.Fatalf("residual response: %+v", body)
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "CRITICAL") || !strings.Contains(logged, "residual-req-1") {
+		t.Fatalf("critical log must scream with the request id: %q", logged)
+	}
+	// The residual: the mutation survived (documented and loud, not silent).
+	if ls, err := (SidecarLabelStore{Dir: dir}).List(1); err != nil || len(ls) != 1 {
+		t.Fatalf("residual mutation state: %v, %d", err, len(ls))
+	}
+
+	// Pre-existing file → restore path fails too.
+	logBuf.Reset()
+	req = httptest.NewRequest(nethttp.MethodPost, labelsPath(1), strings.NewReader(validLabelBody))
+	req.Header.Set("Authorization", bearerScheme+tokReviewer)
+	rr = httptest.NewRecorder()
+	m.ServeHTTP(rr, req)
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	if !strings.Contains(logBuf.String(), "CRITICAL") {
+		t.Fatalf("restore-path failure must also scream: %q", logBuf.String())
+	}
+}
+
+// TestRollbackTolerantOfMissingFile covers the remove-path tolerance: when the
+// handler never materialized the target file, absence already IS the
+// pre-image and the rollback counts as success.
+func TestRollbackTolerantOfMissingFile(t *testing.T) {
+	orig := removeTargetFile
+	removeTargetFile = func(string) error { return os.ErrNotExist }
+	defer func() { removeTargetFile = orig }()
+	if !rollback("/nonexistent/target", preImage{}, "req-x") {
+		t.Fatal("missing target file should count as a successful rollback")
+	}
+}
+
+// TestMutationGuardLockAndPreImageFailures covers the guard's own error
+// branches: target lock acquisition failure and pre-image read failure.
+func TestMutationGuardLockAndPreImageFailures(t *testing.T) {
+	env := newTestEnv(t)
+	post := func() *httptest.ResponseRecorder {
+		req := httptest.NewRequest(nethttp.MethodPost, labelsPath(1), strings.NewReader(validLabelBody))
+		req.Header.Set("Authorization", bearerScheme+tokReviewer)
+		rr := httptest.NewRecorder()
+		env.m.ServeHTTP(rr, req)
+		return rr
+	}
+
+	origLock := acquireFileLock
+	acquireFileLock = func(string) (func() error, error) { return nil, errors.New("lock held") }
+	rr := post()
+	acquireFileLock = origLock
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	var body errorBody
+	decodeBody(t, rr, &body)
+	if !strings.Contains(body.Error, "lock mutation target") {
+		t.Fatalf("lock failure response: %+v", body)
+	}
+
+	origRead := readTargetFile
+	readTargetFile = func(string) ([]byte, error) { return nil, errors.New("io fault") }
+	rr = post()
+	readTargetFile = origRead
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	decodeBody(t, rr, &body)
+	if !strings.Contains(body.Error, "pre-image") {
+		t.Fatalf("pre-image failure response: %+v", body)
+	}
+}
+
+// TestConcurrentLabelSubmissionsNoLostUpdates is the lost-update regression
+// test: N parallel POSTs of distinct labels against the same iteration must
+// ALL survive in the sidecar (the guard serializes the read-modify-write
+// sections), with N audit records and a clean chain.
+func TestConcurrentLabelSubmissionsNoLostUpdates(t *testing.T) {
+	env := newTestEnv(t)
+	const n = 8
+	codes := make([]int, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			body := fmt.Sprintf(
+				`{"correctness":%d,"scope_judgement":"on-target","hallucination":"none","free_text":"writer %d"}`,
+				i%4, i)
+			req := httptest.NewRequest(nethttp.MethodPost, labelsPath(1), strings.NewReader(body))
+			req.Header.Set("Authorization", bearerScheme+tokReviewer)
+			rr := httptest.NewRecorder()
+			env.m.ServeHTTP(rr, req)
+			codes[i] = rr.Code
+		}(i)
+	}
+	wg.Wait()
+	for i, c := range codes {
+		if c != nethttp.StatusCreated {
+			t.Fatalf("writer %d: status %d", i, c)
+		}
+	}
+
+	ls, err := SidecarLabelStore{Dir: env.iterDir}.List(1)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(ls) != n {
+		t.Fatalf("lost update: %d of %d labels survived", len(ls), n)
+	}
+	distinct := make(map[string]struct{}, n)
+	for _, l := range ls {
+		distinct[l.EffectiveFreeText()] = struct{}{}
+	}
+	if len(distinct) != n {
+		t.Fatalf("expected %d distinct labels, got %d", n, len(distinct))
+	}
+	recs := env.auditRecords()
+	if len(recs) != n {
+		t.Fatalf("expected %d audit records, got %d", n, len(recs))
+	}
+	if res, err := env.auditLog.Verify(); err != nil || !res.OK {
+		t.Fatalf("audit verify after concurrent writes: %+v, %v", res, err)
 	}
 }
 
 // TestAuditMiddlewareContractViolations covers the defensive branches: a
-// mutating handler that succeeds without staging an event, and a request-id
-// generation failure.
+// mutating handler that succeeds without staging an event (rolled back like a
+// failed audit), and a request-id generation failure.
 func TestAuditMiddlewareContractViolations(t *testing.T) {
 	env := newTestEnv(t)
+	noTarget := targetFunc(func(*nethttp.Request) string { return "" })
 
 	// 2xx with no staged event → 500.
-	h := env.m.withAudit(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, _ *nethttp.Request) {
+	h := env.m.withAudit(noTarget, nethttp.HandlerFunc(func(w nethttp.ResponseWriter, _ *nethttp.Request) {
 		w.WriteHeader(nethttp.StatusOK)
 	}))
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(nethttp.MethodPost, "/x", nil))
 	wantStatus(t, rr, nethttp.StatusInternalServerError)
 
+	// The no-staged-event violation rolls the mutation back when a target is
+	// known: the file written by the buggy handler must not survive.
+	buggyPath := filepath.Join(t.TempDir(), "buggy.yaml")
+	h = env.m.withAudit(func(*nethttp.Request) string { return buggyPath },
+		nethttp.HandlerFunc(func(w nethttp.ResponseWriter, _ *nethttp.Request) {
+			if err := fsops.WriteFileAtomic(buggyPath, []byte("mutated")); err != nil {
+				t.Errorf("buggy handler write: %v", err)
+			}
+			w.WriteHeader(nethttp.StatusOK)
+		}))
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest(nethttp.MethodPost, "/x", nil))
+	wantStatus(t, rr, nethttp.StatusInternalServerError)
+	if _, err := os.Stat(buggyPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unstaged mutation must be rolled back: %v", err)
+	}
+
 	// Error statuses pass through unaudited.
-	h = env.m.withAudit(nethttp.HandlerFunc(func(w nethttp.ResponseWriter, _ *nethttp.Request) {
+	h = env.m.withAudit(noTarget, nethttp.HandlerFunc(func(w nethttp.ResponseWriter, _ *nethttp.Request) {
 		writeError(w, nethttp.StatusTeapot, "nope", "")
 	}))
 	rr = httptest.NewRecorder()

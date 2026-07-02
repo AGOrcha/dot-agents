@@ -7,9 +7,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	nethttp "net/http"
+	"os"
 	"strings"
+	"sync"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/review/audit"
 	"github.com/AGOrcha/dot-agents/internal/review/auth"
 )
@@ -27,9 +32,27 @@ const maxRequestIDLen = 128
 // bearerScheme is the accepted Authorization scheme prefix.
 const bearerScheme = "Bearer "
 
-// randRead is a seam over crypto/rand.Read so the request-id generation error
-// branch is coverable in tests (mirroring internal/review/auth).
-var randRead = rand.Read
+// Seams over the crypto/lock/filesystem primitives so the request-id,
+// lock-failure, pre-image-read, and rollback-failure branches are coverable
+// deterministically in tests (mirroring internal/review/audit).
+var (
+	// randRead backs request-id generation.
+	randRead = rand.Read
+	// acquireFileLock is the cross-process half of the mutation guard: the
+	// same advisory lock primitive the audit log (and, prospectively, the
+	// admin CLI) uses, so HTTP requests and CLI processes mutating the same
+	// sidecar or users file serialize their read-modify-write sections.
+	acquireFileLock = agentslock.AcquireFileLock
+	// readTargetFile captures a mutation target's pre-image.
+	readTargetFile = os.ReadFile
+	// restoreTargetFile / removeTargetFile perform the fail-closed rollback.
+	restoreTargetFile = fsops.WriteFileAtomic
+	removeTargetFile  = fsops.Remove
+	// criticalLog receives the screaming report for the one residual the
+	// fail-closed guard cannot fix: the audit append AND the rollback both
+	// failed, so an UNAUDITED mutation persisted.
+	criticalLog io.Writer = os.Stderr
+)
 
 // identityCtxKey keys the authenticated identity in the request context.
 type identityCtxKey struct{}
@@ -111,17 +134,36 @@ func bearerToken(r *nethttp.Request) (string, bool) {
 	return token, token != ""
 }
 
-// withAudit is the audit middleware: it buffers the mutating handler's
-// response, and only releases a success response after the staged audit event
-// has been appended to the chained log (spec R6: every mutating action writes
-// one audit record — the client never sees success for an unaudited mutation).
+// targetFunc resolves the file a mutating route will modify, so the mutation
+// guard can lock it and capture its pre-image before the handler runs. It
+// returns "" when the target cannot be derived from the request (malformed
+// iteration) — the handler rejects such requests before mutating anything —
+// or when the backing store has no file target (test fakes).
+type targetFunc func(r *nethttp.Request) string
+
+// withAudit is the mutation guard + audit middleware. For each mutating
+// request it:
 //
-// Append is AT-LEAST-ONCE (see audit.Log.Append): on an append error the
-// mutation has already persisted and the audit record itself may also be
-// durable. The 500 returned here therefore carries the request id and warns
-// against blind retries — a reconciling caller reuses the same X-Request-Id so
-// the already-landed record is detectable.
-func (m *Mount) withAudit(next nethttp.Handler) nethttp.Handler {
+//  1. locks the target file (per-path in-process mutex + agentslock file
+//     lock), serializing the whole [read → mutate → audit] critical section
+//     against concurrent requests AND other processes — without this, two
+//     simultaneous label POSTs both read the same sidecar and the later
+//     atomic replace silently drops the earlier label;
+//  2. captures the target's pre-image;
+//  3. runs the handler with its response buffered;
+//  4. appends the staged audit event, and only then releases the response.
+//
+// The audit is FAIL-CLOSED (spec R6: every mutating action writes one audit
+// record): if the append fails, the target file is restored to its pre-image
+// (still under the lock) and the client gets a 500 carrying the X-Request-Id
+// — the mutation does not survive unaudited. Two residuals remain, both
+// bounded by audit.Append's at-least-once contract: (a) the failed append may
+// still have landed its record, leaving an audit line for a rolled-back
+// mutation (benign — the record's request id matches the 500 the client saw);
+// (b) if the rollback write itself also fails (doubly-degraded environment),
+// the mutation survives unaudited and is reported on criticalLog with the
+// request id. Callers must reconcile by request id, never blind-retry.
+func (m *Mount) withAudit(target targetFunc, next nethttp.Handler) nethttp.Handler {
 	return nethttp.HandlerFunc(func(w nethttp.ResponseWriter, r *nethttp.Request) {
 		reqID, err := requestIDFor(r)
 		if err != nil {
@@ -129,6 +171,22 @@ func (m *Mount) withAudit(next nethttp.Handler) nethttp.Handler {
 			return
 		}
 		w.Header().Set(HeaderRequestID, reqID)
+
+		path := target(r)
+		var pre preImage
+		if path != "" {
+			unlock, err := m.lockTarget(path)
+			if err != nil {
+				writeError(w, nethttp.StatusInternalServerError, "lock mutation target: "+err.Error(), reqID)
+				return
+			}
+			defer unlock()
+			if pre, err = readPreImage(path); err != nil {
+				writeError(w, nethttp.StatusInternalServerError, "capture mutation pre-image: "+err.Error(), reqID)
+				return
+			}
+		}
+
 		staged := &stagedAudit{}
 		buf := newBufferedResponse()
 		ctx := context.WithValue(r.Context(), auditCtxKey{}, staged)
@@ -138,20 +196,104 @@ func (m *Mount) withAudit(next nethttp.Handler) nethttp.Handler {
 			return
 		}
 		if staged.ev == nil {
-			writeError(w, nethttp.StatusInternalServerError,
-				"mutating handler completed without staging an audit event", reqID)
+			// Contract violation (handler mutated without staging): treat like
+			// a failed audit — roll the mutation back rather than letting it
+			// persist unaudited.
+			m.failClosed(w, path, pre, reqID,
+				"mutating handler completed without staging an audit event")
 			return
 		}
 		ev := *staged.ev
 		ev.RequestID = reqID
 		if _, err := m.audit.Append(ev); err != nil {
-			writeError(w, nethttp.StatusInternalServerError,
-				"audit append failed; the mutation may have persisted — do not blind-retry, "+
-					"reconcile using this request id", reqID)
+			m.failClosed(w, path, pre, reqID, "audit append failed")
 			return
 		}
 		buf.flushTo(w)
 	})
+}
+
+// failClosed enforces the no-unaudited-mutation invariant after an audit
+// failure: it restores the mutation target to its pre-image (the caller still
+// holds the target lock) and writes the 500. When the rollback itself fails —
+// or no target file is known — the degraded outcome is stated explicitly.
+func (m *Mount) failClosed(w nethttp.ResponseWriter, path string, pre preImage, reqID, cause string) {
+	if path != "" && rollback(path, pre, reqID) {
+		writeError(w, nethttp.StatusInternalServerError,
+			cause+"; the mutation was rolled back — safe to retry with the same X-Request-Id", reqID)
+		return
+	}
+	writeError(w, nethttp.StatusInternalServerError,
+		cause+"; rollback failed — the mutation may have persisted UNAUDITED, reconcile using this request id", reqID)
+}
+
+// preImage is a mutation target's byte-exact state before the handler ran.
+type preImage struct {
+	data    []byte
+	existed bool
+}
+
+// readPreImage snapshots the target file; a missing file is a valid pre-image
+// (rollback then removes whatever the handler created).
+func readPreImage(path string) (preImage, error) {
+	data, err := readTargetFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return preImage{}, nil
+	}
+	if err != nil {
+		return preImage{}, err
+	}
+	return preImage{data: data, existed: true}, nil
+}
+
+// rollback restores path to its pre-image and reports success. On failure the
+// mutation survives UNAUDITED — the one residual the fail-closed guard cannot
+// fix — so it is reported loudly on criticalLog with the request id.
+func rollback(path string, pre preImage, reqID string) bool {
+	var err error
+	if pre.existed {
+		err = restoreTargetFile(path, pre.data)
+	} else if err = removeTargetFile(path); errors.Is(err, os.ErrNotExist) {
+		// The handler never materialized the file; absence IS the pre-image.
+		err = nil
+	}
+	if err == nil {
+		return true
+	}
+	fmt.Fprintf(criticalLog,
+		"review/http: CRITICAL: audit append failed AND pre-image rollback failed — "+
+			"an UNAUDITED mutation persisted at %s (request_id=%s): %v\n",
+		path, reqID, err)
+	return false
+}
+
+// pathMutex returns the in-process mutex guarding one target file.
+func (m *Mount) pathMutex(path string) *sync.Mutex {
+	m.locksMu.Lock()
+	defer m.locksMu.Unlock()
+	mu, ok := m.locks[path]
+	if !ok {
+		mu = &sync.Mutex{}
+		m.locks[path] = mu
+	}
+	return mu
+}
+
+// lockTarget serializes a mutation on path against other goroutines in this
+// process (per-path mutex) and against other processes mutating the same file,
+// e.g. the admin CLI (agentslock file lock). The returned func releases both.
+func (m *Mount) lockTarget(path string) (func(), error) {
+	mu := m.pathMutex(path)
+	mu.Lock()
+	release, err := acquireFileLock(path)
+	if err != nil {
+		mu.Unlock()
+		return nil, fmt.Errorf("review/http: lock %s: %w", path, err)
+	}
+	return func() {
+		_ = release()
+		mu.Unlock()
+	}, nil
 }
 
 // requestIDFor returns the client-supplied X-Request-Id when present and

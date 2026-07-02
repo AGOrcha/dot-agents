@@ -24,10 +24,16 @@
 // Auth is bearer-token via the pluggable internal/review/auth Authenticator
 // (missing/invalid token → 401, insufficient role → 403 — spec R8). Every
 // mutating call is recorded in the internal/review/audit chained log by the
-// audit middleware. Audit durability is AT-LEAST-ONCE: when the audit append
-// fails after the mutation persisted, the client receives a 500 carrying the
-// request id — callers must not blind-retry; the X-Request-Id echoed on every
-// mutating response is the idempotency key for reconciliation.
+// audit middleware, which is FAIL-CLOSED: each mutating request's
+// [read → mutate → audit] section runs under a per-target lock (in-process
+// mutex + agentslock file lock, so concurrent requests and CLI processes
+// cannot interleave read-modify-write cycles and drop each other's writes),
+// with the target file's pre-image captured up front — if the audit append
+// fails, the mutation is rolled back to the pre-image and the client gets a
+// 500 carrying the X-Request-Id. A persisted-but-unaudited mutation can only
+// survive in the doubly-degraded case where the rollback write also fails
+// (reported loudly with the request id; audit.Append's at-least-once note
+// applies to that residual only — reconcile by request id, never blind-retry).
 //
 // The package name collides with the standard library, so net/http is imported
 // under the alias nethttp (matching internal/service/http).
@@ -37,7 +43,9 @@ import (
 	"errors"
 	"fmt"
 	nethttp "net/http"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/AGOrcha/dot-agents/internal/review/audit"
 	"github.com/AGOrcha/dot-agents/internal/review/auth"
@@ -65,6 +73,10 @@ type LabelStore interface {
 	Get(iteration int, labelID string) (labels.Label, error)
 	Add(iteration int, in labels.AddInput) (labels.Label, error)
 	Edit(iteration int, labelID string, in labels.EditInput) (labels.Label, error)
+	// SidecarPath is the file a mutation on the iteration will modify — the
+	// mutation guard locks it and captures its pre-image before the handler
+	// runs. An empty string disables the guard (stores with no file target).
+	SidecarPath(iteration int) string
 }
 
 // SidecarLabelStore is the production LabelStore, delegating to the
@@ -90,12 +102,20 @@ func (s SidecarLabelStore) Edit(iteration int, labelID string, in labels.EditInp
 	return labels.EditLabel(s.Dir, iteration, labelID, in)
 }
 
+func (s SidecarLabelStore) SidecarPath(iteration int) string {
+	return labels.IterationLabelsPath(s.Dir, iteration)
+}
+
 // UserStore is the users-file surface the admin handlers consume. The
 // production implementation is FileUserStore over the local users file
 // (~/.config/da/review/users.yaml — auth.DefaultUsersPath).
 type UserStore interface {
 	Load() (*auth.UsersFile, error)
 	Save(uf *auth.UsersFile) error
+	// FilePath is the users file a mutation will modify — the mutation guard
+	// locks it and captures its pre-image before the handler runs. An empty
+	// string disables the guard (stores with no file target).
+	FilePath() string
 }
 
 // FileUserStore is the production UserStore over the users file at Path.
@@ -106,6 +126,8 @@ type FileUserStore struct {
 func (s FileUserStore) Load() (*auth.UsersFile, error) { return auth.LoadUsersFile(s.Path) }
 
 func (s FileUserStore) Save(uf *auth.UsersFile) error { return uf.Save(s.Path) }
+
+func (s FileUserStore) FilePath() string { return s.Path }
 
 // AuditLog is the audit surface the mount consumes: chained append for the
 // audit middleware, record read-back for the admin audit view. *audit.Log
@@ -156,6 +178,11 @@ type Mount struct {
 	labels LabelStore
 	users  UserStore
 	audit  AuditLog
+
+	// locks serializes mutating requests per target file (in-process half of
+	// the mutation guard; the agentslock file lock is the cross-process half).
+	locksMu sync.Mutex
+	locks   map[string]*sync.Mutex
 }
 
 // New builds a Mount whose routes are rooted at prefix (typically
@@ -177,6 +204,7 @@ func New(prefix string, deps Deps) (*Mount, error) {
 		labels: deps.Labels,
 		users:  deps.Users,
 		audit:  deps.Audit,
+		locks:  map[string]*sync.Mutex{},
 	}
 	m.routes()
 	return m, nil
@@ -196,28 +224,43 @@ func (m *Mount) ServeHTTP(w nethttp.ResponseWriter, r *nethttp.Request) {
 // auth middleware (and, for mutating routes, the audit middleware).
 func (m *Mount) routes() {
 	labelsPat := m.prefix + "/runs/{iteration}/labels"
-	m.handle("GET "+labelsPat, auth.PermReadLabels, false, m.handleListLabels)
-	m.handle("POST "+labelsPat, auth.PermWriteLabels, true, m.handleSubmitLabel)
-	m.handle("PATCH "+labelsPat+"/{label_id}", auth.PermWriteLabels, true, m.handleEditLabel)
+	m.handle("GET "+labelsPat, auth.PermReadLabels, nil, m.handleListLabels)
+	m.handle("POST "+labelsPat, auth.PermWriteLabels, m.labelSidecarTarget, m.handleSubmitLabel)
+	m.handle("PATCH "+labelsPat+"/{label_id}", auth.PermWriteLabels, m.labelSidecarTarget, m.handleEditLabel)
 
-	m.handle("GET "+m.prefix+"/audit", auth.PermReadAudit, false, m.handleAuditView)
+	m.handle("GET "+m.prefix+"/audit", auth.PermReadAudit, nil, m.handleAuditView)
 
 	usersPat := m.prefix + "/users"
-	m.handle("GET "+usersPat, auth.PermManageUsers, false, m.handleListUsers)
-	m.handle("POST "+usersPat, auth.PermManageUsers, true, m.handleCreateUser)
-	m.handle("PATCH "+usersPat+"/{email}", auth.PermManageUsers, true, m.handleChangeRole)
-	m.handle("DELETE "+usersPat+"/{email}", auth.PermManageUsers, true, m.handleDeleteUser)
+	m.handle("GET "+usersPat, auth.PermManageUsers, nil, m.handleListUsers)
+	m.handle("POST "+usersPat, auth.PermManageUsers, m.usersTarget, m.handleCreateUser)
+	m.handle("PATCH "+usersPat+"/{email}", auth.PermManageUsers, m.usersTarget, m.handleChangeRole)
+	m.handle("DELETE "+usersPat+"/{email}", auth.PermManageUsers, m.usersTarget, m.handleDeleteUser)
 }
 
 // handle wires one route: permission gate outermost, then (for mutating
-// routes) the audit recorder, then the handler.
-func (m *Mount) handle(pattern string, perm auth.Permission, mutating bool, h nethttp.HandlerFunc) {
+// routes, identified by a non-nil target resolver) the locking + fail-closed
+// audit guard, then the handler.
+func (m *Mount) handle(pattern string, perm auth.Permission, target targetFunc, h nethttp.HandlerFunc) {
 	var next nethttp.Handler = h
-	if mutating {
-		next = m.withAudit(next)
+	if target != nil {
+		next = m.withAudit(target, next)
 	}
 	m.mux.Handle(pattern, m.requireAuth(perm, next))
 }
+
+// labelSidecarTarget resolves the sidecar file a label mutation will modify.
+// It returns "" for a malformed iteration — the handler rejects such requests
+// with a 400 before any mutation, so no lock or pre-image is needed.
+func (m *Mount) labelSidecarTarget(r *nethttp.Request) string {
+	iter, err := strconv.Atoi(r.PathValue("iteration"))
+	if err != nil || iter < 0 {
+		return ""
+	}
+	return m.labels.SidecarPath(iter)
+}
+
+// usersTarget resolves the users file a user mutation will modify.
+func (m *Mount) usersTarget(*nethttp.Request) string { return m.users.FilePath() }
 
 // normalizePrefix validates a rooted, non-root prefix and strips any trailing
 // slash.

@@ -71,6 +71,7 @@ func (f failLabelStore) Add(int, labels.AddInput) (labels.Label, error) {
 func (f failLabelStore) Edit(int, string, labels.EditInput) (labels.Label, error) {
 	return labels.Label{}, f.err
 }
+func (f failLabelStore) SidecarPath(int) string { return "" }
 
 // failUserStore serves a fixed users file but fails Save.
 type failUserStore struct {
@@ -81,6 +82,7 @@ type failUserStore struct {
 
 func (f failUserStore) Load() (*auth.UsersFile, error) { return f.uf, f.loadErr }
 func (f failUserStore) Save(*auth.UsersFile) error     { return f.saveErr }
+func (f failUserStore) FilePath() string               { return "" }
 
 // failAudit fails Append and/or Records.
 type failAudit struct {
