@@ -355,16 +355,17 @@ func TestRunTriggerStartFailure(t *testing.T) {
 // whose in-flight run outlives the drain window turns an otherwise-clean
 // shutdown into a wrapped drain error, while a listener error keeps
 // precedence over the drain outcome.
-func TestStopSchedulerDrainTimeout(t *testing.T) {
+func TestShutdownWithinAbandonsUndrainableScheduler(t *testing.T) {
 	sched := scheduler.New()
 	err := sched.Register(scheduler.Task{
 		Name:    "slow",
 		Trigger: scheduler.Interval(time.Millisecond),
-		RunFn: func(ctx context.Context) error {
-			// Outlive the drain window, but honour cancellation so Stop's
-			// post-timeout context cancel can reap the run.
-			<-ctx.Done()
-			return ctx.Err()
+		RunFn: func(context.Context) error {
+			// Deliberately IGNORE cancellation so the scheduler cannot reap
+			// this run — the exact straggler shutdownWithin must abandon at
+			// the budget. Bounded so the test process still exits.
+			time.Sleep(2 * time.Second)
+			return nil
 		},
 	})
 	if err != nil {
@@ -381,9 +382,17 @@ func TestStopSchedulerDrainTimeout(t *testing.T) {
 		time.Sleep(pollInterval)
 	}
 
-	got := stopScheduler(sched, time.Millisecond, nil)
-	if !errors.Is(got, context.DeadlineExceeded) || !strings.Contains(got.Error(), "scheduler drain") {
-		t.Fatalf("stopScheduler = %v, want wrapped scheduler-drain deadline error", got)
+	// With no listeners left to drain and a scheduler that outlives the
+	// budget, shutdownWithin must abandon within the budget and name the
+	// scheduler as the undrained stage rather than block on it.
+	noListeners := make(chan error)
+	start := time.Now()
+	got := shutdownWithin(20*time.Millisecond, sched, noListeners, 0, nil)
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("shutdownWithin took %s, must return within the budget", elapsed)
+	}
+	if got == nil || !strings.Contains(got.Error(), "budget") || !strings.Contains(got.Error(), "scheduler") {
+		t.Fatalf("shutdownWithin = %v, want a budget-exceeded error naming the scheduler", got)
 	}
 }
 
@@ -399,5 +408,59 @@ func TestRunWindowsControlUnsupported(t *testing.T) {
 	err := waitRun(t, done)
 	if err == nil || !strings.Contains(err.Error(), "named-pipe") {
 		t.Fatalf("Run = %v, want named-pipe-unsupported error", err)
+	}
+}
+
+// TestShutdownWithinCleanAndListenerError covers shutdownWithin's in-budget
+// paths without a live runtime: a clean drain returns nil; a preset listener
+// error (a bind failure that began shutdown) is the returned cause; and a
+// listener that reports its error during teardown surfaces when no earlier
+// cause exists.
+func TestShutdownWithinCleanAndListenerError(t *testing.T) {
+	newIdle := func() *scheduler.Scheduler { // started, no tasks: Stop drains at once
+		s := scheduler.New()
+		if err := s.Start(context.Background()); err != nil {
+			t.Fatalf("scheduler start: %v", err)
+		}
+		return s
+	}
+
+	// Clean: no remaining listeners, nothing errored.
+	if err := shutdownWithin(time.Second, newIdle(), make(chan error), 0, nil); err != nil {
+		t.Errorf("clean shutdown = %v, want nil", err)
+	}
+
+	// Preset listener error (startup bind failure) is the returned cause.
+	boom := errors.New("bind failed")
+	if err := shutdownWithin(time.Second, newIdle(), make(chan error), 0, boom); !errors.Is(err, boom) {
+		t.Errorf("preset listener error = %v, want %v", err, boom)
+	}
+
+	// A remaining listener reporting an error during teardown surfaces it.
+	lerrc := make(chan error, 1)
+	lerrc <- errors.New("edge drain failed")
+	got := shutdownWithin(time.Second, newIdle(), lerrc, 1, nil)
+	if got == nil || !strings.Contains(got.Error(), "edge drain failed") {
+		t.Errorf("teardown listener error = %v, want it surfaced", got)
+	}
+}
+
+// TestShutdownWithinAbandonsHungListener covers the budget-exceeded path where
+// a listener (not the scheduler) is the straggler: it never returns, so the
+// budget expires and the error names "listeners".
+func TestShutdownWithinAbandonsHungListener(t *testing.T) {
+	sched := scheduler.New()
+	if err := sched.Start(context.Background()); err != nil {
+		t.Fatalf("scheduler start: %v", err)
+	}
+	// remaining=1 but nothing is ever sent on lerrc: the listener is hung.
+	hung := make(chan error)
+	start := time.Now()
+	got := shutdownWithin(20*time.Millisecond, sched, hung, 1, nil)
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("shutdownWithin took %s, must return within the budget", elapsed)
+	}
+	if got == nil || !strings.Contains(got.Error(), "budget") || !strings.Contains(got.Error(), "listeners") {
+		t.Fatalf("shutdownWithin = %v, want a budget-exceeded error naming listeners", got)
 	}
 }

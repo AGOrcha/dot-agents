@@ -18,6 +18,8 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -27,10 +29,16 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/service/tasks"
 )
 
-// shutdownTimeout bounds the scheduler drain once both listeners are down:
-// in-flight task runs get this long to finish before their context is
-// cancelled. Together with the listeners' own bounded shutdowns it keeps the
-// whole Run teardown inside the spec's exit-cleanly-within-5s criterion.
+// shutdownTimeout is the default single budget covering the ENTIRE teardown —
+// both listeners draining plus the scheduler stop, run concurrently — once
+// shutdown begins. It is one global bound, not a per-stage timeout: the spec's
+// exit-cleanly-within-5s criterion is a wall-clock bound on cancel→return, so
+// stacked per-stage waits (each listener's own ~5s drain, then another 5s for
+// the scheduler) would violate it. When the budget expires Run abandons any
+// straggler (a misbehaving in-flight request, a ctx-ignoring task) and returns
+// — SIGINT responsiveness wins over goroutine hygiene at exit; the process is
+// terminating regardless. Overridable via Config.ShutdownTimeout (tests use a
+// short budget to assert the bound under load).
 const shutdownTimeout = 5 * time.Second
 
 // listenerCount is the number of transport listeners the runtime serves: the
@@ -40,13 +48,6 @@ const listenerCount = 2
 // ErrUnknownTask is returned by Run when Config.EnabledTasks names a task
 // the runtime does not know how to build.
 var ErrUnknownTask = errors.New("service: unknown task name in EnabledTasks")
-
-// listener is the slice of the transport types Run composes: both
-// servicehttp.Control and servicehttp.Server serve until their context is
-// cancelled and then shut down within their own bounded timeouts.
-type listener interface {
-	Serve(ctx context.Context) error
-}
 
 // Run composes and runs the full service runtime until ctx is cancelled or
 // an authorized stop request arrives on the control socket (OQ4: stop rides
@@ -90,20 +91,89 @@ func Run(ctx context.Context, cfg Config) error {
 	if err := sched.Start(runCtx); err != nil {
 		return err
 	}
-	err = serveListeners(runCtx, cancel, ctl, edge)
-	// Listeners are down; drain the scheduler before the deferred bus close
-	// so no task publishes into a closed bus.
-	return stopScheduler(sched, shutdownTimeout, err)
+
+	// Both listeners serve concurrently until runCtx is cancelled (parent ctx,
+	// control-plane stop) or one returns an error at startup (bind failure) —
+	// in which case its sibling is cancelled.
+	lerrc := make(chan error, listenerCount)
+	go func() { lerrc <- ctl.Serve(runCtx) }()
+	go func() { lerrc <- edge.Serve(runCtx) }()
+
+	var listenerErr error
+	remaining := listenerCount
+	select {
+	case <-runCtx.Done():
+	case listenerErr = <-lerrc:
+		remaining--
+		cancel()
+	}
+
+	// Shutdown has begun: bound the entire remaining teardown by one budget.
+	return shutdownWithin(cfg.ShutdownTimeout, sched, lerrc, remaining, listenerErr)
 }
 
-// stopScheduler drains sched within timeout, folding a drain failure into
-// the listener outcome: a listener error (the more causal failure) wins, a
-// drain failure surfaces only against an otherwise-clean shutdown.
-func stopScheduler(sched *scheduler.Scheduler, timeout time.Duration, err error) error {
-	if stopErr := sched.Stop(timeout); stopErr != nil && err == nil {
-		return fmt.Errorf("service: scheduler drain: %w", stopErr)
+// shutdownWithin bounds the whole teardown — the still-serving listeners
+// draining plus the scheduler stop, run CONCURRENTLY — by a single budget.
+// Returns nil on a clean in-budget shutdown; the causal listener error if one
+// bound; a wrapped scheduler-drain error against an otherwise-clean stop; or a
+// budget-exceeded error naming the undrained stage(s) when a straggler is
+// abandoned.
+func shutdownWithin(budget time.Duration, sched *scheduler.Scheduler, lerrc <-chan error, remainingListeners int, listenerErr error) error {
+	var listenersDrained, schedDrained atomic.Bool
+	if remainingListeners == 0 {
+		listenersDrained.Store(true)
 	}
-	return err
+
+	// Drain the scheduler concurrently with the remaining listeners — the
+	// scheduler's own Stop is bounded by the same budget so a ctx-ignoring
+	// task cannot outlast it.
+	schedErrc := make(chan error, 1)
+	go func() { schedErrc <- sched.Stop(budget) }()
+
+	done := make(chan struct{})
+	var (
+		firstListenerErr = listenerErr
+		schedErr         error
+	)
+	go func() {
+		for remainingListeners > 0 {
+			if e := <-lerrc; e != nil && firstListenerErr == nil {
+				firstListenerErr = e
+			}
+			remainingListeners--
+		}
+		listenersDrained.Store(true)
+		schedErr = <-schedErrc
+		schedDrained.Store(true)
+		close(done)
+	}()
+
+	timer := time.NewTimer(budget)
+	defer timer.Stop()
+	select {
+	case <-done:
+		if firstListenerErr != nil {
+			return firstListenerErr
+		}
+		if schedErr != nil {
+			return fmt.Errorf("service: scheduler drain: %w", schedErr)
+		}
+		return nil
+	case <-timer.C:
+		// Budget spent: abandon whatever is still draining and return so a
+		// misbehaving in-flight request or ctx-ignoring task can never hold
+		// SIGINT hostage. Read only the atomic stage flags here — the
+		// collector goroutine owns firstListenerErr/schedErr and may still be
+		// running.
+		var undrained []string
+		if !listenersDrained.Load() {
+			undrained = append(undrained, "listeners")
+		}
+		if !schedDrained.Load() {
+			undrained = append(undrained, "scheduler")
+		}
+		return fmt.Errorf("service: shutdown exceeded %s budget; abandoned: %s", budget, strings.Join(undrained, ", "))
+	}
 }
 
 // registerTasks builds every enabled task against the shared bus and
@@ -158,27 +228,4 @@ func ensureRuntimeDirs(cfg Config) error {
 		return fmt.Errorf("service: create iteration-log dir: %w", err)
 	}
 	return nil
-}
-
-// serveListeners serves the control plane and the HTTP/SSE edge until ctx is
-// cancelled, cancelling the sibling (via cancel) as soon as either returns
-// an error — a listener that cannot bind must not leave the other half
-// serving. It returns only after BOTH Serve calls have returned, so no
-// listener goroutine ever outlives Run, and reports the first error (nil on
-// a clean ctx-driven shutdown of both).
-func serveListeners(ctx context.Context, cancel context.CancelFunc, ctl, edge listener) error {
-	errc := make(chan error, listenerCount)
-	go func() { errc <- ctl.Serve(ctx) }()
-	go func() { errc <- edge.Serve(ctx) }()
-
-	var first error
-	for i := 0; i < listenerCount; i++ {
-		if err := <-errc; err != nil {
-			if first == nil {
-				first = err
-			}
-			cancel()
-		}
-	}
-	return first
 }

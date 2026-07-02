@@ -44,6 +44,11 @@ type Config struct {
 	// RescoreInterval is the rescore task's rubric-version check cadence.
 	// Zero applies the tasks package default.
 	RescoreInterval time.Duration
+	// ShutdownTimeout is the single wall-clock budget covering the whole
+	// teardown (both listeners + scheduler drain, concurrently) once shutdown
+	// begins. Zero applies shutdownTimeout (5s, the spec exit-within-5s bound).
+	// A straggler still draining when the budget expires is abandoned.
+	ShutdownTimeout time.Duration
 	// EnabledTasks selects which background tasks Run registers, by
 	// scheduler task name (tasks.IterLogIngesterName, tasks.RescoreName).
 	// Empty enables every builtin task; an unknown name is rejected.
@@ -80,6 +85,9 @@ func (c Config) withDefaults() (Config, error) {
 	}
 	if len(c.EnabledTasks) == 0 {
 		c.EnabledTasks = []string{tasks.IterLogIngesterName, tasks.RescoreName}
+	}
+	if c.ShutdownTimeout <= 0 {
+		c.ShutdownTimeout = shutdownTimeout
 	}
 	return c, nil
 }

@@ -64,6 +64,7 @@ func TestExplicitFieldsPreserved(t *testing.T) {
 		IterLogDir:      "/tmp/iterlog",
 		RepoDir:         "/tmp/repo",
 		RescoreInterval: time.Hour,
+		ShutdownTimeout: 3 * time.Second,
 		EnabledTasks:    []string{tasks.RescoreName},
 		Bus:             bus,
 	}
