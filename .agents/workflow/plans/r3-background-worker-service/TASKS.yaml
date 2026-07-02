@@ -55,6 +55,7 @@ tasks:
         (scheduler.go + trigger.go + tests) landed via commit 0a57f0b6
         ("feat(service): in-process scheduler core") with the SonarCloud
         follow-up f9ea6632. Marked completed.
+        - (fb:fsnotify-rearm-flake) TestFSNotifyTriggerReArmDuringBurst fails ~40 percent locally under -race on unmodified master (macOS); timing-sensitive re-arm window. Needs the deterministic-seam treatment (like the hangup/partial-identity fixes) rather than timing luck. Found during service-runtime integration (#272).
       app_type: go-cli
     - id: event-bus
       title: In-process pub/sub bus for task → consumer events
