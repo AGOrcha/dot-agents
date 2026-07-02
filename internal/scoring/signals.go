@@ -2,7 +2,7 @@ package scoring
 
 import "fmt"
 
-// SignalSet is the rubric's six typed input signals for one iteration — the
+// SignalSet is the rubric's eight typed input signals for one iteration — the
 // objective values the scorer consumes — together with the integrity
 // observations (claimed vs observed) for the two-way signals.
 //
@@ -15,6 +15,7 @@ type SignalSet struct {
 	Landed             SignalValue
 	Verifier           SignalValue
 	Tests              SignalValue
+	HumanLabel         SignalValue
 	CorrectionPressure SignalValue
 	Scope              SignalValue
 	HookOutcomes       SignalValue
@@ -43,6 +44,8 @@ func (s SignalSet) Value(id SignalID) SignalValue {
 		return s.Verifier
 	case SignalTests:
 		return s.Tests
+	case SignalHumanLabel:
+		return s.HumanLabel
 	case SignalCorrectionPressure:
 		return s.CorrectionPressure
 	case SignalScope:
@@ -151,22 +154,26 @@ func integrityObservations(rec IterationRecord, il IterlogSignals, gs GitSignals
 // AssembleSignalSet joins the extractor partials for one iteration into the
 // rubric's typed input set. It is pure — the scorer task consumes its output.
 //
-// landed, token_efficiency, and hook_outcomes are objective-only. verifier
+// landed, token_efficiency, hook_outcomes, and human_label are one-way (no
+// self-reported counterpart; human_label is human-sourced). verifier
 // and tests come from the iteration log and its verification artifacts. scope
 // prefers the objective git measurement and falls back to the self-reported
 // scope_note. correction_pressure is composed from retries, user corrections,
 // and the transcript error rate. The IterationObjectives are recorded as
 // observational facts on the result; they do not enter the score directly.
 //
-// hookOutcomes is folded from the iter-N.hook-outcomes.yaml sidecar (R1.5);
-// pass AbsentSignal("...") when no sidecar exists or the iteration predates
-// R1.5 — the renormalizing combination then drops it from the vote.
-func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf BackfillSignals, obj IterationObjectives, hookOutcomes SignalValue) SignalSet {
+// hookOutcomes is folded from the iter-N.hook-outcomes.yaml sidecar (R1.5)
+// and humanLabel from the iter-N.labels.yaml sidecar (R5); pass
+// AbsentSignal("...") when the respective sidecar does not exist or the
+// iteration predates it — the renormalizing combination then drops the
+// signal from the vote.
+func AssembleSignalSet(rec IterationRecord, il IterlogSignals, gs GitSignals, bf BackfillSignals, obj IterationObjectives, hookOutcomes, humanLabel SignalValue) SignalSet {
 	return SignalSet{
 		Iteration:          rec.Iteration,
 		Landed:             gs.LandedObserved,
 		Verifier:           il.Verifier,
 		Tests:              il.TestsClaimed,
+		HumanLabel:         humanLabel,
 		CorrectionPressure: correctionPressure(il.Retries, il.UserCorrections, bf.ToolErrorRate, bf.ToolErrorRatePresent),
 		Scope:              coalesce(gs.ScopeObserved, il.ScopeClaimed),
 		HookOutcomes:       hookOutcomes,
@@ -212,7 +219,8 @@ func BuildSignalSets(iterLogDir, repoDir string, transcriptDirs ...string) ([]Si
 		}
 		obj := ExtractIterationObjectives(rec, windows[rec.Iteration], transcriptDirs...)
 		ho := ExtractHookOutcomesSignal(iterLogDir, rec.Iteration)
-		sets = append(sets, AssembleSignalSet(rec, il, gs, bfByIter[rec.Iteration], obj, ho))
+		hl := ExtractHumanLabelSignals(iterLogDir, rec.Iteration)
+		sets = append(sets, AssembleSignalSet(rec, il, gs, bfByIter[rec.Iteration], obj, ho, hl))
 	}
 	return sets, nil
 }

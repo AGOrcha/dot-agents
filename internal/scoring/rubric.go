@@ -20,7 +20,7 @@ import (
 // changed. minor: a weight or sub-score mapping changed. patch: docs or band
 // thresholds only. Every persisted score records the version it was computed
 // under, so a rubric change never silently invalidates historical scores.
-const RubricVersion = "2.1.0"
+const RubricVersion = "3.0.0"
 
 // weightEpsilon is the tolerance for the "weights sum to 1.0" invariant,
 // allowing for floating-point representation error.
@@ -48,6 +48,11 @@ const (
 	// per docs/OUTCOME_SCORING_RUBRIC.md; the extractor lives in
 	// signal_hook_outcomes.go.
 	SignalHookOutcomes SignalID = "hook_outcomes"
+	// SignalHumanLabel scores the structured human-review judgement attached
+	// to the iteration as an `iter-N.labels.yaml` sidecar (R5, spec D5.2).
+	// Added at RubricVersion 3.0.0 per docs/OUTCOME_SCORING_RUBRIC.md; the
+	// extractor lives in signal_human_label.go.
+	SignalHumanLabel SignalID = "human_label"
 )
 
 // AgentRole identifies which role made a self-reported claim. The v2
@@ -116,15 +121,17 @@ type Rubric struct {
 
 // DefaultRubric returns the active, versioned rubric (RubricVersion).
 //
-// Weights (2.1.0): correctness signals (landed 0.20, verifier 0.18, tests
-// 0.17) total 0.55 and dominate; process signals (correction_pressure 0.13,
-// scope 0.13, hook_outcomes 0.10) total 0.36; efficiency (token_efficiency
-// 0.09) is the remainder. The 2.0.2 → 2.1.0 rebalance introduces hook_outcomes
-// (objective hook-gate evidence — see R1.5 design D3 in
-// .agents/workflow/specs/r1-5-hook-enforcement-telemetry/design.md) and
-// trims every existing weight proportionally so the correctness / process /
-// efficiency shape is preserved. Rationale and per-signal sourcing live in
-// docs/OUTCOME_SCORING_RUBRIC.md.
+// Weights (3.0.0): correctness signals (landed 0.17, verifier 0.15, tests
+// 0.14) total 0.46 and still dominate; the new human-judgement signal
+// (human_label 0.15) sits between them and the process signals
+// (correction_pressure 0.11, scope 0.11, hook_outcomes 0.09, total 0.31);
+// efficiency (token_efficiency 0.08) is the remainder. The 2.1.0 → 3.0.0
+// rebalance introduces human_label (structured reviewer judgement from the
+// iter-N.labels.yaml sidecar — see R5 spec D5.2/D5.7/D5.8 in
+// .agents/workflow/specs/r5-review-labeling-access/design.md) at 0.15 and
+// trims the seven existing weights proportionally (×0.85, rounded to two
+// decimals) so the correctness / process / efficiency shape is preserved.
+// Rationale and per-signal sourcing live in docs/OUTCOME_SCORING_RUBRIC.md.
 func DefaultRubric() Rubric {
 	return Rubric{
 		Version:     RubricVersion,
@@ -133,49 +140,56 @@ func DefaultRubric() Rubric {
 			{
 				ID:          SignalLanded,
 				Label:       "Landed on master",
-				Weight:      0.20,
+				Weight:      0.17,
 				Description: "Did the iteration's work survive to master.",
 				TwoWay:      true,
 			},
 			{
 				ID:          SignalVerifier,
 				Label:       "Verifier results",
-				Weight:      0.18,
+				Weight:      0.15,
 				Description: "Did the iteration's verification gates pass.",
 				TwoWay:      true,
 			},
 			{
 				ID:          SignalTests,
 				Label:       "Test outcomes",
-				Weight:      0.17,
+				Weight:      0.14,
 				Description: "Did the iteration's focused and total tests pass.",
 				TwoWay:      true,
 			},
 			{
+				ID:          SignalHumanLabel,
+				Label:       "Human review label",
+				Weight:      0.15,
+				Description: "Structured reviewer judgement (correctness, scope, hallucination) from iter-N.labels.yaml.",
+				TwoWay:      false,
+			},
+			{
 				ID:          SignalCorrectionPressure,
 				Label:       "Correction pressure",
-				Weight:      0.13,
+				Weight:      0.11,
 				Description: "How little the iteration had to be corrected (retries, user corrections, tool errors).",
 				TwoWay:      false,
 			},
 			{
 				ID:          SignalScope,
 				Label:       "Scope adherence",
-				Weight:      0.13,
+				Weight:      0.11,
 				Description: "Did the iteration stay within its declared write-scope.",
 				TwoWay:      true,
 			},
 			{
 				ID:          SignalHookOutcomes,
 				Label:       "Hook-gate outcomes",
-				Weight:      0.10,
+				Weight:      0.09,
 				Description: "Did the iteration's hook gates allow, advise, or remediate (objective evidence from iter-N.hook-outcomes.yaml).",
 				TwoWay:      false,
 			},
 			{
 				ID:          SignalTokenEfficiency,
 				Label:       "Token & cache efficiency",
-				Weight:      0.09,
+				Weight:      0.08,
 				Description: "How efficiently the iteration used the model and prompt cache.",
 				TwoWay:      false,
 			},
