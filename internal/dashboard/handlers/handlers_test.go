@@ -482,7 +482,7 @@ func TestETagCacheValidityContract(t *testing.T) {
 		t.Errorf("changed content must yield a new ETag, still %q", changed)
 	}
 	// Distinct resource => distinct ETag (health vs runs).
-	if healthTag := get(t, m, healthTarget, nil).Header().Get("ETag"); healthTag == first {
+	if get(t, m, healthTarget, nil).Header().Get("ETag") == first {
 		t.Errorf("distinct resources must yield distinct ETags, both %q", first)
 	}
 	// Matching If-None-Match round-trips to 304.
