@@ -44,6 +44,48 @@ func (p *recordingPublisher) Publish(topic string, payload any) {
 	p.notify <- struct{}{}
 }
 
+// syncBuffer is a mutex-guarded io.Writer for the slog test sink. The watcher
+// logs from its own goroutine while the test asserts on the captured output
+// from another, so an unguarded bytes.Buffer is a data race (and its content
+// is not ordered against the published-event signal the tests wait on).
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// assertLoggedEventually polls the sink until it contains substr or the wait
+// window expires. A log line emitted on the watcher's error path has no
+// happens-before edge with the published-event signal the tests wait on, so a
+// one-shot Contains check races that write; polling closes the window
+// deterministically.
+func assertLoggedEventually(t *testing.T, sink *syncBuffer, substr string) {
+	t.Helper()
+	deadline := time.After(waitTimeout)
+	for {
+		if strings.Contains(sink.String(), substr) {
+			return
+		}
+		select {
+		case <-time.After(2 * time.Millisecond):
+		case <-deadline:
+			t.Errorf("log should contain %q within %v, got: %s", substr, waitTimeout, sink.String())
+			return
+		}
+	}
+}
+
 // waitFor blocks until pred matches a captured event or the timeout expires.
 func (p *recordingPublisher) waitFor(t *testing.T, pred func(publishedEvent) bool) publishedEvent {
 	t.Helper()
@@ -310,18 +352,16 @@ func TestDuplicateNotificationIsDeduped(t *testing.T) {
 // Watcher errors are logged and the loop keeps serving events.
 func TestFSErrorIsLoggedAndLoopContinues(t *testing.T) {
 	root := t.TempDir()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 	pub := newRecordingPublisher()
-	_, fake := startWatcher(t, root, pub, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+	_, fake := startWatcher(t, root, pub, WithLogger(slog.New(slog.NewTextHandler(buf, nil))))
 
 	fake.errs <- errors.New("transient watch error")
 	writeFile(t, root, "session-e.score.yaml", "session_id: e\n")
 	fake.events <- fsEvent(root, "session-e.score.yaml", fsnotify.Create)
 
 	pub.waitFor(t, func(e publishedEvent) bool { return e.topic == events.TopicSessionUpdated })
-	if !strings.Contains(buf.String(), "fsnotify error") {
-		t.Errorf("watcher error should be logged, got: %s", buf.String())
-	}
+	assertLoggedEventually(t, buf, "fsnotify error")
 }
 
 // Corrupt neighbours degrade the payload, never suppress the event: an
@@ -330,9 +370,9 @@ func TestFSErrorIsLoggedAndLoopContinues(t *testing.T) {
 func TestPublishBestEffortPayloadOnCorruptNeighbours(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "iter-4.yaml", "not: [valid")
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 	pub := newRecordingPublisher()
-	_, fake := startWatcher(t, root, pub, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+	_, fake := startWatcher(t, root, pub, WithLogger(slog.New(slog.NewTextHandler(buf, nil))))
 
 	writeFile(t, root, "iter-4.score.yaml", "also: [corrupt")
 	fake.events <- fsEvent(root, "iter-4.score.yaml", fsnotify.Create)
@@ -341,9 +381,7 @@ func TestPublishBestEffortPayloadOnCorruptNeighbours(t *testing.T) {
 	if p := ev.payload.(IterationScored); p.SessionID != "" || p.Band != "" || p.Iteration != 4 {
 		t.Errorf("payload = %+v", p)
 	}
-	if !strings.Contains(buf.String(), "unparseable iter record") {
-		t.Errorf("unparseable record should be logged, got: %s", buf.String())
-	}
+	assertLoggedEventually(t, buf, "unparseable iter record")
 }
 
 // --- poll fallback (OQ3) -------------------------------------------------------------
@@ -385,19 +423,17 @@ func TestPollFallbackDetectsNewFile(t *testing.T) {
 func TestStartFSNotifyFailureDegradesToPollOnly(t *testing.T) {
 	stubWatcherFactory(t, func() (fsWatcher, error) { return nil, errors.New("no kqueue") })
 	root := t.TempDir()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 	pub := newRecordingPublisher()
 
 	w := New([]string{root}, pub,
 		WithPollInterval(5*time.Millisecond),
-		WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+		WithLogger(slog.New(slog.NewTextHandler(buf, nil))))
 	if err := w.Start(); err != nil {
 		t.Fatalf("Start should degrade to poll-only, got %v", err)
 	}
 	t.Cleanup(w.Close)
-	if !strings.Contains(buf.String(), "fsnotify unavailable") {
-		t.Errorf("degradation should be logged, got: %s", buf.String())
-	}
+	assertLoggedEventually(t, buf, "fsnotify unavailable")
 	writeFile(t, root, "session-poll.score.yaml", "session_id: poll\n")
 	pub.waitFor(t, func(e publishedEvent) bool { return e.topic == events.TopicSessionUpdated })
 
@@ -415,20 +451,18 @@ func TestStartUnregistrableRootWarnsAndContinues(t *testing.T) {
 	okRoot := t.TempDir()
 	fake.addOKPrefix = okRoot // second root registers fine
 	stubWatcherFactory(t, func() (fsWatcher, error) { return fake, nil })
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 
 	// One root unregistrable, one registered: fsnotify is still an active
 	// source, so Start succeeds even with the poll disabled.
 	w := New([]string{filepath.Join(t.TempDir(), "missing"), okRoot}, newRecordingPublisher(),
 		WithPollInterval(-1),
-		WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+		WithLogger(slog.New(slog.NewTextHandler(buf, nil))))
 	if err := w.Start(); err != nil {
 		t.Fatalf("Start with one registered root must succeed: %v", err)
 	}
 	w.Close()
-	if !strings.Contains(buf.String(), "cannot watch root") {
-		t.Errorf("Add failure should be logged, got: %s", buf.String())
-	}
+	assertLoggedEventually(t, buf, "cannot watch root")
 }
 
 // A watcher with ZERO active sources — every fsnotify Add failed AND the
