@@ -5,13 +5,11 @@
 // storage and no cross-process IPC (see R3 design decision D4).
 //
 // The cross-plan contract that R2's sse-broker and R5's collection endpoint
-// bind to is intentionally tiny:
-//
-//	Publish(topic string, payload any)
-//	Subscribe(topic string) (<-chan Event, func())
-//
-// If async/queue-backed delivery is required later, that is a follow-up via
-// a sibling Publisher interface rather than a change to this surface.
+// bind to is the EventBus interface (spec D4.1) — never this concrete
+// channel implementation. Bus is the channel engine behind InProcBus, the
+// builtin backend (spec D4.3); external backends are post-v1 config-selected
+// adapters behind the same interface (spec D4.4). Conformance of any backend
+// is proven mechanically by the eventbustest suite (spec D4.6).
 package events
 
 import (
