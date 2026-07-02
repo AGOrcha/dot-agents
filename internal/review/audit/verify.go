@@ -94,43 +94,56 @@ func verifyHeadAnchor(recs []Record, head headAnchor, hasHead bool) (VerifyResul
 	}
 	switch {
 	case head.Count == n:
-		tailHash, err := hashRecord(recs[n-1])
-		if err != nil {
-			return VerifyResult{}, err
-		}
-		if head.TailHash != tailHash {
-			return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n)), nil
-		}
-		return VerifyResult{OK: true, Count: n}, nil
+		return verifyAnchoredTail(recs, head)
 	case head.Count == n-1:
-		// Candidate torn append: the head is exactly one behind. It is benign
-		// only if the record the anchor DOES attest is intact (for a torn
-		// first append there is no anchored record to check). The chain walk
-		// already proved record n chains onto record n-1.
-		if head.Count > 0 {
-			anchoredHash, err := hashRecord(recs[head.Count-1])
-			if err != nil {
-				return VerifyResult{}, err
-			}
-			if head.TailHash != anchoredHash {
-				return brokenHead(n, head.Count, fmt.Sprintf(
-					"head anchor does not match record %d it claims to attest (record %d was modified)",
-					head.Count, head.Count)), nil
-			}
-		}
-		return VerifyResult{
-			OK:         true,
-			Count:      n,
-			TornAppend: true,
-			Reason: fmt.Sprintf(
-				"log has %d record(s) but the head anchor attests %d: an append was interrupted before the anchor advanced (or a single chained record was appended out-of-band); run RepairHead after review",
-				n, head.Count),
-		}, nil
+		return verifyTornCandidate(recs, head)
 	default:
 		return brokenHead(n, n, fmt.Sprintf(
 			"head anchor count %d does not match %d record(s) on disk (records were added or removed at the tail)",
 			head.Count, n)), nil
 	}
+}
+
+// verifyAnchoredTail handles the exact-match shape (head.Count == len(recs)):
+// the anchor must equal the recomputed tail hash, else the last record was
+// modified.
+func verifyAnchoredTail(recs []Record, head headAnchor) (VerifyResult, error) {
+	n := len(recs)
+	tailHash, err := hashRecord(recs[n-1])
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if head.TailHash != tailHash {
+		return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n)), nil
+	}
+	return VerifyResult{OK: true, Count: n}, nil
+}
+
+// verifyTornCandidate handles the head-exactly-one-behind shape. It is benign
+// (TornAppend) only if the record the anchor DOES attest is intact — for a torn
+// first append there is no anchored record to check. The chain walk already
+// proved the extra record chains onto its predecessor.
+func verifyTornCandidate(recs []Record, head headAnchor) (VerifyResult, error) {
+	n := len(recs)
+	if head.Count > 0 {
+		anchoredHash, err := hashRecord(recs[head.Count-1])
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		if head.TailHash != anchoredHash {
+			return brokenHead(n, head.Count, fmt.Sprintf(
+				"head anchor does not match record %d it claims to attest (record %d was modified)",
+				head.Count, head.Count)), nil
+		}
+	}
+	return VerifyResult{
+		OK:         true,
+		Count:      n,
+		TornAppend: true,
+		Reason: fmt.Sprintf(
+			"log has %d record(s) but the head anchor attests %d: an append was interrupted before the anchor advanced (or a single chained record was appended out-of-band); run RepairHead after review",
+			n, head.Count),
+	}, nil
 }
 
 // brokenHead renders a head-anchor verification failure.
