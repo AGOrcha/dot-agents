@@ -405,20 +405,22 @@ func TestGetIterationDetailDefaultRoot(t *testing.T) {
 	}
 }
 
-// TestIterationDetailRecomputeFieldsPendingT06 pins the t02 read-layer boundary:
-// IterationDetail DECLARES the recompute-derived fields (integrity, objective,
-// integrity_observation_count, transcript_turn_count) so the payload is
-// shape-complete per API.md, but the raw read layer leaves them empty/null. They
-// are populated by t06's recompute-on-miss path — this asserts the t02 boundary,
-// NOT that the fields are permanently empty or non-conformant.
-func TestIterationDetailRecomputeFieldsPendingT06(t *testing.T) {
+// TestIterationDetailRecomputeFieldsRawReadLayerEmpty pins the t02 side of the
+// t02/t06 boundary: the RAW read layer (bare DiskStore) leaves the
+// recompute-derived fields (integrity, objective, integrity_observation_count,
+// transcript_turn_count) empty/null — they are products of the scoring
+// pipeline, not the persisted sidecar. The t06 recompute path FILLS them:
+// recompute_test.go (TestRecomputeGetIterationMissingSidecarRecomputes) asserts
+// the filled half through RecomputeStore. Both halves are true simultaneously:
+// raw read = empty, recompute path = filled.
+func TestIterationDetailRecomputeFieldsRawReadLayerEmpty(t *testing.T) {
 	s := testStore(t, standardRoot(t))
 	it, err := s.GetIteration(context.Background(), "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if it.Integrity != nil || it.Objective != nil || it.IntegrityObservationCount != 0 || it.TranscriptTurnCount != nil {
-		t.Errorf("t02 read layer must leave recompute-derived fields empty pending t06, got: %+v", it)
+		t.Errorf("raw read layer must leave recompute-derived fields empty (t06's RecomputeStore fills them), got: %+v", it)
 	}
 }
 
