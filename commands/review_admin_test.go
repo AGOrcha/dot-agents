@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/review/audit"
 	"github.com/AGOrcha/dot-agents/internal/review/auth"
@@ -33,6 +35,7 @@ type fakeReviewAdminDeps struct {
 	auditRecords     func(string) ([]audit.Record, error)
 	auditVerify      func(string) (audit.VerifyResult, error)
 	auditRepairHead  func(string) (audit.VerifyResult, error)
+	auditPrune       func(string, int) ([]string, error)
 }
 
 func (f fakeReviewAdminDeps) DefaultUsersPath() (string, error) {
@@ -117,6 +120,13 @@ func (f fakeReviewAdminDeps) AuditRepairHead(logPath string) (audit.VerifyResult
 		return f.auditRepairHead(logPath)
 	}
 	return f.std.AuditRepairHead(logPath)
+}
+
+func (f fakeReviewAdminDeps) AuditPruneArchivesBefore(logPath string, year int) ([]string, error) {
+	if f.auditPrune != nil {
+		return f.auditPrune(logPath, year)
+	}
+	return f.std.AuditPruneArchivesBefore(logPath, year)
 }
 
 // ── harness ─────────────────────────────────────────────────────────────────
@@ -969,6 +979,109 @@ func TestReviewAuditRepairErrors(t *testing.T) {
 	if !payload.OK || payload.Count != 0 {
 		t.Fatalf("bad repair JSON: %+v", payload)
 	}
+}
+
+// ── audit prune ─────────────────────────────────────────────────────────────
+
+// seedAuditArchives appends one record per year through the real audit package,
+// so each year boundary rotates the active log into a dated year-archive. After
+// the call the earlier years are frozen archives and the final year is live.
+func seedAuditArchives(t *testing.T, logPath string, years ...int) {
+	t.Helper()
+	log := audit.Open(logPath)
+	for _, y := range years {
+		if _, err := log.Append(audit.Event{
+			Actor:  "admin@example.com",
+			Role:   "admin",
+			Action: audit.ActionUserCreate,
+			Target: "user/seed",
+			Now:    time.Date(y, 2, 3, 4, 5, 6, 0, time.UTC),
+		}); err != nil {
+			t.Fatalf("seed audit year %d: %v", y, err)
+		}
+	}
+}
+
+func TestReviewAuditPruneCompactsOldArchives(t *testing.T) {
+	_, logPath := tempReviewPaths(t)
+	seedAuditArchives(t, logPath, 2022, 2023, 2024, 2026)
+	base := strings.TrimSuffix(logPath, ".jsonl")
+	deps := adminIdentityFake(adminID())
+
+	out, err := execAuditCmd(t, deps, "prune", "--before-year", "2024",
+		"--audit-log", logPath, "--token", "rvw_t")
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	mustContain(t, out, "Compacted 2 audit archive(s) older than 2024",
+		base+".2022.jsonl", base+".2023.jsonl")
+
+	for _, gone := range []string{base + ".2022.jsonl", base + ".2022.jsonl.head", base + ".2023.jsonl"} {
+		if _, err := os.Stat(gone); !os.IsNotExist(err) {
+			t.Fatalf("expected %s removed, stat err=%v", gone, err)
+		}
+	}
+	for _, kept := range []string{base + ".2024.jsonl", logPath} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("expected %s kept: %v", kept, err)
+		}
+	}
+}
+
+func TestReviewAuditPruneJSONAndEmpty(t *testing.T) {
+	_, logPath := tempReviewPaths(t)
+	seedAuditArchives(t, logPath, 2024, 2026) // one archive (2024), active 2026
+	deps := adminIdentityFake(adminID())
+
+	out, err := execAuditCmd(t, deps, "prune", "--before-year", "2024",
+		"--audit-log", logPath, "--token", "rvw_t")
+	if err != nil {
+		t.Fatalf("prune empty: %v", err)
+	}
+	mustContain(t, out, "No audit archives older than 2024 to compact")
+
+	setJSONFlag(t)
+	out, err = execAuditCmd(t, deps, "prune", "--before-year", "2025",
+		"--audit-log", logPath, "--token", "rvw_t")
+	if err != nil {
+		t.Fatalf("prune json: %v", err)
+	}
+	var payload reviewAuditPruneJSON
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("parse prune JSON: %v", err)
+	}
+	if payload.Count != 1 || payload.BeforeYear != 2025 || len(payload.Removed) != 1 {
+		t.Fatalf("bad prune JSON: %+v", payload)
+	}
+}
+
+func TestReviewAuditPruneErrors(t *testing.T) {
+	usersPath, logPath := tempReviewPaths(t)
+	deps := adminIdentityFake(adminID())
+
+	_, err := execAuditCmd(t, deps, "prune", "--before-year", "0",
+		"--audit-log", logPath, "--token", "rvw_t")
+	mustErrContain(t, err, "--before-year must be a positive four-digit year")
+
+	_, err = execAuditCmd(t, deps, "prune", "--audit-log", logPath, "--token", "rvw_t")
+	mustErrContain(t, err, "before-year", "not set")
+
+	readonly := adminIdentityFake(auth.Identity{Email: "ro@example.com", Role: auth.RoleReadonly})
+	_, err = execAuditCmd(t, readonly, "prune", "--before-year", "2025",
+		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
+	mustErrContain(t, err, "lacks permission audit:read")
+
+	pathErr := fakeReviewAdminDeps{defaultUsersPath: func() (string, error) { return "", errors.New("no home") }}
+	_, err = execAuditCmd(t, pathErr, "prune", "--before-year", "2025", "--audit-log", logPath)
+	mustErrContain(t, err, "no home")
+
+	corrupt := adminIdentityFake(adminID())
+	corrupt.auditPrune = func(string, int) ([]string, error) {
+		return []string{"/x/audit.log.2020.jsonl"}, fmt.Errorf("%w: /x/audit.log.2021.jsonl", audit.ErrCorruptArchive)
+	}
+	_, err = execAuditCmd(t, corrupt, "prune", "--before-year", "2025",
+		"--audit-log", logPath, "--token", "rvw_t")
+	mustErrContain(t, err, "audit prune incomplete (1 archive(s) compacted)", "corrupt archive")
 }
 
 // ── wiring + std deps ───────────────────────────────────────────────────────

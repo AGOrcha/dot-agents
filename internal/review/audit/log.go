@@ -34,6 +34,14 @@ var (
 	renameFunc = os.Rename
 	timeNow    = func() time.Time { return time.Now().UTC() }
 
+	// readDirFunc lists a log directory's entries; a seam so
+	// PruneArchivesBefore's directory-read error branch is coverable.
+	readDirFunc = os.ReadDir
+	// removeFunc deletes a pruned archive (and its head sidecar) through fsops so
+	// the FS-helpers guard is satisfied; a seam so the remove-error branch is
+	// coverable.
+	removeFunc = fsops.Remove
+
 	// openAppend opens path for appending, creating the file and its parent
 	// directory if needed. It uses O_APPEND so concurrent appenders never
 	// truncate each other — the log is append-only by construction, not by

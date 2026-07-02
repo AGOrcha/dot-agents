@@ -50,6 +50,9 @@ const reviewTokenEnv = "DA_REVIEW_TOKEN"
 // set-role`.
 const reviewRoleFlag = "role"
 
+// reviewBeforeYearFlag is the --before-year flag name on `audit prune`.
+const reviewBeforeYearFlag = "before-year"
+
 // reviewBootstrapActor is the audit actor recorded when the first admin is
 // created against an empty users file (no admin exists yet to authenticate).
 const reviewBootstrapActor = "bootstrap"
@@ -80,6 +83,7 @@ type reviewAdminDeps interface {
 	AuditRecords(logPath string) ([]audit.Record, error)
 	AuditVerify(logPath string) (audit.VerifyResult, error)
 	AuditRepairHead(logPath string) (audit.VerifyResult, error)
+	AuditPruneArchivesBefore(logPath string, year int) ([]string, error)
 }
 
 // stdReviewAdminDeps is the production reviewAdminDeps backed by
@@ -114,6 +118,9 @@ func (stdReviewAdminDeps) AuditVerify(logPath string) (audit.VerifyResult, error
 }
 func (stdReviewAdminDeps) AuditRepairHead(logPath string) (audit.VerifyResult, error) {
 	return audit.Open(logPath).RepairHead()
+}
+func (stdReviewAdminDeps) AuditPruneArchivesBefore(logPath string, year int) ([]string, error) {
+	return audit.Open(logPath).PruneArchivesBefore(year)
 }
 
 // withReviewAdmin attaches the R5 admin subcommands to the `da review` group
@@ -268,14 +275,16 @@ func newReviewAuditCmd(deps reviewAdminDeps) *cobra.Command {
 	opts := &reviewAdminOpts{}
 	cmd := &cobra.Command{
 		Use:   "audit",
-		Short: "Inspect and verify the review audit log",
-		Long: "Read and attest the append-only, hash-chained review audit log (spec D5.4).\n" +
-			"`view` is admin-only; `verify` needs no token (it is read-only integrity\n" +
-			"attestation, usable as a CI gate) and exits non-zero on the first chain break.",
+		Short: "Inspect, verify, and compact the review audit log",
+		Long: "Read, attest, and compact the append-only, hash-chained review audit log\n" +
+			"(spec D5.4). `view`, `repair`, and `prune` are admin-only; `verify` needs no\n" +
+			"token (it is read-only integrity attestation, usable as a CI gate) and exits\n" +
+			"non-zero on the first chain break.",
 		Example: ExampleBlock(
 			"  da review audit view --limit 20",
 			"  da review audit verify",
 			"  da review audit repair",
+			"  da review audit prune --before-year 2025",
 		),
 	}
 	opts.registerFlags(cmd)
@@ -283,6 +292,7 @@ func newReviewAuditCmd(deps reviewAdminDeps) *cobra.Command {
 		newReviewAuditViewCmd(deps, opts),
 		newReviewAuditVerifyCmd(deps, opts),
 		newReviewAuditRepairCmd(deps, opts),
+		newReviewAuditPruneCmd(deps, opts),
 	)
 	return cmd
 }
@@ -338,6 +348,31 @@ func newReviewAuditRepairCmd(deps reviewAdminDeps, opts *reviewAdminOpts) *cobra
 			return runReviewAuditRepair(cmd.OutOrStdout(), deps, opts)
 		},
 	}
+}
+
+// newReviewAuditPruneCmd builds `da review audit prune`.
+func newReviewAuditPruneCmd(deps reviewAdminDeps, opts *reviewAdminOpts) *cobra.Command {
+	var beforeYear int
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Compact rotated audit archives older than a given year (admin only)",
+		Long: "Removes the dated year-archive files (produced by the audit log's yearly or\n" +
+			"size-cap rotation) whose year is strictly before --before-year, compacting\n" +
+			"retained history (spec D5.4). The active log is never touched, and an archive\n" +
+			"that fails chain verification is left in place and reported rather than deleted.\n" +
+			"Prune is archive maintenance over frozen, self-contained chains, not a mutating\n" +
+			"review action, so it writes no audit record.",
+		Example: ExampleBlock(
+			"  da review audit prune --before-year 2025",
+		),
+		Args: NoArgsWithHints("`da review audit prune` takes no positional arguments."),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runReviewAuditPrune(cmd.OutOrStdout(), deps, opts, beforeYear)
+		},
+	}
+	cmd.Flags().IntVar(&beforeYear, reviewBeforeYearFlag, 0, "Remove archives whose year is strictly before this four-digit year")
+	_ = cmd.MarkFlagRequired(reviewBeforeYearFlag)
+	return cmd
 }
 
 // ── users runners ───────────────────────────────────────────────────────────
@@ -629,6 +664,65 @@ func runReviewAuditRepair(out io.Writer, deps reviewAdminDeps, opts *reviewAdmin
 		return emitReviewAdminJSON(out, reviewAuditVerifyJSON{OK: true, Count: res.Count})
 	}
 	fmt.Fprintf(out, "audit head anchor is consistent — %d record(s) in %s\n", res.Count, logPath)
+	return nil
+}
+
+// reviewAuditPruneJSON is the `audit prune --json` envelope. Removed lists the
+// archive files compacted (never null — an empty prune renders []).
+type reviewAuditPruneJSON struct {
+	BeforeYear int      `json:"before_year"`
+	Count      int      `json:"count"`
+	Removed    []string `json:"removed"`
+}
+
+// runReviewAuditPrune implements `da review audit prune` (admin only). It
+// compacts rotated year-archives older than --before-year through the audit
+// package's PruneArchivesBefore primitive. Prune is archive maintenance, not an
+// R6 mutation (spec line 111): the removed archives are frozen, self-contained
+// chains and the active log is untouched, so there is deliberately NO
+// fail-closed audit record here (contrast the users-file mutators).
+func runReviewAuditPrune(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOpts, beforeYear int) error {
+	if beforeYear <= 0 {
+		return UsageError("--before-year must be a positive four-digit year")
+	}
+	usersPath, err := opts.resolveUsersPath(deps)
+	if err != nil {
+		return err
+	}
+	if _, err := authenticateReviewAdmin(deps, opts, usersPath, auth.PermReadAudit); err != nil {
+		return err
+	}
+	logPath := opts.resolveAuditPath()
+	removed, err := deps.AuditPruneArchivesBefore(logPath, beforeYear)
+	if err != nil {
+		return reviewPruneFailed(removed, err)
+	}
+	return emitReviewPrune(out, logPath, beforeYear, removed)
+}
+
+// reviewPruneFailed renders a prune that hit a corrupt or unreadable archive.
+// removed still names the archives that WERE compacted before the failure, so
+// a re-run resumes safely.
+func reviewPruneFailed(removed []string, cause error) error {
+	return ErrorWithHints(
+		fmt.Sprintf("audit prune incomplete (%d archive(s) compacted): %v", len(removed), cause),
+		"Investigate the named archive(s); intact older archives were still compacted, so a re-run resumes safely.",
+	)
+}
+
+// emitReviewPrune renders a successful prune (human table or --json).
+func emitReviewPrune(out io.Writer, logPath string, beforeYear int, removed []string) error {
+	if Flags.JSON {
+		return emitReviewAdminJSON(out, reviewAuditPruneJSON{BeforeYear: beforeYear, Count: len(removed), Removed: removed})
+	}
+	if len(removed) == 0 {
+		fmt.Fprintf(out, "No audit archives older than %d to compact — %s\n", beforeYear, logPath)
+		return nil
+	}
+	fmt.Fprintf(out, "Compacted %d audit archive(s) older than %d:\n", len(removed), beforeYear)
+	for _, p := range removed {
+		fmt.Fprintf(out, "  %s\n", p)
+	}
 	return nil
 }
 
