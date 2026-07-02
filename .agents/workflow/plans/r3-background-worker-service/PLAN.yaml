@@ -4,8 +4,8 @@ title: 'R3: Background-worker service'
 status: active
 summary: Long-running `da service` subcommand hosting an in-process scheduler with telemetry-ingestion (fsnotify on iteration log) + scoring-rescore (rubric-version trigger) background tasks. Restart-safe via per-task watermark sidecars. HTTP surface with /healthz + /api/tasks and reserved mount points for R2 (/api) and R5 (/api/reviews); in-process event bus for push-based updates (D4). Replaces hook-and-CLI-only scoring with continuous ingestion.
 created_at: "2026-05-25T19:12:51Z"
-updated_at: "2026-07-02T09:24:02Z"
+updated_at: "2026-07-02T14:53:37Z"
 owner: dot-agents
 success_criteria: Service runs >=2 distinct background tasks on independent schedules/triggers; task health/history observable and feeds R2; service hosts R2 API + R5 collection endpoint.
 verification_strategy: 'da service status (or equivalent) shows running tasks + health; restart preserves in-flight task state; integration test: ingestion + scoring tasks run on schedule and emit observable events to a stubbed R2/R5 consumer.'
-current_focus_task: Rescore-on-rubric-bump task — interval trigger, rescores when RubricVersion changes
+current_focus_task: Service runtime that composes scheduler + http + bus + tasks

@@ -144,7 +144,7 @@ tasks:
       app_type: go-cli
     - id: r1-integration
       title: Human-label signal + RubricVersion major/minor bump (resolve at task time)
-      status: pending
+      status: completed
       depends_on:
         - label-model
       blocks:
