@@ -12,9 +12,12 @@
 // Backpressure implements spec OQ5's recommendation ("bounded buffer with
 // disconnect-on-overflow, client refetches on reconnect"), which is also
 // API.md §3.7's pinned resolution: each subscriber holds one bounded
-// buffered channel; a subscriber whose buffer stays full past a grace
-// window (default 1s) is disconnected — its channel is closed and the SSE
-// client reconnects and refetches. Publishers never block (G3-compatible).
+// buffered channel, and EVERY drop is terminal — the first event that
+// cannot be enqueued disconnects that subscriber (channel closed), so the
+// SSE client reconnects and refetches. A live stream therefore never
+// contains a silent hole: drop ⇒ disconnect ⇒ refetch, with no window in
+// which a client keeps consuming past a lost event. Publishers never
+// block (G3-compatible).
 //
 // The broker also owns the store-cache eviction wiring point: on every
 // pushed event (never on heartbeats) it invalidates the t02 read cache via
@@ -52,9 +55,6 @@ const (
 const (
 	// DefaultBuffer is the per-subscriber bounded channel capacity.
 	DefaultBuffer = 64
-	// DefaultGrace is how long a subscriber's buffer may stay
-	// continuously full before the broker disconnects it (spec OQ5).
-	DefaultGrace = time.Second
 	// DefaultHeartbeat is the keepalive interval (API.md §3.7: 15s).
 	DefaultHeartbeat = 15 * time.Second
 )
@@ -104,8 +104,6 @@ type RootScoped interface {
 type Options struct {
 	// Buffer is the per-subscriber channel capacity; <=0 → DefaultBuffer.
 	Buffer int
-	// Grace is the continuous-full window before disconnect; <=0 → DefaultGrace.
-	Grace time.Duration
 	// Heartbeat is the keepalive interval; 0 → DefaultHeartbeat,
 	// negative → heartbeats disabled (tests, embedded use).
 	Heartbeat time.Duration
@@ -113,14 +111,13 @@ type Options struct {
 	Evictor Evictor
 }
 
-// subscriber is one connected client: a bounded buffer plus stall state.
+// subscriber is one connected client's bounded buffer.
 type subscriber struct {
 	ch chan Event
-	// seq is the next sequence number to assign on successful enqueue.
+	// seq is the next sequence number to assign on enqueue. Because any
+	// drop disconnects the subscriber, a delivered stream is always both
+	// gap-free and hole-free: seq runs contiguously from 0 until close.
 	seq uint64
-	// fullSince is when the buffer was first observed full with no
-	// successful enqueue since; zero means not stalled.
-	fullSince time.Time
 	// done unblocks the context watcher when the subscriber is removed.
 	done chan struct{}
 }
@@ -150,9 +147,6 @@ var _ Publisher = (*Broker)(nil)
 func New(opts Options) *Broker {
 	if opts.Buffer <= 0 {
 		opts.Buffer = DefaultBuffer
-	}
-	if opts.Grace <= 0 {
-		opts.Grace = DefaultGrace
 	}
 	if opts.Heartbeat == 0 {
 		opts.Heartbeat = DefaultHeartbeat
@@ -191,10 +185,11 @@ func (b *Broker) isClosed() bool {
 
 // Subscribe registers a client and returns its bounded event stream plus
 // an idempotent cancel func. The stream closes on cancel, on context
-// cancellation, on broker Close, or when the client overflows its buffer
-// past the grace window (OQ5 disconnect — the client must then reconnect
-// and refetch). Subscribing on a closed broker returns an already-closed
-// stream and a no-op cancel.
+// cancellation, on broker Close, or the moment the client's buffer
+// overflows (OQ5 disconnect-on-overflow — the client must then reconnect
+// and refetch; no event is ever silently skipped on a live stream).
+// Subscribing on a closed broker returns an already-closed stream and a
+// no-op cancel.
 func (b *Broker) Subscribe(ctx context.Context) (<-chan Event, func()) {
 	s := &subscriber{
 		ch:   make(chan Event, b.opts.Buffer),
@@ -288,30 +283,23 @@ func (b *Broker) dispatch(topic string, payload any, ts time.Time) {
 }
 
 // offerLocked enqueues an event on one subscriber without ever blocking
-// the fan-out. On a full buffer the event is dropped for that subscriber
-// (G1 at-most-once) and a stall clock starts; if the buffer is still full
-// past the grace window on a later offer, the subscriber is disconnected
-// (spec OQ5 / TASKS t04: "full channel drops the slowest subscriber after
-// 1s grace"). Any successful enqueue resets the stall clock. Heartbeats
-// flow through here too, bounding stall detection even on idle streams.
+// the fan-out. Every drop is terminal (spec OQ5: bounded buffer with
+// disconnect-on-overflow, client refetches on reconnect): the FIRST
+// event that cannot be enqueued disconnects the subscriber immediately.
+// That preserves the OQ5 invariant drop ⇒ disconnect ⇒ refetch — a live
+// stream can never carry a silent hole the client would consume past.
+// Events already buffered before the drop remain deliverable (they
+// precede the hole); nothing can be delivered after it because the
+// stream is closed here, under the same lock every send takes.
+// Heartbeats are treated uniformly: a buffer with no room for a
+// heartbeat has no room for the next data event either, so keeping the
+// invariant unconditional is both simplest and provably hole-free.
 // Caller must hold b.mu.
 func (b *Broker) offerLocked(s *subscriber, topic string, payload any, ts time.Time) {
 	select {
 	case s.ch <- Event{Type: topic, Seq: s.seq, TS: ts, Payload: payload}:
 		s.seq++
-		s.fullSince = time.Time{}
-		return
 	default:
-	}
-	// Stall bookkeeping uses the monotonic wall clock, NOT b.now():
-	// the stamp clock truncates to whole seconds for the schema's
-	// RFC3339 form, which would make the grace window second-granular.
-	stallNow := time.Now()
-	if s.fullSince.IsZero() {
-		s.fullSince = stallNow
-		return
-	}
-	if stallNow.Sub(s.fullSince) >= b.opts.Grace {
 		b.removeLocked(s)
 	}
 }
@@ -336,7 +324,9 @@ func (b *Broker) removeLocked(s *subscriber) {
 
 // heartbeatLoop emits a typed heartbeat event to every subscriber on the
 // configured interval (API.md §3.7). Heartbeats never trigger cache
-// eviction and double as the idle-stream stall probe for offerLocked.
+// eviction; like any event, an undeliverable heartbeat disconnects the
+// overflowing subscriber, so even idle-stream stalls surface within one
+// heartbeat interval.
 func (b *Broker) heartbeatLoop(interval time.Duration) {
 	defer b.wg.Done()
 	ticker := time.NewTicker(interval)

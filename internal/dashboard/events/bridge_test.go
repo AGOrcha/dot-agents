@@ -222,7 +222,6 @@ func TestBridgedStressUnderRace(t *testing.T) {
 	evictor := &recordingEvictor{}
 	b := New(Options{
 		Buffer:    4,
-		Grace:     5 * time.Millisecond,
 		Heartbeat: 2 * time.Millisecond,
 		Evictor:   evictor,
 	})

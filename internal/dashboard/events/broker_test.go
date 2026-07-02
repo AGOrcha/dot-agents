@@ -104,9 +104,8 @@ func TestNewAppliesDefaults(t *testing.T) {
 	if got := cap(ch); got != DefaultBuffer {
 		t.Errorf("default subscriber buffer = %d, want %d", got, DefaultBuffer)
 	}
-	if b.opts.Grace != DefaultGrace || b.opts.Heartbeat != DefaultHeartbeat {
-		t.Errorf("defaults = grace %v / heartbeat %v, want %v / %v",
-			b.opts.Grace, b.opts.Heartbeat, DefaultGrace, DefaultHeartbeat)
+	if b.opts.Heartbeat != DefaultHeartbeat {
+		t.Errorf("default heartbeat = %v, want %v", b.opts.Heartbeat, DefaultHeartbeat)
 	}
 }
 
@@ -159,68 +158,68 @@ func TestSeqIsPerConnection(t *testing.T) {
 	}
 }
 
-func TestOverflowDisconnectsAfterGrace(t *testing.T) {
-	b := New(Options{Buffer: 1, Grace: 50 * time.Millisecond, Heartbeat: noHeartbeat})
+func TestFirstDropDisconnectsImmediately(t *testing.T) {
+	b := New(Options{Buffer: 1, Heartbeat: noHeartbeat})
 	defer b.Close()
 	ch, cancel := b.Subscribe(context.Background())
 	defer cancel()
 
 	b.Publish(TopicIterationScored, "buffered") // fills the buffer
-	b.Publish(TopicIterationScored, "dropped")  // full: stall clock starts
-	time.Sleep(80 * time.Millisecond)           // exceed the grace window
-	b.Publish(TopicIterationScored, "trigger")  // still full: disconnect
+	b.Publish(TopicIterationScored, "dropped")  // full: FIRST drop → disconnect
 
-	if got := mustReceive(t, ch).Payload; got != "buffered" {
-		t.Errorf("buffered payload = %v, want %q", got, "buffered")
-	}
-	mustClose(t, ch)
 	if n := b.SubscriberCount(); n != 0 {
-		t.Errorf("SubscriberCount after overflow-disconnect = %d, want 0", n)
+		t.Errorf("SubscriberCount right after the drop = %d, want 0 (immediate disconnect)", n)
+	}
+	if got := mustReceive(t, ch).Payload; got != "buffered" {
+		t.Errorf("pre-drop buffered payload = %v, want %q", got, "buffered")
+	}
+	if ev, ok := <-ch; ok {
+		t.Errorf("received %v after the drop, want the stream already closed", ev.Payload)
 	}
 }
 
-func TestOverflowWithinGraceDropsWithoutDisconnect(t *testing.T) {
-	b := New(Options{Buffer: 1, Grace: time.Hour, Heartbeat: noHeartbeat})
+func TestNoDeliveryAfterDrop(t *testing.T) {
+	b := New(Options{Buffer: 2, Heartbeat: noHeartbeat})
 	defer b.Close()
 	ch, cancel := b.Subscribe(context.Background())
 	defer cancel()
 
-	b.Publish(TopicIterationScored, "kept")
-	b.Publish(TopicIterationScored, "lost-1") // stall starts
-	b.Publish(TopicIterationScored, "lost-2") // within grace: dropped, no disconnect
-	if n := b.SubscriberCount(); n != 1 {
-		t.Fatalf("SubscriberCount within grace = %d, want 1", n)
-	}
+	b.Publish(TopicIterationScored, "pre-0") // buffered
+	b.Publish(TopicIterationScored, "pre-1") // buffered
+	b.Publish(TopicIterationScored, "hole")  // full: drop → disconnect
+	b.Publish(TopicIterationScored, "post")  // must never reach this client
 
-	if got := mustReceive(t, ch).Payload; got != "kept" {
-		t.Errorf("first payload = %v, want %q", got, "kept")
+	// Events buffered BEFORE the drop are still deliverable (they precede
+	// the hole) with gap-free seq; the stream then closes with nothing
+	// delivered past the dropped event.
+	for i, want := range []string{"pre-0", "pre-1"} {
+		ev := mustReceive(t, ch)
+		if ev.Payload != want || ev.Seq != uint64(i) {
+			t.Errorf("event %d = %v/seq %d, want %s/seq %d", i, ev.Payload, ev.Seq, want, i)
+		}
 	}
-	b.Publish(TopicIterationScored, "after-drain")
-	got := mustReceive(t, ch)
-	if got.Payload != "after-drain" || got.Seq != 1 {
-		t.Errorf("post-drain event = %v/seq %d, want after-drain/seq 1", got.Payload, got.Seq)
+	if ev, ok := <-ch; ok {
+		t.Errorf("received %v after the drop, want the stream closed (no silent hole)", ev.Payload)
 	}
 }
 
-func TestSuccessfulSendResetsStallClock(t *testing.T) {
-	b := New(Options{Buffer: 1, Grace: 50 * time.Millisecond, Heartbeat: noHeartbeat})
+func TestKeepingUpNeverDisconnects(t *testing.T) {
+	b := New(Options{Buffer: 1, Heartbeat: noHeartbeat})
 	defer b.Close()
 	ch, cancel := b.Subscribe(context.Background())
 	defer cancel()
 
-	b.Publish(TopicIterationScored, "fill")
-	b.Publish(TopicIterationScored, "drop") // stall starts
-	if got := mustReceive(t, ch).Payload; got != "fill" {
-		t.Fatalf("drained payload = %v, want %q", got, "fill")
-	}
-	time.Sleep(80 * time.Millisecond) // grace elapses, but buffer has room now
-	b.Publish(TopicIterationScored, "revived")
-
-	if got := mustReceive(t, ch).Payload; got != "revived" {
-		t.Errorf("payload after drain = %v, want %q", got, "revived")
+	// A draining client on a buffer of 1 rides through repeated
+	// full→empty cycles without ever tripping the overflow disconnect.
+	for i := 0; i < 5; i++ {
+		b.Publish(TopicIterationScored, i)
+		ev := mustReceive(t, ch)
+		if ev.Payload != i || ev.Seq != uint64(i) {
+			t.Fatalf("event = %v/seq %d, want %d/seq %d", ev.Payload, ev.Seq, i, i)
+		}
 	}
 	if n := b.SubscriberCount(); n != 1 {
-		t.Errorf("SubscriberCount after recovery = %d, want 1", n)
+		t.Errorf("SubscriberCount for a keeping-up client = %d, want 1", n)
 	}
 }
 
@@ -306,15 +305,15 @@ func TestHeartbeatIsEmittedAndSkipsEviction(t *testing.T) {
 }
 
 func TestHeartbeatDrivesOverflowDisconnectOnIdleStream(t *testing.T) {
-	b := New(Options{Buffer: 1, Grace: 20 * time.Millisecond, Heartbeat: 10 * time.Millisecond})
+	b := New(Options{Buffer: 1, Heartbeat: 10 * time.Millisecond})
 	defer b.Close()
 	ch, cancel := b.Subscribe(context.Background())
 	defer cancel()
 
-	// Never drain: heartbeats alone must fill the buffer, exceed the
-	// grace window, and disconnect the stalled subscriber. Poll the
-	// count instead of reading ch — receiving would drain the buffer
-	// and defeat the stall.
+	// Never drain: heartbeats alone must fill the buffer and, on the
+	// first undeliverable one, disconnect the stalled subscriber
+	// (uniform drop⇒disconnect). Poll the count instead of reading ch —
+	// receiving would drain the buffer and defeat the stall.
 	deadline := time.Now().Add(waitTimeout)
 	for b.SubscriberCount() != 0 {
 		if time.Now().After(deadline) {
@@ -377,12 +376,14 @@ func TestSubscriberCountTracksLiveSubscribers(t *testing.T) {
 // TestConcurrentPublishSubscribeCancelUnderRace is the -race conformance
 // exercise: concurrent publishers, heartbeats, draining subscribers,
 // abandoning (never-draining) subscribers, mid-flight cancels, and a
-// final Close must produce no data race, no deadlock, and no panic.
+// final Close must produce no data race, no deadlock, and no panic —
+// and every stream a subscriber observes must be gap-free (contiguous
+// seq from 0), because any drop terminates the stream instead of
+// skipping an event.
 func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 	evictor := &recordingEvictor{}
 	b := New(Options{
 		Buffer:    4,
-		Grace:     5 * time.Millisecond,
 		Heartbeat: 2 * time.Millisecond,
 		Evictor:   evictor,
 	})
@@ -401,13 +402,13 @@ func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 			ctx, cancelCtx := context.WithCancel(context.Background())
 			defer cancelCtx()
 			ch, cancel := b.Subscribe(ctx)
-			var last uint64
+			var want uint64
 			for ev := range ch {
-				if ev.Seq < last {
-					t.Errorf("seq went backwards: %d after %d", ev.Seq, last)
+				if ev.Seq != want {
+					t.Errorf("seq gap on a live stream: got %d, want %d", ev.Seq, want)
 					break
 				}
-				last = ev.Seq
+				want++
 				if rng.Intn(200) == 0 {
 					cancel()
 				}
@@ -415,10 +416,12 @@ func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 			cancel()
 		}(int64(i))
 	}
+	abandoned := make([]<-chan Event, 0, abandoners)
 	for i := 0; i < abandoners; i++ {
-		// Subscribe and never drain: must be overflow-disconnected
-		// without wedging any publisher.
-		_, cancel := b.Subscribe(context.Background())
+		// Subscribe and never drain: must be overflow-disconnected on
+		// the first drop without wedging any publisher.
+		ch, cancel := b.Subscribe(context.Background())
+		abandoned = append(abandoned, ch)
 		defer cancel()
 	}
 	for i := 0; i < publishers; i++ {
@@ -432,6 +435,9 @@ func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 	}
 
 	wg.Wait()
+	for _, ch := range abandoned {
+		mustClose(t, ch) // every never-draining subscriber must have been disconnected
+	}
 	b.Close()
 	if n := b.SubscriberCount(); n != 0 {
 		t.Errorf("SubscriberCount after Close = %d, want 0", n)
