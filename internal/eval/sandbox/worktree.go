@@ -30,6 +30,16 @@ const (
 	markerName      = "sandbox.yaml"
 )
 
+// claimSuffix names the sibling claim file (<runsRoot>/<run-id>.claim) that
+// atomically reserves a run id: it is created with O_EXCL before anything
+// shared exists, so two provisions can never share a run dir even if they
+// derive identical ids. maxClaimAttempts bounds the regenerate-and-retry
+// loop on claim contention.
+const (
+	claimSuffix      = ".claim"
+	maxClaimAttempts = 3
+)
+
 // dash separates the run-id components and is the sanitizer's replacement
 // byte for characters that are not directory-name safe on every CI OS.
 const dash = "-"
@@ -127,18 +137,54 @@ func (s *worktreeSandbox) Provision(ctx context.Context, spec *eval.TaskSpec) (*
 	if err != nil {
 		return nil, err
 	}
-	runID, err := s.newRunID(spec.TaskID)
+	runID, err := s.claimRunID(spec.TaskID)
 	if err != nil {
 		return nil, err
 	}
 	return s.materialize(runID, base)
 }
 
+// claimRunID atomically reserves a fresh run id by exclusively creating its
+// claim file. The O_EXCL create is the linearization point: a concurrent
+// provision that derives the same id loses the create and regenerates.
+// Contention beyond maxClaimAttempts (only possible with a wedged entropy
+// source) fails loudly rather than degrading.
+func (s *worktreeSandbox) claimRunID(taskID string) (string, error) {
+	if err := fsops.MkdirAll(s.runsRoot, 0o755); err != nil {
+		return "", fmt.Errorf("sandbox: create runs root: %w", err)
+	}
+	var lastErr error
+	for attempt := 0; attempt < maxClaimAttempts; attempt++ {
+		runID, err := s.newRunID(taskID)
+		if err != nil {
+			return "", err
+		}
+		claim, err := os.OpenFile(filepath.Join(s.runsRoot, runID+claimSuffix), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			_ = claim.Close()
+			return runID, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("sandbox: claim run id %q: %w", runID, err)
+		}
+		lastErr = err
+	}
+	return "", fmt.Errorf("sandbox: no unique run id after %d attempts: %w", maxClaimAttempts, lastErr)
+}
+
+// releaseClaim best-effort removes a run's claim file. Abandoned provisions
+// release it directly; completed runs release it in removeRunTrees.
+func (s *worktreeSandbox) releaseClaim(runID string) {
+	_ = fsops.Remove(filepath.Join(s.runsRoot, runID+claimSuffix))
+}
+
 // materialize creates the run dir contents (scratch home, linked worktree,
-// marker) and assembles the Instance. The run dir is claimed exclusively (a
-// pre-existing dir is a run-id collision, not something to build into), so
-// on a mid-flight failure the rollback can remove everything it created
-// wholesale and a failed Provision leaks nothing (R8).
+// marker) and assembles the Instance for an already-claimed run id. The
+// claim guarantees no concurrent twin; the residual dir check guards the
+// clock-rewind case where a claimed id matches an old run dir retained for
+// its sidecars — building into (or rolling back over) retained data is
+// never allowed. On a mid-flight failure the rollback removes everything
+// this call created, so a failed Provision leaks nothing (R8).
 func (s *worktreeSandbox) materialize(runID string, base plumbing.Hash) (*Instance, error) {
 	runDir := filepath.Join(s.runsRoot, runID)
 	workdir := filepath.Join(runDir, worktreeDirName)
@@ -146,9 +192,11 @@ func (s *worktreeSandbox) materialize(runID string, base plumbing.Hash) (*Instan
 	wtName := gitwt.SafeName(runID)
 
 	if _, err := os.Stat(runDir); err == nil {
+		s.releaseClaim(runID)
 		return nil, fmt.Errorf("sandbox: run dir %q already exists (run id collision)", runDir)
 	}
 	if err := fsops.MkdirAll(home, 0o755); err != nil {
+		s.rollback(runID, wtName, false)
 		return nil, fmt.Errorf("sandbox: create scratch home for run %q: %w", runID, err)
 	}
 	if err := s.addWorktree(wtName, workdir, base); err != nil {
@@ -181,6 +229,7 @@ func (s *worktreeSandbox) rollback(runID, wtName string, worktreeCreated bool) {
 		_ = s.removeRunTrees(runID, wtName)
 	}
 	_ = fsops.RemoveAll(filepath.Join(s.runsRoot, runID))
+	s.releaseClaim(runID)
 }
 
 // PruneStale implements Sandbox: it removes the working trees of runs past
@@ -199,6 +248,10 @@ func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return pruned, fmt.Errorf("sandbox: prune: %w", err)
+		}
+		if !entry.IsDir() {
+			s.sweepOrphanClaim(entry, cutoff)
+			continue
 		}
 		wtName, stale := s.staleWorktreeName(entry, cutoff)
 		if !stale {
@@ -221,18 +274,36 @@ func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
 	return pruned, nil
 }
 
-// staleWorktreeName decides whether a runs-root entry is past the retention
-// cutoff and names the gitwt worktree to release. Marker-bearing run dirs
-// use the marker's timestamp and recorded worktree name. Markerless dirs
-// fall back to the dir's mtime and the deterministic SafeName encoding: a
-// markerless run dir is either a leaked partial provision (a crash between
+// sweepOrphanClaim removes an aged run-id claim file whose run dir no
+// longer exists — the residue of a provision that crashed between claiming
+// the id and materializing the run (or whose rollback died). Fresh claims
+// and claims whose run dir is live are left alone (the dir's own staleness
+// path releases those); non-claim files are foreign and ignored. Best
+// effort: a failed removal is retried by the next sweep.
+func (s *worktreeSandbox) sweepOrphanClaim(entry os.DirEntry, cutoff time.Time) {
+	name := entry.Name()
+	if !strings.HasSuffix(name, claimSuffix) {
+		return
+	}
+	info, err := entry.Info()
+	if err != nil || info.ModTime().After(cutoff) {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(s.runsRoot, strings.TrimSuffix(name, claimSuffix))); err == nil {
+		return
+	}
+	_ = fsops.Remove(filepath.Join(s.runsRoot, name))
+}
+
+// staleWorktreeName decides whether a runs-root dir entry is past the
+// retention cutoff and names the gitwt worktree to release. Marker-bearing
+// run dirs use the marker's timestamp and recorded worktree name. Markerless
+// dirs fall back to the dir's mtime and the deterministic SafeName encoding:
+// a markerless run dir is either a leaked partial provision (a crash between
 // run-dir creation and marker write) or an already-swept run retaining only
 // sidecars — pruneRunTrees only ever removes trees, so sweeping either once
 // aged is safe.
 func (s *worktreeSandbox) staleWorktreeName(entry os.DirEntry, cutoff time.Time) (string, bool) {
-	if !entry.IsDir() {
-		return "", false
-	}
 	if m, provisionedAt, ok := s.readMarker(entry); ok {
 		return m.WorktreeName, !provisionedAt.After(cutoff)
 	}
@@ -253,6 +324,7 @@ func (s *worktreeSandbox) pruneRunTrees(runID, wtName string) (bool, error) {
 		filepath.Join(runDir, worktreeDirName),
 		filepath.Join(runDir, homeDirName),
 		filepath.Join(runDir, markerName),
+		filepath.Join(s.runsRoot, runID+claimSuffix),
 	) {
 		return false, nil
 	}
@@ -295,11 +367,11 @@ func (s *worktreeSandbox) readMarker(entry os.DirEntry) (marker, time.Time, bool
 	return m, provisionedAt, true
 }
 
-// removeRunTrees removes a run's working tree, scratch home, and marker
-// while preserving the run dir itself and any sidecars in it (OQ6: sidecars
-// are retained indefinitely; only working trees are subject to retention).
-// It is idempotent so Cleanup and PruneStale can safely race a prior
-// partial cleanup.
+// removeRunTrees removes a run's working tree, scratch home, marker, and
+// run-id claim while preserving the run dir itself and any sidecars in it
+// (OQ6: sidecars are retained indefinitely; only working trees are subject
+// to retention). It is idempotent so Cleanup and PruneStale can safely race
+// a prior partial cleanup.
 func (s *worktreeSandbox) removeRunTrees(runID, wtName string) error {
 	runDir := filepath.Join(s.runsRoot, runID)
 	workdir := filepath.Join(runDir, worktreeDirName)
@@ -323,6 +395,7 @@ func (s *worktreeSandbox) removeRunTrees(runID, wtName string) error {
 			return fmt.Errorf("sandbox: remove marker for run %q: %w", runID, err)
 		}
 	}
+	s.releaseClaim(runID)
 	return nil
 }
 
@@ -344,14 +417,18 @@ func (s *worktreeSandbox) writeMarker(runDir, runID, wtName string, base plumbin
 	return nil
 }
 
-// newRunID derives a unique, Windows-safe run identifier from the task id, a
-// compact UTC timestamp, and a random suffix. Uniqueness comes from the
-// suffix; the task id and timestamp exist for human navigation of the runs
-// root.
+// newRunID derives a Windows-safe run identifier from the task id, a compact
+// UTC timestamp, and a random suffix; claimRunID makes it unique. A failed
+// or short entropy read fails loudly — a silently low-entropy suffix is what
+// would make claim collisions real.
 func (s *worktreeSandbox) newRunID(taskID string) (string, error) {
 	buf := make([]byte, 4)
-	if _, err := s.randRead(buf); err != nil {
+	n, err := s.randRead(buf)
+	if err != nil {
 		return "", fmt.Errorf("sandbox: derive run id: %w", err)
+	}
+	if n != len(buf) {
+		return "", fmt.Errorf("sandbox: derive run id: short entropy read (%d of %d bytes)", n, len(buf))
 	}
 	stamp := s.now().UTC().Format(runStampFormat)
 	return sanitizeID(taskID) + dash + stamp + dash + hex.EncodeToString(buf), nil

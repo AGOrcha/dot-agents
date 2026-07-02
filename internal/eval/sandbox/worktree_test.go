@@ -222,6 +222,12 @@ func TestProvisionRunIDRandFailure(t *testing.T) {
 	if _, err := f.sb.Provision(context.Background(), testSpec("t")); err == nil || !strings.Contains(err.Error(), "derive run id") {
 		t.Fatalf("rand failure: got %v, want derive run id error", err)
 	}
+	// A short read without an error must fail loudly too — a silently
+	// low-entropy suffix is what would make claim collisions real.
+	f.sb.randRead = func(b []byte) (int, error) { return len(b) - 1, nil }
+	if _, err := f.sb.Provision(context.Background(), testSpec("t")); err == nil || !strings.Contains(err.Error(), "short entropy read") {
+		t.Fatalf("short read: got %v, want short entropy read error", err)
+	}
 }
 
 // mustLeakNothing asserts the runs root holds no run dirs and the manager
@@ -285,19 +291,18 @@ func pinIdentity(sb *worktreeSandbox, taskID string) string {
 	return sanitizeID(taskID) + "-20260102T030405-cdcdcdcd"
 }
 
-func TestProvisionScratchHomeFailure(t *testing.T) {
+func TestProvisionRunsRootFailure(t *testing.T) {
 	f := newFixture(t)
-	// A file where the runs root must go makes the home MkdirAll fail
-	// (stat of the run dir errors with ENOTDIR, not "exists").
+	// A file where the runs root must go makes the claim's MkdirAll fail.
 	if err := os.WriteFile(f.runsRoot, []byte("x"), 0o644); err != nil {
 		t.Fatalf("plant runs-root file: %v", err)
 	}
-	if _, err := f.sb.Provision(context.Background(), testSpec("home-blocked")); err == nil || !strings.Contains(err.Error(), "create scratch home") {
-		t.Fatalf("blocked home: got %v, want create scratch home error", err)
+	if _, err := f.sb.Provision(context.Background(), testSpec("root-blocked")); err == nil || !strings.Contains(err.Error(), "create runs root") {
+		t.Fatalf("blocked root: got %v, want create runs root error", err)
 	}
 }
 
-func TestProvisionRunDirCollision(t *testing.T) {
+func TestProvisionClaimContention(t *testing.T) {
 	f := newFixture(t)
 	pinIdentity(f.sb, "collide")
 	inst, err := f.sb.Provision(context.Background(), testSpec("collide"))
@@ -305,14 +310,68 @@ func TestProvisionRunDirCollision(t *testing.T) {
 		t.Fatalf("first Provision: %v", err)
 	}
 	t.Cleanup(func() { _ = inst.Cleanup() })
-	// The pinned seams re-derive the same run ID; the exclusive run-dir
-	// claim rejects the twin before anything is created or rolled back, so
-	// the live first run is untouched.
-	if _, err := f.sb.Provision(context.Background(), testSpec("collide")); err == nil || !strings.Contains(err.Error(), "run id collision") {
+	// The pinned seams re-derive the same run ID on every retry, so the
+	// atomic claim rejects the twin after the bounded attempts — without
+	// ever touching the live first run.
+	_, err = f.sb.Provision(context.Background(), testSpec("collide"))
+	if err == nil || !strings.Contains(err.Error(), "no unique run id") || !errors.Is(err, os.ErrExist) {
+		t.Fatalf("contention: got %v, want bounded-claim failure wrapping os.ErrExist", err)
+	}
+	mustExist(t, filepath.Join(inst.Workdir, "README.md"))
+	mustExist(t, filepath.Join(inst.RunDir, homeDirName))
+	mustExist(t, filepath.Join(inst.RunDir, markerName))
+}
+
+func TestProvisionClaimRetriesToFreshID(t *testing.T) {
+	f := newFixture(t)
+	f.sb.now = func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
+	calls := 0
+	f.sb.randRead = func(b []byte) (int, error) {
+		calls++
+		fill := byte(0xaa)
+		if calls >= 3 {
+			fill = 0xbb // entropy recovers on the second provision's retry
+		}
+		for i := range b {
+			b[i] = fill
+		}
+		return len(b), nil
+	}
+	first, err := f.sb.Provision(context.Background(), testSpec("retry"))
+	if err != nil {
+		t.Fatalf("first Provision: %v", err)
+	}
+	t.Cleanup(func() { _ = first.Cleanup() })
+	second, err := f.sb.Provision(context.Background(), testSpec("retry"))
+	if err != nil {
+		t.Fatalf("second Provision (should retry to a fresh id): %v", err)
+	}
+	t.Cleanup(func() { _ = second.Cleanup() })
+	if first.RunID == second.RunID {
+		t.Fatalf("retry reused run id %q", first.RunID)
+	}
+	mustExist(t, filepath.Join(first.Workdir, "README.md"))
+	mustExist(t, filepath.Join(second.Workdir, "README.md"))
+}
+
+func TestProvisionRunDirCollision(t *testing.T) {
+	f := newFixture(t)
+	runID := pinIdentity(f.sb, "retained")
+	// A retained run dir (sidecars only, claim long released) matching a
+	// newly claimed id — only reachable via clock rewind — must never be
+	// built into or rolled back over.
+	retained := filepath.Join(f.runsRoot, runID, "eval-run.yaml")
+	if err := os.MkdirAll(filepath.Dir(retained), 0o755); err != nil {
+		t.Fatalf("mkdir retained: %v", err)
+	}
+	if err := os.WriteFile(retained, []byte("run: old\n"), 0o644); err != nil {
+		t.Fatalf("write retained sidecar: %v", err)
+	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("retained")); err == nil || !strings.Contains(err.Error(), "run id collision") {
 		t.Fatalf("collision: got %v, want run id collision error", err)
 	}
-	mustExist(t, inst.Workdir)
-	mustExist(t, filepath.Join(inst.RunDir, homeDirName))
+	mustExist(t, retained)                                        // retained data untouched
+	mustNotExist(t, filepath.Join(f.runsRoot, runID+claimSuffix)) // claim released
 }
 
 func TestCleanupPreservesSidecars(t *testing.T) {
@@ -331,6 +390,7 @@ func TestCleanupPreservesSidecars(t *testing.T) {
 	mustNotExist(t, inst.Workdir)
 	mustNotExist(t, filepath.Join(inst.RunDir, homeDirName))
 	mustNotExist(t, filepath.Join(inst.RunDir, markerName))
+	mustNotExist(t, filepath.Join(f.runsRoot, inst.RunID+claimSuffix))
 	mustExist(t, sidecar)
 	if err := inst.Cleanup(); err != nil {
 		t.Fatalf("second Cleanup: %v", err)
@@ -429,8 +489,10 @@ func TestPruneStaleRemovesOldTrees(t *testing.T) {
 	mustNotExist(t, stale.Workdir)
 	mustNotExist(t, filepath.Join(stale.RunDir, homeDirName))
 	mustNotExist(t, filepath.Join(stale.RunDir, markerName))
+	mustNotExist(t, filepath.Join(f.runsRoot, stale.RunID+claimSuffix))
 	mustExist(t, sidecar) // sidecars retained indefinitely (OQ6)
 	mustExist(t, fresh.Workdir)
+	mustExist(t, filepath.Join(f.runsRoot, fresh.RunID+claimSuffix))
 
 	again, err := f.sb.PruneStale(context.Background())
 	if err != nil {
@@ -478,6 +540,44 @@ func TestPruneStaleSweepsMarkerlessLeak(t *testing.T) {
 	}
 	mustNotExist(t, leakDir) // emptied leak dir is litter, dropped entirely
 	mustExist(t, sidecar)    // swept run's sidecars retained indefinitely
+}
+
+// TestPruneStaleSweepsOrphanClaims covers the claim-file leg of the
+// markerless defense: an aged claim with no run dir is a leaked partial
+// provision and is reclaimed; fresh claims, claims with a live run dir, and
+// non-claim files are left alone.
+func TestPruneStaleSweepsOrphanClaims(t *testing.T) {
+	f := newFixture(t)
+	if err := os.MkdirAll(filepath.Join(f.runsRoot, "live-run"), 0o755); err != nil {
+		t.Fatalf("mkdir live run dir: %v", err)
+	}
+	orphan := filepath.Join(f.runsRoot, "ghost-run"+claimSuffix)
+	young := filepath.Join(f.runsRoot, "young-run"+claimSuffix)
+	owned := filepath.Join(f.runsRoot, "live-run"+claimSuffix)
+	stray := filepath.Join(f.runsRoot, "stray.txt")
+	for _, path := range []string{orphan, young, owned, stray} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	for _, path := range []string{orphan, owned, stray} {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatalf("age %s: %v", path, err)
+		}
+	}
+
+	pruned, err := f.sb.PruneStale(context.Background())
+	if err != nil {
+		t.Fatalf("PruneStale: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want empty (claim sweep reports no run ids)", pruned)
+	}
+	mustNotExist(t, orphan) // aged + no run dir = leaked claim, reclaimed
+	mustExist(t, young)     // fresh claim: a provision may be in flight
+	mustExist(t, owned)     // live run dir owns it; the dir path releases it
+	mustExist(t, stray)     // foreign file, never touched
 }
 
 func TestPruneStaleEdgeCases(t *testing.T) {
