@@ -289,7 +289,7 @@ reconnect, **invalidates all queries** to recover any events missed while discon
 criteria 4). `seq` is not a durable cursor and must not be sent back as a resume token.
 
 **Backpressure (spec OQ5):** the broker (`t04`) holds one bounded buffered channel per subscriber.
-A subscriber that cannot drain within a 1s grace is dropped; the client reconnects and refetches.
+A subscriber whose buffer is full when an event arrives is disconnected immediately; the client reconnects and refetches. (Ratified 2026-07-02: a pre-drop grace is unsatisfiable under non-blocking publishers + gapless streams — arrival-on-full forces disconnect.)
 This is the "bounded buffer with disconnect-on-overflow" resolution of OQ5.
 
 ---
