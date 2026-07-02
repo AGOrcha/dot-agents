@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
@@ -22,26 +23,46 @@ const unixNetwork = "unix"
 const staleDialTimeout = 250 * time.Millisecond
 
 // listenControl binds the local control-plane listener: a Unix-domain socket
-// at path. A leftover socket file from a crashed service is recovered by
-// dial-probing it — if nothing answers, the stale file is removed (through
-// fsops, per the cross-platform fs-helpers rule) and the bind retried. The
-// socket file is then restricted to 0600 so only the owning user may connect
-// at all — the first fence of the §2A "filesystem-permission + peer-uid"
-// stop gate.
+// at path. A leftover socket file from a crashed service is recovered by the
+// serialized takeover protocol below. The socket file is then restricted to
+// 0600 so only the owning user may connect at all — the first fence of the
+// §2A "filesystem-permission + peer-uid" stop gate.
+//
+// Stale-takeover protocol (closes the probe→remove→rebind TOCTOU): a bare
+// listen is attempted FIRST — on a fresh path it succeeds and no recovery is
+// involved. Only when the bind fails on an existing socket file does takeover
+// start, and every takeover step — dial probe, stale-file removal, re-bind —
+// runs while HOLDING the repo's interprocess advisory lock
+// (agentslock.AcquireFileLock on the socket path). Two concurrent starters
+// therefore serialize: the loser either blocks on the lock until the winner
+// has bound and then sees it answer the under-lock probe, or fails its own
+// bare listen against the winner's fresh socket and takes the same
+// under-lock path. Without the lock, starter A could probe a dead socket,
+// starter B could meanwhile remove it and bind a LIVE one, and A would then
+// remove B's live socket and bind over it — two servers each believing they
+// own the control plane.
 func listenControl(path string) (net.Listener, error) {
 	ln, err := net.Listen(unixNetwork, path)
 	if err != nil {
-		if ln, err = relistenStaleSocket(path, err); err != nil {
+		if ln, err = takeOverStaleSocket(path, err); err != nil {
 			return nil, err
 		}
 	}
 	return secureControlSocket(ln, path)
 }
 
-// relistenStaleSocket handles a failed bind on an existing socket file: if a
-// live service answers a dial probe the bind failure is real (one service per
-// socket), otherwise the stale file is removed and the bind retried.
-func relistenStaleSocket(path string, listenErr error) (net.Listener, error) {
+// takeOverStaleSocket handles a failed bind on an existing socket file, with
+// every step under the takeover lock: if a live service answers the
+// under-lock dial probe the bind failure is real (one service per socket);
+// otherwise the stale file is removed (through fsops, per the cross-platform
+// fs-helpers rule) and the bind retried before the lock is released.
+func takeOverStaleSocket(path string, listenErr error) (net.Listener, error) {
+	release, lockErr := agentslock.AcquireFileLock(path)
+	if lockErr != nil {
+		return nil, fmt.Errorf("service/http: control socket %q: %w (takeover lock: %v)", path, listenErr, lockErr)
+	}
+	defer func() { _ = release() }()
+
 	if conn, dialErr := net.DialTimeout(unixNetwork, path, staleDialTimeout); dialErr == nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("service/http: control socket %q already served by a running service: %w", path, listenErr)

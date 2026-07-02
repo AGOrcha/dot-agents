@@ -12,9 +12,10 @@ import (
 const testPipeName = `\\.\pipe\da-service`
 
 // TestCtlWindowsGated pins the documented Windows posture: until the
-// named-pipe transport lands (see the TODO in control_windows.go), every
-// control-plane entry point fails fast with the same clear error — no
-// half-broken pipe behaviour, while the HTTP/SSE edge stays fully usable.
+// named-pipe transport lands (see the deferred-work note in
+// control_windows.go), every control-plane entry point fails fast with the
+// same clear error — no half-broken pipe behaviour, while the HTTP/SSE edge
+// stays fully usable.
 func TestCtlWindowsGated(t *testing.T) {
 	if _, err := listenControl(testPipeName); !errors.Is(err, errControlUnsupportedWindows) {
 		t.Fatalf("listenControl = %v, want errControlUnsupportedWindows", err)

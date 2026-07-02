@@ -8,8 +8,9 @@ import (
 	"net"
 )
 
-// TODO(r3-background-worker-service/http-server): implement the Windows
-// named-pipe control plane (`\\.\pipe\...`) behind this same
+// DEFERRED WORK — tracked in plan r3-background-worker-service (the
+// http-server and cobra-surface task notes carry the requirement): implement
+// the Windows named-pipe control plane (`\\.\pipe\...`) behind this same
 // listenControl/dialControl/defaultPeerUID seam. Spec §2A's cross-platform
 // note names go-winio (or a named-pipe equivalent) behind one small dialer
 // abstraction, and requires the named-pipe path to be EXERCISED ON THE
@@ -32,13 +33,13 @@ var errControlUnsupportedWindows = errors.New(
 	"service/http: named-pipe control plane not yet implemented on windows (spec §2A cross-platform note)")
 
 // listenControl fails fast on Windows: the named-pipe listener is not yet
-// implemented (see the package TODO above).
+// implemented (see the deferred-work note above).
 func listenControl(string) (net.Listener, error) {
 	return nil, errControlUnsupportedWindows
 }
 
 // dialControl fails fast on Windows: the named-pipe dialer is not yet
-// implemented (see the package TODO above).
+// implemented (see the deferred-work note above).
 func dialControl(context.Context, string) (net.Conn, error) {
 	return nil, errControlUnsupportedWindows
 }

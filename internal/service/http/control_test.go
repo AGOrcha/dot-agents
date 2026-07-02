@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/service/events"
 	"github.com/AGOrcha/dot-agents/internal/service/scheduler"
 )
@@ -236,24 +238,166 @@ func TestCtlHangupResp(t *testing.T) {
 	}
 }
 
-// TestCtlStaleSocket proves crash recovery: a leftover socket file with no
-// listener behind it is detected by the dial probe, removed via fsops, and
-// the bind retried successfully.
-func TestCtlStaleSocket(t *testing.T) {
-	path := sockPath(t)
+// makeStaleSocket leaves a dead socket file at path — exactly what a crashed
+// service leaves behind (a listener closed without unlinking).
+func makeStaleSocket(t *testing.T, path string) {
+	t.Helper()
 	ln, err := net.Listen(unixNetwork, path)
 	if err != nil {
 		t.Fatalf("prep listen: %v", err)
 	}
-	// Keep the socket file on disk after close — exactly what a crashed
-	// service leaves behind.
 	ln.(*net.UnixListener).SetUnlinkOnClose(false)
 	ln.Close()
+}
+
+// alreadyServedMsg is the refusal takeOverStaleSocket returns when the
+// under-lock probe finds a live service on the path.
+const alreadyServedMsg = "already served by a running service"
+
+// stageStaleBindFailure creates a stale socket at path and returns the bare
+// bind failure a starter observes on it — the precondition of every takeover.
+func stageStaleBindFailure(t *testing.T, path string) error {
+	t.Helper()
+	makeStaleSocket(t, path)
+	_, err := net.Listen(unixNetwork, path)
+	if err == nil {
+		t.Fatal("bare listen on a stale socket file succeeded; cannot stage the race")
+	}
+	return err
+}
+
+// TestCtlStaleSocket proves crash recovery: a leftover socket file with no
+// listener behind it is detected by the under-lock dial probe, removed via
+// fsops, and the bind retried successfully.
+func TestCtlStaleSocket(t *testing.T) {
+	path := sockPath(t)
+	makeStaleSocket(t, path)
 
 	c := NewControl(path, fakeState{}, func() {})
 	startCtl(t, c)
 	if _, err := NewControlClient(path).Status(context.Background()); err != nil {
 		t.Fatalf("Status after stale-socket recovery: %v", err)
+	}
+}
+
+// TestCtlTakeoverRace replays the probe→remove→rebind TOCTOU deterministically:
+// starter A fails its bare bind on a stale socket file (its "the socket is
+// dead" observation), then starter B completes the full locked takeover and
+// is live; when A proceeds into its own takeover it must re-probe under the
+// lock, see B alive, and back off — B's live socket is never deleted.
+func TestCtlTakeoverRace(t *testing.T) {
+	path := sockPath(t)
+	// A, step 1: bare bind fails on the stale file. A now believes the
+	// socket needs recovering.
+	listenErr := stageStaleBindFailure(t, path)
+
+	// B: full takeover completes first (lock → probe dead → remove → bind).
+	lnB, err := listenControl(path)
+	if err != nil {
+		t.Fatalf("B listenControl: %v", err)
+	}
+	defer lnB.Close()
+
+	// A, step 2: its takeover re-probes under the lock, sees B live, and
+	// must refuse rather than remove B's socket.
+	_, err = takeOverStaleSocket(path, listenErr)
+	if err == nil || !strings.Contains(err.Error(), alreadyServedMsg) {
+		t.Fatalf("A takeOverStaleSocket = %v, want already-served refusal", err)
+	}
+
+	// B's live socket survived A's takeover attempt: on disk and connectable.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("B's live socket was deleted by A's takeover: %v", err)
+	}
+	conn, err := net.Dial(unixNetwork, path)
+	if err != nil {
+		t.Fatalf("B's socket no longer accepts after A's takeover attempt: %v", err)
+	}
+	conn.Close()
+}
+
+// TestCtlTakeoverBlocks proves the serialization itself: while another
+// starter holds the takeover lock, takeOverStaleSocket parks instead of
+// touching the path; once the holder has bound a live socket and released,
+// the parked starter re-probes, sees it live, and backs off.
+func TestCtlTakeoverBlocks(t *testing.T) {
+	path := sockPath(t)
+	listenErr := stageStaleBindFailure(t, path)
+
+	// B holds the takeover lock.
+	release, err := agentslock.AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire takeover lock: %v", err)
+	}
+
+	aErr := make(chan error, 1)
+	go func() {
+		ln, err := takeOverStaleSocket(path, listenErr)
+		if ln != nil {
+			ln.Close()
+		}
+		aErr <- err
+	}()
+
+	// A must be parked on the lock — the stale file untouched meanwhile.
+	select {
+	case err := <-aErr:
+		t.Fatalf("takeover returned (%v) while the lock was held", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("A touched the socket file while parked on the lock: %v", err)
+	}
+
+	// B, still under the lock, completes its takeover: remove stale, bind
+	// live. Then release.
+	if err := fsops.Remove(path); err != nil {
+		t.Fatalf("B remove stale: %v", err)
+	}
+	lnB, err := net.Listen(unixNetwork, path)
+	if err != nil {
+		t.Fatalf("B bind: %v", err)
+	}
+	defer lnB.Close()
+	if err := release(); err != nil {
+		t.Fatalf("release takeover lock: %v", err)
+	}
+
+	// A unblocks, re-probes under the lock, sees B live, and refuses.
+	select {
+	case err := <-aErr:
+		if err == nil || !strings.Contains(err.Error(), alreadyServedMsg) {
+			t.Fatalf("A takeover = %v, want already-served refusal", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("A never returned after the lock was released")
+	}
+	if conn, err := net.Dial(unixNetwork, path); err != nil {
+		t.Fatalf("B's socket no longer accepts after A's takeover attempt: %v", err)
+	} else {
+		conn.Close()
+	}
+}
+
+// TestCtlTakeoverLockTimeout covers the lock-acquisition failure arm: a
+// holder that never releases makes the takeover fail with the lock error
+// after the acquire budget, leaving the path alone.
+func TestCtlTakeoverLockTimeout(t *testing.T) {
+	path := sockPath(t)
+	listenErr := stageStaleBindFailure(t, path)
+
+	release, err := agentslock.AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire takeover lock: %v", err)
+	}
+	defer func() { _ = release() }()
+
+	if _, err := takeOverStaleSocket(path, listenErr); err == nil ||
+		!strings.Contains(err.Error(), "takeover lock") {
+		t.Fatalf("takeover under a never-released lock = %v, want takeover-lock failure", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("socket file touched despite failed lock acquisition: %v", err)
 	}
 }
 
@@ -265,7 +409,7 @@ func TestCtlSecondBind(t *testing.T) {
 
 	second := NewControl(c.SocketPath(), fakeState{}, func() {})
 	err := second.Serve(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "already served by a running service") {
+	if err == nil || !strings.Contains(err.Error(), alreadyServedMsg) {
 		t.Fatalf("second Serve = %v, want already-served error", err)
 	}
 }
