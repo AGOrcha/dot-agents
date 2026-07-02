@@ -1,0 +1,22 @@
+schema_version: 2
+iteration: 3
+date: "2026-05-02"
+wave: "w1"
+task_id: "task-3"
+commit: "commit3"
+files_changed: 3
+lines_added: 30
+lines_removed: 6
+agent:
+  session_id: "sess-a"
+  harness: "claude-code"
+  model: "m-claude"
+impl:
+  summary: "impl 3"
+  retries: 0
+session_tokens:
+  input_tokens: 150
+  output_tokens: 250
+  cache_read_tokens: 600
+  cache_creation_tokens: 400
+  cache_hit_rate: 0.6
