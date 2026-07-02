@@ -118,6 +118,13 @@ tasks:
         - internal/dashboard/handlers/
       verification_required: true
       notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): these REST handlers live
+        on the HTTP/SSE browser edge — the one surface r3's §2A
+        surface→transport map deliberately keeps on HTTP
+        (browser-facing arm of the selection rule). When mounted in
+        R3 (t13) they mount on that HTTP edge via RegisterMount,
+        never on the UDS control plane. Transport is single-sourced
+        in r3 spec §2A; this plan does not re-decide it.
         Pure handlers — depend on dashboard.Store and
         dashboard.Events interfaces, NOT on net/http.ServeMux or any
         router. Wiring lives in t07 / t13. Use stdlib net/http only.
@@ -145,23 +152,37 @@ tasks:
         - internal/dashboard/events/
       verification_required: true
       notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): the cross-plan contract
+        is r3's §D4.1 EventBus INTERFACE —
+          Publish(topic string, payload any) error
+          Subscribe(topic string) (<-chan Event, func(), error)
+          Close() error
+        (r3 task event-bus-interface-seam) — bind to it, never to the
+        concrete *events.Bus. Assume only the §D4.2 G1-G4 floor:
+        at-most-once best-effort delivery, best-effort per-topic
+        order, bounded-buffer drop-oldest (publishers never block),
+        no cross-publish atomicity. The bus backend may later be
+        config-selected (§D4.4) without changing this broker. SSE
+        stays this plan's browser-push wire per the §2A map.
+
         Tiny in-process broker. Interface:
           type Publisher interface { Publish(topic string, payload any) }
           type Broker struct { ... }    // implements Publisher
           func (b *Broker) Subscribe(ctx) (<-chan Event, func())
+        (Broker's local Publisher shape stays minimal; the r3-facing
+        seam is bridged in t13 against the EventBus interface.)
 
         Fan-out: N goroutines each holding a buffered channel; full
-        channel drops the slowest subscriber after 1s grace.
+        channel drops the slowest subscriber after 1s grace — this
+        drop-slowest bounded-buffer policy is exactly G3 / r2 OQ5.
         Heartbeat: emit a ping every 15s.
 
-        Cross-plan contract: this Publisher interface MATCHES R3's
-        event-bus.Publish signature. When R3's bus lands (t13), it
-        replaces this broker as the primary publisher; this broker
-        becomes a thin subscriber+fanout.
+        When R3's bus lands (t13), it replaces this broker as the
+        primary publisher; this broker becomes a thin
+        subscriber+fanout.
 
         Anti-scope: do NOT define WHERE events come from — that is
-        R3's publish primitive (via t13) and a filesystem watcher
-        bridge (t06).
+        R3's EventBus (via t13) and a filesystem watcher bridge (t06).
       app_type: go-cli
 
     - id: t05-sse-handler
@@ -447,23 +468,32 @@ tasks:
         - internal/dashboard/events/r3bridge_test.go
       verification_required: true
       notes: |-
+        RESCOPED 2026-07-02 (§2A coherence).
         GATED ON R3 MILESTONES. Specifically:
-          - R3 task "publish primitive" (event-bus) must merge first.
-          - R3 task "API mount surface" (http-server's RegisterMount)
-            must merge first.
+          - R3 task event-bus (concrete builtin, merged) AND R3 task
+            event-bus-interface-seam (the §D4.1 EventBus interface)
+            must merge first — the bridge binds to the INTERFACE,
+            never to the concrete *events.Bus.
+          - R3 task http-server — now the §2A transport-layer task
+            (UDS control plane + HTTP/SSE edge) — must merge first
+            for RegisterMount.
 
         Deliverable: a Mount(svc r3.Service, deps) function that
-        registers t03's handlers under /api/ on R3's mux, and bridges
-        R3's publish primitive into t04's Broker. After this task
-        lands:
+        registers t03's handlers under /api/ on R3's HTTP/SSE edge
+        (the browser-facing arm of the §2A surface→transport map —
+        NOT the UDS control plane), and bridges R3's EventBus
+        interface into t04's Broker. After this task lands:
           - fswatch (t06) demotes from primary to fallback (kept for
             developers running `da score run` outside the service).
           - the standalone cmd/da-dashboard binary remains valid for
             users not running R3.
 
-        Open: if R3's primitive ends up async/queue-backed instead of
-        in-process, the Broker's Publish signature may need to grow
-        context — adjust in this task, NOT t04.
+        RESOLVED (was open): "if R3's primitive ends up async/
+        queue-backed" — r3 §D4.4 makes external/queue-backed backends
+        config-selected adapters behind the SAME EventBus interface,
+        bounded to the §D4.2 G1-G4 floor. The bridge assumes only
+        G1-G4, so no Publish-signature growth is needed here or in
+        t04.
       app_type: go-cli
 
     - id: t14-documentation
