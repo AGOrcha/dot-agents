@@ -45,3 +45,32 @@ This note is intentionally limited to tool-behavior observation for dot-agents. 
 - Reproduce `da config explain --all --json` on this workstation in both ProvAdm repos with lock tracing enabled.
 - Inspect the parent-directory creation path for `.agentsrc.lock.lock` before manifest reads.
 - Reproduce the workflow mutator writes against `PLAN.yaml` and `TASKS.yaml` on Windows to determine whether the failure is lock acquisition, path normalization, or file-handle reuse.
+
+
+### Error outputs:
+```powershells
+PS C:\Users\nprakash1\Documents\Pers\dot-agents> da install
+
+da install
+────────────────────────────────────────
+Project: dot-agents
+Path:    ~/Documents/Pers/dot-agents
+
+Resolving config
+✗ Error: ensuring resolved config: writing .agentsrc.lock units: agentslock: acquire lock C:\Users\nprakash1\Documents\Pers\dot-agents\.agentsrc.lock.lock: mkdir C:\Users\nprakash1\Documents\Pers\dot-agents\.agentsrc.lock.lock: The system cannot find the file specified.
+
+Hint:
+  - Run `da install --help` to see examples and supported flags.
+- Run `da install --help` to see examples and supported flags.
+PS C:\Users\nprakash1\Documents\Pers\dot-agents> git log
+commit 8dq6fdab4538166cbdf3d891e34487fc42ba50b68d (HEAD -> error/install-explain-error-trace-docs, org/error/install-explain-error-trace-docs)
+Author: Nikash Prakash <nprakash1@deltadentalmi.com>
+Date:   Wed Jul 1 21:19:31 2026 -0400
+PS C:\Users\nprakash1\Documents\Pers\dot-agents> da config explain
+✗ Error: writing .agentsrc.lock units: agentslock: acquire lock C:\Users\nprakash1\Documents\Pers\dot-agents\.agentsrc.lock.lock: mkdir C:\Users\nprakash1\Documents\Pers\dot-agents\.agentsrc.lock.lock: The system cannot find the file specified.
+
+Hints:
+  - Run `da install --generate` to create .agentsrc.json from current state.
+  - Run `da config explain --help` to see examples and supported flags.
+PS C:\Users\nprakash1\Documents\Pers\dot-agents> 
+```
