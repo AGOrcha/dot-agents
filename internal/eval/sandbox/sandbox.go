@@ -22,6 +22,10 @@ var (
 
 	// ErrNilTaskSpec is returned by Provision when the spec is nil.
 	ErrNilTaskSpec = errors.New("sandbox: task spec is nil")
+
+	// ErrEmptyTaskID is returned by Provision when the spec carries no task
+	// id — the run id (and therefore the run dir) is derived from it.
+	ErrEmptyTaskID = errors.New("sandbox: task spec task_id is required")
 )
 
 // Config configures a worktree sandbox.

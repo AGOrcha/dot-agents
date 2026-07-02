@@ -63,9 +63,11 @@ type worktreeSandbox struct {
 	mu  sync.Mutex
 	mgr gitwt.Manager
 
-	// Determinism seams for tests.
-	now      func() time.Time
-	randRead func([]byte) (int, error)
+	// Determinism seams for tests. addWorktree defaults to the gitwt
+	// AddDetached call under mu; tests inject failures to drive rollback.
+	now         func() time.Time
+	randRead    func([]byte) (int, error)
+	addWorktree func(name, path string, base plumbing.Hash) error
 }
 
 var _ Sandbox = (*worktreeSandbox)(nil)
@@ -88,14 +90,24 @@ func NewWorktreeSandbox(cfg Config) (Sandbox, error) {
 	if retention <= 0 {
 		retention = DefaultRetention
 	}
-	return &worktreeSandbox{
+	s := &worktreeSandbox{
 		repoPath:  cfg.RepoPath,
 		runsRoot:  root,
 		retention: retention,
 		mgr:       mgr,
 		now:       time.Now,
 		randRead:  cryptorand.Read,
-	}, nil
+	}
+	s.addWorktree = s.addDetachedLocked
+	return s, nil
+}
+
+// addDetachedLocked is the default addWorktree seam: gitwt AddDetached under
+// the manager mutex.
+func (s *worktreeSandbox) addDetachedLocked(name, path string, base plumbing.Hash) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mgr.AddDetached(name, path, base)
 }
 
 // Provision implements Sandbox. The working tree is checked out at the
@@ -104,6 +116,9 @@ func NewWorktreeSandbox(cfg Config) (Sandbox, error) {
 func (s *worktreeSandbox) Provision(ctx context.Context, spec *eval.TaskSpec) (*Instance, error) {
 	if spec == nil {
 		return nil, ErrNilTaskSpec
+	}
+	if strings.TrimSpace(spec.TaskID) == "" {
+		return nil, ErrEmptyTaskID
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("sandbox: provision: %w", err)
@@ -120,26 +135,28 @@ func (s *worktreeSandbox) Provision(ctx context.Context, spec *eval.TaskSpec) (*
 }
 
 // materialize creates the run dir contents (scratch home, linked worktree,
-// marker) and assembles the Instance. On a mid-flight failure it rolls the
-// already-created pieces back so a failed Provision leaks nothing (R8).
+// marker) and assembles the Instance. The run dir is claimed exclusively (a
+// pre-existing dir is a run-id collision, not something to build into), so
+// on a mid-flight failure the rollback can remove everything it created
+// wholesale and a failed Provision leaks nothing (R8).
 func (s *worktreeSandbox) materialize(runID string, base plumbing.Hash) (*Instance, error) {
 	runDir := filepath.Join(s.runsRoot, runID)
 	workdir := filepath.Join(runDir, worktreeDirName)
 	home := filepath.Join(runDir, homeDirName)
 	wtName := gitwt.SafeName(runID)
 
+	if _, err := os.Stat(runDir); err == nil {
+		return nil, fmt.Errorf("sandbox: run dir %q already exists (run id collision)", runDir)
+	}
 	if err := fsops.MkdirAll(home, 0o755); err != nil {
 		return nil, fmt.Errorf("sandbox: create scratch home for run %q: %w", runID, err)
 	}
-	s.mu.Lock()
-	err := s.mgr.AddDetached(wtName, workdir, base)
-	s.mu.Unlock()
-	if err != nil {
+	if err := s.addWorktree(wtName, workdir, base); err != nil {
+		s.rollback(runID, wtName, false)
 		return nil, fmt.Errorf("sandbox: provision worktree for run %q: %w", runID, err)
 	}
 	if err := s.writeMarker(runDir, runID, wtName, base); err != nil {
-		// Best-effort rollback; the marker failure is the error to surface.
-		_ = s.removeRunTrees(runID, wtName)
+		s.rollback(runID, wtName, true)
 		return nil, err
 	}
 	return &Instance{
@@ -152,9 +169,23 @@ func (s *worktreeSandbox) materialize(runID string, base plumbing.Hash) (*Instan
 	}, nil
 }
 
-// PruneStale implements Sandbox: it removes the working trees of runs whose
-// marker predates the retention window, then clears any orphaned gitwt
-// admin metadata (worktree dirs deleted out-of-band).
+// rollback best-effort removes everything a failed materialize created. The
+// run dir was claimed fresh by materialize, so no sidecars can exist yet and
+// removing the whole dir cannot destroy retained data. worktreeCreated
+// selects whether gitwt admin metadata must be released first. Rollback
+// errors are deliberately dropped — the original provisioning failure is the
+// error the caller must see, and anything left behind is reclaimed by the
+// markerless sweep in PruneStale.
+func (s *worktreeSandbox) rollback(runID, wtName string, worktreeCreated bool) {
+	if worktreeCreated {
+		_ = s.removeRunTrees(runID, wtName)
+	}
+	_ = fsops.RemoveAll(filepath.Join(s.runsRoot, runID))
+}
+
+// PruneStale implements Sandbox: it removes the working trees of runs past
+// the retention window, then clears any orphaned gitwt admin metadata
+// (worktree dirs deleted out-of-band).
 func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
 	entries, err := os.ReadDir(s.runsRoot)
 	if os.IsNotExist(err) {
@@ -169,14 +200,17 @@ func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
 		if err := ctx.Err(); err != nil {
 			return pruned, fmt.Errorf("sandbox: prune: %w", err)
 		}
-		m, provisionedAt, ok := s.readMarker(entry)
-		if !ok || provisionedAt.After(cutoff) {
+		wtName, stale := s.staleWorktreeName(entry, cutoff)
+		if !stale {
 			continue
 		}
-		if err := s.removeRunTrees(entry.Name(), m.WorktreeName); err != nil {
+		removed, err := s.pruneRunTrees(entry.Name(), wtName)
+		if err != nil {
 			return pruned, err
 		}
-		pruned = append(pruned, entry.Name())
+		if removed {
+			pruned = append(pruned, entry.Name())
+		}
 	}
 	s.mu.Lock()
 	_, err = s.mgr.Prune()
@@ -187,15 +221,66 @@ func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
 	return pruned, nil
 }
 
-// readMarker loads the marker sidecar for one runs-root entry. The boolean
-// is false when the entry is not a run dir with a well-formed marker;
-// foreign or corrupt entries are skipped rather than deleted, so pruning
-// never destroys something this package did not provision.
+// staleWorktreeName decides whether a runs-root entry is past the retention
+// cutoff and names the gitwt worktree to release. Marker-bearing run dirs
+// use the marker's timestamp and recorded worktree name. Markerless dirs
+// fall back to the dir's mtime and the deterministic SafeName encoding: a
+// markerless run dir is either a leaked partial provision (a crash between
+// run-dir creation and marker write) or an already-swept run retaining only
+// sidecars — pruneRunTrees only ever removes trees, so sweeping either once
+// aged is safe.
+func (s *worktreeSandbox) staleWorktreeName(entry os.DirEntry, cutoff time.Time) (string, bool) {
+	if !entry.IsDir() {
+		return "", false
+	}
+	if m, provisionedAt, ok := s.readMarker(entry); ok {
+		return m.WorktreeName, !provisionedAt.After(cutoff)
+	}
+	info, err := entry.Info()
+	if err != nil {
+		return "", false
+	}
+	return gitwt.SafeName(entry.Name()), !info.ModTime().After(cutoff)
+}
+
+// pruneRunTrees removes a stale run's trees and reports whether anything was
+// actually on disk to remove, so already-swept run dirs (sidecars only) are
+// not re-reported on every sweep. A run dir left completely empty afterwards
+// is provision litter, not a retained record, and is dropped too.
+func (s *worktreeSandbox) pruneRunTrees(runID, wtName string) (bool, error) {
+	runDir := filepath.Join(s.runsRoot, runID)
+	if !anyExists(
+		filepath.Join(runDir, worktreeDirName),
+		filepath.Join(runDir, homeDirName),
+		filepath.Join(runDir, markerName),
+	) {
+		return false, nil
+	}
+	if err := s.removeRunTrees(runID, wtName); err != nil {
+		return false, err
+	}
+	if remaining, err := os.ReadDir(runDir); err == nil && len(remaining) == 0 {
+		_ = fsops.RemoveAll(runDir)
+	}
+	return true, nil
+}
+
+// anyExists reports whether any of the given paths exists on disk.
+func anyExists(paths ...string) bool {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// readMarker loads the marker sidecar for one runs-root dir entry (the
+// caller has already established entry is a directory). The boolean is
+// false when the dir has no well-formed marker; corrupt markers are treated
+// as absent so the markerless-sweep policy decides their fate.
 func (s *worktreeSandbox) readMarker(entry os.DirEntry) (marker, time.Time, bool) {
 	var m marker
-	if !entry.IsDir() {
-		return m, time.Time{}, false
-	}
 	data, err := os.ReadFile(filepath.Join(s.runsRoot, entry.Name(), markerName))
 	if err != nil {
 		return m, time.Time{}, false

@@ -185,6 +185,9 @@ func TestProvisionInputValidation(t *testing.T) {
 	if _, err := f.sb.Provision(context.Background(), nil); !errors.Is(err, ErrNilTaskSpec) {
 		t.Fatalf("nil spec: got %v, want ErrNilTaskSpec", err)
 	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("   ")); !errors.Is(err, ErrEmptyTaskID) {
+		t.Fatalf("empty task id: got %v, want ErrEmptyTaskID", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := f.sb.Provision(ctx, testSpec("t")); !errors.Is(err, context.Canceled) {
@@ -221,25 +224,17 @@ func TestProvisionRunIDRandFailure(t *testing.T) {
 	}
 }
 
-func TestProvisionMarkerFailureRollsBack(t *testing.T) {
-	f := newFixture(t)
-	f.sb.now = func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
-	f.sb.randRead = func(b []byte) (int, error) {
-		for i := range b {
-			b[i] = 0xab
+// mustLeakNothing asserts the runs root holds no run dirs and the manager
+// tracks no worktrees — the post-rollback invariant.
+func mustLeakNothing(t *testing.T, f *fixture) {
+	t.Helper()
+	if entries, err := os.ReadDir(f.runsRoot); err == nil && len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
 		}
-		return len(b), nil
+		t.Fatalf("rollback leaked run dirs: %v", names)
 	}
-	runID := "kg-go-impl-001-20260102T030405-abababab"
-	// Pre-create the marker path as a directory so the atomic write fails
-	// after the worktree has been provisioned.
-	if err := os.MkdirAll(filepath.Join(f.runsRoot, runID, markerName), 0o755); err != nil {
-		t.Fatalf("plant marker dir: %v", err)
-	}
-	if _, err := f.sb.Provision(context.Background(), testSpec("kg-go-impl-001")); err == nil || !strings.Contains(err.Error(), "write marker") {
-		t.Fatalf("marker failure: got %v, want write marker error", err)
-	}
-	mustNotExist(t, filepath.Join(f.runsRoot, runID, worktreeDirName))
 	names, err := f.sb.mgr.List()
 	if err != nil {
 		t.Fatalf("List: %v", err)
@@ -247,6 +242,34 @@ func TestProvisionMarkerFailureRollsBack(t *testing.T) {
 	if len(names) != 0 {
 		t.Fatalf("rollback leaked worktrees: %v", names)
 	}
+}
+
+func TestProvisionAddWorktreeFailureRollsBack(t *testing.T) {
+	f := newFixture(t)
+	f.sb.addWorktree = func(string, string, plumbing.Hash) error {
+		return errors.New("checkout wedged")
+	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("add-fails")); err == nil || !strings.Contains(err.Error(), "provision worktree") {
+		t.Fatalf("add failure: got %v, want provision worktree error", err)
+	}
+	mustLeakNothing(t, f)
+}
+
+func TestProvisionMarkerFailureRollsBack(t *testing.T) {
+	f := newFixture(t)
+	// Let the worktree add succeed, then plant a directory at the marker
+	// path so the atomic marker write fails and the full rollback runs.
+	realAdd := f.sb.addWorktree
+	f.sb.addWorktree = func(name, path string, base plumbing.Hash) error {
+		if err := realAdd(name, path, base); err != nil {
+			return err
+		}
+		return os.Mkdir(filepath.Join(filepath.Dir(path), markerName), 0o755)
+	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("marker-fails")); err == nil || !strings.Contains(err.Error(), "write marker") {
+		t.Fatalf("marker failure: got %v, want write marker error", err)
+	}
+	mustLeakNothing(t, f)
 }
 
 // pinIdentity fixes the sandbox's time and randomness seams so the next
@@ -264,20 +287,17 @@ func pinIdentity(sb *worktreeSandbox, taskID string) string {
 
 func TestProvisionScratchHomeFailure(t *testing.T) {
 	f := newFixture(t)
-	runID := pinIdentity(f.sb, "home-blocked")
-	// A file where the home dir must go makes MkdirAll fail.
-	if err := os.MkdirAll(filepath.Join(f.runsRoot, runID), 0o755); err != nil {
-		t.Fatalf("mkdir run dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(f.runsRoot, runID, homeDirName), []byte("x"), 0o644); err != nil {
-		t.Fatalf("plant home file: %v", err)
+	// A file where the runs root must go makes the home MkdirAll fail
+	// (stat of the run dir errors with ENOTDIR, not "exists").
+	if err := os.WriteFile(f.runsRoot, []byte("x"), 0o644); err != nil {
+		t.Fatalf("plant runs-root file: %v", err)
 	}
 	if _, err := f.sb.Provision(context.Background(), testSpec("home-blocked")); err == nil || !strings.Contains(err.Error(), "create scratch home") {
 		t.Fatalf("blocked home: got %v, want create scratch home error", err)
 	}
 }
 
-func TestProvisionWorktreeCollision(t *testing.T) {
+func TestProvisionRunDirCollision(t *testing.T) {
 	f := newFixture(t)
 	pinIdentity(f.sb, "collide")
 	inst, err := f.sb.Provision(context.Background(), testSpec("collide"))
@@ -285,11 +305,14 @@ func TestProvisionWorktreeCollision(t *testing.T) {
 		t.Fatalf("first Provision: %v", err)
 	}
 	t.Cleanup(func() { _ = inst.Cleanup() })
-	// The pinned seams re-derive the same run ID, so the second worktree
-	// add collides.
-	if _, err := f.sb.Provision(context.Background(), testSpec("collide")); !errors.Is(err, gitwt.ErrWorktreeExists) {
-		t.Fatalf("collision: got %v, want gitwt.ErrWorktreeExists", err)
+	// The pinned seams re-derive the same run ID; the exclusive run-dir
+	// claim rejects the twin before anything is created or rolled back, so
+	// the live first run is untouched.
+	if _, err := f.sb.Provision(context.Background(), testSpec("collide")); err == nil || !strings.Contains(err.Error(), "run id collision") {
+		t.Fatalf("collision: got %v, want run id collision error", err)
 	}
+	mustExist(t, inst.Workdir)
+	mustExist(t, filepath.Join(inst.RunDir, homeDirName))
 }
 
 func TestCleanupPreservesSidecars(t *testing.T) {
@@ -416,6 +439,45 @@ func TestPruneStaleRemovesOldTrees(t *testing.T) {
 	if len(again) != 0 {
 		t.Fatalf("second prune = %v, want empty", again)
 	}
+}
+
+// TestPruneStaleSweepsMarkerlessLeak is the defense layer for provisions
+// that crashed before the marker was written (or whose rollback died): an
+// aged markerless run dir is reclaimed by mtime, while an aged sidecar-only
+// run dir (a normally-swept run) keeps its sidecars.
+func TestPruneStaleSweepsMarkerlessLeak(t *testing.T) {
+	f := newFixture(t)
+	old := time.Now().Add(-8 * 24 * time.Hour)
+
+	// A leaked partial provision: home dir, no marker.
+	leakDir := filepath.Join(f.runsRoot, "leaked-run")
+	if err := os.MkdirAll(filepath.Join(leakDir, homeDirName), 0o755); err != nil {
+		t.Fatalf("mkdir leak: %v", err)
+	}
+	// An already-swept run: sidecar only, no marker, no trees.
+	sweptDir := filepath.Join(f.runsRoot, "swept-run")
+	if err := os.MkdirAll(sweptDir, 0o755); err != nil {
+		t.Fatalf("mkdir swept: %v", err)
+	}
+	sidecar := filepath.Join(sweptDir, "eval-run.yaml")
+	if err := os.WriteFile(sidecar, []byte("run: swept\n"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	for _, dir := range []string{leakDir, sweptDir} {
+		if err := os.Chtimes(dir, old, old); err != nil {
+			t.Fatalf("age %s: %v", dir, err)
+		}
+	}
+
+	pruned, err := f.sb.PruneStale(context.Background())
+	if err != nil {
+		t.Fatalf("PruneStale: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != "leaked-run" {
+		t.Fatalf("pruned = %v, want [leaked-run]", pruned)
+	}
+	mustNotExist(t, leakDir) // emptied leak dir is litter, dropped entirely
+	mustExist(t, sidecar)    // swept run's sidecars retained indefinitely
 }
 
 func TestPruneStaleEdgeCases(t *testing.T) {
