@@ -135,16 +135,21 @@ func findSeed(ctx context.Context, q *kgquery.Querier, want eval.Difficulty) (se
 }
 
 // pickMatchingSeed iterates seeds in order and returns the first whose derived
-// difficulty equals want. When want is empty any seed is accepted. If no seed
-// matches, an error is returned.
+// difficulty equals want. When want is empty any successfully derived seed is
+// accepted.
 //
-// Invariant: when want is empty, matchesDifficulty is always true, so the
-// first successfully derived seed is returned immediately. The loop can only
-// exhaust all seeds when want is non-empty (no band match) or when every
-// derivation fails (firstErr set). The final path is always one of these two
-// branches.
+// Exhausting the loop has two outcomes that must not be conflated:
+//   - at least one seed derived cleanly but none matched want → a legitimate
+//     empty result ("no seed matches difficulty").
+//   - every candidate seed failed to derive (a KG read/query/storage error) →
+//     an infrastructure failure; the first such error is returned wrapped so
+//     it is not masked as an ordinary no-match (the #262 swallow-class).
+//
+// When want is empty the first successfully derived seed returns immediately,
+// so the no-match branch is only reachable with a non-empty want.
 func pickMatchingSeed(ctx context.Context, q *kgquery.Querier, seeds []graphstore.GraphNode, want eval.Difficulty) (seedResult, error) {
 	var firstErr error
+	derivedAny := false
 	for _, seed := range seeds {
 		r, err := deriveFromSeed(ctx, q, seed)
 		if err != nil {
@@ -153,14 +158,21 @@ func pickMatchingSeed(ctx context.Context, q *kgquery.Querier, seeds []graphstor
 			}
 			continue
 		}
+		derivedAny = true
 		if matchesDifficulty(r.band, want) {
 			return r, nil
 		}
 	}
-	if want != "" {
+	// A seed derived cleanly but none matched the requested difficulty: a
+	// genuine empty result, not a failure. (Only reachable with a non-empty
+	// want — an empty want accepts the first derived seed above.)
+	if derivedAny {
 		return seedResult{}, fmt.Errorf("no seed matches difficulty %q", want)
 	}
-	// All seeds failed derivation; firstErr carries the first failure.
+	// No seed derived at all — every candidate failed with an error. Surface
+	// the first failure rather than reporting a no-match, so a real KG
+	// infrastructure fault is not swallowed. firstErr is non-nil here:
+	// findSeed guarantees len(seeds) > 0 and every seed took the error branch.
 	return seedResult{}, firstErr
 }
 

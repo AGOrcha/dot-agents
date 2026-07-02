@@ -430,10 +430,15 @@ func TestGenerate_DifficultyConstraint_Medium(t *testing.T) {
 
 func TestGenerate_DifficultyConstraint_NoMatch(t *testing.T) {
 	// simpleFakeReader has only easy symbols; requesting hard should fail.
+	// Every seed derives cleanly here, so exhausting the search is a genuine
+	// no-match — the error must be the no-match, not a masked failure.
 	g := mustGenerator(t, simpleFakeReader())
 	_, err := g.Generate(context.Background(), eval.GenerateOptions{Difficulty: eval.DifficultyHard})
 	if err == nil {
 		t.Fatal("expected error when no seed matches difficulty hard")
+	}
+	if !strings.Contains(err.Error(), "no seed matches difficulty") {
+		t.Errorf("error %q should report the genuine no-match; seeds derived cleanly", err)
 	}
 }
 
@@ -496,21 +501,45 @@ func TestGenerate_ComplexityError(t *testing.T) {
 	}
 }
 
-func TestGenerate_AllDeriveFail(t *testing.T) {
-	// When all seeds fail derivation and no difficulty constraint is set,
-	// the error from the first failure is surfaced.
+// allDeriveFailReader returns a reader whose every seed fails to derive:
+// GetEdgesByTarget errors for both symbols, so ComplexityProxy fails after
+// NeighborhoodFor succeeds. Models a KG read/query/storage fault.
+func allDeriveFailReader() *fakeReader {
 	f := simpleFakeReader()
-	// Both seeds share the same file; fail GetNode for the neighbor so
-	// NeighborhoodFor can succeed on root but ComplexityProxy after it fails.
-	// Simplest: make GetAllFiles error so findSeed fails cleanly.
-	// Instead, use inEdges to force ComplexityProxy to fail on all seeds:
-	// GetEdgesByTarget fails for both seeds → ComplexityProxy fails.
 	f.inErrs["pkg/foo.Bar"] = errors.New("target edge failure bar")
 	f.inErrs["pkg/foo.helper"] = errors.New("target edge failure helper")
-	g := mustGenerator(t, f)
+	return f
+}
+
+func TestGenerate_AllDeriveFail(t *testing.T) {
+	// When all seeds fail derivation and no difficulty constraint is set,
+	// the error from the first failure is surfaced — not masked.
+	g := mustGenerator(t, allDeriveFailReader())
 	_, err := g.Generate(context.Background(), eval.GenerateOptions{})
 	if err == nil {
 		t.Fatal("expected error when all seeds fail derivation")
+	}
+	if !strings.Contains(err.Error(), "target edge failure") {
+		t.Errorf("error %q should surface the underlying derivation failure", err)
+	}
+}
+
+func TestGenerate_AllDeriveFail_WithDifficultyConstraint(t *testing.T) {
+	// Regression (cross-brain gate NOT-SOUND, #262 swallow-class): when a
+	// difficulty constraint IS set and every seed fails to derive because of
+	// a KG error, the infrastructure error must be surfaced — never masked as
+	// an ordinary "no seed matches difficulty" empty result. No seed derived
+	// cleanly, so there is no legitimate no-match to report.
+	g := mustGenerator(t, allDeriveFailReader())
+	_, err := g.Generate(context.Background(), eval.GenerateOptions{Difficulty: eval.DifficultyHard})
+	if err == nil {
+		t.Fatal("expected error when all seeds fail derivation under a difficulty constraint")
+	}
+	if strings.Contains(err.Error(), "no seed matches difficulty") {
+		t.Errorf("error %q masks a KG failure as a no-match; want the derivation error surfaced", err)
+	}
+	if !strings.Contains(err.Error(), "target edge failure") {
+		t.Errorf("error %q should surface the underlying derivation failure", err)
 	}
 }
 
