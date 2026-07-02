@@ -1,0 +1,16 @@
+schema_version: 2
+iteration: 1
+date: "2026-05-01"
+wave: "w1"
+task_id: "task-1"
+commit: "commit1"
+files_changed: 1
+lines_added: 10
+lines_removed: 2
+agent:
+  session_id: "sess-a"
+  harness: "claude-code"
+  model: "m-claude"
+impl:
+  summary: "impl 1"
+  retries: 0
