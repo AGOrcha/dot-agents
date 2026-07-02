@@ -1,14 +1,32 @@
-// Package http is the HTTP surface of the `da service` runtime. It hosts two
-// built-in routes — GET /healthz (liveness) and GET /api/tasks (the scheduler
-// State() projection as JSON) — and a RegisterMount reservation point that lets
-// sibling plans (R2's dashboard, R5's review queue) stitch their own handlers
-// under arbitrary path prefixes without modifying this package (see R3 design
-// decision D5).
+// Package http is the transport layer of the `da service` runtime (spec §2A,
+// OQ5 option B). It hosts the service's two listeners, one per arm of the §2A
+// surface→transport map:
 //
-// Scope: this package ships only the mount machinery plus the two built-in
-// routes. It deliberately owns no R2/R5 endpoints and no authn/authz — RBAC is
-// R5's plan. The package name collides with the standard library, so net/http
-// is imported here under the alias nethttp.
+//   - Server — the HTTP/SSE edge, serving ONLY the browser/dashboard surface
+//     and the explicit external bind (OQ3: default loopback 127.0.0.1:7878;
+//     anything wider is a deliberate --addr opt-in). It ships two built-in
+//     routes — GET /healthz (liveness) and GET /api/tasks (the scheduler
+//     State() projection as JSON) — plus the RegisterMount reservation point
+//     that lets sibling plans (R2's dashboard, R5's review queue) stitch
+//     handlers under arbitrary prefixes without modifying this package (D5).
+//
+//   - Control — the local control plane, a Unix-domain socket (named pipe on
+//     Windows; see control_windows.go) answering `da service status`/`stop`
+//     and the §D6 CLI-routes-when-present path. Same-host traffic pays no
+//     TCP/TLS/HTTP overhead, and stop is authorized by socket file permission
+//     plus a kernel peer-credential check (SO_PEERCRED / LOCAL_PEERCRED) —
+//     replacing the earlier "POST /admin/stop gated on loopback" shape (OQ4).
+//
+// The §2A selection rule decides which listener a future surface belongs on:
+// HTTP for browser-facing, cross-machine, or external-HTTP-tool surfaces;
+// the local high-efficiency transport otherwise.
+//
+// Scope: this package ships only the transport machinery plus the built-in
+// routes and control ops. It deliberately owns no R2/R5 endpoints and no
+// authn/authz — RBAC is R5's plan. Handlers that need the event stream bind
+// to the events.EventBus interface (spec D4.1), never the concrete builtin
+// bus. The package name collides with the standard library, so net/http is
+// imported here under the alias nethttp.
 package http
 
 import (
@@ -65,14 +83,15 @@ type StateProvider interface {
 	State() []scheduler.TaskState
 }
 
-// Server is the service HTTP surface. Construct it with New. It is safe for
-// concurrent use: RegisterMount may be called from any goroutine before or
-// after Serve, and Serve/Shutdown coordinate the underlying net/http server.
+// Server is the service HTTP/SSE edge (spec §2A "browser/dashboard" row).
+// Construct it with New. It is safe for concurrent use: RegisterMount may be
+// called from any goroutine before or after Serve, and Serve/Shutdown
+// coordinate the underlying net/http server.
 type Server struct {
 	addr      string
 	mux       *nethttp.ServeMux
 	scheduler StateProvider
-	bus       *events.Bus
+	bus       events.EventBus
 	httpSrv   *nethttp.Server
 
 	shutdownTimeout time.Duration
@@ -84,8 +103,10 @@ type Server struct {
 
 // New builds a Server bound (on Serve) to addr, projecting sched.State() at
 // /api/tasks and carrying bus for sibling plans that mount bus-backed handlers.
+// bus is the D4.1 EventBus interface — mounts stay backend-agnostic and hold
+// only the G1-G4 delivery floor, never a concrete bus's stronger guarantees.
 // The two built-in routes are registered immediately.
-func New(addr string, sched StateProvider, bus *events.Bus) *Server {
+func New(addr string, sched StateProvider, bus events.EventBus) *Server {
 	mux := nethttp.NewServeMux()
 	s := &Server{
 		addr:            addr,
@@ -107,9 +128,9 @@ func New(addr string, sched StateProvider, bus *events.Bus) *Server {
 // (and embedders) can drive the routes via httptest without binding a socket.
 func (s *Server) Handler() nethttp.Handler { return s.mux }
 
-// Bus returns the event bus the server was constructed with, so a sibling
-// plan's mount handler can be wired to it by the composing runtime.
-func (s *Server) Bus() *events.Bus { return s.bus }
+// Bus returns the EventBus interface the server was constructed with, so a
+// sibling plan's mount handler can be wired to it by the composing runtime.
+func (s *Server) Bus() events.EventBus { return s.bus }
 
 // Addr returns the bound listen address once Serve is listening; before that it
 // returns the configured address (which may use a :0 wildcard port).

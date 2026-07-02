@@ -24,7 +24,7 @@ type fakeState struct {
 func (f fakeState) State() []scheduler.TaskState { return f.states }
 
 func newTestServer(sched StateProvider) *Server {
-	return New("127.0.0.1:0", sched, events.NewBus())
+	return New("127.0.0.1:0", sched, events.NewInProcBus())
 }
 
 func TestHealthzReturns200(t *testing.T) {
@@ -273,7 +273,7 @@ func TestApiMountCoexistsWithBuiltinTasks(t *testing.T) {
 }
 
 func TestBusAccessor(t *testing.T) {
-	bus := events.NewBus()
+	bus := events.NewInProcBus()
 	srv := New("127.0.0.1:0", fakeState{}, bus)
 	if srv.Bus() != bus {
 		t.Fatal("Bus() did not return the constructed bus")
@@ -361,14 +361,14 @@ func TestServeListenError(t *testing.T) {
 	}
 	defer ln.Close()
 
-	srv := New(ln.Addr().String(), fakeState{}, events.NewBus())
+	srv := New(ln.Addr().String(), fakeState{}, events.NewInProcBus())
 	if err := srv.Serve(context.Background()); err == nil {
 		t.Fatal("Serve on an occupied port returned nil, want listen error")
 	}
 }
 
 func TestAddrBeforeAndAfterServe(t *testing.T) {
-	srv := New("127.0.0.1:0", fakeState{}, events.NewBus())
+	srv := New("127.0.0.1:0", fakeState{}, events.NewInProcBus())
 	if srv.Addr() != "127.0.0.1:0" {
 		t.Fatalf("Addr() before Serve = %q, want configured addr", srv.Addr())
 	}
