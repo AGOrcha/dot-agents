@@ -26,18 +26,21 @@ type VerifyResult struct {
 	TornAppend bool
 }
 
-// Verify attests the active log in two stages.
+// Verify attests the active log in two stages. Both stages hash the EXACT
+// stored line bytes (post-trim, as read), never a re-marshal of the decoded
+// struct — so even a byte-level rewrite that preserves JSON semantics (key
+// reordering, whitespace, escape or number reformatting) breaks attestation.
 //
 //  1. Chain walk (verifyRecords): every record's prev_hash must equal the
-//     recomputed hash of its predecessor. This catches modification of any
-//     non-tail record and any reordering, because an altered record changes its
-//     hash and breaks the successor's link.
+//     SHA-256 of its predecessor's stored line. This catches modification of
+//     any non-tail record and any reordering.
 //
-//  2. Head anchor (verifyHeadAnchor): the chain alone cannot attest its own last
-//     link — the tail record has no successor storing its hash, so modifying,
-//     truncating, or forging an extra tail record would pass stage 1. The head
-//     sidecar pins the tail's count and hash, closing that gap. Every Append
-//     advances it under the same lock that writes the record.
+//  2. Head anchor (verifyHeadAnchor): the chain alone cannot attest its own
+//     last link — the tail line has no successor storing its hash, so
+//     modifying, truncating, or forging an extra tail record would pass the
+//     chain walk. The head sidecar pins the tail line's count and hash,
+//     closing that gap. Every Append advances it under the same lock that
+//     writes the line.
 //
 // A chain break takes precedence over a head mismatch. An empty log with no head
 // verifies OK (a fresh, never-written log). A log exactly one clean record ahead
@@ -50,36 +53,31 @@ func (l *Log) Verify() (VerifyResult, error) {
 	return res, err
 }
 
-// verifyState is the shared core of Verify and RepairHead: it loads the
-// records, walks the chain, checks the head anchor, and returns the records
+// verifyState is the shared core of Verify and RepairHead: it loads the stored
+// lines, walks the chain, checks the head anchor, and returns the raw lines
 // alongside the result so RepairHead can re-anchor without a second read.
-func (l *Log) verifyState() (VerifyResult, []Record, error) {
-	recs, err := l.Records()
+func (l *Log) verifyState() (VerifyResult, [][]byte, error) {
+	recs, raws, err := l.readStored()
 	if err != nil {
 		return VerifyResult{}, nil, err
 	}
-	res, err := verifyRecords(recs)
-	if err != nil {
-		return VerifyResult{}, nil, err
-	}
-	if !res.OK {
-		return res, recs, nil
+	if res := verifyRecords(recs, raws); !res.OK {
+		return res, raws, nil
 	}
 	head, hasHead, err := l.readHead()
 	if err != nil {
 		return VerifyResult{}, nil, err
 	}
-	res, err = verifyHeadAnchor(recs, head, hasHead)
-	return res, recs, err
+	return verifyHeadAnchor(raws, head, hasHead), raws, nil
 }
 
-// verifyHeadAnchor checks the tail record against the head sidecar. It runs only
-// after the chain has verified, so any failure here is specifically a tail-level
-// inconsistency the chain could not see. The exactly-one-clean-record-ahead
-// shape is classified as a torn append (see VerifyResult.TornAppend); everything
-// else that diverges is tamper.
-func verifyHeadAnchor(recs []Record, head headAnchor, hasHead bool) (VerifyResult, error) {
-	n := len(recs)
+// verifyHeadAnchor checks the stored tail line against the head sidecar. It
+// runs only after the chain has verified, so any failure here is specifically
+// a tail-level inconsistency the chain could not see. The
+// exactly-one-clean-record-ahead shape is classified as a torn append (see
+// VerifyResult.TornAppend); everything else that diverges is tamper.
+func verifyHeadAnchor(raws [][]byte, head headAnchor, hasHead bool) VerifyResult {
+	n := len(raws)
 	// Treat a missing sidecar as an anchor attesting zero records: a fresh log
 	// is OK, a single chained record is a torn FIRST append (the head write
 	// never happened), and two or more unanchored records are tamper.
@@ -88,53 +86,43 @@ func verifyHeadAnchor(recs []Record, head headAnchor, hasHead bool) (VerifyResul
 	}
 	if n == 0 {
 		if head.Count != 0 {
-			return brokenHead(0, 0, "head anchor is present but the log has no records (all records were truncated)"), nil
+			return brokenHead(0, 0, "head anchor is present but the log has no records (all records were truncated)")
 		}
-		return VerifyResult{OK: true, Count: 0}, nil
+		return VerifyResult{OK: true, Count: 0}
 	}
 	switch {
 	case head.Count == n:
-		return verifyAnchoredTail(recs, head)
+		return verifyAnchoredTail(raws, head)
 	case head.Count == n-1:
-		return verifyTornCandidate(recs, head)
+		return verifyTornCandidate(raws, head)
 	default:
 		return brokenHead(n, n, fmt.Sprintf(
 			"head anchor count %d does not match %d record(s) on disk (records were added or removed at the tail)",
-			head.Count, n)), nil
+			head.Count, n))
 	}
 }
 
-// verifyAnchoredTail handles the exact-match shape (head.Count == len(recs)):
-// the anchor must equal the recomputed tail hash, else the last record was
-// modified.
-func verifyAnchoredTail(recs []Record, head headAnchor) (VerifyResult, error) {
-	n := len(recs)
-	tailHash, err := hashRecord(recs[n-1])
-	if err != nil {
-		return VerifyResult{}, err
+// verifyAnchoredTail handles the exact-match shape (head.Count == len(raws)):
+// the anchor must equal the hash of the stored tail line, else the last record
+// was modified.
+func verifyAnchoredTail(raws [][]byte, head headAnchor) VerifyResult {
+	n := len(raws)
+	if head.TailHash != hashBytes(raws[n-1]) {
+		return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n))
 	}
-	if head.TailHash != tailHash {
-		return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n)), nil
-	}
-	return VerifyResult{OK: true, Count: n}, nil
+	return VerifyResult{OK: true, Count: n}
 }
 
 // verifyTornCandidate handles the head-exactly-one-behind shape. It is benign
-// (TornAppend) only if the record the anchor DOES attest is intact — for a torn
-// first append there is no anchored record to check. The chain walk already
+// (TornAppend) only if the stored line the anchor DOES attest is intact — for a
+// torn first append there is no anchored line to check. The chain walk already
 // proved the extra record chains onto its predecessor.
-func verifyTornCandidate(recs []Record, head headAnchor) (VerifyResult, error) {
-	n := len(recs)
-	if head.Count > 0 {
-		anchoredHash, err := hashRecord(recs[head.Count-1])
-		if err != nil {
-			return VerifyResult{}, err
-		}
-		if head.TailHash != anchoredHash {
-			return brokenHead(n, head.Count, fmt.Sprintf(
-				"head anchor does not match record %d it claims to attest (record %d was modified)",
-				head.Count, head.Count)), nil
-		}
+func verifyTornCandidate(raws [][]byte, head headAnchor) VerifyResult {
+	n := len(raws)
+	if head.Count > 0 && head.TailHash != hashBytes(raws[head.Count-1]) {
+		return brokenHead(n, head.Count, fmt.Sprintf(
+			"head anchor does not match record %d it claims to attest (record %d was modified)",
+			head.Count, head.Count))
 	}
 	return VerifyResult{
 		OK:         true,
@@ -143,7 +131,7 @@ func verifyTornCandidate(recs []Record, head headAnchor) (VerifyResult, error) {
 		Reason: fmt.Sprintf(
 			"log has %d record(s) but the head anchor attests %d: an append was interrupted before the anchor advanced (or a single chained record was appended out-of-band); run RepairHead after review",
 			n, head.Count),
-	}, nil
+	}
 }
 
 // brokenHead renders a head-anchor verification failure.
@@ -151,9 +139,12 @@ func brokenHead(count, brokenAt int, reason string) VerifyResult {
 	return VerifyResult{OK: false, Count: count, BrokenAt: brokenAt, Reason: reason}
 }
 
-// verifyRecords is the pure core of Verify, separated so it can be unit-tested
-// against in-memory records without touching the filesystem.
-func verifyRecords(recs []Record) (VerifyResult, error) {
+// verifyRecords is the pure core of the chain walk, separated so it can be
+// unit-tested against in-memory records without touching the filesystem. recs
+// and raws are lockstep views of the same stored lines: recs supplies each
+// record's claimed prev_hash, raws supplies the exact bytes whose hash the NEXT
+// record must claim.
+func verifyRecords(recs []Record, raws [][]byte) VerifyResult {
 	expected := GenesisPrevHash
 	for i, r := range recs {
 		if r.PrevHash != expected {
@@ -162,15 +153,11 @@ func verifyRecords(recs []Record) (VerifyResult, error) {
 				Count:    len(recs),
 				BrokenAt: i + 1,
 				Reason:   brokenReason(i, r.PrevHash, expected),
-			}, nil
+			}
 		}
-		h, err := hashRecord(r)
-		if err != nil {
-			return VerifyResult{}, err
-		}
-		expected = h
+		expected = hashBytes(raws[i])
 	}
-	return VerifyResult{OK: true, Count: len(recs)}, nil
+	return VerifyResult{OK: true, Count: len(recs)}
 }
 
 // brokenReason renders a human-readable explanation of a chain break at the

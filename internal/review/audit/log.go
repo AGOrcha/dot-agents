@@ -132,19 +132,31 @@ func (l *Log) WithSizeCap(cap int64) *Log {
 // valid empty chain). A malformed line returns an error naming the 1-based line
 // number.
 func (l *Log) Records() ([]Record, error) {
-	data, err := readFile(l.path)
-	if errors.Is(err, os.ErrNotExist) {
-		return []Record{}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("audit: read log: %w", err)
-	}
-	return parseRecords(data)
+	recs, _, err := l.readStored()
+	return recs, err
 }
 
-// parseRecords decodes JSON-lines content into records, skipping blank lines.
-func parseRecords(data []byte) ([]Record, error) {
+// readStored reads the active log and returns both the decoded records and, in
+// lockstep, the exact stored line bytes each was parsed from. The raw lines are
+// what the chain and head anchor attest (see hashBytes); the decoded structs
+// exist for validation and for callers that consume record fields.
+func (l *Log) readStored() ([]Record, [][]byte, error) {
+	data, err := readFile(l.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return []Record{}, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("audit: read log: %w", err)
+	}
+	return parseStored(data)
+}
+
+// parseStored decodes JSON-lines content into records plus their raw stored
+// line bytes (post-trim), skipping blank lines. Each raw slice is copied out of
+// the scanner's reused buffer.
+func parseStored(data []byte) ([]Record, [][]byte, error) {
 	out := []Record{}
+	raws := [][]byte{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	// Audit lines are single JSON objects but may grow with free-form targets;
 	// raise the scanner's token cap well above the default 64 KiB.
@@ -158,14 +170,15 @@ func parseRecords(data []byte) ([]Record, error) {
 		}
 		var r Record
 		if err := decode(raw, &r); err != nil {
-			return nil, fmt.Errorf("audit: parse log line %d: %w", line, err)
+			return nil, nil, fmt.Errorf("audit: parse log line %d: %w", line, err)
 		}
 		out = append(out, r)
+		raws = append(raws, append([]byte(nil), raw...))
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("audit: scan log: %w", err)
+		return nil, nil, fmt.Errorf("audit: scan log: %w", err)
 	}
-	return out, nil
+	return out, raws, nil
 }
 
 // Append chains and writes one record for the given event and returns the
@@ -180,10 +193,10 @@ func parseRecords(data []byte) ([]Record, error) {
 //
 // Before writing it applies the rotation policy (yearly or size cap), so a year
 // boundary or an oversized file starts a fresh chain in a dated archive. The new
-// record's prev_hash is the SHA-256 of the last record in the (post-rotation)
-// active file, or GenesisPrevHash when the file is empty. After the line lands,
-// the head anchor is advanced to the new tail so the tail record stays
-// attestable.
+// record's prev_hash is the SHA-256 of the last stored LINE (its exact bytes on
+// disk, not a re-marshal) in the (post-rotation) active file, or GenesisPrevHash
+// when the file is empty. After the line lands, the head anchor is advanced to
+// the hash of the newly written bytes so the tail record stays attestable.
 //
 // Durability is AT-LEAST-ONCE: the record line and the head anchor are two
 // writes, so on an error return (or a crash mid-call) the record MAY already be
@@ -210,7 +223,7 @@ func (l *Log) Append(e Event) (Record, error) {
 	}
 	defer func() { _ = release() }()
 
-	recs, err := l.Records()
+	recs, raws, err := l.readStored()
 	if err != nil {
 		return Record{}, err
 	}
@@ -219,14 +232,11 @@ func (l *Log) Append(e Event) (Record, error) {
 		return Record{}, err
 	}
 	if rotated {
-		recs = nil
+		recs, raws = nil, nil
 	}
 	prev := GenesisPrevHash
-	if n := len(recs); n > 0 {
-		prev, err = hashRecord(recs[n-1])
-		if err != nil {
-			return Record{}, err
-		}
+	if n := len(raws); n > 0 {
+		prev = hashBytes(raws[n-1])
 	}
 	rec := Record{
 		SchemaVersion: SchemaVersion,
@@ -240,9 +250,12 @@ func (l *Log) Append(e Event) (Record, error) {
 		PrevHash:      prev,
 		RequestID:     e.RequestID,
 	}
-	line, err := canonicalBytes(rec)
+	// Marshal exactly once: the bytes hashed into the head anchor are the
+	// bytes written to disk, so the stored line and its attestation can never
+	// diverge.
+	line, err := marshal(rec)
 	if err != nil {
-		return Record{}, err
+		return Record{}, fmt.Errorf("%w: %v", ErrMarshal, err)
 	}
 	if err := appendLine(l.path, line); err != nil {
 		return Record{}, err
@@ -270,16 +283,12 @@ func (l *Log) RepairHead() (VerifyResult, error) {
 	}
 	defer func() { _ = release() }()
 
-	res, recs, err := l.verifyState()
+	res, raws, err := l.verifyState()
 	if err != nil || !res.OK || !res.TornAppend {
 		return res, err
 	}
-	n := len(recs)
-	tailHash, err := hashRecord(recs[n-1])
-	if err != nil {
-		return VerifyResult{}, err
-	}
-	if err := l.writeHead(n, tailHash); err != nil {
+	n := len(raws)
+	if err := l.writeHead(n, hashBytes(raws[n-1])); err != nil {
 		return VerifyResult{}, err
 	}
 	return VerifyResult{OK: true, Count: n}, nil

@@ -212,15 +212,8 @@ func TestAppendCreatesGenesisAndChains(t *testing.T) {
 	if err != nil {
 		t.Fatalf("append 2: %v", err)
 	}
-	wantPrev, err := hashRecord(r1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if r2.PrevHash != wantPrev {
-		t.Errorf("second record prev_hash = %q, want %q", r2.PrevHash, wantPrev)
-	}
-
-	// File is exactly two JSON lines, append-only (record 1 unchanged).
+	// File is exactly two JSON lines, append-only (record 1 unchanged), and
+	// record 2's prev_hash is the SHA-256 of record 1's exact stored bytes.
 	data, err := os.ReadFile(l.Path())
 	if err != nil {
 		t.Fatal(err)
@@ -228,6 +221,9 @@ func TestAppendCreatesGenesisAndChains(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines, got %d", len(lines))
+	}
+	if wantPrev := hashBytes([]byte(lines[0])); r2.PrevHash != wantPrev {
+		t.Errorf("second record prev_hash = %q, want raw-line hash %q", r2.PrevHash, wantPrev)
 	}
 	var got Record
 	if err := json.Unmarshal([]byte(lines[0]), &got); err != nil {
@@ -294,14 +290,14 @@ func TestAppendGenesisMarshalError(t *testing.T) {
 	}
 }
 
-func TestAppendChainHashError(t *testing.T) {
+func TestAppendMarshalErrorWithPriorRecords(t *testing.T) {
 	restoreSeams(t)
 	l := tempLog(t)
 	if _, err := l.Append(sampleEvent(time.Now().UTC())); err != nil {
 		t.Fatal(err)
 	}
-	// With a prior record present, the next append must hash it first; force
-	// the marshal seam to fail to hit that branch.
+	// Chaining onto a prior record hashes its raw stored bytes (infallible);
+	// the only marshal in Append is for the NEW record's line.
 	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
 	if _, err := l.Append(sampleEvent(time.Now().UTC())); !errors.Is(err, ErrMarshal) {
 		t.Fatalf("got %v, want ErrMarshal", err)
@@ -744,34 +740,6 @@ func TestRepairHeadWriteError(t *testing.T) {
 	}
 }
 
-func TestRepairHeadHashError(t *testing.T) {
-	restoreSeams(t)
-	l := tempLog(t)
-	// Craft the torn shape (one clean genesis record, no head), then poison
-	// marshal only for RepairHead's final tail hashRecord: the chain walk in
-	// verifyState marshals once for the single record, so fail from the second
-	// call on.
-	origHead := writeHeadFile
-	boom := errors.New("head write blocked")
-	writeHeadFile = func(string, []byte) error { return boom }
-	if _, err := l.Append(sampleEvent(time.Now().UTC())); err == nil {
-		t.Fatal("expected torn append")
-	}
-	writeHeadFile = origHead
-	calls := 0
-	origMarshal := marshal
-	marshal = func(v any) ([]byte, error) {
-		calls++
-		if calls > 1 { // call 1: verifyState chain walk; call 2: repair tail hash
-			return nil, errors.New("nope")
-		}
-		return origMarshal(v)
-	}
-	if _, err := l.RepairHead(); !errors.Is(err, ErrMarshal) {
-		t.Fatalf("got %v, want ErrMarshal", err)
-	}
-}
-
 func TestAppendWritesHeadAnchor(t *testing.T) {
 	restoreSeams(t)
 	l := tempLog(t)
@@ -838,14 +806,8 @@ func TestVerifyDetectsForgedAppend(t *testing.T) {
 	restoreSeams(t)
 	l := tempLog(t)
 	seedLog(t, l, 3)
-	recs, err := l.Records()
-	if err != nil {
-		t.Fatal(err)
-	}
-	prev, err := hashRecord(recs[2])
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Chain onto the exact stored bytes of line 3, as an attacker would.
+	prev := hashBytes([]byte(readLogLines(t, l)[2]))
 	// A correctly-chained forged record: the chain accepts it, but the head
 	// anchor (still count=3) does not.
 	forged := Record{
@@ -940,16 +902,14 @@ func TestVerifyHeadReadError(t *testing.T) {
 }
 
 func TestVerifyHeadAnchorDirect(t *testing.T) {
-	restoreSeams(t)
-	rec := Record{SchemaVersion: SchemaVersion, PrevHash: GenesisPrevHash, Actor: "a", Action: ActionLabelSubmit, Target: "t"}
-	tail, err := hashRecord(rec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rec2 := Record{SchemaVersion: SchemaVersion, PrevHash: tail, Actor: "b", Action: ActionLabelEdit, Target: "t"}
+	// verifyHeadAnchor attests raw stored line bytes; the table drives it with
+	// synthetic lines directly.
+	lineA := []byte(`{"line":"a"}`)
+	lineB := []byte(`{"line":"b"}`)
+	hashA := hashBytes(lineA)
 	tests := []struct {
 		name     string
-		recs     []Record
+		raws     [][]byte
 		head     headAnchor
 		hasHead  bool
 		wantOK   bool
@@ -957,45 +917,23 @@ func TestVerifyHeadAnchorDirect(t *testing.T) {
 	}{
 		{"empty no head", nil, headAnchor{}, false, true, false},
 		{"empty with head", nil, headAnchor{Count: 1, TailHash: "x"}, true, false, false},
-		{"one record no head is torn first append", []Record{rec}, headAnchor{}, false, true, true},
-		{"two records no head is tamper", []Record{rec, rec2}, headAnchor{}, false, false, false},
-		{"head ahead of log", []Record{rec}, headAnchor{Count: 2, TailHash: tail}, true, false, false},
-		{"tail hash mismatch", []Record{rec}, headAnchor{Count: 1, TailHash: "nope"}, true, false, false},
-		{"all good", []Record{rec}, headAnchor{Count: 1, TailHash: tail}, true, true, false},
-		{"one clean ahead is torn", []Record{rec, rec2}, headAnchor{Count: 1, TailHash: tail}, true, true, true},
-		{"one ahead but anchored record modified", []Record{rec, rec2}, headAnchor{Count: 1, TailHash: "wrong"}, true, false, false},
-		{"two ahead is tamper", []Record{rec, rec2}, headAnchor{Count: 0, TailHash: ""}, true, false, false},
+		{"one record no head is torn first append", [][]byte{lineA}, headAnchor{}, false, true, true},
+		{"two records no head is tamper", [][]byte{lineA, lineB}, headAnchor{}, false, false, false},
+		{"head ahead of log", [][]byte{lineA}, headAnchor{Count: 2, TailHash: hashA}, true, false, false},
+		{"tail hash mismatch", [][]byte{lineA}, headAnchor{Count: 1, TailHash: "nope"}, true, false, false},
+		{"all good", [][]byte{lineA}, headAnchor{Count: 1, TailHash: hashA}, true, true, false},
+		{"one clean ahead is torn", [][]byte{lineA, lineB}, headAnchor{Count: 1, TailHash: hashA}, true, true, true},
+		{"one ahead but anchored record modified", [][]byte{lineA, lineB}, headAnchor{Count: 1, TailHash: "wrong"}, true, false, false},
+		{"two ahead is tamper", [][]byte{lineA, lineB}, headAnchor{Count: 0, TailHash: ""}, true, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := verifyHeadAnchor(tc.recs, tc.head, tc.hasHead)
-			if err != nil {
-				t.Fatal(err)
-			}
+			res := verifyHeadAnchor(tc.raws, tc.head, tc.hasHead)
 			if res.OK != tc.wantOK || res.TornAppend != tc.wantTorn {
 				t.Fatalf("OK=%v torn=%v, want OK=%v torn=%v (%+v)",
 					res.OK, res.TornAppend, tc.wantOK, tc.wantTorn, res)
 			}
 		})
-	}
-}
-
-func TestVerifyHeadAnchorHashError(t *testing.T) {
-	restoreSeams(t)
-	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
-	// Exact-count branch: hashing the tail fails.
-	_, err := verifyHeadAnchor(
-		[]Record{{PrevHash: GenesisPrevHash}},
-		headAnchor{Count: 1, TailHash: "x"}, true)
-	if !errors.Is(err, ErrMarshal) {
-		t.Fatalf("exact-count branch: got %v, want ErrMarshal", err)
-	}
-	// Torn-candidate branch: hashing the anchored record fails.
-	_, err = verifyHeadAnchor(
-		[]Record{{PrevHash: GenesisPrevHash}, {PrevHash: "h"}},
-		headAnchor{Count: 1, TailHash: "x"}, true)
-	if !errors.Is(err, ErrMarshal) {
-		t.Fatalf("torn-candidate branch: got %v, want ErrMarshal", err)
 	}
 }
 
@@ -1067,16 +1005,6 @@ func TestMaybeRotateHeadRenameError(t *testing.T) {
 	}
 }
 
-func TestVerifyChainHashError(t *testing.T) {
-	restoreSeams(t)
-	l := tempLog(t)
-	seedLog(t, l, 1)
-	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
-	if _, err := l.Verify(); !errors.Is(err, ErrMarshal) {
-		t.Fatalf("got %v, want ErrMarshal", err)
-	}
-}
-
 func TestHeadPathFor(t *testing.T) {
 	if got := headPathFor("/x/audit.log.jsonl"); got != "/x/audit.log.jsonl.head" {
 		t.Errorf("headPathFor = %q", got)
@@ -1084,10 +1012,8 @@ func TestHeadPathFor(t *testing.T) {
 }
 
 func TestVerifyGenesisBreak(t *testing.T) {
-	res, err := verifyRecords([]Record{{PrevHash: "not-genesis", Action: ActionLabelSubmit}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	recs := []Record{{PrevHash: "not-genesis", Action: ActionLabelSubmit}}
+	res := verifyRecords(recs, [][]byte{[]byte(`{"x":1}`)})
 	if res.OK || res.BrokenAt != 1 {
 		t.Fatalf("expected genesis break at 1: %+v", res)
 	}
@@ -1105,14 +1031,74 @@ func TestVerifyReadError(t *testing.T) {
 	}
 }
 
-func TestVerifyHashError(t *testing.T) {
+func TestVerifyDetectsSemanticRewrite(t *testing.T) {
+	// The raw-bytes attestation guarantee: rewriting a stored line with
+	// semantically-IDENTICAL but byte-different JSON (key reorder via a map
+	// round-trip — Go maps marshal keys alphabetically, the struct writes them
+	// in declaration order) must break verification, because the chain and
+	// head anchor attest the exact stored bytes, not the JSON meaning.
 	restoreSeams(t)
-	// First record's prev_hash is genesis, so the i==0 prev check passes; then
-	// hashRecord runs and the marshal seam fault surfaces.
-	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
-	if _, err := verifyRecords([]Record{{PrevHash: GenesisPrevHash}}); !errors.Is(err, ErrMarshal) {
-		t.Fatalf("got %v, want ErrMarshal", err)
+
+	rewrite := func(line string) string {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatal(err)
+		}
+		out, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(out) == line {
+			t.Fatal("rewrite produced identical bytes; fixture cannot prove anything")
+		}
+		// Same semantics, different bytes: the decoded record must be equal.
+		var orig, rew Record
+		if err := decode([]byte(line), &orig); err != nil {
+			t.Fatal(err)
+		}
+		if err := decode(out, &rew); err != nil {
+			t.Fatalf("rewritten line must still decode: %v", err)
+		}
+		if orig != rew {
+			t.Fatal("fixture broke semantics; test invalid")
+		}
+		return string(out)
 	}
+
+	t.Run("mid-chain", func(t *testing.T) {
+		l := tempLog(t)
+		seedLog(t, l, 3)
+		lines := readLogLines(t, l)
+		lines[1] = rewrite(lines[1])
+		writeLogLines(t, l, lines)
+
+		res, err := l.Verify()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.OK || res.BrokenAt != 3 {
+			t.Fatalf("semantic rewrite of record 2 not caught: %+v", res)
+		}
+		if !strings.Contains(res.Reason, "record 2") {
+			t.Errorf("reason should implicate record 2: %q", res.Reason)
+		}
+	})
+
+	t.Run("tail", func(t *testing.T) {
+		l := tempLog(t)
+		seedLog(t, l, 3)
+		lines := readLogLines(t, l)
+		lines[2] = rewrite(lines[2])
+		writeLogLines(t, l, lines)
+
+		res, err := l.Verify()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.OK || !strings.Contains(res.Reason, "modified") {
+			t.Fatalf("semantic rewrite of the tail not caught: %+v", res)
+		}
+	})
 }
 
 func TestYearlyRotation(t *testing.T) {

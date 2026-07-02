@@ -128,10 +128,8 @@ var marshal = json.Marshal
 
 // ErrTrailingData is returned when a log line carries bytes after the record's
 // JSON object. Decoder.Decode alone stops at the end of the first value and
-// would silently ignore appended garbage — but the chain hashes canonical
-// re-marshaled bytes, so junk smuggled onto a line would otherwise change the
-// file without tripping Verify. Rejecting it at parse time closes that
-// tamper-evidence hole.
+// would silently ignore appended garbage; rejecting it at parse time keeps a
+// line's semantics and its attested bytes in one-to-one correspondence.
 var ErrTrailingData = errors.New("audit: trailing data after record JSON")
 
 // decode parses one JSON-lines record. Unknown fields are rejected so a
@@ -153,32 +151,13 @@ func decode(raw []byte, r *Record) error {
 	return nil
 }
 
-// canonicalBytes returns the deterministic JSON encoding of a record. Because
-// json.Marshal encodes struct fields in declaration order and the record holds
-// no maps, the bytes are stable across write and re-read — the property the
-// hash chain depends on.
-func canonicalBytes(r Record) ([]byte, error) {
-	b, err := marshal(r)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMarshal, err)
-	}
-	return b, nil
-}
-
-// hashBytes returns the hex-encoded SHA-256 of b. It is the single hashing
-// primitive shared by the chain (hashRecord) and the head anchor, so both attest
-// records with the identical digest.
+// hashBytes returns the hex-encoded SHA-256 of b. The chain's prev_hash and
+// the head anchor's tail_hash are both computed with it over the EXACT stored
+// line bytes (as written by Append, as re-read post-trim by Records) — never
+// over a re-marshal of the decoded struct. Attesting raw bytes means any
+// byte-level rewrite of a stored line is detectable, even one that preserves
+// JSON semantics (key reordering, whitespace, escape reformatting).
 func hashBytes(b []byte) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
-}
-
-// hashRecord returns the hex-encoded SHA-256 of a record's canonical bytes.
-// This is the value the next record stores in prev_hash, linking the chain.
-func hashRecord(r Record) (string, error) {
-	b, err := canonicalBytes(r)
-	if err != nil {
-		return "", err
-	}
-	return hashBytes(b), nil
 }
