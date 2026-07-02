@@ -1806,10 +1806,15 @@ func assertDeniedMkdirFailsFast(t *testing.T, path, parent, goos string) {
 	if strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("denial must not be misreported as a contention timeout: %v", err)
 	}
-	// Fast fail: well under the 5s acquire budget (windows branch pays only
-	// the ~300ms transient window; unix is immediate).
-	if elapsed >= 2*time.Second {
-		t.Fatalf("denied classification took %v; must fail fast, not burn the acquire budget", elapsed)
+	// Fast fail: the semantic proof is above (the DENIED classification, not a
+	// contention timeout). The elapsed bound is belt-and-braces against a
+	// regression that re-burns the whole budget; it is deliberately generous
+	// (nominal cost is ~300ms for the windows branch, immediate for unix)
+	// because -race plus a loaded CI/dev machine can stretch the 30 x 10ms
+	// tick loop severalfold — a 2s bound flaked at 2.10s under parallel test
+	// load.
+	if elapsed >= lockAcquireTimeout {
+		t.Fatalf("denied classification took %v; must fail before the acquire budget expires", elapsed)
 	}
 }
 
