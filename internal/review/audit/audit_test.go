@@ -578,11 +578,197 @@ func TestAppendReleasesLock(t *testing.T) {
 }
 
 func TestAppendWriteHeadError(t *testing.T) {
+	// A failed head write AFTER the record landed = torn append. The error
+	// surfaces, but the state must be benign (at-least-once semantics): the
+	// record is durable, Verify flags TornAppend rather than tamper, and the
+	// next successful Append heals the anchor.
 	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 2) // healthy anchored prefix
+	origHead := writeHeadFile
 	boom := errors.New("head")
 	writeHeadFile = func(string, []byte) error { return boom }
-	if _, err := tempLog(t).Append(sampleEvent(time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "write head") {
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err == nil || !strings.Contains(err.Error(), "write head") {
 		t.Fatalf("got %v, want write head", err)
+	}
+
+	// The record already committed; the anchor is one behind.
+	recs, err := l.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 3 {
+		t.Fatalf("record must be durable despite head failure: got %d records", len(recs))
+	}
+	head, ok, err := l.readHead()
+	if err != nil || !ok || head.Count != 2 {
+		t.Fatalf("head should be stale at 2: %+v ok=%v err=%v", head, ok, err)
+	}
+
+	// Verify: torn append, NOT tamper.
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || !res.TornAppend {
+		t.Fatalf("want OK+TornAppend, got %+v", res)
+	}
+	if !strings.Contains(res.Reason, "interrupted") {
+		t.Errorf("reason should explain the interruption: %q", res.Reason)
+	}
+
+	// The next successful Append heals the anchor.
+	writeHeadFile = origHead
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err != nil {
+		t.Fatal(err)
+	}
+	res, err = l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || res.TornAppend {
+		t.Fatalf("append should heal the torn head, got %+v", res)
+	}
+	if res.Count != 4 {
+		t.Fatalf("want 4 records post-heal, got %d", res.Count)
+	}
+}
+
+func TestRepairHeadHealsTornAppend(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 2)
+	origHead := writeHeadFile
+	boom := errors.New("head")
+	writeHeadFile = func(string, []byte) error { return boom }
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err == nil {
+		t.Fatal("expected torn append")
+	}
+	writeHeadFile = origHead
+
+	res, err := l.RepairHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || res.TornAppend || res.Count != 3 {
+		t.Fatalf("repair should yield clean state: %+v", res)
+	}
+	res, err = l.Verify()
+	if err != nil || !res.OK || res.TornAppend {
+		t.Fatalf("post-repair verify: %+v %v", res, err)
+	}
+}
+
+func TestRepairHeadTornFirstAppend(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	origHead := writeHeadFile
+	boom := errors.New("head")
+	writeHeadFile = func(string, []byte) error { return boom }
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err == nil {
+		t.Fatal("expected torn first append")
+	}
+	writeHeadFile = origHead
+
+	// One record, no anchor at all: still the torn shape.
+	res, err := l.Verify()
+	if err != nil || !res.OK || !res.TornAppend {
+		t.Fatalf("torn first append not flagged: %+v %v", res, err)
+	}
+	res, err = l.RepairHead()
+	if err != nil || !res.OK || res.TornAppend || res.Count != 1 {
+		t.Fatalf("repair of torn first append: %+v %v", res, err)
+	}
+}
+
+func TestRepairHeadNoopWhenClean(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 2)
+	res, err := l.RepairHead()
+	if err != nil || !res.OK || res.TornAppend {
+		t.Fatalf("clean log repair should be a no-op: %+v %v", res, err)
+	}
+}
+
+func TestRepairHeadRefusesTamper(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	lines := readLogLines(t, l)
+	writeLogLines(t, l, lines[:1]) // drop two records: NOT the torn shape
+
+	res, err := l.RepairHead()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK {
+		t.Fatalf("repair must not paper over tamper: %+v", res)
+	}
+	// The stale (tampered-state) anchor must be untouched.
+	head, ok, err := l.readHead()
+	if err != nil || !ok || head.Count != 3 {
+		t.Fatalf("anchor must be unchanged after refused repair: %+v ok=%v err=%v", head, ok, err)
+	}
+}
+
+func TestRepairHeadLockError(t *testing.T) {
+	restoreSeams(t)
+	boom := errors.New("lock")
+	acquireFileLock = func(string) (func() error, error) { return nil, boom }
+	if _, err := tempLog(t).RepairHead(); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want lock", err)
+	}
+}
+
+func TestRepairHeadVerifyError(t *testing.T) {
+	restoreSeams(t)
+	boom := errors.New("io")
+	readFile = func(string) ([]byte, error) { return nil, boom }
+	if _, err := tempLog(t).RepairHead(); !errors.Is(err, boom) {
+		t.Fatalf("got %v, want io", err)
+	}
+}
+
+func TestRepairHeadWriteError(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	boom := errors.New("head")
+	writeHeadFile = func(string, []byte) error { return boom }
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err == nil {
+		t.Fatal("expected torn append")
+	}
+	// Keep the head write failing: repair itself hits the write-error branch.
+	if _, err := l.RepairHead(); err == nil || !strings.Contains(err.Error(), "write head") {
+		t.Fatalf("got %v, want write head", err)
+	}
+}
+
+func TestRepairHeadHashError(t *testing.T) {
+	restoreSeams(t)
+	l := tempLog(t)
+	// Craft the torn shape (one clean genesis record, no head), then poison
+	// marshal only for RepairHead's final tail hashRecord: the chain walk in
+	// verifyState marshals once for the single record, so fail from the second
+	// call on.
+	origHead := writeHeadFile
+	boom := errors.New("head write blocked")
+	writeHeadFile = func(string, []byte) error { return boom }
+	if _, err := l.Append(sampleEvent(time.Now().UTC())); err == nil {
+		t.Fatal("expected torn append")
+	}
+	writeHeadFile = origHead
+	calls := 0
+	origMarshal := marshal
+	marshal = func(v any) ([]byte, error) {
+		calls++
+		if calls > 1 { // call 1: verifyState chain walk; call 2: repair tail hash
+			return nil, errors.New("nope")
+		}
+		return origMarshal(v)
+	}
+	if _, err := l.RepairHead(); !errors.Is(err, ErrMarshal) {
+		t.Fatalf("got %v, want ErrMarshal", err)
 	}
 }
 
@@ -682,8 +868,14 @@ func TestVerifyDetectsForgedAppend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.OK {
-		t.Fatalf("forged append not caught: %+v", res)
+	// A single correctly-chained out-of-band record is byte-for-byte
+	// indistinguishable from an interrupted append, so it is surfaced as
+	// TornAppend for operator review rather than silently accepted — and
+	// rather than hard-failed, which would false-alarm on every real torn
+	// append. TWO or more forged records do hard-fail (see the head-anchor
+	// table test).
+	if !res.TornAppend || res.Reason == "" {
+		t.Fatalf("forged single append must surface as TornAppend for review: %+v", res)
 	}
 }
 
@@ -694,11 +886,13 @@ func TestVerifyHeadMissing(t *testing.T) {
 	if err := os.Remove(headPathFor(l.Path())); err != nil {
 		t.Fatal(err)
 	}
+	// Two records with no anchor at all is NOT the one-record-ahead torn
+	// shape — it stays a hard failure.
 	res, err := l.Verify()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.OK || !strings.Contains(res.Reason, "missing") {
+	if res.OK || res.TornAppend || !strings.Contains(res.Reason, "does not match") {
 		t.Fatalf("removed head anchor not caught: %+v", res)
 	}
 }
@@ -752,19 +946,25 @@ func TestVerifyHeadAnchorDirect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rec2 := Record{SchemaVersion: SchemaVersion, PrevHash: tail, Actor: "b", Action: ActionLabelEdit, Target: "t"}
 	tests := []struct {
-		name    string
-		recs    []Record
-		head    headAnchor
-		hasHead bool
-		wantOK  bool
+		name     string
+		recs     []Record
+		head     headAnchor
+		hasHead  bool
+		wantOK   bool
+		wantTorn bool
 	}{
-		{"empty no head", nil, headAnchor{}, false, true},
-		{"empty with head", nil, headAnchor{Count: 1, TailHash: "x"}, true, false},
-		{"records no head", []Record{rec}, headAnchor{}, false, false},
-		{"count mismatch", []Record{rec}, headAnchor{Count: 2, TailHash: tail}, true, false},
-		{"tail hash mismatch", []Record{rec}, headAnchor{Count: 1, TailHash: "nope"}, true, false},
-		{"all good", []Record{rec}, headAnchor{Count: 1, TailHash: tail}, true, true},
+		{"empty no head", nil, headAnchor{}, false, true, false},
+		{"empty with head", nil, headAnchor{Count: 1, TailHash: "x"}, true, false, false},
+		{"one record no head is torn first append", []Record{rec}, headAnchor{}, false, true, true},
+		{"two records no head is tamper", []Record{rec, rec2}, headAnchor{}, false, false, false},
+		{"head ahead of log", []Record{rec}, headAnchor{Count: 2, TailHash: tail}, true, false, false},
+		{"tail hash mismatch", []Record{rec}, headAnchor{Count: 1, TailHash: "nope"}, true, false, false},
+		{"all good", []Record{rec}, headAnchor{Count: 1, TailHash: tail}, true, true, false},
+		{"one clean ahead is torn", []Record{rec, rec2}, headAnchor{Count: 1, TailHash: tail}, true, true, true},
+		{"one ahead but anchored record modified", []Record{rec, rec2}, headAnchor{Count: 1, TailHash: "wrong"}, true, false, false},
+		{"two ahead is tamper", []Record{rec, rec2}, headAnchor{Count: 0, TailHash: ""}, true, false, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -772,8 +972,9 @@ func TestVerifyHeadAnchorDirect(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if res.OK != tc.wantOK {
-				t.Fatalf("OK = %v, want %v (%+v)", res.OK, tc.wantOK, res)
+			if res.OK != tc.wantOK || res.TornAppend != tc.wantTorn {
+				t.Fatalf("OK=%v torn=%v, want OK=%v torn=%v (%+v)",
+					res.OK, res.TornAppend, tc.wantOK, tc.wantTorn, res)
 			}
 		})
 	}
@@ -782,11 +983,19 @@ func TestVerifyHeadAnchorDirect(t *testing.T) {
 func TestVerifyHeadAnchorHashError(t *testing.T) {
 	restoreSeams(t)
 	marshal = func(any) ([]byte, error) { return nil, errors.New("nope") }
+	// Exact-count branch: hashing the tail fails.
 	_, err := verifyHeadAnchor(
 		[]Record{{PrevHash: GenesisPrevHash}},
 		headAnchor{Count: 1, TailHash: "x"}, true)
 	if !errors.Is(err, ErrMarshal) {
-		t.Fatalf("got %v, want ErrMarshal", err)
+		t.Fatalf("exact-count branch: got %v, want ErrMarshal", err)
+	}
+	// Torn-candidate branch: hashing the anchored record fails.
+	_, err = verifyHeadAnchor(
+		[]Record{{PrevHash: GenesisPrevHash}, {PrevHash: "h"}},
+		headAnchor{Count: 1, TailHash: "x"}, true)
+	if !errors.Is(err, ErrMarshal) {
+		t.Fatalf("torn-candidate branch: got %v, want ErrMarshal", err)
 	}
 }
 

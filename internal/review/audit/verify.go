@@ -2,16 +2,28 @@ package audit
 
 import "fmt"
 
-// VerifyResult is the outcome of walking a log's hash chain. OK is true only
-// when every link is intact; otherwise BrokenAt names the 1-based index of the
-// first record whose prev_hash does not match the recomputed hash of its
-// predecessor (or, for the first record, does not equal GenesisPrevHash), and
-// Reason describes the break.
+// VerifyResult is the outcome of attesting a log. OK is true when every chain
+// link is intact and the head anchor raises no tamper alarm; otherwise BrokenAt
+// names the 1-based index of the first record implicated and Reason describes
+// the break.
+//
+// TornAppend flags the one benign inconsistency an interrupted Append can
+// leave behind: the log holds exactly one valid, correctly-chained record more
+// than the head anchor attests (the record landed, the anchor update did not).
+// Chain integrity still holds, so OK stays true — but callers surfacing audit
+// status should show the flag, and an operator heals it with RepairHead (or it
+// self-heals on the next successful Append). Note the honest limit: a torn
+// append is byte-for-byte indistinguishable from a single FORGED,
+// correctly-chained record appended out-of-band, which is why the state is
+// flagged rather than silently accepted. Any other head/log divergence
+// (two or more records ahead, anchored record altered, records truncated)
+// remains a hard tamper failure.
 type VerifyResult struct {
-	OK       bool
-	Count    int
-	BrokenAt int
-	Reason   string
+	OK         bool
+	Count      int
+	BrokenAt   int
+	Reason     string
+	TornAppend bool
 }
 
 // Verify attests the active log in two stages.
@@ -28,53 +40,97 @@ type VerifyResult struct {
 //     advances it under the same lock that writes the record.
 //
 // A chain break takes precedence over a head mismatch. An empty log with no head
-// verifies OK (a fresh, never-written log).
+// verifies OK (a fresh, never-written log). A log exactly one clean record ahead
+// of its anchor verifies OK with TornAppend set (see VerifyResult).
+//
+// Verify takes no lock; a result observed concurrently with a live Append may
+// transiently show TornAppend.
 func (l *Log) Verify() (VerifyResult, error) {
+	res, _, err := l.verifyState()
+	return res, err
+}
+
+// verifyState is the shared core of Verify and RepairHead: it loads the
+// records, walks the chain, checks the head anchor, and returns the records
+// alongside the result so RepairHead can re-anchor without a second read.
+func (l *Log) verifyState() (VerifyResult, []Record, error) {
 	recs, err := l.Records()
 	if err != nil {
-		return VerifyResult{}, err
+		return VerifyResult{}, nil, err
 	}
 	res, err := verifyRecords(recs)
 	if err != nil {
-		return VerifyResult{}, err
+		return VerifyResult{}, nil, err
 	}
 	if !res.OK {
-		return res, nil
+		return res, recs, nil
 	}
 	head, hasHead, err := l.readHead()
 	if err != nil {
-		return VerifyResult{}, err
+		return VerifyResult{}, nil, err
 	}
-	return verifyHeadAnchor(recs, head, hasHead)
+	res, err = verifyHeadAnchor(recs, head, hasHead)
+	return res, recs, err
 }
 
 // verifyHeadAnchor checks the tail record against the head sidecar. It runs only
 // after the chain has verified, so any failure here is specifically a tail-level
-// tamper the chain could not see.
+// inconsistency the chain could not see. The exactly-one-clean-record-ahead
+// shape is classified as a torn append (see VerifyResult.TornAppend); everything
+// else that diverges is tamper.
 func verifyHeadAnchor(recs []Record, head headAnchor, hasHead bool) (VerifyResult, error) {
 	n := len(recs)
+	// Treat a missing sidecar as an anchor attesting zero records: a fresh log
+	// is OK, a single chained record is a torn FIRST append (the head write
+	// never happened), and two or more unanchored records are tamper.
+	if !hasHead {
+		head = headAnchor{Count: 0, TailHash: ""}
+	}
 	if n == 0 {
-		if hasHead {
+		if head.Count != 0 {
 			return brokenHead(0, 0, "head anchor is present but the log has no records (all records were truncated)"), nil
 		}
 		return VerifyResult{OK: true, Count: 0}, nil
 	}
-	if !hasHead {
-		return brokenHead(n, n, "head anchor is missing; the tail record is unattested (anchor removed)"), nil
-	}
-	if head.Count != n {
+	switch {
+	case head.Count == n:
+		tailHash, err := hashRecord(recs[n-1])
+		if err != nil {
+			return VerifyResult{}, err
+		}
+		if head.TailHash != tailHash {
+			return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n)), nil
+		}
+		return VerifyResult{OK: true, Count: n}, nil
+	case head.Count == n-1:
+		// Candidate torn append: the head is exactly one behind. It is benign
+		// only if the record the anchor DOES attest is intact (for a torn
+		// first append there is no anchored record to check). The chain walk
+		// already proved record n chains onto record n-1.
+		if head.Count > 0 {
+			anchoredHash, err := hashRecord(recs[head.Count-1])
+			if err != nil {
+				return VerifyResult{}, err
+			}
+			if head.TailHash != anchoredHash {
+				return brokenHead(n, head.Count, fmt.Sprintf(
+					"head anchor does not match record %d it claims to attest (record %d was modified)",
+					head.Count, head.Count)), nil
+			}
+		}
+		return VerifyResult{
+			OK:         true,
+			Count:      n,
+			TornAppend: true,
+			Reason: fmt.Sprintf(
+				"log has %d record(s) but the head anchor attests %d: an append was interrupted before the anchor advanced (or a single chained record was appended out-of-band); run RepairHead after review",
+				n, head.Count),
+		}, nil
+	default:
 		return brokenHead(n, n, fmt.Sprintf(
 			"head anchor count %d does not match %d record(s) on disk (records were added or removed at the tail)",
 			head.Count, n)), nil
 	}
-	tailHash, err := hashRecord(recs[n-1])
-	if err != nil {
-		return VerifyResult{}, err
-	}
-	if head.TailHash != tailHash {
-		return brokenHead(n, n, fmt.Sprintf("tail record %d hash does not match the head anchor (the last record was modified)", n)), nil
-	}
-	return VerifyResult{OK: true, Count: n}, nil
 }
 
 // brokenHead renders a head-anchor verification failure.

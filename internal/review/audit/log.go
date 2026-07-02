@@ -184,6 +184,15 @@ func parseRecords(data []byte) ([]Record, error) {
 // active file, or GenesisPrevHash when the file is empty. After the line lands,
 // the head anchor is advanced to the new tail so the tail record stays
 // attestable.
+//
+// Durability is AT-LEAST-ONCE: the record line and the head anchor are two
+// writes, so on an error return (or a crash mid-call) the record MAY already be
+// durable with the anchor one behind. Callers must not blind-retry — a retry
+// would append a duplicate record; use the Event's RequestID to detect an
+// already-landed record before retrying. The stale-anchor state is benign:
+// Verify classifies it as TornAppend (not tamper) and it heals on the next
+// successful Append here (the anchor is recomputed from the on-disk tail) or
+// explicitly via RepairHead.
 func (l *Log) Append(e Event) (Record, error) {
 	if err := e.validate(); err != nil {
 		return Record{}, err
@@ -242,6 +251,38 @@ func (l *Log) Append(e Event) (Record, error) {
 		return Record{}, err
 	}
 	return rec, nil
+}
+
+// RepairHead heals the one benign inconsistency an interrupted Append leaves
+// behind: a clean, fully-chained log whose head anchor is exactly one record
+// behind (VerifyResult.TornAppend). It re-verifies under the same in-process
+// and inter-process locks Append takes, and only when the state is exactly the
+// torn-append shape does it advance the anchor to the on-disk tail. Every other
+// state is left untouched: a clean log is a no-op, and a tamper finding is
+// returned as-is so repair can never be used to paper over a real integrity
+// break. The returned result reflects the post-repair state.
+func (l *Log) RepairHead() (VerifyResult, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	release, err := acquireFileLock(l.path)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	defer func() { _ = release() }()
+
+	res, recs, err := l.verifyState()
+	if err != nil || !res.OK || !res.TornAppend {
+		return res, err
+	}
+	n := len(recs)
+	tailHash, err := hashRecord(recs[n-1])
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if err := l.writeHead(n, tailHash); err != nil {
+		return VerifyResult{}, err
+	}
+	return VerifyResult{OK: true, Count: n}, nil
 }
 
 // headAnchor pins the active log's tail: the count of records and the hash of
