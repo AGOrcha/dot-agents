@@ -216,10 +216,49 @@ func TestCtlUnavailable(t *testing.T) {
 	}
 }
 
-// TestCtlHangupResp covers the client's response-decode error path: a server
-// that accepts and closes without answering is a protocol error, not
-// ErrControlUnavailable.
+// TestCtlHangupResp pins the client's response-decode error path
+// DETERMINISTICALLY: the fake server reads the full request line before
+// closing, so the client's request write always succeeds and the failure
+// always lands on the response decode. (An accept-then-immediate-close
+// server races the client's write — see TestCtlHangupAnyPoint.)
 func TestCtlHangupResp(t *testing.T) {
+	path := sockPath(t)
+	ln, err := net.Listen(unixNetwork, path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		// Consume the one-line request so the client's write is fully
+		// acknowledged, then hang up without answering.
+		buf := make([]byte, maxControlRequestBytes)
+		for {
+			n, rdErr := conn.Read(buf)
+			if rdErr != nil || (n > 0 && buf[n-1] == '\n') {
+				break
+			}
+		}
+		conn.Close()
+	}()
+
+	_, err = NewControlClient(path).Status(context.Background())
+	if err == nil || errors.Is(err, ErrControlUnavailable) || !strings.Contains(err.Error(), "response") {
+		t.Fatalf("Status against hanging-up server = %v, want response decode error", err)
+	}
+}
+
+// TestCtlHangupAnyPoint covers the nondeterministic hangup: a server that
+// accepts and closes immediately races the client's request write, so the
+// exchange legitimately fails EITHER at the request write (EPIPE/ECONNRESET
+// when the close lands first) OR at the response decode (EOF when the write
+// was buffered first). The contract pinned here is what holds on every
+// interleaving: a non-nil exchange error that is NOT ErrControlUnavailable
+// (the dial succeeded — a service was present, it just hung up).
+func TestCtlHangupAnyPoint(t *testing.T) {
 	path := sockPath(t)
 	ln, err := net.Listen(unixNetwork, path)
 	if err != nil {
@@ -234,8 +273,37 @@ func TestCtlHangupResp(t *testing.T) {
 	}()
 
 	_, err = NewControlClient(path).Status(context.Background())
-	if err == nil || errors.Is(err, ErrControlUnavailable) || !strings.Contains(err.Error(), "response") {
-		t.Fatalf("Status against hanging-up server = %v, want response decode error", err)
+	if err == nil || errors.Is(err, ErrControlUnavailable) ||
+		!strings.Contains(err.Error(), "service/http: control status") {
+		t.Fatalf("Status against hanging-up server = %v, want a control-status exchange error", err)
+	}
+}
+
+// TestCtlServerSurvivesHangup is the server side of the hangup contract: a
+// client that connects and hangs up — before sending anything, or mid-request
+// — must not panic the control plane or leak its handler; the very next
+// well-formed exchange succeeds and shutdown stays clean (startCtl's cleanup
+// fails the test if Serve cannot unwind, which is what a leaked handler
+// blocking wg.Wait would cause).
+func TestCtlServerSurvivesHangup(t *testing.T) {
+	c := NewControl(sockPath(t), fakeState{}, func() { t.Error("stop fired") })
+	startCtl(t, c)
+
+	for _, payload := range []string{"", `{"op":"sta`} {
+		conn, err := net.Dial(unixNetwork, c.SocketPath())
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		if payload != "" {
+			if _, err := conn.Write([]byte(payload)); err != nil {
+				t.Fatalf("partial write: %v", err)
+			}
+		}
+		conn.Close()
+	}
+
+	if _, err := NewControlClient(c.SocketPath()).Status(context.Background()); err != nil {
+		t.Fatalf("Status after client hangups = %v, want success (server must survive)", err)
 	}
 }
 
