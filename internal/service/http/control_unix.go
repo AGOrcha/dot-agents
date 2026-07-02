@@ -4,9 +4,11 @@ package http
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
@@ -44,6 +46,14 @@ const staleDialTimeout = 250 * time.Millisecond
 func listenControl(path string) (net.Listener, error) {
 	ln, err := net.Listen(unixNetwork, path)
 	if err != nil {
+		// Takeover is only sound when the bind provably failed because a
+		// socket file already occupies the path (EADDRINUSE). Any other bind
+		// error (permissions, missing parent, path oddities) propagates
+		// untouched — entering takeover there could remove an unrelated file
+		// that happens to live at the path.
+		if !errors.Is(err, syscall.EADDRINUSE) {
+			return nil, err
+		}
 		if ln, err = takeOverStaleSocket(path, err); err != nil {
 			return nil, err
 		}
@@ -66,6 +76,13 @@ func takeOverStaleSocket(path string, listenErr error) (net.Listener, error) {
 	if conn, dialErr := net.DialTimeout(unixNetwork, path, staleDialTimeout); dialErr == nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("service/http: control socket %q already served by a running service: %w", path, listenErr)
+	}
+	// Only a socket file is ever removed: EADDRINUSE proved a bind conflict,
+	// but the occupant could still have been swapped for a regular file or
+	// directory between the bind and this point — refuse rather than delete
+	// something that is not ours.
+	if fi, statErr := os.Lstat(path); statErr != nil || fi.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("service/http: control path %q is not a socket; refusing takeover: %w", path, listenErr)
 	}
 	if rmErr := fsops.Remove(path); rmErr != nil {
 		return nil, fmt.Errorf("service/http: control socket %q: %w (stale-file removal failed: %v)", path, listenErr, rmErr)

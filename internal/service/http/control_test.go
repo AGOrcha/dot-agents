@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -482,5 +483,38 @@ func TestBothListenersShutdown(t *testing.T) {
 	}
 	if _, err := os.Stat(ctl.SocketPath()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("control socket still on disk after shutdown: %v", err)
+	}
+}
+
+// TestListenControlNonAddrInUseErrorPropagates pins the takeover trigger
+// classification: a bind failure that is NOT EADDRINUSE (here: missing parent
+// directory) must propagate untouched — takeover would otherwise run its
+// remove path against an arbitrary listen error.
+func TestListenControlNonAddrInUseErrorPropagates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "no-such-parent", "ctl.sock")
+	if _, err := listenControl(path); err == nil {
+		t.Fatal("listenControl on a missing parent should fail")
+	} else if strings.Contains(err.Error(), "refusing takeover") ||
+		strings.Contains(err.Error(), "already served") {
+		t.Fatalf("non-EADDRINUSE bind error entered takeover: %v", err)
+	}
+}
+
+// TestCtlTakeoverRefusesNonSocket pins the occupant check: when the path
+// holds a REGULAR FILE (not a socket), takeover must refuse rather than
+// delete it — even though a dial probe fails just like a stale socket.
+func TestCtlTakeoverRefusesNonSocket(t *testing.T) {
+	path := sockPath(t)
+	if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := takeOverStaleSocket(path, syscall.EADDRINUSE); err == nil {
+		t.Fatal("takeover over a regular file must refuse")
+	} else if !strings.Contains(err.Error(), "refusing takeover") {
+		t.Fatalf("expected refusing-takeover error, got: %v", err)
+	}
+	// The imposter file must be untouched.
+	if b, err := os.ReadFile(path); err != nil || string(b) != "not a socket" {
+		t.Fatalf("non-socket occupant was modified/removed: %v %q", err, b)
 	}
 }
