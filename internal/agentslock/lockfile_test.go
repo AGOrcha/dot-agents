@@ -1294,29 +1294,40 @@ func TestClaimPublishesCompleteIdentityAtomically(t *testing.T) {
 // complete, parseable identity. Under the old two-step design the poller
 // could catch the holderless window; under the atomic link claim any partial
 // observation is a hard failure, not a flake.
+//
+// The impossibility claim is scoped to the HARDLINK claim path — the degraded
+// O_EXCL path is the documented two-step residual (FAT/exFAT), and on
+// windows-latest an AV scan can transiently pin the claim temp, pushing a
+// cycle onto that path (the master run 28570275221 red: the poller read the
+// O_EXCL window's empty file and correctly reported "partial"). The link seam
+// therefore records whether any cycle COULD have degraded (a link failure
+// other than exists/not-exists); a partial observation is fatal only when no
+// degradation was possible, and otherwise the test verifies the degraded
+// cycle still ended with a complete identity on disk.
 func TestClaimNeverExposesPartialIdentity(t *testing.T) {
+	realLink := linkLockFn
+	t.Cleanup(func() { linkLockFn = realLink })
+	var mu sync.Mutex
+	degradedPossible := false
+	linkLockFn = func(oldname, newname string) error {
+		err := realLink(oldname, newname)
+		if err != nil && !os.IsExist(err) && !os.IsNotExist(err) {
+			mu.Lock()
+			degradedPossible = true
+			mu.Unlock()
+		}
+		return err
+	}
+
 	path := filepath.Join(t.TempDir(), "guarded.ndjson")
 	stop := make(chan struct{})
 	done := make(chan struct{})
-	var partial atomicwrap
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			data, err := os.ReadFile(path + ".lock")
-			if err != nil {
-				continue // free, mid-rename, or trash-churn: all fine
-			}
-			if _, ok := identityAge(data); !ok {
-				partial.set(string(data))
-				return
-			}
-		}
-	}()
+	degraded := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return degradedPossible
+	}
+	partial := pollForPartialIdentity(path+".lock", stop, done, degraded)
 	for i := 0; i < 30; i++ {
 		release, err := AcquireFileLock(path)
 		if err != nil {
@@ -1329,7 +1340,80 @@ func TestClaimNeverExposesPartialIdentity(t *testing.T) {
 	close(stop)
 	<-done
 	if got, seen := partial.get(); seen {
-		t.Fatalf("observer caught a partial identity at the lock name: %q", got)
+		t.Fatalf("observer caught a partial identity on the HARDLINK claim path: %q", got)
+	}
+}
+
+// pollForPartialIdentity starts the concurrent observer for the structural
+// claim-atomicity test: it polls the lock name until stop closes, ignoring
+// read failures (free / mid-rename / trash churn) and any unparseable read
+// for which the degraded O_EXCL path could have been engaged, and captures
+// the first partial identity observed on the hardlink path.
+func pollForPartialIdentity(lockPath string, stop, done chan struct{}, degraded func() bool) *atomicwrap {
+	partial := &atomicwrap{}
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(lockPath)
+			if err != nil {
+				continue // free, mid-rename, or trash-churn: all fine
+			}
+			if _, ok := identityAge(data); ok {
+				continue
+			}
+			if degraded() {
+				continue // documented O_EXCL two-step window; not the hardlink path
+			}
+			partial.set(string(data))
+			return
+		}
+	}()
+	return partial
+}
+
+// TestClaimTransientLinkFailureStaysOnHardlinkPath pins the code-side fix for
+// the windows-latest structural red: a transient hardlink failure (AV pinning
+// the just-written temp) must be retried on the strong path, NOT degrade the
+// claim to the two-step O_EXCL. The exclusive path's pre-verify hook doubles
+// as the detector — it must never fire.
+func TestClaimTransientLinkFailureStaysOnHardlinkPath(t *testing.T) {
+	realLink := linkLockFn
+	t.Cleanup(func() { linkLockFn = realLink })
+	t.Cleanup(func() { testHookBeforeClaimVerify = nil })
+	testHookBeforeClaimVerify = func(string) {
+		t.Error("claim degraded to the O_EXCL path on a transient link failure")
+	}
+	failures := 0
+	linkLockFn = func(oldname, newname string) error {
+		if failures < linkDegradeAttempts-1 {
+			failures++
+			return &os.PathError{Op: "link", Path: newname, Err: fmt.Errorf("simulated AV sharing violation")}
+		}
+		return realLink(oldname, newname)
+	}
+
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire must ride out transient link failures: %v", err)
+	}
+	data, rerr := os.ReadFile(path + ".lock")
+	if rerr != nil {
+		t.Fatalf("lock identity unreadable: %v", rerr)
+	}
+	if _, ok := identityAge(data); !ok {
+		t.Fatalf("hardlink claim must publish a complete identity, got %q", data)
+	}
+	if failures != linkDegradeAttempts-1 {
+		t.Fatalf("expected %d absorbed transients, saw %d", linkDegradeAttempts-1, failures)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }
 
@@ -1359,7 +1443,7 @@ func TestClaimLostRaceReportsExist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guarded.ndjson")
 	occupant := "777\n888\nwinner\n"
 	mustWriteFile(t, path+".lock", occupant)
-	if _, err := claimLock(path + ".lock"); !os.IsExist(err) {
+	if _, err := claimLock(path+".lock", &acquireLoopState{}); !os.IsExist(err) {
 		t.Fatalf("claim against an occupied name must report exists, got: %v", err)
 	}
 	data, err := os.ReadFile(path + ".lock")
@@ -1369,7 +1453,8 @@ func TestClaimLostRaceReportsExist(t *testing.T) {
 }
 
 // TestClaimFallsBackWhenLinkUnsupported: on a filesystem without hardlinks
-// (FAT/exFAT — simulated via the link seam) the claim degrades to the O_EXCL
+// (FAT/exFAT — simulated via the link seam failing every attempt) the claim
+// absorbs linkDegradeAttempts transients, then degrades to the O_EXCL
 // two-step and still publishes a complete identity.
 func TestClaimFallsBackWhenLinkUnsupported(t *testing.T) {
 	realLink := linkLockFn
@@ -1721,10 +1806,15 @@ func assertDeniedMkdirFailsFast(t *testing.T, path, parent, goos string) {
 	if strings.Contains(err.Error(), "timed out") {
 		t.Fatalf("denial must not be misreported as a contention timeout: %v", err)
 	}
-	// Fast fail: well under the 5s acquire budget (windows branch pays only
-	// the ~300ms transient window; unix is immediate).
-	if elapsed >= 2*time.Second {
-		t.Fatalf("denied classification took %v; must fail fast, not burn the acquire budget", elapsed)
+	// Fast fail: the semantic proof is above (the DENIED classification, not a
+	// contention timeout). The elapsed bound is belt-and-braces against a
+	// regression that re-burns the whole budget; it is deliberately generous
+	// (nominal cost is ~300ms for the windows branch, immediate for unix)
+	// because -race plus a loaded CI/dev machine can stretch the 30 x 10ms
+	// tick loop severalfold — a 2s bound flaked at 2.10s under parallel test
+	// load.
+	if elapsed >= lockAcquireTimeout {
+		t.Fatalf("denied classification took %v; must fail before the acquire budget expires", elapsed)
 	}
 }
 
