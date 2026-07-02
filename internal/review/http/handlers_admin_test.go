@@ -14,11 +14,21 @@ import (
 
 // TestUsersCRUDHappyPath drives create → list → role change → delete as the
 // admin, asserting the print-once token contract and one audit record per
-// mutation (spec R6, OQ1).
+// mutation (spec R6, OQ1). Each stage lives in its own helper.
 func TestUsersCRUDHappyPath(t *testing.T) {
 	env := newTestEnv(t)
+	created := createUserStep(t, env)
+	assertIssuedTokenPersisted(t, env, created)
+	assertUsersListSafe(t, env)
+	changeRoleStep(t, env)
+	deleteUserStep(t, env)
+	assertUsersCRUDAudit(t, env)
+}
 
-	// Create.
+// createUserStep creates a reviewer over HTTP and checks the 201 payload,
+// including the rvw_-prefixed print-once plaintext token.
+func createUserStep(t *testing.T, env *testEnv) createUserJSON {
+	t.Helper()
 	rr := env.do(nethttp.MethodPost, DefaultPrefix+"/users", tokAdmin,
 		`{"email":"new@example.com","role":"reviewer"}`)
 	wantStatus(t, rr, nethttp.StatusCreated)
@@ -30,22 +40,31 @@ func TestUsersCRUDHappyPath(t *testing.T) {
 	if !strings.HasPrefix(created.Token, "rvw_") {
 		t.Fatalf("issued token %q lacks the rvw_ prefix", created.Token)
 	}
+	return created
+}
 
-	// The persisted hash verifies against the issued plaintext.
+// assertIssuedTokenPersisted checks the stored argon2id hash verifies against
+// the issued plaintext.
+func assertIssuedTokenPersisted(t *testing.T, env *testEnv, created createUserJSON) {
+	t.Helper()
 	uf, err := auth.LoadUsersFile(env.usersPath)
 	if err != nil {
 		t.Fatalf("load users: %v", err)
 	}
-	stored, found := uf.Find("new@example.com")
+	stored, found := uf.Find(created.Email)
 	if !found {
 		t.Fatal("created user not persisted")
 	}
 	if ok, err := auth.VerifyToken(created.Token, stored.TokenHash); err != nil || !ok {
 		t.Fatalf("issued token does not verify against stored hash: %v %v", ok, err)
 	}
+}
 
-	// List never leaks hashes or plaintext.
-	rr = env.do(nethttp.MethodGet, DefaultPrefix+"/users", tokAdmin, "")
+// assertUsersListSafe checks the list route returns the user without leaking
+// hash or plaintext material.
+func assertUsersListSafe(t *testing.T, env *testEnv) {
+	t.Helper()
+	rr := env.do(nethttp.MethodGet, DefaultPrefix+"/users", tokAdmin, "")
 	wantStatus(t, rr, nethttp.StatusOK)
 	if body := rr.Body.String(); strings.Contains(body, "token") || strings.Contains(body, "argon2") {
 		t.Fatalf("users list leaks secret material: %s", body)
@@ -55,9 +74,12 @@ func TestUsersCRUDHappyPath(t *testing.T) {
 	if len(list.Users) != 1 || list.Users[0].Email != "new@example.com" {
 		t.Fatalf("users list: %+v", list)
 	}
+}
 
-	// Role change (case-insensitive email match).
-	rr = env.do(nethttp.MethodPatch, DefaultPrefix+"/users/NEW@example.com", tokAdmin,
+// changeRoleStep changes the user's role via a case-insensitive email match.
+func changeRoleStep(t *testing.T, env *testEnv) {
+	t.Helper()
+	rr := env.do(nethttp.MethodPatch, DefaultPrefix+"/users/NEW@example.com", tokAdmin,
 		`{"role":"readonly"}`)
 	wantStatus(t, rr, nethttp.StatusOK)
 	var changed userJSON
@@ -65,12 +87,19 @@ func TestUsersCRUDHappyPath(t *testing.T) {
 	if changed.Role != "readonly" {
 		t.Fatalf("role change response: %+v", changed)
 	}
+}
 
-	// Delete.
-	rr = env.do(nethttp.MethodDelete, DefaultPrefix+"/users/new@example.com", tokAdmin, "")
+// deleteUserStep removes the user and expects a 204.
+func deleteUserStep(t *testing.T, env *testEnv) {
+	t.Helper()
+	rr := env.do(nethttp.MethodDelete, DefaultPrefix+"/users/new@example.com", tokAdmin, "")
 	wantStatus(t, rr, nethttp.StatusNoContent)
+}
 
-	// Audit: one record per mutation, correct actions, clean chain.
+// assertUsersCRUDAudit checks one record per mutation, correct actions and
+// attribution, role-change before/after hashes, and a clean chain.
+func assertUsersCRUDAudit(t *testing.T, env *testEnv) {
+	t.Helper()
 	recs := env.auditRecords()
 	if len(recs) != 3 {
 		t.Fatalf("expected 3 audit records, got %d", len(recs))

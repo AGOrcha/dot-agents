@@ -173,19 +173,11 @@ func (m *Mount) withAudit(target targetFunc, next nethttp.Handler) nethttp.Handl
 		w.Header().Set(HeaderRequestID, reqID)
 
 		path := target(r)
-		var pre preImage
-		if path != "" {
-			unlock, err := m.lockTarget(path)
-			if err != nil {
-				writeError(w, nethttp.StatusInternalServerError, "lock mutation target: "+err.Error(), reqID)
-				return
-			}
-			defer unlock()
-			if pre, err = readPreImage(path); err != nil {
-				writeError(w, nethttp.StatusInternalServerError, "capture mutation pre-image: "+err.Error(), reqID)
-				return
-			}
+		pre, unlock, ok := m.prepareTarget(w, path, reqID)
+		if !ok {
+			return
 		}
+		defer unlock()
 
 		staged := &stagedAudit{}
 		buf := newBufferedResponse()
@@ -211,6 +203,28 @@ func (m *Mount) withAudit(target targetFunc, next nethttp.Handler) nethttp.Handl
 		}
 		buf.flushTo(w)
 	})
+}
+
+// prepareTarget locks the mutation target and snapshots its pre-image (steps
+// 1-2 of the guard). On failure it writes the 500 itself, releases anything it
+// acquired, and reports ok=false. A request with no resolvable target ("")
+// skips the guard and gets a no-op unlock.
+func (m *Mount) prepareTarget(w nethttp.ResponseWriter, path, reqID string) (preImage, func(), bool) {
+	if path == "" {
+		return preImage{}, func() {}, true
+	}
+	unlock, err := m.lockTarget(path)
+	if err != nil {
+		writeError(w, nethttp.StatusInternalServerError, "lock mutation target: "+err.Error(), reqID)
+		return preImage{}, nil, false
+	}
+	pre, err := readPreImage(path)
+	if err != nil {
+		unlock()
+		writeError(w, nethttp.StatusInternalServerError, "capture mutation pre-image: "+err.Error(), reqID)
+		return preImage{}, nil, false
+	}
+	return pre, unlock, true
 }
 
 // failClosed enforces the no-unaudited-mutation invariant after an audit
