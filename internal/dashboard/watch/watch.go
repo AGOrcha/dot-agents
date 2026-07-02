@@ -22,6 +22,8 @@
 package watch
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -174,15 +176,17 @@ func New(roots []string, pub events.Publisher, opts ...Option) *Watcher {
 }
 
 // Start seeds the baseline (pre-existing files publish nothing), registers
-// the fsnotify watches, and launches the fsnotify and poll sources. A failed
-// fsnotify setup degrades to poll-only with a warning; it is an error only
-// when the poll fallback is disabled too (a watcher with no source is dead).
+// the fsnotify watches, and launches the fsnotify and poll sources. An
+// inactive fsnotify source — the constructor erroring OR every root failing
+// to register — degrades to poll-only with a warning; it is an error only
+// when the poll fallback is disabled too, because a watcher with zero
+// active sources is dead and must not report healthy.
 func (w *Watcher) Start() error {
 	for _, root := range w.roots {
 		w.seedBaseline(root)
 	}
 	if err := w.startFSNotify(); err != nil && w.poll < 0 {
-		return err
+		return fmt.Errorf("dashboard/watch: no active watch source (poll fallback disabled): %w", err)
 	}
 	if w.poll > 0 {
 		w.wg.Add(1)
@@ -220,9 +224,12 @@ func (w *Watcher) seedBaseline(root string) {
 	}
 }
 
-// startFSNotify builds the fsnotify source and registers every root. An
-// unregistrable root (e.g. not yet created) is a warning, not a failure —
-// the poll fallback picks the directory up once it exists.
+// startFSNotify builds the fsnotify source and registers every root. A
+// single unregistrable root (e.g. not yet created) is a warning, not a
+// failure — the poll fallback picks the directory up once it exists. The
+// returned error reports an INACTIVE source: the constructor failed, or not
+// one root registered (all Add errors wrapped); Start decides whether the
+// poll fallback makes that survivable.
 func (w *Watcher) startFSNotify() error {
 	fsw, err := newWatcher()
 	if err != nil {
@@ -230,14 +237,22 @@ func (w *Watcher) startFSNotify() error {
 		return err
 	}
 	w.fsw = fsw
+	registered := 0
+	addErrs := []error{errors.New("no iter-log root registered with fsnotify")}
 	for _, root := range w.roots {
 		if err := fsw.Add(root); err != nil {
 			w.logger.Warn("dashboard/watch: cannot watch root, poll fallback covers it",
 				"root", root, "error", err)
+			addErrs = append(addErrs, fmt.Errorf("watch %s: %w", root, err))
+			continue
 		}
+		registered++
 	}
 	w.wg.Add(1)
 	go w.fsLoop()
+	if registered == 0 {
+		return errors.Join(addErrs...)
+	}
 	return nil
 }
 

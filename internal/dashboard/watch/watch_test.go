@@ -78,8 +78,11 @@ type fakeFSWatcher struct {
 	errs   chan error
 	added  []string
 	addErr error
-	closed bool
-	mu     sync.Mutex
+	// addOKPrefix, when non-empty, exempts matching paths from addErr so a
+	// test can mix registrable and unregistrable roots.
+	addOKPrefix string
+	closed      bool
+	mu          sync.Mutex
 }
 
 func newFakeFSWatcher() *fakeFSWatcher {
@@ -89,7 +92,7 @@ func newFakeFSWatcher() *fakeFSWatcher {
 func (f *fakeFSWatcher) Add(path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.addErr != nil {
+	if f.addErr != nil && (f.addOKPrefix == "" || !strings.HasPrefix(path, f.addOKPrefix)) {
 		return f.addErr
 	}
 	f.added = append(f.added, path)
@@ -409,18 +412,68 @@ func TestStartFSNotifyFailureDegradesToPollOnly(t *testing.T) {
 func TestStartUnregistrableRootWarnsAndContinues(t *testing.T) {
 	fake := newFakeFSWatcher()
 	fake.addErr = errors.New("no such directory")
+	okRoot := t.TempDir()
+	fake.addOKPrefix = okRoot // second root registers fine
 	stubWatcherFactory(t, func() (fsWatcher, error) { return fake, nil })
 	var buf bytes.Buffer
 
-	w := New([]string{filepath.Join(t.TempDir(), "missing")}, newRecordingPublisher(),
+	// One root unregistrable, one registered: fsnotify is still an active
+	// source, so Start succeeds even with the poll disabled.
+	w := New([]string{filepath.Join(t.TempDir(), "missing"), okRoot}, newRecordingPublisher(),
 		WithPollInterval(-1),
 		WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
 	if err := w.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
+		t.Fatalf("Start with one registered root must succeed: %v", err)
 	}
 	w.Close()
 	if !strings.Contains(buf.String(), "cannot watch root") {
 		t.Errorf("Add failure should be logged, got: %s", buf.String())
+	}
+}
+
+// A watcher with ZERO active sources — every fsnotify Add failed AND the
+// poll fallback disabled — must error out of Start, not report a healthy
+// dead bridge. The wrapped Add error stays inspectable.
+func TestStartAllRootsUnregistrablePollDisabledErrors(t *testing.T) {
+	fake := newFakeFSWatcher()
+	addErr := errors.New("no such directory")
+	fake.addErr = addErr
+	stubWatcherFactory(t, func() (fsWatcher, error) { return fake, nil })
+
+	w := New([]string{filepath.Join(t.TempDir(), "missing")}, newRecordingPublisher(),
+		WithPollInterval(-1))
+	err := w.Start()
+	if err == nil {
+		t.Fatal("Start with all Adds failed + poll disabled must error")
+	}
+	if !errors.Is(err, addErr) {
+		t.Errorf("underlying Add error must be wrapped, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "no active watch source") {
+		t.Errorf("error should name the dead-source condition, got: %v", err)
+	}
+	w.Close()
+}
+
+// Every Add failing is survivable when the poll fallback is enabled: Start
+// succeeds and the poll alone carries changes to the broker.
+func TestStartAllRootsUnregistrablePollEnabledSucceeds(t *testing.T) {
+	root := t.TempDir()
+	fake := newFakeFSWatcher()
+	fake.addErr = errors.New("no such directory")
+	stubWatcherFactory(t, func() (fsWatcher, error) { return fake, nil })
+	pub := newRecordingPublisher()
+
+	w := New([]string{root}, pub, WithPollInterval(5*time.Millisecond))
+	if err := w.Start(); err != nil {
+		t.Fatalf("Start must degrade to poll-only when the poll is enabled: %v", err)
+	}
+	t.Cleanup(w.Close)
+
+	writeFile(t, root, "session-carried.score.yaml", "session_id: carried\n")
+	ev := pub.waitFor(t, func(e publishedEvent) bool { return e.topic == events.TopicSessionUpdated })
+	if p := ev.payload.(SessionUpdated); p.SessionID != "carried" {
+		t.Errorf("payload = %+v", p)
 	}
 }
 
