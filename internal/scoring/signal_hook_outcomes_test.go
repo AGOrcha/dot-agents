@@ -259,7 +259,7 @@ func TestJoinSortedUniqueIsStableAndUnique(t *testing.T) {
 func TestRubricScoreIncludesHookOutcomesContribution(t *testing.T) {
 	// End-to-end at the rubric layer: when the hook_outcomes signal is
 	// present in the SignalSet, the rubric's Score() returns a breakdown
-	// row for it with the configured weight (0.10 nominal).
+	// row for it with the configured weight (0.09 nominal).
 	r := DefaultRubric()
 	set := SignalSet{
 		Iteration:    1,
@@ -276,8 +276,8 @@ func TestRubricScoreIncludesHookOutcomesContribution(t *testing.T) {
 	for _, row := range got.Breakdown {
 		if row.Signal == SignalHookOutcomes {
 			found = true
-			if row.NominalWeight != 0.10 {
-				t.Errorf("hook_outcomes NominalWeight = %g, want 0.10", row.NominalWeight)
+			if row.NominalWeight != 0.09 {
+				t.Errorf("hook_outcomes NominalWeight = %g, want 0.09", row.NominalWeight)
 			}
 			if !row.Present {
 				t.Errorf("hook_outcomes row Present = false, want true")

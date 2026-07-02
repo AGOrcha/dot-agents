@@ -7,8 +7,8 @@ import (
 )
 
 func TestRubricVersionPinned(t *testing.T) {
-	if RubricVersion != "2.1.0" {
-		t.Errorf("RubricVersion = %q, want 2.1.0 — a version change must be deliberate", RubricVersion)
+	if RubricVersion != "3.0.0" {
+		t.Errorf("RubricVersion = %q, want 3.0.0 — a version change must be deliberate", RubricVersion)
 	}
 	if got := DefaultRubric().Version; got != RubricVersion {
 		t.Errorf("DefaultRubric().Version = %q, want %q", got, RubricVersion)
@@ -34,7 +34,7 @@ func TestDefaultRubricWeightsSumToOne(t *testing.T) {
 func TestDefaultRubricSignalSet(t *testing.T) {
 	want := []SignalID{
 		SignalLanded, SignalVerifier, SignalTests,
-		SignalCorrectionPressure, SignalScope,
+		SignalHumanLabel, SignalCorrectionPressure, SignalScope,
 		SignalHookOutcomes, SignalTokenEfficiency,
 	}
 	got := DefaultRubric().Signals
@@ -64,8 +64,8 @@ func TestSignalLookup(t *testing.T) {
 	if !ok {
 		t.Fatal("Signal(landed) ok = false, want true")
 	}
-	if spec.Weight != 0.20 {
-		t.Errorf("landed weight = %g, want 0.20", spec.Weight)
+	if spec.Weight != 0.17 {
+		t.Errorf("landed weight = %g, want 0.17", spec.Weight)
 	}
 
 	if _, ok := r.Signal(SignalID("does_not_exist")); ok {
@@ -85,7 +85,7 @@ func TestTwoWaySignals(t *testing.T) {
 			t.Errorf("signal %q should be two-way (objective + self-reported source)", id)
 		}
 	}
-	wantOneWay := []SignalID{SignalCorrectionPressure, SignalHookOutcomes, SignalTokenEfficiency}
+	wantOneWay := []SignalID{SignalHumanLabel, SignalCorrectionPressure, SignalHookOutcomes, SignalTokenEfficiency}
 	for _, id := range wantOneWay {
 		if twoWay[id] {
 			t.Errorf("signal %q should not be two-way", id)

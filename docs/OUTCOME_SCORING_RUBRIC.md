@@ -1,7 +1,7 @@
 # Outcome-Scoring Rubric
 
 **Status:** active
-**Rubric version:** 2.1.0
+**Rubric version:** 3.0.0
 **Owners:** dot-agents
 **Go source:** [`internal/scoring/rubric.go`](../internal/scoring/rubric.go)
 **Related:** [`agent-run-scoring-observability-platform.md`](../.agents/proposals/agent-run-scoring-observability-platform.md) (R1, the requirement this rubric serves); [ADR-0004](./adr/0004-execution-telemetry-schema-seed.md) (the execution-telemetry pillar the input signals come from); [`workflow-iter-log.schema.json`](../commands/workflow/static/workflow-iter-log.schema.json) (the iteration-log schema the signals are read from)
@@ -79,15 +79,15 @@ version ladder monotonic without requiring plans to predict each other,
 and avoids a merge-conflict-by-version where two open plans both claim
 the same number.
 
-**R1.5 / R5 coordination (current state).** The two in-flight plans that
-mutate `RubricVersion` are `r1-5-hook-enforcement-telemetry` (minor —
+**R1.5 / R5 coordination (resolved).** The two plans that mutated
+`RubricVersion` were `r1-5-hook-enforcement-telemetry` (minor —
 `hook_outcomes`) and `r5-review-labeling-access` (major — `human_label`).
 R1.5 merged first and observed `2.0.2` at execution, so it took the next
-free minor, `2.1.0` (the shipped value). R5, running later, reads `2.1.0`
-and targets `3.0.0` for its major bump; no rebase of R1.5 is required.
-The plan-side resolution and rationale live in R1.5 plan design,
-section `Q4 / D5 — RubricVersion ordering with R5`
-(`.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md`).
+free minor, `2.1.0`. R5's `r1-integration` task then read `2.1.0` at
+execution time and took the major bump to `3.0.0` (the shipped value);
+no rebase of R1.5 was required. The plan-side resolution and rationale
+live in R1.5 plan design, section `Q4 / D5 — RubricVersion ordering with
+R5` (`.agents/workflow/plans/r1-5-hook-enforcement-telemetry/design.md`).
 Any future concurrent rubric mutator follows the same five-step rule
 above rather than hard-coding a target number here.
 
@@ -180,13 +180,13 @@ fields first and falls back to the legacy booleans.
 
 ## Input signals
 
-Six signals. Each is mapped to a **sub-score in `[0, 1]`** or is reported
+Eight signals. Each is mapped to a **sub-score in `[0, 1]`** or is reported
 **absent** when the telemetry to compute it was never captured. Absent is
 a first-class state — see [Combination](#combination). Sub-score
 extraction itself is the `signals` and `scorer` tasks; this section is
 the contract those tasks implement.
 
-### 1. `landed` — Landed on master (weight 0.20, two-way)
+### 1. `landed` — Landed on master (weight 0.17, two-way)
 
 Did the iteration's work survive into the trunk.
 
@@ -204,7 +204,7 @@ Did the iteration's work survive into the trunk.
 - **Why the highest weight:** surviving in `master` is the truest
   outcome there is — it is ground truth, not self-report.
 
-### 2. `verifier` — Verifier results (weight 0.18, two-way)
+### 2. `verifier` — Verifier results (weight 0.15, two-way)
 
 Did the iteration's verification gates pass.
 
@@ -219,7 +219,7 @@ Did the iteration's verification gates pass.
   `pass → 1.0`, `partial → 0.5`, `fail → 0.0`.
 - **Absent when:** no verifier evidence of any kind exists for the entry.
 
-### 3. `tests` — Test outcomes (weight 0.17, two-way)
+### 3. `tests` — Test outcomes (weight 0.14, two-way)
 
 Did the iteration's tests pass.
 
@@ -233,7 +233,52 @@ Did the iteration's tests pass.
 - **Note:** test *volume* (`tests_added`) is not scored — adding tests is
   good practice but not an outcome. It rides in the breakdown as context.
 
-### 4. `correction_pressure` — Correction pressure (weight 0.13)
+### 4. `human_label` — Human review label (weight 0.15, R5)
+
+Structured reviewer judgement attached to the iteration. Human labels
+are the first signal sourced from external human input rather than
+agent-run telemetry — the reason 3.0.0 is a major bump. The label model
+and sidecar persistence live in
+[`internal/review/labels`](../internal/review/labels/label.go) (the R5
+label store, which the R5 label-collection endpoints write through); the
+extractor lives in `internal/scoring/signal_human_label.go`.
+
+- **Source:** the `iter-N.labels.yaml` sidecar adjacent to `iter-N.yaml`
+  in the iteration-log directory (R5 spec D5.1). Each label carries an
+  enum-bounded structured judgement (spec D5.7): `correctness` (0–3),
+  `scope_judgement` (`on-target` | `partial` | `breach`), and
+  `hallucination` (`none` | `minor` | `major`), plus free text.
+- **Per-label mapping (spec D5.7):** sub-score = mean of the three
+  normalized dimensions — `correctness / 3`; `scope_judgement`
+  `on-target → 1.0`, `partial → 0.5`, `breach → 0.0`; `hallucination`
+  `none → 1.0`, `minor → 0.5`, `major → 0.0`. The `free_text` field is
+  surfaced to humans but never affects the score.
+- **Aggregation (spec D5.8 + OQ2):** labels are append-on-edit; a
+  label's effective judgement is its latest edit. When one reviewer
+  holds several labels, only their most recently updated label counts
+  (latest-per-reviewer); the signal is the **mean** across reviewers'
+  latest labels. An admin's *own* label marked `admin_override`
+  supersedes the reviewer mean entirely; an admin *edit* of a reviewer's
+  label remains attributed to the reviewer (the audit log captures who
+  edited) and participates as that reviewer's latest state.
+- **Schema versioning (spec OQ3):** every label and sidecar records
+  `label_schema_version`. The extractor scores schema major 1 only; a
+  sidecar or label at any other major degrades to absent rather than
+  silently misreading a future field layout.
+- **Absent when:** no sidecar exists, the sidecar holds no labels, it is
+  unreadable or fails validation, or its schema major is unsupported.
+  Absent drops the signal from the vote per the renormalizing
+  combination — an unreviewed iteration neither gains nor loses score,
+  so shipping this signal changes nothing for label-less iterations.
+- **One-way (human-sourced):** the label *is* the judgement; there is no
+  self-report counterpart, so this signal does not feed the integrity
+  track.
+- **Why 0.15:** human judgement is the rubric's only direct measure of
+  "did the score get this run right," so it carries more weight than any
+  process signal — but less than the combined objective correctness
+  signals, so a label refines rather than overrides the telemetry.
+
+### 5. `correction_pressure` — Correction pressure (weight 0.11)
 
 How little the iteration had to be corrected. A new signal: it is the
 most informative thing the previous rubric left unweighted.
@@ -250,7 +295,7 @@ most informative thing the previous rubric left unweighted.
 - **Not two-way:** it is a composite of weakly-self-reported and
   objective inputs with no single clean claimed/observed pair.
 
-### 5. `scope` — Scope adherence (weight 0.13, two-way)
+### 6. `scope` — Scope adherence (weight 0.11, two-way)
 
 Did the iteration stay within its declared write-scope.
 
@@ -268,7 +313,7 @@ Did the iteration stay within its declared write-scope.
 - **Absent when:** neither a `write_scope` nor a usable `scope_note`
   exists.
 
-### 6. `hook_outcomes` — Hook-gate outcomes (weight 0.10, R1.5)
+### 7. `hook_outcomes` — Hook-gate outcomes (weight 0.09, R1.5)
 
 Did the iteration's hook gates allow, advise, or remediate. Objective
 evidence from the per-iteration sidecar
@@ -333,7 +378,7 @@ The extractor enforces these exclusions in code
 addition of a class to the sub-score is a deliberate edit, not silent
 inclusion.
 
-### 7. `token_efficiency` — Token & cache efficiency (weight 0.09)
+### 8. `token_efficiency` — Token & cache efficiency (weight 0.08)
 
 How efficiently the iteration used the model.
 
@@ -349,23 +394,25 @@ How efficiently the iteration used the model.
 
 | Signal                | Weight | Kind        | Two-way | Notes                                |
 |-----------------------|-------:|-------------|:-------:|--------------------------------------|
-| `landed`              |   0.20 | correctness | yes     |                                      |
-| `verifier`            |   0.18 | correctness | yes     |                                      |
-| `tests`               |   0.17 | correctness | yes     |                                      |
-| `correction_pressure` |   0.13 | process     | no      |                                      |
-| `scope`               |   0.13 | process     | yes     |                                      |
-| `hook_outcomes`       |   0.10 | process     | no      | added at 2.1.0 (R1.5); scores `prevent_before_action` + `remediate_at_stop` only — see [approved rules](#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6) and [post-tool deferral](#post-tool-observation-evaluation-r15-t1b) |
-| `token_efficiency`    |   0.09 | efficiency  | no      |                                      |
+| `landed`              |   0.17 | correctness | yes     |                                      |
+| `verifier`            |   0.15 | correctness | yes     |                                      |
+| `tests`               |   0.14 | correctness | yes     |                                      |
+| `human_label`         |   0.15 | human judgement | no  | added at 3.0.0 (R5); mean of latest-per-reviewer labels, admin override supersedes — see [`human_label`](#4-human_label--human-review-label-weight-015-r5) |
+| `correction_pressure` |   0.11 | process     | no      |                                      |
+| `scope`               |   0.11 | process     | yes     |                                      |
+| `hook_outcomes`       |   0.09 | process     | no      | added at 2.1.0 (R1.5); scores `prevent_before_action` + `remediate_at_stop` only — see [approved rules](#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6) and [post-tool deferral](#post-tool-observation-evaluation-r15-t1b) |
+| `token_efficiency`    |   0.08 | efficiency  | no      |                                      |
 | **Total**             | **1.00** |          |         |                                      |
 
-Correctness signals total 0.55; process signals total 0.36; efficiency
-0.09. The 2.0.2 → 2.1.0 rebalance preserves the correctness /
-process / efficiency shape: correctness still dominates (was 0.60,
-now 0.55), process grows by 0.06 to absorb the new objective hook
-signal (was 0.30, now 0.36 with `hook_outcomes` carrying 0.10),
-efficiency is trimmed by 0.01 (was 0.10, now 0.09) so its relative
-position is unchanged. The weighting is deliberate: a run is scored
-first on whether it worked and landed.
+Objective correctness signals total 0.46; the human-judgement signal
+carries 0.15; process signals total 0.31; efficiency 0.08. The
+2.1.0 → 3.0.0 rebalance introduces `human_label` at 0.15 and scales the
+seven existing weights proportionally (×0.85, rounded to two decimals),
+so the relative shape among the telemetry signals is preserved:
+objective correctness still dominates, and correctness plus human
+judgement together (0.61) outweigh everything else. The weighting is
+deliberate: a run is scored first on whether it worked and landed, and
+a human label refines — rather than overrides — that telemetry.
 
 ## Combination
 
@@ -405,43 +452,56 @@ A numeric score is also reported as a human-readable band:
 
 ## Worked examples
 
-**A clean iteration, no token telemetry, no hook activity.** Landed on
-master, verifier passed, tests passed, no corrections, scope on-target;
-the entry predates `session_tokens` and no backfill was possible, so
-`token_efficiency` is absent; no hook sentinel was active so
-`hook_outcomes` is absent too.
+**A clean iteration, no token telemetry, no hook activity, unreviewed.**
+Landed on master, verifier passed, tests passed, no corrections, scope
+on-target; the entry predates `session_tokens` and no backfill was
+possible, so `token_efficiency` is absent; no hook sentinel was active
+so `hook_outcomes` is absent; no reviewer has labeled the iteration so
+`human_label` is absent too.
 
 | Signal                | Present | Sub-score | Weight | Eff. weight | Contribution |
 |-----------------------|---------|----------:|-------:|------------:|-------------:|
-| `landed`              | yes     | 1.00      | 0.20   | 0.247       | 0.247        |
-| `verifier`            | yes     | 1.00      | 0.18   | 0.222       | 0.222        |
-| `tests`               | yes     | 1.00      | 0.17   | 0.210       | 0.210        |
-| `correction_pressure` | yes     | 1.00      | 0.13   | 0.160       | 0.160        |
-| `scope`               | yes     | 1.00      | 0.13   | 0.160       | 0.160        |
-| `hook_outcomes`       | no      | —         | 0.10   | —           | —            |
-| `token_efficiency`    | no      | —         | 0.09   | —           | —            |
+| `landed`              | yes     | 1.00      | 0.17   | 0.250       | 0.250        |
+| `verifier`            | yes     | 1.00      | 0.15   | 0.221       | 0.221        |
+| `tests`               | yes     | 1.00      | 0.14   | 0.206       | 0.206        |
+| `human_label`         | no      | —         | 0.15   | —           | —            |
+| `correction_pressure` | yes     | 1.00      | 0.11   | 0.162       | 0.162        |
+| `scope`               | yes     | 1.00      | 0.11   | 0.162       | 0.162        |
+| `hook_outcomes`       | no      | —         | 0.09   | —           | —            |
+| `token_efficiency`    | no      | —         | 0.08   | —           | —            |
 
-Present weights sum to 0.81; `score = 0.81 / 0.81 = 1.00` → **excellent**.
+Present weights sum to 0.68; `score = 0.68 / 0.68 = 1.00` → **excellent**.
 
 **A struggling iteration with a remediation.** Did not land, verifier
 failed, tests failed, three retries, scope partial, cache hit rate 0.60,
-and the iteration-close gate remediated for a missing verification
-artifact (`iteration-close.R1.1` → result `remediate`).
+no human label yet, and the iteration-close gate remediated for a
+missing verification artifact (`iteration-close.R1.1` → result
+`remediate`).
 
-| Signal                | Present | Sub-score | Weight | Contribution |
-|-----------------------|---------|----------:|-------:|-------------:|
-| `landed`              | yes     | 0.00      | 0.20   | 0.000        |
-| `verifier`            | yes     | 0.00      | 0.18   | 0.000        |
-| `tests`               | yes     | 0.00      | 0.17   | 0.000        |
-| `correction_pressure` | yes     | 0.25      | 0.13   | 0.0325       |
-| `scope`               | yes     | 0.50      | 0.13   | 0.065        |
-| `hook_outcomes`       | yes     | 0.00      | 0.10   | 0.000        |
-| `token_efficiency`    | yes     | 0.60      | 0.09   | 0.054        |
+| Signal                | Present | Sub-score | Weight | Eff. weight | Contribution |
+|-----------------------|---------|----------:|-------:|------------:|-------------:|
+| `landed`              | yes     | 0.00      | 0.17   | 0.200       | 0.000        |
+| `verifier`            | yes     | 0.00      | 0.15   | 0.176       | 0.000        |
+| `tests`               | yes     | 0.00      | 0.14   | 0.165       | 0.000        |
+| `human_label`         | no      | —         | 0.15   | —           | —            |
+| `correction_pressure` | yes     | 0.25      | 0.11   | 0.129       | 0.032        |
+| `scope`               | yes     | 0.50      | 0.11   | 0.129       | 0.065        |
+| `hook_outcomes`       | yes     | 0.00      | 0.09   | 0.106       | 0.000        |
+| `token_efficiency`    | yes     | 0.60      | 0.08   | 0.094       | 0.056        |
 
-All signals present (weights sum to 1.00); `score ≈ 0.152` → **poor**.
-The new `hook_outcomes = 0.00` row makes the gate remediation visible in
-the explainable breakdown without changing the overall band the existing
+Present weights sum to 0.85; `score ≈ 0.154` → **poor**. The
+`hook_outcomes = 0.00` row makes the gate remediation visible in the
+explainable breakdown without changing the overall band the existing
 correctness failures already earned.
+
+**Two reviewers and an admin override.** Same struggling iteration,
+later reviewed: alice's latest label scores 1.00 and bob's scores 0.50,
+so the reviewer mean would be 0.75 — but an admin submitted an
+`admin_override` label scoring 0.00 after investigating, so the
+`human_label` sub-score is 0.00 (spec OQ2: the admin's own label
+supersedes the reviewer mean entirely). All eight signals are now
+present, weights sum to 1.00, and the breakdown's `human_label` row
+names the admin in its detail string.
 
 ## Data note
 
@@ -501,7 +561,7 @@ record at
 under "Q3 — Hook-outcome sidecar retention and archival policy".
 
 The new-signal spec and weight rebalance table live in the
-[`hook_outcomes` section above](#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
+[`hook_outcomes` section above](#7-hook_outcomes--hook-gate-outcomes-weight-009-r15)
 and the [weight summary](#weight-summary); the cross-plan version
 coordination rule lives in
 [RubricVersion ordering for concurrent plans](#rubricversion-ordering-for-concurrent-plans);
@@ -560,6 +620,28 @@ the code change required is a single new case in
 
 ## Changelog
 
+- **3.0.0** — Adds the `human_label` signal (weight 0.15, one-way,
+  human-sourced): structured reviewer judgement read from the R5
+  `iter-N.labels.yaml` sidecar (`internal/review/labels`). Major bump —
+  the first signal that depends on external human input rather than
+  agent-run telemetry widens the signal set's dependency surface
+  (see the [ordering policy](#rubricversion-ordering-for-concurrent-plans);
+  the constant read at execution time was 2.1.0, so R5 took the planned
+  major). Per-label sub-score = mean of the three normalized structured
+  dimensions (correctness / scope_judgement / hallucination, spec D5.7);
+  aggregation = mean of latest-per-reviewer with admin-override
+  precedence (spec D5.8 + OQ2); labels at an unsupported
+  `label_schema_version` major degrade to absent (OQ3). The seven
+  existing weights scale proportionally (×0.85, rounded): `landed`
+  0.20→0.17, `verifier` 0.18→0.15, `tests` 0.17→0.14,
+  `correction_pressure` 0.13→0.11, `scope` 0.13→0.11, `hook_outcomes`
+  0.10→0.09, `token_efficiency` 0.09→0.08. Combination method unchanged
+  (`weighted_mean_renormalized`); an iteration with no labels scores
+  exactly as it would without the signal (absent does not vote), and
+  scores persisted under 2.1.0 remain valid under their recorded
+  version. The Go `SignalSet` struct gains a `HumanLabel` field and
+  `SignalSet.Value` a new switch arm; the extractor lives in
+  `signal_human_label.go`.
 - **2.1.0** — Adds the `hook_outcomes` signal (weight 0.10, one-way) and
   rebalances every other weight proportionally (`landed` 0.22→0.20,
   `verifier` 0.20→0.18, `tests` 0.18→0.17, `correction_pressure`

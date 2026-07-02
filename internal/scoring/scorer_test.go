@@ -14,6 +14,7 @@ func TestScoreAllPresentMax(t *testing.T) {
 		Landed:             PresentSignal(1.0, ""),
 		Verifier:           PresentSignal(1.0, ""),
 		Tests:              PresentSignal(1.0, ""),
+		HumanLabel:         PresentSignal(1.0, ""),
 		CorrectionPressure: PresentSignal(1.0, ""),
 		Scope:              PresentSignal(1.0, ""),
 		HookOutcomes:       PresentSignal(1.0, ""),
@@ -54,7 +55,7 @@ func TestScoreAllPresentMax(t *testing.T) {
 // contributions still sum exactly to Value.
 func TestScoreSomeAbsentRenormalizes(t *testing.T) {
 	r := DefaultRubric()
-	// Only verifier (.18) and scope (.13) present — present sum = .31.
+	// Only verifier (.15) and scope (.11) present — present sum = .26.
 	set := SignalSet{
 		Verifier: PresentSignal(1.0, ""),
 		Scope:    PresentSignal(0.5, ""),
@@ -63,8 +64,8 @@ func TestScoreSomeAbsentRenormalizes(t *testing.T) {
 	if !got.Scored {
 		t.Fatal("Scored = false, want true")
 	}
-	const presentSum = 0.18 + 0.13
-	want := (0.18*1.0 + 0.13*0.5) / presentSum
+	const presentSum = 0.15 + 0.11
+	want := (0.15*1.0 + 0.11*0.5) / presentSum
 	if !approxEq(got.Value, want) {
 		t.Errorf("Value = %g, want %g", got.Value, want)
 	}
