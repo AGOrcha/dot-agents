@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
 func TestIsDeletePendingLockErr(t *testing.T) {
@@ -1552,11 +1554,12 @@ func TestReclaimRestoresDisplacedLiveLock(t *testing.T) {
 	}
 }
 
-// TestReclaimRestoreFailureIsLoudButFrees: if the restore link itself fails
-// (a third claimant already took the name), the displacement is permanent —
-// the reclaim frees what it renamed and reports success so the lifecycle
-// continues; the victim's own release then refuses on identity mismatch.
-func TestReclaimRestoreFailureIsLoudButFrees(t *testing.T) {
+// TestReclaimRestoreFailureIsLoudAndDisposes: if the restore link itself
+// fails (a third claimant already took the name), the displacement is
+// permanent — the shared three-actor residual. The trash is disposed, the
+// reclaim reports false (it did NOT take the judged-stale object), and the
+// victim's own release later refuses on identity mismatch.
+func TestReclaimRestoreFailureIsLoudAndDisposes(t *testing.T) {
 	realLink := linkLockFn
 	t.Cleanup(func() { linkLockFn = realLink })
 	linkLockFn = func(string, string) error {
@@ -1567,14 +1570,66 @@ func TestReclaimRestoreFailureIsLoudButFrees(t *testing.T) {
 	path := filepath.Join(dir, "guarded.ndjson")
 	mustWriteFile(t, path+".lock", "31337\n42\nlive-successor\n")
 
-	if !reclaimStaleLock(path+".lock", []byte("999\n1\nstale-old\n")) {
-		t.Fatal("unrestorable displacement must still report the name freed")
+	if reclaimStaleLock(path+".lock", []byte("999\n1\nstale-old\n")) {
+		t.Fatal("a wrong-object displacement must not report a landed reclaim")
 	}
 	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
-		t.Fatalf("lock name should be free after unrestorable displacement: %v", err)
+		t.Fatalf("lock name should be free after an unrestorable displacement: %v", err)
 	}
 	if n := countLockTrash(t, dir, path); n != 0 {
 		t.Fatalf("trash must be disposed of, found %d", n)
+	}
+}
+
+// TestReleaseRestoresDisplacedSuccessor is the deterministic guard for the
+// round-5 gate finding (the release-side twin of the reclaim displacement):
+// between release's fast-path identity check and its rename, the holder is
+// TTL-reclaimed and a successor claims the name. The rename seam swaps in the
+// successor's identity at the last instant, standing in for that
+// interleaving. displaceLock must verify on the RENAMED object, restore the
+// successor atomically, and release must return the honest already-reclaimed
+// outcome (nil) with the successor untouched.
+func TestReleaseRestoresDisplacedSuccessor(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+
+	successor := "31337\n42\nsuccessor\n"
+	realRename := renameLockDirFn
+	t.Cleanup(func() { renameLockDirFn = realRename })
+	swapped := false
+	renameLockDirFn = func(oldPath, newPath string) error {
+		if !swapped && oldPath == path+".lock" {
+			swapped = true
+			// The interleaving: TTL reclaim + successor claim landing after
+			// the fast-path check but before the rename.
+			mustWriteFile(t, oldPath, successor)
+		}
+		return fsops.Rename(oldPath, newPath)
+	}
+
+	if err := release(); err != nil {
+		t.Fatalf("release must report the honest already-reclaimed outcome, got: %v", err)
+	}
+	data, err := os.ReadFile(path + ".lock")
+	if err != nil || string(data) != successor {
+		t.Fatalf("displaced successor not restored: data=%q err=%v", data, err)
+	}
+	if n := countLockTrash(t, dir, path); n != 0 {
+		t.Fatalf("restore must leave no trash behind, found %d", n)
+	}
+	_ = os.Remove(path + ".lock") // cleanup
+}
+
+// TestDisplaceLockGoneOutcome: nothing at the name is the displacedGone
+// outcome, an error-free no-op for both callers.
+func TestDisplaceLockGoneOutcome(t *testing.T) {
+	outcome, err := displaceLock(filepath.Join(t.TempDir(), "gone.lock"), []byte("x"))
+	if outcome != displacedGone || err != nil {
+		t.Fatalf("missing name must be displacedGone/nil, got %v/%v", outcome, err)
 	}
 }
 

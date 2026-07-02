@@ -701,88 +701,132 @@ func lockTrashName(lockPath string) string {
 		lockPath, lockTrashInfix, os.Getpid(), time.Now().UnixNano(), lockTrashSeq.Add(1))
 }
 
-// reclaimStaleLock takes a stale occupant out of the way with a SINGLE atomic
-// rename to a unique trash name, verifies it renamed the same occupant it
-// judged, and deletes the trash out-of-band. It reports whether the reclaim
-// landed (and therefore whether the caller may spend its reclaim budget).
+// displaceOutcome classifies what displaceLock actually took off the name.
+type displaceOutcome int
+
+const (
+	// displacedMatch: the renamed object carried the expected identity — it
+	// was ours (release) or the judged-stale occupant (reclaim); disposed.
+	displacedMatch displaceOutcome = iota
+	// displacedGone: nothing at the name (already released or reclaimed).
+	displacedGone
+	// displacedWrongObject: the rename took a DIFFERENT, live object — a
+	// successor claimed the name between the caller's judgment and the
+	// rename. The object was restored in place via an atomic same-inode link
+	// (or, if a third claimant had already re-taken the name, disposed with a
+	// loud debugf — the shared three-actor residual).
+	displacedWrongObject
+	// displaceFailed: the rename never landed (transient pin / denial); the
+	// name is untouched.
+	displaceFailed
+)
+
+// displaceLock is the ONE primitive that ever frees the lock name, shared by
+// release and stale reclaim. It renames the name away FIRST and verifies
+// AFTERWARD, on the renamed object itself, that it took what the caller
+// expected — so there is no window between judgment and action: judgment IS
+// performed on the very object the action displaced. (The old shape — verify
+// by name, then rename — left a TOCTOU on both paths: between the read and
+// the rename a TTL reclaim plus a successor claim could swap the object, and
+// the rename displaced the successor's live lock.)
 //
-// The judge-then-rename sequence has an inherent TOCTOU: between reading the
-// stale identity and the rename, a rival can reclaim and a successor can
-// re-claim the name, so the rename would displace a LIVE lock. The single
-// object makes that detectable AND repairable: the renamed trash still carries
-// the occupant's identity, so a mismatch against the judged bytes proves the
-// displacement, and os.Link(trash, lockPath) atomically restores the very same
-// inode if the name is still free — the displaced holder never notices. Only
-// if a third claimant takes the name inside that window is the displacement
-// permanent (the victim's release then refuses on identity mismatch); that
-// residue requires three independent actors inside two syscalls. Legacy dirs
-// (judged == nil) cannot be identity-verified or link-restored; they keep the
-// old single-rename semantics for the transition period.
-func reclaimStaleLock(lockPath string, judged []byte) bool {
+// On mismatch the wrongly-taken object is restored by atomically hard-linking
+// the SAME inode back to the name; the displaced holder never notices. Only
+// if a third claimant took the name inside that window is the displacement
+// permanent (loud debugf; the victim's own release then refuses on identity
+// mismatch) — the single documented residual, requiring three independent
+// actors inside a two-syscall window, shared by release and reclaim alike. A
+// nil expected skips verification (legacy lock DIRS cannot be identity-read
+// or link-restored; they keep single-rename semantics for the transition).
+func displaceLock(lockPath string, expected []byte) (displaceOutcome, error) {
 	trash := lockTrashName(lockPath)
 	if err := renameLockDirFn(lockPath, trash); err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return displacedGone, nil
+		}
+		return displaceFailed, err
 	}
-	if judged != nil && !reclaimedMatchesJudged(trash, judged) {
+	outcome := displacedMatch
+	if expected != nil && !trashCarries(trash, expected) {
+		outcome = displacedWrongObject
 		if err := linkLockFn(trash, lockPath); err == nil {
 			_ = fsops.Remove(trash) // drop the extra name; the inode lives on at lockPath
-			return false
+			return outcome, nil
 		}
-		debugf("agentslock: reclaim displaced a live lock at %s and could not restore it", lockPath)
+		debugf("agentslock: displaced a live lock at %s and could not restore it (a third claimant holds the name)", lockPath)
 	}
 	if err := removeTrashFn(trash); err != nil {
-		debugf("agentslock: remove reclaimed lock remnant %s: %v", trash, err)
+		debugf("agentslock: remove displaced lock remnant %s: %v", trash, err)
 	}
-	return true
+	return outcome, nil
 }
 
-// reclaimedMatchesJudged reports whether the renamed-away trash still carries
-// exactly the identity bytes the staleness judgment was made on.
-func reclaimedMatchesJudged(trash string, judged []byte) bool {
+// trashCarries reports whether the renamed-away trash carries exactly the
+// expected identity bytes.
+func trashCarries(trash string, expected []byte) bool {
 	data, err := os.ReadFile(trash)
-	return err == nil && bytes.Equal(data, judged)
+	return err == nil && bytes.Equal(data, expected)
+}
+
+// reclaimStaleLock takes a stale occupant off the name via displaceLock and
+// reports whether the reclaim landed (the caller may spend its once-per-call
+// budget). A wrong-object displacement (rival reclaimed + successor claimed
+// between judgment and rename) restores the successor and reports false — the
+// caller simply keeps waiting on the live lock it nearly displaced.
+func reclaimStaleLock(lockPath string, judged []byte) bool {
+	outcome, _ := displaceLock(lockPath, judged)
+	return outcome == displacedMatch
 }
 
 // releaseLock frees the lock at lockPath. Lifecycle contract: the lock name is
-// only ever freed by a single atomic rename to a unique trash sibling — never
-// by deleting in place (an in-place delete exposes delete-pending states under
-// the live name on Windows, and its failure leaves the name occupied). After a
-// successful rename the name is free no matter what happens to the trash: a
-// failed trash deletion costs a uniquely-named leftover (swept by later
-// releases), never lock availability.
+// only ever freed by displaceLock's atomic rename-away — never deleted in
+// place — and the ownership verification happens on the renamed object itself,
+// so a release that raced a TTL reclaim (e.g. this process resumed after a
+// 30s+ suspend) restores the successor's live lock and reports the honest
+// outcome (already reclaimed, nil) instead of stealing it. An empty identity
+// never releases. The initial read is a fast-path OPTIMIZATION only (skip the
+// rename when we are provably no longer the holder); correctness never rests
+// on it.
 //
-// Before touching anything the release verifies identity: if the lock file no
-// longer carries the exact bytes this acquisition claimed (a contender
-// TTL-reclaimed the lock — e.g. after this process sat suspended past the TTL —
-// and re-acquired), the release is a no-op instead of stealing the new
-// holder's lock. An empty identity never passes the check.
-//
-// The rename is retried briefly (releaseRenameAttempts x releaseRenameBackoff)
-// because on Windows a contender's probe handle or an AV scan can transiently
-// pin the file; it remains ours until the rename lands, so retrying cannot
-// touch anyone else's lock. If the rename never lands the remnant keeps its
-// full identity and self-clears via the TTL; returning the error is the only
-// remaining honest option.
+// The displace is retried briefly (releaseRenameAttempts x
+// releaseRenameBackoff) for transient Windows pins; retrying is safe because
+// every attempt re-verifies on whatever it actually renamed. If the rename
+// never lands the remnant keeps its full identity and self-clears via the
+// TTL; returning the error is the only remaining honest option.
 func releaseLock(lockPath, identity string) error {
-	if !lockStillOurs(lockPath, identity) {
+	if identity == "" {
+		debugf("agentslock: skip release of %s: no identity to prove ownership", lockPath)
+		return nil
+	}
+	if data, err := os.ReadFile(lockPath); err == nil && string(data) != identity {
 		debugf("agentslock: skip release of %s: no longer the holder", lockPath)
 		return nil
 	}
-	var err error
+	var (
+		outcome displaceOutcome
+		err     error
+	)
 	for attempt := 0; attempt < releaseRenameAttempts; attempt++ {
 		if attempt > 0 {
 			time.Sleep(releaseRenameBackoff)
 		}
-		err = renameLockDirFn(lockPath, lockTrashName(lockPath))
-		if err == nil {
-			sweepLockTrash(lockPath)
-			return nil
-		}
-		if os.IsNotExist(err) {
-			return nil // already released or reclaimed out from under us
+		outcome, err = displaceLock(lockPath, []byte(identity))
+		if outcome != displaceFailed {
+			break
 		}
 	}
-	return fmt.Errorf("agentslock: release lock %s: %w", lockPath, err)
+	switch outcome {
+	case displacedMatch:
+		sweepLockTrash(lockPath)
+		return nil
+	case displacedWrongObject:
+		debugf("agentslock: release of %s: lock was TTL-reclaimed by a successor; nothing of ours to free", lockPath)
+		return nil
+	case displacedGone:
+		return nil
+	default:
+		return fmt.Errorf("agentslock: release lock %s: %w", lockPath, err)
+	}
 }
 
 // lockStillOurs reports whether the lock file still carries exactly the
