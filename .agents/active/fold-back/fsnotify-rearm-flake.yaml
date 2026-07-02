@@ -1,0 +1,8 @@
+schema_version: 1
+id: fsnotify-rearm-flake
+plan_id: r3-background-worker-service
+task_id: scheduler-core
+observation: TestFSNotifyTriggerReArmDuringBurst fails ~40 percent locally under -race on unmodified master (macOS); timing-sensitive re-arm window. Needs the deterministic-seam treatment (like the hangup/partial-identity fixes) rather than timing luck. Found during service-runtime integration (#272).
+classification: small
+routed_to: task_note:r3-background-worker-service/scheduler-core
+created_at: "2026-07-02T15:27:06Z"
