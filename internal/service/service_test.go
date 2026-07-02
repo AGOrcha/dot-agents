@@ -464,3 +464,37 @@ func TestShutdownWithinAbandonsHungListener(t *testing.T) {
 		t.Fatalf("shutdownWithin = %v, want a budget-exceeded error naming listeners", got)
 	}
 }
+
+// TestRunLeavesNoGoroutines pins the reviewer-verifies "all goroutines exit"
+// item on the clean shutdown path: after a well-behaved runtime comes up and
+// is cancelled, every goroutine Run started (listeners, scheduler, bus,
+// teardown collector) unwinds back to the pre-Run baseline. (The deliberate
+// abandon-straggler leak is a separate, documented budget-exceeded trade and
+// does not apply here — every task honours cancellation.)
+func TestRunLeavesNoGoroutines(t *testing.T) {
+	skipNoControlPlane(t)
+	base := runtime.NumGoroutine()
+
+	cfg := Config{
+		RepoDir:         t.TempDir(),
+		ControlSocket:   sock(t),
+		HTTPAddr:        freeAddr(t),
+		RescoreInterval: time.Hour,
+	}
+	cancel, done := startRun(t, cfg)
+	waitControl(t, cfg.ControlSocket) // fully up: both listeners + scheduler
+	cancel()
+	if err := waitRun(t, done); err != nil {
+		t.Fatalf("Run = %v, want clean shutdown", err)
+	}
+
+	// Poll until Run's goroutines have unwound to the baseline (the runtime
+	// needs a beat to reap them after Run returns).
+	deadline := time.Now().Add(3 * time.Second)
+	for runtime.NumGoroutine() > base && time.Now().Before(deadline) {
+		time.Sleep(pollInterval)
+	}
+	if n := runtime.NumGoroutine(); n > base {
+		t.Errorf("goroutine leak after clean shutdown: %d running, baseline %d", n, base)
+	}
+}
