@@ -119,6 +119,19 @@ const (
 	// shape) — and must fail fast with the actual cause, not burn the remaining
 	// acquire budget and misreport itself as a lock-contention timeout.
 	deniedTransientAttempts = 30
+	// linkDegradeAttempts bounds how many consecutive hardlink-claim failures
+	// (other than exists / not-exists) ONE acquire call absorbs as transients
+	// before concluding the filesystem cannot do hardlinks and degrading to
+	// the O_EXCL two-step claim. On NTFS a just-written claim temp can be
+	// transiently pinned by an AV scan, failing CreateHardLinkW with a
+	// sharing violation that clears within a tick — degrading on the FIRST
+	// failure routed healthy Windows machines onto the weaker two-step path,
+	// which is exactly how TestClaimNeverExposesPartialIdentity caught an
+	// O_EXCL empty-file window on windows-latest (master run 28570275221). A
+	// genuinely hardlink-less filesystem (FAT/exFAT) fails every attempt
+	// identically, so degradation still engages after ~3 ticks (~30ms), once
+	// per acquire call.
+	linkDegradeAttempts = 3
 )
 
 // removeTrashFn deletes a renamed-away (trash) lock object. A seam so tests
@@ -425,9 +438,10 @@ func acquireLockPath(path string) (lockPath, identity string, err error) {
 // permission-denied streak, and whether the next retry should skip the sleep
 // (a reclaim just freed the name).
 type acquireLoopState struct {
-	reclaimed bool
-	denied    int
-	retryNow  bool
+	reclaimed    bool
+	denied       int
+	retryNow     bool
+	linkFailures int
 }
 
 // acquireTick performs one iteration of the acquisition loop. When the lock
@@ -449,7 +463,7 @@ func acquireTick(lockPath string, st *acquireLoopState) (identity string, acquir
 		}
 		return "", false, nil
 	}
-	id, claimErr := claimLock(lockPath)
+	id, claimErr := claimLock(lockPath, st)
 	if claimErr == nil {
 		return id, true, nil
 	}
@@ -463,6 +477,11 @@ func acquireTick(lockPath string, st *acquireLoopState) (identity string, acquir
 // create-level not-found, which is a distinct, environmental failure.
 var errClaimTempVanished = fmt.Errorf("agentslock: claim temp swept concurrently")
 
+// errClaimLinkTransient marks a hardlink-claim failure being absorbed as a
+// transient (see linkDegradeAttempts): the acquire loop retries on the strong
+// hardlink path instead of degrading to the two-step O_EXCL claim.
+var errClaimLinkTransient = fmt.Errorf("agentslock: hardlink claim transiently failed")
+
 // classifyClaimError maps a failed claim to either a fatal error or nil
 // (retryable contention/transient; the acquire loop waits and retries).
 func classifyClaimError(lockPath string, claimErr error, st *acquireLoopState) error {
@@ -472,6 +491,8 @@ func classifyClaimError(lockPath string, claimErr error, st *acquireLoopState) e
 		return nil // lost the claim race; next tick judges the winner
 	case errors.Is(claimErr, errClaimTempVanished):
 		return nil // transient: retry with a fresh temp
+	case errors.Is(claimErr, errClaimLinkTransient):
+		return nil // transient link pin: retry on the strong hardlink path
 	case os.IsNotExist(claimErr):
 		// A CREATE failing not-found. With a missing parent it is the plain
 		// #148 shape (surface it raw). With a parent that demonstrably EXISTS
@@ -528,7 +549,7 @@ func newLockIdentity() string {
 // name — and the claim degrades to the O_EXCL two-step. If the real cause was
 // a permission denial, the degraded path fails with the same denial and the
 // caller's classification still applies.
-func claimLock(lockPath string) (string, error) {
+func claimLock(lockPath string, st *acquireLoopState) (string, error) {
 	identity := newLockIdentity()
 	temp := lockTrashName(lockPath)
 	if err := writeIdentityFileFn(temp, identity); err != nil {
@@ -544,6 +565,16 @@ func claimLock(lockPath string) (string, error) {
 			// trash namespace. Distinct from a create-level not-found (which
 			// is environmental; see classifyClaimError).
 			return "", fmt.Errorf("%w: %v", errClaimTempVanished, err)
+		}
+		// Any other failure is EITHER a transient pin on the just-written
+		// temp (NTFS: AV scanning it blocks CreateHardLinkW with a sharing
+		// violation for a tick) OR a filesystem without hardlinks. Absorb a
+		// few as transients — degrading to the two-step O_EXCL claim on the
+		// first failure put Windows machines on the weaker path and exposed
+		// its empty-file window to the structural-impossibility test.
+		st.linkFailures++
+		if st.linkFailures < linkDegradeAttempts {
+			return "", fmt.Errorf("%w: %v", errClaimLinkTransient, err)
 		}
 		return claimLockExclusive(lockPath, identity)
 	}
