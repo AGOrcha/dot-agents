@@ -580,31 +580,27 @@ func TestPruneStaleSweepsOrphanClaims(t *testing.T) {
 	mustExist(t, stray)     // foreign file, never touched
 }
 
-func TestPruneStaleEdgeCases(t *testing.T) {
-	f := newFixture(t)
-
-	// Missing runs root is not an error — nothing has been provisioned yet.
-	pruned, err := f.sb.PruneStale(context.Background())
-	if err != nil || len(pruned) != 0 {
-		t.Fatalf("missing root: pruned=%v err=%v, want empty/nil", pruned, err)
-	}
-
-	// Foreign or malformed entries are skipped, never deleted.
+// stageForeignEntries populates the runs root with entries PruneStale must
+// skip: a stray plain file, a dir with no marker, a corrupt-YAML marker, and
+// a marker with an unparseable timestamp. Extracted from
+// TestPruneStaleEdgeCases to keep its cognitive complexity under the S3776
+// threshold.
+func stageForeignEntries(t *testing.T, f *fixture) (plainFile, noMarker string) {
+	t.Helper()
 	if err := os.MkdirAll(f.runsRoot, 0o755); err != nil {
 		t.Fatalf("mkdir runs root: %v", err)
 	}
-	plainFile := filepath.Join(f.runsRoot, "stray.txt")
+	plainFile = filepath.Join(f.runsRoot, "stray.txt")
 	if err := os.WriteFile(plainFile, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write stray: %v", err)
 	}
-	noMarker := filepath.Join(f.runsRoot, "no-marker")
-	corrupt := filepath.Join(f.runsRoot, "corrupt")
-	badTime := filepath.Join(f.runsRoot, "bad-time")
-	for dir, content := range map[string]string{
-		noMarker: "",
-		corrupt:  ":\tnot yaml [",
-		badTime:  "run_id: bad-time\nworktree_name: wt-x\nprovisioned_at: yesterday\n",
-	} {
+	noMarker = filepath.Join(f.runsRoot, "no-marker")
+	markers := map[string]string{
+		noMarker:                              "",
+		filepath.Join(f.runsRoot, "corrupt"):  ":\tnot yaml [",
+		filepath.Join(f.runsRoot, "bad-time"): "run_id: bad-time\nworktree_name: wt-x\nprovisioned_at: yesterday\n",
+	}
+	for dir, content := range markers {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
@@ -615,6 +611,20 @@ func TestPruneStaleEdgeCases(t *testing.T) {
 			t.Fatalf("write marker in %s: %v", dir, err)
 		}
 	}
+	return plainFile, noMarker
+}
+
+func TestPruneStaleEdgeCases(t *testing.T) {
+	f := newFixture(t)
+
+	// Missing runs root is not an error — nothing has been provisioned yet.
+	pruned, err := f.sb.PruneStale(context.Background())
+	if err != nil || len(pruned) != 0 {
+		t.Fatalf("missing root: pruned=%v err=%v, want empty/nil", pruned, err)
+	}
+
+	// Foreign or malformed entries are skipped, never deleted.
+	plainFile, noMarker := stageForeignEntries(t, f)
 	pruned, err = f.sb.PruneStale(context.Background())
 	if err != nil || len(pruned) != 0 {
 		t.Fatalf("foreign entries: pruned=%v err=%v, want empty/nil", pruned, err)
