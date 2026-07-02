@@ -103,6 +103,13 @@ func (packageBulkScorer) ScoreAll(iterLogDir, repoDir string) (bulkScores, error
 // rescore instead of being stripped back to the bare shape — then the
 // per-session aggregates via WriteSessionScores.
 func (packageBulkScorer) WriteSidecars(iterLogDir string, b bulkScores) error {
+	// scores[i]↔records[i] pairing is a construction invariant of Score
+	// (BuildSignalSets order); guard it so a misaligned bulkScores from a
+	// future scorer fails loudly instead of panicking or pairing a score
+	// with the wrong iteration's record.
+	if len(b.scores) != len(b.records) {
+		return fmt.Errorf("tasks: bulkScores misaligned: %d scores vs %d records", len(b.scores), len(b.records))
+	}
 	for i, s := range b.scores {
 		if _, err := scoring.WriteIterationScoreWithRecord(iterLogDir, s, b.records[i]); err != nil {
 			return fmt.Errorf("iter-%d sidecar: %w", s.Iteration, err)

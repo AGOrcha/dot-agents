@@ -499,3 +499,14 @@ func TestPackageBulkScorerWriteSessionError(t *testing.T) {
 		t.Errorf("WriteSidecars = %v, want empty-session_id error", err)
 	}
 }
+
+// TestWriteSidecarsMisalignedBulkScores pins the alignment guard: a
+// bulkScores whose scores/records lengths diverge must error loudly, never
+// index-panic or pair a score with the wrong iteration's record.
+func TestWriteSidecarsMisalignedBulkScores(t *testing.T) {
+	b := bulkScores{scores: make([]scoring.Score, 2), records: make([]scoring.IterationRecord, 1)}
+	err := packageBulkScorer{}.WriteSidecars(t.TempDir(), b)
+	if err == nil || !strings.Contains(err.Error(), "misaligned") {
+		t.Fatalf("WriteSidecars misaligned = %v, want misaligned error", err)
+	}
+}
