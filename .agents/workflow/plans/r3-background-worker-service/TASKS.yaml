@@ -149,6 +149,7 @@ tasks:
         stop; RegisterMount with overlapping prefixes errors
         deterministically; graceful shutdown of both listeners
         completes within ctx deadline.
+        - (fb:windows-named-pipe-control-plane) The UDS control plane (status/stop) is stubbed fail-fast on Windows (control_windows.go): da service will not start on Windows at all. Deferred at the transport layer (#249) and composition layer (#272) because §2A requires the named-pipe path be exercised on a REAL Windows box, not assumed, and go-winio is only an indirect dep. OWNER-RELEVANT: the maintainer's work PC is Windows, so da service is unusable there until this lands. Needs a named-pipe listener/dialer + Windows peer-identity (named-pipe client token per §2A) behind the existing per-OS listenControl/dialControl/defaultPeerUID seam, validated on real Windows CI.
       app_type: go-cli
     - id: tasks-iterlog-ingester
       title: Iter-log ingester task — fsnotify trigger, calls R1 scorer, publishes event

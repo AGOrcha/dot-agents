@@ -1,0 +1,8 @@
+schema_version: 1
+id: windows-named-pipe-control-plane
+plan_id: r3-background-worker-service
+task_id: http-server
+observation: 'The UDS control plane (status/stop) is stubbed fail-fast on Windows (control_windows.go): da service will not start on Windows at all. Deferred at the transport layer (#249) and composition layer (#272) because §2A requires the named-pipe path be exercised on a REAL Windows box, not assumed, and go-winio is only an indirect dep. OWNER-RELEVANT: the maintainer''s work PC is Windows, so da service is unusable there until this lands. Needs a named-pipe listener/dialer + Windows peer-identity (named-pipe client token per §2A) behind the existing per-OS listenControl/dialControl/defaultPeerUID seam, validated on real Windows CI.'
+classification: small
+routed_to: task_note:r3-background-worker-service/http-server
+created_at: "2026-07-02T21:31:54Z"
