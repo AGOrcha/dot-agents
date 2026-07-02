@@ -278,17 +278,6 @@ func TestRecomputeGetIterationPipelineFailureFallsBackToRaw(t *testing.T) {
 	}
 }
 
-// buildSignalSet's no-matching-set branch is unreachable through GetIteration
-// (the snapshot and pipeline read the same log), so it is pinned directly.
-func TestRecomputeBuildSignalSetNoMatchingIteration(t *testing.T) {
-	dir := t.TempDir()
-	writeIterWithMessageCount(t, dir, 1, "sess-x", 1)
-	rs := testRecomputeStore(t, repoRootDir(t), dir)
-	if _, ok := rs.buildSignalSet(dir, 999); ok {
-		t.Error("no signal set should match iteration 999")
-	}
-}
-
 // Error contracts pass through the decorator unchanged.
 func TestRecomputeGetIterationErrorPassthrough(t *testing.T) {
 	rs := testRecomputeStore(t, repoRootDir(t), standardRoot(t))

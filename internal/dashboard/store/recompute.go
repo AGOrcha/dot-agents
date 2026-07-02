@@ -3,13 +3,13 @@
 //
 // RecomputeStore decorates DiskStore's GetIteration: when the requested
 // iteration's iter-N.score.yaml sidecar is missing, corrupt, or older than its
-// iter-N.yaml record, the store runs the scoring pipeline synchronously
-// (internal/scoring.BuildSignalSets + DefaultRubric().Score — the same path
-// close-task's scoring.ScoreIteration takes, kept unrolled here so the
-// SignalSet's integrity / objective outputs survive into the DTO) and returns
-// the freshly-computed score. The sidecar write is best-effort in a background
-// goroutine, so the cold-cache dashboard never says "no score" when the scorer
-// could just answer, and never blocks the response on a disk write.
+// iter-N.yaml record, the store calls scoring.ScoreIterationWithSignals
+// synchronously — the same single-iteration entry point close-task's
+// scoring.ScoreIteration wraps, in the variant that also returns the scored
+// SignalSet so its integrity / objective outputs survive into the DTO — and
+// returns the freshly-computed score. The sidecar write is best-effort in a
+// background goroutine, so the cold-cache dashboard never says "no score" when
+// the scorer could just answer, and never blocks the response on a disk write.
 //
 // The recompute path is also what populates the DTO fields t02's raw read
 // layer declares but leaves empty (integrity, objective,
@@ -115,38 +115,21 @@ func needsRecompute(snap rootSnapshot, n int) bool {
 	return ok && scoreMt.Before(recMt)
 }
 
-// recompute runs the scoring pipeline for rec's iteration and overlays the
-// fresh result onto the raw detail. On any pipeline failure the raw detail is
-// returned unchanged (never worse than t02 alone).
+// recompute runs the mandated single-iteration scoring entry point for rec's
+// iteration and overlays the fresh result onto the raw detail. On any
+// pipeline failure the raw detail is returned unchanged (never worse than t02
+// alone). freshRec — the record as the pipeline just re-read it — feeds the
+// sidecar write and the overlay so both halves see one consistent view even
+// if the snapshot raced a checkpoint rewrite.
 func (r *RecomputeStore) recompute(root string, rec scoring.IterationRecord, base Iteration) Iteration {
-	set, ok := r.buildSignalSet(root, rec.Iteration)
-	if !ok {
-		return base
-	}
-	score := scoring.DefaultRubric().Score(set)
-	r.persistAsync(root, score, rec)
-	return overlayRecompute(base, score, set, rec, root)
-}
-
-// buildSignalSet runs the full-log pipeline (the per-iteration commit-window
-// resolver needs the neighbours, exactly as scoring.ScoreIteration documents)
-// and picks iteration n's SignalSet.
-func (r *RecomputeStore) buildSignalSet(root string, n int) (scoring.SignalSet, bool) {
-	sets, err := scoring.BuildSignalSets(root, r.repoDir, r.transcriptDirs...)
+	score, set, freshRec, err := scoring.ScoreIterationWithSignals(root, r.repoDir, rec.Iteration, r.transcriptDirs...)
 	if err != nil {
 		r.logger.Warn("dashboard/store: recompute-on-miss pipeline failed, serving raw read",
-			"root", root, "iteration", n, "error", err)
-		return scoring.SignalSet{}, false
+			"root", root, "iteration", rec.Iteration, "error", err)
+		return base
 	}
-	for _, set := range sets {
-		if set.Iteration == n {
-			return set, true
-		}
-	}
-	// Unreachable unless the log changed between snapshot and pipeline run.
-	r.logger.Warn("dashboard/store: recompute-on-miss found no signal set, serving raw read",
-		"root", root, "iteration", n)
-	return scoring.SignalSet{}, false
+	r.persistAsync(root, score, freshRec)
+	return overlayRecompute(base, score, set, freshRec, root)
 }
 
 // persistAsync writes the freshly-computed sidecar in the background. The
