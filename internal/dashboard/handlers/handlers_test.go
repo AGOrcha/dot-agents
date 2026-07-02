@@ -436,3 +436,59 @@ func TestServedThroughRecomputeStore(t *testing.T) {
 		t.Errorf("iteration = %d, want 5", env.Data.Iteration)
 	}
 }
+
+// TestEmptyStoreListEndpointsServeEmpty pins the reviewer-verifies checklist
+// item: with zero sidecars on disk (a real empty store root, not a stub), the
+// runs list serves [] with 200 and health stays 200 — the dashboard renders
+// an empty-but-live state, never an error.
+func TestEmptyStoreListEndpointsServeEmpty(t *testing.T) {
+	m, err := New(Deps{Store: store.New([]string{t.TempDir()})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := get(t, m, runsTarget, nil)
+	if runs.Code != http.StatusOK {
+		t.Fatalf("empty-root runs = %d, want 200", runs.Code)
+	}
+	if !bytes.Contains(runs.Body.Bytes(), []byte(`"data":[]`)) || !bytes.Contains(runs.Body.Bytes(), []byte(`"count":0`)) {
+		t.Errorf("empty root must serve an empty runs list, got %s", runs.Body)
+	}
+	if health := get(t, m, healthTarget, nil); health.Code != http.StatusOK {
+		t.Errorf("empty-root health = %d, want 200", health.Code)
+	}
+}
+
+// TestETagCacheValidityContract pins the ETag's contractual properties
+// implementation-agnostically (the string itself is opaque per API.md §1.5,
+// ratified content-derived): identical resource+content yields an identical
+// ETag across requests; a content change yields a different ETag; distinct
+// resources yield distinct ETags; and a matching If-None-Match round-trips to
+// 304.
+func TestETagCacheValidityContract(t *testing.T) {
+	st := &stubStore{runs: []store.RunSummary{{SessionID: "s1"}}}
+	m := newStubMount(t, st)
+
+	first := get(t, m, runsTarget, nil).Header().Get("ETag")
+	if first == "" {
+		t.Fatal("runs response must carry an ETag")
+	}
+	// Same resource + unchanged content => identical ETag.
+	if again := get(t, m, runsTarget, nil).Header().Get("ETag"); again != first {
+		t.Errorf("stable content must yield a stable ETag: %q != %q", again, first)
+	}
+	// Content change => different ETag.
+	st.runs = []store.RunSummary{{SessionID: "s1"}, {SessionID: "s2"}}
+	if changed := get(t, m, runsTarget, nil).Header().Get("ETag"); changed == first {
+		t.Errorf("changed content must yield a new ETag, still %q", changed)
+	}
+	// Distinct resource => distinct ETag (health vs runs).
+	if healthTag := get(t, m, healthTarget, nil).Header().Get("ETag"); healthTag == first {
+		t.Errorf("distinct resources must yield distinct ETags, both %q", first)
+	}
+	// Matching If-None-Match round-trips to 304.
+	st.runs = []store.RunSummary{{SessionID: "s1"}}
+	tag := get(t, m, runsTarget, nil).Header().Get("ETag")
+	if rr := get(t, m, runsTarget, map[string]string{"If-None-Match": tag}); rr.Code != http.StatusNotModified {
+		t.Errorf("matching If-None-Match = %d, want 304", rr.Code)
+	}
+}
