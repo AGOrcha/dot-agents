@@ -92,11 +92,11 @@ type Evictor interface {
 	EvictAll()
 }
 
-// RootScoped is optionally implemented by event payloads that identify
-// the iter-log root they concern. When a payload is root-scoped the
+// IterLogRooter is optionally implemented by event payloads that identify
+// the iter-log root they concern. When a payload reports a root the
 // broker evicts only that root's cache snapshot; otherwise it falls back
 // to whole-cache eviction (correct but coarser).
-type RootScoped interface {
+type IterLogRooter interface {
 	IterLogRoot() string
 }
 
@@ -253,13 +253,14 @@ func (b *Broker) Close() {
 }
 
 // evict runs the store-cache invalidation hook for a pushed event:
-// per-root when the payload is root-scoped, whole-cache otherwise.
-// Called before fan-out so refetching clients see post-event state.
+// per-root when the payload reports its iter-log root, whole-cache
+// otherwise. Called before fan-out so refetching clients see post-event
+// state.
 func (b *Broker) evict(payload any) {
 	if b.opts.Evictor == nil {
 		return
 	}
-	if scoped, ok := payload.(RootScoped); ok {
+	if scoped, ok := payload.(IterLogRooter); ok {
 		if root := scoped.IterLogRoot(); root != "" {
 			b.opts.Evictor.Evict(root)
 			return

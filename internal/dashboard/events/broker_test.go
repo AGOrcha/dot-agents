@@ -48,7 +48,7 @@ func (r *recordingEvictor) snapshot() ([]string, int) {
 	return append([]string(nil), r.roots...), r.evictAll
 }
 
-// rootedPayload implements RootScoped for per-root eviction tests.
+// rootedPayload implements IterLogRooter for per-root eviction tests.
 type rootedPayload struct{ root string }
 
 func (p rootedPayload) IterLogRoot() string { return p.root }
@@ -396,25 +396,7 @@ func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < drainers; i++ {
 		wg.Add(1)
-		go func(seed int64) {
-			defer wg.Done()
-			rng := rand.New(rand.NewSource(seed))
-			ctx, cancelCtx := context.WithCancel(context.Background())
-			defer cancelCtx()
-			ch, cancel := b.Subscribe(ctx)
-			var want uint64
-			for ev := range ch {
-				if ev.Seq != want {
-					t.Errorf("seq gap on a live stream: got %d, want %d", ev.Seq, want)
-					break
-				}
-				want++
-				if rng.Intn(200) == 0 {
-					cancel()
-				}
-			}
-			cancel()
-		}(int64(i))
+		go drainAssertingContiguousSeq(t, b, int64(i), &wg)
 	}
 	abandoned := make([]<-chan Event, 0, abandoners)
 	for i := 0; i < abandoners; i++ {
@@ -426,12 +408,7 @@ func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 	}
 	for i := 0; i < publishers; i++ {
 		wg.Add(1)
-		go func(id int) {
-			defer wg.Done()
-			for n := 0; n < eventsPerPublisher; n++ {
-				b.Publish(TopicIterationScored, rootedPayload{root: "stress"})
-			}
-		}(i)
+		go publishStressEvents(b, eventsPerPublisher, &wg)
 	}
 
 	wg.Wait()
@@ -445,5 +422,38 @@ func TestConcurrentPublishSubscribeCancelUnderRace(t *testing.T) {
 	roots, _ := evictor.snapshot()
 	if len(roots) != publishers*eventsPerPublisher {
 		t.Errorf("evictions = %d, want %d (one per publish)", len(roots), publishers*eventsPerPublisher)
+	}
+}
+
+// drainAssertingContiguousSeq subscribes, drains until its stream closes
+// (random mid-flight cancel, overflow-disconnect, or broker Close), and
+// asserts the observed seq is contiguous from 0 — any drop must terminate
+// the stream, never skip an event.
+func drainAssertingContiguousSeq(t *testing.T, b *Broker, seed int64, wg *sync.WaitGroup) {
+	defer wg.Done()
+	rng := rand.New(rand.NewSource(seed))
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	defer cancelCtx()
+	ch, cancel := b.Subscribe(ctx)
+	defer cancel()
+	var want uint64
+	for ev := range ch {
+		if ev.Seq != want {
+			t.Errorf("seq gap on a live stream: got %d, want %d", ev.Seq, want)
+			return
+		}
+		want++
+		if rng.Intn(200) == 0 {
+			cancel()
+		}
+	}
+}
+
+// publishStressEvents publishes count root-scoped events as fast as the
+// broker accepts them (which is always: publishers never block).
+func publishStressEvents(b *Broker, count int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for n := 0; n < count; n++ {
+		b.Publish(TopicIterationScored, rootedPayload{root: "stress"})
 	}
 }
