@@ -168,9 +168,13 @@ tasks:
         (Broker's local Publisher shape stays minimal; the r3-facing
         seam is bridged in t13 against the EventBus interface.)
 
-        Fan-out: N goroutines each holding a buffered channel; full
-        channel drops the slowest subscriber after 1s grace — this
-        drop-slowest bounded-buffer policy is exactly G3 / r2 OQ5.
+        Fan-out: N goroutines each holding a buffered channel; an event
+        arriving on a FULL channel disconnects that subscriber immediately
+        (client refetches on reconnect) — RATIFIED 2026-07-02 during t04
+        review: with G3 non-blocking publishers and gapless delivered
+        streams, arrival-on-full forces either a silent gap (unsound) or a
+        disconnect; a pre-drop grace window is unsatisfiable as previously
+        worded. This is the OQ5 bounded-buffer disconnect-on-overflow policy.
         Heartbeat: emit a ping every 15s.
 
         When R3's bus lands (t13), it replaces this broker as the
