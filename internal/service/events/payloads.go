@@ -21,3 +21,14 @@ type IterationScored struct {
 	Band        string  `json:"band"`
 	SidecarPath string  `json:"sidecar_path"`
 }
+
+// RescoreDone is the payload published on TopicRescoreDone after a rubric
+// version bump has driven a full-log rescore and the refreshed per-iteration
+// and per-session sidecars are on disk. Subscribers treat it as a wake-up:
+// the sidecars (and the rescore watermark, persisted before this publish)
+// are the canonical state per guarantee G1.
+type RescoreDone struct {
+	FromVersion string `json:"from_version"`
+	ToVersion   string `json:"to_version"`
+	IterCount   int    `json:"iter_count"`
+}
