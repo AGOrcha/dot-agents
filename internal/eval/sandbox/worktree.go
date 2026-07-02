@@ -73,11 +73,17 @@ type worktreeSandbox struct {
 	mu  sync.Mutex
 	mgr gitwt.Manager
 
-	// Determinism seams for tests. addWorktree defaults to the gitwt
-	// AddDetached call under mu; tests inject failures to drive rollback.
+	// Determinism seams for tests. addWorktree and pruneMeta default to the
+	// gitwt calls under mu; readDir defaults to os.ReadDir. Tests inject
+	// failures through these because the corresponding real errors cannot be
+	// staged portably — Windows maps directory-shape errors
+	// (ERROR_DIRECTORY, ERROR_PATH_NOT_FOUND) to "not exist", so fs-layout
+	// tricks that force ENOTDIR on Unix silently succeed there.
 	now         func() time.Time
 	randRead    func([]byte) (int, error)
 	addWorktree func(name, path string, base plumbing.Hash) error
+	readDir     func(name string) ([]os.DirEntry, error)
+	pruneMeta   func() ([]string, error)
 }
 
 var _ Sandbox = (*worktreeSandbox)(nil)
@@ -109,6 +115,8 @@ func NewWorktreeSandbox(cfg Config) (Sandbox, error) {
 		randRead:  cryptorand.Read,
 	}
 	s.addWorktree = s.addDetachedLocked
+	s.readDir = os.ReadDir
+	s.pruneMeta = s.pruneMetaLocked
 	return s, nil
 }
 
@@ -118,6 +126,14 @@ func (s *worktreeSandbox) addDetachedLocked(name, path string, base plumbing.Has
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.mgr.AddDetached(name, path, base)
+}
+
+// pruneMetaLocked is the default pruneMeta seam: gitwt Prune under the
+// manager mutex.
+func (s *worktreeSandbox) pruneMetaLocked() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mgr.Prune()
 }
 
 // Provision implements Sandbox. The working tree is checked out at the
@@ -236,7 +252,7 @@ func (s *worktreeSandbox) rollback(runID, wtName string, worktreeCreated bool) {
 // the retention window, then clears any orphaned gitwt admin metadata
 // (worktree dirs deleted out-of-band).
 func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
-	entries, err := os.ReadDir(s.runsRoot)
+	entries, err := s.readDir(s.runsRoot)
 	if os.IsNotExist(err) {
 		return nil, nil // no runs root yet — nothing to prune
 	}
@@ -265,10 +281,7 @@ func (s *worktreeSandbox) PruneStale(ctx context.Context) ([]string, error) {
 			pruned = append(pruned, entry.Name())
 		}
 	}
-	s.mu.Lock()
-	_, err = s.mgr.Prune()
-	s.mu.Unlock()
-	if err != nil {
+	if _, err := s.pruneMeta(); err != nil {
 		return pruned, fmt.Errorf("sandbox: prune worktree metadata: %w", err)
 	}
 	return pruned, nil

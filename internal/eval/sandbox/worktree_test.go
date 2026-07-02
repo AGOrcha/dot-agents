@@ -629,10 +629,16 @@ func TestPruneStaleEdgeCases(t *testing.T) {
 		t.Fatalf("cancelled ctx: got %v, want context.Canceled", err)
 	}
 
-	// An unreadable runs root (a file, not a dir) is an error.
-	f.sb.runsRoot = plainFile
+	// An unreadable runs root is an error. Injected through the readDir
+	// seam because no fs-shape trick stages this portably: planting a file
+	// where the dir should be forces ENOTDIR on Unix, but Windows maps that
+	// condition to "not exist" and the sweep legitimately reports nothing
+	// to prune.
+	f.sb.readDir = func(string) ([]os.DirEntry, error) {
+		return nil, errors.New("io wedged")
+	}
 	if _, err := f.sb.PruneStale(context.Background()); err == nil || !strings.Contains(err.Error(), "read runs root") {
-		t.Fatalf("file as root: got %v, want read runs root error", err)
+		t.Fatalf("unreadable root: got %v, want read runs root error", err)
 	}
 }
 
@@ -656,21 +662,18 @@ func TestPruneStaleSurfacesRemoveError(t *testing.T) {
 
 func TestPruneStaleSurfacesMetadataPruneError(t *testing.T) {
 	f := newFixture(t)
-	inst, err := f.sb.Provision(context.Background(), testSpec("wedged-task"))
-	if err != nil {
-		t.Fatalf("Provision: %v", err)
+	if err := os.MkdirAll(f.runsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir runs root: %v", err)
 	}
-	// Replace the whole run dir with a plain file: the sweep skips it (not a
-	// dir), but the manager's stat of the recorded worktree path now fails
-	// with a non-NotExist error, surfacing from the metadata prune.
-	if err := os.RemoveAll(inst.RunDir); err != nil {
-		t.Fatalf("remove run dir: %v", err)
-	}
-	if err := os.WriteFile(inst.RunDir, []byte("x"), 0o644); err != nil {
-		t.Fatalf("plant file: %v", err)
+	// Injected through the pruneMeta seam: the natural trigger (a non-
+	// NotExist stat error on a recorded worktree path, e.g. a run dir
+	// replaced by a file) is Unix-only — Windows maps ERROR_PATH_NOT_FOUND
+	// to "not exist" and gitwt prunes the metadata cleanly instead.
+	f.sb.pruneMeta = func() ([]string, error) {
+		return nil, errors.New("admin dir wedged")
 	}
 	if _, err := f.sb.PruneStale(context.Background()); err == nil || !strings.Contains(err.Error(), "prune worktree metadata") {
-		t.Fatalf("wedged run dir: got %v, want prune worktree metadata error", err)
+		t.Fatalf("wedged metadata prune: got %v, want prune worktree metadata error", err)
 	}
 }
 
