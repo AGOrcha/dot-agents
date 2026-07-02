@@ -182,10 +182,10 @@ func TestCheckPackagesSortsFindings(t *testing.T) {
 // matches exactly, a grandfathered package matches by path, and an unknown
 // package at a non-precise line is rejected.
 func TestAllowed(t *testing.T) {
-	// agentslock is NOT in grandfatheredPackages — only its single atomic
-	// os.Mkdir is precisely allowed — so a DIFFERENT line in agentslock must be
-	// rejected. That proves the precise allowlist is line-scoped, not a blanket
-	// package pass.
+	// agentslock is NOT in grandfatheredPackages and no longer carries a
+	// precise entry (its single-file lock uses unpoliced primitives), so any
+	// raw mutator line in it must be rejected. A synthetic precise entry is
+	// injected to prove the file:line matching stays exact.
 	cases := []struct {
 		name             string
 		pkgPath, relPath string
@@ -193,11 +193,19 @@ func TestAllowed(t *testing.T) {
 		want             bool
 	}{
 		{"fsguard self is exempt", modulePath + "/tools/fsguard", "tools/fsguard/main.go", 999, true},
-		{"precise agentslock atomic mkdir", modulePath + "/internal/agentslock", "internal/agentslock/lockfile.go", 331, true},
-		{"precise entry wrong line rejected", modulePath + "/internal/agentslock", "internal/agentslock/lockfile.go", 999, false},
+		{"precise synthetic entry matches", modulePath + "/internal/synthetic", "internal/synthetic/x.go", 42, true},
+		{"precise entry wrong line rejected", modulePath + "/internal/synthetic", "internal/synthetic/x.go", 999, false},
+		{"agentslock raw mutator rejected", modulePath + "/internal/agentslock", "internal/agentslock/lockfile.go", 425, false},
 		{"grandfathered package", modulePath + "/internal/projectsync", "internal/projectsync/promote.go", 135, true},
 		{"unknown package rejected", modulePath + "/internal/brandnew", "internal/brandnew/x.go", 10, false},
 	}
+	realPrecise := preciseAllow
+	t.Cleanup(func() { preciseAllow = realPrecise })
+	preciseAllow = append(append([]allowEntry{}, realPrecise...), allowEntry{
+		relPath: "internal/synthetic/x.go",
+		line:    42,
+		reason:  "synthetic test entry proving exact file:line matching",
+	})
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if got := allowed(c.pkgPath, c.relPath, c.line); got != c.want {
