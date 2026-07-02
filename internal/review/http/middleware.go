@@ -211,7 +211,9 @@ func (m *Mount) withAudit(target targetFunc, next nethttp.Handler) nethttp.Handl
 // skips the guard and gets a no-op unlock.
 func (m *Mount) prepareTarget(w nethttp.ResponseWriter, path, reqID string) (preImage, func(), bool) {
 	if path == "" {
-		return preImage{}, func() {}, true
+		// No mutation target on this route: nothing was locked, so the
+		// returned unlock is intentionally a no-op.
+		return preImage{}, func() { /* no lock taken for target-less request */ }, true
 	}
 	unlock, err := m.lockTarget(path)
 	if err != nil {
