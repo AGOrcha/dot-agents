@@ -1031,74 +1031,77 @@ func TestVerifyReadError(t *testing.T) {
 	}
 }
 
-func TestVerifyDetectsSemanticRewrite(t *testing.T) {
-	// The raw-bytes attestation guarantee: rewriting a stored line with
-	// semantically-IDENTICAL but byte-different JSON (key reorder via a map
-	// round-trip — Go maps marshal keys alphabetically, the struct writes them
-	// in declaration order) must break verification, because the chain and
-	// head anchor attest the exact stored bytes, not the JSON meaning.
-	restoreSeams(t)
-
-	rewrite := func(line string) string {
-		var m map[string]any
-		if err := json.Unmarshal([]byte(line), &m); err != nil {
-			t.Fatal(err)
-		}
-		out, err := json.Marshal(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(out) == line {
-			t.Fatal("rewrite produced identical bytes; fixture cannot prove anything")
-		}
-		// Same semantics, different bytes: the decoded record must be equal.
-		var orig, rew Record
-		if err := decode([]byte(line), &orig); err != nil {
-			t.Fatal(err)
-		}
-		if err := decode(out, &rew); err != nil {
-			t.Fatalf("rewritten line must still decode: %v", err)
-		}
-		if orig != rew {
-			t.Fatal("fixture broke semantics; test invalid")
-		}
-		return string(out)
+// semanticRewrite re-serializes a stored JSON line via a map round-trip: Go
+// maps marshal keys alphabetically while the Record struct writes them in
+// declaration order, so the output has IDENTICAL semantics but different
+// bytes. Both properties are asserted (byte-different, decode-equal) so the
+// fixture proves what the raw-bytes attestation tests rely on.
+func semanticRewrite(t *testing.T, line string) string {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal([]byte(line), &m); err != nil {
+		t.Fatal(err)
 	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out) == line {
+		t.Fatal("rewrite produced identical bytes; fixture cannot prove anything")
+	}
+	var orig, rew Record
+	if err := decode([]byte(line), &orig); err != nil {
+		t.Fatal(err)
+	}
+	if err := decode(out, &rew); err != nil {
+		t.Fatalf("rewritten line must still decode: %v", err)
+	}
+	if orig != rew {
+		t.Fatal("fixture broke semantics; test invalid")
+	}
+	return string(out)
+}
 
-	t.Run("mid-chain", func(t *testing.T) {
-		l := tempLog(t)
-		seedLog(t, l, 3)
-		lines := readLogLines(t, l)
-		lines[1] = rewrite(lines[1])
-		writeLogLines(t, l, lines)
+func TestVerifyDetectsSemanticRewriteMidChain(t *testing.T) {
+	// The raw-bytes attestation guarantee: rewriting a stored line with
+	// semantically-identical but byte-different JSON must break verification,
+	// because the chain attests the exact stored bytes, not the JSON meaning.
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	lines := readLogLines(t, l)
+	lines[1] = semanticRewrite(t, lines[1])
+	writeLogLines(t, l, lines)
 
-		res, err := l.Verify()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if res.OK || res.BrokenAt != 3 {
-			t.Fatalf("semantic rewrite of record 2 not caught: %+v", res)
-		}
-		if !strings.Contains(res.Reason, "record 2") {
-			t.Errorf("reason should implicate record 2: %q", res.Reason)
-		}
-	})
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || res.BrokenAt != 3 {
+		t.Fatalf("semantic rewrite of record 2 not caught: %+v", res)
+	}
+	if !strings.Contains(res.Reason, "record 2") {
+		t.Errorf("reason should implicate record 2: %q", res.Reason)
+	}
+}
 
-	t.Run("tail", func(t *testing.T) {
-		l := tempLog(t)
-		seedLog(t, l, 3)
-		lines := readLogLines(t, l)
-		lines[2] = rewrite(lines[2])
-		writeLogLines(t, l, lines)
+func TestVerifyDetectsSemanticRewriteTail(t *testing.T) {
+	// Same guarantee at the tail: the head anchor attests the tail line's
+	// exact bytes, so a semantics-preserving rewrite of the last record fails.
+	restoreSeams(t)
+	l := tempLog(t)
+	seedLog(t, l, 3)
+	lines := readLogLines(t, l)
+	lines[2] = semanticRewrite(t, lines[2])
+	writeLogLines(t, l, lines)
 
-		res, err := l.Verify()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if res.OK || !strings.Contains(res.Reason, "modified") {
-			t.Fatalf("semantic rewrite of the tail not caught: %+v", res)
-		}
-	})
+	res, err := l.Verify()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OK || !strings.Contains(res.Reason, "modified") {
+		t.Fatalf("semantic rewrite of the tail not caught: %+v", res)
+	}
 }
 
 func TestYearlyRotation(t *testing.T) {
