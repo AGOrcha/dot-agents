@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -111,18 +112,18 @@ func (env *testEnv) loadWatermark(t *testing.T) (IterLogWatermark, bool) {
 	return wm, found
 }
 
-func recvScored(t *testing.T, ch <-chan events.Event) IterationScored {
+func recvScored(t *testing.T, ch <-chan events.Event) events.IterationScored {
 	t.Helper()
 	select {
 	case evt := <-ch:
-		payload, ok := evt.Payload.(IterationScored)
+		payload, ok := evt.Payload.(events.IterationScored)
 		if !ok {
-			t.Fatalf("payload type = %T, want IterationScored", evt.Payload)
+			t.Fatalf("payload type = %T, want events.IterationScored", evt.Payload)
 		}
 		return payload
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for iteration.scored event")
-		return IterationScored{}
+		return events.IterationScored{}
 	}
 }
 
@@ -429,6 +430,54 @@ func TestRunCtxCancelled(t *testing.T) {
 		t.Errorf("run = %v, want context.Canceled", err)
 	}
 	wantCalls(t, env.fake)
+}
+
+// fakeDirEntry is a seam for collectPending's stat handling: Name is real,
+// Info returns the injected result.
+type fakeDirEntry struct {
+	name    string
+	info    fs.FileInfo
+	infoErr error
+}
+
+func (f fakeDirEntry) Name() string               { return f.name }
+func (f fakeDirEntry) IsDir() bool                { return false }
+func (f fakeDirEntry) Type() fs.FileMode          { return 0 }
+func (f fakeDirEntry) Info() (fs.FileInfo, error) { return f.info, f.infoErr }
+
+// An entry that vanished between ReadDir and stat (ErrNotExist) is skipped;
+// the remaining entries still ingest.
+func TestCollectPendingSkipsVanishedEntry(t *testing.T) {
+	env := newTestEnv(t)
+	real := env.writeIter(t, 2)
+	info, err := os.Stat(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := []fs.DirEntry{
+		fakeDirEntry{name: "historical.yaml"}, // non-matching name: ignored
+		fakeDirEntry{name: "iter-1.yaml", infoErr: fs.ErrNotExist},
+		fakeDirEntry{name: "iter-2.yaml", info: info},
+	}
+	pending, err := collectPending(entries, IterLogWatermark{})
+	if err != nil {
+		t.Fatalf("collectPending: %v", err)
+	}
+	if len(pending) != 1 || pending[0].n != 2 {
+		t.Errorf("pending = %+v, want only iter 2", pending)
+	}
+}
+
+// Any other stat failure (e.g. permission) surfaces as the tick's error so
+// the scheduler records it — never a silently skipped iteration.
+func TestCollectPendingSurfacesStatError(t *testing.T) {
+	entries := []fs.DirEntry{
+		fakeDirEntry{name: "iter-1.yaml", infoErr: fs.ErrPermission},
+	}
+	_, err := collectPending(entries, IterLogWatermark{})
+	if !errors.Is(err, fs.ErrPermission) || !strings.Contains(err.Error(), "stat iter-log entry iter-1.yaml") {
+		t.Errorf("collectPending = %v, want wrapped permission error", err)
+	}
 }
 
 // iterNumber accepts only iter-N.yaml log entries.

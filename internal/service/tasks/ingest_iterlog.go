@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"regexp"
 	"sort"
@@ -41,17 +42,6 @@ var (
 	ErrNoRepoDir    = errors.New("tasks: repo dir is required")
 	ErrNoBus        = errors.New("tasks: event bus is required")
 )
-
-// IterationScored is the payload published on events.TopicIterationScored
-// after an iteration has been scored and its sidecar written. Subscribers
-// treat it as a wake-up: the sidecar at SidecarPath is the canonical state
-// (G1 — a dropped event is recovered from disk, not from the bus).
-type IterationScored struct {
-	Iteration   int     `json:"iter"`
-	Score       float64 `json:"score"`
-	Band        string  `json:"band"`
-	SidecarPath string  `json:"sidecar_path"`
-}
 
 // IterLogWatermark is the ingester's D3 restart watermark: the highest
 // iteration already ingested, the newest file mtime seen when it was
@@ -189,6 +179,15 @@ func pendingIterations(dir string, wm IterLogWatermark) ([]pendingIter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("tasks: scan iter-log dir %s: %w", dir, err)
 	}
+	return collectPending(entries, wm)
+}
+
+// collectPending filters directory entries down to the pending iterations.
+// An entry that vanished between ReadDir and stat is skipped (the next fire
+// re-scans); any other stat failure is surfaced as the tick's error so the
+// scheduler records it — silently skipping an iteration on, say, a
+// permission error would be invisible data loss.
+func collectPending(entries []fs.DirEntry, wm IterLogWatermark) ([]pendingIter, error) {
 	var out []pendingIter
 	for _, e := range entries {
 		n, ok := iterNumber(e.Name())
@@ -196,10 +195,11 @@ func pendingIterations(dir string, wm IterLogWatermark) ([]pendingIter, error) {
 			continue
 		}
 		info, err := e.Info()
-		if err != nil {
-			// Entry vanished between ReadDir and stat; the next
-			// fire re-scans.
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("tasks: stat iter-log entry %s: %w", e.Name(), err)
 		}
 		if n > wm.LastIterProcessed || info.ModTime().After(wm.LastMTime) {
 			out = append(out, pendingIter{n: n, mtime: info.ModTime()})
@@ -236,7 +236,7 @@ func (g *iterLogIngester) ingest(p pendingIter, wm *IterLogWatermark) error {
 	if err := state.Save(g.watermarkPath, wm); err != nil {
 		return err
 	}
-	payload := IterationScored{
+	payload := events.IterationScored{
 		Iteration:   p.n,
 		Score:       score.Value,
 		Band:        score.Band,
