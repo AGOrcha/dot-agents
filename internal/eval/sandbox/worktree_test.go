@@ -1,0 +1,585 @@
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/object"
+	"go.yaml.in/yaml/v3"
+
+	"github.com/AGOrcha/dot-agents/internal/eval"
+	"github.com/AGOrcha/dot-agents/internal/gitwt"
+)
+
+// fixture is a temp source repo with one commit plus a worktree sandbox
+// rooted at a sibling runs dir.
+type fixture struct {
+	repoPath string
+	runsRoot string
+	base     plumbing.Hash
+	sb       *worktreeSandbox
+}
+
+func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	root := t.TempDir()
+	repoPath, base := initRepo(t, filepath.Join(root, "repo"), true)
+	runsRoot := filepath.Join(root, "runs")
+	sb, err := NewWorktreeSandbox(Config{RepoPath: repoPath, RunsRoot: runsRoot})
+	if err != nil {
+		t.Fatalf("NewWorktreeSandbox: %v", err)
+	}
+	return &fixture{
+		repoPath: repoPath,
+		runsRoot: runsRoot,
+		base:     base,
+		sb:       sb.(*worktreeSandbox),
+	}
+}
+
+// initRepo creates a git repo at path; withCommit adds one README commit.
+func initRepo(t *testing.T, path string, withCommit bool) (string, plumbing.Hash) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("mkdir repo: %v", err)
+	}
+	repo, err := git.PlainInit(path, false)
+	if err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	if !withCommit {
+		return path, plumbing.ZeroHash
+	}
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	readme := filepath.Join(path, "README.md")
+	if err := os.WriteFile(readme, []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if _, err := wt.Add("README.md"); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	base, err := wt.Commit("initial", &git.CommitOptions{
+		Author: &object.Signature{Name: "Test", Email: "t@example.com", When: time.Now()},
+	})
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return path, base
+}
+
+// testSpec returns a minimal valid TaskSpec with the given task id.
+func testSpec(id string) *eval.TaskSpec {
+	return &eval.TaskSpec{
+		TaskSpecVersion: eval.CurrentTaskSpecVersion,
+		TaskID:          id,
+		Language:        eval.LanguageGo,
+		Difficulty:      eval.DifficultyEasy,
+		GeneratedFrom:   eval.GeneratedFrom{Kind: eval.KindKGTemplate},
+		Prompt:          "implement the function",
+		Verification:    eval.Verification{TestCmd: []string{"go", "test", "./..."}},
+	}
+}
+
+func mustNotExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected %s to be gone, stat err=%v", path, err)
+	}
+}
+
+func mustExist(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected %s to exist: %v", path, err)
+	}
+}
+
+func TestNewWorktreeSandboxConfig(t *testing.T) {
+	if _, err := NewWorktreeSandbox(Config{}); !errors.Is(err, ErrRepoPathRequired) {
+		t.Fatalf("empty repo path: got %v, want ErrRepoPathRequired", err)
+	}
+	if _, err := NewWorktreeSandbox(Config{RepoPath: t.TempDir()}); err == nil {
+		t.Fatal("non-repo path: expected error")
+	}
+
+	repoPath, _ := initRepo(t, filepath.Join(t.TempDir(), "repo"), true)
+	sb, err := NewWorktreeSandbox(Config{RepoPath: repoPath})
+	if err != nil {
+		t.Fatalf("NewWorktreeSandbox: %v", err)
+	}
+	ws := sb.(*worktreeSandbox)
+	wantRoot := filepath.Join(repoPath, ".agents", "eval", "runs")
+	if ws.runsRoot != wantRoot {
+		t.Errorf("default runs root = %q, want %q", ws.runsRoot, wantRoot)
+	}
+	if ws.retention != DefaultRetention {
+		t.Errorf("default retention = %v, want %v", ws.retention, DefaultRetention)
+	}
+}
+
+func TestProvisionCreatesIsolatedWorktree(t *testing.T) {
+	f := newFixture(t)
+	inst, err := f.sb.Provision(context.Background(), testSpec("kg-go-impl-001"))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Cleanup() })
+
+	if inst.RunDir != filepath.Join(f.runsRoot, inst.RunID) {
+		t.Errorf("RunDir = %q, want under runs root with RunID", inst.RunDir)
+	}
+	if inst.Workdir != filepath.Join(inst.RunDir, worktreeDirName) {
+		t.Errorf("Workdir = %q, want %q", inst.Workdir, filepath.Join(inst.RunDir, worktreeDirName))
+	}
+	if inst.BaseCommit != f.base.String() {
+		t.Errorf("BaseCommit = %q, want %q", inst.BaseCommit, f.base.String())
+	}
+	mustExist(t, filepath.Join(inst.Workdir, "README.md"))
+
+	home := filepath.Join(inst.RunDir, homeDirName)
+	wantEnv := []string{"HOME=" + home, "USERPROFILE=" + home}
+	for i, want := range wantEnv {
+		if inst.Env[i] != want {
+			t.Errorf("Env[%d] = %q, want %q", i, inst.Env[i], want)
+		}
+	}
+	mustExist(t, home)
+
+	data, err := os.ReadFile(filepath.Join(inst.RunDir, markerName))
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	var m marker
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal marker: %v", err)
+	}
+	if m.RunID != inst.RunID || m.WorktreeName != gitwt.SafeName(inst.RunID) || m.BaseCommit != f.base.String() {
+		t.Errorf("marker = %+v, want run %q / worktree %q / base %q", m, inst.RunID, gitwt.SafeName(inst.RunID), f.base.String())
+	}
+	if _, err := time.Parse(time.RFC3339, m.ProvisionedAt); err != nil {
+		t.Errorf("marker provisioned_at %q not RFC3339: %v", m.ProvisionedAt, err)
+	}
+
+	// Writes in the sandbox never appear in the operator's tree.
+	if err := os.WriteFile(filepath.Join(inst.Workdir, "agent-output.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write in sandbox: %v", err)
+	}
+	mustNotExist(t, filepath.Join(f.repoPath, "agent-output.txt"))
+}
+
+func TestProvisionInputValidation(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.sb.Provision(context.Background(), nil); !errors.Is(err, ErrNilTaskSpec) {
+		t.Fatalf("nil spec: got %v, want ErrNilTaskSpec", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := f.sb.Provision(ctx, testSpec("t")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ctx: got %v, want context.Canceled", err)
+	}
+}
+
+func TestProvisionHeadErrors(t *testing.T) {
+	// A repo with no commits has no resolvable HEAD.
+	repoPath, _ := initRepo(t, filepath.Join(t.TempDir(), "empty"), false)
+	sb, err := NewWorktreeSandbox(Config{RepoPath: repoPath, RunsRoot: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewWorktreeSandbox: %v", err)
+	}
+	if _, err := sb.Provision(context.Background(), testSpec("t")); err == nil || !strings.Contains(err.Error(), "resolve HEAD") {
+		t.Fatalf("no-commit repo: got %v, want resolve HEAD error", err)
+	}
+
+	// A repo deleted after construction fails at open time.
+	f := newFixture(t)
+	if err := os.RemoveAll(filepath.Join(f.repoPath, ".git")); err != nil {
+		t.Fatalf("remove .git: %v", err)
+	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("t")); err == nil || !strings.Contains(err.Error(), "open repo") {
+		t.Fatalf("deleted repo: got %v, want open repo error", err)
+	}
+}
+
+func TestProvisionRunIDRandFailure(t *testing.T) {
+	f := newFixture(t)
+	f.sb.randRead = func([]byte) (int, error) { return 0, errors.New("entropy down") }
+	if _, err := f.sb.Provision(context.Background(), testSpec("t")); err == nil || !strings.Contains(err.Error(), "derive run id") {
+		t.Fatalf("rand failure: got %v, want derive run id error", err)
+	}
+}
+
+func TestProvisionMarkerFailureRollsBack(t *testing.T) {
+	f := newFixture(t)
+	f.sb.now = func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
+	f.sb.randRead = func(b []byte) (int, error) {
+		for i := range b {
+			b[i] = 0xab
+		}
+		return len(b), nil
+	}
+	runID := "kg-go-impl-001-20260102T030405-abababab"
+	// Pre-create the marker path as a directory so the atomic write fails
+	// after the worktree has been provisioned.
+	if err := os.MkdirAll(filepath.Join(f.runsRoot, runID, markerName), 0o755); err != nil {
+		t.Fatalf("plant marker dir: %v", err)
+	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("kg-go-impl-001")); err == nil || !strings.Contains(err.Error(), "write marker") {
+		t.Fatalf("marker failure: got %v, want write marker error", err)
+	}
+	mustNotExist(t, filepath.Join(f.runsRoot, runID, worktreeDirName))
+	names, err := f.sb.mgr.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("rollback leaked worktrees: %v", names)
+	}
+}
+
+// pinIdentity fixes the sandbox's time and randomness seams so the next
+// Provision derives exactly the returned run ID.
+func pinIdentity(sb *worktreeSandbox, taskID string) string {
+	sb.now = func() time.Time { return time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC) }
+	sb.randRead = func(b []byte) (int, error) {
+		for i := range b {
+			b[i] = 0xcd
+		}
+		return len(b), nil
+	}
+	return sanitizeID(taskID) + "-20260102T030405-cdcdcdcd"
+}
+
+func TestProvisionScratchHomeFailure(t *testing.T) {
+	f := newFixture(t)
+	runID := pinIdentity(f.sb, "home-blocked")
+	// A file where the home dir must go makes MkdirAll fail.
+	if err := os.MkdirAll(filepath.Join(f.runsRoot, runID), 0o755); err != nil {
+		t.Fatalf("mkdir run dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(f.runsRoot, runID, homeDirName), []byte("x"), 0o644); err != nil {
+		t.Fatalf("plant home file: %v", err)
+	}
+	if _, err := f.sb.Provision(context.Background(), testSpec("home-blocked")); err == nil || !strings.Contains(err.Error(), "create scratch home") {
+		t.Fatalf("blocked home: got %v, want create scratch home error", err)
+	}
+}
+
+func TestProvisionWorktreeCollision(t *testing.T) {
+	f := newFixture(t)
+	pinIdentity(f.sb, "collide")
+	inst, err := f.sb.Provision(context.Background(), testSpec("collide"))
+	if err != nil {
+		t.Fatalf("first Provision: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Cleanup() })
+	// The pinned seams re-derive the same run ID, so the second worktree
+	// add collides.
+	if _, err := f.sb.Provision(context.Background(), testSpec("collide")); !errors.Is(err, gitwt.ErrWorktreeExists) {
+		t.Fatalf("collision: got %v, want gitwt.ErrWorktreeExists", err)
+	}
+}
+
+func TestCleanupPreservesSidecars(t *testing.T) {
+	f := newFixture(t)
+	inst, err := f.sb.Provision(context.Background(), testSpec("cleanup-task"))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	sidecar := filepath.Join(inst.RunDir, "taskspec.yaml")
+	if err := os.WriteFile(sidecar, []byte("task_spec_version: 1\n"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	if err := inst.Cleanup(); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	mustNotExist(t, inst.Workdir)
+	mustNotExist(t, filepath.Join(inst.RunDir, homeDirName))
+	mustNotExist(t, filepath.Join(inst.RunDir, markerName))
+	mustExist(t, sidecar)
+	if err := inst.Cleanup(); err != nil {
+		t.Fatalf("second Cleanup: %v", err)
+	}
+	// A zero-value instance's Cleanup is a safe no-op.
+	if err := (&Instance{}).Cleanup(); err != nil {
+		t.Fatalf("zero-value Cleanup: %v", err)
+	}
+}
+
+// TestConcurrentProvisionIsolation is the R4 requirement-R4 gate: two
+// simultaneous Provisions cannot see each other's writes, and neither
+// touches the operator's tree.
+func TestConcurrentProvisionIsolation(t *testing.T) {
+	f := newFixture(t)
+	var (
+		wg    sync.WaitGroup
+		insts [2]*Instance
+		errs  [2]error
+	)
+	for i := range insts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			insts[i], errs[i] = f.sb.Provision(context.Background(), testSpec(fmt.Sprintf("concurrent-%d", i)))
+		}()
+	}
+	wg.Wait()
+	for i := range insts {
+		if errs[i] != nil {
+			t.Fatalf("Provision %d: %v", i, errs[i])
+		}
+		t.Cleanup(func() { _ = insts[i].Cleanup() })
+		name := fmt.Sprintf("only-in-%d.txt", i)
+		if err := os.WriteFile(filepath.Join(insts[i].Workdir, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write in sandbox %d: %v", i, err)
+		}
+	}
+	if insts[0].RunID == insts[1].RunID {
+		t.Fatalf("run IDs collide: %q", insts[0].RunID)
+	}
+	for i := range insts {
+		other := 1 - i
+		mustExist(t, filepath.Join(insts[i].Workdir, fmt.Sprintf("only-in-%d.txt", i)))
+		mustNotExist(t, filepath.Join(insts[i].Workdir, fmt.Sprintf("only-in-%d.txt", other)))
+		mustNotExist(t, filepath.Join(f.repoPath, fmt.Sprintf("only-in-%d.txt", i)))
+	}
+}
+
+// rewriteMarkerAge rewrites a run's marker with the given provisioned_at.
+func rewriteMarkerAge(t *testing.T, runDir string, at time.Time) {
+	t.Helper()
+	path := filepath.Join(runDir, markerName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	var m marker
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal marker: %v", err)
+	}
+	m.ProvisionedAt = at.UTC().Format(time.RFC3339)
+	out, err := yaml.Marshal(&m)
+	if err != nil {
+		t.Fatalf("marshal marker: %v", err)
+	}
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+}
+
+func TestPruneStaleRemovesOldTrees(t *testing.T) {
+	f := newFixture(t)
+	stale, err := f.sb.Provision(context.Background(), testSpec("stale-task"))
+	if err != nil {
+		t.Fatalf("Provision stale: %v", err)
+	}
+	fresh, err := f.sb.Provision(context.Background(), testSpec("fresh-task"))
+	if err != nil {
+		t.Fatalf("Provision fresh: %v", err)
+	}
+	t.Cleanup(func() { _ = fresh.Cleanup() })
+	sidecar := filepath.Join(stale.RunDir, "eval-run.yaml")
+	if err := os.WriteFile(sidecar, []byte("run: stale\n"), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	rewriteMarkerAge(t, stale.RunDir, time.Now().Add(-8*24*time.Hour))
+
+	pruned, err := f.sb.PruneStale(context.Background())
+	if err != nil {
+		t.Fatalf("PruneStale: %v", err)
+	}
+	if len(pruned) != 1 || pruned[0] != stale.RunID {
+		t.Fatalf("pruned = %v, want [%s]", pruned, stale.RunID)
+	}
+	mustNotExist(t, stale.Workdir)
+	mustNotExist(t, filepath.Join(stale.RunDir, homeDirName))
+	mustNotExist(t, filepath.Join(stale.RunDir, markerName))
+	mustExist(t, sidecar) // sidecars retained indefinitely (OQ6)
+	mustExist(t, fresh.Workdir)
+
+	again, err := f.sb.PruneStale(context.Background())
+	if err != nil {
+		t.Fatalf("second PruneStale: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("second prune = %v, want empty", again)
+	}
+}
+
+func TestPruneStaleEdgeCases(t *testing.T) {
+	f := newFixture(t)
+
+	// Missing runs root is not an error — nothing has been provisioned yet.
+	pruned, err := f.sb.PruneStale(context.Background())
+	if err != nil || len(pruned) != 0 {
+		t.Fatalf("missing root: pruned=%v err=%v, want empty/nil", pruned, err)
+	}
+
+	// Foreign or malformed entries are skipped, never deleted.
+	if err := os.MkdirAll(f.runsRoot, 0o755); err != nil {
+		t.Fatalf("mkdir runs root: %v", err)
+	}
+	plainFile := filepath.Join(f.runsRoot, "stray.txt")
+	if err := os.WriteFile(plainFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write stray: %v", err)
+	}
+	noMarker := filepath.Join(f.runsRoot, "no-marker")
+	corrupt := filepath.Join(f.runsRoot, "corrupt")
+	badTime := filepath.Join(f.runsRoot, "bad-time")
+	for dir, content := range map[string]string{
+		noMarker: "",
+		corrupt:  ":\tnot yaml [",
+		badTime:  "run_id: bad-time\nworktree_name: wt-x\nprovisioned_at: yesterday\n",
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+		if content == "" {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dir, markerName), []byte(content), 0o644); err != nil {
+			t.Fatalf("write marker in %s: %v", dir, err)
+		}
+	}
+	pruned, err = f.sb.PruneStale(context.Background())
+	if err != nil || len(pruned) != 0 {
+		t.Fatalf("foreign entries: pruned=%v err=%v, want empty/nil", pruned, err)
+	}
+	mustExist(t, plainFile)
+	mustExist(t, noMarker)
+
+	// A cancelled context aborts the sweep.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := f.sb.PruneStale(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ctx: got %v, want context.Canceled", err)
+	}
+
+	// An unreadable runs root (a file, not a dir) is an error.
+	f.sb.runsRoot = plainFile
+	if _, err := f.sb.PruneStale(context.Background()); err == nil || !strings.Contains(err.Error(), "read runs root") {
+		t.Fatalf("file as root: got %v, want read runs root error", err)
+	}
+}
+
+func TestPruneStaleSurfacesRemoveError(t *testing.T) {
+	f := newFixture(t)
+	inst, err := f.sb.Provision(context.Background(), testSpec("bad-marker-task"))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	t.Cleanup(func() { _ = inst.Cleanup() })
+	// A stale marker naming an invalid worktree makes the removal fail
+	// mid-sweep.
+	data := "run_id: " + inst.RunID + "\nworktree_name: bad_name!\nprovisioned_at: 2020-01-01T00:00:00Z\n"
+	if err := os.WriteFile(filepath.Join(inst.RunDir, markerName), []byte(data), 0o644); err != nil {
+		t.Fatalf("rewrite marker: %v", err)
+	}
+	if _, err := f.sb.PruneStale(context.Background()); !errors.Is(err, gitwt.ErrInvalidName) {
+		t.Fatalf("bad worktree name: got %v, want gitwt.ErrInvalidName", err)
+	}
+}
+
+func TestPruneStaleSurfacesMetadataPruneError(t *testing.T) {
+	f := newFixture(t)
+	inst, err := f.sb.Provision(context.Background(), testSpec("wedged-task"))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	// Replace the whole run dir with a plain file: the sweep skips it (not a
+	// dir), but the manager's stat of the recorded worktree path now fails
+	// with a non-NotExist error, surfacing from the metadata prune.
+	if err := os.RemoveAll(inst.RunDir); err != nil {
+		t.Fatalf("remove run dir: %v", err)
+	}
+	if err := os.WriteFile(inst.RunDir, []byte("x"), 0o644); err != nil {
+		t.Fatalf("plant file: %v", err)
+	}
+	if _, err := f.sb.PruneStale(context.Background()); err == nil || !strings.Contains(err.Error(), "prune worktree metadata") {
+		t.Fatalf("wedged run dir: got %v, want prune worktree metadata error", err)
+	}
+}
+
+func TestPruneStaleClearsOrphanedMetadata(t *testing.T) {
+	f := newFixture(t)
+	inst, err := f.sb.Provision(context.Background(), testSpec("orphan-task"))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	// The working tree vanishes out-of-band (manual rm); admin metadata stays.
+	if err := os.RemoveAll(inst.Workdir); err != nil {
+		t.Fatalf("remove workdir: %v", err)
+	}
+	pruned, err := f.sb.PruneStale(context.Background())
+	if err != nil {
+		t.Fatalf("PruneStale: %v", err)
+	}
+	if len(pruned) != 0 {
+		t.Fatalf("pruned = %v, want empty (run is fresh)", pruned)
+	}
+	names, err := f.sb.mgr.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("orphaned metadata not cleared: %v", names)
+	}
+}
+
+func TestRemoveRunTreesErrors(t *testing.T) {
+	f := newFixture(t)
+
+	// An invalid worktree name surfaces the non-NotFound manager error.
+	if err := f.sb.removeRunTrees("x", "bad_name!"); err == nil || !errors.Is(err, gitwt.ErrInvalidName) {
+		t.Fatalf("invalid name: got %v, want gitwt.ErrInvalidName", err)
+	}
+
+	// A marker that cannot be removed (a non-empty directory in its place)
+	// surfaces a remove-marker error.
+	markerDir := filepath.Join(f.runsRoot, "mk", markerName)
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(markerDir, "child.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write child: %v", err)
+	}
+	if err := f.sb.removeRunTrees("mk", "wt-0000000000000000"); err == nil || !strings.Contains(err.Error(), "remove marker") {
+		t.Fatalf("marker dir: got %v, want remove marker error", err)
+	}
+}
+
+func TestRunIDDerivation(t *testing.T) {
+	sanitizeCases := map[string]string{
+		"KG Go_Impl.001!": "kg-go-impl-001",
+		"  ":              "task",
+		"---":             "task",
+		"already-clean-9": "already-clean-9",
+	}
+	for in, want := range sanitizeCases {
+		if got := sanitizeID(in); got != want {
+			t.Errorf("sanitizeID(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	f := newFixture(t)
+	runID, err := f.sb.newRunID("My Task/07")
+	if err != nil {
+		t.Fatalf("newRunID: %v", err)
+	}
+	pattern := regexp.MustCompile(`^my-task-07-\d{8}T\d{6}-[0-9a-f]{8}$`)
+	if !pattern.MatchString(runID) {
+		t.Errorf("runID %q does not match %s", runID, pattern)
+	}
+}
