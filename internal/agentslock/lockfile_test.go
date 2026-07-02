@@ -1322,31 +1322,12 @@ func TestClaimNeverExposesPartialIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guarded.ndjson")
 	stop := make(chan struct{})
 	done := make(chan struct{})
-	var partial atomicwrap
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			data, err := os.ReadFile(path + ".lock")
-			if err != nil {
-				continue // free, mid-rename, or trash-churn: all fine
-			}
-			if _, ok := identityAge(data); !ok {
-				mu.Lock()
-				degraded := degradedPossible
-				mu.Unlock()
-				if degraded {
-					continue // documented O_EXCL two-step window; not the hardlink path
-				}
-				partial.set(string(data))
-				return
-			}
-		}
-	}()
+	degraded := func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return degradedPossible
+	}
+	partial := pollForPartialIdentity(path+".lock", stop, done, degraded)
 	for i := 0; i < 30; i++ {
 		release, err := AcquireFileLock(path)
 		if err != nil {
@@ -1361,6 +1342,38 @@ func TestClaimNeverExposesPartialIdentity(t *testing.T) {
 	if got, seen := partial.get(); seen {
 		t.Fatalf("observer caught a partial identity on the HARDLINK claim path: %q", got)
 	}
+}
+
+// pollForPartialIdentity starts the concurrent observer for the structural
+// claim-atomicity test: it polls the lock name until stop closes, ignoring
+// read failures (free / mid-rename / trash churn) and any unparseable read
+// for which the degraded O_EXCL path could have been engaged, and captures
+// the first partial identity observed on the hardlink path.
+func pollForPartialIdentity(lockPath string, stop, done chan struct{}, degraded func() bool) *atomicwrap {
+	partial := &atomicwrap{}
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(lockPath)
+			if err != nil {
+				continue // free, mid-rename, or trash-churn: all fine
+			}
+			if _, ok := identityAge(data); ok {
+				continue
+			}
+			if degraded() {
+				continue // documented O_EXCL two-step window; not the hardlink path
+			}
+			partial.set(string(data))
+			return
+		}
+	}()
+	return partial
 }
 
 // TestClaimTransientLinkFailureStaysOnHardlinkPath pins the code-side fix for
