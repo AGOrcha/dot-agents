@@ -94,7 +94,7 @@ tasks:
       app_type: go-cli
     - id: http-server
       title: Service transport layer — UDS/named-pipe control plane + HTTP/SSE edge (mounts for R2/R5, /healthz, /api/tasks)
-      status: pending
+      status: completed
       depends_on:
         - design-doc
         - scheduler-core
@@ -393,7 +393,7 @@ tasks:
       app_type: release
     - id: event-bus-interface-seam
       title: EventBus interface seam over the shipped concrete events.Bus (spec D4.1)
-      status: pending
+      status: completed
       depends_on:
         - event-bus
       blocks:
