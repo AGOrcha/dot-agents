@@ -268,6 +268,97 @@ test_command "first-run: second acquire (install --yes) succeeds" \
   "(cd '${FR_PROJ}' && $DOT_AGENTS_ABS install --yes)"
 rm -rf "${FR_INTERMEDIATE}"
 
+# ── GIT-SOURCE first-run smoke — install/explain/sync against a bare-repo source ─
+# The owner's Windows work PC cannot run `da install` or `da config explain`:
+# its manifest extends a GIT source. Yet this smoke (and CI) only ever exercised
+# a LOCAL extends layer — the entire git lane (clone into the layer cache,
+# cache-integrity locks, Windows path handling) had ZERO live-binary coverage on
+# any OS. That is the same structural blind-spot class as the #147 ESCAPED
+# agentslock bug (.agents/history/rca-windows-agentslock-escape.md): the
+# field-failing surface had no net. This lane is the net for git sources, and it
+# is hermetic + offline: the "remote" is a local BARE repo inside the smoke
+# tree, declared via a file:// URL — the identical go-git clone path a network
+# remote takes (internal/config fetcher accepts file:// as a legitimate clone
+# source), minus the network. FIRST-RUN shape throughout: no pre-created lock,
+# no warmed cache — matching the owner's failing machine.
+GS_WORK="${SMOKE_ROOT}/git-source-work"
+GS_BARE="${SMOKE_ROOT}/git-source-layer.git"
+GS_PROJ="${SMOKE_ROOT}/gitsrc-proj"
+mkdir -p "${GS_WORK}"
+# Source-layer content mirrors the local-extends fixture shape (project + a
+# skill + a feature) so the explain/lock assertions have real fields to win.
+cat > "${GS_WORK}/base.json" <<'JSON'
+{
+  "version": 1,
+  "project": "git-base-project",
+  "skills": ["git-source-skill"],
+  "features": { "gamma": "from-git" }
+}
+JSON
+git init -q "${GS_WORK}"
+# Pin the branch to `main` regardless of the runner's init.defaultBranch (the
+# git fetcher's default ref is main). Re-pointing the unborn HEAD via
+# symbolic-ref is portable to every git version — no `init -b` requirement.
+git -C "${GS_WORK}" symbolic-ref HEAD refs/heads/main
+git -C "${GS_WORK}" add base.json
+# Inline identity so the commit works on clean runners with no git config.
+git -C "${GS_WORK}" -c user.name=smoke -c user.email=smoke@local commit -q -m "git-source layer"
+git clone -q --bare "${GS_WORK}" "${GS_BARE}"
+GS_SHA="$(git --git-dir="${GS_BARE}" rev-parse HEAD)"
+# The clone URL is embedded in .agentsrc.json and read VERBATIM by the binary —
+# no shell path conversion applies to file content — so on Windows-bash it must
+# be the native form. cygpath -m yields forward-slash native paths (C:/...),
+# which are also JSON-safe (no backslash escaping needed).
+GS_URL_PATH="${GS_BARE}"
+if command -v cygpath >/dev/null 2>&1; then
+  GS_URL_PATH="$(cygpath -m "${GS_BARE}")"
+fi
+mkdir -p "${GS_PROJ}"
+cat > "${GS_PROJ}/.agentsrc.json" <<JSON
+{
+  "version": 1,
+  "sources": [ { "type": "git", "id": "gitbase", "url": "file://${GS_URL_PATH}", "ref": "main" } ],
+  "extends": ["gitbase:base.json"],
+  "project": "gitsrc-project"
+}
+JSON
+# FIRST-RUN preconditions: no lock, and the layer cache for this source is cold.
+test_command "git-source: lock absent before first run" "test ! -e '${GS_PROJ}/.agentsrc.lock'"
+test_command "git-source: layer cache cold before first run" "test ! -e '${AGENTS_HOME}/cache/config/gitbase'"
+# `da install` is the owner's first failing surface: it resolves the git layer
+# (clone → cache → lock) as part of materializing the project.
+test_command "git-source: install --yes (first run)" "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS install --yes)"
+test_command "git-source: install wrote lock" "test -f '${GS_PROJ}/.agentsrc.lock'"
+# The units entry pins the git layer to the EXACT commit the bare repo serves —
+# git layers record the resolved commit SHA as the lock digest (the sha256:…
+# form is the http/local/oci content-hash variant of the same field).
+assert_contains "git-source: lock has the git layer unit" \
+  "cat '${GS_PROJ}/.agentsrc.lock'" "gitbase:base.json"
+assert_contains "git-source: lock pins the resolved commit digest" \
+  "cat '${GS_PROJ}/.agentsrc.lock'" "${GS_SHA}"
+# The fetched layer landed in the content-addressed cache at the resolved SHA
+# (~/.agents/cache/config/<source-id>/<layer-path>/<sha>/layer.json).
+test_command "git-source: layer cached content-addressed by SHA" \
+  "test -f '${AGENTS_HOME}/cache/config/gitbase/base.json/${GS_SHA}/layer.json'"
+# `da config explain` is the owner's second failing surface. It must name the
+# git layer as the WINNING source for a field only that layer sets.
+assert_json_field "git-source: explain skills wins from the git layer" \
+  "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS config explain skills --json)" \
+  "d.get('value') == ['git-source-skill'] and d.get('active_layer') == 'gitbase:base.json'"
+assert_json_field "git-source: explain --all merges git layer + repo override" \
+  "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS config explain --all --json)" \
+  "d['effective']['project'] == 'gitsrc-project' and d['effective']['skills'] == ['git-source-skill'] and d['effective']['features'] == {'gamma': 'from-git'}"
+# sync + verify complete the lifecycle against the git-sourced lock.
+test_command "git-source: config sync" "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS config sync)"
+assert_contains "git-source: config verify -> OK" \
+  "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS config verify)" "OK"
+# A SECOND resolve with a warm cache must also succeed (the SHA-addressed
+# cache-serve path), and the sidecar dir-lock must not leak across the runs.
+test_command "git-source: second explain (cache warm) succeeds" \
+  "(cd '${GS_PROJ}' && $DOT_AGENTS_ABS config explain --all)"
+test_command "git-source: sidecar dir-lock released (not leaked)" \
+  "test ! -e '${GS_PROJ}/.agentsrc.lock.lock'"
+
 # ── Layer resolution + provenance combinations ───────────────────────────────
 # Valid rc lints clean.
 assert_contains "config lint (valid rc) -> OK" \
