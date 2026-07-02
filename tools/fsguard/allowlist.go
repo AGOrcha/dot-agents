@@ -27,17 +27,13 @@ type allowEntry struct {
 
 // preciseAllow lists calls sanctioned forever: fsops offers no equivalent, so
 // these stay on raw os.*. Line numbers must be kept current with the source.
-var preciseAllow = []allowEntry{
-	{
-		relPath: "internal/agentslock/lockfile.go",
-		line:    425,
-		reason: "atomic mkdir-as-lock: os.Mkdir of the sidecar lock dir IS the " +
-			"mutual-exclusion primitive (its EEXIST result is the contention " +
-			"signal). fsops has no atomic-mkdir-lock equivalent. The PARENT " +
-			"directory is created via fsops.MkdirAll just above — that was the " +
-			"#148 Windows fix; only this single-component atomic create stays raw.",
-	},
-}
+var preciseAllow = []allowEntry{}
+
+// (Currently empty: the last entry — agentslock's atomic mkdir-as-lock —
+// was retired when the lock became a single FILE claimed via os.Link from a
+// pre-written identity temp. os.Link, os.OpenFile, and os.Lstat are not
+// policed mutators, so the lock primitive no longer needs an exception. The
+// mechanism stays for future genuine fsops-less primitives.)
 
 // reasonUnmigrated is the bare "predates the guard, not yet migrated" reason
 // shared by packages with no further detail to record.

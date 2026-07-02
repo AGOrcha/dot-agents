@@ -8,14 +8,17 @@
 // section and flushes; sibling sections are preserved verbatim. Flush is
 // atomic (temp file + rename, via fsops.WriteFileAtomic). A single Lockfile is
 // safe for concurrent SetSection from parallel resolver goroutines. Flush also
-// takes a portable sidecar-directory lock, rereads the latest on-disk document,
+// takes a portable single-file sidecar lock, rereads the latest on-disk document,
 // and reapplies only this process's staged top-level keys before the atomic
 // write. That keeps sibling sections written by another process from being lost
 // while preserving the §7.4 "parallel resolution, serialized write" contract.
 package agentslock
 
 import (
+	"bytes"
+	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,11 +31,11 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
-// isDeletePendingLockErr reports whether a failed lock-dir Mkdir is the Windows
-// "delete pending" transient — a contender's os.Mkdir racing an in-place delete
-// of the lock dir (an older da release, or trash churn in the parent) observes
-// ERROR_ACCESS_DENIED (mapped to a permission error) while the directory is
-// mid-delete, rather than the portable ERROR_ALREADY_EXISTS.
+// isDeletePendingLockErr reports whether a failed lock-name create is the
+// Windows "delete pending" transient — a contender's create racing an in-place
+// delete of the lock name (an older da release, or trash churn in the parent)
+// observes ERROR_ACCESS_DENIED (mapped to a permission error) while the object
+// is mid-delete, rather than the portable ERROR_ALREADY_EXISTS.
 // It clears within a retry, so the acquisition loop treats it as retryable
 // contention. Gated on goos == "windows" so a genuine permission error stays a
 // fast failure on other platforms (where this race does not occur). goos is a
@@ -42,7 +45,7 @@ func isDeletePendingLockErr(err error, goos string) bool {
 	return goos == "windows" && os.IsPermission(err)
 }
 
-// lockGOOS is the GOOS the acquire loop classifies Mkdir failures under. A
+// lockGOOS is the GOOS the acquire loop classifies claim failures under. A
 // package var (defaulting to runtime.GOOS) for the same reason
 // isDeletePendingLockErr takes goos as a parameter: the Windows-only
 // classification branches are unit-testable from any host.
@@ -64,47 +67,49 @@ const inputsDigestKey = "inputs_digest"
 const (
 	lockAcquireTimeout = 5 * time.Second
 	lockRetryInterval  = 10 * time.Millisecond
-	// lockStaleTTL bounds how long an unreleased lock dir is tolerated before a
-	// contending writer treats it as orphaned and reclaims it. The mkdir lock
-	// has no kernel-backed auto-release, so a holder killed by SIGKILL/OOM/power
+	// lockStaleTTL bounds how long an unreleased lock is tolerated before a
+	// contending writer treats it as orphaned and reclaims it. The lock has no
+	// kernel-backed auto-release, so a holder killed by SIGKILL/OOM/power
 	// loss would otherwise wedge every future Flush permanently. The TTL is set
 	// well above the expected sub-second hold time (a single read-merge-write)
 	// so a live, slow holder is never reclaimed out from under itself, yet a
 	// crashed holder's lock self-clears within the TTL rather than forever.
 	lockStaleTTL = 30 * time.Second
-	// lockNoHolderGrace bounds how long a lock dir with NO readable holder file
-	// is tolerated before a contender treats it as a remnant and reclaims it.
-	// Only two states look like this: the live mid-acquire window between
-	// os.Mkdir and writeHolder (two local fs ops — microseconds, so 2s is a
-	// >1000x margin), and a crash/partial-release remnant (holder gone, dir
-	// stuck). The remnant case MUST clear well inside lockAcquireTimeout:
-	// judging it by the full lockStaleTTL (as the old dir-mtime fallback did)
-	// meant a 30s grace against a 5s acquire budget — every contender and every
-	// fresh da process was stranded into a guaranteed timeout.
+	// lockNoHolderGrace bounds how long an UNIDENTIFIED occupant of the lock
+	// name is tolerated before a contender treats it as a remnant and reclaims
+	// it. With the hardlink claim this state cannot arise for new locks (the
+	// name is only ever created already carrying its full identity); it covers
+	// the degraded O_EXCL claim's create→write gap on hardlink-less
+	// filesystems, torn/corrupt records, and legacy holderless lock DIRS from
+	// pre-single-file binaries. A remnant MUST clear well inside
+	// lockAcquireTimeout: judging it by the full lockStaleTTL (as the original
+	// dir-mtime fallback did) meant a 30s grace against a 5s acquire budget —
+	// every contender and every fresh da process was stranded into a
+	// guaranteed timeout.
 	// Ordering invariant: release rename retries (~300ms) < lockNoHolderGrace
 	// < lockAcquireTimeout < lockStaleTTL.
 	lockNoHolderGrace = 2 * time.Second
-	// holderFile is the name of the sidecar metadata file written inside the
-	// lock dir recording the acquiring PID and acquisition time, used to detect
-	// and reclaim stale locks. Its contents double as the acquisition's identity
-	// for the release-time ownership check.
+	// holderFile is the metadata file a LEGACY (pre-single-file) da binary
+	// wrote inside its lock directory. Kept so upgraded binaries can judge and
+	// describe legacy lock dirs during the transition.
 	holderFile = "holder"
-	// lockTrashInfix joins a lock-dir path to the unique suffix of its
-	// renamed-away trash sibling: "<lockdir>.stale-<pid>-<nanos>". Release and
-	// stale reclaim free the lock NAME with one atomic rename to such a sibling
-	// and delete the trash out-of-band; the name itself is never deleted in
-	// place (see releaseLockDir).
+	// lockTrashInfix joins a lock path to the unique suffix of its renamed-away
+	// trash sibling: "<lockpath>.stale-<pid>-<nanos>". Release and stale
+	// reclaim free the lock NAME with one atomic rename to such a sibling and
+	// delete the trash out-of-band; the name itself is never deleted in place
+	// (see releaseLock). Claim temps share this namespace so crashed claims
+	// are swept too.
 	lockTrashInfix = ".stale-"
 	// releaseRenameAttempts/Backoff bound the holder's release retry of the
 	// single atomic rename. On Windows a contender's probe handle or an AV scan
-	// can transiently pin the dir against rename; the pin clears within
+	// can transiently pin the file against rename; the pin clears within
 	// milliseconds, so a brief bounded retry (~275ms total, well under
 	// lockNoHolderGrace) is the correct semantic. Retrying is safe here —
-	// unlike reclaim — because the dir stays OURS until the rename lands.
+	// unlike reclaim — because the lock stays OURS until the rename lands.
 	releaseRenameAttempts = 12
 	releaseRenameBackoff  = 25 * time.Millisecond
 	// deniedTransientAttempts bounds how many CONSECUTIVE permission-denied
-	// Mkdir results the Windows delete-pending accommodation absorbs before the
+	// claim results the Windows delete-pending accommodation absorbs before the
 	// denial is classified as real. The delete-pending transient clears within a
 	// retry or two; 30 ticks (~300ms at lockRetryInterval) is orders of
 	// magnitude beyond that, so a denial that survives it is an environment
@@ -115,9 +120,9 @@ const (
 	deniedTransientAttempts = 30
 )
 
-// removeTrashFn deletes a renamed-away (trash) lock dir. A seam so tests can
-// force "trash deletion failed" deterministically and prove the lock name is
-// already free regardless; production always uses fsops.RemoveAll.
+// removeTrashFn deletes a renamed-away (trash) lock object. A seam so tests
+// can force "trash deletion failed" deterministically and prove the lock name
+// is already free regardless; production always uses fsops.RemoveAll.
 var removeTrashFn = fsops.RemoveAll
 
 // renameLockDirFn is the seam over fsops.Rename for the release/reclaim
@@ -125,11 +130,21 @@ var removeTrashFn = fsops.RemoveAll
 // production always uses fsops.Rename.
 var renameLockDirFn = fsops.Rename
 
-// testHookAfterLockDirCreated, when non-nil, runs between the winning Mkdir
-// and the holder claim in acquireLockDir. Tests use it to inject the
-// mid-acquire stall interleaving (grace reclaim + successor acquisition)
-// deterministically; production leaves it nil.
-var testHookAfterLockDirCreated func(lockDir string)
+// linkLockFn is the seam over os.Link, the atomic claim primitive (hardlink
+// the pre-written identity temp to the lock name; CreateHardLinkW on Windows,
+// link(2) on unix — both atomic fail-if-exists). A seam so tests can force
+// "filesystem without hardlinks" (the FAT/exFAT degraded path) and pin the
+// reclaim restore interleaving deterministically. os.Link is not an
+// fsguard-policed mutator; the atomic link IS the lock primitive, exactly like
+// the old mkdir-as-lock.
+var linkLockFn = os.Link
+
+// testHookBeforeClaimVerify, when non-nil, runs between the degraded O_EXCL
+// claim's identity write and its read-back verify. Tests use it to inject the
+// mid-write loss interleaving on the hardlink-less fallback path
+// deterministically; production leaves it nil. The primary (hardlink) claim
+// has no hook point because it has no intermediate state to interleave with.
+var testHookBeforeClaimVerify func(lockPath string)
 
 // reservedKeys are the top-level scalar keys the writer manages itself. They are
 // never valid section names — SetSection rejects them so a caller cannot
@@ -309,31 +324,41 @@ func readDocument(path string) (map[string]json.RawMessage, error) {
 // (see Flush); other cooperating da processes (e.g. an append-only NDJSON
 // writer) call it to serialize their own writes to a shared file.
 //
-// The lock is a sidecar directory at "<path>.lock". Acquisition is a single
-// atomic os.Mkdir: success is the mutual-exclusion signal, and EEXIST means
-// another holder currently owns it. The lock is therefore ADVISORY — it excludes
-// only other callers of this function that name the same path, not arbitrary
-// writers of the underlying file. The parent directory of path is created if it
-// does not yet exist.
+// The lock is a SINGLE sidecar file at "<path>.lock" whose contents are the
+// holder's identity (pid, acquisition time, random token). Acquisition is one
+// atomic name-creation: the identity is fully written to a unique temp sibling
+// first and then hard-linked to the lock name (os.Link → CreateHardLinkW, both
+// atomic fail-if-exists). The lock name therefore NEVER holds a partial or
+// identity-less object — there is no observable two-step state, which is what
+// eliminated the mid-acquire interleavings of the previous dir+holder design
+// (a contender could judge the dir between the Mkdir and the holder write).
+// On filesystems without hardlinks (FAT/exFAT, some network mounts) the claim
+// degrades to O_CREATE|O_EXCL + write + read-back verify; that path reopens a
+// microseconds-wide create→write gap, guarded by lockNoHolderGrace and the
+// verify, and is documented as the only residual two-step surface.
+//
+// The lock is ADVISORY — it excludes only other callers of this function that
+// name the same path, not arbitrary writers of the underlying file. The parent
+// directory of path is created if it does not yet exist.
 //
 // Acquisition blocks up to lockAcquireTimeout, retrying every lockRetryInterval,
-// and returns a timeout error if a live holder never releases. Because the mkdir
-// lock has no kernel-backed auto-release, a holder that crashed without releasing
+// and returns a timeout error if a live holder never releases. Because the lock
+// has no kernel-backed auto-release, a holder that crashed without releasing
 // (SIGKILL/OOM/power loss) is detected as stale once its recorded age exceeds
-// lockStaleTTL and is reclaimed at most once per call — so a slow but live holder
-// is never torn down out from under itself. The returned release frees the lock
-// name exactly once (atomic rename-away, see releaseLockDir) and reports an
-// error only when the name could not be freed; it is once-guarded (a second
-// call returns the first call's cached error without touching the filesystem).
+// lockStaleTTL and is reclaimed at most once per call — so a slow but live
+// holder is never torn down out from under itself. A legacy lock DIRECTORY at
+// the same name (left by a pre-single-file da binary) is judged by the old
+// dir+holder staleness rules and reclaimed through the same rename-away path,
+// so upgraded binaries never wedge on old remnants.
 //
-// The once-guard is a correctness requirement, not a convenience: an unguarded
-// release on every call would, after this caller released and another caller
-// re-acquired the same path, tear down the new holder's live lock dir on a stray
-// second release — silently breaking its mutual exclusion. Releasing at most once
-// (plus the holder-identity check inside releaseLockDir) guarantees a duplicate
-// or overdue release can never touch a dir this caller no longer owns.
+// The returned release frees the lock name exactly once (identity-verified
+// atomic rename-away, see releaseLock) and reports an error only when the name
+// could not be freed; it is once-guarded (a second call returns the first
+// call's cached error without touching the filesystem). The once-guard plus
+// the identity check guarantee a duplicate or overdue release can never touch
+// a lock this caller no longer owns.
 func AcquireFileLock(path string) (release func() error, err error) {
-	lockDir, holderID, err := acquireLockDir(path)
+	lockPath, identity, err := acquireLockPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -342,42 +367,33 @@ func AcquireFileLock(path string) (release func() error, err error) {
 		relErr error
 	)
 	return func() error {
-		once.Do(func() { relErr = releaseLockDir(lockDir, holderID) })
+		once.Do(func() { relErr = releaseLock(lockPath, identity) })
 		return relErr
 	}, nil
 }
 
 // acquireFileLock is the internal release-returning-nothing form used by Flush.
-// It shares acquireLockDir with the exported AcquireFileLock; the only
+// It shares acquireLockPath with the exported AcquireFileLock; the only
 // difference is that a release error is surfaced via the package debug channel
 // (Flush has no error path for the deferred unlock) rather than returned.
 func acquireFileLock(path string) (func(), error) {
-	lockDir, holderID, err := acquireLockDir(path)
+	lockPath, identity, err := acquireLockPath(path)
 	if err != nil {
 		return nil, err
 	}
-	return func() { unlockFileLock(lockDir, holderID) }, nil
+	return func() { unlockLock(lockPath, identity) }, nil
 }
 
-// acquireLockDir is the shared mkdir-as-lock acquisition core. It returns the
-// sidecar lock-dir path it created (held) plus the holder identity it recorded
-// (empty when the best-effort holder write failed); both AcquireFileLock and
-// acquireFileLock wrap it with their respective release shapes.
-func acquireLockDir(path string) (lockDir, holderID string, err error) {
-	// Build the sidecar lock-dir path through filepath so it carries the
-	// platform separator (backslashes on Windows) rather than whatever the
-	// caller's `path` happened to use, and ensure its parent exists before the
-	// first Mkdir. os.Mkdir (unlike MkdirAll) does NOT create intermediate
-	// components: if the parent directory is absent it fails with ENOENT on unix
-	// and ERROR_FILE_NOT_FOUND ("The system cannot find the file specified") on
-	// Windows — the exact failure seen in the field, where the lock is taken
-	// before any sibling writer (or fsops.WriteFileAtomic) has materialized the
-	// directory. MkdirAll-ing only the parent keeps the lock-dir Mkdir itself a
-	// single, atomic, EEXIST-distinguishable create — preserving the
-	// contention/stale-reclaim semantics below — while removing the
-	// missing-parent failure mode. A nil/empty parent (".") MkdirAll is a no-op.
-	lockDir = filepath.Clean(path) + ".lock"
-	if parent := filepath.Dir(lockDir); parent != "." && parent != "" {
+// acquireLockPath is the shared acquisition core. It returns the sidecar lock
+// path it now holds plus the identity recorded inside it; both AcquireFileLock
+// and acquireFileLock wrap it with their respective release shapes.
+func acquireLockPath(path string) (lockPath, identity string, err error) {
+	// Build the sidecar lock path through filepath so it carries the platform
+	// separator, and ensure its parent exists before the first claim: the
+	// single-component create does NOT make intermediate components, and an
+	// absent parent was the original Windows field failure (#148).
+	lockPath = filepath.Clean(path) + ".lock"
+	if parent := filepath.Dir(lockPath); parent != "." && parent != "" {
 		if err := fsops.MkdirAll(parent, 0o700); err != nil {
 			return "", "", fmt.Errorf("agentslock: ensure lock parent %s: %w", parent, err)
 		}
@@ -385,19 +401,19 @@ func acquireLockDir(path string) (lockDir, holderID string, err error) {
 	deadline := time.Now().Add(lockAcquireTimeout)
 	st := acquireLoopState{}
 	for {
-		holderID, acquired, err := acquireTick(lockDir, &st)
+		identity, acquired, err := acquireTick(lockPath, &st)
 		if err != nil {
 			return "", "", err
 		}
 		if acquired {
-			return lockDir, holderID, nil
+			return lockPath, identity, nil
 		}
 		if st.retryNow {
 			st.retryNow = false
 			continue
 		}
 		if time.Now().After(deadline) {
-			return "", "", lockTimeoutError(lockDir)
+			return "", "", lockTimeoutError(lockPath)
 		}
 		time.Sleep(lockRetryInterval)
 	}
@@ -413,124 +429,291 @@ type acquireLoopState struct {
 	retryNow  bool
 }
 
-// acquireTick performs one iteration of the acquisition loop: attempt the
-// atomic Mkdir, then either complete the two-step acquisition (holder claim)
-// or classify the failure. It returns the claimed holder identity with
-// acquired=true, a fatal error, or neither (the caller waits and retries).
-func acquireTick(lockDir string, st *acquireLoopState) (holderID string, acquired bool, err error) {
-	// fsguard:allow os.Mkdir — atomic mkdir-as-lock primitive; see allowlist.go.
-	// The single-component create here is the lock acquisition itself: its
-	// success/EEXIST result is the mutual-exclusion signal. fsops has no
-	// atomic-mkdir-lock equivalent, so this one call stays on raw os.Mkdir.
-	mkdirErr := os.Mkdir(lockDir, 0o700)
-	switch {
-	case mkdirErr == nil:
+// acquireTick performs one iteration of the acquisition loop. When the lock
+// name is occupied it evaluates the occupant (live wait / stale reclaim /
+// legacy dir); when free it attempts the atomic claim and classifies any
+// failure. It returns the claimed identity with acquired=true, a fatal error,
+// or neither (the caller waits and retries).
+func acquireTick(lockPath string, st *acquireLoopState) (identity string, acquired bool, err error) {
+	if _, statErr := os.Lstat(lockPath); statErr == nil {
+		// Occupied: any prior denials were the delete-pending transient. Judge
+		// the occupant; a stale one is reclaimed at most once per call, and the
+		// budget is only spent when the reclaim rename actually lands.
 		st.denied = 0
-		if testHookAfterLockDirCreated != nil {
-			testHookAfterLockDirCreated(lockDir)
-		}
-		if id := writeHolder(lockDir); id != "" {
-			return id, true, nil
-		}
-		// Winning the Mkdir is only HALF the acquisition: the O_EXCL holder
-		// claim is the other half, and it just failed. Either we lost the dir
-		// mid-stall (a contender grace-reclaimed it and a successor already
-		// claimed it, or it was renamed away), or the ownership token could not
-		// be recorded. NEVER proceed identity-less — an unverifiable holder
-		// could later release a successor's live lock. Rejoin the contention
-		// loop (the deadline still bounds the caller); an abandoned holderless
-		// dir of ours self-clears via lockNoHolderGrace.
-		return "", false, nil
-	case os.IsExist(mkdirErr):
-		st.denied = 0 // the name exists; any prior denials were the transient
-		// Contention: the lock dir already exists and is held. Before waiting,
-		// decide whether the current holder is alive or stale (crashed without
-		// releasing). A stale lock is reclaimed at most once per call — the
-		// flag is set only when the reclaim RENAME actually lands, so a rename
-		// lost to a rival reclaimer (or a transient Windows pin) does not burn
-		// the budget, while a live holder racing us can still be torn down at
-		// most once.
-		if !st.reclaimed && lockIsStale(lockDir) && reclaimStaleLockDir(lockDir) {
-			st.reclaimed = true
-			st.retryNow = true
+		if !st.reclaimed {
+			if stale, judged := lockOccupantStale(lockPath); stale && reclaimStaleLock(lockPath, judged) {
+				st.reclaimed = true
+				st.retryNow = true
+			}
 		}
 		return "", false, nil
-	case isDeletePendingLockErr(mkdirErr, lockGOOS):
-		// Windows-only transient: a contender's Mkdir can observe
-		// ERROR_ACCESS_DENIED while the dir is in the "delete pending" state
-		// (an older release deleting in place, or trash churn in the parent).
-		// It clears within a retry or two, so wait and retry rather than
-		// failing the whole acquisition. Skip the stale-reclaim path: there is
-		// no live holder to judge, just a dir mid-delete. A denial that
-		// SURVIVES the transient window is not this race at all — it is a real
-		// permission denial (folder protection / AV) and must fail fast with
-		// the actual cause instead of a misleading contention timeout.
+	}
+	id, claimErr := claimLock(lockPath)
+	if claimErr == nil {
+		return id, true, nil
+	}
+	return "", false, classifyClaimError(lockPath, claimErr, st)
+}
+
+// errClaimTempVanished marks the one benign not-found shape inside a claim:
+// the pre-written identity temp was deleted between write and link (it lives
+// in the trash namespace, so a concurrent release's sweep may collect it).
+// Deliberately does NOT wrap os.ErrNotExist so it cannot be confused with a
+// create-level not-found, which is a distinct, environmental failure.
+var errClaimTempVanished = fmt.Errorf("agentslock: claim temp swept concurrently")
+
+// classifyClaimError maps a failed claim to either a fatal error or nil
+// (retryable contention/transient; the acquire loop waits and retries).
+func classifyClaimError(lockPath string, claimErr error, st *acquireLoopState) error {
+	switch {
+	case os.IsExist(claimErr):
+		st.denied = 0
+		return nil // lost the claim race; next tick judges the winner
+	case errors.Is(claimErr, errClaimTempVanished):
+		return nil // transient: retry with a fresh temp
+	case os.IsNotExist(claimErr):
+		// A CREATE failing not-found. With a missing parent it is the plain
+		// #148 shape (surface it raw). With a parent that demonstrably EXISTS
+		// it is impossible from userland filesystem semantics — a filter
+		// driver is intercepting creates — and must fail fast with the
+		// environmental diagnosis instead of burning the acquire budget.
+		if _, statErr := os.Stat(filepath.Dir(lockPath)); statErr == nil {
+			return notFoundLockError(lockPath, claimErr)
+		}
+		return fmt.Errorf("agentslock: acquire lock %s: %w", lockPath, claimErr)
+	case isDeletePendingLockErr(claimErr, lockGOOS):
+		// Windows-only transient: creating at a name that is mid-delete
+		// (delete-pending) reports ERROR_ACCESS_DENIED. It clears within a
+		// retry or two. A denial that SURVIVES the transient window is not this
+		// race at all — it is a real permission denial (folder protection / AV)
+		// and must fail fast with the actual cause instead of a misleading
+		// contention timeout.
 		st.denied++
 		if st.denied >= deniedTransientAttempts {
-			return "", false, deniedLockDirError(lockDir, mkdirErr)
+			return deniedLockError(lockPath, claimErr)
 		}
-		return "", false, nil
-	case os.IsPermission(mkdirErr):
+		return nil
+	case os.IsPermission(claimErr):
 		// Non-Windows permission denial: never a delete-pending transient, so
 		// classify immediately with the actionable message.
-		return "", false, deniedLockDirError(lockDir, mkdirErr)
+		return deniedLockError(lockPath, claimErr)
 	default:
-		return "", false, fmt.Errorf("agentslock: acquire lock %s: %w", lockDir, mkdirErr)
+		return fmt.Errorf("agentslock: acquire lock %s: %w", lockPath, claimErr)
 	}
 }
 
-// lockTimeoutError renders the acquire-timeout failure, naming the blocking
-// holder when its record is readable so a stranded invocation reports WHO
-// holds the lock and when the TTL will self-heal it.
-func lockTimeoutError(lockDir string) error {
-	msg := "timed out"
-	if held := describeHolder(lockDir); held != "" {
-		msg += " (" + held + ")"
+// newLockIdentity renders this acquisition's identity record: pid, acquisition
+// time, and a random token. The token makes the identity unforgeable in
+// practice, so "contents at the lock name == our identity" is proof of
+// ownership even across grace reclaims and re-claims.
+func newLockIdentity() string {
+	var token [8]byte
+	_, _ = rand.Read(token[:]) // best-effort; pid+nanos already disambiguate
+	return fmt.Sprintf("%d\n%d\n%x\n", os.Getpid(), time.Now().UnixNano(), token)
+}
+
+// claimLock atomically claims the free lock name. The identity is FULLY
+// written to a unique temp sibling first, then hard-linked to the lock name:
+// one atomic syscall either publishes the complete identity at the name or
+// fails. No contender can ever observe a claimed-but-identity-less lock, which
+// is the structural property that retired the old design's mid-acquire races.
+//
+// The temp lives in the trash namespace so a crash between write and link is
+// swept by later releases; the price is that a concurrent sweep can delete the
+// temp first, surfacing as an ENOENT the acquire loop simply retries.
+//
+// A link failure other than exists/not-exists means the filesystem cannot do
+// hardlinks (FAT/exFAT, some network mounts) — or is transiently pinning the
+// name — and the claim degrades to the O_EXCL two-step. If the real cause was
+// a permission denial, the degraded path fails with the same denial and the
+// caller's classification still applies.
+func claimLock(lockPath string) (string, error) {
+	identity := newLockIdentity()
+	temp := lockTrashName(lockPath)
+	if err := writeIdentityFileFn(temp, identity); err != nil {
+		return "", err
 	}
-	return fmt.Errorf("agentslock: acquire lock %s: %s", lockDir, msg)
+	defer func() { _ = fsops.Remove(temp) }()
+	if err := linkLockFn(temp, lockPath); err != nil {
+		if os.IsExist(err) {
+			return "", err
+		}
+		if os.IsNotExist(err) {
+			// The temp we just wrote is gone: a concurrent release swept the
+			// trash namespace. Distinct from a create-level not-found (which
+			// is environmental; see classifyClaimError).
+			return "", fmt.Errorf("%w: %v", errClaimTempVanished, err)
+		}
+		return claimLockExclusive(lockPath, identity)
+	}
+	return identity, nil
 }
 
-// deniedLockDirError classifies a PERSISTENT access-denied on the lock-dir
-// Mkdir. Field shape: Windows Controlled Folder Access / OneDrive-protected
-// Documents or antivirus policy denying an unrecognized binary — observed as
-// `da config explain --all` and `da install` failing on `.agentsrc.lock.lock`
-// creation. Before this classification the Windows delete-pending
-// accommodation retried the denial for the whole acquire budget and then
-// reported a generic "timed out", misdiagnosing an environment problem as lock
-// contention. Per the error-message contract the primary line says what
-// failed; the follow-up names the likely causes and the concrete next step.
-func deniedLockDirError(lockDir string, err error) error {
-	return fmt.Errorf("agentslock: acquire lock %s: creating the lock directory is persistently denied (%w); "+
-		"this is not lock contention — the parent folder %s is likely write-protected "+
-		"(Windows Controlled Folder Access, OneDrive-protected Documents, or antivirus policy blocking this binary); "+
-		"allow the da binary for that folder or move the repo outside the protected path, then retry",
-		lockDir, err, filepath.Dir(lockDir))
+// writeIdentityFile writes an identity record with raw file syscalls on
+// purpose (os.OpenFile is not an fsguard-policed mutator): fsops.WriteFile's
+// Windows fallback MkdirAll-then-PowerShell "heals" missing parents and takes
+// hundreds of milliseconds per attempt — the claim must observe the
+// filesystem's true state (and fail fast on a real denial), never repair it.
+var writeIdentityFileFn = writeIdentityFile
+
+func writeIdentityFile(path, identity string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, werr := f.WriteString(identity)
+	cerr := f.Close()
+	if werr != nil {
+		return werr
+	}
+	return cerr
 }
 
-// lockTrashName returns a unique trash sibling for lockDir. Uniqueness (pid +
+// claimLockExclusive is the degraded claim for hardlink-less filesystems:
+// O_CREATE|O_EXCL (CREATE_NEW on Windows — atomic name creation), then write,
+// then a read-back verify. The create→write gap is the one residual two-step
+// surface in the design: a contender that reads the just-created empty file
+// judges it by lockNoHolderGrace, so only a holder that stalls >2s inside a
+// two-syscall window is ever at risk, and the verify converts that loss into
+// a clean retry instead of an unverified acquisition.
+func claimLockExclusive(lockPath, identity string) (string, error) {
+	f, err := os.OpenFile(lockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", err
+	}
+	_, werr := f.WriteString(identity)
+	cerr := f.Close()
+	if werr != nil || cerr != nil {
+		// Retract the half-written token (provably ours — the O_EXCL create
+		// succeeded microseconds ago) so the name reads as unidentified and
+		// clears via the grace instead of lingering as garbage under the TTL.
+		_ = fsops.Remove(lockPath)
+		return "", fmt.Errorf("agentslock: write lock identity %s: %w", lockPath, werr)
+	}
+	if testHookBeforeClaimVerify != nil {
+		testHookBeforeClaimVerify(lockPath)
+	}
+	data, rerr := os.ReadFile(lockPath)
+	if rerr != nil || string(data) != identity {
+		// Lost mid-write to a grace reclaim (the name now holds a successor's
+		// identity, or nothing). Never proceed unverified, and never touch the
+		// name — it is not provably ours anymore.
+		return "", &os.PathError{Op: "claim", Path: lockPath, Err: os.ErrExist}
+	}
+	return identity, nil
+}
+
+// lockOccupantStale judges the object currently at the lock name. It returns
+// whether the occupant is reclaimable plus the exact bytes that were judged
+// (nil for a legacy dir), so the reclaim can verify it renamed the same
+// occupant it judged.
+//
+// A parseable identity is judged by its recorded acquisition age against
+// lockStaleTTL — PID liveness is deliberately not consulted because it cannot
+// be checked portably (notably on Windows). An unidentified occupant (the
+// degraded O_EXCL claim's create→write gap, a torn write, or corruption) gets
+// the SHORT lockNoHolderGrace by mtime: with the hardlink claim this state
+// cannot arise at all, and a remnant must clear well inside a contender's
+// acquire budget. A legacy DIRECTORY (pre-single-file binary) is judged by the
+// old dir+holder rules.
+func lockOccupantStale(lockPath string) (bool, []byte) {
+	fi, err := os.Lstat(lockPath)
+	if err != nil {
+		return false, nil // vanished: the next tick simply claims
+	}
+	if fi.IsDir() {
+		return legacyLockDirStale(lockPath), nil
+	}
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		// Unreadable file (mid-rename, delete-pending, foreign perms): give it
+		// the grace rather than wedging every acquirer until timeout.
+		return pathOlderThan(lockPath, lockNoHolderGrace), nil
+	}
+	if age, ok := identityAge(data); ok {
+		return age > lockStaleTTL, data
+	}
+	return pathOlderThan(lockPath, lockNoHolderGrace), data
+}
+
+// identityAge parses an identity record's recorded acquisition time and
+// returns its age. ok=false means the record is not a parseable identity.
+func identityAge(data []byte) (time.Duration, bool) {
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 2 {
+		return 0, false
+	}
+	acquiredNanos, err := strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return time.Duration(time.Now().UnixNano() - acquiredNanos), true
+}
+
+// legacyLockDirStale judges a lock DIRECTORY left by a pre-single-file da
+// binary, preserving the old rules so mixed-version machines behave: a
+// readable holder file inside the dir is judged by its recorded age against
+// the TTL; a garbage holder falls back to dir mtime against the TTL; a
+// holderless dir gets the short grace (it is either the old design's
+// mid-acquire window or a partial-release remnant, and remnants must clear
+// inside a contender's acquire budget).
+func legacyLockDirStale(lockDir string) bool {
+	data, err := os.ReadFile(filepath.Join(lockDir, holderFile))
+	if err != nil {
+		return pathOlderThan(lockDir, lockNoHolderGrace)
+	}
+	if age, ok := identityAge(data); ok {
+		return age > lockStaleTTL
+	}
+	return pathOlderThan(lockDir, lockStaleTTL)
+}
+
+// pathOlderThan reports whether the path's last-modified time is older than
+// limit. If it can't be stat'd it is treated as stale (it likely no longer
+// exists, in which case the retry will simply re-claim).
+func pathOlderThan(path string, limit time.Duration) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return true
+	}
+	return time.Since(info.ModTime()) > limit
+}
+
+// lockTrashName returns a unique trash sibling for lockPath. Uniqueness (pid +
 // nanos) means trash names are never contended or re-acquired: deleting trash
 // can only ever race other deleters of the same garbage, never a live lock.
-func lockTrashName(lockDir string) string {
-	return fmt.Sprintf("%s%s%d-%d", lockDir, lockTrashInfix, os.Getpid(), time.Now().UnixNano())
+func lockTrashName(lockPath string) string {
+	return fmt.Sprintf("%s%s%d-%d", lockPath, lockTrashInfix, os.Getpid(), time.Now().UnixNano())
 }
 
-// reclaimStaleLockDir takes a stale lock dir out of the way with a SINGLE
-// atomic rename to a unique trash name, then deletes the trash out-of-band.
-// It reports whether the reclaim landed.
+// reclaimStaleLock takes a stale occupant out of the way with a SINGLE atomic
+// rename to a unique trash name, verifies it renamed the same occupant it
+// judged, and deletes the trash out-of-band. It reports whether the reclaim
+// landed (and therefore whether the caller may spend its reclaim budget).
 //
-// Single-shot on purpose. The judge-then-reclaim sequence has an unavoidable
-// TOCTOU window (staleness check and removal cannot be one atomic step over a
-// directory), so the window is kept to exactly one rename syscall. The previous
-// shape — fsops.RemoveAll(lockDir) — retried a delete against the lock NAME for
-// up to ~300ms plus a PowerShell fallback: long enough for a rival contender to
-// have reclaimed and re-acquired, at which point the still-running delete
-// destroyed the rival's LIVE lock. A rename that loses that race fails with
-// ENOENT (source gone) or finds a fresh dir that the caller's next lockIsStale
-// pass will refuse to judge stale; either way the caller just keeps waiting.
-func reclaimStaleLockDir(lockDir string) bool {
-	trash := lockTrashName(lockDir)
-	if err := renameLockDirFn(lockDir, trash); err != nil {
+// The judge-then-rename sequence has an inherent TOCTOU: between reading the
+// stale identity and the rename, a rival can reclaim and a successor can
+// re-claim the name, so the rename would displace a LIVE lock. The single
+// object makes that detectable AND repairable: the renamed trash still carries
+// the occupant's identity, so a mismatch against the judged bytes proves the
+// displacement, and os.Link(trash, lockPath) atomically restores the very same
+// inode if the name is still free — the displaced holder never notices. Only
+// if a third claimant takes the name inside that window is the displacement
+// permanent (the victim's release then refuses on identity mismatch); that
+// residue requires three independent actors inside two syscalls. Legacy dirs
+// (judged == nil) cannot be identity-verified or link-restored; they keep the
+// old single-rename semantics for the transition period.
+func reclaimStaleLock(lockPath string, judged []byte) bool {
+	trash := lockTrashName(lockPath)
+	if err := renameLockDirFn(lockPath, trash); err != nil {
 		return false
+	}
+	if judged != nil && !reclaimedMatchesJudged(trash, judged) {
+		if err := linkLockFn(trash, lockPath); err == nil {
+			_ = fsops.Remove(trash) // drop the extra name; the inode lives on at lockPath
+			return false
+		}
+		debugf("agentslock: reclaim displaced a live lock at %s and could not restore it", lockPath)
 	}
 	if err := removeTrashFn(trash); err != nil {
 		debugf("agentslock: remove reclaimed lock remnant %s: %v", trash, err)
@@ -538,35 +721,36 @@ func reclaimStaleLockDir(lockDir string) bool {
 	return true
 }
 
-// releaseLockDir frees the sidecar lock held at lockDir. Lifecycle contract
-// (the fix for the lock-release lifecycle race): the lock NAME is only ever
-// freed by a single atomic rename to a unique trash sibling — never by deleting
-// in place. In-place deletion (the old fsops.RemoveAll) is not atomic: it
-// removes the holder file, then the dir, with Windows retries in between, so
-// contenders could observe a holderless "fresh" dir under the live lock name —
-// a state the old staleness policy granted the full 30s TTL, stranding every
-// 5s-budget acquirer into a guaranteed timeout — or an ACCESS_DENIED
-// delete-pending name. After a successful rename the name is free no matter
-// what happens to the trash: a failed trash deletion costs a uniquely-named
-// leftover (swept by later releases), never lock availability.
+// reclaimedMatchesJudged reports whether the renamed-away trash still carries
+// exactly the identity bytes the staleness judgment was made on.
+func reclaimedMatchesJudged(trash string, judged []byte) bool {
+	data, err := os.ReadFile(trash)
+	return err == nil && bytes.Equal(data, judged)
+}
+
+// releaseLock frees the lock at lockPath. Lifecycle contract: the lock name is
+// only ever freed by a single atomic rename to a unique trash sibling — never
+// by deleting in place (an in-place delete exposes delete-pending states under
+// the live name on Windows, and its failure leaves the name occupied). After a
+// successful rename the name is free no matter what happens to the trash: a
+// failed trash deletion costs a uniquely-named leftover (swept by later
+// releases), never lock availability.
 //
-// Before touching anything the release verifies identity: if the holder file no
-// longer carries the contents this acquisition claimed (a contender
+// Before touching anything the release verifies identity: if the lock file no
+// longer carries the exact bytes this acquisition claimed (a contender
 // TTL-reclaimed the lock — e.g. after this process sat suspended past the TTL —
-// and re-acquired), the release is a no-op instead of stealing the new holder's
-// lock. An empty holderID never passes the check: acquisition fails rather
-// than proceed identity-less, so a legitimate release always carries the
-// O_EXCL-claimed identity.
+// and re-acquired), the release is a no-op instead of stealing the new
+// holder's lock. An empty identity never passes the check.
 //
 // The rename is retried briefly (releaseRenameAttempts x releaseRenameBackoff)
 // because on Windows a contender's probe handle or an AV scan can transiently
-// pin the dir; the dir remains ours until the rename lands, so retrying cannot
-// touch anyone else's lock. If the rename never lands the remnant is left
-// intact — holder file and all — and self-clears via the TTL; returning the
-// error is the only remaining honest option.
-func releaseLockDir(lockDir, holderID string) error {
-	if !holderStillOurs(lockDir, holderID) {
-		debugf("agentslock: skip release of %s: no longer the holder", lockDir)
+// pin the file; it remains ours until the rename lands, so retrying cannot
+// touch anyone else's lock. If the rename never lands the remnant keeps its
+// full identity and self-clears via the TTL; returning the error is the only
+// remaining honest option.
+func releaseLock(lockPath, identity string) error {
+	if !lockStillOurs(lockPath, identity) {
+		debugf("agentslock: skip release of %s: no longer the holder", lockPath)
 		return nil
 	}
 	var err error
@@ -574,45 +758,51 @@ func releaseLockDir(lockDir, holderID string) error {
 		if attempt > 0 {
 			time.Sleep(releaseRenameBackoff)
 		}
-		err = renameLockDirFn(lockDir, lockTrashName(lockDir))
+		err = renameLockDirFn(lockPath, lockTrashName(lockPath))
 		if err == nil {
-			sweepLockTrash(lockDir)
+			sweepLockTrash(lockPath)
 			return nil
 		}
 		if os.IsNotExist(err) {
 			return nil // already released or reclaimed out from under us
 		}
 	}
-	return fmt.Errorf("agentslock: release lock %s: %w", lockDir, err)
+	return fmt.Errorf("agentslock: release lock %s: %w", lockPath, err)
 }
 
-// holderStillOurs reports whether the lock dir's holder file still carries the
-// identity this acquisition claimed. An empty holderID can NEVER prove
-// ownership: acquireLockDir no longer hands out empty identities (a failed
-// O_EXCL claim fails the acquisition), so refusing here keeps any stray legacy
-// or test caller from releasing a lock it cannot show it holds. An unreadable
-// or mismatched holder means the lock was reclaimed or is mid-teardown by
-// someone else — without proof of ownership the release must not touch the
-// name (a wrongly-skipped release only leaves a remnant that the grace/TTL
-// reclaim clears; a wrongly-performed release steals a live lock).
-func holderStillOurs(lockDir, holderID string) bool {
-	if holderID == "" {
+// lockStillOurs reports whether the lock file still carries exactly the
+// identity this acquisition claimed. An empty identity can NEVER prove
+// ownership (acquisition fails rather than hand out empty identities), and an
+// unreadable or mismatched record means the lock was reclaimed or is
+// mid-teardown by someone else — without proof of ownership the release must
+// not touch the name (a wrongly-skipped release only leaves a remnant that the
+// grace/TTL reclaim clears; a wrongly-performed release steals a live lock).
+func lockStillOurs(lockPath, identity string) bool {
+	if identity == "" {
 		return false
 	}
-	data, err := os.ReadFile(filepath.Join(lockDir, holderFile))
-	if err != nil {
-		return false
-	}
-	return string(data) == holderID
+	data, err := os.ReadFile(lockPath)
+	return err == nil && string(data) == identity
 }
 
-// sweepLockTrash best-effort deletes every trash sibling of lockDir: the one
+// unlockLock is Flush's release shape: same releaseLock lifecycle, with a
+// failure surfaced via the package debug channel (Flush has no error path for
+// the deferred unlock). A rename that never lands leaves the identity intact,
+// so the remnant self-clears via the TTL rather than wedging forever.
+func unlockLock(lockPath, identity string) {
+	if err := releaseLock(lockPath, identity); err != nil {
+		debugf("%v", err)
+	}
+}
+
+// sweepLockTrash best-effort deletes every trash sibling of lockPath: the one
 // the caller just renamed away plus any leftovers from earlier releases whose
-// trash deletion failed. Runs only after the lock name is already free, so a
-// sweep failure costs nothing but disk garbage (retried on the next release).
-func sweepLockTrash(lockDir string) {
-	parent := filepath.Dir(lockDir)
-	prefix := filepath.Base(lockDir) + lockTrashInfix
+// trash deletion failed (and any crashed claim temps, which share the trash
+// namespace). Runs only after the lock name is already free, so a sweep
+// failure costs nothing but disk garbage (retried on the next release).
+func sweepLockTrash(lockPath string) {
+	parent := filepath.Dir(lockPath)
+	prefix := filepath.Base(lockPath) + lockTrashInfix
 	entries, err := os.ReadDir(parent)
 	if err != nil {
 		debugf("agentslock: sweep lock trash in %s: %v", parent, err)
@@ -628,14 +818,62 @@ func sweepLockTrash(lockDir string) {
 	}
 }
 
-// describeHolder renders a short "held by pid P for D; stale after TTL" summary
-// of the current lock holder for the acquire-timeout error, so a stranded `da`
-// invocation reports WHO is blocking it and when self-healing will kick in. An
-// absent or unparseable holder yields "" (the bare timeout message).
-func describeHolder(lockDir string) string {
-	data, err := os.ReadFile(filepath.Join(lockDir, holderFile))
+// lockTimeoutError renders the acquire-timeout failure, naming the blocking
+// holder when its record is readable so a stranded invocation reports WHO
+// holds the lock and when the TTL will self-heal it.
+func lockTimeoutError(lockPath string) error {
+	msg := "timed out"
+	if held := describeHolder(lockPath); held != "" {
+		msg += " (" + held + ")"
+	}
+	return fmt.Errorf("agentslock: acquire lock %s: %s", lockPath, msg)
+}
+
+// deniedLockError classifies a PERSISTENT access-denied creating the lock.
+// Field shape: Windows Controlled Folder Access / OneDrive-protected Documents
+// or antivirus policy denying an unrecognized binary — observed as `da config
+// explain --all` and `da install` failing on `.agentsrc.lock.lock` creation.
+// Without this classification the Windows delete-pending accommodation retried
+// the denial for the whole acquire budget and then reported a generic "timed
+// out", misdiagnosing an environment problem as lock contention. Per the
+// error-message contract the primary line says what failed; the follow-up
+// names the likely causes and the concrete next step.
+func deniedLockError(lockPath string, err error) error {
+	return fmt.Errorf("agentslock: acquire lock %s: creating the lock file is persistently denied (%w); "+
+		"this is not lock contention — the parent folder %s is likely write-protected "+
+		"(Windows Controlled Folder Access, OneDrive-protected Documents, or antivirus policy blocking this binary); "+
+		"allow the da binary for that folder or move the repo outside the protected path, then retry",
+		lockPath, err, filepath.Dir(lockPath))
+}
+
+// notFoundLockError classifies a lock create failing ENOENT /
+// ERROR_FILE_NOT_FOUND while the parent directory demonstrably EXISTS —
+// impossible from plain userland filesystem semantics, so something is
+// intercepting creates in that tree: OneDrive Files-On-Demand / a
+// sync-redirected Documents folder, or a corporate DLP/antivirus filter
+// driver. This is the exact work-PC field shape (`mkdir
+// C:\...\.agentsrc.lock.lock: The system cannot find the file specified`
+// with git operating normally in the same directory — see
+// .agents/history/provadm-windows-da-lock-observation.md). Classified
+// immediately, not retried: the interference is persistent and burning the
+// acquire budget would misreport it as a lock timeout.
+func notFoundLockError(lockPath string, err error) error {
+	return fmt.Errorf("agentslock: acquire lock %s: create failed with not-found although the parent directory exists (%w); "+
+		"this indicates filesystem interference in %s — a OneDrive-redirected or cloud-synced folder, or a DLP/antivirus filter driver intercepting file creation; "+
+		"move the repo outside the synced/protected path or exempt the da binary, then run `da doctor` and retry",
+		lockPath, err, filepath.Dir(lockPath))
+}
+
+// describeHolder renders a short "held by pid P for D; stale after TTL"
+// summary of the current lock holder for the acquire-timeout error. It reads
+// the single-file identity first and falls back to a legacy dir's holder file;
+// an absent or unparseable record yields "" (the bare timeout message).
+func describeHolder(lockPath string) string {
+	data, err := os.ReadFile(lockPath)
 	if err != nil {
-		return ""
+		if data, err = os.ReadFile(filepath.Join(lockPath, holderFile)); err != nil {
+			return ""
+		}
 	}
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
 	if len(lines) < 2 {
@@ -658,106 +896,4 @@ func debugf(format string, args ...any) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
-}
-
-// writeHolder atomically claims ownership of the lock dir at lockDir by
-// creating the holder file with O_CREATE|O_EXCL and returns the recorded
-// contents (PID + acquisition time) as this acquisition's identity. "" means
-// the claim was LOST or unprovable — the caller must treat the acquisition as
-// failed and must never proceed identity-less.
-//
-// The exclusive create is the second half of the two-step acquisition
-// (mkdir-as-lock, then holder-as-claim) and closes the mid-acquire steal
-// window: if the Mkdir winner stalls past lockNoHolderGrace, a contender may
-// legitimately grace-reclaim (rename away) the holderless dir and a successor
-// may re-create and claim it. O_EXCL guarantees at most ONE process ever
-// records ownership of whatever dir sits at the lock name — the stalled
-// winner's late claim hits EEXIST (a successor already holds) or ENOENT (the
-// dir was renamed away) and correctly reports the loss instead of overwriting
-// the successor's token or proceeding unverified.
-//
-// Raw os.OpenFile on purpose (os.OpenFile is not an fsguard-policed mutator,
-// and no fsops helper fits): fsops.WriteFile is actively UNSAFE here — its
-// Windows fallback MkdirAll-then-PowerShell "heals" a missing parent, which
-// would RESURRECT a lock dir that a reclaimer just renamed away and silently
-// convert a lost claim into a phantom acquisition. The claim must observe the
-// dir's true state, never repair it.
-func writeHolder(lockDir string) string {
-	contents := fmt.Sprintf("%d\n%d\n", os.Getpid(), time.Now().UnixNano())
-	holderPath := filepath.Join(lockDir, holderFile)
-	f, err := os.OpenFile(holderPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		debugf("agentslock: claim holder in %s: %v", lockDir, err)
-		return ""
-	}
-	_, werr := f.WriteString(contents)
-	cerr := f.Close()
-	if werr != nil || cerr != nil {
-		// A half-written token is worse than none: retract it (provably ours —
-		// the O_EXCL create succeeded) so the dir reads as holderless and clears
-		// via the short grace instead of lingering as garbage under the TTL.
-		_ = fsops.Remove(holderPath)
-		debugf("agentslock: write holder in %s: %v / %v", lockDir, werr, cerr)
-		return ""
-	}
-	return contents
-}
-
-// lockIsStale reports whether the existing lock dir should be treated as
-// orphaned. A lock is stale when its recorded acquisition time is older than
-// lockStaleTTL. The TTL alone is enough to guarantee no permanent deadlock; PID
-// liveness is deliberately not consulted because it cannot be checked portably
-// (notably on Windows).
-//
-// A dir with NO readable holder file gets the SHORT lockNoHolderGrace, judged
-// by dir mtime, not the full TTL. That state is either the mid-acquire window
-// between os.Mkdir and writeHolder (two local fs ops; the grace is a >1000x
-// margin, so a healthy just-acquired lock is never torn down) or a
-// crash/partial-release remnant — and a remnant must be reclaimable within a
-// contender's lockAcquireTimeout budget. The old fallback granted such dirs the
-// full 30s TTL: any release that removed the holder file but failed to remove
-// the dir (Windows sharing violation / delete-pending) stranded every acquirer
-// — including fresh `da config explain` / `da install` processes — into a
-// guaranteed 5s timeout until the remnant aged out.
-//
-// A holder file that is readable but unparseable keeps the conservative
-// TTL-by-mtime fallback: something wrote it, so it is judged like a recorded
-// acquisition rather than a remnant.
-func lockIsStale(lockDir string) bool {
-	holderPath := filepath.Join(lockDir, holderFile)
-	data, err := os.ReadFile(holderPath)
-	if err != nil {
-		return dirOlderThan(lockDir, lockNoHolderGrace)
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) < 2 {
-		return dirOlderThan(lockDir, lockStaleTTL) // unparseable
-	}
-	acquiredNanos, err := strconv.ParseInt(strings.TrimSpace(lines[1]), 10, 64)
-	if err != nil {
-		return dirOlderThan(lockDir, lockStaleTTL) // unparseable timestamp
-	}
-	age := time.Now().UnixNano() - acquiredNanos
-	return age > int64(lockStaleTTL)
-}
-
-// dirOlderThan reports whether the lock dir's last-modified time is older than
-// limit. If the dir can't be stat'd it is treated as stale (it likely no
-// longer exists, in which case the retry will simply re-acquire).
-func dirOlderThan(lockDir string, limit time.Duration) bool {
-	info, err := os.Stat(lockDir)
-	if err != nil {
-		return true
-	}
-	return time.Since(info.ModTime()) > limit
-}
-
-// unlockFileLock is Flush's release shape: same releaseLockDir lifecycle, with
-// a failure surfaced via the package debug channel (Flush has no error path for
-// the deferred unlock). A rename that never lands leaves the holder file intact,
-// so the remnant self-clears via the TTL rather than wedging forever.
-func unlockFileLock(lockDir, holderID string) {
-	if err := releaseLockDir(lockDir, holderID); err != nil {
-		debugf("%v", err)
-	}
 }

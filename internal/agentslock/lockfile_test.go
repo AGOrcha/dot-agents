@@ -646,7 +646,7 @@ func TestLockIsStaleShortHolderUsesDirMtime(t *testing.T) {
 	if err := os.Chtimes(lockDir, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if !lockIsStale(lockDir) {
+	if !legacyLockDirStale(lockDir) {
 		t.Fatal("short holder + old dir mtime must be stale")
 	}
 	// Fresh dir mtime with the same short holder must NOT be stale.
@@ -654,14 +654,14 @@ func TestLockIsStaleShortHolderUsesDirMtime(t *testing.T) {
 	if err := os.Chtimes(lockDir, now, now); err != nil {
 		t.Fatal(err)
 	}
-	if lockIsStale(lockDir) {
+	if legacyLockDirStale(lockDir) {
 		t.Fatal("short holder + fresh dir mtime must not be stale")
 	}
 }
 
 func TestDirOlderThanMissingDirIsStale(t *testing.T) {
 	// A dir that cannot be stat'd (does not exist) is treated as stale.
-	if !dirOlderThan(filepath.Join(t.TempDir(), "no-such-lock"), lockStaleTTL) {
+	if !pathOlderThan(filepath.Join(t.TempDir(), "no-such-lock"), lockStaleTTL) {
 		t.Fatal("missing lock dir must be reported stale")
 	}
 }
@@ -676,35 +676,28 @@ func TestDebugfGatedOnEnv(t *testing.T) {
 	debugf("should be emitted %d", 2)
 }
 
-func TestUnlockFileLockSurfacesRemoveError(t *testing.T) {
-	// Force RemoveAll of the lock dir to fail by stripping write permission from
-	// its parent so the child cannot be unlinked. unlockFileLock must take the
-	// debugf error branch without panicking. Skipped where the FS does not
-	// enforce the perm bit (e.g. running as root).
+func TestUnlockLockSurfacesRenameError(t *testing.T) {
+	// Force the release rename to fail by stripping write permission from the
+	// lock file's parent. unlockLock must take the debugf error branch without
+	// panicking. Skipped where the FS does not enforce the perm bit (root).
 	parent := filepath.Join(t.TempDir(), "ro-parent")
 	if err := os.Mkdir(parent, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	lockDir := filepath.Join(parent, "x.lock")
-	if err := os.Mkdir(lockDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	// Release requires a matching identity (empty IDs never release), so record
-	// one in the holder file.
+	lockPath := filepath.Join(parent, "x.lock")
+	// Release requires a matching identity (empty IDs never release).
 	id := "1\n2\n"
-	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte(id), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mustWriteFile(t, lockPath, id)
 	if err := os.Chmod(parent, 0o500); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) }) // let TempDir cleanup proceed
 
 	t.Setenv("DA_DEBUG", "1")
-	unlockFileLock(lockDir, id) // must not panic; exercises the rename-failure + debugf branch
+	unlockLock(lockPath, id) // must not panic; exercises the rename-failure + debugf branch
 
-	if _, err := os.Stat(lockDir); os.IsNotExist(err) {
-		t.Skip("filesystem removed the lock dir despite a read-only parent; cannot force RemoveAll error here")
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Skip("filesystem renamed the lock despite a read-only parent; cannot force a release error here")
 	}
 }
 
@@ -1077,9 +1070,14 @@ func assertAcquireRecoversFromRemnant(t *testing.T, age, minElapsed time.Duratio
 	if elapsed < minElapsed {
 		t.Fatalf("acquire returned before the no-holder grace could elapse: %v < %v", elapsed, minElapsed)
 	}
-	// We are now the recorded holder.
-	if _, err := os.Stat(filepath.Join(path+".lock", holderFile)); err != nil {
-		t.Fatalf("holder file absent after reclaim+acquire: %v", err)
+	// We are now the recorded holder: the legacy dir remnant was reclaimed and
+	// replaced by a single-file lock carrying a complete identity.
+	data, rerr := os.ReadFile(path + ".lock")
+	if rerr != nil {
+		t.Fatalf("lock identity absent after reclaim+acquire: %v", rerr)
+	}
+	if _, ok := identityAge(data); !ok {
+		t.Fatalf("lock identity unparseable after reclaim+acquire: %q", data)
 	}
 	if err := release(); err != nil {
 		t.Fatalf("release: %v", err)
@@ -1095,64 +1093,56 @@ func TestLockIsStaleHolderlessDirUsesShortGrace(t *testing.T) {
 	if err := os.Mkdir(lockDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if lockIsStale(lockDir) {
+	if legacyLockDirStale(lockDir) {
 		t.Fatal("fresh holderless dir must not be stale (mid-acquire window)")
 	}
 	old := time.Now().Add(-(lockNoHolderGrace + time.Second))
 	if err := os.Chtimes(lockDir, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if !lockIsStale(lockDir) {
+	if !legacyLockDirStale(lockDir) {
 		t.Fatal("holderless dir older than the grace must be stale well before the TTL")
 	}
 }
 
-// TestReleaseSkipsWhenHolderIdentityChanged proves an overdue release cannot
-// steal a successor's lock: if the holder file no longer carries this
-// acquisition's identity (a rival TTL-reclaimed and re-acquired while we were
-// suspended), release is a no-op and the rival's lock dir survives.
-func TestReleaseSkipsWhenHolderIdentityChanged(t *testing.T) {
+// TestReleaseSkipsWhenIdentityChanged proves an overdue release cannot steal a
+// successor's lock: if the lock file no longer carries this acquisition's
+// identity (a rival TTL-reclaimed and re-acquired while we were suspended),
+// release is a no-op and the rival's lock survives.
+func TestReleaseSkipsWhenIdentityChanged(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guarded.ndjson")
 	release, err := AcquireFileLock(path)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	// Simulate the rival's reclaim + re-acquire: same lock dir, new identity.
-	rival := "999999\n1\n"
-	holderPath := filepath.Join(path+".lock", holderFile)
-	if err := os.WriteFile(holderPath, []byte(rival), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// Simulate the rival's reclaim + re-acquire: same lock name, new identity.
+	rival := "999999\n1\nrival\n"
+	mustWriteFile(t, path+".lock", rival)
 	if err := release(); err != nil {
 		t.Fatalf("identity-mismatch release must be a clean no-op, got: %v", err)
 	}
-	data, err := os.ReadFile(holderPath)
+	data, err := os.ReadFile(path + ".lock")
 	if err != nil || string(data) != rival {
 		t.Fatalf("overdue release touched the rival's live lock: data=%q err=%v", data, err)
 	}
 	_ = os.RemoveAll(path + ".lock") // cleanup for TempDir
 }
 
-// TestHolderStillOurs covers the ownership predicate's branches directly.
-func TestHolderStillOurs(t *testing.T) {
-	lockDir := filepath.Join(t.TempDir(), "x.lock")
-	if err := os.Mkdir(lockDir, 0o700); err != nil {
-		t.Fatal(err)
+// TestLockStillOurs covers the ownership predicate's branches directly.
+func TestLockStillOurs(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "x.lock")
+	if lockStillOurs(lockPath, "") {
+		t.Fatal("empty identity must NEVER prove ownership (an identity-less release could steal a successor's lock)")
 	}
-	if holderStillOurs(lockDir, "") {
-		t.Fatal("empty holderID must NEVER prove ownership (an identity-less release could steal a successor's lock)")
+	if lockStillOurs(lockPath, "1\n2\n") {
+		t.Fatal("a missing lock file must NOT prove ownership")
 	}
-	if holderStillOurs(lockDir, "1\n2\n") {
-		t.Fatal("unreadable holder must NOT prove ownership")
+	mustWriteFile(t, lockPath, "1\n2\n")
+	if !lockStillOurs(lockPath, "1\n2\n") {
+		t.Fatal("matching identity must prove ownership")
 	}
-	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte("1\n2\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if !holderStillOurs(lockDir, "1\n2\n") {
-		t.Fatal("matching holder contents must prove ownership")
-	}
-	if holderStillOurs(lockDir, "3\n4\n") {
-		t.Fatal("mismatched holder contents must not prove ownership")
+	if lockStillOurs(lockPath, "3\n4\n") {
+		t.Fatal("mismatched identity must not prove ownership")
 	}
 }
 
@@ -1217,7 +1207,7 @@ func countLockTrash(t *testing.T, dir, path string) int {
 // gone — a rival reclaimed first) must report false and touch nothing, so the
 // caller's acquire loop just keeps waiting instead of deleting in place.
 func TestReclaimStaleLockDirLostRace(t *testing.T) {
-	if reclaimStaleLockDir(filepath.Join(t.TempDir(), "no-such.lock")) {
+	if reclaimStaleLock(filepath.Join(t.TempDir(), "no-such.lock"), nil) {
 		t.Fatal("reclaim of a vanished lock dir must report false")
 	}
 }
@@ -1228,7 +1218,7 @@ func TestReclaimStaleLockDirRenamesAway(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "guarded.ndjson")
 	seedLockDir(t, path, lockStaleTTL+time.Second, true)
-	if !reclaimStaleLockDir(path + ".lock") {
+	if !reclaimStaleLock(path+".lock", nil) {
 		t.Fatal("reclaim of an existing stale dir must succeed")
 	}
 	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
@@ -1250,7 +1240,7 @@ func TestReclaimStaleLockDirTrashDeleteFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "guarded.ndjson")
 	seedLockDir(t, path, lockStaleTTL+time.Second, true)
-	if !reclaimStaleLockDir(path + ".lock") {
+	if !reclaimStaleLock(path+".lock", nil) {
 		t.Fatal("reclaim must succeed once the rename lands, regardless of trash disposal")
 	}
 	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
@@ -1261,56 +1251,226 @@ func TestReclaimStaleLockDirTrashDeleteFailure(t *testing.T) {
 	}
 }
 
-// TestWriteHolderClaimFailures pins the O_EXCL claim semantics on every OS: a
-// lost claim reports "" so the caller fails the acquisition rather than
-// proceeding identity-less. Two loss shapes: the lock dir was renamed away
-// (ENOENT — the raw os.OpenFile must NOT self-heal the parent the way
-// fsops.WriteFile's Windows PowerShell fallback would, which resurrected the
-// dir and turned this red on windows-latest), and a successor already claimed
-// (EEXIST — the late claim must not overwrite the successor's token).
-func TestWriteHolderClaimFailures(t *testing.T) {
-	if got := writeHolder(filepath.Join(t.TempDir(), "no-such-lock-dir")); got != "" {
-		t.Fatalf("claim into a renamed-away (missing) dir must be lost, got identity %q", got)
+// TestClaimPublishesCompleteIdentityAtomically is the structural assertion
+// the single-object redesign exists for: the lock name is created by ONE
+// atomic hardlink from a temp that already carries the FULL identity, so no
+// observer can ever see a claimed-but-identity-less lock. The link seam
+// captures the temp's contents at the exact instant the name comes into
+// existence and asserts they are already a complete, parseable identity.
+func TestClaimPublishesCompleteIdentityAtomically(t *testing.T) {
+	realLink := linkLockFn
+	t.Cleanup(func() { linkLockFn = realLink })
+	var atLinkTime []byte
+	linkLockFn = func(oldname, newname string) error {
+		data, err := os.ReadFile(oldname)
+		if err != nil {
+			t.Fatalf("temp unreadable at link time: %v", err)
+		}
+		atLinkTime = data
+		return realLink(oldname, newname)
 	}
 
-	lockDir := filepath.Join(t.TempDir(), "x.lock")
-	if err := os.Mkdir(lockDir, 0o700); err != nil {
-		t.Fatal(err)
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
 	}
-	successor := "777\n888\n"
-	holderPath := filepath.Join(lockDir, holderFile)
-	if err := os.WriteFile(holderPath, []byte(successor), 0o600); err != nil {
-		t.Fatal(err)
+	if _, ok := identityAge(atLinkTime); !ok {
+		t.Fatalf("identity must be complete BEFORE the lock name exists, got %q", atLinkTime)
 	}
-	if got := writeHolder(lockDir); got != "" {
-		t.Fatalf("claim against an already-claimed dir must be lost, got identity %q", got)
+	onDisk, err := os.ReadFile(path + ".lock")
+	if err != nil || string(onDisk) != string(atLinkTime) {
+		t.Fatalf("lock name must carry exactly the pre-written identity: %q vs %q (err=%v)", onDisk, atLinkTime, err)
 	}
-	data, err := os.ReadFile(holderPath)
-	if err != nil || string(data) != successor {
-		t.Fatalf("lost claim must not touch the successor's token: data=%q err=%v", data, err)
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }
 
-// TestAcquireTimeoutBareMessageWhenHolderUnreadable: a holder that exists but
-// cannot be summarized (garbage contents, fresh dir so the TTL fallback keeps
-// it live) yields the bare timeout message without a holder description.
-func TestAcquireTimeoutBareMessageWhenHolderUnreadable(t *testing.T) {
+// TestClaimNeverExposesPartialIdentity hammers acquire/release cycles while a
+// concurrent reader polls the lock name: every successful read must be a
+// complete, parseable identity. Under the old two-step design the poller
+// could catch the holderless window; under the atomic link claim any partial
+// observation is a hard failure, not a flake.
+func TestClaimNeverExposesPartialIdentity(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "guarded.ndjson")
-	lockDir := path + ".lock"
-	if err := os.Mkdir(lockDir, 0o700); err != nil {
-		t.Fatal(err)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var partial atomicwrap
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			data, err := os.ReadFile(path + ".lock")
+			if err != nil {
+				continue // free, mid-rename, or trash-churn: all fine
+			}
+			if _, ok := identityAge(data); !ok {
+				partial.set(string(data))
+				return
+			}
+		}
+	}()
+	for i := 0; i < 30; i++ {
+		release, err := AcquireFileLock(path)
+		if err != nil {
+			t.Fatalf("acquire #%d: %v", i, err)
+		}
+		if err := release(); err != nil {
+			t.Fatalf("release #%d: %v", i, err)
+		}
 	}
-	// Garbage holder + fresh dir mtime: judged live via the TTL fallback for the
-	// whole acquire budget, but not describable in the timeout error.
-	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte("not-a-pid\nnot-a-time\n"), 0o600); err != nil {
-		t.Fatal(err)
+	close(stop)
+	<-done
+	if got, seen := partial.get(); seen {
+		t.Fatalf("observer caught a partial identity at the lock name: %q", got)
 	}
+}
+
+// atomicwrap is a tiny mutex-guarded string capture for cross-goroutine test
+// observations.
+type atomicwrap struct {
+	mu   sync.Mutex
+	s    string
+	seen bool
+}
+
+func (a *atomicwrap) set(s string) {
+	a.mu.Lock()
+	a.s, a.seen = s, true
+	a.mu.Unlock()
+}
+
+func (a *atomicwrap) get() (string, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.s, a.seen
+}
+
+// TestClaimLostRaceReportsExist: a claim against an occupied name loses with
+// an exists-classified error and must not disturb the occupant.
+func TestClaimLostRaceReportsExist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	occupant := "777\n888\nwinner\n"
+	mustWriteFile(t, path+".lock", occupant)
+	if _, err := claimLock(path + ".lock"); !os.IsExist(err) {
+		t.Fatalf("claim against an occupied name must report exists, got: %v", err)
+	}
+	data, err := os.ReadFile(path + ".lock")
+	if err != nil || string(data) != occupant {
+		t.Fatalf("lost claim must not touch the occupant: data=%q err=%v", data, err)
+	}
+}
+
+// TestClaimFallsBackWhenLinkUnsupported: on a filesystem without hardlinks
+// (FAT/exFAT — simulated via the link seam) the claim degrades to the O_EXCL
+// two-step and still publishes a complete identity.
+func TestClaimFallsBackWhenLinkUnsupported(t *testing.T) {
+	realLink := linkLockFn
+	t.Cleanup(func() { linkLockFn = realLink })
+	linkLockFn = func(string, string) error {
+		return fmt.Errorf("simulated: filesystem does not support hardlinks")
+	}
+
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire must degrade to the O_EXCL claim, got: %v", err)
+	}
+	data, rerr := os.ReadFile(path + ".lock")
+	if rerr != nil {
+		t.Fatalf("lock file absent after degraded claim: %v", rerr)
+	}
+	if _, ok := identityAge(data); !ok {
+		t.Fatalf("degraded claim must still publish a complete identity, got %q", data)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release after degraded claim: %v", err)
+	}
+}
+
+// TestClaimExclusiveVerifyDetectsMidWriteLoss pins the residual two-step
+// surface of the degraded path deterministically: between the O_EXCL write
+// and the read-back verify, a grace reclaim replaces (or removes) the file.
+// The claim must report the loss as retryable contention and never touch the
+// successor's identity.
+func TestClaimExclusiveVerifyDetectsMidWriteLoss(t *testing.T) {
+	t.Cleanup(func() { testHookBeforeClaimVerify = nil })
+
+	successor := "31337\n42\nsuccessor\n"
+	t.Run("replaced by a successor", func(t *testing.T) {
+		lockPath := filepath.Join(t.TempDir(), "x.lock")
+		testHookBeforeClaimVerify = func(p string) {
+			mustWriteFile(t, p, successor) // grace reclaim + successor claim
+		}
+		if _, err := claimLockExclusive(lockPath, "1\n2\nmine\n"); !os.IsExist(err) {
+			t.Fatalf("mid-write loss must classify as exists/contention, got: %v", err)
+		}
+		data, err := os.ReadFile(lockPath)
+		if err != nil || string(data) != successor {
+			t.Fatalf("lost claim must not touch the successor: data=%q err=%v", data, err)
+		}
+	})
+
+	t.Run("renamed away with no successor", func(t *testing.T) {
+		lockPath := filepath.Join(t.TempDir(), "x.lock")
+		testHookBeforeClaimVerify = func(p string) {
+			if err := os.Remove(p); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := claimLockExclusive(lockPath, "1\n2\nmine\n"); !os.IsExist(err) {
+			t.Fatalf("vanished-name loss must classify as retryable, got: %v", err)
+		}
+	})
+}
+
+// TestAcquireTimeoutBareMessageWhenOccupantUndescribable: an occupant that is
+// judged reclaimable but whose reclaim rename cannot land (seam-forced,
+// standing in for a persistent Windows pin) leaves the acquirer to time out —
+// and a garbage record yields the bare timeout message, no holder summary.
+func TestAcquireTimeoutBareMessageWhenOccupantUndescribable(t *testing.T) {
+	realRename := renameLockDirFn
+	t.Cleanup(func() { renameLockDirFn = realRename })
+	renameLockDirFn = func(string, string) error {
+		return fmt.Errorf("simulated persistent pin")
+	}
+
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	mustWriteFile(t, path+".lock", "not-a-pid\nnot-a-time\n")
+	backdateDir(t, path+".lock", lockNoHolderGrace+time.Second) // reclaimable, but the rename never lands
+
 	_, err := AcquireFileLock(path)
 	if err == nil {
-		t.Fatal("expected timeout while a fresh garbage-holder lock is held")
+		t.Fatal("expected timeout while the occupant cannot be reclaimed")
 	}
 	if !strings.Contains(err.Error(), "timed out") || strings.Contains(err.Error(), "held by pid") {
 		t.Fatalf("expected the bare timeout message, got: %v", err)
+	}
+}
+
+// TestAcquireRecoversFromGarbageIdentity: an unparseable occupant older than
+// the grace is a remnant (torn write / corruption), and a fresh process must
+// acquire well within its budget instead of waiting out the TTL.
+func TestAcquireRecoversFromGarbageIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "guarded.ndjson")
+	mustWriteFile(t, path+".lock", "not-a-pid\nnot-a-time\n")
+	backdateDir(t, path+".lock", lockNoHolderGrace+time.Second)
+
+	start := time.Now()
+	release, err := AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire over a garbage remnant must succeed, got: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= lockAcquireTimeout {
+		t.Fatalf("garbage remnant not reclaimed within budget: %v", elapsed)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }
 
@@ -1340,146 +1500,81 @@ func TestSweepLockTrash(t *testing.T) {
 	sweepLockTrash(filepath.Join(dir, "no-such-parent", "x.lock"))
 }
 
-// TestReleaseLockDirAlreadyGone: an identity-less release (legacy/stray caller)
-// must be a clean refuse-to-touch no-op — empty identities never release.
-func TestReleaseLockDirAlreadyGone(t *testing.T) {
-	if err := releaseLockDir(filepath.Join(t.TempDir(), "gone.lock"), ""); err != nil {
+// TestReleaseIdentityLessIsNoOp: an identity-less release (legacy/stray
+// caller) must be a clean refuse-to-touch no-op — empty identities never
+// release.
+func TestReleaseIdentityLessIsNoOp(t *testing.T) {
+	if err := releaseLock(filepath.Join(t.TempDir(), "gone.lock"), ""); err != nil {
 		t.Fatalf("identity-less release must be a clean no-op, got: %v", err)
 	}
 }
 
-// TestReleaseTreatsVanishedDirAsReleased pins the rename-ENOENT branch
+// TestReleaseTreatsVanishedLockAsReleased pins the rename-ENOENT branch
 // deterministically via the rename seam: identity matched at check time, but
-// the dir vanished before the rename (a rival reclaim's TOCTOU) — release
+// the lock vanished before the rename (a rival reclaim's TOCTOU) — release
 // reports success because there is nothing left to free.
-func TestReleaseTreatsVanishedDirAsReleased(t *testing.T) {
+func TestReleaseTreatsVanishedLockAsReleased(t *testing.T) {
 	realRename := renameLockDirFn
 	t.Cleanup(func() { renameLockDirFn = realRename })
 	renameLockDirFn = func(oldPath, _ string) error {
 		return &os.PathError{Op: "rename", Path: oldPath, Err: os.ErrNotExist}
 	}
 
-	lockDir := filepath.Join(t.TempDir(), "x.lock")
-	if err := os.Mkdir(lockDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	id := "5\n6\n"
-	if err := os.WriteFile(filepath.Join(lockDir, holderFile), []byte(id), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := releaseLockDir(lockDir, id); err != nil {
-		t.Fatalf("release must treat a vanished dir as already released, got: %v", err)
+	lockPath := filepath.Join(t.TempDir(), "x.lock")
+	id := "5\n6\ntoken\n"
+	mustWriteFile(t, lockPath, id)
+	if err := releaseLock(lockPath, id); err != nil {
+		t.Fatalf("release must treat a vanished lock as already released, got: %v", err)
 	}
 }
 
-// TestAcquireClaimLostToMidStallGraceReclaim is the deterministic regression
-// guard for the mid-acquire steal window: holder A wins the Mkdir, stalls past
-// lockNoHolderGrace before claiming, and contender B legitimately
-// grace-reclaims (rename-away) A's holderless dir, re-creates it, and claims.
-// A's late O_EXCL claim MUST lose (EEXIST) without touching B's token, A must
-// never proceed identity-less, and once B releases, A re-acquires cleanly.
-// The interleaving is injected via the post-Mkdir test hook — no timing luck.
-func TestAcquireClaimLostToMidStallGraceReclaim(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
-	bID := fmt.Sprintf("424242\n%d\n", time.Now().UnixNano())
-	var bErr error
-	bDone := make(chan struct{})
-	fired := false
-	t.Cleanup(func() { testHookAfterLockDirCreated = nil })
-	testHookAfterLockDirCreated = func(dir string) {
-		if fired {
-			return
-		}
-		fired = true
-		// A (the caller) has just won the Mkdir and now "stalls": run B's whole
-		// takeover — grace reclaim, re-create, claim — before A's writeHolder,
-		// then release B's lock shortly after from a joined goroutine.
-		simulateMidStallSuccessorTakeover(t, dir, bID)
-		go func() {
-			defer close(bDone)
-			time.Sleep(400 * time.Millisecond)
-			bErr = releaseLockDir(dir, bID)
-		}()
-	}
+// TestReclaimRestoresDisplacedLiveLock is the deterministic guard for the
+// judge-then-rename TOCTOU: the reclaimer renames the occupant and only then
+// can prove what it renamed. If the trash does not carry the identity that
+// was judged stale (a rival reclaimed and a successor re-claimed in between),
+// the reclaim must atomically restore the very same inode via link and report
+// failure — the displaced live holder never notices.
+func TestReclaimRestoresDisplacedLiveLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guarded.ndjson")
+	live := "31337\n42\nlive-successor\n"
+	mustWriteFile(t, path+".lock", live)
 
-	start := time.Now()
-	release, err := AcquireFileLock(path)
-	elapsed := time.Since(start)
-	<-bDone // join B's releaser (happened-before edge for -race and bErr)
-	if err != nil {
-		t.Fatalf("A must re-acquire after B releases: %v", err)
+	if reclaimStaleLock(path+".lock", []byte("999\n1\nstale-old\n")) {
+		t.Fatal("reclaim must report failure after displacing a live lock")
 	}
-	// B's release succeeding proves A's late claim never overwrote B's token —
-	// releaseLockDir refuses on identity mismatch, so pollution would surface
-	// as a skipped release and a >grace stall in A's elapsed time.
-	if bErr != nil {
-		t.Fatalf("B's release must succeed untouched by A's lost claim: %v", bErr)
+	data, err := os.ReadFile(path + ".lock")
+	if err != nil || string(data) != live {
+		t.Fatalf("displaced live lock not restored: data=%q err=%v", data, err)
 	}
-	if elapsed < 400*time.Millisecond {
-		t.Fatalf("A acquired while B still held: %v", elapsed)
-	}
-	if elapsed >= 2*time.Second {
-		t.Fatalf("A should acquire promptly after B's release (a grace-length stall implies A polluted B's holder): %v", elapsed)
-	}
-	if err := release(); err != nil {
-		t.Fatalf("A's release: %v", err)
+	if n := countLockTrash(t, dir, path); n != 0 {
+		t.Fatalf("restore must leave no trash names behind, found %d", n)
 	}
 }
 
-// simulateMidStallSuccessorTakeover ages the caller's freshly-created
-// holderless lock dir past the no-holder grace and performs contender B's
-// full takeover: grace reclaim (rename-away), re-create, claim with bID.
-func simulateMidStallSuccessorTakeover(t *testing.T, dir, bID string) {
-	t.Helper()
-	backdateDir(t, dir, lockNoHolderGrace+time.Second)
-	if !lockIsStale(dir) {
-		t.Fatal("aged holderless dir must be reclaimable by the grace")
-	}
-	if !reclaimStaleLockDir(dir) {
-		t.Fatal("B's grace reclaim must land")
-	}
-	mustMkdir(t, dir)
-	mustWriteFile(t, filepath.Join(dir, holderFile), bID)
-}
-
-// TestAcquireReclaimsCleanlyAfterRenameAwayMidStall pins the other loss shape:
-// A's dir is grace-reclaimed (renamed away) mid-stall with NO successor. A's
-// late claim hits ENOENT, must not resurrect the renamed-away dir (the
-// fsops.WriteFile Windows fallback would have), and A's next loop iteration
-// re-acquires the now-free name legitimately.
-func TestAcquireReclaimsCleanlyAfterRenameAwayMidStall(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".agentsrc.lock")
-	fired := false
-	t.Cleanup(func() { testHookAfterLockDirCreated = nil })
-	testHookAfterLockDirCreated = func(dir string) {
-		if fired {
-			return
-		}
-		fired = true
-		old := time.Now().Add(-(lockNoHolderGrace + time.Second))
-		if err := os.Chtimes(dir, old, old); err != nil {
-			t.Fatal(err)
-		}
-		if !reclaimStaleLockDir(dir) {
-			t.Fatal("grace reclaim must land")
-		}
+// TestReclaimRestoreFailureIsLoudButFrees: if the restore link itself fails
+// (a third claimant already took the name), the displacement is permanent —
+// the reclaim frees what it renamed and reports success so the lifecycle
+// continues; the victim's own release then refuses on identity mismatch.
+func TestReclaimRestoreFailureIsLoudButFrees(t *testing.T) {
+	realLink := linkLockFn
+	t.Cleanup(func() { linkLockFn = realLink })
+	linkLockFn = func(string, string) error {
+		return &os.PathError{Op: "link", Path: "x", Err: os.ErrExist}
 	}
 
-	start := time.Now()
-	release, err := AcquireFileLock(path)
-	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("A must re-acquire the freed name on the next iteration: %v", err)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guarded.ndjson")
+	mustWriteFile(t, path+".lock", "31337\n42\nlive-successor\n")
+
+	if !reclaimStaleLock(path+".lock", []byte("999\n1\nstale-old\n")) {
+		t.Fatal("unrestorable displacement must still report the name freed")
 	}
-	if elapsed >= time.Second {
-		t.Fatalf("re-acquire after a pure rename-away should be immediate, took %v", elapsed)
+	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock name should be free after unrestorable displacement: %v", err)
 	}
-	// The dir at the lock name is A's second acquisition, holder recorded.
-	if _, err := os.Stat(filepath.Join(path+".lock", holderFile)); err != nil {
-		t.Fatalf("holder absent after re-acquire: %v", err)
-	}
-	if err := release(); err != nil {
-		t.Fatalf("release: %v", err)
+	if n := countLockTrash(t, dir, path); n != 0 {
+		t.Fatalf("trash must be disposed of, found %d", n)
 	}
 }
 
@@ -1591,5 +1686,144 @@ func TestAcquireTimeoutErrorNamesHolder(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out") || !strings.Contains(err.Error(), "held by pid") {
 		t.Fatalf("timeout error must include the holder summary, got: %v", err)
+	}
+}
+
+// TestAcquireTickClaimRaceArms covers the tick's claim-failure classification
+// deterministically via the link seam: a lost race (EEXIST — a rival linked
+// between our lstat and our link) and a swept temp (ENOENT) are both silent
+// retries, never fatal.
+func TestAcquireTickClaimRaceArms(t *testing.T) {
+	realLink := linkLockFn
+	t.Cleanup(func() { linkLockFn = realLink })
+
+	for name, simulated := range map[string]error{
+		"lost link race is retryable":   os.ErrExist,
+		"swept claim temp is retryable": os.ErrNotExist,
+	} {
+		t.Run(name, func(t *testing.T) {
+			linkLockFn = func(_, newname string) error {
+				return &os.PathError{Op: "link", Path: newname, Err: simulated}
+			}
+			lockPath := filepath.Join(t.TempDir(), "guarded.ndjson.lock")
+			st := acquireLoopState{denied: 3}
+			id, acquired, err := acquireTick(lockPath, &st)
+			if err != nil || acquired || id != "" {
+				t.Fatalf("race arm must retry silently: id=%q acquired=%v err=%v", id, acquired, err)
+			}
+		})
+	}
+}
+
+// TestAcquireTickUnknownClaimErrorIsFatal: a claim failure that is neither
+// contention, transient, nor a permission denial surfaces immediately (here
+// ENOTDIR from a lock path whose parent is a regular file).
+func TestAcquireTickUnknownClaimErrorIsFatal(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	mustWriteFile(t, blocker, "not a dir")
+	st := acquireLoopState{}
+	_, acquired, err := acquireTick(filepath.Join(blocker, "x.lock"), &st)
+	if acquired || err == nil {
+		t.Fatalf("unknown claim error must be fatal: acquired=%v err=%v", acquired, err)
+	}
+	if !strings.Contains(err.Error(), "acquire lock") {
+		t.Fatalf("fatal claim error must carry the acquire context, got: %v", err)
+	}
+}
+
+// TestClaimExclusiveAgainstOccupiedName: the degraded claim's O_EXCL create
+// loses cleanly against an existing lock file.
+func TestClaimExclusiveAgainstOccupiedName(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "x.lock")
+	mustWriteFile(t, lockPath, "occupied")
+	if _, err := claimLockExclusive(lockPath, "1\n2\nmine\n"); !os.IsExist(err) {
+		t.Fatalf("O_EXCL against an occupied name must report exists, got: %v", err)
+	}
+}
+
+// TestLockOccupantStaleUnreadableFileUsesGrace: a lock file that exists but
+// cannot be read (foreign perms / mid-teardown) is judged by the short grace
+// instead of wedging every acquirer until timeout.
+func TestLockOccupantStaleUnreadableFileUsesGrace(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("cannot revoke read permission via chmod on windows")
+	}
+	lockPath := filepath.Join(t.TempDir(), "x.lock")
+	mustWriteFile(t, lockPath, "1\n2\ntoken\n")
+	if err := os.Chmod(lockPath, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockPath, 0o600) })
+	if _, err := os.ReadFile(lockPath); err == nil {
+		t.Skip("filesystem does not enforce the 0000 mode (running as root?)")
+	}
+	if stale, _ := lockOccupantStale(filepath.Join(t.TempDir(), "vanished.lock")); stale {
+		t.Fatal("a vanished occupant is not stale — the next tick simply claims")
+	}
+	if stale, _ := lockOccupantStale(lockPath); stale {
+		t.Fatal("fresh unreadable occupant must not be stale yet")
+	}
+	backdateDir(t, lockPath, lockNoHolderGrace+time.Second)
+	if stale, _ := lockOccupantStale(lockPath); !stale {
+		t.Fatal("unreadable occupant older than the grace must be stale")
+	}
+}
+
+// TestAcquireNotFoundWithParentPresentFailsFast is the regression guard for
+// the owner's exact work-PC trace (provadm-windows-da-lock-observation.md):
+// the lock create fails ERROR_FILE_NOT_FOUND while the parent directory
+// exists — a filesystem filter driver (OneDrive-redirected Documents, DLP/AV
+// minifilter) intercepting creates. The classification must be IMMEDIATE (no
+// retry burn) and actionable, naming the interference and the next step.
+func TestAcquireNotFoundWithParentPresentFailsFast(t *testing.T) {
+	realWrite := writeIdentityFileFn
+	t.Cleanup(func() { writeIdentityFileFn = realWrite })
+	writeIdentityFileFn = func(path, _ string) error {
+		// The filter-driver shape: create reports not-found even though the
+		// parent exists and is writable.
+		return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+	}
+
+	path := filepath.Join(t.TempDir(), ".agentsrc.lock") // parent EXISTS
+	start := time.Now()
+	_, err := AcquireFileLock(path)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected the environmental not-found classification")
+	}
+	for _, token := range []string{"parent directory exists", "filesystem interference", "OneDrive", "da doctor"} {
+		if !strings.Contains(err.Error(), token) {
+			t.Fatalf("classified error must mention %q, got: %v", token, err)
+		}
+	}
+	if strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("interference must not be misreported as a lock timeout: %v", err)
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("classification must be immediate (no retry burn), took %v", elapsed)
+	}
+}
+
+// TestClassifyClaimErrorNotFoundWithMissingParent: the same not-found without
+// a parent stays the plain raw wrap (the #148 missing-parent shape), not the
+// interference diagnosis.
+func TestClassifyClaimErrorNotFoundWithMissingParent(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "gone-parent", "x.lock")
+	claimErr := &os.PathError{Op: "open", Path: lockPath, Err: os.ErrNotExist}
+	st := acquireLoopState{}
+	err := classifyClaimError(lockPath, claimErr, &st)
+	if err == nil || strings.Contains(err.Error(), "filesystem interference") {
+		t.Fatalf("missing-parent not-found must stay a raw wrap, got: %v", err)
+	}
+}
+
+// TestClassifyClaimErrorTempVanishedIsRetryable: the sentinel for a swept
+// claim temp is silent contention, never fatal and never the interference
+// diagnosis.
+func TestClassifyClaimErrorTempVanishedIsRetryable(t *testing.T) {
+	st := acquireLoopState{}
+	wrapped := fmt.Errorf("%w: link says ENOENT", errClaimTempVanished)
+	if err := classifyClaimError(filepath.Join(t.TempDir(), "x.lock"), wrapped, &st); err != nil {
+		t.Fatalf("swept temp must be retryable, got: %v", err)
 	}
 }

@@ -49,3 +49,17 @@ transient and retried into a generic "timed out"; it now fails fast (~300ms)
 with an actionable error naming the protected parent and likely causes.
 Follow-up (not implemented here): a `da doctor` probe-write check (write+delete
 a temp file in the repo and the lock parent, naming CFA/OneDrive/AV on denial).
+
+## Round 5 (final): single-object redesign
+
+The dir+holder two-object lock kept leaving judge/act seams (rounds 1-4). The
+lock is now a SINGLE file whose name is created by one atomic hardlink from a
+pre-written identity temp (os.Link/CreateHardLinkW; O_EXCL+readback fallback on
+hardlink-less filesystems) — no observable partial state exists, so the
+mid-acquire race class is structurally gone. Reclaim gained post-rename
+verify + atomic same-inode link-restore. Legacy lock DIRS are judged by the old
+rules and reclaimed via the same rename-away path. The owner's exact work-PC
+trace (mkdir ERROR_FILE_NOT_FOUND with an existing parent = filter-driver
+interference; OneDrive/DLP) no longer applies (no CreateDirectory in the
+lifecycle) and, if the file create hits the same filter, is classified
+immediately with an actionable environmental error instead of a timeout.
