@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -315,7 +316,13 @@ func TestRunMissingIterLogDir(t *testing.T) {
 }
 
 // A scan failure (iter-log path is a file) is surfaced with context.
+// Windows maps ReadDir-on-a-file to not-exist, which run treats as "nothing
+// to ingest", so the error-path assertion is unix-only; the branch stays
+// covered through the merged multi-OS coverage profile.
 func TestRunScanError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("ReadDir on a file reports not-exist on Windows")
+	}
 	env := newTestEnv(t)
 	blocker := filepath.Join(env.repoDir, "not-a-dir")
 	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
