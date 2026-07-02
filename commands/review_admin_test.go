@@ -188,6 +188,12 @@ func seededAdmin() auth.User {
 	return auth.User{Email: "admin@example.com", Role: auth.RoleAdmin, TokenHash: stubHash, CreatedAt: "2026-01-01T00:00:00Z"}
 }
 
+// secondAdmin is a second stub admin row so tests can remove/demote the first
+// admin without tripping the last-admin lockout guard.
+func secondAdmin() auth.User {
+	return auth.User{Email: "admin2@example.com", Role: auth.RoleAdmin, TokenHash: stubHash, CreatedAt: "2026-01-02T00:00:00Z"}
+}
+
 // adminID is the identity the adminIdentityFake resolves for seededAdmin.
 func adminID() auth.Identity {
 	return auth.Identity{Email: "admin@example.com", Role: auth.RoleAdmin}
@@ -528,7 +534,9 @@ func TestReviewUsersRemove(t *testing.T) {
 
 func TestReviewUsersRemoveJSONAndNotFound(t *testing.T) {
 	usersPath, logPath := tempReviewPaths(t)
-	writeReviewUsers(t, usersPath, seededAdmin())
+	// Two admins so removing the first does not trip the last-admin guard —
+	// this case exercises the JSON output path, not the lockout guard.
+	writeReviewUsers(t, usersPath, seededAdmin(), secondAdmin())
 	deps := adminIdentityFake(adminID())
 
 	_, err := execUsersCmd(t, deps, "remove", "ghost@example.com",
@@ -587,7 +595,9 @@ func TestReviewUsersSetRole(t *testing.T) {
 
 func TestReviewUsersSetRoleErrorsAndJSON(t *testing.T) {
 	usersPath, logPath := tempReviewPaths(t)
-	writeReviewUsers(t, usersPath, seededAdmin())
+	// Two admins so demoting the first exercises the JSON output path rather
+	// than the last-admin lockout guard (which the dedicated guard test covers).
+	writeReviewUsers(t, usersPath, seededAdmin(), secondAdmin())
 	deps := adminIdentityFake(adminID())
 
 	_, err := execUsersCmd(t, deps, "set-role", "rev@example.com", "--role", "supreme",
@@ -610,6 +620,78 @@ func TestReviewUsersSetRoleErrorsAndJSON(t *testing.T) {
 	}
 	if payload.Role != "readonly" || payload.PreviousRole != "admin" {
 		t.Fatalf("bad set-role JSON: %+v", payload)
+	}
+}
+
+// ── last-admin lockout guard ────────────────────────────────────────────────
+
+// TestReviewUsersLastAdminGuard covers the guard that keeps the users file from
+// ever reaching zero admins (a permanent CLI lockout, since bootstrap only fires
+// on an EMPTY file): demoting or deleting the sole admin is refused with the file
+// and audit log untouched, while the same operations succeed once a second admin
+// exists.
+func TestReviewUsersLastAdminGuard(t *testing.T) {
+	deps := adminIdentityFake(adminID())
+
+	t.Run("sole admin demote refused", func(t *testing.T) {
+		usersPath, logPath := tempReviewPaths(t)
+		writeReviewUsers(t, usersPath, seededAdmin())
+		_, err := execUsersCmd(t, deps, "set-role", "admin@example.com", "--role", "readonly",
+			"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
+		mustErrContain(t, err, "refusing to demote the last admin", "no CLI recovery path")
+		assertSoleAdminUntouched(t, usersPath, logPath)
+	})
+
+	t.Run("sole admin delete refused", func(t *testing.T) {
+		usersPath, logPath := tempReviewPaths(t)
+		writeReviewUsers(t, usersPath, seededAdmin())
+		_, err := execUsersCmd(t, deps, "remove", "admin@example.com",
+			"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
+		mustErrContain(t, err, "refusing to remove the last admin", "no CLI recovery path")
+		assertSoleAdminUntouched(t, usersPath, logPath)
+	})
+
+	t.Run("demote succeeds with another admin", func(t *testing.T) {
+		usersPath, logPath := tempReviewPaths(t)
+		writeReviewUsers(t, usersPath, seededAdmin(), secondAdmin())
+		if _, err := execUsersCmd(t, deps, "set-role", "admin@example.com", "--role", "readonly",
+			"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t"); err != nil {
+			t.Fatalf("demote with spare admin should succeed: %v", err)
+		}
+		uf, _ := auth.LoadUsersFile(usersPath)
+		if got, _ := uf.Find("admin@example.com"); got.Role != auth.RoleReadonly {
+			t.Fatalf("role not demoted: %+v", got)
+		}
+	})
+
+	t.Run("delete succeeds with another admin", func(t *testing.T) {
+		usersPath, logPath := tempReviewPaths(t)
+		writeReviewUsers(t, usersPath, seededAdmin(), secondAdmin())
+		if _, err := execUsersCmd(t, deps, "remove", "admin@example.com",
+			"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t"); err != nil {
+			t.Fatalf("delete with spare admin should succeed: %v", err)
+		}
+		uf, _ := auth.LoadUsersFile(usersPath)
+		if _, ok := uf.Find("admin@example.com"); ok {
+			t.Fatalf("admin should have been removed")
+		}
+	})
+}
+
+// assertSoleAdminUntouched confirms a refused last-admin mutation left the users
+// file (still one admin) and audit log unchanged — the guard fails before any
+// write.
+func assertSoleAdminUntouched(t *testing.T, usersPath, logPath string) {
+	t.Helper()
+	uf, err := auth.LoadUsersFile(usersPath)
+	if err != nil {
+		t.Fatalf("load users after refusal: %v", err)
+	}
+	if got, ok := uf.Find("admin@example.com"); !ok || got.Role != auth.RoleAdmin {
+		t.Fatalf("sole admin must be unchanged after refusal: %+v ok=%v", got, ok)
+	}
+	if recs := auditRecordsOf(t, logPath); len(recs) != 0 {
+		t.Fatalf("refused mutation must not audit: %+v", recs)
 	}
 }
 

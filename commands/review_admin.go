@@ -507,6 +507,9 @@ func runReviewUsersRemove(out io.Writer, deps reviewAdminDeps, opts *reviewAdmin
 		if idx < 0 {
 			return audit.Event{}, reviewUserNotFound(email)
 		}
+		if wouldOrphanAdmins(uf, email) {
+			return audit.Event{}, reviewLastAdminError("remove")
+		}
 		u := uf.Users[idx]
 		uf.Users = append(uf.Users[:idx], uf.Users[idx+1:]...)
 		removed = u
@@ -540,6 +543,9 @@ func runReviewUsersSetRole(out io.Writer, deps reviewAdminDeps, opts *reviewAdmi
 			return audit.Event{}, reviewUserNotFound(email)
 		}
 		previous = uf.Users[idx].Role
+		if role != auth.RoleAdmin && wouldOrphanAdmins(uf, email) {
+			return audit.Event{}, reviewLastAdminError("demote")
+		}
 		uf.Users[idx].Role = role
 		changed = uf.Users[idx]
 		return audit.Event{
@@ -911,6 +917,35 @@ func reviewUserNotFound(email string) error {
 	return ErrorWithHints(
 		fmt.Sprintf("user not found: %s", email),
 		"Run `da review users list` to see known users.",
+	)
+}
+
+// wouldOrphanAdmins reports whether stripping admin rights from email — by
+// deleting the user or demoting them out of the admin role — would leave the
+// users file with no admin at all. Because bootstrap only fires on an EMPTY
+// users file, a non-empty file with zero admins has no CLI recovery path, so
+// both mutators refuse such an operation. It MUST run inside the users-file lock
+// so the admin count is consistent with the write that follows.
+func wouldOrphanAdmins(uf *auth.UsersFile, email string) bool {
+	target, ok := uf.Find(email)
+	if !ok || target.Role != auth.RoleAdmin {
+		return false
+	}
+	admins := 0
+	for _, u := range uf.Users {
+		if u.Role == auth.RoleAdmin {
+			admins++
+		}
+	}
+	return admins == 1
+}
+
+// reviewLastAdminError renders the last-admin lockout guard failure; action is
+// the attempted verb ("remove" or "demote").
+func reviewLastAdminError(action string) error {
+	return ErrorWithHints(
+		"refusing to "+action+" the last admin — the users file would have no admin and no CLI recovery path",
+		"Promote another user to admin first (`da review users set-role <email> --role admin`), then retry.",
 	)
 }
 
