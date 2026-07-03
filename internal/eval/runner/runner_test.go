@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strconv"
 	"sync"
 	"testing"
@@ -497,11 +498,15 @@ func TestCopilotRunner_HappyPath(t *testing.T) {
 		t.Fatalf("expected 1 exec call, got %d", len(*calls))
 	}
 	c := (*calls)[0]
+	// Assert the FULL argv is the canonical `copilot -p <prompt>` code-gen
+	// form — NOT the `gh copilot suggest` shell-suggestion extension. A bare
+	// arg[0] check would pass for any wrong subcommand.
 	if c.name != copilotBin {
 		t.Errorf("exec name: want %q, got %q", copilotBin, c.name)
 	}
-	if len(c.args) == 0 || c.args[0] != copilotSubCmd {
-		t.Errorf("copilot args: want [copilot suggest ...], got %v", c.args)
+	wantArgs := []string{"-p", minimalSpec().Prompt}
+	if !reflect.DeepEqual(c.args, wantArgs) {
+		t.Errorf("copilot argv: want %v, got %v", wantArgs, c.args)
 	}
 	if result.Telemetry.Harness != "gh-copilot" {
 		t.Errorf("Harness: want %q, got %q", "gh-copilot", result.Telemetry.Harness)

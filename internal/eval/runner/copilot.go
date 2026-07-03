@@ -10,17 +10,23 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/platform"
 )
 
-// copilotBin and copilotSubCmd are the GitHub CLI binary and the subcommand
-// used to invoke GitHub Copilot in non-interactive code-suggestion mode.
+// copilotBin and copilotPromptFlag are the standalone GitHub Copilot CLI binary
+// and its headless code-generation prompt flag. `copilot -p <prompt>` is the
+// repo's canonical non-interactive code-gen invocation (cross-harness reviewer
+// dispatch table, prompts/reviewers/cross-harness-adversarial.md:56;
+// skill-architect providers.md:43). This is deliberately NOT the `gh copilot
+// suggest` gh-extension, which targets shell-COMMAND suggestions rather than
+// code generation. The invocation stays behind the exec seam, so if the
+// Copilot CLI flag changes it is a one-line swap here with no caller impact.
 const (
-	copilotBin    = "gh"
-	copilotSubCmd = "copilot"
+	copilotBin        = "copilot"
+	copilotPromptFlag = "-p"
 )
 
-// copilotRunner invokes the GitHub Copilot CLI (via `gh copilot suggest`)
-// against a sandbox workdir. After the run it recovers token telemetry from the
-// Copilot CLI's on-disk session store via the platform copilot scanner (see
-// the run field docs).
+// copilotRunner invokes the standalone GitHub Copilot CLI against a sandbox
+// workdir. After the run it recovers token telemetry from the Copilot CLI's
+// on-disk session store via the platform copilot scanner (see the scan field
+// docs).
 type copilotRunner struct {
 	// run is the exec seam; production code uses realExec, tests inject a fake.
 	run cmdFn
@@ -28,8 +34,8 @@ type copilotRunner struct {
 	// ScanSessionTokens, which walks <home>/.copilot/session-state/*/
 	// events.jsonl for session.shutdown token totals by mtime. It is a struct
 	// field (not a package var) so tests inject a deterministic fake without
-	// touching a real ~/.copilot. The store is populated by the Copilot CLI;
-	// when a run writes none (e.g. gh copilot suggest short-circuits), the scan
+	// touching a real ~/.copilot. The store is populated by the standalone
+	// Copilot CLI this adapter now invokes; when a run writes none, the scan
 	// returns empty and Telemetry.Tokens stays nil — a first-class absent
 	// signal, not a silent drop.
 	scan scanFn
@@ -41,10 +47,10 @@ func newCopilotRunner() *copilotRunner {
 
 var _ Runner = (*copilotRunner)(nil)
 
-// Run implements Runner. It invokes `gh copilot suggest -t code -y <prompt>` in
-// instance.Workdir with instance.Env appended to the process environment, then
-// scans the scratch HOME's Copilot session store for token telemetry emitted
-// after the run started.
+// Run implements Runner. It invokes `copilot -p <prompt>` in instance.Workdir
+// with instance.Env appended to the process environment, then scans the
+// scratch HOME's Copilot session store for token telemetry emitted after the
+// run started.
 func (r *copilotRunner) Run(
 	ctx context.Context,
 	spec *eval.TaskSpec,
@@ -58,10 +64,10 @@ func (r *copilotRunner) Run(
 	}
 
 	env := buildEnv(instance.Env)
-	// `gh copilot suggest -t code <prompt>` requests code-generation
-	// suggestions. The -y flag accepts the first suggestion non-interactively
-	// so the subprocess does not block waiting for TTY input.
-	args := []string{copilotSubCmd, "suggest", "-t", "code", "-y", spec.Prompt}
+	// `copilot -p <prompt>` — v1 best-effort headless code-gen invocation
+	// (cross-harness-adversarial.md:56). The prompt is arg-delivered; realExec
+	// pins stdin to an empty reader so the CLI cannot block on TTY input.
+	args := []string{copilotPromptFlag, spec.Prompt}
 
 	start := time.Now()
 	after := start.UTC().Format(time.RFC3339)
