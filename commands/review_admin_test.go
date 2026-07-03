@@ -817,7 +817,7 @@ func TestReviewUsersAuditFailClosedRollbackVariants(t *testing.T) {
 	})
 }
 
-// ── audit view ──────────────────────────────────────────────────────────────
+// ── audit tail ──────────────────────────────────────────────────────────────
 
 // seedAuditLog writes n chained records through the real audit package.
 func seedAuditLog(t *testing.T, logPath string, n int) {
@@ -835,71 +835,72 @@ func seedAuditLog(t *testing.T, logPath string, n int) {
 	}
 }
 
-func TestReviewAuditView(t *testing.T) {
+func TestReviewAuditTail(t *testing.T) {
 	usersPath, logPath := tempReviewPaths(t)
 	writeReviewUsers(t, usersPath, seededAdmin())
 	seedAuditLog(t, logPath, 3)
 	deps := adminIdentityFake(adminID())
 
-	out, err := execAuditCmd(t, deps, "view",
+	out, err := execAuditCmd(t, deps, "tail",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	if err != nil {
-		t.Fatalf("view: %v", err)
+		t.Fatalf("tail: %v", err)
 	}
 	mustContain(t, out, "ACTOR", "user.create", "user/seed", "Showing 3 of 3 record(s)")
 
+	// The deprecated `view` alias still resolves to the same command.
 	out, err = execAuditCmd(t, deps, "view", "--limit", "1",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	if err != nil {
-		t.Fatalf("view --limit: %v", err)
+		t.Fatalf("view alias --limit: %v", err)
 	}
 	mustContain(t, out, "Showing 1 of 3 record(s)")
 
 	setJSONFlag(t)
-	out, err = execAuditCmd(t, deps, "view", "--limit", "2",
+	out, err = execAuditCmd(t, deps, "tail", "--limit", "2",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	if err != nil {
-		t.Fatalf("view json: %v", err)
+		t.Fatalf("tail json: %v", err)
 	}
-	var payload reviewAuditViewJSON
+	var payload reviewAuditTailJSON
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
-		t.Fatalf("parse view JSON: %v", err)
+		t.Fatalf("parse tail JSON: %v", err)
 	}
 	if payload.Total != 3 || len(payload.Records) != 2 {
-		t.Fatalf("bad view JSON: total=%d records=%d", payload.Total, len(payload.Records))
+		t.Fatalf("bad tail JSON: total=%d records=%d", payload.Total, len(payload.Records))
 	}
 }
 
-func TestReviewAuditViewEmptyAndErrors(t *testing.T) {
+func TestReviewAuditTailEmptyAndErrors(t *testing.T) {
 	usersPath, logPath := tempReviewPaths(t)
 	writeReviewUsers(t, usersPath, seededAdmin())
 	deps := adminIdentityFake(adminID())
 
-	out, err := execAuditCmd(t, deps, "view",
+	out, err := execAuditCmd(t, deps, "tail",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	if err != nil {
-		t.Fatalf("view empty: %v", err)
+		t.Fatalf("tail empty: %v", err)
 	}
 	mustContain(t, out, "No audit records in "+logPath)
 
-	_, err = execAuditCmd(t, deps, "view", "--limit", "-2",
+	_, err = execAuditCmd(t, deps, "tail", "--limit", "-2",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	mustErrContain(t, err, "--limit must be a non-negative integer")
 
 	readonly := adminIdentityFake(auth.Identity{Email: "ro@example.com", Role: auth.RoleReadonly})
-	_, err = execAuditCmd(t, readonly, "view",
+	_, err = execAuditCmd(t, readonly, "tail",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	mustErrContain(t, err, "lacks permission audit:read")
 
 	pathErr := fakeReviewAdminDeps{defaultUsersPath: func() (string, error) { return "", errors.New("no home") }}
-	_, err = execAuditCmd(t, pathErr, "view", "--audit-log", logPath)
+	_, err = execAuditCmd(t, pathErr, "tail", "--audit-log", logPath)
 	mustErrContain(t, err, "no home")
 
 	// A malformed line makes the real Records() fail.
 	if err := os.WriteFile(logPath, []byte("not json\n"), 0o600); err != nil {
 		t.Fatalf("corrupt log: %v", err)
 	}
-	_, err = execAuditCmd(t, deps, "view",
+	_, err = execAuditCmd(t, deps, "tail",
 		"--users-file", usersPath, "--audit-log", logPath, "--token", "rvw_t")
 	mustErrContain(t, err, "parse log line 1")
 }
@@ -1141,11 +1142,14 @@ func TestReviewAuditPruneErrors(t *testing.T) {
 	usersPath, logPath := tempReviewPaths(t)
 	deps := adminIdentityFake(adminID())
 
-	_, err := execAuditCmd(t, deps, "prune", "--before-year", "0",
-		"--audit-log", logPath, "--token", "rvw_t")
-	mustErrContain(t, err, "--before-year must be a positive four-digit year")
+	// Non-four-digit years are rejected at both bounds and at zero.
+	for _, bad := range []string{"0", "999", "10000"} {
+		_, err := execAuditCmd(t, deps, "prune", "--before-year", bad,
+			"--audit-log", logPath, "--token", "rvw_t")
+		mustErrContain(t, err, "--before-year must be a four-digit year (1000-9999)")
+	}
 
-	_, err = execAuditCmd(t, deps, "prune", "--audit-log", logPath, "--token", "rvw_t")
+	_, err := execAuditCmd(t, deps, "prune", "--audit-log", logPath, "--token", "rvw_t")
 	mustErrContain(t, err, "before-year", "not set")
 
 	readonly := adminIdentityFake(auth.Identity{Email: "ro@example.com", Role: auth.RoleReadonly})

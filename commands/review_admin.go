@@ -277,11 +277,11 @@ func newReviewAuditCmd(deps reviewAdminDeps) *cobra.Command {
 		Use:   "audit",
 		Short: "Inspect, verify, and compact the review audit log",
 		Long: "Read, attest, and compact the append-only, hash-chained review audit log\n" +
-			"(spec D5.4). `view`, `repair`, and `prune` are admin-only; `verify` needs no\n" +
+			"(spec D5.4). `tail`, `repair`, and `prune` are admin-only; `verify` needs no\n" +
 			"token (it is read-only integrity attestation, usable as a CI gate) and exits\n" +
 			"non-zero on the first chain break.",
 		Example: ExampleBlock(
-			"  da review audit view --limit 20",
+			"  da review audit tail --limit 20",
 			"  da review audit verify",
 			"  da review audit repair",
 			"  da review audit prune --before-year 2025",
@@ -289,7 +289,7 @@ func newReviewAuditCmd(deps reviewAdminDeps) *cobra.Command {
 	}
 	opts.registerFlags(cmd)
 	cmd.AddCommand(
-		newReviewAuditViewCmd(deps, opts),
+		newReviewAuditTailCmd(deps, opts),
 		newReviewAuditVerifyCmd(deps, opts),
 		newReviewAuditRepairCmd(deps, opts),
 		newReviewAuditPruneCmd(deps, opts),
@@ -297,19 +297,22 @@ func newReviewAuditCmd(deps reviewAdminDeps) *cobra.Command {
 	return cmd
 }
 
-// newReviewAuditViewCmd builds `da review audit view`.
-func newReviewAuditViewCmd(deps reviewAdminDeps, opts *reviewAdminOpts) *cobra.Command {
+// newReviewAuditTailCmd builds `da review audit tail` (spec appendix line 174).
+// `view` is retained as a deprecated alias so anyone who scripted the earlier
+// name keeps working; `tail` is the canonical recent-entries verb.
+func newReviewAuditTailCmd(deps reviewAdminDeps, opts *reviewAdminOpts) *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
-		Use:   "view",
-		Short: "Show audit records, newest last (admin only)",
+		Use:     "tail",
+		Aliases: []string{"view"},
+		Short:   "Show audit records, newest last (admin only)",
 		Example: ExampleBlock(
-			"  da review audit view",
-			"  da review audit view --limit 20 --json",
+			"  da review audit tail",
+			"  da review audit tail --limit 20 --json",
 		),
-		Args: NoArgsWithHints("`da review audit view` takes no positional arguments."),
+		Args: NoArgsWithHints("`da review audit tail` takes no positional arguments."),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runReviewAuditView(cmd.OutOrStdout(), deps, opts, limit)
+			return runReviewAuditTail(cmd.OutOrStdout(), deps, opts, limit)
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 0, "Show only the newest N records (0 = all)")
@@ -569,9 +572,9 @@ func runReviewUsersSetRole(out io.Writer, deps reviewAdminDeps, opts *reviewAdmi
 
 // ── audit runners ───────────────────────────────────────────────────────────
 
-// reviewAuditViewJSON is the `audit view --json` envelope. Total is the full
+// reviewAuditTailJSON is the `audit tail --json` envelope. Total is the full
 // record count before --limit trimming, mirroring the HTTP audit view.
-type reviewAuditViewJSON struct {
+type reviewAuditTailJSON struct {
 	Total   int            `json:"total"`
 	Records []audit.Record `json:"records"`
 }
@@ -585,8 +588,8 @@ type reviewAuditVerifyJSON struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
-// runReviewAuditView implements `da review audit view` (admin only).
-func runReviewAuditView(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOpts, limit int) error {
+// runReviewAuditTail implements `da review audit tail` (admin only).
+func runReviewAuditTail(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOpts, limit int) error {
 	if limit < 0 {
 		return UsageError("--limit must be a non-negative integer")
 	}
@@ -607,7 +610,7 @@ func runReviewAuditView(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOp
 		recs = recs[total-limit:]
 	}
 	if Flags.JSON {
-		return emitReviewAdminJSON(out, reviewAuditViewJSON{Total: total, Records: recs})
+		return emitReviewAdminJSON(out, reviewAuditTailJSON{Total: total, Records: recs})
 	}
 	if total == 0 {
 		fmt.Fprintf(out, "No audit records in %s\n", logPath)
@@ -688,8 +691,8 @@ type reviewAuditPruneJSON struct {
 // chains and the active log is untouched, so there is deliberately NO
 // fail-closed audit record here (contrast the users-file mutators).
 func runReviewAuditPrune(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOpts, beforeYear int) error {
-	if beforeYear <= 0 {
-		return UsageError("--before-year must be a positive four-digit year")
+	if beforeYear < 1000 || beforeYear > 9999 {
+		return UsageError("--before-year must be a four-digit year (1000-9999)")
 	}
 	usersPath, err := opts.resolveUsersPath(deps)
 	if err != nil {
