@@ -303,7 +303,18 @@ func TestRun_Integration(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	// stage 1 — generate
+	// Per-stage assertions live in helpers to keep this test within the
+	// cognitive-complexity gate (S3776).
+	assertIntegrationGenerated(t, got)
+	assertIntegrationRan(t, fakeRun, got, inst)
+	assertIntegrationVerified(t, got)
+	assertIntegrationScored(t, got, inst)
+}
+
+// assertIntegrationGenerated checks stage 1 (generate): the spec targets Go and
+// carries the build command for the fixture package.
+func assertIntegrationGenerated(t *testing.T, got EvalRun) {
+	t.Helper()
 	if got.Spec == nil || got.Spec.Language != eval.LanguageGo {
 		t.Fatalf("spec: %+v", got.Spec)
 	}
@@ -311,9 +322,12 @@ func TestRun_Integration(t *testing.T) {
 	if !reflect.DeepEqual(got.Spec.Verification.BuildCmd, wantBuild) {
 		t.Fatalf("build cmd = %v, want %v", got.Spec.Verification.BuildCmd, wantBuild)
 	}
+}
 
-	// stage 3 — run: the harness passed the generated spec and the provisioned
-	// instance straight through to the runner.
+// assertIntegrationRan checks stage 3 (run): the harness passed the generated
+// spec and the provisioned instance straight through to the runner.
+func assertIntegrationRan(t *testing.T, fakeRun *runner.FakeRunner, got EvalRun, inst *sandbox.Instance) {
+	t.Helper()
 	if fakeRun.Calls != 1 {
 		t.Fatalf("runner calls = %d, want 1", fakeRun.Calls)
 	}
@@ -326,16 +340,24 @@ func TestRun_Integration(t *testing.T) {
 	if got.Run.ExitCode != 0 {
 		t.Fatalf("run exit code = %d, want 0", got.Run.ExitCode)
 	}
+}
 
-	// stage 4 — verify: the real go verifier built and tested the fixture.
+// assertIntegrationVerified checks stage 4 (verify): the real go verifier built
+// and tested the fixture.
+func assertIntegrationVerified(t *testing.T, got EvalRun) {
+	t.Helper()
 	if got.Verify == nil || !got.Verify.Passed {
 		t.Fatalf("verify result = %+v, want passed", got.Verify)
 	}
 	if got.Verify.Phase != goverifier.PhaseTest {
 		t.Fatalf("verify phase = %q, want %q", got.Verify.Phase, goverifier.PhaseTest)
 	}
+}
 
-	// stage 5 — score: the run's identity and the persisted sidecars.
+// assertIntegrationScored checks stage 5 (score): run identity threaded from the
+// instance, the persisted sidecars, and telemetry mapped into the record.
+func assertIntegrationScored(t *testing.T, got EvalRun, inst *sandbox.Instance) {
+	t.Helper()
 	if got.RunID != inst.RunID || got.RunDir != inst.RunDir || got.BaseCommit != inst.BaseCommit {
 		t.Fatalf("run identity not threaded from instance: %+v", got)
 	}
@@ -347,7 +369,6 @@ func TestRun_Integration(t *testing.T) {
 	if test := verifierEntry(t, got.Score.Record, "test"); test.Status != "pass" {
 		t.Fatalf("test verifier status = %q, want pass", test.Status)
 	}
-	// telemetry flowed through the mapper into the record's agent block.
 	if got.Score.Record.Agent.Harness != "fake-harness" || got.Score.Record.Agent.Model != "test-model" {
 		t.Fatalf("agent telemetry not recorded: %+v", got.Score.Record.Agent)
 	}
