@@ -521,3 +521,84 @@ func TestVerify_StderrAccumulates(t *testing.T) {
 		t.Errorf("Stderr = %q, want %q", res.Stderr, "warn1\nwarn2\n")
 	}
 }
+
+// ---- Verify: empty workdir (sandbox-escape guard) ----------------------------
+
+// TestVerify_EmptyWorkdir asserts that Verify rejects an empty workdir with a
+// PhaseValidate VerifyError and executes no command. An empty exec.Cmd.Dir
+// would default to the current process directory, escaping the sandbox.
+func TestVerify_EmptyWorkdir(t *testing.T) {
+	cmdCalled := false
+	v := New()
+	v.runCmd = func(_ context.Context, _ string, _ []string, _ []string) (string, string, int, time.Duration, error) {
+		cmdCalled = true
+		return "", "", 0, 0, nil
+	}
+	spec := minimalSpec()
+	_, err := v.Verify(context.Background(), spec, "", nil)
+	var ve *VerifyError
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected VerifyError for empty workdir, got %T: %v", err, err)
+	}
+	if ve.Phase != PhaseValidate {
+		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, PhaseValidate)
+	}
+	if cmdCalled {
+		t.Error("runCmd was called despite empty workdir; want no execution")
+	}
+}
+
+// ---- Verify: workdir is forwarded to runCmd ----------------------------------
+
+// TestVerify_CommandRunsInWorkdir asserts the happy path: the workdir Verify
+// receives is forwarded unchanged to every runCmd call, confirming that the
+// sandbox boundary is respected and commands do not run in an unexpected
+// directory.
+func TestVerify_CommandRunsInWorkdir(t *testing.T) {
+	want := t.TempDir()
+	var got string
+	v := New()
+	v.runCmd = func(_ context.Context, workdir string, _ []string, _ []string) (string, string, int, time.Duration, error) {
+		got = workdir
+		return "ok\n", "", 0, time.Millisecond, nil
+	}
+	spec := minimalSpec()
+	res, err := v.Verify(context.Background(), spec, want, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Passed {
+		t.Errorf("Passed = false, want true")
+	}
+	if got != want {
+		t.Errorf("runCmd received workdir %q, want %q", got, want)
+	}
+}
+
+// ---- Verify: negative TimeoutSeconds -----------------------------------------
+
+// TestVerify_NegativeTimeout asserts that Verify rejects a negative
+// TimeoutSeconds with a PhaseValidate VerifyError before any command runs.
+// Zero remains "no timeout" (documented contract); only strictly negative values
+// are invalid.
+func TestVerify_NegativeTimeout(t *testing.T) {
+	cmdCalled := false
+	v := New()
+	v.runCmd = func(_ context.Context, _ string, _ []string, _ []string) (string, string, int, time.Duration, error) {
+		cmdCalled = true
+		return "", "", 0, 0, nil
+	}
+	spec := minimalSpec()
+	spec.Verification.TimeoutSeconds = -1
+	_, err := v.Verify(context.Background(), spec, t.TempDir(), nil)
+	var ve *VerifyError
+	if !errors.As(err, &ve) {
+		t.Fatalf("expected VerifyError for negative TimeoutSeconds, got %T: %v", err, err)
+	}
+	if ve.Phase != PhaseValidate {
+		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, PhaseValidate)
+	}
+	if cmdCalled {
+		t.Error("runCmd was called despite negative TimeoutSeconds; want no execution")
+	}
+}

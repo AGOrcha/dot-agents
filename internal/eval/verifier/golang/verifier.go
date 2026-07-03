@@ -21,6 +21,9 @@ const (
 	PhaseBuild Phase = "build"
 	// PhaseTest is the test_cmd step; set on both test pass and test failure.
 	PhaseTest Phase = "test"
+	// PhaseValidate is the pre-flight validation step; it is set on VerifyErrors
+	// returned before any command runs (empty workdir, invalid spec fields).
+	PhaseValidate Phase = "validate"
 )
 
 // VerifyResult is the outcome of running a TaskSpec's verification commands
@@ -101,12 +104,22 @@ func New() *GoVerifier {
 // Language implements Verifier.
 func (v *GoVerifier) Language() eval.Language { return eval.LanguageGo }
 
-// Verify implements Verifier. A nil spec returns an immediate error.
-// TimeoutSeconds, when non-zero, becomes a context deadline spanning both
-// build and test. A build failure short-circuits the test step.
+// Verify implements Verifier. A nil spec returns an immediate error. An empty
+// workdir is rejected with a VerifyError (PhaseValidate) before any command
+// runs — an empty exec.Cmd.Dir would default to the current process directory,
+// escaping the sandbox. A negative TimeoutSeconds is also rejected; 0 means no
+// timeout (documented contract). TimeoutSeconds, when positive, becomes a
+// context deadline spanning both build and test. A build failure short-circuits
+// the test step.
 func (v *GoVerifier) Verify(ctx context.Context, spec *eval.TaskSpec, workdir string, env []string) (*VerifyResult, error) {
 	if spec == nil {
 		return nil, fmt.Errorf("goverifier: spec is required")
+	}
+	if workdir == "" {
+		return nil, &VerifyError{Phase: PhaseValidate, Cause: fmt.Errorf("workdir is required")}
+	}
+	if spec.Verification.TimeoutSeconds < 0 {
+		return nil, &VerifyError{Phase: PhaseValidate, Cause: fmt.Errorf("TimeoutSeconds must be >= 0, got %d", spec.Verification.TimeoutSeconds)}
 	}
 	ctx, cancel := applyTimeout(ctx, spec.Verification.TimeoutSeconds)
 	defer cancel()
