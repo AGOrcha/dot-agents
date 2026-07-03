@@ -1157,13 +1157,13 @@ func TestReviewAuditPruneErrors(t *testing.T) {
 	_, err = execAuditCmd(t, pathErr, "prune", "--before-year", "2025", "--audit-log", logPath)
 	mustErrContain(t, err, "no home")
 
-	corrupt := adminIdentityFake(adminID())
-	corrupt.auditPrune = func(string, int) ([]string, error) {
-		return []string{"/x/audit.log.2020.jsonl"}, fmt.Errorf("%w: /x/audit.log.2021.jsonl", audit.ErrCorruptArchive)
+	unprunable := adminIdentityFake(adminID())
+	unprunable.auditPrune = func(string, int) ([]string, error) {
+		return []string{"/x/audit.log.2020.jsonl"}, fmt.Errorf("%w: /x/audit.log.2021.jsonl", audit.ErrUnprunableArchive)
 	}
-	_, err = execAuditCmd(t, corrupt, "prune", "--before-year", "2025",
+	_, err = execAuditCmd(t, unprunable, "prune", "--before-year", "2025",
 		"--audit-log", logPath, "--token", "rvw_t")
-	mustErrContain(t, err, "audit prune incomplete (1 archive(s) compacted)", "corrupt archive")
+	mustErrContain(t, err, "audit prune incomplete (1 archive(s) compacted)", "/x/audit.log.2021.jsonl")
 }
 
 // ── wiring + std deps ───────────────────────────────────────────────────────

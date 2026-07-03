@@ -112,11 +112,11 @@ func TestPruneArchivesBeforeSkipsCorruptArchive(t *testing.T) {
 	}
 
 	removed, err := l.PruneArchivesBefore(2025)
-	if !errors.Is(err, ErrCorruptArchive) {
-		t.Fatalf("want ErrCorruptArchive, got %v", err)
+	if !errors.Is(err, ErrUnprunableArchive) {
+		t.Fatalf("want ErrUnprunableArchive, got %v", err)
 	}
-	if !strings.Contains(err.Error(), corruptPath) {
-		t.Fatalf("error should name %s: %v", corruptPath, err)
+	if !strings.Contains(err.Error(), corruptPath) || !strings.Contains(err.Error(), "corrupt chain") {
+		t.Fatalf("error should name %s with a corrupt-chain reason: %v", corruptPath, err)
 	}
 	if len(removed) != 1 || removed[0] != base+".2022.jsonl" {
 		t.Fatalf("removed = %v, want only the intact 2022 archive", removed)
@@ -198,21 +198,63 @@ func TestPruneArchivesBeforeRemoveHeadError(t *testing.T) {
 	}
 }
 
-func TestPruneArchivesBeforeHeadMissingIsOK(t *testing.T) {
+func TestPruneArchivesBeforeHeadRemovalENOENTIsOK(t *testing.T) {
 	restoreSeams(t)
 	restorePruneSeams(t)
 	l := tempLog(t)
 	seedYearArchives(t, l, 2022, 2026)
 	base := archiveBase(l.Path())
-	if err := os.Remove(base + ".2022.jsonl.head"); err != nil {
-		t.Fatalf("drop head sidecar: %v", err)
+	orig := removeFunc
+	// The archive keeps its head anchor so it verifies clean (prunable); simulate
+	// the head sidecar vanishing between verify and removal so removeArchive's
+	// ENOENT branch is exercised rather than treated as an error.
+	removeFunc = func(p string) error {
+		if strings.HasSuffix(p, ".head") {
+			return os.ErrNotExist
+		}
+		return orig(p)
 	}
 	removed, err := l.PruneArchivesBefore(2025)
 	if err != nil {
-		t.Fatalf("prune with absent head sidecar: %v", err)
+		t.Fatalf("prune with vanished head sidecar: %v", err)
 	}
 	if len(removed) != 1 || removed[0] != base+".2022.jsonl" {
 		t.Fatalf("removed = %v, want the 2022 archive", removed)
+	}
+}
+
+// TestPruneArchivesBeforeSkipsTornAppendArchive pins the tamper-evidence guard:
+// an archive whose head anchor is one behind reads as OK+TornAppend, which is
+// byte-indistinguishable from a forged out-of-band append, so prune must SKIP it
+// (leave it in place) and report it rather than destroy the evidence.
+func TestPruneArchivesBeforeSkipsTornAppendArchive(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	seedYearArchives(t, l, 2022, 2026)
+	base := archiveBase(l.Path())
+	tornArchive := base + ".2022.jsonl"
+	// Drop the head anchor so the single-record archive reads as a torn (first)
+	// append: chain intact (OK=true) but the anchor is one behind (TornAppend).
+	if err := os.Remove(tornArchive + ".head"); err != nil {
+		t.Fatalf("drop head anchor: %v", err)
+	}
+	if res, err := Open(tornArchive).Verify(); err != nil || !res.OK || !res.TornAppend {
+		t.Fatalf("precondition: want OK+TornAppend, got %+v err=%v", res, err)
+	}
+
+	removed, err := l.PruneArchivesBefore(2025)
+	if !errors.Is(err, ErrUnprunableArchive) {
+		t.Fatalf("want ErrUnprunableArchive, got %v", err)
+	}
+	if !strings.Contains(err.Error(), tornArchive) || !strings.Contains(err.Error(), "torn-append") {
+		t.Fatalf("error should name the torn archive with a torn-append reason: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("torn-append archive must not be pruned; removed=%v", removed)
+	}
+	if _, err := os.Stat(tornArchive); err != nil {
+		t.Fatalf("torn-append archive must be left in place: %v", err)
 	}
 }
 

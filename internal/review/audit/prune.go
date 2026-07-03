@@ -9,11 +9,13 @@ import (
 	"strings"
 )
 
-// ErrCorruptArchive is returned by PruneArchivesBefore when one or more eligible
-// archives fail chain verification: they are left in place (never silently
-// deleted) and named in the error, while intact eligible archives are still
-// compacted. Callers can match it with errors.Is.
-var ErrCorruptArchive = errors.New("audit: refusing to prune corrupt archive(s)")
+// ErrUnprunableArchive is returned by PruneArchivesBefore when one or more
+// eligible archives are not safe to compact: they are left in place (never
+// silently deleted) and named — with a per-archive reason — in the error, while
+// intact eligible archives are still compacted. Callers can match it with
+// errors.Is. An archive is unprunable when it fails chain/anchor verification
+// (tamper) OR reads as an unresolved torn append (see archiveSkipReason).
+var ErrUnprunableArchive = errors.New("audit: refusing to prune archive(s) that are not a fully-clean, fully-anchored chain")
 
 // archiveRef is a rotated year-archive file discovered next to the active log,
 // paired with the calendar year encoded in its rotation-assigned name.
@@ -36,12 +38,16 @@ type archiveRef struct {
 // neither an action value (none exists in the closed set) nor a fail-closed
 // audit wrapper, and the active log is never touched.
 //
-// Safety: an eligible archive is verified as an intact self-contained chain
-// before removal; a corrupt one is left in place and reported via
-// ErrCorruptArchive (intact eligible archives are still compacted, so the
-// returned slice records real progress even on the error path). The whole pass
-// runs under the same in-process mutex and inter-process file lock Append takes
-// on the active log, so a concurrent rotation cannot race the enumeration.
+// Tamper-safety: an eligible archive is compacted ONLY when it verifies as a
+// fully-clean, fully-anchored chain (OK && !TornAppend). A chain/anchor break
+// (tamper) and an unresolved torn append are both left in place and reported via
+// ErrUnprunableArchive — the torn-append case matters because Verify reports it
+// as OK (chain intact) yet it is byte-indistinguishable from a FORGED
+// out-of-band append (see VerifyResult.TornAppend), so deleting it could destroy
+// tamper evidence. Intact eligible archives are still compacted, so the returned
+// slice records real progress even on the error path. The whole pass runs under
+// the same in-process mutex and inter-process file lock Append takes on the
+// active log, so a concurrent rotation cannot race the enumeration.
 func (l *Log) PruneArchivesBefore(year int) ([]string, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -56,17 +62,17 @@ func (l *Log) PruneArchivesBefore(year int) ([]string, error) {
 		return nil, err
 	}
 	removed := []string{}
-	var corrupt []string
+	var skipped []string
 	for _, ref := range refs {
 		if ref.year >= year {
 			continue
 		}
-		intact, err := archiveIntact(ref.path)
+		reason, err := archiveSkipReason(ref.path)
 		if err != nil {
 			return removed, err
 		}
-		if !intact {
-			corrupt = append(corrupt, ref.path)
+		if reason != "" {
+			skipped = append(skipped, fmt.Sprintf("%s (%s)", ref.path, reason))
 			continue
 		}
 		if err := removeArchive(ref.path); err != nil {
@@ -74,8 +80,8 @@ func (l *Log) PruneArchivesBefore(year int) ([]string, error) {
 		}
 		removed = append(removed, ref.path)
 	}
-	if len(corrupt) > 0 {
-		return removed, fmt.Errorf("%w: %s", ErrCorruptArchive, strings.Join(corrupt, ", "))
+	if len(skipped) > 0 {
+		return removed, fmt.Errorf("%w: %s", ErrUnprunableArchive, strings.Join(skipped, "; "))
 	}
 	return removed, nil
 }
@@ -138,15 +144,26 @@ func leadingYear(seg string) (int, bool) {
 	return year, true
 }
 
-// archiveIntact reports whether the archive at path is a fully intact,
-// self-contained chain (safe to compact). An operational read error is returned
-// as err; a chain or head-anchor break yields ok=false (corrupt — do not delete).
-func archiveIntact(path string) (bool, error) {
+// archiveSkipReason reports why the archive at path may NOT be pruned, or "" when
+// it is a fully-clean, fully-anchored chain safe to compact. An operational read
+// error is returned as err. Two states block pruning:
+//   - a chain or head-anchor break (OK=false): tamper — never delete the evidence;
+//   - an unresolved torn append (OK=true but TornAppend=true): the head anchor is
+//     one behind, which Verify cannot distinguish from a forged out-of-band
+//     append, so the archive must be repaired (`da review audit repair`) before it
+//     is safe to delete.
+func archiveSkipReason(path string) (string, error) {
 	res, err := Open(path).Verify()
 	if err != nil {
-		return false, fmt.Errorf("audit: verify archive %s: %w", path, err)
+		return "", fmt.Errorf("audit: verify archive %s: %w", path, err)
 	}
-	return res.OK, nil
+	if !res.OK {
+		return "corrupt chain: " + res.Reason, nil
+	}
+	if res.TornAppend {
+		return "unresolved torn-append / head-anchor mismatch; run `da review audit repair` before pruning", nil
+	}
+	return "", nil
 }
 
 // removeArchive deletes an archive file and its head-anchor sidecar (an absent
