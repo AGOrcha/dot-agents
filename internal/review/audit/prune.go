@@ -63,6 +63,7 @@ func (l *Log) PruneArchivesBefore(year int) ([]string, error) {
 	}
 	removed := []string{}
 	var skipped []string
+	var cruftErrs []error
 	for _, ref := range refs {
 		if ref.year >= year {
 			continue
@@ -76,12 +77,25 @@ func (l *Log) PruneArchivesBefore(year int) ([]string, error) {
 			continue
 		}
 		if err := removeArchive(ref.path); err != nil {
+			if errors.Is(err, errTombstoneCruft) {
+				// The archive is fully pruned (both-or-neither holds); only an
+				// inert ".pruning" tombstone could not be unlinked. Count it and
+				// record the note, then keep pruning the remaining archives.
+				removed = append(removed, ref.path)
+				cruftErrs = append(cruftErrs, err)
+				continue
+			}
 			return removed, err
 		}
 		removed = append(removed, ref.path)
 	}
 	if len(skipped) > 0 {
 		return removed, fmt.Errorf("%w: %s", ErrUnprunableArchive, strings.Join(skipped, "; "))
+	}
+	if len(cruftErrs) > 0 {
+		// Each entry wraps errTombstoneCruft; the archives themselves were
+		// pruned (they are in removed). errors.Join keeps errors.Is matching.
+		return removed, errors.Join(cruftErrs...)
 	}
 	return removed, nil
 }
@@ -184,22 +198,87 @@ func archiveSkipReason(path string) (string, error) {
 	return "", nil
 }
 
-// removeArchive deletes an archive file and its head-anchor sidecar (an absent
-// sidecar is not an error). Removal routes through fsops per the FS-helpers guard.
+// pruningSuffix tombstones an archive or its head sidecar mid-prune. Renaming a
+// file to this suffix atomically moves it off its attestable path; a leftover
+// tombstone (from a benign post-commit unlink failure or a crash) is inert —
+// archiveRefFor ignores any name not ending in ".jsonl", and Verify never
+// consults a ".pruning" sidecar.
+const pruningSuffix = ".pruning"
+
+// errTombstoneCruft signals that an archive was fully pruned — both the archive
+// and its head sidecar left their attestable paths, so the both-or-neither
+// invariant holds — but an inert ".pruning" tombstone could not be unlinked
+// afterward. The prune of that archive is COMPLETE (it is still counted in
+// removed); the leftover is reported for visibility, never treated as a failure
+// that could corrupt attestation. Callers can match it with errors.Is.
+var errTombstoneCruft = errors.New("audit: archive pruned but tombstone cleanup left inert cruft")
+
+// removeArchive deletes an archive file and its head-anchor sidecar as one
+// BOTH-OR-NEITHER transaction. No partial failure may leave a valid archive
+// WITHOUT its head attestation (the round-3 hazard) or an orphaned/misreported
+// head with its archive gone (the round-2 hazard): neither delete order is safe
+// on its own, so the operation is made transactional rather than reordered. An
+// absent head sidecar is not an error — a torn-first archive may never have had
+// one.
 //
-// Delete order: the .head sidecar is removed FIRST, then the archive. This
-// ensures that a mid-failure (head removed but archive deletion fails) leaves
-// the archive file itself intact and recoverable — it can be re-pruned once the
-// underlying I/O problem is resolved. The reverse order (archive first) would
-// orphan the .head sidecar if head deletion subsequently failed, destroying
-// tamper evidence without any compensating recovery path.
+// Rename-based tombstones make the commit atomic (a rename is one observable
+// transition on a single filesystem):
+//
+//  1. Tombstone the head sidecar (if present), then the archive, by renaming
+//     each to "<path>.pruning". A tombstoned file has left its attestable path,
+//     so an observer sees neither the archive nor its head at their real paths.
+//  2. If EITHER tombstone rename fails, roll the already-tombstoned file BACK to
+//     its real path — restoring the untouched both-present state — and return
+//     the error. The caller never counts this archive. A rollback that itself
+//     fails is the one unavoidable inconsistent state; it is surfaced as a LOUD
+//     explicit error naming both paths, never silently.
+//  3. Once BOTH are tombstoned the transaction has COMMITTED (neither remains at
+//     an attestable path). Unlink both tombstones; an unlink failure here cannot
+//     corrupt attestation — the file is already off its real path — so it is
+//     reported as errTombstoneCruft while the prune of that archive is treated
+//     as done.
+//
+// All renames and unlinks route through fsops per the FS-helpers guard.
 func removeArchive(path string) error {
 	head := headPathFor(path)
-	if err := removeFunc(head); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("audit: remove archive head %s: %w", head, err)
+	headTomb := head + pruningSuffix
+	archiveTomb := path + pruningSuffix
+
+	// Step 1a: tombstone the head sidecar, tolerating an absent one.
+	headTombstoned := false
+	if err := renameArchiveFunc(head, headTomb); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("audit: tombstone archive head %s: %w", head, err)
+		}
+	} else {
+		headTombstoned = true
 	}
-	if err := removeFunc(path); err != nil {
-		return fmt.Errorf("audit: remove archive %s: %w", path, err)
+
+	// Step 1b: tombstone the archive. On failure, roll the head back so the
+	// caller observes the untouched both-present state.
+	if err := renameArchiveFunc(path, archiveTomb); err != nil {
+		if headTombstoned {
+			if rbErr := renameArchiveFunc(headTomb, head); rbErr != nil {
+				return fmt.Errorf(
+					"audit: CRITICAL: archive %s tombstone failed (%v) AND head rollback to %s failed (%w): the archive is present but its head anchor is stranded at %s — restore the head manually before trusting this archive",
+					path, err, head, rbErr, headTomb)
+			}
+		}
+		return fmt.Errorf("audit: tombstone archive %s: %w", path, err)
+	}
+
+	// Step 2: committed. Unlink both tombstones; any leftover is inert cruft.
+	var cruft []string
+	if headTombstoned {
+		if err := removeFunc(headTomb); err != nil {
+			cruft = append(cruft, fmt.Sprintf("%s (%v)", headTomb, err))
+		}
+	}
+	if err := removeFunc(archiveTomb); err != nil {
+		cruft = append(cruft, fmt.Sprintf("%s (%v)", archiveTomb, err))
+	}
+	if len(cruft) > 0 {
+		return fmt.Errorf("%w: %s", errTombstoneCruft, strings.Join(cruft, "; "))
 	}
 	return nil
 }

@@ -14,8 +14,10 @@ import (
 // them after the test, mirroring restoreSeams for the shared ones.
 func restorePruneSeams(t *testing.T) {
 	t.Helper()
-	origDir, origRemove := readDirFunc, removeFunc
-	t.Cleanup(func() { readDirFunc, removeFunc = origDir, origRemove })
+	origDir, origRemove, origRename := readDirFunc, removeFunc, renameArchiveFunc
+	t.Cleanup(func() {
+		readDirFunc, removeFunc, renameArchiveFunc = origDir, origRemove, origRename
+	})
 }
 
 // seedYearArchives appends one record per year through the real rotation path,
@@ -165,67 +167,207 @@ func TestPruneArchivesBeforeLockError(t *testing.T) {
 	}
 }
 
-func TestPruneArchivesBeforeRemoveArchiveError(t *testing.T) {
-	restoreSeams(t)
-	restorePruneSeams(t)
-	l := tempLog(t)
-	seedYearArchives(t, l, 2022, 2026)
-	orig := removeFunc
-	removeFunc = func(p string) error {
-		if strings.HasSuffix(p, ".2022.jsonl") {
-			return errors.New("rm boom")
+// assertBothPresentNoTombstones pins the both-present state: the archive and
+// its head are at their real paths and NEITHER ".pruning" tombstone remains.
+func assertBothPresentNoTombstones(t *testing.T, archivePath, headPath string) {
+	t.Helper()
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("archive must be present at its real path: %v", err)
+	}
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head must be present at its real path: %v", err)
+	}
+	for _, tomb := range []string{archivePath + pruningSuffix, headPath + pruningSuffix} {
+		if _, err := os.Stat(tomb); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("no tombstone must remain (%s): stat err=%v", tomb, err)
 		}
-		return orig(p)
-	}
-	removed, err := l.PruneArchivesBefore(2025)
-	if err == nil || !strings.Contains(err.Error(), "remove archive") {
-		t.Fatalf("want remove-archive error, got %v", err)
-	}
-	if len(removed) != 0 {
-		t.Fatalf("removed = %v, want none before the failure", removed)
 	}
 }
 
-func TestPruneArchivesBeforeRemoveHeadError(t *testing.T) {
-	restoreSeams(t)
-	restorePruneSeams(t)
-	l := tempLog(t)
-	seedYearArchives(t, l, 2022, 2026)
-	orig := removeFunc
-	removeFunc = func(p string) error {
-		if strings.HasSuffix(p, ".head") {
-			return errors.New("head boom")
-		}
-		return orig(p)
-	}
-	_, err := l.PruneArchivesBefore(2025)
-	if err == nil || !strings.Contains(err.Error(), "remove archive head") {
-		t.Fatalf("want remove-head error, got %v", err)
-	}
-}
-
-func TestPruneArchivesBeforeHeadRemovalENOENTIsOK(t *testing.T) {
+// TestRemoveArchiveHeadTombstoneFailureIsAtomic — scenario (b): the FIRST
+// transaction step (tombstone the head) fails. Nothing is moved or removed, the
+// error names the step, and removed stays empty (both-present preserved).
+func TestRemoveArchiveHeadTombstoneFailureIsAtomic(t *testing.T) {
 	restoreSeams(t)
 	restorePruneSeams(t)
 	l := tempLog(t)
 	seedYearArchives(t, l, 2022, 2026)
 	base := archiveBase(l.Path())
-	orig := removeFunc
-	// The archive keeps its head anchor so it verifies clean (prunable); simulate
-	// the head sidecar vanishing between verify and removal so removeArchive's
-	// ENOENT branch is exercised rather than treated as an error.
-	removeFunc = func(p string) error {
-		if strings.HasSuffix(p, ".head") {
+	archivePath := base + ".2022.jsonl"
+	headPath := archivePath + headSuffix
+
+	orig := renameArchiveFunc
+	renameArchiveFunc = func(oldp, newp string) error {
+		if strings.HasSuffix(oldp, ".2022.jsonl.head") {
+			return errors.New("head tombstone boom")
+		}
+		return orig(oldp, newp)
+	}
+	removed, err := l.PruneArchivesBefore(2025)
+	if err == nil || !strings.Contains(err.Error(), "tombstone archive head") {
+		t.Fatalf("want tombstone-archive-head error, got %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want none (first step failed)", removed)
+	}
+	assertBothPresentNoTombstones(t, archivePath, headPath)
+}
+
+// TestRemoveArchiveArchiveTombstoneFailureRollsBack — scenario (c): the head is
+// tombstoned, then the archive tombstone fails. The transaction rolls the head
+// BACK to both-present. This is the exact round-3 hazard (a valid archive left
+// without its head) and the round-2 hazard (an orphaned head) — neither may
+// occur: after rollback both files are at their real paths and removed is empty.
+func TestRemoveArchiveArchiveTombstoneFailureRollsBack(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	seedYearArchives(t, l, 2022, 2026)
+	base := archiveBase(l.Path())
+	archivePath := base + ".2022.jsonl"
+	headPath := archivePath + headSuffix
+
+	orig := renameArchiveFunc
+	renameArchiveFunc = func(oldp, newp string) error {
+		// Fail only the archive tombstone (old path ends in .jsonl, not
+		// .pruning); let the head tombstone AND the rollback rename through.
+		if strings.HasSuffix(oldp, ".2022.jsonl") {
+			return errors.New("archive tombstone boom")
+		}
+		return orig(oldp, newp)
+	}
+	removed, err := l.PruneArchivesBefore(2025)
+	if err == nil || !strings.Contains(err.Error(), "tombstone archive") {
+		t.Fatalf("want tombstone-archive error, got %v", err)
+	}
+	if strings.Contains(err.Error(), "CRITICAL") {
+		t.Fatalf("rollback should have succeeded (no CRITICAL): %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want none (rolled back)", removed)
+	}
+	// Rolled back to both-present: NO archive-without-head, NO orphan head.
+	assertBothPresentNoTombstones(t, archivePath, headPath)
+}
+
+// TestRemoveArchiveDoubleFailureIsLoud — scenario (d): the archive tombstone
+// fails AND the head rollback also fails. This is the one unavoidable
+// inconsistent state; it MUST be surfaced as a loud, explicit error naming both
+// paths — never silently — and removed must stay empty.
+func TestRemoveArchiveDoubleFailureIsLoud(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	seedYearArchives(t, l, 2022, 2026)
+	base := archiveBase(l.Path())
+	archivePath := base + ".2022.jsonl"
+	headPath := archivePath + headSuffix
+
+	orig := renameArchiveFunc
+	renameArchiveFunc = func(oldp, newp string) error {
+		if strings.HasSuffix(oldp, ".2022.jsonl") { // archive tombstone
+			return errors.New("archive tombstone boom")
+		}
+		if strings.HasSuffix(oldp, ".2022.jsonl.head"+pruningSuffix) { // rollback
+			return errors.New("rollback boom")
+		}
+		return orig(oldp, newp)
+	}
+	removed, err := l.PruneArchivesBefore(2025)
+	if err == nil || !strings.Contains(err.Error(), "CRITICAL") {
+		t.Fatalf("want loud CRITICAL double-failure error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), archivePath) || !strings.Contains(err.Error(), headPath) {
+		t.Fatalf("double-failure error must name both the archive and head paths: %v", err)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want none on double failure", removed)
+	}
+	// Acknowledged inconsistent-but-LOUD state: the head is stranded at its
+	// tombstone path and the archive remains — surfaced explicitly above.
+	if _, statErr := os.Stat(headPath + pruningSuffix); statErr != nil {
+		t.Fatalf("head should be stranded at the tombstone path: %v", statErr)
+	}
+	if _, statErr := os.Stat(archivePath); statErr != nil {
+		t.Fatalf("archive should still be present: %v", statErr)
+	}
+}
+
+// TestRemoveArchiveVanishedHeadIsToleratedNotFatal exercises the ENOENT branch:
+// if the head sidecar vanishes (a race or crash) after verify judged the
+// archive prunable but before the transaction tombstones it, the missing head
+// is tolerated and the archive is still pruned.
+func TestRemoveArchiveVanishedHeadIsToleratedNotFatal(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	seedYearArchives(t, l, 2022, 2026)
+	base := archiveBase(l.Path())
+	archivePath := base + ".2022.jsonl"
+
+	orig := renameArchiveFunc
+	renameArchiveFunc = func(oldp, newp string) error {
+		if strings.HasSuffix(oldp, ".2022.jsonl.head") {
 			return os.ErrNotExist
 		}
-		return orig(p)
+		return orig(oldp, newp)
 	}
 	removed, err := l.PruneArchivesBefore(2025)
 	if err != nil {
-		t.Fatalf("prune with vanished head sidecar: %v", err)
+		t.Fatalf("vanished head must be tolerated, got %v", err)
 	}
-	if len(removed) != 1 || removed[0] != base+".2022.jsonl" {
+	if len(removed) != 1 || removed[0] != archivePath {
 		t.Fatalf("removed = %v, want the 2022 archive", removed)
+	}
+	if _, statErr := os.Stat(archivePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("archive should be pruned: stat err=%v", statErr)
+	}
+}
+
+// TestRemoveArchiveCommitThenTombstoneCruftIsReportedNotFatal — post-commit
+// path: both tombstone renames succeed (transaction COMMITTED — neither file
+// remains at its attestable path), but unlinking a ".pruning" tombstone fails.
+// That is inert cruft: the archive is still counted in removed and the error
+// wraps errTombstoneCruft, never a corruption.
+func TestRemoveArchiveCommitThenTombstoneCruftIsReportedNotFatal(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	seedYearArchives(t, l, 2022, 2026)
+	base := archiveBase(l.Path())
+	archivePath := base + ".2022.jsonl"
+	headPath := archivePath + headSuffix
+
+	origRemove := removeFunc
+	removeFunc = func(p string) error {
+		// Fail BOTH post-commit tombstone unlinks (head and archive) so both
+		// inert-cruft branches are exercised; the archive is already off its
+		// attestable path, so accounting must still count it.
+		if strings.HasSuffix(p, pruningSuffix) {
+			return errors.New("tombstone unlink boom")
+		}
+		return origRemove(p)
+	}
+	removed, err := l.PruneArchivesBefore(2025)
+	if err == nil || !errors.Is(err, errTombstoneCruft) {
+		t.Fatalf("want errTombstoneCruft, got %v", err)
+	}
+	// Accurate accounting: the archive WAS pruned, so it is still counted.
+	if len(removed) != 1 || removed[0] != archivePath {
+		t.Fatalf("removed = %v, want the 2022 archive counted despite cruft", removed)
+	}
+	// Both-or-neither: neither the archive nor its head remains at its real path.
+	if _, statErr := os.Stat(archivePath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("archive must be gone from its attestable path: %v", statErr)
+	}
+	if _, statErr := os.Stat(headPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("head must be gone from its attestable path: %v", statErr)
+	}
+	// Both inert tombstones remain (the reported cruft) — no attestation harm.
+	for _, tomb := range []string{archivePath + pruningSuffix, headPath + pruningSuffix} {
+		if _, statErr := os.Stat(tomb); statErr != nil {
+			t.Fatalf("tombstone should remain as inert cruft (%s): %v", tomb, statErr)
+		}
 	}
 }
 
@@ -330,12 +472,16 @@ func TestPruneArchivesBeforeDecoyBackupSiblingNotPruned(t *testing.T) {
 	}
 }
 
-// TestPruneArchivesBeforeHeadFirstNoOrphan pins Bug 2: removeArchive must
-// delete the .head sidecar BEFORE the archive file. If head removal fails, the
-// archive must be left intact (no orphaned sidecar, no false "compacted"
-// report). Before the fix, the archive was deleted first; a subsequent head
-// deletion failure left an orphan .head with no archive alongside it.
-func TestPruneArchivesBeforeHeadFirstNoOrphan(t *testing.T) {
+// TestPruneArchivesBeforeMidFailureLeavesNoPartialState pins BOTH bounced
+// delete-ordering hazards at once, now that removeArchive is transactional
+// rather than order-dependent: a mid-transaction failure must leave NEITHER
+//   - round-2: an orphaned .head with its archive already gone (misreported), NOR
+//   - round-3: a valid archive left WITHOUT its .head attestation anchor.
+//
+// The archive tombstone fails after the head was tombstoned; the transaction
+// rolls back to both-present. removed is empty (accurate) and both files are
+// intact at their real paths (neither hazard occurred).
+func TestPruneArchivesBeforeMidFailureLeavesNoPartialState(t *testing.T) {
 	restoreSeams(t)
 	restorePruneSeams(t)
 	l := tempLog(t)
@@ -352,34 +498,29 @@ func TestPruneArchivesBeforeHeadFirstNoOrphan(t *testing.T) {
 		t.Fatalf("head precondition: %v", err)
 	}
 
-	boom := errors.New("head boom")
-	orig := removeFunc
-	removeFunc = func(p string) error {
-		if strings.HasSuffix(p, ".head") {
-			return boom
+	orig := renameArchiveFunc
+	renameArchiveFunc = func(oldp, newp string) error {
+		// Fail the archive tombstone; the head tombstone and the rollback both
+		// go through, so the transaction rewinds to both-present.
+		if strings.HasSuffix(oldp, ".2022.jsonl") {
+			return errors.New("archive tombstone boom")
 		}
-		return orig(p)
+		return orig(oldp, newp)
 	}
 
 	removed, err := l.PruneArchivesBefore(2025)
 
-	// (a) Accurate removed count: nothing was fully compacted.
+	// Accurate removed count: nothing was fully compacted.
 	if len(removed) != 0 {
-		t.Fatalf("removed = %v, want 0 when head removal fails (archive must not be reported as compacted)", removed)
+		t.Fatalf("removed = %v, want 0 when the transaction rolls back", removed)
 	}
-	if err == nil || !strings.Contains(err.Error(), "remove archive head") {
-		t.Fatalf("expected remove-archive-head error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "tombstone archive") {
+		t.Fatalf("expected tombstone-archive error, got %v", err)
 	}
 
-	// (b) No orphan sidecar and no false success: both files must be intact
-	// because head-first delete order means the archive is never touched when
-	// head removal fails.
-	if _, statErr := os.Stat(archivePath); statErr != nil {
-		t.Fatalf("archive must remain intact after head-removal failure (delete-order bug would have removed it): %v", statErr)
-	}
-	if _, statErr := os.Stat(headPath); statErr != nil {
-		t.Fatalf(".head sidecar must not be orphaned (deletion failed, archive still present): %v", statErr)
-	}
+	// No round-3 archive-without-head and no round-2 orphan: both intact, no
+	// tombstone leftovers.
+	assertBothPresentNoTombstones(t, archivePath, headPath)
 }
 
 func TestPruneArchivesBeforeSkipsNonArchiveSiblings(t *testing.T) {
