@@ -1,0 +1,11 @@
+schema_version: 1
+id: verifier-precondition-policy
+title: Configurable verifier precondition policy (lpf-e rework)
+status: archived
+summary: 'Rework lpf-e''s hardcoded verifierPreconditions struct into a configurable precondition policy: predicates over the unified event contract, named in a top-level precondition_policies registry, referenced by stage profiles, resolved from the lockfile. Implements the layered-pr-fanout spec 2.3/6.1 amendment + unified-event-contract D2/D3 + stage-profile config. Slice A (evaluator) then Slice B (config/lockfile).'
+created_at: "2026-06-22T15:58:02Z"
+updated_at: "2026-06-29T02:03:44Z"
+owner: dot-agents
+success_criteria: verifierTransition evaluates a resolved PreconditionPolicy (predicates over the event registry) with no hardcoded PROpen/SonarOK fields; precondition_policies is a top-level named registry referenced by stage profiles; policy resolved from the lockfile by app_type; built-in default reproduces the historical PR/go-cli gate; config verify rejects undefined policy refs and unregistered signal kinds; go test ./commands/workflow/... ./internal/config/... green.
+verification_strategy: Focused go test on commands/workflow (evaluator + transitions) and internal/config (registry round-trip + schema + lockfile resolution + validation); table-driven predicate tests (each built-in satisfied/unsatisfied with reason); fail-closed tests (unregistered kind, undefined policy ref, empty policy falls back to default); end-to-end resolution app_type -> stage profile -> named policy from a synthetic lock.
+current_focus_task: ""

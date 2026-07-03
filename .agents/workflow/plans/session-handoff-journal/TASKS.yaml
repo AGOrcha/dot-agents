@@ -1,0 +1,271 @@
+schema_version: 1
+plan_id: session-handoff-journal
+tasks:
+    - id: p0-extract-interprocess-lock
+      title: Export reusable interprocess file-lock primitive from agentslock
+      status: completed
+      depends_on:
+        - config-v2-migration/p4h-agentslock-interprocess-lock
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/agentslock/lockfile.go
+        - internal/agentslock/lockfile_test.go
+      verification_required: true
+      notes: |-
+        p4h shipped acquireFileLock (mkdir-as-lock with PID holder + stale-reclaim TTL) but it is
+        unexported and only used by the lockfile flush path. Promote it to an exported, reusable
+        primitive AcquireFileLock(path string) (release func(), err error) (keep the existing
+        unexported caller delegating to it) so the journal appender can take the same
+        interprocess-safe advisory lock the spec ties it to (Relationship-to-p4h; Done criterion 4).
+        Do not change lock semantics — only widen visibility and add a focused exported-API test
+        plus a parallel-acquire contention test. Cross-plan dep config-v2-migration/p4h is already
+        completed, so this task is immediately eligible.
+    - id: p1-journal-core
+      title: 'Journal core: envelope, repo identity, atomic interprocess-safe NDJSON appender'
+      status: completed
+      depends_on:
+        - p0-extract-interprocess-lock
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/journal/journal.go
+        - internal/journal/envelope.go
+        - internal/journal/identity.go
+        - internal/journal/append.go
+        - internal/journal/journal_test.go
+      verification_required: true
+      notes: |-
+        New package internal/journal. journal.go owns the package doc and path resolution: the log
+        lives off the git-tracked tree under config.AgentsStateDir()/journal/<repo-fingerprint>/
+        (D9), with events.log (NDJSON, one Envelope per line), snapshot.json, and reasoned.log.
+        envelope.go defines the common envelope from the spec (ts RFC3339-UTC-ns, monotonic seq,
+        actor main|loop-worker|orchestrator, command, cwd_repo, event_type
+        durable_delta|input_only|failed, input json.RawMessage, observed json.RawMessage) plus
+        EventType constants. identity.go computes the D8 composite key
+        {repo-fingerprint, remote-url, default-branch, current-branch, HEAD, worktree-path, PR#}
+        and the repo-fingerprint used for the per-repo subdir. append.go exposes
+        Emit(ctx, entry) error: line append via O_APPEND single write held under
+        agentslock.AcquireFileLock (p0), seq assigned monotonically, success-only (a failed command
+        records a failed event, never a false observed) per R1. Full snapshot writes use
+        fsops.WriteFileAtomic (temp-then-rename, D9). Tests cover envelope round-trip, monotonic
+        seq, and a concurrent multi-goroutine Emit asserting no interleaved/torn lines.
+    - id: p2-command-schemas
+      title: Per-command typed Input/Observed schemas + command registry (Tier-1/2, KG, review)
+      status: completed
+      depends_on:
+        - p1-journal-core
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/journal/schema.go
+        - internal/journal/schema_test.go
+      verification_required: true
+      notes: |-
+        Encode the spec's Command Surface as typed Go structs (D3): one Input and one Observed
+        struct per journaled command from the Representative per-command schemas block (advance,
+        start-task, close-task, task add, task update, plan create, plan archive, fanout,
+        merge-back, fold-back create, delegation closeout, verify record, checkpoint, commit,
+        archive-orphans, sweep --apply, review approve/reject, kg ingest, kg build/update,
+        kg sync). A registry maps canonical command name to its tier (Tier-1 unconditional,
+        Tier-2 changed_fields-only, KG, review) so Emit selects durable_delta vs input_only and
+        Tier-2 records observed:{changed_fields} only (R6). R8: tracked-item shapes carry their
+        locus — canonical:{ref:master@sha} vs in_open_pr:{pr,status} — so recovery never conflates
+        in-PR work with done-on-master or fresh-eligible. Table-driven tests assert every
+        journaled command resolves to a tier + schema and that excluded commands (config,
+        hook-sentinel/outcome, score) resolve to none.
+    - id: p3a-emit-workflow-commands
+      title: Wire journal.Emit into workflow Tier-1 + Tier-2 state-mutating commands
+      status: completed
+      depends_on:
+        - p1-journal-core
+        - p2-command-schemas
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/state.go
+        - commands/workflow/start_task.go
+        - commands/workflow/close_task.go
+        - commands/workflow/commit_cmd.go
+        - commands/workflow/delegation.go
+        - commands/workflow/plan_task.go
+        - commands/workflow/archive_orphans.go
+        - commands/workflow/drift.go
+        - commands/workflow/contract.go
+        - commands/workflow/prefs.go
+        - commands/workflow/journal_emit_test.go
+      verification_required: true
+      notes: |-
+        The write side (R9, R1). At the end of each command's successful RunE, build the typed
+        Input/Observed (p2) and call journal.Emit. Tier-1 unconditional: advance, start-task,
+        close-task, plan create, plan archive, merge-back, delegation closeout, fanout,
+        fold-back create/update, verify record, checkpoint, commit, archive-orphans, sweep --apply.
+        Tier-2 delta-only: task add, task update, plan update, prefs set-local/set-shared. Capture
+        observed from the result already computed in-runner (to_status, created ids, resulting
+        head_sha, files) so no extra reasoning or queries are added. A failed command appends a
+        failed event or nothing (never a false observed). Tests assert representative commands emit
+        exactly one typed event with the expected tier/observed, and that latency is negligible
+        (dirty-check no-op guard, Done criterion 5).
+    - id: p3b-emit-kg-review-commands
+      title: Wire journal.Emit into KG and review state-mutating commands
+      status: completed
+      depends_on:
+        - p1-journal-core
+        - p2-command-schemas
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/io.go
+        - commands/kg/sync_code_warm_link.go
+        - commands/kg/query_lint_maintain.go
+        - commands/kg/bridge.go
+        - commands/kg/kg_journal_test.go
+        - commands/review.go
+        - commands/review_journal_test.go
+      verification_required: true
+      notes: |-
+        KG scope (D4): content deltas kg ingest, kg link add/remove, kg maintain
+        reweave|mark-stale|compact, kg warm record counts + ids (not bodies); decision events
+        kg build, kg update, kg postprocess record rebuilt-at-base + outcome (not node/edge dumps);
+        kg sync journals fully (moves a git remote, not snapshot-recoverable); skip kg setup after
+        first run. review approve/reject records {decision, applied, archived_path,
+        refresh_triggered}. Parallel with p3a (disjoint write_scope, separate packages); both depend
+        only on the journal lib. Tests assert ids/counts-not-bodies framing and that read-only KG
+        commands emit nothing.
+    - id: p4-deterministic-snapshot
+      title: Deterministic live-state snapshot capture (queryable set, canonical-vs-in-PR locus)
+      status: completed
+      depends_on:
+        - p1-journal-core
+        - p2-command-schemas
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/journal/snapshot.go
+        - internal/journal/snapshot_test.go
+      verification_required: true
+      notes: |-
+        D5: capture the queryable live-state set without agent reasoning — task<->PR<->merge
+        mapping, branch + remote-identity + HEAD + open-PRs, worktree/worker inventory, active env
+        gotchas — timestamped (last_deterministic_write) and written atomically to snapshot.json
+        (D9). R8: each tracked item carries its locus (canonical:{master@sha} vs in_open_pr:{pr,
+        status}). Sources are pluggable behind a small interface so the recovery view (p5) can re-run
+        them as re-verify probes; default probes prefer store/service-backed queries (gh/remote)
+        that survive a locked or missing working tree (R7), with local git/da as fallback. Tests use
+        a fake probe to assert the snapshot shape, the canonical-vs-in-PR locus split, and the
+        timestamp.
+    - id: p5-verified-recovery-view
+      title: 'Replay + verified recovery view: re-verify, trust gradient, identity quarantine'
+      status: completed
+      depends_on:
+        - p1-journal-core
+        - p2-command-schemas
+        - p4-deterministic-snapshot
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/journal/recover.go
+        - internal/journal/recover_test.go
+      verification_required: true
+      notes: |-
+        The read side (D7/D8/D10). Replay recent events + load the snapshot + reasoned deltas, then
+        for each item run its cheap re-verify probe (R7: prefer gh/remote/store-backed, fall back to
+        local git/da) and tag each fact verified|changed|missing with an explicit delta string
+        (e.g. "snapshot said PR#12 open; GitHub says merged"). Never emit a raw stale claim
+        (Done criterion 2). D8: key candidates by composite identity, quarantine identity mismatches,
+        and when several remain choose newest-verified and surface older ones only as stale
+        references (Done criterion 3). D10: derive the trust label from last_reasoned_write recency
+        relative to the snapshot timestamp (fresh->trust / stale->hypothesis / orphaned->quarantine).
+        Output a structured RecoveryView consumed by the command (p6). Tests cover the trust
+        gradient, a changed-since-snapshot delta, and a wrong-identity bundle being quarantined.
+    - id: p6-journal-command-surface
+      title: 'da workflow journal command: append (reasoned), snapshot, recover, show, prune'
+      status: completed
+      depends_on:
+        - p1-journal-core
+        - p2-command-schemas
+        - p4-deterministic-snapshot
+        - p5-verified-recovery-view
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/journal.go
+        - commands/workflow/journal_test.go
+        - commands/workflow/cmd.go
+        - docs/WORKFLOW_CLIENT_COMMANDS.md
+      verification_required: true
+      notes: |-
+        Subcommands wiring the libs. journal append writes a reasoned-overlay delta (R3, append-only
+        to reasoned.log, with the D6 dirty-check no-op guard and hard ceiling). journal snapshot
+        captures + writes the deterministic snapshot (p4) — invoked by the PreCompact hook (p7).
+        journal recover --json emits the verified RecoveryView (p5) consumed by agent-start (p8).
+        journal show replays raw events for debugging. journal prune applies stale/quarantine
+        hygiene (D10). Document the surface in WORKFLOW_CLIENT_COMMANDS.md. Tests cover each
+        subcommand's JSON output and the no-op guard on append.
+    - id: p7-precompact-recovery-hooks
+      title: PreCompact snapshot hook + SessionStart(compact) recovery re-inject scaffolding
+      status: completed
+      depends_on:
+        - p6-journal-command-surface
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/hooks
+        - internal/platform/hooks.go
+        - internal/platform/hooks_test.go
+        - docs/HOOKS.md
+      verification_required: true
+      notes: |-
+        R2: a PreCompact hook runs da workflow journal snapshot (deterministic, no reasoning) so the
+        live-state file survives compaction; a SessionStart(matcher:compact) hook runs
+        da workflow journal recover and re-injects the verified view. Both run da alongside the
+        agent's da on shared state, which is why the appender takes the p4h interprocess lock (p0).
+        Add the hook specs to the starter scaffold and render them per platform (the When values and
+        compact matcher already exist from loop-discipline-stop-hooks); document in HOOKS.md. Verify
+        with the platform hook render tests and a scaffold-copy assertion.
+    - id: p8-agent-handoff-cadence-readback
+      title: 'agent-handoff skill: D6 cadence rules + reasoned overlay + verified-recovery readback'
+      status: completed
+      depends_on:
+        - p6-journal-command-surface
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/agent-handoff/SKILL.md
+        - .agents/skills/agent-handoff/instructions
+        - internal/scaffold/home/starter/skills/global/agent-handoff/SKILL.md
+      verification_required: true
+      notes: |-
+        agent-handoff becomes the home for the cadence rules and the read logic (spec
+        Relationship-to-other-artifacts). Encode the D6 adaptive cadence: risky-op preemptor,
+        context-pressure, post-decision/instruction/PR-open/task-advance (folded into advance and
+        iteration-close defaults), boundary backstop (work-OR-time ~5-8 calls or ~10 min) with the
+        hard ceiling and dirty-check guard. Wire the reasoned overlay to da workflow journal append
+        and the readback (agent-start/orient) to da workflow journal recover, presenting only
+        verified/changed/missing facts (Done criterion 1, 2). Promote the updated skill to the
+        starter copy. Verify by scaffold-copy parity and a skill-content lint that the readback
+        references the recover command, not raw file reads.
+    - id: p9-e2e-integration-test
+      title: End-to-end shell integration test across the five Done criteria
+      status: completed
+      depends_on:
+        - p3a-emit-workflow-commands
+        - p3b-emit-kg-review-commands
+        - p6-journal-command-surface
+        - p7-precompact-recovery-hooks
+        - p8-agent-handoff-cadence-readback
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - tests/test-session-handoff-journal.sh
+      verification_required: true
+      notes: |-
+        One shell smoke that proves the spec Done criteria against a sandbox repo: (1) run a
+        sequence of state-mutating da commands, snapshot, then assert recover returns the state with
+        no extra git/gh/da-status calls needed; (2) simulate a forced-kill (no Stop/SessionEnd) and
+        assert recover runs re-verify and labels verified/changed/missing; (3) seed a wrong-identity
+        bundle and assert it is quarantined not resumed; (4) assert config commands (da refresh)
+        append nothing while workflow/KG/review commands each append one typed event; (5) assert
+        append is a single bounded write under the lock with negligible latency. This is the
+        cross-task closeout verification for the plan.

@@ -1,0 +1,64 @@
+schema_version: 1
+plan_id: config-architecture-impl
+tasks:
+    - id: l1-unified-profiles
+      title: 'L1: unified-config-profiles (selector-merge through §15)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/profile*.go
+      verification_required: true
+      notes: 'PR #195, in cross-brain re-review'
+    - id: l1-followups
+      title: 'L1 follow-ups: R2 lock-file profile units, R7/R8 projection+drift, authored profiles key'
+      status: completed
+      depends_on:
+        - l1-unified-profiles
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: l2-manifest
+      title: 'L2: distributable-config-manifest (kind:manifest, init --from)'
+      status: completed
+      depends_on:
+        - l1-unified-profiles
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: l3-homeconfig-p0
+      title: 'L3: home-config phase-0 (machine-local split, identity registry kind:project-set)'
+      status: completed
+      depends_on:
+        - l1-unified-profiles
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: l3-homeconfig-p1
+      title: 'L3: home-config phase-1 (init --from) — BOUNDARY #2 cross-machine dogfood'
+      status: completed
+      depends_on:
+        - l3-homeconfig-p0
+        - l2-manifest
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""
+    - id: l4-multiharness
+      title: 'L4: multi-harness (F4 hand-add-one-harness probe, then descriptor schema)'
+      status: pending
+      depends_on:
+        - l1-unified-profiles
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: ""

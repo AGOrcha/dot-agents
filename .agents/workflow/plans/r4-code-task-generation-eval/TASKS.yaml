@@ -233,7 +233,7 @@ tasks:
       app_type: go-cli
     - id: agent-runner
       title: AgentRunner interface + claude / codex bindings
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
       blocks:

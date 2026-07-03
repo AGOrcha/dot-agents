@@ -1,0 +1,117 @@
+schema_version: 1
+plan_id: r1-outcome-scoring
+slices:
+  # ── signals task — telemetry → rubric typed inputs ──────────────────────
+  # Dependency shape: reader is the foundation; the three extractors fan out
+  # from it in parallel; assemble is the capstone that joins them.
+
+  - id: signals-reader
+    parent_task_id: signals
+    title: "Dual-schema iteration-log reader"
+    summary: |-
+      Parse the salvaged iteration log into one normalized IterationRecord
+      covering both schema versions: v1 flat (39 entries — top-level
+      tests/scope/self_assessment) and v2 nested (26 entries —
+      impl/verifiers[]/review blocks). Repair the corrupt historical.yaml
+      (bad indentation makes it unparseable today) so its archived entries
+      load too. Commit a curated testdata/ fixture set: a v1 sample, a v2
+      sample, and the edge cases — free-text scope_note, abbreviated commit
+      SHA, empty verifiers.
+    status: completed
+    depends_on: []
+    write_scope:
+      - internal/scoring/iterlog.go
+      - internal/scoring/iterlog_test.go
+      - internal/scoring/testdata
+      - .agents/active/iteration-log/historical.yaml
+    verification_focus: |-
+      Parses all 65 iter-N.yaml plus historical.yaml with zero errors;
+      table tests assert v1 and v2 entries normalize to the same struct.
+    owner: dot-agents
+
+  - id: signals-iterlog
+    parent_task_id: signals
+    title: "Iteration-log-native signal extraction"
+    summary: |-
+      From the normalized record, extract every signal sourced from the
+      iteration log itself: the self-reported scope_note, the test
+      pass-flags (v1 tests_total_pass + v2 focused_tests_pass), the v2
+      verifiers[] records, retries, and the verifier-objective read from the
+      referenced verification artifacts (result_artifact / decision_artifact
+      → review-decision.yaml). Produces a typed IterlogSignals partial.
+    status: completed
+    depends_on:
+      - signals-reader
+    write_scope:
+      - internal/scoring/signal_iterlog.go
+      - internal/scoring/signal_iterlog_test.go
+    verification_focus: |-
+      Self-reported and artifact-derived sub-scores extracted for the
+      testdata fixtures; absent-signal cases return the absent state.
+    owner: dot-agents
+
+  - id: signals-git
+    parent_task_id: signals
+    title: "Git-topology objective extractors"
+    summary: |-
+      The objective half of the two-way signals. landed: is the iteration's
+      commit reachable from master and not reverted — patch-id / commit-
+      message fallback for rebased or abbreviated SHAs. scope: the changed
+      file set (git diff) checked against the task's declared write_scope,
+      the same comparison da workflow plan check-scope performs. Produces a
+      typed GitSignals partial.
+    status: completed
+    depends_on:
+      - signals-reader
+    write_scope:
+      - internal/scoring/signal_git.go
+      - internal/scoring/signal_git_test.go
+    verification_focus: |-
+      landed resolves on a fixture repo for reachable, reverted, and
+      orphaned commits; scope computes the in-scope fraction correctly.
+    owner: dot-agents
+
+  - id: signals-backfill
+    parent_task_id: signals
+    title: "Transcript token & error backfill"
+    summary: |-
+      Reconstruct telemetry the iteration log never captured. For each
+      iteration, window the Claude (249) and Codex (204) session transcripts
+      by the commit timestamps of iteration N-1 and N, reusing
+      internal/platform/session.go's token scanners. Yields token_efficiency
+      (cache hit rate) and the tool-call is_error rate that feeds
+      correction_pressure. Produces a typed BackfillSignals partial.
+    status: completed
+    depends_on:
+      - signals-reader
+    write_scope:
+      - internal/scoring/signal_backfill.go
+      - internal/scoring/signal_backfill_test.go
+    verification_focus: |-
+      A known commit window yields non-zero token totals and a cache hit
+      rate in [0,1]; iterations outside transcript coverage report absent.
+    owner: dot-agents
+
+  - id: signals-assemble
+    parent_task_id: signals
+    title: "SignalSet assembly & integrity pairing"
+    summary: |-
+      The capstone. Combine the three extractor partials into the
+      per-iteration SignalSet — the rubric's typed inputs the scorer
+      consumes. Assemble correction_pressure from retries + user_corrections
+      + transcript error rate. For each two-way signal, pair the
+      self-reported (claimed) and objective (observed) sub-scores into an
+      integrity delta attributed to its role (impl / verifier / review).
+    status: completed
+    depends_on:
+      - signals-iterlog
+      - signals-git
+      - signals-backfill
+    write_scope:
+      - internal/scoring/signals.go
+      - internal/scoring/signals_test.go
+    verification_focus: |-
+      A full SignalSet assembled for every testdata fixture; integrity
+      deltas computed for the two-way signals; correction_pressure matches
+      its documented formula.
+    owner: dot-agents

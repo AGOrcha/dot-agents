@@ -1,0 +1,159 @@
+schema_version: 1
+plan_id: layered-pr-fanout
+tasks:
+    - id: lpf-a-status-enum
+      title: awaiting_review task status + sub-statuses + advance validator + max_parallel default
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/task_status.go
+        - commands/workflow/task_status_test.go
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: |-
+        Per spec layered-pr-fanout §2.1/§2.2/§3.1. Add the awaiting_review status with sub-statuses
+        awaiting_agent_review and awaiting_owner_review to the task-status vocabulary; make `da workflow advance
+        --status` accept them and reject invalid transitions per the §3.1 state machine. Dep-less root: the MVP
+        unblocker the other lpf tasks build on. Centralize status constants in a new task_status.go. NOTE: the
+        max_parallel_tasks AgentsRC field + schema (§2.9) is DEFERRED to a follow-on so this task does not touch
+        schemas/agentsrc.schema.json (owned by the open p5 PR #209); use the existing code default of 7 for now.
+      app_type: go-cli
+    - id: lpf-b-slot-dep-accounting
+      title: Slot accounting (§2.8) + eligibility dep-satisfaction for awaiting_owner_review
+      status: completed
+      depends_on:
+        - lpf-a-status-enum
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/cmd.go
+        - commands/workflow/eligible_accounting.go
+        - commands/workflow/eligible_accounting_test.go
+      verification_required: true
+      notes: |-
+        Per §2.8 + §3.4.6/§4. Slot accounting table: in_progress + awaiting_agent_review COUNT against
+        max_parallel_tasks; awaiting_owner_review + blocked-on FREE the slot. Eligibility/dep-satisfaction: an
+        upstream in {completed, awaiting_owner_review} satisfies a downstream dep; in_progress does NOT. This is the
+        change that lets open-PR tasks free slots and unblock their dependents (e.g. config-v2 coherence fold-tasks).
+        Track a separate `blocked` slot-ledger bucket so an all-blocked state is visible.
+      app_type: go-cli
+    - id: lpf-c-blocked-on-state
+      title: blocked-on:<ref> parameterized state + auto-resume predicates
+      status: completed
+      depends_on:
+        - lpf-a-status-enum
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/blocked_on.go
+        - commands/workflow/blocked_on_test.go
+      verification_required: true
+      notes: |-
+        Per §3.4. blocked-on:<ref> frees the slot (§3.4.3) and is tracked in the blocked bucket. Auto-resume predicate
+        evaluation (§3.4.5): task:<plan>/<task> (status completed), secret:<NAME> (gh secret list), decision:<id>
+        (da workflow resolve-decision), condition:<predicate> (pluggable evaluator). On predicate true -> in_progress
+        (default, --resume-as override). Eligibility decay annotation (blocker_stale_since, §3.4.4) after N days.
+      app_type: go-cli
+    - id: lpf-d-base-resolution
+      title: Layered base-resolution algorithm in fanout (§4)
+      status: completed
+      depends_on:
+        - lpf-a-status-enum
+        - lpf-pr-producer
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/delegation.go
+        - commands/workflow/base_resolution.go
+        - commands/workflow/base_resolution_test.go
+        - commands/workflow/cmd.go
+      verification_required: true
+      notes: |-
+        Per §4. da workflow fanout computes base_branch for a new bundle from the union of the task's depends_on PR
+        branches (lineage-aware) rather than always master — so a fold/downstream task branches off its dependency's
+        open PR. Add the §4.2 bundle schema fields (base_branch, lineage) and the optional §4.3 lineage-certificate.
+        This is what makes land-it-once fold-tasks branch off the right PR.
+        BLOCKED-ON-PRODUCER (#214 must not merge as-is): this task drove the PR-event design. Its current PR #214
+        resolves dep PR branches via a bespoke `ghPRLister` seam — that must be REPLACED with the internal/events
+        producer (consume event.pr.* / the pr_source engine from lpf-pr-producer) so base-resolution is platform-agnostic,
+        not gh-coupled. Rework folds onto the existing #214 branch (land-it-once); do NOT merge #214 until the
+        ghPRLister->producer swap lands. Spec: workflow/specs/pr-event-source/design.md.
+      app_type: go-cli
+    - id: lpf-e-transitions-poll
+      title: Verifier/lens/owner transition split + PR poll detector (§6, §3.2)
+      status: completed
+      depends_on:
+        - lpf-b-slot-dep-accounting
+        - lpf-pr-producer
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/transitions.go
+        - commands/workflow/transitions_test.go
+      verification_required: true
+      notes: |-
+        Per §6 + §3.2. Verifier owns in_progress->awaiting_agent_review (terminal-green + PR open + Sonar OK + 0 open
+        issues, §2.3); lens-gate owns awaiting_agent_review->awaiting_owner_review; owner-merge owns
+        awaiting_owner_review->completed. The PR poll detector CONSUMES event.pr.* (merged/closed/force_rebased/
+        review_requested_change) from the internal/events registry (lpf-pr-producer) — NO direct gh calls here — and
+        maps them to transitions: merged->completed, request-changes->in_progress, close->blocked cascade (§2.6),
+        force-rebase (SHA1 set diff §2.7)->rebase. Also wires the §3.4.5 auto-resume predicate evaluators.
+      app_type: go-cli
+    - id: lpf-event-foundation
+      title: 'Unified event contract core: envelope + kind registry + dispatch + producer engine'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/events/envelope.go
+        - internal/events/envelope_test.go
+        - internal/events/registry.go
+        - internal/events/registry_test.go
+        - internal/events/dispatch.go
+        - internal/events/dispatch_test.go
+        - internal/events/producer.go
+        - internal/events/producer_test.go
+        - internal/events/jsonpath.go
+        - internal/events/jsonpath_test.go
+      verification_required: true
+      notes: |-
+        Implements spec workflow/specs/unified-event-contract/design.md (D1-D5: envelope, registry, dispatch,
+        validation disposition, generic producer engine). Dep-less foundation. Deliver in a NEW internal/events
+        package: (1) common envelope {type, source, occurred_at, idempotency_key, payload}; (2) kind registry keyed by
+        name (schema-additive, NO enum — mirrors verifier_profiles) carrying a per-kind/namespace DISPOSITION
+        (reject|soft), default reject; (3) table-driven dispatch (no switch); (4) the generic exec/http PRODUCER engine
+        (run argv or http call, apply field map, diff vs last cycle, emit envelopes) — there must be NO per-platform
+        producer files; (5) a ~100-LINE built-in JSONPath SUBSET (.a.b, array index, one equality filter) — NO jq, NO
+        yq lib (a heavy expression evaluator must not be smuggled into a foundational contract). Validation:
+        control-plane kinds reject-on-unknown at EMIT time (fail-fast, loud); observational kinds may fail-soft. Graduates
+        into r3-background-worker-service (or sibling event-contract spec).
+      app_type: go-cli
+    - id: lpf-pr-producer
+      title: 'PR as first event: gh pr_source config + event.pr.* registrations + AuthRoundTripper seam'
+      status: completed
+      depends_on:
+        - lpf-event-foundation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/events/pr.go
+        - internal/events/pr_test.go
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: |-
+        Per .agents/proposals/pr-source-abstraction.md §2-§5. NO internal/prsource package — PR support is just
+        config + kind registrations + reactions on the lpf-event-foundation engine. Deliver: (1) the canonical PR
+        payload (PR/Rollup/Check/Comment) + the shared Rollup.State derive rule; (2) the event.pr.* kind registrations
+        (opened/ci_green/ci_failed/merged/closed/force_rebased/review_requested_change/comment_posted), all
+        CONTROL-PLANE disposition (reject-on-unknown); (3) the default `gh` pr_source config block (exec + field map)
+        interpreted by the generic engine; (4) the pr_source top-level .agentsrc.json field (per [[schema-usage]]
+        four-place AgentsRC rule + schema, additionalProperties open); (5) the AuthRoundTripper seam the producer
+        receives (proxy target localhost:<port>/proxy/<host>, with direct-load fallback consuming cred-store-loader).
+        A new platform = a pr_source config block, ZERO new Go. Map 1:1 to monitor-pr-review-comment §4 events.
+        Spec: workflow/specs/pr-event-source/design.md. Auth seam consumes external-agent-sources/cred-store-loader
+        (cross-plan) via the AuthRoundTripper, with direct-load fallback.
+      app_type: go-cli

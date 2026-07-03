@@ -1,0 +1,116 @@
+schema_version: 1
+plan_id: r1-outcome-scoring
+tasks:
+    - id: rubric
+      title: Define and version the scoring rubric
+      status: completed
+      depends_on: []
+      blocks:
+        - signals
+        - scorer
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: 'Specify the versioned scoring rubric: the input signals (token/cache telemetry, verifier results, merge-back status, scope adherence, test outcomes), their weights, and the combination formula. Ship it as a documented spec plus a versioned Go data structure, so changing the rubric is a deliberate, reviewable act.'
+      app_type: go-cli
+    - id: signals
+      title: Extract input signals from captured telemetry
+      status: completed
+      depends_on:
+        - rubric
+      blocks:
+        - scorer
+      owner: dot-agents
+      write_scope:
+        - internal/scoring
+      verification_required: true
+      notes: 'Map already-captured data into the rubric typed input signals: platform-session-integration token/cache telemetry, .ralph-loop-streams loop metrics, and the iteration log verifier / merge-back / scope-adherence / test-outcome fields. No new capture -- the inputs already exist.'
+      app_type: go-cli
+    - id: objective-checks
+      title: Drop dead self-reports, tri-state the rest, wire objective checks
+      status: completed
+      depends_on:
+        - signals
+      blocks:
+        - structured-claims
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/objective_checks.go
+        - internal/scoring/objective_checks_test.go
+        - internal/scoring/signal_iterlog.go
+        - internal/scoring/signals.go
+        - internal/scoring/signals_test.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+        - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log.go
+      verification_required: true
+      notes: Half of the self_assessment schema rework. DROP five dead/arbitrary fields — tdd_refresh_performed (0/22 true), stayed_under_10_files (arbitrary threshold; correction_pressure already captures overload symptoms), read_loop_state, committed_after_tests, ran_cli_command (~98% true — rubber-stamped). TRI-STATE the four keepers (one_item_only, aligned_with_canonical_tasks, no_destructive_commands, scoped_tests_to_write_scope) by removing them from "required" — absent = unmeasured, distinct from false. WIRE the objective checks (ranCliCommand, readLoopState, committedAfterTests) into the integrity track to replace the dropped trio; DROP filesUnder10 from objective_checks.go (the arbitrary-threshold problem). The structured- list expansions live in the sibling structured-claims task.
+      app_type: go-cli
+    - id: structured-claims
+      title: Expand boolean claims into named-artifact lists
+      status: completed
+      depends_on:
+        - objective-checks
+      blocks:
+        - scorer
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/static/workflow-iter-log.schema.json
+        - commands/workflow/iter_log.go
+        - internal/scoring/iterlog.go
+        - internal/scoring/iterlog_test.go
+        - internal/scoring/signal_iterlog.go
+        - internal/scoring/signal_iterlog_test.go
+        - internal/scoring/signals.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: 'Second half of the self_assessment schema rework. DROP two redundant booleans — exercised_new_scenario (already covered by scenario_tags) and tests_used_sandbox (universal Go practice, no signal). EXPAND two booleans into named-artifact lists so the claim becomes verifiable: tests_positive_and_negative → tests_added_by_kind: [{name, kind}] with kind in positive | negative | edge | regression, and linked_traces_to_outcomes → linked_traces: [{trace_ref, outcome_ref}]. The named items must be checkable against the diff / verification artifacts — a named test must exist, a named trace_ref must resolve. Backward-compatible reader; the 66 salvaged entries still parse.'
+      app_type: go-cli
+    - id: scorer
+      title: Compute the explainable outcome score
+      status: completed
+      depends_on:
+        - rubric
+        - signals
+        - objective-checks
+        - structured-claims
+      blocks:
+        - persist
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/scorer.go
+        - internal/scoring/scorer_test.go
+        - docs/OUTCOME_SCORING_RUBRIC.md
+      verification_required: true
+      notes: 'Pure scoring function: rubric plus extracted signals produce a numeric score per session and per iteration, with a per-signal breakdown showing which signals drove the score (explainable, not a black box). Unit-tested in isolation. In-flight: untracked scorer.go + scorer_test.go from a prior session — inspect before overwriting. Doc update only if rubric→score mapping needs codifying alongside the implementation.'
+      app_type: go-cli
+    - id: persist
+      title: Persist scores alongside telemetry
+      status: completed
+      depends_on:
+        - scorer
+      blocks:
+        - cli
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/persist.go
+        - internal/scoring/persist_test.go
+        - internal/scoring/linked_traces.go
+        - internal/scoring/linked_traces_test.go
+      verification_required: true
+      notes: 'Persist each score and its breakdown alongside the existing telemetry, and compute the iteration log currently-uncomputed linked_traces_to_outcomes marker. Sidecar layout: .agents/active/iteration-log/iter-N.score.yaml per iteration, session-<id>.score.yaml per session. Marker is derivable: len(verifier.linked_traces) > 0 per structured-claims schema.'
+      app_type: go-cli
+    - id: cli
+      title: CLI to query outcome scores
+      status: completed
+      depends_on:
+        - persist
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/score.go
+        - commands/score_test.go
+        - commands/root.go
+      verification_required: true
+      notes: 'Add a `da score` command tree: `da score run` scores every iteration in the active log dir and writes sidecars; `da score iteration <N>` renders a per-iter score from its sidecar; `da score session <id>` renders a per-session score. CLI smoke is a Go test that drives `da score run` against a fixture iter-log dir and asserts the breakdown lines render.'
+      app_type: go-cli

@@ -1,0 +1,35 @@
+schema_version: 1
+id: session-handoff-journal
+title: Session-Handoff Journal
+status: active
+summary: |-
+    Append-only, crash-survivable per-command event journal plus a PreCompact deterministic
+    live-state snapshot, a reasoned-delta overlay, and a verified recovery view for
+    cross-session state recovery. The journal is the episodic-KG seam (events/history/decisions).
+    Write side (R9) is the non-optional must-build piece; the read side mechanically re-verifies
+    before injecting any fact (D7), keys by composite repo identity (D8), and quarantines stale or
+    wrong-identity bundles. Config is excluded as snapshot/lock-redundant (D4). Implements
+    workflow/specs/session-handoff-journal/design.md (ratified 2026-06-22, openQ=0).
+created_at: "2026-06-29T02:09:37Z"
+updated_at: "2026-06-29T16:05:25Z"
+owner: dot-agents
+success_criteria: |-
+    Traces to the spec's five Done criteria: (1) a compact+resume session shows no git/gh/da-status
+    re-grounding burst for state already in the verified recovery view; (2) agent-start after a
+    forced-kill loads the journal, runs the per-item re-verify commands, and presents
+    verified/changed/missing facts plus the latest reasoned deltas, never a raw stale claim;
+    (3) a stale or wrong-identity crash-bundle is quarantined, not auto-resumed; (4) every
+    Tier-1/Tier-2/KG/review command appends one typed event while config appends nothing, and
+    partial-write plus concurrent-write are safe (atomic temp-then-rename for full writes, single
+    append under the p4h interprocess lock for line appends); (5) the journal write adds negligible
+    latency and tokens (dirty-check guard plus append-only deltas).
+verification_strategy: |-
+    Per-task Go unit tests live beside implementation (table-driven for envelope, schema registry,
+    identity keying, snapshot capture, and the recovery-view trust gradient). Concurrency tests
+    drive parallel appends through the extracted interprocess lock. A shell integration test
+    tests/test-session-handoff-journal.sh exercises the five Done criteria end to end:
+    compaction-resume with no re-grounding, forced-kill recovery via re-verify, stale-identity
+    quarantine, config-not-journaled, and append latency. Verify with focused packages first
+    (go test ./internal/journal/... ./internal/agentslock/... ./commands/...) then go test ./...
+    and ./scripts/verify.sh for CLI smoke.
+current_focus_task: ""

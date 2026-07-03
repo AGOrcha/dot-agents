@@ -1,0 +1,11 @@
+schema_version: 1
+id: config-architecture-impl
+title: Config-architecture implementation (substrate-first layer cascade)
+status: active
+summary: Implement the ratified 5-layer config architecture on the merged §15 substrate; each layer gated by cross-brain review + a built-in empirical gate
+created_at: "2026-06-28T02:49:44Z"
+updated_at: "2026-06-28T22:31:46Z"
+owner: dot-agents
+success_criteria: All layers (L1-L4) merged on master, each cross-brain-reviewed SOUND; L1 zero-diff migration proven; L3 cross-machine init --from works on a second machine; L4 F4 hand-add-one-harness probe passes
+verification_strategy: per-layer cross-brain (codex) review pre-merge + the layer's empirical gate (L1 zero-diff, L3 cross-machine dogfood, L4 F4 probe)
+current_focus_task: 'L4: multi-harness (F4 hand-add-one-harness probe, then descriptor schema)'

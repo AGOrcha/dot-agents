@@ -1,0 +1,91 @@
+schema_version: 1
+plan_id: workflow-commit-command
+tasks:
+    - id: wc-path-derivation
+      title: Deterministic workflow-state path-set derivation
+      status: completed
+      depends_on:
+        - pr10-branch-split/pr3b-workflow
+      blocks:
+        - wc-commit-subcommand
+        - wc-iteration-close
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/commit_pathset.go
+        - commands/workflow/commit_pathset_test.go
+        - commands/workflow/testdata/commit_pathset/
+      verification_required: true
+      notes: |-
+        Pure function: given git status + the workflow mutation surface,
+        return ONLY managed .agents/workflow/** + .agents/history/** +
+        session-touched state paths. Never `-A`. Mandatory exclusions:
+        submodule-pointer entries and pre-existing-untracked dirs. Same
+        mutation set => same path set (deterministic). Unit-tested against
+        a deliberately dirty worktree + a submodule pointer fixture.
+        Greenfield in commands/workflow/ (no existing git-staging surface
+        to integrate with). File naming follows sibling convention
+        (snake_case, one scope per file: bundle.go, iter_log.go, ...).
+    - id: wc-commit-subcommand
+      title: da workflow commit subcommand (+ --dry-run, idempotent)
+      status: completed
+      depends_on:
+        - wc-path-derivation
+      blocks:
+        - wc-iteration-close
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        Cobra subcommand wired in commands/workflow/cmd.go. Stages the
+        derived set, commits with a generated message (state updated via
+        da workflow; distinct from code commits). No-op + clear status
+        line when clean (idempotent — second run does nothing). --dry-run
+        prints the exact `git add` set + message, mutates nothing.
+        Headless-safe: raw `da`, no Claude Code hook dependency.
+    - id: wc-prefs-optout
+      title: Per-project opt-out via workflow prefs
+      status: completed
+      depends_on:
+        - wc-commit-subcommand
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        New workflow-prefs key; when set, da workflow commit and the
+        iteration-close hook short-circuit to a documented no-op (status
+        line states opt-out active). For repos managing state commits
+        elsewhere.
+    - id: wc-iteration-close
+      title: iteration-close atomic state-commit integration
+      status: completed
+      depends_on:
+        - wc-commit-subcommand
+        - wc-prefs-optout
+      blocks:
+        - wc-verify-close
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+      verification_required: true
+      notes: |-
+        The verify -> checkpoint -> advance/merge-back close path ends by
+        invoking the same staged commit so the iter-log entry and the
+        state commit are atomic (no canonical-store drift after close).
+        Honors the opt-out pref.
+    - id: wc-verify-close
+      title: Spec done-criteria verification + close
+      status: completed
+      depends_on:
+        - wc-iteration-close
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: |-
+        Prove every spec done criterion: dry-run path-set (dirty+submodule
+        fixture), plan/task/advance/checkpoint/archive sequence ->
+        clean, idempotent rerun, headless raw-da run, opt-out no-op,
+        coverage gate green per touched package. go build/test/gofmt.
