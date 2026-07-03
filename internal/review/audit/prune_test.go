@@ -48,6 +48,10 @@ func TestLeadingYear(t *testing.T) {
 		{"2024.tmp", 0, false},    // another non-integer suffix variant
 		{"notyear", 0, false},
 		{"", 0, false},
+		{"-2024", 0, false}, // signed year: 5 chars, rejected by length check
+		{"-024", 0, false},  // signed 4-char: '-' not a digit, rejected by char check
+		{"999", 0, false},   // fewer than 4 digits
+		{"10000", 0, false}, // more than 4 digits
 	}
 	for _, c := range cases {
 		y, ok := leadingYear(c.in)

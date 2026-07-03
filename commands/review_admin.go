@@ -581,11 +581,11 @@ type reviewAuditTailJSON struct {
 
 // reviewAuditVerifyJSON is the `audit verify` / `audit repair` success
 // envelope (failures stay human-first per the error-message contract).
+// TornAppend is not present in the success envelope: that state is now a
+// hard failure returned as an error, not a warning within a successful result.
 type reviewAuditVerifyJSON struct {
-	OK         bool   `json:"ok"`
-	Count      int    `json:"count"`
-	TornAppend bool   `json:"torn_append,omitempty"`
-	Reason     string `json:"reason,omitempty"`
+	OK    bool `json:"ok"`
+	Count int  `json:"count"`
 }
 
 // runReviewAuditTail implements `da review audit tail` (admin only).
@@ -629,6 +629,13 @@ func runReviewAuditTail(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOp
 // runReviewAuditVerify implements `da review audit verify`. It requires no
 // token: verification is read-only integrity attestation (spec R7) and a
 // candidate CI gate, where no reviewer token exists.
+//
+// TornAppend is treated as a hard failure (fail-closed): the state is
+// byte-for-byte indistinguishable from a single forged, correctly-chained
+// tail record appended out-of-band (see audit.VerifyResult). Returning
+// success with a warning would silently accept a potential forgery in a
+// security audit context. Operators must run `da review audit repair` only
+// after manually confirming the tail record is legitimate.
 func runReviewAuditVerify(out io.Writer, deps reviewAdminDeps, opts *reviewAdminOpts) error {
 	logPath := opts.resolveAuditPath()
 	res, err := deps.AuditVerify(logPath)
@@ -638,16 +645,13 @@ func runReviewAuditVerify(out io.Writer, deps reviewAdminDeps, opts *reviewAdmin
 	if !res.OK {
 		return reviewAuditBroken(logPath, res)
 	}
+	if res.TornAppend {
+		return reviewAuditTornAppend(logPath, res)
+	}
 	if Flags.JSON {
-		return emitReviewAdminJSON(out, reviewAuditVerifyJSON{
-			OK: true, Count: res.Count, TornAppend: res.TornAppend, Reason: res.Reason,
-		})
+		return emitReviewAdminJSON(out, reviewAuditVerifyJSON{OK: true, Count: res.Count})
 	}
 	fmt.Fprintf(out, "audit chain OK — %d record(s) in %s\n", res.Count, logPath)
-	if res.TornAppend {
-		fmt.Fprintf(out, "\nwarning: torn append — %s\n", res.Reason)
-		fmt.Fprintln(out, "Run `da review audit repair` after reviewing the tail record.")
-	}
 	return nil
 }
 
@@ -741,6 +745,22 @@ func reviewAuditBroken(logPath string, res audit.VerifyResult) error {
 	return ErrorWithHints(
 		fmt.Sprintf("audit chain integrity break at record %d: %s", res.BrokenAt, res.Reason),
 		"The log at "+logPath+" diverged from its hash chain; investigate before trusting labels or user changes.",
+	)
+}
+
+// reviewAuditTornAppend renders a torn-tail / possibly-forged state as a
+// non-zero-exit error (fail-closed). A TornAppend result is byte-for-byte
+// indistinguishable from a single forged, correctly-chained tail record
+// appended out-of-band, so verify cannot safely accept it as clean.
+// The error message names the forgery risk explicitly and directs the
+// operator to `da review audit repair` so the recovery path is clear.
+func reviewAuditTornAppend(logPath string, res audit.VerifyResult) error {
+	return ErrorWithHints(
+		fmt.Sprintf(
+			"integrity failure: torn or possibly-forged tail — %s — run `da review audit repair` only after manually confirming the tail record is legitimate",
+			res.Reason,
+		),
+		"The head anchor in "+logPath+" is one record behind the log. This is byte-for-byte indistinguishable from a single forged, correctly-chained tail append.",
 	)
 }
 

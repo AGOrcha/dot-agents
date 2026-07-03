@@ -926,7 +926,7 @@ func TestReviewAuditVerifyOK(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
 		t.Fatalf("parse verify JSON: %v", err)
 	}
-	if !payload.OK || payload.Count != 3 || payload.TornAppend {
+	if !payload.OK || payload.Count != 3 {
 		t.Fatalf("bad verify JSON: %+v", payload)
 	}
 }
@@ -954,17 +954,18 @@ func TestReviewAuditVerifyDetectsTamper(t *testing.T) {
 	mustErrContain(t, err, "integrity break at record 3", "record 2 was altered or removed")
 }
 
-func TestReviewAuditVerifyReportsTornAppend(t *testing.T) {
+// TestReviewAuditVerifyFailsOnTornAppend pins the fail-closed security
+// invariant: a torn-append state (head anchor one behind) is byte-for-byte
+// indistinguishable from a single forged tail record, so verify must return
+// a non-zero-exit error naming the forgery risk explicitly.
+func TestReviewAuditVerifyFailsOnTornAppend(t *testing.T) {
 	_, logPath := tempReviewPaths(t)
 	seedAuditLog(t, logPath, 1)
 	if err := os.Remove(logPath + ".head"); err != nil {
 		t.Fatalf("remove head anchor: %v", err)
 	}
-	out, err := execAuditCmd(t, stdReviewAdminDeps{}, "verify", "--audit-log", logPath)
-	if err != nil {
-		t.Fatalf("verify torn: %v", err)
-	}
-	mustContain(t, out, "audit chain OK", "torn append", "da review audit repair")
+	_, err := execAuditCmd(t, stdReviewAdminDeps{}, "verify", "--audit-log", logPath)
+	mustErrContain(t, err, "integrity failure", "torn or possibly-forged tail", "forged", "da review audit repair")
 }
 
 // TestReviewAuditVerifyDefaultLogPath pins the repo-relative default audit

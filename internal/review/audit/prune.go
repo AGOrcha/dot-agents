@@ -131,10 +131,11 @@ func archiveRefFor(e os.DirEntry, dir, activeName, stem string) (archiveRef, boo
 
 // leadingYear parses the year from an archive's variable segment, which is
 // "<year>" or "<year>.<n>" (a second same-year, size-triggered rotation). A
-// segment that is not a plain year integer, or whose dot-suffix is not a plain
-// non-negative integer (e.g. "2024.backup"), yields ok=false so the file is
-// left untouched. This tightens matching to ONLY the exact rotation-archive
-// formats the writer produces.
+// segment whose dot-suffix is not a plain non-negative integer (e.g.
+// "2024.backup"), or whose year portion is not exactly four decimal digits
+// (rejecting signed values like "-2024" and non-four-digit spans like "999"
+// or "10000"), yields ok=false so the file is left untouched. This tightens
+// matching to ONLY the exact rotation-archive formats the writer produces.
 func leadingYear(seg string) (int, bool) {
 	if i := strings.IndexByte(seg, '.'); i >= 0 {
 		// The suffix after the dot must be a plain non-negative integer
@@ -146,10 +147,18 @@ func leadingYear(seg string) (int, bool) {
 		}
 		seg = seg[:i]
 	}
-	year, err := strconv.Atoi(seg)
-	if err != nil {
+	// Accept ONLY a plain 4-decimal-digit segment (no sign prefix, no fewer
+	// or more digits). Signed inputs like "-024" and non-4-digit spans like
+	// "999" or "10000" are not valid rotation-archive years.
+	if len(seg) != 4 {
 		return 0, false
 	}
+	for _, c := range seg {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+	}
+	year, _ := strconv.Atoi(seg)
 	return year, true
 }
 

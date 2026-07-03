@@ -242,6 +242,13 @@ tasks:
         Audit log rotation is year-keyed (archive names encode year),
         so year-granular prune is the correct contract. The
         internal/review/audit/ prune implementation uses this flag.
+        RATIFIED 2026-07-02 (audit surface): the full `da review audit`
+        command set is tail | verify | repair | prune. `repair`
+        (RepairHead) advances the head anchor to the actual log tail
+        after an operator has manually confirmed a torn-append tail
+        record is legitimate. It is admin-only (mutates the head
+        sidecar) and intentionally separate from verify (which is
+        token-free) so that the CI gate cannot self-heal.
       app_type: go-cli
     - id: e2e-smoke
       title: End-to-end test — reviewer labels run, label feeds R1 on next recompute
