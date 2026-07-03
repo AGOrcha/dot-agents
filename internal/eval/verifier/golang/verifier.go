@@ -158,7 +158,7 @@ func (v *GoVerifier) runStep(
 // The returned cancel must always be called (the caller is responsible).
 func applyTimeout(ctx context.Context, sec int) (context.Context, context.CancelFunc) {
 	if sec <= 0 {
-		return ctx, func() {}
+		return ctx, func() { /* no deadline set: nothing to cancel */ }
 	}
 	return context.WithTimeout(ctx, time.Duration(sec)*time.Second)
 }
