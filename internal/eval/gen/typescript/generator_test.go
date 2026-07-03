@@ -1,4 +1,4 @@
-package gogen
+package tsgen
 
 import (
 	"context"
@@ -14,33 +14,33 @@ import (
 // ---- fake KG reader ------------------------------------------------------------
 
 // fakeReader is a minimal in-memory graphstore.CodeGraphReader seeded with one
-// easy Go symbol, enough to drive a full Generate through the shared engine and
-// assert the Go-specific spec output.
+// easy TypeScript symbol, enough to drive a full Generate through the shared
+// engine and assert the TypeScript-specific spec output.
 type fakeReader struct{}
 
-func (fakeReader) GetAllFiles() ([]string, error) { return []string{"pkg/foo/foo.go"}, nil }
+func (fakeReader) GetAllFiles() ([]string, error) { return []string{"src/foo/foo.ts"}, nil }
 func (fakeReader) GetNodesByFile(string) ([]graphstore.GraphNode, error) {
 	return []graphstore.GraphNode{{
 		Kind:          graphstore.NodeKindFunction,
-		Name:          "pkg/foo.Bar",
-		QualifiedName: "pkg/foo.Bar",
-		FilePath:      "pkg/foo/foo.go",
-		Language:      "go",
-		LineStart:     10,
-		LineEnd:       30,
+		Name:          "foo.bar",
+		QualifiedName: "foo.bar",
+		FilePath:      "src/foo/foo.ts",
+		Language:      "typescript",
+		LineStart:     1,
+		LineEnd:       20,
 	}}, nil
 }
 func (fakeReader) GetNode(qn string) (*graphstore.GraphNode, error) {
-	if qn != "pkg/foo.Bar" {
+	if qn != "foo.bar" {
 		return nil, nil
 	}
 	return &graphstore.GraphNode{
 		Kind:          graphstore.NodeKindFunction,
-		QualifiedName: "pkg/foo.Bar",
-		FilePath:      "pkg/foo/foo.go",
-		Language:      "go",
-		LineStart:     10,
-		LineEnd:       30,
+		QualifiedName: "foo.bar",
+		FilePath:      "src/foo/foo.ts",
+		Language:      "typescript",
+		LineStart:     1,
+		LineEnd:       20,
 	}, nil
 }
 func (fakeReader) GetEdgesBySource(string) ([]graphstore.GraphEdge, error) { return nil, nil }
@@ -80,61 +80,36 @@ func TestProfile_Registers(t *testing.T) {
 	if err := gencore.Register(r, mustQuerier(t), Profile); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	if _, ok := r.Lookup(eval.LanguageGo); !ok {
+	if _, ok := r.Lookup(eval.LanguageTypeScript); !ok {
 		t.Fatal("generator not found in registry after Register")
 	}
 }
 
-// ---- Go-specific spec output --------------------------------------------------
+// ---- TypeScript-specific spec output ------------------------------------------
 
-// TestGenerate_GoSpec drives the shared engine through the Go profile and pins
-// the Go-specific outputs: language, task-ID prefix, verification commands, and
-// the *_test.go add-test-coverage artifact.
-func TestGenerate_GoSpec(t *testing.T) {
+// TestGenerate_TsSpec drives the shared engine through the TypeScript profile
+// and pins the TS-specific outputs: language, task-ID prefix, and the
+// tsc/node verification commands.
+func TestGenerate_TsSpec(t *testing.T) {
 	g := newGen(t)
 	spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: gencore.TemplateImplPureFn})
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	if spec.Language != eval.LanguageGo {
-		t.Errorf("Language = %q, want %q", spec.Language, eval.LanguageGo)
+	if spec.Language != eval.LanguageTypeScript {
+		t.Errorf("Language = %q, want %q", spec.Language, eval.LanguageTypeScript)
 	}
-	if !strings.HasPrefix(spec.TaskID, "kg-go-impl-") {
-		t.Errorf("TaskID %q should start with kg-go-impl-", spec.TaskID)
+	if !strings.HasPrefix(spec.TaskID, "kg-ts-impl-") {
+		t.Errorf("TaskID %q should start with kg-ts-impl-", spec.TaskID)
 	}
-	if got := spec.Verification.BuildCmd; len(got) == 0 || got[0] != goCmd {
-		t.Errorf("BuildCmd = %v, want first element %q", got, goCmd)
+	if got := spec.Verification.BuildCmd; len(got) < 2 || got[0] != tscCmd || got[1] != noEmitFlag {
+		t.Errorf("BuildCmd = %v, want [%q %q]", got, tscCmd, noEmitFlag)
 	}
-	hasRace := false
-	for _, a := range spec.Verification.TestCmd {
-		if a == raceFlag {
-			hasRace = true
-		}
-	}
-	if !hasRace {
-		t.Errorf("TestCmd %v missing %q", spec.Verification.TestCmd, raceFlag)
+	if got := spec.Verification.TestCmd; len(got) == 0 || got[0] != nodeCmd {
+		t.Errorf("TestCmd = %v, want first element %q", got, nodeCmd)
 	}
 	if err := spec.Validate(); err != nil {
 		t.Errorf("spec.Validate(): %v", err)
-	}
-}
-
-// TestGenerate_GoPromptGolden pins the exact impl-pure-fn prompt text the Go
-// profile renders, so the refactor onto gencore is provably byte-identical to
-// the pre-refactor generator's output for a fixed seed.
-func TestGenerate_GoPromptGolden(t *testing.T) {
-	g := newGen(t)
-	spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: gencore.TemplateImplPureFn})
-	if err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	want := "Implement the function `pkg/foo.Bar` in `pkg/foo/foo.go` so that the existing tests pass.\n\n" +
-		"Nearby symbols (within 2 hops): (none)\n\n" +
-		"Constraints:\n" +
-		"- Do not modify any existing *_test.go file.\n" +
-		"- The solution must satisfy: go test -race ./pkg/foo/..."
-	if spec.Prompt != want {
-		t.Errorf("prompt mismatch:\n got: %q\nwant: %q", spec.Prompt, want)
 	}
 }
 
@@ -145,21 +120,21 @@ func TestGenerate_AddTestCoverageArtifact(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	art := spec.SolutionArtifacts[0].Path
-	if !strings.HasSuffix(art, "_test.go") {
-		t.Errorf("add-test-coverage artifact = %q, want a *_test.go file", art)
+	if !strings.HasSuffix(art, ".test.ts") {
+		t.Errorf("add-test-coverage artifact = %q, want a *.test.ts file", art)
 	}
 	if !strings.Contains(spec.Prompt, art) {
 		t.Errorf("prompt should reference the artifact %q", art)
 	}
 }
 
-// ---- Go path/command helpers --------------------------------------------------
+// ---- TypeScript path/command helpers ------------------------------------------
 
 func TestTestFilePath(t *testing.T) {
 	tests := []struct{ implPath, want string }{
-		{"pkg/foo/foo.go", "pkg/foo/foo_test.go"},
-		{"foo.go", "foo_test.go"},
-		{"internal/eval/gen/golang/generator.go", "internal/eval/gen/golang/generator_test.go"},
+		{"src/foo/foo.ts", "src/foo/foo.test.ts"},
+		{"foo.ts", "foo.test.ts"},
+		{"internal/eval/gen/typescript/generator.ts", "internal/eval/gen/typescript/generator.test.ts"},
 	}
 	for _, tc := range tests {
 		if got := testFilePath(tc.implPath); got != tc.want {
@@ -168,32 +143,32 @@ func TestTestFilePath(t *testing.T) {
 	}
 }
 
-func TestPkgPattern(t *testing.T) {
+func TestTestGlobPattern(t *testing.T) {
 	tests := []struct{ filePath, want string }{
-		{"internal/eval/foo.go", "./internal/eval/..."},
-		{"foo.go", "./..."},
-		{"", "./..."},
-		{".", "./..."},
-		{"a/b/c/d.go", "./a/b/c/..."},
+		{"src/foo/foo.ts", "src/foo/*.test.ts"},
+		{"foo.ts", "*.test.ts"},
+		{"", "*.test.ts"},
+		{".", "*.test.ts"},
+		{"a/b/c/d.ts", "a/b/c/*.test.ts"},
 	}
 	for _, tc := range tests {
-		if got := pkgPattern(tc.filePath); got != tc.want {
-			t.Errorf("pkgPattern(%q) = %q, want %q", tc.filePath, got, tc.want)
+		if got := testGlobPattern(tc.filePath); got != tc.want {
+			t.Errorf("testGlobPattern(%q) = %q, want %q", tc.filePath, got, tc.want)
 		}
 	}
 }
 
 func TestBuildCmd(t *testing.T) {
-	got := buildCmd("pkg/foo/foo.go")
-	want := []string{"go", "build", "./pkg/foo/..."}
+	got := buildCmd("src/foo/foo.ts")
+	want := []string{"tsc", "--noEmit"}
 	if !equalStrs(got, want) {
 		t.Errorf("buildCmd = %v, want %v", got, want)
 	}
 }
 
 func TestTestCmd(t *testing.T) {
-	got := testCmd("pkg/foo/foo.go")
-	want := []string{"go", "test", "-race", "./pkg/foo/..."}
+	got := testCmd("src/foo/foo.ts")
+	want := []string{"node", "--test", "src/foo/*.test.ts"}
 	if !equalStrs(got, want) {
 		t.Errorf("testCmd = %v, want %v", got, want)
 	}
