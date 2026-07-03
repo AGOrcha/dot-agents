@@ -225,11 +225,20 @@ tasks:
         NAME CLASH IS REAL (verified 2026-06-25): commands/review.go
         already registers `da review` with subcommands show|approve|
         reject (NewReviewCmd). The admin surface (users add|list|
-        remove --role; audit verify|prune --before) therefore CANNOT
+        remove --role; audit tail|verify|repair|prune --before-year) therefore CANNOT
         nest under `da review` without colliding. Resolution: nest the
         admin subtree under the existing `da review` group as
         `da review users ...` / `da review audit ...` ONLY if those
         subcommand names do not collide with show/approve/reject
+        RATIFIED 2026-07-02 (admin-cli review): the audit surface is
+        `tail|verify|repair|prune --before-year`. `tail` (not `view`) is the
+        canonical recent-entries verb (spec appendix line 174). `--before-year`
+        (not bare `--before`) is the operator flag — rotation is year-keyed
+        (spec: "compact older years") so a 4-digit year cutoff is the natural,
+        unambiguous granularity. `repair` is an authorized addition exposing
+        audit.RepairHead for the torn-append recovery case (#250); it is not an
+        R6 mutating action (prune/repair are archive maintenance, not live-chain
+        mutations).
         (they don't) — i.e. extend NewReviewCmd with new subcommands
         rather than a second top-level group. Otherwise use
         `da review-admin` or `da workflow review-admin`. Pick one and
