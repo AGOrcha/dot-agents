@@ -15,11 +15,15 @@ import (
 // TestHelperProcess is the subprocess used by integration tests that need a
 // deterministic exit code without depending on /usr/bin/true or /usr/bin/false
 // (which are unavailable on Windows). When GO_VERIFIER_TEST_HELPER is set to
-// "1" the process reads GO_VERIFIER_EXIT, exits with that code, and never
-// runs any actual tests. All other processes ignore this block.
+// "1" the process reads GO_VERIFIER_SLEEP_MS (optional sleep before exit) and
+// GO_VERIFIER_EXIT, then exits with that code, and never runs any actual tests.
+// All other processes ignore this block.
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_VERIFIER_TEST_HELPER") != "1" {
 		return
+	}
+	if ms, _ := strconv.Atoi(os.Getenv("GO_VERIFIER_SLEEP_MS")); ms > 0 {
+		time.Sleep(time.Duration(ms) * time.Millisecond)
 	}
 	code, _ := strconv.Atoi(os.Getenv("GO_VERIFIER_EXIT"))
 	os.Exit(code)
@@ -34,6 +38,15 @@ func helperCmd(code int) (cmd []string, env []string) {
 		"GO_VERIFIER_TEST_HELPER=1",
 		fmt.Sprintf("GO_VERIFIER_EXIT=%d", code),
 	}
+	return
+}
+
+// helperSleepCmd returns the argv + env for a subprocess that sleeps sleepMs
+// milliseconds before exiting with code. Built on helperCmd so it stays
+// portable across all CI platforms (no dependency on /bin/sleep or cmd.exe).
+func helperSleepCmd(sleepMs, code int) (cmd []string, env []string) {
+	cmd, env = helperCmd(code)
+	env = append(env, fmt.Sprintf("GO_VERIFIER_SLEEP_MS=%d", sleepMs))
 	return
 }
 
@@ -261,6 +274,51 @@ func TestVerify_TimeoutApplied(t *testing.T) {
 	}
 }
 
+// TestVerify_TimeoutExpires proves that applyTimeout + exec.CommandContext
+// actually cancels a running subprocess when TimeoutSeconds elapses. It uses
+// the portable helperSleepCmd pattern so the test passes on Windows too.
+//
+// Production contract (ExitError path in runProcess): when the process is
+// killed by SIGKILL/TerminateProcess the error from cmd.Run() is an
+// *exec.ExitError, so runProcess returns (code!=0, nil). Verify therefore
+// returns a non-nil result with Passed=false and a non-zero ExitCode — not a
+// VerifyError.
+func TestVerify_TimeoutExpires(t *testing.T) {
+	// Subprocess sleeps 3s; the 1s timeout must fire first and kill it.
+	cmd, env := helperSleepCmd(3000, 0)
+
+	v := New()
+	spec := minimalSpec()
+	spec.Verification.TestCmd = cmd
+	spec.Verification.TimeoutSeconds = 1
+
+	start := time.Now()
+	result, err := v.Verify(context.Background(), spec, t.TempDir(), env)
+
+	// Must complete well before the 3-second subprocess finishes.
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Errorf("Verify took %v; 1s timeout should have cancelled the 3s subprocess far sooner", elapsed)
+	}
+	// Contract: killed process travels the ExitError path → Verify returns no error.
+	if err != nil {
+		t.Fatalf("unexpected error from Verify: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result, got nil")
+	}
+	if result.Passed {
+		t.Error("Passed = true; want false (subprocess was killed by timeout)")
+	}
+	// Unix: SIGKILL → ExitCode=-1. Windows: TerminateProcess → ExitCode=1.
+	// Either way, exit 0 is impossible for a killed process.
+	if result.ExitCode == 0 {
+		t.Errorf("ExitCode = 0; want non-zero (subprocess was killed by context timeout)")
+	}
+	if result.Phase != PhaseTest {
+		t.Errorf("Phase = %q, want %q", result.Phase, PhaseTest)
+	}
+}
+
 func TestVerify_TimeoutZeroNoDeadline(t *testing.T) {
 	// TimeoutSeconds=0 must not add a deadline; the pre-cancelled context
 	// is the only deadline.
@@ -395,31 +453,34 @@ func TestRunProcess_CommandNotFound(t *testing.T) {
 }
 
 func TestRunProcess_ContextCancelled(t *testing.T) {
-	// Re-invoke the test binary as a slow subprocess (exit 0 after delay).
-	// Cancel the context before the command finishes.
-	cmd, env := helperCmd(0) // helper exits immediately; we need something that runs longer
+	// Launch a helper subprocess that sleeps 3s; the 100ms context deadline
+	// fires first, guaranteeing cancellation well before the sleep ends.
+	cmd, env := helperSleepCmd(3000, 0)
 
-	// Start a long-running command: "go version" is fast, so instead use
-	// a helper that sleeps. On all CI platforms "sleep" or equivalent is not
-	// guaranteed; use the test-binary pattern with a small delay env var.
-	_ = cmd
-	_ = env
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// Use "go version" (fast) but with a 1ms deadline — it may or may not
-	// finish in time, but the test validates the error-path when it does not.
-	_, _, _, _, err := runProcess(ctx, t.TempDir(), nil, []string{"go", "version"})
-	// If "go version" finishes before the 1ms timeout, err is nil — that is
-	// acceptable. The test is not asserting "context always wins"; it asserts
-	// that when context fires, the return is an error (not an exit code).
-	if err != nil && errors.Is(err, context.DeadlineExceeded) {
-		// Correct: deadline exceeded is returned as an error, not a code.
-		return
+	start := time.Now()
+	_, _, code, _, err := runProcess(ctx, t.TempDir(), env, cmd)
+
+	// Must return well before the 3-second subprocess finishes.
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("runProcess took %v; 100ms context should have cancelled the 3s subprocess far sooner", elapsed)
 	}
-	// Either the command finished in time (no error) or returned something else.
-	// Both are valid outcomes for this fast-finishing command.
+	// A killed subprocess never produces a clean success.
+	// On Unix: *exec.ExitError with code -1 → runProcess returns (code=-1, nil).
+	// On Windows: *exec.ExitError with code 1  → runProcess returns (code=1, nil).
+	// (err==nil, code==0) is therefore impossible for a killed process.
+	if err == nil && code == 0 {
+		t.Error("context deadline fired but runProcess returned (code=0, err=nil) — cancellation not enforced")
+	}
+	if err != nil {
+		// runProcess must return raw errors, never wrapped in VerifyError.
+		var ve *VerifyError
+		if errors.As(err, &ve) {
+			t.Errorf("runProcess must not wrap errors in VerifyError; got %T", err)
+		}
+	}
 }
 
 // ---- Verify: Duration accumulates across steps --------------------------------
