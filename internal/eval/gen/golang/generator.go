@@ -229,13 +229,32 @@ func buildSpec(tid string, r seedResult) *eval.TaskSpec {
 			},
 		},
 		Prompt:            renderPrompt(tid, r),
-		SolutionArtifacts: []eval.SolutionArtifact{{Path: r.seed.FilePath, Role: "target"}},
+		SolutionArtifacts: []eval.SolutionArtifact{{Path: solutionArtifactPath(tid, r.seed.FilePath), Role: "target"}},
 		Verification: eval.Verification{
 			BuildCmd:       []string{goCmd, buildSub, pkg},
 			TestCmd:        []string{goCmd, testSub, raceFlag, pkg},
 			TimeoutSeconds: defaultTimeout,
 		},
 	}
+}
+
+// solutionArtifactPath names the file the template's prompt directs the agent
+// to WRITE — the file a downstream verifier/scorer must look for the diff in.
+// The two "modify the implementation" templates target the seed's own file;
+// add-test-coverage directs the agent to a sibling *_test.go file, so its
+// expected artifact must be that test file, not the implementation. A mismatch
+// here makes the harness score the wrong file and mis-judge every run.
+func solutionArtifactPath(tid, implPath string) string {
+	if tid == TemplateAddTestCoverage {
+		return testFilePath(implPath)
+	}
+	return implPath
+}
+
+// testFilePath maps a Go implementation file to its conventional test file in
+// the same package (e.g. "pkg/foo/foo.go" → "pkg/foo/foo_test.go").
+func testFilePath(implPath string) string {
+	return strings.TrimSuffix(implPath, ".go") + "_test.go"
 }
 
 // pkgPattern returns the Go package pattern for the directory containing
@@ -327,15 +346,18 @@ func promptRefactorExtract(r seedResult) string {
 	)
 }
 
-// promptAddTestCoverage builds a prompt asking the agent to write tests.
+// promptAddTestCoverage builds a prompt asking the agent to write tests. It
+// names the exact test file the agent should create or extend — the same file
+// buildSpec records as the expected solution artifact — so the prompt's write
+// target and the spec's artifact never disagree.
 func promptAddTestCoverage(r seedResult) string {
 	return fmt.Sprintf(
-		"Add test coverage for `%s` in `%s`.\n\n"+
+		"Add test coverage for `%s` (implemented in `%s`).\n\n"+
 			"Call-graph context: %d caller(s), %d callee(s).\n"+
 			"Nearby symbols (within %d hops): %s\n\n"+
 			"Constraints:\n"+
-			"- Create or extend a *_test.go file in the same package.\n"+
-			"- Do not modify the implementation file.\n"+
+			"- Create or extend the test file `%s` in the same package.\n"+
+			"- Do not modify the implementation file `%s`.\n"+
 			"- The solution must satisfy: go test -race %s",
 		r.seed.QualifiedName,
 		r.seed.FilePath,
@@ -343,6 +365,8 @@ func promptAddTestCoverage(r seedResult) string {
 		r.complexity.FanOut,
 		neighborhoodDepth,
 		neighborList(r.nbhd),
+		testFilePath(r.seed.FilePath),
+		r.seed.FilePath,
 		pkgPattern(r.seed.FilePath),
 	)
 }

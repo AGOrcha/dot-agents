@@ -404,6 +404,45 @@ func TestGenerate_SolutionArtifactPresent(t *testing.T) {
 	}
 }
 
+// TestGenerate_ArtifactMatchesPromptTarget pins the invariant that each
+// template's expected solution artifact is the file its prompt directs the
+// agent to WRITE — so a downstream verifier/scorer looks for the diff in the
+// right file. add-test-coverage must target a *_test.go file (its prompt tells
+// the agent to write tests); the two implementation templates must target the
+// non-test seed file. A template whose prompt says "write X_test.go" but whose
+// spec names "X.go" fails here.
+func TestGenerate_ArtifactMatchesPromptTarget(t *testing.T) {
+	cases := []struct {
+		tid          string
+		wantTestFile bool
+	}{
+		{TemplateImplPureFn, false},
+		{TemplateRefactorExtract, false},
+		{TemplateAddTestCoverage, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.tid, func(t *testing.T) {
+			g := mustGenerator(t, simpleFakeReader())
+			spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: tc.tid})
+			if err != nil {
+				t.Fatalf("Generate(%q): %v", tc.tid, err)
+			}
+			if len(spec.SolutionArtifacts) == 0 {
+				t.Fatalf("%s: no solution artifacts", tc.tid)
+			}
+			artifact := spec.SolutionArtifacts[0].Path
+			if isTest := strings.HasSuffix(artifact, "_test.go"); isTest != tc.wantTestFile {
+				t.Errorf("%s: artifact %q isTestFile=%v, want %v", tc.tid, artifact, isTest, tc.wantTestFile)
+			}
+			// The expected artifact must be the file the prompt actually
+			// directs the agent to write, so its path appears in the prompt.
+			if !strings.Contains(spec.Prompt, artifact) {
+				t.Errorf("%s: artifact %q not referenced by its prompt:\n%s", tc.tid, artifact, spec.Prompt)
+			}
+		})
+	}
+}
+
 // ---- Generate: difficulty constraint ------------------------------------------
 
 func TestGenerate_DifficultyConstraint_Easy(t *testing.T) {
@@ -615,6 +654,39 @@ func TestSelectTemplateID_Unknown(t *testing.T) {
 	_, err := selectTemplateID(eval.GenerateOptions{TemplateID: "bogus"})
 	if err == nil {
 		t.Fatal("expected error for unknown template ID")
+	}
+}
+
+func TestTestFilePath(t *testing.T) {
+	tests := []struct {
+		implPath string
+		want     string
+	}{
+		{"pkg/foo/foo.go", "pkg/foo/foo_test.go"},
+		{"foo.go", "foo_test.go"},
+		{"internal/eval/gen/golang/generator.go", "internal/eval/gen/golang/generator_test.go"},
+	}
+	for _, tc := range tests {
+		if got := testFilePath(tc.implPath); got != tc.want {
+			t.Errorf("testFilePath(%q) = %q, want %q", tc.implPath, got, tc.want)
+		}
+	}
+}
+
+func TestSolutionArtifactPath(t *testing.T) {
+	const impl = "pkg/foo/foo.go"
+	tests := []struct {
+		tid  string
+		want string
+	}{
+		{TemplateImplPureFn, impl},
+		{TemplateRefactorExtract, impl},
+		{TemplateAddTestCoverage, "pkg/foo/foo_test.go"},
+	}
+	for _, tc := range tests {
+		if got := solutionArtifactPath(tc.tid, impl); got != tc.want {
+			t.Errorf("solutionArtifactPath(%q, %q) = %q, want %q", tc.tid, impl, got, tc.want)
+		}
 	}
 }
 
