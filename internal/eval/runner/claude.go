@@ -56,6 +56,23 @@ func (r *claudeRunner) Run(
 	}
 
 	env := buildEnv(instance.Env)
+	// Runner invocation: `claude --print --output-format json <prompt>` with
+	// empty stdin (realExec pins cmd.Stdin = bytes.NewReader(nil)).
+	//
+	// This deliberately diverges from the repo's headless REVIEWER convention
+	// (`claude --print --output-format text`, prompt via STDIN, e.g.
+	// prompts/reviewers/cross-harness-adversarial.md), for two reasons:
+	//
+	//  1. Token telemetry: --output-format json emits a structured envelope
+	//     containing session_id, model, and the usage block (input_tokens,
+	//     output_tokens, cache_read/creation_tokens, cache_hit_rate).
+	//     parseClaudeTelemetry extracts these from stdout; the text format
+	//     provides no machine-readable token counts.
+	//  2. Prompt delivery: the RUNNER hands an opaque task prompt (not an
+	//     agent-to-agent message); passing it as ARGV keeps the subprocess
+	//     interface uniform with codex (`codex exec <prompt>`) and copilot
+	//     (`copilot -p <prompt>`). STDIN is held empty so no adapter can block
+	//     waiting on interactive TTY input.
 	args := []string{"--print", "--output-format", "json", spec.Prompt}
 
 	start := time.Now()

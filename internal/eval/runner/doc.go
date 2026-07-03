@@ -14,10 +14,12 @@
 //
 // # OQ1 ruling (v1 adapter set)
 //
-// v1 ships three adapters — claude, codex, and copilot — matching the OQ1
-// recommendation from the R4 spec. Additional platforms (cursor, others) are
-// stubbed behind the Runner interface and can be added as follow-on per-adapter
-// tasks without harness changes.
+// v1 runners: claude, codex, AND copilot all ship (repo-owner ruling
+// 2026-07-02), overriding R4 OQ1's "others stubbed" default
+// (design.md:101). The owner ruling is the canonical authorization;
+// additional platforms (cursor, others) remain deferred behind the Runner
+// interface and can be added as follow-on per-adapter tasks without harness
+// changes.
 //
 // # Exec seam
 //

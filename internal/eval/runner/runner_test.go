@@ -306,6 +306,32 @@ func TestClaudeRunner_PromptPassedAsArg(t *testing.T) {
 	}
 }
 
+// TestClaudeRunner_FullArgv asserts the complete Claude argv in one place,
+// mirroring the full-argv assertions that TestCodexRunner_HappyPath and
+// TestCopilotRunner_HappyPath already apply to their adapters. The runner
+// invokes `claude --print --output-format json <prompt>` with empty stdin:
+// --output-format json is required so parseClaudeTelemetry can extract
+// session_id, model, and token-usage from the structured envelope; the
+// reviewer convention (text + STDIN) is intentionally not used here (see
+// the comment near args construction in claude.go).
+func TestClaudeRunner_FullArgv(t *testing.T) {
+	t.Parallel()
+	fn, calls := recordingCmdFn(nil, nil, 0, nil)
+	r := &claudeRunner{run: fn, scan: emptyScan}
+
+	spec := minimalSpec()
+	_, err := r.Run(context.Background(), spec, minimalInstance(t))
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+
+	c := (*calls)[0]
+	wantArgs := []string{"--print", "--output-format", "json", spec.Prompt}
+	if !reflect.DeepEqual(c.args, wantArgs) {
+		t.Errorf("claude argv: want %v, got %v", wantArgs, c.args)
+	}
+}
+
 func TestClaudeRunner_SandboxEnvAppended(t *testing.T) {
 	t.Parallel()
 	fn, calls := recordingCmdFn(nil, nil, 0, nil)
