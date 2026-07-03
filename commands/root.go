@@ -174,7 +174,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(mcp.NewCmd(rootMCPDeps()))
 	root.AddCommand(settings.NewCmd(rootSettingsDeps()))
 	root.AddCommand(config.NewConfigCmd(rootConfigDeps()))
-	root.AddCommand(NewReviewCmd())
+	root.AddCommand(withReviewAdmin(NewReviewCmd()))
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewExplainCmd())
 	root.AddCommand(lifecycle.NewInstallCmd(buildLifecycleDeps()))
