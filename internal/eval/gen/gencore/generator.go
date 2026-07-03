@@ -156,7 +156,6 @@ func (g *Generator) findSeed(ctx context.Context, want eval.Difficulty) (seedRes
 // so the no-match branch is only reachable with a non-empty want.
 func pickMatchingSeed(ctx context.Context, q *kgquery.Querier, seeds []graphstore.GraphNode, want eval.Difficulty) (seedResult, error) {
 	var firstErr error
-	derivedAny := false
 	for _, seed := range seeds {
 		r, err := deriveFromSeed(ctx, q, seed)
 		if err != nil {
@@ -165,22 +164,22 @@ func pickMatchingSeed(ctx context.Context, q *kgquery.Querier, seeds []graphstor
 			}
 			continue
 		}
-		derivedAny = true
 		if matchesDifficulty(r.band, want) {
 			return r, nil
 		}
 	}
-	// A seed derived cleanly but none matched the requested difficulty: a
-	// genuine empty result, not a failure. (Only reachable with a non-empty
-	// want — an empty want accepts the first derived seed above.)
-	if derivedAny {
-		return seedResult{}, fmt.Errorf("no seed matches difficulty %q", want)
+	// If any seed failed to derive, surface that KG failure rather than a
+	// no-match — even when another seed derived cleanly. A storage/query fault
+	// could have hidden a seed that would have matched, so a partial failure
+	// under a difficulty constraint must not masquerade as a genuine empty
+	// result. (firstErr is also non-nil in the all-fail case.)
+	if firstErr != nil {
+		return seedResult{}, firstErr
 	}
-	// No seed derived at all — every candidate failed with an error. Surface
-	// the first failure rather than reporting a no-match, so a real KG
-	// infrastructure fault is not swallowed. firstErr is non-nil here:
-	// findSeed guarantees len(seeds) > 0 and every seed took the error branch.
-	return seedResult{}, firstErr
+	// Every seed derived cleanly but none matched the requested difficulty:
+	// a genuine empty result. (Only reachable with a non-empty want — an
+	// empty want accepts the first derived seed above.)
+	return seedResult{}, fmt.Errorf("no seed matches difficulty %q", want)
 }
 
 // matchesDifficulty reports whether band satisfies the want constraint.

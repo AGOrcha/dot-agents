@@ -659,6 +659,26 @@ func TestGenerate_AllDeriveFail_WithDifficultyConstraint(t *testing.T) {
 	}
 }
 
+func TestGenerate_PartialDeriveFail_WithDifficultyConstraint(t *testing.T) {
+	// Partial-failure variant of the #262 swallow class: one seed fails to
+	// derive while another derives cleanly but does not match the requested
+	// difficulty. The KG failure must surface — a storage fault could have
+	// hidden a matching seed, so it must not masquerade as "no seed matches".
+	f := simpleFakeReader()
+	f.inErrs["pkg/foo.helper"] = errors.New("target edge failure helper")
+	g := mustGenerator(t, f)
+	_, err := g.Generate(context.Background(), eval.GenerateOptions{Difficulty: eval.DifficultyHard})
+	if err == nil {
+		t.Fatal("expected error when a seed fails derivation under a difficulty constraint")
+	}
+	if strings.Contains(err.Error(), "no seed matches difficulty") {
+		t.Errorf("error %q masks a partial KG failure as a no-match", err)
+	}
+	if !strings.Contains(err.Error(), "target edge failure") {
+		t.Errorf("error %q should surface the underlying derivation failure", err)
+	}
+}
+
 func TestGenerate_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
