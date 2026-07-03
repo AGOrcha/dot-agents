@@ -89,6 +89,13 @@ func (l *Log) PruneArchivesBefore(year int) ([]string, error) {
 		}
 		removed = append(removed, ref.path)
 	}
+	return prunePassOutcome(removed, skipped, cruftErrs)
+}
+
+// prunePassOutcome assembles the return value for a completed prune pass:
+// unprunable-archive errors take precedence over inert-tombstone-cruft notes,
+// and `removed` records the archives actually compacted in either case.
+func prunePassOutcome(removed, skipped []string, cruftErrs []error) ([]string, error) {
 	if len(skipped) > 0 {
 		return removed, fmt.Errorf("%w: %s", ErrUnprunableArchive, strings.Join(skipped, "; "))
 	}
