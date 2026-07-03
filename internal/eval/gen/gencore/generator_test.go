@@ -215,6 +215,69 @@ func TestNew_NilQuerier(t *testing.T) {
 	}
 }
 
+// TestNew_MalformedProfile_NilFunc asserts that gencore.New rejects a Profile
+// whose required function fields are nil with an error (not a panic). Each
+// nil-func case is checked individually so the error message can be inspected.
+func TestNew_MalformedProfile_NilFunc(t *testing.T) {
+	q := mustQuerier(t, simpleFakeReader())
+	cases := []struct {
+		name    string
+		profile Profile
+	}{
+		{
+			name: "nil TestFilePath",
+			profile: Profile{
+				Language: testProfile.Language, IDToken: testProfile.IDToken,
+				ErrPrefix: testProfile.ErrPrefix, DisplayName: testProfile.DisplayName,
+				VerifyTarget: testProfile.VerifyTarget,
+				BuildCmd:     testProfile.BuildCmd, TestCmd: testProfile.TestCmd,
+				// TestFilePath intentionally nil
+			},
+		},
+		{
+			name: "nil VerifyTarget",
+			profile: Profile{
+				Language: testProfile.Language, IDToken: testProfile.IDToken,
+				ErrPrefix: testProfile.ErrPrefix, DisplayName: testProfile.DisplayName,
+				TestFilePath: testProfile.TestFilePath,
+				BuildCmd:     testProfile.BuildCmd, TestCmd: testProfile.TestCmd,
+				// VerifyTarget intentionally nil
+			},
+		},
+		{
+			name: "nil BuildCmd",
+			profile: Profile{
+				Language: testProfile.Language, IDToken: testProfile.IDToken,
+				ErrPrefix: testProfile.ErrPrefix, DisplayName: testProfile.DisplayName,
+				TestFilePath: testProfile.TestFilePath, VerifyTarget: testProfile.VerifyTarget,
+				TestCmd: testProfile.TestCmd,
+				// BuildCmd intentionally nil
+			},
+		},
+		{
+			name: "nil TestCmd",
+			profile: Profile{
+				Language: testProfile.Language, IDToken: testProfile.IDToken,
+				ErrPrefix: testProfile.ErrPrefix, DisplayName: testProfile.DisplayName,
+				TestFilePath: testProfile.TestFilePath, VerifyTarget: testProfile.VerifyTarget,
+				BuildCmd: testProfile.BuildCmd,
+				// TestCmd intentionally nil
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(q, tc.profile)
+			if err == nil {
+				t.Fatalf("New with %s should return error, not panic", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.profile.ErrPrefix) {
+				t.Errorf("error %q should carry ErrPrefix %q", err, tc.profile.ErrPrefix)
+			}
+		})
+	}
+}
+
 func TestNew_OK(t *testing.T) {
 	g, err := New(mustQuerier(t, simpleFakeReader()), testProfile)
 	if err != nil {

@@ -15,6 +15,13 @@
 // eval.Language, task-ID token, file/test naming, verification commands, and
 // the language-specific prompt fragments). Adding a language is a new Profile
 // plus a two-line constructor wrapper, not another copy of the engine.
+//
+// Scope authorization: this net-new package spans the golang/typescript/python
+// generator task write-scopes per repo-owner ruling 2026-07-02. The ~58%
+// duplication across the per-language R4 generators is bad design; the fix is
+// a shared core with thin per-language Profile adapters. Authorized scope
+// extension spanning the golang/typescript/python generator task scopes.
+// Supersedes #283, #284.
 package gencore
 
 import (

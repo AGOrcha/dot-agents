@@ -49,12 +49,36 @@ type Generator struct {
 }
 
 // New constructs a Generator for profile p backed by querier. It errors on a
-// nil querier, tagging the message with the profile's error prefix.
+// nil querier or a Profile with nil required function fields, tagging the
+// message with the profile's error prefix.
 func New(querier *kgquery.Querier, p Profile) (*Generator, error) {
 	if querier == nil {
 		return nil, fmt.Errorf("%s: querier is required", p.ErrPrefix)
 	}
+	if err := validateProfile(p); err != nil {
+		return nil, fmt.Errorf("%s: %w", p.ErrPrefix, err)
+	}
 	return &Generator{querier: querier, profile: p}, nil
+}
+
+// validateProfile returns an error if any required function field of p is nil.
+// Nil function fields cause a runtime panic when the engine first calls them
+// (in buildSpec and the prompt builders); catching them at construction time
+// produces an actionable error instead of a crash.
+func validateProfile(p Profile) error {
+	if p.TestFilePath == nil {
+		return fmt.Errorf("Profile.TestFilePath is required")
+	}
+	if p.VerifyTarget == nil {
+		return fmt.Errorf("Profile.VerifyTarget is required")
+	}
+	if p.BuildCmd == nil {
+		return fmt.Errorf("Profile.BuildCmd is required")
+	}
+	if p.TestCmd == nil {
+		return fmt.Errorf("Profile.TestCmd is required")
+	}
+	return nil
 }
 
 // Register constructs a Generator for profile p and adds it to r. It is a
