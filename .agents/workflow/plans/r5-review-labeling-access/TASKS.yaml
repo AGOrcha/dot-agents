@@ -237,6 +237,11 @@ tasks:
         if extending the existing group, vs commands/review_admin.go
         if a new group). Admin-only; operates on local YAML/JSONL —
         no network.
+        RATIFIED 2026-07-02: prune uses --before-year (year-keyed
+        rotation), superseding the earlier --before <date> sketch.
+        Audit log rotation is year-keyed (archive names encode year),
+        so year-granular prune is the correct contract. The
+        internal/review/audit/ prune implementation uses this flag.
       app_type: go-cli
     - id: e2e-smoke
       title: End-to-end test — reviewer labels run, label feeds R1 on next recompute

@@ -131,10 +131,19 @@ func archiveRefFor(e os.DirEntry, dir, activeName, stem string) (archiveRef, boo
 
 // leadingYear parses the year from an archive's variable segment, which is
 // "<year>" or "<year>.<n>" (a second same-year, size-triggered rotation). A
-// segment that is not a plain integer (a stray sibling sharing the stem) yields
-// ok=false so it is left untouched.
+// segment that is not a plain year integer, or whose dot-suffix is not a plain
+// non-negative integer (e.g. "2024.backup"), yields ok=false so the file is
+// left untouched. This tightens matching to ONLY the exact rotation-archive
+// formats the writer produces.
 func leadingYear(seg string) (int, bool) {
 	if i := strings.IndexByte(seg, '.'); i >= 0 {
+		// The suffix after the dot must be a plain non-negative integer
+		// (the size-rotation sequence number). Anything else — e.g.
+		// "backup", "tmp" — means this is not a rotation archive and
+		// must be ignored.
+		if _, err := strconv.Atoi(seg[i+1:]); err != nil {
+			return 0, false
+		}
 		seg = seg[:i]
 	}
 	year, err := strconv.Atoi(seg)
@@ -168,13 +177,20 @@ func archiveSkipReason(path string) (string, error) {
 
 // removeArchive deletes an archive file and its head-anchor sidecar (an absent
 // sidecar is not an error). Removal routes through fsops per the FS-helpers guard.
+//
+// Delete order: the .head sidecar is removed FIRST, then the archive. This
+// ensures that a mid-failure (head removed but archive deletion fails) leaves
+// the archive file itself intact and recoverable — it can be re-pruned once the
+// underlying I/O problem is resolved. The reverse order (archive first) would
+// orphan the .head sidecar if head deletion subsequently failed, destroying
+// tamper evidence without any compensating recovery path.
 func removeArchive(path string) error {
-	if err := removeFunc(path); err != nil {
-		return fmt.Errorf("audit: remove archive %s: %w", path, err)
-	}
 	head := headPathFor(path)
 	if err := removeFunc(head); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("audit: remove archive head %s: %w", head, err)
+	}
+	if err := removeFunc(path); err != nil {
+		return fmt.Errorf("audit: remove archive %s: %w", path, err)
 	}
 	return nil
 }

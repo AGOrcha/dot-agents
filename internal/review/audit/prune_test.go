@@ -43,7 +43,9 @@ func TestLeadingYear(t *testing.T) {
 		ok   bool
 	}{
 		{"2025", 2025, true},
-		{"2025.1", 2025, true}, // second same-year (size-triggered) rotation
+		{"2025.1", 2025, true},    // second same-year (size-triggered) rotation
+		{"2024.backup", 0, false}, // non-integer suffix must be rejected (Bug 1)
+		{"2024.tmp", 0, false},    // another non-integer suffix variant
 		{"notyear", 0, false},
 		{"", 0, false},
 	}
@@ -273,6 +275,106 @@ func TestPruneArchivesBeforeVerifyError(t *testing.T) {
 	_, err := l.PruneArchivesBefore(2025)
 	if err == nil || !strings.Contains(err.Error(), "verify archive") || !strings.Contains(err.Error(), "read boom") {
 		t.Fatalf("want verify-archive error, got %v", err)
+	}
+}
+
+// TestPruneArchivesBeforeDecoyBackupSiblingNotPruned pins Bug 1: a sibling
+// whose name matches the archive stem and ends in .jsonl but whose mid-segment
+// is "<year>.<non-integer>" (e.g. "2024.backup") must NOT be treated as a
+// rotation archive. Before the fix, leadingYear("2024.backup") stripped the
+// ".backup" suffix and returned year 2024, so a healthy-looking decoy would be
+// silently compacted. After the fix, the non-integer suffix is rejected and the
+// file is left untouched.
+func TestPruneArchivesBeforeDecoyBackupSiblingNotPruned(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	// Seed a real 2020 archive and keep 2026 active.
+	seedYearArchives(t, l, 2020, 2026)
+	base := archiveBase(l.Path())
+	dir := filepath.Dir(l.Path())
+
+	// Create a decoy at audit.log.2024.backup.jsonl with a fully-anchored chain
+	// (one valid record + head sidecar) so archiveSkipReason would mark it safe
+	// to compact if it were incorrectly classified as a year-2024 archive.
+	decoyPath := filepath.Join(dir, "audit.log.2024.backup.jsonl")
+	decoy := Open(decoyPath)
+	if _, err := decoy.Append(Event{
+		Actor:  "admin@example.com",
+		Role:   "admin",
+		Action: ActionUserCreate,
+		Target: "user/decoy",
+		Now:    time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatalf("write decoy archive: %v", err)
+	}
+	// Precondition: the decoy verifies clean so the old bug would have pruned it.
+	if res, err := Open(decoyPath).Verify(); err != nil || !res.OK || res.TornAppend {
+		t.Fatalf("decoy precondition: want clean verify, got %+v err=%v", res, err)
+	}
+
+	removed, err := l.PruneArchivesBefore(2025)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	// Only the genuine 2020 archive should be compacted.
+	if len(removed) != 1 || removed[0] != base+".2020.jsonl" {
+		t.Fatalf("removed = %v, want only the 2020 archive; decoy must be untouched", removed)
+	}
+	if _, err := os.Stat(decoyPath); err != nil {
+		t.Fatalf("decoy %s must survive prune (was wrongly classified as year-2024 archive): %v", decoyPath, err)
+	}
+}
+
+// TestPruneArchivesBeforeHeadFirstNoOrphan pins Bug 2: removeArchive must
+// delete the .head sidecar BEFORE the archive file. If head removal fails, the
+// archive must be left intact (no orphaned sidecar, no false "compacted"
+// report). Before the fix, the archive was deleted first; a subsequent head
+// deletion failure left an orphan .head with no archive alongside it.
+func TestPruneArchivesBeforeHeadFirstNoOrphan(t *testing.T) {
+	restoreSeams(t)
+	restorePruneSeams(t)
+	l := tempLog(t)
+	seedYearArchives(t, l, 2022, 2026)
+	base := archiveBase(l.Path())
+	archivePath := base + ".2022.jsonl"
+	headPath := archivePath + headSuffix
+
+	// Confirm both files exist before the prune attempt.
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("archive precondition: %v", err)
+	}
+	if _, err := os.Stat(headPath); err != nil {
+		t.Fatalf("head precondition: %v", err)
+	}
+
+	boom := errors.New("head boom")
+	orig := removeFunc
+	removeFunc = func(p string) error {
+		if strings.HasSuffix(p, ".head") {
+			return boom
+		}
+		return orig(p)
+	}
+
+	removed, err := l.PruneArchivesBefore(2025)
+
+	// (a) Accurate removed count: nothing was fully compacted.
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want 0 when head removal fails (archive must not be reported as compacted)", removed)
+	}
+	if err == nil || !strings.Contains(err.Error(), "remove archive head") {
+		t.Fatalf("expected remove-archive-head error, got %v", err)
+	}
+
+	// (b) No orphan sidecar and no false success: both files must be intact
+	// because head-first delete order means the archive is never touched when
+	// head removal fails.
+	if _, statErr := os.Stat(archivePath); statErr != nil {
+		t.Fatalf("archive must remain intact after head-removal failure (delete-order bug would have removed it): %v", statErr)
+	}
+	if _, statErr := os.Stat(headPath); statErr != nil {
+		t.Fatalf(".head sidecar must not be orphaned (deletion failed, archive still present): %v", statErr)
 	}
 }
 
