@@ -309,14 +309,23 @@ func renderPrompt(tid string, r seedResult) string {
 	}
 }
 
+// Prompt fragments shared across the three task templates (hoisted to consts
+// so the format strings stay DRY — sonar S1192).
+const (
+	promptNearbySymbols  = "Nearby symbols (within %d hops): %s\n\n"
+	promptConstraintsHdr = "Constraints:\n"
+	promptNoTestEdit     = "- Do not modify any existing *_test.go file.\n"
+	promptMustSatisfy    = "- The solution must satisfy: go test -race %s"
+)
+
 // promptImplPureFn builds a prompt asking the agent to implement a function.
 func promptImplPureFn(r seedResult) string {
 	return fmt.Sprintf(
 		"Implement the function `%s` in `%s` so that the existing tests pass.\n\n"+
-			"Nearby symbols (within %d hops): %s\n\n"+
-			"Constraints:\n"+
-			"- Do not modify any existing *_test.go file.\n"+
-			"- The solution must satisfy: go test -race %s",
+			promptNearbySymbols+
+			promptConstraintsHdr+
+			promptNoTestEdit+
+			promptMustSatisfy,
 		r.seed.QualifiedName,
 		r.seed.FilePath,
 		neighborhoodDepth,
@@ -331,10 +340,10 @@ func promptRefactorExtract(r seedResult) string {
 	return fmt.Sprintf(
 		"Refactor `%s` in `%s` by extracting one or more well-named helper functions.\n\n"+
 			"Complexity signals: cyclomatic=%d, fan-out=%d callee(s), span=%d line(s).\n"+
-			"Nearby symbols (within %d hops): %s\n\n"+
-			"Constraints:\n"+
-			"- Do not modify any existing *_test.go file.\n"+
-			"- The solution must satisfy: go test -race %s",
+			promptNearbySymbols+
+			promptConstraintsHdr+
+			promptNoTestEdit+
+			promptMustSatisfy,
 		r.seed.QualifiedName,
 		r.seed.FilePath,
 		r.complexity.Cyclomatic,
@@ -354,11 +363,11 @@ func promptAddTestCoverage(r seedResult) string {
 	return fmt.Sprintf(
 		"Add test coverage for `%s` (implemented in `%s`).\n\n"+
 			"Call-graph context: %d caller(s), %d callee(s).\n"+
-			"Nearby symbols (within %d hops): %s\n\n"+
-			"Constraints:\n"+
+			promptNearbySymbols+
+			promptConstraintsHdr+
 			"- Create or extend the test file `%s` in the same package.\n"+
 			"- Do not modify the implementation file `%s`.\n"+
-			"- The solution must satisfy: go test -race %s",
+			promptMustSatisfy,
 		r.seed.QualifiedName,
 		r.seed.FilePath,
 		r.complexity.FanIn,
