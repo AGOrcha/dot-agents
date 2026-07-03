@@ -209,7 +209,7 @@ tasks:
       app_type: web
     - id: admin-cli
       title: '`da review` CLI for user/audit administration'
-      status: pending
+      status: completed
       depends_on:
         - rbac-identity
         - audit-log
