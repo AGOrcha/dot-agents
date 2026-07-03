@@ -431,7 +431,6 @@ func TestGenerate_SolutionArtifactPresent(t *testing.T) {
 // two implementation templates must target the non-test seed file. In every
 // case the artifact path appears in the prompt.
 func TestGenerate_ArtifactMatchesPromptTarget(t *testing.T) {
-	const impl = "pkg/foo/foo.go"
 	cases := []struct {
 		tid          string
 		wantTestFile bool
@@ -442,26 +441,34 @@ func TestGenerate_ArtifactMatchesPromptTarget(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.tid, func(t *testing.T) {
-			g := mustGenerator(t, simpleFakeReader())
-			spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: tc.tid})
-			if err != nil {
-				t.Fatalf("Generate(%q): %v", tc.tid, err)
-			}
-			if len(spec.SolutionArtifacts) == 0 {
-				t.Fatalf("%s: no solution artifacts", tc.tid)
-			}
-			artifact := spec.SolutionArtifacts[0].Path
-			wantArtifact := impl
-			if tc.wantTestFile {
-				wantArtifact = testProfile.TestFilePath(impl)
-			}
-			if artifact != wantArtifact {
-				t.Errorf("%s: artifact = %q, want %q", tc.tid, artifact, wantArtifact)
-			}
-			if !strings.Contains(spec.Prompt, artifact) {
-				t.Errorf("%s: artifact %q not referenced by its prompt:\n%s", tc.tid, artifact, spec.Prompt)
-			}
+			assertArtifactMatchesPromptTarget(t, tc.tid, tc.wantTestFile)
 		})
+	}
+}
+
+// assertArtifactMatchesPromptTarget checks one template: the solution artifact
+// is the expected seed/test file and its path appears in the generated prompt.
+func assertArtifactMatchesPromptTarget(t *testing.T, tid string, wantTestFile bool) {
+	t.Helper()
+	const impl = "pkg/foo/foo.go"
+	g := mustGenerator(t, simpleFakeReader())
+	spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: tid})
+	if err != nil {
+		t.Fatalf("Generate(%q): %v", tid, err)
+	}
+	if len(spec.SolutionArtifacts) == 0 {
+		t.Fatalf("%s: no solution artifacts", tid)
+	}
+	artifact := spec.SolutionArtifacts[0].Path
+	wantArtifact := impl
+	if wantTestFile {
+		wantArtifact = testProfile.TestFilePath(impl)
+	}
+	if artifact != wantArtifact {
+		t.Errorf("%s: artifact = %q, want %q", tid, artifact, wantArtifact)
+	}
+	if !strings.Contains(spec.Prompt, artifact) {
+		t.Errorf("%s: artifact %q not referenced by its prompt:\n%s", tid, artifact, spec.Prompt)
 	}
 }
 
