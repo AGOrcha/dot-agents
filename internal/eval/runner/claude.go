@@ -148,18 +148,24 @@ func parseClaudeTelemetry(stdout []byte) AgentTelemetry {
 	return t
 }
 
-// computeHitRate derives cache hit rate from token counts when the CLI did not
-// report it directly. The formula matches the rubric's token-efficiency
-// definition: cached reads as a fraction of total input cost.
+// computeHitRate derives cache hit rate as cache_read / (cache_read +
+// cache_creation) when the CLI did not report a rate directly. This is the
+// shipped contract used everywhere else in the codebase — scoring's transcript
+// backfill (internal/scoring/signal_backfill.go cacheHitRate) and the platform
+// session scanners (internal/platform/session.go claudeScanSessionTokens).
+// input_tokens is deliberately NOT in the denominator: including it
+// under-reports cache efficiency and would skew the token_efficiency signal,
+// which scoring treats native session_tokens.cache_hit_rate as authoritative
+// for. Returns 0 when no cacheable context existed (divide-by-zero guard).
 func computeHitRate(u *claudeTokenUsage) float64 {
 	if u.CacheHitRate > 0 {
 		return u.CacheHitRate
 	}
-	total := u.InputTokens + u.CacheReadTokens + u.CacheCreationTokens
-	if total == 0 {
+	denom := u.CacheReadTokens + u.CacheCreationTokens
+	if denom <= 0 {
 		return 0
 	}
-	return float64(u.CacheReadTokens) / float64(total)
+	return float64(u.CacheReadTokens) / float64(denom)
 }
 
 // buildEnv constructs the subprocess environment by appending sandbox

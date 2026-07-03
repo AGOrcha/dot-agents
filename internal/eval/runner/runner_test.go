@@ -133,6 +133,65 @@ func TestNew_UnknownAdapter(t *testing.T) {
 	}
 }
 
+// --- FakeRunner --------------------------------------------------------------
+
+func TestFakeRunner_ReturnsCannedResult(t *testing.T) {
+	t.Parallel()
+	canned := Result{
+		Stdout:   []byte("scripted output"),
+		ExitCode: 0,
+		Telemetry: AgentTelemetry{
+			Harness: "fake",
+			Model:   "fake-model",
+		},
+	}
+	f := &FakeRunner{Result: canned}
+
+	spec := minimalSpec()
+	inst := minimalInstance(t)
+	got, err := f.Run(context.Background(), spec, inst)
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if string(got.Stdout) != "scripted output" {
+		t.Errorf("Stdout: want %q, got %q", "scripted output", string(got.Stdout))
+	}
+	if got.Telemetry.Harness != "fake" {
+		t.Errorf("Harness: want %q, got %q", "fake", got.Telemetry.Harness)
+	}
+	// Call recording lets consumers assert the harness wired spec + instance.
+	if f.Calls != 1 {
+		t.Errorf("Calls: want 1, got %d", f.Calls)
+	}
+	if f.LastSpec != spec {
+		t.Error("LastSpec was not recorded")
+	}
+	if f.LastInstance != inst {
+		t.Error("LastInstance was not recorded")
+	}
+}
+
+func TestFakeRunner_ReturnsCannedErr(t *testing.T) {
+	t.Parallel()
+	sentinel := errors.New("scripted launch failure")
+	f := &FakeRunner{Err: sentinel}
+
+	_, err := f.Run(context.Background(), minimalSpec(), minimalInstance(t))
+	if !errors.Is(err, sentinel) {
+		t.Errorf("Run: want scripted error, got %v", err)
+	}
+}
+
+func TestFakeRunner_SatisfiesRunner(t *testing.T) {
+	t.Parallel()
+	// Compile-time guarantee is in fake.go; assert it holds at the value level
+	// too so a downstream consumer can inject a FakeRunner as a Runner.
+	var r Runner = &FakeRunner{}
+	if _, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t)); err != nil {
+		t.Errorf("Run via Runner interface: unexpected error: %v", err)
+	}
+}
+
 // --- claudeRunner ------------------------------------------------------------
 
 func TestClaudeRunner_HappyPath(t *testing.T) {
@@ -686,8 +745,9 @@ func TestParseClaudeTelemetry_ValidJSON(t *testing.T) {
 	if tel.Tokens.InputTokens != 10 {
 		t.Errorf("InputTokens: want 10, got %d", tel.Tokens.InputTokens)
 	}
-	// cache hit rate = 8 / (10 + 8 + 2) = 0.4
-	want := 0.4
+	// cache hit rate = cache_read / (cache_read + cache_creation) = 8 / (8 + 2)
+	// = 0.8. input_tokens (10) is NOT in the denominator.
+	want := 0.8
 	if tel.Tokens.CacheHitRate < want-0.001 || tel.Tokens.CacheHitRate > want+0.001 {
 		t.Errorf("CacheHitRate: want ~%.3f, got %.3f", want, tel.Tokens.CacheHitRate)
 	}
@@ -775,9 +835,32 @@ func TestComputeHitRate_Derived(t *testing.T) {
 		CacheReadTokens:     8,
 		CacheCreationTokens: 2,
 	}
+	// 8 / (8 + 2) = 0.8; input_tokens excluded from the denominator.
 	got := computeHitRate(u)
-	if got < 0.399 || got > 0.401 {
-		t.Errorf("want ~0.4, got %f", got)
+	if got < 0.799 || got > 0.801 {
+		t.Errorf("want ~0.8, got %f", got)
+	}
+}
+
+// TestComputeHitRate_ExcludesInputTokens is the FIX A regression: with a
+// nonzero input_tokens, the derived rate must equal
+// cache_read / (cache_read + cache_creation) — proving input_tokens is NOT in
+// the denominator (the shipped contract in signal_backfill.go / session.go).
+func TestComputeHitRate_ExcludesInputTokens(t *testing.T) {
+	t.Parallel()
+	const (
+		cacheRead     = 30
+		cacheCreation = 10
+	)
+	u := &claudeTokenUsage{
+		InputTokens:         5000, // large; must not affect the rate
+		CacheReadTokens:     cacheRead,
+		CacheCreationTokens: cacheCreation,
+	}
+	want := float64(cacheRead) / float64(cacheRead+cacheCreation) // 0.75
+	got := computeHitRate(u)
+	if got < want-0.0001 || got > want+0.0001 {
+		t.Errorf("CacheHitRate: want %.4f (cache_read/(cache_read+cache_creation)), got %.4f", want, got)
 	}
 }
 
