@@ -313,7 +313,7 @@ tasks:
       app_type: go-cli
     - id: cli-eval
       title: '`da eval` CLI command tree'
-      status: pending
+      status: completed
       depends_on:
         - harness-driver
         - persistence
