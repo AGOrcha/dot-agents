@@ -3,7 +3,7 @@ plan_id: da-recipe-scripts
 tasks:
     - id: p1-run-command-skeleton
       title: '`da run <file>`: parse + tokenize + in-process dispatch'
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - p2-failfast-errors
@@ -50,6 +50,7 @@ tasks:
       status: pending
       depends_on:
         - p1-run-command-skeleton
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/run.go
@@ -68,6 +69,7 @@ tasks:
       depends_on:
         - p1-run-command-skeleton
         - p2-failfast-errors
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/run_test.go
@@ -88,6 +90,7 @@ tasks:
         - p2-failfast-errors
         - p3-env-substitution
         - p4-shebang-crossplatform-acceptance
+      blocks: []
       owner: dot-agents
       write_scope:
         - src/share/recipes/checkpoint-advance.da
