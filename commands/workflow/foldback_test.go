@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -716,6 +717,209 @@ func TestFoldBackCreate_DryRunNoSideEffects(t *testing.T) {
 		}
 		if got := fbArtifacts(repo); len(got) != 0 {
 			t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
+		}
+	})
+}
+
+// fbDryRunUpdateVerb is the preview verb the dry-run render emits when a prior
+// artifact already exists (priorExists → "update", first-time → "record").
+const fbDryRunUpdateVerb = "would update"
+
+// foldBackArtifactPaths globs the repo's fold-back staging dir for *.yaml
+// (slug-scoped IDs are <slug>.yaml, defaults are fold-<ts>.yaml).
+func foldBackArtifactPaths(repo string) []string {
+	m, _ := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "*.yaml"))
+	return m
+}
+
+// seedFoldBack runs a real (non-dry-run) `fold-back create`, failing on error,
+// to establish a prior artifact the update-route dry-run tests re-enter.
+func seedFoldBack(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	full := append([]string{"fold-back", "create"}, args...)
+	if err := executeWorkflowCommand(t, repo, full...); err != nil {
+		t.Fatalf("seed fold-back create %v: %v", args, err)
+	}
+}
+
+// dryRunFoldBackCreate runs `fold-back create ... --dry-run` and returns stdout,
+// failing on error (the happy-path preview cases).
+func dryRunFoldBackCreate(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	full := append([]string{"fold-back", "create"}, args...)
+	full = append(full, "--dry-run")
+	return executeWorkflowCommandOutput(t, repo, full...)
+}
+
+// mustReadFileString reads path or fails, returning its bytes as a string.
+func mustReadFileString(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// requireContainsAll fails unless out contains every wanted substring.
+func requireContainsAll(t *testing.T, out string, wants ...string) {
+	t.Helper()
+	for _, w := range wants {
+		if !strings.Contains(out, w) {
+			t.Fatalf("output missing %q:\n%s", w, out)
+		}
+	}
+}
+
+// TestFoldBackCreate_DryRunUpdateRoutes covers the priorExists ("update")
+// branches of planFoldBackRouting / runFoldBackUpsertDryRun. Re-entering
+// `fold-back create` with an existing --slug routes as an update: the preview
+// reports "would update", targets the same route the seeded prior owns, and
+// still writes nothing (no new artifact, no TASKS.yaml/PLAN.yaml/proposal edit).
+func TestFoldBackCreate_DryRunUpdateRoutes(t *testing.T) {
+	tasksRel := filepath.Join(".agents", "workflow", "plans", "p1", "TASKS.yaml")
+	planRel := filepath.Join(".agents", "workflow", "plans", "p1", "PLAN.yaml")
+
+	t.Run("existing small task-note route previews update", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		seedFoldBack(t, repo, "--plan", "p1", "--task", "t1", "--slug", "s1", "--observation", "first")
+		if got := foldBackArtifactPaths(repo); len(got) != 1 {
+			t.Fatalf("seed should write exactly one artifact, got %v", got)
+		}
+		tasksBefore := mustReadFileString(t, filepath.Join(repo, tasksRel))
+
+		out := dryRunFoldBackCreate(t, repo,
+			"--plan", "p1", "--task", "t1", "--slug", "s1", "--observation", "second")
+
+		requireContainsAll(t, out, fbDryRunUpdateVerb, "task_note:p1/t1", "TASKS.yaml")
+		if got := foldBackArtifactPaths(repo); len(got) != 1 {
+			t.Fatalf("dry-run update changed artifact count: %v", got)
+		}
+		if after := mustReadFileString(t, filepath.Join(repo, tasksRel)); after != tasksBefore {
+			t.Fatalf("dry-run update mutated TASKS.yaml:\nbefore=%q\nafter=%q", tasksBefore, after)
+		}
+	})
+
+	t.Run("existing small plan-summary route previews update", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		seedFoldBack(t, repo, "--plan", "p1", "--slug", "s2", "--observation", "first")
+		planBefore := mustReadFileString(t, filepath.Join(repo, planRel))
+
+		out := dryRunFoldBackCreate(t, repo,
+			"--plan", "p1", "--slug", "s2", "--observation", "second")
+
+		requireContainsAll(t, out, fbDryRunUpdateVerb, "plan_summary:p1", "PLAN.yaml")
+		if after := mustReadFileString(t, filepath.Join(repo, planRel)); after != planBefore {
+			t.Fatalf("dry-run update mutated PLAN.yaml:\nbefore=%q\nafter=%q", planBefore, after)
+		}
+	})
+
+	t.Run("existing proposal route previews update", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		agentsHome := t.TempDir()
+		t.Setenv("AGENTS_HOME", agentsHome)
+		seedFoldBack(t, repo, "--plan", "p1", "--task", "t1", "--slug", "s3", "--observation", "first", "--propose")
+		if props, _ := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-s3.md")); len(props) != 1 {
+			t.Fatalf("seed --propose should write one proposal, got %v", props)
+		}
+
+		// Re-enter WITHOUT --propose: an existing proposal-classified slug routes
+		// as a proposal update, keeping the prior route rather than reclassifying.
+		out := dryRunFoldBackCreate(t, repo,
+			"--plan", "p1", "--slug", "s3", "--observation", "second")
+
+		requireContainsAll(t, out, fbDryRunUpdateVerb, "proposal:obs-s3", "update proposal")
+		if props, _ := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md")); len(props) != 1 {
+			t.Fatalf("dry-run update changed proposal files: %v", props)
+		}
+	})
+}
+
+// TestFoldBackCreate_DryRunJSONEnvelope covers the deps.Flags.JSON() branch of
+// runFoldBackUpsertDryRun: the machine-readable foldBackDryRunResult envelope
+// (dry_run + artifact routing + would_write targets), emitted with zero writes.
+func TestFoldBackCreate_DryRunJSONEnvelope(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	priorJSON := deps.Flags.JSON
+	deps.Flags.JSON = func() bool { return true }
+	t.Cleanup(func() { deps.Flags.JSON = priorJSON })
+
+	out := dryRunFoldBackCreate(t, repo,
+		"--plan", "p1", "--task", "t1", "--observation", "json obs")
+
+	var res foldBackDryRunResult
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("dry-run JSON did not decode: %v\n%s", err, out)
+	}
+	if !res.DryRun {
+		t.Fatalf("dry_run should be true: %+v", res)
+	}
+	if res.Artifact.Classification != "small" || res.Artifact.RoutedTo != "task_note:p1/t1" || res.Artifact.TaskID != "t1" {
+		t.Fatalf("unexpected artifact routing in JSON envelope: %+v", res.Artifact)
+	}
+	if len(res.WouldWrite) != 2 {
+		t.Fatalf("expected two would_write targets, got %v", res.WouldWrite)
+	}
+	requireContainsAll(t, strings.Join(res.WouldWrite, "\n"), "edit task note t1", "write fold-back artifact")
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("JSON dry-run wrote artifact(s): %v", got)
+	}
+}
+
+// TestFoldBackCreate_DryRunProposeSlugAndMissingPlan covers two remaining
+// dry-run branches: the slug-named proposal name (planFoldBackRouting propose
+// branch when a --slug is set) and the read-only preamble error path (a missing
+// plan surfaces the same "plan not found" error the write path would, no writes).
+func TestFoldBackCreate_DryRunProposeSlugAndMissingPlan(t *testing.T) {
+	t.Run("propose with slug previews slug-named proposal", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		agentsHome := t.TempDir()
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		out := dryRunFoldBackCreate(t, repo,
+			"--plan", "p1", "--task", "t1", "--slug", "s4", "--observation", "big", "--propose")
+
+		requireContainsAll(t, out, "proposal:obs-s4", "create proposal", "obs-s4.md")
+		if _, err := os.Stat(filepath.Join(agentsHome, "proposals")); !os.IsNotExist(err) {
+			t.Fatalf("propose dry-run created proposals dir: %v", err)
+		}
+		if got := foldBackArtifactPaths(repo); len(got) != 0 {
+			t.Fatalf("propose dry-run wrote artifact(s): %v", got)
+		}
+	})
+
+	t.Run("missing plan surfaces error before preview", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		err := executeWorkflowCommand(t, repo, "fold-back", "create",
+			"--plan", "ghost", "--task", "t1", "--observation", "x", "--dry-run")
+		if err == nil {
+			t.Fatal("dry-run against a missing plan should error")
+		}
+		if !strings.Contains(err.Error(), "plan ghost not found") {
+			t.Fatalf("want plan-not-found error, got %v", err)
+		}
+	})
+
+	// A prior artifact that exists but fails to load must surface the load error
+	// from the shared read-only preamble (prepareFoldBackUpsert), not a false-green
+	// preview — the write path would hit the same error.
+	t.Run("corrupt prior artifact surfaces load error", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		fbDir := filepath.Join(repo, ".agents", "active", "fold-back")
+		if err := os.MkdirAll(fbDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(fbDir, "s5.yaml"), []byte(": not: valid: yaml\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		err := executeWorkflowCommand(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--slug", "s5", "--observation", "x", "--dry-run")
+		if err == nil {
+			t.Fatal("dry-run against a corrupt prior artifact should error")
+		}
+		if !strings.Contains(err.Error(), "load fold-back") {
+			t.Fatalf("want load-fold-back error, got %v", err)
 		}
 	})
 }
