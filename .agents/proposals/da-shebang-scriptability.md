@@ -1,6 +1,8 @@
 # Proposal: `da` recipe scripts (shebang-executable command sequences)
 
-Status: draft / for-review · Created: 2026-07-03 · Origin: owner idea (yq shebang acceptance test)
+Status: shipped · Created: 2026-07-03 · Origin: owner idea (yq shebang acceptance test)
+
+> **Shipped** as `da run` (`commands/run.go`) — shebang-executable, in-process, cross-platform da-command recipes. Canonical plan: `.agents/workflow/plans/da-recipe-scripts/` (core `da run` = p1 done; fail-fast messaging / env-substitution / cross-platform acceptance test / dogfood recipe tracked there as p2–p5).
 
 ## Idea
 
