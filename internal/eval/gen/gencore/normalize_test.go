@@ -3,6 +3,7 @@ package gencore
 import (
 	"context"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -11,21 +12,27 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
-// crgFakeReader seeds a fakeReader with a symbol shaped the way the
-// code-review-graph ingestion stores it: an ABSOLUTE file path and a
+// crgReaderFor seeds a fakeReader with a symbol shaped the way the
+// code-review-graph ingestion stores it: the given ABSOLUTE file path and a
 // "<abs-file>::<decl>" qualified name (graphstore makeQualified's no-parent
 // fallback). It mirrors simpleFakeReader's easy shape (Bar calls helper) so the
-// seed derives cleanly. It returns the reader and the absolute file path so a
-// test can assert that path never survives into the emitted spec.
-func crgFakeReader(repoRoot string) (*fakeReader, string) {
+// seed derives cleanly.
+func crgReaderFor(absFile string) *fakeReader {
 	f := newFakeReader()
-	absFile := filepath.Join(repoRoot, "internal", "eval", "foo.go")
 	bar := absFile + "::Bar"
 	helper := absFile + "::helper"
 	f.addGoFn(bar, absFile, 10, 30)
 	f.addGoFn(helper, absFile, 35, 45)
 	f.addCall(bar, helper)
-	return f, absFile
+	return f
+}
+
+// crgFakeReader builds a code-review-graph fixture under repoRoot and returns it
+// with the seed's absolute file path so a test can assert that path never
+// survives into the emitted spec.
+func crgFakeReader(repoRoot string) (*fakeReader, string) {
+	absFile := filepath.Join(repoRoot, "internal", "eval", "foo.go")
+	return crgReaderFor(absFile), absFile
 }
 
 // TestGenerate_NormalizesAbsoluteCRGPaths is the release-blocker reproduction:
@@ -117,6 +124,37 @@ func TestGenerate_AbsolutePathOutsideRepoFails(t *testing.T) {
 	}
 }
 
+// TestGenerate_WindowsAbsoluteCRGSeed proves OS-agnostic handling of a Windows
+// absolute CRG seed. On a non-Windows host the foreign-OS absolute path cannot
+// be relativized against a runtime-OS repo root and is rejected loudly; on
+// Windows the same path normalizes to a repo-relative slash path. Either way, no
+// backslash or drive-letter residue survives into a spec.
+func TestGenerate_WindowsAbsoluteCRGSeed(t *testing.T) {
+	const winRoot = `C:\proj\repo`
+	const winFile = `C:\proj\repo\internal\eval\foo.go`
+	f := crgReaderFor(winFile)
+	g, err := newForRoot(mustQuerier(t, f), testProfile, winRoot)
+	if err != nil {
+		t.Fatalf("newForRoot: %v", err)
+	}
+	spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: TemplateImplPureFn})
+	if runtime.GOOS == "windows" {
+		if err != nil {
+			t.Fatalf("on Windows a native absolute seed should normalize, got: %v", err)
+		}
+		if got := spec.SolutionArtifacts[0].Path; got != "internal/eval/foo.go" {
+			t.Errorf("artifact path = %q, want repo-relative", got)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatal("on a non-Windows host a Windows absolute seed must be rejected, not emitted")
+	}
+	if !strings.Contains(err.Error(), "different OS") {
+		t.Errorf("error %q should explain the path is from a different OS", err)
+	}
+}
+
 // assertNoAbsolute fails if the marshalled spec contains the repo root or the
 // seed's absolute file path anywhere — the strongest form of "no absolute path
 // leaked into the spec/prompt".
@@ -175,6 +213,23 @@ func TestRelativizePath(t *testing.T) {
 	}
 }
 
+// TestRelativizePath_ForeignOSAbsolute pins that an absolute path from the OTHER
+// OS convention than the runtime is rejected loudly (it cannot be relativized
+// against a runtime-OS repo root) rather than passed through uncleaned.
+func TestRelativizePath_ForeignOSAbsolute(t *testing.T) {
+	foreign, root := `C:\win\repo\foo.go`, "/unix/repo"
+	if runtime.GOOS == "windows" {
+		foreign, root = "/unix/abs/repo/foo.go", `C:\repo`
+	}
+	_, err := relativizePath(foreign, root)
+	if err == nil {
+		t.Fatalf("relativizePath(%q,%q) should reject a foreign-OS absolute path", foreign, root)
+	}
+	if !strings.Contains(err.Error(), "different OS") {
+		t.Errorf("error %q should explain the path is from a different OS", err)
+	}
+}
+
 // ---- cleanSymbol ---------------------------------------------------------------
 
 func TestCleanSymbol(t *testing.T) {
@@ -221,6 +276,34 @@ func TestNormalizeNeighborhood(t *testing.T) {
 	}
 }
 
+// ---- isAbsAnyOS ----------------------------------------------------------------
+
+func TestIsAbsAnyOS(t *testing.T) {
+	tests := []struct {
+		p    string
+		want bool
+	}{
+		{"", false},
+		{"pkg/foo/bar.go", false},
+		{"./internal/...", false},
+		{`internal\eval`, false}, // backslash but relative — not absolute
+		{"C:", false},            // drive-relative, no separator
+		{"C:foo", false},         // drive-relative
+		{"/Users/x/foo.go", true},
+		{"//host/share", true}, // POSIX/UNC double-slash root
+		{`\\host\share\foo`, true},
+		{`\rooted\path`, true},
+		{`C:\Users\x`, true},
+		{"C:/Users/x", true},
+		{"c:/lower", true},
+	}
+	for _, tc := range tests {
+		if got := isAbsAnyOS(tc.p); got != tc.want {
+			t.Errorf("isAbsAnyOS(%q) = %v, want %v", tc.p, got, tc.want)
+		}
+	}
+}
+
 // ---- hasAbsPathToken -----------------------------------------------------------
 
 func TestHasAbsPathToken(t *testing.T) {
@@ -236,6 +319,10 @@ func TestHasAbsPathToken(t *testing.T) {
 		{absDir, true},
 		{".//Users/x/repo/internal/eval/...", true}, // Go's "./" + abs glued
 		{"./..//abs/dir/...", true},
+		{"/Users/x/foo.go", true},      // Unix abs regardless of runtime OS
+		{`C:\Users\x\foo.go`, true},    // Windows drive abs regardless of runtime OS
+		{`\\host\share\pkg\...`, true}, // Windows UNC
+		{`pkg\foo\bar.go`, true},       // backslash residue (un-normalized Windows sep)
 	}
 	for _, tc := range tests {
 		if got := hasAbsPathToken(tc.tok); got != tc.want {
@@ -244,7 +331,37 @@ func TestHasAbsPathToken(t *testing.T) {
 	}
 }
 
+// ---- hasAbsPathResidue ---------------------------------------------------------
+
+func TestHasAbsPathResidue(t *testing.T) {
+	absTok := filepath.Join(t.TempDir(), "foo.go") // this-OS absolute
+	tests := []struct {
+		s    string
+		want bool
+	}{
+		{"", false},
+		{"Implement `pkg/foo.Bar` in `internal/eval/foo.go`", false}, // native + relative — clean
+		{"kg-go-impl-declnames", false},
+		{"declNames", false},
+		{"pkg/foo.Bar", false},                             // native symbol with "/" is not a residue
+		{"foo.go::Bar", true},                              // "::" residue on an otherwise-relative token
+		{"Implement `/Users/x/foo.go` now", true},          // Unix abs token
+		{`Refactor ` + "`" + `C:\repo\foo.go` + "`", true}, // Windows abs / backslash
+		{"go test -race .//Users/x/...", true},             // "//" glue
+		{"in `" + absTok + "`", true},                      // this-OS abs
+	}
+	for _, tc := range tests {
+		if got := hasAbsPathResidue(tc.s); got != tc.want {
+			t.Errorf("hasAbsPathResidue(%q) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}
+
 // ---- assertSpecRelative --------------------------------------------------------
+
+// relTestCmd is a valid repo-relative test command used as filler in
+// assertSpecRelative cases whose subject is a different field.
+func relTestCmd() []string { return []string{"go", "test", "./..."} }
 
 func TestAssertSpecRelative(t *testing.T) {
 	absPath := filepath.Join(t.TempDir(), "foo.go")
@@ -261,17 +378,27 @@ func TestAssertSpecRelative(t *testing.T) {
 			},
 		},
 		{
+			name: "clean native text fields (no false positive)",
+			spec: &eval.TaskSpec{
+				TaskID:            "kg-go-impl-pkg-foo-bar",
+				Prompt:            "Implement `pkg/foo.Bar` in `internal/eval/foo.go` so tests pass.",
+				GeneratedFrom:     eval.GeneratedFrom{KGQuery: &eval.KGQuery{SeedSymbol: "pkg/foo.Bar"}},
+				SolutionArtifacts: []eval.SolutionArtifact{{Path: "internal/eval/foo.go"}},
+				Verification:      eval.Verification{TestCmd: []string{"go", "test", "./internal/eval/..."}},
+			},
+		},
+		{
 			name: "absolute artifact",
 			spec: &eval.TaskSpec{
 				SolutionArtifacts: []eval.SolutionArtifact{{Path: absPath}},
-				Verification:      eval.Verification{TestCmd: []string{"go", "test", "./..."}},
+				Verification:      eval.Verification{TestCmd: relTestCmd()},
 			},
 			wantErr: true,
 		},
 		{
 			name: "glued build token",
 			spec: &eval.TaskSpec{
-				Verification: eval.Verification{BuildCmd: []string{"go", "build", ".//abs/dir/..."}, TestCmd: []string{"go", "test", "./..."}},
+				Verification: eval.Verification{BuildCmd: []string{"go", "build", ".//abs/dir/..."}, TestCmd: relTestCmd()},
 			},
 			wantErr: true,
 		},
@@ -279,6 +406,45 @@ func TestAssertSpecRelative(t *testing.T) {
 			name: "glued test token",
 			spec: &eval.TaskSpec{
 				Verification: eval.Verification{TestCmd: []string{"go", "test", ".//abs/dir/..."}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "windows backslash build token",
+			spec: &eval.TaskSpec{
+				Verification: eval.Verification{BuildCmd: []string{"go", "build", `C:\repo\pkg\...`}, TestCmd: relTestCmd()},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prompt with absolute path",
+			spec: &eval.TaskSpec{
+				Prompt:       "Implement the function in `/Users/x/repo/foo.go` now.",
+				Verification: eval.Verification{TestCmd: relTestCmd()},
+			},
+			wantErr: true,
+		},
+		{
+			name: "prompt with :: residue",
+			spec: &eval.TaskSpec{
+				Prompt:       "Implement `foo.go::Bar` so tests pass.",
+				Verification: eval.Verification{TestCmd: relTestCmd()},
+			},
+			wantErr: true,
+		},
+		{
+			name: "task id absolute",
+			spec: &eval.TaskSpec{
+				TaskID:       "/abs/leaked/thing",
+				Verification: eval.Verification{TestCmd: relTestCmd()},
+			},
+			wantErr: true,
+		},
+		{
+			name: "seed symbol with abspath",
+			spec: &eval.TaskSpec{
+				GeneratedFrom: eval.GeneratedFrom{KGQuery: &eval.KGQuery{SeedSymbol: "/Users/x/foo.go::Bar"}},
+				Verification:  eval.Verification{TestCmd: relTestCmd()},
 			},
 			wantErr: true,
 		},
