@@ -609,6 +609,115 @@ func TestFoldBackCreate_DryRunNoSideEffects(t *testing.T) {
 			t.Fatalf("task notes not mutated: %q", tf.Tasks[0].Notes)
 		}
 	})
+
+	// The global -n/--dry-run flag (deps.Flags.DryRun, OR-merged in foldBackDryRun)
+	// must trigger the same side-effect-free guard as the local --dry-run flag —
+	// no artifact, no TASKS.yaml edit — and queue zero journal events.
+	t.Run("global -n flag guards without local --dry-run", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
+		before, err := os.ReadFile(tasksPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events := captureJournal(t)
+		prev := deps.Flags.DryRun
+		deps.Flags.DryRun = func() bool { return true }
+		t.Cleanup(func() { deps.Flags.DryRun = prev })
+
+		// No local --dry-run in the args: only the global flag gates here.
+		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--observation", "global dry")
+
+		if got := fbArtifacts(repo); len(got) != 0 {
+			t.Fatalf("global dry-run wrote fold-back artifact(s): %v", got)
+		}
+		after, err := os.ReadFile(tasksPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(before) != string(after) {
+			t.Fatalf("global dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
+		}
+		if len(*events) != 0 {
+			t.Fatalf("global dry-run queued %d journal event(s), want 0", len(*events))
+		}
+		if !strings.Contains(out, "dry-run") {
+			t.Fatalf("output missing dry-run marker:\n%s", out)
+		}
+	})
+
+	// A dry-run records nothing durable, so it must queue zero journal events
+	// (the write path defers a journalTier1 delta; the dry-run path returns first).
+	t.Run("queues no journal event", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		events := captureJournal(t)
+
+		_ = executeWorkflowCommandOutput(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--observation", "no journal", "--dry-run")
+
+		if len(*events) != 0 {
+			t.Fatalf("dry-run queued %d journal event(s), want 0", len(*events))
+		}
+	})
+
+	// Accurate preview: a task-note dry-run against a NON-EXISTENT task must return
+	// the same missing-task error the real create path hits at updateTaskFoldBackNote,
+	// not a false-green preview — and must still write nothing / journal nothing.
+	t.Run("missing task surfaces error and writes nothing", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
+		before, err := os.ReadFile(tasksPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events := captureJournal(t)
+
+		err = executeWorkflowCommand(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "ghost", "--observation", "no such task", "--dry-run")
+		if err == nil {
+			t.Fatal("dry-run of a task-note route against a missing task should error")
+		}
+		if !strings.Contains(err.Error(), "task ghost not found in plan p1") {
+			t.Fatalf("want missing-task error, got %v", err)
+		}
+		if got := fbArtifacts(repo); len(got) != 0 {
+			t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
+		}
+		after, err := os.ReadFile(tasksPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(before) != string(after) {
+			t.Fatalf("failed dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
+		}
+		if len(*events) != 0 {
+			t.Fatalf("failed dry-run queued %d journal event(s), want 0", len(*events))
+		}
+	})
+
+	// The read-only precondition surfaces a TASKS.yaml load failure too (not just a
+	// missing task): a corrupt tasks file makes the task-note dry-run report the same
+	// load error the write path would, still writing nothing.
+	t.Run("unreadable tasks file surfaces load error", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
+		if err := os.WriteFile(tasksPath, []byte("[unterminated\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		err := executeWorkflowCommand(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--observation", "corrupt", "--dry-run")
+		if err == nil {
+			t.Fatal("dry-run should surface the TASKS.yaml load error")
+		}
+		if !strings.Contains(err.Error(), "load tasks for plan p1") {
+			t.Fatalf("want load-tasks error, got %v", err)
+		}
+		if got := fbArtifacts(repo); len(got) != 0 {
+			t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
+		}
+	})
 }
 
 func TestFoldBackCreate_WriteError(t *testing.T) {

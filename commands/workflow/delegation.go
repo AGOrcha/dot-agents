@@ -494,6 +494,24 @@ func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(note
 	return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
 }
 
+// assertFoldBackTaskExists mirrors, read-only, the precondition the task-note write
+// path enforces: updateTaskFoldBackNote loads TASKS.yaml and requires taskID to exist
+// before editing. Running it on the --dry-run path surfaces the same load / missing-task
+// error the real create would hit, so the preview reflects reality instead of a
+// false-green. It performs no writes.
+func assertFoldBackTaskExists(projectPath, planID, taskID string) error {
+	tf, err := loadCanonicalTasks(projectPath, planID)
+	if err != nil {
+		return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
+	}
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == taskID {
+			return nil
+		}
+	}
+	return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+}
+
 func updatePlanFoldBackSummary(projectPath, planID, createdAt string, mutate func(summary string) string) error {
 	plan, err := loadCanonicalPlan(projectPath, planID)
 	if err != nil {
@@ -857,6 +875,16 @@ func runFoldBackUpsertDryRun(cmd *cobra.Command, projectPath string, in *foldBac
 	wouldWrite, err := planFoldBackRouting(projectPath, in, prior, priorExists, ts, &artifact)
 	if err != nil {
 		return err
+	}
+	// Accurate preview: the task-note route (classification small with a task target)
+	// is the one route whose write path enforces a precondition planFoldBackRouting only
+	// formats — updateTaskFoldBackNote requires the task to exist. Mirror that check
+	// read-only so a dry-run against a missing task surfaces the real error instead of a
+	// false-green preview.
+	if artifact.Classification == "small" && artifact.TaskID != "" {
+		if err := assertFoldBackTaskExists(projectPath, in.planID, artifact.TaskID); err != nil {
+			return err
+		}
 	}
 	// The write path always persists the fold-back artifact YAML alongside the route.
 	wouldWrite = append(wouldWrite, "write fold-back artifact "+foldBackArtifactFile(projectPath, artifact.ID))
