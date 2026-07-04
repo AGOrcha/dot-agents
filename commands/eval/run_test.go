@@ -15,7 +15,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
-	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +24,7 @@ import (
 
 // buildTestHarness assembles a harness from a fixed-spec generator, the given
 // sandbox + runner, and a scripted go verifier — no KG or go toolchain needed.
-func buildTestHarness(t *testing.T, sb sandbox.Sandbox, run runner.Runner, ver *goverifier.VerifyResult) *harness.Harness {
+func buildTestHarness(t *testing.T, sb sandbox.Sandbox, run runner.Runner, ver *verifier.VerifyResult) *harness.Harness {
 	t.Helper()
 	reg := evalcore.NewRegistry()
 	if err := reg.Register(fixedGenerator{spec: validSpec()}); err != nil {
@@ -34,7 +34,7 @@ func buildTestHarness(t *testing.T, sb sandbox.Sandbox, run runner.Runner, ver *
 		Generators: reg,
 		Sandbox:    sb,
 		Runner:     run,
-		Verifiers:  map[evalcore.Language]goverifier.Verifier{evalcore.LanguageGo: &fakeVerifier{res: ver}},
+		Verifiers:  map[evalcore.Language]verifier.Verifier{evalcore.LanguageGo: &fakeVerifier{res: ver}},
 	})
 	if err != nil {
 		t.Fatalf("harness.New: %v", err)

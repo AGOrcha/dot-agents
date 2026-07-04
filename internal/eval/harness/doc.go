@@ -15,7 +15,7 @@
 //
 // The harness is pure orchestration. Every stage's heavy lifting lives behind
 // a seam interface injected at construction (an eval.Registry of generators, a
-// sandbox.Sandbox, a runner.Runner, and per-language goverifier.Verifiers), so
+// sandbox.Sandbox, a runner.Runner, and per-language verifier.Verifiers), so
 // a test can swap a FakeRunner or a fixture sandbox without touching the
 // driver. The driver owns only the sequencing and the failure policy:
 //

@@ -15,7 +15,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/scoringbridge"
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
-	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 	"go.yaml.in/yaml/v3"
@@ -114,9 +114,9 @@ func buildTestRun(t *testing.T, scoreRoot string) harness.EvalRun {
 				Retries:   0,
 			},
 		},
-		Verify: &goverifier.VerifyResult{
+		Verify: &verifier.VerifyResult{
 			Passed:   true,
-			Phase:    goverifier.PhaseTest,
+			Phase:    verifier.PhaseTest,
 			ExitCode: 0,
 			Duration: 300 * time.Millisecond,
 		},

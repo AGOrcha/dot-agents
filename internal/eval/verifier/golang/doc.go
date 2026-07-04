@@ -2,14 +2,15 @@
 // eval harness (R4 spec task t-verifier-iface). It runs the build_cmd and
 // test_cmd from an [eval.TaskSpec] inside a sandbox working directory,
 // captures pass/fail + stdout/stderr + elapsed duration, and returns a typed
-// [VerifyResult].
+// [verifier.VerifyResult].
 //
 // # Seam and interface
 //
-// [Verifier] is the language-agnostic interface the R4 harness driver binds
-// to; [GoVerifier] is the Go adapter. The sibling verifier-python and
-// verifier-typescript packages mirror this shape — sequenced after this
-// package so the [VerifyResult] shape stabilizes first.
+// [verifier.Verifier] is the language-agnostic interface the R4 harness driver
+// binds to; [GoVerifier] is the Go adapter. The interface and its result types
+// live in the neutral internal/eval/verifier package so the sibling
+// verifier-python and verifier-typescript packages can mirror the
+// [verifier.VerifyResult] shape without importing this package.
 //
 // # Command execution model
 //
@@ -23,11 +24,11 @@
 // scratch directory provisioned by the sandbox.
 //
 // A non-zero exit code is NOT returned as an error; it is encoded in
-// [VerifyResult.Passed] and [VerifyResult.ExitCode] so the scoring bridge
-// can record failure outcomes rather than treating them as harness faults
-// (R4 spec done-criterion 8: "a failed run still emits a score sidecar").
-// A [VerifyError] is returned only when a step could not start at all
-// (context cancelled, binary not found, OS-level failure).
+// [verifier.VerifyResult.Passed] and [verifier.VerifyResult.ExitCode] so the
+// scoring bridge can record failure outcomes rather than treating them as
+// harness faults (R4 spec done-criterion 8: "a failed run still emits a score
+// sidecar"). A [verifier.VerifyError] is returned only when a step could not
+// start at all (context cancelled, binary not found, OS-level failure).
 //
 // # Testability
 //

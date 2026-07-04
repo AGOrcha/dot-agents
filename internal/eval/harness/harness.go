@@ -8,7 +8,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
 	"github.com/AGOrcha/dot-agents/internal/eval/scoringbridge"
-	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 )
 
 // Config carries the seam dependencies a Harness orchestrates. Every field is
@@ -25,7 +25,7 @@ type Config struct {
 	Runner runner.Runner
 	// Verifiers maps a language to the verifier that runs its build/test
 	// commands (the verify stage). At least one entry is required.
-	Verifiers map[eval.Language]goverifier.Verifier
+	Verifiers map[eval.Language]verifier.Verifier
 }
 
 // Harness sequences the five eval stages behind their seam interfaces. It is
@@ -35,7 +35,7 @@ type Harness struct {
 	generators *eval.Registry
 	sandbox    sandbox.Sandbox
 	runner     runner.Runner
-	verifiers  map[eval.Language]goverifier.Verifier
+	verifiers  map[eval.Language]verifier.Verifier
 }
 
 // New validates cfg and returns a Harness. It errors when any dependency is
@@ -92,7 +92,7 @@ type EvalRun struct {
 	// Run is the agent runner's output and telemetry (stage 3).
 	Run runner.Result
 	// Verify is the verifier's full build/test outcome (stage 4).
-	Verify *goverifier.VerifyResult
+	Verify *verifier.VerifyResult
 	// Score is everything the scoring bridge persisted and computed (stage 5).
 	Score scoringbridge.Result
 }
@@ -195,7 +195,7 @@ func (h *Harness) runAgent(ctx context.Context, spec *eval.TaskSpec, instance *s
 // verify runs the language verifier over the sandbox workdir. A failing build
 // or test is encoded in the returned VerifyResult (Passed=false), not an error;
 // only a verifier step that could not start (a VerifyError) stops the run.
-func (h *Harness) verify(ctx context.Context, spec *eval.TaskSpec, instance *sandbox.Instance) (*goverifier.VerifyResult, error) {
+func (h *Harness) verify(ctx context.Context, spec *eval.TaskSpec, instance *sandbox.Instance) (*verifier.VerifyResult, error) {
 	v, ok := h.verifiers[spec.Language]
 	if !ok {
 		return nil, fmt.Errorf("harness: no verifier registered for language %q", spec.Language)
@@ -214,7 +214,7 @@ func (h *Harness) score(
 	spec *eval.TaskSpec,
 	instance *sandbox.Instance,
 	agentResult runner.Result,
-	verifyResult *goverifier.VerifyResult,
+	verifyResult *verifier.VerifyResult,
 ) (scoringbridge.Result, error) {
 	result, err := scoringbridge.ScoreRun(scoringbridge.EvalRun{
 		RunID:      instance.RunID,
@@ -254,11 +254,11 @@ func mapTelemetry(t runner.AgentTelemetry) scoringbridge.AgentTelemetry {
 //
 // PhaseValidate never reaches here — the verifier returns it only via a
 // VerifyError, which the verify stage already surfaced as an error.
-func mapVerify(spec *eval.TaskSpec, result *goverifier.VerifyResult) scoringbridge.VerifyResult {
+func mapVerify(spec *eval.TaskSpec, result *verifier.VerifyResult) scoringbridge.VerifyResult {
 	switch result.Phase {
-	case goverifier.PhaseBuild:
+	case verifier.PhaseBuild:
 		return scoringbridge.VerifyResult{BuildRan: true, BuildPassed: false}
-	case goverifier.PhaseTest:
+	case verifier.PhaseTest:
 		hasBuild := len(spec.Verification.BuildCmd) > 0
 		return scoringbridge.VerifyResult{
 			BuildRan:    hasBuild,

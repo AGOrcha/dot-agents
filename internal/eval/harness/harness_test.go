@@ -16,6 +16,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
 	"github.com/AGOrcha/dot-agents/internal/eval/scoringbridge"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
@@ -105,10 +106,10 @@ func (s *fakeSandbox) Provision(context.Context, *eval.TaskSpec) (*sandbox.Insta
 }
 func (s *fakeSandbox) PruneStale(context.Context) ([]string, error) { return nil, nil }
 
-// fakeVerifier is a scripted goverifier.Verifier for the unit paths.
+// fakeVerifier is a scripted verifier.Verifier for the unit paths.
 type fakeVerifier struct {
 	lang        eval.Language
-	res         *goverifier.VerifyResult
+	res         *verifier.VerifyResult
 	err         error
 	calls       int
 	lastWorkdir string
@@ -116,7 +117,7 @@ type fakeVerifier struct {
 }
 
 func (v *fakeVerifier) Language() eval.Language { return v.lang }
-func (v *fakeVerifier) Verify(_ context.Context, _ *eval.TaskSpec, workdir string, env []string) (*goverifier.VerifyResult, error) {
+func (v *fakeVerifier) Verify(_ context.Context, _ *eval.TaskSpec, workdir string, env []string) (*verifier.VerifyResult, error) {
 	v.calls++
 	v.lastWorkdir = workdir
 	v.lastEnv = env
@@ -168,7 +169,7 @@ func unitHarness(t *testing.T, sb sandbox.Sandbox, run runner.Runner, ver *fakeV
 		Generators: registryWith(t, gen),
 		Sandbox:    sb,
 		Runner:     run,
-		Verifiers:  map[eval.Language]goverifier.Verifier{ver.Language(): ver},
+		Verifiers:  map[eval.Language]verifier.Verifier{ver.Language(): ver},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -231,7 +232,7 @@ func TestNew_Validation(t *testing.T) {
 	reg := registryWith(t, fakeGenerator{lang: eval.LanguageGo, spec: validSpec()})
 	sb := &fakeSandbox{}
 	run := &runner.FakeRunner{}
-	vers := map[eval.Language]goverifier.Verifier{eval.LanguageGo: &fakeVerifier{lang: eval.LanguageGo}}
+	vers := map[eval.Language]verifier.Verifier{eval.LanguageGo: &fakeVerifier{lang: eval.LanguageGo}}
 
 	tests := []struct {
 		name string
@@ -292,7 +293,7 @@ func TestRun_Integration(t *testing.T) {
 		Generators: reg,
 		Sandbox:    &fakeSandbox{inst: inst},
 		Runner:     fakeRun,
-		Verifiers:  map[eval.Language]goverifier.Verifier{eval.LanguageGo: goverifier.New()},
+		Verifiers:  map[eval.Language]verifier.Verifier{eval.LanguageGo: goverifier.New()},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -349,8 +350,8 @@ func assertIntegrationVerified(t *testing.T, got EvalRun) {
 	if got.Verify == nil || !got.Verify.Passed {
 		t.Fatalf("verify result = %+v, want passed", got.Verify)
 	}
-	if got.Verify.Phase != goverifier.PhaseTest {
-		t.Fatalf("verify phase = %q, want %q", got.Verify.Phase, goverifier.PhaseTest)
+	if got.Verify.Phase != verifier.PhaseTest {
+		t.Fatalf("verify phase = %q, want %q", got.Verify.Phase, verifier.PhaseTest)
 	}
 }
 
@@ -380,7 +381,7 @@ func TestRun_ContextCanceled(t *testing.T) {
 	h := unitHarness(t,
 		&fakeSandbox{inst: fakeInstance(t, "r1")},
 		&runner.FakeRunner{},
-		&fakeVerifier{lang: eval.LanguageGo, res: &goverifier.VerifyResult{Passed: true, Phase: goverifier.PhaseTest}},
+		&fakeVerifier{lang: eval.LanguageGo, res: &verifier.VerifyResult{Passed: true, Phase: verifier.PhaseTest}},
 		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
 	)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -468,7 +469,7 @@ func TestRun_VerifyStepError(t *testing.T) {
 	// A VerifyError (a step that could not start) is an infra failure.
 	ver := &fakeVerifier{
 		lang: eval.LanguageGo,
-		err:  &goverifier.VerifyError{Phase: goverifier.PhaseTest, Cause: errors.New("go: not found")},
+		err:  &verifier.VerifyError{Phase: verifier.PhaseTest, Cause: errors.New("go: not found")},
 	}
 	h := unitHarness(t,
 		&fakeSandbox{inst: fakeInstance(t, "r1")},
@@ -487,7 +488,7 @@ func TestRun_ScoreError(t *testing.T) {
 	h := unitHarness(t,
 		&fakeSandbox{inst: inst},
 		&runner.FakeRunner{},
-		&fakeVerifier{lang: eval.LanguageGo, res: &goverifier.VerifyResult{Passed: true, Phase: goverifier.PhaseTest}},
+		&fakeVerifier{lang: eval.LanguageGo, res: &verifier.VerifyResult{Passed: true, Phase: verifier.PhaseTest}},
 		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
 	)
 	_, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
@@ -503,7 +504,7 @@ func TestRun_VerifyFailureScored(t *testing.T) {
 	inst := fakeInstance(t, "r-fail")
 	ver := &fakeVerifier{
 		lang: eval.LanguageGo,
-		res:  &goverifier.VerifyResult{Passed: false, Phase: goverifier.PhaseTest, ExitCode: 1},
+		res:  &verifier.VerifyResult{Passed: false, Phase: verifier.PhaseTest, ExitCode: 1},
 	}
 	fakeRun := &runner.FakeRunner{Result: runner.Result{ExitCode: 7}}
 	h := unitHarness(t, &fakeSandbox{inst: inst}, fakeRun, ver,
@@ -550,37 +551,37 @@ func TestMapVerify(t *testing.T) {
 	tests := []struct {
 		name   string
 		spec   *eval.TaskSpec
-		result *goverifier.VerifyResult
+		result *verifier.VerifyResult
 		want   scoringbridge.VerifyResult
 	}{
 		{
 			name:   "build failed short-circuits test",
 			spec:   withBuild,
-			result: &goverifier.VerifyResult{Phase: goverifier.PhaseBuild, Passed: false},
+			result: &verifier.VerifyResult{Phase: verifier.PhaseBuild, Passed: false},
 			want:   scoringbridge.VerifyResult{BuildRan: true, BuildPassed: false},
 		},
 		{
 			name:   "build passed then test passed",
 			spec:   withBuild,
-			result: &goverifier.VerifyResult{Phase: goverifier.PhaseTest, Passed: true},
+			result: &verifier.VerifyResult{Phase: verifier.PhaseTest, Passed: true},
 			want:   scoringbridge.VerifyResult{BuildRan: true, BuildPassed: true, TestRan: true, TestPassed: true},
 		},
 		{
 			name:   "build passed then test failed",
 			spec:   withBuild,
-			result: &goverifier.VerifyResult{Phase: goverifier.PhaseTest, Passed: false},
+			result: &verifier.VerifyResult{Phase: verifier.PhaseTest, Passed: false},
 			want:   scoringbridge.VerifyResult{BuildRan: true, BuildPassed: true, TestRan: true, TestPassed: false},
 		},
 		{
 			name:   "no build command, test passed",
 			spec:   noBuild,
-			result: &goverifier.VerifyResult{Phase: goverifier.PhaseTest, Passed: true},
+			result: &verifier.VerifyResult{Phase: verifier.PhaseTest, Passed: true},
 			want:   scoringbridge.VerifyResult{BuildRan: false, TestRan: true, TestPassed: true},
 		},
 		{
 			name:   "unset phase yields empty result",
 			spec:   noBuild,
-			result: &goverifier.VerifyResult{},
+			result: &verifier.VerifyResult{},
 			want:   scoringbridge.VerifyResult{},
 		},
 	}
@@ -603,7 +604,7 @@ func TestNew_NilVerifierEntry(t *testing.T) {
 		Generators: registryWith(t, fakeGenerator{lang: eval.LanguageGo, spec: validSpec()}),
 		Sandbox:    &fakeSandbox{},
 		Runner:     &runner.FakeRunner{},
-		Verifiers:  map[eval.Language]goverifier.Verifier{eval.LanguageGo: nil},
+		Verifiers:  map[eval.Language]verifier.Verifier{eval.LanguageGo: nil},
 	})
 	if err == nil {
 		t.Fatal("New(nil verifier entry): expected error")
@@ -649,7 +650,7 @@ func TestRun_NonZeroExitScoredByVerify(t *testing.T) {
 	inst := fakeInstance(t, "r-exit")
 	ver := &fakeVerifier{
 		lang: eval.LanguageGo,
-		res:  &goverifier.VerifyResult{Passed: true, Phase: goverifier.PhaseTest},
+		res:  &verifier.VerifyResult{Passed: true, Phase: verifier.PhaseTest},
 	}
 	fakeRun := &runner.FakeRunner{Result: runner.Result{ExitCode: 3}}
 	h := unitHarness(t, &fakeSandbox{inst: inst}, fakeRun, ver,
