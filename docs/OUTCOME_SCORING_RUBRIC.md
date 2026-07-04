@@ -27,6 +27,32 @@ bumping `RubricVersion`. That is the "deliberate, reviewable act" R1
 requires: a rubric change is a reviewable diff, not a silent constant
 edit buried in scoring logic.
 
+## Sources scored under this rubric
+
+This rubric scores **two** kinds of iteration, under the same versioned
+definition:
+
+- **Production iterations** — real workflow iterations in
+  `.agents/active/iteration-log/`, scored by `da score`.
+- **Eval-source iterations** — iterations produced by `da eval run`, the R4
+  agent-evaluation harness. Each eval run emits an R1-shaped `iter-1.yaml`
+  and is scored with `scoring.DefaultRubric()` — the **same** rubric, same
+  `RubricVersion`, no eval-special scoring path. The resulting
+  `iter-1.score.yaml` sidecar is loadable by `da score iteration` and carries
+  the same explainable breakdown as any production iteration.
+
+An eval run leaves some objective signals **absent by construction** (its
+sandbox worktree never lands on trunk, so `landed` is absent; it declares no
+`write_scope`, so the objective half of `scope` is absent; v1 captures no
+transcript window, so the objective process checks are absent). Absent is
+first-class — the [renormalizing combination](#combination) drops those
+signals from the vote — so an eval run is scored on the signals it does
+carry, exactly as a production iteration with the same sparse telemetry would
+be. See [`EVAL_HARNESS.md`](./EVAL_HARNESS.md) — in particular
+[How eval outcomes feed R1](./EVAL_HARNESS.md#how-eval-outcomes-feed-r1) — for
+the harness, the run-dir layout, and the `da score iteration --iter-log-dir`
+invocation that reads an eval run.
+
 ## Versioning policy
 
 `RubricVersion` is semantic:
