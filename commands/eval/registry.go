@@ -33,22 +33,19 @@ var openReader = openWarmReader
 // path mirrors `da kg`'s warm-store layout (<KG_HOME>/ops/graphstore.db).
 //
 // gen/run are read paths, so a missing store is an operator error — the code
-// graph has not been built — NOT a reason to create one. graphstore.OpenSQLite
-// is an open-or-CREATE call (it MkdirAlls the parent and initialises an empty
-// schema), so calling it against an absent path would silently leave a useless
-// empty graphstore.db behind and then fail deeper in the generator with an
-// opaque "no symbols" error. Gate on existence first: fail cleanly with a
-// build-the-graph message and touch nothing when the store is absent.
+// graph has not been built — NOT a reason to create one. It opens through
+// graphstore.OpenSQLiteReadOnly (a `mode=ro`, creation-safe-by-construction
+// open) rather than the open-or-CREATE OpenSQLite, so an absent store can never
+// leave a useless empty graphstore.db behind regardless of timing. A missing
+// store surfaces as os.ErrNotExist, which maps to the actionable
+// build-the-graph message.
 func openWarmReader() (graphstore.CodeGraphReader, func() error, error) {
 	path := warmDBPath()
-	if _, err := os.Stat(path); err != nil {
+	store, err := graphstore.OpenSQLiteReadOnly(path)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, fmt.Errorf("eval: code graph not built at %s", path)
 		}
-		return nil, nil, fmt.Errorf("eval: stat code graph: %w", err)
-	}
-	store, err := graphstore.OpenSQLite(path)
-	if err != nil {
 		return nil, nil, fmt.Errorf("eval: open code graph: %w", err)
 	}
 	return store, store.Close, nil

@@ -394,16 +394,44 @@ func TestBuildHarnessRunnerErrorNoStutter(t *testing.T) {
 	}
 }
 
-// resolveGenerators validates --difficulty on the KG (non --task) path, so an
-// invalid band fails before the registry opens.
-func TestResolveGeneratorsInvalidDifficulty(t *testing.T) {
-	_, _, closeFn, err := resolveGenerators(runOptions{language: "go", difficulty: "bogus"})
-	if err == nil {
-		closeReader(closeFn)
-		t.Fatal("invalid difficulty should fail resolveGenerators before opening the graph")
+// runEvalCommand validates --difficulty up front for EVERY mode. The key case is
+// --task: its fixed-registry path bypasses the generator (and thus the old
+// KG-branch check), so validating in runEvalCommand is what stops a malformed
+// band from being silently accepted alongside a pre-generated spec. Also covers
+// the generate path and the dry-run preview.
+func TestRunEvalCommandInvalidDifficulty(t *testing.T) {
+	taskPath := writeSpecFile(t, validSpec())
+	cases := []struct {
+		name   string
+		opts   runOptions
+		dryRun bool
+	}{
+		{"task_mode", runOptions{task: taskPath, difficulty: "bogus"}, false},
+		{"generate_mode", runOptions{language: "go", difficulty: "bogus"}, false},
+		{"dry_run", runOptions{language: "go", difficulty: "bogus"}, true},
 	}
-	if !strings.Contains(err.Error(), `invalid difficulty "bogus"`) {
-		t.Errorf("resolveGenerators difficulty error not actionable: %v", err)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runEvalCommand(context.Background(), &bytes.Buffer{}, tc.opts, false, tc.dryRun)
+			if err == nil {
+				t.Fatal("invalid difficulty should fail before any generation/replay")
+			}
+			if !strings.Contains(err.Error(), `invalid difficulty "bogus"`) {
+				t.Errorf("difficulty error not actionable: %v", err)
+			}
+		})
+	}
+}
+
+// A valid --difficulty is accepted with --task (it is ignored per the flag's
+// documented behaviour, not rejected) — only a malformed band errors. Driven
+// through the dry-run preview so no live sandbox/agent is needed.
+func TestRunEvalCommandValidDifficultyWithTaskIgnored(t *testing.T) {
+	taskPath := writeSpecFile(t, validSpec())
+	err := runEvalCommand(context.Background(), &bytes.Buffer{},
+		runOptions{task: taskPath, difficulty: "medium"}, false, true)
+	if err != nil {
+		t.Fatalf("a valid --difficulty must be accepted (ignored) with --task: %v", err)
 	}
 }
 

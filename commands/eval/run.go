@@ -99,10 +99,17 @@ func runOptionsFrom(cmd *cobra.Command) runOptions {
 // CLI entry; the acceptance test drives the same path with the sandbox/runner
 // seams overridden.
 func runEvalCommand(ctx context.Context, out io.Writer, opts runOptions, asJSON, dryRun bool) error {
-	// Validate the adapter once here — the single entry for both the dry-run
-	// preview (which shows the agent it WOULD run) and the live path — so a typo
-	// fails fast with an enumerated error before either branch does any work.
+	// Validate the adapter and difficulty once here — the single entry for the
+	// dry-run preview, the --task replay, AND the live-generate path — so a typo
+	// fails fast with an actionable error before any branch does work. Doing the
+	// difficulty check here (not in resolveGenerators) is what catches
+	// `--task <spec> --difficulty bogus`, whose fixed-registry path bypasses the
+	// generator entirely; a malformed band is rejected even when it is otherwise
+	// ignored with --task (per the flag's documented behaviour).
 	if err := validateAdapter(runner.Adapter(opts.adapter)); err != nil {
+		return err
+	}
+	if err := validateDifficulty(evalcore.Difficulty(opts.difficulty)); err != nil {
 		return err
 	}
 	root := resolveRepoDir(opts.repoDir)
@@ -233,9 +240,9 @@ func resolveGenerators(opts runOptions) (*evalcore.Registry, evalcore.Language, 
 	if err := validateLanguage(lang); err != nil {
 		return nil, "", nil, err
 	}
-	if err := validateDifficulty(evalcore.Difficulty(opts.difficulty)); err != nil {
-		return nil, "", nil, err
-	}
+	// Difficulty is validated up front in runEvalCommand (the single command
+	// entry) so both the --task replay and this generate path reject a malformed
+	// band — it is not re-checked here.
 	reg, closeFn, err := kgRegistry()
 	return reg, lang, closeFn, err
 }
