@@ -199,7 +199,7 @@ tasks:
       app_type: go-cli
     - id: verifier-python
       title: Python verifier
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
         - generator-python
@@ -216,7 +216,7 @@ tasks:
       app_type: go-cli
     - id: verifier-typescript
       title: TypeScript verifier
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
         - generator-typescript
