@@ -125,16 +125,19 @@ func tokenize(s string) []string {
 		case ch == '"':
 			inDouble = true
 		case ch == ' ' || ch == '\t':
-			if cur.Len() > 0 {
-				tokens = append(tokens, cur.String())
-				cur.Reset()
-			}
+			tokens = flushToken(tokens, &cur)
 		default:
 			cur.WriteRune(ch)
 		}
 	}
+	return flushToken(tokens, &cur)
+}
+
+// flushToken appends the accumulated token (if any) to tokens and resets cur.
+func flushToken(tokens []string, cur *strings.Builder) []string {
 	if cur.Len() > 0 {
 		tokens = append(tokens, cur.String())
+		cur.Reset()
 	}
 	return tokens
 }
