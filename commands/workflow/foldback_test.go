@@ -499,226 +499,206 @@ func TestFoldBackCreate_RewritesFromBlocks(t *testing.T) {
 	}
 }
 
+// fbPlanFileRel returns the on-disk path to a p1 plan artifact
+// (TASKS.yaml / PLAN.yaml) inside repo.
+func fbPlanFileRel(repo, name string) string {
+	return filepath.Join(repo, ".agents", "workflow", "plans", "p1", name)
+}
+
+// fbDryRunInlineTaskNoteWritesNothing exercises the inline task-note route:
+// the preview reports task_note:p1/t1 and leaves TASKS.yaml plus the fold-back
+// staging dir untouched.
+func fbDryRunInlineTaskNoteWritesNothing(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	tasksPath := fbPlanFileRel(repo, "TASKS.yaml")
+	before := mustReadFileString(t, tasksPath)
+
+	out := dryRunFoldBackCreate(t, repo,
+		"--plan", "p1", "--task", "t1", "--observation", "dry obs")
+
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
+	}
+	if after := mustReadFileString(t, tasksPath); after != before {
+		t.Fatalf("dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
+	}
+	requireContainsAll(t, out, "dry-run", "task_note:p1/t1", "TASKS.yaml")
+}
+
+// fbDryRunPlanSummaryWritesNothing exercises the plan-summary route: the
+// preview reports plan_summary:p1 and leaves PLAN.yaml plus the staging dir
+// untouched.
+func fbDryRunPlanSummaryWritesNothing(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	planPath := fbPlanFileRel(repo, "PLAN.yaml")
+	before := mustReadFileString(t, planPath)
+
+	out := dryRunFoldBackCreate(t, repo,
+		"--plan", "p1", "--observation", "plan dry obs")
+
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
+	}
+	if after := mustReadFileString(t, planPath); after != before {
+		t.Fatalf("dry-run mutated PLAN.yaml:\nbefore=%q\nafter=%q", before, after)
+	}
+	requireContainsAll(t, out, "dry-run", "plan_summary:p1", "PLAN.yaml")
+}
+
+// fbDryRunProposeWritesNothing exercises the --propose route: the preview
+// reports the obs- proposal but creates neither the proposal file nor the
+// proposals dir, and writes no fold-back artifact.
+func fbDryRunProposeWritesNothing(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	out := dryRunFoldBackCreate(t, repo,
+		"--plan", "p1", "--task", "t1", "--observation", "big dry", "--propose")
+
+	if props, _ := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md")); len(props) != 0 {
+		t.Fatalf("dry-run wrote proposal file(s): %v", props)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, "proposals")); !os.IsNotExist(err) {
+		t.Fatalf("dry-run created the proposals dir (want none): %v", err)
+	}
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
+	}
+	requireContainsAll(t, out, "dry-run", "proposal:obs-", "create proposal")
+}
+
+// fbDryRunWetInlineWrites is the companion positive case: the same inline
+// invocation WITHOUT --dry-run does mutate TASKS.yaml and persist the artifact,
+// so the gate is the only difference between preview and write.
+func fbDryRunWetInlineWrites(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	seedFoldBack(t, repo, "--plan", "p1", "--task", "t1", "--observation", "wet obs")
+	if got := foldBackArtifactPaths(repo); len(got) != 1 {
+		t.Fatalf("expected one fold-back artifact without dry-run, got %v", got)
+	}
+	tf, err := loadCanonicalTasks(repo, "p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tf.Tasks[0].Notes, "wet obs") {
+		t.Fatalf("task notes not mutated: %q", tf.Tasks[0].Notes)
+	}
+}
+
+// fbDryRunGlobalFlagGuards proves the global -n/--dry-run flag
+// (deps.Flags.DryRun, OR-merged in foldBackDryRun) triggers the same
+// side-effect-free guard as the local --dry-run flag — no artifact, no
+// TASKS.yaml edit — and queues zero journal events.
+func fbDryRunGlobalFlagGuards(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	tasksPath := fbPlanFileRel(repo, "TASKS.yaml")
+	before := mustReadFileString(t, tasksPath)
+	events := captureJournal(t)
+	prev := deps.Flags.DryRun
+	deps.Flags.DryRun = func() bool { return true }
+	t.Cleanup(func() { deps.Flags.DryRun = prev })
+
+	// No local --dry-run in the args: only the global flag gates here.
+	out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "global dry")
+
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("global dry-run wrote fold-back artifact(s): %v", got)
+	}
+	if after := mustReadFileString(t, tasksPath); after != before {
+		t.Fatalf("global dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
+	}
+	if len(*events) != 0 {
+		t.Fatalf("global dry-run queued %d journal event(s), want 0", len(*events))
+	}
+	if !strings.Contains(out, "dry-run") {
+		t.Fatalf("output missing dry-run marker:\n%s", out)
+	}
+}
+
+// fbDryRunQueuesNoJournal proves a dry-run records nothing durable, so it must
+// queue zero journal events (the write path defers a journalTier1 delta; the
+// dry-run path returns first).
+func fbDryRunQueuesNoJournal(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	events := captureJournal(t)
+
+	_ = dryRunFoldBackCreate(t, repo,
+		"--plan", "p1", "--task", "t1", "--observation", "no journal")
+
+	if len(*events) != 0 {
+		t.Fatalf("dry-run queued %d journal event(s), want 0", len(*events))
+	}
+}
+
+// fbDryRunMissingTaskErrors proves an accurate preview: a task-note dry-run
+// against a NON-EXISTENT task must return the same missing-task error the real
+// create path hits at updateTaskFoldBackNote, not a false-green preview — and
+// must still write nothing / journal nothing.
+func fbDryRunMissingTaskErrors(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	tasksPath := fbPlanFileRel(repo, "TASKS.yaml")
+	before := mustReadFileString(t, tasksPath)
+	events := captureJournal(t)
+
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "ghost", "--observation", "no such task", "--dry-run")
+	if err == nil {
+		t.Fatal("dry-run of a task-note route against a missing task should error")
+	}
+	if !strings.Contains(err.Error(), "task ghost not found in plan p1") {
+		t.Fatalf("want missing-task error, got %v", err)
+	}
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
+	}
+	if after := mustReadFileString(t, tasksPath); after != before {
+		t.Fatalf("failed dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
+	}
+	if len(*events) != 0 {
+		t.Fatalf("failed dry-run queued %d journal event(s), want 0", len(*events))
+	}
+}
+
+// fbDryRunUnreadableTasksErrors proves the read-only precondition surfaces a
+// TASKS.yaml load failure too (not just a missing task): a corrupt tasks file
+// makes the task-note dry-run report the same load error the write path would,
+// still writing nothing.
+func fbDryRunUnreadableTasksErrors(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	tasksPath := fbPlanFileRel(repo, "TASKS.yaml")
+	if err := os.WriteFile(tasksPath, []byte("[unterminated\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--observation", "corrupt", "--dry-run")
+	if err == nil {
+		t.Fatal("dry-run should surface the TASKS.yaml load error")
+	}
+	if !strings.Contains(err.Error(), "load tasks for plan p1") {
+		t.Fatalf("want load-tasks error, got %v", err)
+	}
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
+	}
+}
+
 // TestFoldBackCreate_DryRunNoSideEffects proves `fold-back create --dry-run`
 // previews the routing decision and writes NOTHING to disk: no obs-*.md
 // proposal, no fold-back artifact YAML, and the target TASKS.yaml/PLAN.yaml
 // bytes stay identical. It covers the inline task-note route, the plan-summary
 // route, and the --propose route.
 func TestFoldBackCreate_DryRunNoSideEffects(t *testing.T) {
-	fbArtifacts := func(repo string) []string {
-		m, _ := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "*.yaml"))
-		return m
-	}
-
-	t.Run("inline task-note route", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
-		before, err := os.ReadFile(tasksPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--observation", "dry obs", "--dry-run")
-
-		if got := fbArtifacts(repo); len(got) != 0 {
-			t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
-		}
-		after, err := os.ReadFile(tasksPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(before) != string(after) {
-			t.Fatalf("dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
-		}
-		for _, want := range []string{"dry-run", "task_note:p1/t1", "TASKS.yaml"} {
-			if !strings.Contains(out, want) {
-				t.Fatalf("output missing %q:\n%s", want, out)
-			}
-		}
-	})
-
-	t.Run("plan-summary route", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		planPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "PLAN.yaml")
-		before, err := os.ReadFile(planPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
-			"--plan", "p1", "--observation", "plan dry obs", "--dry-run")
-
-		if got := fbArtifacts(repo); len(got) != 0 {
-			t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
-		}
-		after, err := os.ReadFile(planPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(before) != string(after) {
-			t.Fatalf("dry-run mutated PLAN.yaml:\nbefore=%q\nafter=%q", before, after)
-		}
-		for _, want := range []string{"dry-run", "plan_summary:p1", "PLAN.yaml"} {
-			if !strings.Contains(out, want) {
-				t.Fatalf("output missing %q:\n%s", want, out)
-			}
-		}
-	})
-
-	t.Run("propose route", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
-
-		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--observation", "big dry", "--propose", "--dry-run")
-
-		if props, _ := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md")); len(props) != 0 {
-			t.Fatalf("dry-run wrote proposal file(s): %v", props)
-		}
-		if _, err := os.Stat(filepath.Join(agentsHome, "proposals")); !os.IsNotExist(err) {
-			t.Fatalf("dry-run created the proposals dir (want none): %v", err)
-		}
-		if got := fbArtifacts(repo); len(got) != 0 {
-			t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
-		}
-		for _, want := range []string{"dry-run", "proposal:obs-", "create proposal"} {
-			if !strings.Contains(out, want) {
-				t.Fatalf("output missing %q:\n%s", want, out)
-			}
-		}
-	})
-
-	// Companion positive case: the same inline invocation WITHOUT --dry-run
-	// does mutate TASKS.yaml and persist the artifact, so the gate is the only
-	// difference between preview and write.
-	t.Run("writes without dry-run", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		if err := executeWorkflowCommand(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--observation", "wet obs"); err != nil {
-			t.Fatal(err)
-		}
-		if got := fbArtifacts(repo); len(got) != 1 {
-			t.Fatalf("expected one fold-back artifact without dry-run, got %v", got)
-		}
-		tf, err := loadCanonicalTasks(repo, "p1")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(tf.Tasks[0].Notes, "wet obs") {
-			t.Fatalf("task notes not mutated: %q", tf.Tasks[0].Notes)
-		}
-	})
-
-	// The global -n/--dry-run flag (deps.Flags.DryRun, OR-merged in foldBackDryRun)
-	// must trigger the same side-effect-free guard as the local --dry-run flag —
-	// no artifact, no TASKS.yaml edit — and queue zero journal events.
-	t.Run("global -n flag guards without local --dry-run", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
-		before, err := os.ReadFile(tasksPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		events := captureJournal(t)
-		prev := deps.Flags.DryRun
-		deps.Flags.DryRun = func() bool { return true }
-		t.Cleanup(func() { deps.Flags.DryRun = prev })
-
-		// No local --dry-run in the args: only the global flag gates here.
-		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--observation", "global dry")
-
-		if got := fbArtifacts(repo); len(got) != 0 {
-			t.Fatalf("global dry-run wrote fold-back artifact(s): %v", got)
-		}
-		after, err := os.ReadFile(tasksPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(before) != string(after) {
-			t.Fatalf("global dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
-		}
-		if len(*events) != 0 {
-			t.Fatalf("global dry-run queued %d journal event(s), want 0", len(*events))
-		}
-		if !strings.Contains(out, "dry-run") {
-			t.Fatalf("output missing dry-run marker:\n%s", out)
-		}
-	})
-
-	// A dry-run records nothing durable, so it must queue zero journal events
-	// (the write path defers a journalTier1 delta; the dry-run path returns first).
-	t.Run("queues no journal event", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		events := captureJournal(t)
-
-		_ = executeWorkflowCommandOutput(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--observation", "no journal", "--dry-run")
-
-		if len(*events) != 0 {
-			t.Fatalf("dry-run queued %d journal event(s), want 0", len(*events))
-		}
-	})
-
-	// Accurate preview: a task-note dry-run against a NON-EXISTENT task must return
-	// the same missing-task error the real create path hits at updateTaskFoldBackNote,
-	// not a false-green preview — and must still write nothing / journal nothing.
-	t.Run("missing task surfaces error and writes nothing", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
-		before, err := os.ReadFile(tasksPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		events := captureJournal(t)
-
-		err = executeWorkflowCommand(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "ghost", "--observation", "no such task", "--dry-run")
-		if err == nil {
-			t.Fatal("dry-run of a task-note route against a missing task should error")
-		}
-		if !strings.Contains(err.Error(), "task ghost not found in plan p1") {
-			t.Fatalf("want missing-task error, got %v", err)
-		}
-		if got := fbArtifacts(repo); len(got) != 0 {
-			t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
-		}
-		after, err := os.ReadFile(tasksPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if string(before) != string(after) {
-			t.Fatalf("failed dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
-		}
-		if len(*events) != 0 {
-			t.Fatalf("failed dry-run queued %d journal event(s), want 0", len(*events))
-		}
-	})
-
-	// The read-only precondition surfaces a TASKS.yaml load failure too (not just a
-	// missing task): a corrupt tasks file makes the task-note dry-run report the same
-	// load error the write path would, still writing nothing.
-	t.Run("unreadable tasks file surfaces load error", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
-		if err := os.WriteFile(tasksPath, []byte("[unterminated\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		err := executeWorkflowCommand(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--observation", "corrupt", "--dry-run")
-		if err == nil {
-			t.Fatal("dry-run should surface the TASKS.yaml load error")
-		}
-		if !strings.Contains(err.Error(), "load tasks for plan p1") {
-			t.Fatalf("want load-tasks error, got %v", err)
-		}
-		if got := fbArtifacts(repo); len(got) != 0 {
-			t.Fatalf("failed dry-run wrote fold-back artifact(s): %v", got)
-		}
-	})
+	t.Run("inline task-note route", fbDryRunInlineTaskNoteWritesNothing)
+	t.Run("plan-summary route", fbDryRunPlanSummaryWritesNothing)
+	t.Run("propose route", fbDryRunProposeWritesNothing)
+	t.Run("writes without dry-run", fbDryRunWetInlineWrites)
+	t.Run("global -n flag guards without local --dry-run", fbDryRunGlobalFlagGuards)
+	t.Run("queues no journal event", fbDryRunQueuesNoJournal)
+	t.Run("missing task surfaces error and writes nothing", fbDryRunMissingTaskErrors)
+	t.Run("unreadable tasks file surfaces load error", fbDryRunUnreadableTasksErrors)
 }
 
 // fbDryRunUpdateVerb is the preview verb the dry-run render emits when a prior
@@ -866,62 +846,72 @@ func TestFoldBackCreate_DryRunJSONEnvelope(t *testing.T) {
 	}
 }
 
-// TestFoldBackCreate_DryRunProposeSlugAndMissingPlan covers two remaining
-// dry-run branches: the slug-named proposal name (planFoldBackRouting propose
-// branch when a --slug is set) and the read-only preamble error path (a missing
-// plan surfaces the same "plan not found" error the write path would, no writes).
+// fbDryRunProposeSlugNamedProposal covers the slug-named proposal name
+// (planFoldBackRouting propose branch when a --slug is set): the preview names
+// obs-s4 without creating the proposals dir or any fold-back artifact.
+func fbDryRunProposeSlugNamedProposal(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	agentsHome := t.TempDir()
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	out := dryRunFoldBackCreate(t, repo,
+		"--plan", "p1", "--task", "t1", "--slug", "s4", "--observation", "big", "--propose")
+
+	requireContainsAll(t, out, "proposal:obs-s4", "create proposal", "obs-s4.md")
+	if _, err := os.Stat(filepath.Join(agentsHome, "proposals")); !os.IsNotExist(err) {
+		t.Fatalf("propose dry-run created proposals dir: %v", err)
+	}
+	if got := foldBackArtifactPaths(repo); len(got) != 0 {
+		t.Fatalf("propose dry-run wrote artifact(s): %v", got)
+	}
+}
+
+// fbDryRunMissingPlanErrors covers the read-only preamble error path: a missing
+// plan surfaces the same "plan not found" error the write path would, before
+// any preview render.
+func fbDryRunMissingPlanErrors(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "ghost", "--task", "t1", "--observation", "x", "--dry-run")
+	if err == nil {
+		t.Fatal("dry-run against a missing plan should error")
+	}
+	if !strings.Contains(err.Error(), "plan ghost not found") {
+		t.Fatalf("want plan-not-found error, got %v", err)
+	}
+}
+
+// fbDryRunCorruptPriorArtifactErrors covers the shared read-only preamble
+// (prepareFoldBackUpsert): a prior artifact that exists but fails to load must
+// surface the load error, not a false-green preview — the write path would hit
+// the same error.
+func fbDryRunCorruptPriorArtifactErrors(t *testing.T) {
+	repo := setupFoldBackProject(t)
+	fbDir := filepath.Join(repo, ".agents", "active", "fold-back")
+	if err := os.MkdirAll(fbDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fbDir, "s5.yaml"), []byte(": not: valid: yaml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := executeWorkflowCommand(t, repo, "fold-back", "create",
+		"--plan", "p1", "--task", "t1", "--slug", "s5", "--observation", "x", "--dry-run")
+	if err == nil {
+		t.Fatal("dry-run against a corrupt prior artifact should error")
+	}
+	if !strings.Contains(err.Error(), "load fold-back") {
+		t.Fatalf("want load-fold-back error, got %v", err)
+	}
+}
+
+// TestFoldBackCreate_DryRunProposeSlugAndMissingPlan covers three remaining
+// dry-run branches: the slug-named proposal name, the read-only preamble error
+// path (missing plan), and the corrupt prior-artifact load error.
 func TestFoldBackCreate_DryRunProposeSlugAndMissingPlan(t *testing.T) {
-	t.Run("propose with slug previews slug-named proposal", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		agentsHome := t.TempDir()
-		t.Setenv("AGENTS_HOME", agentsHome)
-
-		out := dryRunFoldBackCreate(t, repo,
-			"--plan", "p1", "--task", "t1", "--slug", "s4", "--observation", "big", "--propose")
-
-		requireContainsAll(t, out, "proposal:obs-s4", "create proposal", "obs-s4.md")
-		if _, err := os.Stat(filepath.Join(agentsHome, "proposals")); !os.IsNotExist(err) {
-			t.Fatalf("propose dry-run created proposals dir: %v", err)
-		}
-		if got := foldBackArtifactPaths(repo); len(got) != 0 {
-			t.Fatalf("propose dry-run wrote artifact(s): %v", got)
-		}
-	})
-
-	t.Run("missing plan surfaces error before preview", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		err := executeWorkflowCommand(t, repo, "fold-back", "create",
-			"--plan", "ghost", "--task", "t1", "--observation", "x", "--dry-run")
-		if err == nil {
-			t.Fatal("dry-run against a missing plan should error")
-		}
-		if !strings.Contains(err.Error(), "plan ghost not found") {
-			t.Fatalf("want plan-not-found error, got %v", err)
-		}
-	})
-
-	// A prior artifact that exists but fails to load must surface the load error
-	// from the shared read-only preamble (prepareFoldBackUpsert), not a false-green
-	// preview — the write path would hit the same error.
-	t.Run("corrupt prior artifact surfaces load error", func(t *testing.T) {
-		repo := setupFoldBackProject(t)
-		fbDir := filepath.Join(repo, ".agents", "active", "fold-back")
-		if err := os.MkdirAll(fbDir, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(fbDir, "s5.yaml"), []byte(": not: valid: yaml\n"), 0644); err != nil {
-			t.Fatal(err)
-		}
-
-		err := executeWorkflowCommand(t, repo, "fold-back", "create",
-			"--plan", "p1", "--task", "t1", "--slug", "s5", "--observation", "x", "--dry-run")
-		if err == nil {
-			t.Fatal("dry-run against a corrupt prior artifact should error")
-		}
-		if !strings.Contains(err.Error(), "load fold-back") {
-			t.Fatalf("want load-fold-back error, got %v", err)
-		}
-	})
+	t.Run("propose with slug previews slug-named proposal", fbDryRunProposeSlugNamedProposal)
+	t.Run("missing plan surfaces error before preview", fbDryRunMissingPlanErrors)
+	t.Run("corrupt prior artifact surfaces load error", fbDryRunCorruptPriorArtifactErrors)
 }
 
 func TestFoldBackCreate_WriteError(t *testing.T) {
