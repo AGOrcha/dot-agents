@@ -22,6 +22,10 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 gate="$here/gate-cross.sh"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 
+# Fictional Go package the gate is pointed at across the reachable/unreachable
+# cases; a single constant so the fixture package name lives in one place.
+readonly FIXTURE_PKG='./internal/foo'
+
 fail=0
 chk() {
   local got="$1" want="$2" desc="$3"
@@ -83,7 +87,7 @@ chk "$rc2b" "1" "control: no Windows credit -> foo_windows.go <95% -> FAIL"
 
 echo "== case 3: unreachable box -> loud-skip, exit 0 =="
 set +e
-out3="$(GATE_CROSS_PKGS="./internal/foo" PROBE_CMD="false" bash "$gate" 2>&1)"; rc3=$?
+out3="$(GATE_CROSS_PKGS="$FIXTURE_PKG" PROBE_CMD="false" bash "$gate" 2>&1)"; rc3=$?
 set -e
 chk "$rc3" "0" "unreachable box loud-skips deterministically (exit 0)"
 grep -q "UNREACHABLE" <<<"$out3" \
@@ -92,13 +96,13 @@ grep -q "UNREACHABLE" <<<"$out3" \
 
 echo "== case 4: GATE_CROSS_STRICT=1 + unreachable -> hard-fail =="
 set +e
-GATE_CROSS_PKGS="./internal/foo" PROBE_CMD="false" GATE_CROSS_STRICT=1 bash "$gate" >/dev/null 2>&1; rc4=$?
+GATE_CROSS_PKGS="$FIXTURE_PKG" PROBE_CMD="false" GATE_CROSS_STRICT=1 bash "$gate" >/dev/null 2>&1; rc4=$?
 set -e
 chk "$rc4" "1" "STRICT turns an unreachable box into a non-zero failure"
 
 echo "== case 5: reachable full run (mock probe/sync/ssh) -> merge + PASS =="
 set +e
-out5="$(GATE_CROSS_PKGS="./internal/foo" \
+out5="$(GATE_CROSS_PKGS="$FIXTURE_PKG" \
         PROBE_CMD="true" SYNC_CMD="true" \
         SSH_CMD="bash $tmp/fakessh.sh" WINPROF="$tmp/win-good.out" \
         GATE_CROSS_LOCAL_PROFILE="$tmp/local.out" \
@@ -115,7 +119,7 @@ grep -q "gate-cross PASS" <<<"$out5" \
 
 echo "== case 6: reachable, Windows profile has the gap -> FAIL (not a stamp) =="
 set +e
-GATE_CROSS_PKGS="./internal/foo" \
+GATE_CROSS_PKGS="$FIXTURE_PKG" \
   PROBE_CMD="true" SYNC_CMD="true" \
   SSH_CMD="bash $tmp/fakessh.sh" WINPROF="$tmp/win-bad.out" \
   GATE_CROSS_LOCAL_PROFILE="$tmp/local.out" \
