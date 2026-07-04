@@ -202,6 +202,18 @@ var _ graphstore.CodeGraphReader = crgReader{}
 // is a well-formed repo-relative Go package pattern with a clean symbol and no
 // absolute path anywhere.
 func TestGenerate_GoNormalizesAbsoluteCRGPaths(t *testing.T) {
+	spec, absFile, wd := genGoCRGSpec(t)
+	assertGoVerificationRelative(t, spec)
+	assertGoArtifactAndPrompt(t, spec)
+	assertNoAbsoluteMarkers(t, spec, absFile, wd)
+}
+
+// genGoCRGSpec drives the production gen path (gencore.New → resolveRepoRoot →
+// os.Getwd, pinned via t.Chdir) over a code-review-graph seed (absolute path +
+// "file::name") and returns the emitted spec plus the seed's absolute file path
+// and the resolved working dir, so callers can assert neither survives.
+func genGoCRGSpec(t *testing.T) (*eval.TaskSpec, string, string) {
+	t.Helper()
 	repoRoot := t.TempDir()
 	t.Chdir(repoRoot)
 	wd, err := os.Getwd() // canonical root gencore.New resolves; may differ from repoRoot via symlinks
@@ -221,7 +233,14 @@ func TestGenerate_GoNormalizesAbsoluteCRGPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
+	return spec, absFile, wd
+}
 
+// assertGoVerificationRelative asserts both verification commands carry the
+// well-formed repo-relative package pattern and that no token leaks an absolute
+// path (the pre-fix ".//<abs>" bug).
+func assertGoVerificationRelative(t *testing.T, spec *eval.TaskSpec) {
+	t.Helper()
 	const wantPattern = "./internal/eval/..."
 	if !contains(spec.Verification.TestCmd, wantPattern) {
 		t.Errorf("TestCmd = %v, want a well-formed repo-relative pattern %q", spec.Verification.TestCmd, wantPattern)
@@ -236,6 +255,12 @@ func TestGenerate_GoNormalizesAbsoluteCRGPaths(t *testing.T) {
 			}
 		}
 	}
+}
+
+// assertGoArtifactAndPrompt asserts the solution artifact is repo-relative and
+// the prompt is the exact repo-relative golden with a clean symbol.
+func assertGoArtifactAndPrompt(t *testing.T, spec *eval.TaskSpec) {
+	t.Helper()
 	if got := spec.SolutionArtifacts[0].Path; got != "internal/eval/foo.go" {
 		t.Errorf("artifact path = %q, want repo-relative", got)
 	}
@@ -247,6 +272,12 @@ func TestGenerate_GoNormalizesAbsoluteCRGPaths(t *testing.T) {
 	if spec.Prompt != want {
 		t.Errorf("prompt mismatch:\n got: %q\nwant: %q", spec.Prompt, want)
 	}
+}
+
+// assertNoAbsoluteMarkers asserts the marshalled spec contains neither the seed's
+// absolute file path, the working dir, nor a "::" residue.
+func assertNoAbsoluteMarkers(t *testing.T, spec *eval.TaskSpec, absFile, wd string) {
+	t.Helper()
 	data, err := spec.MarshalYAML()
 	if err != nil {
 		t.Fatalf("MarshalYAML: %v", err)

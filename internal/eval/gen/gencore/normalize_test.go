@@ -196,20 +196,27 @@ func TestRelativizePath(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := relativizePath(tc.path, tc.root)
-			if tc.wantErr != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("relativizePath(%q,%q) err = %v, want containing %q", tc.path, tc.root, err, tc.wantErr)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("relativizePath(%q,%q): %v", tc.path, tc.root, err)
-			}
-			if got != tc.want {
-				t.Errorf("relativizePath(%q,%q) = %q, want %q", tc.path, tc.root, got, tc.want)
-			}
+			assertRelativizePath(t, tc.path, tc.root, tc.want, tc.wantErr)
 		})
+	}
+}
+
+// assertRelativizePath runs one relativizePath case: when wantErr is set it
+// requires an error containing it, otherwise it requires the exact want result.
+func assertRelativizePath(t *testing.T, path, root, want, wantErr string) {
+	t.Helper()
+	got, err := relativizePath(path, root)
+	if wantErr != "" {
+		if err == nil || !strings.Contains(err.Error(), wantErr) {
+			t.Fatalf("relativizePath(%q,%q) err = %v, want containing %q", path, root, err, wantErr)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("relativizePath(%q,%q): %v", path, root, err)
+	}
+	if got != want {
+		t.Errorf("relativizePath(%q,%q) = %q, want %q", path, root, got, want)
 	}
 }
 
