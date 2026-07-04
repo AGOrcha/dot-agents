@@ -29,13 +29,9 @@ const BAND_STYLES: Record<ScoreBand, string> = {
   unscored: 'bg-gray-100 text-gray-500 border-gray-200',
 }
 
-export default function ScoreBadge({ band, score, className = '' }: ScoreBadgeProps) {
-  const label =
-    band === 'unscored'
-      ? 'unscored'
-      : score != null
-        ? `${band} (${(score * 100).toFixed(0)}%)`
-        : band
+export default function ScoreBadge({ band, score, className = '' }: Readonly<ScoreBadgeProps>) {
+  const scoreLabel = score == null ? band : `${band} (${(score * 100).toFixed(0)}%)`
+  const label = band === 'unscored' ? 'unscored' : scoreLabel
 
   return (
     <span

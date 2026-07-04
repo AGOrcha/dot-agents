@@ -39,11 +39,11 @@ export default function AggregateView() {
           Dashboard API is not reachable. Start the service and refresh.
         </p>
       )}
-      {data && data.length === 0 && (
+      {data?.length === 0 && (
         <p className="text-gray-500 text-sm">No runs found.</p>
       )}
-      {data && data.length > 0 && (
-        <p className="text-gray-700 text-sm">{data.length} run(s) loaded.</p>
+      {(data?.length ?? 0) > 0 && (
+        <p className="text-gray-700 text-sm">{data!.length} run(s) loaded.</p>
       )}
     </section>
   )

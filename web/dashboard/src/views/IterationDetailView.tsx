@@ -18,7 +18,7 @@ export default function IterationDetailView() {
   const { n = '' } = useParams<{ n: string }>()
   const [searchParams] = useSearchParams()
   const iterLogDir = searchParams.get('iter_log_dir') ?? ''
-  const iterN = parseInt(n, 10)
+  const iterN = Number.parseInt(n, 10)
 
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.iteration(iterN, iterLogDir),

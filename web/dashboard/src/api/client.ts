@@ -87,7 +87,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       headers: {
         Accept: 'application/json',
         ...getAuthHeaders(),
-        ...(init?.headers ?? {}),
+        ...init?.headers as Record<string, string>,
       },
     })
 
