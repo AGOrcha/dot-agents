@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
 	"github.com/spf13/cobra"
@@ -22,6 +23,16 @@ func writeRunSidecar(t *testing.T, root, runID, body string) {
 		t.Fatalf("mkdir run dir: %v", err)
 	}
 	writeFile(t, filepath.Join(dir, evalRunFile), body)
+}
+
+// setSidecarMtime stamps a run's eval-run.yaml modification time so recency
+// ordering is deterministic (test-written files can otherwise share a tick).
+func setSidecarMtime(t *testing.T, root, runID string, when time.Time) {
+	t.Helper()
+	path := filepath.Join(store.RunDir(root, runID), evalRunFile)
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatalf("chtimes %s: %v", runID, err)
+	}
 }
 
 func goRunSidecar(runID, band string, value float64, scored, verified bool) string {
@@ -75,10 +86,16 @@ func TestRunLsEmptyRoot(t *testing.T) {
 	}
 }
 
-func TestRunLsListsRunsSorted(t *testing.T) {
+// Runs are listed most-recent-first by sidecar mtime — NOT alphabetically by
+// run id. eval-aaa is written with a newer mtime than eval-zzz, so it must lead
+// despite sorting after eval-zzz alphabetically.
+func TestRunLsListsRunsByRecency(t *testing.T) {
 	root := t.TempDir()
 	writeRunSidecar(t, root, "eval-zzz", goRunSidecar("eval-zzz", "good", 0.812, true, true))
 	writeRunSidecar(t, root, "eval-aaa", goRunSidecar("eval-aaa", "fair", 0.5, true, false))
+	base := time.Now().Add(-time.Hour)
+	setSidecarMtime(t, root, "eval-zzz", base)                  // older
+	setSidecarMtime(t, root, "eval-aaa", base.Add(time.Minute)) // newer
 
 	var buf bytes.Buffer
 	if err := runLs(&buf, root, false); err != nil {
@@ -90,9 +107,68 @@ func TestRunLsListsRunsSorted(t *testing.T) {
 			t.Errorf("listing missing %q in:\n%s", want, out)
 		}
 	}
-	// Sorted ascending: eval-aaa must precede eval-zzz.
+	// Recency order: the newer eval-aaa must precede the older eval-zzz.
 	if strings.Index(out, "eval-aaa") > strings.Index(out, "eval-zzz") {
-		t.Errorf("runs not sorted by id:\n%s", out)
+		t.Errorf("runs not ordered most-recent-first:\n%s", out)
+	}
+}
+
+// sortByRecency falls back to a stable descending run-id order when two runs
+// share the same mtime, so a tie never renders non-deterministically.
+func TestSortByRecencyTieBreaksByRunID(t *testing.T) {
+	when := time.Unix(1_700_000_000, 0)
+	records := []lsRecord{
+		{RunID: "run-b", modTime: when},
+		{RunID: "run-a", modTime: when},
+		{RunID: "run-c", modTime: when},
+	}
+	sortByRecency(records)
+	got := []string{records[0].RunID, records[1].RunID, records[2].RunID}
+	want := []string{"run-c", "run-b", "run-a"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("tie-break order = %v, want %v", got, want)
+		}
+	}
+}
+
+// A run id far wider than the fixed 40-column legacy width must not shear the
+// row: every column still starts at the same offset in the header and each data
+// row (the RUN column width is derived from the widest id present).
+func TestRenderRunListLongRunIDStaysAligned(t *testing.T) {
+	root := t.TempDir()
+	longID := "run-" + strings.Repeat("x", 60) // 64 chars, well past the old 40
+	shortID := "run-short"
+	writeRunSidecar(t, root, longID, goRunSidecar(longID, "good", 0.812, true, true))
+	writeRunSidecar(t, root, shortID, goRunSidecar(shortID, "fair", 0.5, true, false))
+
+	var buf bytes.Buffer
+	if err := runLs(&buf, root, false); err != nil {
+		t.Fatalf("runLs: %v", err)
+	}
+	lines := dataLines(buf.String())
+	// Header + both data rows must place the LANG column ("go"/"LANG") at the
+	// same offset: run-column width floored at the widest id (longID).
+	wantOffset := len(longID) + 2
+	assertColumnAt(t, lines[0], "LANG", wantOffset)
+	for _, ln := range lines[1:] {
+		assertColumnAt(t, ln, "go", wantOffset)
+	}
+}
+
+// dataLines returns the table rows of renderRunList output: it drops the title
+// line and the blank separator, returning the header row followed by data rows.
+func dataLines(out string) []string {
+	all := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	return all[2:] // [0]=title, [1]=blank, [2]=header, [3:]=rows
+}
+
+// assertColumnAt asserts token begins exactly at offset in line — i.e. the RUN
+// column padded every row to the same width so the next column aligns.
+func assertColumnAt(t *testing.T, line, token string, offset int) {
+	t.Helper()
+	if len(line) < offset+len(token) || line[offset:offset+len(token)] != token {
+		t.Errorf("column %q not aligned at offset %d in %q", token, offset, line)
 	}
 }
 

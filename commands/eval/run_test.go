@@ -3,6 +3,7 @@ package eval
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,6 +313,125 @@ func TestBuildHarnessNewError(t *testing.T) {
 	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return nil, nil })
 	if _, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go"}); err == nil {
 		t.Fatal("nil runner should make harness.New fail")
+	}
+}
+
+// ---- fix 4: adapter enumeration + no double-prefix stutter -------------------
+
+func TestValidateAdapter(t *testing.T) {
+	// Empty means "use the --agent default"; the three known adapters validate.
+	for _, a := range []runner.Adapter{"", runner.AdapterClaude, runner.AdapterCodex, runner.AdapterCopilot} {
+		if err := validateAdapter(a); err != nil {
+			t.Errorf("adapter %q should validate: %v", a, err)
+		}
+	}
+	err := validateAdapter("bogus")
+	if err == nil {
+		t.Fatal("unknown adapter should error")
+	}
+	if !strings.Contains(err.Error(), `unknown adapter "bogus"`) ||
+		!strings.Contains(err.Error(), "claude, codex, or copilot") {
+		t.Errorf("adapter error must name the invalid value and enumerate valid ones: %v", err)
+	}
+}
+
+// runEvalCommand rejects an unknown adapter up front — the single entry for both
+// the dry-run preview and the live path — with the enumerated message, before
+// any graph or sandbox work. Driven here through the dry-run branch so no KG or
+// sandbox is needed to prove the gate fires first.
+func TestRunEvalCommandUnknownAdapter(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		err := runEvalCommand(context.Background(), &bytes.Buffer{},
+			runOptions{language: "go", adapter: "bogus"}, false, dryRun)
+		if err == nil {
+			t.Fatalf("unknown adapter should fail runEvalCommand (dryRun=%v)", dryRun)
+		}
+		if !strings.Contains(err.Error(), `unknown adapter "bogus"`) ||
+			!strings.Contains(err.Error(), "claude, codex, or copilot") {
+			t.Errorf("adapter error not actionable (dryRun=%v): %v", dryRun, err)
+		}
+	}
+}
+
+// A sandbox constructor error is wrapped with the command context only — the
+// inner error already carries the "sandbox:" prefix, so the surfaced message
+// must not double it into "sandbox: sandbox:".
+func TestBuildHarnessSandboxErrorNoStutter(t *testing.T) {
+	swapOpenReader(t, fixtureOpenReader)
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) {
+		return nil, errors.New("sandbox: gitwt: worktree add failed")
+	})
+	_, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go", adapter: defaultAdapter})
+	if err == nil {
+		t.Fatal("sandbox error should surface")
+	}
+	if strings.Contains(err.Error(), "sandbox: sandbox:") {
+		t.Errorf("sandbox error double-prefixed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "eval run: sandbox: gitwt:") {
+		t.Errorf("sandbox error lost its single-prefixed context: %v", err)
+	}
+}
+
+// A runner constructor error is likewise wrapped with the command context only —
+// the inner error already carries the "runner:" prefix, so it must not become
+// "runner: runner:".
+func TestBuildHarnessRunnerErrorNoStutter(t *testing.T) {
+	swapOpenReader(t, fixtureOpenReader)
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{}, nil })
+	swapRunner(t, func(runner.Adapter) (runner.Runner, error) {
+		return nil, errors.New("runner: unknown adapter \"x\"")
+	})
+	_, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go", adapter: defaultAdapter})
+	if err == nil {
+		t.Fatal("runner error should surface")
+	}
+	if strings.Contains(err.Error(), "runner: runner:") {
+		t.Errorf("runner error double-prefixed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "eval run: runner: unknown adapter") {
+		t.Errorf("runner error lost its single-prefixed context: %v", err)
+	}
+}
+
+// runEvalCommand validates --difficulty up front for EVERY mode. The key case is
+// --task: its fixed-registry path bypasses the generator (and thus the old
+// KG-branch check), so validating in runEvalCommand is what stops a malformed
+// band from being silently accepted alongside a pre-generated spec. Also covers
+// the generate path and the dry-run preview.
+func TestRunEvalCommandInvalidDifficulty(t *testing.T) {
+	taskPath := writeSpecFile(t, validSpec())
+	cases := []struct {
+		name   string
+		opts   runOptions
+		dryRun bool
+	}{
+		{"task_mode", runOptions{task: taskPath, difficulty: "bogus"}, false},
+		{"generate_mode", runOptions{language: "go", difficulty: "bogus"}, false},
+		{"dry_run", runOptions{language: "go", difficulty: "bogus"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := runEvalCommand(context.Background(), &bytes.Buffer{}, tc.opts, false, tc.dryRun)
+			if err == nil {
+				t.Fatal("invalid difficulty should fail before any generation/replay")
+			}
+			if !strings.Contains(err.Error(), `invalid difficulty "bogus"`) {
+				t.Errorf("difficulty error not actionable: %v", err)
+			}
+		})
+	}
+}
+
+// A valid --difficulty is accepted with --task (it is ignored per the flag's
+// documented behaviour, not rejected) — only a malformed band errors. Driven
+// through the dry-run preview so no live sandbox/agent is needed.
+func TestRunEvalCommandValidDifficultyWithTaskIgnored(t *testing.T) {
+	taskPath := writeSpecFile(t, validSpec())
+	err := runEvalCommand(context.Background(), &bytes.Buffer{},
+		runOptions{task: taskPath, difficulty: "medium"}, false, true)
+	if err != nil {
+		t.Fatalf("a valid --difficulty must be accepted (ignored) with --task: %v", err)
 	}
 }
 

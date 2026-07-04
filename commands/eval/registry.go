@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,12 +28,31 @@ var languageProfiles = []gencore.Profile{gogen.Profile, pygen.Profile, tsgen.Pro
 // generator tests use).
 var openReader = openWarmReader
 
+// openWarmStore is the seam over the no-create read-only store open, so
+// openWarmReader's not-exist vs other-error classification is testable by
+// injecting a synthetic error rather than relying on OS-specific filesystem
+// error semantics (which differ between Unix ENOTDIR and Windows
+// ERROR_PATH_NOT_FOUND).
+var openWarmStore = graphstore.OpenSQLiteReadOnly
+
 // openWarmReader opens the warm SQLite code graph as a graphstore.CodeGraphReader
 // and returns it alongside a closer the caller must invoke when done. The DB
 // path mirrors `da kg`'s warm-store layout (<KG_HOME>/ops/graphstore.db).
+//
+// gen/run are read paths, so a missing store is an operator error — the code
+// graph has not been built — NOT a reason to create one. It opens through
+// graphstore.OpenSQLiteReadOnly (a `mode=ro`, creation-safe-by-construction
+// open) rather than the open-or-CREATE OpenSQLite, so an absent store can never
+// leave a useless empty graphstore.db behind regardless of timing. A missing
+// store surfaces as os.ErrNotExist, which maps to the actionable
+// build-the-graph message.
 func openWarmReader() (graphstore.CodeGraphReader, func() error, error) {
-	store, err := graphstore.OpenSQLite(warmDBPath())
+	path := warmDBPath()
+	store, err := openWarmStore(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("eval: code graph not built at %s", path)
+		}
 		return nil, nil, fmt.Errorf("eval: open code graph: %w", err)
 	}
 	return store, store.Close, nil
@@ -106,6 +126,21 @@ func validateLanguage(lang evalcore.Language) error {
 	}
 	if !lang.Valid() {
 		return fmt.Errorf("eval: invalid language %q (want go, python, or typescript)", lang)
+	}
+	return nil
+}
+
+// validateDifficulty rejects an unrecognised difficulty band before it reaches
+// the generator. An empty value is allowed — it means "generator's choice" (the
+// documented default). A non-empty typo must surface as an actionable "invalid
+// difficulty" error rather than the generator's ambiguous "no seed matches
+// difficulty" filter-miss, mirroring how validateLanguage guards --language.
+func validateDifficulty(diff evalcore.Difficulty) error {
+	if diff == "" {
+		return nil
+	}
+	if !diff.Valid() {
+		return fmt.Errorf("eval: invalid difficulty %q (want easy, medium, or hard)", diff)
 	}
 	return nil
 }

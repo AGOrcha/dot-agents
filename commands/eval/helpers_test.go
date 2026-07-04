@@ -192,6 +192,13 @@ func swapOpenReader(t *testing.T, fn func() (graphstore.CodeGraphReader, func() 
 	t.Cleanup(func() { openReader = prev })
 }
 
+func swapOpenWarmStore(t *testing.T, fn func(string) (*graphstore.SQLiteStore, error)) {
+	t.Helper()
+	prev := openWarmStore
+	openWarmStore = fn
+	t.Cleanup(func() { openWarmStore = prev })
+}
+
 func swapSandbox(t *testing.T, fn func(sandbox.Config) (sandbox.Sandbox, error)) {
 	t.Helper()
 	prev := newSandbox
