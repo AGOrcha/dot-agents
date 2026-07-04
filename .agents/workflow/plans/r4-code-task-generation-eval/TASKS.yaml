@@ -294,7 +294,7 @@ tasks:
       app_type: go-cli
     - id: persistence
       title: EvalRun + TaskSpec sidecar persistence
-      status: pending
+      status: completed
       depends_on:
         - harness-driver
       blocks:
