@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -49,47 +50,61 @@ func TestEffectiveLines_Empty(t *testing.T) {
 	}
 }
 
+// TestEffectiveLines_StripsTrailingCR proves CRLF (Windows) recipes yield
+// clean lines with no stray "\r" — the shebang/comment/blank filters and the
+// returned lines all operate on the CR-stripped text (R4).
+func TestEffectiveLines_StripsTrailingCR(t *testing.T) {
+	got := effectiveLines("#!/usr/bin/env da\r\nstatus\r\nrefresh\r\n")
+	want := []string{"status", "refresh"}
+	assertStringSlice(t, got, want)
+	for _, l := range got {
+		if strings.Contains(l, "\r") {
+			t.Errorf("line %q still contains a carriage return", l)
+		}
+	}
+}
+
 // ----- tokenize tests -----
 
 func TestTokenize_SimpleLine(t *testing.T) {
-	got := tokenize("workflow orient")
+	got := mustTokenize(t, "workflow orient")
 	want := []string{"workflow", "orient"}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_DoubleQuotedArg(t *testing.T) {
-	got := tokenize(`skills new "my skill" --verbose`)
+	got := mustTokenize(t, `skills new "my skill" --verbose`)
 	want := []string{"skills", "new", "my skill", "--verbose"}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_SingleQuotedArg(t *testing.T) {
-	got := tokenize("add 'path with spaces'")
+	got := mustTokenize(t, "add 'path with spaces'")
 	want := []string{"add", "path with spaces"}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_MultipleSpaces(t *testing.T) {
-	got := tokenize("sync   status")
+	got := mustTokenize(t, "sync   status")
 	want := []string{"sync", "status"}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_TabDelimiter(t *testing.T) {
-	got := tokenize("add\t.")
+	got := mustTokenize(t, "add\t.")
 	want := []string{"add", "."}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_EmptyString(t *testing.T) {
-	got := tokenize("")
+	got := mustTokenize(t, "")
 	if len(got) != 0 {
 		t.Errorf("expected no tokens for empty string, got %v", got)
 	}
 }
 
 func TestTokenize_OnlyWhitespace(t *testing.T) {
-	got := tokenize("   \t  ")
+	got := mustTokenize(t, "   \t  ")
 	if len(got) != 0 {
 		t.Errorf("expected no tokens for whitespace-only string, got %v", got)
 	}
@@ -97,23 +112,63 @@ func TestTokenize_OnlyWhitespace(t *testing.T) {
 
 func TestTokenize_QuotesAdjacentToWords(t *testing.T) {
 	// Quoted span directly adjacent to unquoted text forms a single token.
-	got := tokenize(`--project="my project"`)
+	got := mustTokenize(t, `--project="my project"`)
 	want := []string{"--project=my project"}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_NestedQuoteCharInsideSingle(t *testing.T) {
 	// Double-quote character is literal inside single quotes.
-	got := tokenize(`say 'he said "hello"'`)
+	got := mustTokenize(t, `say 'he said "hello"'`)
 	want := []string{"say", `he said "hello"`}
 	assertStringSlice(t, got, want)
 }
 
 func TestTokenize_NestedSingleInsideDouble(t *testing.T) {
 	// Single-quote character is literal inside double quotes.
-	got := tokenize(`say "it's here"`)
+	got := mustTokenize(t, `say "it's here"`)
 	want := []string{"say", "it's here"}
 	assertStringSlice(t, got, want)
+}
+
+// TestTokenize_EmptyDoubleQuotedArg proves an empty double-quoted span emits
+// an empty-string token rather than being dropped.
+func TestTokenize_EmptyDoubleQuotedArg(t *testing.T) {
+	got := mustTokenize(t, `cmd ""`)
+	assertStringSlice(t, got, []string{"cmd", ""})
+}
+
+// TestTokenize_EmptySingleQuotedArg mirrors the double-quote case for single
+// quotes.
+func TestTokenize_EmptySingleQuotedArg(t *testing.T) {
+	got := mustTokenize(t, "cmd ''")
+	assertStringSlice(t, got, []string{"cmd", ""})
+}
+
+// TestTokenize_EmptyQuotedArgBetween proves an empty quoted arg between two
+// real args keeps its position (does not collapse).
+func TestTokenize_EmptyQuotedArgBetween(t *testing.T) {
+	got := mustTokenize(t, `a "" b`)
+	assertStringSlice(t, got, []string{"a", "", "b"})
+}
+
+// TestTokenize_UnterminatedDoubleQuote proves an unclosed double quote is a
+// hard error, not a silently-accepted token.
+func TestTokenize_UnterminatedDoubleQuote(t *testing.T) {
+	if _, err := tokenize(`cmd "oops`); err == nil {
+		t.Fatal("expected unterminated-quote error, got nil")
+	}
+}
+
+// TestTokenize_UnterminatedSingleQuote mirrors the double-quote error case.
+func TestTokenize_UnterminatedSingleQuote(t *testing.T) {
+	_, err := tokenize("cmd 'oops")
+	if err == nil {
+		t.Fatal("expected unterminated-quote error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unterminated quote") {
+		t.Errorf("expected 'unterminated quote' message, got %v", err)
+	}
 }
 
 // ----- runRecipe / dispatch tests -----
@@ -164,6 +219,30 @@ func TestRunRecipe_SkipsShebangAndComments(t *testing.T) {
 	assertCallSlice(t, rec.calls, wantCalls)
 }
 
+// TestRunRecipe_CRLFDispatchesCleanTokens proves a recipe authored with
+// Windows CRLF line endings dispatches clean tokens with no trailing "\r"
+// on any command token (R4, cross-platform).
+func TestRunRecipe_CRLFDispatchesCleanTokens(t *testing.T) {
+	f := writeTempRecipe(t, "workflow orient\r\nstatus\r\n")
+	rec := &recordingDispatcher{failAt: -1}
+
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantCalls := [][]string{
+		{"workflow", "orient"},
+		{"status"},
+	}
+	assertCallSlice(t, rec.calls, wantCalls)
+	for _, call := range rec.calls {
+		for _, tok := range call {
+			if strings.Contains(tok, "\r") {
+				t.Errorf("dispatched token %q contains a carriage return", tok)
+			}
+		}
+	}
+}
+
 func TestRunRecipe_StopsOnFirstError(t *testing.T) {
 	f := writeTempRecipe(t, "step-a\nstep-b\nstep-c\n")
 	sentinel := errors.New("step-b failed")
@@ -212,18 +291,49 @@ func TestRunRecipe_QuotedArgsPassedCorrectly(t *testing.T) {
 	assertStringSlice(t, rec.calls[0], want)
 }
 
-func TestRunRecipe_EmptyTokenLineSkipped(t *testing.T) {
-	// A line that is non-blank and non-comment but produces zero tokens after
-	// tokenization (e.g. an unclosed single-quote) is silently skipped rather
-	// than dispatched. This exercises the len(tokens)==0 safety guard.
-	f := writeTempRecipe(t, "'\nstatus\n")
+// TestRunRecipe_UnterminatedQuoteAborts proves a malformed line (unterminated
+// quote) surfaces the tokenizer error and aborts the run — earlier valid
+// lines dispatch, the malformed line does not, and later lines never run.
+func TestRunRecipe_UnterminatedQuoteAborts(t *testing.T) {
+	f := writeTempRecipe(t, "status\ncmd \"oops\nrefresh\n")
 	rec := &recordingDispatcher{failAt: -1}
-	if err := runRecipe(f, rec.dispatch); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+
+	err := runRecipe(f, rec.dispatch)
+	if err == nil {
+		t.Fatal("expected error for unterminated-quote line, got nil")
 	}
-	// Only "status" should be dispatched.
+	if !strings.Contains(err.Error(), "unterminated quote") {
+		t.Errorf("expected 'unterminated quote' message, got %v", err)
+	}
+	// Only the first valid line dispatched before the malformed line aborted.
 	if len(rec.calls) != 1 || rec.calls[0][0] != "status" {
-		t.Errorf("expected [status] dispatch, got %v", rec.calls)
+		t.Errorf("expected only [status] dispatched before abort, got %v", rec.calls)
+	}
+}
+
+// TestRunRecipe_RecursionGuardStops proves a recipe that invokes `da run` on
+// itself fails with a recursion/cycle error via the REAL production dispatcher
+// (defaultDispatcher) instead of recursing without limit. This also exercises
+// real in-process dispatch of the `run` subcommand end-to-end.
+func TestRunRecipe_RecursionGuardStops(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "self.da")
+	// The recipe's only step re-runs itself (path double-quoted so any spaces
+	// in the temp dir survive tokenization).
+	if err := os.WriteFile(self, []byte(`run "`+self+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runRecipe(self, defaultDispatcher)
+	if err == nil {
+		t.Fatal("expected recursion-limit error, got nil (guard did not fire)")
+	}
+	if !strings.Contains(err.Error(), "recursion limit") {
+		t.Errorf("expected 'recursion limit' error, got %v", err)
+	}
+	// The guard must fully unwind: the depth env var is left unset afterward.
+	if _, present := os.LookupEnv(recipeDepthEnv); present {
+		t.Errorf("recursion-depth env var %q leaked after run", recipeDepthEnv)
 	}
 }
 
@@ -241,7 +351,17 @@ func TestNewRunCmd_RunE_InvokesRecipeViaInjectedDispatcher(t *testing.T) {
 	assertCallSlice(t, rec.calls, wantCalls)
 }
 
-// ----- defaultDispatcher coverage -----
+// ----- defaultDispatcher (real production dispatch) coverage -----
+
+// TestDefaultDispatcher_RealSubcommandSucceeds drives a real, side-effect-free
+// da subcommand (`explain links`) through the production dispatcher so the
+// in-process seam is exercised against a genuine RunE (not just the fake sink
+// or the --help fast path).
+func TestDefaultDispatcher_RealSubcommandSucceeds(t *testing.T) {
+	if err := defaultDispatcher([]string{"explain", "links"}); err != nil {
+		t.Fatalf("real dispatch of `explain links` returned error: %v", err)
+	}
+}
 
 func TestDefaultDispatcher_HelpExitsClean(t *testing.T) {
 	// Exercise the production dispatcher seam: --help is handled by cobra
@@ -273,6 +393,15 @@ func TestNewRunCmd_RequiresOneArg(t *testing.T) {
 }
 
 // ----- helpers -----
+
+func mustTokenize(t *testing.T, s string) []string {
+	t.Helper()
+	got, err := tokenize(s)
+	if err != nil {
+		t.Fatalf("tokenize(%q) unexpected error: %v", s, err)
+	}
+	return got
+}
 
 func writeTempRecipe(t *testing.T, content string) string {
 	t.Helper()

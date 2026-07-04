@@ -1,11 +1,24 @@
 package commands
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
+
+// maxRecipeDepth bounds how deeply `da run` may recurse (a recipe that
+// invokes `da run` on itself, or a cycle of recipes). Past this depth
+// runRecipe fails instead of recursing without limit.
+const maxRecipeDepth = 32
+
+// recipeDepthEnv carries the current recursion depth across nested in-process
+// (and shebang-exec) `da run` invocations. An env var (rather than a package
+// counter) survives the process boundary when a chmod-+x `.da` file re-execs
+// `da run`, so the guard holds for both in-process and exec recursion.
+const recipeDepthEnv = "DA_RECIPE_DEPTH"
 
 // recipeDispatcher is the function type used to dispatch a single tokenized
 // recipe line (the args that follow "da"). Injectable for testing.
@@ -47,19 +60,45 @@ line (#!/...) is ignored. No shell is invoked; recipes are cross-platform.`,
 	}
 }
 
+// enterRecipe increments the recursion-depth guard, returning a restore
+// closure (to defer) and an error when the depth limit is exceeded.
+func enterRecipe() (func(), error) {
+	depth, _ := strconv.Atoi(os.Getenv(recipeDepthEnv))
+	if depth >= maxRecipeDepth {
+		return nil, fmt.Errorf(
+			"da run: recipe recursion limit (%d) exceeded — a recipe is invoking `da run` on itself or a cycle exists",
+			maxRecipeDepth)
+	}
+	prev, had := os.LookupEnv(recipeDepthEnv)
+	os.Setenv(recipeDepthEnv, strconv.Itoa(depth+1))
+	return func() {
+		if had {
+			os.Setenv(recipeDepthEnv, prev)
+		} else {
+			os.Unsetenv(recipeDepthEnv)
+		}
+	}, nil
+}
+
 // runRecipe reads the recipe file, extracts effective lines, tokenizes each,
-// and dispatches them in order. For p1 the loop stops on the first error
-// (full fail-fast messaging is added in p2).
+// and dispatches them in order. A malformed line (unterminated quote) aborts
+// the run. For p1 the loop stops on the first dispatch error (full fail-fast
+// messaging is added in p2).
 func runRecipe(path string, dispatch recipeDispatcher) error {
+	restore, err := enterRecipe()
+	if err != nil {
+		return err
+	}
+	defer restore()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	lines := effectiveLines(string(data))
-	for _, line := range lines {
-		tokens := tokenize(line)
-		if len(tokens) == 0 {
-			continue
+	for _, line := range effectiveLines(string(data)) {
+		tokens, err := tokenize(line)
+		if err != nil {
+			return err
 		}
 		if err := dispatch(tokens); err != nil {
 			return err
@@ -71,23 +110,35 @@ func runRecipe(path string, dispatch recipeDispatcher) error {
 // effectiveLines returns the lines from the recipe content that should be
 // dispatched, dropping the shebang (first line starting with "#!"), comment
 // lines (any line whose trimmed content starts with "#"), and blank lines
-// (D2/R2).
+// (D2/R2). A trailing "\r" is stripped first so CRLF (Windows) recipes
+// dispatch clean tokens rather than a stray "\r" on the last token (R4).
 func effectiveLines(content string) []string {
 	raw := strings.Split(content, "\n")
 	out := make([]string, 0, len(raw))
-	for i, line := range raw {
+	for _, line := range raw {
+		line = strings.TrimSuffix(line, "\r")
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
-		// Shebang on the first raw line and all comment lines start with "#".
+		// The shebang (line 0) and every comment line start with "#".
 		if strings.HasPrefix(trimmed, "#") {
-			_ = i // shebang is line 0; both shebang and comments are caught here
 			continue
 		}
 		out = append(out, line)
 	}
 	return out
+}
+
+// flushToken appends the current token to tokens when a token was started
+// (including an empty token produced by an empty quoted span), and resets the
+// builder. The caller clears its "started" flag after calling.
+func flushToken(tokens []string, cur *strings.Builder, started bool) []string {
+	if started {
+		tokens = append(tokens, cur.String())
+		cur.Reset()
+	}
+	return tokens
 }
 
 // tokenize splits a recipe line into tokens using a minimal shell-like
@@ -97,47 +148,41 @@ func effectiveLines(content string) []string {
 //
 // Rules:
 //   - whitespace (space/tab) outside quotes delimits tokens
-//   - content inside single quotes is literal (including spaces)
-//   - content inside double quotes is literal (including spaces)
-//   - the quote characters themselves are not included in the token
-func tokenize(s string) []string {
+//   - content inside single or double quotes is literal (including spaces)
+//   - the quote characters themselves are not part of the token
+//   - an empty quoted span (a pair of quotes) still emits an empty-string token
+//   - an unterminated quote is an error, not a silently-accepted token
+func tokenize(s string) ([]string, error) {
 	var tokens []string
 	var cur strings.Builder
+	started := false
 	inSingle := false
 	inDouble := false
 
 	for _, ch := range s {
 		switch {
 		case inSingle:
-			if ch == '\'' {
-				inSingle = false
-			} else {
+			if inSingle = ch != '\''; inSingle {
 				cur.WriteRune(ch)
 			}
 		case inDouble:
-			if ch == '"' {
-				inDouble = false
-			} else {
+			if inDouble = ch != '"'; inDouble {
 				cur.WriteRune(ch)
 			}
 		case ch == '\'':
-			inSingle = true
+			inSingle, started = true, true
 		case ch == '"':
-			inDouble = true
+			inDouble, started = true, true
 		case ch == ' ' || ch == '\t':
-			tokens = flushToken(tokens, &cur)
+			tokens = flushToken(tokens, &cur, started)
+			started = false
 		default:
 			cur.WriteRune(ch)
+			started = true
 		}
 	}
-	return flushToken(tokens, &cur)
-}
-
-// flushToken appends the accumulated token (if any) to tokens and resets cur.
-func flushToken(tokens []string, cur *strings.Builder) []string {
-	if cur.Len() > 0 {
-		tokens = append(tokens, cur.String())
-		cur.Reset()
+	if inSingle || inDouble {
+		return nil, fmt.Errorf("unterminated quote in recipe line: %q", s)
 	}
-	return tokens
+	return flushToken(tokens, &cur, started), nil
 }
