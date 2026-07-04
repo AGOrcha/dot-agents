@@ -28,7 +28,7 @@ tasks:
         da-command sequences, distinct from the JS Workflow agent-fanout engine.
     - id: p2-failfast-errors
       title: Fail-fast semantics + step/line error reporting + exit codes
-      status: pending
+      status: completed
       depends_on:
         - p1-run-command-skeleton
       blocks:
@@ -47,7 +47,7 @@ tasks:
         names the step index and source line.
     - id: p3-env-substitution
       title: Environment-variable substitution in recipe lines
-      status: pending
+      status: completed
       depends_on:
         - p1-run-command-skeleton
       blocks: []
@@ -65,7 +65,7 @@ tasks:
         substitution in bare and quoted positions; undefined-var behavior.
     - id: p4-shebang-crossplatform-acceptance
       title: Shebang execution + cross-platform acceptance test
-      status: pending
+      status: completed
       depends_on:
         - p1-run-command-skeleton
         - p2-failfast-errors
@@ -84,7 +84,7 @@ tasks:
         into CI so it runs on every target OS.
     - id: p5-dogfood-recipe
       title: Dogfood — express one meta-loop sequence as a shipped recipe
-      status: pending
+      status: completed
       depends_on:
         - p1-run-command-skeleton
         - p2-failfast-errors
