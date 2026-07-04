@@ -50,10 +50,12 @@ Load → `instructions/plan-scaffolding.md`
     block sequential→concurrent). This decision is itself recorded in the plan notes.
 
 11. **Task breakdown + dependency ordering**
+    Load → `instructions/task-breakdown.md`
     Turn spec requirements into concrete, bounded tasks. Order them with explicit
     depends_on relationships. Cross-plan deps use `<plan-id>/<task-id>` form.
 
 12. **Write-scopes per task**
+    Load → `instructions/write-scope-derive.md`
     Derive each task's write_scope. Where Phase 1 ran get_impact_radius_tool, use the
     impact radius to ground write-scopes rather than guessing.
 

@@ -18,34 +18,19 @@ Signs that concurrent/folded may apply:
 - All spec decisions are ratified; no open questions remain.
 - The work is purely mechanical (a refactor with a clear change surface, a doc update,
   an additive feature with no behavioral forks).
-- An open question from Phase 2 was already answered mechanically by the briefing (a
-  signal surfaced in instructions/gap-conversion.md).
+- An open question from Phase 2 was already answered mechanically by the briefing
+  (the gap→open-question signal from Phase 2 `spec-scaffold`).
 
 The concurrency decision is itself recorded in the plan notes (block scalar form — see
 YAML colon-space rule below).
 
 ## Step 11 — Task breakdown + dependency ordering
 
-Turn spec requirements into concrete, bounded tasks:
-- Each task has a single, observable outcome (one thing verifiable, not "implement X and Y").
-- Order with explicit `depends_on` relationships; never leave ordering implicit.
-- Cross-plan deps use `<plan-id>/<task-id>` form. A dep string is cross-plan iff it
-  contains `/`. Example: `depends_on: [kg-ideate-skill/p0-compound-skill]`.
-- A task with a dependency on an external plan that has not been started yet should be
-  flagged in its notes with the blocking plan ID.
+Load → `instructions/task-breakdown.md`
 
 ## Step 12 — Write-scopes per task
 
-Derive each task's `write_scope`:
-- **Prefer the Phase 1 impact radius.** When Phase 1 ran `get_impact_radius_tool` (because
-  the topic named a file, function, or module), use those results to ground write-scopes
-  rather than guessing.
-- A task with an unknowable write-scope is a signal the spec still has an open question.
-  Flag it and resolve the spec gap before locking the task.
-- Write-scopes are paths (files or directories), not intent. Example:
-  `write_scope: [internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/]`
-- Molecule sibling names for cross-referencing: `kg-brief`, `spec-scaffold`, `plan-scaffold`,
-  `staged-execution-handoff`.
+Load → `instructions/write-scope-derive.md`
 
 ## Step 13 — Verification strategy per task
 
@@ -54,6 +39,8 @@ Each task must name how it will be verified:
 - Do not invent verification criteria that contradict or ignore the spec's done criteria.
 - Acceptable verification forms: `go test ./...`, `da workflow verify record`, CI pass,
   file exists check, smoke test against a known input/output pair.
+- Record the verification intent in the task `notes` field (block scalar).
+  Set `verification_required: true` (boolean) — there is no free-text `verification` field.
 
 ## Step 14 — Write the plan
 

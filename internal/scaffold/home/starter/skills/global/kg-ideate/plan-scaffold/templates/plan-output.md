@@ -26,23 +26,26 @@ Each task entry:
 
 ```yaml
 - id: <task-id>
+  title: <short task title>
   status: pending
   write_scope:
     - <path derived from Phase 1 impact radius or spec decisions>
   depends_on:
     - <local-task-id>                     # same-plan dep
     - <plan-id>/<task-id>                 # cross-plan dep (contains "/")
-  verification: |-
-    <how this task is verified; traces to spec done criterion>
+  blocks: []
+  verification_required: true
   notes: |-
-    <block scalar — safe for ": " free text; records task-scoping rationale>
+    <block scalar — safe for ": " free text; records task-scoping rationale and
+    how this task is verified (traces to spec done criterion)>
 ```
 
 Rules:
 - `write_scope` entries are file or directory paths, not intent descriptions.
 - `depends_on` entries use `<plan-id>/<task-id>` form for cross-plan deps; a dep is
   cross-plan iff it contains `/`.
-- `verification` and `notes` MUST use `|-` block scalar when the value may contain `: `.
+- `notes` (and other free-text fields) MUST use `|-` block scalar when the value may contain `: `.
+- `verification_required` is a boolean (`true`/`false`) — NOT a block scalar.
 - `status` starts at `pending`; advance via `da workflow advance`, never by hand-editing.
 
 ---
@@ -51,36 +54,42 @@ Rules:
 
 ```yaml
 - id: p0-skill-md
+  title: Author plan-scaffold SKILL.md
   status: pending
   write_scope:
     - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/SKILL.md
   depends_on: []
-  verification: |-
-    File exists at write_scope path; go test ./internal/scaffold/... passes.
+  blocks: []
+  verification_required: true
   notes: |-
     Authors the plan-scaffold molecule SKILL.md (Phase 3 of kg-ideate).
     Sequential mode — spec was fully stabilized before this task was created.
+    Verified: file exists at write_scope path; go test ./internal/scaffold/... passes.
 
 - id: p1-instructions
+  title: Author plan-scaffold instruction files
   status: pending
   write_scope:
     - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/instructions/
   depends_on:
     - p0-skill-md
-  verification: |-
-    plan-scaffolding.md exists; content matches proposal instructions/plan-scaffolding.md body.
+  blocks: []
+  verification_required: true
   notes: |-
-    Authors instructions/plan-scaffolding.md for the plan-scaffold molecule.
+    Authors instruction files for the plan-scaffold molecule.
+    Verified: instruction files exist at write_scope path; content matches proposal body.
 
 - id: p2-templates
+  title: Author plan-scaffold templates
   status: pending
   write_scope:
     - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/templates/
   depends_on:
     - p0-skill-md
-  verification: |-
-    plan-output.md exists; YAML colon-space rule demonstrated in template body.
+  blocks: []
+  verification_required: true
   notes: |-
     Authors templates/plan-output.md for the plan-scaffold molecule.
     Cross-plan dep example: kg-ideate-skill/p0-compound-skill
+    Verified: plan-output.md exists; YAML colon-space rule demonstrated in template body.
 ```
