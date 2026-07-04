@@ -2,9 +2,17 @@
 // the canonical layout under <root>/.agents/eval/runs/<run-id>/. It is the
 // single write path the R2 dashboard reads; the layout it produces is the
 // stable contract every downstream consumer depends on.
+//
+// WriteEvalRun is transactional: the whole run directory is assembled in a
+// hidden staging sibling and moved into place with a single atomic rename, so a
+// crash or a mid-write failure never leaves a partial run directory visible at
+// the canonical path.
 package store
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -24,12 +32,32 @@ const (
 	taskspecYAML   = "taskspec.yaml"
 	evalRunYAML    = "eval-run.yaml"
 	iterRecordYAML = "iter-1.yaml"
+
+	// digestPrefix labels the hash algorithm of a digest field so a future
+	// algorithm swap is self-describing on disk.
+	digestPrefix = "sha256:"
+)
+
+// Filesystem seams. They default to the fsops primitives (fsguard: every
+// mutation routes through internal/fsops) and are overridable in tests so the
+// atomic-write and rename error paths are coverable without platform-specific
+// filesystem tricks.
+var (
+	mkdirAll            = fsops.MkdirAll
+	writeFileAtomic     = fsops.WriteFileAtomic
+	renameDir           = fsops.Rename
+	removeAll           = fsops.RemoveAll
+	writeIterationScore = scoring.WriteIterationScore
 )
 
 // Typed errors callers can match with errors.Is.
 var (
 	// ErrEmptyRunID is returned when the run carries no run ID.
 	ErrEmptyRunID = errors.New("store: run id is required")
+	// ErrUnsafeRunID is returned when the run ID contains a path separator,
+	// a ".." segment, or otherwise does not name a single path element — any
+	// of which could escape the <root>/.agents/eval/runs/ directory.
+	ErrUnsafeRunID = errors.New("store: run id is not a safe path element")
 	// ErrNilSpec is returned when the run carries no task spec.
 	ErrNilSpec = errors.New("store: task spec is nil")
 	// ErrEmptyRoot is returned when the root dir is empty.
@@ -40,7 +68,8 @@ var (
 	ErrEmptyRecordPath = errors.New("store: score record path is required")
 )
 
-// Result reports the persisted artifact paths produced by WriteEvalRun.
+// Result reports the persisted artifact paths produced by WriteEvalRun. Every
+// path names the committed canonical location, not the staging location.
 type Result struct {
 	// RunDir is the run's sidecar directory (<root>/.agents/eval/runs/<run-id>).
 	RunDir string
@@ -57,23 +86,36 @@ type Result struct {
 }
 
 // PersistedEvalRun is the on-disk YAML shape of eval-run.yaml. It aggregates
-// run identity, agent outcome, verification result, and score summary so the
-// R2 dashboard can render a run summary without reading all four sidecar files.
+// run identity, the agent-runner identity + reproducibility metadata (spec R9 /
+// R10, plan D6), the verification result, and the score summary so the R2
+// dashboard can render a run without reading all four sidecar files.
 type PersistedEvalRun struct {
 	RunID      string        `yaml:"run_id"`
 	BaseCommit string        `yaml:"base_commit"`
 	TaskID     string        `yaml:"task_id"`
 	Language   string        `yaml:"language"`
 	Difficulty string        `yaml:"difficulty"`
-	Agent      agentOutcome  `yaml:"agent"`
+	Agent      agentIdentity `yaml:"agent"`
 	Verify     verifyOutcome `yaml:"verify"`
 	Score      scoreOutcome  `yaml:"score"`
 }
 
-// agentOutcome is the agent-runner summary block in eval-run.yaml.
-type agentOutcome struct {
-	ExitCode int    `yaml:"exit_code"`
-	Duration string `yaml:"duration"`
+// agentIdentity is the agent-runner identity + reproducibility block of
+// eval-run.yaml (spec R9: platform, model, prompt overlay captured so the
+// platform-tuner persona can diff platforms; R10: a run is reproducible from
+// its inputs). PromptDigest hashes the prompt the agent actually ran against —
+// in v1 the runner delivers TaskSpec.Prompt verbatim, so that hash is the
+// prompt-overlay identity. OutputDigest hashes the agent's stdout so a re-run's
+// output can be compared without persisting the full transcript here.
+type agentIdentity struct {
+	Harness      string `yaml:"harness,omitempty"`
+	Model        string `yaml:"model,omitempty"`
+	SessionID    string `yaml:"session_id,omitempty"`
+	Retries      int    `yaml:"retries"`
+	ExitCode     int    `yaml:"exit_code"`
+	Duration     string `yaml:"duration"`
+	PromptDigest string `yaml:"prompt_digest"`
+	OutputDigest string `yaml:"output_digest"`
 }
 
 // verifyOutcome is the verification-result summary block in eval-run.yaml.
@@ -84,11 +126,18 @@ type verifyOutcome struct {
 	Duration string `yaml:"duration"`
 }
 
-// scoreOutcome is the scoring-result summary block in eval-run.yaml.
+// scoreOutcome is the scoring-result summary block in eval-run.yaml. RubricVersion
+// pins the rubric the value was produced under (spec R10 reproducibility).
 type scoreOutcome struct {
-	Value  float64 `yaml:"value"`
-	Band   string  `yaml:"band"`
-	Scored bool    `yaml:"scored"`
+	Value         float64 `yaml:"value"`
+	Band          string  `yaml:"band"`
+	Scored        bool    `yaml:"scored"`
+	RubricVersion string  `yaml:"rubric_version,omitempty"`
+}
+
+// runsRoot returns the eval runs root for a repo root: <root>/.agents/eval/runs.
+func runsRoot(root string) string {
+	return filepath.Join(root, ".agents", "eval", "runs")
 }
 
 // RunDir returns the canonical sidecar directory for root and runID:
@@ -98,68 +147,66 @@ type scoreOutcome struct {
 // This path matches the default sandbox.Config.RunsRoot layout so the path the
 // sandbox provisions and the path the store writes are always the same.
 func RunDir(root, runID string) string {
-	return filepath.Join(root, ".agents", "eval", "runs", runID)
+	return filepath.Join(runsRoot(root), runID)
 }
 
-// WriteEvalRun persists the four sidecar artifacts of a completed eval run to:
+// WriteEvalRun transactionally persists the four sidecar artifacts of a
+// completed eval run to:
 //
 //	<root>/.agents/eval/runs/<run.RunID>/
 //	  taskspec.yaml                    — the eval.TaskSpec
-//	  eval-run.yaml                    — the run aggregate
+//	  eval-run.yaml                    — the run aggregate (identity + R9/R10 metadata)
 //	  iteration-log/iter-1.yaml        — R1-shaped iteration record
 //	  iteration-log/iter-1.score.yaml  — score sidecar
 //
-// All four writes are atomic (temp-then-rename via fsops.WriteFileAtomic) so a
-// crash never leaves a partial sidecar visible to the dashboard. The
-// iter-1.yaml bytes are copied byte-for-byte from run.Score.RecordPath,
-// preserving the emitRecord YAML schema that scoring.LoadIterationLog expects.
-// The score sidecar is re-persisted from run.Score.Score via the production
-// scoring.WriteIterationScore so the same PersistedScore shape is always used.
-func WriteEvalRun(run harness.EvalRun, root string) (Result, error) {
+// The whole directory is built in a hidden staging sibling under the runs root
+// and moved into place with a single atomic rename, so a mid-write failure
+// leaves NO partial directory at the canonical path (the staging dir is removed
+// on any error). A pre-existing run dir is replaced. Every file write is itself
+// atomic (temp-then-rename via fsops.WriteFileAtomic). The iter-1.yaml bytes are
+// copied byte-for-byte from run.Score.RecordPath, preserving the emitRecord YAML
+// schema that scoring.LoadIterationLog expects; the score sidecar is
+// re-persisted via the production scoring.WriteIterationScore.
+func WriteEvalRun(run harness.EvalRun, root string) (res Result, err error) {
 	if err := validateRun(run, root); err != nil {
 		return Result{}, err
 	}
 
-	runDir := RunDir(root, run.RunID)
-	iterDir := filepath.Join(runDir, iterLogDirName)
-	if err := fsops.MkdirAll(iterDir, 0o755); err != nil {
-		return Result{}, fmt.Errorf("store: create sidecar dirs: %w", err)
+	runs := runsRoot(root)
+	if err := mkdirAll(runs, 0o755); err != nil {
+		return Result{}, fmt.Errorf("store: create runs root: %w", err)
 	}
 
-	taskspecPath := filepath.Join(runDir, taskspecYAML)
-	if err := writeTaskspec(taskspecPath, run); err != nil {
-		return Result{}, err
-	}
-
-	evalRunPath := filepath.Join(runDir, evalRunYAML)
-	if err := writeEvalRunFile(evalRunPath, run); err != nil {
-		return Result{}, err
-	}
-
-	recordPath := filepath.Join(iterDir, iterRecordYAML)
-	if err := copyFileAtomic(recordPath, run.Score.RecordPath); err != nil {
-		return Result{}, fmt.Errorf("store: write iter record: %w", err)
-	}
-
-	scorePath, err := scoring.WriteIterationScore(iterDir, run.Score.Score)
+	staging, err := makeStagingDir(runs, run.RunID)
 	if err != nil {
-		return Result{}, fmt.Errorf("store: persist score: %w", err)
+		return Result{}, err
+	}
+	// Remove the staging dir unless it is successfully committed into place, so
+	// a failed write never leaks a hidden partial directory.
+	committed := false
+	defer func() {
+		if !committed {
+			_ = removeAll(staging)
+		}
+	}()
+
+	if err := writeSidecars(staging, run); err != nil {
+		return Result{}, err
 	}
 
-	return Result{
-		RunDir:       runDir,
-		TaskspecPath: taskspecPath,
-		EvalRunPath:  evalRunPath,
-		IterLogDir:   iterDir,
-		RecordPath:   recordPath,
-		ScorePath:    scorePath,
-	}, nil
+	finalDir := RunDir(root, run.RunID)
+	if err := commitStaging(staging, finalDir); err != nil {
+		return Result{}, err
+	}
+	committed = true
+
+	return newResult(finalDir, run.Score.Score.Iteration), nil
 }
 
 // validateRun checks the structural invariants WriteEvalRun depends on.
 func validateRun(run harness.EvalRun, root string) error {
-	if strings.TrimSpace(run.RunID) == "" {
-		return ErrEmptyRunID
+	if err := validateRunID(run.RunID); err != nil {
+		return err
 	}
 	if run.Spec == nil {
 		return ErrNilSpec
@@ -173,36 +220,98 @@ func validateRun(run harness.EvalRun, root string) error {
 	return nil
 }
 
-// writeTaskspec marshals run.Spec to YAML and atomically writes it to path.
-func writeTaskspec(path string, run harness.EvalRun) error {
-	data, err := yaml.Marshal(run.Spec)
-	if err != nil {
-		return fmt.Errorf("store: marshal taskspec: %w", err)
+// validateRunID rejects a run ID that is empty or that does not name a single,
+// separator-free path element — the guard that keeps a hostile or malformed run
+// ID from escaping the runs directory (e.g. "../../etc" or "a/b").
+func validateRunID(runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return ErrEmptyRunID
 	}
-	if err := fsops.WriteFileAtomic(path, data); err != nil {
-		return fmt.Errorf("store: write taskspec: %w", err)
+	if runID == "." || strings.Contains(runID, "..") ||
+		strings.ContainsAny(runID, `/\`) || filepath.Base(runID) != runID {
+		return ErrUnsafeRunID
 	}
 	return nil
 }
 
-// writeEvalRunFile builds a PersistedEvalRun from run, marshals it, and
-// atomically writes it to path.
-func writeEvalRunFile(path string, run harness.EvalRun) error {
-	persisted := buildPersistedEvalRun(run)
-	data, err := yaml.Marshal(persisted)
+// makeStagingDir creates a hidden, uniquely-named staging directory as a
+// sibling of the eventual run dir (same filesystem, so the commit rename is
+// atomic). The leading dot keeps it out of the dashboard's run globs, and the
+// random suffix keeps concurrent writers of the same run ID from colliding.
+func makeStagingDir(runs, runID string) (string, error) {
+	tok, err := randToken()
 	if err != nil {
-		return fmt.Errorf("store: marshal eval-run: %w", err)
+		return "", fmt.Errorf("store: generate staging token: %w", err)
 	}
-	if err := fsops.WriteFileAtomic(path, data); err != nil {
-		return fmt.Errorf("store: write eval-run: %w", err)
+	staging := filepath.Join(runs, fmt.Sprintf(".%s.staging-%s", runID, tok))
+	if err := mkdirAll(staging, 0o755); err != nil {
+		return "", fmt.Errorf("store: create staging dir: %w", err)
+	}
+	return staging, nil
+}
+
+// writeSidecars lays down all four artifacts inside dir (a staging directory).
+// It performs no rename into the canonical location — the caller commits.
+func writeSidecars(dir string, run harness.EvalRun) error {
+	iterDir := filepath.Join(dir, iterLogDirName)
+	if err := mkdirAll(iterDir, 0o755); err != nil {
+		return fmt.Errorf("store: create iteration-log dir: %w", err)
+	}
+	if err := writeYAML(filepath.Join(dir, taskspecYAML), run.Spec); err != nil {
+		return fmt.Errorf("store: taskspec: %w", err)
+	}
+	if err := writeYAML(filepath.Join(dir, evalRunYAML), buildPersistedEvalRun(run)); err != nil {
+		return fmt.Errorf("store: eval-run: %w", err)
+	}
+	if err := copyFileAtomic(filepath.Join(iterDir, iterRecordYAML), run.Score.RecordPath); err != nil {
+		return fmt.Errorf("store: iter record: %w", err)
+	}
+	if _, err := writeIterationScore(iterDir, run.Score.Score); err != nil {
+		return fmt.Errorf("store: persist score: %w", err)
 	}
 	return nil
+}
+
+// commitStaging atomically moves the fully-built staging directory into place at
+// final, replacing any existing run dir. removeAll clears a pre-existing dir (a
+// no-op when absent) so the single rename lands cleanly; the completed
+// replacement already sits in staging, so this never exposes a partial dir.
+func commitStaging(staging, final string) error {
+	if err := removeAll(final); err != nil {
+		return fmt.Errorf("store: clear existing run dir: %w", err)
+	}
+	if err := renameDir(staging, final); err != nil {
+		return fmt.Errorf("store: commit run dir: %w", err)
+	}
+	return nil
+}
+
+// writeYAML marshals v and atomically writes it to path.
+func writeYAML(path string, v any) error {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+	if err := writeFileAtomic(path, data); err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	return nil
+}
+
+// copyFileAtomic reads src and atomically writes its bytes to dst, so a crash
+// mid-copy never leaves dst in a partial state.
+func copyFileAtomic(dst, src string) error {
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read source %s: %w", src, err)
+	}
+	return writeFileAtomic(dst, data)
 }
 
 // buildPersistedEvalRun translates a completed harness.EvalRun into the
 // eval-run.yaml shape. A nil Verify leaves the verify block zero-valued —
-// present in the YAML with zero fields — rather than omitting the key
-// entirely, so the schema stays stable.
+// present in the YAML with zero fields — rather than omitting the key, so the
+// schema stays stable.
 func buildPersistedEvalRun(run harness.EvalRun) PersistedEvalRun {
 	p := PersistedEvalRun{
 		RunID:      run.RunID,
@@ -210,14 +319,12 @@ func buildPersistedEvalRun(run harness.EvalRun) PersistedEvalRun {
 		TaskID:     run.Spec.TaskID,
 		Language:   string(run.Spec.Language),
 		Difficulty: string(run.Spec.Difficulty),
-		Agent: agentOutcome{
-			ExitCode: run.Run.ExitCode,
-			Duration: run.Run.Duration.String(),
-		},
+		Agent:      buildAgentIdentity(run),
 		Score: scoreOutcome{
-			Value:  run.Score.Score.Value,
-			Band:   run.Score.Score.Band,
-			Scored: run.Score.Score.Scored,
+			Value:         run.Score.Score.Value,
+			Band:          run.Score.Score.Band,
+			Scored:        run.Score.Score.Scored,
+			RubricVersion: run.Score.Score.RubricVersion,
 		},
 	}
 	if run.Verify != nil {
@@ -231,13 +338,49 @@ func buildPersistedEvalRun(run harness.EvalRun) PersistedEvalRun {
 	return p
 }
 
-// copyFileAtomic reads src and atomically writes its bytes to dst, so a crash
-// mid-copy never leaves dst in a partial state. When dst == src the operation
-// is an atomic idempotent overwrite: correct and harmless.
-func copyFileAtomic(dst, src string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return fmt.Errorf("read source %s: %w", src, err)
+// buildAgentIdentity assembles the R9/R10 agent block: runner identity from the
+// telemetry, run outcome from the runner result, and the two reproducibility
+// digests (prompt delivered to the agent, and the agent's stdout).
+func buildAgentIdentity(run harness.EvalRun) agentIdentity {
+	t := run.Run.Telemetry
+	return agentIdentity{
+		Harness:      t.Harness,
+		Model:        t.Model,
+		SessionID:    t.SessionID,
+		Retries:      t.Retries,
+		ExitCode:     run.Run.ExitCode,
+		Duration:     run.Run.Duration.String(),
+		PromptDigest: digest([]byte(run.Spec.Prompt)),
+		OutputDigest: digest(run.Run.Stdout),
 	}
-	return fsops.WriteFileAtomic(dst, data)
+}
+
+// digest returns the algorithm-prefixed hex SHA-256 of data. A nil slice hashes
+// to the well-known empty digest — a stable, non-empty marker.
+func digest(data []byte) string {
+	sum := sha256.Sum256(data)
+	return digestPrefix + hex.EncodeToString(sum[:])
+}
+
+// newResult derives the committed artifact paths from the canonical run dir.
+func newResult(runDir string, iteration int) Result {
+	iterDir := filepath.Join(runDir, iterLogDirName)
+	return Result{
+		RunDir:       runDir,
+		TaskspecPath: filepath.Join(runDir, taskspecYAML),
+		EvalRunPath:  filepath.Join(runDir, evalRunYAML),
+		IterLogDir:   iterDir,
+		RecordPath:   filepath.Join(iterDir, iterRecordYAML),
+		ScorePath:    scoring.IterationScorePath(iterDir, iteration),
+	}
+}
+
+// randToken returns 16 hex characters of cryptographic randomness for the
+// staging directory suffix.
+func randToken() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
 }

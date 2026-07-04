@@ -1,9 +1,12 @@
 package store_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,14 +16,31 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/scoringbridge"
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
 	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 	"go.yaml.in/yaml/v3"
 )
 
 // ---- fixtures ---------------------------------------------------------------
 
-// fixedRunID is the run ID used across test helpers.
-const fixedRunID = "eval-store-test-01"
+const (
+	fixedRunID    = "eval-store-test-01"
+	fixedPrompt   = "Implement function Foo."
+	fixedHarness  = "test-harness"
+	fixedModel    = "test-model"
+	fixedSession  = "sess-store-001"
+	fixedBaseSHA  = "0000000000000000000000000000000000abcdef"
+	agentStdout   = "agent produced this output"
+	agentExitCode = 0
+)
+
+var errBoom = errors.New("boom")
+
+// wantDigest computes the "sha256:<hex>" digest the store is expected to emit.
+func wantDigest(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
 
 // testSpec returns a minimal valid v1 TaskSpec fixture.
 func testSpec() *eval.TaskSpec {
@@ -33,7 +53,7 @@ func testSpec() *eval.TaskSpec {
 			Kind:       eval.KindKGTemplate,
 			TemplateID: "impl-pure-fn",
 		},
-		Prompt: "Implement function Foo.",
+		Prompt: fixedPrompt,
 		Verification: eval.Verification{
 			BuildCmd:       []string{"go", "build", "./..."},
 			TestCmd:        []string{"go", "test", "./..."},
@@ -42,22 +62,23 @@ func testSpec() *eval.TaskSpec {
 	}
 }
 
-// buildTestRun creates a harness.EvalRun rooted at <root>/.agents/eval/runs/<fixedRunID>
-// with scoringbridge-written iteration-log files already present. It is the
-// standard fully-populated fixture for happy-path tests.
-func buildTestRun(t *testing.T, root string) harness.EvalRun {
+// buildTestRun creates a harness.EvalRun whose iteration-log files are already
+// written by scoringbridge.ScoreRun under sbRoot. The returned run is then
+// persisted by the store under a (possibly different) target root, so failure
+// tests can block the target without disturbing the scoringbridge fixture.
+func buildTestRun(t *testing.T, sbRoot string) harness.EvalRun {
 	t.Helper()
-	runDir := store.RunDir(root, fixedRunID)
+	runDir := store.RunDir(sbRoot, fixedRunID)
 
 	sbRun := scoringbridge.EvalRun{
 		RunID:      fixedRunID,
 		RunDir:     runDir,
-		BaseCommit: "0000000000000000000000000000000000abcdef",
+		BaseCommit: fixedBaseSHA,
 		Spec:       testSpec(),
 		Agent: scoringbridge.AgentTelemetry{
-			SessionID: "sess-store-001",
-			Harness:   "test-harness",
-			Model:     "test-model",
+			SessionID: fixedSession,
+			Harness:   fixedHarness,
+			Model:     fixedModel,
 			Retries:   0,
 			Tokens: &scoring.TokenUsage{
 				InputTokens:  1000,
@@ -80,10 +101,17 @@ func buildTestRun(t *testing.T, root string) harness.EvalRun {
 		Spec:       testSpec(),
 		RunID:      fixedRunID,
 		RunDir:     runDir,
-		BaseCommit: "0000000000000000000000000000000000abcdef",
+		BaseCommit: fixedBaseSHA,
 		Run: runner.Result{
-			ExitCode: 0,
+			Stdout:   []byte(agentStdout),
+			ExitCode: agentExitCode,
 			Duration: 2 * time.Second,
+			Telemetry: runner.AgentTelemetry{
+				SessionID: fixedSession,
+				Harness:   fixedHarness,
+				Model:     fixedModel,
+				Retries:   0,
+			},
 		},
 		Verify: &goverifier.VerifyResult{
 			Passed:   true,
@@ -105,15 +133,35 @@ func mustFileExist(t *testing.T, path string) []byte {
 	return data
 }
 
+// assertNoCanonicalDir asserts the canonical run dir is absent and the runs
+// root holds no leftover (staging) entries — the transactional guarantee.
+func assertNoCanonicalDir(t *testing.T, root string) {
+	t.Helper()
+	finalDir := store.RunDir(root, fixedRunID)
+	if _, err := os.Stat(finalDir); !os.IsNotExist(err) {
+		t.Errorf("canonical run dir exists after failure: stat err = %v, want IsNotExist", err)
+	}
+	runsRoot := filepath.Join(root, ".agents", "eval", "runs")
+	entries, err := os.ReadDir(runsRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		t.Fatalf("read runs root: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("runs root not empty after failure, leftover entries: %v", names)
+	}
+}
+
 // ---- happy-path: full layout ------------------------------------------------
 
-// TestWriteEvalRun_FullLayout is the primary layout-pinning test. It verifies
-// that after WriteEvalRun:
-//   - all four sidecar files exist at their canonical paths
-//   - taskspec.yaml round-trips through eval.ParseTaskSpec
-//   - eval-run.yaml carries the correct run_id and verify block
-//   - iter-1.yaml is readable by scoring.LoadIterationLog (R2 stable contract)
-//   - iter-1.score.yaml parses as a scored PersistedScore
+// TestWriteEvalRun_FullLayout pins the four-file layout and round-trips
+// iter-1.yaml through the production loader (the R2 stable contract).
 func TestWriteEvalRun_FullLayout(t *testing.T) {
 	root := t.TempDir()
 	run := buildTestRun(t, root)
@@ -123,23 +171,30 @@ func TestWriteEvalRun_FullLayout(t *testing.T) {
 		t.Fatalf("WriteEvalRun() = %v, want nil", err)
 	}
 
-	// --- path assertions ------------------------------------------------------
+	assertResultPaths(t, res, root)
+	assertTaskspecFile(t, res)
+	assertEvalRunFile(t, res)
+	assertIterLogRoundTrip(t, res)
+	assertScoreSidecar(t, res)
+}
+
+func assertResultPaths(t *testing.T, res store.Result, root string) {
+	t.Helper()
 	wantRunDir := store.RunDir(root, fixedRunID)
 	if res.RunDir != wantRunDir {
 		t.Errorf("Result.RunDir = %q, want %q", res.RunDir, wantRunDir)
 	}
-	wantIterDir := filepath.Join(wantRunDir, "iteration-log")
-	if res.IterLogDir != wantIterDir {
-		t.Errorf("Result.IterLogDir = %q, want %q", res.IterLogDir, wantIterDir)
+	if res.IterLogDir != filepath.Join(wantRunDir, "iteration-log") {
+		t.Errorf("Result.IterLogDir = %q, want <run>/iteration-log", res.IterLogDir)
 	}
-
 	for _, p := range []string{res.TaskspecPath, res.EvalRunPath, res.RecordPath, res.ScorePath} {
 		mustFileExist(t, p)
 	}
+}
 
-	// --- taskspec.yaml --------------------------------------------------------
-	tsData := mustFileExist(t, res.TaskspecPath)
-	spec, err := eval.ParseTaskSpec(tsData)
+func assertTaskspecFile(t *testing.T, res store.Result) {
+	t.Helper()
+	spec, err := eval.ParseTaskSpec(mustFileExist(t, res.TaskspecPath))
 	if err != nil {
 		t.Fatalf("ParseTaskSpec(taskspec.yaml) = %v, want nil", err)
 	}
@@ -149,33 +204,30 @@ func TestWriteEvalRun_FullLayout(t *testing.T) {
 	if spec.Language != eval.LanguageGo {
 		t.Errorf("taskspec language = %q, want go", spec.Language)
 	}
+}
 
-	// --- eval-run.yaml --------------------------------------------------------
-	erData := mustFileExist(t, res.EvalRunPath)
-	var persisted store.PersistedEvalRun
-	if err := yaml.Unmarshal(erData, &persisted); err != nil {
+func assertEvalRunFile(t *testing.T, res store.Result) {
+	t.Helper()
+	var p store.PersistedEvalRun
+	if err := yaml.Unmarshal(mustFileExist(t, res.EvalRunPath), &p); err != nil {
 		t.Fatalf("unmarshal eval-run.yaml: %v", err)
 	}
-	if persisted.RunID != fixedRunID {
-		t.Errorf("eval-run run_id = %q, want %q", persisted.RunID, fixedRunID)
+	if p.RunID != fixedRunID {
+		t.Errorf("eval-run run_id = %q, want %q", p.RunID, fixedRunID)
 	}
-	if persisted.Language != "go" {
-		t.Errorf("eval-run language = %q, want go", persisted.Language)
+	if p.Language != "go" || p.Difficulty != "medium" {
+		t.Errorf("eval-run language/difficulty = %q/%q, want go/medium", p.Language, p.Difficulty)
 	}
-	if persisted.Difficulty != "medium" {
-		t.Errorf("eval-run difficulty = %q, want medium", persisted.Difficulty)
+	if !p.Verify.Passed || p.Verify.Phase != "test" {
+		t.Errorf("eval-run verify = %+v, want passed test", p.Verify)
 	}
-	if !persisted.Verify.Passed {
-		t.Errorf("eval-run verify.passed = false, want true")
-	}
-	if persisted.Verify.Phase != "test" {
-		t.Errorf("eval-run verify.phase = %q, want test", persisted.Verify.Phase)
-	}
-	if !persisted.Score.Scored {
+	if !p.Score.Scored {
 		t.Errorf("eval-run score.scored = false, want true")
 	}
+}
 
-	// --- iter-1.yaml (R2 stable contract: production loader round-trip) ------
+func assertIterLogRoundTrip(t *testing.T, res store.Result) {
+	t.Helper()
 	records, err := scoring.LoadIterationLog(res.IterLogDir)
 	if err != nil {
 		t.Fatalf("LoadIterationLog() = %v, want nil", err)
@@ -189,26 +241,74 @@ func TestWriteEvalRun_FullLayout(t *testing.T) {
 	if records[0].Wave != fixedRunID {
 		t.Errorf("iter-1 wave = %q, want %q (run ID)", records[0].Wave, fixedRunID)
 	}
+}
 
-	// --- iter-1.score.yaml ----------------------------------------------------
-	scoreData := mustFileExist(t, res.ScorePath)
+func assertScoreSidecar(t *testing.T, res store.Result) {
+	t.Helper()
 	var ps scoring.PersistedScore
-	if err := yaml.Unmarshal(scoreData, &ps); err != nil {
+	if err := yaml.Unmarshal(mustFileExist(t, res.ScorePath), &ps); err != nil {
 		t.Fatalf("unmarshal iter-1.score.yaml: %v", err)
 	}
-	if ps.Iteration != 1 {
-		t.Errorf("score iteration = %d, want 1", ps.Iteration)
-	}
-	if !ps.Scored {
-		t.Errorf("score.scored = false, want true")
+	if ps.Iteration != 1 || !ps.Scored {
+		t.Errorf("score = {iter:%d scored:%t}, want {1 true}", ps.Iteration, ps.Scored)
 	}
 	if ps.RubricVersion != scoring.RubricVersion {
 		t.Errorf("score rubric_version = %q, want %q", ps.RubricVersion, scoring.RubricVersion)
 	}
 }
 
-// TestWriteEvalRun_NilVerify confirms a nil Verify in harness.EvalRun writes a
-// zero-valued verify block in eval-run.yaml (not a marshal error).
+// TestWriteEvalRun_AgentReproducibilityFields pins spec R9 / R10: eval-run.yaml
+// must carry the agent platform/harness, model, session id, the prompt-overlay
+// identity (prompt digest), and the agent-output digest — not just exit code +
+// duration.
+func TestWriteEvalRun_AgentReproducibilityFields(t *testing.T) {
+	root := t.TempDir()
+	run := buildTestRun(t, root)
+
+	res, err := store.WriteEvalRun(run, root)
+	if err != nil {
+		t.Fatalf("WriteEvalRun() = %v, want nil", err)
+	}
+
+	var p store.PersistedEvalRun
+	if err := yaml.Unmarshal(mustFileExist(t, res.EvalRunPath), &p); err != nil {
+		t.Fatalf("unmarshal eval-run.yaml: %v", err)
+	}
+
+	checks := []struct {
+		field string
+		got   any
+		want  any
+	}{
+		{"agent.harness", p.Agent.Harness, fixedHarness},
+		{"agent.model", p.Agent.Model, fixedModel},
+		{"agent.session_id", p.Agent.SessionID, fixedSession},
+		{"agent.retries", p.Agent.Retries, 0},
+		{"agent.exit_code", p.Agent.ExitCode, agentExitCode},
+		{"agent.duration", p.Agent.Duration, (2 * time.Second).String()},
+		{"agent.prompt_digest", p.Agent.PromptDigest, wantDigest(fixedPrompt)},
+		{"agent.output_digest", p.Agent.OutputDigest, wantDigest(agentStdout)},
+		{"base_commit", p.BaseCommit, fixedBaseSHA},
+		{"score.rubric_version", p.Score.RubricVersion, scoring.RubricVersion},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.field, c.got, c.want)
+		}
+	}
+
+	// The digests must be raw-string present in the file bytes so a downstream
+	// text-diff tool (not just the typed struct) can read them.
+	raw := string(mustFileExist(t, res.EvalRunPath))
+	for _, frag := range []string{"prompt_digest:", "output_digest:", "session_id:", "harness:", "model:"} {
+		if !strings.Contains(raw, frag) {
+			t.Errorf("eval-run.yaml missing %q key", frag)
+		}
+	}
+}
+
+// TestWriteEvalRun_NilVerify confirms a nil Verify writes a zero-valued verify
+// block rather than erroring.
 func TestWriteEvalRun_NilVerify(t *testing.T) {
 	root := t.TempDir()
 	run := buildTestRun(t, root)
@@ -218,21 +318,17 @@ func TestWriteEvalRun_NilVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteEvalRun(nil verify) = %v, want nil", err)
 	}
-	data := mustFileExist(t, res.EvalRunPath)
-	var persisted store.PersistedEvalRun
-	if err := yaml.Unmarshal(data, &persisted); err != nil {
+	var p store.PersistedEvalRun
+	if err := yaml.Unmarshal(mustFileExist(t, res.EvalRunPath), &p); err != nil {
 		t.Fatalf("unmarshal eval-run.yaml: %v", err)
 	}
-	if persisted.Verify.Passed {
-		t.Errorf("verify.passed = true, want false (zero value for nil Verify)")
-	}
-	if persisted.Verify.Phase != "" {
-		t.Errorf("verify.phase = %q, want empty (zero value)", persisted.Verify.Phase)
+	if p.Verify.Passed || p.Verify.Phase != "" {
+		t.Errorf("verify = %+v, want zero value for nil Verify", p.Verify)
 	}
 }
 
-// TestWriteEvalRun_Idempotent confirms that calling WriteEvalRun twice on the
-// same (root, runID) pair succeeds and yields identical file content.
+// TestWriteEvalRun_Idempotent confirms a second write replaces the run dir
+// atomically and yields identical content (exercises the replace path).
 func TestWriteEvalRun_Idempotent(t *testing.T) {
 	root := t.TempDir()
 	run := buildTestRun(t, root)
@@ -245,15 +341,12 @@ func TestWriteEvalRun_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteEvalRun (second) = %v, want nil", err)
 	}
-
 	for _, pair := range [][2]string{
 		{res1.TaskspecPath, res2.TaskspecPath},
 		{res1.EvalRunPath, res2.EvalRunPath},
 		{res1.RecordPath, res2.RecordPath},
 	} {
-		d1 := mustFileExist(t, pair[0])
-		d2 := mustFileExist(t, pair[1])
-		if string(d1) != string(d2) {
+		if string(mustFileExist(t, pair[0])) != string(mustFileExist(t, pair[1])) {
 			t.Errorf("idempotent: %s content changed between calls", filepath.Base(pair[0]))
 		}
 	}
@@ -263,150 +356,185 @@ func TestWriteEvalRun_Idempotent(t *testing.T) {
 
 func TestWriteEvalRun_Validation(t *testing.T) {
 	root := t.TempDir()
-
 	cases := []struct {
 		name    string
 		mutate  func(*harness.EvalRun, *string)
 		wantErr error
 	}{
-		{
-			name:    "empty run id",
-			mutate:  func(r *harness.EvalRun, _ *string) { r.RunID = "   " },
-			wantErr: store.ErrEmptyRunID,
-		},
-		{
-			name:    "nil spec",
-			mutate:  func(r *harness.EvalRun, _ *string) { r.Spec = nil },
-			wantErr: store.ErrNilSpec,
-		},
-		{
-			name:    "empty root",
-			mutate:  func(_ *harness.EvalRun, rt *string) { *rt = "" },
-			wantErr: store.ErrEmptyRoot,
-		},
-		{
-			name:    "empty record path",
-			mutate:  func(r *harness.EvalRun, _ *string) { r.Score.RecordPath = "  " },
-			wantErr: store.ErrEmptyRecordPath,
-		},
+		{"empty run id", func(r *harness.EvalRun, _ *string) { r.RunID = "   " }, store.ErrEmptyRunID},
+		{"nil spec", func(r *harness.EvalRun, _ *string) { r.Spec = nil }, store.ErrNilSpec},
+		{"empty root", func(_ *harness.EvalRun, rt *string) { *rt = "" }, store.ErrEmptyRoot},
+		{"empty record path", func(r *harness.EvalRun, _ *string) { r.Score.RecordPath = "  " }, store.ErrEmptyRecordPath},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			run := buildTestRun(t, root)
 			rt := root
 			tc.mutate(&run, &rt)
-			_, err := store.WriteEvalRun(run, rt)
-			if !errors.Is(err, tc.wantErr) {
+			if _, err := store.WriteEvalRun(run, rt); !errors.Is(err, tc.wantErr) {
 				t.Errorf("WriteEvalRun() = %v, want errors.Is(_, %v)", err, tc.wantErr)
 			}
 		})
 	}
 }
 
-// ---- filesystem failure paths -----------------------------------------------
+// TestWriteEvalRun_UnsafeRunID pins the path-traversal guard: a run ID with a
+// separator or ".." is rejected with ErrUnsafeRunID and NOTHING is written
+// anywhere under the root.
+func TestWriteEvalRun_UnsafeRunID(t *testing.T) {
+	malicious := []string{
+		"../../etc",
+		"a/b",
+		`a\b`,
+		"..",
+		"foo/../../bar",
+		".",
+	}
+	for _, id := range malicious {
+		t.Run(id, func(t *testing.T) {
+			sbRoot := t.TempDir()
+			run := buildTestRun(t, sbRoot)
+			run.RunID = id
 
-// TestWriteEvalRun_DirCreateFail verifies the "create sidecar dirs" error path:
-// a regular file squatting at the iteration-log directory prevents MkdirAll.
-// buildTestRun uses sbRoot so the canonical structure there does not interfere
-// with the blocker planted at targetRoot.
-func TestWriteEvalRun_DirCreateFail(t *testing.T) {
+			targetRoot := t.TempDir()
+			_, err := store.WriteEvalRun(run, targetRoot)
+			if !errors.Is(err, store.ErrUnsafeRunID) {
+				t.Fatalf("WriteEvalRun(%q) = %v, want ErrUnsafeRunID", id, err)
+			}
+			// Nothing must have been created under the target root at all.
+			if _, statErr := os.Stat(filepath.Join(targetRoot, ".agents")); !os.IsNotExist(statErr) {
+				t.Errorf("unsafe run id %q created files under target root (stat err = %v)", id, statErr)
+			}
+		})
+	}
+}
+
+// ---- transactional failure paths --------------------------------------------
+
+// TestWriteEvalRun_PartialFailureNoCanonicalDir is the core fix-3 guarantee: a
+// mid-write step failure (here, an unreadable iteration record source) leaves NO
+// partial run directory at the canonical path and no leftover staging dir.
+func TestWriteEvalRun_PartialFailureNoCanonicalDir(t *testing.T) {
 	sbRoot := t.TempDir()
-	run := buildTestRun(t, sbRoot) // iter-log files written under sbRoot
-
-	// Plant the blocker at a fresh targetRoot that has no pre-existing dirs.
-	targetRoot := t.TempDir()
-	targetRunDir := store.RunDir(targetRoot, fixedRunID)
-	if err := os.MkdirAll(targetRunDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// A regular file at iteration-log makes MkdirAll fail.
-	if err := os.WriteFile(filepath.Join(targetRunDir, "iteration-log"), []byte("blocker"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := store.WriteEvalRun(run, targetRoot)
-	if err == nil {
-		t.Fatal("WriteEvalRun() = nil, want dir-create error")
-	}
-}
-
-// TestWriteEvalRun_TaskspecWriteFail verifies the "write taskspec" error path:
-// a directory squatting at taskspec.yaml prevents the atomic rename.
-func TestWriteEvalRun_TaskspecWriteFail(t *testing.T) {
-	root := t.TempDir()
-	run := buildTestRun(t, root)
-
-	runDir := store.RunDir(root, fixedRunID)
-	if err := os.MkdirAll(filepath.Join(runDir, "iteration-log"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(runDir, "taskspec.yaml"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := store.WriteEvalRun(run, root)
-	if err == nil {
-		t.Fatal("WriteEvalRun() = nil, want taskspec write error")
-	}
-}
-
-// TestWriteEvalRun_EvalRunWriteFail verifies the "write eval-run" error path:
-// a directory squatting at eval-run.yaml prevents the atomic rename.
-func TestWriteEvalRun_EvalRunWriteFail(t *testing.T) {
-	root := t.TempDir()
-	run := buildTestRun(t, root)
-
-	runDir := store.RunDir(root, fixedRunID)
-	if err := os.MkdirAll(filepath.Join(runDir, "iteration-log"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(runDir, "eval-run.yaml"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := store.WriteEvalRun(run, root)
-	if err == nil {
-		t.Fatal("WriteEvalRun() = nil, want eval-run write error")
-	}
-}
-
-// TestWriteEvalRun_IterRecordReadFail verifies the "write iter record" error
-// path when run.Score.RecordPath points to a non-existent file.
-func TestWriteEvalRun_IterRecordReadFail(t *testing.T) {
-	root := t.TempDir()
-	run := buildTestRun(t, root)
+	run := buildTestRun(t, sbRoot)
 	run.Score.RecordPath = filepath.Join(t.TempDir(), "does-not-exist.yaml")
 
-	_, err := store.WriteEvalRun(run, root)
+	targetRoot := t.TempDir()
+	_, err := store.WriteEvalRun(run, targetRoot)
 	if err == nil {
-		t.Fatal("WriteEvalRun() = nil, want iter-record read error")
+		t.Fatal("WriteEvalRun() = nil, want mid-write error")
+	}
+	assertNoCanonicalDir(t, targetRoot)
+}
+
+// TestWriteEvalRun_RunsRootBlocked covers the "create runs root" failure: a
+// regular file where the runs root must go.
+func TestWriteEvalRun_RunsRootBlocked(t *testing.T) {
+	sbRoot := t.TempDir()
+	run := buildTestRun(t, sbRoot)
+
+	targetRoot := t.TempDir()
+	evalDir := filepath.Join(targetRoot, ".agents", "eval")
+	if err := os.MkdirAll(evalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(evalDir, "runs"), []byte("blocker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.WriteEvalRun(run, targetRoot)
+	if err == nil || !strings.Contains(err.Error(), "create runs root") {
+		t.Fatalf("WriteEvalRun() = %v, want create-runs-root error", err)
 	}
 }
 
-// TestWriteEvalRun_ScoreWriteFail verifies the "persist score" error path:
-// a directory at iter-1.score.yaml prevents the atomic rename.
-// buildTestRun uses sbRoot so its iter-1.score.yaml file does not occupy the
-// path we need to turn into a directory blocker at targetRoot.
-func TestWriteEvalRun_ScoreWriteFail(t *testing.T) {
-	sbRoot := t.TempDir()
-	run := buildTestRun(t, sbRoot) // iter-log files written under sbRoot
-
-	// At targetRoot, create the iter-log dir and block the score sidecar path.
-	targetRoot := t.TempDir()
-	targetIterDir := filepath.Join(store.RunDir(targetRoot, fixedRunID), "iteration-log")
-	if err := os.MkdirAll(targetIterDir, 0o755); err != nil {
-		t.Fatal(err)
+// failMkdirOn returns a mkdir seam that fails when the FINAL path element
+// contains match (inspecting only the base avoids matching the test-name that
+// t.TempDir bakes into the temp path) and otherwise delegates to fsops.MkdirAll.
+func failMkdirOn(match string) func(string, os.FileMode) error {
+	return func(path string, perm os.FileMode) error {
+		if strings.Contains(filepath.Base(path), match) {
+			return errBoom
+		}
+		return fsops.MkdirAll(path, perm)
 	}
-	// A directory at iter-1.score.yaml makes scoring.WriteIterationScore fail.
-	if err := os.MkdirAll(filepath.Join(targetIterDir, "iter-1.score.yaml"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// run.Score.RecordPath still points to the valid file under sbRoot, so
-	// copyFileAtomic succeeds; only the score sidecar rename hits the blocker.
+}
 
-	_, err := store.WriteEvalRun(run, targetRoot)
-	if err == nil {
-		t.Fatal("WriteEvalRun() = nil, want score-persist error")
+// failWriteOn returns a write seam that fails on a path suffix and otherwise
+// delegates to the real fsops.WriteFileAtomic.
+func failWriteOn(suffix string) func(string, []byte) error {
+	return func(path string, data []byte) error {
+		if strings.HasSuffix(path, suffix) {
+			return errBoom
+		}
+		return fsops.WriteFileAtomic(path, data)
+	}
+}
+
+func TestWriteEvalRun_SeamFailures(t *testing.T) {
+	cases := []struct {
+		name    string
+		install func() (restore func())
+		wantSub string
+	}{
+		{
+			name:    "staging dir create",
+			install: func() func() { return store.SetMkdirAll(failMkdirOn(".staging-")) },
+			wantSub: "create staging dir",
+		},
+		{
+			name:    "iteration-log dir create",
+			install: func() func() { return store.SetMkdirAll(failMkdirOn("iteration-log")) },
+			wantSub: "create iteration-log dir",
+		},
+		{
+			name:    "taskspec write",
+			install: func() func() { return store.SetWriteFileAtomic(failWriteOn("taskspec.yaml")) },
+			wantSub: "taskspec",
+		},
+		{
+			name:    "eval-run write",
+			install: func() func() { return store.SetWriteFileAtomic(failWriteOn("eval-run.yaml")) },
+			wantSub: "eval-run",
+		},
+		{
+			name: "score persist",
+			install: func() func() {
+				return store.SetWriteIterationScore(func(string, scoring.Score) (string, error) { return "", errBoom })
+			},
+			wantSub: "persist score",
+		},
+		{
+			name:    "clear existing run dir",
+			install: func() func() { return store.SetRemoveAll(func(string) error { return errBoom }) },
+			wantSub: "clear existing run dir",
+		},
+		{
+			name:    "commit rename",
+			install: func() func() { return store.SetRenameDir(func(string, string) error { return errBoom }) },
+			wantSub: "commit run dir",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sbRoot := t.TempDir()
+			run := buildTestRun(t, sbRoot)
+			targetRoot := t.TempDir()
+
+			restore := tc.install()
+			defer restore()
+
+			_, err := store.WriteEvalRun(run, targetRoot)
+			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("WriteEvalRun() = %v, want error containing %q", err, tc.wantSub)
+			}
+			// The canonical dir must never appear on any failure. (The remove-all
+			// seam override disables staging cleanup, so only assert the canonical
+			// path is absent there.)
+			finalDir := store.RunDir(targetRoot, fixedRunID)
+			if _, statErr := os.Stat(finalDir); !os.IsNotExist(statErr) {
+				t.Errorf("canonical run dir exists after %s failure: %v", tc.name, statErr)
+			}
+		})
 	}
 }
 
