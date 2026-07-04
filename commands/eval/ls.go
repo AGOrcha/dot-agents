@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -31,6 +32,12 @@ type lsRecord struct {
 	Score      lsScore    `yaml:"score"`
 	Verify     lsVerify   `yaml:"verify"`
 	Agent      lsAgentTag `yaml:"agent"`
+
+	// modTime is the eval-run.yaml modification time — the run's persisted-at
+	// wall clock. It backs the recency ordering (most-recent first) and is
+	// intentionally untagged so it is neither read from nor written to the
+	// sidecar YAML.
+	modTime time.Time
 }
 
 type lsScore struct {
@@ -92,7 +99,7 @@ func runLs(out io.Writer, root string, asJSON bool) error {
 
 // collectRuns reads the eval-run.yaml of every run dir under runsDir, skipping
 // non-directories and dirs without a readable/parseable sidecar (an in-flight
-// or leaked run), and returns the records sorted by run id.
+// or leaked run), and returns the records ordered most-recent-first.
 func collectRuns(runsDir string, entries []os.DirEntry) []lsRecord {
 	records := make([]lsRecord, 0, len(entries))
 	for _, e := range entries {
@@ -105,21 +112,38 @@ func collectRuns(runsDir string, entries []os.DirEntry) []lsRecord {
 		}
 		records = append(records, rec)
 	}
-	sort.Slice(records, func(i, j int) bool { return records[i].RunID < records[j].RunID })
+	sortByRecency(records)
 	return records
 }
 
-// readRunRecord loads and parses a run dir's eval-run.yaml. The boolean is false
-// when the sidecar is absent or malformed — ls degrades past such a run rather
-// than failing the whole listing.
+// sortByRecency orders records most-recent-first by the sidecar's modification
+// time. Ties (equal mtime — e.g. two runs persisted within the same clock tick)
+// fall back to a stable descending run-id order so the listing is deterministic.
+func sortByRecency(records []lsRecord) {
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].modTime.Equal(records[j].modTime) {
+			return records[i].RunID > records[j].RunID
+		}
+		return records[i].modTime.After(records[j].modTime)
+	})
+}
+
+// readRunRecord loads and parses a run dir's eval-run.yaml, capturing its
+// modification time for recency ordering. The boolean is false when the sidecar
+// is absent or malformed — ls degrades past such a run rather than failing the
+// whole listing.
 func readRunRecord(runDir string) (lsRecord, bool) {
-	data, err := os.ReadFile(filepath.Join(runDir, evalRunFile))
+	path := filepath.Join(runDir, evalRunFile)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return lsRecord{}, false
 	}
 	var rec lsRecord
 	if err := yaml.Unmarshal(data, &rec); err != nil {
 		return lsRecord{}, false
+	}
+	if info, err := os.Stat(path); err == nil {
+		rec.modTime = info.ModTime()
 	}
 	return rec, true
 }
@@ -162,19 +186,35 @@ type lsRecordJSON struct {
 	Agent      lsAgentTag `json:"agent"`
 }
 
-// renderRunList prints the run table (or the empty-state notice).
+// renderRunList prints the run table (or the empty-state notice). The RUN
+// column width is derived from the widest run id present (floored at the header
+// label) so a long run id never overflows a fixed column and shears the rest of
+// the row out of alignment.
 func renderRunList(out io.Writer, runsDir string, records []lsRecord) {
 	if len(records) == 0 {
 		fmt.Fprintf(out, "eval: no runs found in %s\n", runsDir)
 		return
 	}
+	runW := runColWidth(records)
+	rowFmt := fmt.Sprintf("%%-%ds  %%-10s  %%-8s  %%-9s  %%-10s  %%s\n", runW)
 	fmt.Fprintf(out, "Eval runs — %s\n\n", runsDir)
-	fmt.Fprintf(out, "%-40s  %-10s  %-8s  %-9s  %-10s  %s\n",
-		"RUN", "LANG", "DIFF", "SCORE", "BAND", "VERIFY")
+	fmt.Fprintf(out, rowFmt, "RUN", "LANG", "DIFF", "SCORE", "BAND", "VERIFY")
 	for _, r := range records {
-		fmt.Fprintf(out, "%-40s  %-10s  %-8s  %-9s  %-10s  %s\n",
+		fmt.Fprintf(out, rowFmt,
 			r.RunID, r.Language, r.Difficulty, lsScoreCol(r.Score), r.Score.Band, verifyCol(r.Verify))
 	}
+}
+
+// runColWidth returns the RUN column width: the widest run id, floored at the
+// "RUN" header label so the header never truncates.
+func runColWidth(records []lsRecord) int {
+	w := len("RUN")
+	for _, r := range records {
+		if len(r.RunID) > w {
+			w = len(r.RunID)
+		}
+	}
+	return w
 }
 
 // lsScoreCol formats the score column, showing a dash for an unscored run.

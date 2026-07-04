@@ -3,6 +3,7 @@ package eval
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,6 +313,97 @@ func TestBuildHarnessNewError(t *testing.T) {
 	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return nil, nil })
 	if _, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go"}); err == nil {
 		t.Fatal("nil runner should make harness.New fail")
+	}
+}
+
+// ---- fix 4: adapter enumeration + no double-prefix stutter -------------------
+
+func TestValidateAdapter(t *testing.T) {
+	// Empty means "use the --agent default"; the three known adapters validate.
+	for _, a := range []runner.Adapter{"", runner.AdapterClaude, runner.AdapterCodex, runner.AdapterCopilot} {
+		if err := validateAdapter(a); err != nil {
+			t.Errorf("adapter %q should validate: %v", a, err)
+		}
+	}
+	err := validateAdapter("bogus")
+	if err == nil {
+		t.Fatal("unknown adapter should error")
+	}
+	if !strings.Contains(err.Error(), `unknown adapter "bogus"`) ||
+		!strings.Contains(err.Error(), "claude, codex, or copilot") {
+		t.Errorf("adapter error must name the invalid value and enumerate valid ones: %v", err)
+	}
+}
+
+// runEvalCommand rejects an unknown adapter up front — the single entry for both
+// the dry-run preview and the live path — with the enumerated message, before
+// any graph or sandbox work. Driven here through the dry-run branch so no KG or
+// sandbox is needed to prove the gate fires first.
+func TestRunEvalCommandUnknownAdapter(t *testing.T) {
+	for _, dryRun := range []bool{true, false} {
+		err := runEvalCommand(context.Background(), &bytes.Buffer{},
+			runOptions{language: "go", adapter: "bogus"}, false, dryRun)
+		if err == nil {
+			t.Fatalf("unknown adapter should fail runEvalCommand (dryRun=%v)", dryRun)
+		}
+		if !strings.Contains(err.Error(), `unknown adapter "bogus"`) ||
+			!strings.Contains(err.Error(), "claude, codex, or copilot") {
+			t.Errorf("adapter error not actionable (dryRun=%v): %v", dryRun, err)
+		}
+	}
+}
+
+// A sandbox constructor error is wrapped with the command context only — the
+// inner error already carries the "sandbox:" prefix, so the surfaced message
+// must not double it into "sandbox: sandbox:".
+func TestBuildHarnessSandboxErrorNoStutter(t *testing.T) {
+	swapOpenReader(t, fixtureOpenReader)
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) {
+		return nil, errors.New("sandbox: gitwt: worktree add failed")
+	})
+	_, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go", adapter: defaultAdapter})
+	if err == nil {
+		t.Fatal("sandbox error should surface")
+	}
+	if strings.Contains(err.Error(), "sandbox: sandbox:") {
+		t.Errorf("sandbox error double-prefixed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "eval run: sandbox: gitwt:") {
+		t.Errorf("sandbox error lost its single-prefixed context: %v", err)
+	}
+}
+
+// A runner constructor error is likewise wrapped with the command context only —
+// the inner error already carries the "runner:" prefix, so it must not become
+// "runner: runner:".
+func TestBuildHarnessRunnerErrorNoStutter(t *testing.T) {
+	swapOpenReader(t, fixtureOpenReader)
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{}, nil })
+	swapRunner(t, func(runner.Adapter) (runner.Runner, error) {
+		return nil, errors.New("runner: unknown adapter \"x\"")
+	})
+	_, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go", adapter: defaultAdapter})
+	if err == nil {
+		t.Fatal("runner error should surface")
+	}
+	if strings.Contains(err.Error(), "runner: runner:") {
+		t.Errorf("runner error double-prefixed: %v", err)
+	}
+	if !strings.Contains(err.Error(), "eval run: runner: unknown adapter") {
+		t.Errorf("runner error lost its single-prefixed context: %v", err)
+	}
+}
+
+// resolveGenerators validates --difficulty on the KG (non --task) path, so an
+// invalid band fails before the registry opens.
+func TestResolveGeneratorsInvalidDifficulty(t *testing.T) {
+	_, _, closeFn, err := resolveGenerators(runOptions{language: "go", difficulty: "bogus"})
+	if err == nil {
+		closeReader(closeFn)
+		t.Fatal("invalid difficulty should fail resolveGenerators before opening the graph")
+	}
+	if !strings.Contains(err.Error(), `invalid difficulty "bogus"`) {
+		t.Errorf("resolveGenerators difficulty error not actionable: %v", err)
 	}
 }
 

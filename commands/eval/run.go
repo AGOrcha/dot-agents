@@ -99,6 +99,12 @@ func runOptionsFrom(cmd *cobra.Command) runOptions {
 // CLI entry; the acceptance test drives the same path with the sandbox/runner
 // seams overridden.
 func runEvalCommand(ctx context.Context, out io.Writer, opts runOptions, asJSON, dryRun bool) error {
+	// Validate the adapter once here — the single entry for both the dry-run
+	// preview (which shows the agent it WOULD run) and the live path — so a typo
+	// fails fast with an enumerated error before either branch does any work.
+	if err := validateAdapter(runner.Adapter(opts.adapter)); err != nil {
+		return err
+	}
 	root := resolveRepoDir(opts.repoDir)
 	if dryRun {
 		return previewEvalRun(ctx, out, root, opts, asJSON)
@@ -170,7 +176,10 @@ func buildHarness(root string, opts runOptions) (*harness.Harness, evalcore.Lang
 	sb, err := newSandbox(sandbox.Config{RepoPath: root})
 	if err != nil {
 		closeReader(closeFn)
-		return nil, "", nil, fmt.Errorf("eval run: sandbox: %w", err)
+		// The sandbox constructor already prefixes its errors with "sandbox:";
+		// wrapRun adds the command context alone (not another "sandbox:") so the
+		// message stays single-prefixed instead of "sandbox: sandbox: ...".
+		return nil, "", nil, wrapRun(err)
 	}
 	// OQ6: sweep stale worktrees from crashed prior runs before this run
 	// provisions its own sandbox. Best-effort — a prune failure never aborts.
@@ -178,7 +187,9 @@ func buildHarness(root string, opts runOptions) (*harness.Harness, evalcore.Lang
 	run, err := newRunner(runner.Adapter(opts.adapter))
 	if err != nil {
 		closeReader(closeFn)
-		return nil, "", nil, fmt.Errorf("eval run: runner: %w", err)
+		// runner.New already prefixes its errors with "runner:"; wrapRun adds the
+		// command context alone so the message is not "runner: runner: ...".
+		return nil, "", nil, wrapRun(err)
 	}
 	h, err := harness.New(harness.Config{
 		Generators: reg,
@@ -222,8 +233,34 @@ func resolveGenerators(opts runOptions) (*evalcore.Registry, evalcore.Language, 
 	if err := validateLanguage(lang); err != nil {
 		return nil, "", nil, err
 	}
+	if err := validateDifficulty(evalcore.Difficulty(opts.difficulty)); err != nil {
+		return nil, "", nil, err
+	}
 	reg, closeFn, err := kgRegistry()
 	return reg, lang, closeFn, err
+}
+
+// wrapRun tags err with the `eval run` command context. Every stage
+// collaborator (sandbox, runner, harness) already prefixes its own errors, so
+// this adds only the command scope and never a duplicate stage prefix — which is
+// what keeps a runner/sandbox failure single-prefixed (no "runner: runner:").
+func wrapRun(err error) error {
+	return fmt.Errorf("eval run: %w", err)
+}
+
+// validateAdapter rejects an unrecognised agent adapter up front (see
+// runEvalCommand), so a typo (`--agent bogus`) surfaces as an enumerated,
+// actionable CLI error rather than a bare runner-lookup miss. An empty adapter
+// is allowed — the --agent flag defaults to claude, so empty only appears in
+// direct callers that mean "use the default". This mirrors validateLanguage's
+// enumerating guard.
+func validateAdapter(adapter runner.Adapter) error {
+	switch adapter {
+	case "", runner.AdapterClaude, runner.AdapterCodex, runner.AdapterCopilot:
+		return nil
+	default:
+		return fmt.Errorf("eval run: unknown adapter %q (want claude, codex, or copilot)", adapter)
+	}
 }
 
 // fixedRegistry loads the --task spec and wraps it in a registry whose only
@@ -326,7 +363,7 @@ func runEval(ctx context.Context, out io.Writer, rc runContext) error {
 		TemplateID: rc.template,
 	})
 	if err != nil {
-		return fmt.Errorf("eval run: %w", err)
+		return wrapRun(err)
 	}
 	res, err := store.WriteEvalRun(evalRun, rc.root)
 	if err != nil {

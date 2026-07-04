@@ -2,6 +2,7 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 
@@ -40,9 +41,12 @@ func newGenCmd(runE handlerFunc) *cobra.Command {
 }
 
 // RunGen is the `da eval gen` entry point the root wires as the subcommand's
-// RunE. It reads the gen flags off cmd and synthesises + writes a TaskSpec.
-func RunGen(cmd *cobra.Command) error {
-	return runGen(cmd.Context(), cmd.OutOrStdout(), genOptionsFrom(cmd))
+// RunE. asJSON is the resolved global --json flag, passed by the root handler so
+// the flag read stays statically traceable in package commands (mirroring
+// RunEval/RunLs). It reads the gen flags off cmd and synthesises + writes a
+// TaskSpec as JSON when asJSON is set, YAML otherwise.
+func RunGen(cmd *cobra.Command, asJSON bool) error {
+	return runGen(cmd.Context(), cmd.OutOrStdout(), genOptionsFrom(cmd), asJSON)
 }
 
 // genOptionsFrom reads the gen subcommand's flags off cmd.
@@ -57,10 +61,15 @@ func genOptionsFrom(cmd *cobra.Command) genOptions {
 
 // runGen builds the generator registry over the warm code graph, synthesises
 // one TaskSpec for the requested language, and writes it. It validates the
-// language up front so a typo fails before the (comparatively expensive) graph
-// open.
-func runGen(ctx context.Context, out io.Writer, opts genOptions) error {
+// language AND difficulty up front so a typo fails before the (comparatively
+// expensive) graph open — and, for difficulty, so an invalid band surfaces as a
+// clear "invalid difficulty" error rather than an ambiguous "no seed matches
+// difficulty" filter miss deep in the generator.
+func runGen(ctx context.Context, out io.Writer, opts genOptions, asJSON bool) error {
 	if err := validateLanguage(evalcore.Language(opts.language)); err != nil {
+		return err
+	}
+	if err := validateDifficulty(evalcore.Difficulty(opts.difficulty)); err != nil {
 		return err
 	}
 	reg, closeFn, err := kgRegistry()
@@ -68,14 +77,15 @@ func runGen(ctx context.Context, out io.Writer, opts genOptions) error {
 		return err
 	}
 	defer closeReader(closeFn)
-	return generateAndWrite(ctx, out, reg, opts)
+	return generateAndWrite(ctx, out, reg, opts, asJSON)
 }
 
 // generateAndWrite resolves the language's generator, produces one TaskSpec, and
-// emits it as YAML to opts.out (or out when opts.out is empty). Splitting it
-// from runGen keeps the registry-lifecycle and the generate/emit concerns
-// separately testable (the latter with a hand-built registry).
-func generateAndWrite(ctx context.Context, out io.Writer, reg *evalcore.Registry, opts genOptions) error {
+// emits it (JSON when asJSON is set, YAML otherwise) to opts.out (or out when
+// opts.out is empty). Splitting it from runGen keeps the registry-lifecycle and
+// the generate/emit concerns separately testable (the latter with a hand-built
+// registry).
+func generateAndWrite(ctx context.Context, out io.Writer, reg *evalcore.Registry, opts genOptions, asJSON bool) error {
 	lang := evalcore.Language(opts.language)
 	gen, ok := reg.Lookup(lang)
 	if !ok {
@@ -88,11 +98,41 @@ func generateAndWrite(ctx context.Context, out io.Writer, reg *evalcore.Registry
 	if err != nil {
 		return fmt.Errorf("eval gen: %w", err)
 	}
-	data, err := yaml.Marshal(spec)
+	data, err := marshalSpec(spec, asJSON)
 	if err != nil {
 		return fmt.Errorf("eval gen: marshal task spec: %w", err)
 	}
 	return emitSpec(out, data, spec.TaskID, opts.out)
+}
+
+// marshalSpec renders the TaskSpec as JSON (structured, snake_case keys) when
+// asJSON is set, YAML otherwise. YAML is both the default form and the source
+// the JSON form is derived from — the TaskSpec struct carries only YAML field
+// tags — so a marshal error or a non-JSON request both return through the same
+// path here; only the JSON request delegates to yamlToJSON.
+func marshalSpec(spec *evalcore.TaskSpec, asJSON bool) ([]byte, error) {
+	yamlData, err := yaml.Marshal(spec)
+	if err != nil || !asJSON {
+		return yamlData, err
+	}
+	return yamlToJSON(yamlData)
+}
+
+// yamlToJSON re-encodes canonical TaskSpec YAML as indented JSON by decoding it
+// into a generic map and marshalling that. Going through the YAML form keeps the
+// JSON keys identical to (and single-sourced from) the spec's snake_case YAML
+// contract, and json.Marshal's sorted map-key order keeps the output
+// deterministic.
+func yamlToJSON(yamlData []byte) ([]byte, error) {
+	var generic map[string]any
+	if err := yaml.Unmarshal(yamlData, &generic); err != nil {
+		return nil, err
+	}
+	jsonData, err := json.MarshalIndent(generic, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(jsonData, '\n'), nil
 }
 
 // emitSpec writes the marshalled spec to stdout or, when outPath is set, to that

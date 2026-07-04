@@ -42,9 +42,12 @@ func rootEvalCmd() *cobra.Command {
 	return eval.NewCmd(runEvalGen, runEvalRun, runEvalLs)
 }
 
-// runEvalGen is the `da eval gen` RunE handler. Gen has no --json output.
+// runEvalGen is the `da eval gen` RunE handler; it threads the global --json
+// flag so gen emits the TaskSpec as structured JSON (YAML otherwise). The read
+// happens here so internal/globalflagcov can statically trace it (see
+// rootEvalCmd).
 func runEvalGen(cmd *cobra.Command, _ []string) error {
-	return eval.RunGen(cmd)
+	return eval.RunGen(cmd, Flags.JSON)
 }
 
 // runEvalRun is the `da eval run` RunE handler; it threads the global --json and

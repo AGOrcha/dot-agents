@@ -2,6 +2,7 @@ package eval
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,11 +36,12 @@ func TestWarmDBPath(t *testing.T) {
 	}
 }
 
-// openWarmReader is the production seam: point KG_HOME at a temp dir and prove
-// it opens a real SQLite-backed reader (OpenSQLite creates the parent + db) and
-// hands back a working closer.
+// openWarmReader is the production seam: with a real store already built at the
+// warm path, it opens a SQLite-backed reader and hands back a working closer.
 func TestOpenWarmReaderOpensRealStore(t *testing.T) {
 	t.Setenv("KG_HOME", t.TempDir())
+	buildWarmStore(t)
+
 	reader, closeFn, err := openWarmReader()
 	if err != nil {
 		t.Fatalf("openWarmReader: %v", err)
@@ -55,6 +57,65 @@ func TestOpenWarmReaderOpensRealStore(t *testing.T) {
 		t.Errorf("GetAllFiles on warm reader: %v", err)
 	}
 	closeReader(closeFn)
+}
+
+// gen/run are read paths: an absent warm store is an operator error, not a
+// reason to create one. openWarmReader must fail cleanly with a build-the-graph
+// message AND leave the filesystem untouched (no empty graphstore.db, no ops/).
+func TestOpenWarmReaderMissingDBFails(t *testing.T) {
+	kgHomeDir := t.TempDir()
+	t.Setenv("KG_HOME", kgHomeDir)
+
+	reader, closeFn, err := openWarmReader()
+	if err == nil {
+		closeReader(closeFn)
+		t.Fatal("openWarmReader against an absent store should fail")
+	}
+	if reader != nil || closeFn != nil {
+		t.Fatal("openWarmReader must return no reader/closer on the absent-store error")
+	}
+	if !strings.Contains(err.Error(), "code graph not built") {
+		t.Errorf("absent-store error not actionable: %v", err)
+	}
+	// The read path created nothing: no graphstore.db and no ops/ directory.
+	if _, statErr := os.Stat(warmDBPath()); !os.IsNotExist(statErr) {
+		t.Errorf("openWarmReader created a store on the read path: stat err = %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(kgHomeDir, "ops")); !os.IsNotExist(statErr) {
+		t.Error("openWarmReader created the ops/ directory on the read path")
+	}
+}
+
+// A stat error that is NOT "not exist" (here: a non-directory in the store's
+// parent path, yielding ENOTDIR) surfaces as the wrapped stat error, not the
+// build-the-graph message.
+func TestOpenWarmReaderStatError(t *testing.T) {
+	kgHomeDir := t.TempDir()
+	t.Setenv("KG_HOME", kgHomeDir)
+	// Place a regular file where the "ops" directory would be, so stat of
+	// ops/graphstore.db fails with ENOTDIR rather than ErrNotExist.
+	writeFile(t, filepath.Join(kgHomeDir, "ops"), "not a directory")
+
+	_, _, err := openWarmReader()
+	if err == nil {
+		t.Fatal("openWarmReader should surface a non-not-exist stat error")
+	}
+	if strings.Contains(err.Error(), "code graph not built") {
+		t.Errorf("ENOTDIR stat error should not be reported as an unbuilt graph: %v", err)
+	}
+}
+
+// buildWarmStore materialises a real (empty-schema) warm SQLite store at the
+// resolved warm path so openWarmReader's exists-then-open path is exercised.
+func buildWarmStore(t *testing.T) {
+	t.Helper()
+	store, err := graphstore.OpenSQLite(warmDBPath())
+	if err != nil {
+		t.Fatalf("build warm store: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close warm store: %v", err)
+	}
 }
 
 func TestBuildRegistryRegistersEveryLanguage(t *testing.T) {
@@ -137,5 +198,25 @@ func TestValidateLanguage(t *testing.T) {
 	}
 	if err := validateLanguage(evalcore.LanguageGo); err != nil {
 		t.Errorf("go should validate: %v", err)
+	}
+}
+
+func TestValidateDifficulty(t *testing.T) {
+	// Empty is allowed — it means "generator's choice".
+	if err := validateDifficulty(""); err != nil {
+		t.Errorf("empty difficulty should be allowed: %v", err)
+	}
+	for _, d := range []evalcore.Difficulty{evalcore.DifficultyEasy, evalcore.DifficultyMedium, evalcore.DifficultyHard} {
+		if err := validateDifficulty(d); err != nil {
+			t.Errorf("%q should validate: %v", d, err)
+		}
+	}
+	err := validateDifficulty("bogus")
+	if err == nil {
+		t.Fatal("invalid difficulty should error")
+	}
+	if !strings.Contains(err.Error(), `invalid difficulty "bogus"`) ||
+		!strings.Contains(err.Error(), "easy, medium, or hard") {
+		t.Errorf("difficulty error not actionable: %v", err)
 	}
 }

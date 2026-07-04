@@ -262,6 +262,9 @@ var cliHintRules = []cliHintRule{
 		"Check that the resource name exists in one of the `.agentsrc.json` sources.",
 		"Use `da install --strict` when you want missing resources to fail fast.",
 	}},
+	{"code graph not built", []string{
+		"Run `da kg build` then `da kg warm --include-code` to build the code graph the eval generator reads.",
+	}},
 	{"unknown command", []string{
 		"Run `da --help` to see available command families.",
 	}},
