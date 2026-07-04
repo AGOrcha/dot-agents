@@ -288,7 +288,8 @@ da install
 #### Layered config & the lockfile (`.agentsrc.lock`)
 
 A `.agentsrc.json` manifest may `extends` one or more config layers sourced from
-git, local paths, or HTTP (OCI is not valid for `extends`), declared as `source:path@version`.
+git, local paths, HTTP, or OCI (any source may supply a layer; the kind is set by the
+pulled blob's media type), declared as `source:path@version`.
 When the layers are resolved, the resolved layer SHAs are pinned in
 `.agentsrc.lock` so every machine projects the same effective config.
 
