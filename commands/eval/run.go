@@ -11,6 +11,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
 	"github.com/spf13/cobra"
 )
@@ -230,8 +231,8 @@ func (g fixedGenerator) Generate(context.Context, evalcore.GenerateOptions) (*ev
 
 // verifiers is the language→verifier map the harness verifies against. v1 ships
 // the go verifier only; a python/typescript verifier is an additive entry.
-func verifiers() map[evalcore.Language]goverifier.Verifier {
-	return map[evalcore.Language]goverifier.Verifier{
+func verifiers() map[evalcore.Language]verifier.Verifier {
+	return map[evalcore.Language]verifier.Verifier{
 		evalcore.LanguageGo: goverifier.New(),
 	}
 }

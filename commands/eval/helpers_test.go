@@ -14,7 +14,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/gen/gencore"
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/sandbox"
-	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
 )
 
@@ -113,15 +113,15 @@ func (s *fakeSandbox) PruneStale(context.Context) ([]string, error) {
 	return s.pruned, s.pruneErr
 }
 
-// fakeVerifier is a scripted goverifier.Verifier that returns a canned result
+// fakeVerifier is a scripted verifier.Verifier that returns a canned result
 // without shelling out — used by the runEval error-path tests so they need no
 // go toolchain.
 type fakeVerifier struct {
-	res *goverifier.VerifyResult
+	res *verifier.VerifyResult
 }
 
 func (v *fakeVerifier) Language() evalcore.Language { return evalcore.LanguageGo }
-func (v *fakeVerifier) Verify(context.Context, *evalcore.TaskSpec, string, []string) (*goverifier.VerifyResult, error) {
+func (v *fakeVerifier) Verify(context.Context, *evalcore.TaskSpec, string, []string) (*verifier.VerifyResult, error) {
 	return v.res, nil
 }
 
@@ -233,6 +233,6 @@ const zeroCommit = "0000000000000000000000000000000000000000"
 var errFixture = errors.New("fixture failure")
 
 // passingVerify is a canned "build+test passed" verifier result.
-func passingVerify() *goverifier.VerifyResult {
-	return &goverifier.VerifyResult{Passed: true, Phase: goverifier.PhaseTest, Duration: time.Millisecond}
+func passingVerify() *verifier.VerifyResult {
+	return &verifier.VerifyResult{Passed: true, Phase: verifier.PhaseTest, Duration: time.Millisecond}
 }

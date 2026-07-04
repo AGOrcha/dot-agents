@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 )
 
 // TestHelperProcess is the subprocess used by integration tests that need a
@@ -115,8 +116,8 @@ func TestVerify_TestPassNoBuildCmd(t *testing.T) {
 	if !res.Passed {
 		t.Errorf("Passed = false, want true")
 	}
-	if res.Phase != PhaseTest {
-		t.Errorf("Phase = %q, want %q", res.Phase, PhaseTest)
+	if res.Phase != verifier.PhaseTest {
+		t.Errorf("Phase = %q, want %q", res.Phase, verifier.PhaseTest)
 	}
 	if res.ExitCode != 0 {
 		t.Errorf("ExitCode = %d, want 0", res.ExitCode)
@@ -140,8 +141,8 @@ func TestVerify_TestFail(t *testing.T) {
 	if res.Passed {
 		t.Errorf("Passed = true, want false")
 	}
-	if res.Phase != PhaseTest {
-		t.Errorf("Phase = %q, want %q", res.Phase, PhaseTest)
+	if res.Phase != verifier.PhaseTest {
+		t.Errorf("Phase = %q, want %q", res.Phase, verifier.PhaseTest)
 	}
 	if res.ExitCode != 1 {
 		t.Errorf("ExitCode = %d, want 1", res.ExitCode)
@@ -160,12 +161,12 @@ func TestVerify_TestExecError(t *testing.T) {
 
 	spec := minimalSpec()
 	_, err := v.Verify(context.Background(), spec, t.TempDir(), nil)
-	var ve *VerifyError
+	var ve *verifier.VerifyError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected VerifyError, got %T: %v", err, err)
 	}
-	if ve.Phase != PhaseTest {
-		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, PhaseTest)
+	if ve.Phase != verifier.PhaseTest {
+		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, verifier.PhaseTest)
 	}
 	if !errors.Is(err, execErr) {
 		t.Errorf("errors.Is(err, execErr) = false, want true")
@@ -194,8 +195,8 @@ func TestVerify_BuildPassTestPass(t *testing.T) {
 	if !res.Passed {
 		t.Errorf("Passed = false, want true")
 	}
-	if res.Phase != PhaseTest {
-		t.Errorf("Phase = %q, want %q", res.Phase, PhaseTest)
+	if res.Phase != verifier.PhaseTest {
+		t.Errorf("Phase = %q, want %q", res.Phase, verifier.PhaseTest)
 	}
 	// Output from both steps is concatenated.
 	if res.Stdout != "step1\nstep2\n" {
@@ -225,8 +226,8 @@ func TestVerify_BuildFailShortCircuits(t *testing.T) {
 	if res.Passed {
 		t.Errorf("Passed = true, want false")
 	}
-	if res.Phase != PhaseBuild {
-		t.Errorf("Phase = %q, want %q", res.Phase, PhaseBuild)
+	if res.Phase != verifier.PhaseBuild {
+		t.Errorf("Phase = %q, want %q", res.Phase, verifier.PhaseBuild)
 	}
 	if res.ExitCode != 2 {
 		t.Errorf("ExitCode = %d, want 2", res.ExitCode)
@@ -243,12 +244,12 @@ func TestVerify_BuildExecError(t *testing.T) {
 	spec := minimalSpec()
 	spec.Verification.BuildCmd = []string{"go", "build", "./..."}
 	_, err := v.Verify(context.Background(), spec, t.TempDir(), nil)
-	var ve *VerifyError
+	var ve *verifier.VerifyError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected VerifyError, got %T: %v", err, err)
 	}
-	if ve.Phase != PhaseBuild {
-		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, PhaseBuild)
+	if ve.Phase != verifier.PhaseBuild {
+		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, verifier.PhaseBuild)
 	}
 	if !errors.Is(err, buildErr) {
 		t.Errorf("errors.Is(err, buildErr) = false, want true")
@@ -314,8 +315,8 @@ func TestVerify_TimeoutExpires(t *testing.T) {
 	if result.ExitCode == 0 {
 		t.Errorf("ExitCode = 0; want non-zero (subprocess was killed by context timeout)")
 	}
-	if result.Phase != PhaseTest {
-		t.Errorf("Phase = %q, want %q", result.Phase, PhaseTest)
+	if result.Phase != verifier.PhaseTest {
+		t.Errorf("Phase = %q, want %q", result.Phase, verifier.PhaseTest)
 	}
 }
 
@@ -337,7 +338,7 @@ func TestVerify_TimeoutZeroNoDeadline(t *testing.T) {
 	spec := minimalSpec() // TimeoutSeconds defaults to 0
 	_, err := v.Verify(ctx, spec, t.TempDir(), nil)
 	// Expect a VerifyError wrapping context.Canceled.
-	var ve *VerifyError
+	var ve *verifier.VerifyError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected VerifyError for cancelled context, got %T: %v", err, err)
 	}
@@ -350,7 +351,7 @@ func TestVerify_TimeoutZeroNoDeadline(t *testing.T) {
 
 func TestVerifyError_ErrorAndUnwrap(t *testing.T) {
 	cause := errors.New("underlying cause")
-	ve := &VerifyError{Phase: PhaseBuild, Cause: cause}
+	ve := &verifier.VerifyError{Phase: verifier.PhaseBuild, Cause: cause}
 	if ve.Error() == "" {
 		t.Fatal("VerifyError.Error() returned empty string")
 	}
@@ -360,8 +361,8 @@ func TestVerifyError_ErrorAndUnwrap(t *testing.T) {
 }
 
 func TestVerifyError_PhaseInMessage(t *testing.T) {
-	for _, phase := range []Phase{PhaseBuild, PhaseTest} {
-		ve := &VerifyError{Phase: phase, Cause: errors.New("x")}
+	for _, phase := range []verifier.Phase{verifier.PhaseBuild, verifier.PhaseTest} {
+		ve := &verifier.VerifyError{Phase: phase, Cause: errors.New("x")}
 		msg := ve.Error()
 		if msg == "" {
 			t.Errorf("VerifyError.Error() for phase %q is empty", phase)
@@ -446,7 +447,7 @@ func TestRunProcess_CommandNotFound(t *testing.T) {
 		t.Fatal("expected error for non-existent binary, got nil")
 	}
 	// Must NOT be wrapped as a VerifyError — runProcess returns raw errors.
-	var ve *VerifyError
+	var ve *verifier.VerifyError
 	if errors.As(err, &ve) {
 		t.Errorf("runProcess should not wrap errors in VerifyError; got %T", err)
 	}
@@ -476,7 +477,7 @@ func TestRunProcess_ContextCancelled(t *testing.T) {
 	}
 	if err != nil {
 		// runProcess must return raw errors, never wrapped in VerifyError.
-		var ve *VerifyError
+		var ve *verifier.VerifyError
 		if errors.As(err, &ve) {
 			t.Errorf("runProcess must not wrap errors in VerifyError; got %T", err)
 		}
@@ -525,7 +526,7 @@ func TestVerify_StderrAccumulates(t *testing.T) {
 // ---- Verify: empty workdir (sandbox-escape guard) ----------------------------
 
 // TestVerify_EmptyWorkdir asserts that Verify rejects an empty workdir with a
-// PhaseValidate VerifyError and executes no command. An empty exec.Cmd.Dir
+// verifier.PhaseValidate VerifyError and executes no command. An empty exec.Cmd.Dir
 // would default to the current process directory, escaping the sandbox.
 func TestVerify_EmptyWorkdir(t *testing.T) {
 	cmdCalled := false
@@ -536,12 +537,12 @@ func TestVerify_EmptyWorkdir(t *testing.T) {
 	}
 	spec := minimalSpec()
 	_, err := v.Verify(context.Background(), spec, "", nil)
-	var ve *VerifyError
+	var ve *verifier.VerifyError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected VerifyError for empty workdir, got %T: %v", err, err)
 	}
-	if ve.Phase != PhaseValidate {
-		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, PhaseValidate)
+	if ve.Phase != verifier.PhaseValidate {
+		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, verifier.PhaseValidate)
 	}
 	if cmdCalled {
 		t.Error("runCmd was called despite empty workdir; want no execution")
@@ -578,7 +579,7 @@ func TestVerify_CommandRunsInWorkdir(t *testing.T) {
 // ---- Verify: negative TimeoutSeconds -----------------------------------------
 
 // TestVerify_NegativeTimeout asserts that Verify rejects a negative
-// TimeoutSeconds with a PhaseValidate VerifyError before any command runs.
+// TimeoutSeconds with a verifier.PhaseValidate VerifyError before any command runs.
 // Zero remains "no timeout" (documented contract); only strictly negative values
 // are invalid.
 func TestVerify_NegativeTimeout(t *testing.T) {
@@ -591,12 +592,12 @@ func TestVerify_NegativeTimeout(t *testing.T) {
 	spec := minimalSpec()
 	spec.Verification.TimeoutSeconds = -1
 	_, err := v.Verify(context.Background(), spec, t.TempDir(), nil)
-	var ve *VerifyError
+	var ve *verifier.VerifyError
 	if !errors.As(err, &ve) {
 		t.Fatalf("expected VerifyError for negative TimeoutSeconds, got %T: %v", err, err)
 	}
-	if ve.Phase != PhaseValidate {
-		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, PhaseValidate)
+	if ve.Phase != verifier.PhaseValidate {
+		t.Errorf("VerifyError.Phase = %q, want %q", ve.Phase, verifier.PhaseValidate)
 	}
 	if cmdCalled {
 		t.Error("runCmd was called despite negative TimeoutSeconds; want no execution")

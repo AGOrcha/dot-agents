@@ -12,7 +12,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/runner"
 	"github.com/AGOrcha/dot-agents/internal/eval/scoringbridge"
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
-	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
+	"github.com/AGOrcha/dot-agents/internal/eval/verifier"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
@@ -28,7 +28,7 @@ func scoredRun() (harness.EvalRun, store.Result) {
 			Duration:  time.Second,
 			Telemetry: runner.AgentTelemetry{Harness: "fake-harness", Model: "test-model"},
 		},
-		Verify: &goverifier.VerifyResult{Passed: true, Phase: goverifier.PhaseTest, ExitCode: 0},
+		Verify: &verifier.VerifyResult{Passed: true, Phase: verifier.PhaseTest, ExitCode: 0},
 		Score: scoringbridge.Result{
 			Score: scoring.Score{Value: 0.812, Band: "good", Scored: true, RubricVersion: "9.9.9"},
 		},
@@ -80,7 +80,7 @@ func TestRenderRunJSON(t *testing.T) {
 	if got.RunID != "eval-render-1" || !got.Score.Scored || got.Score.Value != 0.812 {
 		t.Errorf("json envelope = %+v", got)
 	}
-	if got.Verify.Phase != string(goverifier.PhaseTest) || !got.Verify.Passed {
+	if got.Verify.Phase != string(verifier.PhaseTest) || !got.Verify.Passed {
 		t.Errorf("json verify = %+v", got.Verify)
 	}
 	if got.Sidecars.EvalRun != res.EvalRunPath {
