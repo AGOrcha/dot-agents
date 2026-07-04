@@ -34,6 +34,8 @@ mechanical sequences become versionable artifacts executed identically by every 
   no branching on outcomes. Sequences that need agent judgment stay **skills**; a skill MAY
   call a recipe for its mechanical spine. If a proposed recipe wants a conditional/loop over
   outcomes, it belongs in a skill, not a recipe.
+  Recipes are the deterministic floor of orchestration; the Workflow engine is the programmable
+  ceiling. If a recipe wants to become programmable, it wants to be a workflow.
 - **D4 — Error handling: fail-fast.** A non-zero step aborts the run, reporting the failing
   step index + source line, with a non-zero process exit. Rationale: recipes mutate workflow
   state; continuing past a failed step risks corrupt state. (A future opt-in continue-on-error
