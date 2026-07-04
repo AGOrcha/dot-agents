@@ -352,7 +352,7 @@ tasks:
       app_type: go-cli
     - id: docs
       title: docs/EVAL_HARNESS.md + rubric-cross-link
-      status: pending
+      status: completed
       depends_on:
         - cli-eval
         - r2-visibility-contract
