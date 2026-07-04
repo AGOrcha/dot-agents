@@ -13,8 +13,8 @@ import RubricView from './views/RubricView'
  *   /iterations/:n     → IterationDetailView (per-iteration full detail)
  *   /rubric            → RubricView      (active rubric explainer)
  *
- * R5 extension slot: RunDetailView accepts localStorage-based Bearer-token
- * plumbing via the API client (client.ts AUTH_TOKEN_KEY seam).
+ * R5 extension slot: RunDetailView accepts in-memory Bearer-token
+ * plumbing via the API client (client.ts setAuthToken/clearAuthToken seam).
  */
 export default function App() {
   return (
