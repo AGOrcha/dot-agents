@@ -3,7 +3,7 @@ plan_id: kg-ideate-skill
 tasks:
     - id: t1-kg-brief-molecule
       title: Phase 1 molecule `kg-brief` (degraded-mode capable)
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-spec-scaffold-molecule
@@ -21,7 +21,7 @@ tasks:
         Spec ref: kg-ideate-skill design.md D2, D3, D4; proposal Phase 1.
     - id: t2-spec-scaffold-molecule
       title: Phase 2 molecule `spec-scaffold` (competing-decisions fallback)
-      status: pending
+      status: completed
       depends_on:
         - t1-kg-brief-molecule
       blocks:
@@ -40,7 +40,7 @@ tasks:
         function names / task lists). Spec ref: design.md D3, D6; proposal Phase 2.
     - id: t3-plan-scaffold-molecule
       title: Phase 3 molecule `plan-scaffold` (spec->tasks/write-scopes/dep-order)
-      status: pending
+      status: completed
       depends_on:
         - t2-spec-scaffold-molecule
       blocks:
@@ -58,7 +58,7 @@ tasks:
         never hand-edits task status. Spec ref: design.md D5, D6; proposal Phase 3.
     - id: t4-staged-execution-handoff-molecule
       title: Phase 4 molecule `staged-execution-handoff` (no implementation)
-      status: pending
+      status: completed
       depends_on:
         - t3-plan-scaffold-molecule
       blocks:
@@ -74,7 +74,7 @@ tasks:
         Spec ref: design.md Requirement 5; proposal Phase 4.
     - id: t5-orchestrator-compound
       title: Compound orchestrator `kg-ideate` (T2, dispatches the four molecules)
-      status: pending
+      status: completed
       depends_on:
         - t1-kg-brief-molecule
         - t2-spec-scaffold-molecule
@@ -93,7 +93,7 @@ tasks:
         self-contained cold-start context). Spec ref: design.md D1.
     - id: t6-degraded-mode-e2e
       title: Degraded-mode end-to-end demonstration (graceful-degradation contract)
-      status: pending
+      status: completed
       depends_on:
         - t5-orchestrator-compound
       blocks: []
@@ -135,7 +135,7 @@ tasks:
         status: blocked until the gate clears (do not advance manually).
     - id: t8-proposal-lesson-schema-formalization
       title: Formalize canonical proposal.schema.json + lesson.schema.json (single-source)
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: AGOrcha
