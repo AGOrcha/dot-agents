@@ -3,7 +3,9 @@ package commands
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -637,5 +639,129 @@ func assertCallSlice(t *testing.T, got, want [][]string) {
 	}
 	for i := range got {
 		assertStringSlice(t, got[i], want[i])
+	}
+}
+
+// ----- shebang cross-platform acceptance test (R4/R5/D1) -----
+
+// acceptanceStep is the single effective recipe step used by the acceptance
+// test: dispatched as `da --version`, which prints "da version dev" to stdout.
+const acceptanceStep = "--version\n"
+
+// acceptanceShebang is the D1-mandated shebang that makes a .da file
+// directly executable on POSIX systems.
+const acceptanceShebang = "#!/usr/bin/env -S da run\n"
+
+// acceptanceComment proves effectiveLines drops comment lines on the exec path.
+const acceptanceComment = "# this comment line must be skipped by effectiveLines\n"
+
+// acceptanceRecipeContent is the full recipe file content for the acceptance
+// test: shebang + comment + one effective step.
+const acceptanceRecipeContent = acceptanceShebang + acceptanceComment + acceptanceStep
+
+// acceptanceVersionPfx is the leading prefix of `da --version` output.
+// Used to assert both the shebang-direct and Windows-fallback paths.
+const acceptanceVersionPfx = "da "
+
+// buildAcceptanceBinary compiles the da CLI binary into dir and returns its
+// absolute path. The import path is used (not a relative path) so the build
+// works regardless of the test's working directory — required for the
+// cross-platform CI matrix (R4).
+func buildAcceptanceBinary(t *testing.T, dir string) string {
+	t.Helper()
+	name := "da"
+	if runtime.GOOS == "windows" {
+		name = "da.exe"
+	}
+	out := filepath.Join(dir, name)
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", out,
+		"github.com/AGOrcha/dot-agents/cmd/da")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build da binary: %v\n%s", err, output)
+	}
+	return out
+}
+
+// writeAcceptanceRecipe writes the shebang recipe into dir, marks it +x (0755),
+// and returns its absolute path.
+func writeAcceptanceRecipe(t *testing.T, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "recipe.da")
+	if err := os.WriteFile(path, []byte(acceptanceRecipeContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// prependBinToPath returns a copy of env with dir prepended to the PATH entry
+// so child processes resolve our freshly built `da` binary before any
+// system-installed version. Works on POSIX (PATH= is always uppercase).
+func prependBinToPath(env []string, dir string) []string {
+	result := make([]string, len(env))
+	copy(result, env)
+	for i, e := range result {
+		if strings.HasPrefix(e, "PATH=") {
+			result[i] = "PATH=" + dir + string(os.PathListSeparator) + e[5:]
+			return result
+		}
+	}
+	return append(result, "PATH="+dir)
+}
+
+// stderrBytes extracts the Stderr field from an *exec.ExitError for richer
+// failure messages; returns an empty string for any other error type or nil.
+func stderrBytes(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return string(ee.Stderr)
+	}
+	return ""
+}
+
+// TestShebangRecipe_Acceptance proves R5/D1: a chmod-+x .da file with the
+// D1 shebang (#!/usr/bin/env -S da run) executes directly on macOS/Linux —
+// the OS invokes env -S da run, our built `da` binary reads the recipe and
+// dispatches the --version step. On Windows (no OS-level shebang) the
+// equivalent `da run <file>` produces identical output, satisfying R4.
+//
+// The test runs in CI on every target OS via `go test ./...` in the existing
+// matrix (windows-latest, macos-latest, ubuntu-latest), so it covers all
+// three platforms without any workflow edit.
+func TestShebangRecipe_Acceptance(t *testing.T) {
+	dir := t.TempDir()
+	daPath := buildAcceptanceBinary(t, dir)
+	recipePath := writeAcceptanceRecipe(t, dir)
+
+	env := prependBinToPath(os.Environ(), dir)
+
+	var rawOut []byte
+	var runErr error
+
+	if runtime.GOOS == "windows" {
+		// Windows has no OS-level shebang interpreter. Prove R4 via the direct
+		// equivalent: `da.exe run <recipe>` produces the same output.
+		cmd := exec.Command(daPath, "run", recipePath)
+		cmd.Env = env
+		rawOut, runErr = cmd.Output()
+		if runErr != nil {
+			t.Fatalf("windows fallback `da run %s` failed: %v\nstderr: %s",
+				recipePath, runErr, stderrBytes(runErr))
+		}
+	} else {
+		// macOS / Linux: exec the recipe file DIRECTLY. The OS reads the shebang
+		// and invokes `/usr/bin/env -S da run <recipe>`. PATH is set so `env`
+		// resolves our freshly built binary, not any system-installed `da`.
+		cmd := exec.Command(recipePath)
+		cmd.Env = env
+		rawOut, runErr = cmd.Output()
+		if runErr != nil {
+			t.Fatalf("shebang direct exec %s failed: %v\nstderr: %s",
+				recipePath, runErr, stderrBytes(runErr))
+		}
+	}
+
+	out := strings.TrimSpace(string(rawOut))
+	if !strings.HasPrefix(out, acceptanceVersionPfx) {
+		t.Errorf("expected output starting with %q, got %q", acceptanceVersionPfx, out)
 	}
 }
