@@ -607,7 +607,9 @@ jobs:
         # esbuild postinstall (binary download) was skipped by --ignore-scripts
         # above. pnpm rebuild runs only the named package's build scripts so the
         # vite and vitest invocations in the next step can locate the native binary.
-        run: pnpm rebuild esbuild
+        # Filter to the dashboard package: the repo root has no package.json, so a
+        # bare `pnpm rebuild` errors ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND.
+        run: pnpm --filter r2-observability-dashboard rebuild esbuild
 
       - name: Run dashboard vitest with lcov coverage
         # Produces web/dashboard/coverage/lcov.info consumed by sonar.javascript.lcov.reportPaths.
