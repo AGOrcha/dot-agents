@@ -300,19 +300,33 @@ environment variable the sandbox passes through (`ANTHROPIC_API_KEY`, `OPENAI_AP
 `GH_TOKEN`), or via credentials the agent reads from a location independent of `$HOME`. If it is
 not, the run cannot produce a meaningful sample.
 
-**Distinguishable signal.** The runner classifies two agent start failures and returns a distinct
-`*runner.AgentStartError` ([`internal/eval/runner/agentcheck.go`](../internal/eval/runner/agentcheck.go))
-instead of a scored `Result`, which the harness surfaces as a `harness: agent did not run: …`
-abort:
+**Distinguishable signal.** Two agent start failures are classified as a distinct
+`*runner.AgentStartError` and surfaced by the harness as a `harness: agent did not run: …` abort
+(instead of a scored `Result`):
 
-| `Reason` | Trigger | Message gist |
-| --- | --- | --- |
-| `unavailable` | the agent binary does not resolve on PATH (`exec.ErrNotFound`) | `… agent CLI "claude" not found on PATH — install it or choose an installed --agent` |
-| `auth` | the CLI ran but exited non-zero with an auth/config signature in its output (`not logged in`, `unauthorized`, `invalid api key`, `ANTHROPIC_API_KEY`, …) | `… agent auth/config failure under isolated HOME (exit N, matched "…") — the eval sandbox runs the agent under a credential-free HOME; authenticate the CLI or see docs/EVAL_HARNESS.md` |
+| `Reason` | Owner | Trigger | Message gist |
+| --- | --- | --- | --- |
+| `unavailable` | runner ([`agentcheck.go`](../internal/eval/runner/agentcheck.go)) | the agent binary does not resolve on PATH (`exec.ErrNotFound`) — a pure launch fault | `… agent CLI "claude" not found on PATH — install it or choose an installed --agent` |
+| `auth` | harness ([`authcheck.go`](../internal/eval/harness/authcheck.go)) | **all three** hold: non-zero exit, an auth-startup signature in the CLI's **stderr**, **and no solution produced** | `… agent auth/config failure under isolated HOME (exit N, matched "…") — the eval sandbox runs the agent under a credential-free HOME; authenticate the CLI or see docs/EVAL_HARNESS.md` |
 
-The auth signature match is intentionally conservative — it fires only on a **non-zero exit** whose
-output carries an agent-auth phrase — so an ordinary wrong-solution run (a non-zero exit with no
-auth text) is still scored normally as a completed run, not misread as an auth failure.
+The `auth` classification is deliberately narrow to avoid corrupting eval results on auth-related
+tasks — a legitimate run that *produced a solution* about, say, an auth handler must be **scored**,
+even if its diff or test output contains auth vocabulary. Three guards combine:
+
+1. **No-solution gate (the robust guard).** The harness checks the sandbox working tree
+   (`detectWorktreeChanges`, via go-git status). If the agent produced **any** change — a tracked
+   edit or an untracked file — it *ran*: the run is scored, never auth-aborted, regardless of its
+   output text. Only a run that changed nothing is a candidate for the auth abort. On any
+   uncertainty (not a resolvable worktree, status error) the detector fails safe to "changed", so a
+   run is scored rather than wrongly aborted.
+2. **stderr-only scan.** Signatures are matched against the CLI's **stderr** only — an agent's
+   solution and task output flow to stdout and the working tree, so solution content never feeds the
+   match.
+3. **Narrow signatures.** Only phrases that are unambiguously the CLI's own login/api-key startup
+   failure are used (`not logged in`, `please run /login`, `claude login`, `codex login`,
+   `gh auth login`, `invalid api key`, `no api key`, `missing api key`, `api key not set`). Bare
+   `unauthorized` / `authentication failed` / `401` are **excluded** — they occur in legitimate
+   solution and test output.
 
 ## How eval outcomes feed R1
 

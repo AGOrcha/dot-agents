@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
-	"strings"
 )
 
 // AgentStartReason classifies why an agent invocation did not yield a scorable
@@ -60,33 +59,17 @@ func (e *AgentStartError) Error() string {
 // (the unavailable case wraps the original exec failure).
 func (e *AgentStartError) Unwrap() error { return e.Cause }
 
-// authFailureSignatures are lowercased substrings that mark an agent CLI exiting
-// for want of usable credentials/config. They are deliberately specific to an
-// agent's OWN auth so an ordinary wrong-solution run — a non-zero exit whose
-// output merely mentions, say, an HTTP client — is NOT misclassified as auth.
-var authFailureSignatures = []string{
-	"not logged in",
-	"please log in",
-	"please run /login",
-	"claude login",
-	"codex login",
-	"gh auth login",
-	"not authenticated",
-	"authentication failed",
-	"unauthorized",
-	"login required",
-	"no credentials",
-	"credentials not found",
-	"invalid api key",
-	"missing api key",
-	"anthropic_api_key",
-	"openai_api_key",
-}
-
 // classifyExecError maps an exec-seam failure to an *AgentStartError only when it
 // is a genuine "binary not found" on PATH; every other exec error (a real launch
 // fault) returns nil so the caller wraps it as-is. The returned error unwraps to
 // cause, so existing errors.Is checks against the original error keep passing.
+//
+// The complementary auth/config classification (a CLI that launched but could
+// not authenticate under the sandbox's isolated HOME) does NOT live here: it
+// requires evidence that the agent produced no solution — a working-tree fact
+// only the harness holds — so it is gated and decided in
+// internal/eval/harness (see the harness's agent auth detection). Detecting a
+// missing binary, by contrast, is a pure exec concern with no such gate.
 func classifyExecError(agent, binary string, cause error) *AgentStartError {
 	if cause == nil || !errors.Is(cause, exec.ErrNotFound) {
 		return nil
@@ -97,27 +80,4 @@ func classifyExecError(agent, binary string, cause error) *AgentStartError {
 		Reason: ReasonUnavailable,
 		Cause:  cause,
 	}
-}
-
-// classifyAuthFailure inspects a COMPLETED agent run (the exec seam returned no
-// error) and reports an *AgentStartError when a non-zero exit carries an
-// auth/config signature. A zero exit — or a non-zero exit with no auth signature
-// — returns nil so the run is scored as an ordinary agent outcome.
-func classifyAuthFailure(agent, binary string, exitCode int, stdout, stderr []byte) *AgentStartError {
-	if exitCode == 0 {
-		return nil
-	}
-	haystack := strings.ToLower(string(stderr) + "\n" + string(stdout))
-	for _, sig := range authFailureSignatures {
-		if strings.Contains(haystack, sig) {
-			return &AgentStartError{
-				Agent:    agent,
-				Binary:   binary,
-				Reason:   ReasonAuth,
-				ExitCode: exitCode,
-				Detail:   sig,
-			}
-		}
-	}
-	return nil
 }

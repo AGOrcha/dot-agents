@@ -72,9 +72,6 @@ func (r *codexRunner) Run(
 		}
 		return Result{}, fmt.Errorf("runner/codex: exec: %w", err)
 	}
-	if se := classifyAuthFailure(codexHarness, codexBin, code, stdout, stderr); se != nil {
-		return Result{}, se
-	}
 
 	return Result{
 		Stdout:   stdout,

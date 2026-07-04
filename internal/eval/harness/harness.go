@@ -37,6 +37,13 @@ type Harness struct {
 	sandbox    sandbox.Sandbox
 	runner     runner.Runner
 	verifiers  map[eval.Language]verifier.Verifier
+
+	// producedSolution reports whether the agent produced a solution in the
+	// sandbox working tree (any tracked edit or untracked file). It gates the
+	// agent auth-failure detection: a run whose working tree changed is scored,
+	// never auth-aborted, regardless of its output text. The seam defaults to
+	// detectWorktreeChanges and is injected by tests.
+	producedSolution func(workdir string) bool
 }
 
 // New validates cfg and returns a Harness. It errors when any dependency is
@@ -60,10 +67,11 @@ func New(cfg Config) (*Harness, error) {
 		}
 	}
 	return &Harness{
-		generators: cfg.Generators,
-		sandbox:    cfg.Sandbox,
-		runner:     cfg.Runner,
-		verifiers:  cfg.Verifiers,
+		generators:       cfg.Generators,
+		sandbox:          cfg.Sandbox,
+		runner:           cfg.Runner,
+		verifiers:        cfg.Verifiers,
+		producedSolution: detectWorktreeChanges,
 	}, nil
 }
 
@@ -197,6 +205,9 @@ func (h *Harness) runAgent(ctx context.Context, spec *eval.TaskSpec, instance *s
 			return runner.Result{}, fmt.Errorf("harness: agent did not run: %w", err)
 		}
 		return runner.Result{}, fmt.Errorf("harness: run agent: %w", err)
+	}
+	if authErr := h.detectAuthFailure(instance, result); authErr != nil {
+		return runner.Result{}, fmt.Errorf("harness: agent did not run: %w", authErr)
 	}
 	return result, nil
 }

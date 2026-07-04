@@ -65,76 +65,39 @@ func TestClassifyExecError(t *testing.T) {
 	}
 }
 
-// ---- classifyAuthFailure ------------------------------------------------------
-
-func TestClassifyAuthFailure(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		code   int
-		stdout string
-		stderr string
-		want   bool
-	}{
-		{"clean exit", 0, "Please log in", "", false},
-		{"non-auth failure", 1, "compile error: undefined Foo", "", false},
-		{"login on stderr", 1, "", "Error: Not logged in. Please run /login", true},
-		{"api key on stdout", 2, "set ANTHROPIC_API_KEY to continue", "", true},
-	}
-	for _, tc := range cases {
-		got := classifyAuthFailure("claude-code", "claude", tc.code, []byte(tc.stdout), []byte(tc.stderr))
-		if (got != nil) != tc.want {
-			t.Errorf("%s: got %v, want non-nil=%v", tc.name, got, tc.want)
-		}
-		if got != nil && got.Reason != ReasonAuth {
-			t.Errorf("%s: reason = %q, want %q", tc.name, got.Reason, ReasonAuth)
-		}
-	}
-}
-
-// ---- adapter integration ------------------------------------------------------
+// ---- adapter integration: missing-CLI classification --------------------------
+//
+// The auth/config classification is gated on "no solution produced" and lives in
+// internal/eval/harness (a completed run whose working tree changed is scored,
+// never auth-aborted); these adapter tests cover only the missing-CLI launch
+// fault, which is a pure exec concern the runner owns.
 
 // notFoundErr is an exec failure that unwraps to exec.ErrNotFound, the shape a
 // real missing-CLI launch produces.
 func notFoundErr() error { return fmt.Errorf("exec: %w", exec.ErrNotFound) }
 
-// assertStartReason runs r and asserts Run aborted with an *AgentStartError of
-// the given reason (the adapter classified a missing CLI or an auth failure).
-func assertStartReason(t *testing.T, r Runner, want AgentStartReason) {
+// assertUnavailable runs r and asserts Run aborted with an unavailable
+// *AgentStartError (the adapter classified a missing CLI).
+func assertUnavailable(t *testing.T, r Runner) {
 	t.Helper()
 	_, err := r.Run(context.Background(), minimalSpec(), minimalInstance(t))
 	var se *AgentStartError
-	if !errors.As(err, &se) || se.Reason != want {
-		t.Fatalf("want %s AgentStartError, got %T: %v", want, err, err)
+	if !errors.As(err, &se) || se.Reason != ReasonUnavailable {
+		t.Fatalf("want unavailable AgentStartError, got %T: %v", err, err)
 	}
-}
-
-func TestClaudeRunner_AuthFailureClassified(t *testing.T) {
-	t.Parallel()
-	assertStartReason(t, &claudeRunner{run: fixedCmdFn([]byte("Error: Not logged in"), nil, 1, nil), scan: emptyScan}, ReasonAuth)
 }
 
 func TestClaudeRunner_MissingCLIClassified(t *testing.T) {
 	t.Parallel()
-	assertStartReason(t, &claudeRunner{run: fixedCmdFn(nil, nil, 0, notFoundErr()), scan: emptyScan}, ReasonUnavailable)
-}
-
-func TestCodexRunner_AuthFailureClassified(t *testing.T) {
-	t.Parallel()
-	assertStartReason(t, &codexRunner{run: fixedCmdFn(nil, []byte("unauthorized"), 1, nil)}, ReasonAuth)
+	assertUnavailable(t, &claudeRunner{run: fixedCmdFn(nil, nil, 0, notFoundErr()), scan: emptyScan})
 }
 
 func TestCodexRunner_MissingCLIClassified(t *testing.T) {
 	t.Parallel()
-	assertStartReason(t, &codexRunner{run: fixedCmdFn(nil, nil, 0, notFoundErr())}, ReasonUnavailable)
-}
-
-func TestCopilotRunner_AuthFailureClassified(t *testing.T) {
-	t.Parallel()
-	assertStartReason(t, &copilotRunner{run: fixedCmdFn([]byte("Please run /login"), nil, 1, nil), scan: emptyScan}, ReasonAuth)
+	assertUnavailable(t, &codexRunner{run: fixedCmdFn(nil, nil, 0, notFoundErr())})
 }
 
 func TestCopilotRunner_MissingCLIClassified(t *testing.T) {
 	t.Parallel()
-	assertStartReason(t, &copilotRunner{run: fixedCmdFn(nil, nil, 0, notFoundErr()), scan: emptyScan}, ReasonUnavailable)
+	assertUnavailable(t, &copilotRunner{run: fixedCmdFn(nil, nil, 0, notFoundErr()), scan: emptyScan})
 }

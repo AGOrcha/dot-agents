@@ -80,9 +80,6 @@ func (r *copilotRunner) Run(
 		}
 		return Result{}, fmt.Errorf("runner/copilot: exec: %w", err)
 	}
-	if se := classifyAuthFailure(copilotHarness, copilotBin, code, stdout, stderr); se != nil {
-		return Result{}, se
-	}
 
 	// Copilot publishes no session-id env var, so the scanner filters by
 	// events.jsonl mtime > after; the fresh scratch HOME scopes the walk to

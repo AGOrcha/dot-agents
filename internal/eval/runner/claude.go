@@ -89,9 +89,6 @@ func (r *claudeRunner) Run(
 		}
 		return Result{}, fmt.Errorf("runner/claude: exec: %w", err)
 	}
-	if se := classifyAuthFailure(claudeHarness, claudeBin, code, stdout, stderr); se != nil {
-		return Result{}, se
-	}
 
 	telemetry := parseClaudeTelemetry(stdout)
 	r.backfillTokens(&telemetry, instance, after)
