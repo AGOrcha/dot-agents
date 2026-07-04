@@ -1,6 +1,6 @@
 # Eval Harness
 
-**Status:** active (partial — R2 visibility contract only)
+**Status:** active
 **Owners:** dot-agents
 **Related:** [`OUTCOME_SCORING_RUBRIC.md`](./OUTCOME_SCORING_RUBRIC.md) (the rubric the score
 breakdown is produced under); [`internal/eval/store/store.go`](../internal/eval/store/store.go)
@@ -12,10 +12,305 @@ The R4 eval harness generates a language-agnostic `TaskSpec`, runs an agent agai
 sandbox, verifies the result, and scores the run through the production R1 scoring rubric. It
 persists each run as a small set of YAML sidecar files under a canonical run directory.
 
-> **Scope of this document.** Only the **R2 visibility contract** — the on-disk shape a
-> dashboard consumes — is documented below. The full user guide (generating tasks, running the
-> harness, interpreting results) is added by a sibling task and extends this same file; keep new
-> sections additive and do not fold the visibility contract into them.
+> **Document map.** The [user guide](#pipeline) below covers generating tasks, running the
+> harness, the `TaskSpec` schema, language coverage, the sandbox model, how outcomes feed R1,
+> and the CLI. The [R2 visibility contract](#r2-visibility-contract) is a specialized appendix:
+> the exact on-disk shape a dashboard consumes. The two are complementary; the appendix is not
+> folded into the guide.
+
+## Pipeline
+
+`da eval run` drives one task through five stages, each behind a seam interface so the harness is
+language-agnostic ([`internal/eval/harness/harness.go`](../internal/eval/harness/harness.go)):
+
+1. **generate** — a per-language generator synthesises a `TaskSpec` from the Tree-sitter
+   knowledge graph ([`internal/eval/gen/`](../internal/eval/gen/)).
+2. **provision** — the sandbox checks out an isolated working tree at the source repo's HEAD
+   ([`internal/eval/sandbox/`](../internal/eval/sandbox/)).
+3. **run** — the agent runner invokes the configured agent inside that working tree
+   ([`internal/eval/runner/`](../internal/eval/runner/)).
+4. **verify** — the language verifier runs the spec's `build_cmd` then `test_cmd`
+   ([`internal/eval/verifier/`](../internal/eval/verifier/)).
+5. **score** — the scoring bridge writes an R1-shaped iteration record and scores it under the
+   production rubric ([`internal/eval/scoringbridge/`](../internal/eval/scoringbridge/)).
+
+A completed run is persisted as a small set of YAML sidecars under
+`.agents/eval/runs/<run-id>/`; the store owns `taskspec.yaml` + `eval-run.yaml` and the score
+stage owns the `iteration-log/` sidecars ([`internal/eval/store/store.go`](../internal/eval/store/store.go)).
+An agent or verifier that *fails* is not a pipeline error — the failure flows into the score;
+only an infrastructure fault (no generator, sandbox provision failure, a verifier step that
+could not start) aborts the run.
+
+## CLI usage
+
+The operator surface is the `da eval` command group
+([`commands/eval/eval.go`](../commands/eval/eval.go), wired at
+[`commands/root.go`](../commands/root.go)). It mirrors `da score`'s idioms: subcommands under a
+group, a `--repo-dir` root resolver, and the global `--json` flag.
+
+### `da eval gen` — synthesise a TaskSpec
+
+```
+da eval gen --language go
+da eval gen --language typescript --difficulty medium
+da eval gen --language python --template add-test-coverage --out task.yaml
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--language` | Task language: `go`, `python`, or `typescript` (required). |
+| `--difficulty` | Constrain the band: `easy`, `medium`, or `hard` (default: the generator's choice). |
+| `--template` | Task template id: `impl-pure-fn` (default), `refactor-extract`, or `add-test-coverage`. |
+| `--out` | Write the `TaskSpec` YAML to this file (atomic write) instead of stdout. |
+
+### `da eval run` — run one task end-to-end and score it
+
+```
+da eval run --language go
+da eval run --language go --agent codex
+da eval run --task task.yaml
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--language` | Task language (inferred from `--task` when a spec is supplied). |
+| `--task` | Run a pre-generated `TaskSpec` YAML instead of generating one. |
+| `--agent` | Agent adapter: `claude` (default), `codex`, or `copilot`. |
+| `--difficulty` | Constrain the generated band (ignored with `--task`). |
+| `--template` | Task template id (ignored with `--task`). |
+| `--repo-dir` | Repository root (default: current working directory). |
+
+The flag that selects the agent is `--agent`, not `--runner`; the internal
+`runner.Adapter` type is unchanged, only the CLI flag string is `agent`
+([`commands/eval/run.go`](../commands/eval/run.go),
+[`internal/eval/runner/runner.go`](../internal/eval/runner/runner.go)). `da eval run` also
+sweeps stale sandbox worktrees from crashed prior runs before it provisions its own — see
+[Sandbox model](#sandbox-model). Add the global `--json` flag for machine-readable output.
+
+### `da eval ls` — list persisted runs
+
+```
+da eval ls
+da eval ls --repo-dir /path/to/repo
+```
+
+Lists the persisted eval runs under `<repo>/.agents/eval/runs/`, reading each run's
+`eval-run.yaml` summary. Takes `--repo-dir` and the global `--json`
+([`commands/eval/ls.go`](../commands/eval/ls.go)).
+
+## TaskSpec schema
+
+The `TaskSpec` is the versioned, language-agnostic description of one evaluable task and the
+central contract of the harness: generators produce it, the sandbox provisions against it,
+verifiers consume its verification commands, and the scoring bridge records it. It is defined and
+parsed in [`internal/eval/taskspec.go`](../internal/eval/taskspec.go) (`TaskSpec` /
+`ParseTaskSpec`) and round-trips through YAML via the canonical field tags, so the on-disk
+`taskspec.yaml` sidecar matches the in-memory shape exactly.
+
+| Field | YAML key | Type | Notes |
+| --- | --- | --- | --- |
+| Schema version | `task_spec_version` | int | Must equal `CurrentTaskSpecVersion` (`1`). A mismatched version is rejected by `ParseTaskSpec`. |
+| Task id | `task_id` | string | Required. Deterministic, e.g. `kg-go-impl-<seed>`; the run id is derived from it. |
+| Language | `language` | string | `go`, `python`, or `typescript` (`Language.Valid()`). |
+| Difficulty band | `difficulty` | string | `easy` \| `medium` \| `hard` — reproducibly derived from the KG signals below (see [Language coverage](#language-coverage) and `internal/eval/difficulty.go`). |
+| Difficulty signals | `difficulty_signals` | map[string]int | KG-derived structural counts the band is bucketed from; omitted when empty. Canonical keys: `involved_symbols`, `edge_count`, `cyclomatic_complexity` (`difficulty.go`). Emitted in sorted key order for byte-stable output. |
+| Provenance | `generated_from` | object | `kind` (`kg_template` \| `benchmark_seed`), `template_id`, and an optional `kg_query` (`intent`, `seed_symbol`). |
+| Prompt | `prompt` | string | Required. The full instruction the agent runs against. |
+| Expected artifacts | `solution_artifacts` | list | Files the task expects to be written, each `{path, role}` (e.g. `role: target`); omitted when empty. |
+| Verification | `verification` | object | `build_cmd` (optional []string), `test_cmd` (required []string), `timeout_seconds` (optional int, applied as a context deadline when non-zero). |
+
+`ParseTaskSpec` decodes strictly (`KnownFields(true)`) so a stale-version or typo'd sidecar is
+rejected rather than silently misread, then runs `TaskSpec.Validate` (version match, non-empty
+`task_id` and `prompt`, valid `language`/`difficulty`/`kind`, non-empty `test_cmd`,
+non-negative `timeout_seconds`).
+
+The test command is **hidden from the agent** (R4 decision D4.7): the agent sees the prompt, the
+verifier runs `verification.test_cmd` after the agent finishes.
+
+### Example
+
+A Go `impl-pure-fn` task, as the generator emits it (values illustrative; keys and shape are the
+generator's actual output — [`internal/eval/gen/gencore/generator.go`](../internal/eval/gen/gencore/generator.go)):
+
+```yaml
+task_spec_version: 1
+task_id: kg-go-impl-mathx-gcd
+language: go
+difficulty: medium
+difficulty_signals:
+    cyclomatic_complexity: 4
+    edge_count: 9
+    involved_symbols: 6
+generated_from:
+    kind: kg_template
+    template_id: impl-pure-fn
+    kg_query:
+        intent: code_context
+        seed_symbol: mathx.GCD
+prompt: |-
+    Implement the function `mathx.GCD` in `mathx/gcd.go` so that the existing tests pass.
+
+    Nearby symbols (within 2 hops): mathx.abs, mathx.Reduce
+
+    Constraints:
+    - Do not modify any existing *_test.go file.
+    - The solution must satisfy: go test -race ./mathx/...
+solution_artifacts:
+    - path: mathx/gcd.go
+      role: target
+verification:
+    build_cmd:
+        - go
+        - build
+        - ./mathx/...
+    test_cmd:
+        - go
+        - test
+        - -race
+        - ./mathx/...
+    timeout_seconds: 120
+```
+
+A byte-exact on-disk sample (hand-frozen for the R2 contract) ships at
+[`internal/eval/store/testdata/r2contract-go-impl-pure-fn/taskspec.yaml`](../internal/eval/store/testdata/r2contract-go-impl-pure-fn/taskspec.yaml).
+
+## Language coverage
+
+The v1 harness covers three languages. Each is a thin adapter over shared engines: a **generator**
+(`internal/eval/gen/<lang>`) supplies a `gencore.Profile` to the shared generation engine
+([`internal/eval/gen/gencore/`](../internal/eval/gen/gencore/)), and a **verifier**
+(`internal/eval/verifier/<lang>`) embeds the shared run engine
+([`internal/eval/verifier/engine.go`](../internal/eval/verifier/engine.go)) and contributes only
+its `Language()` identity. All generation control flow (template selection, KG seed search,
+difficulty derivation, prompt rendering) lives in `gencore` once; the build-then-test run loop
+lives in `verifier.BaseVerifier` once.
+
+| Language | `language` | Generator profile | Verifier | `build_cmd` | `test_cmd` |
+| --- | --- | --- | --- | --- | --- |
+| Go | `go` | [`gen/golang`](../internal/eval/gen/golang/generator.go) | [`verifier/golang`](../internal/eval/verifier/golang/verifier.go) | `go build ./<dir>/...` | `go test -race ./<dir>/...` |
+| Python | `python` | [`gen/python`](../internal/eval/gen/python/generator.go) | [`verifier/python`](../internal/eval/verifier/python/verifier.go) | `python -m py_compile <file>` | `python -m pytest -v <dir>` |
+| TypeScript | `typescript` | [`gen/typescript`](../internal/eval/gen/typescript/generator.go) | [`verifier/typescript`](../internal/eval/verifier/typescript/verifier.go) | `tsc --noEmit` | `node --test <dir>/*.test.ts` |
+
+Each generator resolves the seed's implementation file and derives the language's conventional
+test file (`foo.go` → `foo_test.go`; `utils.py` → `test_utils.py`; `foo.ts` → `foo.test.ts`) and
+verify target (Go package pattern, Python directory, TypeScript test glob). The verify commands
+above are emitted onto the `TaskSpec`; the shared `BaseVerifier` runs `build_cmd` first and
+short-circuits the test step on a non-zero build exit, applies `timeout_seconds` as a context
+deadline when non-zero, and records the outcome as a
+[`VerifyResult`](../internal/eval/verifier/verifier.go) (`Passed`, `Phase`, `ExitCode`, combined
+`Stdout`/`Stderr`, `Duration`).
+
+The `difficulty` band is a pure, reproducible function of three KG-derived signals — the
+neighborhood node count (`involved_symbols`), edge count (`edge_count`), and the seed's
+cyclomatic-complexity proxy (`cyclomatic_complexity`) — bucketed per-signal against the rubric v1
+thresholds with hardest-signal-wins ([`internal/eval/difficulty.go`](../internal/eval/difficulty.go)).
+Re-running a generator on the same graph state yields the same band and the same
+`difficulty_signals` map.
+
+## Sandbox model
+
+Each run executes in an isolated working tree provisioned by the v1 worktree sandbox
+([`internal/eval/sandbox/`](../internal/eval/sandbox/), `sandbox.Sandbox` interface). `Provision`:
+
+- checks out a **linked git worktree** detached at the source repo's current HEAD
+  (recorded as `BaseCommit` for reproducibility) under `<run-dir>/worktree`, and
+- creates a **scratch HOME** under `<run-dir>/home`, exported to the agent as
+  `HOME` / `USERPROFILE` so the agent never touches the operator's real home.
+
+**Concurrent isolation.** Two runs can never see each other's writes: each gets its own
+worktree directory, and the run id is reserved by exclusively creating a sibling
+`<run-id>.claim` file (`O_CREATE|O_EXCL`) before anything shared exists — a concurrent
+provision that derives an identical id loses the create and regenerates. Run ids are
+directory-name-safe on every CI OS (sanitized task id + colon-free UTC timestamp + random
+suffix).
+
+**Retention.** A provisioned working tree lingers no longer than `DefaultRetention` — **7 days**
+(the R4 OQ6 default) — before `PruneStale` removes it. Pruning is wired to run **on the next
+`da eval run`**: before it provisions its own sandbox, the run sweeps stale worktrees from
+crashed prior runs (`pruneStaleSandbox` in [`commands/eval/run.go`](../commands/eval/run.go)).
+The sweep is best-effort — a prune failure is warned to stderr, never aborts the run.
+
+**Sidecars are never pruned.** Retention removes only the working tree, scratch home, and
+sandbox marker; it preserves the run dir and every YAML sidecar in it (`taskspec.yaml`,
+`eval-run.yaml`, and the `iteration-log/` records), so a run's score record and reproducibility
+metadata survive indefinitely even after its working tree is reclaimed.
+
+The `Sandbox` interface is the provider swap point: the v1 worktree implementation, a future
+`DockerSandbox`, or a managed provider all sit behind it.
+
+## How eval outcomes feed R1
+
+An eval run is scored by the **same** production rubric as a real workflow iteration — there is
+no eval-special scoring path (R4 invariant D4.4). The scoring bridge
+([`internal/eval/scoringbridge/`](../internal/eval/scoringbridge/), `ScoreRun`) emits an
+R1-shaped iteration record and scores it with `scoring.DefaultRubric()`, the same rubric
+[`da score`](./OUTCOME_SCORING_RUBRIC.md) applies to production iterations.
+
+Because an eval run is a single 1-shot sample (R4 OQ2), its iteration log always holds exactly
+`iter-1.*`. The run-dir layout is:
+
+```
+.agents/eval/runs/<run-id>/
+├── taskspec.yaml                     # the TaskSpec that ran               (store)
+├── eval-run.yaml                     # run aggregate + score summary + R9/R10 (store)
+└── iteration-log/
+    ├── iter-1.yaml                   # R1-shaped iteration record          (score stage)
+    └── iter-1.score.yaml             # explainable rubric score sidecar    (score stage)
+```
+
+`iter-1.yaml` round-trips through `scoring.ParseIterationRecord` and `iter-1.score.yaml` through
+`scoring.PersistedScore`, so the eval run's iteration and score sidecar are directly loadable by
+`da score iteration`. Point its `--iter-log-dir` at the run's iteration-log directory:
+
+```
+da score iteration 1 --iter-log-dir .agents/eval/runs/<run-id>/iteration-log
+da score iteration 1 --iter-log-dir .agents/eval/runs/<run-id>/iteration-log --recompute
+```
+
+`--recompute` re-scores `iter-1.yaml` fresh under the current rubric; without it the persisted
+`iter-1.score.yaml` is rendered as-is.
+
+Some objective signals are **absent by construction** for an eval run: an ephemeral sandbox
+worktree never lands on trunk (`landed`), eval tasks declare no `write_scope` (`scope`), and v1
+captures no agent transcript window (the objective process checks). Absent is first-class — the
+rubric renormalizes over the present signals — so an eval run is scored on what it actually
+produced (verifier + test outcomes, correction pressure, token efficiency, and a human label if
+one was attached), exactly as a production iteration with the same sparse telemetry would be.
+See [`OUTCOME_SCORING_RUBRIC.md`](./OUTCOME_SCORING_RUBRIC.md) for the signal set and
+combination, and the [R2 visibility contract](#r2-visibility-contract) below for the on-disk
+join a dashboard performs over these files.
+
+## Adding a fourth language
+
+Adding a language is a new adapter, not a new engine. Python and TypeScript were both added this
+way over the Go-first foundation; use [`gen/golang`](../internal/eval/gen/golang/generator.go) +
+[`gen/python`](../internal/eval/gen/python/generator.go) and their verifier siblings as the
+template. The concrete steps:
+
+1. **Register the language value.** Add a `Language` constant (e.g. `LanguageRust Language =
+   "rust"`) in [`internal/eval/taskspec.go`](../internal/eval/taskspec.go) and a matching arm in
+   `Language.Valid()`.
+2. **Add a generator profile.** Create `internal/eval/gen/rust/` exporting a `gencore.Profile`
+   that fills in only what varies by language: the `Language`, the task-id `IDToken`,
+   `ErrPrefix`/`DisplayName`, the no-test-edit prompt fragment, the `MustSatisfyCmd`, and the
+   `TestFilePath` / `VerifyTarget` / `BuildCmd` / `TestCmd` functions. All generation control
+   flow stays in `gencore` — do not copy the engine. `gencore.New` validates that the required
+   function fields are non-nil at construction.
+3. **Wire the generator into the CLI registry.** Add the profile to the `languageProfiles` slice
+   in [`commands/eval/registry.go`](../commands/eval/registry.go) — one entry; the shared engine
+   drives them all.
+4. **Add a verifier adapter.** Create `internal/eval/verifier/rust/` with a thin wrapper that
+   embeds `*verifier.BaseVerifier`: `func New() *RustVerifier { return
+   &RustVerifier{verifier.NewBase(eval.LanguageRust)} }`. `Language()` and `Verify()` are
+   promoted from the engine; no per-language run logic is added.
+5. **Register the verifier factory.** Add a `commands/eval/verifiers_rust.go` file whose `init`
+   calls `registerVerifier(func() verifier.Verifier { return rustverifier.New() })` — a new
+   file per language keeps `run.go` language-agnostic and per-language deliveries disjoint.
+6. **Update the language-list surfaces.** The `--language` help text and the `validateLanguage`
+   error message enumerate the supported languages
+   ([`commands/eval/registry.go`](../commands/eval/registry.go),
+   [`commands/eval/eval.go`](../commands/eval/eval.go)); extend them so a typo still fails with
+   an actionable list.
 
 ## R2 visibility contract
 
