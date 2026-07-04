@@ -107,9 +107,9 @@ tasks:
         resolves competing decisions explicitly; Phase 4 emits no code. This is the
         ship-now proof that early shipping does not reintroduce the silent-no-op problem.
         Spec ref: design.md done-criteria 3.
-    # --- GATED: structural-contradiction traversal (the ONLY adapter-gated step) ---
+        - (fb:kgi-t6-owns-behavioral) t6 is the recorded home for the molecules' behavioral verification (verification_required on t1-t4 behavioral paths). Must demonstrate, on a profile WITHOUT the citation adapter: empty-KG briefing states 'KG has no prior decisions' (not fabricated); Contradictions renders [adapter-absent]; competing-decisions fallback active in spec-scaffold; Phase 4 emits no code. PLUS a conformance assertion that every molecule SKILL.md Load-> instruction/template ref resolves and briefing/spec/plan template headers match the canonical contract. This closes the codex gate finding that degraded-KG/adapter-absent paths had zero captured verification.
     - id: t7-structural-contradiction-traversal
-      title: "GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)"
+      title: 'GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)'
       status: blocked
       depends_on:
         - t2-spec-scaffold-molecule
@@ -133,7 +133,6 @@ tasks:
         functional via t6's fallback. Verify Requirement 3 once the gate clears:
         `da graph query contradicting_claims` emits explicit spec decision points.
         status: blocked until the gate clears (do not advance manually).
-    # --- Cross-cutting: proposal/lesson schema formalization (single-source) ---
     - id: t8-proposal-lesson-schema-formalization
       title: Formalize canonical proposal.schema.json + lesson.schema.json (single-source)
       status: pending
