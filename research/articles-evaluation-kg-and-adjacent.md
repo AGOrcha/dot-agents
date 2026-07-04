@@ -1035,4 +1035,62 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 
 ---
 
+## Part I — 2026-07-03 addendum: six agentic-engineering articles (owner-flagged)
+
+Six x.com threads flagged by the owner to sharpen the `da-recipe-scripts` spec. All are
+teaser-level (full X Articles login-walled; bodies `NEEDS-PASTE`, deep-read pending the X MCP
+read path). Article files under `research/articles/`; distilled takeaways in
+`research/extracts/agentic-engineering-2026-07.md`.
+
+### I.1 elvissun — /goal + Loss Functions
+Autonomous loops should optimize an explicit *loss function*, not run fire-and-forget. Maps to
+r1-outcome-scoring + the r4 eval harness: make each run's objective explicit and measurable.
+
+### I.2 iamgrigorev (Poolside) — designing ML experiments that teach
+Throughput without hypothesis + clean readout is noise. Reinforces
+`prototype-experiment-fidelity-gate` and the harness discipline.
+
+### I.3 sergeykarayev — Your Agents Should Be Multiplayer
+Siloed per-agent context forces humans to be couriers. Validates orchestrator+workers+
+`session-handoff-journal` and "shared coordination backend > isolated-worktree status."
+
+### I.4 thealexker — token engineering, not tokenmaxxing
+A $200 unmonitored expensive-model run; engineer + monitor spend. External validation of the
+`worker-model-selection` policy (scope model to task; expensive tiers not a default).
+
+### I.5 nifinet — signal-based outbound engine (Codex)
+watch → validate-a-real-signal → decide → draft. A concrete template for the dot-agents X
+outreach engine once the X app is approved.
+
+### I.6 realmcore_ (akira) — Onyx: a programmable runtime for agent orchestration  ← the sharpener
+Onyx is a VM for *programmable* agent orchestration ("orchestration as software engineering") —
+the maximal end of the orchestration spectrum.
+
+### I.7 The `da-recipe-scripts` sharpening (why this pass mattered)
+Onyx could provoke the wrong instinct — "make `da` recipes programmable (control flow, state, a
+DSL)." That is wrong for dot-agents, because **we already own the programmable-orchestration end:
+the `Workflow` JS engine** (fan-out, pipelines, control flow, budget). We do not need a second
+programmable runtime. So Onyx sharpens `da-recipe-scripts` by **reinforcing its boundaries**:
+
+- **Reinforce D3 (mechanical-only):** recipes stay deterministic, no control flow. Any branching/
+  looping/dynamic dispatch is a signal the work belongs in a **skill** (judgment) or the
+  **Workflow engine** (programmable orchestration) — never a recipe. Resist DSL creep.
+- **Resolve OQ3 (vs the Workflow engine) decisively** — three complementary layers:
+  - **Workflow engine** = programmable/agentic orchestration (dot-agents' "Onyx").
+  - **Skills** = judgment sequences; may *call* a recipe for a mechanical spine.
+  - **`da`-recipes** = the deterministic, cross-platform, versionable *floor* — fixed `da`-command
+    sequences below skills. Deliberately NOT programmable.
+- **Spec edit to fold in when building `da-recipe-scripts` p1:** add to `design.md` §2 D3 / §7 the
+  positioning line — *"Recipes are the deterministic floor of orchestration; the Workflow engine is
+  the programmable ceiling. If a recipe wants to become programmable, it wants to be a workflow."*
+- **No plan/scope change:** the 5 tasks and the minimal line-oriented format (D2) stand; the value
+  is determinism + portability + versionability, not expressiveness.
+
+### Part I — PENDING
+Full bodies login-walled (`NEEDS-PASTE` in the six `research/articles/` files). When the X MCP
+read path is live, deep-read Onyx (I.6) and the loss-function article (I.1) and refine I.7 if the
+bodies draw the mechanical/programmable boundary differently.
+
+---
+
 *Document status: draft. No changes made to code, specs, or plans. This is evaluation only.*
