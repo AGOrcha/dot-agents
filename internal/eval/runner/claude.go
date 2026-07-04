@@ -14,8 +14,12 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 )
 
-// claudeBin is the Claude Code CLI binary name resolved via PATH.
-const claudeBin = "claude"
+// claudeBin is the Claude Code CLI binary name resolved via PATH; claudeHarness
+// is the platform identity recorded in telemetry and start-failure diagnostics.
+const (
+	claudeBin     = "claude"
+	claudeHarness = "claude-code"
+)
 
 // claudeRunner invokes the Claude Code CLI against a sandbox workdir.
 // It requests JSON output (--output-format json) to extract token usage and
@@ -80,7 +84,13 @@ func (r *claudeRunner) Run(
 	stdout, stderr, code, err := r.run(ctx, claudeBin, args, instance.Workdir, env)
 	dur := time.Since(start)
 	if err != nil {
+		if se := classifyExecError(claudeHarness, claudeBin, err); se != nil {
+			return Result{}, se
+		}
 		return Result{}, fmt.Errorf("runner/claude: exec: %w", err)
+	}
+	if se := classifyAuthFailure(claudeHarness, claudeBin, code, stdout, stderr); se != nil {
+		return Result{}, se
 	}
 
 	telemetry := parseClaudeTelemetry(stdout)
@@ -131,7 +141,7 @@ type claudeTokenUsage struct {
 // Partial or unparseable output is gracefully degraded — the caller still
 // gets a valid AgentTelemetry, just with fewer fields set.
 func parseClaudeTelemetry(stdout []byte) AgentTelemetry {
-	t := AgentTelemetry{Harness: "claude-code"}
+	t := AgentTelemetry{Harness: claudeHarness}
 
 	// Claude may emit multiple JSON objects; the last well-formed one with
 	// a usage block is the session summary.

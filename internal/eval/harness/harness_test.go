@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
@@ -479,6 +480,52 @@ func TestRun_VerifyStepError(t *testing.T) {
 	)
 	if _, err := h.Run(context.Background(), Options{Language: eval.LanguageGo}); err == nil {
 		t.Fatal("Run(verify step error): expected error")
+	}
+}
+
+// TestRun_ToolchainUnavailable proves a missing interpreter/compiler is
+// surfaced as a distinct "toolchain unavailable" abort (carrying the underlying
+// *verifier.ToolchainError) rather than a scored verification failure.
+func TestRun_ToolchainUnavailable(t *testing.T) {
+	ver := &fakeVerifier{
+		lang: eval.LanguageGo,
+		err:  &verifier.ToolchainError{Language: eval.LanguageGo, Binary: "go", Tried: []string{"go"}},
+	}
+	h := unitHarness(t,
+		&fakeSandbox{inst: fakeInstance(t, "r1")},
+		&runner.FakeRunner{},
+		ver,
+		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
+	)
+	_, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
+	var tcErr *verifier.ToolchainError
+	if !errors.As(err, &tcErr) {
+		t.Fatalf("want *verifier.ToolchainError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "toolchain unavailable") {
+		t.Fatalf("error %q missing distinct 'toolchain unavailable' prefix", err)
+	}
+}
+
+// TestRun_AgentStartError proves an agent that could not start/authenticate is
+// surfaced as a distinct "agent did not run" abort (carrying the underlying
+// *runner.AgentStartError) rather than a scored run, so it is never read as poor
+// model quality.
+func TestRun_AgentStartError(t *testing.T) {
+	startErr := &runner.AgentStartError{Agent: "claude-code", Binary: "claude", Reason: runner.ReasonAuth, ExitCode: 1, Detail: "not logged in"}
+	h := unitHarness(t,
+		&fakeSandbox{inst: fakeInstance(t, "r1")},
+		&runner.FakeRunner{Err: startErr},
+		&fakeVerifier{lang: eval.LanguageGo},
+		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
+	)
+	_, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
+	var se *runner.AgentStartError
+	if !errors.As(err, &se) {
+		t.Fatalf("want *runner.AgentStartError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "agent did not run") {
+		t.Fatalf("error %q missing distinct 'agent did not run' prefix", err)
 	}
 }
 

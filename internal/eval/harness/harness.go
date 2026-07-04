@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
@@ -183,10 +184,18 @@ func (h *Harness) generate(ctx context.Context, opts Options) (*eval.TaskSpec, e
 
 // runAgent invokes the agent runner inside the provisioned sandbox. A non-zero
 // agent exit code is recorded in the returned Result, not surfaced as an error;
-// only a launch failure (non-nil error) stops the run.
+// only a launch failure (non-nil error) stops the run. An *AgentStartError (the
+// CLI was absent, or it failed to authenticate under the sandbox's isolated
+// HOME) is wrapped with a distinct "agent did not run" prefix so the operator
+// sees an environment/credential problem rather than a poor model-quality score
+// (dogfood #10).
 func (h *Harness) runAgent(ctx context.Context, spec *eval.TaskSpec, instance *sandbox.Instance) (runner.Result, error) {
 	result, err := h.runner.Run(ctx, spec, instance)
 	if err != nil {
+		var startErr *runner.AgentStartError
+		if errors.As(err, &startErr) {
+			return runner.Result{}, fmt.Errorf("harness: agent did not run: %w", err)
+		}
 		return runner.Result{}, fmt.Errorf("harness: run agent: %w", err)
 	}
 	return result, nil
@@ -202,6 +211,13 @@ func (h *Harness) verify(ctx context.Context, spec *eval.TaskSpec, instance *san
 	}
 	result, err := v.Verify(ctx, spec, instance.Workdir, instance.Env)
 	if err != nil {
+		var tcErr *verifier.ToolchainError
+		if errors.As(err, &tcErr) {
+			// A missing interpreter/compiler is an environment fault, not a
+			// verification failure — surface it distinctly so it is not read as
+			// the agent's code failing its tests.
+			return nil, fmt.Errorf("harness: toolchain unavailable: %w", err)
+		}
 		return nil, fmt.Errorf("harness: verify: %w", err)
 	}
 	return result, nil

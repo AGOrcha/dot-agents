@@ -24,14 +24,19 @@ type BaseVerifier struct {
 	// runCmd is the seam for executing a single command. Tests inject a
 	// deterministic fake; production code uses runProcess.
 	runCmd func(ctx context.Context, workdir string, env []string, cmd []string) (stdout, stderr string, exitCode int, dur time.Duration, err error)
+	// lookPath resolves toolchain binaries on PATH for the pre-flight. The seam
+	// defaults to exec.LookPath and is injected by tests so the toolchain-missing
+	// path can be exercised without mutating the process PATH.
+	lookPath lookPathFn
 }
 
 // Compile-time assertion that the engine satisfies the shared contract.
 var _ Verifier = (*BaseVerifier)(nil)
 
-// NewBase returns a BaseVerifier for lang backed by the real process runner.
+// NewBase returns a BaseVerifier for lang backed by the real process runner and
+// exec.LookPath as the toolchain resolver.
 func NewBase(lang eval.Language) *BaseVerifier {
-	return &BaseVerifier{lang: lang, runCmd: runProcess}
+	return &BaseVerifier{lang: lang, runCmd: runProcess, lookPath: exec.LookPath}
 }
 
 // Language implements Verifier.
@@ -54,25 +59,56 @@ func (b *BaseVerifier) Verify(ctx context.Context, spec *eval.TaskSpec, workdir 
 	if spec.Verification.TimeoutSeconds < 0 {
 		return nil, &VerifyError{Phase: PhaseValidate, Cause: fmt.Errorf("TimeoutSeconds must be >= 0, got %d", spec.Verification.TimeoutSeconds)}
 	}
+
+	// Toolchain pre-flight: resolve the interpreter/compiler each command needs
+	// BEFORE running anything. A missing toolchain fails fast with a distinct
+	// *ToolchainError (not a VerifyError) carrying a clear, actionable message,
+	// so "the python interpreter is absent" is never mistaken for "the agent's
+	// code failed its tests". The resolved commands carry the actual binary
+	// (e.g. python3 in place of python) into execution.
+	buildCmd, testCmd, err := b.preflight(spec.Verification.BuildCmd, spec.Verification.TestCmd)
+	if err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := applyTimeout(ctx, spec.Verification.TimeoutSeconds)
 	defer cancel()
 
 	var result VerifyResult
 
-	if len(spec.Verification.BuildCmd) > 0 {
-		stop, err := b.runStep(ctx, workdir, env, spec.Verification.BuildCmd, PhaseBuild, &result)
-		if err != nil {
-			return nil, err
+	if len(buildCmd) > 0 {
+		stop, berr := b.runStep(ctx, workdir, env, buildCmd, PhaseBuild, &result)
+		if berr != nil {
+			return nil, berr
 		}
 		if stop {
 			return &result, nil
 		}
 	}
 
-	if _, err := b.runStep(ctx, workdir, env, spec.Verification.TestCmd, PhaseTest, &result); err != nil {
-		return nil, err
+	if _, terr := b.runStep(ctx, workdir, env, testCmd, PhaseTest, &result); terr != nil {
+		return nil, terr
 	}
 	return &result, nil
+}
+
+// preflight resolves the toolchain for the build (when present) and test
+// commands ahead of execution, returning the resolved argv for each with the
+// leading token(s) rewritten to the first available candidate. It returns a
+// *ToolchainError when a required interpreter/compiler is absent, before any
+// command runs.
+func (b *BaseVerifier) preflight(build, test []string) (resolvedBuild, resolvedTest []string, err error) {
+	if len(build) > 0 {
+		resolvedBuild, err = resolveToolchain(b.lang, build, b.lookPath)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	resolvedTest, err = resolveToolchain(b.lang, test, b.lookPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolvedBuild, resolvedTest, nil
 }
 
 // runStep executes one verification command, appends its output to result,

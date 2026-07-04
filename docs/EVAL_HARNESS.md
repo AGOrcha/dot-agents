@@ -28,9 +28,13 @@ language-agnostic ([`internal/eval/harness/harness.go`](../internal/eval/harness
 2. **provision** — the sandbox checks out an isolated working tree at the source repo's HEAD
    ([`internal/eval/sandbox/`](../internal/eval/sandbox/)).
 3. **run** — the agent runner invokes the configured agent inside that working tree
-   ([`internal/eval/runner/`](../internal/eval/runner/)).
-4. **verify** — the language verifier runs the spec's `build_cmd` then `test_cmd`
-   ([`internal/eval/verifier/`](../internal/eval/verifier/)).
+   ([`internal/eval/runner/`](../internal/eval/runner/)). It classifies a missing agent CLI
+   and an auth-shaped failure as a distinct signal — see
+   [Agent CLI and the isolated HOME](#agent-cli-and-the-isolated-home).
+4. **verify** — the language verifier runs the spec's `build_cmd` then `test_cmd`, after a
+   **toolchain pre-flight** that resolves the required interpreter/compiler on PATH
+   ([`internal/eval/verifier/`](../internal/eval/verifier/)) — see
+   [Toolchain pre-flight](#toolchain-pre-flight).
 5. **score** — the scoring bridge writes an R1-shaped iteration record and scores it under the
    production rubric ([`internal/eval/scoringbridge/`](../internal/eval/scoringbridge/)).
 
@@ -38,8 +42,18 @@ A completed run is persisted as a small set of YAML sidecars under
 `.agents/eval/runs/<run-id>/`; the store owns `taskspec.yaml` + `eval-run.yaml` and the score
 stage owns the `iteration-log/` sidecars ([`internal/eval/store/store.go`](../internal/eval/store/store.go)).
 An agent or verifier that *fails* is not a pipeline error — the failure flows into the score;
-only an infrastructure fault (no generator, sandbox provision failure, a verifier step that
-could not start) aborts the run.
+only an infrastructure fault aborts the run. Those aborts are kept **distinct from a scored
+failure** so an environment problem is never mistaken for the agent producing bad code:
+
+| Abort | Top-line prefix | Meaning |
+| --- | --- | --- |
+| no generator / sandbox provision failure / verifier step could not start | `harness: …` | classic wiring / infra fault. |
+| the language toolchain is not installed | `harness: toolchain unavailable: …` (wraps `*verifier.ToolchainError`) | the interpreter/compiler the `test_cmd`/`build_cmd` needs is absent on PATH — see [Toolchain pre-flight](#toolchain-pre-flight). |
+| the agent CLI is missing or fails to authenticate | `harness: agent did not run: …` (wraps `*runner.AgentStartError`) | the CLI is not on PATH, or it exited with an auth/config failure under the sandbox's credential-free HOME — see [Agent CLI and the isolated HOME](#agent-cli-and-the-isolated-home). |
+
+A **scored** run, by contrast, is one where the toolchain was present, the agent ran and
+completed, and the verifier's `build_cmd`/`test_cmd` produced a real pass/fail — that failure is
+data, and it flows into the score.
 
 ## CLI usage
 
@@ -207,6 +221,39 @@ thresholds with hardest-signal-wins ([`internal/eval/difficulty.go`](../internal
 Re-running a generator on the same graph state yields the same band and the same
 `difficulty_signals` map.
 
+### Toolchain pre-flight
+
+Before it runs any `build_cmd`/`test_cmd`, the shared `BaseVerifier` **resolves the required
+toolchain on PATH** ([`internal/eval/verifier/toolchain.go`](../internal/eval/verifier/toolchain.go)).
+This is what keeps a missing interpreter/compiler from being scored as a code failure: a machine
+with no `python3`, no `node`, or no `tsc` would otherwise fail the verify commands cryptically and
+score the run *poor* — indistinguishable from the agent genuinely producing broken code.
+
+The pre-flight resolves each command's leading executable with a **candidate list per binary**
+(`exec.LookPath`, which applies Windows `PATHEXT` so `python`/`node`/`go` resolve
+`python.exe`/`node.exe`/`go.exe`), and rewrites the argv to the resolved candidate so the actual
+binary flows into execution:
+
+| `TaskSpec` binary | Candidates tried, in order | Notes |
+| --- | --- | --- |
+| `python` | `python3`, then `python` | prefers `python3` (many machines ship only it); the resolved name replaces `python` in the executed command. |
+| `tsc` | `tsc`, then `npx tsc` | falls back to running the local devDependency via `npx` when no global `tsc` is installed. |
+| `node` / `go` | itself | resolved as-is. |
+
+If **no** candidate resolves, verification does not run: the verifier returns a distinct
+`*verifier.ToolchainError` (not the `*verifier.VerifyError` a started-but-failed step returns),
+which the harness surfaces as a `harness: toolchain unavailable: …` abort. The message is
+actionable, e.g.:
+
+```
+harness: toolchain unavailable: verifier: python toolchain unavailable: "python" not found on
+PATH (tried: python3, python); install it or run a language whose toolchain is present
+```
+
+Because the run **aborts rather than scores**, a missing toolchain can never be recorded as a
+*poor* outcome. A scored verify failure means the toolchain was present and the tests actually
+ran and failed.
+
 ## Sandbox model
 
 Each run executes in an isolated working tree provisioned by the v1 worktree sandbox
@@ -237,6 +284,35 @@ metadata survive indefinitely even after its working tree is reclaimed.
 
 The `Sandbox` interface is the provider swap point: the v1 worktree implementation, a future
 `DockerSandbox`, or a managed provider all sit behind it.
+
+### Agent CLI and the isolated HOME
+
+The sandbox exports its scratch directory as `HOME` / `USERPROFILE` so the agent never reads or
+writes the operator's real home. This isolation is deliberate and correct — but it means the agent
+CLI runs **with no credentials or config unless they live somewhere the isolated HOME can see**.
+An unauthenticated agent CLI typically exits non-zero on the first turn; left unclassified, that
+exit would flow into the score as a *poor* outcome, mistaking an **auth/config problem for poor
+model quality** (dogfood #10).
+
+**Operator requirement.** For a real (non-fake) `da eval run`, the chosen `--agent` CLI must be
+(a) installed on PATH and (b) usable under an isolated HOME — e.g. authenticated via an
+environment variable the sandbox passes through (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, a
+`GH_TOKEN`), or via credentials the agent reads from a location independent of `$HOME`. If it is
+not, the run cannot produce a meaningful sample.
+
+**Distinguishable signal.** The runner classifies two agent start failures and returns a distinct
+`*runner.AgentStartError` ([`internal/eval/runner/agentcheck.go`](../internal/eval/runner/agentcheck.go))
+instead of a scored `Result`, which the harness surfaces as a `harness: agent did not run: …`
+abort:
+
+| `Reason` | Trigger | Message gist |
+| --- | --- | --- |
+| `unavailable` | the agent binary does not resolve on PATH (`exec.ErrNotFound`) | `… agent CLI "claude" not found on PATH — install it or choose an installed --agent` |
+| `auth` | the CLI ran but exited non-zero with an auth/config signature in its output (`not logged in`, `unauthorized`, `invalid api key`, `ANTHROPIC_API_KEY`, …) | `… agent auth/config failure under isolated HOME (exit N, matched "…") — the eval sandbox runs the agent under a credential-free HOME; authenticate the CLI or see docs/EVAL_HARNESS.md` |
+
+The auth signature match is intentionally conservative — it fires only on a **non-zero exit** whose
+output carries an agent-auth phrase — so an ordinary wrong-solution run (a non-zero exit with no
+auth text) is still scored normally as a completed run, not misread as an auth failure.
 
 ## How eval outcomes feed R1
 
