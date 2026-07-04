@@ -12,7 +12,6 @@ tier: molecule
 calls:
   - task-breakdown
   - write-scope-derive
-  - plan-write
 verifier: batch
 review_gate: default
 ---
