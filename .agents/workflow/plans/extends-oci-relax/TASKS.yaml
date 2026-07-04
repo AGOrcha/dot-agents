@@ -2,8 +2,8 @@ schema_version: 1
 plan_id: extends-oci-relax
 tasks:
     - id: t1-spec-amend
-      title: 'Amend config-distribution-model §15 with D13 (extends accepts oci)'
-      status: pending
+      title: Amend config-distribution-model §15 with D13 (extends accepts oci)
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -18,7 +18,7 @@ tasks:
       app_type: docs
     - id: t2-impl-extends-oci
       title: 'Implement: SelectFetcher accepts oci; OCI layer fetcher + media-type guard'
-      status: pending
+      status: completed
       depends_on:
         - t1-spec-amend
       blocks: []
@@ -45,7 +45,7 @@ tasks:
       app_type: go-cli
     - id: t3-docs-flip
       title: 'Flip docs/comments: no source/kind asymmetry (extends accepts oci)'
-      status: pending
+      status: completed
       depends_on:
         - t2-impl-extends-oci
       blocks: []
