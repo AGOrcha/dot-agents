@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -1258,6 +1263,11 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	skipATGate, _ := cmd.Flags().GetBool("skip-asserting-test-gate")
+	if err := checkFanoutAssertingTestScope(project.Path, writeScope, skipATGate); err != nil {
+		return err
+	}
+
 	baseRes, err := fanoutResolveBase(cmd, project.Path, in.planID, taskID, targetTask.DependsOn)
 	if err != nil {
 		return err
@@ -2236,4 +2246,298 @@ func closeoutReconciledStatus(decision string) string {
 		return "blocked"
 	}
 	return "completed"
+}
+
+// ── §0d asserting-test-scope gate ────────────────────────────────────────────
+//
+// Implements delegation-lifecycle §0d (coverage-delta forecast) mechanically:
+// for every exported symbol declared in write_scope, find *_test.go files
+// outside write_scope that reference it.  If any such "asserting callers" exist
+// they are classified as EXPAND (same package → warn) or REFUSE (cross-package
+// → hard error).
+//
+// Scope: Go / *_test.go only.  Non-Go write_scopes (manifest, scaffold, etc.)
+// are skipped — the manifest/snapshot-test coverage check is a future extension
+// tracked separately.
+
+const (
+	atgViolationExpand = "expand"
+	atgViolationRefuse = "refuse"
+	atgSkipFlag        = "--skip-asserting-test-gate"
+)
+
+// skippedDirNames are directories that the asserting-test walker never descends into.
+var skippedDirNames = map[string]bool{
+	"vendor":   true,
+	".git":     true,
+	"testdata": true,
+	".claude":  true,
+}
+
+// atgScopeSymbol is an exported identifier declared in the fanout write_scope.
+type atgScopeSymbol struct {
+	Name    string
+	DeclDir string // absolute path to declaring package directory
+}
+
+// atgViolation is a *_test.go file outside write_scope that references a scope symbol.
+type atgViolation struct {
+	TestFile string // absolute path to test file
+	Symbol   string
+	Kind     string // atgViolationExpand or atgViolationRefuse
+}
+
+// checkFanoutAssertingTestScope enforces delegation-lifecycle §0d: exported
+// symbols changed by a Go write_scope must not have asserting *_test.go callers
+// outside that scope unless every such caller is in the same package (EXPAND)
+// — cross-package callers REFUSE the fanout to preserve the disjoint-slice
+// invariant.  Use --skip-asserting-test-gate for doc-only or deliberate cases.
+//
+// Non-Go write_scopes (docs/, manifest/scaffold, etc.) are skipped automatically
+// when symbol enumeration yields no exported Go identifiers.  The
+// manifest/snapshot-test coverage check for non-code scopes is a future
+// extension tracked separately.
+func checkFanoutAssertingTestScope(projectPath string, writeScope []string, skip bool) error {
+	if skip {
+		return nil
+	}
+	symbols, err := atgEnumerateScopeSymbols(projectPath, writeScope)
+	if err != nil || len(symbols) == 0 {
+		// No exported Go symbols in scope (non-Go scope or empty package); skip gate.
+		return nil
+	}
+	scopeDirs := atgBuildScopeDirSet(projectPath, writeScope)
+	violations, walkErr := atgFindCallers(projectPath, symbols, scopeDirs)
+	if walkErr != nil || len(violations) == 0 {
+		return nil // best-effort: walk errors don't block fanout
+	}
+	return atgClassifyAndReport(violations)
+}
+
+// atgBuildScopeDirSet returns the set of absolute directories covered by writeScope.
+func atgBuildScopeDirSet(projectPath string, writeScope []string) map[string]bool {
+	dirs := make(map[string]bool)
+	for _, p := range writeScope {
+		clean := strings.TrimRight(filepath.FromSlash(p), string(filepath.Separator))
+		abs := filepath.Join(projectPath, clean)
+		if strings.HasSuffix(p, ".go") {
+			dirs[filepath.Dir(abs)] = true
+		} else {
+			dirs[abs] = true
+		}
+	}
+	return dirs
+}
+
+// atgEnumerateScopeSymbols collects exported top-level identifiers from
+// non-test .go files in the write_scope paths.
+func atgEnumerateScopeSymbols(projectPath string, writeScope []string) ([]atgScopeSymbol, error) {
+	var symbols []atgScopeSymbol
+	for _, p := range writeScope {
+		abs := filepath.Join(projectPath, filepath.FromSlash(p))
+		atgCollectFromPath(abs, &symbols)
+	}
+	return symbols, nil
+}
+
+// isNonTestGoFile reports whether name is a non-test Go source file.
+func isNonTestGoFile(name string) bool {
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+}
+
+// atgCollectFromPath collects symbols from an absolute path (file or directory).
+func atgCollectFromPath(absPath string, out *[]atgScopeSymbol) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return
+	}
+	if info.IsDir() {
+		atgCollectFromDir(absPath, out)
+		return
+	}
+	if isNonTestGoFile(info.Name()) {
+		atgCollectFromFile(absPath, out)
+	}
+}
+
+// atgCollectFromDir scans immediate (non-recursive) .go files in a directory.
+func atgCollectFromDir(absDir string, out *[]atgScopeSymbol) {
+	entries, err := os.ReadDir(absDir)
+	if err != nil {
+		// Defensive: only reachable if the directory is removed between Stat and ReadDir.
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() && isNonTestGoFile(e.Name()) {
+			atgCollectFromFile(filepath.Join(absDir, e.Name()), out)
+		}
+	}
+}
+
+// atgCollectFromFile parses a Go file and appends exported top-level symbols.
+func atgCollectFromFile(absPath string, out *[]atgScopeSymbol) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, absPath, nil, 0)
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(absPath)
+	for _, decl := range f.Decls {
+		atgCollectFromDecl(decl, dir, out)
+	}
+}
+
+// atgCollectFromDecl extracts exported names from a single top-level declaration.
+func atgCollectFromDecl(decl ast.Decl, dir string, out *[]atgScopeSymbol) {
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		if d.Name.IsExported() {
+			*out = append(*out, atgScopeSymbol{Name: d.Name.Name, DeclDir: dir})
+		}
+	case *ast.GenDecl:
+		atgCollectFromGenDecl(d, dir, out)
+	}
+}
+
+// atgCollectFromGenDecl extracts exported names from a GenDecl (type/var/const).
+func atgCollectFromGenDecl(d *ast.GenDecl, dir string, out *[]atgScopeSymbol) {
+	for _, spec := range d.Specs {
+		switch s := spec.(type) {
+		case *ast.TypeSpec:
+			if s.Name.IsExported() {
+				*out = append(*out, atgScopeSymbol{Name: s.Name.Name, DeclDir: dir})
+			}
+		case *ast.ValueSpec:
+			for _, name := range s.Names {
+				if name.IsExported() {
+					*out = append(*out, atgScopeSymbol{Name: name.Name, DeclDir: dir})
+				}
+			}
+		}
+	}
+}
+
+// atgBuildSymbolRegex compiles a word-boundary regex that matches any scope
+// symbol name in a file's content.  Deduplicates names before building the
+// pattern to keep it from growing with repeated symbols across files.
+func atgBuildSymbolRegex(symbols []atgScopeSymbol) (*regexp.Regexp, error) {
+	seen := make(map[string]bool)
+	var parts []string
+	for _, s := range symbols {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			parts = append(parts, regexp.QuoteMeta(s.Name))
+		}
+	}
+	return regexp.Compile(`\b(` + strings.Join(parts, "|") + `)\b`)
+}
+
+// atgWalkTestFiles walks projectPath and calls visit for every *_test.go file,
+// skipping vendor/.git/testdata/.claude sub-trees.
+func atgWalkTestFiles(projectPath string, visit func(path string) error) error {
+	return filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if skippedDirNames[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		return visit(path)
+	})
+}
+
+// atgMatchedSymbol returns the first scope-symbol name found in the file at
+// path, or "" if none match or the file cannot be read.
+func atgMatchedSymbol(path string, re *regexp.Regexp) string {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	m := re.FindSubmatch(content)
+	if len(m) < 2 {
+		return ""
+	}
+	return string(m[1])
+}
+
+// atgViolationKind returns atgViolationExpand when the test file lives in the
+// same directory as the declaring package (same disjoint slice), and
+// atgViolationRefuse otherwise.
+func atgViolationKind(testDir, matched string, symbols []atgScopeSymbol) string {
+	for _, s := range symbols {
+		if s.Name == matched && s.DeclDir == testDir {
+			return atgViolationExpand
+		}
+	}
+	return atgViolationRefuse
+}
+
+// atgFindCallers walks all *_test.go files and returns violations for those
+// outside the scope dirs that reference a scope symbol.
+func atgFindCallers(projectPath string, symbols []atgScopeSymbol, scopeDirs map[string]bool) ([]atgViolation, error) {
+	re, err := atgBuildSymbolRegex(symbols)
+	if err != nil {
+		return nil, err
+	}
+	var violations []atgViolation
+	walkErr := atgWalkTestFiles(projectPath, func(path string) error {
+		dir := filepath.Dir(path)
+		if scopeDirs[dir] {
+			return nil
+		}
+		matched := atgMatchedSymbol(path, re)
+		if matched == "" {
+			return nil
+		}
+		kind := atgViolationKind(dir, matched, symbols)
+		violations = append(violations, atgViolation{TestFile: path, Symbol: matched, Kind: kind})
+		return nil
+	})
+	return violations, walkErr
+}
+
+// atgClassifyAndReport emits an EXPAND warning (stderr, non-blocking) for
+// same-package callers and returns a REFUSE error for cross-package callers.
+func atgClassifyAndReport(violations []atgViolation) error {
+	var expand, refuse []atgViolation
+	for _, v := range violations {
+		if v.Kind == atgViolationExpand {
+			expand = append(expand, v)
+		} else {
+			refuse = append(refuse, v)
+		}
+	}
+	if len(expand) > 0 {
+		atgWarnExpand(expand)
+	}
+	if len(refuse) == 0 {
+		return nil
+	}
+	return atgRefuseError(refuse)
+}
+
+// atgWarnExpand emits a non-blocking stderr warning for same-package asserters
+// not explicitly listed in write_scope.
+func atgWarnExpand(expand []atgViolation) {
+	fmt.Fprintf(os.Stderr, "warning: asserting-test scope gate: test file(s) in the write_scope package assert on scope symbols but are not listed in write_scope (consider adding them):\n")
+	for _, v := range expand {
+		fmt.Fprintf(os.Stderr, "  - %s (asserts on %s)\n", v.TestFile, v.Symbol)
+	}
+}
+
+// atgRefuseError constructs the REFUSE error listing offending files and symbols.
+func atgRefuseError(refuse []atgViolation) error {
+	var sb strings.Builder
+	sb.WriteString("fanout asserting-test scope gate: write_scope changes exported symbol(s) referenced by test file(s) in other packages (cannot fix within scope — would shatter disjoint-slice invariant):\n")
+	for _, v := range refuse {
+		sb.WriteString(fmt.Sprintf("  - %s → %s\n", v.TestFile, v.Symbol))
+	}
+	sb.WriteString("use " + atgSkipFlag + " for deliberate cross-scope changes or an additive-helper approach")
+	return fmt.Errorf("%s", sb.String())
 }
