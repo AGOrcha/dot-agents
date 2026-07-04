@@ -32,7 +32,7 @@ func TestResolveRepoDir(t *testing.T) {
 		t.Errorf("explicit = %q, want /explicit/root", got)
 	}
 	// Empty falls back to a non-empty cwd on a live process.
-	if got := resolveRepoDir(""); got == "" {
+	if resolveRepoDir("") == "" {
 		t.Error("empty repo-dir should fall back to a non-empty cwd")
 	}
 }
