@@ -2,6 +2,7 @@ package eval
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,22 +87,41 @@ func TestOpenWarmReaderMissingDBFails(t *testing.T) {
 	}
 }
 
-// A stat error that is NOT "not exist" (here: a non-directory in the store's
-// parent path, yielding ENOTDIR) surfaces as the wrapped stat error, not the
-// build-the-graph message.
-func TestOpenWarmReaderStatError(t *testing.T) {
-	kgHomeDir := t.TempDir()
-	t.Setenv("KG_HOME", kgHomeDir)
-	// Place a regular file where the "ops" directory would be, so stat of
-	// ops/graphstore.db fails with ENOTDIR rather than ErrNotExist.
-	writeFile(t, filepath.Join(kgHomeDir, "ops"), "not a directory")
-
-	_, _, err := openWarmReader()
+// A store-open failure that is NOT os.ErrNotExist (e.g. a corrupt store)
+// surfaces as the wrapped open error, NOT the build-the-graph message. The error
+// is injected through the openWarmStore seam so the test does not depend on
+// OS-specific filesystem error semantics (Unix ENOTDIR vs Windows
+// ERROR_PATH_NOT_FOUND classify differently).
+func TestOpenWarmReaderNonNotExistError(t *testing.T) {
+	swapOpenWarmStore(t, func(string) (*graphstore.SQLiteStore, error) {
+		return nil, errors.New("graphstore: db is corrupt")
+	})
+	reader, closeFn, err := openWarmReader()
 	if err == nil {
-		t.Fatal("openWarmReader should surface a non-not-exist stat error")
+		closeReader(closeFn)
+		t.Fatal("openWarmReader should surface a non-not-exist open error")
+	}
+	if reader != nil || closeFn != nil {
+		t.Fatal("openWarmReader must return no reader/closer on the open error")
 	}
 	if strings.Contains(err.Error(), "code graph not built") {
-		t.Errorf("ENOTDIR stat error should not be reported as an unbuilt graph: %v", err)
+		t.Errorf("a non-not-exist open error must not be reported as an unbuilt graph: %v", err)
+	}
+	if !strings.Contains(err.Error(), "open code graph") {
+		t.Errorf("open error lost its command context: %v", err)
+	}
+}
+
+// An os.ErrNotExist from the store open (however the OS spells it) maps to the
+// build-the-graph message. Injected through the seam so the mapping is asserted
+// independently of the OS-specific not-exist errno.
+func TestOpenWarmReaderMapsNotExist(t *testing.T) {
+	swapOpenWarmStore(t, func(string) (*graphstore.SQLiteStore, error) {
+		return nil, fmt.Errorf("graphstore: db does not exist: %w", os.ErrNotExist)
+	})
+	_, _, err := openWarmReader()
+	if err == nil || !strings.Contains(err.Error(), "code graph not built") {
+		t.Fatalf("os.ErrNotExist should map to the build-the-graph message, got %v", err)
 	}
 }
 

@@ -28,6 +28,13 @@ var languageProfiles = []gencore.Profile{gogen.Profile, pygen.Profile, tsgen.Pro
 // generator tests use).
 var openReader = openWarmReader
 
+// openWarmStore is the seam over the no-create read-only store open, so
+// openWarmReader's not-exist vs other-error classification is testable by
+// injecting a synthetic error rather than relying on OS-specific filesystem
+// error semantics (which differ between Unix ENOTDIR and Windows
+// ERROR_PATH_NOT_FOUND).
+var openWarmStore = graphstore.OpenSQLiteReadOnly
+
 // openWarmReader opens the warm SQLite code graph as a graphstore.CodeGraphReader
 // and returns it alongside a closer the caller must invoke when done. The DB
 // path mirrors `da kg`'s warm-store layout (<KG_HOME>/ops/graphstore.db).
@@ -41,7 +48,7 @@ var openReader = openWarmReader
 // build-the-graph message.
 func openWarmReader() (graphstore.CodeGraphReader, func() error, error) {
 	path := warmDBPath()
-	store, err := graphstore.OpenSQLiteReadOnly(path)
+	store, err := openWarmStore(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil, fmt.Errorf("eval: code graph not built at %s", path)

@@ -92,21 +92,33 @@ func TestOpenSQLiteReadOnly_SQLOpenError(t *testing.T) {
 	}
 }
 
-// A non-not-exist open failure (a regular file where the store's parent dir
-// should be, yielding ENOTDIR) is reported as an open error, NOT as a missing
-// store — so callers do not misreport it as "not built".
-func TestOpenSQLiteReadOnly_NonNotExistError(t *testing.T) {
-	dir := t.TempDir()
-	notADir := filepath.Join(dir, "ops")
-	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+// classifyReadOnlyOpenErr distinguishes an absent store (wrapped os.ErrNotExist)
+// from any other open failure. It is unit-tested directly with real paths so the
+// classification is proven independently of OS-specific open/stat error
+// semantics (Unix ENOTDIR vs Windows ERROR_PATH_NOT_FOUND, etc.): the stat of an
+// EXISTING path succeeds on every OS, and the stat of an absent path under an
+// existing parent is os.ErrNotExist on every OS.
+func TestClassifyReadOnlyOpenErr(t *testing.T) {
+	synthetic := errors.New("driver open failure")
+
+	// Existing path → NOT a missing store; the open error is preserved so
+	// callers do not misreport it as "not built".
+	existing := filepath.Join(t.TempDir(), "corrupt.db")
+	if err := os.WriteFile(existing, []byte("not a database"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
-	_, err := OpenSQLiteReadOnly(filepath.Join(notADir, "graphstore.db"))
-	if err == nil {
-		t.Fatal("expected an open error for a store under a non-directory")
+	gen := classifyReadOnlyOpenErr(existing, synthetic)
+	if errors.Is(gen, os.ErrNotExist) {
+		t.Errorf("an existing-but-unopenable store must not classify as not-exist: %v", gen)
 	}
-	if errors.Is(err, os.ErrNotExist) {
-		t.Errorf("ENOTDIR-style failure must not be classified as a missing store: %v", err)
+	if !errors.Is(gen, synthetic) {
+		t.Errorf("the underlying open error must be preserved: %v", gen)
+	}
+
+	// Absent path (with an existing parent) → wrapped os.ErrNotExist.
+	absent := filepath.Join(t.TempDir(), "missing.db")
+	if got := classifyReadOnlyOpenErr(absent, synthetic); !errors.Is(got, os.ErrNotExist) {
+		t.Errorf("an absent store must classify as os.ErrNotExist: %v", got)
 	}
 }
 
