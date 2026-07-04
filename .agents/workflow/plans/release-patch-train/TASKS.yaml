@@ -1,10 +1,45 @@
 schema_version: 1
 plan_id: release-patch-train
 tasks:
+    - id: release-docs-refresh
+      title: 'Release: reconcile docs vs code + platform-dirs before the patch bump'
+      status: pending
+      depends_on: []
+      blocks:
+        - release-patch
+      owner: dot-agents
+      write_scope:
+        - docs
+        - README.md
+        - docs/web
+      verification_required: true
+      notes: |-
+        Mandatory pre-cut docs pass — the required predecessor of release-patch,
+        so it is auto-included in EVERY patch cut and never has to be added by
+        hand. Runs the release-docs-refresh skill
+        (.agents/skills/release-docs-refresh/) BEFORE release-patch bumps VERSION
+        and finalizes the CHANGELOG. This mechanizes the docs-accuracy pass that
+        the release-gated-plans-convention already mandates for every release
+        (maintainer ruling 2026-05-28).
+        Purpose: reconcile the scope, spec, and user-facing docs (README, docs/**,
+        docs/web/**) AND docs/PLATFORM_DIRS_DOCS.md against the code at
+        release-ready state. Fix genuinely stale docs in place. Where the CODE
+        breaks a documented contract or promise (not merely lagging docs),
+        classify it and route a tracked code-fix or proposal via the
+        promise-gap-analyst (and platform-dir drift via the
+        platform-dirs-change-analyst) — do NOT paper over the gap by editing the
+        doc.
+        Discipline: this task NEVER touches VERSION or CHANGELOG.md — the skill is
+        a pre-cut reconciliation; the bump itself belongs to release-patch.
+        Recurring lifecycle: reset to pending after each release in lockstep with
+        release-patch, so the next cadence tick re-runs the docs pass before the
+        next bump.
+      app_type: release
     - id: release-patch
       title: 'Release: cadence patch bump + finalize CHANGELOG for bundled fixes'
       status: pending
-      depends_on: []
+      depends_on:
+        - release-docs-refresh
       blocks: []
       owner: dot-agents
       write_scope:
@@ -20,9 +55,11 @@ tasks:
         patch bump.
         Recurring lifecycle: after the bump merges and auto-release fires,
         reset this task back to pending for the next cadence tick rather
-        than marking it permanently completed. depends_on is intentionally
-        empty — it does not gate on any plan; it gathers whatever has
-        landed.
+        than marking it permanently completed. depends_on gates ONLY on
+        release-docs-refresh (the mandatory pre-cut docs pass) — it still
+        does not gate on any feature plan; it gathers whatever has landed,
+        but never bumps VERSION until the docs pass has reconciled the docs
+        against the shipped code.
         Scope guard: if any merged change since the last tag added a
         user-visible surface (new da command/flag, .agentsrc.json schema
         addition, generated-config shape, skill/agent/hook contract) it
