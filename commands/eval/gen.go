@@ -105,6 +105,8 @@ func emitSpec(out io.Writer, data []byte, taskID, outPath string) error {
 	if err := fsops.WriteFileAtomic(outPath, data); err != nil {
 		return fmt.Errorf("eval gen: write %s: %w", outPath, err)
 	}
-	fmt.Fprintf(out, "Wrote TaskSpec %s to %s\n", taskID, outPath)
+	if _, err := fmt.Fprintf(out, "Wrote TaskSpec %s to %s\n", taskID, outPath); err != nil {
+		return fmt.Errorf("eval gen: confirm write: %w", err)
+	}
 	return nil
 }

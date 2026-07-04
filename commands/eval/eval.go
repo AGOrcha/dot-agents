@@ -49,7 +49,10 @@ const (
 	templateFlagName   = "template"
 	outFlagName        = "out"
 	taskFlagName       = "task"
-	runnerFlagName     = "runner"
+	// agentFlagName is the CLI flag selecting the agent runner (spec R3 /
+	// Done-Criterion 3: `da eval run --task <spec> --agent <runner>`). Only the
+	// flag string is "agent"; the internal runner.Adapter type is unchanged.
+	agentFlagName = "agent"
 )
 
 // handlerFunc is the cobra RunE signature the root wires per subcommand.

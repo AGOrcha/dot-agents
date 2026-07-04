@@ -86,8 +86,9 @@ func TestRunEvalCommandGoEndToEnd(t *testing.T) {
 		Workdir:    writeGoModule(t),
 		BaseCommit: zeroCommit,
 	}
+	sb := &fakeSandbox{inst: inst}
 	swapOpenReader(t, fixtureOpenReader)
-	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{inst: inst}, nil })
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return sb, nil })
 	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return okRunner(), nil })
 
 	var buf bytes.Buffer
@@ -96,6 +97,11 @@ func TestRunEvalCommandGoEndToEnd(t *testing.T) {
 	}, false)
 	if err != nil {
 		t.Fatalf("runEvalCommand: %v", err)
+	}
+
+	// OQ6: the run path swept stale sandboxes exactly once before provisioning.
+	if sb.pruneCalls != 1 {
+		t.Errorf("PruneStale called %d times on the run path, want 1", sb.pruneCalls)
 	}
 
 	// Sidecars persisted at the canonical run dir (adopt-in-place path).
@@ -205,7 +211,8 @@ func TestRunEvalPersistError(t *testing.T) {
 
 func TestBuildHarnessSuccess(t *testing.T) {
 	swapOpenReader(t, fixtureOpenReader)
-	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{}, nil })
+	sb := &fakeSandbox{}
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return sb, nil })
 	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return &runner.FakeRunner{}, nil })
 	h, lang, closeFn, err := buildHarness(t.TempDir(), runOptions{language: "go"})
 	if err != nil {
@@ -214,6 +221,55 @@ func TestBuildHarnessSuccess(t *testing.T) {
 	defer closeReader(closeFn)
 	if h == nil || lang != evalcore.LanguageGo {
 		t.Fatalf("buildHarness returned h=%v lang=%q", h, lang)
+	}
+	// OQ6: a successful sandbox wiring sweeps stale worktrees exactly once.
+	if sb.pruneCalls != 1 {
+		t.Errorf("PruneStale called %d times, want 1", sb.pruneCalls)
+	}
+}
+
+// A prune FAILURE is best-effort: it is surfaced on warnOut but never aborts
+// the run (buildHarness still succeeds).
+func TestBuildHarnessPruneFailureDoesNotAbort(t *testing.T) {
+	swapOpenReader(t, fixtureOpenReader)
+	sb := &fakeSandbox{pruneErr: errFixture}
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return sb, nil })
+	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return &runner.FakeRunner{}, nil })
+	var warn bytes.Buffer
+	swapWarnOut(t, &warn)
+
+	h, _, closeFn, err := buildHarness(t.TempDir(), runOptions{language: "go"})
+	if err != nil {
+		t.Fatalf("prune failure must not abort buildHarness: %v", err)
+	}
+	defer closeReader(closeFn)
+	if h == nil {
+		t.Fatal("buildHarness returned a nil harness despite only a prune failure")
+	}
+	if sb.pruneCalls != 1 {
+		t.Errorf("PruneStale called %d times, want 1", sb.pruneCalls)
+	}
+	if !strings.Contains(warn.String(), "prune failed") {
+		t.Errorf("prune failure not surfaced as a warning: %q", warn.String())
+	}
+}
+
+// A non-empty prune reports the pruned count on warnOut.
+func TestBuildHarnessPruneReportsCount(t *testing.T) {
+	swapOpenReader(t, fixtureOpenReader)
+	sb := &fakeSandbox{pruned: []string{"old-run-1", "old-run-2"}}
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return sb, nil })
+	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return &runner.FakeRunner{}, nil })
+	var warn bytes.Buffer
+	swapWarnOut(t, &warn)
+
+	_, _, closeFn, err := buildHarness(t.TempDir(), runOptions{language: "go"})
+	if err != nil {
+		t.Fatalf("buildHarness: %v", err)
+	}
+	defer closeReader(closeFn)
+	if !strings.Contains(warn.String(), "pruned 2") {
+		t.Errorf("pruned-count not reported: %q", warn.String())
 	}
 }
 
@@ -246,14 +302,16 @@ func TestBuildHarnessRunnerError(t *testing.T) {
 	}
 }
 
-// newSandbox returning a nil sandbox with no error makes harness.New reject the
-// wiring — covering buildHarness's harness.New error branch.
+// newRunner returning a nil runner with no error makes harness.New reject the
+// wiring — covering buildHarness's harness.New error branch. (A nil sandbox is
+// not usable here: the OQ6 prune runs on the sandbox before harness.New, and the
+// real newSandbox never returns a nil sandbox with a nil error.)
 func TestBuildHarnessNewError(t *testing.T) {
 	swapOpenReader(t, fixtureOpenReader)
-	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return nil, nil })
-	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return &runner.FakeRunner{}, nil })
+	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{}, nil })
+	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return nil, nil })
 	if _, _, _, err := buildHarness(t.TempDir(), runOptions{language: "go"}); err == nil {
-		t.Fatal("nil sandbox should make harness.New fail")
+		t.Fatal("nil runner should make harness.New fail")
 	}
 }
 

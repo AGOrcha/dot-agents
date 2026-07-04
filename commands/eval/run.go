@@ -15,9 +15,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// defaultAdapter is the agent runner used when --runner is not given. Claude is
+// defaultAdapter is the agent runner used when --agent is not given. Claude is
 // the v1 default (runner.AdapterClaude).
 const defaultAdapter = string(runner.AdapterClaude)
+
+// warnOut is where best-effort run diagnostics (e.g. a stale-sandbox prune
+// failure) are surfaced. It defaults to stderr and is overridable in tests.
+var warnOut io.Writer = os.Stderr
 
 // newSandbox and newRunner are the production-wiring seams for the two agent-
 // facing collaborators. Production returns the worktree sandbox and the
@@ -54,7 +58,7 @@ func newRunCmd(runE handlerFunc) *cobra.Command {
 			"the outcome against the R1 rubric, and persist the sidecars under\n" +
 			".agents/eval/runs/<run-id>/.",
 		Example: "  da eval run --language go\n" +
-			"  da eval run --language go --runner codex\n" +
+			"  da eval run --language go --agent codex\n" +
 			"  da eval run --task task.yaml",
 		Args: cobra.NoArgs,
 		RunE: runE,
@@ -63,7 +67,7 @@ func newRunCmd(runE handlerFunc) *cobra.Command {
 	cmd.Flags().String(taskFlagName, "", "Run a pre-generated TaskSpec YAML instead of generating one")
 	cmd.Flags().String(difficultyFlagName, "", "Constrain the generated difficulty band (ignored with --task)")
 	cmd.Flags().String(templateFlagName, "", "Task template id (ignored with --task)")
-	cmd.Flags().String(runnerFlagName, defaultAdapter, "Agent adapter: claude, codex, or copilot")
+	cmd.Flags().String(agentFlagName, defaultAdapter, "Agent adapter: claude, codex, or copilot")
 	cmd.Flags().String(repoDirFlagName, "", repoDirFlagHelp)
 	return cmd
 }
@@ -82,7 +86,7 @@ func runOptionsFrom(cmd *cobra.Command) runOptions {
 		task:       flagString(cmd, taskFlagName),
 		difficulty: flagString(cmd, difficultyFlagName),
 		template:   flagString(cmd, templateFlagName),
-		adapter:    flagString(cmd, runnerFlagName),
+		adapter:    flagString(cmd, agentFlagName),
 		repoDir:    flagString(cmd, repoDirFlagName),
 	}
 }
@@ -123,6 +127,9 @@ func buildHarness(root string, opts runOptions) (*harness.Harness, evalcore.Lang
 		closeReader(closeFn)
 		return nil, "", nil, fmt.Errorf("eval run: sandbox: %w", err)
 	}
+	// OQ6: sweep stale worktrees from crashed prior runs before this run
+	// provisions its own sandbox. Best-effort — a prune failure never aborts.
+	pruneStaleSandbox(sb)
 	run, err := newRunner(runner.Adapter(opts.adapter))
 	if err != nil {
 		closeReader(closeFn)
@@ -139,6 +146,22 @@ func buildHarness(root string, opts runOptions) (*harness.Harness, evalcore.Lang
 		return nil, "", nil, fmt.Errorf("eval run: build harness: %w", err)
 	}
 	return h, lang, closeFn, nil
+}
+
+// pruneStaleSandbox runs the OQ6 stale-worktree sweep. It is deliberately
+// best-effort: neither a prune failure nor a pruned-run report aborts the run
+// (the failure is surfaced as a warning on warnOut rather than swallowed, and a
+// non-empty sweep is noted). The v1 spec default is "pruned on next da eval
+// run", and R4 is CLI-first (D4.8), so the run path is the sweep's trigger.
+func pruneStaleSandbox(sb sandbox.Sandbox) {
+	pruned, err := sb.PruneStale(context.Background())
+	if err != nil {
+		fmt.Fprintf(warnOut, "eval run: warning: stale-sandbox prune failed: %v\n", err)
+		return
+	}
+	if len(pruned) > 0 {
+		fmt.Fprintf(warnOut, "eval run: pruned %d stale sandbox worktree(s)\n", len(pruned))
+	}
 }
 
 // resolveGenerators picks the generator source. With --task it registers a

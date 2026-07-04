@@ -92,6 +92,22 @@ func TestGenerateAndWriteFileError(t *testing.T) {
 	}
 }
 
+// The --out confirmation write is not swallowed: the spec file is written, but a
+// failing confirmation writer surfaces as an error.
+func TestGenerateAndWriteConfirmError(t *testing.T) {
+	reg, err := buildRegistry(fixtureReader())
+	if err != nil {
+		t.Fatalf("buildRegistry: %v", err)
+	}
+	out := filepath.Join(t.TempDir(), "task.yaml")
+	err = generateAndWrite(context.Background(), failWriter{}, reg, genOptions{language: "go", out: out})
+	if err == nil {
+		t.Fatal("confirmation-write failure should surface")
+	}
+	// The spec file itself was still written atomically before the confirmation.
+	mustExist(t, out)
+}
+
 // Driving the assembled command through Execute with the real RunGen entry
 // point covers RunGen + genOptionsFrom + flag wiring end-to-end.
 func TestGenCommandExecute(t *testing.T) {

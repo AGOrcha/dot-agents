@@ -3,6 +3,7 @@ package eval
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,16 +94,24 @@ func fixtureOpenReader() (graphstore.CodeGraphReader, func() error, error) {
 // ---- scripted sandbox / verifier --------------------------------------------
 
 // fakeSandbox is a scripted sandbox.Sandbox that hands back a pre-built instance
-// (its Cleanup is a no-op because the unexported cleanup hook is nil).
+// (its Cleanup is a no-op because the unexported cleanup hook is nil) and
+// records PruneStale invocations so the OQ6 prune wiring is assertable.
 type fakeSandbox struct {
 	inst *sandbox.Instance
 	err  error
+
+	pruneCalls int
+	pruned     []string
+	pruneErr   error
 }
 
 func (s *fakeSandbox) Provision(context.Context, *evalcore.TaskSpec) (*sandbox.Instance, error) {
 	return s.inst, s.err
 }
-func (s *fakeSandbox) PruneStale(context.Context) ([]string, error) { return nil, nil }
+func (s *fakeSandbox) PruneStale(context.Context) ([]string, error) {
+	s.pruneCalls++
+	return s.pruned, s.pruneErr
+}
 
 // fakeVerifier is a scripted goverifier.Verifier that returns a canned result
 // without shelling out — used by the runEval error-path tests so they need no
@@ -203,6 +212,19 @@ func swapLanguageProfiles(t *testing.T, profiles []gencore.Profile) {
 	languageProfiles = profiles
 	t.Cleanup(func() { languageProfiles = prev })
 }
+
+func swapWarnOut(t *testing.T, w io.Writer) {
+	t.Helper()
+	prev := warnOut
+	warnOut = w
+	t.Cleanup(func() { warnOut = prev })
+}
+
+// failWriter is an io.Writer that always errors — used to exercise the
+// confirmation-write error path.
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) { return 0, errFixture }
 
 // zeroCommit is a stable, all-zero base commit for fixture instances.
 const zeroCommit = "0000000000000000000000000000000000000000"
