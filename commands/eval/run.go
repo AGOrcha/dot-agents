@@ -73,10 +73,12 @@ func newRunCmd(runE handlerFunc) *cobra.Command {
 }
 
 // RunEval is the `da eval run` entry point the root wires as the subcommand's
-// RunE. asJSON is the resolved global --json flag, passed by the root handler so
-// the flag read stays statically traceable in package commands.
-func RunEval(cmd *cobra.Command, asJSON bool) error {
-	return runEvalCommand(cmd.Context(), cmd.OutOrStdout(), runOptionsFrom(cmd), asJSON)
+// RunE. asJSON and dryRun are the resolved global --json and -n/--dry-run flags,
+// passed by the root handler so the flag reads stay statically traceable in
+// package commands. When dryRun is set the run resolves and previews the task
+// but performs no live work (no agent, no sandbox, no persisted run dir).
+func RunEval(cmd *cobra.Command, asJSON, dryRun bool) error {
+	return runEvalCommand(cmd.Context(), cmd.OutOrStdout(), runOptionsFrom(cmd), asJSON, dryRun)
 }
 
 // runOptionsFrom reads the run subcommand's flags off cmd.
@@ -96,8 +98,11 @@ func runOptionsFrom(cmd *cobra.Command) runOptions {
 // and the go verifier) and drives the shared runEval core. It is the un-mocked
 // CLI entry; the acceptance test drives the same path with the sandbox/runner
 // seams overridden.
-func runEvalCommand(ctx context.Context, out io.Writer, opts runOptions, asJSON bool) error {
+func runEvalCommand(ctx context.Context, out io.Writer, opts runOptions, asJSON, dryRun bool) error {
 	root := resolveRepoDir(opts.repoDir)
+	if dryRun {
+		return previewEvalRun(ctx, out, root, opts, asJSON)
+	}
 	h, lang, closeFn, err := buildHarness(root, opts)
 	if err != nil {
 		return err
@@ -111,6 +116,46 @@ func runEvalCommand(ctx context.Context, out io.Writer, opts runOptions, asJSON 
 		template:   opts.template,
 		asJSON:     asJSON,
 	})
+}
+
+// previewEvalRun resolves the run's TaskSpec (the read-only stage-1 work) and
+// prints the plan of what a live `da eval run` WOULD do, then stops. It honors
+// the global -n/--dry-run contract every mutating da command follows: strictly
+// side-effect-free — it provisions no sandbox, prunes no worktrees, invokes no
+// agent, runs no verification, and writes no run dir or sidecars. The one thing
+// it does is generate/load the TaskSpec, which is itself read-only (the same
+// stage `da eval gen` performs) and is what makes the preview concrete.
+func previewEvalRun(ctx context.Context, out io.Writer, root string, opts runOptions, asJSON bool) error {
+	spec, err := resolveTaskSpec(ctx, opts)
+	if err != nil {
+		return err
+	}
+	return renderRunPreview(out, buildRunPreview(spec, opts, root), asJSON)
+}
+
+// resolveTaskSpec resolves the run's TaskSpec without touching the sandbox: it
+// loads the --task spec (or generates one from the KG registry for --language)
+// and releases any opened graph reader before returning. It mirrors the
+// harness's stage-1 generate, lifted out so the dry-run preview can show the
+// resolved task without assembling (or running) the rest of the pipeline.
+func resolveTaskSpec(ctx context.Context, opts runOptions) (*evalcore.TaskSpec, error) {
+	reg, lang, closeFn, err := resolveGenerators(opts)
+	if err != nil {
+		return nil, err
+	}
+	defer closeReader(closeFn)
+	gen, ok := reg.Lookup(lang)
+	if !ok {
+		return nil, fmt.Errorf("eval run: no generator registered for language %q", lang)
+	}
+	spec, err := gen.Generate(ctx, evalcore.GenerateOptions{
+		Difficulty: evalcore.Difficulty(opts.difficulty),
+		TemplateID: opts.template,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("eval run: generate task: %w", err)
+	}
+	return spec, nil
 }
 
 // buildHarness resolves the generator source, provisions the sandbox and runner
