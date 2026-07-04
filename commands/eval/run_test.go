@@ -94,7 +94,7 @@ func TestRunEvalCommandGoEndToEnd(t *testing.T) {
 	var buf bytes.Buffer
 	err := runEvalCommand(context.Background(), &buf, runOptions{
 		language: "go", repoDir: root, adapter: defaultAdapter,
-	}, false)
+	}, false, false)
 	if err != nil {
 		t.Fatalf("runEvalCommand: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRunCommandExecute(t *testing.T) {
 	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{inst: inst}, nil })
 	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return okRunner(), nil })
 
-	cmd := newRunCmd(func(c *cobra.Command, _ []string) error { return RunEval(c, false) })
+	cmd := newRunCmd(func(c *cobra.Command, _ []string) error { return RunEval(c, false, false) })
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"--language", "go", "--repo-dir", root})
@@ -160,7 +160,7 @@ func TestRunCommandExecute(t *testing.T) {
 // buildHarness before any sandbox/graph wiring, so the entry point is covered
 // on the error path.
 func TestRunEvalEntryInvalidLanguage(t *testing.T) {
-	cmd := newRunCmd(func(c *cobra.Command, _ []string) error { return RunEval(c, false) })
+	cmd := newRunCmd(func(c *cobra.Command, _ []string) error { return RunEval(c, false, false) })
 	cmd.SetArgs([]string{}) // no --language, no --task
 	cmd.SetOut(&bytes.Buffer{})
 	if err := cmd.Execute(); err == nil {
@@ -378,7 +378,7 @@ func TestFixedRegistryLoadError(t *testing.T) {
 // runEvalCommand surfaces a buildHarness failure (invalid language) before any
 // sandbox/runner/graph wiring runs.
 func TestRunEvalCommandBuildError(t *testing.T) {
-	err := runEvalCommand(context.Background(), &bytes.Buffer{}, runOptions{language: ""}, false)
+	err := runEvalCommand(context.Background(), &bytes.Buffer{}, runOptions{language: ""}, false, false)
 	if err == nil {
 		t.Fatal("empty language should fail the run before wiring")
 	}

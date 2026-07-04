@@ -47,10 +47,13 @@ func runEvalGen(cmd *cobra.Command, _ []string) error {
 	return eval.RunGen(cmd)
 }
 
-// runEvalRun is the `da eval run` RunE handler; it threads the global --json
-// flag into the run pipeline.
+// runEvalRun is the `da eval run` RunE handler; it threads the global --json and
+// -n/--dry-run flags into the run pipeline. --dry-run makes the run resolve and
+// preview the task without invoking the agent, provisioning a sandbox, or
+// writing a run dir. Both reads happen here so internal/globalflagcov can
+// statically trace them (see rootEvalCmd).
 func runEvalRun(cmd *cobra.Command, _ []string) error {
-	return eval.RunEval(cmd, Flags.JSON)
+	return eval.RunEval(cmd, Flags.JSON, Flags.DryRun)
 }
 
 // runEvalLs is the `da eval ls` RunE handler; it threads the global --json flag
