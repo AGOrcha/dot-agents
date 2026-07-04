@@ -62,8 +62,27 @@ sample).
   joins back to the run.
 - **`iteration-log/iter-1.score.yaml`** is the full explainable score: `value`, `band`,
   `scored`, `rubric_version`, and the per-signal `breakdown` (one row per rubric dimension, with
-  `sub_score`, `nominal_weight`, `effective_weight`, `contribution`). It is the source of truth
-  for the **score dimensions**.
+  `signal`, `label`, `present`, `sub_score`, `detail`, `nominal_weight`, `effective_weight`,
+  `contribution`). It is the source of truth for the **score dimensions** — see
+  [Score dimensions](#score-dimensions) for the per-field contract.
+
+### Score dimensions
+
+`iteration-log/iter-1.score.yaml:breakdown[]` carries one row per rubric signal, in the rubric's
+declared order. Each row emits exactly these fields, in this order — the set written by
+`scoring.PersistedContribution` — so a dashboard renders them verbatim without re-running the
+scorer:
+
+| Field | Meaning |
+| --- | --- |
+| `signal` | Stable rubric signal id the row scores. |
+| `label` | Human-readable name of the signal. |
+| `present` | Whether the signal was observed on this run; an absent signal still gets a row but votes nothing (`effective_weight` and `contribution` are 0). |
+| `sub_score` | The signal's score in `[0, 1]`; meaningful only when `present` is true. |
+| `detail` | Short human-readable note on what produced the value; omitted from the YAML when empty. |
+| `nominal_weight` | The signal's configured weight in the rubric, before absence renormalization. |
+| `effective_weight` | The weight actually applied after renormalizing across the present signals (`nominal_weight ÷ Σ present nominal weights`); 0 when the signal is absent. |
+| `contribution` | The signal's share of the run `value` (`effective_weight × sub_score`); the present rows sum exactly to `value`. |
 
 ### The join a dashboard performs
 
@@ -93,7 +112,7 @@ For every field R2 renders, the authoritative source and the join that reaches i
 | prompt integrity | `eval-run.yaml:agent.prompt_digest` == `sha256(taskspec.yaml:prompt)` | task-metadata |
 | score value / band | `eval-run.yaml:score.value` / `score.band` (summary) — full `iter-1.score.yaml:value` / `band` | score-summary |
 | rubric version | `eval-run.yaml:score.rubric_version` == `iter-1.score.yaml:rubric_version` | score-summary |
-| score dimensions | `iter-1.score.yaml:breakdown[]` (`signal`, `label`, `sub_score`, `effective_weight`, `contribution`) | run dir + iteration |
+| score dimensions | `iter-1.score.yaml:breakdown[]` (`signal`, `label`, `present`, `sub_score`, `detail`, `nominal_weight`, `effective_weight`, `contribution` — see [Score dimensions](#score-dimensions)) | run dir + iteration |
 | verify outcome | `eval-run.yaml:verify.passed` / `phase` / `exit_code` / `duration` | run-identity |
 | agent identity | `eval-run.yaml:agent.*` (also `iter-1.yaml:agent.*`) | run-identity |
 
