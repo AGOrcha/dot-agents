@@ -15,6 +15,43 @@ public [Rekor](https://rekor.sigstore.dev/) transparency log.
 
 This document explains how to verify a release before installing it.
 
+## Before cutting a release (maintainers)
+
+> This section is for maintainers **cutting** a release. If you are a user
+> verifying a release you downloaded, skip to [Why verify?](#why-verify).
+
+**REQUIRED pre-cut step — run `release-docs-refresh` BEFORE bumping `VERSION`
+or finalizing the `CHANGELOG`.** This applies to **every** release cut, patch
+and minor alike. It is not optional and it is not added by hand per cut: it is
+wired in as a structural predecessor of the version bump (see below), so every
+cut auto-includes it.
+
+1. Run the `release-docs-refresh` skill (`.agents/skills/release-docs-refresh/`)
+   at release-ready state. It reconciles the scope, spec, and user-facing docs
+   (`README.md`, `docs/**`, `docs/web/**`) **and** `docs/PLATFORM_DIRS_DOCS.md`
+   against the code, fixing genuinely stale docs in place.
+2. Where the **code** breaks a documented contract or promise (not merely
+   lagging docs), the skill classifies it and routes a tracked code-fix or
+   proposal via the promise-gap analyst (and platform-dir drift via the
+   platform-dirs change analyst) — **do not paper over the gap by editing the
+   doc.**
+3. Only after the docs pass completes: bump `VERSION`, finalize the `CHANGELOG`
+   `## [X.Y.Z]` section, and merge. The `VERSION` change on merge to `master`
+   fires `auto-release.yml`.
+
+**How this is enforced structurally (so it can never be forgotten):**
+
+- **Patch cuts:** the `release-patch-train` plan's `release-patch` task declares
+  `depends_on: [release-docs-refresh]`, and the `release-docs-refresh` task is
+  its mandatory predecessor. `release-patch` cannot run until the docs pass
+  completes.
+- **Minor cuts:** every plan-tail `release-minor` task MUST likewise declare a
+  `release-docs-refresh` predecessor in its `depends_on`, per the
+  release-gated-plans convention
+  (`.agents/proposals/release-gated-plans-convention.md`). New feature-plan
+  release tails inherit this from the convention's wiring recipe, so minor cuts
+  get the docs pass too — not just the patch train.
+
 ## Why verify?
 
 Verifying the release lets you confirm that:
