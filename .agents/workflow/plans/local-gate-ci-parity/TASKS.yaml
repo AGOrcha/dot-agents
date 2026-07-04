@@ -30,7 +30,7 @@ tasks:
       app_type: go-cli
     - id: t3-gate-cross-windows
       title: 'make gate-cross: Windows-ssh tests for changed packages + merged multi-OS coverage'
-      status: pending
+      status: completed
       depends_on:
         - t1-make-gate-single-source
       blocks: []

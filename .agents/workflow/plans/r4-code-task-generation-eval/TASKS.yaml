@@ -334,7 +334,7 @@ tasks:
       app_type: go-cli
     - id: r2-visibility-contract
       title: R2 visibility contract — documented join + fixture
-      status: pending
+      status: completed
       depends_on:
         - persistence
       blocks:

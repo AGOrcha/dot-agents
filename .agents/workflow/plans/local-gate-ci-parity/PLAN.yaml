@@ -4,8 +4,8 @@ title: Local gate <-> CI parity (make gate single-source)
 status: draft
 summary: make gate is the single merge-blocking mandate run by the prek hook, humans, and CI; fast every-push tier + make gate-cross pre-merge (Windows-ssh + merged multi-OS coverage + native sonar); kills the pass-local-fail-CI and --no-verify loops
 created_at: "2026-06-26T00:09:23Z"
-updated_at: "2026-06-26T00:09:55Z"
+updated_at: "2026-07-04T14:45:41Z"
 owner: dot-agents
 success_criteria: 'Replaying #173 and #174 pre-fix fails make gate locally; make gate is deterministic (twice = identical PASS, no tree mutation); prek hook AND CI both invoke make gate*; a worker never needs --no-verify'
 verification_strategy: 'Regression replay of #173/#174; determinism check; grep that no divergent coverage-mode constant exists between hook and CI; smoke make gate + make gate-cross'
-current_focus_task: ""
+current_focus_task: make gate target + prek hook calls it + per-file coverage on changed files
