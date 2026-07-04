@@ -480,18 +480,30 @@ func validateFoldBackPriorAgreement(prior *foldBackArtifact, in *foldBackUpsertI
 	return nil
 }
 
-func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(notes string) string) error {
+// findTaskInPlan loads the canonical TASKS.yaml for planID and returns the file
+// together with the index of taskID within tf.Tasks. It reports errLoadTasksForPlanFmt
+// on load failure and errTaskNotFoundInPlanShort when the task is absent, mirroring the
+// precondition the fold-back task-note write path enforces. It performs no writes.
+func findTaskInPlan(projectPath, planID, taskID string) (*CanonicalTaskFile, int, error) {
 	tf, err := loadCanonicalTasks(projectPath, planID)
 	if err != nil {
-		return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
+		return nil, 0, fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
 	}
 	for i := range tf.Tasks {
 		if tf.Tasks[i].ID == taskID {
-			tf.Tasks[i].Notes = mutate(tf.Tasks[i].Notes)
-			return saveCanonicalTasks(projectPath, tf)
+			return tf, i, nil
 		}
 	}
-	return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+	return nil, 0, fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+}
+
+func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(notes string) string) error {
+	tf, idx, err := findTaskInPlan(projectPath, planID, taskID)
+	if err != nil {
+		return err
+	}
+	tf.Tasks[idx].Notes = mutate(tf.Tasks[idx].Notes)
+	return saveCanonicalTasks(projectPath, tf)
 }
 
 // assertFoldBackTaskExists mirrors, read-only, the precondition the task-note write
@@ -500,16 +512,8 @@ func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(note
 // error the real create would hit, so the preview reflects reality instead of a
 // false-green. It performs no writes.
 func assertFoldBackTaskExists(projectPath, planID, taskID string) error {
-	tf, err := loadCanonicalTasks(projectPath, planID)
-	if err != nil {
-		return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
-	}
-	for i := range tf.Tasks {
-		if tf.Tasks[i].ID == taskID {
-			return nil
-		}
-	}
-	return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+	_, _, err := findTaskInPlan(projectPath, planID, taskID)
+	return err
 }
 
 func updatePlanFoldBackSummary(projectPath, planID, createdAt string, mutate func(summary string) string) error {
