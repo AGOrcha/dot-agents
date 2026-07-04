@@ -44,21 +44,31 @@ type seedResult struct {
 // eval.Generator; a language package supplies a [Profile] and thin New/Register
 // wrappers so all generation control flow lives in this one place.
 type Generator struct {
-	querier *kgquery.Querier
-	profile Profile
+	querier  *kgquery.Querier
+	profile  Profile
+	repoRoot string // root KG file paths are relativized against (see normalize.go)
 }
 
 // New constructs a Generator for profile p backed by querier. It errors on a
 // nil querier or a Profile with nil required function fields, tagging the
-// message with the profile's error prefix.
+// message with the profile's error prefix. The repository root used to
+// relativize KG file paths is resolved from the process working directory
+// (mirroring commands/eval resolveRepoDir); newForRoot injects a fixed root.
 func New(querier *kgquery.Querier, p Profile) (*Generator, error) {
+	return newForRoot(querier, p, resolveRepoRoot())
+}
+
+// newForRoot is New with an explicit repository root. New resolves the root from
+// the working directory; tests inject a fixed root to exercise the absolute-path
+// (code-review-graph) normalization deterministically.
+func newForRoot(querier *kgquery.Querier, p Profile, repoRoot string) (*Generator, error) {
 	if querier == nil {
 		return nil, fmt.Errorf("%s: querier is required", p.ErrPrefix)
 	}
 	if err := validateProfile(p); err != nil {
 		return nil, fmt.Errorf("%s: %w", p.ErrPrefix, err)
 	}
-	return &Generator{querier: querier, profile: p}, nil
+	return &Generator{querier: querier, profile: p, repoRoot: repoRoot}, nil
 }
 
 // validateProfile returns an error if any required function field of p is nil.
@@ -118,13 +128,24 @@ func (g *Generator) selectTemplateID(opts eval.GenerateOptions) (string, error) 
 	}
 }
 
-// synthesize finds a suitable seed and builds the TaskSpec for template tid.
+// synthesize finds a suitable seed and builds the TaskSpec for template tid. It
+// normalizes the seed's KG paths and symbol names to a repo-relative,
+// ingestion-independent form before assembly, then guards the emitted spec so no
+// absolute path can escape into a package pattern, artifact, or prompt.
 func (g *Generator) synthesize(ctx context.Context, tid string, opts eval.GenerateOptions) (*eval.TaskSpec, error) {
 	r, err := g.findSeed(ctx, opts.Difficulty)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", g.profile.ErrPrefix, err)
 	}
-	return g.buildSpec(tid, r), nil
+	r, err = normalizeSeed(r, g.repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", g.profile.ErrPrefix, err)
+	}
+	spec := g.buildSpec(tid, r)
+	if err := assertSpecRelative(spec); err != nil {
+		return nil, fmt.Errorf("%s: %w", g.profile.ErrPrefix, err)
+	}
+	return spec, nil
 }
 
 // findSeed picks the first seed whose derived difficulty matches want (any
