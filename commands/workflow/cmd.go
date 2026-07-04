@@ -964,6 +964,7 @@ func newWorkflowFoldBackCmd() *cobra.Command {
 	foldBackCreateCmd.Flags().String("observation", "", "Observation text (required)")
 	foldBackCreateCmd.Flags().String("slug", "", "Stable id for create-or-update (D2.a); one tagged line per slug in TASKS/plan notes")
 	foldBackCreateCmd.Flags().Bool("propose", false, "Route as proposal rather than inline task note")
+	foldBackCreateCmd.Flags().Bool("dry-run", false, "Print the routing decision and paths without writing anything")
 	_ = foldBackCreateCmd.MarkFlagRequired("plan")
 	_ = foldBackCreateCmd.MarkFlagRequired("observation")
 	foldBackUpdateCmd := &cobra.Command{
