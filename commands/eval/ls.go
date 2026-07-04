@@ -1,0 +1,194 @@
+package eval
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+
+	"go.yaml.in/yaml/v3"
+
+	"github.com/AGOrcha/dot-agents/internal/eval/store"
+	"github.com/spf13/cobra"
+)
+
+// evalRunFile is the per-run aggregate sidecar `da eval run` persists and
+// `da eval ls` reads back. The name is the R2 dashboard contract the store
+// pins; ls reads it by name to list runs without re-deriving every stage.
+const evalRunFile = "eval-run.yaml"
+
+// lsOptions are the parsed flags of `da eval ls`.
+type lsOptions struct {
+	repoDir string
+}
+
+// lsRecord is the read-back projection of eval-run.yaml `da eval ls` needs. It
+// is intentionally a subset of the store's PersistedEvalRun (run identity, the
+// scored outcome, and the verify pass flag) so ls stays decoupled from the
+// store's internal, unexported summary sub-types.
+type lsRecord struct {
+	RunID      string     `yaml:"run_id"`
+	Language   string     `yaml:"language"`
+	Difficulty string     `yaml:"difficulty"`
+	Score      lsScore    `yaml:"score"`
+	Verify     lsVerify   `yaml:"verify"`
+	Agent      lsAgentTag `yaml:"agent"`
+}
+
+type lsScore struct {
+	Value  float64 `yaml:"value" json:"value"`
+	Band   string  `yaml:"band" json:"band"`
+	Scored bool    `yaml:"scored" json:"scored"`
+}
+
+type lsVerify struct {
+	Passed bool `yaml:"passed" json:"passed"`
+}
+
+type lsAgentTag struct {
+	Harness string `yaml:"harness" json:"harness,omitempty"`
+}
+
+// newLsCmd builds `da eval ls`.
+func newLsCmd(deps Deps) *cobra.Command {
+	var opts lsOptions
+	cmd := &cobra.Command{
+		Use:     "ls",
+		Short:   "List persisted eval runs",
+		Example: "  da eval ls\n  da eval ls --repo-dir /path/to/repo",
+		Args:    cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runLs(cmd.OutOrStdout(), resolveRepoDir(opts.repoDir), deps.json())
+		},
+	}
+	cmd.Flags().StringVar(&opts.repoDir, repoDirFlagName, "", repoDirFlagHelp)
+	return cmd
+}
+
+// evalRunsRoot returns the eval runs root (<root>/.agents/eval/runs) by deriving
+// the parent of the store's canonical run dir, so the on-disk layout stays
+// single-sourced in the store package.
+func evalRunsRoot(root string) string {
+	return filepath.Dir(store.RunDir(root, "_"))
+}
+
+// runLs enumerates the eval runs root and renders each run's summary. A missing
+// runs root is the first-use state, not an error — it renders the same friendly
+// "no runs" notice an empty root does.
+func runLs(out io.Writer, root string, asJSON bool) error {
+	runsDir := evalRunsRoot(root)
+	entries, err := os.ReadDir(runsDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return emitRuns(out, runsDir, nil, asJSON)
+	}
+	if err != nil {
+		return fmt.Errorf("eval ls: read runs dir: %w", err)
+	}
+	return emitRuns(out, runsDir, collectRuns(runsDir, entries), asJSON)
+}
+
+// collectRuns reads the eval-run.yaml of every run dir under runsDir, skipping
+// non-directories and dirs without a readable/parseable sidecar (an in-flight
+// or leaked run), and returns the records sorted by run id.
+func collectRuns(runsDir string, entries []os.DirEntry) []lsRecord {
+	records := make([]lsRecord, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		rec, ok := readRunRecord(filepath.Join(runsDir, e.Name()))
+		if !ok {
+			continue
+		}
+		records = append(records, rec)
+	}
+	sort.Slice(records, func(i, j int) bool { return records[i].RunID < records[j].RunID })
+	return records
+}
+
+// readRunRecord loads and parses a run dir's eval-run.yaml. The boolean is false
+// when the sidecar is absent or malformed — ls degrades past such a run rather
+// than failing the whole listing.
+func readRunRecord(runDir string) (lsRecord, bool) {
+	data, err := os.ReadFile(filepath.Join(runDir, evalRunFile))
+	if err != nil {
+		return lsRecord{}, false
+	}
+	var rec lsRecord
+	if err := yaml.Unmarshal(data, &rec); err != nil {
+		return lsRecord{}, false
+	}
+	return rec, true
+}
+
+// emitRuns dispatches to the JSON or text renderer.
+func emitRuns(out io.Writer, runsDir string, records []lsRecord, asJSON bool) error {
+	if asJSON {
+		return emitRunsJSON(out, records)
+	}
+	renderRunList(out, runsDir, records)
+	return nil
+}
+
+// emitRunsJSON writes the run list as an indented JSON array (never null: an
+// empty listing marshals to []).
+func emitRunsJSON(out io.Writer, records []lsRecord) error {
+	payload := make([]lsRecordJSON, 0, len(records))
+	for _, r := range records {
+		payload = append(payload, lsRecordJSON{
+			RunID:      r.RunID,
+			Language:   r.Language,
+			Difficulty: r.Difficulty,
+			Score:      r.Score,
+			Verify:     r.Verify,
+			Agent:      r.Agent,
+		})
+	}
+	enc := json.NewEncoder(out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
+}
+
+// lsRecordJSON is the JSON shape of one listed run (snake_case top-level keys).
+type lsRecordJSON struct {
+	RunID      string     `json:"run_id"`
+	Language   string     `json:"language"`
+	Difficulty string     `json:"difficulty"`
+	Score      lsScore    `json:"score"`
+	Verify     lsVerify   `json:"verify"`
+	Agent      lsAgentTag `json:"agent"`
+}
+
+// renderRunList prints the run table (or the empty-state notice).
+func renderRunList(out io.Writer, runsDir string, records []lsRecord) {
+	if len(records) == 0 {
+		fmt.Fprintf(out, "eval: no runs found in %s\n", runsDir)
+		return
+	}
+	fmt.Fprintf(out, "Eval runs — %s\n\n", runsDir)
+	fmt.Fprintf(out, "%-40s  %-10s  %-8s  %-9s  %-10s  %s\n",
+		"RUN", "LANG", "DIFF", "SCORE", "BAND", "VERIFY")
+	for _, r := range records {
+		fmt.Fprintf(out, "%-40s  %-10s  %-8s  %-9s  %-10s  %s\n",
+			r.RunID, r.Language, r.Difficulty, lsScoreCol(r.Score), r.Score.Band, verifyCol(r.Verify))
+	}
+}
+
+// lsScoreCol formats the score column, showing a dash for an unscored run.
+func lsScoreCol(s lsScore) string {
+	if !s.Scored {
+		return "-"
+	}
+	return fmt.Sprintf("%.3f", s.Value)
+}
+
+// verifyCol renders the verify column as pass/fail.
+func verifyCol(v lsVerify) string {
+	if v.Passed {
+		return "pass"
+	}
+	return "fail"
+}

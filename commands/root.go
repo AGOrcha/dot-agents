@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/commands/config"
+	"github.com/AGOrcha/dot-agents/commands/eval"
 	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/commands/internal/mcp"
@@ -27,6 +28,16 @@ func rootConfigDeps() config.Deps {
 		ExactArgsWithHints:    ExactArgsWithHints,
 		JSON:                  func() bool { return Flags.JSON },
 		DryRun:                func() bool { return Flags.DryRun },
+	}
+}
+
+// rootEvalDeps builds the eval.Deps passed to eval.NewCmd. The eval command
+// tree needs only the resolved global --json getter, threaded as a closure so
+// it observes commands.Flags at RunE time (cobra parses persistent flags after
+// the constructor returns).
+func rootEvalDeps() eval.Deps {
+	return eval.Deps{
+		JSON: func() bool { return Flags.JSON },
 	}
 }
 
@@ -182,6 +193,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewWorkflowCmd())
 	root.AddCommand(NewKGCmd())
 	root.AddCommand(NewScoreCmd())
+	root.AddCommand(eval.NewCmd(rootEvalDeps()))
 	root.AddCommand(NewRunCmd())
 
 	root.SetErr(os.Stderr)
