@@ -154,7 +154,10 @@ The current public exit-code contract is **binary**:
 - **`1`** on any error.
 
 `cmd/da/main.go` flattens every non-nil error from `root.Execute()` to
-`os.Exit(1)` — there is no other exit-code path in the real binary:
+`os.Exit(1)`. Every process-exit path resolves to `os.Exit(1)` — including the
+one direct exit outside `main`, in `da kg lint --json`
+(`commands/kg/query_lint_maintain.go`, after emitting its JSON report when
+`ErrorCount > 0`), which also exits `1`:
 
 ```go
 if err := root.Execute(); err != nil {

@@ -59,6 +59,7 @@ today (consistent with the Hook Wiring Audit in
 | Codex | `.codex/hooks.json` | Wired (project `.codex/hooks.json` is rendered from the canonical hook spec and removed again on project teardown) |
 | GitHub Copilot | `.github/hooks/*.json` plus Claude-compatible settings | Wired (canonical hooks fan out to `.github/hooks/*.json`; legacy single-file hooks still emit) |
 | OpenCode | — | No dedicated hook file is documented upstream, so none is created |
+| Antigravity | `.antigravity/hooks.json` (project) and `~/.antigravity/hooks.json` (user) | Wired (F4/DC0 probe: rendered from the canonical hook spec via `renderAntigravityHookConfig`; managed regular file / hard link, not a symlink) |
 
 If a platform cannot represent a particular hook, it is skipped for that
 platform rather than emitted incorrectly.
@@ -85,22 +86,27 @@ event and the renderer omits it for that platform (the
 `hookRequiredOnPlatform` fall-through is the right behavior — if you
 mark such a hook `required_on` that vendor, the renderer errors).
 
-| Canonical `When`              | Claude Code        | Codex               | Cursor                  | GitHub Copilot         |
-|-------------------------------|--------------------|---------------------|-------------------------|------------------------|
-| `pre_tool_use`                | `PreToolUse`       | `PreToolUse`        | `preToolUse`            | `preToolUse`           |
-| `post_tool_use`               | `PostToolUse`      | `PostToolUse`       | `postToolUse`           | `postToolUse`          |
-| `post_tool_use_failure`       | `PostToolUseFailure` |                   | `postToolUseFailure`    | `postToolUseFailure`   |
-| `user_prompt_submit`          | `UserPromptSubmit` | `UserPromptSubmit`  | `beforeSubmitPrompt`    | `userPromptSubmitted`  |
-| `notification`                | `Notification`     |                     |                         | `notification`         |
-| `session_start`               | `SessionStart`     | `SessionStart`      | `sessionStart`          | `sessionStart`         |
-| `session_end`                 | `SessionEnd`       |                     | `sessionEnd`            | `sessionEnd`           |
-| `stop`                        | `Stop`             | `Stop`              | `stop`                  | `agentStop`            |
-| `subagent_start`              | `SubagentStart`    | `SubagentStart`     | `subagentStart`         | `subagentStart`        |
-| `subagent_stop`               | `SubagentStop`     | `SubagentStop`      | `subagentStop`          | `subagentStop`         |
-| `pre_compact`                 | `PreCompact`       | `PreCompact`        | `preCompact`            | `preCompact`           |
-| `post_compact`                | `PostCompact`      | `PostCompact`       |                         |                        |
-| `permission_request`          | `PermissionRequest`| `PermissionRequest` |                         | `permissionRequest`    |
-| `error_occurred`              |                    |                     |                         | `errorOccurred`        |
+| Canonical `When`              | Claude Code        | Codex               | Cursor                  | GitHub Copilot         | Antigravity   |
+|-------------------------------|--------------------|---------------------|-------------------------|------------------------|---------------|
+| `pre_tool_use`                | `PreToolUse`       | `PreToolUse`        | `preToolUse`            | `preToolUse`           | `PreToolUse`  |
+| `post_tool_use`               | `PostToolUse`      | `PostToolUse`       | `postToolUse`           | `postToolUse`          | `PostToolUse` |
+| `post_tool_use_failure`       | `PostToolUseFailure` |                   | `postToolUseFailure`    | `postToolUseFailure`   |               |
+| `user_prompt_submit`          | `UserPromptSubmit` | `UserPromptSubmit`  | `beforeSubmitPrompt`    | `userPromptSubmitted`  |               |
+| `notification`                | `Notification`     |                     |                         | `notification`         |               |
+| `session_start`               | `SessionStart`     | `SessionStart`      | `sessionStart`          | `sessionStart`         |               |
+| `session_end`                 | `SessionEnd`       |                     | `sessionEnd`            | `sessionEnd`           |               |
+| `stop`                        | `Stop`             | `Stop`              | `stop`                  | `agentStop`            | `Stop`        |
+| `subagent_start`              | `SubagentStart`    | `SubagentStart`     | `subagentStart`         | `subagentStart`        |               |
+| `subagent_stop`               | `SubagentStop`     | `SubagentStop`      | `subagentStop`          | `subagentStop`         |               |
+| `pre_compact`                 | `PreCompact`       | `PreCompact`        | `preCompact`            | `preCompact`           |               |
+| `post_compact`                | `PostCompact`      | `PostCompact`       |                         |                        |               |
+| `permission_request`          | `PermissionRequest`| `PermissionRequest` |                         | `permissionRequest`    |               |
+| `error_occurred`              |                    |                     |                         | `errorOccurred`        |               |
+
+> Antigravity is the F4/DC0 probe platform and maps only the three events with a
+> confirmed canonical analog (`pre_tool_use` / `post_tool_use` / `stop`); its
+> native `PreInvocation` / `PostInvocation` events have no canonical equivalent
+> yet (`internal/platform/antigravity.go`).
 
 ### Claude-wider surface (Claude-only canonical values)
 
@@ -167,10 +173,11 @@ mappers no-op for these values.
 A single canonical `HookSpec` is portable to every vendor whose mapper
 documents the event. If you author a cross-platform hook bundle, use
 the canonical values from the table above and accept that **not every
-vendor will implement every non-critical event**. The `Stop` /
-`SubagentStop` terminal events are documented on every supported
-platform; the wider lifecycle surface is uneven and will stay uneven
-until vendors converge.
+vendor will implement every non-critical event**. `Stop` (or its vendor
+equivalent) is documented on every supported hook platform, and
+`SubagentStop` on all except the Antigravity probe (which maps only
+`pre_tool_use` / `post_tool_use` / `stop`); the wider lifecycle surface is
+uneven and will stay uneven until vendors converge.
 
 If a hook is genuinely required on a platform that does not document
 the event, set `required_on:` for that platform — the renderer will

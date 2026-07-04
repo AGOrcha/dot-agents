@@ -20,7 +20,7 @@ The composition rules we want enforced are restatements of the tier invariants i
 | Skill | **T2 compound** | `iteration-close`, `orchestrator-session-start`, `isp` |
 
 The primitive examples above are a representative slice, not the full set. The
-`da workflow` surface has ~32 subcommands — beyond the atoms shown, it also
+`da workflow` surface has ~34 subcommands — beyond the atoms shown, it also
 includes `merge-back`, `fold-back`, `delegation` (closeout/gate), `contract`,
 `drift`, `sweep`, `bundle`, `hook-sentinel`, `hook-outcome`, `archive-orphans`,
 and `plan` verbs (`schedule`, `derive-scope`, `check-scope`), among others. Run
