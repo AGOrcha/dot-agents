@@ -62,13 +62,16 @@ func testSpec() *eval.TaskSpec {
 	}
 }
 
-// buildTestRun creates a harness.EvalRun whose iteration-log files are already
-// written by scoringbridge.ScoreRun under sbRoot. The returned run is then
-// persisted by the store under a (possibly different) target root, so failure
-// tests can block the target without disturbing the scoringbridge fixture.
-func buildTestRun(t *testing.T, sbRoot string) harness.EvalRun {
+// buildTestRun creates a harness.EvalRun whose scoring artifacts are written by
+// scoringbridge.ScoreRun into a private SCRATCH dir — the scoring stage's own
+// working location, deliberately distinct from the store's canonical root. That
+// mirrors the write-once contract: the store owns the canonical run dir and
+// reads run.Score.RecordPath as an input from elsewhere, so every test targets a
+// canonical root that does not already contain the run.
+func buildTestRun(t *testing.T) harness.EvalRun {
 	t.Helper()
-	runDir := store.RunDir(sbRoot, fixedRunID)
+	scratch := t.TempDir()
+	runDir := store.RunDir(scratch, fixedRunID)
 
 	sbRun := scoringbridge.EvalRun{
 		RunID:      fixedRunID,
@@ -164,7 +167,7 @@ func assertNoCanonicalDir(t *testing.T, root string) {
 // iter-1.yaml through the production loader (the R2 stable contract).
 func TestWriteEvalRun_FullLayout(t *testing.T) {
 	root := t.TempDir()
-	run := buildTestRun(t, root)
+	run := buildTestRun(t)
 
 	res, err := store.WriteEvalRun(run, root)
 	if err != nil {
@@ -263,7 +266,7 @@ func assertScoreSidecar(t *testing.T, res store.Result) {
 // duration.
 func TestWriteEvalRun_AgentReproducibilityFields(t *testing.T) {
 	root := t.TempDir()
-	run := buildTestRun(t, root)
+	run := buildTestRun(t)
 
 	res, err := store.WriteEvalRun(run, root)
 	if err != nil {
@@ -311,7 +314,7 @@ func TestWriteEvalRun_AgentReproducibilityFields(t *testing.T) {
 // block rather than erroring.
 func TestWriteEvalRun_NilVerify(t *testing.T) {
 	root := t.TempDir()
-	run := buildTestRun(t, root)
+	run := buildTestRun(t)
 	run.Verify = nil
 
 	res, err := store.WriteEvalRun(run, root)
@@ -327,28 +330,37 @@ func TestWriteEvalRun_NilVerify(t *testing.T) {
 	}
 }
 
-// TestWriteEvalRun_Idempotent confirms a second write replaces the run dir
-// atomically and yields identical content (exercises the replace path).
-func TestWriteEvalRun_Idempotent(t *testing.T) {
+// TestWriteEvalRun_RefusesOverwrite pins the write-once contract and the fix for
+// the erase hazard: a second write to a run id whose canonical dir already
+// exists returns ErrRunExists, the persisted run is left byte-for-byte intact,
+// and no staging dir is leaked. The commit never deletes the existing run, so a
+// failure between "delete" and "rename" can never erase it — there is no delete.
+func TestWriteEvalRun_RefusesOverwrite(t *testing.T) {
 	root := t.TempDir()
-	run := buildTestRun(t, root)
+	run := buildTestRun(t)
 
-	res1, err := store.WriteEvalRun(run, root)
+	res, err := store.WriteEvalRun(run, root)
 	if err != nil {
 		t.Fatalf("WriteEvalRun (first) = %v, want nil", err)
 	}
-	res2, err := store.WriteEvalRun(run, root)
-	if err != nil {
-		t.Fatalf("WriteEvalRun (second) = %v, want nil", err)
+	orig := mustFileExist(t, res.EvalRunPath)
+
+	_, err = store.WriteEvalRun(run, root)
+	if !errors.Is(err, store.ErrRunExists) {
+		t.Fatalf("WriteEvalRun (second) = %v, want ErrRunExists", err)
 	}
-	for _, pair := range [][2]string{
-		{res1.TaskspecPath, res2.TaskspecPath},
-		{res1.EvalRunPath, res2.EvalRunPath},
-		{res1.RecordPath, res2.RecordPath},
-	} {
-		if string(mustFileExist(t, pair[0])) != string(mustFileExist(t, pair[1])) {
-			t.Errorf("idempotent: %s content changed between calls", filepath.Base(pair[0]))
-		}
+
+	// The persisted run must survive the refused overwrite unchanged.
+	if got := mustFileExist(t, res.EvalRunPath); string(got) != string(orig) {
+		t.Errorf("existing run content changed after refused overwrite")
+	}
+	// The runs root holds exactly the one committed run dir — no leaked staging.
+	entries, err := os.ReadDir(filepath.Join(root, ".agents", "eval", "runs"))
+	if err != nil {
+		t.Fatalf("read runs root: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != fixedRunID {
+		t.Errorf("runs root = %v, want exactly [%s]", entries, fixedRunID)
 	}
 }
 
@@ -368,7 +380,7 @@ func TestWriteEvalRun_Validation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			run := buildTestRun(t, root)
+			run := buildTestRun(t)
 			rt := root
 			tc.mutate(&run, &rt)
 			if _, err := store.WriteEvalRun(run, rt); !errors.Is(err, tc.wantErr) {
@@ -392,8 +404,7 @@ func TestWriteEvalRun_UnsafeRunID(t *testing.T) {
 	}
 	for _, id := range malicious {
 		t.Run(id, func(t *testing.T) {
-			sbRoot := t.TempDir()
-			run := buildTestRun(t, sbRoot)
+			run := buildTestRun(t)
 			run.RunID = id
 
 			targetRoot := t.TempDir()
@@ -415,8 +426,7 @@ func TestWriteEvalRun_UnsafeRunID(t *testing.T) {
 // mid-write step failure (here, an unreadable iteration record source) leaves NO
 // partial run directory at the canonical path and no leftover staging dir.
 func TestWriteEvalRun_PartialFailureNoCanonicalDir(t *testing.T) {
-	sbRoot := t.TempDir()
-	run := buildTestRun(t, sbRoot)
+	run := buildTestRun(t)
 	run.Score.RecordPath = filepath.Join(t.TempDir(), "does-not-exist.yaml")
 
 	targetRoot := t.TempDir()
@@ -430,8 +440,7 @@ func TestWriteEvalRun_PartialFailureNoCanonicalDir(t *testing.T) {
 // TestWriteEvalRun_RunsRootBlocked covers the "create runs root" failure: a
 // regular file where the runs root must go.
 func TestWriteEvalRun_RunsRootBlocked(t *testing.T) {
-	sbRoot := t.TempDir()
-	run := buildTestRun(t, sbRoot)
+	run := buildTestRun(t)
 
 	targetRoot := t.TempDir()
 	evalDir := filepath.Join(targetRoot, ".agents", "eval")
@@ -504,9 +513,11 @@ func TestWriteEvalRun_SeamFailures(t *testing.T) {
 			wantSub: "persist score",
 		},
 		{
-			name:    "clear existing run dir",
-			install: func() func() { return store.SetRemoveAll(func(string) error { return errBoom }) },
-			wantSub: "clear existing run dir",
+			name: "stat run dir",
+			install: func() func() {
+				return store.SetStatPath(func(string) (os.FileInfo, error) { return nil, errBoom })
+			},
+			wantSub: "stat run dir",
 		},
 		{
 			name:    "commit rename",
@@ -516,8 +527,7 @@ func TestWriteEvalRun_SeamFailures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sbRoot := t.TempDir()
-			run := buildTestRun(t, sbRoot)
+			run := buildTestRun(t)
 			targetRoot := t.TempDir()
 
 			restore := tc.install()
@@ -527,13 +537,9 @@ func TestWriteEvalRun_SeamFailures(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantSub) {
 				t.Fatalf("WriteEvalRun() = %v, want error containing %q", err, tc.wantSub)
 			}
-			// The canonical dir must never appear on any failure. (The remove-all
-			// seam override disables staging cleanup, so only assert the canonical
-			// path is absent there.)
-			finalDir := store.RunDir(targetRoot, fixedRunID)
-			if _, statErr := os.Stat(finalDir); !os.IsNotExist(statErr) {
-				t.Errorf("canonical run dir exists after %s failure: %v", tc.name, statErr)
-			}
+			// Every failure path leaves NO partial directory at the canonical
+			// path (the staging dir is removed on error).
+			assertNoCanonicalDir(t, targetRoot)
 		})
 	}
 }

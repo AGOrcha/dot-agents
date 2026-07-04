@@ -31,11 +31,11 @@ func SetRenameDir(fn func(string, string) error) (restore func()) {
 	return func() { renameDir = prev }
 }
 
-// SetRemoveAll overrides the recursive-remove seam.
-func SetRemoveAll(fn func(string) error) (restore func()) {
-	prev := removeAll
-	removeAll = fn
-	return func() { removeAll = prev }
+// SetStatPath overrides the run-dir existence-check seam.
+func SetStatPath(fn func(string) (os.FileInfo, error)) (restore func()) {
+	prev := statPath
+	statPath = fn
+	return func() { statPath = prev }
 }
 
 // SetWriteIterationScore overrides the score-persist seam.

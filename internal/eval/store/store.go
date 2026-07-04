@@ -47,6 +47,7 @@ var (
 	writeFileAtomic     = fsops.WriteFileAtomic
 	renameDir           = fsops.Rename
 	removeAll           = fsops.RemoveAll
+	statPath            = os.Stat
 	writeIterationScore = scoring.WriteIterationScore
 )
 
@@ -66,6 +67,12 @@ var (
 	// The score record path is written by scoringbridge.ScoreRun; its absence
 	// means the scoring stage did not complete.
 	ErrEmptyRecordPath = errors.New("store: score record path is required")
+	// ErrRunExists is returned when the canonical run dir already exists. Eval
+	// runs are write-once — a run id names exactly one run (the sandbox reserves
+	// ids with an O_EXCL claim, and R10 reproducibility means a re-run gets a
+	// NEW id) — so WriteEvalRun refuses to overwrite a persisted run rather than
+	// risk erasing it.
+	ErrRunExists = errors.New("store: run already persisted")
 )
 
 // Result reports the persisted artifact paths produced by WriteEvalRun. Every
@@ -160,13 +167,18 @@ func RunDir(root, runID string) string {
 //	  iteration-log/iter-1.score.yaml  — score sidecar
 //
 // The whole directory is built in a hidden staging sibling under the runs root
-// and moved into place with a single atomic rename, so a mid-write failure
-// leaves NO partial directory at the canonical path (the staging dir is removed
-// on any error). A pre-existing run dir is replaced. Every file write is itself
-// atomic (temp-then-rename via fsops.WriteFileAtomic). The iter-1.yaml bytes are
-// copied byte-for-byte from run.Score.RecordPath, preserving the emitRecord YAML
-// schema that scoring.LoadIterationLog expects; the score sidecar is
-// re-persisted via the production scoring.WriteIterationScore.
+// and published with a single atomic rename, so a mid-write failure leaves NO
+// partial directory at the canonical path (the staging dir is removed on any
+// error). Eval runs are WRITE-ONCE: if the canonical run dir already exists,
+// WriteEvalRun returns ErrRunExists and leaves the persisted run untouched
+// rather than deleting it — a run id names exactly one run, so there is no
+// legitimate overwrite, and refusing eliminates any erase hazard. Every file
+// write is itself atomic (temp-then-rename via fsops.WriteFileAtomic). The
+// iter-1.yaml bytes are copied byte-for-byte from run.Score.RecordPath — an
+// input produced by the scoring stage in its own working location, distinct
+// from this canonical dir — preserving the emitRecord YAML schema that
+// scoring.LoadIterationLog expects; the score sidecar is re-persisted via the
+// production scoring.WriteIterationScore.
 func WriteEvalRun(run harness.EvalRun, root string) (res Result, err error) {
 	if err := validateRun(run, root); err != nil {
 		return Result{}, err
@@ -272,13 +284,20 @@ func writeSidecars(dir string, run harness.EvalRun) error {
 	return nil
 }
 
-// commitStaging atomically moves the fully-built staging directory into place at
-// final, replacing any existing run dir. removeAll clears a pre-existing dir (a
-// no-op when absent) so the single rename lands cleanly; the completed
-// replacement already sits in staging, so this never exposes a partial dir.
+// commitStaging publishes the fully-built staging directory at final with a
+// single atomic rename. Eval runs are WRITE-ONCE, so an existing canonical dir
+// is never deleted or overwritten: commitStaging refuses with ErrRunExists,
+// which eliminates the delete-then-rename erase hazard (a mid-commit failure can
+// never leave a persisted run erased with nothing to restore). When the target
+// is absent the lone rename is atomic — the run appears all-at-once or not at
+// all. os.Rename also refuses a non-empty existing target at the syscall level,
+// so the stat pre-check is the friendly typed error, not the only guard.
 func commitStaging(staging, final string) error {
-	if err := removeAll(final); err != nil {
-		return fmt.Errorf("store: clear existing run dir: %w", err)
+	switch _, err := statPath(final); {
+	case err == nil:
+		return fmt.Errorf("store: run %q: %w", filepath.Base(final), ErrRunExists)
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("store: stat run dir: %w", err)
 	}
 	if err := renameDir(staging, final); err != nil {
 		return fmt.Errorf("store: commit run dir: %w", err)
