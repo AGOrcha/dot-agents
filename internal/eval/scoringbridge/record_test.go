@@ -68,26 +68,35 @@ func TestEmittedRecordValidatesAgainstIterLogSchema(t *testing.T) {
 	sch := compileIterLogSchema(t)
 	for name, run := range runVariants(t) {
 		t.Run(name, func(t *testing.T) {
-			data, err := yaml.Marshal(buildEmitRecord(run))
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			var doc any
-			if err := yaml.Unmarshal(data, &doc); err != nil {
-				t.Fatalf("re-parse emitted YAML: %v", err)
-			}
-			jsonBytes, err := json.Marshal(doc)
-			if err != nil {
-				t.Fatalf("to JSON: %v", err)
-			}
-			inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonBytes))
-			if err != nil {
-				t.Fatalf("jsonschema.UnmarshalJSON: %v", err)
-			}
-			if err := sch.Validate(inst); err != nil {
-				t.Errorf("emitted record violates workflow-iter-log schema: %v\nrecord:\n%s", err, data)
-			}
+			assertEmittedRecordValid(t, sch, run)
 		})
+	}
+}
+
+// assertEmittedRecordValid marshals one emit variant to YAML, round-trips it to
+// JSON, and validates it against the compiled iter-log schema. Extracted from
+// the table loop so the error handling stays flat (each check is one step, not
+// nested inside for -> subtest closure).
+func assertEmittedRecordValid(t *testing.T, sch *jsonschema.Schema, run EvalRun) {
+	t.Helper()
+	data, err := yaml.Marshal(buildEmitRecord(run))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var doc any
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("re-parse emitted YAML: %v", err)
+	}
+	jsonBytes, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("to JSON: %v", err)
+	}
+	inst, err := jsonschema.UnmarshalJSON(bytes.NewReader(jsonBytes))
+	if err != nil {
+		t.Fatalf("jsonschema.UnmarshalJSON: %v", err)
+	}
+	if err := sch.Validate(inst); err != nil {
+		t.Errorf("emitted record violates workflow-iter-log schema: %v\nrecord:\n%s", err, data)
 	}
 }
 

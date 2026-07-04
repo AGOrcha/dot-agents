@@ -10,12 +10,15 @@ set -e
 PASS=0
 FAIL=0
 
+# Separator bar used in test section headers and the summary block
+readonly SEP_BAR='━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'
+
 log_test() {
   local test_name="$1"
   echo ""
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "$SEP_BAR"
   echo "TEST: $test_name"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo "$SEP_BAR"
 }
 
 log_pass() { local msg="$1"; echo "✅ PASS: $msg"; ((PASS++)); }
@@ -118,8 +121,8 @@ fi
 # SUMMARY
 ###########################################
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "$SEP_BAR"
 echo "RESULTS: $PASS passed, $FAIL failed"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "$SEP_BAR"
 
 [[ $FAIL -eq 0 ]] && exit 0 || exit 1
