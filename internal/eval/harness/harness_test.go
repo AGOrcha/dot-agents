@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/eval"
@@ -479,6 +480,95 @@ func TestRun_VerifyStepError(t *testing.T) {
 	)
 	if _, err := h.Run(context.Background(), Options{Language: eval.LanguageGo}); err == nil {
 		t.Fatal("Run(verify step error): expected error")
+	}
+}
+
+// TestRun_ToolchainUnavailable proves a missing interpreter/compiler is
+// surfaced as a distinct "toolchain unavailable" abort (carrying the underlying
+// *verifier.ToolchainError) rather than a scored verification failure.
+func TestRun_ToolchainUnavailable(t *testing.T) {
+	ver := &fakeVerifier{
+		lang: eval.LanguageGo,
+		err:  &verifier.ToolchainError{Language: eval.LanguageGo, Binary: "go", Tried: []string{"go"}},
+	}
+	h := unitHarness(t,
+		&fakeSandbox{inst: fakeInstance(t, "r1")},
+		&runner.FakeRunner{},
+		ver,
+		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
+	)
+	_, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
+	var tcErr *verifier.ToolchainError
+	if !errors.As(err, &tcErr) {
+		t.Fatalf("want *verifier.ToolchainError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "toolchain unavailable") {
+		t.Fatalf("error %q missing distinct 'toolchain unavailable' prefix", err)
+	}
+}
+
+// TestRun_AgentStartError proves an agent that could not start (the runner
+// returned an *AgentStartError, e.g. the CLI is missing) is surfaced as a
+// distinct "agent did not run" abort rather than a scored run.
+func TestRun_AgentStartError(t *testing.T) {
+	startErr := &runner.AgentStartError{Agent: "claude-code", Binary: "claude", Reason: runner.ReasonUnavailable}
+	h := unitHarness(t,
+		&fakeSandbox{inst: fakeInstance(t, "r1")},
+		&runner.FakeRunner{Err: startErr},
+		&fakeVerifier{lang: eval.LanguageGo},
+		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
+	)
+	_, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
+	var se *runner.AgentStartError
+	if !errors.As(err, &se) {
+		t.Fatalf("want *runner.AgentStartError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "agent did not run") {
+		t.Fatalf("error %q missing distinct 'agent did not run' prefix", err)
+	}
+}
+
+// authRunHarness builds a unit harness whose runner returns a completed
+// non-zero-exit Result with the given stderr, and whose solution gate is pinned
+// to producedSolution. It returns the harness for a full Run.
+func authRunHarness(t *testing.T, stderr string, producedSolution bool) *Harness {
+	t.Helper()
+	h := unitHarness(t,
+		&fakeSandbox{inst: fakeInstance(t, "r1")},
+		&runner.FakeRunner{Result: runner.Result{ExitCode: 1, Stderr: []byte(stderr)}},
+		&fakeVerifier{lang: eval.LanguageGo, res: &verifier.VerifyResult{Passed: false, Phase: verifier.PhaseTest, ExitCode: 1}},
+		fakeGenerator{lang: eval.LanguageGo, spec: validSpec()},
+	)
+	h.producedSolution = func(string) bool { return producedSolution }
+	return h
+}
+
+// TestRun_AuthFailureNotScored is the coordinator's case (b): a genuine auth
+// failure (non-zero exit + narrow startup signature + NO solution produced) is
+// aborted as an auth AgentStartError, never scored.
+func TestRun_AuthFailureNotScored(t *testing.T) {
+	h := authRunHarness(t, "Error: Not logged in. Please run /login", false)
+	_, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
+	var se *runner.AgentStartError
+	if !errors.As(err, &se) || se.Reason != runner.ReasonAuth {
+		t.Fatalf("want auth AgentStartError, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "agent did not run") {
+		t.Fatalf("error %q missing 'agent did not run' prefix", err)
+	}
+}
+
+// TestRun_SolutionWithAuthTextScored is the coordinator's case (a): an agent that
+// PRODUCED a solution but whose failing run also emits auth vocabulary is scored
+// normally — the working-tree gate wins over the output text.
+func TestRun_SolutionWithAuthTextScored(t *testing.T) {
+	h := authRunHarness(t, "Error: Not logged in. Please run /login", true)
+	got, err := h.Run(context.Background(), Options{Language: eval.LanguageGo})
+	if err != nil {
+		t.Fatalf("solution-producing run must be scored, not aborted: %v", err)
+	}
+	if got.Run.ExitCode != 1 || got.Verify == nil {
+		t.Fatalf("expected a scored run with the agent exit recorded, got %+v", got)
 	}
 }
 

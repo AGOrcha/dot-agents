@@ -21,6 +21,7 @@ import (
 const (
 	copilotBin        = "copilot"
 	copilotPromptFlag = "-p"
+	copilotHarness    = "gh-copilot"
 )
 
 // copilotRunner invokes the standalone GitHub Copilot CLI against a sandbox
@@ -74,6 +75,9 @@ func (r *copilotRunner) Run(
 	stdout, stderr, code, err := r.run(ctx, copilotBin, args, instance.Workdir, env)
 	dur := time.Since(start)
 	if err != nil {
+		if se := classifyExecError(copilotHarness, copilotBin, err); se != nil {
+			return Result{}, se
+		}
 		return Result{}, fmt.Errorf("runner/copilot: exec: %w", err)
 	}
 
@@ -89,7 +93,7 @@ func (r *copilotRunner) Run(
 		ExitCode: code,
 		Duration: dur,
 		Telemetry: AgentTelemetry{
-			Harness: "gh-copilot",
+			Harness: copilotHarness,
 			Tokens:  tokens,
 		},
 	}, nil

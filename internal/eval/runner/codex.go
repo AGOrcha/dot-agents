@@ -18,6 +18,7 @@ import (
 const (
 	codexBin     = "codex"
 	codexExecSub = "exec"
+	codexHarness = "codex"
 )
 
 // codexRunner invokes the OpenAI Codex CLI against a sandbox workdir.
@@ -66,6 +67,9 @@ func (r *codexRunner) Run(
 	stdout, stderr, code, err := r.run(ctx, codexBin, args, instance.Workdir, env)
 	dur := time.Since(start)
 	if err != nil {
+		if se := classifyExecError(codexHarness, codexBin, err); se != nil {
+			return Result{}, se
+		}
 		return Result{}, fmt.Errorf("runner/codex: exec: %w", err)
 	}
 
@@ -75,7 +79,7 @@ func (r *codexRunner) Run(
 		ExitCode: code,
 		Duration: dur,
 		Telemetry: AgentTelemetry{
-			Harness: "codex",
+			Harness: codexHarness,
 			// Tokens is nil — see the codexRunner type doc for the documented
 			// session-id gap. The rubric renormalises over the absent signal.
 		},
