@@ -12,8 +12,11 @@ set -euo pipefail
 PASS=0
 FAIL=0
 
-pass() { PASS=$((PASS + 1)); echo "PASS: $1"; }
-fail() { FAIL=$((FAIL + 1)); echo "FAIL: $1"; }
+# Expected leading prefix of `da --version` output, shared by all assertions.
+readonly EXPECTED_PREFIX="da "
+
+pass() { local msg="$1"; PASS=$((PASS + 1)); echo "PASS: $msg"; }
+fail() { local msg="$1"; FAIL=$((FAIL + 1)); echo "FAIL: $msg"; }
 
 # Locate the repo root from this script's own path so the script is invocable
 # from any working directory (CI, developer shell, etc.).
@@ -42,7 +45,7 @@ case "$platform" in
     Darwin | Linux)
         echo "--- Shebang direct execution (yq-#1851 path) ---"
         output="$("$recipe")"
-        if [[ "$output" == "da "* ]]; then
+        if [[ "$output" == "$EXPECTED_PREFIX"* ]]; then
             pass "shebang direct exec produced: $output"
         else
             fail "shebang direct exec: expected output starting with 'da ', got: $output"
@@ -53,7 +56,7 @@ case "$platform" in
         # The 'da run <file>' fallback is the R4-equivalent path.
         echo "NOTE: Windows Git Bash detected (${platform}) — no native OS shebang; using 'da run <file>' fallback"
         output="$(da run "$recipe")"
-        if [[ "$output" == "da "* ]]; then
+        if [[ "$output" == "$EXPECTED_PREFIX"* ]]; then
             pass "da run fallback produced: $output"
         else
             fail "da run fallback: expected output starting with 'da ', got: $output"
@@ -62,7 +65,7 @@ case "$platform" in
     *)
         echo "NOTE: Unrecognised platform '${platform}' — using 'da run <file>' fallback"
         output="$(da run "$recipe")"
-        if [[ "$output" == "da "* ]]; then
+        if [[ "$output" == "$EXPECTED_PREFIX"* ]]; then
             pass "da run fallback produced: $output"
         else
             fail "da run fallback: expected output starting with 'da ', got: $output"
@@ -72,6 +75,6 @@ esac
 
 echo ""
 echo "Results: PASS=${PASS} FAIL=${FAIL}"
-if [ "$FAIL" -gt 0 ]; then
+if [[ "$FAIL" -gt 0 ]]; then
     exit 1
 fi
