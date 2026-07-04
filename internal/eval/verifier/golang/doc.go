@@ -1,39 +1,17 @@
-// Package goverifier implements the Go-language eval verifier for the R4
-// eval harness (R4 spec task t-verifier-iface). It runs the build_cmd and
-// test_cmd from an [eval.TaskSpec] inside a sandbox working directory,
-// captures pass/fail + stdout/stderr + elapsed duration, and returns a typed
-// [verifier.VerifyResult].
+// Package goverifier is the Go-language adapter for the R4 eval verifier (R4
+// spec task t-verifier-iface). It is a thin wrapper over the shared run engine:
+// [GoVerifier] embeds [verifier.BaseVerifier] and supplies the eval.LanguageGo
+// identity, so Language and Verify are promoted from the engine unchanged.
 //
 // # Seam and interface
 //
 // [verifier.Verifier] is the language-agnostic interface the R4 harness driver
-// binds to; [GoVerifier] is the Go adapter. The interface and its result types
-// live in the neutral internal/eval/verifier package so the sibling
-// verifier-python and verifier-typescript packages can mirror the
-// [verifier.VerifyResult] shape without importing this package.
+// binds to; [GoVerifier] is the Go adapter. The interface, its result types,
+// and the generic build-then-test run engine ([verifier.BaseVerifier]) all live
+// in the neutral internal/eval/verifier package so the sibling verifier-python
+// and verifier-typescript adapters reuse the same engine without importing this
+// package or duplicating the run loop.
 //
-// # Command execution model
-//
-// build_cmd runs first when present; a non-zero build exit short-circuits
-// the test step so the harness does not spin up a test run against unbuilt
-// code. test_cmd always runs if the build passes. The
-// [eval.Verification.TimeoutSeconds] field, when non-zero, is applied as a
-// context deadline over the combined build + test wall time. Both commands
-// run in the sandbox workdir with the sandbox environment appended to the
-// host environment so the agent's HOME and USERPROFILE are pinned to the
-// scratch directory provisioned by the sandbox.
-//
-// A non-zero exit code is NOT returned as an error; it is encoded in
-// [verifier.VerifyResult.Passed] and [verifier.VerifyResult.ExitCode] so the
-// scoring bridge can record failure outcomes rather than treating them as
-// harness faults (R4 spec done-criterion 8: "a failed run still emits a score
-// sidecar"). A [verifier.VerifyError] is returned only when a step could not
-// start at all (context cancelled, binary not found, OS-level failure).
-//
-// # Testability
-//
-// [GoVerifier] holds a runCmd seam (unexported function-variable field) so
-// tests can inject a deterministic command runner without invoking the real
-// Go toolchain. Integration tests for [runProcess] exercise the real exec
-// path using a test-helper subprocess pattern.
+// See the internal/eval/verifier package docs for the command execution,
+// result, error, and testability models the engine implements.
 package goverifier
