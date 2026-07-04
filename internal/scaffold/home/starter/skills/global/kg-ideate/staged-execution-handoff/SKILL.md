@@ -8,8 +8,7 @@ description: |-
 argument-hint: "<plan-id>"
 tier: molecule
 calls:
-  - fanout-decision
-  - staged-handoff
+  - execution-handoff
 verifier: batch
 review_gate: default
 ---

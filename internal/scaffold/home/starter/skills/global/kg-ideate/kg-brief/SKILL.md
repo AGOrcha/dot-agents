@@ -10,10 +10,9 @@ description: |-
 argument-hint: "<topic>"
 tier: molecule
 calls:
-  - kg-query
+  - kg-queries
   - corpus-scan
   - context-scan
-  - briefing-render
 verifier: batch
 review_gate: default
 ---
