@@ -46,7 +46,7 @@ You will also need `sha256sum` (preinstalled on Linux; on macOS use
 
 ## Step-by-step verification
 
-Replace `VERSION` with the release tag you downloaded, e.g. `0.3.3`.
+Replace `VERSION` with the release tag you downloaded, e.g. `0.5.0`.
 
 ### 1. Download the release assets
 
@@ -59,12 +59,14 @@ or via `gh`, download:
 - `checksums.txt.bundle`
 
 ```bash
-VERSION=0.3.3
+VERSION=0.5.0
 TAG="v${VERSION}"
+# GoReleaser names archives with amd64/arm64; normalize uname -m to match.
+ARCH=$(uname -m); case "$ARCH" in x86_64) ARCH=amd64;; aarch64) ARCH=arm64;; esac
 gh release download "${TAG}" \
   --repo AGOrcha/dot-agents \
   --pattern 'checksums.txt*' \
-  --pattern "dot-agents_${VERSION}_$(uname -s | tr A-Z a-z)_$(uname -m).tar.gz"
+  --pattern "dot-agents_${VERSION}_$(uname -s | tr A-Z a-z)_${ARCH}.tar.gz"
 ```
 
 ### 2. Verify the Cosign signature on `checksums.txt`
@@ -117,7 +119,7 @@ shasum -a 256 dot-agents_${VERSION}_darwin_arm64.tar.gz
 Expected output (Linux/coreutils form):
 
 ```
-dot-agents_0.3.3_darwin_arm64.tar.gz: OK
+dot-agents_0.5.0_darwin_arm64.tar.gz: OK
 ```
 
 ### 4. Install
@@ -148,14 +150,14 @@ You can browse Rekor entries for this project at
 
 This signing approach (Cosign keyless on `checksums.txt`) provides
 **supply-chain integrity** — proof that the artifacts came from this
-project's official release workflow. It does **not** provide OS-level
-code-signing trust:
+project's official release workflow. It is separate from OS-level
+code-signing trust, which now varies by platform:
 
-- macOS Gatekeeper still treats the binary as unsigned. The Homebrew
-  **cask** strips the quarantine attribute on install (an interim workaround) so
-  `brew install --cask` works today, but a binary downloaded **manually** from
-  the releases page still needs the right-click → Open workaround on first
-  launch until Apple Developer ID notarization lands.
+- macOS: the darwin `da` binary is Apple Developer ID-signed and notarized
+  (via quill) as of v0.4.0, so it clears Gatekeeper on first run — both via
+  `brew install da` (the Homebrew cask no longer strips the quarantine
+  attribute; that stopgap postflight hook was removed) and when the tarball is
+  downloaded **manually** from the releases page.
 - Windows SmartScreen will warn about an unrecognized publisher.
 - Linux package managers will not pick up the cosign signature
   automatically.

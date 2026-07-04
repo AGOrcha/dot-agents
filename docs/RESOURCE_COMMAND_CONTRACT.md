@@ -81,16 +81,16 @@ Phase **5** aligned readback/install/remove copy with this model; **rules** have
 | **3 — rules lifecycle** | Shipped `rules list`, `rules show`, `rules remove` for canonical `~/.agents/rules/` files; matches the per-resource family + shared link/refresh model. |
 | **4 — MCP, settings** | Shipped `mcp list`, `mcp show`, `mcp remove` and `settings list`, `settings show`, `settings remove` over canonical `~/.agents/mcp/` and `~/.agents/settings/` trees; matches per-resource family + shared link/refresh model. |
 
-## Canonical task graph note (for maintainers)
+## Canonical task graph note (historical)
 
-`TASKS.yaml` may show **phase 5 completed** while **phase 3 and phase 4** are still **pending**. That
-is a known **DAG drift**: readback was aligned early, but upstream lifecycle commands are not all
-shipped. Parent orchestration should either adjust `depends_on` / statuses or add a follow-up task —
-do not treat “phase 5 completed” as proof that phases 3–4 are done.
+This plan is complete: phases 1–5 all shipped and the plan is archived under
+`.agents/history/resource-command-parity/`. (Historical note: during
+implementation the DAG briefly showed phase 5 completed ahead of phases 3–4;
+that drift was reconciled at archive time.)
 
 ## Change process
 
-1. Update this document and `.agents/workflow/plans/resource-command-parity/resource-command-parity.plan.md`.
+1. Update this document and `.agents/history/resource-command-parity/resource-command-parity.plan.md`.
 2. Adjust tests or help text in `commands/` when boundaries or naming change.
 3. Run `go test ./commands/...` (or broader) before merge.
 
