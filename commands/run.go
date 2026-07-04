@@ -80,10 +80,10 @@ func enterRecipe() (func(), error) {
 	}, nil
 }
 
-// runRecipe reads the recipe file, extracts effective lines, tokenizes each,
-// and dispatches them in order. A malformed line (unterminated quote) aborts
-// the run. For p1 the loop stops on the first dispatch error (full fail-fast
-// messaging is added in p2).
+// runRecipe reads the recipe file, extracts effective lines, and dispatches
+// them in order via dispatchStep. The first failure aborts the run (fail-fast,
+// D4/R3); subsequent steps are never dispatched. The returned error wraps the
+// original underlying error with %w so errors.Is/errors.As still work.
 func runRecipe(path string, dispatch recipeDispatcher) error {
 	restore, err := enterRecipe()
 	if err != nil {
@@ -95,14 +95,26 @@ func runRecipe(path string, dispatch recipeDispatcher) error {
 	if err != nil {
 		return err
 	}
-	for _, line := range effectiveLines(string(data)) {
-		tokens, err := tokenize(line)
-		if err != nil {
+	for i, line := range effectiveLines(string(data)) {
+		if err := dispatchStep(i+1, line, dispatch); err != nil {
 			return err
 		}
-		if err := dispatch(tokens); err != nil {
-			return err
-		}
+	}
+	return nil
+}
+
+// dispatchStep tokenizes one effective recipe line and dispatches it.
+// n is the 1-based index of this step among the effective (dispatched) lines.
+// Any error — tokenization or dispatch — is returned as a wrapped error that
+// names the step index and the original source line, preserving the underlying
+// error via %w for errors.Is/errors.As and exit-code propagation (D4/R3).
+func dispatchStep(n int, line string, dispatch recipeDispatcher) error {
+	tokens, err := tokenize(line)
+	if err == nil {
+		err = dispatch(tokens)
+	}
+	if err != nil {
+		return fmt.Errorf("step %d (%q) failed: %w", n, line, err)
 	}
 	return nil
 }

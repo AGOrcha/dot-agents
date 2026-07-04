@@ -249,12 +249,96 @@ func TestRunRecipe_StopsOnFirstError(t *testing.T) {
 	rec := &recordingDispatcher{failAt: 1, failWith: sentinel}
 
 	err := runRecipe(f, rec.dispatch)
+	// The sentinel must be unwrappable through the step-context wrapper.
 	if !errors.Is(err, sentinel) {
-		t.Fatalf("expected sentinel error, got %v", err)
+		t.Fatalf("expected sentinel error to be unwrappable, got %v", err)
 	}
-	// step-c must NOT have been dispatched
+	// Message must name the step index (step-b is the 2nd effective line).
+	if !strings.Contains(err.Error(), "step 2 (") {
+		t.Errorf("expected 'step 2 (' in message, got %v", err)
+	}
+	// Message must include the source line text.
+	if !strings.Contains(err.Error(), "step-b") {
+		t.Errorf("expected source line text in message, got %v", err)
+	}
+	// Message must include the underlying error text.
+	if !strings.Contains(err.Error(), sentinel.Error()) {
+		t.Errorf("expected underlying error text in message, got %v", err)
+	}
+	// step-c must NOT have been dispatched (fail-fast).
 	if len(rec.calls) != 2 {
 		t.Errorf("expected 2 dispatch calls, got %d: %v", len(rec.calls), rec.calls)
+	}
+}
+
+// TestRunRecipe_FailFastCountsOnlyEffectiveLines proves that N in the
+// "step N (...)" message counts only dispatched (effective) lines —
+// comments and blank lines preceding the failing step do not increment N.
+func TestRunRecipe_FailFastCountsOnlyEffectiveLines(t *testing.T) {
+	// A comment and a blank line precede the two effective steps.
+	// step-b is the 2nd effective line, so the message must say "step 2".
+	f := writeTempRecipe(t, "# header comment\n\nstep-a\nstep-b\n")
+	sentinel := errors.New("injected failure")
+	rec := &recordingDispatcher{failAt: 1, failWith: sentinel}
+
+	err := runRecipe(f, rec.dispatch)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel error unwrappable, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "step 2 (") {
+		t.Errorf("expected 'step 2 (' in message (comments/blanks must not be counted), got %v", err)
+	}
+}
+
+// TestRunRecipe_FailFastIncludesSourceLine proves the original source line
+// text — including any quoted arguments — is embedded verbatim in the error
+// message so operators can identify exactly which recipe line failed.
+func TestRunRecipe_FailFastIncludesSourceLine(t *testing.T) {
+	srcLine := `skills new "my cool skill" --project proj`
+	f := writeTempRecipe(t, srcLine+"\n")
+	sentinel := errors.New("dispatch error")
+	rec := &recordingDispatcher{failAt: 0, failWith: sentinel}
+
+	err := runRecipe(f, rec.dispatch)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// The source line text (including quoted args) must appear in the message.
+	if !strings.Contains(err.Error(), "my cool skill") {
+		t.Errorf("source line text not found in error message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "--project proj") {
+		t.Errorf("source line args not found in error message: %v", err)
+	}
+}
+
+// testStepErr is a concrete error type used to verify errors.As unwrapping
+// through the step-context wrapper produced by dispatchStep.
+type testStepErr struct{ msg string }
+
+func (e *testStepErr) Error() string { return e.msg }
+
+// TestRunRecipe_WrappedErrorPreservesIdentity proves errors.Is and errors.As
+// both penetrate the step-context wrapper so exit-code-carrying errors and
+// typed sentinel errors survive the fail-fast wrapping.
+func TestRunRecipe_WrappedErrorPreservesIdentity(t *testing.T) {
+	f := writeTempRecipe(t, "some-cmd\n")
+	original := &testStepErr{"original dispatch error"}
+	rec := &recordingDispatcher{failAt: 0, failWith: original}
+
+	err := runRecipe(f, rec.dispatch)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, original) {
+		t.Errorf("errors.Is failed to find original error through wrapper: %v", err)
+	}
+	var target *testStepErr
+	if !errors.As(err, &target) {
+		t.Errorf("errors.As failed to extract original error type through wrapper: %v", err)
+	}
+	if target.msg != original.msg {
+		t.Errorf("errors.As target msg: got %q, want %q", target.msg, original.msg)
 	}
 }
 
