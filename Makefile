@@ -1,5 +1,5 @@
 # Minimal Makefile; scripts live in /scripts.
-.PHONY: run build test coverage acceptance-coverage coverage-html gate
+.PHONY: run build test coverage acceptance-coverage coverage-html gate gate-cross
 
 run:
 	go run ./cmd/da
@@ -30,3 +30,13 @@ coverage-html: coverage
 # that has zero coverage rows on this single-OS local run.
 gate:
 	bash scripts/gate.sh
+
+# gate-cross — the HEAVY pre-merge cross-OS tier (companion to the fast `gate`).
+# ssh-runs the changed-package tests on the Windows box (pap-h@pap-home.local),
+# merges local + Windows coverage into a true multi-OS per-file profile, and runs
+# the per-file coverage ENFORCE over the union (exactly as CI's post-matrix
+# coverage-gate job). Deterministic; never mutates the local working tree. If the
+# box is unreachable it LOUD-SKIPS with exit 0 (CI is the authoritative multi-OS
+# gate); set GATE_CROSS_STRICT=1 to hard-fail instead. See scripts/gate-cross.sh.
+gate-cross:
+	bash scripts/gate-cross.sh
