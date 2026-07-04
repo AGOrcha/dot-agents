@@ -175,4 +175,81 @@ describe('refreshAccessToken', () => {
     const ok = await refreshAccessToken()
     expect(ok).toBe(false)
   })
+
+  it('returns false when response body is missing access_token', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      // 200 OK but data.access_token is absent
+      new Response(JSON.stringify({ data: {} }), { status: 200 }),
+    )
+    const ok = await refreshAccessToken()
+    expect(ok).toBe(false)
+    expect(getAccessToken()).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// apiFetch error-body edge cases
+// ---------------------------------------------------------------------------
+
+describe('apiFetch error body edge cases', () => {
+  it('falls back to statusText when error body is not valid JSON', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('not json', { status: 502, statusText: 'Bad Gateway' }),
+    )
+
+    await expect(apiFetch('/runs')).rejects.toMatchObject({
+      message: 'Bad Gateway',
+      status: 502,
+    })
+  })
+
+  it('falls back to "internal" code when error body code field is absent', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { message: 'oops' } }), { status: 500 }),
+    )
+
+    await expect(apiFetch('/runs')).rejects.toMatchObject({
+      code: 'internal',
+      message: 'oops',
+    })
+  })
+
+  it('falls back to statusText message when error message field is absent', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'not_found' } }), {
+        status: 404,
+        statusText: 'Not Found',
+      }),
+    )
+
+    await expect(apiFetch('/runs')).rejects.toMatchObject({
+      code: 'not_found',
+      message: 'Not Found',
+    })
+  })
+
+  it('does not attempt a refresh on 401 when no access token is held', async () => {
+    // _accessToken is null (cleared in beforeEach); 401 should throw directly without refresh
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: { code: 'unauthorized', message: 'no token' } }), {
+        status: 401,
+      }),
+    )
+
+    await expect(apiFetch('/runs')).rejects.toMatchObject({ status: 401 })
+    // Only one fetch call — no refresh attempt
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards custom request headers when init.headers are provided', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: { ok: true } }), { status: 200 }),
+    )
+
+    await apiFetch('/runs', { headers: { 'X-Request-ID': 'trace-42' } })
+
+    const [, init] = spy.mock.calls[0] as [string, RequestInit]
+    // Custom header must be forwarded (init?.headers ?? {} branch covered)
+    expect((init.headers as Record<string, string>)['X-Request-ID']).toBe('trace-42')
+  })
 })
