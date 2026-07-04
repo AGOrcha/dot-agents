@@ -65,9 +65,18 @@ const lockVersionKey = "lock_version"
 // it cannot be staged via SetSection; use SetInputsDigest / InputsDigest.
 const inputsDigestKey = "inputs_digest"
 
+// lockAcquireTimeout bounds how long AcquireFileLock blocks before it returns a
+// timeout error. It is a var, not a const, solely so the concurrent-churn test
+// can widen the budget under the race detector: -race inflates every timing by
+// 10-20x and, combined with 16-way contention, can push one scheduled hold past
+// a 5s waiter deadline even though the primitive is correct. The acquire loop is
+// pure polling (time.Sleep + retry, no channel/condvar/futex), so there is no
+// wakeup to lose — a timeout under -race is scheduling latency, never a lost
+// signal. Production always uses 5s.
+var lockAcquireTimeout = 5 * time.Second
+
 const (
-	lockAcquireTimeout = 5 * time.Second
-	lockRetryInterval  = 10 * time.Millisecond
+	lockRetryInterval = 10 * time.Millisecond
 	// lockStaleTTL bounds how long an unreleased lock is tolerated before a
 	// contending writer treats it as orphaned and reclaims it. The lock has no
 	// kernel-backed auto-release, so a holder killed by SIGKILL/OOM/power
@@ -133,6 +142,21 @@ const (
 	// per acquire call.
 	linkDegradeAttempts = 3
 )
+
+// readLockFile reads the sidecar lock name (or a trash sibling) and returns its
+// bytes. It exists because the lock name is freed by an atomic rename-away
+// (displaceLock) while contenders concurrently read it to judge the occupant —
+// and on Windows a rename cannot proceed while ANY other handle on the source
+// was opened WITHOUT FILE_SHARE_DELETE, which is exactly what Go's os.ReadFile /
+// os.Open omit (syscall.Open uses FILE_SHARE_READ|FILE_SHARE_WRITE only). A
+// plain read therefore intermittently blocks a holder's release rename with
+// ERROR_SHARING_VIOLATION ("the process cannot access the file because it is
+// being used by another process"). The Windows build overrides this var (see
+// readlock_windows.go) with a reader that shares DELETE, so a concurrent read
+// never blocks the displace rename; every other platform renames open files
+// freely and uses os.ReadFile unchanged. Read semantics (bytes returned, and an
+// os.IsNotExist-classifiable error for a missing name) match os.ReadFile.
+var readLockFile = os.ReadFile
 
 // removeTrashFn deletes a renamed-away (trash) lock object. A seam so tests
 // can force "trash deletion failed" deterministically and prove the lock name
@@ -625,7 +649,7 @@ func claimLockExclusive(lockPath, identity string) (string, error) {
 	if testHookBeforeClaimVerify != nil {
 		testHookBeforeClaimVerify(lockPath)
 	}
-	data, rerr := os.ReadFile(lockPath)
+	data, rerr := readLockFile(lockPath)
 	if rerr != nil || string(data) != identity {
 		// Lost mid-write to a grace reclaim (the name now holds a successor's
 		// identity, or nothing). Never proceed unverified, and never touch the
@@ -656,7 +680,7 @@ func lockOccupantStale(lockPath string) (bool, []byte) {
 	if fi.IsDir() {
 		return legacyLockDirStale(lockPath), nil
 	}
-	data, err := os.ReadFile(lockPath)
+	data, err := readLockFile(lockPath)
 	if err != nil {
 		// Unreadable file (mid-rename, delete-pending, foreign perms): give it
 		// the grace rather than wedging every acquirer until timeout.
@@ -795,7 +819,7 @@ func displaceLock(lockPath string, expected []byte) (displaceOutcome, error) {
 // trashCarries reports whether the renamed-away trash carries exactly the
 // expected identity bytes.
 func trashCarries(trash string, expected []byte) bool {
-	data, err := os.ReadFile(trash)
+	data, err := readLockFile(trash)
 	return err == nil && bytes.Equal(data, expected)
 }
 
@@ -829,7 +853,7 @@ func releaseLock(lockPath, identity string) error {
 		debugf("agentslock: skip release of %s: no identity to prove ownership", lockPath)
 		return nil
 	}
-	if data, err := os.ReadFile(lockPath); err == nil && string(data) != identity {
+	if data, err := readLockFile(lockPath); err == nil && string(data) != identity {
 		debugf("agentslock: skip release of %s: no longer the holder", lockPath)
 		return nil
 	}
@@ -871,7 +895,7 @@ func lockStillOurs(lockPath, identity string) bool {
 	if identity == "" {
 		return false
 	}
-	data, err := os.ReadFile(lockPath)
+	data, err := readLockFile(lockPath)
 	return err == nil && string(data) == identity
 }
 
@@ -959,7 +983,7 @@ func notFoundLockError(lockPath string, err error) error {
 // the single-file identity first and falls back to a legacy dir's holder file;
 // an absent or unparseable record yields "" (the bare timeout message).
 func describeHolder(lockPath string) string {
-	data, err := os.ReadFile(lockPath)
+	data, err := readLockFile(lockPath)
 	if err != nil {
 		if data, err = os.ReadFile(filepath.Join(lockPath, holderFile)); err != nil {
 			return ""

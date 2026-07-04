@@ -1289,6 +1289,30 @@ func TestClaimPublishesCompleteIdentityAtomically(t *testing.T) {
 	}
 }
 
+// TestReadLockFileMatchesOSReadFile pins the readLockFile seam's os.ReadFile
+// contract on every platform: a present file yields its exact bytes, and a
+// missing name yields an os.IsNotExist-classifiable error. On Windows this
+// exercises the FILE_SHARE_DELETE reader (readlock_windows.go) that lets a
+// concurrent read coexist with the release rename; elsewhere it is os.ReadFile.
+func TestReadLockFileMatchesOSReadFile(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "present.lock")
+	want := "1234\n567890\ndeadbeef\n"
+	mustWriteFile(t, present, want)
+
+	got, err := readLockFile(present)
+	if err != nil {
+		t.Fatalf("readLockFile(present): %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("readLockFile content mismatch: got %q want %q", got, want)
+	}
+
+	if _, err := readLockFile(filepath.Join(dir, "absent.lock")); !os.IsNotExist(err) {
+		t.Fatalf("readLockFile(absent) must be an os.IsNotExist error, got: %v", err)
+	}
+}
+
 // TestClaimNeverExposesPartialIdentity hammers acquire/release cycles while a
 // concurrent reader polls the lock name: every successful read must be a
 // complete, parseable identity. Under the old two-step design the poller
@@ -1359,7 +1383,14 @@ func pollForPartialIdentity(lockPath string, stop, done chan struct{}, degraded 
 				return
 			default:
 			}
-			data, err := os.ReadFile(lockPath)
+			// Read through the same seam production contenders use: on Windows
+			// that shares DELETE so this poll never blocks the holder's atomic
+			// rename-away (a plain os.ReadFile here pins the name against the
+			// release rename with ERROR_SHARING_VIOLATION — the exact windows-
+			// latest red this models). The atomicity assertion is unchanged: a
+			// share-DELETE read still observes either a complete identity or a
+			// vanished name, never a partial.
+			data, err := readLockFile(lockPath)
 			if err != nil {
 				continue // free, mid-rename, or trash-churn: all fine
 			}
@@ -2007,6 +2038,18 @@ func TestLockTrashNamesUniqueUnderConcurrency(t *testing.T) {
 // acquire must succeed within budget (no identity wedges, no starvation) and
 // every release must verify cleanly.
 func TestAcquireReleaseConcurrentChurn(t *testing.T) {
+	// Widen the per-acquire budget for the duration of this test only. What the
+	// test proves is concurrent acquire/release SAFETY — every acquire succeeds,
+	// no error, the lock name is free afterward — not that an acquire completes
+	// within the 5s production UX bound. Under -race (every memory access
+	// instrumented, 10-20x slower) with 16-way contention on a loaded CI runner,
+	// a single scheduled hold can be delayed past a 5s waiter deadline purely by
+	// scheduling latency; the acquire loop is pure polling, so a timeout there is
+	// never a lost wakeup. Restored on cleanup; other timeout-asserting tests run
+	// sequentially at the 5s default.
+	defer func(orig time.Duration) { lockAcquireTimeout = orig }(lockAcquireTimeout)
+	lockAcquireTimeout = 60 * time.Second
+
 	path := filepath.Join(t.TempDir(), "churn.ndjson")
 	const goroutines, cycles = 16, 4
 	errs := make(chan error, goroutines*cycles)
