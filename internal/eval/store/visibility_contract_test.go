@@ -132,40 +132,60 @@ func TestVisibilityContract_JoinKeysResolve(t *testing.T) {
 		t.Fatalf("ParseIterationRecord(%s) = %v, want nil", iterRecordName, err)
 	}
 
-	// Run-identity join: eval-run.run_id == iter-1.yaml wave == the dir name.
+	// Each documented JOIN is asserted by a dedicated helper so the individual
+	// checks sit at nesting level 0 and every field/message is preserved.
+	assertRunIdentityJoin(t, run, rec)
+	assertTaskMetadataJoin(t, run, spec, rec)
+	assertPromptProvenanceJoin(t, run, spec)
+	assertScoreSummaryJoin(t, run, score)
+}
+
+// assertRunIdentityJoin asserts the run-identity join: eval-run.run_id ==
+// iter-1.yaml wave == the dir name (contractRunID).
+func assertRunIdentityJoin(t *testing.T, run store.PersistedEvalRun, rec scoring.IterationRecord) {
+	t.Helper()
 	if run.RunID != contractRunID {
 		t.Errorf("eval-run run_id = %q, want %q", run.RunID, contractRunID)
 	}
 	if rec.Wave != run.RunID {
 		t.Errorf("iter-1.yaml wave = %q, want run_id %q", rec.Wave, run.RunID)
 	}
+}
 
-	// Task-metadata join: task_id ties the three files together.
+// assertTaskMetadataJoin asserts the task-metadata join: task_id ties eval-run,
+// taskspec and the iter record together, and the language / difficulty
+// denormalized onto eval-run.yaml agree with the canonical taskspec.yaml.
+func assertTaskMetadataJoin(t *testing.T, run store.PersistedEvalRun, spec *eval.TaskSpec, rec scoring.IterationRecord) {
+	t.Helper()
 	if run.TaskID != contractTaskID || spec.TaskID != contractTaskID || rec.TaskID != contractTaskID {
 		t.Errorf("task_id mismatch: eval-run=%q taskspec=%q iter-record=%q, want %q",
 			run.TaskID, spec.TaskID, rec.TaskID, contractTaskID)
 	}
-
-	// language / difficulty are denormalized onto eval-run.yaml for list
-	// rendering; taskspec.yaml is canonical. Both must agree.
 	if run.Language != contractLanguage || string(spec.Language) != contractLanguage {
 		t.Errorf("language: eval-run=%q taskspec=%q, want %q", run.Language, spec.Language, contractLanguage)
 	}
 	if run.Difficulty != contractDiff || string(spec.Difficulty) != contractDiff {
 		t.Errorf("difficulty: eval-run=%q taskspec=%q, want %q", run.Difficulty, spec.Difficulty, contractDiff)
 	}
+}
 
-	// prompt-id provenance: the human-readable prompt identity is the template
-	// id on taskspec.yaml; its integrity is pinned by the eval-run prompt
-	// digest over the exact prompt bytes.
+// assertPromptProvenanceJoin asserts the prompt-id provenance join: the
+// human-readable prompt identity is the template id on taskspec.yaml, and its
+// integrity is pinned by the eval-run prompt digest over the exact prompt bytes.
+func assertPromptProvenanceJoin(t *testing.T, run store.PersistedEvalRun, spec *eval.TaskSpec) {
+	t.Helper()
 	if spec.GeneratedFrom.TemplateID != contractTemplate {
 		t.Errorf("taskspec generated_from.template_id = %q, want %q", spec.GeneratedFrom.TemplateID, contractTemplate)
 	}
 	if got := wantDigest(spec.Prompt); run.Agent.PromptDigest != got {
 		t.Errorf("agent.prompt_digest = %q, want sha256(taskspec.prompt) = %q", run.Agent.PromptDigest, got)
 	}
+}
 
-	// Score-summary join: eval-run.score is a summary of iter-1.score.yaml.
+// assertScoreSummaryJoin asserts the score-summary join: eval-run.score is a
+// summary of iter-1.score.yaml (value, band, scored, rubric_version).
+func assertScoreSummaryJoin(t *testing.T, run store.PersistedEvalRun, score scoring.PersistedScore) {
+	t.Helper()
 	if math.Abs(run.Score.Value-score.Value) > scoreValueEpsilon {
 		t.Errorf("score value: eval-run=%v iter-score=%v, want equal", run.Score.Value, score.Value)
 	}
