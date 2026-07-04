@@ -575,6 +575,46 @@ jobs:
           # (no scan-arg override needed).
           "$(go env GOPATH)/bin/gocovmerge" "${profiles[@]}" > coverage.out
 
+      # Generate dashboard (React/TS) vitest coverage so Sonar gets an lcov
+      # report for web/dashboard/src — without this the new TS lines land at
+      # 0% covered and trigger the new_coverage gate. The lcov is output to
+      # web/dashboard/coverage/lcov.info as configured in vite.config.ts and
+      # referenced by sonar.javascript.lcov.reportPaths in sonar-project.properties.
+      - name: Set up Node (dashboard vitest coverage)
+        # SHA-pinned per Sonar S8543 (mutable tag refs are security-sensitive).
+        # v6.4.0 is the same SHA used in deploy-docs.yml; node-version is set
+        # below so the action version does not constrain the Node runtime.
+        # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22), so Node 20
+        # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) and pass
+        # --ignore-scripts (S6505: lifecycle scripts). pnpm is pure JS so it
+        # functions correctly without running its own postinstall scripts.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
+
+      - name: Install pnpm workspace dependencies
+        # pnpm-lock.yaml lives at the repo root (workspace root).
+        # --frozen-lockfile ensures the install matches the committed lock exactly.
+        # --ignore-scripts per Sonar S6505. esbuild (in onlyBuiltDependencies)
+        # is rebuilt explicitly in the next step so vite/vitest find the binary.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild esbuild binary
+        # esbuild postinstall (binary download) was skipped by --ignore-scripts
+        # above. pnpm rebuild runs only the named package's build scripts so the
+        # vite and vitest invocations in the next step can locate the native binary.
+        # Filter to the dashboard package: the repo root has no package.json, so a
+        # bare `pnpm rebuild` errors ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND.
+        run: pnpm --filter r2-observability-dashboard rebuild esbuild
+
+      - name: Run dashboard vitest with lcov coverage
+        # Produces web/dashboard/coverage/lcov.info consumed by sonar.javascript.lcov.reportPaths.
+        run: pnpm --filter r2-observability-dashboard test:coverage
+
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and failed this
       # gate). Paired with sonar.scanner.skipJreProvisioning below.
