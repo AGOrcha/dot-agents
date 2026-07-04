@@ -1,0 +1,13 @@
+#!/usr/bin/env -S da run
+# checkpoint-advance.da — mechanical iteration-close spine: checkpoint, then advance.
+#
+# A deterministic sequence of real da subcommands (spec D3: mechanical only —
+# no agent judgment, no branching on outcomes). The calling skill decides the
+# values and exports them; this recipe only executes the spine. Env vars:
+#   DA_CHECKPOINT_MSG  checkpoint message
+#   DA_PLAN            canonical plan id
+#   DA_TASK            task id to advance
+#   DA_STATUS          new task status (pending | in_progress | completed)
+# Directly executable when chmod +x (p4 shebang contract), or via: da run <file>.
+workflow checkpoint --message "${DA_CHECKPOINT_MSG}"
+workflow advance "${DA_PLAN}" --task "${DA_TASK}" --status "${DA_STATUS}"
