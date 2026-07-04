@@ -421,6 +421,128 @@ func TestRunRecipe_RecursionGuardStops(t *testing.T) {
 	}
 }
 
+// ----- expandEnv / env-substitution tests -----
+
+// TestExpandEnv covers $VAR, ${VAR}, quote-blind expansion, undefined-var
+// empty-string semantics, and multi-var lines (D6/R6, OQ1).
+func TestExpandEnv(t *testing.T) {
+	const keyA = "DA_TEST_EXPKEY_A"
+	const keyB = "DA_TEST_EXPKEY_B"
+	const keyUndef = "DA_TEST_EXPKEY_UNDEF"
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T)
+		input string
+		want  string
+	}{
+		{
+			name:  "bare $VAR expands",
+			setup: func(t *testing.T) { t.Setenv(keyA, "hello") },
+			input: "cmd $" + keyA,
+			want:  "cmd hello",
+		},
+		{
+			name:  "braced ${VAR} expands",
+			setup: func(t *testing.T) { t.Setenv(keyA, "world") },
+			input: "cmd ${" + keyA + "}",
+			want:  "cmd world",
+		},
+		{
+			// Quote-blind: $VAR inside double quotes still expands. A recipe is
+			// not a shell (D5); double quotes do not suppress expansion.
+			name:  "expands inside double quotes (quote-blind)",
+			setup: func(t *testing.T) { t.Setenv(keyA, "dval") },
+			input: `cmd "prefix-$` + keyA + `"`,
+			want:  `cmd "prefix-dval"`,
+		},
+		{
+			// Quote-blind: $VAR inside single quotes also expands. A recipe is
+			// not a shell (D5); single quotes do NOT suppress expansion.
+			name:  "expands inside single quotes (quote-blind, not a shell)",
+			setup: func(t *testing.T) { t.Setenv(keyA, "sval") },
+			input: "cmd '$" + keyA + "'",
+			want:  "cmd 'sval'",
+		},
+		{
+			// Undefined variable: os.Getenv returns "" for unknown keys.
+			name:  "undefined var expands to empty string",
+			setup: func(t *testing.T) { os.Unsetenv(keyUndef) },
+			input: "cmd $" + keyUndef + " end",
+			want:  "cmd  end",
+		},
+		{
+			name: "multiple vars on one line all expand",
+			setup: func(t *testing.T) {
+				t.Setenv(keyA, "foo")
+				t.Setenv(keyB, "bar")
+			},
+			input: "cmd $" + keyA + " $" + keyB,
+			want:  "cmd foo bar",
+		},
+		{
+			// Lines with no $ are returned unchanged (no-op path).
+			name:  "line without vars is unchanged",
+			setup: func(t *testing.T) {},
+			input: "workflow orient",
+			want:  "workflow orient",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
+			if got := expandEnv(tc.input); got != tc.want {
+				t.Errorf("expandEnv(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunRecipe_EnvVarExpandsBeforeDispatch proves the dispatcher receives the
+// expanded token value, not the raw $VAR text. Substitution happens before
+// tokenization per D6/R6.
+func TestRunRecipe_EnvVarExpandsBeforeDispatch(t *testing.T) {
+	const key = "DA_TEST_RECIPE_ARG"
+	t.Setenv(key, "expanded-arg")
+
+	f := writeTempRecipe(t, "cmd $"+key+"\n")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rec.calls) != 1 {
+		t.Fatalf("expected 1 dispatch call, got %d", len(rec.calls))
+	}
+	assertStringSlice(t, rec.calls[0], []string{"cmd", "expanded-arg"})
+}
+
+// TestDispatchStep_EnvVarNoLeak proves the fail-fast error message contains the
+// original $VAR reference (not the expanded secret value). This is
+// security-load-bearing: expanded values may contain credentials.
+func TestDispatchStep_EnvVarNoLeak(t *testing.T) {
+	const secretVar = "DA_TEST_SECRET_NOSHOW"
+	const secretVal = "sentinel-secret-abc987"
+	t.Setenv(secretVar, secretVal)
+
+	srcLine := "da-cmd --token $" + secretVar
+	f := writeTempRecipe(t, srcLine+"\n")
+	sentinel := errors.New("injected failure")
+	rec := &recordingDispatcher{failAt: 0, failWith: sentinel}
+
+	err := runRecipe(f, rec.dispatch)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	// The expanded secret value MUST NOT appear in the error message.
+	if strings.Contains(err.Error(), secretVal) {
+		t.Errorf("error message leaks expanded env value %q: %v", secretVal, err)
+	}
+	// The original source line (with the literal $VAR text) MUST appear.
+	if !strings.Contains(err.Error(), "$"+secretVar) {
+		t.Errorf("error message must contain original $VAR reference, got: %v", err)
+	}
+}
+
 // ----- newRunCmd RunE coverage -----
 
 func TestNewRunCmd_RunE_InvokesRecipeViaInjectedDispatcher(t *testing.T) {
