@@ -31,14 +31,32 @@ func rootConfigDeps() config.Deps {
 	}
 }
 
-// rootEvalDeps builds the eval.Deps passed to eval.NewCmd. The eval command
-// tree needs only the resolved global --json getter, threaded as a closure so
-// it observes commands.Flags at RunE time (cobra parses persistent flags after
-// the constructor returns).
-func rootEvalDeps() eval.Deps {
-	return eval.Deps{
-		JSON: func() bool { return Flags.JSON },
-	}
+// rootEvalCmd builds the `da eval` group, wiring the gen/run/ls RunE handlers
+// here in package commands. The handlers are defined as named functions (below)
+// rather than injected closures so internal/globalflagcov can statically trace
+// their global-flag reads: that analyzer indexes a fixed set of command
+// packages that excludes commands/eval, so a RunE defined there resolves to an
+// "unresolved closure". Reading Flags.JSON directly in runEvalRun/runEvalLs
+// keeps the --json coverage analysable.
+func rootEvalCmd() *cobra.Command {
+	return eval.NewCmd(runEvalGen, runEvalRun, runEvalLs)
+}
+
+// runEvalGen is the `da eval gen` RunE handler. Gen has no --json output.
+func runEvalGen(cmd *cobra.Command, _ []string) error {
+	return eval.RunGen(cmd)
+}
+
+// runEvalRun is the `da eval run` RunE handler; it threads the global --json
+// flag into the run pipeline.
+func runEvalRun(cmd *cobra.Command, _ []string) error {
+	return eval.RunEval(cmd, Flags.JSON)
+}
+
+// runEvalLs is the `da eval ls` RunE handler; it threads the global --json flag
+// into the run listing.
+func runEvalLs(cmd *cobra.Command, _ []string) error {
+	return eval.RunLs(cmd, Flags.JSON)
 }
 
 // rootMCPDeps builds the mcp.Deps passed to mcp.NewCmd. Inlined here after
@@ -193,7 +211,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewWorkflowCmd())
 	root.AddCommand(NewKGCmd())
 	root.AddCommand(NewScoreCmd())
-	root.AddCommand(eval.NewCmd(rootEvalDeps()))
+	root.AddCommand(rootEvalCmd())
 	root.AddCommand(NewRunCmd())
 
 	root.SetErr(os.Stderr)

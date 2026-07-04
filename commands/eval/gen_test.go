@@ -9,6 +9,7 @@ import (
 
 	evalcore "github.com/AGOrcha/dot-agents/internal/eval"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/spf13/cobra"
 )
 
 // runGen over the fixture graph writes a valid, parseable Go TaskSpec to stdout.
@@ -91,14 +92,14 @@ func TestGenerateAndWriteFileError(t *testing.T) {
 	}
 }
 
-// Driving the assembled command through Execute covers the RunE closure and
-// flag wiring end-to-end.
+// Driving the assembled command through Execute with the real RunGen entry
+// point covers RunGen + genOptionsFrom + flag wiring end-to-end.
 func TestGenCommandExecute(t *testing.T) {
 	swapOpenReader(t, fixtureOpenReader)
-	cmd := newGenCmd(Deps{})
+	cmd := newGenCmd(func(c *cobra.Command, _ []string) error { return RunGen(c) })
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
-	cmd.SetArgs([]string{"--language", "go"})
+	cmd.SetArgs([]string{"--language", "go", "--difficulty", "easy", "--template", "impl-pure-fn"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("gen Execute: %v", err)
 	}

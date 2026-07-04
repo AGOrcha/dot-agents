@@ -20,11 +20,6 @@ import (
 // pins; ls reads it by name to list runs without re-deriving every stage.
 const evalRunFile = "eval-run.yaml"
 
-// lsOptions are the parsed flags of `da eval ls`.
-type lsOptions struct {
-	repoDir string
-}
-
 // lsRecord is the read-back projection of eval-run.yaml `da eval ls` needs. It
 // is intentionally a subset of the store's PersistedEvalRun (run identity, the
 // scored outcome, and the verify pass flag) so ls stays decoupled from the
@@ -52,20 +47,25 @@ type lsAgentTag struct {
 	Harness string `yaml:"harness" json:"harness,omitempty"`
 }
 
-// newLsCmd builds `da eval ls`.
-func newLsCmd(deps Deps) *cobra.Command {
-	var opts lsOptions
+// newLsCmd builds `da eval ls`. The RunE handler is injected by the root (see
+// package doc); this constructor owns only the command shape + flag definitions.
+func newLsCmd(runE handlerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "ls",
 		Short:   "List persisted eval runs",
 		Example: "  da eval ls\n  da eval ls --repo-dir /path/to/repo",
 		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runLs(cmd.OutOrStdout(), resolveRepoDir(opts.repoDir), deps.json())
-		},
+		RunE:    runE,
 	}
-	cmd.Flags().StringVar(&opts.repoDir, repoDirFlagName, "", repoDirFlagHelp)
+	cmd.Flags().String(repoDirFlagName, "", repoDirFlagHelp)
 	return cmd
+}
+
+// RunLs is the `da eval ls` entry point the root wires as the subcommand's RunE.
+// asJSON is the resolved global --json flag, passed by the root handler so the
+// flag read stays statically traceable in package commands.
+func RunLs(cmd *cobra.Command, asJSON bool) error {
+	return runLs(cmd.OutOrStdout(), resolveRepoDir(flagString(cmd, repoDirFlagName)), asJSON)
 }
 
 // evalRunsRoot returns the eval runs root (<root>/.agents/eval/runs) by deriving

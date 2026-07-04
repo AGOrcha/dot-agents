@@ -17,6 +17,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
 	goverifier "github.com/AGOrcha/dot-agents/internal/eval/verifier/golang"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/spf13/cobra"
 )
 
 // ---- test-harness builders --------------------------------------------------
@@ -122,8 +123,9 @@ func TestRunEvalCommandGoEndToEnd(t *testing.T) {
 	}
 }
 
-// TestRunCommandExecute drives the assembled cobra command to cover its RunE
-// closure and flag wiring end-to-end.
+// TestRunCommandExecute drives the assembled cobra command through the real
+// RunEval entry point to cover RunEval + runOptionsFrom + flag wiring
+// end-to-end.
 func TestRunCommandExecute(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test shells out to the go toolchain")
@@ -136,7 +138,7 @@ func TestRunCommandExecute(t *testing.T) {
 	swapSandbox(t, func(sandbox.Config) (sandbox.Sandbox, error) { return &fakeSandbox{inst: inst}, nil })
 	swapRunner(t, func(runner.Adapter) (runner.Runner, error) { return okRunner(), nil })
 
-	cmd := newRunCmd(Deps{})
+	cmd := newRunCmd(func(c *cobra.Command, _ []string) error { return RunEval(c, false) })
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"--language", "go", "--repo-dir", root})
@@ -145,6 +147,18 @@ func TestRunCommandExecute(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), runID) {
 		t.Errorf("run Execute output missing run id:\n%s", buf.String())
+	}
+}
+
+// RunEval + runOptionsFrom without a go toolchain: an empty --language fails in
+// buildHarness before any sandbox/graph wiring, so the entry point is covered
+// on the error path.
+func TestRunEvalEntryInvalidLanguage(t *testing.T) {
+	cmd := newRunCmd(func(c *cobra.Command, _ []string) error { return RunEval(c, false) })
+	cmd.SetArgs([]string{}) // no --language, no --task
+	cmd.SetOut(&bytes.Buffer{})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("run with no language should fail before wiring seams")
 	}
 }
 

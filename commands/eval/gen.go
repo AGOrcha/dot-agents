@@ -20,9 +20,9 @@ type genOptions struct {
 	out        string
 }
 
-// newGenCmd builds `da eval gen`.
-func newGenCmd(_ Deps) *cobra.Command {
-	var opts genOptions
+// newGenCmd builds `da eval gen`. The RunE handler is injected by the root (see
+// package doc); this constructor owns only the command shape + flag definitions.
+func newGenCmd(runE handlerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gen",
 		Short: "Generate an eval TaskSpec from the knowledge graph",
@@ -30,15 +30,29 @@ func newGenCmd(_ Deps) *cobra.Command {
 			"  da eval gen --language go --difficulty medium\n" +
 			"  da eval gen --language typescript --out task.yaml",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runGen(cmd.Context(), cmd.OutOrStdout(), opts)
-		},
+		RunE: runE,
 	}
-	cmd.Flags().StringVar(&opts.language, languageFlagName, "", languageFlagHelp)
-	cmd.Flags().StringVar(&opts.difficulty, "difficulty", "", "Constrain the difficulty band: easy, medium, or hard (default: generator's choice)")
-	cmd.Flags().StringVar(&opts.template, "template", "", "Task template id (default: impl-pure-fn)")
-	cmd.Flags().StringVar(&opts.out, "out", "", "Write the TaskSpec YAML to this file instead of stdout")
+	cmd.Flags().String(languageFlagName, "", languageFlagHelp)
+	cmd.Flags().String(difficultyFlagName, "", "Constrain the difficulty band: easy, medium, or hard (default: generator's choice)")
+	cmd.Flags().String(templateFlagName, "", "Task template id (default: impl-pure-fn)")
+	cmd.Flags().String(outFlagName, "", "Write the TaskSpec YAML to this file instead of stdout")
 	return cmd
+}
+
+// RunGen is the `da eval gen` entry point the root wires as the subcommand's
+// RunE. It reads the gen flags off cmd and synthesises + writes a TaskSpec.
+func RunGen(cmd *cobra.Command) error {
+	return runGen(cmd.Context(), cmd.OutOrStdout(), genOptionsFrom(cmd))
+}
+
+// genOptionsFrom reads the gen subcommand's flags off cmd.
+func genOptionsFrom(cmd *cobra.Command) genOptions {
+	return genOptions{
+		language:   flagString(cmd, languageFlagName),
+		difficulty: flagString(cmd, difficultyFlagName),
+		template:   flagString(cmd, templateFlagName),
+		out:        flagString(cmd, outFlagName),
+	}
 }
 
 // runGen builds the generator registry over the warm code graph, synthesises

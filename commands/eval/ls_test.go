@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/eval/store"
+	"github.com/spf13/cobra"
 )
 
 // writeRunSidecar creates <root>/.agents/eval/runs/<runID>/eval-run.yaml with
@@ -167,11 +168,12 @@ func TestReadRunRecordMissing(t *testing.T) {
 	}
 }
 
-// The ls command Execute path covers the RunE closure + flag wiring.
+// The ls command Execute path via the real RunLs entry point covers RunLs +
+// flag wiring. A JSON pass also exercises the asJSON thread-through.
 func TestLsCommandExecute(t *testing.T) {
 	root := t.TempDir()
 	writeRunSidecar(t, root, "eval-exec", goRunSidecar("eval-exec", "good", 0.812, true, true))
-	cmd := newLsCmd(Deps{})
+	cmd := newLsCmd(func(c *cobra.Command, _ []string) error { return RunLs(c, false) })
 	var buf bytes.Buffer
 	cmd.SetOut(&buf)
 	cmd.SetArgs([]string{"--repo-dir", root})
@@ -180,5 +182,21 @@ func TestLsCommandExecute(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "eval-exec") {
 		t.Errorf("ls Execute output missing run:\n%s", buf.String())
+	}
+}
+
+// RunLs with asJSON=true routes through the JSON renderer.
+func TestRunLsEntryJSON(t *testing.T) {
+	root := t.TempDir()
+	writeRunSidecar(t, root, "eval-jsonentry", goRunSidecar("eval-jsonentry", "good", 0.812, true, true))
+	cmd := newLsCmd(func(c *cobra.Command, _ []string) error { return RunLs(c, true) })
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	cmd.SetArgs([]string{"--repo-dir", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("ls Execute json: %v", err)
+	}
+	if !strings.Contains(buf.String(), "\"run_id\": \"eval-jsonentry\"") {
+		t.Errorf("ls json output missing run_id:\n%s", buf.String())
 	}
 }

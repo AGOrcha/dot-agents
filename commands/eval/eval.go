@@ -9,6 +9,14 @@
 //   - `da eval run`  drives one task end-to-end (gen → sandbox → run → verify →
 //     score → persist) and prints the R1-scored outcome.
 //   - `da eval ls`   lists the persisted eval runs under the eval root.
+//
+// The gen/run/ls RunE handlers are injected by the root command rather than
+// defined here (see NewCmd). internal/globalflagcov statically traces each
+// handler's global-flag reads by indexing a fixed set of command packages that
+// does not include this subpackage, so a RunE closure defined here is opaque to
+// it ("unresolved closure"). Wiring the handlers from package commands — where
+// they read the global --json flag through a traceable commands.Flags access —
+// keeps global-flag coverage analysable while the run logic stays here.
 package eval
 
 import (
@@ -33,25 +41,25 @@ const (
 	languageFlagHelp = "Task language: go, python, or typescript"
 )
 
-// Deps carries the cross-cutting collaborators the eval command tree needs from
-// root. Today that is only the resolved global --json getter, threaded the same
-// way config/mcp/settings receive theirs.
-type Deps struct {
-	// JSON reports whether the global --json flag is set. A nil getter is
-	// treated as "text output" so a zero Deps is usable in tests.
-	JSON func() bool
-}
+// Shared generation-tuning + run flag names, named once so the constructors
+// (which define them) and the option readers (which read them back) cannot
+// drift apart.
+const (
+	difficultyFlagName = "difficulty"
+	templateFlagName   = "template"
+	outFlagName        = "out"
+	taskFlagName       = "task"
+	runnerFlagName     = "runner"
+)
 
-// json reports the resolved --json flag, tolerating a nil getter.
-func (d Deps) json() bool {
-	if d.JSON == nil {
-		return false
-	}
-	return d.JSON()
-}
+// handlerFunc is the cobra RunE signature the root wires per subcommand.
+type handlerFunc = func(*cobra.Command, []string) error
 
-// NewCmd builds the `da eval` command group and its gen/run/ls subcommands.
-func NewCmd(deps Deps) *cobra.Command {
+// NewCmd builds the `da eval` command group. The gen/run/ls RunE handlers are
+// supplied by the caller (root) so they compile in package commands and stay
+// statically analysable by internal/globalflagcov; the exported RunGen/RunEval/
+// RunLs entry points below are what those handlers call.
+func NewCmd(genRunE, runRunE, lsRunE handlerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "eval",
 		Short: "Generate, run, and inspect agent evaluation tasks",
@@ -62,9 +70,9 @@ func NewCmd(deps Deps) *cobra.Command {
 			"--task is not given) and persists eval-run.yaml + the scored iteration-log\n" +
 			"sidecars under .agents/eval/runs/<run-id>/. `eval ls` lists those runs.",
 	}
-	cmd.AddCommand(newGenCmd(deps))
-	cmd.AddCommand(newRunCmd(deps))
-	cmd.AddCommand(newLsCmd(deps))
+	cmd.AddCommand(newGenCmd(genRunE))
+	cmd.AddCommand(newRunCmd(runRunE))
+	cmd.AddCommand(newLsCmd(lsRunE))
 	return cmd
 }
 
@@ -79,4 +87,13 @@ func resolveRepoDir(explicit string) string {
 	}
 	cwd, _ := os.Getwd()
 	return cwd
+}
+
+// flagString reads a string flag off cmd, tolerating an undefined flag (empty).
+// The subcommand constructors define the flags; the exported RunGen/RunEval/
+// RunLs handlers read them back through this helper so the injected RunE
+// handlers in package commands need no knowledge of the flag wiring.
+func flagString(cmd *cobra.Command, name string) string {
+	v, _ := cmd.Flags().GetString(name)
+	return v
 }

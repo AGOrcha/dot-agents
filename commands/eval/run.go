@@ -43,9 +43,9 @@ type runOptions struct {
 	repoDir    string
 }
 
-// newRunCmd builds `da eval run`.
-func newRunCmd(deps Deps) *cobra.Command {
-	var opts runOptions
+// newRunCmd builds `da eval run`. The RunE handler is injected by the root (see
+// package doc); this constructor owns only the command shape + flag definitions.
+func newRunCmd(runE handlerFunc) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run one eval task end-to-end and score the outcome",
@@ -57,17 +57,34 @@ func newRunCmd(deps Deps) *cobra.Command {
 			"  da eval run --language go --runner codex\n" +
 			"  da eval run --task task.yaml",
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runEvalCommand(cmd.Context(), cmd.OutOrStdout(), opts, deps.json())
-		},
+		RunE: runE,
 	}
-	cmd.Flags().StringVar(&opts.language, languageFlagName, "", languageFlagHelp+" (inferred from --task when given)")
-	cmd.Flags().StringVar(&opts.task, "task", "", "Run a pre-generated TaskSpec YAML instead of generating one")
-	cmd.Flags().StringVar(&opts.difficulty, "difficulty", "", "Constrain the generated difficulty band (ignored with --task)")
-	cmd.Flags().StringVar(&opts.template, "template", "", "Task template id (ignored with --task)")
-	cmd.Flags().StringVar(&opts.adapter, "runner", defaultAdapter, "Agent adapter: claude, codex, or copilot")
-	cmd.Flags().StringVar(&opts.repoDir, repoDirFlagName, "", repoDirFlagHelp)
+	cmd.Flags().String(languageFlagName, "", languageFlagHelp+" (inferred from --task when given)")
+	cmd.Flags().String(taskFlagName, "", "Run a pre-generated TaskSpec YAML instead of generating one")
+	cmd.Flags().String(difficultyFlagName, "", "Constrain the generated difficulty band (ignored with --task)")
+	cmd.Flags().String(templateFlagName, "", "Task template id (ignored with --task)")
+	cmd.Flags().String(runnerFlagName, defaultAdapter, "Agent adapter: claude, codex, or copilot")
+	cmd.Flags().String(repoDirFlagName, "", repoDirFlagHelp)
 	return cmd
+}
+
+// RunEval is the `da eval run` entry point the root wires as the subcommand's
+// RunE. asJSON is the resolved global --json flag, passed by the root handler so
+// the flag read stays statically traceable in package commands.
+func RunEval(cmd *cobra.Command, asJSON bool) error {
+	return runEvalCommand(cmd.Context(), cmd.OutOrStdout(), runOptionsFrom(cmd), asJSON)
+}
+
+// runOptionsFrom reads the run subcommand's flags off cmd.
+func runOptionsFrom(cmd *cobra.Command) runOptions {
+	return runOptions{
+		language:   flagString(cmd, languageFlagName),
+		task:       flagString(cmd, taskFlagName),
+		difficulty: flagString(cmd, difficultyFlagName),
+		template:   flagString(cmd, templateFlagName),
+		adapter:    flagString(cmd, runnerFlagName),
+		repoDir:    flagString(cmd, repoDirFlagName),
+	}
 }
 
 // runEvalCommand assembles the real harness around the pipeline seams (KG
