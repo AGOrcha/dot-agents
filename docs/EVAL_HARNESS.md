@@ -77,6 +77,15 @@ da eval gen --language python --template add-test-coverage --out task.yaml
 | `--template` | Task template id: `impl-pure-fn` (default), `refactor-extract`, or `add-test-coverage`. |
 | `--out` | Write the `TaskSpec` YAML to this file (atomic write) instead of stdout. |
 
+> **Build the graph for *this* repo first.** `da eval gen` reads the **global**
+> knowledge-graph store at `$KG_HOME/ops/graphstore.db` — the same warm store
+> `da kg` maintains — not a repo-local store. Before generating, build (or warm)
+> the graph for the repository you are standing in with `da kg build` (or
+> `da kg warm`). If the global KG was last built for a *different* repository,
+> `gen` fails loudly rather than emitting a spec against foreign paths — its seed
+> paths "resolve outside the repository root". Repo-scoped `--repo-dir` generation
+> and a cross-machine portable KG are planned for 0.5.1.
+
 ### `da eval run` — run one task end-to-end and score it
 
 ```

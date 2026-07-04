@@ -7,6 +7,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-04
+
+A capability release: a code-task generation and evaluation pipeline (`da eval`),
+shebang-executable `da run` recipe scripts, review RBAC plus a tamper-evident
+audit log, and the crash-survivable session-handoff journal (`da workflow
+journal`). All additive — no breaking changes.
+
+### Added
+
+- **`da eval` — code-task generation and evaluation pipeline.** A new command
+  group (`gen`, `run`, `ls`) that turns the Tree-sitter knowledge graph into
+  runnable agent evaluations. `da eval gen` synthesises a language-agnostic
+  `TaskSpec` (`--language go|python|typescript`, `--difficulty easy|medium|hard`,
+  `--template`, `--out`); `da eval run` runs one task end-to-end inside an
+  isolated sandbox worktree, verifies the result, and scores it
+  (`--agent claude|codex|copilot`, `--task`, `--repo-dir`, `-n`/`--dry-run`
+  preview); `da eval ls` lists persisted runs. Go, Python, and TypeScript
+  generators and verifiers run over one shared engine, difficulty is derived from
+  graph signals, and each run's outcome is scored through the same bridge that
+  feeds `da score iteration`. `da eval gen` reads the global knowledge-graph
+  store, so build the graph for the current repository first (`da kg build` /
+  `da kg warm`) — see [docs/EVAL_HARNESS.md](docs/EVAL_HARNESS.md).
+- **`da run <file>` — recipe scripts.** Execute a line-oriented sequence of `da`
+  commands from a file. Each non-blank, non-comment line is tokenized with
+  shell-like quoting and dispatched in order, with `$VAR` / `${VAR}` environment
+  substitution and no shell invoked (recipes are cross-platform). Runs are
+  fail-fast — the first failing step aborts and the error names the step index and
+  the original line. A leading shebang line is ignored, so a `chmod +x` recipe
+  starting with `#!/usr/bin/env -S da run` is directly executable; recursion is
+  depth-bounded.
+- **`da review users` — review RBAC administration (admin only).** `add <email>`
+  mints a user's bearer token (printed once), `list` shows users with hashed
+  secrets only, `remove <email>` revokes a token immediately, and
+  `set-role <email>` changes a role while keeping the token. `remove` and
+  `set-role` are guarded against locking out the last admin.
+- **`da review audit` — review audit-log inspection and maintenance (admin
+  only).** A tamper-evident, chained audit log of review actions: `tail` shows
+  recent records, `verify` checks the chain and exits non-zero on any integrity
+  break, `repair` heals a benign torn-append head anchor, and `prune` compacts
+  rotated archives transactionally. Appends are atomic and anchored against
+  tampering.
+- **`da workflow journal` — session-handoff journal.** An append-only,
+  crash-survivable journal for recovering workflow state across sessions:
+  `snapshot` captures the deterministic live-state snapshot, `show` displays the
+  snapshot plus recent events, `recover` builds a verified recovery view
+  (snapshot plus replay, re-verified against reality), `prune` bounds retention,
+  and `append` writes a single low-level event.
+
+### Changed
+
+- **Iteration scoring rubric (RubricVersion 3.0.0).** Scores now incorporate a
+  `human_label` signal and route recompute through a single unified entry point,
+  and `da eval` runs are scored with the same production rubric as workflow
+  iterations — so `da score iteration` reflects the new dimensions.
+
+### Fixed
+
+- **`agentslock` contention and Windows reliability.** Lock acquire/release is now
+  robust under concurrency and on Windows: the release/reclaim race and a
+  transient claim-degrade are fixed, the Windows "delete-pending" and
+  concurrent-read races during the lock-file rename no longer block acquisition,
+  and release/reclaim are unified into one rename-then-verify primitive. This
+  hardens first-run `da install` / `da config` / `da refresh` across platforms.
+- **Filesystem mutations on Windows.** `da` now retries the native remove (and
+  recursive remove) on transient Windows sharing violations instead of failing the
+  operation outright.
+- **Hook-bucket errors surfaced on every OS.** A regular file found where a hooks
+  directory is expected is now reported on all platforms (it was silently
+  swallowed on Windows).
+- **`da workflow plan archive` persistence.** The archive move is now committed by
+  default (it was previously silently non-persistent), while archive sweeps
+  correctly skip the cwd-bound commit.
+
+### Internal
+
+- Zero-new-issues Sonar and coverage gate hardening across the release wave, plus
+  a heavy cross-OS pre-merge gate tier (`make gate-cross`).
+- Foundational build-out behind the CLI for the in-progress workflow service and
+  dashboard (event-bus fan-out with terminal overflow semantics, content-
+  fingerprint cache invalidation and content-derived ETags, and iteration-log
+  ingestion) and for the eval KG-query and scoring-bridge layers. These are not
+  yet exposed as a user-facing command.
+
 ## [0.4.1] - 2026-06-24
 
 A cross-platform reliability release: first-run lock acquisition now works on
@@ -362,7 +445,8 @@ plus test-structure hygiene.
 - Windows support deferred to future release
 - Tasks and History features are opt-in and not yet implemented
 
-[Unreleased]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/AGOrcha/dot-agents/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/AGOrcha/dot-agents/compare/v0.4.2...v0.5.0
 [0.3.3]: https://github.com/NikashPrakash/dot-agents/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/NikashPrakash/dot-agents/releases/tag/v0.3.2
 [0.1.8]: https://github.com/dot-agents/dot-agents/compare/v0.1.8...v0.1.9
