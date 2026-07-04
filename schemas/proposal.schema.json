@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/proposal.schema.json",
+  "title": "dot-agents canonical proposal",
+  "description": "JSON Schema for formal dot-agents proposal artifacts (.agents/proposals/<id>.yaml for project-local or ~/.agents/proposals/<id>.yaml for global). A proposal captures an idea or change request before it graduates to a spec/plan. Informal project-local research artifacts use .md format and are not validated by this schema. The scope field is the canonical discriminator: 'global' maps to ~/.agents/proposals/ and applies to shared resources (rules, skills, hooks, settings) that affect all projects; 'project-local' maps to .agents/proposals/ and applies to project-specific design docs, ADRs, or workflow specs that have not yet graduated to workflow/specs/<id>/design.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "status",
+    "type",
+    "action",
+    "target",
+    "rationale",
+    "content",
+    "created_at",
+    "created_by"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Canonical proposal schema version. Always 1."
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+      "description": "Stable kebab-case identifier; should match the filename (without extension) under proposals/."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "in_review", "approved", "rejected", "promoted", "deferred"],
+      "description": "Lifecycle status. draft → work in progress; in_review → awaiting maintainer ruling; approved → accepted but not yet implemented; rejected → decided against; promoted → graduated to a canonical spec/plan (see promoted_at, promoted_to_spec, promoted_to_plan); deferred → on hold for a later cycle."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["global", "project-local"],
+      "description": "Optional but recommended routing discriminator (may be inferred from the artifact's directory when absent). 'global' = artifact lives under ~/.agents/proposals/ and targets a shared resource (rule, skill, hook, MCP config, or global setting) that applies across all projects managed by dot-agents. 'project-local' = artifact lives under .agents/proposals/ and targets something specific to one project (design doc, ADR, workflow spec in ideation, research artifact). Decision heuristic: if this repo were removed from dot-agents management, would the proposal still matter? Yes → global; No → project-local."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Category of the artifact being proposed. Common values: skill, rule, hook, setting, design, research, decision. Open string — not enum-constrained because the set is open-ended."
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What this proposal intends to do to the target. Common values: create, update, remove, promote, revise. Open string — not enum-constrained."
+    },
+    "target": {
+      "description": "Location or entity this proposal acts on. May be a single path string (e.g. 'internal/scaffold/home/starter/skills/global/kg-ideate/') or a structured object with named sub-targets (e.g. {starter_source: ..., installed_at: ...}).",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "minProperties": 1
+        }
+      ]
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Why this proposal is needed. Use block scalar (|-) in YAML when the text contains ': ' to avoid parse errors."
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The full proposal body — the canonical artifact content. May include inline Markdown, SKILL.md drafts, instruction files, templates, or other authoring artifacts. Use block scalar (|) in YAML."
+    },
+    "created_at": {
+      "type": "string",
+      "description": "RFC3339 timestamp when the proposal was authored."
+    },
+    "created_by": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Author identifier. Typically a model identifier (e.g. claude-sonnet-4-6) or a human handle."
+    },
+    "promoted_at": {
+      "type": "string",
+      "description": "RFC3339 timestamp when the proposal was promoted to a canonical spec/plan. Only present when status=promoted."
+    },
+    "promoted_to_spec": {
+      "type": "string",
+      "description": "Path to the canonical spec this proposal was promoted to (e.g. .agents/workflow/specs/<id>/design.md). Only present when status=promoted."
+    },
+    "promoted_to_plan": {
+      "type": "string",
+      "description": "Path to the canonical plan directory this proposal was promoted to (e.g. .agents/workflow/plans/<id>/). Only present when status=promoted."
+    },
+    "reviewed_at": {
+      "type": "string",
+      "description": "RFC3339 timestamp stamped by `da review approve` when the proposal was reviewed. Written during the review/approval lifecycle; may be empty or absent on unreviewed drafts."
+    },
+    "review_reason": {
+      "type": "string",
+      "description": "Free-text reviewer note recorded by `da review approve` (may be an empty string). Explains the review decision when non-empty."
+    }
+  }
+}
