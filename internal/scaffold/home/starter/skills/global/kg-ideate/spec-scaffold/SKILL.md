@@ -13,7 +13,6 @@ calls:
   - gap-conversion
   - contradiction-framing
   - done-criteria
-  - spec-write
 verifier: batch
 review_gate: default
 ---
