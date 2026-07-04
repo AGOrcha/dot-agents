@@ -1,7 +1,8 @@
 # Scoping: Loop-Discipline Stop Hooks (iteration-close / isp / loop-worker)
 
 - type: project-local scoping & analysis (pre-proposal)
-- status: draft / for-review
+- status: superseded
+- superseded-by: `.agents/workflow/specs/loop-discipline-stop-hooks/design.md` + `.agents/workflow/plans/loop-discipline-stop-hooks/` (the promoted, authoritative owner — see the Promotion addendum below; plan currently active).
 - date: 2026-05-25
 - scope: `internal/scaffold/home/starter/`, `internal/scaffold/hooks/global/`,
   `internal/platform/hooks.go`, `commands/workflow/` (new hook-sentinel surface),
