@@ -681,6 +681,45 @@ func renderFoldBackList(out io.Writer, artifacts []foldBackArtifact) error {
 	return nil
 }
 
+// foldBackDryRun reports whether the fold-back create command should preview
+// its routing without writing. The local --dry-run flag (create only; GetBool
+// tolerates its absence on update, returning false) is OR-merged with the
+// global -n/--dry-run so `da -n workflow fold-back create` is honored like every
+// other mutating command (sibling of commit / archive-orphans dry-run wiring).
+func foldBackDryRun(cmd *cobra.Command) bool {
+	local, _ := cmd.Flags().GetBool("dry-run")
+	return local || safeDryRun()
+}
+
+// prepareFoldBackUpsert runs the read-only preamble shared by the write and
+// dry-run paths — plan existence check, prior-artifact load, agreement
+// validation, and artifact identity assignment — without touching disk.
+func prepareFoldBackUpsert(projectPath string, in *foldBackUpsertInputs, updateOnly bool, createdAt string, ts int64) (foldBackArtifact, *foldBackArtifact, bool, error) {
+	if _, err := loadCanonicalPlan(projectPath, in.planID); err != nil {
+		return foldBackArtifact{}, nil, false, fmt.Errorf("plan %s not found: %w", in.planID, err)
+	}
+	prior, priorExists, err := loadPriorFoldBackArtifact(projectPath, in.slug)
+	if err != nil {
+		return foldBackArtifact{}, nil, false, err
+	}
+	if updateOnly && !priorExists {
+		return foldBackArtifact{}, nil, false, fmt.Errorf("no fold-back artifact with slug %q", in.slug)
+	}
+	if priorExists {
+		if err := validatePriorFoldBack(prior, in); err != nil {
+			return foldBackArtifact{}, nil, false, err
+		}
+	}
+	artifact := foldBackArtifact{
+		SchemaVersion: 1,
+		PlanID:        in.planID,
+		Observation:   in.observation,
+		CreatedAt:     createdAt,
+	}
+	assignFoldBackArtifactIdentity(&artifact, prior, priorExists, in.slug, ts)
+	return artifact, prior, priorExists, nil
+}
+
 func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -689,6 +728,16 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	in, err := parseFoldBackUpsertInputs(cmd, updateOnly)
 	if err != nil {
 		return err
+	}
+
+	now := time.Now().UTC()
+	createdAt := now.Format(time.RFC3339)
+	ts := now.UnixNano()
+
+	// --dry-run previews the routing decision and returns before any disk write
+	// (proposal file, artifact YAML, note/summary edit) OR journal event.
+	if foldBackDryRun(cmd) {
+		return runFoldBackUpsertDryRun(cmd, project.Path, in, updateOnly, createdAt, ts)
 	}
 
 	command := journal.CmdFoldBackCreate
@@ -702,34 +751,10 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	ok := false
 	defer func() { journalTier1(project.Path, command, input, observed, ok) }()
 
-	if _, err := loadCanonicalPlan(project.Path, in.planID); err != nil {
-		return fmt.Errorf("plan %s not found: %w", in.planID, err)
-	}
-
-	now := time.Now().UTC()
-	createdAt := now.Format(time.RFC3339)
-	ts := now.UnixNano()
-
-	prior, priorExists, err := loadPriorFoldBackArtifact(project.Path, in.slug)
+	artifact, prior, priorExists, err := prepareFoldBackUpsert(project.Path, in, updateOnly, createdAt, ts)
 	if err != nil {
 		return err
 	}
-	if updateOnly && !priorExists {
-		return fmt.Errorf("no fold-back artifact with slug %q", in.slug)
-	}
-	if priorExists {
-		if err := validatePriorFoldBack(prior, in); err != nil {
-			return err
-		}
-	}
-
-	artifact := foldBackArtifact{
-		SchemaVersion: 1,
-		PlanID:        in.planID,
-		Observation:   in.observation,
-		CreatedAt:     createdAt,
-	}
-	assignFoldBackArtifactIdentity(&artifact, prior, priorExists, in.slug, ts)
 
 	if err := dispatchFoldBackUpsert(project.Path, in, prior, priorExists, ts, createdAt, &artifact); err != nil {
 		return err
@@ -756,6 +781,101 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		verb = "Updated"
 	}
 	fmt.Fprintf(out, "  %s fold-back %s (%s) → %s\n", verb, artifact.ID, artifact.Classification, artifact.RoutedTo)
+	return nil
+}
+
+// foldBackDryRunResult is the machine-readable --dry-run payload: the artifact
+// the command WOULD record plus the disk targets it WOULD touch. dry_run is
+// always true here (this shape is emitted only on the dry-run path).
+type foldBackDryRunResult struct {
+	DryRun     bool             `json:"dry_run"`
+	Artifact   foldBackArtifact `json:"artifact"`
+	WouldWrite []string         `json:"would_write"`
+}
+
+// planFoldBackRouting mirrors dispatchFoldBackUpsert as a pure, read-only
+// computation: it assigns the classification / task / routed_to the write path
+// would produce and returns a human description of each disk target that would
+// be touched — without writing anything.
+func planFoldBackRouting(projectPath string, in *foldBackUpsertInputs, prior *foldBackArtifact, priorExists bool, ts int64, artifact *foldBackArtifact) ([]string, error) {
+	tasksPath := filepath.Join(plansBaseDir(projectPath), in.planID, workflowTasksFileName)
+	planPath := filepath.Join(plansBaseDir(projectPath), in.planID, workflowPlanFileName)
+	switch {
+	case priorExists && prior.Classification == "proposal":
+		artifact.Classification = "proposal"
+		artifact.TaskID = prior.TaskID
+		artifact.RoutedTo = prior.RoutedTo
+		propPath, err := proposalAbsPathFromRoutedTo(prior.RoutedTo)
+		if err != nil {
+			return nil, err
+		}
+		return []string{"update proposal " + propPath}, nil
+	case priorExists && prior.Classification == "small":
+		artifact.Classification = "small"
+		if prior.TaskID != "" {
+			artifact.TaskID = prior.TaskID
+			artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, in.planID, prior.TaskID)
+			return []string{fmt.Sprintf("edit task note %s in %s", prior.TaskID, tasksPath)}, nil
+		}
+		artifact.TaskID = ""
+		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, in.planID)
+		return []string{"edit plan summary in " + planPath}, nil
+	case !priorExists && in.propose:
+		artifact.Classification = "proposal"
+		artifact.TaskID = strings.TrimSpace(in.taskID)
+		proposalName := fmt.Sprintf("obs-%d.md", ts)
+		if in.slug != "" {
+			proposalName = fmt.Sprintf("obs-%s.md", in.slug)
+		}
+		artifact.RoutedTo = delegationProposalRoutePfx + proposalName
+		return []string{"create proposal " + filepath.Join(config.AgentsHome(), "proposals", proposalName)}, nil
+	case !priorExists:
+		artifact.Classification = "small"
+		taskID := strings.TrimSpace(in.taskID)
+		artifact.TaskID = taskID
+		if taskID != "" {
+			artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, in.planID, taskID)
+			return []string{fmt.Sprintf("edit task note %s in %s", taskID, tasksPath)}, nil
+		}
+		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, in.planID)
+		return []string{"edit plan summary in " + planPath}, nil
+	default:
+		return nil, fmt.Errorf("internal fold-back routing error (slug=%q propose=%v priorExists=%v)", in.slug, in.propose, priorExists)
+	}
+}
+
+// runFoldBackUpsertDryRun previews the routing decision and the paths the
+// command WOULD write, then returns without any disk change: no proposal file,
+// no fold-back artifact YAML, no TASKS.yaml/PLAN.yaml note edit, and no journal
+// event. It runs the same read-only preamble as the write path so the preview
+// reflects the real decision and surfaces the same validation errors.
+func runFoldBackUpsertDryRun(cmd *cobra.Command, projectPath string, in *foldBackUpsertInputs, updateOnly bool, createdAt string, ts int64) error {
+	artifact, prior, priorExists, err := prepareFoldBackUpsert(projectPath, in, updateOnly, createdAt, ts)
+	if err != nil {
+		return err
+	}
+	wouldWrite, err := planFoldBackRouting(projectPath, in, prior, priorExists, ts, &artifact)
+	if err != nil {
+		return err
+	}
+	// The write path always persists the fold-back artifact YAML alongside the route.
+	wouldWrite = append(wouldWrite, "write fold-back artifact "+foldBackArtifactFile(projectPath, artifact.ID))
+
+	out := cmd.OutOrStdout()
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(foldBackDryRunResult{DryRun: true, Artifact: artifact, WouldWrite: wouldWrite})
+	}
+
+	verb := "record"
+	if priorExists {
+		verb = "update"
+	}
+	fmt.Fprintf(out, "  [dry-run] would %s fold-back %s (%s) → %s\n", verb, artifact.ID, artifact.Classification, artifact.RoutedTo)
+	for _, w := range wouldWrite {
+		fmt.Fprintf(out, "  [dry-run] would %s\n", w)
+	}
 	return nil
 }
 

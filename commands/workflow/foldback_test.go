@@ -498,6 +498,119 @@ func TestFoldBackCreate_RewritesFromBlocks(t *testing.T) {
 	}
 }
 
+// TestFoldBackCreate_DryRunNoSideEffects proves `fold-back create --dry-run`
+// previews the routing decision and writes NOTHING to disk: no obs-*.md
+// proposal, no fold-back artifact YAML, and the target TASKS.yaml/PLAN.yaml
+// bytes stay identical. It covers the inline task-note route, the plan-summary
+// route, and the --propose route.
+func TestFoldBackCreate_DryRunNoSideEffects(t *testing.T) {
+	fbArtifacts := func(repo string) []string {
+		m, _ := filepath.Glob(filepath.Join(repo, ".agents", "active", "fold-back", "*.yaml"))
+		return m
+	}
+
+	t.Run("inline task-note route", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		tasksPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "TASKS.yaml")
+		before, err := os.ReadFile(tasksPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--observation", "dry obs", "--dry-run")
+
+		if got := fbArtifacts(repo); len(got) != 0 {
+			t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
+		}
+		after, err := os.ReadFile(tasksPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(before) != string(after) {
+			t.Fatalf("dry-run mutated TASKS.yaml:\nbefore=%q\nafter=%q", before, after)
+		}
+		for _, want := range []string{"dry-run", "task_note:p1/t1", "TASKS.yaml"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("plan-summary route", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		planPath := filepath.Join(repo, ".agents", "workflow", "plans", "p1", "PLAN.yaml")
+		before, err := os.ReadFile(planPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
+			"--plan", "p1", "--observation", "plan dry obs", "--dry-run")
+
+		if got := fbArtifacts(repo); len(got) != 0 {
+			t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
+		}
+		after, err := os.ReadFile(planPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(before) != string(after) {
+			t.Fatalf("dry-run mutated PLAN.yaml:\nbefore=%q\nafter=%q", before, after)
+		}
+		for _, want := range []string{"dry-run", "plan_summary:p1", "PLAN.yaml"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("propose route", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		agentsHome := t.TempDir()
+		t.Setenv("AGENTS_HOME", agentsHome)
+
+		out := executeWorkflowCommandOutput(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--observation", "big dry", "--propose", "--dry-run")
+
+		if props, _ := filepath.Glob(filepath.Join(agentsHome, "proposals", "obs-*.md")); len(props) != 0 {
+			t.Fatalf("dry-run wrote proposal file(s): %v", props)
+		}
+		if _, err := os.Stat(filepath.Join(agentsHome, "proposals")); !os.IsNotExist(err) {
+			t.Fatalf("dry-run created the proposals dir (want none): %v", err)
+		}
+		if got := fbArtifacts(repo); len(got) != 0 {
+			t.Fatalf("dry-run wrote fold-back artifact(s): %v", got)
+		}
+		for _, want := range []string{"dry-run", "proposal:obs-", "create proposal"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("output missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	// Companion positive case: the same inline invocation WITHOUT --dry-run
+	// does mutate TASKS.yaml and persist the artifact, so the gate is the only
+	// difference between preview and write.
+	t.Run("writes without dry-run", func(t *testing.T) {
+		repo := setupFoldBackProject(t)
+		if err := executeWorkflowCommand(t, repo, "fold-back", "create",
+			"--plan", "p1", "--task", "t1", "--observation", "wet obs"); err != nil {
+			t.Fatal(err)
+		}
+		if got := fbArtifacts(repo); len(got) != 1 {
+			t.Fatalf("expected one fold-back artifact without dry-run, got %v", got)
+		}
+		tf, err := loadCanonicalTasks(repo, "p1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(tf.Tasks[0].Notes, "wet obs") {
+			t.Fatalf("task notes not mutated: %q", tf.Tasks[0].Notes)
+		}
+	})
+}
+
 func TestFoldBackCreate_WriteError(t *testing.T) {
 	repo := setupFoldBackProject(t)
 	chdirRepo(t, repo)
