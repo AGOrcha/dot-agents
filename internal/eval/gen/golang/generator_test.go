@@ -2,6 +2,8 @@ package gogen
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -151,6 +153,118 @@ func TestGenerate_AddTestCoverageArtifact(t *testing.T) {
 	if !strings.Contains(spec.Prompt, art) {
 		t.Errorf("prompt should reference the artifact %q", art)
 	}
+}
+
+// ---- code-review-graph absolute-path reproduction -----------------------------
+
+// crgReader is a graphstore.CodeGraphReader seeded the way the code-review-graph
+// ingestion stores a symbol: an ABSOLUTE file path and a "<abs-file>::<decl>"
+// qualified name. It embeds fakeReader for the unused stubs and overrides the
+// three methods kgquery drives, so it exercises the real Go profile end-to-end
+// with code-review-graph-shaped data.
+type crgReader struct {
+	fakeReader
+	absFile string
+	qn      string
+}
+
+func (r crgReader) node() graphstore.GraphNode {
+	return graphstore.GraphNode{
+		Kind:          graphstore.NodeKindFunction,
+		Name:          "Bar",
+		QualifiedName: r.qn,
+		FilePath:      r.absFile,
+		Language:      "go",
+		LineStart:     10,
+		LineEnd:       30,
+	}
+}
+
+func (r crgReader) GetAllFiles() ([]string, error) { return []string{r.absFile}, nil }
+func (r crgReader) GetNodesByFile(string) ([]graphstore.GraphNode, error) {
+	return []graphstore.GraphNode{r.node()}, nil
+}
+func (r crgReader) GetNode(qn string) (*graphstore.GraphNode, error) {
+	if qn != r.qn {
+		return nil, nil
+	}
+	n := r.node()
+	return &n, nil
+}
+
+var _ graphstore.CodeGraphReader = crgReader{}
+
+// TestGenerate_GoNormalizesAbsoluteCRGPaths is the release-blocker reproduction
+// against the REAL Go profile: with code-review-graph data (absolute paths +
+// "file::name" symbols) the pre-fix generator emitted `go build .//<abs>/...`
+// and a "<abs>::Bar" symbol. This drives the production path (gencore.New →
+// resolveRepoRoot → os.Getwd, pinned via t.Chdir) and asserts the emitted spec
+// is a well-formed repo-relative Go package pattern with a clean symbol and no
+// absolute path anywhere.
+func TestGenerate_GoNormalizesAbsoluteCRGPaths(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Chdir(repoRoot)
+	wd, err := os.Getwd() // canonical root gencore.New resolves; may differ from repoRoot via symlinks
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	absFile := filepath.Join(wd, "internal", "eval", "foo.go")
+	q, err := kgquery.New(crgReader{absFile: absFile, qn: absFile + "::Bar"})
+	if err != nil {
+		t.Fatalf("kgquery.New: %v", err)
+	}
+	g, err := gencore.New(q, Profile)
+	if err != nil {
+		t.Fatalf("gencore.New: %v", err)
+	}
+	spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: gencore.TemplateImplPureFn})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	const wantPattern = "./internal/eval/..."
+	if !contains(spec.Verification.TestCmd, wantPattern) {
+		t.Errorf("TestCmd = %v, want a well-formed repo-relative pattern %q", spec.Verification.TestCmd, wantPattern)
+	}
+	if !contains(spec.Verification.BuildCmd, wantPattern) {
+		t.Errorf("BuildCmd = %v, want a well-formed repo-relative pattern %q", spec.Verification.BuildCmd, wantPattern)
+	}
+	for _, cmd := range [][]string{spec.Verification.BuildCmd, spec.Verification.TestCmd} {
+		for _, tok := range cmd {
+			if filepath.IsAbs(tok) || strings.Contains(tok, "//") {
+				t.Errorf("verification token %q leaks an absolute path (pre-fix `.//<abs>` bug)", tok)
+			}
+		}
+	}
+	if got := spec.SolutionArtifacts[0].Path; got != "internal/eval/foo.go" {
+		t.Errorf("artifact path = %q, want repo-relative", got)
+	}
+	want := "Implement the function `Bar` in `internal/eval/foo.go` so that the existing tests pass.\n\n" +
+		"Nearby symbols (within 2 hops): (none)\n\n" +
+		"Constraints:\n" +
+		"- Do not modify any existing *_test.go file.\n" +
+		"- The solution must satisfy: go test -race ./internal/eval/..."
+	if spec.Prompt != want {
+		t.Errorf("prompt mismatch:\n got: %q\nwant: %q", spec.Prompt, want)
+	}
+	data, err := spec.MarshalYAML()
+	if err != nil {
+		t.Fatalf("MarshalYAML: %v", err)
+	}
+	for _, needle := range []string{filepath.ToSlash(absFile), filepath.ToSlash(wd), "::"} {
+		if strings.Contains(string(data), needle) {
+			t.Errorf("emitted spec still contains absolute marker %q:\n%s", needle, data)
+		}
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- Go path/command helpers --------------------------------------------------

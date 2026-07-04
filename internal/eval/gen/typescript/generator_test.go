@@ -2,6 +2,8 @@ package tsgen
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -82,6 +84,82 @@ func TestProfile_Registers(t *testing.T) {
 	}
 	if _, ok := r.Lookup(eval.LanguageTypeScript); !ok {
 		t.Fatal("generator not found in registry after Register")
+	}
+}
+
+// ---- code-review-graph absolute-path reproduction -----------------------------
+
+// crgReader is a graphstore.CodeGraphReader seeded the way the code-review-graph
+// ingestion stores a symbol: an ABSOLUTE file path and a "<abs-file>::<decl>"
+// qualified name. It embeds fakeReader for the unused stubs.
+type crgReader struct {
+	fakeReader
+	absFile string
+	qn      string
+}
+
+func (r crgReader) node() graphstore.GraphNode {
+	return graphstore.GraphNode{
+		Kind: graphstore.NodeKindFunction, Name: "bar", QualifiedName: r.qn,
+		FilePath: r.absFile, Language: "typescript", LineStart: 1, LineEnd: 20,
+	}
+}
+
+func (r crgReader) GetAllFiles() ([]string, error) { return []string{r.absFile}, nil }
+func (r crgReader) GetNodesByFile(string) ([]graphstore.GraphNode, error) {
+	return []graphstore.GraphNode{r.node()}, nil
+}
+func (r crgReader) GetNode(qn string) (*graphstore.GraphNode, error) {
+	if qn != r.qn {
+		return nil, nil
+	}
+	n := r.node()
+	return &n, nil
+}
+
+var _ graphstore.CodeGraphReader = crgReader{}
+
+// TestGenerate_TsNormalizesAbsoluteCRGPaths proves the shared normalization
+// reaches the TypeScript profile: code-review-graph data (absolute path +
+// "file::name") yields a repo-relative node --test glob and a clean symbol, with
+// no absolute path in the emitted spec.
+func TestGenerate_TsNormalizesAbsoluteCRGPaths(t *testing.T) {
+	repoRoot := t.TempDir()
+	t.Chdir(repoRoot)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	absFile := filepath.Join(wd, "src", "foo", "foo.ts")
+	q, err := kgquery.New(crgReader{absFile: absFile, qn: absFile + "::bar"})
+	if err != nil {
+		t.Fatalf("kgquery.New: %v", err)
+	}
+	g, err := gencore.New(q, Profile)
+	if err != nil {
+		t.Fatalf("gencore.New: %v", err)
+	}
+	spec, err := g.Generate(context.Background(), eval.GenerateOptions{TemplateID: gencore.TemplateImplPureFn})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if got := spec.SolutionArtifacts[0].Path; got != "src/foo/foo.ts" {
+		t.Errorf("artifact path = %q, want repo-relative", got)
+	}
+	if got := spec.Verification.TestCmd; len(got) == 0 || got[len(got)-1] != "src/foo/*.test.ts" {
+		t.Errorf("TestCmd = %v, want it to end with the repo-relative glob %q", got, "src/foo/*.test.ts")
+	}
+	if !strings.Contains(spec.Prompt, "`bar`") || !strings.Contains(spec.Prompt, "`src/foo/foo.ts`") {
+		t.Errorf("prompt should name the clean symbol and relative file:\n%s", spec.Prompt)
+	}
+	data, err := spec.MarshalYAML()
+	if err != nil {
+		t.Fatalf("MarshalYAML: %v", err)
+	}
+	for _, needle := range []string{filepath.ToSlash(absFile), filepath.ToSlash(wd), "::"} {
+		if strings.Contains(string(data), needle) {
+			t.Errorf("emitted spec still contains absolute marker %q:\n%s", needle, data)
+		}
 	}
 }
 
