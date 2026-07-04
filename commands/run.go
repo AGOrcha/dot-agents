@@ -103,18 +103,35 @@ func runRecipe(path string, dispatch recipeDispatcher) error {
 	return nil
 }
 
-// dispatchStep tokenizes one effective recipe line and dispatches it.
+// expandEnv applies $VAR and ${VAR} substitution to a recipe line using
+// os.Expand semantics. Undefined variables expand to the empty string (the
+// os.Getenv default for unknown keys). Substitution runs on the whole raw line
+// BEFORE tokenization — this is intentional: a recipe is not a shell (D5), so
+// single quotes do NOT suppress expansion (quote-blind expansion).
+//
+// v1: env-var expansion only. Positional arguments ($1, $2, $@) are not
+// supported; os.Getenv("1") always returns "" so $1 silently expands to empty.
+func expandEnv(line string) string {
+	return os.Expand(line, os.Getenv)
+}
+
+// dispatchStep expands environment variables in line, tokenizes the result,
+// and dispatches the tokens.
 // n is the 1-based index of this step among the effective (dispatched) lines.
 // Any error — tokenization or dispatch — is returned as a wrapped error that
-// names the step index and the original source line, preserving the underlying
-// error via %w for errors.Is/errors.As and exit-code propagation (D4/R3).
+// names the step index and the ORIGINAL (un-expanded) source line. Keeping the
+// original line in the error is load-bearing: expanded values may contain
+// secrets (e.g. $TOKEN), so echoing them into error messages would leak
+// credentials. It also shows what the recipe author wrote, not the runtime
+// value. The underlying error is preserved via %w for errors.Is/errors.As and
+// exit-code propagation (D4/R3).
 func dispatchStep(n int, line string, dispatch recipeDispatcher) error {
-	tokens, err := tokenize(line)
+	tokens, err := tokenize(expandEnv(line)) // expand BEFORE tokenize; original line kept for error
 	if err == nil {
 		err = dispatch(tokens)
 	}
 	if err != nil {
-		return fmt.Errorf("step %d (%q) failed: %w", n, line, err)
+		return fmt.Errorf("step %d (%q) failed: %w", n, line, err) // ORIGINAL line, not expanded
 	}
 	return nil
 }
