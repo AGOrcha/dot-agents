@@ -58,13 +58,13 @@ describe('apiFetch Authorization header', () => {
   }
 
   it('includes Authorization header when token is set', async () => {
-    setAuthToken('bearer-tok-123')
+    setAuthToken('fake-test-token')
     const spy = mockFetch(200, { data: { ok: true } })
 
     await apiFetch('/test')
 
     const [, init] = spy.mock.calls[0] as [string, RequestInit]
-    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer bearer-tok-123')
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer fake-test-token')
   })
 
   it('omits Authorization header when no token is set', async () => {

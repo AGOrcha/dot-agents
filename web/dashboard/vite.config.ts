@@ -15,5 +15,10 @@ export default defineConfig({
     // runner, not Vitest. Without this exclusion Vitest picks them up and fails
     // because Playwright's test() is not compatible with Vitest's test context.
     exclude: ['**/node_modules/**', '**/e2e/**'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['lcov'],
+      reportsDirectory: 'coverage',
+    },
   },
 })

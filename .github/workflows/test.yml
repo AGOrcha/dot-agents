@@ -575,6 +575,28 @@ jobs:
           # (no scan-arg override needed).
           "$(go env GOPATH)/bin/gocovmerge" "${profiles[@]}" > coverage.out
 
+      # Generate dashboard (React/TS) vitest coverage so Sonar gets an lcov
+      # report for web/dashboard/src — without this the new TS lines land at
+      # 0% covered and trigger the new_coverage gate. The lcov is output to
+      # web/dashboard/coverage/lcov.info as configured in vite.config.ts and
+      # referenced by sonar.javascript.lcov.reportPaths in sonar-project.properties.
+      - name: Set up Node (dashboard vitest coverage)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm
+
+      - name: Install pnpm workspace dependencies
+        # pnpm-lock.yaml lives at the repo root (workspace root).
+        # --frozen-lockfile ensures the install matches the committed lock exactly.
+        run: pnpm install --frozen-lockfile
+
+      - name: Run dashboard vitest with lcov coverage
+        # Produces web/dashboard/coverage/lcov.info consumed by sonar.javascript.lcov.reportPaths.
+        run: pnpm --filter r2-observability-dashboard test:coverage
+
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and failed this
       # gate). Paired with sonar.scanner.skipJreProvisioning below.
