@@ -293,12 +293,46 @@ func TestAtgScopeContains_ExplicitFileAndDirPrefix(t *testing.T) {
 	}
 }
 
-func TestAtgEnumerateScopeSymbols_ExportedOnly(t *testing.T) {
+func TestATG_FileScope_UnexportedSiblingTestExpands(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, filepath.Join(dir, "pkg", "foo.go"), "pkg", "func helper() {}\n")
+	writeRefTestFile(t, filepath.Join(dir, "pkg", "foo_test.go"), "pkg", "helper")
+
+	warn := captureStderr(t, func() {
+		if err := checkFanoutAssertingTestScope(dir, []string{"pkg/foo.go"}, false); err != nil {
+			t.Errorf("same-package unexported symbol should EXPAND, got: %v", err)
+		}
+	})
+	if !strings.Contains(warn, "foo_test.go") || !strings.Contains(warn, "helper") {
+		t.Errorf("EXPAND warning should name unexported symbol and test file, got: %q", warn)
+	}
+}
+
+func TestATG_CrossPackageUnexportedDoesNotRefuse(t *testing.T) {
+	dir := t.TempDir()
+	writeSourceFile(t, filepath.Join(dir, "pkg", "foo.go"), "pkg", "func helper() {}\n")
+	writeRefTestFile(t, filepath.Join(dir, "other", "helper_test.go"), "other", "helper")
+
+	if err := checkFanoutAssertingTestScope(dir, []string{"pkg/"}, false); err != nil {
+		t.Errorf("unexported cross-package name must not REFUSE, got: %v", err)
+	}
+}
+
+func TestAtgEnumerateScopeSymbols_IncludesExportedAndUnexported(t *testing.T) {
 	dir := t.TempDir()
 	writeSourceFile(t, filepath.Join(dir, "mypkg", "x.go"), "mypkg", "func Exported() {}\nfunc unexported() {}\n")
 	symbols := atgEnumerateScopeSymbols(dir, []string{"mypkg/"})
-	if len(symbols) != 1 || symbols[0].Name != "Exported" {
-		t.Errorf("expected exactly [Exported], got %+v", symbols)
+	names := symbolNameSet(symbols)
+	if !names["Exported"] || !names["unexported"] {
+		t.Errorf("expected exported and unexported symbols, got %+v", symbols)
+	}
+	for _, s := range symbols {
+		if s.Name == "Exported" && !s.Exported {
+			t.Errorf("Exported symbol should record Exported=true: %+v", s)
+		}
+		if s.Name == "unexported" && s.Exported {
+			t.Errorf("unexported symbol should record Exported=false: %+v", s)
+		}
 	}
 }
 
@@ -391,11 +425,13 @@ func TestAtgReferencedIdents_MalformedReturnsNil(t *testing.T) {
 }
 
 func TestAtgClassifyTestFile_StrictestRefuse(t *testing.T) {
-	declDirs := map[string]map[string]bool{
-		"Same":  {"/proj/pkg": true},
-		"Cross": {"/proj/other": true},
+	pkgDir := filepath.Join("proj", "pkg")
+	otherDir := filepath.Join("proj", "other")
+	decls := map[string][]atgSymbolDecl{
+		"Same":  {{DeclDir: pkgDir, Exported: true}},
+		"Cross": {{DeclDir: otherDir, Exported: true}},
 	}
-	v, ok := atgClassifyTestFile("/proj/pkg/x_test.go", []string{"Cross", "Same"}, declDirs)
+	v, ok := atgClassifyTestFile(filepath.Join(pkgDir, "x_test.go"), []string{"Cross", "Same"}, decls)
 	if !ok {
 		t.Fatal("expected a violation")
 	}
@@ -408,17 +444,28 @@ func TestAtgClassifyTestFile_StrictestRefuse(t *testing.T) {
 }
 
 func TestAtgClassifyTestFile_AllSameExpand(t *testing.T) {
-	declDirs := map[string]map[string]bool{"Same": {"/proj/pkg": true}}
-	v, ok := atgClassifyTestFile("/proj/pkg/x_test.go", []string{"Same"}, declDirs)
+	pkgDir := filepath.Join("proj", "pkg")
+	decls := map[string][]atgSymbolDecl{"Same": {{DeclDir: pkgDir, Exported: true}}}
+	v, ok := atgClassifyTestFile(filepath.Join(pkgDir, "x_test.go"), []string{"Same"}, decls)
 	if !ok || v.Kind != atgViolationExpand {
 		t.Errorf("all-same should EXPAND, got ok=%v kind=%q", ok, v.Kind)
 	}
 }
 
 func TestAtgClassifyTestFile_NoMatchNoViolation(t *testing.T) {
-	declDirs := map[string]map[string]bool{"Same": {"/proj/pkg": true}}
-	if _, ok := atgClassifyTestFile("/proj/pkg/x_test.go", nil, declDirs); ok {
+	pkgDir := filepath.Join("proj", "pkg")
+	decls := map[string][]atgSymbolDecl{"Same": {{DeclDir: pkgDir, Exported: true}}}
+	if _, ok := atgClassifyTestFile(filepath.Join(pkgDir, "x_test.go"), nil, decls); ok {
 		t.Error("no matched names should yield no violation")
+	}
+}
+
+func TestAtgClassifyTestFile_UnexportedCrossDoesNotViolate(t *testing.T) {
+	pkgDir := filepath.Join("proj", "pkg")
+	otherDir := filepath.Join("proj", "other")
+	decls := map[string][]atgSymbolDecl{"helper": {{DeclDir: otherDir, Exported: false}}}
+	if _, ok := atgClassifyTestFile(filepath.Join(pkgDir, "x_test.go"), []string{"helper"}, decls); ok {
+		t.Error("unexported cross-package name should not violate")
 	}
 }
 

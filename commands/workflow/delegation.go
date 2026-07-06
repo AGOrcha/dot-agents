@@ -2250,16 +2250,16 @@ func closeoutReconciledStatus(decision string) string {
 // ── §0d asserting-test-scope gate ────────────────────────────────────────────
 //
 // Implements delegation-lifecycle §0d (coverage-delta forecast) mechanically:
-// for every EXPORTED symbol declared in the Go write_scope, find *_test.go files
-// OUTSIDE write_scope that reference it, then classify each such file:
+// for every Go symbol declared in the write_scope, find *_test.go files OUTSIDE
+// write_scope that reference it, then classify each such file:
 //
 //   - EXPAND (warn, non-blocking): the test lives in the SAME package directory
 //     as a declaring symbol but is not itself listed in write_scope. It is part
 //     of the same disjoint slice, so the orchestrator merely needs to widen the
 //     scope to include it.
-//   - REFUSE (hard error, aborts fanout): the test lives in a DIFFERENT package.
-//     Silently widening scope across packages shatters the disjoint-slice
-//     invariant, so the bundle is bounced back.
+//   - REFUSE (hard error, aborts fanout): the test references an EXPORTED symbol
+//     declared in a DIFFERENT package. Silently widening scope across packages
+//     shatters the disjoint-slice invariant, so the bundle is bounced back.
 //
 // Matching is AST-based: each *_test.go is parsed with go/ast and its referenced
 // identifiers are collected, which inherently excludes names appearing only in
@@ -2289,10 +2289,11 @@ var skippedDirNames = map[string]bool{
 	"worktrees": true,
 }
 
-// atgScopeSymbol is an exported identifier declared in the fanout write_scope.
+// atgScopeSymbol is an identifier declared in the fanout write_scope.
 type atgScopeSymbol struct {
-	Name    string
-	DeclDir string // absolute path to declaring package directory
+	Name     string
+	DeclDir  string // absolute path to declaring package directory
+	Exported bool
 }
 
 // atgViolation is one out-of-scope *_test.go file that references scope
@@ -2321,7 +2322,7 @@ func checkFanoutAssertingTestScope(projectPath string, writeScope []string, skip
 	}
 	symbols := atgEnumerateScopeSymbols(projectPath, writeScope)
 	if len(symbols) == 0 {
-		// No exported Go symbols in scope (non-Go scope or empty package); skip gate.
+		// No Go symbols in scope (non-Go scope or empty package); skip gate.
 		return nil
 	}
 	scope := atgParseScope(projectPath, writeScope)
@@ -2364,9 +2365,9 @@ func (s atgScope) contains(testAbs string) bool {
 	return false
 }
 
-// atgEnumerateScopeSymbols collects exported top-level identifiers declared by
-// non-test .go files reachable from the write_scope paths. Directory entries
-// are walked RECURSIVELY (a scope of "commands/" covers "commands/workflow/…");
+// atgEnumerateScopeSymbols collects top-level identifiers declared by non-test
+// .go files reachable from the write_scope paths. Directory entries are walked
+// RECURSIVELY (a scope of "commands/" covers "commands/workflow/…");
 // file entries contribute only that single file.
 func atgEnumerateScopeSymbols(projectPath string, writeScope []string) []atgScopeSymbol {
 	var symbols []atgScopeSymbol
@@ -2417,7 +2418,7 @@ func atgCollectFromDirRecursive(absDir string, out *[]atgScopeSymbol) {
 	})
 }
 
-// atgCollectFromFile parses a Go file and appends exported top-level symbols.
+// atgCollectFromFile parses a Go file and appends top-level symbols.
 func atgCollectFromFile(absPath string, out *[]atgScopeSymbol) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, absPath, nil, 0)
@@ -2430,46 +2431,44 @@ func atgCollectFromFile(absPath string, out *[]atgScopeSymbol) {
 	}
 }
 
-// atgCollectFromDecl extracts exported names from a single top-level declaration.
+// atgCollectFromDecl extracts names from a single top-level declaration.
 func atgCollectFromDecl(decl ast.Decl, dir string, out *[]atgScopeSymbol) {
 	switch d := decl.(type) {
 	case *ast.FuncDecl:
-		if d.Name.IsExported() {
-			*out = append(*out, atgScopeSymbol{Name: d.Name.Name, DeclDir: dir})
-		}
+		*out = append(*out, atgScopeSymbol{Name: d.Name.Name, DeclDir: dir, Exported: d.Name.IsExported()})
 	case *ast.GenDecl:
 		atgCollectFromGenDecl(d, dir, out)
 	}
 }
 
-// atgCollectFromGenDecl extracts exported names from a GenDecl (type/var/const).
+// atgCollectFromGenDecl extracts names from a GenDecl (type/var/const).
 func atgCollectFromGenDecl(d *ast.GenDecl, dir string, out *[]atgScopeSymbol) {
 	for _, spec := range d.Specs {
 		switch s := spec.(type) {
 		case *ast.TypeSpec:
-			if s.Name.IsExported() {
-				*out = append(*out, atgScopeSymbol{Name: s.Name.Name, DeclDir: dir})
-			}
+			*out = append(*out, atgScopeSymbol{Name: s.Name.Name, DeclDir: dir, Exported: s.Name.IsExported()})
 		case *ast.ValueSpec:
 			for _, name := range s.Names {
-				if name.IsExported() {
-					*out = append(*out, atgScopeSymbol{Name: name.Name, DeclDir: dir})
-				}
+				*out = append(*out, atgScopeSymbol{Name: name.Name, DeclDir: dir, Exported: name.IsExported()})
 			}
 		}
 	}
 }
 
-// atgSymbolDeclDirs maps each scope-symbol name to the set of directories that
-// declare it. A name may be declared in more than one package when the same
-// exported identifier appears across multiple scoped directories.
-func atgSymbolDeclDirs(symbols []atgScopeSymbol) map[string]map[string]bool {
-	m := make(map[string]map[string]bool)
+// atgSymbolDecl preserves where a matched symbol was declared and whether it is
+// visible across package boundaries.
+type atgSymbolDecl struct {
+	DeclDir  string
+	Exported bool
+}
+
+// atgSymbolDecls maps each scope-symbol name to the declarations behind it. A
+// name may be declared in more than one package when the same identifier appears
+// across multiple scoped directories.
+func atgSymbolDecls(symbols []atgScopeSymbol) map[string][]atgSymbolDecl {
+	m := make(map[string][]atgSymbolDecl)
 	for _, s := range symbols {
-		if m[s.Name] == nil {
-			m[s.Name] = make(map[string]bool)
-		}
-		m[s.Name][s.DeclDir] = true
+		m[s.Name] = append(m[s.Name], atgSymbolDecl{DeclDir: s.DeclDir, Exported: s.Exported})
 	}
 	return m
 }
@@ -2524,10 +2523,10 @@ func atgReferencedIdents(path string) map[string]bool {
 
 // atgMatchedNames returns the sorted set of scope-symbol names referenced by the
 // test file at path.
-func atgMatchedNames(path string, declDirs map[string]map[string]bool) []string {
+func atgMatchedNames(path string, decls map[string][]atgSymbolDecl) []string {
 	idents := atgReferencedIdents(path)
 	var matched []string
-	for name := range declDirs {
+	for name := range decls {
 		if idents[name] {
 			matched = append(matched, name)
 		}
@@ -2538,17 +2537,21 @@ func atgMatchedNames(path string, declDirs map[string]map[string]bool) []string 
 
 // atgClassifyTestFile splits an out-of-scope test file's matched symbols into
 // same-package and cross-package sets and returns the STRICTEST violation:
-// REFUSE if ANY matched symbol is declared only in other packages (listing all
-// cross-package offenders), otherwise EXPAND. REFUSE always wins so a same-dir
-// match cannot mask a cross-package break in the same file.
-func atgClassifyTestFile(testPath string, matched []string, declDirs map[string]map[string]bool) (atgViolation, bool) {
+// REFUSE if ANY matched exported symbol is declared in another package (listing
+// all cross-package offenders), otherwise EXPAND for same-package matches.
+// Unexported names never drive cross-package REFUSE: another package cannot
+// legally assert on them, and common names like helper/setup would false-positive.
+// REFUSE always wins so a same-dir match cannot mask a cross-package break in
+// the same file.
+func atgClassifyTestFile(testPath string, matched []string, decls map[string][]atgSymbolDecl) (atgViolation, bool) {
 	testDir := filepath.Dir(testPath)
 	var crossPkg, samePkg []string
 	for _, name := range matched {
-		if declDirs[name][testDir] {
-			samePkg = append(samePkg, name)
-		} else {
+		same, exportedCross := atgClassifySymbolForTestDir(testDir, decls[name])
+		if exportedCross {
 			crossPkg = append(crossPkg, name)
+		} else if same {
+			samePkg = append(samePkg, name)
 		}
 	}
 	if len(crossPkg) > 0 {
@@ -2560,20 +2563,33 @@ func atgClassifyTestFile(testPath string, matched []string, declDirs map[string]
 	return atgViolation{}, false
 }
 
+func atgClassifySymbolForTestDir(testDir string, decls []atgSymbolDecl) (same, exportedCross bool) {
+	for _, decl := range decls {
+		if decl.DeclDir == testDir {
+			same = true
+			continue
+		}
+		if decl.Exported {
+			exportedCross = true
+		}
+	}
+	return same, exportedCross
+}
+
 // atgFindCallers walks all *_test.go files and returns one classified violation
 // per out-of-scope test file that references a scope symbol.
 func atgFindCallers(projectPath string, symbols []atgScopeSymbol, scope atgScope) []atgViolation {
-	declDirs := atgSymbolDeclDirs(symbols)
+	decls := atgSymbolDecls(symbols)
 	var violations []atgViolation
 	_ = atgWalkTestFiles(projectPath, func(path string) error {
 		if scope.contains(path) {
 			return nil
 		}
-		matched := atgMatchedNames(path, declDirs)
+		matched := atgMatchedNames(path, decls)
 		if len(matched) == 0 {
 			return nil
 		}
-		if v, ok := atgClassifyTestFile(path, matched, declDirs); ok {
+		if v, ok := atgClassifyTestFile(path, matched, decls); ok {
 			violations = append(violations, v)
 		}
 		return nil
