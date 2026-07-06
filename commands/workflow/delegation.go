@@ -2276,6 +2276,7 @@ const (
 	atgViolationExpand  = "expand"
 	atgViolationRefuse  = "refuse"
 	atgSkipFlag         = "--skip-asserting-test-gate"
+	atgTestFileSuffix   = "_test.go"
 	atgExpandWarnHeader = "warning: asserting-test scope gate: test file(s) in a write_scope package assert on scope symbols but are not listed in write_scope (consider widening scope to include them):\n"
 	atgRefuseHeader     = "fanout asserting-test scope gate: write_scope changes exported symbol(s) referenced by test file(s) in OTHER packages (cannot fix within scope — would shatter the disjoint-slice invariant):\n"
 )
@@ -2380,7 +2381,7 @@ func atgEnumerateScopeSymbols(projectPath string, writeScope []string) []atgScop
 
 // isNonTestGoFile reports whether name is a non-test Go source file.
 func isNonTestGoFile(name string) bool {
-	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, atgTestFileSuffix)
 }
 
 // atgCollectFromPath collects symbols from an absolute path (file or directory).
@@ -2486,7 +2487,7 @@ func atgWalkTestFiles(projectPath string, visit func(path string) error) error {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, "_test.go") {
+		if !strings.HasSuffix(path, atgTestFileSuffix) {
 			return nil
 		}
 		return visit(path)
