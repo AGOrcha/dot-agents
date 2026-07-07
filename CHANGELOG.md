@@ -12,7 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A capability release: a code-task generation and evaluation pipeline (`da eval`),
 shebang-executable `da run` recipe scripts, review RBAC plus a tamper-evident
 audit log, and the crash-survivable session-handoff journal (`da workflow
-journal`). All additive — no breaking changes.
+journal`). This 0.5.0 entry also backfills the previously missed 0.4.2
+CHANGELOG window — most notably the layered-config follow-through and the macOS
+release-signing repair that shipped in that cut. All additive — no breaking
+changes.
 
 ### Added
 
@@ -55,6 +58,12 @@ journal`). All additive — no breaking changes.
   (snapshot plus replay, re-verified against reality), `prune` bounds retention,
   and `append` writes a single low-level event.
 
+- **Layered config follow-through (`0.4.2` backfill).** The v2 config model
+  gained its operator/portability surfaces: unified config profiles on the
+  shared substrate, distributable config manifests, `da init --from` cross-
+  machine bootstrap, content-addressed `.agentsrc.lock` units keyed by
+  `inputs_digest`, and the `da config sync` / `lint` / `verify` command family.
+
 ### Changed
 
 - **Iteration scoring rubric (RubricVersion 3.0.0).** Scores now incorporate a
@@ -79,6 +88,11 @@ journal`). All additive — no breaking changes.
 - **`da workflow plan archive` persistence.** The archive move is now committed by
   default (it was previously silently non-persistent), while archive sweeps
   correctly skip the cwd-bound commit.
+
+- **macOS release signing (`0.4.2` backfill).** The 0.4.2 cut repaired Developer
+  ID signing by rebuilding the full-chain signing input and added a real-Mac
+  verification gate for release signatures/executability so the broken-signature
+  path does not silently ship again.
 
 ### Internal
 
