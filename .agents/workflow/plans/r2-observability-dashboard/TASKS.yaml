@@ -81,7 +81,7 @@ tasks:
   app_type: go-cli
 - id: t03-handlers-rest
   title: Implement HTTP handlers for the REST API per the contract
-  status: pending
+  status: completed
   depends_on:
   - t01-api-contract-design
   - t02-storage-read-layer
