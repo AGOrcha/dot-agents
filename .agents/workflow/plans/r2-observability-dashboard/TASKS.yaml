@@ -137,7 +137,7 @@ tasks:
     \ is\nR3's EventBus (via t13) and a filesystem watcher bridge (t06)."
   app_type: go-cli
 - id: t05-sse-handler
-  title: Wire /api/stream SSE handler to broker
+  title: Wire /api/v1/observability/events SSE handler to broker
   status: pending
   depends_on:
   - t03-handlers-rest
@@ -147,10 +147,18 @@ tasks:
   - t12-e2e-smoke-live-iteration
   owner: dot-agents
   write_scope:
+  - internal/dashboard/handlers/handlers.go
   - internal/dashboard/handlers/stream.go
   - internal/dashboard/handlers/stream_test.go
   verification_required: true
-  notes: 'Long-lived HTTP handler emitting text/event-stream. Each
+  notes: 'Long-lived HTTP handler for GET /api/v1/observability/events
+    emitting text/event-stream. Route registration lives in handlers.go
+    because Mount.routes() owns every full-path binding; stream.go owns the
+    handler implementation and stream_test.go owns the endpoint proof. Treat
+    design/API.md as authoritative over older /api/stream references in
+    adjacent narrative docs/schema descriptions.
+
+    Each
 
     connected client subscribes to the broker, formats incoming
 
@@ -302,7 +310,7 @@ tasks:
     \ /iterations/:n loads IterationDetailView\nstandalone (no run context required)."
   app_type: web
 - id: t11-frontend-sse-integration
-  title: Connect frontend to /api/stream and invalidate queries on events
+  title: Connect frontend to /api/v1/observability/events and invalidate queries on events
   status: pending
   depends_on:
   - t08-frontend-skeleton
@@ -341,7 +349,7 @@ tasks:
   verification_required: true
   notes: "Two complementary tests:\n\n(a) Go integration test\n(tests/e2e/dashboard_live_iteration_test.go):\n\
     \  1. spin up cmd/da-dashboard against a fresh tmpdir iter-log\n     fixture (3 iters);\n  2. open\
-    \ an SSE client to /api/stream;\n  3. write a new iter-4.yaml + run scoring.ScoreIteration +\n   \
+    \ an SSE client to /api/v1/observability/events;\n  3. write a new iter-4.yaml + run scoring.ScoreIteration +\n   \
     \  write the sidecar;\n  4. assert an iteration.scored frame arrives within 2s.\n\n(b) Playwright\
     \ UI smoke (web/dashboard/e2e/):\n  1. start the standalone service in test mode against the\n   \
     \  same fixture,\n  2. navigate to /, assert RunsGrid renders,\n  3. drill into /runs/:sid, assert\
