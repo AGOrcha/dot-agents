@@ -16,28 +16,34 @@ decision in the agent-ops-hardening design (§3, P3.12); see
 
 ## Why route at all
 
-The two toolchains have measured, complementary strengths and weaknesses, not
-just preferences:
+The routing is evidence-based, not stylistic:
 
-- **Codex** showed clean cross-tool resume of rate-limited Claude sessions,
-  impeccable read-only adversarial review (it caught a `sync.go` lock-writer and
-  a `docsaccess/client.go` HTTP-token leak), and native spawn/wait/close staged
-  delegation. Its dominant mechanical tax was its sandbox: it could not write the
-  default Go build cache, producing more than a thousand `GOCACHE=/tmp`
-  workarounds, and rate-limit caps with no failover once killed a pipeline.
-- **Claude** carried the heavy iterative build-test loops in this run, but paid
-  its own environment taxes (the macOS `~/Documents` TCC lock; the Sonar pre-push
-  scanner flaking on `dist/`/`.scannerwork`).
+- The 2026-06-25 graph-chain wave produced new **cross-harness** evidence:
+  Codex adversarial review found a `BLOCKER` or `HIGH` issue in every reviewed
+  Claude implementation PR in that wave, and it also caught incomplete fixes on
+  re-review. The misses were not cosmetic; they included tautological parity,
+  papered lifecycle, and unwired gate defects that same-model Claude review did
+  not catch.
+- In the same wave, Codex implementation work itself was clean, but the harness
+  still had friction around self-publish and repo-faithful gate replay. Claude
+  was the practical rescue path for publish, per-file gate reruns, and cross-OS
+  repro when the delegated Codex slice needed a full local toolchain handoff.
 
-Routing is therefore about playing to each tool's strength and away from its tax,
-until the environment fixes (agent-ops-hardening P0) remove the taxes — after
-which either tool can take either kind of work.
+Routing therefore optimizes for the **second brain** where it pays off most
+(review) and the **more friction-free execution harness** where it still matters
+(implementation closeout, publish, and gate repro).
 
-## Route to Codex
+## Route to Codex first
 
-- **Adversarial / second-opinion review.** Read-only, cited code review where the
-  goal is to find what the implementing agent missed. Codex must stay read-only
-  on these tasks and cite the file and line for every finding.
+- **Cross-harness adversarial review on substantive work.** Treat this as the
+  recommended blocking gate for non-trivial changes: production Go logic,
+  workflow/runtime changes, test or gate semantics, plan/skill/refinement work
+  that changes how the system operates, and any fix whose correctness depends on
+  more than "tests passed". If Codex returns `BLOCKER` or `HIGH`, do not merge
+  until the finding is resolved and re-reviewed.
+- **Read-only second-opinion review generally.** Codex is the preferred cited
+  reviewer when the goal is to find what the implementing agent missed. Keep the
+  read-only boundary explicit in the brief and require file/line citations.
 - **Cross-tool resume of rate-limited sessions.** When a Claude session hits a
   rate-limit cap mid-flight, Codex can pick up and continue the work rather than
   stalling the pipeline.
@@ -45,22 +51,37 @@ which either tool can take either kind of work.
   a clear stage boundary (impl / verify / review), where Codex's native
   spawn/wait/close delegation fits.
 
-## Keep on Claude
+## Keep Claude as primary implementation + rescue
 
-- **Heavy iterative Go build-test loops.** Tight edit/`go test`/re-edit cycles —
-  the work that depends on a fast, writable local toolchain — stay on Claude
-  while Codex's sandbox cannot write the default Go cache and Claude's own env
-  taxes are being fixed.
+- **Implementation-heavy loops.** Tight edit/`go test`/re-edit cycles, especially
+  when the change needs repeated local command execution or branch surgery, still
+  fit Claude best.
+- **Publish and gate-running rescue.** When a Codex-authored change needs branch
+  publish, PR updates, per-file coverage reruns, sonar/native gate replay, or
+  cross-OS verification, hand off to Claude rather than pretending the Codex
+  harness already proved those steps.
+- **Cross-OS / CI-parity repro.** Use Claude for the repro path that depends on
+  the repo's real gate machinery (`make gate`, `make gate-cross`, Windows/runtime
+  checks, or other local/CI parity work). The 2026-06-25 wave showed that this
+  friction is operationally real even when the code change itself is sound.
 
-Once the environment taxes are fixed at the source (Codex sandbox `GOCACHE`/
-`GOTMPDIR` writable; the `~/Documents` TCC move; Sonar scanner exclusions), this
-build-test work is no longer Claude-only — route it to **either** tool by
-availability and load.
+## Rescue pattern
+
+Use the tools together, in this order:
+
+1. Implement in Claude or Codex.
+2. Run Codex cross-harness review as the independent second brain on substantive
+   work.
+3. If the change was authored in Codex and needs publish or repo-faithful gate
+   replay, hand the branch to Claude for gate-running and closeout.
+4. Re-run Codex review after any non-trivial fix prompted by that review.
 
 ## Notes
 
+- Same-model review is not an acceptable substitute for the cross-harness pass
+  when the task is substantive; the graph-chain wave showed that it can miss
+  defects that the independent harness catches immediately.
 - Keep the read-only boundary explicit in any review or plan task brief routed to
-  Codex; front-loading it is one of the brief-template hardening rules in the same
-  design (§3, P2).
-- This routing is a policy, not a hard gate; it should track the environment-tax
-  state above and be revisited when those fixes land.
+  Codex; front-loading it remains one of the brief-template hardening rules.
+- This is still a routing policy, not an ownership silo. If the harness friction
+  changes materially, update the policy to match the new measured behavior.
