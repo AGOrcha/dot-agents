@@ -235,7 +235,7 @@ tasks:
       app_type: go-cli
     - id: service-runtime
       title: Service runtime that composes scheduler + http + bus + tasks
-      status: pending
+      status: completed
       depends_on:
         - http-server
         - tasks-iterlog-ingester
