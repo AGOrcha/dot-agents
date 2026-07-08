@@ -17,6 +17,10 @@ import (
 	"github.com/go-git/go-billy/v6/memfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/client"
+	"github.com/go-git/go-git/v6/plumbing/transport"
+	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v6/plumbing/transport/ssh/sshagent"
 	"github.com/go-git/go-git/v6/storage/memory"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -304,9 +308,18 @@ func (f *gitFetcher) clone(ctx context.Context, url, ref string) (*gogit.Reposit
 // billy filesystem, so nothing is written to disk and no temp dir cleanup is
 // needed. Returns the repository (for HEAD) and the worktree filesystem.
 func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
+	auth, err := gitSSHAuth(url)
+	if err != nil {
+		return nil, nil, err
+	}
+	var clientOpts []client.Option
+	if auth != nil {
+		clientOpts = []client.Option{client.WithSSHAuth(auth)}
+	}
 	fs := memfs.New()
 	repo, err := gogit.CloneContext(ctx, memory.NewStorage(), fs, &gogit.CloneOptions{
 		URL:           url,
+		ClientOptions: clientOpts,
 		ReferenceName: plumbing.ReferenceName(ref),
 		SingleBranch:  true,
 		Depth:         1,
@@ -316,6 +329,128 @@ func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, b
 		return nil, nil, err
 	}
 	return repo, fs, nil
+}
+
+// gitSSHAuth builds go-git's SSH ClientConfig for an ssh:// (or SCP-style
+// git@host:path) rawURL, so a `git` config/package source authenticates the
+// same way the user's own `git clone`/`git push` for that URL already does —
+// no separate `eval $(ssh-agent) && ssh-add` just to run da.
+//
+// go-git v6 has no such fallback on its own: leaving ClientOptions unset
+// makes it call ssh.NewSSHAgentAuth unconditionally, which hard-fails with
+// "SSH agent requested but SSH_AUTH_SOCK not-specified" the instant
+// SSH_AUTH_SOCK is unset — even when the user has a perfectly usable
+// unencrypted default key (the common case: a plain shell often does not
+// have SSH_AUTH_SOCK exported even though a keychain/GUI agent exists and
+// `git clone`/`git push` for the same URL work fine).
+//
+// The preference order mirrors OpenSSH's own client:
+//  1. A running SSH agent (SSH_AUTH_SOCK set) — unchanged from before.
+//  2. Default identity files, in the order ssh(1) tries them, with any
+//     ~/.ssh/config `IdentityFile` for the host tried first (a more specific
+//     match than the bare defaults).
+//
+// A passphrase-protected key with no agent available surfaces a clear,
+// actionable error instead of go-git's raw "SSH_AUTH_SOCK not-specified".
+//
+// Returns (nil, nil) for a non-ssh URL: the caller then leaves ClientOptions
+// unset, so http(s)/file sources are completely unaffected by this fetcher's
+// auth building.
+func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
+	u, err := transport.ParseURL(rawURL)
+	if err != nil || u.Scheme != "ssh" {
+		return nil, nil
+	}
+	user := gogitssh.DefaultUsername
+	if u.User != nil {
+		if name := u.User.Username(); name != "" {
+			user = name
+		}
+	}
+
+	if sshagent.Available() {
+		return gogitssh.NewSSHAgentAuth(user)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and $HOME is unavailable to locate a default key: %w; run `eval $(ssh-agent) && ssh-add`, or export SSH_AUTH_SOCK", rawURL, err)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	candidates := append(sshConfigIdentityFiles(sshDir, u.Hostname()),
+		filepath.Join(sshDir, "id_ed25519"),
+		filepath.Join(sshDir, "id_rsa"),
+		filepath.Join(sshDir, "id_ecdsa"),
+	)
+
+	var lastErr error
+	for _, path := range candidates {
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		keyAuth, keyErr := gogitssh.NewPublicKeysFromFile(user, path, "")
+		if keyErr == nil {
+			return keyAuth, nil
+		}
+		lastErr = fmt.Errorf("%s: %w", path, keyErr)
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and the default SSH key needs a passphrase da cannot prompt for; run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent: %w", rawURL, lastErr)
+	}
+	return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and no default SSH key found in %s (looked for id_ed25519, id_rsa, id_ecdsa); run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent", rawURL, sshDir)
+}
+
+// sshConfigIdentityFiles returns the IdentityFile paths <sshDir>/config
+// declares for host, in file order, tilde-expanded. It implements just the
+// slice of ssh_config(5) this fetcher needs — literal/glob (`*`/`?`) `Host`
+// patterns naming one or more `IdentityFile` lines — instead of pulling in a
+// full config-parser dependency. A missing config file or no matching block
+// yields nil, so the caller falls through to the OpenSSH default identity
+// list unchanged.
+func sshConfigIdentityFiles(sshDir, host string) []string {
+	data, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	if err != nil {
+		return nil
+	}
+	home, _ := os.UserHomeDir() // best-effort tilde-expansion below
+
+	var files []string
+	matched := false
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "host":
+			matched = hostPatternMatches(fields[1:], host)
+		case "identityfile":
+			if matched {
+				files = append(files, expandTildePath(fields[1], home))
+			}
+		}
+	}
+	return files
+}
+
+// hostPatternMatches reports whether any of an ssh_config `Host` line's
+// literal/glob (`*`/`?`) patterns matches host.
+func hostPatternMatches(patterns []string, host string) bool {
+	for _, pat := range patterns {
+		if ok, _ := filepath.Match(pat, host); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// expandTildePath expands a leading "~/" in path against home. Returns path
+// unchanged when it has no such prefix or home is unknown.
+func expandTildePath(path, home string) string {
+	if home == "" || !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	return filepath.Join(home, path[2:])
 }
 
 func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
