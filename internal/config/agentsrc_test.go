@@ -286,7 +286,7 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	tmp := t.TempDir()
 
 	orig := &AgentsRC{
-		Schema:   "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:   "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version:  1,
 		Project:  testProject,
 		Skills:   []string{"skill-a", "skill-b"},
@@ -963,7 +963,7 @@ func TestAgentsRCKnownFieldsNotDuplicated(t *testing.T) {
 func TestAgentsRCJSONShape(t *testing.T) {
 	tmp := t.TempDir()
 	rc := &AgentsRC{
-		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:  "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version: 1,
 		Project: "proj",
 		Skills:  []string{"s1"},
@@ -1105,7 +1105,7 @@ func TestMarshalJSON_OverlapWithExtraFieldsDoesNotOverwriteKnown(t *testing.T) {
 			"team":    json.RawMessage(`"platform"`),
 		},
 	}
-	rc.Schema = "https://dot-agents.dev/schemas/agentsrc.json"
+	rc.Schema = "https://agorcha.dev/schemas/agentsrc.schema.json"
 	data, err := json.Marshal(rc)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -1114,7 +1114,7 @@ func TestMarshalJSON_OverlapWithExtraFieldsDoesNotOverwriteKnown(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw["$schema"]), "dot-agents.dev") {
+	if !strings.Contains(string(raw["$schema"]), "agorcha.dev") {
 		t.Errorf("$schema overwritten by ExtraFields: %s", raw["$schema"])
 	}
 	if string(raw["team"]) != `"platform"` {

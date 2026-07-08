@@ -73,7 +73,7 @@ A minimal v2 manifest:
 
 ```json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "repo_id": "github.com/acme/manager-ui",
   "sources": [
     { "id": "acme", "type": "git", "url": "git@github.com:acme/agents-config.git", "ref": "main" }
@@ -381,7 +381,7 @@ validate.
 ```console
 $ cat .agentsrc.json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "repo_id": "github.com/acme/manager-ui",
   "kg": { "backend": "sqlite" }
 }
@@ -410,7 +410,7 @@ Declare the source and extend it:
 
 ```json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "repo_id": "github.com/acme/manager-ui",
   "sources": [
     { "id": "team", "type": "local", "path": "layers" }
