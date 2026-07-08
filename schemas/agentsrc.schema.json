@@ -252,8 +252,9 @@
         "commit": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 8,
-          "examples": ["ad213s5e"]
+          "maxLength": 40,
+          "description": "Git commit SHA the refresh was performed at. Full (40-char) SHA-1, as written by the refresh writer (commands.Commit, ldflags-injected from $GITHUB_SHA) — not the abbreviated 7-8 char form.",
+          "examples": ["ad213s5e", "c1245e559bf366c63487b2edbf5ac5371a48e0f7"]
         },
         "describe": {
           "type": "string",

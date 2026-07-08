@@ -87,6 +87,37 @@ func TestBuildLintReport_ValidManifestAndLayerPass(t *testing.T) {
 	}
 }
 
+// TestBuildLintReport_RefreshFullSHACommitPasses confirms a refresh.commit
+// value carrying the full 40-char SHA-1 the refresh writer emits (ldflags
+// commands.Commit, injected from $GITHUB_SHA in .github/workflows/auto-release.yml
+// — see finalizeProjectRefresh / projectsync.WriteRefreshToAgentsRC) validates
+// against the schema. Guards against a regression to the old maxLength:8 cap,
+// which rejected every real refresh stamp da itself writes.
+func TestBuildLintReport_RefreshFullSHACommitPasses(t *testing.T) {
+	manifest := `{
+		"version": 2,
+		"repo_id": "github.com/acme/app",
+		"refresh": {
+			"version": "1.2.3",
+			"commit": "c1245e559bf366c63487b2edbf5ac5371a48e0f7",
+			"describe": "v1.2.3",
+			"refreshedAt": "2026-04-15T04:00:00Z"
+		}
+	}`
+	project := withRawManifest(t, manifest)
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("expected OK report for full-SHA refresh.commit, got %+v", report)
+	}
+	repo, ok := findLintResult(report.Results, "repo-local")
+	if !ok || repo.Status != lintPass {
+		t.Fatalf("repo-local result = %+v (ok=%v), want pass", repo, ok)
+	}
+}
+
 // TestRunLint_FailsOnCorruptLayer is the acceptance test: a corrupt extends layer
 // (a schema-invalid version) makes lint fail with a structured per-file error and
 // a non-zero exit (a non-nil error from runLint).
