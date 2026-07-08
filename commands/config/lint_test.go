@@ -72,6 +72,30 @@ func TestBuildLintReport_ValidManifestPasses(t *testing.T) {
 	}
 }
 
+// TestBuildLintReport_LegacyRefreshBlockWithFullSHAPasses is the back-compat
+// acceptance test for refresh-metadata-to-lock: a manifest stamped by a
+// pre-fix da build carries a top-level "refresh" object, including a full
+// 40-char commit SHA that the old maxLength:8 schema constraint rejected
+// (superseded PR #347). Since "refresh" is no longer a validated manifest
+// property (deprecated + unconstrained), lint must still pass — proving both
+// the maxLength regression is gone and legacy-stamped repos keep linting
+// clean.
+func TestBuildLintReport_LegacyRefreshBlockWithFullSHAPasses(t *testing.T) {
+	fullSHA := "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+	project := lintProject(t, `,"refresh":{"version":"v1.0.0","commit":"`+fullSHA+`","describe":"legacy stamp","refreshedAt":"2026-04-13T12:59:35Z"}`, "")
+	report, err := buildLintReport(project)
+	if err != nil {
+		t.Fatalf("buildLintReport: %v", err)
+	}
+	if !report.OK {
+		t.Fatalf("expected OK report for legacy refresh block with full SHA, got %+v", report)
+	}
+	repo, ok := findLintResult(report.Results, "repo-local")
+	if !ok || repo.Status != lintPass {
+		t.Fatalf("repo-local result = %+v (ok=%v), want pass", repo, ok)
+	}
+}
+
 func TestBuildLintReport_ValidManifestAndLayerPass(t *testing.T) {
 	project := lintProject(t, "", `{"version":2,"skills":["org-skill"]}`)
 	report, err := buildLintReport(project)

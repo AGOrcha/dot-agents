@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
 )
@@ -87,7 +89,7 @@ func TestRefreshMarkerContent_EmptyOptionals(t *testing.T) {
 	}
 }
 
-func TestWriteRefreshToAgentsRC_CreatesManifestAndRemovesLegacy(t *testing.T) {
+func TestWriteRefreshToLock_CreatesManifestWritesLockRemovesLegacy(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -102,17 +104,32 @@ func TestWriteRefreshToAgentsRC_CreatesManifestAndRemovesLegacy(t *testing.T) {
 	if err := os.WriteFile(legacy, []byte("legacy\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToAgentsRC("myproj", projectPath, "1.0.0", "deadbeef", "v1"); err != nil {
-		t.Fatalf("WriteRefreshToAgentsRC: %v", err)
+	if err := projectsync.WriteRefreshToLock("myproj", projectPath, "1.0.0", "deadbeef", "v1"); err != nil {
+		t.Fatalf("WriteRefreshToLock: %v", err)
 	}
-	data, err := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
+
+	// .agentsrc.json is bootstrapped (git-portable manifest) but carries NO
+	// refresh metadata — that lives in the lock.
+	manifestData, err := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(data)
-	if !strings.Contains(s, `"refresh"`) || !strings.Contains(s, "deadbeef") {
-		t.Fatalf("manifest missing refresh metadata: %s", s)
+	if strings.Contains(string(manifestData), "refresh") {
+		t.Fatalf("manifest must NOT carry refresh metadata: %s", manifestData)
 	}
+
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var meta config.RefreshMetadata
+	if ok, err := lf.Section(config.LockSectionRefresh, &meta); err != nil || !ok {
+		t.Fatalf("lock refresh section missing: ok=%v err=%v", ok, err)
+	}
+	if meta.Commit != "deadbeef" || meta.Version != "1.0.0" {
+		t.Fatalf("lock refresh metadata = %+v, want commit=deadbeef version=1.0.0", meta)
+	}
+
 	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
 		t.Fatalf("legacy .agents-refresh should be removed: stat err=%v", err)
 	}
@@ -234,7 +251,7 @@ func TestEnsureGitignoreEntry_UnreadableFileSkipsCleanly(t *testing.T) {
 	projectsync.EnsureGitignoreEntry("/nonexistent/path", "entry")
 }
 
-func TestWriteRefreshToAgentsRC_SaveError(t *testing.T) {
+func TestWriteRefreshToLock_SaveError(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -242,12 +259,12 @@ func TestWriteRefreshToAgentsRC_SaveError(t *testing.T) {
 
 	projectPath := filepath.Join(tmp, "regular")
 	os.WriteFile(projectPath, []byte("file"), 0644)
-	if err := projectsync.WriteRefreshToAgentsRC("p", projectPath, "v", "c", "d"); err == nil {
+	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
 		t.Error("expected Save error when projectPath is a regular file")
 	}
 }
 
-func TestWriteRefreshToAgentsRC_LoadError(t *testing.T) {
+func TestWriteRefreshToLock_LoadError(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -258,7 +275,7 @@ func TestWriteRefreshToAgentsRC_LoadError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"), []byte("not json"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToAgentsRC("p", projectPath, "v", "c", "d"); err == nil {
+	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
 		t.Error("expected error from malformed .agentsrc.json")
 	}
 }
@@ -270,11 +287,11 @@ func TestCopyTreeMissingSource(t *testing.T) {
 	}
 }
 
-// TestWriteRefreshToAgentsRC_LegacyRemoveErrorPropagates covers the
+// TestWriteRefreshToLock_LegacyRemoveErrorPropagates covers the
 // non-IsNotExist branch of `os.Remove(legacy)`. We place a non-empty
 // directory at the legacy `.agents-refresh` path so os.Remove returns
 // ENOTEMPTY rather than ENOENT.
-func TestWriteRefreshToAgentsRC_LegacyRemoveErrorPropagates(t *testing.T) {
+func TestWriteRefreshToLock_LegacyRemoveErrorPropagates(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -295,13 +312,16 @@ func TestWriteRefreshToAgentsRC_LegacyRemoveErrorPropagates(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(legacy, "child"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	err := projectsync.WriteRefreshToAgentsRC("p", projectPath, "v", "c", "d")
+	err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d")
 	if err == nil {
 		t.Skip("filesystem allowed os.Remove on non-empty dir; legacy-error branch not exercised")
 	}
 }
 
-func TestWriteRefreshToAgentsRC_ExistingManifest(t *testing.T) {
+// TestWriteRefreshToLock_ExistingManifest is the direct acceptance check:
+// refresh stamps .agentsrc.lock, and a pre-existing .agentsrc.json gains NO
+// refresh block (even though it is re-saved to strip any legacy one).
+func TestWriteRefreshToLock_ExistingManifest(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -316,11 +336,24 @@ func TestWriteRefreshToAgentsRC_ExistingManifest(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"), []byte(`{"version":1,"project":"myproj","sources":[{"type":"local"}]}`), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectsync.WriteRefreshToAgentsRC("myproj", projectPath, "2.0", "c2", "v2"); err != nil {
-		t.Fatalf("WriteRefreshToAgentsRC: %v", err)
+	if err := projectsync.WriteRefreshToLock("myproj", projectPath, "2.0", "c2", "v2"); err != nil {
+		t.Fatalf("WriteRefreshToLock: %v", err)
 	}
-	data, _ := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
-	if want := "c2"; !contains(string(data), want) {
-		t.Errorf("manifest missing %s: %s", want, data)
+
+	manifestData, _ := os.ReadFile(filepath.Join(projectPath, ".agentsrc.json"))
+	if strings.Contains(string(manifestData), "c2") || strings.Contains(string(manifestData), "refresh") {
+		t.Errorf("manifest must NOT gain refresh metadata: %s", manifestData)
+	}
+
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var meta config.RefreshMetadata
+	if ok, err := lf.Section(config.LockSectionRefresh, &meta); err != nil || !ok {
+		t.Fatalf("lock refresh section missing: ok=%v err=%v", ok, err)
+	}
+	if meta.Commit != "c2" {
+		t.Errorf("lock refresh commit = %q, want c2", meta.Commit)
 	}
 }

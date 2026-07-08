@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/events"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
@@ -223,18 +222,17 @@ type AgentsRCKG struct {
 //
 // See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
 type AgentsRC struct {
-	Schema   string           `json:"$schema,omitempty"`
-	Version  int              `json:"version"`
-	Project  string           `json:"project,omitempty"`
-	Skills   []string         `json:"skills,omitempty"`
-	Rules    []string         `json:"rules,omitempty"`
-	Agents   []string         `json:"agents,omitempty"`
-	Hooks    StringsOrBool    `json:"hooks"`
-	MCP      StringsOrBool    `json:"mcp"`
-	Settings bool             `json:"settings"`
-	Sources  []Source         `json:"sources"`
-	KG       *AgentsRCKG      `json:"kg,omitempty"`
-	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+	Schema   string        `json:"$schema,omitempty"`
+	Version  int           `json:"version"`
+	Project  string        `json:"project,omitempty"`
+	Skills   []string      `json:"skills,omitempty"`
+	Rules    []string      `json:"rules,omitempty"`
+	Agents   []string      `json:"agents,omitempty"`
+	Hooks    StringsOrBool `json:"hooks"`
+	MCP      StringsOrBool `json:"mcp"`
+	Settings bool          `json:"settings"`
+	Sources  []Source      `json:"sources"`
+	KG       *AgentsRCKG   `json:"kg,omitempty"`
 
 	// --- v2 additive fields (config-distribution-model §3) ---
 
@@ -630,25 +628,20 @@ type StageProfile struct {
 	PreconditionPolicy string `json:"precondition_policy,omitempty"`
 }
 
-// RefreshMetadata records the latest da install/refresh that updated a project.
+// RefreshMetadata records the latest da install/refresh that updated a
+// project. It is a LOCK type (config-distribution-model §7A /
+// refresh-metadata-to-lock): the payload for .agentsrc.lock's "refresh"
+// section, written via WriteRefreshLock and read via ReadRefreshLock — never
+// a field of the committed .agentsrc.json manifest. Refresh metadata is
+// resolved STATE about the project (what was last refreshed, with which da
+// build), not manifest content, so it does not participate in schema
+// validation of the manifest and is not carried through
+// MergeGenerateAgentsRC.
 type RefreshMetadata struct {
 	Version     string `json:"version,omitempty"`
 	Commit      string `json:"commit,omitempty"`
 	Describe    string `json:"describe,omitempty"`
 	RefreshedAt string `json:"refreshedAt,omitempty"`
-}
-
-// SetRefreshMetadata stores the latest refresh details in the manifest.
-func (a *AgentsRC) SetRefreshMetadata(version, commit, describe string, refreshedAt time.Time) {
-	if a == nil {
-		return
-	}
-	a.Refresh = &RefreshMetadata{
-		Version:     version,
-		Commit:      commit,
-		Describe:    describe,
-		RefreshedAt: refreshedAt.UTC().Format(time.RFC3339),
-	}
 }
 
 // agentsRCKnown lists all JSON keys owned by AgentsRC's known fields.
@@ -659,7 +652,15 @@ var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
-	"kg": true, "refresh": true,
+	"kg": true,
+	// refresh is a legacy pre-refresh-metadata-to-lock manifest key: refresh
+	// metadata now lives in .agentsrc.lock's "refresh" section (RefreshMetadata /
+	// WriteRefreshLock), never the committed manifest. It stays "known" here so a
+	// legacy value is silently ignored during UnmarshalJSON — never captured into
+	// ExtraFields (which would re-emit it) — instead of erroring; AgentsRC has no
+	// Refresh field to decode it into, so it is dropped and the next
+	// `da refresh`/Save naturally strips it from the manifest.
+	"refresh": true,
 	// v2 additive fields (config-distribution-model §3)
 	"repo_id": true, "extends": true, "packages": true, "features": true,
 	// execution-profile layer (config relevance / skill-relevance-filter)
@@ -691,18 +692,17 @@ var agentsRCKnown = map[string]bool{
 // infinite recursion while still using the standard json encoder.
 // Per [[schema-usage]]: this MUST mirror AgentsRC's typed fields exactly.
 type agentsRCCore struct {
-	Schema   string           `json:"$schema,omitempty"`
-	Version  int              `json:"version"`
-	Project  string           `json:"project,omitempty"`
-	Skills   []string         `json:"skills,omitempty"`
-	Rules    []string         `json:"rules,omitempty"`
-	Agents   []string         `json:"agents,omitempty"`
-	Hooks    StringsOrBool    `json:"hooks"`
-	MCP      StringsOrBool    `json:"mcp"`
-	Settings bool             `json:"settings"`
-	Sources  []Source         `json:"sources"`
-	KG       *AgentsRCKG      `json:"kg,omitempty"`
-	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+	Schema   string        `json:"$schema,omitempty"`
+	Version  int           `json:"version"`
+	Project  string        `json:"project,omitempty"`
+	Skills   []string      `json:"skills,omitempty"`
+	Rules    []string      `json:"rules,omitempty"`
+	Agents   []string      `json:"agents,omitempty"`
+	Hooks    StringsOrBool `json:"hooks"`
+	MCP      StringsOrBool `json:"mcp"`
+	Settings bool          `json:"settings"`
+	Sources  []Source      `json:"sources"`
+	KG       *AgentsRCKG   `json:"kg,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
 	RepoID           string            `json:"repo_id,omitempty"`
@@ -737,7 +737,6 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Settings = core.Settings
 	a.Sources = core.Sources
 	a.KG = core.KG
-	a.Refresh = core.Refresh
 	a.RepoID = core.RepoID
 	a.Extends = core.Extends
 	a.Packages = core.Packages
@@ -808,7 +807,6 @@ func (a AgentsRC) MarshalJSON() ([]byte, error) {
 		Settings:             a.Settings,
 		Sources:              a.Sources,
 		KG:                   a.KG,
-		Refresh:              a.Refresh,
 		RepoID:               a.RepoID,
 		Extends:              a.Extends,
 		Packages:             a.Packages,
@@ -1001,9 +999,6 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	// schema-usage.md typed-field/ExtraFields breakage rule).
 	if len(existing.Manifests) > 0 {
 		out.Manifests = cloneManifests(existing.Manifests)
-	}
-	if existing.Refresh != nil {
-		out.Refresh = existing.Refresh
 	}
 	return &out
 }

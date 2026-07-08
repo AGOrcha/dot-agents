@@ -722,10 +722,11 @@ func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
 		t.Fatal("expected runRefresh to return non-zero error after swallowed restore failure")
 	}
 
-	// .agentsrc.json must NOT carry refresh metadata for the partially-applied project.
-	rc, loadErr := config.LoadAgentsRC(projectPath)
-	if loadErr == nil && rc.Refresh != nil {
-		t.Errorf("expected NO refresh metadata after partial restore, got %+v", rc.Refresh)
+	// .agentsrc.lock must NOT carry a refresh stamp for the partially-applied
+	// project — finalizeProjectRefresh skips WriteRefreshToLock entirely on
+	// projectFailed, so no lock is ever written for this project.
+	if _, statErr := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(statErr) {
+		t.Errorf("expected NO .agentsrc.lock refresh stamp after partial restore, stat err = %v", statErr)
 	}
 }
 

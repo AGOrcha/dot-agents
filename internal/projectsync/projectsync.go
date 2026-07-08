@@ -83,9 +83,17 @@ func RefreshMarkerContent(version, commit, describe string) []byte {
 	return []byte(content)
 }
 
-// WriteRefreshToAgentsRC updates or creates .agentsrc.json with refresh metadata
-// (version, commit, describe, refreshedAt) and removes a legacy .agents-refresh file if present.
-func WriteRefreshToAgentsRC(projectName, projectPath, version, commit, describe string) error {
+// WriteRefreshToLock ensures .agentsrc.json exists (generating one via a
+// project scan when absent, mirroring the old manifest-bootstrap behavior)
+// and re-saves it — which also strips any legacy top-level "refresh" key a
+// pre-refresh-metadata-to-lock manifest may still carry, since AgentsRC no
+// longer has a Refresh field to round-trip it through (config-distribution-
+// model §7A / refresh-metadata-to-lock). It then stamps the refresh metadata
+// (version, commit, describe, refreshedAt) into .agentsrc.lock's "refresh"
+// section — refresh metadata is resolved state about the project, not
+// manifest content, so it belongs in the lock, not the committed manifest —
+// and removes a legacy .agents-refresh marker file if present.
+func WriteRefreshToLock(projectName, projectPath, version, commit, describe string) error {
 	rc, err := config.LoadAgentsRC(projectPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -96,8 +104,16 @@ func WriteRefreshToAgentsRC(projectName, projectPath, version, commit, describe 
 			return err
 		}
 	}
-	rc.SetRefreshMetadata(version, commit, describe, time.Now())
 	if err := rc.Save(projectPath); err != nil {
+		return err
+	}
+	meta := config.RefreshMetadata{
+		Version:     version,
+		Commit:      commit,
+		Describe:    describe,
+		RefreshedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := config.WriteRefreshLock(projectPath, meta); err != nil {
 		return err
 	}
 	legacy := filepath.Join(projectPath, ".agents-refresh")

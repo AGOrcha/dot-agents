@@ -885,12 +885,8 @@ func TestFinalizeInstall_WritesLockStampNotManifest(t *testing.T) {
 		t.Fatalf("finalizeInstall: %v", err)
 	}
 
-	loaded, err := config.LoadAgentsRC(projectPath)
-	if err != nil {
+	if _, err := config.LoadAgentsRC(projectPath); err != nil {
 		t.Fatal(err)
-	}
-	if loaded.Refresh != nil {
-		t.Fatalf("install must not stamp .agentsrc.json refresh metadata: %+v", loaded.Refresh)
 	}
 	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
 	if err != nil {
@@ -1516,12 +1512,8 @@ func TestRunInstall_HappyPathWithInstalledClaude(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(projDir, ".agentsrc.json")); err != nil {
 		t.Errorf("expected manifest to remain: %v", err)
 	}
-	loaded, err := config.LoadAgentsRC(projDir)
-	if err != nil {
+	if _, err := config.LoadAgentsRC(projDir); err != nil {
 		t.Fatalf("LoadAgentsRC: %v", err)
-	}
-	if loaded.Refresh != nil {
-		t.Fatalf("install must not stamp .agentsrc.json refresh metadata: %+v", loaded.Refresh)
 	}
 	lock, err := config.ReadUnits(projDir)
 	if err != nil {
