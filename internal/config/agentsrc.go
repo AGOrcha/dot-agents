@@ -935,7 +935,7 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
 	rc := &AgentsRC{
-		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:  "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version: 1,
 		Project: projectName,
 		Sources: []Source{{Type: "local"}},

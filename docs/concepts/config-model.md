@@ -258,7 +258,7 @@ JSON Schema draft 2020-12). The project manifest's contract is `schemas/agentsrc
 aligned with the Go `AgentsRC` struct, carries a `$schema` / `$id` so editor YAML/JSON language
 servers validate `.agentsrc.json` live, and sets `additionalProperties: false` so an unknown
 top-level field is caught rather than silently ignored. The manifest references it via
-`"$schema": "https://dot-agents.dev/schemas/agentsrc.json"`.
+`"$schema": "https://agorcha.dev/schemas/agentsrc.schema.json"`.
 
 The original schema inventory (manifest, hook, plugin, workflow-plan, workflow-tasks, delegation
 bundle) has since grown to include verification and dashboard schemas — the family is the canonical

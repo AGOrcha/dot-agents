@@ -1,5 +1,5 @@
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "version": 2,
   "project": "invalid-cross-tier",
   "repo_id": "github.com/acme/bad",
