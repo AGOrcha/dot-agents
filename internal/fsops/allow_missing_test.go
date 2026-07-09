@@ -20,55 +20,84 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
+// The three helpers share one contract — absent -> (zero,false,nil), real
+// error -> (zero,false,err), present -> (value,true,nil) — so the found/err
+// half of every assertion is factored into these helpers. Keeping the
+// multi-branch checks out of the test bodies holds each Test* function's
+// cognitive complexity under the S3776 limit while still exercising all three
+// branches of every helper (only the type-specific value check stays inline).
+
+func assertAbsent(t *testing.T, found bool, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("expected nil error for a legitimately-absent path, got %v", err)
+	}
+	if found {
+		t.Fatalf("expected found=false for a legitimately-absent path")
+	}
+}
+
+func assertRealError(t *testing.T, found bool, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected a real error to be surfaced, not conflated with absence")
+	}
+	if found {
+		t.Fatalf("expected found=false when a real error is surfaced")
+	}
+}
+
+func assertPresent(t *testing.T, found bool, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("unexpected error for a present path: %v", err)
+	}
+	if !found {
+		t.Fatalf("expected found=true for a present path")
+	}
+}
+
+func seedFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed file %s: %v", path, err)
+	}
+}
+
+func seedDir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("seed dir %s: %v", path, err)
+	}
+}
+
 func TestReadFileAllowMissing(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
-		dir := t.TempDir()
-		data, found, err := fsops.ReadFileAllowMissing(filepath.Join(dir, "absent.txt"))
-		if err != nil {
-			t.Fatalf("expected nil error for missing file, got %v", err)
-		}
-		if found {
-			t.Fatalf("expected found=false for missing file")
-		}
+		data, found, err := fsops.ReadFileAllowMissing(filepath.Join(t.TempDir(), "absent.txt"))
+		assertAbsent(t, found, err)
 		if data != nil {
-			t.Fatalf("expected nil data for missing file, got %q", data)
+			t.Fatalf("expected nil data for a missing file, got %q", data)
 		}
 	})
 
 	t.Run("permission denied", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "denied.txt")
-		if err := os.WriteFile(path, []byte("secret"), 0o644); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
+		path := filepath.Join(t.TempDir(), "denied.txt")
+		seedFile(t, path, "secret")
 		testutil.MakeFileUnreadable(t, path)
 
 		data, found, err := fsops.ReadFileAllowMissing(path)
-		if err == nil {
-			t.Fatalf("expected a real error for permission-denied file")
-		}
-		if found {
-			t.Fatalf("expected found=false for permission-denied file")
-		}
+		assertRealError(t, found, err)
 		if data != nil {
-			t.Fatalf("expected nil data for permission-denied file, got %q", data)
+			t.Fatalf("expected nil data for a permission-denied file, got %q", data)
 		}
 	})
 
 	t.Run("normal", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "present.txt")
-		if err := os.WriteFile(path, []byte("payload"), 0o644); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
+		path := filepath.Join(t.TempDir(), "present.txt")
+		seedFile(t, path, "payload")
 
 		data, found, err := fsops.ReadFileAllowMissing(path)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !found {
-			t.Fatalf("expected found=true for present file")
-		}
+		assertPresent(t, found, err)
 		if string(data) != "payload" {
 			t.Fatalf("expected data=%q, got %q", "payload", data)
 		}
@@ -77,51 +106,31 @@ func TestReadFileAllowMissing(t *testing.T) {
 
 func TestReadDirAllowMissing(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
-		dir := t.TempDir()
-		entries, found, err := fsops.ReadDirAllowMissing(filepath.Join(dir, "absent"))
-		if err != nil {
-			t.Fatalf("expected nil error for missing dir, got %v", err)
-		}
-		if found {
-			t.Fatalf("expected found=false for missing dir")
-		}
+		entries, found, err := fsops.ReadDirAllowMissing(filepath.Join(t.TempDir(), "absent"))
+		assertAbsent(t, found, err)
 		if entries != nil {
-			t.Fatalf("expected nil entries for missing dir, got %v", entries)
+			t.Fatalf("expected nil entries for a missing dir, got %v", entries)
 		}
 	})
 
 	t.Run("permission denied", func(t *testing.T) {
 		dir := filepath.Join(t.TempDir(), "denied")
-		if err := os.Mkdir(dir, 0o755); err != nil {
-			t.Fatalf("seed dir: %v", err)
-		}
+		seedDir(t, dir)
 		testutil.MakeDirUnreadable(t, dir)
 
 		entries, found, err := fsops.ReadDirAllowMissing(dir)
-		if err == nil {
-			t.Fatalf("expected a real error for permission-denied dir")
-		}
-		if found {
-			t.Fatalf("expected found=false for permission-denied dir")
-		}
+		assertRealError(t, found, err)
 		if entries != nil {
-			t.Fatalf("expected nil entries for permission-denied dir, got %v", entries)
+			t.Fatalf("expected nil entries for a permission-denied dir, got %v", entries)
 		}
 	})
 
 	t.Run("normal", func(t *testing.T) {
 		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "child.txt"), []byte("x"), 0o644); err != nil {
-			t.Fatalf("seed child: %v", err)
-		}
+		seedFile(t, filepath.Join(dir, "child.txt"), "x")
 
 		entries, found, err := fsops.ReadDirAllowMissing(dir)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !found {
-			t.Fatalf("expected found=true for present dir")
-		}
+		assertPresent(t, found, err)
 		if len(entries) != 1 || entries[0].Name() != "child.txt" {
 			t.Fatalf("expected single child.txt entry, got %v", entries)
 		}
@@ -130,63 +139,39 @@ func TestReadDirAllowMissing(t *testing.T) {
 
 func TestStatAllowMissing(t *testing.T) {
 	t.Run("missing", func(t *testing.T) {
-		dir := t.TempDir()
-		info, found, err := fsops.StatAllowMissing(filepath.Join(dir, "absent"))
-		if err != nil {
-			t.Fatalf("expected nil error for missing path, got %v", err)
-		}
-		if found {
-			t.Fatalf("expected found=false for missing path")
-		}
+		info, found, err := fsops.StatAllowMissing(filepath.Join(t.TempDir(), "absent"))
+		assertAbsent(t, found, err)
 		if info != nil {
-			t.Fatalf("expected nil info for missing path, got %v", info)
+			t.Fatalf("expected nil info for a missing path, got %v", info)
 		}
 	})
 
 	t.Run("permission denied", func(t *testing.T) {
-		// os.Stat on a path itself only needs execute/search permission on
-		// its PARENT directory, not on the path's own mode bits, so
-		// chmod-0'ing the target directly does not fail a Stat of that
-		// directory. To force a genuine Stat error we deny traversal into
-		// the PARENT and stat a child underneath it, mirroring
-		// fsops_windows_test.go's *_UnderUnreadableParent convention.
-		parent := t.TempDir()
-		sub := filepath.Join(parent, "sub")
-		if err := os.Mkdir(sub, 0o755); err != nil {
-			t.Fatalf("seed sub dir: %v", err)
-		}
+		// os.Stat on a path itself only needs execute/search permission on its
+		// PARENT directory, not on the path's own mode bits, so chmod-0'ing the
+		// target directly does not fail a Stat of that directory. To force a
+		// genuine Stat error we deny traversal into the PARENT and stat a child
+		// underneath it, mirroring fsops_windows_test.go's
+		// *_UnderUnreadableParent convention.
+		sub := filepath.Join(t.TempDir(), "sub")
+		seedDir(t, sub)
 		child := filepath.Join(sub, "child.txt")
-		if err := os.WriteFile(child, []byte("x"), 0o644); err != nil {
-			t.Fatalf("seed child: %v", err)
-		}
+		seedFile(t, child, "x")
 		testutil.MakeDirUnreadable(t, sub)
 
 		info, found, err := fsops.StatAllowMissing(child)
-		if err == nil {
-			t.Fatalf("expected a real error for a path under an unreadable parent")
-		}
-		if found {
-			t.Fatalf("expected found=false for a path under an unreadable parent")
-		}
+		assertRealError(t, found, err)
 		if info != nil {
 			t.Fatalf("expected nil info for a path under an unreadable parent, got %v", info)
 		}
 	})
 
 	t.Run("normal", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "present.txt")
-		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
-			t.Fatalf("seed file: %v", err)
-		}
+		path := filepath.Join(t.TempDir(), "present.txt")
+		seedFile(t, path, "x")
 
 		info, found, err := fsops.StatAllowMissing(path)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !found {
-			t.Fatalf("expected found=true for present path")
-		}
+		assertPresent(t, found, err)
 		if info == nil || info.Name() != "present.txt" {
 			t.Fatalf("expected info for present.txt, got %v", info)
 		}
