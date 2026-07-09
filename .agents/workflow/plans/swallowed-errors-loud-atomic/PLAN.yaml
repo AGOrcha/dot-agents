@@ -1,0 +1,11 @@
+schema_version: 1
+id: swallowed-errors-loud-atomic
+title: 'Swallowed errors: loud + atomic'
+status: active
+summary: 'Make swallow-and-degrade error sites loud (distinguish os.IsNotExist from real errors) and atomic (fail-or-full), per the #350 fold-back audit: 312 sites, delivered as a layered/stacked PR series'
+created_at: "2026-07-09T02:02:27Z"
+updated_at: "2026-07-09T02:09:10Z"
+owner: dot-agents
+success_criteria: Each of the 11 remediation slices lands as a stacked PR into master; top-3 blast-radius risks (platform prune-on-read-error, AgentsHome relative fallback, graphstore atomicity) fixed with survival/rollback tests; no regression to legitimate-absence behavior
+verification_strategy: 'Per-slice: go build ./... + targeted go test (three-way absent/corrupt/present tables reusing internal/testutil/perms*); should-be-ATOMIC slices assert the destructive side-effect is absent on a real error'
+current_focus_task: se2-platform-prune-guard

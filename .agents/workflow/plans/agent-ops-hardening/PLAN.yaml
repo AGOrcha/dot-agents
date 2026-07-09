@@ -4,8 +4,8 @@ title: Agent-ops hardening (retro of config-v2/0.4.0 + recent sessions)
 status: active
 summary: 'Operationalize the 4-stream retrospective: fix the environment taxes (TCC ~/Documents, Codex GOCACHE, sonar pre-push flake) and convert mature-but-unenforced lessons into skills + brief gates'
 created_at: "2026-06-24T01:02:42Z"
-updated_at: "2026-06-25T23:48:26Z"
+updated_at: "2026-07-07T12:54:38Z"
 owner: dot-agents
 success_criteria: The top recurring taxes are eliminated at the source (env) or enforced (skills/gates), not just re-documented; agents stop re-hitting TCC/GOCACHE/--no-verify/stale-queue/S3776-in-CI; release is pinned+retryable; routing of work Claude-vs-Codex is documented
 verification_strategy: Each task self-verifies (CI green for the env/CI PRs; skills via skill-architect eval; lessons indexed); the meta-check is a follow-up session showing reduced overhead-PR ratio
-current_focus_task: 'P1: operationalize pre-fanout bundle hardening (make validate-bundle-against-head + bundle-scope-via-code-graph mandatory in orchestrator-session-start/delegation-lifecycle)'
+current_focus_task: 'P4: mechanical refuse-check in da workflow fanout for out-of-scope asserting test callers'

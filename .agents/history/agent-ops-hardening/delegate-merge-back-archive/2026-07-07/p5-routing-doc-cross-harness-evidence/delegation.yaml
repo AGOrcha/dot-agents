@@ -1,0 +1,16 @@
+schema_version: 1
+id: del-p5-routing-doc-cross-harness-evidence-1783428571
+mode: delegated
+parent_plan_id: agent-ops-hardening
+parent_task_id: p5-routing-doc-cross-harness-evidence
+title: Update AGENT_TOOL_ROUTING.md with cross-harness wave evidence + blocking-gate policy
+summary: Delegated from plan Agent-ops hardening (retro of config-v2/0.4.0 + recent sessions)
+write_scope:
+    - docs/AGENT_TOOL_ROUTING.md
+success_criteria: '2026-06-25 graph-chain wave produced fresh Claude-vs-Codex data: Codex adversarial review caught a BLOCKER or HIGH in every Claude impl PR (tautological parity, papered lifecycle, unwired gate) AND caught incomplete fixes on re-review; same-model Claude review missed them. Codex impl was clean but could not self-publish/run per-file gate (sandbox tax) — Claude rescued. Update the routing doc: codex=review (recommend BLOCKING gate on substantive work), claude=impl + publish/gate-running; document the rescue patterns and the per-file/cross-OS gate-repro friction.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: routing-p5-worker
+status: completed
+created_at: "2026-07-07T12:49:31Z"
+updated_at: "2026-07-07T12:53:19Z"

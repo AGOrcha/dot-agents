@@ -1,0 +1,14 @@
+schema_version: 1
+task_id: t1-kg-brief-molecule
+parent_plan_id: kg-ideate-skill
+verifier_type: merge-back
+status: pass
+summary: Focused scaffold verification passed via go test ./internal/scaffold/.... Parent should review and then close out t1 before considering t2 fanout refresh.
+recorded_at: "2026-07-07T12:10:26Z"
+delegation_id: del-t1-kg-brief-molecule-1783183670
+artifact_paths:
+    - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/SKILL.md
+    - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/instructions/context-scan.md
+    - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/instructions/corpus-scan.md
+    - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/instructions/kg-queries.md
+    - internal/scaffold/home/starter/skills/global/kg-ideate/kg-brief/templates/briefing-output.md

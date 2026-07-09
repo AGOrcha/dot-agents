@@ -1,0 +1,11 @@
+schema_version: 1
+id: omp-meta-loop-resume
+title: OMP-aware meta-loop resume
+status: active
+summary: Refresh the local dot-agents loop branch safely, reconcile resume state from backlog-drain and iter-68, and continue one canonical meta-loop pass using the current OMP harness model.
+created_at: "2026-07-07T14:33:18Z"
+updated_at: "2026-07-07T14:34:47Z"
+owner: dot-agents
+success_criteria: (1) the working branch is synced against current origin/master without losing local workflow artifacts; (2) resume state is grounded in .agents/active/backlog-drain-queue.md, iter-68, prior Claude/Codex transcripts, and current OMP docs; (3) one canonical next-loop action is executed or cleanly blocked with updated workflow artifacts.
+verification_strategy: Verify with git branch state checks, da workflow status/orient/eligible/tasks readback, transcript-backed evidence, and focused command/test evidence for the resumed task.
+current_focus_task: Reconcile backlog, transcripts, and OMP harness state

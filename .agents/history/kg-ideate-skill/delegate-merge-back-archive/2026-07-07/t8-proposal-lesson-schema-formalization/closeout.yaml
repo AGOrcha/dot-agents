@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+task_id: t8-proposal-lesson-schema-formalization
+delegation_id: del-t8-proposal-lesson-schema-formalization-1783183671
+decision: reject
+note: bundle scope only covers schema draft files; consumer wiring plus real proposal/lesson artifact validation still missing
+closed_at: "2026-07-07T12:46:16Z"

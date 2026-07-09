@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: graphstore-concurrency-contract
+task_id: gcc5-verify-close-unblock
+delegation_id: del-gcc5-verify-close-unblock-1779848143
+decision: accept
+closed_at: "2026-07-07T01:08:39Z"

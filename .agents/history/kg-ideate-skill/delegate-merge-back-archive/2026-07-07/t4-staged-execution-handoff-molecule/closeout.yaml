@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: kg-ideate-skill
+task_id: t4-staged-execution-handoff-molecule
+delegation_id: del-t4-staged-execution-handoff-molecule-1783183680
+decision: reject
+note: stale parallel fanout; rerun after t3 with refreshed scope
+closed_at: "2026-07-07T12:14:23Z"

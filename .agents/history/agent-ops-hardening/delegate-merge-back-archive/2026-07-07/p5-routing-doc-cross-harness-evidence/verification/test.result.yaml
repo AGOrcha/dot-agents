@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: p5-routing-doc-cross-harness-evidence
+parent_plan_id: agent-ops-hardening
+verifier_type: test
+status: pass
+summary: 'Focused docs checks passed: required cross-harness routing, blocking-gate, rescue, and gate-friction language present; stale either-tool wording absent.'
+recorded_at: "2026-07-07T12:52:56Z"
+delegation_id: del-p5-routing-doc-cross-harness-evidence-1783428571
+recorded_by: da workflow verify record
+commands:
+    - rg-based docs assertions on docs/AGENT_TOOL_ROUTING.md

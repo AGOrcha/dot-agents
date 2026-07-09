@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+task_id: p5-routing-doc-cross-harness-evidence
+delegation_id: del-p5-routing-doc-cross-harness-evidence-1783428571
+decision: accept
+closed_at: "2026-07-07T12:54:38Z"

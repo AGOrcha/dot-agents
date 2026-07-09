@@ -3,7 +3,7 @@ plan_id: kg-ideate-skill
 tasks:
     - id: t1-kg-brief-molecule
       title: Phase 1 molecule `kg-brief` (degraded-mode capable)
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-spec-scaffold-molecule
@@ -21,7 +21,7 @@ tasks:
         Spec ref: kg-ideate-skill design.md D2, D3, D4; proposal Phase 1.
     - id: t2-spec-scaffold-molecule
       title: Phase 2 molecule `spec-scaffold` (competing-decisions fallback)
-      status: pending
+      status: blocked
       depends_on:
         - t1-kg-brief-molecule
       blocks:
@@ -38,9 +38,10 @@ tasks:
         path active; the structural-traversal branch is authored as adapter-conditional but
         verified end-to-end only by the gated task t7. Respects the spec tier (no file paths /
         function names / task lists). Spec ref: design.md D3, D6; proposal Phase 2.
+        - delegation closeout reject: stale parallel fanout; rerun after t1 with refreshed scope
     - id: t3-plan-scaffold-molecule
       title: Phase 3 molecule `plan-scaffold` (spec->tasks/write-scopes/dep-order)
-      status: pending
+      status: blocked
       depends_on:
         - t2-spec-scaffold-molecule
       blocks:
@@ -58,7 +59,7 @@ tasks:
         never hand-edits task status. Spec ref: design.md D5, D6; proposal Phase 3.
     - id: t4-staged-execution-handoff-molecule
       title: Phase 4 molecule `staged-execution-handoff` (no implementation)
-      status: pending
+      status: blocked
       depends_on:
         - t3-plan-scaffold-molecule
       blocks:
@@ -72,6 +73,7 @@ tasks:
         direct-vs-fanout decision and hands briefing + spec + plan into
         [[orchestrator-session-start]] / [[isp]]; feeds layered-pr-fanout. Emits NO code.
         Spec ref: design.md Requirement 5; proposal Phase 4.
+        - delegation closeout reject: stale parallel fanout; rerun after t3 with refreshed scope
     - id: t5-orchestrator-compound
       title: Compound orchestrator `kg-ideate` (T2, dispatches the four molecules)
       status: pending
@@ -107,9 +109,8 @@ tasks:
         resolves competing decisions explicitly; Phase 4 emits no code. This is the
         ship-now proof that early shipping does not reintroduce the silent-no-op problem.
         Spec ref: design.md done-criteria 3.
-    # --- GATED: structural-contradiction traversal (the ONLY adapter-gated step) ---
     - id: t7-structural-contradiction-traversal
-      title: "GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)"
+      title: 'GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)'
       status: blocked
       depends_on:
         - t2-spec-scaffold-molecule
@@ -133,10 +134,9 @@ tasks:
         functional via t6's fallback. Verify Requirement 3 once the gate clears:
         `da graph query contradicting_claims` emits explicit spec decision points.
         status: blocked until the gate clears (do not advance manually).
-    # --- Cross-cutting: proposal/lesson schema formalization (single-source) ---
     - id: t8-proposal-lesson-schema-formalization
       title: Formalize canonical proposal.schema.json + lesson.schema.json (single-source)
-      status: pending
+      status: blocked
       depends_on: []
       blocks: []
       owner: AGOrcha
@@ -159,3 +159,4 @@ tasks:
         global -> ~/.agents/{proposals,lessons}/ vs project-local -> .agents/{proposals,lessons}/,
         per the proposal-routing rule) so the meta-loop can emit/refine scoped proposals + lessons
         on the same non-code `docs`-composed profile (meta-loop-operating-model §5A OQ4).
+        - delegation closeout reject: bundle scope only covers schema draft files; consumer wiring plus real proposal/lesson artifact validation still missing

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t1-kg-brief-molecule
+parent_plan_id: kg-ideate-skill
+verifier_type: unit
+status: pass
+summary: internal/scaffold packages pass after kg-brief starter molecule scaffold
+recorded_at: "2026-07-07T12:10:26Z"
+delegation_id: del-t1-kg-brief-molecule-1783183670
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/scaffold/...

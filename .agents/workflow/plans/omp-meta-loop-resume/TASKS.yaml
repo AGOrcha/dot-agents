@@ -1,0 +1,43 @@
+schema_version: 1
+plan_id: omp-meta-loop-resume
+tasks:
+    - id: reconcile-resume-state
+      title: Reconcile backlog, transcripts, and OMP harness state
+      status: in_progress
+      depends_on:
+        - sync-working-branch
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/omp-meta-loop-resume/
+        - .agents/active/
+        - docs/ or notes only if needed
+      verification_required: true
+      notes: 'Ground the next pass in .agents/active/backlog-drain-queue.md, iter-68, the latest Claude transcript, the failed Codex p4 worker transcript, pending proposals, and current OMP docs/README. Extract the live loop rules: serialized gates, reuse active bundles, all-plan eligible view, staged inner pipeline, outer refinement/ideation split.'
+      app_type: docs
+    - id: sync-working-branch
+      title: Sync working branch against origin/master safely
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/omp-meta-loop-resume/
+        - git metadata readback
+      verification_required: true
+      notes: 'Anchor on the backlog-drain queue''s explicit warning: feat/verifier-go diverged from origin and should not be pushed as-is. Preserve current dirty workflow artifacts, inspect ahead/behind and worktree state, fetch current remotes, and choose the least-destructive sync path before any backlog execution.'
+      app_type: docs
+    - id: run-next-loop-pass
+      title: Run the next canonical meta-loop pass
+      status: pending
+      depends_on:
+        - reconcile-resume-state
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/active/
+        - .agents/workflow/plans/
+        - selected task scope
+      verification_required: true
+      notes: After branch sync and state reconciliation, choose exactly one canonical next action. Reuse an existing active delegation bundle if valid; otherwise operate from current eligible state and the backlog queue. Verify the selected pass with the narrowest meaningful commands/tests before closeout.
+      app_type: docs

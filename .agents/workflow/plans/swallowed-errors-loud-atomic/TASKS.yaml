@@ -1,0 +1,242 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+tasks:
+    - id: se0-fsops-helpers
+      title: 'Slice 0: exported allow-missing file/dir/stat helpers (stack base)'
+      status: completed
+      depends_on: []
+      blocks:
+        - se2-platform-prune-guard
+      owner: dot-agents
+      write_scope:
+        - internal/fsops/
+      verification_required: true
+      notes: |-
+        BASE of the layered/stacked PR series. Add EXPORTED
+        ReadFileAllowMissing / ReadDirAllowMissing / StatAllowMissing to
+        internal/fsops: os.IsNotExist -> (zero,false,nil); other err ->
+        (zero,false,err); ok -> (value,true,nil). Three-way tests
+        (absent/perm-denied/normal) reusing internal/testutil/perms*. No
+        callers wired here. PR base master, head swallowed/0-fsops-allow-missing.
+        In flight: agent Swallowed0Fsops. STOP before merge; no AI trailer.
+    - id: se2-platform-prune-guard
+      title: 'Slice 2: internal/platform prune-on-read-error guard (top risk #1, destructive)'
+      status: in_progress
+      depends_on:
+        - se0-fsops-helpers
+      blocks:
+        - se3-agentsrc-detectors
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+      verification_required: true
+      notes: |-
+        Top blast-radius fix (active data destruction). Root cause
+        hooks.go:resolveHookSpecInScopes/ListHookSpecs -> return (*HookSpec,error)
+        via se0 helper; emit/prune only on confirmed-absent, never errored/unknown.
+        Callers (claude.go createRulesLinks/ensureUserSettings/linkProjectSettings/
+        createSkillsLinks, cursor.go collectRuleLinks, copilot.go
+        emitLegacyProjectHookFiles + codex/opencode/antigravity): read error ->
+        abort that platform's sync, LEAVE existing destination links untouched,
+        surface the error (stop discarding CreateLinks/RemoveLinks returns).
+        HIGHEST-VALUE TEST: chmod source dir unreadable -> assert existing
+        .claude/rules/* .cursor/rules/* .github/hooks/*.json ~/.claude/settings.json
+        SURVIVE. PR base swallowed/0-fsops-allow-missing, head swallowed/2-platform-prune-guard.
+    - id: se3-agentsrc-detectors
+      title: 'Slice 3: agentsrc GenerateAgentsRC detectors fail-or-full (#350 trigger)'
+      status: pending
+      depends_on:
+        - se2-platform-prune-guard
+      blocks:
+        - se1-userhome-preflight
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+      verification_required: true
+      notes: |-
+        The original #350 trigger. 7 detectors (isDirEntry, collectScopedDirs,
+        hasYAMLHooks, detectSettingsHookEvents, detectMCPServers/readMCPScope,
+        detectPlatformSettings, detectRuleScopes) return an error alongside their
+        value (via se0 helper); GenerateAgentsRC aggregates (errors.Join) and
+        returns (nil,err) on any real failure -- fail-or-full, no external
+        signature break (already (*AgentsRC,error)). DeriveRepoIDFromGit keeps
+        its zero-error fallback (spec 5.3) but emits an events warning on a
+        genuine corrupt-.git/config (not ErrNoOrigin / not-a-checkout). Tests:
+        chmod each scoped resource dir 0000 -> non-nil err (not silent-empty);
+        corrupt .git/config -> warning fires, still returns "".
+        PR base swallowed/2-platform-prune-guard, head swallowed/3-agentsrc-detectors.
+    - id: se1-userhome-preflight
+      title: 'Slice 1: UserHomeDir preflight, hard-fail on unresolvable home (top risk #2)'
+      status: pending
+      depends_on:
+        - se3-agentsrc-detectors
+      blocks:
+        - se6-graphstore-atomic
+      owner: dot-agents
+      write_scope:
+        - internal/config/paths.go
+        - commands/root.go
+        - commands/kg/kg.go
+        - internal/graphstore/mcp_server.go
+      verification_required: true
+      notes: |-
+        AgentsHome() silently degrades to relative ./.agents on home-resolution
+        failure (single point of failure for every persisted path). Fix: one-time
+        preflight in root PersistentPreRunE -- call config.UserHomeDir() once,
+        hard-fail with actionable msg ("set $HOME or AGENTS_HOME") if it errors
+        and AGENTS_HOME unset. Apply same to the 2 duplicate sites: kg.go:38
+        kgHome(), graphstore/mcp_server.go:101 defaultKGHome (only those lines).
+        NOT a signature refactor of AgentsHome's callers. Tests: AGENTS_HOME set
+        + $HOME unset -> ok; both unset -> hard actionable error, no relative
+        fallback. PR base swallowed/3-agentsrc-detectors, head swallowed/1-userhome-preflight.
+    - id: se6-graphstore-atomic
+      title: 'Slice 6: graphstore atomicity + corrupt-extra visibility (top risk #3)'
+      status: pending
+      depends_on:
+        - se1-userhome-preflight
+      blocks:
+        - se4-kgmcp-guard
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/sqlite.go
+        - internal/graphstore/postgres.go
+        - internal/graphstore/crg.go
+      verification_required: true
+      notes: |-
+        6a (write, quick): StoreFileNodesEdges (sqlite+postgres) check
+        encodeExtra err -> abort/rollback tx instead of substituting "{}" (4
+        sites). 6b (read): decodeExtra log-and-tag on decode failure (no
+        signature change now; full error-propagation tracked as follow-up).
+        6c (crg mirror): ReadNodes/ReadEdges check os.IsNotExist before "no db",
+        count (not silent-continue) per-row Scan failures. NOTE: mcp_server.go is
+        se1's scope -- do NOT touch it here. Tests: node/edge with NaN float in
+        Extra -> whole StoreFileNodesEdges tx rolls back (GetNode not-found);
+        invalid extra JSON -> warning logged on read.
+        PR base swallowed/1-userhome-preflight, head swallowed/6-graphstore-atomic.
+    - id: se4-kgmcp-guard
+      title: 'Slice 4: kgmcp WriteKGMCPConfigFile corrupt-overwrite guard'
+      status: pending
+      depends_on:
+        - se6-graphstore-atomic
+      blocks:
+        - se5-sync-git-checks
+      owner: dot-agents
+      write_scope:
+        - commands/internal/lifecycle/kgmcp.go
+      verification_required: true
+      notes: |-
+        On json.Unmarshal failure of an EXISTING claude.json/cursor.json/mcp.json,
+        abort the write + return error instead of overwriting with the empty/
+        partial map (destroys other MCP entries). Convert the `_ = json.Unmarshal`
+        into a checked early-return. Test: seed corrupt claude.json -> returns
+        error, on-disk bytes untouched. PR base swallowed/6-graphstore-atomic,
+        head swallowed/4-kgmcp-guard.
+    - id: se5-sync-git-checks
+      title: 'Slice 5: sync push/commit git-error checks'
+      status: pending
+      depends_on:
+        - se4-kgmcp-guard
+      blocks:
+        - se7-delegation-visibility
+      owner: dot-agents
+      write_scope:
+        - commands/sync/push.go
+        - commands/sync/commit.go
+        - commands/sync/init.go
+      verification_required: true
+      notes: |-
+        Check git add -A / git commit errors; only the documented "nothing to
+        commit" sentinel is non-fatal -- any other failure aborts before
+        confirm/push (da sync push/commit currently report success while never
+        committing). Also init.go untrackMachineLocalState `_ = ...Run()`.
+        Test: fake git wrapper (sync package's existing helpers pattern) makes
+        commit fail non-"nothing to commit" -> non-nil error, never reaches push.
+        PR base swallowed/4-kgmcp-guard, head swallowed/5-sync-git-checks.
+    - id: se7-delegation-visibility
+      title: 'Slice 7: workflow delegation fanout-safety visibility'
+      status: pending
+      depends_on:
+        - se5-sync-git-checks
+      blocks:
+        - se8-registration-visibility
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/delegation.go
+      verification_required: true
+      notes: |-
+        listDelegationContracts must surface per-entry read/parse failures
+        (warnings slice threaded to checkFanoutWriteScopeConflicts + active-
+        delegation/plan-lock accounting) instead of silent continue -- a corrupt
+        contract must not silently defeat write-scope-conflict detection. The two
+        rollback `_ = os.Remove(contractPath)` sites log loudly on failure with
+        the orphaned path. Test: corrupt contract alongside valid ones ->
+        conflict check warns or fails closed. PR base swallowed/5-sync-git-checks,
+        head swallowed/7-delegation-visibility.
+    - id: se8-registration-visibility
+      title: 'Slice 8: agents/skills registration-step visibility'
+      status: pending
+      depends_on:
+        - se7-delegation-visibility
+      blocks:
+        - se9-p2-loud-batch
+      owner: dot-agents
+      write_scope:
+        - commands/agents/new.go
+        - commands/skills/new.go
+      verification_required: true
+      notes: |-
+        appendAgentsRCStep / appendSkillToAgentsRC / ensureUserSkillLinks return
+        their config.Load/LoadAgentsRC/rc.Save/os.Symlink errors up to
+        CreateAgent/createSkill, which downgrade the ui.SuccessBox to a partial-
+        success warning naming what didn't register (should-be-LOUD, not roll
+        back the already-written AGENT.md/SKILL.md). Test: corrupt .agentsrc.json
+        -> `da agents new`/`skills new` prints a registration-failed warning, not
+        an unqualified "Created". PR base swallowed/7-delegation-visibility,
+        head swallowed/8-registration-visibility.
+    - id: se9-p2-loud-batch
+      title: 'Slice 9: P2 should-be-LOUD quick-win batch (split by subsystem)'
+      status: pending
+      depends_on:
+        - se8-registration-visibility
+      blocks:
+        - se10-p3-diagnostics-batch
+      owner: dot-agents
+      write_scope:
+        - commands/kg/
+        - commands/internal/lifecycle/
+        - commands/workflow/
+        - internal/links/
+        - internal/projectsync/
+        - internal/gitwt/
+        - internal/platform/
+        - commands/
+      verification_required: true
+      notes: |-
+        Grab-bag of should-be-LOUD one-liners (add os.IsNotExist/errors.Is before
+        degrading, se0 helper where it fits), each independently landable; may be
+        split into sub-PRs 9a-9f by subsystem: 9a commands/kg (incl the
+        --require-graph bypass, closer to a correctness bug -- prioritize), 9b
+        lifecycle init/backup, 9c workflow journal/eligible_accounting/plan_task/
+        commit_cmd/drift, 9d links/projectsync/gitwt, 9e internal/platform
+        detector-shape family (same fix as se3), 9f commands/* top-level
+        (remove.go no-orphan invariant; import.go hook-bundle Unmarshal sites,
+        should-be-ATOMIC -- pair with se4 pattern). Three-way tables throughout.
+        PR base swallowed/8-registration-visibility, head swallowed/9-p2-loud-batch (or 9a..9f substack).
+    - id: se10-p3-diagnostics-batch
+      title: 'Slice 10: P3 diagnostics/telemetry batch (lowest priority)'
+      status: pending
+      depends_on:
+        - se9-p2-loud-batch
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scoring/
+        - internal/dashboard/store/
+        - internal/adapters/builtin/sdd-register/
+        - internal/globalflagcov/
+      verification_required: true
+      notes: |-
+        scoring/signal_backfill.go:391, dashboard/store/store.go:138-141 (add the
+        log line its siblings have), adapters/builtin/sdd-register/ingest.go:349-352,
+        globalflagcov/static.go:77-80. One small PR; safe to slip last.
+        PR base swallowed/9-p2-loud-batch, head swallowed/10-p3-diagnostics-batch.

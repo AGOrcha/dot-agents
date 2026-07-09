@@ -3,33 +3,27 @@ id: kg-ideate-skill
 title: KG-Ideate Skill — Build + Schedule
 status: active
 summary: |-
-  Build the kg-ideate compound skill (T2 orchestrator over four T1 molecules) and its
-  instruction/template files per the promoted proposal. Phase 1 (degraded-mode briefing) plus
-  Phases 2-4 (spec-scaffold, plan-scaffold, staged-execution-handoff) are activatable now and
-  ship the competing-decisions fallback. The single structural-contradiction step (Phase 2
-  step 7) is gated on the citation adapter shipping `contradicting_claims` end-to-end. Also
-  files the cross-cutting proposal/lesson schema-formalization task so the global
-  proposal/lesson system and the KG typed Proposal/Lesson nodes reference one canonical schema.
+    Build the kg-ideate compound skill (T2 orchestrator over four T1 molecules) and its
+    instruction/template files per the promoted proposal. Phase 1 (degraded-mode briefing) plus
+    Phases 2-4 (spec-scaffold, plan-scaffold, staged-execution-handoff) are activatable now and
+    ship the competing-decisions fallback. The single structural-contradiction step (Phase 2
+    step 7) is gated on the citation adapter shipping `contradicting_claims` end-to-end. Also
+    files the cross-cutting proposal/lesson schema-formalization task so the global
+    proposal/lesson system and the KG typed Proposal/Lesson nodes reference one canonical schema.
+    - (fb:t8-schema-formalization-scope-mismatch) t8-proposal-lesson-schema-formalization delegated only schemas/proposal.schema.json + schemas/lesson.schema.json, but the task contract requires those schemas to be the single source of truth for BOTH proposal/lesson artifacts and their typed consumers. Draft schemas were authored, but HEAD still loads proposals through internal/config/proposals.go hardcoded structs/validators, schemas/schemas.go does not embed/export the new schema files, and there is no evidence-backed validation against existing proposal + lesson artifacts. Re-fanout only after either expanding write_scope to include consumer wiring/validation or narrowing the task contract to schema authoring only.
 created_at: "2026-06-25T00:00:00Z"
-updated_at: "2026-06-25T00:00:00Z"
+updated_at: "2026-07-07T12:46:24Z"
 owner: AGOrcha
-spec_ref: .agents/workflow/specs/kg-ideate-skill/design.md
 success_criteria: |-
-  The kg-ideate compound skill + its four molecules + instruction/template files exist and pass
-  the batch verifier; a degraded-mode run (no citation adapter) completes all four phases with
-  the contradiction step no-opping into the competing-decisions fallback; the structural
-  contradiction step lights up once §13.4 `contradicting_claims` ships; canonical
-  proposal.schema.json + lesson.schema.json exist and are referenced by both the global
-  proposal/lesson system and the KG typed nodes.
+    The kg-ideate compound skill + its four molecules + instruction/template files exist and pass
+    the batch verifier; a degraded-mode run (no citation adapter) completes all four phases with
+    the contradiction step no-opping into the competing-decisions fallback; the structural
+    contradiction step lights up once §13.4 `contradicting_claims` ships; canonical
+    proposal.schema.json + lesson.schema.json exist and are referenced by both the global
+    proposal/lesson system and the KG typed nodes.
 verification_strategy: |-
-  Per-molecule batch verifier (skill frontmatter declares verifier: batch); a degraded-mode
-  end-to-end dry-run demonstrating the graceful-degradation contract (D3); schema validation of
-  the new proposal/lesson schemas against existing proposal/lesson artifacts. The
-  structural-contradiction task is verified only after the citation adapter gate clears.
-current_focus_task: Author the kg-brief molecule (Phase 1, degraded-mode capable)
-notes: |-
-  Single-source: the ideation *profile* (verifiers/reviewers/relevance) is owned by the
-  ideation-execution-profile spec and is NOT rebuilt here. This plan builds only the skill.
-  The one adapter gate is wired as a cross-plan dependency on
-  graph-backend-adapter-contract/t4-crg-dual-read (the citation adapter lands with the
-  adapter-implementation wave; §13.4 contradicting_claims is the precise trigger).
+    Per-molecule batch verifier (skill frontmatter declares verifier: batch); a degraded-mode
+    end-to-end dry-run demonstrating the graceful-degradation contract (D3); schema validation of
+    the new proposal/lesson schemas against existing proposal/lesson artifacts. The
+    structural-contradiction task is verified only after the citation adapter gate clears.
+current_focus_task: ""

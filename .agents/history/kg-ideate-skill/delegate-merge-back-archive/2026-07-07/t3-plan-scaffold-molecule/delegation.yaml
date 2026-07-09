@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-t3-plan-scaffold-molecule-1783183679
+mode: delegated
+parent_plan_id: kg-ideate-skill
+parent_task_id: t3-plan-scaffold-molecule
+title: Phase 3 molecule `plan-scaffold` (spec->tasks/write-scopes/dep-order)
+summary: Delegated from plan KG-Ideate Skill — Build + Schedule
+write_scope:
+    - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold
+success_criteria: |-
+    Author plan-scaffold + plan-scaffolding.md instruction + plan-output.md template.
+    Implements the mandatory recorded concurrency decision (sequential default;
+    concurrent/folded only when no open questions change ordering/write-scopes). Derives
+    write-scopes from the Phase 1 impact radius. Authors via `da workflow plan create`;
+    never hand-edits task status. Spec ref: design.md D5, D6; proposal Phase 3.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: kgi-t3-worker
+status: completed
+created_at: "2026-07-04T16:47:59Z"
+updated_at: "2026-07-07T12:14:23Z"
