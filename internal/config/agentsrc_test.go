@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-git/go-git/v6"
+
 	"github.com/AGOrcha/dot-agents/internal/events"
 )
 
@@ -884,6 +886,47 @@ func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 	}
 }
 
+// TestGenerateAgentsRC_DetectorIOErrors covers the fail-or-full contract: a
+// real I/O error (unreadable directory, not "not configured yet") on any
+// scoped resource dir must abort GenerateAgentsRC with a non-nil error and a
+// nil manifest, never a silently-empty field for that resource type.
+func TestGenerateAgentsRC_DetectorIOErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  func(home string) string
+	}{
+		{"skills", func(home string) string { return filepath.Join(home, "skills", testProject) }},
+		{"agents", func(home string) string { return filepath.Join(home, "agents", testProject) }},
+		{"hooks", func(home string) string { return filepath.Join(home, "hooks", testProject) }},
+		{"mcp", func(home string) string { return filepath.Join(home, "mcp", testProject) }},
+		{"settings", func(home string) string { return filepath.Join(home, "settings", testProject) }},
+		{"rules", func(home string) string { return filepath.Join(home, "rules", testProject) }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			chmodTestSkip(t)
+			home := t.TempDir()
+			t.Setenv("AGENTS_HOME", home)
+			dir := c.dir(home)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(dir, 0); err != nil {
+				t.Fatalf("chmod dir unreadable: %v", err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+			rc, err := GenerateAgentsRC(testProject, t.TempDir())
+			if err == nil {
+				t.Fatalf("GenerateAgentsRC with unreadable %s dir: expected non-nil error, got nil (rc=%+v)", c.name, rc)
+			}
+			if rc != nil {
+				t.Errorf("GenerateAgentsRC with unreadable %s dir: expected nil manifest on error, got %+v", c.name, rc)
+			}
+		})
+	}
+}
+
 // ── Unknown field round-trip ─────────────────────────────────────────────────
 
 func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
@@ -1155,7 +1198,10 @@ func TestDetectHookEvents_GlobalYAMLBundleEnablesAll(t *testing.T) {
 	dir := filepath.Join(home, "hooks", "global", "b1")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "HOOK.yaml"), []byte("name: b1\n"), 0644)
-	got := detectHookEvents(home, "myproj")
+	got, err := detectHookEvents(home, "myproj")
+	if err != nil {
+		t.Fatalf("detectHookEvents: %v", err)
+	}
 	if !got.All {
 		t.Errorf("expected All=true with global yaml bundle, got %+v", got)
 	}
@@ -1163,7 +1209,10 @@ func TestDetectHookEvents_GlobalYAMLBundleEnablesAll(t *testing.T) {
 
 func TestDetectHookEvents_None(t *testing.T) {
 	home := t.TempDir()
-	got := detectHookEvents(home, "p")
+	got, err := detectHookEvents(home, "p")
+	if err != nil {
+		t.Fatalf("detectHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Errorf("expected disabled, got %+v", got)
 	}
@@ -1174,7 +1223,10 @@ func TestDetectSettingsHookEvents_BadJSON(t *testing.T) {
 	dir := filepath.Join(home, "settings", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "claude-code.json"), []byte("not json"), 0644)
-	got := detectSettingsHookEvents(home, "global")
+	got, err := detectSettingsHookEvents(home, "global")
+	if err != nil {
+		t.Fatalf("detectSettingsHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Errorf("bad json: got %+v", got)
 	}
@@ -1185,7 +1237,10 @@ func TestDetectSettingsHookEvents_HooksNotMap(t *testing.T) {
 	dir := filepath.Join(home, "settings", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "claude-code.json"), []byte(`{"hooks":"not a map"}`), 0644)
-	got := detectSettingsHookEvents(home, "global")
+	got, err := detectSettingsHookEvents(home, "global")
+	if err != nil {
+		t.Fatalf("detectSettingsHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when hooks is not a map")
 	}
@@ -1196,7 +1251,10 @@ func TestDetectSettingsHookEvents_NoHooksKey(t *testing.T) {
 	dir := filepath.Join(home, "settings", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "claude-code.json"), []byte(`{}`), 0644)
-	got := detectSettingsHookEvents(home, "global")
+	got, err := detectSettingsHookEvents(home, "global")
+	if err != nil {
+		t.Fatalf("detectSettingsHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when no hooks key")
 	}
@@ -1207,7 +1265,10 @@ func TestReadMCPScope_BadJSON(t *testing.T) {
 	dir := filepath.Join(home, "mcp", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "mcp.json"), []byte("not json"), 0644)
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Errorf("bad json: got %+v", got)
 	}
@@ -1218,7 +1279,10 @@ func TestReadMCPScope_NoServersKey(t *testing.T) {
 	dir := filepath.Join(home, "mcp", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"other":"value"}`), 0644)
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when no servers key")
 	}
@@ -1229,7 +1293,10 @@ func TestReadMCPScope_EmptyServers(t *testing.T) {
 	dir := filepath.Join(home, "mcp", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"servers":{}}`), 0644)
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when servers map is empty")
 	}
@@ -1237,7 +1304,10 @@ func TestReadMCPScope_EmptyServers(t *testing.T) {
 
 func TestReadMCPScope_NoFiles(t *testing.T) {
 	home := t.TempDir()
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when scope has no files")
 	}
@@ -1248,7 +1318,10 @@ func TestDetectRuleScopes_OnlyOtherExt(t *testing.T) {
 	dir := filepath.Join(home, "rules", "proj")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "weird.json"), []byte("{}"), 0644)
-	got := detectRuleScopes(home, "proj")
+	got, err := detectRuleScopes(home, "proj")
+	if err != nil {
+		t.Fatalf("detectRuleScopes: %v", err)
+	}
 	if len(got) != 1 || got[0] != "global" {
 		t.Errorf("expected only [global], got %v", got)
 	}
@@ -1256,14 +1329,21 @@ func TestDetectRuleScopes_OnlyOtherExt(t *testing.T) {
 
 func TestDetectRuleScopes_MissingDir(t *testing.T) {
 	home := t.TempDir()
-	got := detectRuleScopes(home, "missing-proj")
+	got, err := detectRuleScopes(home, "missing-proj")
+	if err != nil {
+		t.Fatalf("detectRuleScopes: %v", err)
+	}
 	if len(got) != 1 || got[0] != "global" {
 		t.Errorf("expected only [global], got %v", got)
 	}
 }
 
 func TestHasYAMLHooks_DirAbsent(t *testing.T) {
-	if hasYAMLHooks("/path/that/does/not/exist") {
+	got, err := hasYAMLHooks("/path/that/does/not/exist")
+	if err != nil {
+		t.Fatalf("hasYAMLHooks: %v", err)
+	}
+	if got {
 		t.Error("missing dir should return false")
 	}
 }
@@ -1272,7 +1352,11 @@ func TestHasYAMLHooks_FileInDirIgnored(t *testing.T) {
 	tmp := t.TempDir()
 
 	os.WriteFile(filepath.Join(tmp, "stray.yaml"), []byte("x"), 0644)
-	if hasYAMLHooks(tmp) {
+	got, err := hasYAMLHooks(tmp)
+	if err != nil {
+		t.Fatalf("hasYAMLHooks: %v", err)
+	}
+	if got {
 		t.Error("non-dir entry should be ignored")
 	}
 }
@@ -1922,6 +2006,78 @@ func TestGenerateAgentsRC_NoGitRemoteLeavesRepoIDEmpty(t *testing.T) {
 	}
 	if rc.RepoID != "" {
 		t.Errorf("RepoID should be empty when no git remote, got %q", rc.RepoID)
+	}
+}
+
+// TestDeriveRepoIDFromGit_CorruptConfigEmitsWarning covers the genuine-
+// corruption branch (spec Slice 3): a real git checkout whose .git/config
+// is malformed is neither ErrNoOrigin nor "not a checkout", so it must fire
+// a structured warning via the emitConfigWarning seam while still returning
+// "" (the documented spec §5.3 fallback is unchanged).
+func TestDeriveRepoIDFromGit_CorruptConfigEmitsWarning(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := git.PlainInit(tmp, false); err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	cfgPath := filepath.Join(tmp, ".git", "config")
+	if err := os.WriteFile(cfgPath, []byte("[core\nbroken = true"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var fired []events.Envelope
+	prev := emitConfigWarning
+	emitConfigWarning = func(env events.Envelope) { fired = append(fired, env) }
+	t.Cleanup(func() { emitConfigWarning = prev })
+
+	if got := DeriveRepoIDFromGit(tmp); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with corrupt config = %q, want empty", got)
+	}
+	if len(fired) != 1 {
+		t.Fatalf("expected exactly one warning event, got %d: %+v", len(fired), fired)
+	}
+	if fired[0].Type != "event.config.git_origin_unreadable" {
+		t.Errorf("warning event type = %q", fired[0].Type)
+	}
+}
+
+// TestDeriveRepoIDFromGit_NotACheckoutNoWarning regression-guards the
+// legitimate-absence case: a plain directory that was never a git checkout
+// must NOT fire a warning (git.ErrRepositoryNotExists is excluded).
+func TestDeriveRepoIDFromGit_NotACheckoutNoWarning(t *testing.T) {
+	tmp := t.TempDir()
+
+	var fired []events.Envelope
+	prev := emitConfigWarning
+	emitConfigWarning = func(env events.Envelope) { fired = append(fired, env) }
+	t.Cleanup(func() { emitConfigWarning = prev })
+
+	if got := DeriveRepoIDFromGit(tmp); got != "" {
+		t.Errorf("DeriveRepoIDFromGit on non-checkout = %q, want empty", got)
+	}
+	if len(fired) != 0 {
+		t.Errorf("expected no warning for a plain non-checkout dir, got %d: %+v", len(fired), fired)
+	}
+}
+
+// TestDeriveRepoIDFromGit_NoOriginRemoteNoWarning regression-guards the
+// other legitimate-absence case: a real checkout with no `origin` remote
+// configured (gitremote.ErrNoOrigin) must NOT fire a warning either.
+func TestDeriveRepoIDFromGit_NoOriginRemoteNoWarning(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := git.PlainInit(tmp, false); err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+
+	var fired []events.Envelope
+	prev := emitConfigWarning
+	emitConfigWarning = func(env events.Envelope) { fired = append(fired, env) }
+	t.Cleanup(func() { emitConfigWarning = prev })
+
+	if got := DeriveRepoIDFromGit(tmp); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with no origin = %q, want empty", got)
+	}
+	if len(fired) != 0 {
+		t.Errorf("expected no warning when repo simply has no origin remote, got %d: %+v", len(fired), fired)
 	}
 }
 
