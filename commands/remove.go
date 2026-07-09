@@ -195,6 +195,11 @@ func confirmRemoveProceed() bool {
 	return false
 }
 
+// registrationPreservedHint is the shared cleanup-retry guidance appended to
+// every "remove incomplete" error so the operator knows the registration was
+// intentionally kept for a retry.
+const registrationPreservedHint = "The project registration was PRESERVED so cleanup can be retried. "
+
 // removeProjectLinks runs the "Removing project..." link-removal phase:
 // shared-target unwind plus per-platform RemoveLinks. A missing project
 // directory is treated as "links already removed" (skip). Returns a typed
@@ -214,7 +219,7 @@ func removeProjectLinks(projectName, projectPath string) error {
 		// Surface it so the registration is preserved for a retry.
 		return ErrorWithHints(
 			fmt.Sprintf("remove incomplete for '%s': could not verify project directory: %v", projectName, err),
-			"The project registration was PRESERVED so cleanup can be retried. "+
+			registrationPreservedHint+
 				"Resolve the error above (permissions, disk issues), then re-run `da remove "+projectName+"`.",
 		)
 	}
@@ -241,7 +246,7 @@ func removeProjectLinks(projectName, projectPath string) error {
 	if len(cleanupFailures) > 0 {
 		return ErrorWithHints(
 			fmt.Sprintf("remove incomplete for '%s': %s", projectName, strings.Join(cleanupFailures, "; ")),
-			"The project registration was PRESERVED so cleanup can be retried. "+
+			registrationPreservedHint+
 				"Resolve the warnings above, then re-run `da remove "+projectName+"`.",
 		)
 	}
@@ -269,7 +274,7 @@ func cleanProjectCanonicalDirs(projectName string, cleanDirs bool, deps removeDe
 		}
 		return ErrorWithHints(
 			fmt.Sprintf("remove incomplete for '%s': could not clean project directories: %v", projectName, cleanupErr),
-			"The project registration was PRESERVED so cleanup can be retried. "+
+			registrationPreservedHint+
 				"Resolve the errors above (permissions, locked files), then re-run "+
 				"`"+retryCmd+"`.",
 		)
