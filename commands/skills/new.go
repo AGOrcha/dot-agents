@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,33 +13,43 @@ import (
 
 // AppendSkillToAgentsRC adds name to the .agentsrc.json Skills list for the
 // project registered under scope. Returns a status message on success, "" if
-// the scope is not registered or the manifest is missing — both are non-fatal
-// "best effort" outcomes used by skillCreationNextSteps. Production wrapper
-// over appendSkillToAgentsRC; passes stdSkillsIO{}.
+// the scope is not registered, the manifest is legitimately absent, or the
+// registration step failed — the failure case is surfaced to the caller by
+// CreateSkill via the lower-level appendSkillToAgentsRC instead. Production
+// wrapper over appendSkillToAgentsRC; passes stdSkillsIO{}.
 func AppendSkillToAgentsRC(name, scope string) string {
-	return appendSkillToAgentsRC(stdSkillsIO{}, name, scope)
+	msg, _ := appendSkillToAgentsRC(stdSkillsIO{}, name, scope)
+	return msg
 }
 
 // appendSkillToAgentsRC is the IO-injected unit under test. Tests pass a
-// fakeSkillsIO to drive the ConfigLoad error branch (see seams_test.go).
-func appendSkillToAgentsRC(io skillsIO, name, scope string) string {
+// fakeSkillsIO to drive the ConfigLoad error branch (see seams_test.go). A
+// non-nil error means the project IS registered but ConfigLoad/LoadAgentsRC/
+// rc.Save hit a real failure (corrupt JSON, permission denied, disk full) —
+// createSkill has already written SKILL.md, so it downgrades its success
+// message to a warning instead of rolling back. A missing .agentsrc.json
+// (os.IsNotExist) is legitimate absence, not an error.
+func appendSkillToAgentsRC(io skillsIO, name, scope string) (string, error) {
 	cfg, err := io.ConfigLoad()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("loading config.json: %w", err)
 	}
 	projPath := cfg.GetProjectPath(scope)
 	if projPath == "" {
-		return ""
+		return "", nil
 	}
 	rc, err := config.LoadAgentsRC(projPath)
 	if err != nil {
-		return ""
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("loading .agentsrc.json: %w", err)
 	}
 	rc.Skills = config.AppendUnique(rc.Skills, name)
 	if err := rc.Save(projPath); err != nil {
-		return ""
+		return "", fmt.Errorf("saving .agentsrc.json: %w", err)
 	}
-	return "Updated .agentsrc.json with skill '" + name + "'"
+	return "Updated .agentsrc.json with skill '" + name + "'", nil
 }
 
 // EnsureSkillMarkdown writes a templated SKILL.md when one does not already
@@ -68,19 +79,26 @@ func ensureSkillMarkdown(io skillsIO, skillMD, name string) error {
 // the project .agentsrc.json and appends a confirmation line when that
 // succeeded. Production wrapper over skillCreationNextSteps.
 func SkillCreationNextSteps(name, scope, skillMD string) []string {
-	return skillCreationNextSteps(stdSkillsIO{}, name, scope, skillMD)
+	steps, _ := skillCreationNextSteps(stdSkillsIO{}, name, scope, skillMD)
+	return steps
 }
 
 // skillCreationNextSteps is the IO-injected unit; only routes through io for
-// the AppendSkillToAgentsRC delegation.
-func skillCreationNextSteps(io skillsIO, name, scope, skillMD string) []string {
+// the appendSkillToAgentsRC delegation. A non-nil error propagates a real
+// registration failure from appendSkillToAgentsRC up to createSkill.
+func skillCreationNextSteps(io skillsIO, name, scope, skillMD string) ([]string, error) {
 	nextSteps := []string{"Edit the skill: " + config.DisplayPath(skillMD)}
-	if scope != "global" {
-		if msg := appendSkillToAgentsRC(io, name, scope); msg != "" {
-			nextSteps = append(nextSteps, msg)
-		}
+	if scope == "global" {
+		return nextSteps, nil
 	}
-	return nextSteps
+	msg, err := appendSkillToAgentsRC(io, name, scope)
+	if err != nil {
+		return nextSteps, err
+	}
+	if msg != "" {
+		nextSteps = append(nextSteps, msg)
+	}
+	return nextSteps, nil
 }
 
 // EnsureUserSkillLinks creates symlinks for a single global skill into all
@@ -90,29 +108,38 @@ func skillCreationNextSteps(io skillsIO, name, scope, skillMD string) []string {
 //   - ~/.agents/skills/<name>  → agentsHome/skills/global/<name>   (Codex)
 //   - ~/.claude/skills/<name>  → agentsHome/skills/global/<name>   (Claude Code)
 func EnsureUserSkillLinks(agentsHome, name, skillDir string) {
-	ensureUserSkillLinks(stdSkillsIO{}, agentsHome, name, skillDir)
+	_ = ensureUserSkillLinks(stdSkillsIO{}, agentsHome, name, skillDir)
 }
 
 // ensureUserSkillLinks is the IO-injected unit under test. Tests pass a
-// fakeSkillsIO to drive the MkdirAll-continue and Symlink-skip branches.
-func ensureUserSkillLinks(io skillsIO, agentsHome, name, skillDir string) {
+// fakeSkillsIO to drive the MkdirAll and Symlink error branches. A non-nil
+// error (joining every target's failure) propagates up to createSkill, which
+// has already written SKILL.md, so it downgrades its success message to a
+// warning instead of rolling back. A target that already has a link is
+// skipped, not an error.
+func ensureUserSkillLinks(io skillsIO, agentsHome, name, skillDir string) error {
 	homeDir, err := config.UserHomeDir()
 	if err != nil {
-		return
+		return fmt.Errorf("resolving user home directory: %w", err)
 	}
 	targets := []string{
 		filepath.Join(homeDir, ".agents", "skills", name),
 		filepath.Join(homeDir, ".claude", "skills", name),
 	}
+	var errs []error
 	for _, target := range targets {
 		if err := io.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			errs = append(errs, fmt.Errorf("creating %s: %w", filepath.Dir(target), err))
 			continue
 		}
 		if _, err := os.Lstat(target); err == nil {
 			continue // already exists
 		}
-		_ = io.Symlink(skillDir, target)
+		if err := io.Symlink(skillDir, target); err != nil {
+			errs = append(errs, fmt.Errorf("linking %s: %w", target, err))
+		}
 	}
+	return errors.Join(errs...)
 }
 
 // CreateSkill scaffolds a new skill under ~/.agents/skills/<scope>/<name>/,
@@ -125,6 +152,11 @@ func CreateSkill(name, scope string) error {
 
 // createSkill is the IO-injected unit under test. Tests pass a fakeSkillsIO
 // to drive the MkdirAll and downstream ensureSkillMarkdown error branches.
+// SKILL.md creation failures still abort with a hard error (nothing was
+// written yet). Once SKILL.md exists, a registration-step failure (the
+// user-level symlinks and/or the .agentsrc.json update) does NOT roll it
+// back or fail the call — it downgrades the terminal success message to a
+// warning naming exactly what didn't register.
 func createSkill(io skillsIO, name, scope string) error {
 	agentsHome := config.AgentsHome()
 	skillDir := filepath.Join(agentsHome, "skills", scope, name)
@@ -140,13 +172,33 @@ func createSkill(io skillsIO, name, scope string) error {
 
 	// Create user-level symlinks immediately so the skill is live without
 	// needing a refresh. Only global-scope skills get user-level links.
+	var regErrs []string
 	if scope == "global" {
-		ensureUserSkillLinks(io, agentsHome, name, skillDir)
+		if err := ensureUserSkillLinks(io, agentsHome, name, skillDir); err != nil {
+			regErrs = append(regErrs, "user-level skill symlinks: "+err.Error())
+		}
+	}
+
+	nextSteps, err := skillCreationNextSteps(io, name, scope, skillMD)
+	if err != nil {
+		regErrs = append(regErrs, ".agentsrc.json: "+err.Error())
+	}
+
+	if len(regErrs) > 0 {
+		lines := append([]string{}, nextSteps...)
+		for _, e := range regErrs {
+			lines = append(lines, "did not register — "+e)
+		}
+		ui.WarnBox(
+			fmt.Sprintf("Created skill '%s' in ~/.agents/skills/%s/%s/, but registration did not fully complete", name, scope, name),
+			lines...,
+		)
+		return nil
 	}
 
 	ui.SuccessBox(
 		fmt.Sprintf("Created skill '%s' in ~/.agents/skills/%s/%s/", name, scope, name),
-		skillCreationNextSteps(io, name, scope, skillMD)...,
+		nextSteps...,
 	)
 	return nil
 }
