@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 )
@@ -221,31 +222,50 @@ func (c *copilot) CreateLinks(project, repoPath string) error {
 	return nil
 }
 
-func (c *copilot) resolveInstructionsSrc(project, agentsHome string) string {
+// resolveInstructionsSrc returns the highest-priority canonical instructions
+// source under <agentsHome>/rules/, or ("", nil) when none of the candidates
+// exist. A confirmed-absent candidate (fsops.StatAllowMissing found=false,
+// err=nil) is skipped and the search continues to the next candidate; a real
+// Stat error (permission denied, I/O failure, ...) aborts the search
+// immediately and propagates — it must never be treated as "this candidate
+// doesn't exist" and silently skipped, which would mask a real error as
+// "nothing to link" upstream in createInstructionsLink.
+func (c *copilot) resolveInstructionsSrc(project, agentsHome string) (string, error) {
 	// Priority order per bash implementation
 	candidates := []string{
 		filepath.Join(agentsHome, "rules", project, copilotInstructionsMD),
 		filepath.Join(agentsHome, "rules", "global", copilotInstructionsMD),
 	}
 	for _, f := range candidates {
-		if _, err := os.Stat(f); err == nil {
-			return f
+		_, found, err := fsops.StatAllowMissing(f)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			return f, nil
 		}
 	}
 	// Fallback: rules.(md|mdc|txt)
 	for _, scope := range []string{project, "global"} {
 		for _, ext := range []string{"md", "mdc", "txt"} {
 			f := filepath.Join(agentsHome, "rules", scope, "rules."+ext)
-			if _, err := os.Stat(f); err == nil {
-				return f
+			_, found, err := fsops.StatAllowMissing(f)
+			if err != nil {
+				return "", err
+			}
+			if found {
+				return f, nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) error {
-	src := c.resolveInstructionsSrc(project, agentsHome)
+	src, err := c.resolveInstructionsSrc(project, agentsHome)
+	if err != nil {
+		return err
+	}
 	if src == "" {
 		return nil
 	}

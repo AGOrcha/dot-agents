@@ -9,6 +9,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 const codexAgentMarkdownFile = "AGENT.md"
@@ -1007,4 +1008,154 @@ func TestCodexUserBadge(t *testing.T) {
 // UserConfigReporter for the codex platform.
 func TestCodexUserConfig_InterfaceConformance(t *testing.T) {
 	var _ UserConfigReporter = (*codex)(nil)
+}
+
+// TestCodexLinkCodexAgentsMD_GlobalCandidateRealErrorPropagates covers the
+// swallow fixed in se9-platform-shared: a permission-denied Stat on a
+// global-scope AGENTS.md candidate must abort with a wrapped error, never
+// be silently read as "this candidate doesn't exist" and skipped.
+func TestCodexLinkCodexAgentsMD_GlobalCandidateRealErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	testutil.MakeDirUnreadable(t, globalRules)
+
+	c := NewCodex().(*codex)
+	if err := c.linkCodexAgentsMD("proj", tmp, agentsHome); err == nil {
+		t.Fatal("expected a real Stat error on the global candidates, got nil")
+	}
+}
+
+// TestCodexLinkCodexAgentsMD_ProjectOverrideRealErrorPropagates isolates the
+// second (project-override) Stat loop: the global bucket is genuinely
+// absent (legitimate absence, loop 1 completes cleanly), but the
+// project-scope rules dir is unreadable, so loop 2 must abort with a
+// wrapped error instead of silently falling through to "no override".
+func TestCodexLinkCodexAgentsMD_ProjectOverrideRealErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectRules := filepath.Join(agentsHome, "rules", "proj")
+	mustMkdirAllT(t, projectRules)
+	testutil.MakeDirUnreadable(t, projectRules)
+
+	c := NewCodex().(*codex)
+	if err := c.linkCodexAgentsMD("proj", tmp, agentsHome); err == nil {
+		t.Fatal("expected a real Stat error on the project override, got nil")
+	}
+}
+
+// TestCodexLinkCodexAgentsMD_LegitimateAbsenceNoError guards the sibling
+// path: neither the global bucket nor the project override exists, so
+// linkCodexAgentsMD is still a silent no-op, not an error.
+func TestCodexLinkCodexAgentsMD_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	mustMkdirAllT(t, agentsHome)
+	repo := filepath.Join(tmp, "repo")
+	mustMkdirAllT(t, repo)
+
+	c := NewCodex().(*codex)
+	if err := c.linkCodexAgentsMD("proj", repo, agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent AGENTS.md sources, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, codexAgentsMarkdown)); !os.IsNotExist(err) {
+		t.Errorf("expected no AGENTS.md link created, lstat err = %v", err)
+	}
+}
+
+// TestCodexCreateLinks_UnreadableAgentsMDSourceLeavesExistingLink is the
+// se2-contract survival check: CreateLinks succeeds once with a real global
+// AGENTS.md source, creating the repo-root AGENTS.md managed link. Once
+// that source directory becomes unreadable, a second CreateLinks call must
+// abort with an error and leave the pre-existing managed link alone.
+func TestCodexCreateLinks_UnreadableAgentsMDSourceLeavesExistingLink(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	src := filepath.Join(globalRules, "agents.md")
+	if err := os.WriteFile(src, []byte("# agents\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(repo, codexAgentsMarkdown)
+	if !links.IsManagedLink(dst, src) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, src)
+	}
+
+	testutil.MakeDirUnreadable(t, globalRules)
+	if err := NewCodex().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the AGENTS.md source is unreadable")
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Errorf("existing AGENTS.md managed link must survive the aborted sync")
+	}
+}
+
+// TestCodexEnsureUserAgents_RealStatErrorPropagates covers the swallow
+// fixed in se9-platform-shared: a permission-denied Stat on the global
+// agents bucket itself must abort with a wrapped error rather than being
+// silently read as "no agents to link".
+func TestCodexEnsureUserAgents_RealStatErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	agentsBucket := filepath.Join(agentsHome, "agents")
+	globalAgents := filepath.Join(agentsBucket, "global")
+	mustMkdirAllT(t, globalAgents)
+	// Block traversal into the "agents" bucket itself so Stat(globalAgents)
+	// fails with a real permission error, not ENOENT.
+	testutil.MakeDirUnreadable(t, agentsBucket)
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserAgents(agentsHome); err == nil {
+		t.Fatal("expected a real Stat error, got nil")
+	}
+}
+
+// TestCodexEnsureUserAgents_LegitimateAbsenceNoError guards the sibling
+// path: a genuinely absent global agents bucket is still a silent no-op.
+func TestCodexEnsureUserAgents_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	mustMkdirAllT(t, agentsHome)
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserAgents(agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent global agents bucket, got %v", err)
+	}
+}
+
+// TestCodexCreateLinks_UnreadableAgentsSourceLeavesExistingAgentToml is the
+// se2-contract survival check for the native .codex/agents/*.toml family:
+// CreateLinks succeeds once with a real global agent, rendering the toml
+// under the user's ~/.codex/agents/. Once the source bucket becomes
+// unreadable, a second CreateLinks call must abort and leave the
+// pre-existing rendered toml alone.
+func TestCodexCreateLinks_UnreadableAgentsSourceLeavesExistingAgentToml(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	agentsBucket := filepath.Join(agentsHome, "agents")
+	agentDir := filepath.Join(agentsBucket, "global", "reviewer")
+	mustMkdirAllT(t, agentDir)
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(os.Getenv("HOME"), codexDir, "agents", "reviewer.toml")
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("expected rendered toml at %s: %v", dst, err)
+	}
+
+	testutil.MakeDirUnreadable(t, agentsBucket)
+	if err := NewCodex().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the agents source bucket is unreadable")
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Errorf("existing rendered agent toml %s must survive the aborted sync: %v", dst, err)
+	}
 }
