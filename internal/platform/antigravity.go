@@ -122,11 +122,15 @@ func (a *antigravity) writeRepoHooks(project, repoPath, agentsHome string) error
 	if err := a.io.MkdirAll(filepath.Join(repoPath, antigravityDir), 0755); err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks"}, project, antigravityJSON)
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFile(
 		a.io,
 		repoTarget,
 		renderAntigravityHookConfig,
-		resolveHookSpec(agentsHome, []string{"hooks"}, project, antigravityJSON),
+		spec,
 		directHardlinkHookMode,
 		func(p string) error { return removeRenderedAntigravityHookConfig(a.io, p) },
 		repoBundles,
@@ -138,11 +142,15 @@ func (a *antigravity) writeUserHomeHooks(project, agentsHome string) error {
 	if err != nil {
 		return err
 	}
+	spec, err := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", antigravityJSON)
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFileToUserHomes(
 		a.io,
 		filepath.Join(antigravityDir, antigravityHooksFile),
 		renderAntigravityHookConfig,
-		resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", antigravityJSON),
+		spec,
 		directHardlinkHookMode,
 		func(p string) error { return removeRenderedAntigravityHookConfig(a.io, p) },
 		globalBundles,
