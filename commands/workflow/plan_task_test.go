@@ -1068,6 +1068,43 @@ func TestAnnotateEligibleTasks_WriteScopeDeclaredTrue(t *testing.T) {
 	}
 }
 
+// TestAnnotateEligibleTasks_UnreadableSidecar drives the REAL read-error
+// branch (plan_task.go: sidecarPath os.ReadFile): the sidecar file exists but
+// cannot be read (not "doesn't exist"). has_evidence/evidence_confidence must
+// still degrade to false/"none" (the task list can't block on it), but the
+// failure must be surfaced via ui.Warn instead of silently looking identical
+// to "no sidecar ever written".
+func TestAnnotateEligibleTasks_UnreadableSidecar(t *testing.T) {
+	proj := t.TempDir()
+	planID, taskID := "plan-locked", "t1"
+	sidecarPath := deriveScopeEvidencePath(proj, planID, taskID)
+	if err := os.MkdirAll(filepath.Dir(sidecarPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecarPath, []byte("confidence: high\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, sidecarPath)
+
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: planID, TaskID: taskID, WriteScope: []string{"commands/"}},
+	}
+	out, _ := captureCovStdout(t, func() error {
+		annotated := annotateEligibleTasks(proj, tasks)
+		at := annotated[0]
+		if at.HasEvidence {
+			t.Error("HasEvidence should be false when sidecar is unreadable")
+		}
+		if at.EvidenceConfidence != "none" {
+			t.Errorf("EvidenceConfidence should be 'none' on unreadable sidecar; got %q", at.EvidenceConfidence)
+		}
+		return nil
+	})
+	if !strings.Contains(out, "evidence sidecar unreadable") {
+		t.Errorf("expected an 'unreadable' warning on stdout, got %q", out)
+	}
+}
+
 // TestEligibleOutput_HasMaxBatchField verifies that eligibleOutput marshals to
 // JSON with a max_batch field (present even when empty).
 func TestEligibleOutput_HasMaxBatchField(t *testing.T) {
@@ -1562,6 +1599,31 @@ func TestRunWorkflowPlanCreate_RejectsExisting(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("error should mention 'already exists'; got: %v", err)
+	}
+}
+
+// TestRunWorkflowPlanCreate_StatErrorSurfaced drives the REAL Stat-error
+// branch on the collision check (plan_task.go: os.Stat(dir) in
+// runWorkflowPlanCreate): the plans/ directory itself is unreadable, so
+// Stat-ing the candidate plan dir fails with something other than
+// IsNotExist. That must surface as an error distinct from "already exists"
+// instead of being silently treated as "no collision, proceed".
+func TestRunWorkflowPlanCreate_StatErrorSurfaced(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	chmodUnreadableDir(t, plansBaseDir(repo))
+
+	err := runWorkflowPlanCreate("brand-new-plan", "T", "S", "O", "SC", "VS")
+	if err == nil {
+		t.Fatal("expected an error when the plans dir cannot be stat-ed")
+	}
+	if strings.Contains(err.Error(), "already exists") {
+		t.Errorf("a real Stat error must not be reported as 'already exists': %v", err)
+	}
+	if !strings.Contains(err.Error(), "check for existing plan") {
+		t.Errorf("expected a 'check for existing plan' error, got: %v", err)
 	}
 }
 

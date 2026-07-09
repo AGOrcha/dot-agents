@@ -195,7 +195,15 @@ func checkRefreshProjectPath(name, path string) bool {
 		return false
 	}
 	if _, err := os.Stat(path); err != nil {
-		ui.Warn("Skipping " + name + ": directory not found at " + path)
+		if os.IsNotExist(err) {
+			ui.Warn("Skipping " + name + ": directory not found at " + path)
+		} else {
+			// A REAL Stat error (permission denied, TOCTOU) is not the same
+			// as "directory not found" — the path may well exist. Say so
+			// instead of sending the operator hunting for a directory that's
+			// actually just inaccessible.
+			ui.Warn("Skipping " + name + ": could not access " + path + ": " + err.Error())
+		}
 		return false
 	}
 	return true

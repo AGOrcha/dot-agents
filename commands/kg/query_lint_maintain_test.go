@@ -1355,3 +1355,40 @@ func TestSaveManifest_HomeBlocked(t *testing.T) {
 		t.Error("expected error when home is blocked")
 	}
 }
+
+// ── lintIntegrityViolations: real manifest read error vs legitimate absence ──
+
+// TestLintIntegrityViolations_ManifestReadError_SurfacesAsLintResult drives
+// the should-be-LOUD fix: a REAL loadManifest error (permission/I-O fault,
+// not "manifest doesn't exist yet") must be surfaced as a LintResult instead
+// of silently returning nil (which would defeat the integrity check).
+func TestLintIntegrityViolations_ManifestReadError_SurfacesAsLintResult(t *testing.T) {
+	home := newTempKG(t)
+	fake := &fakeKGIO{readFile: func(string) ([]byte, error) { return nil, errSeam }}
+
+	results := lintIntegrityViolations(fake, home, map[string]*GraphNote{})
+	if len(results) != 1 {
+		t.Fatalf("expected exactly one LintResult surfacing the manifest error, got %d: %+v", len(results), results)
+	}
+	got := results[0]
+	if got.Check != "integrity_manifest_unreadable" {
+		t.Errorf("Check = %q, want %q", got.Check, "integrity_manifest_unreadable")
+	}
+	if got.Severity != "error" {
+		t.Errorf("Severity = %q, want %q", got.Severity, "error")
+	}
+	if !strings.Contains(got.Message, "unreadable") {
+		t.Errorf("Message = %q, want it to mention the manifest is unreadable", got.Message)
+	}
+}
+
+// TestLintIntegrityViolations_ManifestAbsent_StaysUnchanged proves the
+// legitimate-absence path (no manifest.json yet) is untouched by the fix:
+// no violations, no spurious error LintResult.
+func TestLintIntegrityViolations_ManifestAbsent_StaysUnchanged(t *testing.T) {
+	home := newTempKG(t)
+	results := lintIntegrityViolations(testIO(), home, map[string]*GraphNote{})
+	if len(results) != 0 {
+		t.Errorf("expected no LintResults when manifest is legitimately absent, got %d: %+v", len(results), results)
+	}
+}

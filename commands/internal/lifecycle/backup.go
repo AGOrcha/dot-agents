@@ -9,6 +9,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 // HasMultipleHardLinks is the platform-tagged hard-link counter seam.
@@ -168,6 +169,12 @@ func BackupExistingConfigsList(files []string, projectPath, agentsHome, project,
 			continue
 		}
 		if _, err := os.Lstat(f); err != nil {
+			if !os.IsNotExist(err) {
+				// A real Lstat error (permission denied, etc.) is not the same
+				// as "already removed" — warn instead of silently dropping this
+				// candidate from the backup batch with zero signal.
+				ui.Warn(fmt.Sprintf("skipping backup for %s: %v", f, err))
+			}
 			continue
 		}
 		// A PROVEN managed link (resolvable POSIX symlink / Windows junction
@@ -207,6 +214,13 @@ func BackupExistingConfigsList(files []string, projectPath, agentsHome, project,
 			return count, fmt.Errorf("backing up %s: %w", f, err)
 		}
 		if err := deps.Remove(f); err != nil {
+			if !os.IsNotExist(err) {
+				// A real Remove error (permission denied, file locked, etc.).
+				// The backup copy already landed, so nothing is lost, but the
+				// original silently stays in the project tree — warn so the
+				// caller isn't left thinking cleanup fully succeeded.
+				ui.Warn(fmt.Sprintf("backed up %s but could not remove the original: %v", f, err))
+			}
 			continue
 		}
 		count++

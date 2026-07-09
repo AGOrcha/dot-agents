@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // fakeAddDeps is a minimal AddDeps for fault injection in backup tests.
@@ -665,6 +666,126 @@ func TestBackupExistingConfigsList_RemoveErrorSkipsCount(t *testing.T) {
 	// Mirror copies should still be on disk.
 	if _, err := os.Stat(filepath.Join(agentsHome, "resources", "proj", "AGENTS.md")); err != nil {
 		t.Errorf("mirror should be written even when Remove fails: %v", err)
+	}
+}
+
+// A real Lstat error (permission denied on a parent directory) is not the
+// same as "candidate already removed" — it must be warned about and the
+// candidate skipped, not silently dropped with zero signal.
+func TestBackupExistingConfigsList_LstatPermissionError_WarnsAndSkips(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission-denial semantics")
+	}
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	blocked := filepath.Join(tmp, "blocked")
+	if err := os.MkdirAll(blocked, 0755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(blocked, "AGENTS.md")
+	if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Deny traversal into blocked/ so Lstat(target) fails with a non-ENOENT
+	// error (see TestRestoreFromResourcesCounted_StatErrorIsPropagated for
+	// the same testutil.MakeDirUnreadable pattern).
+	testutil.MakeDirUnreadable(t, blocked)
+
+	out := captureDoctorOutput(t, func() {
+		count, err := BackupExistingConfigsList([]string{target}, tmp, agentsHome, "proj", "20260101-000000", StdAddDeps{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("expected count=0 when Lstat fails, got %d", count)
+		}
+	})
+	if !strings.Contains(out, "skipping backup") {
+		t.Errorf("expected a warning about skipping backup, got: %q", out)
+	}
+}
+
+// A candidate that legitimately vanished before Lstat (os.IsNotExist) must
+// stay silent — no warning, matching the pre-existing "nothing to back up"
+// behavior.
+func TestBackupExistingConfigsList_LstatNotExist_StaysSilent(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	missing := filepath.Join(tmp, "does-not-exist.md")
+	out := captureDoctorOutput(t, func() {
+		count, err := BackupExistingConfigsList([]string{missing}, tmp, agentsHome, "proj", "20260101-000000", StdAddDeps{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("expected count=0 for a missing candidate, got %d", count)
+		}
+	})
+	if out != "" {
+		t.Errorf("expected no warning for a legitimately-absent candidate, got: %q", out)
+	}
+}
+
+// A real Remove error must be warned about (backup succeeded, but the
+// original was not cleaned up) while still preserving the best-effort
+// "don't abort the batch" semantics.
+func TestBackupExistingConfigsList_RemoveError_Warns(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	_ = os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	src := filepath.Join(tmp, "AGENTS.md")
+	_ = os.WriteFile(src, []byte("x"), 0644)
+
+	deps := fakeAddDeps{remove: func(string) error { return errors.New("remove denied") }}
+	out := captureDoctorOutput(t, func() {
+		count, err := BackupExistingConfigsList([]string{src}, tmp, agentsHome, "proj", "20260101-000000", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("expected count=0 when Remove fails, got %d", count)
+		}
+	})
+	if !strings.Contains(out, "could not remove the original") {
+		t.Errorf("expected a warning about the failed removal, got: %q", out)
+	}
+}
+
+// A Remove failure that is legitimate absence (os.IsNotExist — e.g. a
+// concurrent process already removed it) must stay silent.
+func TestBackupExistingConfigsList_RemoveNotExist_StaysSilent(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	_ = os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	src := filepath.Join(tmp, "AGENTS.md")
+	_ = os.WriteFile(src, []byte("x"), 0644)
+
+	deps := fakeAddDeps{remove: func(string) error { return os.ErrNotExist }}
+	out := captureDoctorOutput(t, func() {
+		count, err := BackupExistingConfigsList([]string{src}, tmp, agentsHome, "proj", "20260101-000000", deps)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if count != 0 {
+			t.Errorf("expected count=0 when Remove reports not-exist, got %d", count)
+		}
+	})
+	if out != "" {
+		t.Errorf("expected no warning for a legitimately-absent removal target, got: %q", out)
 	}
 }
 

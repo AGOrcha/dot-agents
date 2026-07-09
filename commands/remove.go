@@ -203,8 +203,20 @@ func confirmRemoveProceed() bool {
 func removeProjectLinks(projectName, projectPath string) error {
 	ui.Step("Removing project...")
 	if _, err := os.Stat(projectPath); err != nil {
-		ui.Bullet("skip", "Skipped link removal (directory not found)")
-		return nil
+		if os.IsNotExist(err) {
+			ui.Bullet("skip", "Skipped link removal (directory not found)")
+			return nil
+		}
+		// A REAL Stat error (permission denied, TOCTOU) must not be treated
+		// as "directory already gone" — the caller unregisters the project
+		// right after this returns nil, which would orphan whatever links or
+		// content still exist under projectPath but couldn't be verified.
+		// Surface it so the registration is preserved for a retry.
+		return ErrorWithHints(
+			fmt.Sprintf("remove incomplete for '%s': could not verify project directory: %v", projectName, err),
+			"The project registration was PRESERVED so cleanup can be retried. "+
+				"Resolve the error above (permissions, disk issues), then re-run `da remove "+projectName+"`.",
+		)
 	}
 	config.SetWindowsMirrorContext(projectPath)
 	var installed []platform.Platform
