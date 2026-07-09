@@ -43,7 +43,9 @@ func newCommitCmd(deps Deps) *cobra.Command {
 				return nil
 			}
 
-			execabs.Command("git", "-C", agentsHome, "add", "-A").Run()
+			if addOut, err := execabs.Command("git", "-C", agentsHome, "add", "-A").CombinedOutput(); err != nil {
+				return fmt.Errorf("git add: %w\n%s", err, strings.TrimSpace(string(addOut)))
+			}
 			out, err := execabs.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
 			output := strings.TrimSpace(string(out))
 			if err != nil {
