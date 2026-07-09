@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,60 @@ func TestWriteKGMCPConfigFile_MergesExistingServers(t *testing.T) {
 	}
 	if _, ok := servers["dot-agents-kg"]; !ok {
 		t.Error("expected dot-agents-kg server entry")
+	}
+}
+
+// WriteKGMCPConfigFile must abort the write and leave the on-disk file
+// untouched when an EXISTING claude.json/cursor.json/mcp.json is not
+// valid JSON — overwriting it would silently replace every other
+// server entry with an empty/partial config (should-be-ATOMIC).
+func TestWriteKGMCPConfigFile_CorruptExistingFileAborts(t *testing.T) {
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "claude.json")
+	corrupt := []byte(`{"servers": {"other": {"command": "foo"}` + "\n") // truncated/invalid JSON
+	if err := os.WriteFile(target, corrupt, 0644); err != nil {
+		t.Fatalf("seed corrupt config: %v", err)
+	}
+
+	server := map[string]any{"command": "exe", "args": []string{"kg", "serve"}, "type": "stdio"}
+	err := WriteKGMCPConfigFile(target, server, StdAddDeps{})
+	if err == nil {
+		t.Fatal("expected an error for corrupt existing JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), target) {
+		t.Errorf("expected error to name the offending path %q, got %v", target, err)
+	}
+
+	out, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("re-reading target: %v", readErr)
+	}
+	if string(out) != string(corrupt) {
+		t.Errorf("on-disk bytes changed after aborted write:\n got: %q\nwant: %q", out, corrupt)
+	}
+}
+
+// WriteKGMCPConfigFile must also abort when the existing file cannot be
+// read at all (e.g. permission denied) rather than silently treating a
+// real I/O error identically to "file does not exist yet."
+func TestWriteKGMCPConfigFile_UnreadableExistingFileAborts(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("chmod-based fault injection not available")
+	}
+	tmp := t.TempDir()
+	target := filepath.Join(tmp, "claude.json")
+	pre := []byte(`{"servers": {"other": {"command": "foo"}}}`)
+	if err := os.WriteFile(target, pre, 0644); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := os.Chmod(target, 0000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(target, 0644) })
+
+	err := WriteKGMCPConfigFile(target, map[string]any{"command": "x"}, StdAddDeps{})
+	if err == nil {
+		t.Fatal("expected an error for unreadable existing config, got nil")
 	}
 }
 
