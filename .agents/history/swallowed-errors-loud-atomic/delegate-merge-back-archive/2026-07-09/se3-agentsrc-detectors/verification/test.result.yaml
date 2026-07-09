@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se3-agentsrc-detectors
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: test
+status: pass
+summary: 'go build ./... and go test ./internal/config/... green in worktree /tmp/da-swallowed-3 on swallowed/3-agentsrc-detectors (commit 0ed4b8b5); TestGenerateAgentsRC_DetectorIOErrors (6 subtests: skills/agents/hooks/mcp/settings/rules chmod-unreadable -> non-nil err, nil manifest), TestDeriveRepoIDFromGit_CorruptConfigEmitsWarning (real corrupt .git/config -> warning fires, still returns empty), TestDeriveRepoIDFromGit_NotACheckoutNoWarning + TestDeriveRepoIDFromGit_NoOriginRemoteNoWarning (legitimate-absence regression guards), all 13 pre-existing detector-level tests updated for new two-value signatures'
+recorded_at: "2026-07-09T02:54:29Z"
+delegation_id: del-se3-agentsrc-detectors-1783564600
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./internal/config/...

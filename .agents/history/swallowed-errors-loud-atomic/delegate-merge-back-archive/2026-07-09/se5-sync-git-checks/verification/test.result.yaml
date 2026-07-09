@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se5-sync-git-checks
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: test
+status: pass
+summary: 'go build ./... clean; go test ./commands/sync/... green (26 tests) incl. new negative-path coverage: TestStageAndCommit_CommitFailureSurfacesError, TestStageAndCommit_GitAddFailureSurfacesError, TestRunSyncPush_CommitFailureAbortsBeforePush, TestCommit_GitCommitFailureSurfacesError, TestCommit_GitAddFailureSurfacesError, TestRunSyncInit_UntrackFailureSurfacesError. PR #356 base master head swallowed/5-sync-git-checks.'
+recorded_at: "2026-07-09T03:03:20Z"
+delegation_id: del-se5-sync-git-checks-1783565715
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./commands/sync/...

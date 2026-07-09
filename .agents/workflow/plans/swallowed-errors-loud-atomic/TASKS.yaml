@@ -7,6 +7,7 @@ tasks:
       depends_on: []
       blocks:
         - se2-platform-prune-guard
+        - se9-p2-loud-batch
       owner: dot-agents
       write_scope:
         - internal/fsops/
@@ -21,7 +22,7 @@ tasks:
         In flight: agent Swallowed0Fsops. STOP before merge; no AI trailer.
     - id: se2-platform-prune-guard
       title: 'Slice 2: internal/platform prune-on-read-error guard (top risk #1, destructive)'
-      status: in_progress
+      status: completed
       depends_on:
         - se0-fsops-helpers
       blocks:
@@ -44,14 +45,14 @@ tasks:
         SURVIVE. PR base swallowed/0-fsops-allow-missing, head swallowed/2-platform-prune-guard.
     - id: se3-agentsrc-detectors
       title: 'Slice 3: agentsrc GenerateAgentsRC detectors fail-or-full (#350 trigger)'
-      status: pending
+      status: completed
       depends_on:
         - se2-platform-prune-guard
-      blocks:
-        - se1-userhome-preflight
+      blocks: []
       owner: dot-agents
       write_scope:
         - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
       verification_required: true
       notes: |-
         The original #350 trigger. 7 detectors (isDirEntry, collectScopedDirs,
@@ -67,11 +68,9 @@ tasks:
         PR base swallowed/2-platform-prune-guard, head swallowed/3-agentsrc-detectors.
     - id: se1-userhome-preflight
       title: 'Slice 1: UserHomeDir preflight, hard-fail on unresolvable home (top risk #2)'
-      status: pending
-      depends_on:
-        - se3-agentsrc-detectors
-      blocks:
-        - se6-graphstore-atomic
+      status: completed
+      depends_on: []
+      blocks: []
       owner: dot-agents
       write_scope:
         - internal/config/paths.go
@@ -88,14 +87,12 @@ tasks:
         kgHome(), graphstore/mcp_server.go:101 defaultKGHome (only those lines).
         NOT a signature refactor of AgentsHome's callers. Tests: AGENTS_HOME set
         + $HOME unset -> ok; both unset -> hard actionable error, no relative
-        fallback. PR base swallowed/3-agentsrc-detectors, head swallowed/1-userhome-preflight.
+        fallback. PR base master, head swallowed/1-userhome-preflight.
     - id: se6-graphstore-atomic
       title: 'Slice 6: graphstore atomicity + corrupt-extra visibility (top risk #3)'
-      status: pending
-      depends_on:
-        - se1-userhome-preflight
-      blocks:
-        - se4-kgmcp-guard
+      status: in_progress
+      depends_on: []
+      blocks: []
       owner: dot-agents
       write_scope:
         - internal/graphstore/sqlite.go
@@ -112,14 +109,12 @@ tasks:
         se1's scope -- do NOT touch it here. Tests: node/edge with NaN float in
         Extra -> whole StoreFileNodesEdges tx rolls back (GetNode not-found);
         invalid extra JSON -> warning logged on read.
-        PR base swallowed/1-userhome-preflight, head swallowed/6-graphstore-atomic.
+        PR base master, head swallowed/6-graphstore-atomic.
     - id: se4-kgmcp-guard
       title: 'Slice 4: kgmcp WriteKGMCPConfigFile corrupt-overwrite guard'
-      status: pending
-      depends_on:
-        - se6-graphstore-atomic
-      blocks:
-        - se5-sync-git-checks
+      status: completed
+      depends_on: []
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/internal/lifecycle/kgmcp.go
@@ -129,15 +124,13 @@ tasks:
         abort the write + return error instead of overwriting with the empty/
         partial map (destroys other MCP entries). Convert the `_ = json.Unmarshal`
         into a checked early-return. Test: seed corrupt claude.json -> returns
-        error, on-disk bytes untouched. PR base swallowed/6-graphstore-atomic,
+        error, on-disk bytes untouched. PR base master,
         head swallowed/4-kgmcp-guard.
     - id: se5-sync-git-checks
       title: 'Slice 5: sync push/commit git-error checks'
-      status: pending
-      depends_on:
-        - se4-kgmcp-guard
-      blocks:
-        - se7-delegation-visibility
+      status: completed
+      depends_on: []
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/sync/push.go
@@ -151,14 +144,12 @@ tasks:
         committing). Also init.go untrackMachineLocalState `_ = ...Run()`.
         Test: fake git wrapper (sync package's existing helpers pattern) makes
         commit fail non-"nothing to commit" -> non-nil error, never reaches push.
-        PR base swallowed/4-kgmcp-guard, head swallowed/5-sync-git-checks.
+        PR base master, head swallowed/5-sync-git-checks.
     - id: se7-delegation-visibility
       title: 'Slice 7: workflow delegation fanout-safety visibility'
       status: pending
-      depends_on:
-        - se5-sync-git-checks
-      blocks:
-        - se8-registration-visibility
+      depends_on: []
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/workflow/delegation.go
@@ -170,15 +161,13 @@ tasks:
         contract must not silently defeat write-scope-conflict detection. The two
         rollback `_ = os.Remove(contractPath)` sites log loudly on failure with
         the orphaned path. Test: corrupt contract alongside valid ones ->
-        conflict check warns or fails closed. PR base swallowed/5-sync-git-checks,
+        conflict check warns or fails closed. PR base master,
         head swallowed/7-delegation-visibility.
     - id: se8-registration-visibility
       title: 'Slice 8: agents/skills registration-step visibility'
-      status: pending
-      depends_on:
-        - se7-delegation-visibility
-      blocks:
-        - se9-p2-loud-batch
+      status: in_progress
+      depends_on: []
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/agents/new.go
@@ -191,15 +180,14 @@ tasks:
         success warning naming what didn't register (should-be-LOUD, not roll
         back the already-written AGENT.md/SKILL.md). Test: corrupt .agentsrc.json
         -> `da agents new`/`skills new` prints a registration-failed warning, not
-        an unqualified "Created". PR base swallowed/7-delegation-visibility,
+        an unqualified "Created". PR base master,
         head swallowed/8-registration-visibility.
     - id: se9-p2-loud-batch
       title: 'Slice 9: P2 should-be-LOUD quick-win batch (split by subsystem)'
       status: pending
       depends_on:
-        - se8-registration-visibility
-      blocks:
-        - se10-p3-diagnostics-batch
+        - se0-fsops-helpers
+      blocks: []
       owner: dot-agents
       write_scope:
         - commands/kg/
@@ -221,12 +209,11 @@ tasks:
         detector-shape family (same fix as se3), 9f commands/* top-level
         (remove.go no-orphan invariant; import.go hook-bundle Unmarshal sites,
         should-be-ATOMIC -- pair with se4 pattern). Three-way tables throughout.
-        PR base swallowed/8-registration-visibility, head swallowed/9-p2-loud-batch (or 9a..9f substack).
+        PR base master, head swallowed/9-p2-loud-batch (or 9a..9f substack).
     - id: se10-p3-diagnostics-batch
       title: 'Slice 10: P3 diagnostics/telemetry batch (lowest priority)'
-      status: pending
-      depends_on:
-        - se9-p2-loud-batch
+      status: in_progress
+      depends_on: []
       blocks: []
       owner: dot-agents
       write_scope:
@@ -239,4 +226,4 @@ tasks:
         scoring/signal_backfill.go:391, dashboard/store/store.go:138-141 (add the
         log line its siblings have), adapters/builtin/sdd-register/ingest.go:349-352,
         globalflagcov/static.go:77-80. One small PR; safe to slip last.
-        PR base swallowed/9-p2-loud-batch, head swallowed/10-p3-diagnostics-batch.
+        PR base master, head swallowed/10-p3-diagnostics-batch.
