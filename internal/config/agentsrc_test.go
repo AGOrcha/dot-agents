@@ -1028,7 +1028,6 @@ func TestGenerateAgentsRCSettingsFalse(t *testing.T) {
 	}
 }
 
-
 func TestGenerateAgentsRCDefaultFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
