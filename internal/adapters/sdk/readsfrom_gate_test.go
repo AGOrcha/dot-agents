@@ -124,6 +124,6 @@ func TestMaterializeViewRequiresGate(t *testing.T) {
 		return nil, nil
 	})
 	if err == nil {
-		t.Fatal("MaterializeView must reject a nil ReadsFromGate rather than skip the reads_from check")
+		t.Fatal("MaterializeView must reject a nil ReadsFromValidator rather than skip the reads_from check")
 	}
 }

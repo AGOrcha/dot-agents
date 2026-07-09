@@ -113,7 +113,7 @@ func TestStoreRejectsUnauthorizedRead(t *testing.T) {
 	}
 }
 
-// allowAllGate is a ReadsFromGate stub that never rejects. It isolates the
+// allowAllGate is a ReadsFromValidator stub that never rejects. It isolates the
 // pre-existing MaterializeView mechanics tests below (token derivation,
 // store error propagation) from the reads_from gate under test in
 // readsfrom_gate_test.go — those tests exercise the runner/store plumbing,
