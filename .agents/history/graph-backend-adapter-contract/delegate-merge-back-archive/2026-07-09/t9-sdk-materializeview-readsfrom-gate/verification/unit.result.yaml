@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: t9-sdk-materializeview-readsfrom-gate
+parent_plan_id: graph-backend-adapter-contract
+verifier_type: unit
+status: pass
+summary: 'go build ./... clean (repo-wide); go test ./internal/adapters/sdk/... PASS — 3 new gate tests (reject migration_only, accept legitimate, reject nil gate) + 17 pre-existing SDK tests + sdk/dogfood suite all green. Mutation-verified: temporarily stripped gate.ValidateReadsFrom call from MaterializeView, reran gate tests -> 2 failed as expected; restored -> green again.'
+recorded_at: "2026-07-09T03:16:18Z"
+delegation_id: del-t9-sdk-materializeview-readsfrom-gate-1783566402
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./internal/adapters/sdk/...

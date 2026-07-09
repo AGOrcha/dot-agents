@@ -1,0 +1,7 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+task_id: p4-fanout-gate-enforcement
+delegation_id: del-p4-fanout-gate-enforcement-1783429285
+decision: reject
+note: 38h-stale orphan reclaim; scope released; impl branch preserved
+closed_at: "2026-07-09T04:21:06Z"

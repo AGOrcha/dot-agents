@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se10-p3-diagnostics-batch
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: test
+status: pass
+summary: 'go build ./... clean; go test all 15 packages under scoring/dashboard/adapters/globalflagcov green, incl 4 new tests for the se10 fixes (TestBackfillIterationsUnreadableTranscriptRoot, TestReadDirStateUnreadableRoot+MissingRootNotLogged, TestFileExists, TestLoadCommandPackagesLogsPerPackageErrors). PR #358 open base master.'
+recorded_at: "2026-07-09T03:10:34Z"
+delegation_id: del-se10-p3-diagnostics-batch-1783565919
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./internal/scoring/... ./internal/dashboard/... ./internal/adapters/... ./internal/globalflagcov/...

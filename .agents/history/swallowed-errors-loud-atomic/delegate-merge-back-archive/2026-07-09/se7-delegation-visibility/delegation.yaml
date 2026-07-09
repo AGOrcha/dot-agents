@@ -1,0 +1,25 @@
+schema_version: 1
+id: del-se7-delegation-visibility-1783570867
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se7-delegation-visibility
+title: 'Slice 7: workflow delegation fanout-safety visibility'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - commands/workflow/delegation.go
+    - commands/workflow/delegation_test.go
+success_criteria: |-
+    listDelegationContracts must surface per-entry read/parse failures
+    (warnings slice threaded to checkFanoutWriteScopeConflicts + active-
+    delegation/plan-lock accounting) instead of silent continue -- a corrupt
+    contract must not silently defeat write-scope-conflict detection. The two
+    rollback `_ = os.Remove(contractPath)` sites log loudly on failure with
+    the orphaned path. Test: corrupt contract alongside valid ones ->
+    conflict check warns or fails closed. PR base master,
+    head swallowed/7-delegation-visibility.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed7Delegation
+status: completed
+created_at: "2026-07-09T04:21:07Z"
+updated_at: "2026-07-09T04:31:52Z"

@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: graph-backend-adapter-contract
+task_id: t9-sdk-materializeview-readsfrom-gate
+delegation_id: del-t9-sdk-materializeview-readsfrom-gate-1783566402
+decision: accept
+closed_at: "2026-07-09T03:27:02Z"

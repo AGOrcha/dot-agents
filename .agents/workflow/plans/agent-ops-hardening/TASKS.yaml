@@ -221,7 +221,7 @@ tasks:
       app_type: docs
     - id: p4-fanout-gate-enforcement
       title: 'P4: mechanical refuse-check in da workflow fanout for out-of-scope asserting test callers'
-      status: in_progress
+      status: blocked
       depends_on:
         - p1-delegation-brief-hardening-skill
       blocks: []
@@ -236,6 +236,7 @@ tasks:
         (expand-only-if-same-package, else refuse). The skill prose is now mandatory
         (PR #134); this is the code enforcement. Future: drive the symbol/caller lineage
         from the graph (scoped-KG derivation), not just grep.
+        - delegation closeout reject: 38h-stale orphan reclaim; scope released; impl branch preserved
       app_type: go-cli
     - id: p5-routing-doc-cross-harness-evidence
       title: Update AGENT_TOOL_ROUTING.md with cross-harness wave evidence + blocking-gate policy

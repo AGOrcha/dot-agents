@@ -90,7 +90,7 @@ tasks:
         fallback. PR base master, head swallowed/1-userhome-preflight.
     - id: se6-graphstore-atomic
       title: 'Slice 6: graphstore atomicity + corrupt-extra visibility (top risk #3)'
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -147,7 +147,7 @@ tasks:
         PR base master, head swallowed/5-sync-git-checks.
     - id: se7-delegation-visibility
       title: 'Slice 7: workflow delegation fanout-safety visibility'
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -165,7 +165,7 @@ tasks:
         head swallowed/7-delegation-visibility.
     - id: se8-registration-visibility
       title: 'Slice 8: agents/skills registration-step visibility'
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -212,7 +212,7 @@ tasks:
         PR base master, head swallowed/9-p2-loud-batch (or 9a..9f substack).
     - id: se10-p3-diagnostics-batch
       title: 'Slice 10: P3 diagnostics/telemetry batch (lowest priority)'
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -227,3 +227,15 @@ tasks:
         log line its siblings have), adapters/builtin/sdd-register/ingest.go:349-352,
         globalflagcov/static.go:77-80. One small PR; safe to slip last.
         PR base master, head swallowed/10-p3-diagnostics-batch.
+    - id: se9-periph-loud
+      title: 'Slice 9 (periph): links/projectsync/gitwt should-be-LOUD'
+      status: in_progress
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/links/
+        - internal/projectsync/
+        - internal/gitwt/
+      verification_required: true
+      notes: 'P2 should-be-LOUD (proposal Slice 9 group 9d); isolated packages (no unmerged-sibling overlap); dir-scoped so _test.go auto-included. Sites: links.go handleUnmanagedOccupant/IsManagedFileLink/RemoveIfHardlinkedToAny (distinguish os.IsNotExist vs real Lstat error, fail-safe direction \u2014 unmanaged occupant must NOT be treated as vanished on a real error before overwrite); projectsync/journal.go readPendingJournalEntry + promote.go clearExistingCanonical (should-be-ATOMIC: real error must not read as absent before a destructive promote/write); projectsync/list.go ListBucket (loud); gitwt/gogit.go Prune/adminDir/worktreeDir (distinguish real error from missing). Add a test per site (reuse internal/testutil/perms*). PR base master.'
