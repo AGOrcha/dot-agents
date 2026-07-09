@@ -165,7 +165,10 @@ func TestAppendAgentsRCStep_CorruptManifestSkipsAppend(t *testing.T) {
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
-	out := appendAgentsRCStep([]string{"step1"}, "x", "corruptproj")
+	out, err := appendAgentsRCStep([]string{"step1"}, "x", "corruptproj")
+	if err == nil {
+		t.Error("expected error on corrupt .agentsrc.json, got nil")
+	}
 	if len(out) != 1 {
 		t.Errorf("expected unchanged steps on corrupt manifest, got: %v", out)
 	}
@@ -693,7 +696,10 @@ func TestAppendAgentsRCStep_CorruptGlobalConfigSkipsAppend(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	out := appendAgentsRCStep([]string{"step1"}, "x", "someproj")
+	out, err := appendAgentsRCStep([]string{"step1"}, "x", "someproj")
+	if err == nil {
+		t.Error("expected error on corrupt global config.json, got nil")
+	}
 	if len(out) != 1 {
 		t.Errorf("expected unchanged steps on corrupt global config, got: %v", out)
 	}
@@ -713,7 +719,10 @@ func TestAppendAgentsRCStep_UnknownProjectSkipsAppend(t *testing.T) {
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	out := appendAgentsRCStep([]string{"step1"}, "x", "ghost")
+	out, err := appendAgentsRCStep([]string{"step1"}, "x", "ghost")
+	if err != nil {
+		t.Errorf("unexpected error for unknown project: %v", err)
+	}
 	if len(out) != 1 {
 		t.Errorf("expected unchanged steps for unknown project, got: %v", out)
 	}

@@ -24,9 +24,18 @@ func CreateAgent(name, scope string) error {
 		return err
 	}
 
+	nextSteps, rcErr := createAgentNextSteps(agentMD, name, scope)
+	if rcErr != nil {
+		ui.WarnBox(
+			fmt.Sprintf("Created agent '%s' in ~/.agents/agents/%s/%s/, but registration did not fully complete", name, scope, name),
+			append(nextSteps, "did not update .agentsrc.json: "+rcErr.Error())...,
+		)
+		return nil
+	}
+
 	ui.SuccessBox(
 		fmt.Sprintf("Created agent '%s' in ~/.agents/agents/%s/%s/", name, scope, name),
-		createAgentNextSteps(agentMD, name, scope)...,
+		nextSteps...,
 	)
 	return nil
 }
@@ -38,7 +47,7 @@ func scopeFromArgs(args []string) string {
 	return args[0]
 }
 
-func createAgentNextSteps(agentMD, name, scope string) []string {
+func createAgentNextSteps(agentMD, name, scope string) ([]string, error) {
 	nextSteps := []string{"Edit the agent: " + config.DisplayPath(agentMD)}
 	return appendAgentsRCStep(nextSteps, name, scope)
 }
@@ -59,26 +68,35 @@ func writeAgentMDIfAbsent(agentMD, name string) error {
 }
 
 // appendAgentsRCStep auto-updates .agentsrc.json for project-scoped agents and
-// returns nextSteps with an optional confirmation message appended.
-func appendAgentsRCStep(nextSteps []string, name, scope string) []string {
+// returns nextSteps with an optional confirmation message appended. A non-nil
+// error means the project IS registered but config.Load/LoadAgentsRC/rc.Save
+// failed on a real error (corrupt JSON, permission denied, disk full) — the
+// caller (CreateAgent) has already written AGENT.md, so it downgrades its
+// success message to a warning naming the failure instead of rolling back.
+// A missing .agentsrc.json (os.IsNotExist) is legitimate absence, not an
+// error: the project simply hasn't been initialized with one yet.
+func appendAgentsRCStep(nextSteps []string, name, scope string) ([]string, error) {
 	if scope == "global" {
-		return nextSteps
+		return nextSteps, nil
 	}
 	cfg, err := config.Load()
 	if err != nil {
-		return nextSteps
+		return nextSteps, fmt.Errorf("loading config.json: %w", err)
 	}
 	projPath := cfg.GetProjectPath(scope)
 	if projPath == "" {
-		return nextSteps
+		return nextSteps, nil
 	}
 	rc, err := config.LoadAgentsRC(projPath)
 	if err != nil {
-		return nextSteps
+		if os.IsNotExist(err) {
+			return nextSteps, nil
+		}
+		return nextSteps, fmt.Errorf("loading .agentsrc.json: %w", err)
 	}
 	rc.Agents = config.AppendUnique(rc.Agents, name)
-	if err := rc.Save(projPath); err == nil {
-		nextSteps = append(nextSteps, "Updated .agentsrc.json with agent '"+name+"'")
+	if err := rc.Save(projPath); err != nil {
+		return nextSteps, fmt.Errorf("saving .agentsrc.json: %w", err)
 	}
-	return nextSteps
+	return append(nextSteps, "Updated .agentsrc.json with agent '"+name+"'"), nil
 }
