@@ -439,6 +439,28 @@ func TestPromoteJournal_ListPendingReadDirError(t *testing.T) {
 	}
 }
 
+// TestPromoteJournal_ListPendingReadDirPermissionError forces the real
+// (non-NotExist) os.ReadDir failure branch in classifyJournalReadDirError:
+// the journal dir exists under a directory agents-home, but is itself
+// unreadable (EACCES). Distinct from TestPromoteJournal_ListPendingReadDirError
+// above, which forces the "agents-home is a regular file" branch instead.
+func TestPromoteJournal_ListPendingReadDirPermissionError(t *testing.T) {
+	agentsHome := t.TempDir()
+	dir := promoteJournalDirPath(agentsHome)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, dir)
+
+	_, err := ListPendingPromoteJournals(agentsHome)
+	if err == nil {
+		t.Fatal("expected ReadDir error when journal dir is unreadable")
+	}
+	if !strings.Contains(err.Error(), "reading promote-journal dir") {
+		t.Errorf("expected wrapped error, got %v", err)
+	}
+}
+
 // TestPromoteJournal_ListPendingSkipsNonEntries covers the two legitimate
 // "continue" branches: directory entries and non-.json files. Neither is a
 // real error, so ListPendingPromoteJournals must not surface one.
