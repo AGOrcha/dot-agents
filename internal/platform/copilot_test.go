@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestCopilotSharedTargetIntentsPopulated drives the skills+agents combination.
@@ -166,14 +168,17 @@ func TestCopilotResolveInstructionsSrcFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewCopilot().(*copilot)
-	got := c.resolveInstructionsSrc("proj", tmp)
+	got, err := c.resolveInstructionsSrc("proj", tmp)
+	if err != nil {
+		t.Fatalf("resolveInstructionsSrc: %v", err)
+	}
 	if !strings.HasSuffix(got, "rules.md") {
 		t.Errorf("expected rules.md fallback, got %q", got)
 	}
 
-	// Missing → empty.
-	if got := c.resolveInstructionsSrc("proj", filepath.Join(tmp, "no-such")); got != "" {
-		t.Errorf("expected empty for missing rules, got %q", got)
+	// Missing → empty, no error.
+	if got, err := c.resolveInstructionsSrc("proj", filepath.Join(tmp, "no-such")); got != "" || err != nil {
+		t.Errorf("expected (\"\", nil) for missing rules, got (%q, %v)", got, err)
 	}
 }
 
@@ -190,8 +195,69 @@ func TestCopilotResolveInstructionsSrcDirectFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewCopilot().(*copilot)
-	if got := c.resolveInstructionsSrc("proj", tmp); got != src {
-		t.Errorf("got %q, want %q", got, src)
+	if got, err := c.resolveInstructionsSrc("proj", tmp); got != src || err != nil {
+		t.Errorf("got (%q, %v), want (%q, nil)", got, err, src)
+	}
+}
+
+// TestCopilotResolveInstructionsSrc_RealStatErrorPropagates covers the
+// swallow fixed in se9-platform-shared: a permission-denied Stat on a
+// candidate must abort the search with a wrapped error, never be silently
+// read as "this candidate doesn't exist" and skipped to the next one.
+func TestCopilotResolveInstructionsSrc_RealStatErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	projectRules := filepath.Join(tmp, "rules", "proj")
+	mustMkdirAllT(t, projectRules)
+	testutil.MakeDirUnreadable(t, projectRules)
+
+	c := NewCopilot().(*copilot)
+	got, err := c.resolveInstructionsSrc("proj", tmp)
+	if err == nil {
+		t.Fatalf("expected a real Stat error, got (%q, nil)", got)
+	}
+	if got != "" {
+		t.Errorf("expected empty src alongside the error, got %q", got)
+	}
+}
+
+// TestCopilotCreateLinks_UnreadableInstructionsSourceLeavesExistingLink is
+// the se2-contract survival check: CreateLinks succeeds once with a real
+// global instructions source, creating .github/copilot-instructions.md.
+// Once that source directory becomes unreadable, a second CreateLinks call
+// must abort with an error and leave the pre-existing managed link alone —
+// never delete it because the resolver misread the permission error as
+// "nothing to link".
+func TestCopilotCreateLinks_UnreadableInstructionsSourceLeavesExistingLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+	mustMkdirAllT(t, repo)
+
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	src := filepath.Join(globalRules, copilotInstructionsMD)
+	if err := os.WriteFile(src, []byte("# instructions\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(repo, copilotGitHubDir, copilotInstructionsMD)
+	if !links.IsManagedLink(dst, src) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, src)
+	}
+
+	testutil.MakeDirUnreadable(t, globalRules)
+	if err := NewCopilot().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the instructions source is unreadable")
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Errorf("existing managed link %s must survive the aborted sync", dst)
 	}
 }
 
@@ -658,6 +724,28 @@ func TestCopilotCreateLinks_WiresUserHomeHooks(t *testing.T) {
 		if _, err := os.Stat(expect); err != nil {
 			t.Errorf("expected %s: %v", expect, err)
 		}
+	}
+}
+
+// TestCopilotCreateLinks_ProjectHookFilesMkdirError covers CreateLinks' repo-
+// scope hooks error return: a MkdirAll fault scoped to .github/hooks lets
+// every earlier step (instructions, skills, agents, mcp, claude-compat)
+// succeed, then fails createProjectHookFiles so CreateLinks propagates the
+// error instead of continuing to the user-home hooks step.
+func TestCopilotCreateLinks_ProjectHookFilesMkdirError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	c := &copilot{io: withMkdirAllError(t, filepath.Join(".github", "hooks"))}
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to surface the .github/hooks MkdirAll fault")
 	}
 }
 

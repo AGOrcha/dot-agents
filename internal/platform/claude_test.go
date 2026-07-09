@@ -300,6 +300,152 @@ func TestClaudeEnsureUserRules_PreExistingSymlinkSkipped(t *testing.T) {
 	}
 }
 
+// TestClaudeEnsureUserRules_RealStatErrorPropagates covers the swallow
+// fixed in se9-platform-shared: a permission-denied Stat on a global-rules
+// candidate must abort the search with a wrapped error, never be silently
+// read as "this candidate doesn't exist" and skipped to the next one.
+func TestClaudeEnsureUserRules_RealStatErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	testutil.MakeDirUnreadable(t, globalRules)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserRules(agentsHome); err == nil {
+		t.Fatal("expected a real Stat error, got nil")
+	}
+}
+
+// TestClaudeEnsureUserRules_LegitimateAbsenceNoError guards the sibling
+// path the fix above must not regress: a genuinely absent global rules
+// bucket is still a silent no-op, not an error.
+func TestClaudeEnsureUserRules_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserRules(agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent global rules, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, claudeDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("expected no CLAUDE.md link created, lstat err = %v", err)
+	}
+}
+
+// TestClaudeCreateLinks_UnreadableGlobalRulesLeavesExistingLink is the
+// se2-contract survival check: CreateLinks succeeds once with a real global
+// rules source, creating ~/.claude/CLAUDE.md. Once that source directory
+// becomes unreadable, a second CreateLinks call must abort with an error
+// and leave the pre-existing managed link alone.
+func TestClaudeCreateLinks_UnreadableGlobalRulesLeavesExistingLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+	mustMkdirAllT(t, repo)
+
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	src := filepath.Join(globalRules, "rules.md")
+	if err := os.WriteFile(src, []byte("# rules\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewClaude().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(home, claudeDir, "CLAUDE.md")
+	if !links.IsManagedLink(dst, src) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, src)
+	}
+
+	testutil.MakeDirUnreadable(t, globalRules)
+	if err := NewClaude().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the global rules source is unreadable")
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Errorf("existing CLAUDE.md managed link must survive the aborted sync")
+	}
+}
+
+// TestClaudeEnsureUserAgents_RealReadDirErrorPropagates covers the swallow
+// fixed in se9-platform-shared: a permission-denied ReadDir on the global
+// agents bucket must abort with a wrapped error rather than being silently
+// read as "no agents to link".
+func TestClaudeEnsureUserAgents_RealReadDirErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	globalAgents := filepath.Join(agentsHome, "agents", "global")
+	mustMkdirAllT(t, globalAgents)
+	testutil.MakeDirUnreadable(t, globalAgents)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserAgents(agentsHome); err == nil {
+		t.Fatal("expected a real ReadDir error, got nil")
+	}
+}
+
+// TestClaudeEnsureUserAgents_LegitimateAbsenceNoError guards the sibling
+// path: a genuinely absent global agents bucket is still a silent no-op.
+func TestClaudeEnsureUserAgents_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserAgents(agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent global agents bucket, got %v", err)
+	}
+}
+
+// TestClaudeCreateLinks_UnreadableGlobalAgentsLeavesExistingLink is the
+// se2-contract survival check for the user-agent link family: CreateLinks
+// succeeds once with a real global agent, creating the managed link under
+// ~/.claude/agents/. Once the source bucket becomes unreadable, a second
+// CreateLinks call must abort and leave the pre-existing managed link alone.
+func TestClaudeCreateLinks_UnreadableGlobalAgentsLeavesExistingLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+	mustMkdirAllT(t, repo)
+
+	globalAgents := filepath.Join(agentsHome, "agents", "global")
+	agentDir := filepath.Join(globalAgents, "reviewer")
+	mustMkdirAllT(t, agentDir)
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# reviewer\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewClaude().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(home, claudeDir, "agents", "reviewer")
+	if !links.IsManagedLink(dst, agentDir) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, agentDir)
+	}
+
+	testutil.MakeDirUnreadable(t, globalAgents)
+	if err := NewClaude().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the global agents source is unreadable")
+	}
+	if !links.IsManagedLink(dst, agentDir) {
+		t.Errorf("existing user-agent managed link must survive the aborted sync")
+	}
+}
+
 // TestClaudeEnsureUserSettings_LegacyPathWithExistingSymlink covers the
 // settings.json continue-on-existing-symlink branch.
 func TestClaudeEnsureUserSettings_PreExistingSymlinkSkipped(t *testing.T) {

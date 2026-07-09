@@ -399,8 +399,11 @@ func (c *claude) pruneProjectRuleLinks(rulesDir, project string, wanted ...map[s
 
 func (c *claude) ensureUserAgents(agentsHome string) error {
 	globalAgents := filepath.Join(agentsHome, "agents", "global")
-	entries, err := os.ReadDir(globalAgents)
+	entries, found, err := fsops.ReadDirAllowMissing(globalAgents)
 	if err != nil {
+		return err
+	}
+	if !found {
 		return nil
 	}
 
@@ -450,10 +453,18 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 		filepath.Join(agentsHome, "rules", "global", "rules.txt"),
 	}
 
+	// A confirmed-absent candidate is skipped and the search continues; a
+	// real Stat error (permission denied, I/O failure, ...) aborts the
+	// search and propagates immediately — it must never be treated as
+	// "this candidate doesn't exist" and silently skipped.
 	var src string
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			src = c
+	for _, cand := range candidates {
+		_, found, err := fsops.StatAllowMissing(cand)
+		if err != nil {
+			return fmt.Errorf("checking claude global rules candidate %s: %w", cand, err)
+		}
+		if found {
+			src = cand
 			break
 		}
 	}

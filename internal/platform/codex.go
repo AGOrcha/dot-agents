@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 )
@@ -158,27 +159,34 @@ func (c *codex) linkCodexAgentsMD(project, repoPath, agentsHome string) error {
 		filepath.Join(agentsHome, "rules", "global", "rules.md"),
 		filepath.Join(agentsHome, "rules", "global", "rules.mdc"),
 	}
-	for _, src := range globalCandidates {
-		if _, err := os.Stat(src); err == nil {
-			// Managed-replace: AGENTS.md is a dot-agents output at a fixed
-			// owned repo path that refresh re-points (global → project). A
-			// stale managed symlink is idempotently re-pointed; a genuine
-			// user-authored AGENTS.md is preserved as
-			// AGENTS.md.dot-agents-backup, never silently destroyed.
-			if err := links.SymlinkReplacing(src, dst, backupSidecar); err != nil {
-				return err
-			}
-			break
-		}
+	if err := linkFirstResolvedAgentsCandidate(globalCandidates, dst); err != nil {
+		return err
 	}
-	// Project override
-	for _, name := range []string{"agents.md", "agents.mdc"} {
-		src := filepath.Join(agentsHome, "rules", project, name)
-		if _, err := os.Stat(src); err == nil {
-			if err := links.SymlinkReplacing(src, dst, backupSidecar); err != nil {
-				return err
-			}
-			break
+	// Project override: symlink-replaces the global link above when present.
+	projectCandidates := []string{
+		filepath.Join(agentsHome, "rules", project, "agents.md"),
+		filepath.Join(agentsHome, "rules", project, "agents.mdc"),
+	}
+	return linkFirstResolvedAgentsCandidate(projectCandidates, dst)
+}
+
+// linkFirstResolvedAgentsCandidate symlink-replaces dst with the first
+// candidate that resolves to a real file, skipping a legitimately absent
+// candidate (fsops.StatAllowMissing found=false, err=nil) and continuing the
+// search. A real Stat error (permission denied, I/O failure, ...) aborts the
+// search immediately and propagates — it must never be treated as "this
+// candidate doesn't exist" and silently skipped. Managed-replace: a stale
+// managed symlink is idempotently re-pointed; a genuine user-authored
+// AGENTS.md is preserved as AGENTS.md.dot-agents-backup, never silently
+// destroyed.
+func linkFirstResolvedAgentsCandidate(candidates []string, dst string) error {
+	for _, src := range candidates {
+		_, found, err := fsops.StatAllowMissing(src)
+		if err != nil {
+			return err
+		}
+		if found {
+			return links.SymlinkReplacing(src, dst, backupSidecar)
 		}
 	}
 	return nil
@@ -202,7 +210,11 @@ func (c *codex) linkCodexConfigToml(project, repoPath, agentsHome string) error 
 
 func (c *codex) ensureUserAgents(agentsHome string) error {
 	globalAgents := filepath.Join(agentsHome, "agents", "global")
-	if _, err := os.Stat(globalAgents); err != nil {
+	_, found, err := fsops.StatAllowMissing(globalAgents)
+	if err != nil {
+		return err
+	}
+	if !found {
 		return nil
 	}
 	for _, homeRoot := range config.UserHomeRoots() {
