@@ -93,7 +93,6 @@ func TestWriteRefreshLock_NeverTouchesManifest(t *testing.T) {
 	}
 }
 
-
 // A directory at the lockfile path makes agentslock.Open/Flush fail, exercising
 // the error returns in WriteRefreshLock/ReadRefreshLock.
 func TestWriteRefreshLock_LockPathIsDirErrors(t *testing.T) {

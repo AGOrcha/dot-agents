@@ -99,10 +99,15 @@ func WriteRefreshToLock(projectName, projectPath, version, commit, describe stri
 		if !os.IsNotExist(err) {
 			return err
 		}
-		rc, err = config.GenerateAgentsRC(projectName, projectPath)
-		if err != nil {
-			return err
-		}
+		// GenerateAgentsRC scans local ~/.agents state (skills, rules, agents,
+		// hooks, mcp, settings dirs) and the project's git remote; every one
+		// of those lookups swallows its own error (missing dir, unreadable
+		// file, non-git checkout) and degrades to an empty/zero value instead
+		// of propagating one. It has no failure mode today, so its error
+		// return is deliberately ignored here rather than left as an
+		// uncoverable dead branch — see its doc comment for the "never
+		// fails" guarantee.
+		rc, _ = config.GenerateAgentsRC(projectName, projectPath)
 	}
 	if err := rc.Save(projectPath); err != nil {
 		return err

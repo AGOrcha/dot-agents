@@ -251,7 +251,13 @@ func TestEnsureGitignoreEntry_UnreadableFileSkipsCleanly(t *testing.T) {
 	projectsync.EnsureGitignoreEntry("/nonexistent/path", "entry")
 }
 
-func TestWriteRefreshToLock_SaveError(t *testing.T) {
+// TestWriteRefreshToLock_LoadErrorRegularFileProjectPath covers the
+// LoadAgentsRC !os.IsNotExist(err) branch via ENOTDIR: joining
+// ".agentsrc.json" onto a projectPath that is itself a regular file (not a
+// directory) fails with "not a directory", which os.IsNotExist does not
+// match, so WriteRefreshToLock returns it directly instead of falling
+// through to the generate-and-bootstrap path.
+func TestWriteRefreshToLock_LoadErrorRegularFileProjectPath(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	t.Setenv("AGENTS_HOME", agentsHome)
@@ -260,7 +266,48 @@ func TestWriteRefreshToLock_SaveError(t *testing.T) {
 	projectPath := filepath.Join(tmp, "regular")
 	os.WriteFile(projectPath, []byte("file"), 0644)
 	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
-		t.Error("expected Save error when projectPath is a regular file")
+		t.Error("expected Load error (ENOTDIR) when projectPath is a regular file")
+	}
+}
+
+// TestWriteRefreshToLock_SaveError covers the rc.Save error-propagation
+// branch. projectPath does not exist at all: LoadAgentsRC misses with
+// os.IsNotExist (falls through to GenerateAgentsRC, which always succeeds),
+// but rc.Save then fails writing .agentsrc.json because its parent
+// directory was never created — a cross-platform ENOENT on every OS.
+func TestWriteRefreshToLock_SaveError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	os.MkdirAll(agentsHome, 0755)
+
+	projectPath := filepath.Join(tmp, "does-not-exist")
+	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
+		t.Error("expected Save error when projectPath directory does not exist")
+	}
+}
+
+// TestWriteRefreshToLock_WriteRefreshLockError covers the
+// config.WriteRefreshLock error-propagation branch: a valid, saveable
+// manifest exists, but a directory sits at .agentsrc.lock, so
+// agentslock.Open's os.ReadFile fails to read it (EISDIR, cross-platform).
+func TestWriteRefreshToLock_WriteRefreshLockError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	os.MkdirAll(agentsHome, 0755)
+
+	projectPath := filepath.Join(tmp, "repo")
+	os.MkdirAll(projectPath, 0755)
+	if err := os.WriteFile(filepath.Join(projectPath, ".agentsrc.json"),
+		[]byte(`{"version":1,"project":"p","sources":[{"type":"local"}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(config.AgentsLockPath(projectPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectsync.WriteRefreshToLock("p", projectPath, "v", "c", "d"); err == nil {
+		t.Error("expected WriteRefreshLock error when .agentsrc.lock is a directory")
 	}
 }
 

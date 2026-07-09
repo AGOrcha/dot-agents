@@ -928,7 +928,14 @@ func AppendUnique(slice []string, s string) []string {
 	return append(slice, s)
 }
 
-// GenerateAgentsRC inspects ~/.agents/ and builds a manifest for the given project.
+// GenerateAgentsRC inspects ~/.agents/ and builds a manifest for the given
+// project. It currently never returns a non-nil error: every scan it
+// performs (skills/rules/agents/hooks/mcp/settings dirs, git origin lookup)
+// swallows its own I/O failures and degrades to an empty/zero value rather
+// than propagating one. The error return is retained as the stable contract
+// callers rely on (e.g. WriteRefreshToLock's !IsNotExist bootstrap path,
+// commands/internal/lifecycle/install.go) so a future fallible step can be
+// added here without an API break.
 func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
