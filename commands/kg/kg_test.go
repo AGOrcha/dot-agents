@@ -1,8 +1,10 @@
 package kg
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -214,6 +216,47 @@ func TestKGHome_UnresolvableHomeHardFails(t *testing.T) {
 	}
 	if gotErr == nil {
 		t.Fatal("expected kgHomeExit to be invoked with a non-nil error")
+	}
+}
+
+// TestKGHomeExit_DefaultHookHardFailsAndExits drives the real (unstubbed)
+// kgHomeExit hook — the "print + os.Exit(1)" body itself, as opposed to
+// TestKGHome_UnresolvableHomeHardFails above which overrides the hook to
+// observe the error without exiting. Since os.Exit(1) would kill this test
+// binary, the body runs in a re-exec'd child process (the stdlib
+// TestHelperProcess pattern; see internal/events/producer_test.go for the
+// precedent in this repo).
+func TestKGHomeExit_DefaultHookHardFailsAndExits(t *testing.T) {
+	if os.Getenv("KG_HOME_EXIT_HELPER") == "1" {
+		// Child process: kgHomeExit is never overridden here, so this calls
+		// straight into the production print+exit body.
+		kgHome()
+		t.Fatal("kgHome should have exited via kgHomeExit before returning")
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestKGHomeExit_DefaultHookHardFailsAndExits$")
+	cmd.Env = append(os.Environ(),
+		"KG_HOME_EXIT_HELPER=1",
+		"KG_HOME=",
+		"HOME=",
+		"USERPROFILE=",
+		"HOMEDRIVE=",
+		"HOMEPATH=",
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected the child process to exit non-zero via os.Exit(1), got err=%v, stderr=%s", err, stderr.String())
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("expected exit code 1, got %d (stderr=%s)", exitErr.ExitCode(), stderr.String())
+	}
+	msg := stderr.String()
+	if !strings.Contains(msg, "cannot resolve home directory") || !strings.Contains(msg, "$KG_HOME") {
+		t.Errorf("expected actionable message on stderr mentioning $KG_HOME, got: %q", msg)
 	}
 }
 
