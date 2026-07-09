@@ -137,6 +137,30 @@ func TestRunSyncInit_UntracksAlreadyTrackedMachineLocal(t *testing.T) {
 	}
 }
 
+// TestRunSyncInit_UntrackFailureSurfacesError proves the previously-discarded
+// `git rm --cached` error in untrackMachineLocalState is now surfaced: a
+// corrupt index makes the untrack step fail, and runSyncInit must report
+// that failure instead of silently proceeding to report success.
+func TestRunSyncInit_UntrackFailureSurfacesError(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+
+	// Corrupt the index so `git rm --cached` fails with a real git error.
+	indexPath := filepath.Join(agentsHome, ".git", "index")
+	if err := os.WriteFile(indexPath, []byte("not-a-real-index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	err := runSyncInit(deps)
+	if err == nil {
+		t.Fatal("expected runSyncInit to surface the git rm --cached failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "untracking machine-local state") {
+		t.Errorf("expected an untrack error, got %q", err)
+	}
+}
+
 func TestRunSyncInit_ExistingRepoWithRemote(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	initEmptyRepo(t, agentsHome)
@@ -155,6 +179,31 @@ func TestRunSyncInit_ExistingRepoWithRemote(t *testing.T) {
 	}
 }
 
+// stripGitIdentity removes every git identity source in scope for the
+// current test's git commands, so a subsequent `git commit` fails
+// deterministically ("Author identity unknown") instead of falling back to a
+// real developer's ~/.gitconfig. HOME + XDG_CONFIG_HOME point at empty dirs
+// (no ~/.gitconfig), GIT_CONFIG_* vars are unset, and GIT_AUTHOR_*/
+// GIT_COMMITTER_* are cleared so git falls back to the (also unset)
+// user.email/user.name. Shared by push/commit/init tests that need a real
+// (not "nothing to commit") git commit failure.
+func stripGitIdentity(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	emptyHome := filepath.Join(tmp, "empty-home")
+	if err := os.MkdirAll(emptyHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", emptyHome)
+	t.Setenv("XDG_CONFIG_HOME", emptyHome)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(emptyHome, ".no-such-config"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(emptyHome, ".no-such-system"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(k, "")
+	}
+}
+
 // TestRunSyncInit_GitCommitFailureSurfacesError ensures the friendly error
 // path fires when git refuses to commit because user.email/user.name are
 // unset. The previous code swallowed the .Run() error and lied to the user
@@ -168,23 +217,7 @@ func TestRunSyncInit_GitCommitFailureSurfacesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
-
-	// Strip every git identity source so the commit must fail. HOME +
-	// XDG_CONFIG_HOME point at empty dirs (no ~/.gitconfig). GIT_CONFIG_*
-	// vars are unset. GIT_AUTHOR_*/GIT_COMMITTER_* are unset so git falls
-	// back to user.email/user.name (which is also unset).
-	emptyHome := filepath.Join(tmp, "empty-home")
-	if err := os.MkdirAll(emptyHome, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", emptyHome)
-	t.Setenv("XDG_CONFIG_HOME", emptyHome)
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(emptyHome, ".no-such-config"))
-	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(emptyHome, ".no-such-system"))
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
-		t.Setenv(k, "")
-	}
+	stripGitIdentity(t)
 
 	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
 	err := runSyncInit(deps)

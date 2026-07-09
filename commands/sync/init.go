@@ -41,7 +41,9 @@ func runSyncInit(deps Deps) error {
 			// committed local/ or cache/ would keep pushing them. Untrack them
 			// (without deleting the working-tree files) so machine-local state
 			// stops syncing on an already-initialized home.
-			untrackMachineLocalState(agentsHome)
+			if err := untrackMachineLocalState(agentsHome); err != nil {
+				return fmt.Errorf("untracking machine-local state: %w", err)
+			}
 		}
 		return reportExistingSyncRepo(agentsHome)
 	}
@@ -158,9 +160,13 @@ func ensureSyncGitignore(path string) error {
 // This is the in-place repair counterpart to ensureSyncGitignore: the gitignore
 // stops new tracking, this stops the already-tracked ones from continuing to
 // push (defects 2 & 5, R7).
-func untrackMachineLocalState(agentsHome string) {
-	_ = execabs.Command("git", "-C", agentsHome, "rm", "--cached", "-r",
-		"--ignore-unmatch", "--quiet", "local/", "cache/").Run()
+func untrackMachineLocalState(agentsHome string) error {
+	out, err := execabs.Command("git", "-C", agentsHome, "rm", "--cached", "-r",
+		"--ignore-unmatch", "--quiet", "local/", "cache/").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git rm --cached: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // printSyncNextSteps writes the canonical "create remote and push" recipe.

@@ -42,7 +42,9 @@ func runSyncPush(deps Deps, message string) error {
 		return nil
 	}
 
-	stageAndCommit(agentsHome, message)
+	if err := stageAndCommit(agentsHome, message); err != nil {
+		return err
+	}
 
 	if !deps.Flags.Yes && !deps.Flags.Force {
 		if !ui.Confirm("Push to remote?", false) {
@@ -74,12 +76,24 @@ func printPendingPushCommits(agentsHome string) {
 }
 
 // stageAndCommit runs `git add -A` and `git commit -m <message>`, printing
-// commit output unless it is the noisy "nothing to commit" status.
-func stageAndCommit(agentsHome, message string) {
-	execabs.Command("git", "-C", agentsHome, "add", "-A").Run()
-	commitOut, _ := execabs.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
+// commit output unless it is the noisy "nothing to commit" status. Only the
+// "nothing to commit" sentinel is non-fatal — any other add/commit failure
+// aborts before the confirm/push step so `da sync push` never reports
+// success while silently failing to commit the pending changes.
+func stageAndCommit(agentsHome, message string) error {
+	if addOut, err := execabs.Command("git", "-C", agentsHome, "add", "-A").CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w\n%s", err, strings.TrimSpace(string(addOut)))
+	}
+	commitOut, err := execabs.Command("git", "-C", agentsHome, "commit", "-m", message).CombinedOutput()
 	commitStr := strings.TrimSpace(string(commitOut))
-	if commitStr != "" && !strings.Contains(commitStr, "nothing to commit") {
+	if err != nil {
+		if strings.Contains(commitStr, "nothing to commit") {
+			return nil
+		}
+		return fmt.Errorf("git commit: %w\n%s", err, commitStr)
+	}
+	if commitStr != "" {
 		fmt.Fprintln(os.Stdout, commitStr)
 	}
+	return nil
 }
