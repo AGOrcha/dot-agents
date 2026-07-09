@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -389,6 +390,10 @@ func backfillAcrossDirs(rec IterationRecord, win IterationWindow, dirs []string)
 			continue
 		}
 		if _, err := os.Stat(dir); err != nil {
+			if !os.IsNotExist(err) {
+				slog.Default().Warn("scoring: transcript root unreadable, skipping",
+					"dir", dir, "error", err)
+			}
 			continue // a missing transcript root is not fatal
 		}
 		totals, err := scanTranscriptWindow(dir, win.Start, win.End)
