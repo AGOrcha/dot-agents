@@ -253,11 +253,15 @@ func (c *codex) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err := c.io.MkdirAll(filepath.Join(repoPath, codexDir), 0755); err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json")
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFile(
 		c.io,
 		repoTarget,
 		renderCodexHookConfig,
-		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
+		spec,
 		directSymlinkHookMode,
 		func(p string) error { return removeRenderedCodexHookConfig(c.io, p) },
 		repoBundles,
@@ -269,11 +273,15 @@ func (c *codex) writeUserHomeHooks(project, agentsHome string) error {
 	if err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json")
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFileToUserHomes(
 		c.io,
 		filepath.Join(codexDir, codexHooksJSON),
 		renderCodexHookConfig,
-		resolveHookSpec(agentsHome, []string{"hooks"}, project, "codex.json", "codex-hooks.json"),
+		spec,
 		directSymlinkHookMode,
 		func(p string) error { return removeRenderedCodexHookConfig(c.io, p) },
 		globalBundles,

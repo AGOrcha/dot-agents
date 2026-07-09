@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 )
@@ -263,7 +264,9 @@ func (c *claude) CreateLinks(project, repoPath string) error {
 	if err := c.createRulesLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
-	c.linkProjectSettings(project, repoPath, agentsHome)
+	if err := c.linkProjectSettings(project, repoPath, agentsHome); err != nil {
+		return err
+	}
 	if err := c.linkProjectMCP(project, repoPath, agentsHome); err != nil {
 		return err
 	}
@@ -288,21 +291,25 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	return c.io.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
 }
 
-func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
+func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) error {
 	target := filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON)
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err != nil {
-		return
+		return err
 	}
 	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 	if err != nil {
-		return
+		return err
 	}
-	_ = emitPreferredHookFile(
+	spec, err := findClaudeSettingsHookSpec(agentsHome, project)
+	if err != nil {
+		return err
+	}
+	return emitPreferredHookFile(
 		c.io,
 		target,
 		renderClaudeHookSettings,
-		findClaudeSettingsHookSpec(agentsHome, project),
+		spec,
 		directSymlinkHookMode,
 		func(p string) error { return removeRenderedClaudeHookSettings(c.io, p) },
 		projectBundles,
@@ -318,7 +325,7 @@ func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) error {
 	return nil
 }
 
-func findClaudeSettingsHookSpec(agentsHome, scope string) *HookSpec {
+func findClaudeSettingsHookSpec(agentsHome, scope string) (*HookSpec, error) {
 	return resolveHookSpecInScope(agentsHome, []string{"hooks", "settings"}, scope, claudeCodeJSON)
 }
 
@@ -326,8 +333,11 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
 	projectRulesDir := filepath.Join(agentsHome, "rules", project)
 
-	entries, err := os.ReadDir(projectRulesDir)
+	entries, found, err := fsops.ReadDirAllowMissing(projectRulesDir)
 	if err != nil {
+		return err
+	}
+	if !found {
 		return c.pruneProjectRuleLinks(rulesDir, project)
 	}
 	wanted := map[string]string{}
@@ -478,24 +488,29 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 		return emitRenderedHookFileToUserHomes(c.io, globalBundles, filepath.Join(claudeDir, claudeSettingsJSON), renderClaudeHookSettings)
 	}
 
-	spec := findClaudeSettingsHookSpec(agentsHome, "global")
-	if spec == nil {
-		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(c.io, filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
-		}
-		return nil
+	spec, err := findClaudeSettingsHookSpec(agentsHome, "global")
+	if err != nil {
+		return err
 	}
+	if spec == nil {
+		var errs []error
+		for _, homeRoot := range config.UserHomeRoots() {
+			errs = append(errs, removeManagedFileIf(c.io, filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings))
+		}
+		return errors.Join(errs...)
+	}
+	var errs []error
 	for _, homeRoot := range config.UserHomeRoots() {
 		target := filepath.Join(homeRoot, claudeDir, claudeSettingsJSON)
 		if isPreExistingManagedLink(target, spec.SourcePath) {
 			continue // already a managed link, leave it
 		}
-		_ = emitHookSpec(c.io, spec, target, HookEmissionMode{
+		errs = append(errs, emitHookSpec(c.io, spec, target, HookEmissionMode{
 			Shape:     HookShapeDirect,
 			Transport: HookTransportSymlink,
-		})
+		}))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (c *claude) ensureUserSkills(agentsHome string) error {
@@ -522,8 +537,7 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 	// Shared repo targets (.claude/skills/*, .agents/skills/*) are now written
 	// by CollectAndExecuteSharedTargetPlan at the command layer before
 	// CreateLinks is called. This method only handles user-home skill links.
-	c.ensureUserSkills(agentsHome)
-	return nil
+	return c.ensureUserSkills(agentsHome)
 }
 
 func (c *claude) RemoveLinks(project, repoPath string) error {

@@ -32,7 +32,10 @@ func TestResolveHookSpecPrefersProjectHooksOverSettingsAndGlobal(t *testing.T) {
 	writeTextFile(t, projectSettings, "{\"source\":\"project-settings\"}\n")
 	writeTextFile(t, globalHook, "{\"source\":\"global-hook\"}\n")
 
-	spec := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, "proj", hooksTestClaudeCompatFile)
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, "proj", hooksTestClaudeCompatFile)
+	if err != nil {
+		t.Fatalf("resolveHookSpec: %v", err)
+	}
 	if spec == nil {
 		t.Fatal("expected hook spec")
 	}

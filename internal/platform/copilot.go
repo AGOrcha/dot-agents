@@ -289,11 +289,15 @@ func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) 
 	if err := c.io.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json")
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFile(
 		c.io,
 		target,
 		renderClaudeHookSettings,
-		resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json"),
+		spec,
 		directSymlinkHookMode,
 		func(p string) error { return removeRenderedClaudeHookSettings(c.io, p) },
 		projectBundles,
@@ -328,6 +332,9 @@ func (c *copilot) emitCanonicalProjectHookFiles(specs []HookSpec, hooksDir strin
 func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir string) error {
 	specs, err := ListHookSpecs(agentsHome, project)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
 		return pruneManagedRenderedFanoutExtras(c.io, hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
 	}
 	if err := emitHookFanout(c.io, specs, hooksDir, HookEmissionMode{

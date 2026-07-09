@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"golang.org/x/sys/execabs"
@@ -268,8 +269,12 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 	desired := map[string]string{}
-	c.collectRuleLinks(filepath.Join(agentsHome, "rules", "global"), globalRulesPrefix, desired)
-	c.collectRuleLinks(filepath.Join(agentsHome, "rules", project), project+"--", desired)
+	if err := c.collectRuleLinks(filepath.Join(agentsHome, "rules", "global"), globalRulesPrefix, desired); err != nil {
+		return err
+	}
+	if err := c.collectRuleLinks(filepath.Join(agentsHome, "rules", project), project+"--", desired); err != nil {
+		return err
+	}
 	if err := c.pruneRuleLinks(rulesDir, project, desired); err != nil {
 		return err
 	}
@@ -288,14 +293,18 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	return nil
 }
 
-func (c *cursor) collectRuleLinks(sourceDir, prefix string, desired map[string]string) {
-	entries, err := os.ReadDir(sourceDir)
+func (c *cursor) collectRuleLinks(sourceDir, prefix string, desired map[string]string) error {
+	entries, found, err := fsops.ReadDirAllowMissing(sourceDir)
 	if err != nil {
-		return
+		return err
+	}
+	if !found {
+		return nil
 	}
 	for _, entry := range entries {
 		c.collectRuleEntry(entry, sourceDir, prefix, desired)
 	}
+	return nil
 }
 
 func (c *cursor) collectRuleEntry(entry os.DirEntry, sourceDir, prefix string, desired map[string]string) {
@@ -382,11 +391,15 @@ func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON)
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFile(
 		c.io,
 		repoTarget,
 		renderCursorHookConfig,
-		resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON),
+		spec,
 		directHardlinkHookMode,
 		func(p string) error { return removeRenderedCursorHookConfig(c.io, p) },
 		repoBundles,
@@ -398,11 +411,15 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	if err != nil {
 		return err
 	}
+	spec, err := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON)
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFileToUserHomes(
 		c.io,
 		filepath.Join(cursorDir, cursorHooksFile),
 		renderCursorHookConfig,
-		resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON),
+		spec,
 		directHardlinkHookMode,
 		func(p string) error { return removeRenderedCursorHookConfig(c.io, p) },
 		globalBundles,
