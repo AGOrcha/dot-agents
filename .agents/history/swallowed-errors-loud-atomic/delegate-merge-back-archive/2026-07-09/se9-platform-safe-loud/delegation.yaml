@@ -1,0 +1,21 @@
+schema_version: 1
+id: del-se9-platform-safe-loud-1783574065
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se9-platform-safe-loud
+title: 'Slice 9 (platform-safe): resources/mcp_settings/rules should-be-LOUD'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - internal/platform/resources.go
+    - internal/platform/resources_test.go
+    - internal/platform/mcp_settings.go
+    - internal/platform/mcp_settings_test.go
+    - internal/platform/rules.go
+    - internal/platform/rules_test.go
+success_criteria: 'P2 should-be-LOUD (proposal Slice 9 group 9e SAFE subset). resources.go/mcp_settings.go/rules.go are NOT touched by se2''s unmerged prune-guard PR. claude/codex/copilot detector-shape is DEFERRED to post-se2-merge (overlap). Sites: resources.go resolveScopedFile/resolveScopedFileFromBuckets (agentsrc-detector shape: os.Stat loop -> '''' no error), mcp_settings.go resolveCanonicalFileByExt, rules.go ResolveCanonicalRuleFile (Stat loop -> generic not-found). Distinguish real error; keep absence. Tests <15 complexity + cover branches. PR base master.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed9PlatformSafe
+status: completed
+created_at: "2026-07-09T05:14:25Z"
+updated_at: "2026-07-09T05:24:18Z"

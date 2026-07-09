@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se9-periph-loud
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: unit
+status: pass
+summary: 'PR #363 (swallowed/9-periph-loud -> master): go build ./... clean; go vet clean on the 3 target packages; go test green across internal/links, internal/projectsync, internal/gitwt incl. -race, including new real-error-vs-legitimate-absence branch tests for links.go handleUnmanagedOccupant/IsManagedFileLink/RemoveIfHardlinkedToAny, projectsync journal.go readPendingJournalEntry/promote.go clearExistingCanonical/list.go ListBucket, gitwt adminDir/worktreeDir/Prune. Coverage 92-100% on every touched function; gocognit <=14 on every touched function (source+tests), none at/above the 15 Sonar threshold.'
+recorded_at: "2026-07-09T05:10:04Z"
+delegation_id: del-se9-periph-loud-1783572544
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go vet ./internal/links/... ./internal/projectsync/... ./internal/gitwt/... && go test ./internal/links/... ./internal/projectsync/... ./internal/gitwt/...

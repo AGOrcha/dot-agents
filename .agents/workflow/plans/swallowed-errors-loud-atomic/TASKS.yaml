@@ -229,7 +229,7 @@ tasks:
         PR base master, head swallowed/10-p3-diagnostics-batch.
     - id: se9-periph-loud
       title: 'Slice 9 (periph): links/projectsync/gitwt should-be-LOUD'
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -239,3 +239,53 @@ tasks:
         - internal/gitwt/
       verification_required: true
       notes: 'P2 should-be-LOUD (proposal Slice 9 group 9d); isolated packages (no unmerged-sibling overlap); dir-scoped so _test.go auto-included. Sites: links.go handleUnmanagedOccupant/IsManagedFileLink/RemoveIfHardlinkedToAny (distinguish os.IsNotExist vs real Lstat error, fail-safe direction \u2014 unmanaged occupant must NOT be treated as vanished on a real error before overwrite); projectsync/journal.go readPendingJournalEntry + promote.go clearExistingCanonical (should-be-ATOMIC: real error must not read as absent before a destructive promote/write); projectsync/list.go ListBucket (loud); gitwt/gogit.go Prune/adminDir/worktreeDir (distinguish real error from missing). Add a test per site (reuse internal/testutil/perms*). PR base master.'
+    - id: se9-commands-loud
+      title: 'Slice 9 (commands): kg/lifecycle/workflow/toplevel should-be-LOUD'
+      status: in_progress
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/kg/query_lint_maintain.go
+        - commands/kg/query_lint_maintain_test.go
+        - commands/kg/sync_code_warm_link.go
+        - commands/kg/sync_code_warm_link_test.go
+        - commands/internal/lifecycle/init.go
+        - commands/internal/lifecycle/init_test.go
+        - commands/internal/lifecycle/backup.go
+        - commands/internal/lifecycle/backup_test.go
+        - commands/workflow/journal.go
+        - commands/workflow/journal_test.go
+        - commands/workflow/eligible_accounting.go
+        - commands/workflow/eligible_accounting_test.go
+        - commands/workflow/plan_task.go
+        - commands/workflow/plan_task_test.go
+        - commands/workflow/commit_cmd.go
+        - commands/workflow/commit_cmd_test.go
+        - commands/workflow/drift.go
+        - commands/workflow/drift_test.go
+        - commands/remove.go
+        - commands/remove_test.go
+        - commands/import.go
+        - commands/import_test.go
+        - commands/import_plugins.go
+        - commands/import_plugins_test.go
+        - commands/refresh.go
+        - commands/refresh_test.go
+      verification_required: true
+      notes: 'P2 should-be-LOUD (proposal Slice 9 groups 9a/9b/9c/9f). FILE-scoped: siblings se1/se4/se7 have UNMERGED changes to kg.go/kgmcp.go/delegation.go in these packages -- do NOT touch those files; put new tests in file-specific *_test.go, NOT shared kg_test.go/delegation_test.go. Prioritize sync_code_warm_link.go checkCRGReadiness --require-graph bypass (correctness bug). Add os.IsNotExist/errors.Is discrimination + surface/log real errors; keep legitimate-absence. Keep test funcs <15 cognitive complexity + cover new branches >=80% (preempt Sonar gate). PR base master.'
+    - id: se9-platform-safe-loud
+      title: 'Slice 9 (platform-safe): resources/mcp_settings/rules should-be-LOUD'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/resources.go
+        - internal/platform/resources_test.go
+        - internal/platform/mcp_settings.go
+        - internal/platform/mcp_settings_test.go
+        - internal/platform/rules.go
+        - internal/platform/rules_test.go
+      verification_required: true
+      notes: 'P2 should-be-LOUD (proposal Slice 9 group 9e SAFE subset). resources.go/mcp_settings.go/rules.go are NOT touched by se2''s unmerged prune-guard PR. claude/codex/copilot detector-shape is DEFERRED to post-se2-merge (overlap). Sites: resources.go resolveScopedFile/resolveScopedFileFromBuckets (agentsrc-detector shape: os.Stat loop -> '''' no error), mcp_settings.go resolveCanonicalFileByExt, rules.go ResolveCanonicalRuleFile (Stat loop -> generic not-found). Distinguish real error; keep absence. Tests <15 complexity + cover branches. PR base master.'
