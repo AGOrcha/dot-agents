@@ -300,3 +300,15 @@ tasks:
         - commands/import_plugins.go
       verification_required: true
       notes: ""
+    - id: se5-add-errors
+      title: sync add -A + push commit error surfacing
+      status: pending
+      depends_on:
+        - se5-sync-git-checks
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/sync/commit.go
+        - commands/sync/push.go
+      verification_required: true
+      notes: 'se5 follow-up (PR #367, https://github.com/AGOrcha/dot-agents/pull/367). se5/#356 surfaced git commit and git push errors but missed two discards: commit.go''s unconditional pre-commit ''git add -A'' (.Run(), error dropped) and push.go''s stageAndCommit (void helper) swallowing both add -A and commit errors so runSyncPush would push after a genuine commit failure. Fix: commit.go now returns a wrapped git-add-A error and drops the vestigial diff/add/out dead-code block in the empty-message branch; push.go''s stageAndCommit now returns error (add -A / genuine commit failures wrapped, ''nothing to commit'' -> nil), and runSyncPush stops before the push confirmation on any staging/commit failure. Tests: TestCommit_AddStagingErrorPropagates, TestStageAndCommit_GenuineFailurePropagates, TestStageAndCommit_AddFailurePropagates, TestRunSyncPush_CommitFailureStopsBeforePush (chmod-read-only .git / failing pre-commit hook fault injection, same pattern as internal/lifecycle backup_test.go). Coverage: commit.go 95.83%, push.go 97.67% (>=95% gate, no exceptions entry). PR base master, head swallowed/se5-add-errors. Worktree /tmp/da-se5-follow. STOPPED before merge; no AI trailer.'
