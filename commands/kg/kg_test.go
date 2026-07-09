@@ -182,6 +182,36 @@ func TestKGHome_EnvOverride(t *testing.T) {
 	}
 }
 
+// TestKGHome_OverrideBypassesHomeResolution covers the KG_HOME override
+// short-circuiting home resolution even when $HOME is unresolvable.
+func TestKGHome_OverrideBypassesHomeResolution(t *testing.T) {
+	t.Setenv("KG_HOME", "/tmp/my-graph")
+	t.Setenv("HOME", "")
+	if got := kgHome(); got != "/tmp/my-graph" {
+		t.Errorf("expected /tmp/my-graph, got %s", got)
+	}
+}
+
+// TestKGHome_UnresolvableHomeHardFails covers the remediation for the
+// UserHomeDir-swallow class (top-risk #2 duplicate site): no KG_HOME
+// override and an unresolvable $HOME must hard-fail via kgHomeExit instead
+// of silently falling back to a relative "knowledge-graph" path.
+func TestKGHome_UnresolvableHomeHardFails(t *testing.T) {
+	t.Setenv("KG_HOME", "")
+	t.Setenv("HOME", "")
+	orig := kgHomeExit
+	var gotErr error
+	kgHomeExit = func(err error) { gotErr = err }
+	defer func() { kgHomeExit = orig }()
+
+	if got := kgHome(); got != "" {
+		t.Errorf("expected empty result after hard-fail hook fires, got %q", got)
+	}
+	if gotErr == nil {
+		t.Fatal("expected kgHomeExit to be invoked with a non-nil error")
+	}
+}
+
 func TestKGConfigRoundTrip(t *testing.T) {
 	home := newTempKG(t)
 	_ = os.MkdirAll(filepath.Join(home, "self"), 0755)

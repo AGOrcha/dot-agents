@@ -94,11 +94,26 @@ func NewMCPServer(workDir string) *MCPServer {
 	return s
 }
 
+// defaultKGHomeExit is invoked by defaultKGHome() when no KG_HOME override
+// is set and the process cannot resolve a home directory — same guard
+// class as kgHome() (commands/kg) and config.PreflightUserHome
+// (internal/config/paths.go): print an actionable message and exit instead
+// of degrading to a relative path. Kept as a package var so tests can
+// observe the failure without exiting the test binary.
+var defaultKGHomeExit = func(err error) {
+	fmt.Fprintf(os.Stderr, "error: cannot resolve home directory for the knowledge graph: %v — set $HOME or $KG_HOME and retry\n", err)
+	os.Exit(1)
+}
+
 func defaultKGHome() string {
 	if v := os.Getenv("KG_HOME"); v != "" {
 		return v
 	}
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		defaultKGHomeExit(err)
+		return ""
+	}
 	return filepath.Join(home, "knowledge-graph")
 }
 

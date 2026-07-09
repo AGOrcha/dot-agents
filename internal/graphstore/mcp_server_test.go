@@ -726,6 +726,36 @@ func TestDefaultKGHome_EnvOverride(t *testing.T) {
 	}
 }
 
+// TestDefaultKGHome_OverrideBypassesHomeResolution covers the KG_HOME
+// override short-circuiting home resolution even when $HOME is unresolvable.
+func TestDefaultKGHome_OverrideBypassesHomeResolution(t *testing.T) {
+	t.Setenv("KG_HOME", "/tmp/kg-test-home")
+	t.Setenv("HOME", "")
+	if defaultKGHome() != "/tmp/kg-test-home" {
+		t.Errorf("expected env override to win")
+	}
+}
+
+// TestDefaultKGHome_UnresolvableHomeHardFails covers the remediation for
+// the UserHomeDir-swallow class (top-risk #2 duplicate site): no KG_HOME
+// override and an unresolvable $HOME must hard-fail via defaultKGHomeExit
+// instead of silently falling back to a relative "knowledge-graph" path.
+func TestDefaultKGHome_UnresolvableHomeHardFails(t *testing.T) {
+	t.Setenv("KG_HOME", "")
+	t.Setenv("HOME", "")
+	orig := defaultKGHomeExit
+	var gotErr error
+	defaultKGHomeExit = func(err error) { gotErr = err }
+	defer func() { defaultKGHomeExit = orig }()
+
+	if got := defaultKGHome(); got != "" {
+		t.Errorf("expected empty result after hard-fail hook fires, got %q", got)
+	}
+	if gotErr == nil {
+		t.Fatal("expected defaultKGHomeExit to be invoked with a non-nil error")
+	}
+}
+
 func TestDefaultGraphstoreDBPath(t *testing.T) {
 	t.Setenv("KG_HOME", "/tmp/kg-test-home")
 	p := defaultGraphstoreDBPath()

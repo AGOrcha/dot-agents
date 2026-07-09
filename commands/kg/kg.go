@@ -31,11 +31,27 @@ type KGConfig struct {
 	UpdatedAt       string   `json:"updated_at" yaml:"updated_at"`
 }
 
+// kgHomeExit is invoked by kgHome() when no KG_HOME override is set and the
+// process cannot resolve a home directory — the same "hard-fail instead of
+// a silent relative fallback" guard as config.PreflightUserHome (see
+// internal/config/paths.go), applied at this package's own home-resolution
+// site. Kept as a package var (rather than an inline os.Exit) purely so
+// tests can observe the failure without killing the test binary;
+// production callers print an actionable message and exit(1).
+var kgHomeExit = func(err error) {
+	ui.Errorf("cannot resolve home directory for the knowledge graph: %v — set $HOME or $KG_HOME and retry", err)
+	os.Exit(1)
+}
+
 func kgHome() string {
 	if v := os.Getenv("KG_HOME"); v != "" {
 		return v
 	}
-	home, _ := config.UserHomeDir()
+	home, err := config.UserHomeDir()
+	if err != nil {
+		kgHomeExit(err)
+		return ""
+	}
 	return filepath.Join(home, "knowledge-graph")
 }
 

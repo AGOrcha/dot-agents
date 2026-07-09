@@ -25,6 +25,43 @@ func TestAgentsHomeDefault(t *testing.T) {
 	}
 }
 
+// TestPreflightUserHome_OverrideBypassesHomeResolution covers the top-risk
+// #2 remediation: an explicit AGENTS_HOME override short-circuits the
+// preflight, so an unresolvable $HOME is irrelevant.
+func TestPreflightUserHome_OverrideBypassesHomeResolution(t *testing.T) {
+	t.Setenv("AGENTS_HOME", "/tmp/explicit-agents-home")
+	t.Setenv("HOME", "")
+	if err := PreflightUserHome(); err != nil {
+		t.Errorf("expected nil error with AGENTS_HOME override, got: %v", err)
+	}
+}
+
+// TestPreflightUserHome_ResolvableHomeSucceeds covers the normal case: no
+// AGENTS_HOME override, but $HOME resolves fine.
+func TestPreflightUserHome_ResolvableHomeSucceeds(t *testing.T) {
+	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("HOME", t.TempDir())
+	if err := PreflightUserHome(); err != nil {
+		t.Errorf("expected nil error with a resolvable $HOME, got: %v", err)
+	}
+}
+
+// TestPreflightUserHome_UnresolvableHomeHardFails covers the actual
+// remediation: AGENTS_HOME unset AND $HOME unresolvable must hard-fail with
+// an actionable message, never silently succeed (which previously let
+// AgentsHome() degrade to a relative "./.agents" path).
+func TestPreflightUserHome_UnresolvableHomeHardFails(t *testing.T) {
+	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("HOME", "")
+	err := PreflightUserHome()
+	if err == nil {
+		t.Fatal("expected a hard error when home is unresolvable and AGENTS_HOME is unset")
+	}
+	if !strings.Contains(err.Error(), "HOME") || !strings.Contains(err.Error(), "AGENTS_HOME") {
+		t.Errorf("expected actionable error mentioning $HOME and $AGENTS_HOME, got: %v", err)
+	}
+}
+
 func TestUserHome(t *testing.T) {
 	got := UserHome()
 	want, _ := os.UserHomeDir()
