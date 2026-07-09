@@ -113,6 +113,16 @@ func TestStoreRejectsUnauthorizedRead(t *testing.T) {
 	}
 }
 
+// allowAllGate is a ReadsFromValidator stub that never rejects. It isolates the
+// pre-existing MaterializeView mechanics tests below (token derivation,
+// store error propagation) from the reads_from gate under test in
+// readsfrom_gate_test.go — those tests exercise the runner/store plumbing,
+// not the §11.2 rule, so they opt into "no gate" explicitly rather than
+// silently bypassing one.
+type allowAllGate struct{}
+
+func (allowAllGate) ValidateReadsFrom(string, []string) error { return nil }
+
 func TestMaterializeViewCrossNamespaceRead(t *testing.T) {
 	store := NewMemStore()
 	// Seed a dependency namespace (as if another adapter wrote it).
@@ -124,7 +134,7 @@ func TestMaterializeViewCrossNamespaceRead(t *testing.T) {
 
 	s := For("ttrpg", store)
 	// A view declaring reads_from [crg] CAN read crg; a named query cannot.
-	err := s.MaterializeView("dep_view", []string{"crg"}, func(read func(ns string) ([]Note, error)) ([]Note, error) {
+	err := s.MaterializeView("dep_view", []string{"crg"}, allowAllGate{}, func(read func(ns string) ([]Note, error)) ([]Note, error) {
 		dep, err := read("crg")
 		if err != nil {
 			return nil, err
@@ -160,7 +170,7 @@ func TestViewRunnerCannotReadUndeclaredNamespace(t *testing.T) {
 	_ = store.WriteNotes(BootstrapToken("secret"), "secret", []Note{{ID: "s1", Type: "t"}})
 	s := For("ttrpg", store)
 	// reads_from declares [crg] but the runner tries to read [secret].
-	err := s.MaterializeView("v", []string{"crg"}, func(read func(ns string) ([]Note, error)) ([]Note, error) {
+	err := s.MaterializeView("v", []string{"crg"}, allowAllGate{}, func(read func(ns string) ([]Note, error)) ([]Note, error) {
 		return read("secret")
 	})
 	if err == nil {
@@ -252,7 +262,7 @@ func TestQueryPropagatesEdgesError(t *testing.T) {
 
 func TestMaterializeViewPropagatesRunnerError(t *testing.T) {
 	s := For("ttrpg", NewMemStore())
-	err := s.MaterializeView("v", nil, func(func(string) ([]Note, error)) ([]Note, error) {
+	err := s.MaterializeView("v", nil, allowAllGate{}, func(func(string) ([]Note, error)) ([]Note, error) {
 		return nil, errFault
 	})
 	if err == nil {
@@ -263,7 +273,7 @@ func TestMaterializeViewPropagatesRunnerError(t *testing.T) {
 func TestMaterializeViewPropagatesWriteError(t *testing.T) {
 	// Runner succeeds but the final write to the adapter namespace fails.
 	s := For("ttrpg", &faultStore{inner: NewMemStore(), failWriteOn: "ttrpg"})
-	err := s.MaterializeView("v", nil, func(func(string) ([]Note, error)) ([]Note, error) {
+	err := s.MaterializeView("v", nil, allowAllGate{}, func(func(string) ([]Note, error)) ([]Note, error) {
 		return []Note{{ID: "n", Type: "t"}}, nil
 	})
 	if err == nil {
