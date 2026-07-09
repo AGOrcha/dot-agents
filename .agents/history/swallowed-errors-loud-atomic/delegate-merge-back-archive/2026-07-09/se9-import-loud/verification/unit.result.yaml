@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se9-import-loud
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: unit
+status: pass
+summary: 'go build/vet green; go test ./commands/ green incl. updated hook-bundle InvalidJSON tests + new Stat-error/ClaudeCompat tests; per-file coverage import.go 95.70%, import_plugins.go 93.44% (pre-existing legacy-tail allowlist, refreshed %); PR #366 opened base master'
+recorded_at: "2026-07-09T06:13:52Z"
+delegation_id: del-se9-import-loud-1783577626
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./commands/ && go vet ./commands/...

@@ -184,7 +184,7 @@ tasks:
         head swallowed/8-registration-visibility.
     - id: se9-p2-loud-batch
       title: 'Slice 9: P2 should-be-LOUD quick-win batch (split by subsystem)'
-      status: pending
+      status: completed
       depends_on:
         - se0-fsops-helpers
       blocks: []
@@ -241,7 +241,7 @@ tasks:
       notes: 'P2 should-be-LOUD (proposal Slice 9 group 9d); isolated packages (no unmerged-sibling overlap); dir-scoped so _test.go auto-included. Sites: links.go handleUnmanagedOccupant/IsManagedFileLink/RemoveIfHardlinkedToAny (distinguish os.IsNotExist vs real Lstat error, fail-safe direction \u2014 unmanaged occupant must NOT be treated as vanished on a real error before overwrite); projectsync/journal.go readPendingJournalEntry + promote.go clearExistingCanonical (should-be-ATOMIC: real error must not read as absent before a destructive promote/write); projectsync/list.go ListBucket (loud); gitwt/gogit.go Prune/adminDir/worktreeDir (distinguish real error from missing). Add a test per site (reuse internal/testutil/perms*). PR base master.'
     - id: se9-commands-loud
       title: 'Slice 9 (commands): kg/lifecycle/workflow/toplevel should-be-LOUD'
-      status: in_progress
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -291,7 +291,7 @@ tasks:
       notes: 'P2 should-be-LOUD (proposal Slice 9 group 9e SAFE subset). resources.go/mcp_settings.go/rules.go are NOT touched by se2''s unmerged prune-guard PR. claude/codex/copilot detector-shape is DEFERRED to post-se2-merge (overlap). Sites: resources.go resolveScopedFile/resolveScopedFileFromBuckets (agentsrc-detector shape: os.Stat loop -> '''' no error), mcp_settings.go resolveCanonicalFileByExt, rules.go ResolveCanonicalRuleFile (Stat loop -> generic not-found). Distinguish real error; keep absence. Tests <15 complexity + cover branches. PR base master.'
     - id: se9-import-loud
       title: import/hook-bundle error-surfacing
-      status: pending
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -302,7 +302,7 @@ tasks:
       notes: ""
     - id: se5-add-errors
       title: sync add -A + push commit error surfacing
-      status: pending
+      status: completed
       depends_on:
         - se5-sync-git-checks
       blocks: []
@@ -312,3 +312,15 @@ tasks:
         - commands/sync/push.go
       verification_required: true
       notes: 'se5 follow-up (PR #367, https://github.com/AGOrcha/dot-agents/pull/367). se5/#356 surfaced git commit and git push errors but missed two discards: commit.go''s unconditional pre-commit ''git add -A'' (.Run(), error dropped) and push.go''s stageAndCommit (void helper) swallowing both add -A and commit errors so runSyncPush would push after a genuine commit failure. Fix: commit.go now returns a wrapped git-add-A error and drops the vestigial diff/add/out dead-code block in the empty-message branch; push.go''s stageAndCommit now returns error (add -A / genuine commit failures wrapped, ''nothing to commit'' -> nil), and runSyncPush stops before the push confirmation on any staging/commit failure. Tests: TestCommit_AddStagingErrorPropagates, TestStageAndCommit_GenuineFailurePropagates, TestStageAndCommit_AddFailurePropagates, TestRunSyncPush_CommitFailureStopsBeforePush (chmod-read-only .git / failing pre-commit hook fault injection, same pattern as internal/lifecycle backup_test.go). Coverage: commit.go 95.83%, push.go 97.67% (>=95% gate, no exceptions entry). PR base master, head swallowed/se5-add-errors. Worktree /tmp/da-se5-follow. STOPPED before merge; no AI trailer.'
+    - id: se9-platform-shared
+      title: 'Slice 9 (platform-shared): claude/codex/copilot detector-shape should-be-LOUD'
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/copilot.go
+      verification_required: true
+      notes: 'Deferred se9 slice, unblocked by se2 (#353) merge (file overlap). PR #369 https://github.com/AGOrcha/dot-agents/pull/369 - surfaces claude/codex/copilot canonical-source resolver errors (copilot resolveInstructionsSrc, claude global-rules candidate resolver, codex linkCodexAgentsMD + ensureUserAgents) vs silent skip on real Stat errors; os.IsNotExist absence kept; existing links preserved per se2 contract. testutil cross-platform forced-error tests (not chmod). Per-file cov claude 95.77/codex 95.50/copilot 95.26; all-OS + Sonar + coverage-gate green. Salvaged from cancelled worker. STOP before merge - awaiting review-merge.'

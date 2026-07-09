@@ -1,0 +1,41 @@
+schema_version: 1
+id: del-se9-commands-loud-1783574064
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se9-commands-loud
+title: 'Slice 9 (commands): kg/lifecycle/workflow/toplevel should-be-LOUD'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - commands/kg/query_lint_maintain.go
+    - commands/kg/query_lint_maintain_test.go
+    - commands/kg/sync_code_warm_link.go
+    - commands/kg/sync_code_warm_link_test.go
+    - commands/internal/lifecycle/init.go
+    - commands/internal/lifecycle/init_test.go
+    - commands/internal/lifecycle/backup.go
+    - commands/internal/lifecycle/backup_test.go
+    - commands/workflow/journal.go
+    - commands/workflow/journal_test.go
+    - commands/workflow/eligible_accounting.go
+    - commands/workflow/eligible_accounting_test.go
+    - commands/workflow/plan_task.go
+    - commands/workflow/plan_task_test.go
+    - commands/workflow/commit_cmd.go
+    - commands/workflow/commit_cmd_test.go
+    - commands/workflow/drift.go
+    - commands/workflow/drift_test.go
+    - commands/remove.go
+    - commands/remove_test.go
+    - commands/import.go
+    - commands/import_test.go
+    - commands/import_plugins.go
+    - commands/import_plugins_test.go
+    - commands/refresh.go
+    - commands/refresh_test.go
+success_criteria: 'P2 should-be-LOUD (proposal Slice 9 groups 9a/9b/9c/9f). FILE-scoped: siblings se1/se4/se7 have UNMERGED changes to kg.go/kgmcp.go/delegation.go in these packages -- do NOT touch those files; put new tests in file-specific *_test.go, NOT shared kg_test.go/delegation_test.go. Prioritize sync_code_warm_link.go checkCRGReadiness --require-graph bypass (correctness bug). Add os.IsNotExist/errors.Is discrimination + surface/log real errors; keep legitimate-absence. Keep test funcs <15 cognitive complexity + cover new branches >=80% (preempt Sonar gate). PR base master.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed9Commands
+status: completed
+created_at: "2026-07-09T05:14:24Z"
+updated_at: "2026-07-09T06:10:45Z"
