@@ -10,6 +10,8 @@ import (
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
+
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // fixture is a temp git repo with one commit on the default branch, plus a
@@ -406,15 +408,34 @@ func assertBaseRefNotRecorded(t *testing.T, f *fixture) {
 	if err := f.mgr.AddBranch("nobase", f.wtPath("nobase"), f.base); err != nil {
 		t.Fatalf("AddBranch: %v", err)
 	}
-	dir, ok := f.mgr.(*manager).adminDir("nobase")
-	if !ok {
-		t.Fatal("adminDir not found")
+	dir, err := f.mgr.(*manager).adminDir("nobase")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
 	}
 	if err := os.Remove(filepath.Join(dir, baseRefFile)); err != nil {
 		t.Fatalf("rm base-ref: %v", err)
 	}
 	if _, err := f.mgr.BaseRef("nobase"); !errors.Is(err, ErrBaseRefNotRecorded) {
 		t.Fatalf("want ErrBaseRefNotRecorded, got %v", err)
+	}
+}
+
+// TestAdminDir_RealStatErrorSurfaces exercises the should-be-LOUD fix: a
+// real Lstat failure on .git/worktrees (permission-denied, not "never
+// existed") must not be reported as ErrWorktreeNotFound.
+func TestAdminDir_RealStatErrorSurfaces(t *testing.T) {
+	f := newFixture(t)
+	if err := f.mgr.AddBranch("locked", f.wtPath("locked"), f.base); err != nil {
+		t.Fatalf("AddBranch: %v", err)
+	}
+	testutil.MakeDirUnreadable(t, dotgitWorktreesDir(f.repoPath))
+
+	_, err := f.mgr.(*manager).adminDir("locked")
+	if err == nil {
+		t.Fatal("want a surfaced error for a real stat failure, not silent not-found")
+	}
+	if errors.Is(err, ErrWorktreeNotFound) {
+		t.Errorf("a real stat error must not be reported as ErrWorktreeNotFound: %v", err)
 	}
 }
 

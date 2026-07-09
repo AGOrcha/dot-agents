@@ -10,6 +10,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // promoteEnv constructs a self-contained AGENTS_HOME + repo with a
@@ -423,6 +424,36 @@ func TestPromoteResource_CopyTreeFailsBlockerInRepo(t *testing.T) {
 	err := projectsync.PromoteResource("alpha", projectPath, widgetSpecX(t))
 	if err == nil {
 		t.Error("expected error from canonical being a regular file")
+	}
+}
+
+// TestPromoteResource_RcSaveFailsAfterSuccessfulMaterialize exercises the
+// rc.Save error branch in PromoteResource. Unlike
+// TestPromoteResource_RcSaveFails (which never reaches rc.Save because a
+// directory-shaped .agentsrc.json fails earlier, inside loadPromoteRC),
+// this test lets the promote fully materialize the managed symlink and
+// only denies the write when PromoteResource tries to persist the updated
+// manifest, so both the outer error-return and the journal-rollback calls
+// guarded by `journalPath != ""` execute.
+func TestPromoteResource_RcSaveFailsAfterSuccessfulMaterialize(t *testing.T) {
+	_, projectPath := promoteEnvX(t, "savefail2")
+	srcDir := filepath.Join(projectPath, ".agents", "widgets", "alpha")
+	os.MkdirAll(srcDir, 0755)
+	os.WriteFile(filepath.Join(srcDir, "WIDGET.md"), []byte("c"), 0644)
+
+	rcPath := filepath.Join(projectPath, ".agentsrc.json")
+	testutil.MakeFileReadOnly(t, rcPath)
+
+	err := projectsync.PromoteResource("alpha", projectPath, widgetSpecX(t))
+	if err == nil || !strings.Contains(err.Error(), "updating .agentsrc.json") {
+		t.Fatalf("expected rc.Save failure, got: %v", err)
+	}
+
+	// The promote itself must have gone through: source is now a managed
+	// symlink even though persisting the manifest failed afterward.
+	info, lerr := os.Lstat(srcDir)
+	if lerr != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected source replaced with symlink despite rc.Save failure, lstat: %v info: %v", lerr, info)
 	}
 }
 

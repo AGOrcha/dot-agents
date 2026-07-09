@@ -294,6 +294,57 @@ func TestRemoveIfHardlinkedToAny_RemovalFailurePropagates(t *testing.T) {
 	}
 }
 
+// TestRemoveIfHardlinkedToAny_RealStatErrorSurfaces exercises the
+// should-be-LOUD fix: a real (non-NotExist) stat failure on the candidate
+// path must not be reported as "not hard-linked" — the caller would
+// otherwise conclude "not managed" while ownership was never determined.
+func TestRemoveIfHardlinkedToAny_RealStatErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	canonical := filepath.Join(tmp, "canonical")
+	if err := os.WriteFile(canonical, []byte("c"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(tmp, "parent")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "f")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	ok, err := links.RemoveIfHardlinkedToAny(target, []string{canonical})
+	if ok {
+		t.Errorf("want matched=false on a real stat error, got true")
+	}
+	if err == nil {
+		t.Fatal("want a surfaced error for a real stat failure, not (false,nil)")
+	}
+}
+
+// TestRemoveIfHardlinkedToAny_MissingCandidateIsSkipped confirms the
+// legitimate-absence branch is unchanged by the fix: a candidate source
+// that simply doesn't exist is skipped, not surfaced as an error, and a
+// later match is still found.
+func TestRemoveIfHardlinkedToAny_MissingCandidateIsSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	canonical := filepath.Join(tmp, "canonical.txt")
+	if err := os.WriteFile(canonical, []byte("c"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(tmp, "does-not-exist.txt")
+	managed := filepath.Join(tmp, "managed")
+	if err := os.Link(canonical, managed); err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := links.RemoveIfHardlinkedToAny(managed, []string{missing, canonical})
+	if !ok || err != nil {
+		t.Errorf("missing candidate source: want (true,nil) after skipping it, got (%v,%v)", ok, err)
+	}
+}
+
 func TestHardlinkRefusesUnmanagedThenReplacingBacksUp(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "src.txt")

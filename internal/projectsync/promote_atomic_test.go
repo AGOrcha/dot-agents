@@ -10,6 +10,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // atomicEnv mirrors promote_test.go's promoteEnv but lives inside the
@@ -227,6 +228,34 @@ func TestMaterializePromoteSource_ClearExistingCanonicalError(t *testing.T) {
 	}
 }
 
+// TestClearExistingCanonical_RealLstatErrorSurfaces exercises the
+// should-be-ATOMIC fix: clearExistingCanonical runs immediately before a
+// destructive CopyTree, so a real (non-NotExist) Lstat failure must abort
+// rather than being read as "nothing there, safe to write."
+func TestClearExistingCanonical_RealLstatErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "bucket")
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(parent, "widget")
+	testutil.MakeDirUnreadable(t, parent)
+
+	if err := clearExistingCanonical(canonical, "widget", PromoteSpec{BucketSpec: BucketSpec{Singular: "widget"}}); err == nil {
+		t.Fatal("want a surfaced error for a real Lstat failure, not a silent nil")
+	}
+}
+
+// TestClearExistingCanonical_AbsentPathIsNoop covers the legitimate-absence
+// case unchanged by the fix: a canonical path that has never been created
+// yet is safe to proceed past.
+func TestClearExistingCanonical_AbsentPathIsNoop(t *testing.T) {
+	canonical := filepath.Join(t.TempDir(), "widget")
+	if err := clearExistingCanonical(canonical, "widget", PromoteSpec{BucketSpec: BucketSpec{Singular: "widget"}}); err != nil {
+		t.Fatalf("want nil for a legitimately absent canonical path, got %v", err)
+	}
+}
+
 // TestMaterializePromoteSource_CopyTreeError exercises the CopyTree-fails
 // branch by making the source manifest file unreadable. CopyTree should
 // fail on the read; we restore mode in cleanup so the temp dir can be
@@ -324,6 +353,41 @@ func TestMaterializePromoteSource_RollbackCrossFsFallback(t *testing.T) {
 	canonicalPath := filepath.Join(agentsHome, "widgets", "exdev", "alpha")
 	if _, err := os.Stat(canonicalPath); !os.IsNotExist(err) {
 		t.Errorf("canonical should be removed after cross-fs rollback, got err=%v", err)
+	}
+}
+
+// TestCrossFSRollback_RemoveAllFails exercises the "partial recovery"
+// branch: the EXDEV fallback's CopyTree-back succeeds (source is restored
+// from canonical) but the subsequent os.RemoveAll(canonicalPath) fails,
+// leaving canonical in place. The write denial is installed inside the
+// synthetic osRename seam, which fires only after materializePromoteSource's
+// initial CopyTree has already populated canonical — so only the final
+// cleanup removal is blocked, not the promote copy itself.
+func TestCrossFSRollback_RemoveAllFails(t *testing.T) {
+	agentsHome, projectPath := atomicEnv(t, "exdevpartial")
+	writeWidget(t, projectPath, "alpha")
+
+	canonicalParent := filepath.Join(agentsHome, "widgets", "exdevpartial")
+
+	swapSymlink(t, func(string, string) error {
+		return errors.New("synthetic symlink failure")
+	})
+	swapRename(t, func(string, string) error {
+		testutil.MakeDirWriteDenied(t, canonicalParent)
+		return &os.LinkError{Op: "rename", Old: "x", New: "y", Err: syscall.EXDEV}
+	})
+
+	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
+	if err == nil {
+		t.Fatal("expected error from PromoteResource")
+	}
+	if !strings.Contains(err.Error(), "canonical still present") {
+		t.Errorf("expected partial-recovery message, got: %v", err)
+	}
+
+	sourcePath := filepath.Join(projectPath, ".agents", "widgets", "alpha")
+	if _, err := os.Stat(filepath.Join(sourcePath, "WIDGET.md")); err != nil {
+		t.Errorf("manifest missing after rollback copy: %v", err)
 	}
 }
 
