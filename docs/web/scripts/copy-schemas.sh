@@ -3,7 +3,7 @@
 # directory so they are served verbatim at:
 #   https://agorcha.dev/schemas/<name>.json
 #
-# Runs from `npm run build` via the `prebuild` script in package.json.
+# Runs from `pnpm run build` via the `prebuild` script in package.json.
 # Idempotent — safe to run repeatedly.
 set -euo pipefail
 

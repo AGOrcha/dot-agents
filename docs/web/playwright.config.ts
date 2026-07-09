@@ -33,7 +33,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `DEPLOY_TARGET=cloudflare npm run build && npx serve dist -l ${PORT} --no-clipboard`,
+    command: `DEPLOY_TARGET=cloudflare pnpm run build && npx serve dist -l ${PORT} --no-clipboard`,
     url: `${BASE_URL}/`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
