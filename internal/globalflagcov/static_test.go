@@ -1,10 +1,14 @@
 package globalflagcov
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -196,6 +200,45 @@ func TestLoadCommandPackagesNoPackages(t *testing.T) {
 	// A directory with no Go module / command packages yields no ok packages.
 	if _, err := loadCommandPackages(t.TempDir()); err == nil {
 		t.Fatal("expected error when no command packages load cleanly")
+	}
+}
+
+// TestLoadCommandPackagesLogsPerPackageErrors covers the len(p.Errors) > 0
+// branch specifically: a broken package must be logged (not silently
+// excluded) while a sibling clean package still loads fine -- distinct from
+// TestLoadCommandPackagesNoPackages, where the whole module fails to load.
+func TestLoadCommandPackagesLogsPerPackageErrors(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), "module fixturemod\n\ngo 1.23\n")
+	mustWriteFile(t, filepath.Join(root, "commands", "root.go"),
+		"package commands\n\nconst RootMarker = \"ok\"\n")
+	mustWriteFile(t, filepath.Join(root, "commands", "agents", "broken.go"),
+		"package agents\n\nfunc broken( {\n")
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	pkgs, err := loadCommandPackages(root)
+	if err != nil {
+		t.Fatalf("loadCommandPackages() = %v, want nil (the clean ./commands package should still load)", err)
+	}
+	if len(pkgs) == 0 {
+		t.Fatal("loadCommandPackages() returned no packages, want the clean ./commands package")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("package failed to load")) {
+		t.Errorf("expected a warning log for the broken package, got %q", buf.String())
+	}
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,6 +150,58 @@ func (s *SQLiteStore) initSchema() error {
 		return fmt.Errorf("graphstore: init schema: %w", err)
 	}
 	return nil
+}
+
+// OpenSQLiteReadOnly opens an EXISTING SQLite store at dbPath read-only, for
+// read paths (e.g. the eval generator) that must never bring a store into
+// being as a side effect. Unlike OpenSQLite — which is open-or-CREATE: it
+// MkdirAlls the parent and initialises an empty schema — this opens through a
+// `mode=ro` file URI, so the open itself is creation-safe BY CONSTRUCTION: a
+// missing store fails to open rather than being silently created, no matter the
+// caller's timing (there is no create-capable open to race). It also skips the
+// schema init and the WAL/journal PRAGMAs, which are writes a read-only handle
+// must not perform.
+//
+// A missing store is reported as a wrapped os.ErrNotExist so callers can
+// errors.Is(err, os.ErrNotExist) and render an actionable "not built" message.
+func OpenSQLiteReadOnly(dbPath string) (*SQLiteStore, error) {
+	db, err := sqlOpen("sqlite", readOnlyDSN(dbPath))
+	if err != nil {
+		return nil, fmt.Errorf("graphstore: open db: %w", err)
+	}
+	// sql.Open is lazy; Ping forces the actual (no-create) open so an absent or
+	// unreadable store fails here rather than at the first query.
+	if err := db.Ping(); err != nil {
+		db.Close()
+		return nil, classifyReadOnlyOpenErr(dbPath, err)
+	}
+	return &SQLiteStore{db: db}, nil
+}
+
+// classifyReadOnlyOpenErr turns a failed read-only open into a caller-friendly
+// error: a wrapped os.ErrNotExist when the store file is genuinely absent,
+// otherwise the underlying open error. The stat runs only AFTER the open has
+// already failed, so it is purely for classifying the message — it is never
+// load-bearing for the no-create guarantee (mode=ro already owns that).
+func classifyReadOnlyOpenErr(dbPath string, openErr error) error {
+	if _, statErr := os.Stat(dbPath); errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("graphstore: db %s does not exist: %w", dbPath, os.ErrNotExist)
+	}
+	return fmt.Errorf("graphstore: open db %s: %w", dbPath, openErr)
+}
+
+// readOnlyDSN builds a `mode=ro` SQLite file URI for dbPath. The `file:` prefix
+// makes modernc treat it as a URI (so mode=ro reaches sqlite3_open_v2 and
+// suppresses SQLITE_OPEN_CREATE); url.URL handles percent-encoding of spaces
+// and other special characters in the path, and the leading-slash normalisation
+// keeps Windows drive paths (C:/… → /C:/…) valid file URIs.
+func readOnlyDSN(dbPath string) string {
+	p := filepath.ToSlash(dbPath)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	u := url.URL{Scheme: "file", Path: p, RawQuery: "mode=ro"}
+	return u.String()
 }
 
 // Close shuts the store down deterministically: it marks the store
@@ -301,12 +356,15 @@ func (s *SQLiteStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edg
 
 	for _, node := range nodes {
 		qualified := makeQualified(node)
-		extra, _ := encodeExtra(node.Extra)
+		extra, err := encodeExtra(node.Extra)
+		if err != nil {
+			return fmt.Errorf("graphstore: encode extra for node %q: %w", qualified, err)
+		}
 		isTest := 0
 		if node.IsTest {
 			isTest = 1
 		}
-		_, err := tx.Exec(`
+		_, err = tx.Exec(`
 			INSERT INTO nodes
 			  (kind, name, qualified_name, file_path, line_start, line_end,
 			   language, parent_name, params, return_type, modifiers, is_test,
@@ -332,8 +390,11 @@ func (s *SQLiteStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edg
 	}
 
 	for _, edge := range edges {
-		extra, _ := encodeExtra(edge.Extra)
-		_, err := tx.Exec(`
+		extra, err := encodeExtra(edge.Extra)
+		if err != nil {
+			return fmt.Errorf("graphstore: encode extra for edge %s->%s: %w", edge.Source, edge.Target, err)
+		}
+		_, err = tx.Exec(`
 			INSERT INTO edges
 			  (kind, source_qualified, target_qualified, file_path, line, extra, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -832,12 +893,21 @@ func encodeExtra(m map[string]any) (string, error) {
 	return string(b), nil
 }
 
+// extraDecodeErrorKey tags the map returned by decodeExtra when the stored
+// extra JSON failed to parse, so a corrupt row is distinguishable from a
+// legitimately empty one without changing decodeExtra's signature (a full
+// error-propagating signature is tracked as a follow-up).
+const extraDecodeErrorKey = "_graphstore_extra_decode_error"
+
 func decodeExtra(s string) map[string]any {
 	if s == "" || s == "{}" {
 		return nil
 	}
 	var m map[string]any
-	_ = json.Unmarshal([]byte(s), &m)
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		slog.Warn("graphstore: corrupt extra JSON on read, dropping metadata", "error", err)
+		return map[string]any{extraDecodeErrorKey: err.Error()}
+	}
 	return m
 }
 

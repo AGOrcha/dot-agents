@@ -73,7 +73,7 @@ A minimal v2 manifest:
 
 ```json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "repo_id": "github.com/acme/manager-ui",
   "sources": [
     { "id": "acme", "type": "git", "url": "git@github.com:acme/agents-config.git", "ref": "main" }
@@ -94,11 +94,13 @@ A **source** names *where* layers and packages come from. The `type` determines 
 | `local` | A path on disk | Yes | Yes |
 | `git` | A git repository (`url` + `ref`) | Yes | Yes |
 | `http` | An HTTP(S) endpoint | Yes | Yes |
-| `oci` | An OCI registry (content-addressed) | **No** | Yes |
+| `oci` | An OCI registry (content-addressed) | Yes | Yes |
 
-> **Only `extends` rejects `oci`** — oci cannot supply a config layer. Every other source×kind
-> combination is valid: packages/artifacts may be fetched from git, local, http, or oci. Declaring
-> an `oci` source in `extends` is rejected at resolution.
+> **Every source×kind combination is valid** (config-distribution-model §15 D13) — there is no
+> source/kind asymmetry. An `oci` source can supply a config **layer** via `extends` exactly as it
+> supplies a package **artifact**: the same OCI pull backs both, and the *kind* is set by the pulled
+> blob's media type (a config-layer media type for `extends`, an artifact-bundle media type for
+> `packages`), not by the source. Layers and packages alike may be fetched from git, local, http, or oci.
 
 Each source carries an `id` (required for v2 refs), an optional `cache_ttl` (a *review nudge*, not a
 hard expiry — see [Caching](#caching-and-staleness)), an optional opaque `auth` block, and an
@@ -379,7 +381,7 @@ validate.
 ```console
 $ cat .agentsrc.json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "repo_id": "github.com/acme/manager-ui",
   "kg": { "backend": "sqlite" }
 }
@@ -408,7 +410,7 @@ Declare the source and extend it:
 
 ```json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "repo_id": "github.com/acme/manager-ui",
   "sources": [
     { "id": "team", "type": "local", "path": "layers" }
@@ -535,7 +537,7 @@ $ echo $?
 |---|---|---|
 | `repo_id` | string | Protected; imported layers cannot override. |
 | `sources` | array of `{ id, type, url?, path?, ref?, cache_ttl?, auth?, cache_keys? }` | `type` ∈ `local`/`git`/`http`/`oci`. |
-| `extends` | array of `string` or `{ ref, optional? }` | Ref form `source-id:path[@version]`; resolves to `layer` units; rejects `oci`. |
+| `extends` | array of `string` or `{ ref, optional? }` | Ref form `source-id:path[@version]`; resolves to `layer` units; valid from any source (git/local/http/oci), kind set by media type. |
 | `packages` | array of `string` | Ref form `source-id:path@version`; resolves to `artifact` units; valid from any source (git/local/http/oci). |
 | `features` | object (map-merge) | Feature-flag overrides. |
 | `execution_profile` | object (map-merge) | Execution shape by `app_type` — see [Config Relevance](./CONFIG_RELEVANCE.md). |

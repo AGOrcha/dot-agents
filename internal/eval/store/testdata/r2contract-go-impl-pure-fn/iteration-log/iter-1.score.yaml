@@ -1,0 +1,70 @@
+iteration: 1
+rubric_version: 3.0.0
+scored: true
+value: 0.9366666666666665
+band: excellent
+breakdown:
+    - signal: landed
+      label: Landed on master
+      present: false
+      sub_score: 0
+      detail: 'eval sandbox run: trunk landing not applicable'
+      nominal_weight: 0.17
+      effective_weight: 0
+      contribution: 0
+    - signal: verifier
+      label: Verifier results
+      present: true
+      sub_score: 1
+      detail: 2/2 verifiers scored, mean status
+      nominal_weight: 0.15
+      effective_weight: 0.31249999999999994
+      contribution: 0.31249999999999994
+    - signal: tests
+      label: Test outcomes
+      present: true
+      sub_score: 1
+      detail: 1/1 test-pass flags true
+      nominal_weight: 0.14
+      effective_weight: 0.2916666666666667
+      contribution: 0.2916666666666667
+    - signal: human_label
+      label: Human review label
+      present: false
+      sub_score: 0
+      detail: no human labels for iter-1
+      nominal_weight: 0.15
+      effective_weight: 0
+      contribution: 0
+    - signal: correction_pressure
+      label: Correction pressure
+      present: true
+      sub_score: 1
+      detail: 0 retries, 0 user corrections
+      nominal_weight: 0.11
+      effective_weight: 0.22916666666666666
+      contribution: 0.22916666666666666
+    - signal: scope
+      label: Scope adherence
+      present: false
+      sub_score: 0
+      detail: no scope_note in iteration log
+      nominal_weight: 0.11
+      effective_weight: 0
+      contribution: 0
+    - signal: hook_outcomes
+      label: Hook-gate outcomes
+      present: false
+      sub_score: 0
+      detail: no hook-outcomes sidecar for iter-1
+      nominal_weight: 0.09
+      effective_weight: 0
+      contribution: 0
+    - signal: token_efficiency
+      label: Token & cache efficiency
+      present: true
+      sub_score: 0.62
+      detail: 'native session_tokens: cache_hit_rate 0.620'
+      nominal_weight: 0.08
+      effective_weight: 0.16666666666666666
+      contribution: 0.10333333333333333

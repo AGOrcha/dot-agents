@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"log/slog"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -76,6 +77,8 @@ func loadCommandPackages(absDir string) ([]*packages.Package, error) {
 	var okPkgs []*packages.Package
 	for _, p := range pkgs {
 		if len(p.Errors) > 0 {
+			slog.Default().Warn("globalflagcov: package failed to load, excluding from analysis",
+				"package", p.PkgPath, "error_count", len(p.Errors), "first_error", p.Errors[0])
 			continue
 		}
 		if p.TypesInfo == nil || p.Types == nil || len(p.Syntax) == 0 {

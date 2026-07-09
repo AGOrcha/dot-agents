@@ -12,7 +12,7 @@ summary: |-
     proposal/lesson system and the KG typed Proposal/Lesson nodes reference one canonical schema.
     - (fb:t8-schema-formalization-scope-mismatch) t8-proposal-lesson-schema-formalization delegated only schemas/proposal.schema.json + schemas/lesson.schema.json, but the task contract requires those schemas to be the single source of truth for BOTH proposal/lesson artifacts and their typed consumers. Draft schemas were authored, but HEAD still loads proposals through internal/config/proposals.go hardcoded structs/validators, schemas/schemas.go does not embed/export the new schema files, and there is no evidence-backed validation against existing proposal + lesson artifacts. Re-fanout only after either expanding write_scope to include consumer wiring/validation or narrowing the task contract to schema authoring only.
 created_at: "2026-06-25T00:00:00Z"
-updated_at: "2026-07-07T12:46:24Z"
+updated_at: "2026-07-04T19:30:18Z"
 owner: AGOrcha
 success_criteria: |-
     The kg-ideate compound skill + its four molecules + instruction/template files exist and pass

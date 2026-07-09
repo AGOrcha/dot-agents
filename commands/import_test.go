@@ -14,6 +14,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
 	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -1994,9 +1995,16 @@ func TestCanonicalHookBundleOutputsFromCursorFile_MissingFileErrors(t *testing.T
 func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSONReturnsFalse(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte("not json"), 0644)
-	_, ok, err := canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	var ok bool
+	var err error
+	out := captureRelinkStdout(t, func() {
+		_, ok, err = canonicalHookBundleOutputsFromCursorFile("p", tmp)
+	})
 	if err != nil || ok {
 		t.Errorf("got ok=%v err=%v, want false,nil", ok, err)
+	}
+	if !strings.Contains(out, "not valid JSON") {
+		t.Errorf("expected loud warning for genuinely malformed JSON, got:\n%s", out)
 	}
 }
 
@@ -2037,9 +2045,15 @@ func TestCanonicalHookBundleOutputsFromCodexFile_MissingFileErrors(t *testing.T)
 func TestCanonicalHookBundleOutputsFromCodexFile_InvalidJSON(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte("notjson"), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	var ok bool
+	out := captureRelinkStdout(t, func() {
+		_, ok, _ = canonicalHookBundleOutputsFromCodexFile("p", tmp)
+	})
 	if ok {
 		t.Error("invalid json should return ok=false")
+	}
+	if !strings.Contains(out, "not valid JSON") {
+		t.Errorf("expected loud warning for genuinely malformed JSON, got:\n%s", out)
 	}
 }
 
@@ -2089,6 +2103,26 @@ func TestCanonicalHookBundleOutputsFromClaudeCompatFile_EmptyHooks(t *testing.T)
 	}
 }
 
+// TestCanonicalHookBundleOutputsFromClaudeCompatFile_InvalidJSON covers the
+// genuinely-malformed-JSON branch of isJSONHookSyntaxError: unlike
+// NonClaudeKeysReturnsFalse (valid JSON, wrong shape), this content never
+// parses at all and must warn loudly while still returning false.
+func TestCanonicalHookBundleOutputsFromClaudeCompatFile_InvalidJSON(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "x.json")
+	os.WriteFile(tmp, []byte("not json"), 0644)
+	var ok bool
+	var err error
+	out := captureRelinkStdout(t, func() {
+		_, ok, err = canonicalHookBundleOutputsFromClaudeCompatFile("p", tmp)
+	})
+	if err != nil || ok {
+		t.Errorf("got ok=%v err=%v, want false,nil", ok, err)
+	}
+	if !strings.Contains(out, "not valid JSON") {
+		t.Errorf("expected loud warning for genuinely malformed JSON, got:\n%s", out)
+	}
+}
+
 func TestCanonicalHookBundleOutputsFromClaudeCompatFile_Success(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"echo hi"}]}]}}`), 0644)
@@ -2111,9 +2145,15 @@ func TestCanonicalHookBundleOutputsFromCopilotFile_MissingFileErrors(t *testing.
 func TestCanonicalHookBundleOutputsFromCopilotFile_InvalidJSON(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "x.json")
 	os.WriteFile(tmp, []byte("notjson"), 0644)
-	_, ok, _ := canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	var ok bool
+	out := captureRelinkStdout(t, func() {
+		_, ok, _ = canonicalHookBundleOutputsFromCopilotFile("p", tmp, "h")
+	})
 	if ok {
 		t.Error("invalid json should return ok=false")
+	}
+	if !strings.Contains(out, "not valid JSON") {
+		t.Errorf("expected loud warning for genuinely malformed JSON, got:\n%s", out)
 	}
 }
 
@@ -2211,6 +2251,68 @@ func TestProcessImportCandidate_DirectorySourceIsNoop(t *testing.T) {
 	res := processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
 	if res.imported != 0 || res.skipped != 0 {
 		t.Errorf("directory source = no-op, got %+v", res)
+	}
+}
+
+// TestProcessImportCandidate_SourceStatErrorWarnsAndSkips covers the real
+// (non-IsNotExist) Stat-error branch of statImportSourceCandidate via the
+// non-canonical code path: a permission-denied parent directory surfaces
+// loud instead of silently no-op'ing the way a genuinely missing source
+// does (TestProcessImportCandidate_SourceMissingIsNoop above).
+func TestProcessImportCandidate_SourceStatErrorWarnsAndSkips(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	blocked := filepath.Join(projRoot, "blocked")
+	if err := os.MkdirAll(blocked, 0755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(blocked, "generic.txt")
+	writeFile(t, src, []byte("payload"))
+	testutil.MakeDirUnreadable(t, blocked)
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "x"}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	var res importResult
+	out := captureRelinkStdout(t, func() {
+		res = processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
+	})
+	if res.imported != 0 || res.skipped != 1 {
+		t.Errorf("real stat error should warn and count as skipped, got %+v", res)
+	}
+	if !strings.Contains(out, "Failed to inspect") {
+		t.Errorf("expected loud warning for real Stat error, got:\n%s", out)
+	}
+}
+
+// TestProcessImportCandidate_CanonicalSourceStatErrorWarnsAndSkips exercises
+// the same statImportSourceCandidate error branch through the canonical
+// hook-bundle code path (rel matches supportsCanonicalImportPath), which
+// processImportCandidate checks before the generic-file path above.
+func TestProcessImportCandidate_CanonicalSourceStatErrorWarnsAndSkips(t *testing.T) {
+	agentsHome, projRoot := setupImportHomeAndProject(t)
+	src := filepath.Join(projRoot, relCursorHooksJSON)
+	if err := os.MkdirAll(filepath.Dir(src), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, src, []byte(`{"hooks":{}}`))
+	testutil.MakeDirUnreadable(t, filepath.Dir(src))
+
+	c := importCandidate{project: "p", sourceRoot: projRoot, sourcePath: src, destRel: "x"}
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	var res importResult
+	out := captureRelinkStdout(t, func() {
+		res = processImportCandidate(c, agentsHome, "ts", stdImportDeps{})
+	})
+	if res.imported != 0 || res.skipped != 1 {
+		t.Errorf("real stat error should warn and count as skipped, got %+v", res)
+	}
+	if !strings.Contains(out, "Failed to inspect") {
+		t.Errorf("expected loud warning for real Stat error, got:\n%s", out)
 	}
 }
 
@@ -2499,9 +2601,16 @@ func TestCanonicalHookBundleOutputsFromCursorFile_InvalidJSON(t *testing.T) {
 	tmp := t.TempDir()
 	path := filepath.Join(tmp, "hooks.json")
 	os.WriteFile(path, []byte("not-json"), 0644)
-	outputs, ok, _ := canonicalHookBundleOutputsFromCursorFile("p", path)
+	var outputs []importOutput
+	var ok bool
+	out := captureRelinkStdout(t, func() {
+		outputs, ok, _ = canonicalHookBundleOutputsFromCursorFile("p", path)
+	})
 	if outputs != nil || ok {
 		t.Errorf("expected (nil, false) for invalid cursor json")
+	}
+	if !strings.Contains(out, "not valid JSON") {
+		t.Errorf("expected loud warning for genuinely malformed JSON, got:\n%s", out)
 	}
 }
 

@@ -148,7 +148,7 @@ The shared planner dedupes canonical plugin bundles before any platform-local wr
 
 | Platform | Emitter implemented | Target path | Notes |
 |----------|--------------------|---------|----|
-| OpenCode | Yes | `.opencode/plugins/{name}/` | `kind: native` only; emits `files/` + `platforms/opencode/` overlay |
+| OpenCode | Yes | `.opencode/plugins/{name}/` | Symlinks the whole canonical bundle dir (kind-agnostic today; per-`kind` filtering + selective `files/` / `platforms/opencode/` overlay are the intended refinement, tracked in `plugin-resource-salvage`) |
 | Cursor | No | `.cursor-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/cursor/` |
 | Claude Code | No | `.claude-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/claude/` |
 | Codex | No | `.codex-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/codex/` |
@@ -189,5 +189,5 @@ The native `plugin.json` is preserved verbatim at `platforms/{platformID}/plugin
 - All five platforms have first-class plugin support; only OpenCode has an emitter today
 - The canonical bundle contract intentionally stays platform-neutral so the storage model supports all emitters without format lock-in
 - Codex's native marketplace path (`$REPO_ROOT/.agents/plugins/marketplace.json`) aligns naturally with our canonical storage — a future `da plugins marketplace` command could generate this file from all enabled bundles
-- The donor branch `claude/scalable-skill-syncing-sfxOd` is historical provenance only; the current tree already landed `canonicalPackagePluginManifestOutputs`, `canonicalPluginOutputsFromOpenCodeFile`, `LoadPluginSpec`, `ListPluginSpecs`, and `syncPluginOverlayTree`, so Stage 2 planning should build from that rebuilt baseline
+- The donor branch `claude/scalable-skill-syncing-sfxOd` is historical provenance only; the current tree already landed `canonicalPackagePluginManifestOutputs`, `canonicalPluginOutputsFromOpenCodeFile`, `LoadPluginSpec`, and `ListPluginSpecs`, so Stage 2 planning should build from that rebuilt baseline
 - Runtime implementation, multi-platform emitters, and any remaining Stage 2 bucket-expansion slices are tracked in the `plugin-resource-salvage` plan

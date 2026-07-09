@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,26 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
+
+// captureStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
 
 func TestCreateAgent_GlobalScope_WritesManifest(t *testing.T) {
 	agentsHome, _ := testutil.NewTempProject(t, "")
@@ -89,7 +110,10 @@ func TestAppendAgentsRCStep_GlobalScopeReturnsUnchanged(t *testing.T) {
 	testutil.NewTempProject(t, "")
 	in := []string{"step1"}
 
-	out := appendAgentsRCStep(in, "any-name", "global")
+	out, err := appendAgentsRCStep(in, "any-name", "global")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 1 || out[0] != "step1" {
 		t.Fatalf("expected unchanged steps for global scope, got: %v", out)
 	}
@@ -98,9 +122,40 @@ func TestAppendAgentsRCStep_GlobalScopeReturnsUnchanged(t *testing.T) {
 func TestAppendAgentsRCStep_ProjectNotRegistered(t *testing.T) {
 	testutil.NewTempProject(t, "")
 
-	out := appendAgentsRCStep([]string{"step1"}, "any-name", "unregistered-scope")
+	out, err := appendAgentsRCStep([]string{"step1"}, "any-name", "unregistered-scope")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 1 {
 		t.Fatalf("expected unchanged steps when project not registered, got: %v", out)
+	}
+}
+
+// TestAppendAgentsRCStep_MissingAgentsRCIsLegitimateAbsence covers the
+// os.IsNotExist branch: a registered project that simply has no
+// .agentsrc.json yet is a legitimate best-effort skip, not a loud error.
+func TestAppendAgentsRCStep_MissingAgentsRCIsLegitimateAbsence(t *testing.T) {
+	agentsHome, projectPath := testutil.NewTempProject(t, "myproj")
+	_ = agentsHome
+	if err := os.Remove(filepath.Join(projectPath, config.AgentsRCFile)); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.AddProject("myproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := appendAgentsRCStep([]string{"step1"}, "agent-x", "myproj")
+	if err != nil {
+		t.Fatalf("missing .agentsrc.json should not be a loud error, got: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected unchanged steps when .agentsrc.json absent, got: %v", out)
 	}
 }
 
@@ -118,7 +173,10 @@ func TestAppendAgentsRCStep_UpdatesAgentsRC(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := appendAgentsRCStep([]string{"step1"}, "agent-x", "myproj")
+	out, err := appendAgentsRCStep([]string{"step1"}, "agent-x", "myproj")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(out) != 2 {
 		t.Fatalf("expected appended step, got: %v", out)
 	}
@@ -143,11 +201,62 @@ func TestAppendAgentsRCStep_UpdatesAgentsRC(t *testing.T) {
 
 func TestCreateAgentNextSteps_GlobalIncludesDisplayPath(t *testing.T) {
 	testutil.NewTempProject(t, "")
-	steps := createAgentNextSteps("/tmp/agent/AGENT.md", "n", "global")
+	steps, err := createAgentNextSteps("/tmp/agent/AGENT.md", "n", "global")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(steps) != 1 {
 		t.Fatalf("expected 1 step for global, got: %v", steps)
 	}
 	if !strings.Contains(steps[0], "AGENT.md") {
 		t.Fatalf("step should mention AGENT.md, got: %v", steps[0])
+	}
+}
+
+// TestCreateAgent_CorruptAgentsRCWarnsInsteadOfSuccess is the acceptance test
+// for se8: a corrupt .agentsrc.json must not silently make CreateAgent look
+// like an unqualified success. AGENT.md is still written (no rollback);
+// CreateAgent must still return nil (the agent WAS created), and the printed
+// output must carry a registration-failed warning, not the plain "Created"
+// success box.
+func TestCreateAgent_CorruptAgentsRCWarnsInsteadOfSuccess(t *testing.T) {
+	_, projectPath := testutil.NewTempProject(t, "warnproj")
+	if err := os.WriteFile(filepath.Join(projectPath, config.AgentsRCFile), []byte("{not-json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.AddProject("warnproj", projectPath)
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := captureStdout(t, func() {
+		if err := CreateAgent("gadget", "warnproj"); err != nil {
+			t.Fatalf("CreateAgent: %v", err)
+		}
+	})
+
+	manifest := filepath.Join(config.AgentsHome(), "agents", "warnproj", "gadget", agentManifestName)
+	if _, err := os.Stat(manifest); err != nil {
+		t.Fatalf("AGENT.md should still be written despite registration failure: %v", err)
+	}
+
+	if strings.Contains(stdout, "✓") {
+		t.Fatalf("expected no unqualified success marker, got: %q", stdout)
+	}
+	if !strings.Contains(stdout, "registration did not fully complete") {
+		t.Fatalf("expected a registration-failed warning, got: %q", stdout)
+	}
+
+	// The corrupt manifest must be left untouched, not rolled back/overwritten.
+	raw, err := os.ReadFile(filepath.Join(projectPath, config.AgentsRCFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "{not-json" {
+		t.Fatalf("corrupt .agentsrc.json should be left untouched, got: %q", raw)
 	}
 }

@@ -143,7 +143,7 @@ tasks:
       notes: 'Shell smoke test in the existing flat `tests/test-*.sh` convention; assert terminal and PreToolUse native remediation, SubagentStart/PreCompact non-blocking behavior, JSON block output where supported, Cursor followup output, and advisories. Contract: tasks/p5-e2e-integration.contract.md. Landed: merged to master via PR #124 (wave-2 state sync).'
     - id: p6-payout-backfill
       title: Explicit payout migration and active-loop readback
-      status: pending
+      status: completed
       depends_on:
         - p5-e2e-integration
         - p3b-companion-discipline-skills

@@ -32,7 +32,7 @@ func compiledAgentsRCSchema() (*jsonschema.Schema, error) {
 			return
 		}
 		c := jsonschema.NewCompiler()
-		const url = "https://dot-agents.dev/schemas/agentsrc.schema.json"
+		const url = "https://agorcha.dev/schemas/agentsrc.schema.json"
 		if err := c.AddResource(url, doc); err != nil {
 			agentsRCSchemaCompileErr = fmt.Errorf("registering agentsrc schema: %w", err)
 			return

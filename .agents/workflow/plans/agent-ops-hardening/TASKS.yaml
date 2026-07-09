@@ -221,7 +221,7 @@ tasks:
       app_type: docs
     - id: p4-fanout-gate-enforcement
       title: 'P4: mechanical refuse-check in da workflow fanout for out-of-scope asserting test callers'
-      status: blocked
+      status: completed
       depends_on:
         - p1-delegation-brief-hardening-skill
       blocks: []

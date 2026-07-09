@@ -1,0 +1,28 @@
+task_spec_version: 1
+task_id: go-impl-pure-fn-001
+language: go
+difficulty: medium
+difficulty_signals:
+    cyclomatic_complexity: 4
+    edge_count: 9
+    involved_symbols: 6
+generated_from:
+    kind: kg_template
+    template_id: impl-pure-fn
+    kg_query:
+        intent: code_context
+        seed_symbol: mathx.GCD
+prompt: Implement the pure function GCD(a, b int) int in package mathx using the Euclidean algorithm. Return the greatest common divisor of the absolute values of a and b; GCD(0, 0) must return 0. Do not add any new exported symbols.
+solution_artifacts:
+    - path: mathx/gcd.go
+      role: target
+verification:
+    build_cmd:
+        - go
+        - build
+        - ./...
+    test_cmd:
+        - go
+        - test
+        - ./mathx/...
+    timeout_seconds: 120

@@ -50,6 +50,23 @@ specific docs that drifted. Note in the task which docs were touched and why.
 Rationale: docs drift silently between releases; tying the accuracy sweep to the release task means
 a version never ships with docs that lie about the product.
 
+**Mechanized as `release-docs-refresh` — a REQUIRED PREDECESSOR task, not a step folded into the
+bump (amendment 2026-07-04).** The docs-accuracy pass is not run ad-hoc inside the version-bump
+task; it is a separate `release-docs-refresh` task that the release task `depends_on`, so the bump
+cannot proceed until the docs pass completes and **every release cut (patch AND minor) auto-includes
+it** without anyone adding it by hand. Run the `release-docs-refresh` skill
+(`.agents/skills/release-docs-refresh/`), which reconciles README / `docs/**` / `docs/web/**` and
+`docs/PLATFORM_DIRS_DOCS.md` against the code and — where the CODE breaks a documented contract (not
+merely lagging docs) — routes a tracked code-fix/proposal via the `promise-gap-analyst` (and
+platform-dir drift via the `platform-dirs-change-analyst`) instead of papering over the doc. The
+`release-docs-refresh` task NEVER touches `VERSION` or `CHANGELOG.md`; the bump belongs to the
+release task it gates.
+
+- **PATCH path:** the standalone `release-patch` task `depends_on: [release-docs-refresh]`
+  (see the `release-patch-train` plan).
+- **MINOR / MAJOR path:** every plan-tail `release-v<target>` task adds a `release-docs-refresh`
+  task and lists it in `depends_on` alongside the plan's other tasks.
+
 ## The hybrid model (maintainer ruling 2026-05-28)
 
 Three release paths, chosen by what the work delivers:
@@ -91,14 +108,21 @@ task.
 
 When creating or amending a version-worthy plan:
 
-1. Add a final task `release-v<target>` with:
+1. Add a `release-docs-refresh` task (the mandatory pre-cut docs pass) with:
+   - `app_type: release`
+   - `write_scope: docs, README.md, docs/web` (NOT `VERSION` / `CHANGELOG.md`)
+   - `verification_required: true`
+   - notes: run the `release-docs-refresh` skill; route code-vs-contract gaps via the
+     `promise-gap-analyst` rather than editing the doc
+2. Add a final task `release-v<target>` with:
    - `app_type: release` (or `go-cli` if no release app-type exists yet)
    - `write_scope: VERSION, CHANGELOG.md`
-   - `depends_on:` **every other task id in the plan** (the release is the last thing)
+   - `depends_on:` **`release-docs-refresh` + every other task id in the plan** (the release is the
+     last thing, and it must not bump `VERSION` until the docs pass completes)
    - `verification_required: true`
    - notes: the semver rationale (why minor vs major) + the CHANGELOG section to finalize
-2. The task's PR bumps `VERSION` and finalizes the CHANGELOG `## [X.Y.Z]` section.
-3. On merge, `auto-release.yml` tags + publishes.
+3. The release task's PR bumps `VERSION` and finalizes the CHANGELOG `## [X.Y.Z]` section.
+4. On merge, `auto-release.yml` tags + publishes.
 
 ## Decision rule (which path?)
 

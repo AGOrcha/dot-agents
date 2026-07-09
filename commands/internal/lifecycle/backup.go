@@ -9,6 +9,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 // HasMultipleHardLinks is the platform-tagged hard-link counter seam.
@@ -163,55 +164,81 @@ func MirrorBackupChecked(project, projectPath, srcFile, timestamp string, deps A
 func BackupExistingConfigsList(files []string, projectPath, agentsHome, project, timestamp string, deps AddDeps) (int, error) {
 	count := 0
 	for _, f := range files {
-		// Safety: never back up backup artifacts
-		if IsBackupArtifact(filepath.Base(f)) {
-			continue
+		counted, err := backupOneConfig(f, projectPath, agentsHome, project, timestamp, deps)
+		if err != nil {
+			return count, err
 		}
-		if _, err := os.Lstat(f); err != nil {
-			continue
-		}
-		// A PROVEN managed link (resolvable POSIX symlink / Windows junction
-		// whose target resolves under the canonical agents root) has no
-		// standalone content to preserve — remove it without a backup.
-		// A merely-resolvable link is NOT proof: a project-owned
-		// symlink/junction pointing at a real user file OUTSIDE dot-agents
-		// (the symlink twin of the unmanaged-hard-link case below) carries
-		// the user's only copy of that config. Dropping it without mirroring
-		// the resolved content destroys it while claiming a backup. Such an
-		// unmanaged link falls through to the normal mirror/backup path,
-		// which copies the resolved bytes before removal.
-		if links.IsManagedLinkUnder(f, agentsHome) {
-			_ = os.Remove(f)
+		if counted {
 			count++
-			continue
 		}
-		// A hard link is only safe to drop without a backup when it is PROVEN
-		// managed: its inode is shared with the canonical source this candidate
-		// maps to under agentsHome. A bare nlink>1 is NOT proof — an
-		// UNMANAGED hard-linked AGENTS.md/.mcp.json (e.g. the project hard
-		// links its real config elsewhere) also has nlink>1, and dropping it
-		// without a mirror backup destroys the project's real config while
-		// claiming it was backed up. Unknown/unmanaged hard links fall through
-		// to the normal backup/mirror path below.
-		if HasMultipleHardLinks(f) && isManagedHardlinkToCanonicalSource(project, projectPath, f, agentsHome) {
-			_ = os.Remove(f)
-			count++
-			continue
-		}
-		// Regular file: copy into resources, then delete from project.
-		// The removal below is destructive — it deletes the user's only
-		// copy of an unmanaged config. Only proceed once the required
-		// backup copies have actually landed; otherwise abort so runAdd
-		// returns an error WITHOUT removing the original.
-		if err := MirrorBackupChecked(project, projectPath, f, timestamp, deps); err != nil {
-			return count, fmt.Errorf("backing up %s: %w", f, err)
-		}
-		if err := deps.Remove(f); err != nil {
-			continue
-		}
-		count++
 	}
 	return count, nil
+}
+
+// backupOneConfig processes a single candidate for BackupExistingConfigsList:
+// it mirrors the file into ~/.agents/resources/<project>/ and removes the
+// original from the project tree. It reports whether the candidate counted as
+// processed, and returns a non-nil error only when a REQUIRED backup copy
+// failed — that must abort the whole batch before any destructive removal.
+func backupOneConfig(f, projectPath, agentsHome, project, timestamp string, deps AddDeps) (bool, error) {
+	// Safety: never back up backup artifacts
+	if IsBackupArtifact(filepath.Base(f)) {
+		return false, nil
+	}
+	if _, err := os.Lstat(f); err != nil {
+		if !os.IsNotExist(err) {
+			// A real Lstat error (permission denied, etc.) is not the same
+			// as "already removed" — warn instead of silently dropping this
+			// candidate from the backup batch with zero signal.
+			ui.Warn(fmt.Sprintf("skipping backup for %s: %v", f, err))
+		}
+		return false, nil
+	}
+	// A PROVEN managed link (resolvable POSIX symlink / Windows junction
+	// whose target resolves under the canonical agents root) has no
+	// standalone content to preserve — remove it without a backup.
+	// A merely-resolvable link is NOT proof: a project-owned
+	// symlink/junction pointing at a real user file OUTSIDE dot-agents
+	// (the symlink twin of the unmanaged-hard-link case below) carries
+	// the user's only copy of that config. Dropping it without mirroring
+	// the resolved content destroys it while claiming a backup. Such an
+	// unmanaged link falls through to the normal mirror/backup path,
+	// which copies the resolved bytes before removal.
+	if links.IsManagedLinkUnder(f, agentsHome) {
+		_ = os.Remove(f)
+		return true, nil
+	}
+	// A hard link is only safe to drop without a backup when it is PROVEN
+	// managed: its inode is shared with the canonical source this candidate
+	// maps to under agentsHome. A bare nlink>1 is NOT proof — an
+	// UNMANAGED hard-linked AGENTS.md/.mcp.json (e.g. the project hard
+	// links its real config elsewhere) also has nlink>1, and dropping it
+	// without a mirror backup destroys the project's real config while
+	// claiming it was backed up. Unknown/unmanaged hard links fall through
+	// to the normal backup/mirror path below.
+	if HasMultipleHardLinks(f) && isManagedHardlinkToCanonicalSource(project, projectPath, f, agentsHome) {
+		_ = os.Remove(f)
+		return true, nil
+	}
+	// Regular file: copy into resources, then delete from project.
+	// The removal below is destructive — it deletes the user's only
+	// copy of an unmanaged config. Only proceed once the required
+	// backup copies have actually landed; otherwise abort so runAdd
+	// returns an error WITHOUT removing the original.
+	if err := MirrorBackupChecked(project, projectPath, f, timestamp, deps); err != nil {
+		return false, fmt.Errorf("backing up %s: %w", f, err)
+	}
+	if err := deps.Remove(f); err != nil {
+		if !os.IsNotExist(err) {
+			// A real Remove error (permission denied, file locked, etc.).
+			// The backup copy already landed, so nothing is lost, but the
+			// original silently stays in the project tree — warn so the
+			// caller isn't left thinking cleanup fully succeeded.
+			ui.Warn(fmt.Sprintf("backed up %s but could not remove the original: %v", f, err))
+		}
+		return false, nil
+	}
+	return true, nil
 }
 
 // RestoreFromResourcesCountedWithDeps restores files from

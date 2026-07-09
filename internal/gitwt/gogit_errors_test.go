@@ -84,11 +84,11 @@ func TestPrune_WorktreeMissingGitdir(t *testing.T) {
 	if err := f.mgr.AddBranch("nogitdir", f.wtPath("nogitdir"), f.base); err != nil {
 		t.Fatalf("AddBranch: %v", err)
 	}
-	// Remove the admin gitdir pointer so worktreeDir() returns ok=false and
-	// Prune skips the entry (continue branch).
-	dir, ok := f.mgr.(*manager).adminDir("nogitdir")
-	if !ok {
-		t.Fatal("adminDir missing")
+	// Remove the admin gitdir pointer so worktreeDir() returns
+	// ErrWorktreeNotFound and Prune skips the entry (continue branch).
+	dir, err := f.mgr.(*manager).adminDir("nogitdir")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
 	}
 	if err := os.Remove(filepath.Join(dir, "gitdir")); err != nil {
 		t.Fatalf("rm gitdir: %v", err)
@@ -101,6 +101,31 @@ func TestPrune_WorktreeMissingGitdir(t *testing.T) {
 		if p == "nogitdir" {
 			t.Fatal("entry with missing gitdir should be skipped, not pruned")
 		}
+	}
+}
+
+// TestPrune_WorktreeDirRealErrorAborts exercises the should-be-ATOMIC fix:
+// a real (non-NotFound) worktreeDir failure during Prune must abort the
+// pass with an error instead of silently dropping the entry and reporting
+// prune as complete.
+func TestPrune_WorktreeDirRealErrorAborts(t *testing.T) {
+	f := newFixture(t)
+	if err := f.mgr.AddBranch("prune-err", f.wtPath("prune-err"), f.base); err != nil {
+		t.Fatalf("AddBranch: %v", err)
+	}
+	dir, err := f.mgr.(*manager).adminDir("prune-err")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
+	gitdirFile := filepath.Join(dir, "gitdir")
+	if err := os.Remove(gitdirFile); err != nil {
+		t.Fatalf("rm gitdir: %v", err)
+	}
+	if err := os.Mkdir(gitdirFile, 0o755); err != nil {
+		t.Fatalf("mkdir gitdir: %v", err)
+	}
+	if _, err := f.mgr.Prune(); err == nil {
+		t.Fatal("want Prune to abort on a real worktreeDir error, not silently continue")
 	}
 }
 
@@ -177,17 +202,48 @@ func TestWorktreeDir_NoGitdir(t *testing.T) {
 		t.Fatalf("AddBranch: %v", err)
 	}
 	m := f.mgr.(*manager)
-	// Unknown name -> adminDir not ok.
-	if _, ok := m.worktreeDir("does-not-exist"); ok {
-		t.Fatal("unknown worktree should not resolve a dir")
+	// Unknown name -> adminDir reports ErrWorktreeNotFound.
+	if _, err := m.worktreeDir("does-not-exist"); !errors.Is(err, ErrWorktreeNotFound) {
+		t.Fatalf("unknown worktree should yield ErrWorktreeNotFound, got %v", err)
 	}
-	// Existing admin but gitdir removed -> ReadFile error path.
-	dir, _ := m.adminDir("wd")
+	// Existing admin but gitdir removed -> ReadFile IsNotExist -> still
+	// ErrWorktreeNotFound (legitimate absence, not a real error).
+	dir, err := m.adminDir("wd")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
 	if err := os.Remove(filepath.Join(dir, "gitdir")); err != nil {
 		t.Fatalf("rm gitdir: %v", err)
 	}
-	if _, ok := m.worktreeDir("wd"); ok {
-		t.Fatal("missing gitdir should yield ok=false")
+	if _, err := m.worktreeDir("wd"); !errors.Is(err, ErrWorktreeNotFound) {
+		t.Fatalf("missing gitdir should yield ErrWorktreeNotFound, got %v", err)
+	}
+}
+
+// TestWorktreeDir_RealReadErrorSurfaces exercises the should-be-LOUD fix: a
+// real gitdir-pointer read failure (not "missing") must not be reported as
+// ErrWorktreeNotFound.
+func TestWorktreeDir_RealReadErrorSurfaces(t *testing.T) {
+	f := newFixture(t)
+	if err := f.mgr.AddBranch("gdread", f.wtPath("gdread"), f.base); err != nil {
+		t.Fatalf("AddBranch: %v", err)
+	}
+	m := f.mgr.(*manager)
+	dir, err := m.adminDir("gdread")
+	if err != nil {
+		t.Fatalf("adminDir: %v", err)
+	}
+	gitdirFile := filepath.Join(dir, "gitdir")
+	if err := os.Remove(gitdirFile); err != nil {
+		t.Fatalf("rm gitdir: %v", err)
+	}
+	if err := os.Mkdir(gitdirFile, 0o755); err != nil {
+		t.Fatalf("mkdir gitdir: %v", err)
+	}
+	if _, err := m.worktreeDir("gdread"); err == nil {
+		t.Fatal("want a surfaced error when gitdir is unreadable for a real reason")
+	} else if errors.Is(err, ErrWorktreeNotFound) {
+		t.Errorf("a real read error must not be reported as ErrWorktreeNotFound: %v", err)
 	}
 }
 

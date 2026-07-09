@@ -154,9 +154,12 @@ func (m *manager) Prune() ([]string, error) {
 	}
 	var pruned []string
 	for _, name := range names {
-		path, ok := m.worktreeDir(name)
-		if !ok {
-			continue
+		path, wdErr := m.worktreeDir(name)
+		if wdErr != nil {
+			if errors.Is(wdErr, ErrWorktreeNotFound) {
+				continue // admin metadata legitimately absent — nothing to prune
+			}
+			return pruned, fmt.Errorf("gitwt: resolve worktree dir for %q: %w", name, wdErr)
 		}
 		if _, statErr := os.Stat(path); statErr == nil {
 			continue // working tree still present — not stale
@@ -221,38 +224,49 @@ func assertLinkedWorktree(path string) error {
 	return nil
 }
 
-// adminDir returns the .git/worktrees/<name> filesystem path for a worktree's
-// admin metadata, and whether the worktree exists.
-func (m *manager) adminDir(name string) (string, bool) {
+// adminDir returns the .git/worktrees/<name> filesystem path for a
+// worktree's admin metadata. A worktree that genuinely never existed (or was
+// already removed) returns ErrWorktreeNotFound; any other Lstat failure is a
+// real error and is returned as such so callers do not mistake it for
+// "never existed."
+func (m *manager) adminDir(name string) (string, error) {
 	fs := m.repo.Storer.(interface{ Filesystem() billy.Filesystem }).Filesystem()
 	path := filepath.Join(fs.Root(), "worktrees", name)
 	if _, err := fs.Lstat(filepath.Join("worktrees", name)); err != nil {
-		return "", false
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
+		}
+		return "", fmt.Errorf("gitwt: stat admin dir for worktree %q: %w", name, err)
 	}
-	return path, true
+	return path, nil
 }
 
 // worktreeDir resolves the working-tree directory for a linked worktree by
-// reading its admin gitdir pointer (.git/worktrees/<name>/gitdir points at the
-// worktree's own .git file).
-func (m *manager) worktreeDir(name string) (string, bool) {
-	dir, ok := m.adminDir(name)
-	if !ok {
-		return "", false
+// reading its admin gitdir pointer (.git/worktrees/<name>/gitdir points at
+// the worktree's own .git file). Like adminDir, a real read failure is
+// distinguished from "never existed" and returned as an error rather than
+// folded into the same not-found outcome.
+func (m *manager) worktreeDir(name string) (string, error) {
+	dir, err := m.adminDir(name)
+	if err != nil {
+		return "", err
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "gitdir"))
 	if err != nil {
-		return "", false
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
+		}
+		return "", fmt.Errorf("gitwt: read gitdir pointer for worktree %q: %w", name, err)
 	}
 	gitFile := strings.TrimSpace(string(data))
 	// gitFile is ".../<worktree>/.git"; the working tree is its parent.
-	return filepath.Dir(gitFile), true
+	return filepath.Dir(gitFile), nil
 }
 
 func (m *manager) RecordBaseRef(name string, base plumbing.Hash) error {
-	dir, ok := m.adminDir(name)
-	if !ok {
-		return fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
+	dir, err := m.adminDir(name)
+	if err != nil {
+		return err
 	}
 	content := base.String() + "\n"
 	if err := os.WriteFile(filepath.Join(dir, baseRefFile), []byte(content), 0o644); err != nil {
@@ -262,9 +276,9 @@ func (m *manager) RecordBaseRef(name string, base plumbing.Hash) error {
 }
 
 func (m *manager) BaseRef(name string) (plumbing.Hash, error) {
-	dir, ok := m.adminDir(name)
-	if !ok {
-		return plumbing.ZeroHash, fmt.Errorf(errFmtWrap, ErrWorktreeNotFound, name)
+	dir, err := m.adminDir(name)
+	if err != nil {
+		return plumbing.ZeroHash, err
 	}
 	data, err := os.ReadFile(filepath.Join(dir, baseRefFile))
 	if errors.Is(err, os.ErrNotExist) {

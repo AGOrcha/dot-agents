@@ -3,6 +3,7 @@ package sddregister
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -345,10 +346,21 @@ func listSubdirsWithFile(dir, fileName string) ([]string, error) {
 	return out, nil
 }
 
-// fileExists reports whether path is an existing regular file.
+// fileExists reports whether path is an existing regular file. A genuinely
+// absent path (os.IsNotExist) returns false silently. Any other Stat error
+// (permission denied, I/O fault) also returns false — the caller drops that
+// spec/plan the same way it would an absence — but is logged, since a real
+// error silently makes the ingested graph incomplete otherwise.
 func fileExists(path string) bool {
 	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Default().Warn("sdd-register: stat failed, excluding from ingest",
+				"path", path, "error", err)
+		}
+		return false
+	}
+	return !info.IsDir()
 }
 
 // toSet builds a presence set from a slice.

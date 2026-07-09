@@ -6,6 +6,6 @@ summary: 'Standing, recurring release vehicle for the PATCH digit. Bundles merge
 created_at: "2026-05-28T00:00:00Z"
 updated_at: "2026-05-28T00:00:00Z"
 owner: dot-agents
-success_criteria: 'On each cadence tick with merged patch-eligible work since the last tag, VERSION is bumped one patch digit and the CHANGELOG section is finalized, firing auto-release.yml. The task is recurring — reset to pending after each release rather than completed-and-archived.'
-verification_strategy: 'git log since last v-tag shows only patch-eligible changes (fixes/refactors/internal/test/docs/coverage/lint, no new user-visible surface and no breaking change); VERSION bumped exactly one patch digit from the previous tag; CHANGELOG section matches the merged set; auto-release.yml tags + publishes on merge to master.'
-current_focus_task: release-patch
+success_criteria: 'On each cadence tick with merged patch-eligible work since the last tag, the release-docs-refresh predecessor runs first (mandatory pre-cut docs pass), then VERSION is bumped one patch digit and the CHANGELOG section is finalized, firing auto-release.yml. The task is recurring — reset to pending after each release rather than completed-and-archived.'
+verification_strategy: 'release-docs-refresh completed before release-patch (docs reconciled against code, platform-dirs refreshed, any code-vs-contract gaps routed via the gap analyst rather than papered over); git log since last v-tag shows only patch-eligible changes (fixes/refactors/internal/test/docs/coverage/lint, no new user-visible surface and no breaking change); VERSION bumped exactly one patch digit from the previous tag; CHANGELOG section matches the merged set; auto-release.yml tags + publishes on merge to master.'
+current_focus_task: release-docs-refresh

@@ -139,7 +139,11 @@ func ListPendingPromoteJournals(agentsHome string) ([]PromoteJournalEntry, error
 	}
 	var pending []PromoteJournalEntry
 	for _, e := range entries {
-		if je, ok := readPendingJournalEntry(dir, e); ok {
+		je, ok, jerr := readPendingJournalEntry(dir, e)
+		if jerr != nil {
+			return nil, jerr
+		}
+		if ok {
 			pending = append(pending, je)
 		}
 	}
@@ -172,24 +176,31 @@ func classifyJournalReadDirError(agentsHome, dir string, err error) ([]PromoteJo
 }
 
 // readPendingJournalEntry decodes a single directory entry into a journal
-// entry, returning ok=false for non-JSON files, unreadable/unparseable files,
-// and entries already in a terminal state.
-func readPendingJournalEntry(dir string, e os.DirEntry) (PromoteJournalEntry, bool) {
+// entry, returning ok=false for non-JSON files and entries already in a
+// terminal state — both legitimate skips (err is nil). A real read or parse
+// failure returns a non-nil err instead of silently dropping the entry: this
+// feeds crash-recovery (RecoverPendingPromote), so a silently-dropped
+// in-flight entry would make a partially-completed destructive promote
+// permanently unrecoverable.
+func readPendingJournalEntry(dir string, e os.DirEntry) (PromoteJournalEntry, bool, error) {
 	if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-		return PromoteJournalEntry{}, false
+		return PromoteJournalEntry{}, false, nil
 	}
 	data, rerr := os.ReadFile(filepath.Join(dir, e.Name()))
 	if rerr != nil {
-		return PromoteJournalEntry{}, false
+		if os.IsNotExist(rerr) {
+			return PromoteJournalEntry{}, false, nil // TOCTOU: removed after ReadDir
+		}
+		return PromoteJournalEntry{}, false, fmt.Errorf("reading journal entry %s: %w", e.Name(), rerr)
 	}
 	var je PromoteJournalEntry
-	if json.Unmarshal(data, &je) != nil {
-		return PromoteJournalEntry{}, false
+	if uerr := json.Unmarshal(data, &je); uerr != nil {
+		return PromoteJournalEntry{}, false, fmt.Errorf("parsing journal entry %s: %w", e.Name(), uerr)
 	}
 	if isTerminalPromoteState(je.State) {
-		return PromoteJournalEntry{}, false
+		return PromoteJournalEntry{}, false, nil
 	}
-	return je, true
+	return je, true, nil
 }
 
 // isTerminalPromoteState reports whether the journal state indicates the

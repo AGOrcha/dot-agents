@@ -282,17 +282,61 @@ func TestCollectTaskStatuses_PlanFilterError(t *testing.T) {
 	}
 }
 
-// TestPlanTaskStatuses_MissingPlan asserts a missing/unloadable plan yields nil
-// rather than an error (defensive skip).
+// TestPlanTaskStatuses_MissingPlan asserts a missing/unloadable plan yields
+// (nil, nil) rather than an error (legitimate-absence skip).
 func TestPlanTaskStatuses_MissingPlan(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
-	if got := planTaskStatuses(repo, "nope"); got != nil {
+	got, err := planTaskStatuses(repo, "nope")
+	if err != nil {
+		t.Fatalf("expected no error for a missing plan, got %v", err)
+	}
+	if got != nil {
 		t.Fatalf("expected nil for missing plan, got %v", got)
 	}
 }
 
+// TestPlanTaskStatuses_MalformedPlan covers the loadCanonicalPlan real-error
+// branch (corrupt PLAN.yaml itself, not TASKS.yaml) — must also error rather
+// than silently returning nil.
+func TestPlanTaskStatuses_MalformedPlan(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	planDir := filepath.Join(plansBaseDir(repo), "brokenplan")
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, workflowPlanFileName), []byte("status: [this is not valid yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := planTaskStatuses(repo, "brokenplan")
+	if err == nil {
+		t.Fatalf("expected an error for malformed PLAN.yaml, got nil (statuses=%v)", got)
+	}
+	if got != nil {
+		t.Fatalf("expected nil statuses alongside the error, got %v", got)
+	}
+}
+
+// TestPlanTaskStatuses_ActivePlanNoTasksFile covers the legitimate-absence
+// case where an active plan has no TASKS.yaml yet — must stay (nil, nil),
+// not an error.
+func TestPlanTaskStatuses_ActivePlanNoTasksFile(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	if err := saveCanonicalPlan(repo, &CanonicalPlan{SchemaVersion: 1, ID: "notasksyet", Title: "notasksyet", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := planTaskStatuses(repo, "notasksyet")
+	if err != nil {
+		t.Fatalf("expected no error for a legitimately-absent TASKS.yaml, got %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil statuses, got %v", got)
+	}
+}
+
 // TestPlanTaskStatuses_MalformedTasks asserts an active plan with an
-// unparseable TASKS.yaml is skipped (nil) rather than crashing the ledger.
+// unparseable TASKS.yaml is a REAL error (should-be-ATOMIC), not a silent
+// nil — a corrupt TASKS.yaml must abort the ledger instead of silently
+// understating in-flight concurrency (see planTaskStatuses doc comment).
 func TestPlanTaskStatuses_MalformedTasks(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
 	if err := saveCanonicalPlan(repo, &CanonicalPlan{SchemaVersion: 1, ID: "broken", Title: "broken", Status: "active"}); err != nil {
@@ -302,8 +346,31 @@ func TestPlanTaskStatuses_MalformedTasks(t *testing.T) {
 	if err := os.WriteFile(tasksPath, []byte("this: : not: valid: yaml: ["), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if got := planTaskStatuses(repo, "broken"); got != nil {
-		t.Fatalf("expected nil for malformed TASKS.yaml, got %v", got)
+	got, err := planTaskStatuses(repo, "broken")
+	if err == nil {
+		t.Fatalf("expected an error for malformed TASKS.yaml, got nil (statuses=%v)", got)
+	}
+	if got != nil {
+		t.Fatalf("expected nil statuses alongside the error, got %v", got)
+	}
+}
+
+// TestCollectTaskStatuses_MalformedTasksAborts asserts the malformed-TASKS
+// error from planTaskStatuses propagates through collectTaskStatuses,
+// aborting the whole ledger computation rather than silently omitting the
+// corrupt plan's tasks from the occupied-slot count.
+func TestCollectTaskStatuses_MalformedTasksAborts(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	seedSlotsPlan(t, repo, "alpha", TaskStatusInProgress)
+	if err := saveCanonicalPlan(repo, &CanonicalPlan{SchemaVersion: 1, ID: "broken", Title: "broken", Status: "active"}); err != nil {
+		t.Fatal(err)
+	}
+	tasksPath := filepath.Join(plansBaseDir(repo), "broken", workflowTasksFileName)
+	if err := os.WriteFile(tasksPath, []byte("this: : not: valid: yaml: ["), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := collectTaskStatuses(repo, nil); err == nil {
+		t.Fatal("expected collectTaskStatuses to abort on a corrupt TASKS.yaml, got nil error")
 	}
 }
 

@@ -1,600 +1,494 @@
 schema_version: 1
 plan_id: r2-observability-dashboard
 tasks:
-    - id: design-doc
-      title: Resolve R2 open questions (frontend, storage, real-time) in design.md
-      status: completed
-      depends_on: []
-      blocks:
-        - t01-api-contract-design
-      owner: dot-agents
-      write_scope:
-        - .agents/workflow/plans/r2-observability-dashboard/design.md
-      verification_required: false
-      notes: |-
-        Landed via R2 planner output 2026-05-25: Q1 Vite + React +
-        TypeScript + TanStack Query + Tailwind (static-built bundle
-        via go:embed); Q2 read-through from disk + in-process LRU
-        (no new persistent store v1; Store interface for future
-        swap); Q3 SSE with R3 publish primitive bridge (rejected
-        WS/long-poll); Q4 REST/JSON resource-oriented API; Q5
-        config-resolved iter-log root list; Q6 4 frontend routes.
-      app_type: research
-    - id: t01-api-contract-design
-      title: Design dashboard API contract (endpoints, payload shapes, JSON Schemas)
-      status: completed
-      depends_on:
-        - design-doc
-      blocks:
-        - t02-storage-read-layer
-        - t03-handlers-rest
-        - t04-sse-broker
-        - t08-frontend-skeleton
-      owner: dot-agents
-      write_scope:
-        - .agents/workflow/plans/r2-observability-dashboard/design/API.md
-        - schemas/dashboard-run.schema.json
-        - schemas/dashboard-iteration.schema.json
-        - schemas/dashboard-rubric.schema.json
-        - schemas/dashboard-event.schema.json
-      verification_required: false
-      notes: |-
-        Read-mostly design pass. Produce API.md covering:
-          - Final endpoint list per design.md Q4.
-          - For each endpoint: method, path, query params, response
-            envelope, status codes, example response.
-          - Payload field-by-field mapping to existing Go types:
-            internal/scoring.PersistedScore / SessionScore /
-            IterationRecord. The dashboard DTO is a presentation
-            projection — name it and pin its fields here so handler
-            authors and frontend authors share one source.
-          - SSE event taxonomy: iteration.scored, session.updated,
-            score.recomputed; payload shape per event; ordering and
-            replay semantics (no replay in v1, document explicitly).
-          - Error envelope (RFC 7807 problem+json or simpler
-            { error: { code, message } }; pick one and pin).
-          - Embedded JSON Schemas shipped under schemas/ so the
-            contract test in t03 + the frontend types-from-schema
-            generator both consume the same source.
-        Anti-scope: NO RBAC (R5), NO write endpoints, NO pagination
-        beyond limit/offset. This task lands BEFORE handler /
-        frontend / broker implementation so all four downstreams
-        build to one contract.
-        SHIPPED (coherence 2026-06-25): the four entity schemas
-        (schemas/dashboard-{run,iteration,rubric,event}.schema.json)
-        and API.md landed via commit c74d8d8b ("design(r2):
-        dashboard API contract + entity JSON schemas"). Marked
-        completed; downstream tasks build to this contract.
-    - id: t02-storage-read-layer
-      title: Build dashboard.Store read-through layer over iter-log + score sidecars
-      status: completed
-      depends_on:
-        - t01-api-contract-design
-      blocks:
-        - t03-handlers-rest
-        - t06-recompute-on-miss-and-fswatch
-      owner: dot-agents
-      write_scope:
-        - internal/dashboard/store/
-      verification_required: true
-      notes: |-
-        Implements design.md Q2: read directly from
-        .agents/active/iteration-log/ + iter-N.score.yaml +
-        session-*.score.yaml sidecars, with a small in-process LRU
-        cache (size 256, TTL 30s, exposed metrics).
+- id: design-doc
+  title: Resolve R2 open questions (frontend, storage, real-time) in design.md
+  status: completed
+  depends_on: []
+  blocks:
+  - t01-api-contract-design
+  owner: dot-agents
+  write_scope:
+  - .agents/workflow/plans/r2-observability-dashboard/design.md
+  verification_required: false
+  notes: 'Landed via R2 planner output 2026-05-25: Q1 Vite + React +
 
-        Store interface (sketch):
-          type Store interface {
-            ListRuns(ctx, filter) ([]RunSummary, error)
-            GetRun(ctx, sessionID) (RunDetail, error)
-            ListIterations(ctx, sessionID) ([]IterationSummary, error)
-            GetIteration(ctx, iter int) (IterationDetail, error)
-            Rubric(ctx) (RubricDoc, error)
-          }
+    TypeScript + TanStack Query + Tailwind (static-built bundle
 
-        Uses internal/scoring.LoadIterationLog for the iter-log walk
-        and a sidecar glob + YAML decode for scores. Wraps disk reads
-        in a sync.Mutex-protected LRU keyed by (root, sessionID|iter).
-        Cache invalidation on iter-log mtime change; the broker (t04)
-        also evicts on push events.
-        Anti-scope: no writes, no recompute (t06 owns recompute).
-      app_type: go-cli
-    - id: t03-handlers-rest
-      title: Implement HTTP handlers for the REST API per the contract
-      status: pending
-      depends_on:
-        - t01-api-contract-design
-        - t02-storage-read-layer
-      blocks:
-        - t07-standalone-service-bin
-        - t13-r3-mount-integration
-        - t09-feature-aggregate-view
-        - t10-feature-per-run-drilldown
-      owner: dot-agents
-      write_scope:
-        - internal/dashboard/handlers/
-      verification_required: true
-      notes: |-
-        RESCOPED 2026-07-02 (§2A coherence): these REST handlers live
-        on the HTTP/SSE browser edge — the one surface r3's §2A
-        surface→transport map deliberately keeps on HTTP
-        (browser-facing arm of the selection rule). When mounted in
-        R3 (t13) they mount on that HTTP edge via RegisterMount,
-        never on the UDS control plane. Transport is single-sourced
-        in r3 spec §2A; this plan does not re-decide it.
-        Pure handlers — depend on dashboard.Store and
-        dashboard.Events interfaces, NOT on net/http.ServeMux or any
-        router. Wiring lives in t07 / t13. Use stdlib net/http only.
+    via go:embed); Q2 read-through from disk + in-process LRU
 
-        Each handler: parses query params, validates, calls Store,
-        writes envelope-wrapped JSON, sets ETag from store mtime,
-        emits structured log lines (slog).
+    (no new persistent store v1; Store interface for future
 
-        contract_test.go: golden-file response per endpoint + JSON
-        Schema validation using
-        github.com/santhosh-tekuri/jsonschema (already in go.mod).
-        Fixture iter-log lives under handlers/testdata/.
-      app_type: go-cli
-    - id: t04-sse-broker
-      title: Build SSE event broker (subscribe / publish / fan-out)
-      status: completed
-      depends_on:
-        - t01-api-contract-design
-      blocks:
-        - t05-sse-handler
-        - t13-r3-mount-integration
-      owner: dot-agents
-      write_scope:
-        - internal/dashboard/events/
-      verification_required: true
-      notes: |-
-        RESCOPED 2026-07-02 (§2A coherence): the cross-plan contract
-        is r3's §D4.1 EventBus INTERFACE —
-          Publish(topic string, payload any) error
-          Subscribe(topic string) (<-chan Event, func(), error)
-          Close() error
-        (r3 task event-bus-interface-seam) — bind to it, never to the
-        concrete *events.Bus. Assume only the §D4.2 G1-G4 floor:
-        at-most-once best-effort delivery, best-effort per-topic
-        order, bounded-buffer drop-oldest (publishers never block),
-        no cross-publish atomicity. The bus backend may later be
-        config-selected (§D4.4) without changing this broker. SSE
-        stays this plan's browser-push wire per the §2A map.
+    swap); Q3 SSE with R3 publish primitive bridge (rejected
 
-        Tiny in-process broker. Interface:
-          type Publisher interface { Publish(topic string, payload any) }
-          type Broker struct { ... }    // implements Publisher
-          func (b *Broker) Subscribe(ctx) (<-chan Event, func())
-        (Broker's local Publisher shape stays minimal; the r3-facing
-        seam is bridged in t13 against the EventBus interface.)
+    WS/long-poll); Q4 REST/JSON resource-oriented API; Q5
 
-        Fan-out: N goroutines each holding a buffered channel; an event
-        arriving on a FULL channel disconnects that subscriber immediately
-        (client refetches on reconnect) — RATIFIED 2026-07-02 during t04
-        review: with G3 non-blocking publishers and gapless delivered
-        streams, arrival-on-full forces either a silent gap (unsound) or a
-        disconnect; a pre-drop grace window is unsatisfiable as previously
-        worded. This is the OQ5 bounded-buffer disconnect-on-overflow policy.
-        Heartbeat: emit a ping every 15s.
+    config-resolved iter-log root list; Q6 4 frontend routes.'
+  app_type: research
+- id: t01-api-contract-design
+  title: Design dashboard API contract (endpoints, payload shapes, JSON Schemas)
+  status: completed
+  depends_on:
+  - design-doc
+  blocks:
+  - t02-storage-read-layer
+  - t03-handlers-rest
+  - t04-sse-broker
+  - t08-frontend-skeleton
+  owner: dot-agents
+  write_scope:
+  - .agents/workflow/plans/r2-observability-dashboard/design/API.md
+  - schemas/dashboard-run.schema.json
+  - schemas/dashboard-iteration.schema.json
+  - schemas/dashboard-rubric.schema.json
+  - schemas/dashboard-event.schema.json
+  verification_required: false
+  notes: "Read-mostly design pass. Produce API.md covering:\n  - Final endpoint list per design.md Q4.\n\
+    \  - For each endpoint: method, path, query params, response\n    envelope, status codes, example\
+    \ response.\n  - Payload field-by-field mapping to existing Go types:\n    internal/scoring.PersistedScore\
+    \ / SessionScore /\n    IterationRecord. The dashboard DTO is a presentation\n    projection \u2014\
+    \ name it and pin its fields here so handler\n    authors and frontend authors share one source.\n\
+    \  - SSE event taxonomy: iteration.scored, session.updated,\n    score.recomputed; payload shape per\
+    \ event; ordering and\n    replay semantics (no replay in v1, document explicitly).\n  - Error envelope\
+    \ (RFC 7807 problem+json or simpler\n    { error: { code, message } }; pick one and pin).\n  - Embedded\
+    \ JSON Schemas shipped under schemas/ so the\n    contract test in t03 + the frontend types-from-schema\n\
+    \    generator both consume the same source.\nAnti-scope: NO RBAC (R5), NO write endpoints, NO pagination\n\
+    beyond limit/offset. This task lands BEFORE handler /\nfrontend / broker implementation so all four\
+    \ downstreams\nbuild to one contract.\nSHIPPED (coherence 2026-06-25): the four entity schemas\n(schemas/dashboard-{run,iteration,rubric,event}.schema.json)\n\
+    and API.md landed via commit c74d8d8b (\"design(r2):\ndashboard API contract + entity JSON schemas\"\
+    ). Marked\ncompleted; downstream tasks build to this contract."
+- id: t02-storage-read-layer
+  title: Build dashboard.Store read-through layer over iter-log + score sidecars
+  status: completed
+  depends_on:
+  - t01-api-contract-design
+  blocks:
+  - t03-handlers-rest
+  - t06-recompute-on-miss-and-fswatch
+  owner: dot-agents
+  write_scope:
+  - internal/dashboard/store/
+  verification_required: true
+  notes: "Implements design.md Q2: read directly from\n.agents/active/iteration-log/ + iter-N.score.yaml\
+    \ +\nsession-*.score.yaml sidecars, with a small in-process LRU\ncache (size 256, TTL 30s, exposed\
+    \ metrics).\n\nStore interface (sketch):\n  type Store interface {\n    ListRuns(ctx, filter) ([]RunSummary,\
+    \ error)\n    GetRun(ctx, sessionID) (RunDetail, error)\n    ListIterations(ctx, sessionID) ([]IterationSummary,\
+    \ error)\n    GetIteration(ctx, iter int) (IterationDetail, error)\n    Rubric(ctx) (RubricDoc, error)\n\
+    \  }\n\nUses internal/scoring.LoadIterationLog for the iter-log walk\nand a sidecar glob + YAML decode\
+    \ for scores. Wraps disk reads\nin a sync.Mutex-protected LRU keyed by (root, sessionID|iter).\nCache\
+    \ invalidation on iter-log mtime change; the broker (t04)\nalso evicts on push events.\nAnti-scope:\
+    \ no writes, no recompute (t06 owns recompute)."
+  app_type: go-cli
+- id: t03-handlers-rest
+  title: Implement HTTP handlers for the REST API per the contract
+  status: completed
+  depends_on:
+  - t01-api-contract-design
+  - t02-storage-read-layer
+  blocks:
+  - t07-standalone-service-bin
+  - t13-r3-mount-integration
+  - t09-feature-aggregate-view
+  - t10-feature-per-run-drilldown
+  owner: dot-agents
+  write_scope:
+  - internal/dashboard/handlers/
+  verification_required: true
+  notes: "RESCOPED 2026-07-02 (\xA72A coherence): these REST handlers live\non the HTTP/SSE browser edge\
+    \ \u2014 the one surface r3's \xA72A\nsurface\u2192transport map deliberately keeps on HTTP\n(browser-facing\
+    \ arm of the selection rule). When mounted in\nR3 (t13) they mount on that HTTP edge via RegisterMount,\n\
+    never on the UDS control plane. Transport is single-sourced\nin r3 spec \xA72A; this plan does not\
+    \ re-decide it.\nPure handlers \u2014 depend on dashboard.Store and\ndashboard.Events interfaces,\
+    \ NOT on net/http.ServeMux or any\nrouter. Wiring lives in t07 / t13. Use stdlib net/http only.\n\n\
+    Each handler: parses query params, validates, calls Store,\nwrites envelope-wrapped JSON, sets ETag\
+    \ from store mtime,\nemits structured log lines (slog).\n\ncontract_test.go: golden-file response\
+    \ per endpoint + JSON\nSchema validation using\ngithub.com/santhosh-tekuri/jsonschema (already in\
+    \ go.mod).\nFixture iter-log lives under handlers/testdata/."
+  app_type: go-cli
+- id: t04-sse-broker
+  title: Build SSE event broker (subscribe / publish / fan-out)
+  status: completed
+  depends_on:
+  - t01-api-contract-design
+  blocks:
+  - t05-sse-handler
+  - t13-r3-mount-integration
+  owner: dot-agents
+  write_scope:
+  - internal/dashboard/events/
+  verification_required: true
+  notes: "RESCOPED 2026-07-02 (\xA72A coherence): the cross-plan contract\nis r3's \xA7D4.1 EventBus INTERFACE\
+    \ \u2014\n  Publish(topic string, payload any) error\n  Subscribe(topic string) (<-chan Event, func(),\
+    \ error)\n  Close() error\n(r3 task event-bus-interface-seam) \u2014 bind to it, never to the\nconcrete\
+    \ *events.Bus. Assume only the \xA7D4.2 G1-G4 floor:\nat-most-once best-effort delivery, best-effort\
+    \ per-topic\norder, bounded-buffer drop-oldest (publishers never block),\nno cross-publish atomicity.\
+    \ The bus backend may later be\nconfig-selected (\xA7D4.4) without changing this broker. SSE\nstays\
+    \ this plan's browser-push wire per the \xA72A map.\n\nTiny in-process broker. Interface:\n  type\
+    \ Publisher interface { Publish(topic string, payload any) }\n  type Broker struct { ... }    // implements\
+    \ Publisher\n  func (b *Broker) Subscribe(ctx) (<-chan Event, func())\n(Broker's local Publisher shape\
+    \ stays minimal; the r3-facing\nseam is bridged in t13 against the EventBus interface.)\n\nFan-out:\
+    \ N goroutines each holding a buffered channel; an event\narriving on a FULL channel disconnects that\
+    \ subscriber immediately\n(client refetches on reconnect) \u2014 RATIFIED 2026-07-02 during t04\n\
+    review: with G3 non-blocking publishers and gapless delivered\nstreams, arrival-on-full forces either\
+    \ a silent gap (unsound) or a\ndisconnect; a pre-drop grace window is unsatisfiable as previously\n\
+    worded. This is the OQ5 bounded-buffer disconnect-on-overflow policy.\nHeartbeat: emit a ping every\
+    \ 15s.\n\nWhen R3's bus lands (t13), it replaces this broker as the\nprimary publisher; this broker\
+    \ becomes a thin\nsubscriber+fanout.\n\nAnti-scope: do NOT define WHERE events come from \u2014 that\
+    \ is\nR3's EventBus (via t13) and a filesystem watcher bridge (t06)."
+  app_type: go-cli
+- id: t05-sse-handler
+  title: Wire /api/v1/observability/events SSE handler to broker
+  status: pending
+  depends_on:
+  - t03-handlers-rest
+  - t04-sse-broker
+  blocks:
+  - t07-standalone-service-bin
+  - t12-e2e-smoke-live-iteration
+  owner: dot-agents
+  write_scope:
+  - internal/dashboard/handlers/handlers.go
+  - internal/dashboard/handlers/stream.go
+  - internal/dashboard/handlers/stream_test.go
+  verification_required: true
+  notes: 'Long-lived HTTP handler for GET /api/v1/observability/events
+    emitting text/event-stream. Route registration lives in handlers.go
+    because Mount.routes() owns every full-path binding; stream.go owns the
+    handler implementation and stream_test.go owns the endpoint proof. Treat
+    design/API.md as authoritative over older /api/stream references in
+    adjacent narrative docs/schema descriptions.
 
-        When R3's bus lands (t13), it replaces this broker as the
-        primary publisher; this broker becomes a thin
-        subscriber+fanout.
+    Each
 
-        Anti-scope: do NOT define WHERE events come from — that is
-        R3's EventBus (via t13) and a filesystem watcher bridge (t06).
-      app_type: go-cli
-    - id: t05-sse-handler
-      title: Wire /api/stream SSE handler to broker
-      status: pending
-      depends_on:
-        - t03-handlers-rest
-        - t04-sse-broker
-      blocks:
-        - t07-standalone-service-bin
-        - t12-e2e-smoke-live-iteration
-      owner: dot-agents
-      write_scope:
-        - internal/dashboard/handlers/stream.go
-        - internal/dashboard/handlers/stream_test.go
-      verification_required: true
-      notes: |-
-        Long-lived HTTP handler emitting text/event-stream. Each
-        connected client subscribes to the broker, formats incoming
-        Events as SSE frames (event: <topic>, id: <seq>, data:
-        <json>). Sends 2KB padding comment on connect to defeat
-        proxy buffering. Respects request context cancellation.
-        Test: httptest server, EventSource-like reader, broker
-        publishes one event, assert frame arrives within 100ms.
-      app_type: go-cli
-    - id: t06-recompute-on-miss-and-fswatch
-      title: Score-recompute-on-miss + iter-log filesystem watcher → broker bridge
-      status: completed
-      depends_on:
-        - t02-storage-read-layer
-        - t04-sse-broker
-      blocks:
-        - t07-standalone-service-bin
-        - t12-e2e-smoke-live-iteration
-      owner: dot-agents
-      write_scope:
-        - internal/dashboard/store/recompute.go
-        - internal/dashboard/store/recompute_test.go
-        - internal/dashboard/watch/
-      verification_required: true
-      notes: |-
-        Two thin pieces:
+    connected client subscribes to the broker, formats incoming
 
-        (1) recompute.go — when Store.GetIteration is called and the
-        iter-N.score.yaml sidecar is missing or older than
-        iter-N.yaml, the store calls
-        internal/scoring.ScoreIteration synchronously and returns
-        the freshly-computed score. The sidecar write is best-effort
-        (background goroutine). Cold-cache fallback so the dashboard
-        never says "no score" when the scorer could just answer.
+    Events as SSE frames (event: <topic>, id: <seq>, data:
 
-        (2) fswatch.go — wraps fsnotify (add dep:
-        github.com/fsnotify/fsnotify) to watch the iter-log root
-        list. On iter-*.yaml or session-*.score.yaml change/create,
-        publish an event to the broker (iteration.scored or
-        session.updated). This is the v1 standalone push path BEFORE
-        R3's publish primitive exists.
+    <json>). Sends 2KB padding comment on connect to defeat
 
-        When R3's publisher lands (t13), fswatch becomes the
-        fallback only — R3's in-process publish is the primary path;
-        the watcher exists because some writers may not go through
-        R3 (eg. developer running `da score run` manually).
-      app_type: go-cli
-    - id: t07-standalone-service-bin
-      title: Standalone dashboard service (cmd/da-dashboard) for dev + pre-R3 use
-      status: pending
-      depends_on:
-        - t03-handlers-rest
-        - t05-sse-handler
-        - t06-recompute-on-miss-and-fswatch
-      blocks:
-        - t12-e2e-smoke-live-iteration
-      owner: dot-agents
-      write_scope:
-        - cmd/da-dashboard/
-        - internal/dashboard/server/
-      verification_required: true
-      notes: |-
-        Tiny standalone binary that wires Store + Broker + Handlers
-        + Watcher into an http.Server bound to 127.0.0.1:<port>.
-        Flags: --iter-log-dir (repeatable), --addr (default
-        127.0.0.1:7300), --dev-asset-proxy (when set, proxies
-        non-/api/ to Vite dev server), --static-dir (overrides
-        go:embed dist/ for local frontend iteration).
-        Dev-and-pre-R3 home for the dashboard. When R3 ships, R3's
-        service mounts the same Server type via t13 — cmd/da-dashboard
-        remains for dev and for users who do not run R3.
-        Tests: server start/stop, /api/health returns 200, embedded
-        static handler serves index.html for non-/api/ routes (SPA
-        fallback).
-      app_type: go-cli
-    - id: t08-frontend-skeleton
-      title: Vite + React + TS skeleton with routing, API client, query layer
-      status: pending
-      depends_on:
-        - t01-api-contract-design
-      blocks:
-        - t09-feature-aggregate-view
-        - t10-feature-per-run-drilldown
-        - t11-frontend-sse-integration
-        - t15-rubric-versioning-ui
-      owner: dot-agents
-      write_scope:
-        - web/dashboard/
-      verification_required: true
-      notes: |-
-        Per design.md Q1: Vite + React 18 + TS + TanStack Query v5 +
-        Tailwind + Recharts. TypeScript types in src/api/types.gen.ts
-        are GENERATED from the JSON Schemas shipped in t01 — wire
-        json-schema-to-typescript into a `pnpm types` script; commit
-        the generated file so Go-side and frontend-side stay in
-        lockstep.
+    proxy buffering. Respects request context cancellation.
 
-        Routes (react-router-dom v6):
-          /                  → AggregateView (placeholder this task)
-          /runs/:sessionId   → RunDetailView (placeholder)
-          /iterations/:n     → IterationDetailView (placeholder)
-          /rubric            → RubricView (placeholder)
+    Test: httptest server, EventSource-like reader, broker
 
-        API client: thin fetch wrapper, base URL from
-        import.meta.env.VITE_API_BASE (default '' so same-origin).
-        TanStack Query keys named per endpoint.
+    publishes one event, assert frame arrives within 100ms.'
+  app_type: go-cli
+- id: t06-recompute-on-miss-and-fswatch
+  title: "Score-recompute-on-miss + iter-log filesystem watcher \u2192 broker bridge"
+  status: completed
+  depends_on:
+  - t02-storage-read-layer
+  - t04-sse-broker
+  blocks:
+  - t07-standalone-service-bin
+  - t12-e2e-smoke-live-iteration
+  owner: dot-agents
+  write_scope:
+  - internal/dashboard/store/recompute.go
+  - internal/dashboard/store/recompute_test.go
+  - internal/dashboard/watch/
+  verification_required: true
+  notes: "Two thin pieces:\n\n(1) recompute.go \u2014 when Store.GetIteration is called and the\niter-N.score.yaml\
+    \ sidecar is missing or older than\niter-N.yaml, the store calls\ninternal/scoring.ScoreIteration\
+    \ synchronously and returns\nthe freshly-computed score. The sidecar write is best-effort\n(background\
+    \ goroutine). Cold-cache fallback so the dashboard\nnever says \"no score\" when the scorer could\
+    \ just answer.\n\n(2) fswatch.go \u2014 wraps fsnotify (add dep:\ngithub.com/fsnotify/fsnotify) to\
+    \ watch the iter-log root\nlist. On iter-*.yaml or session-*.score.yaml change/create,\npublish an\
+    \ event to the broker (iteration.scored or\nsession.updated). This is the v1 standalone push path\
+    \ BEFORE\nR3's publish primitive exists.\n\nWhen R3's publisher lands (t13), fswatch becomes the\n\
+    fallback only \u2014 R3's in-process publish is the primary path;\nthe watcher exists because some\
+    \ writers may not go through\nR3 (eg. developer running `da score run` manually)."
+  app_type: go-cli
+- id: t07-standalone-service-bin
+  title: Standalone dashboard service (cmd/da-dashboard) for dev + pre-R3 use
+  status: pending
+  depends_on:
+  - t03-handlers-rest
+  - t05-sse-handler
+  - t06-recompute-on-miss-and-fswatch
+  blocks:
+  - t12-e2e-smoke-live-iteration
+  owner: dot-agents
+  write_scope:
+  - cmd/da-dashboard/
+  - internal/dashboard/server/
+  verification_required: true
+  notes: "Tiny standalone binary that wires Store + Broker + Handlers\n+ Watcher into an http.Server bound\
+    \ to 127.0.0.1:<port>.\nFlags: --iter-log-dir (repeatable), --addr (default\n127.0.0.1:7300), --dev-asset-proxy\
+    \ (when set, proxies\nnon-/api/ to Vite dev server), --static-dir (overrides\ngo:embed dist/ for local\
+    \ frontend iteration).\nDev-and-pre-R3 home for the dashboard. When R3 ships, R3's\nservice mounts\
+    \ the same Server type via t13 \u2014 cmd/da-dashboard\nremains for dev and for users who do not run\
+    \ R3.\nTests: server start/stop, /api/health returns 200, embedded\nstatic handler serves index.html\
+    \ for non-/api/ routes (SPA\nfallback)."
+  app_type: go-cli
+- id: t08-frontend-skeleton
+  title: Vite + React + TS skeleton with routing, API client, query layer
+  status: completed
+  depends_on:
+  - t01-api-contract-design
+  blocks:
+  - t09-feature-aggregate-view
+  - t10-feature-per-run-drilldown
+  - t11-frontend-sse-integration
+  - t15-rubric-versioning-ui
+  owner: dot-agents
+  write_scope:
+  - web/dashboard/
+  verification_required: true
+  notes: "Per design.md Q1: Vite + React 18 + TS + TanStack Query v5 +\nTailwind + Recharts. TypeScript\
+    \ types in src/api/types.gen.ts\nare GENERATED from the JSON Schemas shipped in t01 \u2014 wire\n\
+    json-schema-to-typescript into a `pnpm types` script; commit\nthe generated file so Go-side and frontend-side\
+    \ stay in\nlockstep.\n\nRoutes (react-router-dom v6):\n  /                  \u2192 AggregateView (placeholder\
+    \ this task)\n  /runs/:sessionId   \u2192 RunDetailView (placeholder)\n  /iterations/:n     \u2192\
+    \ IterationDetailView (placeholder)\n  /rubric            \u2192 RubricView (placeholder)\n\nAPI client:\
+    \ thin fetch wrapper, base URL from\nimport.meta.env.VITE_API_BASE (default '' so same-origin).\n\
+    TanStack Query keys named per endpoint.\n\nTests: Vitest + React Testing Library; smoke test renders\n\
+    App without crashing; ScoreBadge renders bands correctly.\n\nBuild outputs to web/dashboard/dist/,\
+    \ which t07's server\nembeds via go:embed.\n\nCross-plan dep: R5's review-ui task hooks into this\
+    \ skeleton\n(NEEDS localStorage-based Bearer-token plumbing in the API\nclient + extension slots on\
+    \ RunDetailView).\n\nAUTH RULING (owner, 2026-07-04): SUPERSEDES the localStorage Bearer plumbing\
+    \ in this task's original R5 line. Access token is IN-MEMORY (module-scoped), refresh token is an\
+    \ HttpOnly cookie set by R5 (SPA never reads it); 401 -> refresh-via-cookie -> retry. Rationale: localStorage\
+    \ is XSS-readable. Delivered in #286. FOLLOWUP(t16): main.test.tsx guard test is partly tautological\
+    \ (reimplements guard vs importing main.tsx); CI coverage-gate wiring (test.yml, sonar-project.properties,\
+    \ vitest lcov) was folded into #286 to unblock t08's own sonar coverage gate."
+  app_type: web
+- id: t09-feature-aggregate-view
+  title: Aggregate-dashboard view (runs grid, score trend, cache trend)
+  status: pending
+  depends_on:
+  - t08-frontend-skeleton
+  - t03-handlers-rest
+  blocks:
+  - t12-e2e-smoke-live-iteration
+  owner: dot-agents
+  write_scope:
+  - web/dashboard/src/views/AggregateView.tsx
+  - web/dashboard/src/views/AggregateView.test.tsx
+  - web/dashboard/src/components/RunsGrid.tsx
+  - web/dashboard/src/components/RunsGrid.test.tsx
+  - web/dashboard/src/components/ScoreTrendChart.tsx
+  - web/dashboard/src/components/ScoreTrendChart.test.tsx
+  - web/dashboard/src/components/CacheTrendChart.tsx
+  - web/dashboard/src/components/CacheTrendChart.test.tsx
+  verification_required: true
+  notes: 'Renders /api/runs as a sortable filterable grid (columns:
 
-        Tests: Vitest + React Testing Library; smoke test renders
-        App without crashing; ScoreBadge renders bands correctly.
+    session id, harness, last iter, iters count, mean score,
 
-        Build outputs to web/dashboard/dist/, which t07's server
-        embeds via go:embed.
+    band, last update). Time-series charts (Recharts): score
 
-        Cross-plan dep: R5's review-ui task hooks into this skeleton
-        (NEEDS localStorage-based Bearer-token plumbing in the API
-        client + extension slots on RunDetailView).
-      app_type: web
-    - id: t09-feature-aggregate-view
-      title: Aggregate-dashboard view (runs grid, score trend, cache trend)
-      status: pending
-      depends_on:
-        - t08-frontend-skeleton
-        - t03-handlers-rest
-      blocks:
-        - t12-e2e-smoke-live-iteration
-      owner: dot-agents
-      write_scope:
-        - web/dashboard/src/views/AggregateView.tsx
-        - web/dashboard/src/views/AggregateView.test.tsx
-        - web/dashboard/src/components/RunsGrid.tsx
-        - web/dashboard/src/components/RunsGrid.test.tsx
-        - web/dashboard/src/components/ScoreTrendChart.tsx
-        - web/dashboard/src/components/ScoreTrendChart.test.tsx
-        - web/dashboard/src/components/CacheTrendChart.tsx
-        - web/dashboard/src/components/CacheTrendChart.test.tsx
-      verification_required: true
-      notes: |-
-        Renders /api/runs as a sortable filterable grid (columns:
-        session id, harness, last iter, iters count, mean score,
-        band, last update). Time-series charts (Recharts): score
-        trend per iteration over last N; cache_hit_rate per iteration
-        same window. Loading skeleton, empty-state, error-boundary.
-      app_type: web
-    - id: t10-feature-per-run-drilldown
-      title: Per-run drill-down view (iteration timeline + breakdown + integrity)
-      status: pending
-      depends_on:
-        - t08-frontend-skeleton
-        - t03-handlers-rest
-      blocks:
-        - t12-e2e-smoke-live-iteration
-      owner: dot-agents
-      write_scope:
-        - web/dashboard/src/views/RunDetailView.tsx
-        - web/dashboard/src/views/RunDetailView.test.tsx
-        - web/dashboard/src/views/IterationDetailView.tsx
-        - web/dashboard/src/views/IterationDetailView.test.tsx
-        - web/dashboard/src/components/IterationTimeline.tsx
-        - web/dashboard/src/components/IterationTimeline.test.tsx
-        - web/dashboard/src/components/SignalBreakdown.tsx
-        - web/dashboard/src/components/SignalBreakdown.test.tsx
-        - web/dashboard/src/components/IntegrityPanel.tsx
-        - web/dashboard/src/components/IntegrityPanel.test.tsx
-      verification_required: true
-      notes: |-
-        RunDetailView: header (session id, harness, mean score),
-        then IterationTimeline (horizontal strip, one tick per
-        iteration, colored by band, click → IterationDetailView).
-        IterationDetailView: full iteration record (task_id, commit,
-        files_changed, lines_added/removed, retries, verifier
-        results), SignalBreakdown table (one row per signal with
-        weight, sub_score, contribution from PersistedScore.
-        Breakdown), IntegrityPanel showing claimed-vs-observed
-        deltas for two-way signals.
-        Deep-linkable: /iterations/:n loads IterationDetailView
-        standalone (no run context required).
-      app_type: web
-    - id: t11-frontend-sse-integration
-      title: Connect frontend to /api/stream and invalidate queries on events
-      status: pending
-      depends_on:
-        - t08-frontend-skeleton
-        - t05-sse-handler
-      blocks:
-        - t12-e2e-smoke-live-iteration
-      owner: dot-agents
-      write_scope:
-        - web/dashboard/src/api/eventStream.ts
-        - web/dashboard/src/api/eventStream.test.ts
-        - web/dashboard/src/hooks/useLiveUpdates.ts
-        - web/dashboard/src/hooks/useLiveUpdates.test.ts
-      verification_required: true
-      notes: |-
-        Wrap EventSource in a small reconnecting client. On each
-        received event:
-          iteration.scored  → invalidate queries: runs, runs/:sid,
-                              iterations/:n (for the affected ids).
-          session.updated   → invalidate runs + runs/:sid.
-          score.recomputed  → invalidate iterations/:n.
-        useLiveUpdates hook wires the client into the QueryClient at
-        app root. On disconnect: exponential backoff up to 30s; on
-        reconnect: invalidate all queries to recover from missed
-        events.
-        Tests: mock EventSource, push fake events, assert correct
-        QueryClient.invalidateQueries calls.
-      app_type: web
-    - id: t12-e2e-smoke-live-iteration
-      title: End-to-end smoke — live iteration triggers UI update within 2s
-      status: pending
-      depends_on:
-        - t07-standalone-service-bin
-        - t09-feature-aggregate-view
-        - t10-feature-per-run-drilldown
-        - t11-frontend-sse-integration
-      blocks:
-        - t14-documentation
-      owner: dot-agents
-      write_scope:
-        - tests/e2e/dashboard_live_iteration_test.go
-        - web/dashboard/playwright.config.ts
-        - web/dashboard/e2e/live-iteration.spec.ts
-      verification_required: true
-      notes: |-
-        Two complementary tests:
+    trend per iteration over last N; cache_hit_rate per iteration
 
-        (a) Go integration test
-        (tests/e2e/dashboard_live_iteration_test.go):
-          1. spin up cmd/da-dashboard against a fresh tmpdir iter-log
-             fixture (3 iters);
-          2. open an SSE client to /api/stream;
-          3. write a new iter-4.yaml + run scoring.ScoreIteration +
-             write the sidecar;
-          4. assert an iteration.scored frame arrives within 2s.
+    same window. Loading skeleton, empty-state, error-boundary.'
+  app_type: web
+- id: t10-feature-per-run-drilldown
+  title: Per-run drill-down view (iteration timeline + breakdown + integrity)
+  status: pending
+  depends_on:
+  - t08-frontend-skeleton
+  - t03-handlers-rest
+  blocks:
+  - t12-e2e-smoke-live-iteration
+  owner: dot-agents
+  write_scope:
+  - web/dashboard/src/views/RunDetailView.tsx
+  - web/dashboard/src/views/RunDetailView.test.tsx
+  - web/dashboard/src/views/IterationDetailView.tsx
+  - web/dashboard/src/views/IterationDetailView.test.tsx
+  - web/dashboard/src/components/IterationTimeline.tsx
+  - web/dashboard/src/components/IterationTimeline.test.tsx
+  - web/dashboard/src/components/SignalBreakdown.tsx
+  - web/dashboard/src/components/SignalBreakdown.test.tsx
+  - web/dashboard/src/components/IntegrityPanel.tsx
+  - web/dashboard/src/components/IntegrityPanel.test.tsx
+  verification_required: true
+  notes: "RunDetailView: header (session id, harness, mean score),\nthen IterationTimeline (horizontal\
+    \ strip, one tick per\niteration, colored by band, click \u2192 IterationDetailView).\nIterationDetailView:\
+    \ full iteration record (task_id, commit,\nfiles_changed, lines_added/removed, retries, verifier\n\
+    results), SignalBreakdown table (one row per signal with\nweight, sub_score, contribution from PersistedScore.\n\
+    Breakdown), IntegrityPanel showing claimed-vs-observed\ndeltas for two-way signals.\nDeep-linkable:\
+    \ /iterations/:n loads IterationDetailView\nstandalone (no run context required)."
+  app_type: web
+- id: t11-frontend-sse-integration
+  title: Connect frontend to /api/v1/observability/events and invalidate queries on events
+  status: pending
+  depends_on:
+  - t08-frontend-skeleton
+  - t05-sse-handler
+  blocks:
+  - t12-e2e-smoke-live-iteration
+  owner: dot-agents
+  write_scope:
+  - web/dashboard/src/api/eventStream.ts
+  - web/dashboard/src/api/eventStream.test.ts
+  - web/dashboard/src/hooks/useLiveUpdates.ts
+  - web/dashboard/src/hooks/useLiveUpdates.test.ts
+  verification_required: true
+  notes: "Wrap EventSource in a small reconnecting client. On each\nreceived event:\n  iteration.scored\
+    \  \u2192 invalidate queries: runs, runs/:sid,\n                      iterations/:n (for the affected\
+    \ ids).\n  session.updated   \u2192 invalidate runs + runs/:sid.\n  score.recomputed  \u2192 invalidate\
+    \ iterations/:n.\nuseLiveUpdates hook wires the client into the QueryClient at\napp root. On disconnect:\
+    \ exponential backoff up to 30s; on\nreconnect: invalidate all queries to recover from missed\nevents.\n\
+    Tests: mock EventSource, push fake events, assert correct\nQueryClient.invalidateQueries calls."
+  app_type: web
+- id: t12-e2e-smoke-live-iteration
+  title: "End-to-end smoke \u2014 live iteration triggers UI update within 2s"
+  status: pending
+  depends_on:
+  - t07-standalone-service-bin
+  - t09-feature-aggregate-view
+  - t10-feature-per-run-drilldown
+  - t11-frontend-sse-integration
+  blocks:
+  - t14-documentation
+  owner: dot-agents
+  write_scope:
+  - tests/e2e/dashboard_live_iteration_test.go
+  - web/dashboard/playwright.config.ts
+  - web/dashboard/e2e/live-iteration.spec.ts
+  verification_required: true
+  notes: "Two complementary tests:\n\n(a) Go integration test\n(tests/e2e/dashboard_live_iteration_test.go):\n\
+    \  1. spin up cmd/da-dashboard against a fresh tmpdir iter-log\n     fixture (3 iters);\n  2. open\
+    \ an SSE client to /api/v1/observability/events;\n  3. write a new iter-4.yaml + run scoring.ScoreIteration +\n   \
+    \  write the sidecar;\n  4. assert an iteration.scored frame arrives within 2s.\n\n(b) Playwright\
+    \ UI smoke (web/dashboard/e2e/):\n  1. start the standalone service in test mode against the\n   \
+    \  same fixture,\n  2. navigate to /, assert RunsGrid renders,\n  3. drill into /runs/:sid, assert\
+    \ iteration count,\n  4. write a new iter-4 sidecar from the test harness,\n  5. assert the grid count\
+    \ increments without reload.\n\nBoth tests skip-guarded behind an `e2e` build tag."
+  app_type: go-cli
+- id: t13-r3-mount-integration
+  title: Replace fswatch primary with R3 publish primitive; mount handlers in R3 service
+  status: pending
+  depends_on:
+  - t03-handlers-rest
+  - t05-sse-handler
+  - t06-recompute-on-miss-and-fswatch
+  blocks:
+  - t14-documentation
+  owner: dot-agents
+  write_scope:
+  - internal/dashboard/server/r3mount.go
+  - internal/dashboard/server/r3mount_test.go
+  - internal/dashboard/events/r3bridge.go
+  - internal/dashboard/events/r3bridge_test.go
+  verification_required: true
+  notes: "RESCOPED 2026-07-02 (\xA72A coherence).\nGATED ON R3 MILESTONES. Specifically:\n  - R3 task\
+    \ event-bus (concrete builtin, merged) AND R3 task\n    event-bus-interface-seam (the \xA7D4.1 EventBus\
+    \ interface)\n    must merge first \u2014 the bridge binds to the INTERFACE,\n    never to the concrete\
+    \ *events.Bus.\n  - R3 task http-server \u2014 now the \xA72A transport-layer task\n    (UDS control\
+    \ plane + HTTP/SSE edge) \u2014 must merge first\n    for RegisterMount.\n\nDeliverable: a Mount(svc\
+    \ r3.Service, deps) function that\nregisters t03's handlers under /api/ on R3's HTTP/SSE edge\n(the\
+    \ browser-facing arm of the \xA72A surface\u2192transport map \u2014\nNOT the UDS control plane),\
+    \ and bridges R3's EventBus\ninterface into t04's Broker. After this task lands:\n  - fswatch (t06)\
+    \ demotes from primary to fallback (kept for\n    developers running `da score run` outside the service).\n\
+    \  - the standalone cmd/da-dashboard binary remains valid for\n    users not running R3.\n\nRESOLVED\
+    \ (was open): \"if R3's primitive ends up async/\nqueue-backed\" \u2014 r3 \xA7D4.4 makes external/queue-backed\
+    \ backends\nconfig-selected adapters behind the SAME EventBus interface,\nbounded to the \xA7D4.2\
+    \ G1-G4 floor. The bridge assumes only\nG1-G4, so no Publish-signature growth is needed here or in\n\
+    t04."
+  app_type: go-cli
+- id: t14-documentation
+  title: "Documentation \u2014 operator guide, API reference, frontend dev guide"
+  status: pending
+  depends_on:
+  - t12-e2e-smoke-live-iteration
+  - t13-r3-mount-integration
+  blocks: []
+  owner: dot-agents
+  write_scope:
+  - docs/OBSERVABILITY_DASHBOARD.md
+  - docs/DASHBOARD_API.md
+  - web/dashboard/README.md
+  - README.md
+  verification_required: false
+  notes: 'OBSERVABILITY_DASHBOARD.md: how to run (standalone vs.
 
-        (b) Playwright UI smoke (web/dashboard/e2e/):
-          1. start the standalone service in test mode against the
-             same fixture,
-          2. navigate to /, assert RunsGrid renders,
-          3. drill into /runs/:sid, assert iteration count,
-          4. write a new iter-4 sidecar from the test harness,
-          5. assert the grid count increments without reload.
+    R3-hosted), config (iter-log roots, addr, dev-proxy), push
 
-        Both tests skip-guarded behind an `e2e` build tag.
-      app_type: go-cli
-    - id: t13-r3-mount-integration
-      title: Replace fswatch primary with R3 publish primitive; mount handlers in R3 service
-      status: pending
-      depends_on:
-        - t03-handlers-rest
-        - t05-sse-handler
-        - t06-recompute-on-miss-and-fswatch
-      blocks:
-        - t14-documentation
-      owner: dot-agents
-      write_scope:
-        - internal/dashboard/server/r3mount.go
-        - internal/dashboard/server/r3mount_test.go
-        - internal/dashboard/events/r3bridge.go
-        - internal/dashboard/events/r3bridge_test.go
-      verification_required: true
-      notes: |-
-        RESCOPED 2026-07-02 (§2A coherence).
-        GATED ON R3 MILESTONES. Specifically:
-          - R3 task event-bus (concrete builtin, merged) AND R3 task
-            event-bus-interface-seam (the §D4.1 EventBus interface)
-            must merge first — the bridge binds to the INTERFACE,
-            never to the concrete *events.Bus.
-          - R3 task http-server — now the §2A transport-layer task
-            (UDS control plane + HTTP/SSE edge) — must merge first
-            for RegisterMount.
+    channel architecture, troubleshooting.
 
-        Deliverable: a Mount(svc r3.Service, deps) function that
-        registers t03's handlers under /api/ on R3's HTTP/SSE edge
-        (the browser-facing arm of the §2A surface→transport map —
-        NOT the UDS control plane), and bridges R3's EventBus
-        interface into t04's Broker. After this task lands:
-          - fswatch (t06) demotes from primary to fallback (kept for
-            developers running `da score run` outside the service).
-          - the standalone cmd/da-dashboard binary remains valid for
-            users not running R3.
+    DASHBOARD_API.md: generated-from-JSON-Schema reference for
 
-        RESOLVED (was open): "if R3's primitive ends up async/
-        queue-backed" — r3 §D4.4 makes external/queue-backed backends
-        config-selected adapters behind the SAME EventBus interface,
-        bounded to the §D4.2 G1-G4 floor. The bridge assumes only
-        G1-G4, so no Publish-signature growth is needed here or in
-        t04.
-      app_type: go-cli
-    - id: t14-documentation
-      title: Documentation — operator guide, API reference, frontend dev guide
-      status: pending
-      depends_on:
-        - t12-e2e-smoke-live-iteration
-        - t13-r3-mount-integration
-      blocks: []
-      owner: dot-agents
-      write_scope:
-        - docs/OBSERVABILITY_DASHBOARD.md
-        - docs/DASHBOARD_API.md
-        - web/dashboard/README.md
-        - README.md
-      verification_required: false
-      notes: |-
-        OBSERVABILITY_DASHBOARD.md: how to run (standalone vs.
-        R3-hosted), config (iter-log roots, addr, dev-proxy), push
-        channel architecture, troubleshooting.
-        DASHBOARD_API.md: generated-from-JSON-Schema reference for
-        every endpoint, SSE event taxonomy, error envelope.
-        web/dashboard/README.md: dev-loop (vite dev + dev-asset-proxy
-        flag), build, test, types-gen script.
-        README.md: one-paragraph mention of the dashboard + link.
-      app_type: docs
-    - id: t15-rubric-versioning-ui
-      title: Rubric explainer view (read /api/rubric, render weights + bands)
-      status: pending
-      depends_on:
-        - t08-frontend-skeleton
-        - t03-handlers-rest
-      blocks: []
-      owner: dot-agents
-      write_scope:
-        - web/dashboard/src/views/RubricView.tsx
-        - web/dashboard/src/views/RubricView.test.tsx
-        - web/dashboard/src/components/RubricTable.tsx
-        - web/dashboard/src/components/RubricTable.test.tsx
-      verification_required: true
-      notes: |-
-        Small view rendering the active rubric (version, six signals
-        with weight + label + description, band ladder). Each score
-        in the UI links here. Per spec D3 ("rubric is versioned") —
-        every iteration card shows the rubric version it was scored
-        under; mismatch with active version renders an info pill.
-      app_type: web
-    - id: t16-coverage-gate-and-ci
-      title: Coverage gate + CI wiring for new dashboard packages
-      status: pending
-      depends_on:
-        - t12-e2e-smoke-live-iteration
-      blocks:
-        - t14-documentation
-      owner: dot-agents
-      write_scope:
-        - .github/workflows/dashboard.yml
-        - internal/dashboard/coverage_test.go
-        - web/dashboard/.github/workflows/test.yml
-      verification_required: true
-      notes: |-
-        Mirror the existing per-package coverage convention
-        (coverage-95-staged plan's pattern). Assert coverage floor
-        on internal/dashboard/{store,handlers,events,watch,server}
-        — pick project's standard threshold (likely 95% per
-        coverage-gate-per-file).
-        CI: a dashboard job that runs `go test
-        ./internal/dashboard/...` plus `pnpm --filter dashboard
-        test` plus a build check (`pnpm --filter dashboard build`).
-        Playwright e2e behind the `e2e` tag, gated to manual/nightly.
-      app_type: go-cli
-    - id: release-minor
-      title: 'Release: bump VERSION + finalize CHANGELOG for the observability-dashboard minor'
-      status: pending
-      depends_on:
-        - design-doc
-        - t01-api-contract-design
-        - t02-storage-read-layer
-        - t03-handlers-rest
-        - t04-sse-broker
-        - t05-sse-handler
-        - t06-recompute-on-miss-and-fswatch
-        - t07-standalone-service-bin
-        - t08-frontend-skeleton
-        - t09-feature-aggregate-view
-        - t10-feature-per-run-drilldown
-        - t11-frontend-sse-integration
-        - t12-e2e-smoke-live-iteration
-        - t13-r3-mount-integration
-        - t14-documentation
-        - t15-rubric-versioning-ui
-        - t16-coverage-gate-and-ci
-      blocks: []
-      owner: dot-agents
-      write_scope:
-        - VERSION
-        - CHANGELOG.md
-      verification_required: true
-      notes: |-
-        Release-gated tail task (hybrid convention, MINOR path). This plan
-        delivers a new user-visible surface — the real-time observability
-        dashboard (React/TS frontend + Go backend API over telemetry, loop
-        metrics, and R1 scores) plus its serving binary. New surface +
-        new capability, MINOR not MAJOR (no public surface removed or
-        incompatibly changed).
-        Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
-        shipped), so the next minor is 0.5.0; resolve from VERSION when this
-        task becomes ready; serialize at the VERSION bump if another minor
-        ships first.
-        Action: bump VERSION to the resolved next minor and finalize the
-        CHANGELOG "## [<target>]" section, moving the dashboard entries out
-        of Unreleased. Merge to master fires auto-release.yml.
-      app_type: release
+    every endpoint, SSE event taxonomy, error envelope.
+
+    web/dashboard/README.md: dev-loop (vite dev + dev-asset-proxy
+
+    flag), build, test, types-gen script.
+
+    README.md: one-paragraph mention of the dashboard + link.'
+  app_type: docs
+- id: t15-rubric-versioning-ui
+  title: Rubric explainer view (read /api/rubric, render weights + bands)
+  status: pending
+  depends_on:
+  - t08-frontend-skeleton
+  - t03-handlers-rest
+  blocks: []
+  owner: dot-agents
+  write_scope:
+  - web/dashboard/src/views/RubricView.tsx
+  - web/dashboard/src/views/RubricView.test.tsx
+  - web/dashboard/src/components/RubricTable.tsx
+  - web/dashboard/src/components/RubricTable.test.tsx
+  verification_required: true
+  notes: "Small view rendering the active rubric (version, six signals\nwith weight + label + description,\
+    \ band ladder). Each score\nin the UI links here. Per spec D3 (\"rubric is versioned\") \u2014\nevery\
+    \ iteration card shows the rubric version it was scored\nunder; mismatch with active version renders\
+    \ an info pill."
+  app_type: web
+- id: t16-coverage-gate-and-ci
+  title: Coverage gate + CI wiring for new dashboard packages
+  status: pending
+  depends_on:
+  - t12-e2e-smoke-live-iteration
+  blocks:
+  - t14-documentation
+  owner: dot-agents
+  write_scope:
+  - .github/workflows/dashboard.yml
+  - internal/dashboard/coverage_test.go
+  - web/dashboard/.github/workflows/test.yml
+  verification_required: true
+  notes: "Mirror the existing per-package coverage convention\n(coverage-95-staged plan's pattern). Assert\
+    \ coverage floor\non internal/dashboard/{store,handlers,events,watch,server}\n\u2014 pick project's\
+    \ standard threshold (likely 95% per\ncoverage-gate-per-file).\nCI: a dashboard job that runs `go\
+    \ test\n./internal/dashboard/...` plus `pnpm --filter dashboard\ntest` plus a build check (`pnpm --filter\
+    \ dashboard build`).\nPlaywright e2e behind the `e2e` tag, gated to manual/nightly."
+  app_type: go-cli
+- id: release-minor
+  title: 'Release: bump VERSION + finalize CHANGELOG for the observability-dashboard minor'
+  status: pending
+  depends_on:
+  - design-doc
+  - t01-api-contract-design
+  - t02-storage-read-layer
+  - t03-handlers-rest
+  - t04-sse-broker
+  - t05-sse-handler
+  - t06-recompute-on-miss-and-fswatch
+  - t07-standalone-service-bin
+  - t08-frontend-skeleton
+  - t09-feature-aggregate-view
+  - t10-feature-per-run-drilldown
+  - t11-frontend-sse-integration
+  - t12-e2e-smoke-live-iteration
+  - t13-r3-mount-integration
+  - t14-documentation
+  - t15-rubric-versioning-ui
+  - t16-coverage-gate-and-ci
+  blocks: []
+  owner: dot-agents
+  write_scope:
+  - VERSION
+  - CHANGELOG.md
+  verification_required: true
+  notes: "Release-gated tail task (hybrid convention, MINOR path). This plan\ndelivers a new user-visible\
+    \ surface \u2014 the real-time observability\ndashboard (React/TS frontend + Go backend API over telemetry,\
+    \ loop\nmetrics, and R1 scores) plus its serving binary. New surface +\nnew capability, MINOR not\
+    \ MAJOR (no public surface removed or\nincompatibly changed).\nTarget version = next minor computed\
+    \ from current VERSION at\nready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor\nshipped),\
+    \ so the next minor is 0.5.0; resolve from VERSION when this\ntask becomes ready; serialize at the\
+    \ VERSION bump if another minor\nships first.\nAction: bump VERSION to the resolved next minor and\
+    \ finalize the\nCHANGELOG \"## [<target>]\" section, moving the dashboard entries out\nof Unreleased.\
+    \ Merge to master fires auto-release.yml."
+  app_type: release

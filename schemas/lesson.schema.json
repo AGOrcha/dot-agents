@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "./schemas/lesson.schema.json",
+  "title": "dot-agents canonical lesson frontmatter",
+  "description": "JSON Schema for the YAML frontmatter block of dot-agents lesson files (.agents/lessons/<name>/LESSON.md for project-local or ~/.agents/lessons/<name>/LESSON.md for global). A lesson captures a corrective pattern, root cause, and actionable rule derived from a mistake or user correction. The body of the file is Markdown prose (not validated here); this schema covers only the frontmatter fields. The scope field is the canonical discriminator: 'global' maps to ~/.agents/lessons/ and applies to patterns that hold across all projects; 'project-local' maps to .agents/lessons/ and applies to patterns specific to one project or codebase. Note: many existing lesson files predate the frontmatter convention and have no frontmatter; this schema validates only those that carry a frontmatter block.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$",
+      "description": "Stable kebab-case identifier; should match the lesson directory name under lessons/. Used for cross-references in index.md and workflow artifact notes."
+    },
+    "scope": {
+      "type": "string",
+      "enum": ["global", "project-local"],
+      "description": "Optional but recommended routing discriminator (may be inferred from the lesson's directory when absent). 'global' = lesson lives under ~/.agents/lessons/ and captures a pattern that applies across all projects managed by dot-agents (e.g. general agent-behavior, cross-repo workflow patterns). 'project-local' = lesson lives under .agents/lessons/ and captures a pattern specific to one project's codebase or workflow (e.g. a project-specific Go import rule, project hook behavior, repo-specific CI gate mechanics)."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line summary of the lesson pattern. Shown in the lessons index (index.md) and in worker bundle context blocks."
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Category of lesson. Observed values: feedback (a corrective pattern from a user correction), process (a workflow or sequencing rule), lesson (a general learning). Open string — not enum-constrained to allow future categories."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "description": "Optional keyword tags for KG indexing and relevance matching during Phase 1 lessons scan (see kg-ideate skill). Use lowercase kebab tokens."
+    },
+    "superseded_by": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional. Name of the lesson that supersedes this one. When set, consumers should load the referenced lesson instead. Use the kebab-case lesson name (directory name)."
+    }
+  }
+}

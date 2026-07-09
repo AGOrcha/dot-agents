@@ -1,0 +1,11 @@
+schema_version: 1
+id: da-recipe-scripts
+title: da recipe scripts (shebang-executable da-command sequences)
+status: draft
+summary: 'Add `da run <file>`: line-oriented, in-process, cross-platform recipes of da subcommands; shebang-executable (#!/usr/bin/env -S da run); fail-fast; env substitution. Mechanical-only layer below skills.'
+created_at: "2026-07-03T00:00:00Z"
+updated_at: "2026-07-04T19:38:33Z"
+owner: dot-agents
+success_criteria: '`da run` executes a multi-step recipe in order; a failing step aborts fail-fast with a clear step+line message and non-zero exit; comment/blank/shebang lines skipped; env substitution works; a chmod-+x .da file runs directly on every target OS (acceptance test); one real meta-loop sequence dogfooded as a shipped recipe.'
+verification_strategy: Table-driven unit tests for parse (shebang/comment/blank strip), tokenization+quoting, in-process dispatch, fail-fast + exit codes, env substitution. Cross-platform shebang acceptance test in CI (or documented equivalent). Dogfood recipe exercised. Traces to specs/da-recipe-scripts/design.md done criteria.
+current_focus_task: ""

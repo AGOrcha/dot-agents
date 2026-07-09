@@ -1,10 +1,21 @@
 # Planner Evidence-Backed Write Scope
 
-**Status:** design artifact
+**Status:** SHIPPED + archived. All five delegated tasks executed and archived 2026-04-21
+(`delegate-merge-back-archive/2026-04-21/`): `sidecar-schema`, `derive-scope-command`,
+`check-scope-command`, `sidecar-manual-experiment`, `fanout-evidence-integration`.
+Phases 1–3 from §9 are complete. Spec retained as the design record.
 
 **Purpose:** define the first upgrade to the planning system so canonical workflow tasks stop treating `write_scope` as an unsupported guess and start treating it as a justified, reviewable contract backed by code-graph evidence.
 
-**Dependency:** live graph-backed planner automation from this spec depends on the canonical [Graph Bridge Command Readiness](../../plans/graph-bridge-command-readiness/PLAN.yaml) plan, because the current repo state does not yet provide dependable `workflow graph query` and `kg bridge query` behavior for planning use. New follow-on plan/task work should be recorded through `da workflow` under `.agents/workflow/plans/` and `.agents/workflow/specs/`.
+**Dependency (met — archived):** the graph-backed planner automation dependency on
+dependable `workflow graph query` and `kg bridge query` behavior has been resolved. The
+`graph-bridge-command-readiness` plan completed and moved to history:
+`.agents/history/graph-bridge-command-readiness/PLAN.yaml` (status: completed). The
+earlier link `../../plans/graph-bridge-command-readiness/PLAN.yaml` pointed to the
+pre-archive location; that path is now dead (the plan is at the history path above).
+`derive-scope` degrades honestly to `confidence:low` rather than hard-gating when graph
+evidence is unavailable (`plan_task.go:208,236-248`). New follow-on plan/task work should
+be recorded through `da workflow` under `.agents/workflow/plans/` and `.agents/workflow/specs/`.
 
 ## 1. Audit Summary
 
@@ -416,27 +427,28 @@ The planning problem is not only command-side. Several skills should explicitly 
 
 ## 9. Rollout Plan
 
-### Phase 1: spec only
+### Phase 1: spec only — SHIPPED
 
 - document the model
 - keep `TASKS.yaml` unchanged
 - use manual sidecar authoring for early experiments
 - treat graph-readiness as an explicit dependency, not an implicit assumption
 
-### Phase 2: read-only command support
+### Phase 2: read-only command support — SHIPPED
 
-- add `workflow plan derive-scope`
-- add `workflow plan check-scope`
+- add `workflow plan derive-scope` — shipped (`commands/workflow/graph.go:33-38,474-515`)
+- add `workflow plan check-scope` — shipped (`plan_task.go:2577-2613,2645`)
 - add tests for sidecar parsing and candidate generation
 - ensure the generated artifact can carry both scope evidence and context-pack fields without forcing `TASKS.yaml` schema churn
-- gate `derive-scope` on the graph-bridge readiness resurrection plan, or make it degrade honestly when graph evidence is unavailable
+- `derive-scope` degrades honestly to `confidence:low` when graph evidence is unavailable
+  (`plan_task.go:208,236-248`), satisfying the graph-bridge-readiness precondition gracefully
 
-### Phase 3: planner integration
+### Phase 3: planner integration — SHIPPED
 
-- let plan-authoring flows and fanout helpers reference evidence sidecars
-- add warnings when code tasks have no evidence
-- teach review/closeout flows to read required and excluded paths
-- teach fanout readiness to reject tasks that still leave major decisions to the worker
+- plan-authoring flows and fanout helpers reference evidence sidecars
+- warnings when code tasks have no evidence
+- review/closeout flows read required and excluded paths
+- fanout readiness rejects tasks that still leave major decisions to the worker
 
 ### Phase 4: enforcement and metrics
 
@@ -455,21 +467,75 @@ The planner still decides the task boundary. The graph supplies evidence, not au
 
 ## 11. Open Questions
 
-1. Should the evidence sidecar remain separate long-term, or should `TASKS.yaml` eventually get an `evidence_ref` field?
-2. How should confidence be scored: manual, heuristic, or based on query coverage?
-3. When a task intentionally excludes a likely affected path, should that create a fold-back automatically?
-4. How should shell/runtime files that are weakly represented in the graph be captured without forcing false precision?
-5. Should `tests_for` evidence become part of the existing TDD gate, or stay planner-only until later?
-6. Should `SLICES.yaml` eventually carry lightweight execution-contract fields directly, or should rich task/slice context remain sidecar-only?
+1. **[Resolved in code]** Should the evidence sidecar remain separate long-term, or should
+   `TASKS.yaml` eventually get an `evidence_ref` field? — Sidecar-only with deterministic
+   path. `CanonicalTask` (`types.go:120-131`) has no `evidence_ref`; the path is computed
+   from `(plan_id, task_id)` by `deriveScopeEvidencePath` (`plan_task.go:125-127`), making
+   a stored ref unnecessary.
+
+2. **[Resolved in code]** How should confidence be scored: manual, heuristic, or based on
+   query coverage? — Heuristic from lane-readiness and query coverage:
+   `deriveScopeConfidence(mode,codeReady,contextReady,hasScopeInputs,queryCount)` yields
+   low/medium, never "high" (`plan_task.go:307-326`). Optional upgrade: fold in
+   `computeSparsityScore` (0–100 per-query, `bridge.go:748-768`) — currently unused by
+   the sidecar; tracked as a follow-on.
+
+3. **[Owner ruling, ratified 2026-07-04 — adopt opt-in `--fold-back` flag]** When a task
+   intentionally excludes a likely affected path, should that create a fold-back
+   automatically? — Ruling: adopt an opt-in `--fold-back` flag on `check-scope`, not
+   always-auto. Detection is already shipped: `classifyCheckScopeFiles` flags
+   `touchedExcluded` and exits 1 (`plan_task.go:2577-2613,2645`); `da workflow fold-back
+   create` is a one-shot (`commands/workflow/cmd.go:945-960`). The maintainer's reasoning:
+   "fold back flag likely makes sense to help auto track the new found issue / dangling thing
+   as it comes up — helps reduce extra command burden / command chaining." An intentional
+   exclusion later proven necessary is often a legitimate scope correction, not a design
+   gap — always-auto would be noisy and conflate correction with gap. The actual flag
+   implementation is a tracked follow-on code task (not built here).
+
+4. **[Resolved in code]** How should shell/runtime files that are weakly represented in the
+   graph be captured without forcing false precision? — Mode routing plus `excluded_paths`
+   plus `open_gaps`. `deriveScopeMode` (`plan_task.go:280-305`) classes non-Go as
+   doc/research; `deriveScopeWarningsForMode` (`plan_task.go:161-172`) skips scope-lane
+   graph queries for non-code modes and records the skip in `open_gaps` rather than
+   inventing edges. Confirmed by `sidecar-manual-experiment` merge-back: "graph queries add
+   little for research tasks."
+
+5. **[Resolved in code — keep decoupled]** Should `tests_for` evidence become part of the
+   existing TDD gate, or stay planner-only until later? — Stay planner-only and keep
+   decoupled. The existing TDD gate (`delegation.go:953-994`) is a pure filesystem glob
+   (Go non-test file in scope needs a sibling `*_test.go`), with `--skip-tdd-gate` escape
+   (`cmd.go:905`) and no graph dependency, making it reliable when the KG is cold.
+   `derive-scope`'s scope-lane does not yet wire `tests_for` (`plan_task.go:342-354`)
+   despite the intent existing; wiring it in is a tracked follow-on.
+
+6. **[OPEN — explicit design question, ratified 2026-07-04]** Should `SLICES.yaml`
+   eventually carry lightweight execution-contract fields directly, or should rich
+   task/slice context remain sidecar-only? — Keep OPEN. The current split is shipped:
+   `CanonicalSlice` (`types.go:141-150`) carries lightweight contract fields
+   (`VerificationFocus`, its own `WriteScope`, `Summary`); rich fields (`decision_locks`,
+   `required_reads`, `stop_conditions`, `provides/consumes`, `excluded_paths`) remain in
+   the sidecar `ScopeEvidence` (`plan_task.go:36-58`). The maintainer's current framing:
+   `SLICES.yaml` was intended to reuse the TASK schema — a slice is a subtask; the original
+   unit must remain a task but is large enough to be broken into slices. The maintainer
+   flags: "that thinking might be flawed and better way might exist." This is an explicit
+   OPEN design question inviting a better model — a candidate for a future ideation cycle.
+   Do not close it as a code-resolvable task; it requires a model-level decision about how
+   much execution-contract belongs in engine-parsed YAML versus the sidecar.
 
 ## 12. Recommended First Implementation Slice
 
-Start with a narrow planner-only experiment after the dependency line is clear:
+This section is preserved as a historical record of the initial implementation strategy.
+All five items above shipped in 2026-04-21 under the five delegated tasks (see Status).
 
-1. pick one active canonical plan
-2. add one evidence sidecar by hand for a code task
-3. resurrect and close the graph-bridge readiness gap for the query surfaces the planner wants to use
-4. add a read-only checker that compares changed files to the sidecar
-5. evaluate whether the evidence was useful enough to justify command-level generation
+## 13. Tracked follow-ons (not built here)
 
-That keeps the first slice small, proves the shape, and avoids another planning system that is more ambitious than operational.
+- **Wire `tests_for` into derive-scope's scope-lane:** `plan_task.go:342-354` runs
+  symbol_lookup, callers_of, and impact_radius but does not yet include `tests_for` despite
+  the intent existing. The query surface is shipped; wiring it in enriches confidence without
+  coupling the mandatory TDD gate to graph freshness.
+- **Fold `SparsityScore` into confidence:** `computeSparsityScore` (0–100 per-query score)
+  is available at `bridge.go:748-768` (`resp.SparsityScore`) but is currently unused by
+  `deriveScopeConfidence`. Incorporating it makes confidence scoring more data-driven.
+- **Implement `--fold-back` flag on `check-scope`:** see Q3 owner ruling in §11. Detection
+  is already shipped; the flag wires the one-shot `da workflow fold-back create` to the
+  `touchedExcluded` exit-1 path automatically.

@@ -2,15 +2,19 @@ package config
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -18,7 +22,9 @@ import (
 	"github.com/go-git/go-billy/v6/memfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/storage/memory"
+	cryptossh "golang.org/x/crypto/ssh"
 )
 
 // withPackagesCache points the tier-2 packages cache root (~/.agents/cache) at a
@@ -1927,5 +1933,271 @@ func TestReadLockedLayers(t *testing.T) {
 	}
 	if l, ok := got["acme:org/base.json"]; !ok || l.ResolvedSHA != "abc123" {
 		t.Fatalf("locked layer = %+v (ok=%v), want resolved_sha abc123", l, ok)
+	}
+}
+
+// --- git ssh auth (layered agent -> default-key fallback) ------------------
+//
+// go-git v6 leaves ClientOptions unset -> ssh.NewSSHAgentAuth unconditionally,
+// which hard-fails with "SSH agent requested but SSH_AUTH_SOCK not-specified"
+// the instant SSH_AUTH_SOCK is unset, even when the user has a perfectly
+// usable unencrypted default key and their own `git` works fine. gitSSHAuth
+// (consumed by gitCloneShallow, shared by gitFetcher and gitArtifactFetcher)
+// layers: SSH agent when present, else the OpenSSH default identity files
+// (honoring ~/.ssh/config IdentityFile first), else a clear actionable error.
+
+// setTestHomeDir points os.UserHomeDir() at dir for the duration of the
+// test. Go's UserHomeDir reads $HOME on unix/darwin but %USERPROFILE% on
+// Windows, so a plain t.Setenv("HOME", dir) is silently ignored on the
+// windows-latest CI runner — set both so the fixture is honored everywhere.
+func setTestHomeDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
+// writeTestSSHKey writes an OpenSSH-format ed25519 private key to
+// <sshDir>/<name>, optionally passphrase-protected, and returns its path.
+// Generated entirely via golang.org/x/crypto/ssh (no ssh-keygen subprocess),
+// so the fixture is hermetic and needs no external binary.
+func writeTestSSHKey(t *testing.T, sshDir, name, passphrase string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	var block *pem.Block
+	if passphrase == "" {
+		block, err = cryptossh.MarshalPrivateKey(priv, "")
+	} else {
+		block, err = cryptossh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
+	}
+	if err != nil {
+		t.Fatalf("MarshalPrivateKey: %v", err)
+	}
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll sshDir: %v", err)
+	}
+	path := filepath.Join(sshDir, name)
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+	return path
+}
+
+// TestGitSSHAuthNonSSHURLIsNoop proves https/file sources are completely
+// unaffected by this fetcher's auth building: no ClientOptions, no error.
+func TestGitSSHAuthNonSSHURLIsNoop(t *testing.T) {
+	for _, url := range []string{"https://github.com/acme/repo.git", "file:///tmp/repo", "http://example.com/x"} {
+		auth, err := gitSSHAuth(url)
+		if err != nil || auth != nil {
+			t.Fatalf("gitSSHAuth(%q) = (%v, %v), want (nil, nil)", url, auth, err)
+		}
+	}
+}
+
+// TestGitSSHAuthPrefersAgentWhenAvailable proves the SSH_AUTH_SOCK branch is
+// still tried first (preserving prior behavior) and never falls through to
+// the default-key path when an agent is configured, even if that agent turns
+// out to be unreachable.
+//
+// Skipped on windows: go-git's sshagent.Available() there checks for a
+// running Pageant (a named pipe), never SSH_AUTH_SOCK
+// (plumbing/transport/ssh/sshagent/sshagent_windows.go), so faking
+// SSH_AUTH_SOCK cannot exercise the "agent present" branch on that platform.
+func TestGitSSHAuthPrefersAgentWhenAvailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("go-git's sshagent.Available() checks Pageant on windows, not SSH_AUTH_SOCK")
+	}
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "not-a-real-agent.sock"))
+	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err == nil {
+		t.Fatal("expected an error dialing the fake agent socket")
+	}
+	if strings.Contains(err.Error(), "no default SSH key") {
+		t.Fatalf("agent branch should not fall through to the default-key error, got: %v", err)
+	}
+}
+
+// TestGitSSHAuthFallsBackToDefaultKeyFile is the headline fix: no agent, but
+// an unencrypted default key exists — exactly the reported scenario.
+func TestGitSSHAuthFallsBackToDefaultKeyFile(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if auth == nil {
+		t.Fatal("expected non-nil auth built from the default id_ed25519 key")
+	}
+}
+
+// TestGitSSHAuthUsesURLUserOrDefault proves the ssh user comes from the URL
+// when present, else falls back to git.DefaultUsername ("git").
+func TestGitSSHAuthUsesURLUserOrDefault(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	auth, err := gitSSHAuth("ssh://custom-user@example.com/acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	pk, ok := auth.(*gogitssh.PublicKeys)
+	if !ok {
+		t.Fatalf("auth type = %T, want *ssh.PublicKeys", auth)
+	}
+	if pk.User != "custom-user" {
+		t.Fatalf("User = %q, want custom-user", pk.User)
+	}
+
+	auth2, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if pk2 := auth2.(*gogitssh.PublicKeys); pk2.User != "git" {
+		t.Fatalf("User = %q, want git (DefaultUsername)", pk2.User)
+	}
+}
+
+// TestGitSSHAuthPassphraseProtectedKeyErrorsClearly proves a passphrase-
+// protected key with no agent surfaces an actionable error instead of
+// go-git's raw "SSH_AUTH_SOCK not-specified".
+func TestGitSSHAuthPassphraseProtectedKeyErrorsClearly(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "s3cret")
+
+	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err == nil {
+		t.Fatal("expected an error for a passphrase-protected key with no agent")
+	}
+	if !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("expected a passphrase-specific error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh-agent") {
+		t.Fatalf("expected actionable ssh-agent guidance, got: %v", err)
+	}
+}
+
+// TestGitSSHAuthNoKeyFoundErrorsClearly proves the "nothing at all to try"
+// case is also a clear, actionable error rather than a silent auth failure.
+func TestGitSSHAuthNoKeyFoundErrorsClearly(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+
+	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err == nil {
+		t.Fatal("expected an error when no agent and no default key exist")
+	}
+	if !strings.Contains(err.Error(), "no default SSH key found") {
+		t.Fatalf("expected a 'no default SSH key' error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh-agent") {
+		t.Fatalf("expected actionable ssh-agent guidance, got: %v", err)
+	}
+}
+
+// TestGitSSHAuthHonorsSSHConfigIdentityFile proves a ~/.ssh/config
+// IdentityFile for the host is tried even when none of the OpenSSH default
+// filenames (id_ed25519/id_rsa/id_ecdsa) exist.
+func TestGitSSHAuthHonorsSSHConfigIdentityFile(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	sshDir := filepath.Join(home, ".ssh")
+	writeTestSSHKey(t, sshDir, "custom_key", "")
+	cfg := "Host github.com\n  IdentityFile ~/.ssh/custom_key\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("WriteFile config: %v", err)
+	}
+
+	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if auth == nil {
+		t.Fatal("expected auth built from the ssh_config IdentityFile")
+	}
+}
+
+// TestSSHConfigIdentityFiles unit-tests the ssh_config(5) subset the fetcher
+// relies on: literal/glob Host matching, multiple IdentityFile lines in file
+// order, tilde expansion, and non-matching hosts yielding nothing.
+func TestSSHConfigIdentityFiles(t *testing.T) {
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfg := strings.Join([]string{
+		"# a comment, and a blank line below",
+		"",
+		"Host bitbucket.org",
+		"  IdentityFile ~/.ssh/bb_key",
+		"",
+		"Host *.github.com github.com",
+		"  IdentityFile ~/.ssh/gh_key1",
+		"  IdentityFile /abs/gh_key2",
+		"",
+		"Host gitlab.com",
+		"  IdentityFile ~/.ssh/gl_key",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got := sshConfigIdentityFiles(sshDir, "github.com")
+	wantGh1 := filepath.Join(home, ".ssh", "gh_key1")
+	if len(got) != 2 || got[0] != wantGh1 || got[1] != "/abs/gh_key2" {
+		t.Fatalf("sshConfigIdentityFiles(github.com) = %v", got)
+	}
+
+	if got := sshConfigIdentityFiles(sshDir, "sub.github.com"); len(got) != 2 || got[0] != wantGh1 || got[1] != "/abs/gh_key2" {
+		t.Fatalf("wildcard Host match: got %v", got)
+	}
+
+	if got := sshConfigIdentityFiles(sshDir, "unknown.example.com"); got != nil {
+		t.Fatalf("expected no match for an unconfigured host, got %v", got)
+	}
+}
+
+// TestSSHConfigIdentityFilesMissingFile proves a missing ~/.ssh/config is not
+// an error — it just yields nothing to add to the default identity list.
+func TestSSHConfigIdentityFilesMissingFile(t *testing.T) {
+	if got := sshConfigIdentityFiles(filepath.Join(t.TempDir(), ".ssh"), "github.com"); got != nil {
+		t.Fatalf("expected nil for a missing config file, got %v", got)
+	}
+}
+
+// TestGitFetcherSSHNoAgentNoKeyErrorsClearly is the end-to-end proof: the
+// same actionable error surfaces through the real gitFetcher.Fetch path
+// (FetchRefresh -> clone -> gitCloneShallow -> gitSSHAuth), not just the
+// unit-level gitSSHAuth call, and fails before any network clone attempt.
+func TestGitFetcherSSHNoAgentNoKeyErrorsClearly(t *testing.T) {
+	withPackagesCache(t)
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+
+	f := &gitFetcher{}
+	_, err := f.Fetch(
+		Source{Type: "git", URL: "git@github.com:acme/does-not-matter.git", Ref: "main"},
+		LayerRefParts{LayerPath: "layer.json"},
+		filepath.Join(t.TempDir(), "cache"),
+	)
+	if err == nil {
+		t.Fatal("expected an ssh auth error")
+	}
+	if !strings.Contains(err.Error(), "no default SSH key found") {
+		t.Fatalf("expected the actionable ssh auth error, got: %v", err)
 	}
 }

@@ -280,7 +280,7 @@ Illustrative repo-local shape (field surface specified in full in
 
 ```json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "version": 2,
   "project": "po-core-api-se",
   "repo_id": "github.com/acme/po-core-api-se",
@@ -695,7 +695,7 @@ Illustrative target:
 
 ```json
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "version": 2,
   "project": "manager-ui",
   "repo_id": "github.com/acme/manager-ui",

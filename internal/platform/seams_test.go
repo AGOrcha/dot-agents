@@ -248,10 +248,12 @@ func TestClaudeLinkProjectSettings_PropagatesProjectBundlesError(t *testing.T) {
 	}
 
 	c := NewClaude().(*claude)
-	// linkProjectSettings has signature (project, repoPath, agentsHome); it
-	// returns no error, so we only verify it doesn't panic on the propagated
-	// error. The early-return branch is now covered.
-	c.linkProjectSettings("proj", repo, agentsHome)
+	// linkProjectSettings now returns (project, repoPath, agentsHome) error;
+	// the broken HOOK.yaml under the project scope must abort the call and
+	// surface the parse error, not silently no-op.
+	if err := c.linkProjectSettings("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected error from broken project-scope HOOK.yaml bundle")
+	}
 }
 
 // TestClaudeLinkProjectSettings_PropagatesGlobalBundlesError covers the
@@ -267,7 +269,9 @@ func TestClaudeLinkProjectSettings_PropagatesGlobalBundlesError(t *testing.T) {
 	}
 
 	c := NewClaude().(*claude)
-	c.linkProjectSettings("proj", repo, agentsHome)
+	if err := c.linkProjectSettings("proj", repo, agentsHome); err == nil {
+		t.Fatal("expected error from broken global-scope HOOK.yaml bundle")
+	}
 }
 
 // TestClaudeRemoveProjectSettingsLink_GlobalBundleFallback covers the

@@ -71,12 +71,24 @@ func ResolveCanonicalRuleFile(agentsHome, scope, name string) (*RuleFileSpec, er
 	}
 	for _, cand := range candidates {
 		p := filepath.Join(root, cand)
-		if fi, err := os.Stat(p); err == nil && !fi.IsDir() && isCanonicalRuleFileName(cand) {
-			return &RuleFileSpec{
-				Scope:      scope,
-				BaseName:   cand,
-				SourcePath: p,
-			}, nil
+		fi, statErr := os.Stat(p)
+		if statErr == nil {
+			if !fi.IsDir() && isCanonicalRuleFileName(cand) {
+				return &RuleFileSpec{
+					Scope:      scope,
+					BaseName:   cand,
+					SourcePath: p,
+				}, nil
+			}
+			continue
+		}
+		if !os.IsNotExist(statErr) {
+			// A real Stat failure (permission-denied, I/O error) is not the
+			// same as "this candidate doesn't exist" — surface it directly
+			// instead of letting the loop fall through to the generic
+			// not-found error below, which would mask it as legitimate
+			// absence.
+			return nil, fmt.Errorf("checking rule candidate %s: %w", p, statErr)
 		}
 	}
 	return nil, fmt.Errorf("rule not found: %s / %s", scope, name)

@@ -298,6 +298,7 @@ func TestEnrichCLIError_MessageBasedBranches(t *testing.T) {
 		{"invalid_plan_status", errors.New("invalid plan status"), "draft"},
 		{"invalid_verify_status", errors.New("invalid verification status"), "partial"},
 		{"not_found_in_source", errors.New("not found in any source"), ".agentsrc.json"},
+		{"code_graph_not_built", errors.New("eval: code graph not built at /x/ops/graphstore.db"), "da kg build"},
 		{"unknown_command", errors.New("unknown command"), "da --help"},
 	}
 	for _, tc := range tests {

@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -100,12 +101,22 @@ func WriteKGMCPConfigs(scopeDir string, deps AddDeps) error {
 
 // WriteKGMCPConfigFile merges the dot-agents-kg server entry into the
 // JSON file at path, preserving any existing top-level keys and any
-// other server entries. Lifted from commands/add.go in
-// root-command-decomposition t02b.
+// other server entries. If path exists but is not readable or not
+// valid JSON, the write is aborted and an error is returned rather
+// than overwriting the file with a fresh, partial config — a corrupt
+// existing file must never silently lose every other server entry.
+// Lifted from commands/add.go in root-command-decomposition t02b.
 func WriteKGMCPConfigFile(path string, server map[string]any, deps AddDeps) error {
 	configMap := map[string]any{}
-	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &configMap)
+	switch data, err := os.ReadFile(path); {
+	case err == nil:
+		if err := json.Unmarshal(data, &configMap); err != nil {
+			return fmt.Errorf("existing MCP config %s is not valid JSON, refusing to overwrite it: %w", path, err)
+		}
+	case os.IsNotExist(err):
+		// No existing config file: start from an empty config map.
+	default:
+		return fmt.Errorf("reading existing MCP config %s: %w", path, err)
 	}
 	servers, _ := configMap["servers"].(map[string]any)
 	if servers == nil {

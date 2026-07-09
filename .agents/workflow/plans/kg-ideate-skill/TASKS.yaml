@@ -21,7 +21,7 @@ tasks:
         Spec ref: kg-ideate-skill design.md D2, D3, D4; proposal Phase 1.
     - id: t2-spec-scaffold-molecule
       title: Phase 2 molecule `spec-scaffold` (competing-decisions fallback)
-      status: blocked
+      status: completed
       depends_on:
         - t1-kg-brief-molecule
       blocks:
@@ -41,7 +41,7 @@ tasks:
         - delegation closeout reject: stale parallel fanout; rerun after t1 with refreshed scope
     - id: t3-plan-scaffold-molecule
       title: Phase 3 molecule `plan-scaffold` (spec->tasks/write-scopes/dep-order)
-      status: blocked
+      status: completed
       depends_on:
         - t2-spec-scaffold-molecule
       blocks:
@@ -59,7 +59,7 @@ tasks:
         never hand-edits task status. Spec ref: design.md D5, D6; proposal Phase 3.
     - id: t4-staged-execution-handoff-molecule
       title: Phase 4 molecule `staged-execution-handoff` (no implementation)
-      status: blocked
+      status: completed
       depends_on:
         - t3-plan-scaffold-molecule
       blocks:
@@ -76,7 +76,7 @@ tasks:
         - delegation closeout reject: stale parallel fanout; rerun after t3 with refreshed scope
     - id: t5-orchestrator-compound
       title: Compound orchestrator `kg-ideate` (T2, dispatches the four molecules)
-      status: pending
+      status: completed
       depends_on:
         - t1-kg-brief-molecule
         - t2-spec-scaffold-molecule
@@ -95,7 +95,7 @@ tasks:
         self-contained cold-start context). Spec ref: design.md D1.
     - id: t6-degraded-mode-e2e
       title: Degraded-mode end-to-end demonstration (graceful-degradation contract)
-      status: pending
+      status: completed
       depends_on:
         - t5-orchestrator-compound
       blocks: []
@@ -109,6 +109,7 @@ tasks:
         resolves competing decisions explicitly; Phase 4 emits no code. This is the
         ship-now proof that early shipping does not reintroduce the silent-no-op problem.
         Spec ref: design.md done-criteria 3.
+        - (fb:kgi-t6-owns-behavioral) t6 is the recorded home for the molecules' behavioral verification (verification_required on t1-t4 behavioral paths). Must demonstrate, on a profile WITHOUT the citation adapter: empty-KG briefing states 'KG has no prior decisions' (not fabricated); Contradictions renders [adapter-absent]; competing-decisions fallback active in spec-scaffold; Phase 4 emits no code. PLUS a conformance assertion that every molecule SKILL.md Load-> instruction/template ref resolves and briefing/spec/plan template headers match the canonical contract. This closes the codex gate finding that degraded-KG/adapter-absent paths had zero captured verification.
     - id: t7-structural-contradiction-traversal
       title: 'GATED: Phase 2 step 7 structural contradiction traversal (citation adapter)'
       status: blocked
@@ -136,7 +137,7 @@ tasks:
         status: blocked until the gate clears (do not advance manually).
     - id: t8-proposal-lesson-schema-formalization
       title: Formalize canonical proposal.schema.json + lesson.schema.json (single-source)
-      status: blocked
+      status: completed
       depends_on: []
       blocks: []
       owner: AGOrcha

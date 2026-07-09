@@ -296,12 +296,26 @@ func crgStatusState(root string) string {
 	return status.State
 }
 
+// crgBridgeStatus is a seam over CRGBridge.Status for tests to inject a
+// real-error response (production Status() never returns a non-nil error
+// today, but callers must not silently swallow one if that changes).
+var crgBridgeStatus = func(root string) (*graphstore.CRGStatus, error) {
+	return (&graphstore.CRGBridge{RepoRoot: root}).Status()
+}
+
 // checkCRGReadiness calls Status() and emits warnings for unbuilt/busy states.
 // When requireGraph is true and the graph is not ready, an error is returned.
 func checkCRGReadiness(root string, requireGraph bool) error {
-	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	status, err := crgBridgeStatus(root)
 	if err != nil {
-		// Status() failed — CRG may not be installed; warn but don't block.
+		// Status() failed — this is a REAL error (permission/db/I-O fault), not
+		// "CRG not installed" (that case is reported via status.State/Message
+		// with a nil error, handled below). Warn, and — critically — do not let
+		// --require-graph silently pass when readiness could not be determined.
+		ui.WarnBox("Code graph status unavailable", fmt.Sprintf("could not determine code graph readiness: %v", err))
+		if requireGraph {
+			return fmt.Errorf("code graph readiness unknown: %w", err)
+		}
 		return nil
 	}
 	switch status.State {

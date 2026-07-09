@@ -1,8 +1,13 @@
 package graphstore_test
 
 import (
+	"bytes"
+	"database/sql"
+	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -233,6 +238,101 @@ func TestStoreFileNodesEdges_Atomic(t *testing.T) {
 	got, _ = s.GetNodesByFile("b.go")
 	if len(got) != 1 {
 		t.Errorf("want 1 node after replace, got %d", len(got))
+	}
+}
+
+// TestStoreFileNodesEdges_EncodeExtraError_RollsBack: an unencodable Extra
+// value (NaN — json.Marshal rejects non-finite floats) on either a node or
+// an edge must abort the whole transaction, not silently substitute "{}"
+// for that one row while the rest of the batch commits.
+func TestStoreFileNodesEdges_EncodeExtraError_RollsBack(t *testing.T) {
+	t.Run("bad node", func(t *testing.T) {
+		s := openTestStore(t)
+		nodes := []graphstore.NodeInfo{
+			makeNode("Good", graphstore.NodeKindFunction, "nan_node.go"),
+			{Kind: graphstore.NodeKindFunction, Name: "Bad", FilePath: "nan_node.go",
+				Extra: map[string]any{"v": math.NaN()}},
+		}
+		if err := s.StoreFileNodesEdges("nan_node.go", nodes, nil, "hash"); err == nil {
+			t.Fatal("expected error from unencodable (NaN) node Extra")
+		}
+		got, err := s.GetNode("nan_node.go::Good")
+		if err != nil {
+			t.Fatalf("GetNode: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected the tx to roll back entirely — no partial row, got %+v", got)
+		}
+	})
+
+	t.Run("bad edge", func(t *testing.T) {
+		s := openTestStore(t)
+		nodes := []graphstore.NodeInfo{
+			makeNode("A", graphstore.NodeKindFunction, "nan_edge.go"),
+			makeNode("B", graphstore.NodeKindFunction, "nan_edge.go"),
+		}
+		edges := []graphstore.EdgeInfo{
+			{Kind: graphstore.EdgeKindCalls, Source: "nan_edge.go::A", Target: "nan_edge.go::B",
+				FilePath: "nan_edge.go", Extra: map[string]any{"v": math.NaN()}},
+		}
+		if err := s.StoreFileNodesEdges("nan_edge.go", nodes, edges, "hash"); err == nil {
+			t.Fatal("expected error from unencodable (NaN) edge Extra")
+		}
+		got, err := s.GetNode("nan_edge.go::A")
+		if err != nil {
+			t.Fatalf("GetNode: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected the tx to roll back entirely — no partial row, got %+v", got)
+		}
+	})
+}
+
+// TestGetNode_CorruptExtraJSON_WarnsAndTags exercises decodeExtra's
+// log-and-tag path: a stored extra column that fails to parse as JSON must
+// not silently drop to nil — it must log a warning and the returned map
+// must be visibly tagged, without turning GetNode itself into an error.
+func TestGetNode_CorruptExtraJSON_WarnsAndTags(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "corrupt.db")
+	s, err := graphstore.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	if _, err := s.UpsertNode(makeNode("Corrupt", graphstore.NodeKindFunction, "c.go"), ""); err != nil {
+		t.Fatalf("UpsertNode: %v", err)
+	}
+
+	raw, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	if _, err := raw.Exec(`UPDATE nodes SET extra = ? WHERE qualified_name = ?`, "{not-valid-json", "c.go::Corrupt"); err != nil {
+		t.Fatalf("corrupt extra column: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatalf("close raw db: %v", err)
+	}
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	got, err := s.GetNode("c.go::Corrupt")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected the node row to still be readable despite corrupt extra JSON")
+	}
+	if len(got.Extra) == 0 {
+		t.Error("expected decodeExtra to tag the corrupt row instead of returning an empty map")
+	}
+	if !strings.Contains(buf.String(), "corrupt extra") {
+		t.Errorf("expected a corrupt-extra warning to be logged, got: %q", buf.String())
 	}
 }
 

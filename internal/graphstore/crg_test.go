@@ -12,6 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // ── parseCRGStatusOutput ──────────────────────────────────────────────────────
@@ -291,6 +292,59 @@ func TestCRGBridge_ReadNodes_Limit(t *testing.T) {
 	}
 }
 
+// TestCRGBridge_ReadNodes_PermissionDeniedStat_ReturnsError: a real Stat
+// failure (permission denied on the containing dir) must surface as an
+// error, not be folded into the legitimate-absence "no CRG db" nil,nil path.
+func TestCRGBridge_ReadNodes_PermissionDeniedStat_ReturnsError(t *testing.T) {
+	repo := t.TempDir()
+	dbPath := graphstore.CRGDBPath(repo)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, filepath.Dir(dbPath))
+
+	b := &graphstore.CRGBridge{RepoRoot: repo, Bin: ""}
+	nodes, err := b.ReadNodes(10)
+	if err == nil {
+		t.Fatal("expected a real error from a permission-denied Stat, not the legitimate-absence nil,nil")
+	}
+	if nodes != nil {
+		t.Errorf("expected nil nodes alongside the error, got %v", nodes)
+	}
+}
+
+// TestCRGBridge_ReadNodes_ScanFailureCounted: a row that fails to Scan
+// (corrupt column type) must be surfaced via the returned error instead of
+// vanishing via a silent `continue` — the well-formed rows are still
+// returned so the caller can decide what to do with the partial result.
+func TestCRGBridge_ReadNodes_ScanFailureCounted(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 2, 0)
+	db, err := sql.Open("sqlite", graphstore.CRGDBPath(dir))
+	if err != nil {
+		t.Fatalf("open fake db: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO nodes (kind,name,qualified_name,file_path,line_start,line_end,language,parent_name,params,return_type,is_test,file_hash,extra,updated_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"Function", "badrow", "pkg::badrow", "f.go", "not-a-number", 5, "go", "pkg", "", "", 0, "", "{}", 1.0,
+	); err != nil {
+		t.Fatalf("insert bad row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close fake db: %v", err)
+	}
+
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	nodes, err := b.ReadNodes(0)
+	if err == nil {
+		t.Fatal("expected the row-scan failure to be surfaced, not silently skipped")
+	}
+	if len(nodes) != 2 {
+		t.Errorf("expected the 2 well-formed rows to still be returned, got %d", len(nodes))
+	}
+}
+
 func TestCRGBridge_ReadEdges_NoDB(t *testing.T) {
 	b := &graphstore.CRGBridge{RepoRoot: t.TempDir(), Bin: ""}
 	edges, err := b.ReadEdges(10)
@@ -325,6 +379,56 @@ func TestCRGBridge_ReadEdges_Limit(t *testing.T) {
 	}
 	if len(edges) != 2 {
 		t.Errorf("expected 2 (limit), got %d", len(edges))
+	}
+}
+
+// TestCRGBridge_ReadEdges_PermissionDeniedStat_ReturnsError mirrors the
+// ReadNodes coverage for the edges path.
+func TestCRGBridge_ReadEdges_PermissionDeniedStat_ReturnsError(t *testing.T) {
+	repo := t.TempDir()
+	dbPath := graphstore.CRGDBPath(repo)
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, filepath.Dir(dbPath))
+
+	b := &graphstore.CRGBridge{RepoRoot: repo, Bin: ""}
+	edges, err := b.ReadEdges(10)
+	if err == nil {
+		t.Fatal("expected a real error from a permission-denied Stat, not the legitimate-absence nil,nil")
+	}
+	if edges != nil {
+		t.Errorf("expected nil edges alongside the error, got %v", edges)
+	}
+}
+
+// TestCRGBridge_ReadEdges_ScanFailureCounted mirrors the ReadNodes coverage
+// for the edges path.
+func TestCRGBridge_ReadEdges_ScanFailureCounted(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeCRGDB(t, dir, 0, 2)
+	db, err := sql.Open("sqlite", graphstore.CRGDBPath(dir))
+	if err != nil {
+		t.Fatalf("open fake db: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO edges (kind,source_qualified,target_qualified,file_path,line,extra,updated_at)
+		 VALUES (?,?,?,?,?,?,?)`,
+		"CALLS", "pkg::C", "pkg::D", "f.go", "not-a-number", "{}", 1.0,
+	); err != nil {
+		t.Fatalf("insert bad row: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close fake db: %v", err)
+	}
+
+	b := &graphstore.CRGBridge{RepoRoot: dir, Bin: ""}
+	edges, err := b.ReadEdges(0)
+	if err == nil {
+		t.Fatal("expected the row-scan failure to be surfaced, not silently skipped")
+	}
+	if len(edges) != 2 {
+		t.Errorf("expected the 2 well-formed rows to still be returned, got %d", len(edges))
 	}
 }
 

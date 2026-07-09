@@ -1,0 +1,32 @@
+schema_version: 2
+iteration: 1
+date: "2026-07-01"
+wave: r2contract-go-impl-pure-fn
+task_id: go-impl-pure-fn-001
+commit: 9f3c1a4e7b2d8c05f61a9e4d3b7c8f20a1e6d4b9
+checkpoint_at: "2026-07-01T12:00:00Z"
+agent:
+    session_id: b7f4e2a0-9c1d-4e83-a6b2-3f5d8c7e1a04
+    harness: claude-code
+    model: claude-opus-4-8
+session_tokens:
+    input_tokens: 4200
+    output_tokens: 850
+    cache_read_tokens: 3100
+    cache_creation_tokens: 900
+    cache_hit_rate: 0.62
+impl:
+    summary: 'eval run r2contract-go-impl-pure-fn: go/medium task go-impl-pure-fn-001 scored via the R1 bridge'
+    retries: 0
+verifiers:
+    - type: build
+      status: pass
+      gate_passed: true
+    - type: test
+      status: pass
+      gate_passed: true
+      tests_total_pass: true
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""

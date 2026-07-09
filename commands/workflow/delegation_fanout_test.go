@@ -383,6 +383,60 @@ func TestFanout_TDDGateRejectsGoScopeWithoutTests(t *testing.T) {
 	}
 }
 
+// seedAssertingTestGateProject writes a source symbol inside task-001's
+// write_scope (commands/) and a cross-package *_test.go asserting on it OUTSIDE
+// scope, so a real `da workflow fanout` run exercises the §0d gate end-to-end.
+func seedAssertingTestGateProject(t *testing.T, repo string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repo, "commands"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "commands", "thing.go"),
+		[]byte("package commands\n\nfunc ExportedThing() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "other"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	crossTest := "package other\n\nimport \"testing\"\n\nvar _ = ExportedThing\n\nfunc TestX(t *testing.T) {}\n"
+	if err := os.WriteFile(filepath.Join(repo, "other", "x_test.go"), []byte(crossTest), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFanout_AssertingTestGateRefusesByDefault(t *testing.T) {
+	repo := setupTestProject(t)
+	seedAssertingTestGateProject(t, repo)
+
+	err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w")
+	if err == nil {
+		t.Fatal("gate should be ON by default and REFUSE the cross-package asserter")
+	}
+	if !strings.Contains(err.Error(), "asserting-test scope gate") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ExportedThing") {
+		t.Fatalf("error should name the symbol, got: %v", err)
+	}
+	// A refused fanout must not have created a delegation contract.
+	if _, err := loadDelegationContract(repo, "task-001"); err == nil {
+		t.Fatal("refused fanout must not create a delegation contract")
+	}
+}
+
+func TestFanout_AssertingTestGateSkipFlagBypasses(t *testing.T) {
+	repo := setupTestProject(t)
+	seedAssertingTestGateProject(t, repo)
+
+	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001",
+		"--owner", "w", "--skip-asserting-test-gate"); err != nil {
+		t.Fatalf("--skip-asserting-test-gate should bypass the gate, got: %v", err)
+	}
+	if _, err := loadDelegationContract(repo, "task-001"); err != nil {
+		t.Fatalf("expected delegation contract after bypass, got: %v", err)
+	}
+}
+
 func TestFanout_VerifierRetryMaxInBundle(t *testing.T) {
 	repo := setupTestProject(t)
 	if err := executeWorkflowCommand(t, repo, "fanout", "--plan", "plan-001", "--task", "task-001", "--owner", "w", "--verifier-retry-max", "4"); err != nil {

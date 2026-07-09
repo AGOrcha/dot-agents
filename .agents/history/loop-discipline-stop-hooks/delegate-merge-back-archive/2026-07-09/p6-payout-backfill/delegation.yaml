@@ -1,0 +1,43 @@
+schema_version: 1
+id: del-p6-payout-backfill-1783629131
+mode: delegated
+parent_plan_id: loop-discipline-stop-hooks
+parent_task_id: p6-payout-backfill
+title: Explicit payout migration and active-loop readback
+summary: Delegated contract for plan loop-discipline-stop-hooks
+write_scope:
+    - .agents/history/loop-discipline-stop-hooks/payout-migration-readback.md
+    - /Users/nikashp/proj-docs/payout/.agentsrc.json
+    - /Users/nikashp/proj-docs/payout/.agents/workflow/plans/loop-discipline-stop-hooks-backfill/
+success_criteria: |-
+    REPO LOCATION CORRECTED 2026-06-30: payout now lives at ~/proj-docs/payout
+    (the ~/Documents/payout path in the contract is stale from the TCC-era move;
+    write_scope updated). Confirm before migrating.
+
+    ORIGINAL SCOPE (still required): payout opts out of hooks ("hooks": false) and
+    does not declare isp/loop-worker; run an authorized configuration migration and
+    persist readback without unrelated artifact loss. Contract:
+    tasks/p6-payout-backfill.contract.md.
+
+    EXPANDED SCOPE — bring payout the config-architecture benefits now SHIPPED
+    (config-architecture-impl L1-L3, all merged):
+      - unified-config-profiles (L1, selector-merge through §15): migrate payout's
+        config to the profile model; this is also the substrate app-type-profiles
+        builds on (payout's po-core-api-se multi-mode API/batch/streaming is the
+        canonical multi-profile case — see app-type-profiles spec §1.2).
+      - distributable-config-manifest + init --from (L2): payout should adopt its
+        home config via the manifest/init --from path rather than ad-hoc edits.
+      - home-config machine-local split + identity registry kind:project-set (L3
+        p0/p1): keep machine-local state (binding table + cache) OUT of payout's
+        synced tree; rebind by identity, not absolute path.
+      - layered lock-pinning + content-driven (not clock-driven) staleness: payout's
+        .agentsrc.lock should carry inputs_digest + units.
+    UPCOMING (do NOT block on, but set payout up to receive it): L4 multi-harness
+    (descriptor schema, owner-gated) — payout's harness adoption should anticipate
+    the descriptor-schema multi-harness path so it gains new harnesses without rework.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: P6PayoutBackfill
+status: completed
+created_at: "2026-07-09T20:32:11Z"
+updated_at: "2026-07-09T20:32:34Z"

@@ -321,7 +321,14 @@ func commitDisabledFromPrefs() (bool, string) {
 	}
 	prefs, err := resolvePreferences(project.Path, project.Name)
 	if err != nil {
-		return false, ""
+		// resolvePreferences already treats a missing preferences.yaml as
+		// legitimate absence (nil error) — reaching here means a REAL error,
+		// e.g. corrupt YAML or permission denied. Silently returning
+		// "not disabled" would let the auto-commit flow run even though the
+		// operator's actual (unreadable) preference might be
+		// commit.disable=true — the unsafe direction. Fail safe: skip the
+		// auto-commit and say why, instead of silently overriding it.
+		return true, fmt.Sprintf("workflow preferences unreadable, commit.disable unknown: %v", err)
 	}
 	if prefs.Commit.Disable != nil && *prefs.Commit.Disable {
 		return true, "commit.disable=true in workflow preferences"

@@ -1,7 +1,8 @@
 # Proposal: Staged Profile Dispatch And Return-Gate Contract
 
 - type: project-local scoping and design input
-- status: draft / ready for canonical spec-and-plan authoring
+- status: superseded
+- superseded-by: `.agents/workflow/plans/stage-profile-and-routing-consolidation/` (status completed) — the stage_profiles unification consumed this scoping input.
 - date: 2026-05-26
 - prompted by: PA-cursor salvage, starter agent-config consistency review,
   and the named-stage profile discussion

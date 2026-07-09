@@ -260,7 +260,7 @@ da install
 
 ## Commands
 
-`da` exposes 22 top-level commands (excluding `help` and `completion`).
+`da` exposes 24 top-level commands (excluding `help` and `completion`).
 
 ### Project Management
 
@@ -288,7 +288,8 @@ da install
 #### Layered config & the lockfile (`.agentsrc.lock`)
 
 A `.agentsrc.json` manifest may `extends` one or more config layers sourced from
-git, local paths, or HTTP (OCI is not valid for `extends`), declared as `source:path@version`.
+git, local paths, HTTP, or OCI (any source may supply a layer; the kind is set by the
+pulled blob's media type), declared as `source:path@version`.
 When the layers are resolved, the resolved layer SHAs are pinned in
 `.agentsrc.lock` so every machine projects the same effective config.
 
@@ -340,6 +341,8 @@ own [Hooks guide](docs/HOOKS.md)).
 | `review show <id>` | Show a pending proposal |
 | `review approve <id>` | Approve and apply a pending proposal |
 | `review reject <id>` | Reject a pending proposal |
+| `review users <add\|list\|remove\|set-role>` | Admin-only RBAC for the review surface; `add` mints a bearer token printed once, every mutation writes a hash-chained audit record (`--role`, `--token`, `--users-file`) |
+| `review audit <tail\|verify\|repair\|prune>` | Inspect and attest the append-only, hash-chained review audit log; `verify` needs no token and exits non-zero on an integrity break (usable as a CI gate) |
 
 ### Workflow State
 
@@ -385,6 +388,22 @@ queries — so humans and agents can resume work safely.
 | `workflow verify log` | Show verification log entries |
 | `workflow prefs` | Show resolved workflow preferences (`set-local`, `set-shared`) |
 | `workflow graph query` | Query knowledge graph context by bridge intent (`graph health`) |
+
+#### Session-handoff journal
+
+`da workflow journal` is an append-only, crash-survivable event log plus a
+deterministic live-state snapshot, kept off the git tree under the XDG state
+directory — so a session resumed after a compaction or crash re-injects state
+from durable file state, re-verified against current reality, instead of
+re-grounding from scratch.
+
+| Command | Description |
+|---------|-------------|
+| `workflow journal snapshot` | Capture the deterministic live-state snapshot for the current project |
+| `workflow journal recover` | Build the verified recovery view (snapshot + replay, re-verified against reality) |
+| `workflow journal show` | Show the current snapshot and recent journal events (`--limit`, `--all`) |
+| `workflow journal prune` | Drop journal events beyond a bounded retention (safe, atomic; `--keep`) |
+| `workflow journal append` | Low-level: append one event to the journal (reasoned-overlay / testing) |
 
 #### Delegation
 
@@ -481,6 +500,21 @@ structured project memory, bridge queries, and code-to-note context.
 | `sync push` | Push to remote |
 | `sync pull` | Pull from remote |
 | `sync log` | Show recent commit log |
+
+### Evaluation & Recipes
+
+`da eval` drives the R4 agent-evaluation harness end to end — synthesise a
+reproducible TaskSpec from the knowledge graph, run it in an isolated sandbox,
+and score the outcome against the same rubric `da score` uses (see the
+[**Eval harness guide**](docs/EVAL_HARNESS.md)). `da run` executes a *recipe*:
+a line-oriented sequence of `da` commands.
+
+| Command | Description |
+|---------|-------------|
+| `eval gen` | Generate a reproducible eval TaskSpec from the knowledge graph (`--language go\|python\|typescript`, `--difficulty`, `--template`, `--out`) |
+| `eval run` | Run one eval task end-to-end in an isolated sandbox and score the outcome (`--agent claude\|codex\|copilot`, `--task`, `--language`, `--repo-dir`) |
+| `eval ls` | List persisted eval runs under `.agents/eval/runs/` (`--repo-dir`) |
+| `run <file>` | Execute a da recipe file — dispatched in order, fail-fast, with `$VAR`/`${VAR}` env-substitution and no shell invoked (shebang-friendly via `#!/usr/bin/env -S da run`) |
 
 ### Utilities
 

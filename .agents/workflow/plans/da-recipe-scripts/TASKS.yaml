@@ -1,0 +1,104 @@
+schema_version: 1
+plan_id: da-recipe-scripts
+tasks:
+    - id: p1-run-command-skeleton
+      title: '`da run <file>`: parse + tokenize + in-process dispatch'
+      status: completed
+      depends_on: []
+      blocks:
+        - p2-failfast-errors
+        - p3-env-substitution
+        - p4-shebang-crossplatform-acceptance
+      owner: dot-agents
+      write_scope:
+        - commands/run.go
+        - commands/run_test.go
+        - cmd/dot-agents/main.go
+      verification_required: true
+      notes: |-
+        Add a Cobra `run <file>` command (register in the root tree). Read the
+        file; produce effective lines: drop a leading `#!` shebang (D2/R2), drop
+        `#`-comment and blank lines. Tokenize each effective line with a minimal
+        shell-like quoted-field splitter (handles single/double quotes; NOT a
+        shell, no `sh -c` — D5). Dispatch each line by invoking the existing `da`
+        root command in-process with those args (rootCmd.SetArgs + Execute, or
+        the equivalent seam) so it is cross-platform (R4). Unit tests: parsing
+        (shebang/comment/blank strip), tokenization incl. quoted args, ordered
+        dispatch via a fake/recording sink. Resolve OQ3 in notes: recipes are
+        da-command sequences, distinct from the JS Workflow agent-fanout engine.
+    - id: p2-failfast-errors
+      title: Fail-fast semantics + step/line error reporting + exit codes
+      status: completed
+      depends_on:
+        - p1-run-command-skeleton
+      blocks:
+        - p4-shebang-crossplatform-acceptance
+      owner: dot-agents
+      write_scope:
+        - commands/run.go
+        - commands/run_test.go
+      verification_required: true
+      notes: |-
+        Per D4/R3: the first step whose dispatch returns a non-zero/err aborts
+        the run; report `step N ("<source line>") failed: <err>`; process exits
+        non-zero; subsequent steps do not run. Preserve the underlying command's
+        exit code where meaningful. Table-driven tests: a failing middle step
+        stops the run, later steps never dispatch, exit code non-zero, message
+        names the step index and source line.
+    - id: p3-env-substitution
+      title: Environment-variable substitution in recipe lines
+      status: completed
+      depends_on:
+        - p1-run-command-skeleton
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/run.go
+        - commands/run_test.go
+      verification_required: true
+      notes: |-
+        Per D6/R6: apply `$VAR` / `${VAR}` env substitution to each effective
+        line before tokenization. Undefined vars: decide + document (recommend
+        empty-string expansion, matching os.Expand, and note it). Resolve OQ1 in
+        notes: env-substitution only for v1; do NOT add positional args ($1/$@)
+        unless the p5 dogfood needs them (if it does, amend this task). Tests:
+        substitution in bare and quoted positions; undefined-var behavior.
+    - id: p4-shebang-crossplatform-acceptance
+      title: Shebang execution + cross-platform acceptance test
+      status: completed
+      depends_on:
+        - p1-run-command-skeleton
+        - p2-failfast-errors
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/run_test.go
+        - tests/test-da-run.sh
+      verification_required: true
+      notes: |-
+        Per R5: a chmod-+x `.da` file with `#!/usr/bin/env -S da run` executes
+        directly. Acceptance test mirroring yq #1851: build the binary, write a
+        `.da` recipe with the shebang, chmod +x, execute it, assert the recipe's
+        effect. POSIX shebang works on macOS/Linux; on Windows document + test
+        the `da run <file>` equivalent (Windows has no shebang) so R4 holds. Wire
+        into CI so it runs on every target OS.
+    - id: p5-dogfood-recipe
+      title: Dogfood — express one meta-loop sequence as a shipped recipe
+      status: completed
+      depends_on:
+        - p1-run-command-skeleton
+        - p2-failfast-errors
+        - p3-env-substitution
+        - p4-shebang-crossplatform-acceptance
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - src/share/recipes/checkpoint-advance.da
+      verification_required: true
+      notes: |-
+        Resolve OQ2 (recipe home + convention) by placing a real recipe: pick a
+        genuinely mechanical meta-loop sequence (e.g. a checkpoint→advance or a
+        verify→checkpoint spine — NOT one needing judgment per D3) and ship it as
+        a `.da` recipe under the chosen dir (proposed src/share/recipes/). Prove
+        it runs end-to-end via `da run`. If any step needs a decision, that step
+        stays in the calling skill; the recipe holds only the mechanical spine.

@@ -86,6 +86,33 @@ func TestCheckRefreshProjectPath_UnboundVsMissing(t *testing.T) {
 	}
 }
 
+// TestCheckRefreshProjectPath_StatErrorVsMissing drives the REAL Stat-error
+// branch (refresh.go: os.Stat(path) in checkRefreshProjectPath): a path that
+// exists but cannot be verified (parent unreadable) must warn with a
+// distinct "could not access" message, not the generic "directory not
+// found" reserved for legitimate absence — the operator otherwise goes
+// hunting for a directory that is actually just inaccessible.
+func TestCheckRefreshProjectPath_StatErrorVsMissing(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "proj")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	out := captureRefreshStdout(t, func() {
+		if checkRefreshProjectPath("svc", dir) {
+			t.Error("unverifiable directory must not be treated as refreshable")
+		}
+	})
+	if !strings.Contains(out, "could not access") {
+		t.Errorf("expected a 'could not access' warning distinct from 'not found', got: %q", out)
+	}
+	if strings.Contains(out, "directory not found") {
+		t.Errorf("a real Stat error must not be reported as the generic 'not found' message: %q", out)
+	}
+}
+
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
 
 // fakeRefreshConfigLoader is the interface-DI test double for
@@ -722,10 +749,11 @@ func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
 		t.Fatal("expected runRefresh to return non-zero error after swallowed restore failure")
 	}
 
-	// .agentsrc.json must NOT carry refresh metadata for the partially-applied project.
-	rc, loadErr := config.LoadAgentsRC(projectPath)
-	if loadErr == nil && rc.Refresh != nil {
-		t.Errorf("expected NO refresh metadata after partial restore, got %+v", rc.Refresh)
+	// .agentsrc.lock must NOT carry a refresh stamp for the partially-applied
+	// project — finalizeProjectRefresh skips WriteRefreshToLock entirely on
+	// projectFailed, so no lock is ever written for this project.
+	if _, statErr := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(statErr) {
+		t.Errorf("expected NO .agentsrc.lock refresh stamp after partial restore, stat err = %v", statErr)
 	}
 }
 

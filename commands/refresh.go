@@ -183,6 +183,7 @@ func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string,
 // real, present directory. It emits the user-facing warn on skip so callers
 // just consult the bool.
 func checkRefreshProjectPath(name, path string) bool {
+	const skipPrefix = "Skipping "
 	if path == "" {
 		// Known in the synced identity registry but with no machine-local
 		// binding — report it explicitly rather than silently skip-as-missing
@@ -191,11 +192,19 @@ func checkRefreshProjectPath(name, path string) bool {
 		return false
 	}
 	if path == "." {
-		ui.Warn("Skipping " + name + ": path not found")
+		ui.Warn(skipPrefix + name + ": path not found")
 		return false
 	}
 	if _, err := os.Stat(path); err != nil {
-		ui.Warn("Skipping " + name + ": directory not found at " + path)
+		if os.IsNotExist(err) {
+			ui.Warn(skipPrefix + name + ": directory not found at " + path)
+		} else {
+			// A REAL Stat error (permission denied, TOCTOU) is not the same
+			// as "directory not found" — the path may well exist. Say so
+			// instead of sending the operator hunting for a directory that's
+			// actually just inaccessible.
+			ui.Warn(skipPrefix + name + ": could not access " + path + ": " + err.Error())
+		}
 		return false
 	}
 	return true
@@ -332,10 +341,10 @@ func recreatePlatformLinks(name, path string, enabledPlatforms []platform.Platfo
 // finalizeProjectRefresh writes the refresh metadata stamp when the project
 // finished cleanly. Returns true on a successful stamp (counted toward the
 // success total) and false on dry-run, partial application, or stamp failure.
-// Dry-run is treated as success for the counter but skips the manifest write.
+// Dry-run is treated as success for the counter but skips the lock write.
 func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit, refreshDescribe string) bool {
 	if Flags.DryRun {
-		msg := "Update .agentsrc.json refresh details"
+		msg := "Update .agentsrc.lock refresh details"
 		if refreshCommit != "" {
 			msg += " (commit=" + refreshCommit[:8] + ")"
 		}
@@ -346,8 +355,8 @@ func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit
 		ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
 		return false
 	}
-	if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+	if err := projectsync.WriteRefreshToLock(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("lock refresh metadata: %v", err))
 		return false
 	}
 	return true

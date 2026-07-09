@@ -6,8 +6,8 @@ summary: |-
     Terminal loop-discipline enforcement plus approved early prevention, worker bootstrap, and compaction continuity hooks for iteration-close, isp, and loop-worker; promote skills into starter; close platform event-coverage gaps.
     - (fb:iteration-close-gate-archived-mergeback-mismatch) iteration-close-gate R1.1 checks sentinel.expected_artifacts by path only. After delegated closeout archived t1-kg-brief-molecule merge-back, the sentinel remained active and still required .agents/active/merge-back/t1-kg-brief-molecule.md, causing recursive stop/pretool deadlock despite canonical task completion. Current recovery split: finish worker closeout if it truly died mid-closeout, otherwise clear the stale sentinel manually because workflow delegation closeout does not auto-clear or supersede it today. Follow-up: reconcile sentinel lifecycle with delegation closeout/archive semantics; consider workflow journal or trace-backed closure to distinguish active-vs-archived satisfaction.
 created_at: "2026-05-25T15:16:58Z"
-updated_at: "2026-07-07T12:57:39Z"
+updated_at: "2026-07-09T20:38:07Z"
 owner: dot-agents
 success_criteria: All three discipline hooks ship in the starter; terminal gates enforce durable evidence; approved PreToolUse, SubagentStart, and PreCompact behavior is bounded and verified; hard violations request platform-native remediation on Claude/Codex/Cursor/Copilot; archived sentinels live with durable plan history; hook event parity and adjacent discipline skills are assessed; payout and legacy downstream overrides receive explicit migration readback.
 verification_strategy: Unit tests for sentinel CLI and history archival; per-platform input/output and event-rendering tests; scaffold-copy tests for promoted starter assets; shell integration test in tests/test-loop-discipline-stop-hooks.sh covering terminal remediation, approved pre-action guards, startup/compaction advice, and trace-backed advisories; payout and downstream migration readback records.
-current_focus_task: Explicit payout migration and active-loop readback
+current_focus_task: Final migration of legacy downstream discipline-skill overrides

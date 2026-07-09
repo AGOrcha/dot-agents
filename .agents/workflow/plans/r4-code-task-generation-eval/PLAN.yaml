@@ -4,8 +4,8 @@ title: 'R4: Code-task generation and evaluation harness'
 status: active
 summary: Generate verifiable programming tasks across Go/Python/TypeScript by templating over the Tree-sitter KG; run an agent against each task in a worktree sandbox; verify outcomes via build+test; feed results into the R1 scoring pipeline; persist task + run + score sidecars consumable by R2.
 created_at: "2026-05-25T19:12:51Z"
-updated_at: "2026-07-03T15:39:27Z"
+updated_at: "2026-07-04T15:06:29Z"
 owner: dot-agents
 success_criteria: Generator produces verifiable tasks across >=3 languages with difficulty metadata; harness runs an agent end-to-end on a task and emits an R1-scored outcome; generated tasks + results persist and are visible in R2.
 verification_strategy: da eval run --language go produces an R1-scored outcome + a row in R2; coverage of the generator across >=3 languages verified via unit tests; harness sandbox isolates agent execution from host.
-current_focus_task: Go task generator (per-language adapter
+current_focus_task: 'Release: bump VERSION + finalize CHANGELOG for the eval-harness minor'

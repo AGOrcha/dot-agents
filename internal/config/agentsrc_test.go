@@ -11,7 +11,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/go-git/go-git/v6"
 
 	"github.com/AGOrcha/dot-agents/internal/events"
 )
@@ -286,7 +287,7 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	tmp := t.TempDir()
 
 	orig := &AgentsRC{
-		Schema:   "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:   "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version:  1,
 		Project:  testProject,
 		Skills:   []string{"skill-a", "skill-b"},
@@ -300,7 +301,6 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 			{Type: "git", URL: "https://github.com/example/repo.git", Ref: "main"},
 		},
 	}
-	orig.SetRefreshMetadata("1.2.3", "abcdef12", "v1.2.3", time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC))
 
 	if err := orig.Save(tmp); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -335,11 +335,44 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	if len(got.Sources) != 2 || got.Sources[1].URL != orig.Sources[1].URL {
 		t.Errorf("Sources: got %+v, want %+v", got.Sources, orig.Sources)
 	}
-	if got.Refresh == nil {
-		t.Fatal("Refresh: got nil, want metadata")
+}
+
+// TestLoadAgentsRC_LegacyRefreshBlockIgnoredAndStripped is the back-compat
+// guard for refresh-metadata-to-lock: a manifest stamped by a pre-fix da
+// build still carries a top-level "refresh" object. LoadAgentsRC must load it
+// without error (the key has no AgentsRC field to decode into, so it is
+// silently dropped rather than erroring or leaking into ExtraFields), and a
+// subsequent Save must not re-emit it — the legacy key is stripped on the
+// next rewrite.
+func TestLoadAgentsRC_LegacyRefreshBlockIgnoredAndStripped(t *testing.T) {
+	tmp := t.TempDir()
+	legacy := `{
+  "version": 1,
+  "project": "myproject",
+  "sources": [{"type": "local"}],
+  "refresh": {"version": "0.9.0", "commit": "deadbeef", "describe": "v0.9.0", "refreshedAt": "2026-01-01T00:00:00Z"}
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Refresh, orig.Refresh) {
-		t.Errorf("Refresh: got %+v, want %+v", got.Refresh, orig.Refresh)
+
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC on legacy refresh manifest: %v", err)
+	}
+	if len(rc.ExtraFields) != 0 {
+		t.Fatalf("legacy refresh block must not leak into ExtraFields: %+v", rc.ExtraFields)
+	}
+
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, AgentsRCFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "refresh") {
+		t.Fatalf("re-saved manifest must strip the legacy refresh key: %s", data)
 	}
 }
 
@@ -438,23 +471,6 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 	out := MergeGenerateAgentsRC(existing, generated)
 	if len(out.ExtraFields) != 1 || string(out.ExtraFields["customExtension"]) != string(legacy) {
 		t.Errorf("ExtraFields not preserved: %#v", out.ExtraFields)
-	}
-}
-
-func TestMergeGenerateAgentsRCPreservesRefresh(t *testing.T) {
-	existing := &AgentsRC{
-		Version: 1,
-		Sources: []Source{{Type: testSourceTypeLocal}},
-	}
-	existing.SetRefreshMetadata("1.0.0", "abc", "v1.0.0", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
-	generated := &AgentsRC{
-		Version: 1,
-		Skills:  []string{"s"},
-		Sources: []Source{{Type: testSourceTypeLocal}},
-	}
-	out := MergeGenerateAgentsRC(existing, generated)
-	if out.Refresh == nil || out.Refresh.Version != "1.0.0" || out.Refresh.RefreshedAt == "" {
-		t.Fatalf("Refresh not preserved: %+v", out.Refresh)
 	}
 }
 
@@ -870,6 +886,47 @@ func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 	}
 }
 
+// TestGenerateAgentsRC_DetectorIOErrors covers the fail-or-full contract: a
+// real I/O error (unreadable directory, not "not configured yet") on any
+// scoped resource dir must abort GenerateAgentsRC with a non-nil error and a
+// nil manifest, never a silently-empty field for that resource type.
+func TestGenerateAgentsRC_DetectorIOErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  func(home string) string
+	}{
+		{"skills", func(home string) string { return filepath.Join(home, "skills", testProject) }},
+		{"agents", func(home string) string { return filepath.Join(home, "agents", testProject) }},
+		{"hooks", func(home string) string { return filepath.Join(home, "hooks", testProject) }},
+		{"mcp", func(home string) string { return filepath.Join(home, "mcp", testProject) }},
+		{"settings", func(home string) string { return filepath.Join(home, "settings", testProject) }},
+		{"rules", func(home string) string { return filepath.Join(home, "rules", testProject) }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			chmodTestSkip(t)
+			home := t.TempDir()
+			t.Setenv("AGENTS_HOME", home)
+			dir := c.dir(home)
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(dir, 0); err != nil {
+				t.Fatalf("chmod dir unreadable: %v", err)
+			}
+			t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+			rc, err := GenerateAgentsRC(testProject, t.TempDir())
+			if err == nil {
+				t.Fatalf("GenerateAgentsRC with unreadable %s dir: expected non-nil error, got nil (rc=%+v)", c.name, rc)
+			}
+			if rc != nil {
+				t.Errorf("GenerateAgentsRC with unreadable %s dir: expected nil manifest on error, got %+v", c.name, rc)
+			}
+		})
+	}
+}
+
 // ── Unknown field round-trip ─────────────────────────────────────────────────
 
 func TestAgentsRCUnknownFieldsRoundtrip(t *testing.T) {
@@ -963,7 +1020,7 @@ func TestAgentsRCKnownFieldsNotDuplicated(t *testing.T) {
 func TestAgentsRCJSONShape(t *testing.T) {
 	tmp := t.TempDir()
 	rc := &AgentsRC{
-		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:  "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version: 1,
 		Project: "proj",
 		Skills:  []string{"s1"},
@@ -1070,23 +1127,6 @@ func TestAgentsRCKG_MarshalRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSetRefreshMetadata_NilSafe(t *testing.T) {
-	var a *AgentsRC
-	a.SetRefreshMetadata("v", "c", "d", time.Now())
-}
-
-func TestSetRefreshMetadata_UTC(t *testing.T) {
-	a := &AgentsRC{}
-	ts := time.Date(2026, 4, 1, 12, 0, 0, 0, time.FixedZone("EST", -5*3600))
-	a.SetRefreshMetadata("1.0", "abc", "v1", ts)
-	if a.Refresh == nil {
-		t.Fatal("Refresh nil")
-	}
-	if !strings.HasSuffix(a.Refresh.RefreshedAt, "Z") {
-		t.Errorf("RefreshedAt should be UTC RFC3339 (Z), got %q", a.Refresh.RefreshedAt)
-	}
-}
-
 func TestUnmarshalJSON_InvalidCore(t *testing.T) {
 	var rc AgentsRC
 	if err := rc.UnmarshalJSON([]byte("not json")); err == nil {
@@ -1105,7 +1145,7 @@ func TestMarshalJSON_OverlapWithExtraFieldsDoesNotOverwriteKnown(t *testing.T) {
 			"team":    json.RawMessage(`"platform"`),
 		},
 	}
-	rc.Schema = "https://dot-agents.dev/schemas/agentsrc.json"
+	rc.Schema = "https://agorcha.dev/schemas/agentsrc.schema.json"
 	data, err := json.Marshal(rc)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -1114,7 +1154,7 @@ func TestMarshalJSON_OverlapWithExtraFieldsDoesNotOverwriteKnown(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw["$schema"]), "dot-agents.dev") {
+	if !strings.Contains(string(raw["$schema"]), "agorcha.dev") {
 		t.Errorf("$schema overwritten by ExtraFields: %s", raw["$schema"])
 	}
 	if string(raw["team"]) != `"platform"` {
@@ -1158,7 +1198,10 @@ func TestDetectHookEvents_GlobalYAMLBundleEnablesAll(t *testing.T) {
 	dir := filepath.Join(home, "hooks", "global", "b1")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "HOOK.yaml"), []byte("name: b1\n"), 0644)
-	got := detectHookEvents(home, "myproj")
+	got, err := detectHookEvents(home, "myproj")
+	if err != nil {
+		t.Fatalf("detectHookEvents: %v", err)
+	}
 	if !got.All {
 		t.Errorf("expected All=true with global yaml bundle, got %+v", got)
 	}
@@ -1166,7 +1209,10 @@ func TestDetectHookEvents_GlobalYAMLBundleEnablesAll(t *testing.T) {
 
 func TestDetectHookEvents_None(t *testing.T) {
 	home := t.TempDir()
-	got := detectHookEvents(home, "p")
+	got, err := detectHookEvents(home, "p")
+	if err != nil {
+		t.Fatalf("detectHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Errorf("expected disabled, got %+v", got)
 	}
@@ -1177,7 +1223,10 @@ func TestDetectSettingsHookEvents_BadJSON(t *testing.T) {
 	dir := filepath.Join(home, "settings", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "claude-code.json"), []byte("not json"), 0644)
-	got := detectSettingsHookEvents(home, "global")
+	got, err := detectSettingsHookEvents(home, "global")
+	if err != nil {
+		t.Fatalf("detectSettingsHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Errorf("bad json: got %+v", got)
 	}
@@ -1188,7 +1237,10 @@ func TestDetectSettingsHookEvents_HooksNotMap(t *testing.T) {
 	dir := filepath.Join(home, "settings", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "claude-code.json"), []byte(`{"hooks":"not a map"}`), 0644)
-	got := detectSettingsHookEvents(home, "global")
+	got, err := detectSettingsHookEvents(home, "global")
+	if err != nil {
+		t.Fatalf("detectSettingsHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when hooks is not a map")
 	}
@@ -1199,7 +1251,10 @@ func TestDetectSettingsHookEvents_NoHooksKey(t *testing.T) {
 	dir := filepath.Join(home, "settings", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "claude-code.json"), []byte(`{}`), 0644)
-	got := detectSettingsHookEvents(home, "global")
+	got, err := detectSettingsHookEvents(home, "global")
+	if err != nil {
+		t.Fatalf("detectSettingsHookEvents: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when no hooks key")
 	}
@@ -1210,7 +1265,10 @@ func TestReadMCPScope_BadJSON(t *testing.T) {
 	dir := filepath.Join(home, "mcp", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "mcp.json"), []byte("not json"), 0644)
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Errorf("bad json: got %+v", got)
 	}
@@ -1221,7 +1279,10 @@ func TestReadMCPScope_NoServersKey(t *testing.T) {
 	dir := filepath.Join(home, "mcp", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"other":"value"}`), 0644)
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when no servers key")
 	}
@@ -1232,7 +1293,10 @@ func TestReadMCPScope_EmptyServers(t *testing.T) {
 	dir := filepath.Join(home, "mcp", "global")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "mcp.json"), []byte(`{"servers":{}}`), 0644)
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when servers map is empty")
 	}
@@ -1240,7 +1304,10 @@ func TestReadMCPScope_EmptyServers(t *testing.T) {
 
 func TestReadMCPScope_NoFiles(t *testing.T) {
 	home := t.TempDir()
-	got := readMCPScope(home, "global")
+	got, err := readMCPScope(home, "global")
+	if err != nil {
+		t.Fatalf("readMCPScope: %v", err)
+	}
 	if got.IsEnabled() {
 		t.Error("expected disabled when scope has no files")
 	}
@@ -1251,7 +1318,10 @@ func TestDetectRuleScopes_OnlyOtherExt(t *testing.T) {
 	dir := filepath.Join(home, "rules", "proj")
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "weird.json"), []byte("{}"), 0644)
-	got := detectRuleScopes(home, "proj")
+	got, err := detectRuleScopes(home, "proj")
+	if err != nil {
+		t.Fatalf("detectRuleScopes: %v", err)
+	}
 	if len(got) != 1 || got[0] != "global" {
 		t.Errorf("expected only [global], got %v", got)
 	}
@@ -1259,14 +1329,21 @@ func TestDetectRuleScopes_OnlyOtherExt(t *testing.T) {
 
 func TestDetectRuleScopes_MissingDir(t *testing.T) {
 	home := t.TempDir()
-	got := detectRuleScopes(home, "missing-proj")
+	got, err := detectRuleScopes(home, "missing-proj")
+	if err != nil {
+		t.Fatalf("detectRuleScopes: %v", err)
+	}
 	if len(got) != 1 || got[0] != "global" {
 		t.Errorf("expected only [global], got %v", got)
 	}
 }
 
 func TestHasYAMLHooks_DirAbsent(t *testing.T) {
-	if hasYAMLHooks("/path/that/does/not/exist") {
+	got, err := hasYAMLHooks("/path/that/does/not/exist")
+	if err != nil {
+		t.Fatalf("hasYAMLHooks: %v", err)
+	}
+	if got {
 		t.Error("missing dir should return false")
 	}
 }
@@ -1275,7 +1352,11 @@ func TestHasYAMLHooks_FileInDirIgnored(t *testing.T) {
 	tmp := t.TempDir()
 
 	os.WriteFile(filepath.Join(tmp, "stray.yaml"), []byte("x"), 0644)
-	if hasYAMLHooks(tmp) {
+	got, err := hasYAMLHooks(tmp)
+	if err != nil {
+		t.Fatalf("hasYAMLHooks: %v", err)
+	}
+	if got {
 		t.Error("non-dir entry should be ignored")
 	}
 }
@@ -1925,6 +2006,78 @@ func TestGenerateAgentsRC_NoGitRemoteLeavesRepoIDEmpty(t *testing.T) {
 	}
 	if rc.RepoID != "" {
 		t.Errorf("RepoID should be empty when no git remote, got %q", rc.RepoID)
+	}
+}
+
+// TestDeriveRepoIDFromGit_CorruptConfigEmitsWarning covers the genuine-
+// corruption branch (spec Slice 3): a real git checkout whose .git/config
+// is malformed is neither ErrNoOrigin nor "not a checkout", so it must fire
+// a structured warning via the emitConfigWarning seam while still returning
+// "" (the documented spec §5.3 fallback is unchanged).
+func TestDeriveRepoIDFromGit_CorruptConfigEmitsWarning(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := git.PlainInit(tmp, false); err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+	cfgPath := filepath.Join(tmp, ".git", "config")
+	if err := os.WriteFile(cfgPath, []byte("[core\nbroken = true"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var fired []events.Envelope
+	prev := emitConfigWarning
+	emitConfigWarning = func(env events.Envelope) { fired = append(fired, env) }
+	t.Cleanup(func() { emitConfigWarning = prev })
+
+	if got := DeriveRepoIDFromGit(tmp); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with corrupt config = %q, want empty", got)
+	}
+	if len(fired) != 1 {
+		t.Fatalf("expected exactly one warning event, got %d: %+v", len(fired), fired)
+	}
+	if fired[0].Type != "event.config.git_origin_unreadable" {
+		t.Errorf("warning event type = %q", fired[0].Type)
+	}
+}
+
+// TestDeriveRepoIDFromGit_NotACheckoutNoWarning regression-guards the
+// legitimate-absence case: a plain directory that was never a git checkout
+// must NOT fire a warning (git.ErrRepositoryNotExists is excluded).
+func TestDeriveRepoIDFromGit_NotACheckoutNoWarning(t *testing.T) {
+	tmp := t.TempDir()
+
+	var fired []events.Envelope
+	prev := emitConfigWarning
+	emitConfigWarning = func(env events.Envelope) { fired = append(fired, env) }
+	t.Cleanup(func() { emitConfigWarning = prev })
+
+	if got := DeriveRepoIDFromGit(tmp); got != "" {
+		t.Errorf("DeriveRepoIDFromGit on non-checkout = %q, want empty", got)
+	}
+	if len(fired) != 0 {
+		t.Errorf("expected no warning for a plain non-checkout dir, got %d: %+v", len(fired), fired)
+	}
+}
+
+// TestDeriveRepoIDFromGit_NoOriginRemoteNoWarning regression-guards the
+// other legitimate-absence case: a real checkout with no `origin` remote
+// configured (gitremote.ErrNoOrigin) must NOT fire a warning either.
+func TestDeriveRepoIDFromGit_NoOriginRemoteNoWarning(t *testing.T) {
+	tmp := t.TempDir()
+	if _, err := git.PlainInit(tmp, false); err != nil {
+		t.Fatalf("PlainInit: %v", err)
+	}
+
+	var fired []events.Envelope
+	prev := emitConfigWarning
+	emitConfigWarning = func(env events.Envelope) { fired = append(fired, env) }
+	t.Cleanup(func() { emitConfigWarning = prev })
+
+	if got := DeriveRepoIDFromGit(tmp); got != "" {
+		t.Errorf("DeriveRepoIDFromGit with no origin = %q, want empty", got)
+	}
+	if len(fired) != 0 {
+		t.Errorf("expected no warning when repo simply has no origin remote, got %d: %+v", len(fired), fired)
 	}
 }
 
