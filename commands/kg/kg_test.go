@@ -1,8 +1,10 @@
 package kg
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -179,6 +181,82 @@ func TestKGHome_EnvOverride(t *testing.T) {
 	t.Setenv("KG_HOME", "/tmp/my-graph")
 	if got := kgHome(); got != "/tmp/my-graph" {
 		t.Errorf("expected /tmp/my-graph, got %s", got)
+	}
+}
+
+// TestKGHome_OverrideBypassesHomeResolution covers the KG_HOME override
+// short-circuiting home resolution even when $HOME is unresolvable.
+func TestKGHome_OverrideBypassesHomeResolution(t *testing.T) {
+	t.Setenv("KG_HOME", "/tmp/my-graph")
+	t.Setenv("HOME", "")
+	if got := kgHome(); got != "/tmp/my-graph" {
+		t.Errorf("expected /tmp/my-graph, got %s", got)
+	}
+}
+
+// TestKGHome_UnresolvableHomeHardFails covers the remediation for the
+// UserHomeDir-swallow class (top-risk #2 duplicate site): no KG_HOME
+// override and an unresolvable $HOME must hard-fail via kgHomeExit instead
+// of silently falling back to a relative "knowledge-graph" path.
+func TestKGHome_UnresolvableHomeHardFails(t *testing.T) {
+	t.Setenv("KG_HOME", "")
+	t.Setenv("HOME", "")
+	// os.UserHomeDir resolves via USERPROFILE (then HOMEDRIVE+HOMEPATH) on
+	// Windows, so clear those too to force the failure cross-platform.
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	orig := kgHomeExit
+	var gotErr error
+	kgHomeExit = func(err error) { gotErr = err }
+	defer func() { kgHomeExit = orig }()
+
+	if got := kgHome(); got != "" {
+		t.Errorf("expected empty result after hard-fail hook fires, got %q", got)
+	}
+	if gotErr == nil {
+		t.Fatal("expected kgHomeExit to be invoked with a non-nil error")
+	}
+}
+
+// TestKGHomeExit_DefaultHookHardFailsAndExits drives the real (unstubbed)
+// kgHomeExit hook — the "print + os.Exit(1)" body itself, as opposed to
+// TestKGHome_UnresolvableHomeHardFails above which overrides the hook to
+// observe the error without exiting. Since os.Exit(1) would kill this test
+// binary, the body runs in a re-exec'd child process (the stdlib
+// TestHelperProcess pattern; see internal/events/producer_test.go for the
+// precedent in this repo).
+func TestKGHomeExit_DefaultHookHardFailsAndExits(t *testing.T) {
+	if os.Getenv("KG_HOME_EXIT_HELPER") == "1" {
+		// Child process: kgHomeExit is never overridden here, so this calls
+		// straight into the production print+exit body.
+		kgHome()
+		t.Fatal("kgHome should have exited via kgHomeExit before returning")
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestKGHomeExit_DefaultHookHardFailsAndExits$")
+	cmd.Env = append(os.Environ(),
+		"KG_HOME_EXIT_HELPER=1",
+		"KG_HOME=",
+		"HOME=",
+		"USERPROFILE=",
+		"HOMEDRIVE=",
+		"HOMEPATH=",
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected the child process to exit non-zero via os.Exit(1), got err=%v, stderr=%s", err, stderr.String())
+	}
+	if exitErr.ExitCode() != 1 {
+		t.Errorf("expected exit code 1, got %d (stderr=%s)", exitErr.ExitCode(), stderr.String())
+	}
+	msg := stderr.String()
+	if !strings.Contains(msg, "cannot resolve home directory") || !strings.Contains(msg, "$KG_HOME") {
+		t.Errorf("expected actionable message on stderr mentioning $KG_HOME, got: %q", msg)
 	}
 }
 

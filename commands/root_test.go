@@ -78,6 +78,40 @@ func TestNewRootCommand_PreRunNoop(t *testing.T) {
 	}
 }
 
+// TestNewRootCommand_PreRun_AgentsHomeOverrideBypassesHomeCheck covers the
+// top-risk #2 remediation: an explicit AGENTS_HOME override short-circuits
+// the preflight even when $HOME is unresolvable.
+func TestNewRootCommand_PreRun_AgentsHomeOverrideBypassesHomeCheck(t *testing.T) {
+	t.Setenv("AGENTS_HOME", "/tmp/explicit-agents-home")
+	t.Setenv("HOME", "")
+	root := NewRootCommand()
+	if err := root.PersistentPreRunE(root, nil); err != nil {
+		t.Errorf("expected no error with AGENTS_HOME override even though $HOME is unset: %v", err)
+	}
+}
+
+// TestNewRootCommand_PreRun_HomeUnresolvableHardFails covers the actual
+// remediation: no AGENTS_HOME override and an unresolvable $HOME must
+// hard-fail with an actionable message rather than let every downstream
+// AgentsHome() call silently degrade to a relative "./.agents" path.
+func TestNewRootCommand_PreRun_HomeUnresolvableHardFails(t *testing.T) {
+	t.Setenv("AGENTS_HOME", "")
+	t.Setenv("HOME", "")
+	// os.UserHomeDir resolves via USERPROFILE (then HOMEDRIVE+HOMEPATH) on
+	// Windows, so clear those too to force the failure cross-platform.
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	root := NewRootCommand()
+	err := root.PersistentPreRunE(root, nil)
+	if err == nil {
+		t.Fatal("expected a hard error when home is unresolvable and AGENTS_HOME is unset")
+	}
+	if !strings.Contains(err.Error(), "AGENTS_HOME") {
+		t.Errorf("expected actionable error mentioning AGENTS_HOME, got: %v", err)
+	}
+}
+
 // TestNewRootCommand_VersionTemplate verifies the version output uses the
 // "da version X" format rather than the cobra default.
 func TestNewRootCommand_VersionTemplate(t *testing.T) {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -21,6 +22,33 @@ func UserHomeDir() (string, error) {
 		return h, nil
 	}
 	return os.UserHomeDir()
+}
+
+// PreflightUserHome verifies the process can resolve the user's home
+// directory before any AgentsHome()/UserHome()-derived path gets used.
+// AgentsHome() (and UserHome(), AgentsStateDir(), ExpandPath(),
+// DisplayPath(), UserHomeRoots()) all resolve home via UserHomeDir() with no
+// error channel of their own — on the rare host where $HOME and
+// os.UserHomeDir() both fail (minimal containers, some CI/sandbox
+// environments), AgentsHome() silently degraded to the *relative* path
+// "./.agents" in whatever directory the command happened to run from: the
+// single point of failure for every persisted dot-agents path, with a
+// failure mode ("looks empty/uninitialized") that is maximally confusing to
+// debug. Call this once, early — cobra's root PersistentPreRunE — so that
+// failure surfaces as one actionable error instead of quietly corrupting
+// state.
+//
+// An explicit AGENTS_HOME override always short-circuits this check: when
+// set, AgentsHome() never calls UserHomeDir() at all, so an unresolvable
+// home is irrelevant and this returns nil without probing it.
+func PreflightUserHome() error {
+	if os.Getenv("AGENTS_HOME") != "" {
+		return nil
+	}
+	if _, err := UserHomeDir(); err != nil {
+		return fmt.Errorf("cannot resolve your home directory: %w — set $HOME or $AGENTS_HOME and retry", err)
+	}
+	return nil
 }
 
 // AgentsHome returns the path to the ~/.agents directory.

@@ -12,6 +12,7 @@ import (
 	"github.com/AGOrcha/dot-agents/commands/internal/mcp"
 	"github.com/AGOrcha/dot-agents/commands/internal/rules"
 	"github.com/AGOrcha/dot-agents/commands/internal/settings"
+	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -225,7 +226,7 @@ func NewRootCommand() *cobra.Command {
 	ConfigureRootCommandUX(root)
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		return nil
+		return cfg.PreflightUserHome()
 	}
 	cobra.EnableCommandSorting = false
 
