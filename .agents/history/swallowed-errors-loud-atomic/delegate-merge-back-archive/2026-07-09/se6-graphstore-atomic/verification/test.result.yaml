@@ -1,0 +1,9 @@
+schema_version: 1
+task_id: se6-graphstore-atomic
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: test
+status: pass
+summary: go build ./... clean; go test ./internal/graphstore/... 18.7s all pass (incl. live-postgres NaN-rollback + CRG scan-failure/permission tests); go test ./commands/kg/... pass (ReadNodes/ReadEdges callers unaffected).
+recorded_at: "2026-07-09T03:16:53Z"
+delegation_id: del-se6-graphstore-atomic-1783565716
+recorded_by: da workflow verify record

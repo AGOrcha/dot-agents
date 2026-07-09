@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se9-commands-loud
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: unit
+status: pass
+summary: 'go build ./... green; go vet ./... green; go test ./commands/... green (all 14 subpackages); per-file coverage gate enforce >=95% passes for all 21 changed files in PR #365 (9/11 source files natively >=95%, 2 pre-existing legacy-tail allowlist entries unaffected/slightly improved by this change, new branches 100% test-covered verified against pre-commit baseline)'
+recorded_at: "2026-07-09T06:10:34Z"
+delegation_id: del-se9-commands-loud-1783574064
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go vet ./... && go test ./commands/... && COVERAGE_FILE_MODE=enforce coverage-gate.sh

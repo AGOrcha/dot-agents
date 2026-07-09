@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se9-platform-safe-loud
+delegation_id: del-se9-platform-safe-loud-1783574065
+decision: accept
+closed_at: "2026-07-09T05:24:55Z"

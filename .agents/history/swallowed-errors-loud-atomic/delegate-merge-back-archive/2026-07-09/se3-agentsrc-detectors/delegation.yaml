@@ -1,0 +1,28 @@
+schema_version: 1
+id: del-se3-agentsrc-detectors-1783564600
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se3-agentsrc-detectors
+title: 'Slice 3: agentsrc GenerateAgentsRC detectors fail-or-full (#350 trigger)'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - internal/config/agentsrc.go
+    - internal/config/agentsrc_test.go
+success_criteria: |-
+    The original #350 trigger. 7 detectors (isDirEntry, collectScopedDirs,
+    hasYAMLHooks, detectSettingsHookEvents, detectMCPServers/readMCPScope,
+    detectPlatformSettings, detectRuleScopes) return an error alongside their
+    value (via se0 helper); GenerateAgentsRC aggregates (errors.Join) and
+    returns (nil,err) on any real failure -- fail-or-full, no external
+    signature break (already (*AgentsRC,error)). DeriveRepoIDFromGit keeps
+    its zero-error fallback (spec 5.3) but emits an events warning on a
+    genuine corrupt-.git/config (not ErrNoOrigin / not-a-checkout). Tests:
+    chmod each scoped resource dir 0000 -> non-nil err (not silent-empty);
+    corrupt .git/config -> warning fires, still returns "".
+    PR base swallowed/2-platform-prune-guard, head swallowed/3-agentsrc-detectors.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed3Agentsrc
+status: completed
+created_at: "2026-07-09T02:36:40Z"
+updated_at: "2026-07-09T02:54:44Z"

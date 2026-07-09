@@ -1,0 +1,48 @@
+schema_version: 1
+task_id: se8-registration-visibility
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: merge-back
+status: pass
+summary: 'Implemented se8 (agents/skills registration-step visibility). appendAgentsRCStep (agents/new.go), appendSkillToAgentsRC + ensureUserSkillLinks (skills/new.go) now return their config.Load/LoadAgentsRC/rc.Save/os.Symlink errors instead of discarding them; CreateAgent/createSkill downgrade the terminal ui.SuccessBox to a ui.WarnBox naming exactly what failed to register, without rolling back the already-written AGENT.md/SKILL.md. os.IsNotExist on .agentsrc.json stays a legitimate best-effort skip (no warning) per the audit''s loud-vs-absent distinction. Exported wrapper signatures (CreateAgent, CreateSkill, AppendSkillToAgentsRC, SkillCreationNextSteps, EnsureUserSkillLinks) are unchanged — only the unexported IO-injected units gained the error return. Ripple: commands/agents/coverage_test.go and commands/skills/seams_test.go updated for the new two-return call sites (out of nominal write_scope but required to keep the packages compiling after the signature change; no other in-flight slice touches those two files). Added commands/skills/new_test.go (did not previously exist) with the registration-warning acceptance test + legitimate-absence test; commands/agents/new_test.go got the matching pair plus a local captureStdout helper. go build ./... and go vet ./... clean repo-wide; go test ./commands/agents/... ./commands/skills/... green. PR #359 opened base master <- swallowed/8-registration-visibility, stopped before merge, no AI trailer on commit/PR.'
+recorded_at: "2026-07-09T03:11:11Z"
+delegation_id: del-se8-registration-visibility-1783565918
+artifact_paths:
+    - .agents/active/delegation-bundles/del-cg-project-local-overlay-1780781079.yaml
+    - .agents/active/delegation-bundles/del-gcc5-verify-close-unblock-1779848143.yaml
+    - .agents/active/delegation-bundles/del-l1-followups-1782677806.yaml
+    - .agents/active/delegation-bundles/del-p1c-verifier-profile-source-aware-1780784015.yaml
+    - .agents/active/delegation-bundles/del-p1e-docs-hooks-consistency-1779841818.yaml
+    - .agents/active/delegation-bundles/del-p2-hook-scripts-1779841782.yaml
+    - .agents/active/delegation-bundles/del-p3-starter-promotion-1779841783.yaml
+    - .agents/active/delegation-bundles/del-t14-import-graph-assertion-1779841818.yaml
+    - .agents/active/delegation-bundles/del-t2-config-relevance-resolver-1780554684.yaml
+    - .agents/active/delegation-bundles/del-t3-cli-readback-1779841781.yaml
+    - .agents/active/delegation-bundles/del-t4-relevance-recompute-1780556883.yaml
+    - .agents/active/delegation/gcc5-verify-close-unblock.yaml
+    - .agents/active/delegation/l1-followups.yaml
+    - .agents/active/delegation/p1c-verifier-profile-source-aware.yaml
+    - .agents/active/delegation/p1e-docs-hooks-consistency.yaml
+    - .agents/active/delegation/p2-hook-scripts.yaml
+    - .agents/active/delegation/p3-starter-promotion.yaml
+    - .agents/active/delegation/t14-import-graph-assertion.yaml
+    - .agents/active/delegation/t3-cli-readback.yaml
+    - .agents/active/merge-back/gcc5-verify-close-unblock.md
+    - .agents/active/merge-back/t3-cli-readback.md
+    - .agents/active/verification/gcc5-verify-close-unblock/custom.result.yaml
+    - .agents/active/verification/gcc5-verify-close-unblock/merge-back.result.yaml
+    - .agents/active/verification/t3-cli-readback/merge-back.result.yaml
+    - .agents/active/verification/t3-cli-readback/unit.result.yaml
+    - .agents/lessons/index.md
+    - .agents/workflow/plans/graph-backend-adapter-contract/TASKS.yaml
+    - .agents/workflow/plans/swallowed-errors-loud-atomic/PLAN.yaml
+    - .agents/workflow/plans/swallowed-errors-loud-atomic/TASKS.yaml
+    - .agentsrc.json
+    - commands/import.go
+    - commands/import_test.go
+    - commands/internal/lifecycle/deps.go
+    - commands/internal/lifecycle/project.go
+    - commands/internal/lifecycle/project_test.go
+    - commands/root.go
+    - internal/config/fetcher.go
+    - internal/config/fetcher_test.go
+    - internal/dashboard/handlers/handlers_test.go

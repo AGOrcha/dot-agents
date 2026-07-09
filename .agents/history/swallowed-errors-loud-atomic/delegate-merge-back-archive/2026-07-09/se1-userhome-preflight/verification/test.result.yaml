@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se1-userhome-preflight
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: test
+status: pass
+summary: 'go build ./... clean; targeted go test packages all green (incl. new PreflightUserHome/root PersistentPreRunE/kgHome/defaultKGHome hard-fail + override tests). gofmt/go vet clean. PR #357 open base master, STOP before merge.'
+recorded_at: "2026-07-09T03:05:16Z"
+delegation_id: del-se1-userhome-preflight-1783565716
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./internal/config/... ./commands/kg/... ./internal/graphstore/... ./commands/...

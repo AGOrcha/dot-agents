@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se10-p3-diagnostics-batch
+delegation_id: del-se10-p3-diagnostics-batch-1783565919
+decision: accept
+closed_at: "2026-07-09T03:12:55Z"

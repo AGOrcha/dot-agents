@@ -1,0 +1,27 @@
+schema_version: 1
+id: del-se8-registration-visibility-1783565918
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se8-registration-visibility
+title: 'Slice 8: agents/skills registration-step visibility'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - commands/agents/new.go
+    - commands/agents/new_test.go
+    - commands/skills/new.go
+    - commands/skills/new_test.go
+success_criteria: |-
+    appendAgentsRCStep / appendSkillToAgentsRC / ensureUserSkillLinks return
+    their config.Load/LoadAgentsRC/rc.Save/os.Symlink errors up to
+    CreateAgent/createSkill, which downgrade the ui.SuccessBox to a partial-
+    success warning naming what didn't register (should-be-LOUD, not roll
+    back the already-written AGENT.md/SKILL.md). Test: corrupt .agentsrc.json
+    -> `da agents new`/`skills new` prints a registration-failed warning, not
+    an unqualified "Created". PR base master,
+    head swallowed/8-registration-visibility.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed8Registration
+status: completed
+created_at: "2026-07-09T02:58:38Z"
+updated_at: "2026-07-09T03:11:11Z"
