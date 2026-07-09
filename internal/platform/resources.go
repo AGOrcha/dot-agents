@@ -3,6 +3,7 @@ package platform
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,12 +33,26 @@ func scopedNames(project string) []string {
 	return []string{project, "global"}
 }
 
+// resolveScopedFile returns the first candidate under
+// <agentsHome>/<bucket>/<scope>/<name> (scanning project scope then global)
+// that os.Stat confirms exists, or "" if none of the candidates exist. A
+// candidate that is genuinely absent (os.IsNotExist) is a silent skip — that
+// is the expected steady state for most (bucket, scope, name) combinations.
+// A real Stat failure (permission-denied, I/O error) is NOT the same as
+// absent: we cannot prove the candidate doesn't exist, so it is logged
+// rather than silently treated as "keep looking". The return value stays ""
+// either way — callers across platform files rely on that contract — but
+// the log line makes a masked real error distinguishable from legitimate
+// absence.
 func resolveScopedFile(agentsHome, bucket, project string, names ...string) string {
 	for _, scope := range scopedNames(project) {
 		for _, name := range names {
 			src := filepath.Join(agentsHome, bucket, scope, name)
 			if _, err := os.Stat(src); err == nil {
 				return src
+			} else if !os.IsNotExist(err) {
+				slog.Default().Warn("platform: stat failed while resolving scoped file, skipping candidate",
+					"path", src, "error", err)
 			}
 		}
 	}
@@ -76,6 +91,8 @@ func scopedBucketFileSources(agentsHome, bucket, project, name string) []string 
 	return srcs
 }
 
+// resolveScopedFileFromBuckets is resolveScopedFile's cross-bucket sibling:
+// same candidate-loop/skip-on-absence contract, same real-error visibility.
 func resolveScopedFileFromBuckets(agentsHome string, buckets []string, project string, names ...string) string {
 	for _, scope := range scopedNames(project) {
 		for _, bucket := range buckets {
@@ -83,6 +100,9 @@ func resolveScopedFileFromBuckets(agentsHome string, buckets []string, project s
 				src := filepath.Join(agentsHome, bucket, scope, name)
 				if _, err := os.Stat(src); err == nil {
 					return src
+				} else if !os.IsNotExist(err) {
+					slog.Default().Warn("platform: stat failed while resolving scoped file across buckets, skipping candidate",
+						"path", src, "error", err)
 				}
 			}
 		}

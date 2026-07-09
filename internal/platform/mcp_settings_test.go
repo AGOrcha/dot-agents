@@ -3,6 +3,7 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/testutil"
@@ -166,5 +167,29 @@ func TestResolveCanonicalSettingsFile_Found(t *testing.T) {
 	}
 	if got.SourcePath != src {
 		t.Errorf("source %q, want %q", got.SourcePath, src)
+	}
+}
+
+// TestResolveCanonicalMCPFileStatErrorSurfaced covers the real-error branch
+// in resolveCanonicalFileByExt: a candidate whose immediate parent directory
+// is unreadable must surface a distinct error (not the generic not-found
+// message a legitimately-absent scope produces), so callers can't mistake a
+// masked permission/I-O failure for "the file was never created".
+func TestResolveCanonicalMCPFileStatErrorSurfaced(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	scope := "proj"
+	testutil.WriteScopeFile(t, agentsHome, "mcp", scope, "mcp.json", []byte("{}"))
+	testutil.MakeDirUnreadable(t, filepath.Join(agentsHome, "mcp", scope))
+
+	_, err := ResolveCanonicalMCPFile(agentsHome, scope, "mcp")
+	if err == nil {
+		t.Fatal("expected an error for the unreadable scope dir")
+	}
+	if os.IsNotExist(err) {
+		t.Fatalf("real stat error must not read as not-exist, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "checking mcp candidate") {
+		t.Errorf("expected the real-error message, got %q", err.Error())
 	}
 }
