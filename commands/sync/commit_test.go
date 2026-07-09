@@ -160,3 +160,30 @@ func TestCommit_DefaultMessageWhenEmpty(t *testing.T) {
 		t.Errorf("expected default message in log:\n%s", out)
 	}
 }
+
+// TestCommit_DryRunDoesNotStage guards resolveCommitMessage's purity: a
+// --dry-run with NO message must not stage anything. The prior version ran
+// `git add -A` during message resolution — before runSyncCommit's dry-run
+// guard — so `da sync commit --dry-run` silently staged the whole tree.
+func TestCommit_DryRunDoesNotStage(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "untracked.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	cmd := newCommitCmd(deps)
+	// No -m and no positional args -> exercises resolveCommitMessage's default path.
+	if err := cmd.RunE(cmd, nil); err != nil {
+		t.Fatalf("dry-run commit: %v", err)
+	}
+
+	out, err := execabs.Command("git", "-C", agentsHome, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "?? untracked.txt") {
+		t.Errorf("dry-run must not stage; untracked.txt should stay untracked, got:\n%s", out)
+	}
+}

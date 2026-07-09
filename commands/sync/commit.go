@@ -23,7 +23,7 @@ func newCommitCmd(deps Deps) *cobra.Command {
 		),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			agentsHome := config.AgentsHome()
-			resolved := resolveCommitMessage(agentsHome, message, args)
+			resolved := resolveCommitMessage(message, args)
 			return runSyncCommit(deps, agentsHome, resolved)
 		},
 	}
@@ -31,23 +31,18 @@ func newCommitCmd(deps Deps) *cobra.Command {
 	return cmd
 }
 
-// resolveCommitMessage returns the commit message to use for `da sync
-// commit`: the explicit flag/positional-args message if provided, otherwise
-// a default message. When no message was given, it also makes sure changes
-// are staged (so a `git diff --cached` prior to commit sees them) before
-// falling back to the default.
-func resolveCommitMessage(agentsHome, message string, args []string) string {
+// resolveCommitMessage returns the commit message for `da sync commit`: the
+// explicit flag/positional-args message if provided, otherwise the default.
+// It is PURE — no git, no side effects. Staging (and surfacing its `git add -A`
+// error) is runSyncCommit's job; an earlier version staged via `git add -A`
+// here, which both swallowed that error and — because this runs before
+// runSyncCommit's dry-run guard — mutated the tree even under `--dry-run`.
+func resolveCommitMessage(message string, args []string) string {
 	if message == "" && len(args) > 0 {
 		message = strings.Join(args, " ")
 	}
 	if message == "" {
-		out, _ := execabs.Command("git", "-C", agentsHome, "diff", "--cached", "--stat", "HEAD").Output()
-		if len(out) == 0 {
-			execabs.Command("git", "-C", agentsHome, "add", "-A").Run()
-			out, _ = execabs.Command("git", "-C", agentsHome, "diff", "--cached", "--stat", "HEAD").Output()
-		}
 		message = "Update ~/.agents/ configuration"
-		_ = out
 	}
 	return message
 }
