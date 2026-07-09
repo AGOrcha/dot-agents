@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se7-delegation-visibility
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: test
+status: pass
+summary: 'go build ./...: clean. go test ./commands/workflow/...: ok (all existing + 8 new tests, incl 4 corrupt/unreadable-contract fail-closed and rollback-Remove-failure cases). go vet ./...: clean.'
+recorded_at: "2026-07-09T04:31:37Z"
+delegation_id: del-se7-delegation-visibility-1783570867
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./commands/workflow/... && go vet ./...

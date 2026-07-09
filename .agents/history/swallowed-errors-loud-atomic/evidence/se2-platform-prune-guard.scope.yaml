@@ -1,0 +1,27 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se2-platform-prune-guard
+status: draft
+mode: code
+goal: |-
+    Top blast-radius fix (active data destruction). Root cause
+    hooks.go:resolveHookSpecInScopes/ListHookSpecs -> return (*Ho…
+confidence: low
+decision_locks: []
+required_reads: []
+queries: []
+required_paths:
+    - path: internal/platform/
+      because:
+        - listed in TASKS.yaml write_scope
+optional_paths: []
+excluded_paths: []
+provides: []
+consumes: []
+final_write_scope: []
+verification_focus: []
+allowed_local_choices: []
+stop_conditions: []
+open_gaps:
+    - scope-lane graph queries skipped (no --seed-symbol or --seed-path provided)
+    - context-lane queries skipped (context-lane not ready; run 'kg warm' after authoring notes)

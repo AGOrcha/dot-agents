@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se6-graphstore-atomic
+delegation_id: del-se6-graphstore-atomic-1783565716
+decision: accept
+closed_at: "2026-07-09T03:27:02Z"

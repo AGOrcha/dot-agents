@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se1-userhome-preflight
+delegation_id: del-se1-userhome-preflight-1783565716
+decision: accept
+closed_at: "2026-07-09T03:07:41Z"

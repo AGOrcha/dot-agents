@@ -1,0 +1,31 @@
+schema_version: 1
+id: del-se6-graphstore-atomic-1783565716
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se6-graphstore-atomic
+title: 'Slice 6: graphstore atomicity + corrupt-extra visibility (top risk #3)'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - internal/graphstore/sqlite.go
+    - internal/graphstore/postgres.go
+    - internal/graphstore/crg.go
+    - internal/graphstore/sqlite_test.go
+    - internal/graphstore/postgres_test.go
+    - internal/graphstore/crg_test.go
+success_criteria: |-
+    6a (write, quick): StoreFileNodesEdges (sqlite+postgres) check
+    encodeExtra err -> abort/rollback tx instead of substituting "{}" (4
+    sites). 6b (read): decodeExtra log-and-tag on decode failure (no
+    signature change now; full error-propagation tracked as follow-up).
+    6c (crg mirror): ReadNodes/ReadEdges check os.IsNotExist before "no db",
+    count (not silent-continue) per-row Scan failures. NOTE: mcp_server.go is
+    se1's scope -- do NOT touch it here. Tests: node/edge with NaN float in
+    Extra -> whole StoreFileNodesEdges tx rolls back (GetNode not-found);
+    invalid extra JSON -> warning logged on read.
+    PR base master, head swallowed/6-graphstore-atomic.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed6Graphstore
+status: completed
+created_at: "2026-07-09T02:55:16Z"
+updated_at: "2026-07-09T03:17:08Z"

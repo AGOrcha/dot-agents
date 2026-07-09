@@ -1,0 +1,18 @@
+schema_version: 1
+id: del-se9-periph-loud-1783572544
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se9-periph-loud
+title: 'Slice 9 (periph): links/projectsync/gitwt should-be-LOUD'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - internal/links/
+    - internal/projectsync/
+    - internal/gitwt/
+success_criteria: 'P2 should-be-LOUD (proposal Slice 9 group 9d); isolated packages (no unmerged-sibling overlap); dir-scoped so _test.go auto-included. Sites: links.go handleUnmanagedOccupant/IsManagedFileLink/RemoveIfHardlinkedToAny (distinguish os.IsNotExist vs real Lstat error, fail-safe direction \u2014 unmanaged occupant must NOT be treated as vanished on a real error before overwrite); projectsync/journal.go readPendingJournalEntry + promote.go clearExistingCanonical (should-be-ATOMIC: real error must not read as absent before a destructive promote/write); projectsync/list.go ListBucket (loud); gitwt/gogit.go Prune/adminDir/worktreeDir (distinguish real error from missing). Add a test per site (reuse internal/testutil/perms*). PR base master.'
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed9Periph
+status: completed
+created_at: "2026-07-09T04:49:04Z"
+updated_at: "2026-07-09T05:10:26Z"

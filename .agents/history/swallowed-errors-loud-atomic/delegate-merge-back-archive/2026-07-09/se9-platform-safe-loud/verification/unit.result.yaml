@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se9-platform-safe-loud
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: unit
+status: pass
+summary: 'go build ./... clean; go test ./internal/platform/... PASS (95.6%25 coverage, all-new branches covered: resolveScopedFile/resolveScopedFileFromBuckets real-Stat-error logged via slog, resolveCanonicalFileByExt/ResolveCanonicalRuleFile real-Stat-error surfaced distinctly from generic not-found); go vet ./... clean. PR #364 base master.'
+recorded_at: "2026-07-09T05:23:42Z"
+delegation_id: del-se9-platform-safe-loud-1783574065
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./internal/platform/... && go vet ./...
