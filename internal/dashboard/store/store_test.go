@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/scoring"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"go.yaml.in/yaml/v3"
 )
@@ -578,6 +579,42 @@ func TestResilientCorruptSessionSidecar(t *testing.T) {
 	}
 	if run.Scored {
 		t.Errorf("corrupt session sidecar should leave run unscored: %+v", run)
+	}
+}
+
+// --- readDirState real-error visibility -------------------------------------
+
+func TestReadDirStateUnreadableRoot(t *testing.T) {
+	// A permission-denied root degrades the same as a missing one (empty
+	// state, no fatal error) but must now be logged so the swallow is
+	// distinguishable from legitimate absence.
+	root := t.TempDir()
+	writeFile(t, root, "iter-1.yaml", "schema_version: 1\niteration: 1\ncommit: \"x\"\ntests_total_pass: true\n")
+	testutil.MakeDirUnreadable(t, root)
+
+	var buf bytes.Buffer
+	s := New([]string{root}, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+	mtimes, newest, fp := s.readDirState(root)
+	if len(mtimes) != 0 || !newest.IsZero() || fp != 0 {
+		t.Errorf("readDirState(unreadable) = (%v, %v, %v), want empty/zero", mtimes, newest, fp)
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("unreadable root")) {
+		t.Errorf("expected a warning log for the unreadable root, got %q", buf.String())
+	}
+}
+
+func TestReadDirStateMissingRootNotLogged(t *testing.T) {
+	// A missing root is legitimately absent -- it must degrade the same way
+	// as an unreadable one but WITHOUT a warning (os.IsNotExist discrimination).
+	root := filepath.Join(t.TempDir(), "does-not-exist")
+	var buf bytes.Buffer
+	s := New([]string{root}, WithLogger(slog.New(slog.NewTextHandler(&buf, nil))))
+	mtimes, newest, fp := s.readDirState(root)
+	if len(mtimes) != 0 || !newest.IsZero() || fp != 0 {
+		t.Errorf("readDirState(missing) = (%v, %v, %v), want empty/zero", mtimes, newest, fp)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("missing root should not log a warning, got %q", buf.String())
 	}
 }
 

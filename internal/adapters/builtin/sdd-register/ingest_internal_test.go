@@ -1,6 +1,8 @@
 package sddregister
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +10,7 @@ import (
 	"github.com/AGOrcha/dot-agents/commands/workflow"
 	"github.com/AGOrcha/dot-agents/internal/adapters/sdk"
 	"github.com/AGOrcha/dot-agents/internal/kg/registry"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 const (
@@ -166,6 +169,42 @@ func TestParseSpecFrontmatterMissing(t *testing.T) {
 func TestListSubdirsWithFileError(t *testing.T) {
 	if _, err := listSubdirsWithFile(filepath.Join(t.TempDir(), "missing"), specFileName); err == nil {
 		t.Fatal("listSubdirsWithFile on missing dir: nil error")
+	}
+}
+
+// TestFileExists covers the three-way fileExists contract: present (true, no
+// log), genuinely absent (false, no log), and permission-denied (false, but
+// now logged so the swallow is distinguishable from legitimate absence).
+// os.Stat needs execute permission on the PARENT of the target, not on the
+// target itself, so the permission-denied case chmods the parent dir.
+func TestFileExists(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "design.md")
+	writeFile(t, present, "# spec\n")
+	if !fileExists(present) {
+		t.Error("fileExists(present file) = false, want true")
+	}
+
+	if fileExists(filepath.Join(dir, "nope.md")) {
+		t.Error("fileExists(missing file) = true, want false")
+	}
+
+	parent := t.TempDir()
+	sub := filepath.Join(parent, "spec-id")
+	target := filepath.Join(sub, "design.md")
+	writeFile(t, target, "# spec\n")
+	testutil.MakeDirUnreadable(t, parent)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	if fileExists(target) {
+		t.Error("fileExists(permission-denied file) = true, want false")
+	}
+	if !bytes.Contains(buf.Bytes(), []byte("stat failed")) {
+		t.Errorf("expected a warning log for the permission-denied stat, got %q", buf.String())
 	}
 }
 

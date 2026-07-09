@@ -119,7 +119,7 @@ type sessionCtx struct {
 // deletion of a non-newest file all invalidate, where a max-mtime key would
 // serve stale data.
 func (s *DiskStore) snapshot(root string) rootSnapshot {
-	mtimes, newest, fp := readDirState(root)
+	mtimes, newest, fp := s.readDirState(root)
 	if v, ok := s.cache.get(rootKey(root), fp); ok {
 		return v.(rootSnapshot)
 	}
@@ -132,11 +132,16 @@ func (s *DiskStore) snapshot(root string) rootSnapshot {
 // readDirState lists root once, returning per-file mtimes, the newest mtime
 // (for last_update / health), and an FNV-1a fingerprint over every (name,
 // mtime) pair. os.ReadDir returns entries sorted by filename, so the hash is
-// deterministic. A missing/unreadable root yields an empty map, the zero time,
-// and a zero fingerprint.
-func readDirState(root string) (map[string]time.Time, time.Time, int64) {
+// deterministic. A missing root yields an empty map, the zero time, and a
+// zero fingerprint, same as an empty root — legitimately absent. Any other
+// ReadDir error (permission denied, I/O fault) degrades the same way but is
+// logged, matching the decodeYAML/resilientRecords siblings below.
+func (s *DiskStore) readDirState(root string) (map[string]time.Time, time.Time, int64) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			s.logger.Warn("dashboard/store: skip unreadable root", "root", root, "error", err)
+		}
 		return map[string]time.Time{}, time.Time{}, 0
 	}
 	m := make(map[string]time.Time, len(entries))
