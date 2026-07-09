@@ -178,6 +178,140 @@ func TestCheckFanoutWriteScopeConflicts_SameTaskAllowed(t *testing.T) {
 	}
 }
 
+// TestCheckFanoutWriteScopeConflicts_CorruptContractFailsClosed seeds a
+// corrupt delegation contract file alongside a valid one and asserts the
+// conflict check fails closed (returns a non-nil error) and warns loudly
+// naming the corrupt file, instead of silently excluding its unknowable
+// write_scope from overlap detection.
+func TestCheckFanoutWriteScopeConflicts_CorruptContractFailsClosed(t *testing.T) {
+	repo := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339)
+	valid := &DelegationContract{
+		SchemaVersion: 1, ID: "del-valid", ParentPlanID: "p1", ParentTaskID: "tx",
+		Title: "x", WriteScope: []string{"internal/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, valid); err != nil {
+		t.Fatalf("seed valid contract: %v", err)
+	}
+	corrupt := filepath.Join(delegationDir(repo), "ty.yaml")
+	if err := os.WriteFile(corrupt, []byte("not: [valid: yaml"), 0644); err != nil {
+		t.Fatalf("seed corrupt contract: %v", err)
+	}
+
+	var err error
+	out := captureStdoutToString(t, func() {
+		err = checkFanoutWriteScopeConflicts(repo, []string{"commands/foo.go"}, "tz")
+	})
+	if err == nil {
+		t.Fatal("expected checkFanoutWriteScopeConflicts to fail closed on a corrupt contract")
+	}
+	if !strings.Contains(err.Error(), "unreadable/corrupt") {
+		t.Fatalf("expected fail-closed error to name the corrupt state, got: %v", err)
+	}
+	if !strings.Contains(out, "ty.yaml") {
+		t.Fatalf("expected a loud warning naming the corrupt file, got: %q", out)
+	}
+}
+
+// TestCheckFanoutWriteScopeConflicts_UnreadableContractFailsClosed reuses
+// internal/testutil's cross-platform unreadable-file helper (rather than a
+// raw chmod) to cover the permission-denied read variant of the same
+// fail-closed contract.
+func TestCheckFanoutWriteScopeConflicts_UnreadableContractFailsClosed(t *testing.T) {
+	repo := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339)
+	valid := &DelegationContract{
+		SchemaVersion: 1, ID: "del-valid", ParentPlanID: "p1", ParentTaskID: "tx",
+		Title: "x", WriteScope: []string{"internal/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, valid); err != nil {
+		t.Fatalf("seed valid contract: %v", err)
+	}
+	unreadable := &DelegationContract{
+		SchemaVersion: 1, ID: "del-unreadable", ParentPlanID: "p1", ParentTaskID: "ty",
+		Title: "y", WriteScope: []string{"internal/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, unreadable); err != nil {
+		t.Fatalf("seed unreadable contract: %v", err)
+	}
+	testutil.MakeFileUnreadable(t, filepath.Join(delegationDir(repo), "ty.yaml"))
+
+	err := checkFanoutWriteScopeConflicts(repo, []string{"commands/foo.go"}, "tz")
+	if err == nil || !strings.Contains(err.Error(), "unreadable/corrupt") {
+		t.Fatalf("expected fail-closed error, got %v", err)
+	}
+}
+
+// TestListDelegationContractsWithWarnings_CorruptEntryWarnsAndExcludes covers
+// the warnings-aware core directly: a corrupt entry is excluded from the
+// returned contracts (matching listDelegationContracts's historical
+// best-effort behavior for its other callers) but produces exactly one
+// warning naming the offending file, rather than vanishing without a trace.
+func TestListDelegationContractsWithWarnings_CorruptEntryWarnsAndExcludes(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-good", "plan", "del-good")
+	if err := os.WriteFile(filepath.Join(delegationDir(repo), "broken.yaml"), []byte("not: valid: yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	contracts, warnings, err := listDelegationContractsWithWarnings(repo)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(contracts) != 1 {
+		t.Fatalf("expected 1 valid contract, got %d", len(contracts))
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "broken.yaml") {
+		t.Fatalf("expected one warning naming broken.yaml, got %v", warnings)
+	}
+}
+
+// TestListDelegationContractsWithWarnings_EmptyDirNoWarnings keeps the
+// legitimate-absence case (no delegation dir yet, e.g. a fresh project) free
+// of spurious warnings — only actual read/parse failures should surface.
+func TestListDelegationContractsWithWarnings_EmptyDirNoWarnings(t *testing.T) {
+	repo := t.TempDir()
+	contracts, warnings, err := listDelegationContractsWithWarnings(repo)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(contracts) != 0 || len(warnings) != 0 {
+		t.Fatalf("expected no contracts/warnings for legitimate-absence dir, got %d/%d", len(contracts), len(warnings))
+	}
+}
+
+// TestListDelegationContracts_WarnsOnCorruptEntry asserts the
+// listDelegationContracts wrapper (used by loadActiveDelegationTaskSet and
+// the workflow-state delegation summary) still surfaces a loud warning for a
+// corrupt entry even though its own return signature stays best-effort
+// (nil error, entry silently excluded from the slice) for backward
+// compatibility with those out-of-scope callers.
+func TestListDelegationContracts_WarnsOnCorruptEntry(t *testing.T) {
+	repo := t.TempDir()
+	saveTestDelegationContract(t, repo, "task-good", "plan", "del-good")
+	if err := os.WriteFile(filepath.Join(delegationDir(repo), "broken.yaml"), []byte("not: valid: yaml"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	var contracts []DelegationContract
+	var err error
+	out := captureStdoutToString(t, func() {
+		contracts, err = listDelegationContracts(repo)
+	})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(contracts) != 1 {
+		t.Fatalf("expected 1 valid contract, got %d", len(contracts))
+	}
+	if !strings.Contains(out, "broken.yaml") {
+		t.Fatalf("expected a loud warning naming broken.yaml, got: %q", out)
+	}
+}
+
 func TestPersistFanoutBundle_BundleSaveRollback(t *testing.T) {
 	repo := t.TempDir()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -203,6 +337,49 @@ func TestPersistFanoutBundle_BundleSaveRollback(t *testing.T) {
 	contractPath := filepath.Join(delegationDir(repo), "t1.yaml")
 	if _, err := os.Stat(contractPath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("expected contract file to be removed after bundle save failure, got stat err=%v", err)
+	}
+}
+
+// TestPersistFanoutBundle_RemoveFailureLogsWarning covers the rollback path
+// when saveDelegationBundleWithBase fails AND the subsequent orphan-contract
+// os.Remove also fails: the bundle-save error must still surface, plus a
+// loud warning naming the orphaned contract path (rather than the historical
+// `_ = os.Remove(...)`, which discarded the second failure entirely).
+func TestPersistFanoutBundle_RemoveFailureLogsWarning(t *testing.T) {
+	repo := t.TempDir()
+	now := time.Now().UTC().Format(time.RFC3339)
+	contract := &DelegationContract{
+		SchemaVersion: 1, ID: "del-1", ParentPlanID: "p1", ParentTaskID: "t1",
+		Title: "x", WriteScope: []string{"commands/"}, Status: "active",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := saveDelegationContract(repo, contract); err != nil {
+		t.Fatalf("seed contract: %v", err)
+	}
+
+	// Deny delete on the delegation dir's children so the rollback
+	// os.Remove(contractPath) fails after the (unrelated, validation-only)
+	// bundle save failure below — saveDelegationBundleWithBase writes to a
+	// different directory (delegationBundlesDir), so this denial only
+	// affects the rollback step under test.
+	testutil.MakeDirWriteDenied(t, delegationDir(repo))
+
+	bundle := &delegationBundleYAML{} // empty DelegationID -> save fails before touching disk
+
+	var err error
+	out := captureStdoutToString(t, func() {
+		err = persistFanoutBundle(repo, contract, bundle)
+	})
+	if err == nil || !strings.Contains(err.Error(), "save delegation bundle") {
+		t.Fatalf("expected bundle save error, got %v", err)
+	}
+	if !strings.Contains(out, "rollback could not remove orphaned delegation contract") {
+		t.Fatalf("expected rollback-remove-failure warning, got: %q", out)
+	}
+
+	contractPath := filepath.Join(delegationDir(repo), "t1.yaml")
+	if _, statErr := os.Stat(contractPath); statErr != nil {
+		t.Errorf("expected contract file to survive the denied rollback, got stat err=%v", statErr)
 	}
 }
 

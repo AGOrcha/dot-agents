@@ -154,16 +154,41 @@ func saveDelegationContract(projectPath string, c *DelegationContract) error {
 	return osWriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644)
 }
 
+// listDelegationContracts loads every delegation contract file in the
+// delegation directory. A per-entry read/parse failure is not silently
+// dropped: listDelegationContractsWithWarnings logs one ui.Warn line per
+// skipped entry (visible to every caller of this wrapper — including the
+// active-delegation/plan-lock accounting in loadActiveDelegationTaskSet and
+// the workflow-state delegation summary) while still excluding the corrupt
+// entry from the returned slice, preserving the historical best-effort
+// signature those callers depend on. checkFanoutWriteScopeConflicts, which
+// must not let a corrupt contract silently defeat write-scope-conflict
+// detection, calls listDelegationContractsWithWarnings directly so it can
+// fail closed instead of proceeding as if the corrupt entry never existed.
 func listDelegationContracts(projectPath string) ([]DelegationContract, error) {
+	contracts, warnings, err := listDelegationContractsWithWarnings(projectPath)
+	for _, w := range warnings {
+		ui.Warn(w)
+	}
+	return contracts, err
+}
+
+// listDelegationContractsWithWarnings is listDelegationContracts's core
+// implementation. Alongside the successfully loaded contracts it returns one
+// warning string per contract file that could not be read or parsed, so a
+// caller that cannot tolerate an unknown write_scope can fail closed rather
+// than silently excluding the corrupt entry from its accounting.
+func listDelegationContractsWithWarnings(projectPath string) ([]DelegationContract, []string, error) {
 	dir := delegationDir(projectPath)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var contracts []DelegationContract
+	var warnings []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -171,11 +196,15 @@ func listDelegationContracts(projectPath string) ([]DelegationContract, error) {
 		taskID := strings.TrimSuffix(e.Name(), ".yaml")
 		c, err := loadDelegationContract(projectPath, taskID)
 		if err != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"delegation contract %s is unreadable/corrupt, excluded from write-scope and plan-lock accounting: %v",
+				e.Name(), err,
+			))
 			continue
 		}
 		contracts = append(contracts, *c)
 	}
-	return contracts, nil
+	return contracts, warnings, nil
 }
 
 func writeScopeOverlaps(existing []DelegationContract, newScope []string, excludeTaskID string) []string {
@@ -1108,10 +1137,26 @@ func resolveFanoutWriteScope(seed []string, csv string, explicit bool, fallback 
 	return seed
 }
 
+// checkFanoutWriteScopeConflicts refuses a fanout whose write_scope overlaps
+// an existing pending/active delegation. It uses
+// listDelegationContractsWithWarnings (not the listDelegationContracts
+// wrapper) so a corrupt/unreadable contract is never silently excluded from
+// this safety check: since its write_scope and status cannot be parsed, we
+// cannot know whether it would have conflicted, so the check fails closed
+// rather than approving a fanout past an unknown scope.
 func checkFanoutWriteScopeConflicts(projectPath string, writeScope []string, taskID string) error {
-	existing, err := listDelegationContracts(projectPath)
+	existing, warnings, err := listDelegationContractsWithWarnings(projectPath)
 	if err != nil {
 		return fmt.Errorf("list delegations: %w", err)
+	}
+	if len(warnings) > 0 {
+		for _, w := range warnings {
+			ui.Warn(w)
+		}
+		return fmt.Errorf(
+			"delegation rejected: %d existing delegation contract(s) unreadable/corrupt, cannot verify write-scope conflicts (see warnings above); fix or remove them before fanout",
+			len(warnings),
+		)
 	}
 	conflicts := writeScopeOverlaps(existing, writeScope, taskID)
 	if len(conflicts) == 0 {
@@ -1137,7 +1182,9 @@ func persistFanoutBundle(projectPath string, contract *DelegationContract, bundl
 func persistFanoutBundleWithBase(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML, res *baseResolution) error {
 	if err := saveDelegationBundleWithBase(projectPath, bundle, res); err != nil {
 		contractPath := filepath.Join(delegationDir(projectPath), contract.ParentTaskID+".yaml")
-		_ = os.Remove(contractPath)
+		if rmErr := os.Remove(contractPath); rmErr != nil {
+			ui.Warn(fmt.Sprintf("bundle save failed and rollback could not remove orphaned delegation contract %s: %v", contractPath, rmErr))
+		}
 		return fmt.Errorf("save delegation bundle: %w", err)
 	}
 	return nil
@@ -1986,7 +2033,9 @@ func materializeFanoutContractAndBundle(cmd *cobra.Command, req fanoutMaterializ
 	})
 	if err != nil {
 		contractPath := filepath.Join(delegationDir(req.Project.Path), req.TaskID+".yaml")
-		_ = os.Remove(contractPath)
+		if rmErr := os.Remove(contractPath); rmErr != nil {
+			ui.Warn(fmt.Sprintf("bundle build failed and rollback could not remove orphaned delegation contract %s: %v", contractPath, rmErr))
+		}
 		return nil, err
 	}
 	if err := persistFanoutBundleWithBase(req.Project.Path, contract, bundle, req.BaseRes); err != nil {
