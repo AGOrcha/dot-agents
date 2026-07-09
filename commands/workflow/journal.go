@@ -3,8 +3,10 @@ package workflow
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"sort"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/journal"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/execabs"
 )
@@ -429,10 +432,17 @@ func runWorkflowJournalShow(out io.Writer, limit int, all bool) error {
 }
 
 // loadSnapshotOrNil returns the persisted snapshot, or nil when none exists yet
-// (a never-snapshotted repo is a normal, non-error state for `show`).
+// (a never-snapshotted repo is a normal, non-error state for `show`). A REAL
+// load error — corrupt snapshot.json, permission denied — is distinguished
+// from legitimate absence and warned about, instead of being silently
+// indistinguishable from "no snapshot yet" (which would defeat `journal
+// show`'s purpose of surfacing recovery-snapshot health).
 func loadSnapshotOrNil(repoPath string) *journal.SnapshotState {
 	snap, err := journal.LoadSnapshot(repoPath)
 	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			ui.Warn(fmt.Sprintf("journal snapshot unreadable, showing recent events only: %v", err))
+		}
 		return nil
 	}
 	return &snap

@@ -343,3 +343,129 @@ func TestDriftPlanScanPhase_SkipsNonDirAndUnreadablePlanFile(t *testing.T) {
 		t.Errorf("expected no archived inconsistencies recorded, got %v", rep.InconsistentArchivedPlanIDs)
 	}
 }
+
+// TestDriftCheckpointPhase_UnreadableCheckpoint drives the REAL-read-error
+// branch (drift.go:94-99): checkpoint.yaml exists but os.ReadFile fails with
+// something other than IsNotExist. The warning must name the file as
+// unreadable, distinct from the generic "no checkpoint found" message used
+// for legitimate absence.
+func TestDriftCheckpointPhase_UnreadableCheckpoint(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("AGENTS_HOME", tmp)
+
+	ctx := filepath.Join(tmp, "context", "unreadable-cp")
+	if err := os.MkdirAll(ctx, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cpPath := filepath.Join(ctx, "checkpoint.yaml")
+	if err := os.WriteFile(cpPath, []byte("timestamp: '2020-01-01T00:00:00Z'\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, cpPath)
+
+	rep := &RepoDriftReport{CheckpointAgeDays: -1}
+	driftCheckpointPhase(rep, ManagedProject{Name: "unreadable-cp"}, 7)
+	if !rep.MissingCheckpoint {
+		t.Error("expected MissingCheckpoint true even on a real read error")
+	}
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "checkpoint.yaml unreadable") {
+			found = true
+		}
+		if w == "no checkpoint found" {
+			t.Error("real read error must not be reported as the generic absence message")
+		}
+	}
+	if !found {
+		t.Errorf("expected an 'unreadable' warning, got %v", rep.Warnings)
+	}
+}
+
+// TestDriftPlanScanPhase_UnreadablePlansDir drives the real ReadDir-error
+// branch (drift.go:167-173): workflow/plans/ exists (MissingPlanStructure
+// stays false) but cannot be enumerated. The scan must warn instead of
+// silently reporting zero plans.
+func TestDriftPlanScanPhase_UnreadablePlansDir(t *testing.T) {
+	repo := t.TempDir()
+	plansDir := filepath.Join(repo, ".agents", "workflow", "plans")
+	if err := os.MkdirAll(plansDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadableDir(t, plansDir)
+
+	rep := &RepoDriftReport{}
+	driftPlanScanPhase(rep, ManagedProject{Path: repo})
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "could not scan workflow/plans/") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'could not scan' warning, got %v", rep.Warnings)
+	}
+}
+
+// TestDriftPlanScanPhase_UnreadablePlanFile drives the real ReadFile-error
+// branch on an individual PLAN.yaml (drift.go:181-186): the plan directory
+// exists but its PLAN.yaml cannot be read (not "doesn't exist"). The scan
+// must warn and continue to the next entry, not skip silently.
+func TestDriftPlanScanPhase_UnreadablePlanFile(t *testing.T) {
+	repo := t.TempDir()
+	planDir := filepath.Join(repo, ".agents", "workflow", "plans", "locked-plan")
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	planFile := filepath.Join(planDir, "PLAN.yaml")
+	if err := os.WriteFile(planFile, []byte("status: active\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, planFile)
+
+	rep := &RepoDriftReport{}
+	driftPlanScanPhase(rep, ManagedProject{Path: repo})
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "could not read locked-plan/PLAN.yaml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'could not read' warning, got %v", rep.Warnings)
+	}
+	if len(rep.CompletedPlanIDs) != 0 || len(rep.InconsistentArchivedPlanIDs) != 0 {
+		t.Error("unreadable plan file must not record a status")
+	}
+}
+
+// TestDriftPlanScanPhase_MalformedPlanYAML drives extractPlanStatusChecked's
+// error branch (drift.go:188-191): PLAN.yaml exists and reads fine but fails
+// to parse as YAML. The scan must warn distinctly from "could not read" and
+// must not record a status for that plan.
+func TestDriftPlanScanPhase_MalformedPlanYAML(t *testing.T) {
+	repo := t.TempDir()
+	planDir := filepath.Join(repo, ".agents", "workflow", "plans", "corrupt-plan")
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "PLAN.yaml"), []byte("status: [unterminated"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rep := &RepoDriftReport{}
+	driftPlanScanPhase(rep, ManagedProject{Path: repo})
+	found := false
+	for _, w := range rep.Warnings {
+		if strings.Contains(w, "could not parse corrupt-plan/PLAN.yaml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a 'could not parse' warning, got %v", rep.Warnings)
+	}
+	if len(rep.CompletedPlanIDs) != 0 || len(rep.InconsistentArchivedPlanIDs) != 0 {
+		t.Error("malformed PLAN.yaml must not record a status")
+	}
+}

@@ -1317,7 +1317,11 @@ func annotateEligibleTasks(projectPath string, tasks []workflowNextTaskSuggestio
 			WriteScopeDeclared:         len(t.WriteScope) > 0,
 		}
 
-		// Check for evidence sidecar.
+		// Check for evidence sidecar. A missing sidecar (os.IsNotExist) is
+		// legitimate absence — most tasks have none. A REAL read error
+		// (permission denied, TOCTOU) is silently indistinguishable from
+		// "no evidence" without this check, which would defeat eligible's
+		// evidence-confidence signal without any indication why.
 		sidecarPath := deriveScopeEvidencePath(projectPath, t.PlanID, t.TaskID)
 		data, err := os.ReadFile(sidecarPath)
 		if err == nil {
@@ -1334,6 +1338,9 @@ func annotateEligibleTasks(projectPath string, tasks []workflowNextTaskSuggestio
 		} else {
 			at.HasEvidence = false
 			at.EvidenceConfidence = "none"
+			if !os.IsNotExist(err) {
+				ui.Warn(fmt.Sprintf("evidence sidecar unreadable for %s/%s, treating as no-evidence: %v", t.PlanID, t.TaskID, err))
+			}
 		}
 
 		annotated[i] = at
@@ -2060,6 +2067,11 @@ func runWorkflowPlanCreate(planID, title, summary, owner, successCriteria, verif
 	defer func() { journalTier1(project.Path, journal.CmdPlanCreate, input, observed, ok) }()
 	if _, err := os.Stat(dir); err == nil {
 		return fmt.Errorf("plan %q already exists at %s", planID, config.DisplayPath(dir))
+	} else if !os.IsNotExist(err) {
+		// A real Stat error (permission denied, TOCTOU) must not be treated
+		// as "no collision" — that would let plan create silently write over
+		// or beside a directory it couldn't actually verify was absent.
+		return fmt.Errorf("check for existing plan %q at %s: %w", planID, config.DisplayPath(dir), err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	plan := &CanonicalPlan{

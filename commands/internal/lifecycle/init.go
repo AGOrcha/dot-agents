@@ -337,9 +337,14 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 		return err
 	}
 
-	// State dir — best-effort idempotent create.
-	_ = deps.MkdirAll(config.AgentsStateDir(), 0755)
-	ui.Bullet("ok", "Created state directory")
+	// State dir — best-effort idempotent create; a real failure here must not
+	// be reported as "ok" (MkdirAll already no-ops when the dir exists, so
+	// any error is a genuine I/O/permission fault, not legitimate absence).
+	if err := deps.MkdirAll(config.AgentsStateDir(), 0755); err != nil {
+		ui.Warn(fmt.Sprintf("could not create state directory %s: %v", config.AgentsStateDir(), err))
+	} else {
+		ui.Bullet("ok", "Created state directory")
+	}
 
 	ui.SuccessBox("Initialization complete!",
 		"Add your first project: da add ~/path/to/project",
@@ -435,8 +440,16 @@ func createInitialAgentsDirs(agentsHome string, deps initDirMaker) error {
 // pre-populated registry.
 func seedInitialConfig(agentsHome string) error {
 	cfgPath := filepath.Join(agentsHome, "config.json")
-	if _, err := os.Stat(cfgPath); !(os.IsNotExist(err) || InitForceFn()) {
-		return nil
+	_, statErr := os.Stat(cfgPath)
+	switch {
+	case statErr == nil && !InitForceFn():
+		return nil // config.json already exists; not forcing overwrite.
+	case statErr != nil && !os.IsNotExist(statErr) && !InitForceFn():
+		// A real Stat error (permission denied, etc.) is not the same as
+		// "config.json doesn't exist yet" — surface it instead of silently
+		// skipping config creation (da init would otherwise report success
+		// without writing the foundational config file).
+		return fmt.Errorf("checking for existing config.json: %w", statErr)
 	}
 	cfg := &config.Config{
 		Version:  1,

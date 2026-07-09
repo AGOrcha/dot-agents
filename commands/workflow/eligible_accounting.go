@@ -205,27 +205,46 @@ func collectTaskStatuses(projectPath string, planFilter []string) ([]string, err
 	}
 	var statuses []string
 	for _, id := range ids {
-		statuses = append(statuses, planTaskStatuses(projectPath, id)...)
+		st, err := planTaskStatuses(projectPath, id)
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, st...)
 	}
 	return statuses, nil
 }
 
-// planTaskStatuses returns the statuses of an active plan's tasks, or nil when
-// the plan is missing, not active, or its task file cannot be loaded.
-func planTaskStatuses(projectPath, planID string) []string {
+// planTaskStatuses returns the statuses of an active plan's tasks. A
+// missing/inactive plan, or a missing TASKS.yaml for it, is a legitimate
+// skip: (nil, nil). A REAL load/parse error (corrupt PLAN.yaml/TASKS.yaml,
+// permission denied) is surfaced instead of silently understating in-flight
+// concurrency — this feeds `da workflow slots`' occupied-count, which the
+// orchestrator relies on to stay within max_parallel_tasks; a corrupt
+// TASKS.yaml must abort the ledger, not quietly report fewer occupied slots
+// than actually exist.
+func planTaskStatuses(projectPath, planID string) ([]string, error) {
 	plan, err := loadCanonicalPlan(projectPath, planID)
-	if err != nil || plan.Status != "active" {
-		return nil
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("loading plan %s: %w", planID, err)
+	}
+	if plan.Status != "active" {
+		return nil, nil
 	}
 	tf, err := loadCanonicalTasks(projectPath, planID)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("loading tasks for plan %s: %w", planID, err)
 	}
 	out := make([]string, 0, len(tf.Tasks))
 	for _, t := range tf.Tasks {
 		out = append(out, t.Status)
 	}
-	return out
+	return out, nil
 }
 
 // resolveMaxParallelTasks reads the configured slot budget (design.md §2.9

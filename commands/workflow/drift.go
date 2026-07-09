@@ -65,13 +65,23 @@ type RepoDriftReport struct {
 // extractPlanStatus reads the status field from a PLAN.yaml byte slice.
 // Returns empty string if parsing fails or status is absent.
 func extractPlanStatus(data []byte) string {
+	status, _ := extractPlanStatusChecked(data)
+	return status
+}
+
+// extractPlanStatusChecked is extractPlanStatus's error-aware twin: it
+// additionally reports whether the YAML failed to parse (vs. parsing fine
+// but the status field simply being absent), so driftPlanScanPhase can
+// distinguish "this PLAN.yaml is corrupt" from "no status field" instead of
+// treating both identically as silent no-signal.
+func extractPlanStatusChecked(data []byte) (string, error) {
 	var plan struct {
 		Status string `yaml:"status"`
 	}
 	if err := yaml.Unmarshal(data, &plan); err != nil {
-		return ""
+		return "", err
 	}
-	return plan.Status
+	return plan.Status, nil
 }
 
 func driftCheckpointPhase(report *RepoDriftReport, project ManagedProject, checkpointStaleDays int) {
@@ -79,7 +89,14 @@ func driftCheckpointPhase(report *RepoDriftReport, project ManagedProject, check
 	checkpointData, err := os.ReadFile(checkpointPath)
 	if err != nil {
 		report.MissingCheckpoint = true
-		report.Warnings = append(report.Warnings, "no checkpoint found")
+		if os.IsNotExist(err) {
+			report.Warnings = append(report.Warnings, "no checkpoint found")
+		} else {
+			// A REAL read error (permission denied, etc.) is not the same as
+			// "never checkpointed" — say so instead of reusing the generic
+			// absence message, which would defeat the drift check's purpose.
+			report.Warnings = append(report.Warnings, fmt.Sprintf("checkpoint.yaml unreadable: %v", err))
+		}
 		return
 	}
 	var cp workflowCheckpoint
@@ -148,6 +165,12 @@ func driftPlanScanPhase(report *RepoDriftReport, project ManagedProject) {
 	plansDir := filepath.Join(project.Path, driftAgentsDir, "workflow", "plans")
 	entries, err := os.ReadDir(plansDir)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			// MissingPlanStructure already covers "plans/ doesn't exist"; a
+			// real ReadDir error here (permission denied, TOCTOU) must not
+			// be silent — it means this scan ran zero plans with no signal.
+			report.Warnings = append(report.Warnings, fmt.Sprintf("could not scan workflow/plans/: %v", err))
+		}
 		return
 	}
 	for _, e := range entries {
@@ -157,9 +180,17 @@ func driftPlanScanPhase(report *RepoDriftReport, project ManagedProject) {
 		planFile := filepath.Join(plansDir, e.Name(), "PLAN.yaml")
 		data, err := os.ReadFile(planFile)
 		if err != nil {
+			if !os.IsNotExist(err) {
+				report.Warnings = append(report.Warnings, fmt.Sprintf("could not read %s/PLAN.yaml: %v", e.Name(), err))
+			}
 			continue
 		}
-		recordPlanStatusDrift(report, e.Name(), extractPlanStatus(data))
+		status, err := extractPlanStatusChecked(data)
+		if err != nil {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("could not parse %s/PLAN.yaml: %v", e.Name(), err))
+			continue
+		}
+		recordPlanStatusDrift(report, e.Name(), status)
 	}
 }
 

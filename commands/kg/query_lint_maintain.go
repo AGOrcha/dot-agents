@@ -693,7 +693,16 @@ func countSharedKeywords(a, b map[string]bool) int {
 func lintIntegrityViolations(io kgIO, kgHomeDir string, notes map[string]*GraphNote) []LintResult {
 	m, err := loadManifest(io, kgHomeDir)
 	if err != nil {
-		return nil // manifest unreadable → skip check
+		// loadManifest already treats a missing manifest as legitimate absence
+		// (empty manifest, nil error); reaching here means a REAL error — a
+		// corrupt manifest.json or an unreadable file. Surface it instead of
+		// silently skipping the integrity check (which would defeat its purpose).
+		return []LintResult{{
+			Check:    "integrity_manifest_unreadable",
+			Severity: "error",
+			Message:  fmt.Sprintf("integrity manifest unreadable, skipping integrity check: %v", err),
+			Path:     integrityManifestPath(kgHomeDir),
+		}}
 	}
 	var results []LintResult
 	for id, note := range notes {

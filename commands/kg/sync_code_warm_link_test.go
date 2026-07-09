@@ -136,6 +136,43 @@ func TestCheckCRGReadiness_UnbuiltRequireGraph(t *testing.T) {
 	})
 }
 
+// TestCheckCRGReadiness_StatusError_RequireGraphBlocks drives the should-be-
+// LOUD fix for the --require-graph correctness bug: when Status() itself
+// returns a REAL error (distinct from "CRG not installed", which Status()
+// reports via status.State with a nil error), requireGraph=true must abort
+// instead of silently returning nil and bypassing the flag's contract.
+func TestCheckCRGReadiness_StatusError_RequireGraphBlocks(t *testing.T) {
+	orig := crgBridgeStatus
+	t.Cleanup(func() { crgBridgeStatus = orig })
+	crgBridgeStatus = func(string) (*graphstore.CRGStatus, error) { return nil, fmt.Errorf("status seam failure") }
+
+	repo := t.TempDir()
+	out := captureStdout(t, func() {
+		if err := checkCRGReadiness(repo, true); err == nil {
+			t.Error("expected error when Status() fails and requireGraph=true")
+		}
+	})
+	if !strings.Contains(string(out), "unavailable") {
+		t.Errorf("expected a warning that code graph status is unavailable, got: %q", out)
+	}
+}
+
+// TestCheckCRGReadiness_StatusError_RequireGraphFalse asserts the
+// non-strict path still just warns and returns nil — unchanged behavior for
+// callers that don't pass --require-graph.
+func TestCheckCRGReadiness_StatusError_RequireGraphFalse(t *testing.T) {
+	orig := crgBridgeStatus
+	t.Cleanup(func() { crgBridgeStatus = orig })
+	crgBridgeStatus = func(string) (*graphstore.CRGStatus, error) { return nil, fmt.Errorf("status seam failure") }
+
+	repo := t.TempDir()
+	captureStdout(t, func() {
+		if err := checkCRGReadiness(repo, false); err != nil {
+			t.Errorf("unexpected error when requireGraph=false: %v", err)
+		}
+	})
+}
+
 // TestRunKGBuild_JSONOutput drives the build command through a fake CRG
 // binary and asserts the JSON shape.
 func TestRunKGBuild_JSONOutput(t *testing.T) {

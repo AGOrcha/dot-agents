@@ -9,6 +9,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // ---------- removeProjectDirs ----------
@@ -568,6 +569,37 @@ func TestRunRemove_MissingProjectDirStillUnregisters(t *testing.T) {
 	reloaded, _ := config.Load()
 	if reloaded.GetProjectPath("ghost") != "" {
 		t.Error("ghost should still be unregistered when path missing")
+	}
+}
+
+// TestRemoveProjectLinks_StatErrorPreservesRegistration drives the REAL
+// Stat-error branch (remove.go: os.Stat(projectPath) in removeProjectLinks):
+// the directory exists but cannot be verified (parent unreadable), which
+// must NOT be treated the same as "directory not found" — that would let
+// runRemove's caller unregister the project while its links/content are
+// still on disk but unverifiable, orphaning them. Denies traversal into the
+// project dir's parent so os.Stat(projectPath) fails with a non-ENOENT error.
+func TestRemoveProjectLinks_StatErrorPreservesRegistration(t *testing.T) {
+	parent := t.TempDir()
+	projectPath := filepath.Join(parent, "proj")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	err := removeProjectLinks("proj", projectPath)
+	if err == nil {
+		t.Fatal("expected an error when the project directory cannot be stat-ed")
+	}
+	if !strings.Contains(err.Error(), "could not verify project directory") {
+		t.Errorf("expected a 'could not verify' error, got: %v", err)
+	}
+	cliErr, ok := err.(*CLIError)
+	if !ok {
+		t.Fatalf("expected *CLIError with a retry hint, got %T: %v", err, err)
+	}
+	if len(cliErr.Hints) == 0 || !strings.Contains(cliErr.Hints[0], "PRESERVED") {
+		t.Errorf("expected the registration-preserved hint, got: %v", cliErr.Hints)
 	}
 }
 

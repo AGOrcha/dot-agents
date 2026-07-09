@@ -249,8 +249,11 @@ func TestCommitDisabledFromPrefsDefaultFalse(t *testing.T) {
 	}
 }
 
-// A corrupted preferences.local.yaml is treated as "could not read prefs →
-// fall back to enabled" rather than crashing the command. Surfaces the
+// A corrupted preferences.local.yaml is a REAL read error (not "no prefs
+// file"), so commitDisabledFromPrefs fails safe: skip the auto-commit
+// (disabled=true) rather than silently falling back to "not disabled",
+// which would run the commit flow even though the actual (unreadable)
+// preference might be commit.disable=true. Surfaces the
 // resolvePreferences-error branch.
 func TestCommitDisabledFromPrefsHandlesCorruptedPrefs(t *testing.T) {
 	repo := initWorkflowTestRepo(t)
@@ -264,9 +267,12 @@ func TestCommitDisabledFromPrefsHandlesCorruptedPrefs(t *testing.T) {
 	if err := os.WriteFile(localPath, []byte("not: [valid yaml\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	disabled, _ := commitDisabledFromPrefs()
-	if disabled {
-		t.Error("disabled = true on corrupted prefs, want false (safe default)")
+	disabled, reason := commitDisabledFromPrefs()
+	if !disabled {
+		t.Error("disabled = false on corrupted prefs, want true (fail-safe: skip auto-commit)")
+	}
+	if !strings.Contains(reason, "unreadable") {
+		t.Errorf("reason should explain the prefs were unreadable, got: %q", reason)
 	}
 }
 
