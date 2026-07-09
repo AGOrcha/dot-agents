@@ -92,3 +92,38 @@ func TestWriteRefreshLock_NeverTouchesManifest(t *testing.T) {
 		t.Fatalf("expected %s to be written: %v", AgentsLockFile, err)
 	}
 }
+
+
+// A directory at the lockfile path makes agentslock.Open/Flush fail, exercising
+// the error returns in WriteRefreshLock/ReadRefreshLock.
+func TestWriteRefreshLock_LockPathIsDirErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(AgentsLockPath(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteRefreshLock(dir, RefreshMetadata{Version: "1.0.0", Commit: "abc123"}); err == nil {
+		t.Fatal("expected error when the lock path is a directory")
+	}
+}
+
+func TestReadRefreshLock_LockPathIsDirErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(AgentsLockPath(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReadRefreshLock(dir); err == nil {
+		t.Fatal("expected error when the lock path is a directory")
+	}
+}
+
+// A "refresh" section whose JSON is not a RefreshMetadata object makes
+// lf.Section fail to unmarshal, exercising ReadRefreshLock's decode-error path.
+func TestReadRefreshLock_MalformedSectionErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(AgentsLockPath(dir), []byte(`{"lock_version":1,"refresh":"not-an-object"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ReadRefreshLock(dir); err == nil {
+		t.Fatal("expected a decode error for a malformed refresh section")
+	}
+}
