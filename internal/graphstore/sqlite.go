@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -355,12 +356,15 @@ func (s *SQLiteStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edg
 
 	for _, node := range nodes {
 		qualified := makeQualified(node)
-		extra, _ := encodeExtra(node.Extra)
+		extra, err := encodeExtra(node.Extra)
+		if err != nil {
+			return fmt.Errorf("graphstore: encode extra for node %q: %w", qualified, err)
+		}
 		isTest := 0
 		if node.IsTest {
 			isTest = 1
 		}
-		_, err := tx.Exec(`
+		_, err = tx.Exec(`
 			INSERT INTO nodes
 			  (kind, name, qualified_name, file_path, line_start, line_end,
 			   language, parent_name, params, return_type, modifiers, is_test,
@@ -386,8 +390,11 @@ func (s *SQLiteStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, edg
 	}
 
 	for _, edge := range edges {
-		extra, _ := encodeExtra(edge.Extra)
-		_, err := tx.Exec(`
+		extra, err := encodeExtra(edge.Extra)
+		if err != nil {
+			return fmt.Errorf("graphstore: encode extra for edge %s->%s: %w", edge.Source, edge.Target, err)
+		}
+		_, err = tx.Exec(`
 			INSERT INTO edges
 			  (kind, source_qualified, target_qualified, file_path, line, extra, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -886,12 +893,21 @@ func encodeExtra(m map[string]any) (string, error) {
 	return string(b), nil
 }
 
+// extraDecodeErrorKey tags the map returned by decodeExtra when the stored
+// extra JSON failed to parse, so a corrupt row is distinguishable from a
+// legitimately empty one without changing decodeExtra's signature (a full
+// error-propagating signature is tracked as a follow-up).
+const extraDecodeErrorKey = "_graphstore_extra_decode_error"
+
 func decodeExtra(s string) map[string]any {
 	if s == "" || s == "{}" {
 		return nil
 	}
 	var m map[string]any
-	_ = json.Unmarshal([]byte(s), &m)
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		slog.Warn("graphstore: corrupt extra JSON on read, dropping metadata", "error", err)
+		return map[string]any{extraDecodeErrorKey: err.Error()}
+	}
 	return m
 }
 

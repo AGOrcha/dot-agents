@@ -918,7 +918,10 @@ func CRGDBPath(repoRoot string) string {
 func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 	dbPath := CRGDBPath(b.RepoRoot)
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, nil // no CRG db — not an error
+		if os.IsNotExist(err) {
+			return nil, nil // no CRG db — not an error
+		}
+		return nil, fmt.Errorf("stat CRG db: %w", err)
 	}
 	db, err := sql.Open("sqlite", dbPath+crgReadOnlyPragma)
 	if err != nil {
@@ -948,6 +951,7 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 	defer rows.Close()
 
 	var nodes []GraphNode
+	var scanErrs int
 	for rows.Next() {
 		var n GraphNode
 		var extraStr string
@@ -956,13 +960,20 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 			&n.LineStart, &n.LineEnd, &n.Language, &n.ParentName,
 			&n.Params, &n.ReturnType, &isTest, &n.FileHash,
 			&extraStr, &n.UpdatedAt); err != nil {
+			scanErrs++
 			continue
 		}
 		n.IsTest = isTest != 0
 		_ = json.Unmarshal([]byte(extraStr), &n.Extra)
 		nodes = append(nodes, n)
 	}
-	return nodes, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nodes, fmt.Errorf("iterate CRG nodes: %w", err)
+	}
+	if scanErrs > 0 {
+		return nodes, fmt.Errorf("crg: %d node row(s) failed to scan", scanErrs)
+	}
+	return nodes, nil
 }
 
 // ReadEdges reads up to limit edges directly from the CRG SQLite database.
@@ -974,7 +985,10 @@ func (b *CRGBridge) ReadNodes(limit int) ([]GraphNode, error) {
 func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
 	dbPath := CRGDBPath(b.RepoRoot)
 	if _, err := os.Stat(dbPath); err != nil {
-		return nil, nil
+		if os.IsNotExist(err) {
+			return nil, nil // no CRG db — not an error
+		}
+		return nil, fmt.Errorf("stat CRG db: %w", err)
 	}
 	db, err := sql.Open("sqlite", dbPath+crgReadOnlyPragma)
 	if err != nil {
@@ -999,15 +1013,23 @@ func (b *CRGBridge) ReadEdges(limit int) ([]GraphEdge, error) {
 	defer rows.Close()
 
 	var edges []GraphEdge
+	var scanErrs int
 	for rows.Next() {
 		var e GraphEdge
 		var extraStr string
 		if err := rows.Scan(&e.ID, &e.Kind, &e.SourceQualified, &e.TargetQualified,
 			&e.FilePath, &e.Line, &extraStr, &e.UpdatedAt); err != nil {
+			scanErrs++
 			continue
 		}
 		_ = json.Unmarshal([]byte(extraStr), &e.Extra)
 		edges = append(edges, e)
 	}
-	return edges, rows.Err()
+	if err := rows.Err(); err != nil {
+		return edges, fmt.Errorf("iterate CRG edges: %w", err)
+	}
+	if scanErrs > 0 {
+		return edges, fmt.Errorf("crg: %d edge row(s) failed to scan", scanErrs)
+	}
+	return edges, nil
 }

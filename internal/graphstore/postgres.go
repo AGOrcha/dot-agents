@@ -307,8 +307,11 @@ func (s *PostgresStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, e
 
 	for _, node := range nodes {
 		qualified := makeQualified(node)
-		extra, _ := encodeExtra(node.Extra)
-		_, err := tx.Exec(ctx, `
+		extra, err := encodeExtra(node.Extra)
+		if err != nil {
+			return fmt.Errorf("graphstore: encode extra for node %q: %w", qualified, err)
+		}
+		_, err = tx.Exec(ctx, `
 			INSERT INTO nodes
 			  (kind, name, qualified_name, file_path, line_start, line_end,
 			   language, parent_name, params, return_type, modifiers, is_test,
@@ -334,8 +337,11 @@ func (s *PostgresStore) StoreFileNodesEdges(filePath string, nodes []NodeInfo, e
 	}
 
 	for _, edge := range edges {
-		extra, _ := encodeExtra(edge.Extra)
-		_, err := tx.Exec(ctx, `
+		extra, err := encodeExtra(edge.Extra)
+		if err != nil {
+			return fmt.Errorf("graphstore: encode extra for edge %s->%s: %w", edge.Source, edge.Target, err)
+		}
+		_, err = tx.Exec(ctx, `
 			INSERT INTO edges
 			  (kind, source_qualified, target_qualified, file_path, line, extra, updated_at)
 			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
