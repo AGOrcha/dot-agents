@@ -289,3 +289,14 @@ tasks:
         - internal/platform/rules_test.go
       verification_required: true
       notes: 'P2 should-be-LOUD (proposal Slice 9 group 9e SAFE subset). resources.go/mcp_settings.go/rules.go are NOT touched by se2''s unmerged prune-guard PR. claude/codex/copilot detector-shape is DEFERRED to post-se2-merge (overlap). Sites: resources.go resolveScopedFile/resolveScopedFileFromBuckets (agentsrc-detector shape: os.Stat loop -> '''' no error), mcp_settings.go resolveCanonicalFileByExt, rules.go ResolveCanonicalRuleFile (Stat loop -> generic not-found). Distinguish real error; keep absence. Tests <15 complexity + cover branches. PR base master.'
+    - id: se9-import-loud
+      title: import/hook-bundle error-surfacing
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/import.go
+        - commands/import_plugins.go
+      verification_required: true
+      notes: ""
