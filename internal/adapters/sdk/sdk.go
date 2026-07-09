@@ -195,12 +195,39 @@ func (s *SDK) Query(runner QueryRunner) ([]Row, error) {
 	return runner(NamespaceView{Notes: notes, Edges: edges}), nil
 }
 
+// ReadsFromGate is the read-only registry consult MaterializeView requires on
+// every call (spec §11.2). *registry.Registry satisfies it structurally via
+// ValidateReadsFrom — the read-only counterpart of the same migration_only
+// rule registry.EnforceReadsFrom applies once, for every adapter, at load
+// time (t4) — so this package need not import internal/kg/registry to use
+// it.
+//
+// Wiring this closes the gap Codex's t4 review (PR #172) found:
+// MaterializeView accepted an arbitrary readsFrom without ever asking the
+// registry, so a view could read a migration_only adapter's namespace even
+// though the schema-level load gate would reject the same dependency if it
+// had been declared as a materialized_views entry instead of built at
+// runtime.
+type ReadsFromGate interface {
+	ValidateReadsFrom(dependent string, readsFrom []string) error
+}
+
 // MaterializeView computes and persists a view (§8.4.1 sdk.materialize_view).
-// The SDK derives a multi-namespace token from readsFrom: {adapter, write}
-// plus {dep, read} for each dependency. This is the ONLY surface that may read
-// cross-namespace (§8.3). readNotes lets the runner pull a dependency's notes;
-// the store rejects any namespace not in readsFrom.
-func (s *SDK) MaterializeView(name string, readsFrom []string, runner ViewRunner) error {
+// gate enforces the §11.2 migration_only rule against readsFrom BEFORE the
+// runner executes or anything is written — pass the live *registry.Registry
+// (or an equivalent ReadsFromGate); a nil gate is rejected rather than
+// silently skipping the check. The SDK derives a multi-namespace token from
+// readsFrom: {adapter, write} plus {dep, read} for each dependency. This is
+// the ONLY surface that may read cross-namespace (§8.3). readNotes lets the
+// runner pull a dependency's notes; the store rejects any namespace not in
+// readsFrom.
+func (s *SDK) MaterializeView(name string, readsFrom []string, gate ReadsFromGate, runner ViewRunner) error {
+	if gate == nil {
+		return fmt.Errorf("sdk: MaterializeView %q: a ReadsFromGate is required so the §11.2 migration_only rule is enforced (pass the live registry)", name)
+	}
+	if err := gate.ValidateReadsFrom(s.adapter, readsFrom); err != nil {
+		return fmt.Errorf("sdk: MaterializeView %q: reads_from rejected: %w", name, err)
+	}
 	token := ViewToken(s.adapter, name, readsFrom)
 	read := func(ns string) ([]Note, error) {
 		return s.store.Notes(token, ns)
