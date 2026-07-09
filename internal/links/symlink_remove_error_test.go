@@ -89,3 +89,59 @@ func TestSymlink_RemoveAllErrorBranches(t *testing.T) {
 		t.Errorf("expected injected remove error after backup, got %v", bkErr)
 	}
 }
+
+// TestHandleUnmanagedOccupant_LstatRealErrorSurfaces exercises the
+// should-be-LOUD fix: a real (non-NotExist) Lstat failure must not be read
+// as "vanished, nothing to protect" — the caller would otherwise proceed to
+// overwrite an entry it never actually inspected.
+func TestHandleUnmanagedOccupant_LstatRealErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "parent")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	occupant := filepath.Join(parent, "occupant")
+	if err := os.WriteFile(occupant, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	err := handleUnmanagedOccupant(occupant, nil)
+	if err == nil {
+		t.Fatal("want a surfaced error for a real Lstat failure, not a silent nil")
+	}
+	if errors.Is(err, ErrUnmanagedTarget) {
+		t.Errorf("a real Lstat error must not be reported as ErrUnmanagedTarget: %v", err)
+	}
+}
+
+// TestHandleUnmanagedOccupant_AbsentPathIsNoop covers the legitimate-absence
+// case unchanged by the fix: a path that genuinely vanished has nothing to
+// protect.
+func TestHandleUnmanagedOccupant_AbsentPathIsNoop(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "nope")
+	if err := handleUnmanagedOccupant(missing, nil); err != nil {
+		t.Fatalf("want nil for a legitimately absent path, got %v", err)
+	}
+}
+
+// TestIsManagedFileLink_RealLstatErrorFailsSafe exercises the should-be-LOUD
+// fix: a real Lstat failure must not be reported as "not ours, safe to
+// delete" (the unsafe direction platform/hooks.go and platform/claude.go
+// gate destructive decisions on) — it must fail safe as "protected."
+func TestIsManagedFileLink_RealLstatErrorFailsSafe(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "parent")
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(parent, "f.txt")
+	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	if !IsManagedFileLink(target) {
+		t.Error("a real Lstat error must fail safe (report true/protected), not the unsafe false")
+	}
+}

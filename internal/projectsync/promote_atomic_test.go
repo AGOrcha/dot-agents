@@ -10,6 +10,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // atomicEnv mirrors promote_test.go's promoteEnv but lives inside the
@@ -224,6 +225,34 @@ func TestMaterializePromoteSource_ClearExistingCanonicalError(t *testing.T) {
 	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
 	if err == nil || !strings.Contains(err.Error(), "real directory") {
 		t.Errorf("expected real-directory error, got %v", err)
+	}
+}
+
+// TestClearExistingCanonical_RealLstatErrorSurfaces exercises the
+// should-be-ATOMIC fix: clearExistingCanonical runs immediately before a
+// destructive CopyTree, so a real (non-NotExist) Lstat failure must abort
+// rather than being read as "nothing there, safe to write."
+func TestClearExistingCanonical_RealLstatErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "bucket")
+	if err := os.MkdirAll(parent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(parent, "widget")
+	testutil.MakeDirUnreadable(t, parent)
+
+	if err := clearExistingCanonical(canonical, "widget", PromoteSpec{BucketSpec: BucketSpec{Singular: "widget"}}); err == nil {
+		t.Fatal("want a surfaced error for a real Lstat failure, not a silent nil")
+	}
+}
+
+// TestClearExistingCanonical_AbsentPathIsNoop covers the legitimate-absence
+// case unchanged by the fix: a canonical path that has never been created
+// yet is safe to proceed past.
+func TestClearExistingCanonical_AbsentPathIsNoop(t *testing.T) {
+	canonical := filepath.Join(t.TempDir(), "widget")
+	if err := clearExistingCanonical(canonical, "widget", PromoteSpec{BucketSpec: BucketSpec{Singular: "widget"}}); err != nil {
+		t.Fatalf("want nil for a legitimately absent canonical path, got %v", err)
 	}
 }
 

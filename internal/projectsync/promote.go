@@ -273,7 +273,13 @@ func validatePromoteSymlink(sourcePath, canonicalPath, name string, spec Promote
 func clearExistingCanonical(canonicalPath, name string, spec PromoteSpec) error {
 	fi, err := os.Lstat(canonicalPath)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		// Called immediately before CopyTree writes into canonicalPath: an
+		// unknown Lstat failure must not be read as "nothing there, safe to
+		// write" — surface it and abort before the destructive copy.
+		return fmt.Errorf("checking canonical path for %s %q: %w", spec.Singular, name, err)
 	}
 	// A stale managed link occupying the canonical slot is removable on every
 	// OS. ModeSymlink covers POSIX symlinks; ManagedLinkTarget additionally

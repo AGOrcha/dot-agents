@@ -50,7 +50,14 @@ func ownedManagedHardlink(linkPath string) bool {
 func handleUnmanagedOccupant(path string, backup func(string) error) error {
 	info, statErr := os.Lstat(path)
 	if statErr != nil {
-		return nil // vanished between checks; nothing to protect
+		if os.IsNotExist(statErr) {
+			return nil // vanished between checks; nothing to protect
+		}
+		// A real Lstat failure (permission-denied, I/O error) is NOT the
+		// same as "vanished" — we cannot prove there is nothing here to
+		// protect, so fail safe and surface it rather than silently
+		// proceeding to overwrite an entry we could not inspect.
+		return fmt.Errorf("checking existing entry at %s before replace: %w", path, statErr)
 	}
 	if info.IsDir() {
 		if entries, derr := os.ReadDir(path); derr == nil && len(entries) == 0 {
@@ -365,7 +372,18 @@ func RemoveIfSymlinkUnder(linkPath, prefix string) error {
 // active managed file is left behind.
 func RemoveIfHardlinkedToAny(path string, sources []string) (bool, error) {
 	for _, src := range sources {
-		if linked, _ := AreHardlinked(path, src); linked {
+		linked, err := AreHardlinked(path, src)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // path or this candidate source doesn't exist
+			}
+			// A real syscall error (permission-denied, I/O) must not read
+			// as "not hard-linked" — that would let the caller conclude
+			// "not managed" while never having actually determined
+			// ownership.
+			return false, fmt.Errorf("checking hard-link identity of %s against %s: %w", path, src, err)
+		}
+		if linked {
 			if err := fsops.RemoveAll(path); err != nil {
 				return true, fmt.Errorf("removing managed hard link %s: %w", path, err)
 			}
@@ -392,7 +410,14 @@ func RemoveIfHardlinkedToAny(path string, sources []string) (bool, error) {
 func IsManagedFileLink(path string) bool {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			return false // legitimately absent — nothing to protect
+		}
+		// A real Lstat failure must not be read as "not ours, safe to
+		// delete/overwrite" — that is the unsafe fail direction callers
+		// (platform/hooks.go, platform/claude.go) rely on this predicate to
+		// avoid. Fail safe: report the entry as managed/protected instead.
+		return true
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
 		return true

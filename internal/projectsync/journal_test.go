@@ -439,8 +439,9 @@ func TestPromoteJournal_ListPendingReadDirError(t *testing.T) {
 	}
 }
 
-// TestPromoteJournal_ListPendingSkipsNonEntries covers three "continue"
-// branches: directory entries, non-.json files, and corrupt JSON files.
+// TestPromoteJournal_ListPendingSkipsNonEntries covers the two legitimate
+// "continue" branches: directory entries and non-.json files. Neither is a
+// real error, so ListPendingPromoteJournals must not surface one.
 func TestPromoteJournal_ListPendingSkipsNonEntries(t *testing.T) {
 	home := journalAgentsHome(t)
 	dir := promoteJournalDirPath(home)
@@ -453,10 +454,6 @@ func TestPromoteJournal_ListPendingSkipsNonEntries(t *testing.T) {
 	}
 
 	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("nope"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("{not json"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -477,10 +474,39 @@ func TestPromoteJournal_ListPendingSkipsNonEntries(t *testing.T) {
 	}
 }
 
-// TestPromoteJournal_ListPendingReadFileSkip forces the rerr branch in the
-// per-entry read by creating an unreadable .json file (chmod 0000). Skipped
-// on platforms where chmod does not restrict read for the owner (root, etc.).
-func TestPromoteJournal_ListPendingReadFileSkip(t *testing.T) {
+// TestPromoteJournal_ListPendingCorruptJSONSurfacesError covers the
+// should-be-ATOMIC fix: a corrupt journal entry is a real parse failure,
+// not a legitimate absence, so it must abort ListPendingPromoteJournals
+// instead of silently vanishing from the pending list — a
+// partially-completed destructive promote must never become permanently
+// unrecoverable.
+func TestPromoteJournal_ListPendingCorruptJSONSurfacesError(t *testing.T) {
+	home := journalAgentsHome(t)
+	dir := promoteJournalDirPath(home)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "broken.json"), []byte("{not json"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ListPendingPromoteJournals(home)
+	if err == nil {
+		t.Fatal("want a surfaced error for a corrupt journal entry, not a silent skip")
+	}
+	if !strings.Contains(err.Error(), "broken.json") {
+		t.Errorf("expected the error to name the offending entry, got %v", err)
+	}
+}
+
+// TestPromoteJournal_ListPendingUnreadableEntrySurfacesError forces the
+// rerr branch in the per-entry read by creating an unreadable .json file
+// (chmod 0000 / Windows byte-range lock). Skipped on platforms where mode
+// bits do not enforce read denial (root, etc.). Per the should-be-ATOMIC
+// fix, a permission-denied journal entry is a real error and must abort the
+// listing rather than silently vanish.
+func TestPromoteJournal_ListPendingUnreadableEntrySurfacesError(t *testing.T) {
 	home := journalAgentsHome(t)
 	dir := promoteJournalDirPath(home)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -495,15 +521,12 @@ func TestPromoteJournal_ListPendingReadFileSkip(t *testing.T) {
 	// bypassed.
 	testutil.MakeFileUnreadable(t, unreadable)
 
-	pending, err := ListPendingPromoteJournals(home)
-	if err != nil {
-		t.Fatalf("ListPendingPromoteJournals: %v", err)
+	_, err := ListPendingPromoteJournals(home)
+	if err == nil {
+		t.Fatal("want a surfaced error for an unreadable journal entry, not a silent skip")
 	}
-
-	for _, p := range pending {
-		if p.ID == "locked" {
-			t.Errorf("expected locked entry to be skipped, got %+v", p)
-		}
+	if !strings.Contains(err.Error(), "locked.json") {
+		t.Errorf("expected the error to name the offending entry, got %v", err)
 	}
 }
 
