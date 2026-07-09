@@ -356,6 +356,41 @@ func TestMaterializePromoteSource_RollbackCrossFsFallback(t *testing.T) {
 	}
 }
 
+// TestCrossFSRollback_RemoveAllFails exercises the "partial recovery"
+// branch: the EXDEV fallback's CopyTree-back succeeds (source is restored
+// from canonical) but the subsequent os.RemoveAll(canonicalPath) fails,
+// leaving canonical in place. The write denial is installed inside the
+// synthetic osRename seam, which fires only after materializePromoteSource's
+// initial CopyTree has already populated canonical — so only the final
+// cleanup removal is blocked, not the promote copy itself.
+func TestCrossFSRollback_RemoveAllFails(t *testing.T) {
+	agentsHome, projectPath := atomicEnv(t, "exdevpartial")
+	writeWidget(t, projectPath, "alpha")
+
+	canonicalParent := filepath.Join(agentsHome, "widgets", "exdevpartial")
+
+	swapSymlink(t, func(string, string) error {
+		return errors.New("synthetic symlink failure")
+	})
+	swapRename(t, func(string, string) error {
+		testutil.MakeDirWriteDenied(t, canonicalParent)
+		return &os.LinkError{Op: "rename", Old: "x", New: "y", Err: syscall.EXDEV}
+	})
+
+	err := PromoteResource("alpha", projectPath, atomicWidgetSpec())
+	if err == nil {
+		t.Fatal("expected error from PromoteResource")
+	}
+	if !strings.Contains(err.Error(), "canonical still present") {
+		t.Errorf("expected partial-recovery message, got: %v", err)
+	}
+
+	sourcePath := filepath.Join(projectPath, ".agents", "widgets", "alpha")
+	if _, err := os.Stat(filepath.Join(sourcePath, "WIDGET.md")); err != nil {
+		t.Errorf("manifest missing after rollback copy: %v", err)
+	}
+}
+
 // TestValidatePromoteSymlink_HappyPath covers the matched-target return.
 func TestValidatePromoteSymlink_HappyPath(t *testing.T) {
 	tmp := t.TempDir()
