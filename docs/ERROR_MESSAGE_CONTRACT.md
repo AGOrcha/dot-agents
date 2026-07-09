@@ -204,8 +204,8 @@ The 2026-04-19 inventory puts the highest normalization priority on:
 
 1. `commands/kg/bridge.go` and `commands/kg/query_lint_maintain.go`
 2. `commands/kg/sync_code_warm_link.go`
-3. `commands/agents/remove.go`, `commands/agents/import.go`, and `commands/agents/promote.go`
-4. setup-validation drift in `commands/add.go` and `commands/install.go`
+3. `commands/agents/promote.go` and `commands/skills/promote.go` (both route through the still-raw `internal/projectsync.PromoteResource`); `commands/agents/remove.go` and `commands/agents/import.go` have since been normalized onto `ErrorWithHints` via the package's `agentUserError` helper and are no longer priority areas
+4. setup-validation drift in `commands/add.go` and `commands/internal/lifecycle/install.go`
 
 The strongest current examples to preserve are:
 

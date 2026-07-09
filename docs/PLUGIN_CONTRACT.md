@@ -8,7 +8,7 @@ sidebar:
 # Canonical Plugin Contract
 
 Status: Directional
-Last updated: 2026-04-12
+Last updated: 2026-07-09
 Depends on: `docs/PLATFORM_DIRS_DOCS.md`, `docs/rfcs/resource-intent-centralization-rfc.md`
 
 This document defines the canonical plugin bundle contract for `dot-agents` on the current shared planner/executor architecture. It is a storage and ownership contract, not runtime wiring.
@@ -148,7 +148,7 @@ The shared planner dedupes canonical plugin bundles before any platform-local wr
 
 | Platform | Emitter implemented | Target path | Notes |
 |----------|--------------------|---------|----|
-| OpenCode | Yes | `.opencode/plugins/{name}/` | Symlinks the whole canonical bundle dir (kind-agnostic today; per-`kind` filtering + selective `files/` / `platforms/opencode/` overlay are the intended refinement, tracked in `plugin-resource-salvage`) |
+| OpenCode | Yes | `.opencode/plugins/{name}/` | Symlinks the whole canonical bundle dir (kind-agnostic today; per-`kind` filtering + selective `files/` / `platforms/opencode/` overlay are the intended refinement, not currently tracked by an active plan — `plugin-resource-salvage` closed out 2026-04-20) |
 | Cursor | No | `.cursor-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/cursor/` |
 | Claude Code | No | `.claude-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/claude/` |
 | Codex | No | `.codex-plugin/` | `kind: package`; generate or copy `plugin.json` from `platforms/codex/` |
@@ -190,4 +190,4 @@ The native `plugin.json` is preserved verbatim at `platforms/{platformID}/plugin
 - The canonical bundle contract intentionally stays platform-neutral so the storage model supports all emitters without format lock-in
 - Codex's native marketplace path (`$REPO_ROOT/.agents/plugins/marketplace.json`) aligns naturally with our canonical storage — a future `da plugins marketplace` command could generate this file from all enabled bundles
 - The donor branch `claude/scalable-skill-syncing-sfxOd` is historical provenance only; the current tree already landed `canonicalPackagePluginManifestOutputs`, `canonicalPluginOutputsFromOpenCodeFile`, `LoadPluginSpec`, and `ListPluginSpecs`, so Stage 2 planning should build from that rebuilt baseline
-- Runtime implementation, multi-platform emitters, and any remaining Stage 2 bucket-expansion slices are tracked in the `plugin-resource-salvage` plan
+- Runtime implementation, multi-platform emitters, and any remaining Stage 2 bucket-expansion slices have no active tracking plan today: `plugin-resource-salvage` (status: completed, archived under `.agents/history/`) landed the canonical contract and the OpenCode emitter, then deliberately deferred the remaining package-platform emitters to a future slice without naming a successor plan

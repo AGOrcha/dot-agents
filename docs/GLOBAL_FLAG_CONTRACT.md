@@ -7,7 +7,7 @@ sidebar:
 
 # Global flag contract (dot-agents CLI)
 
-**Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md).  
+**Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/history/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md) (archived; formerly under `.agents/workflow/plans/`).  
 **Scope:** Describes **observed** semantics of persistent root flags and known footguns. Implementation and help-text changes are tracked under the global-flag-compliance plan.
 
 ## Persistent globals
@@ -26,7 +26,7 @@ Nested subcommands may define **local** flags with the same long name. A local w
 
 - **`kg ingest --dry-run`** — OR-merged with the global `-n` (`commands/kg/kg.go`); see [`kg ingest` dry-run](#kg-ingest-dry-run-vs-global-dry-run).
 - **`workflow commit --dry-run`** — OR-merged with the global `--dry-run` (`commands/workflow/commit_cmd.go:211-218`): `effectiveDryRun = dryRun || deps.Flags.DryRun()`.
-- **`workflow fold-back create --dry-run`** — OR-merged with the global `-n` (`commands/workflow/delegation.go:706-713`): `local || safeDryRun()`.
+- **`workflow fold-back create --dry-run`** — OR-merged with the global `-n` (`commands/workflow/delegation.go:715-718`): `local || safeDryRun()`.
 - **`hook-sentinel --json`** — OR-merged with the global `--json` (`commands/workflow/hook_sentinel.go:858,1050`): emits the sentinel as JSON if either the local `--json` or the global `--json` is set.
 
 ## Legend
@@ -58,9 +58,9 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 | `refresh` | unsupported | supported | unsupported | unsupported | unsupported | |
 | `import` | unsupported | supported | supported | unsupported | unsupported | |
 | `status` | **supported** | unsupported | unsupported | unsupported | unsupported | Structured JSON via `runStatus` |
-| `doctor` | unsupported | supported | unsupported | unsupported | supported | `--dry-run` suppresses link repair; verbose expands audits |
+| `doctor` | unsupported | unsupported | unsupported | unsupported | supported | Read-only by design (own `Long` help text: "never repairs"); `--dry-run` parses but `doctor.go` never reads `Flags.DryRun` — no repair action exists to suppress. Verbose expands audits |
 | `skills` (all subcommands) | unsupported | unsupported | unsupported | unsupported | unsupported | No global flag reads |
-| `agents` | unsupported | partial | partial | partial | unsupported | `agents remove` honors `--yes`/`--dry-run`/`--force`; other subcommands unsupported |
+| `agents` | unsupported | unsupported | partial | unsupported | unsupported | `agents.GlobalFlags` (`commands/agents.go`) wires only `Yes` — no `DryRun`/`Force` field exists. `agents remove --purge` reads `deps.Flags.Yes` to skip the delete-confirmation prompt; `--dry-run`/`--force` are parsed but never read by any agents subcommand. (`agents promote --force` is an unrelated local flag, see below.) |
 | `hooks` | unsupported | partial | partial | partial | unsupported | `hooks remove` honors `--dry-run`/`--yes`/`--force`; other subcommands unsupported |
 | `mcp` | unsupported | partial | partial | partial | unsupported | `mcp remove` honors `--dry-run`/`--yes`/`--force` |
 | `rules` | unsupported | partial | partial | partial | unsupported | `rules remove` honors `--dry-run`/`--yes`/`--force` |
@@ -69,7 +69,7 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 | `session` | unsupported | unsupported | unsupported | unsupported | unsupported | `session stats` renders human-only platform usage; reads no globals |
 | `workflow` | unsupported | unsupported | unsupported | unsupported | unsupported | Per-subcommand; see [Workflow](#workflow-subcommands) |
 | `review` | unsupported | unsupported | unsupported | unsupported | unsupported | |
-| `sync` | unsupported | partial | partial | unsupported | unsupported | `init` / `commit` / `push` honor `--dry-run`; `pull` rejects `--dry-run` (errors); `push` + `pull` (refresh prompt) honor `--yes`; `status` / `log` do not use these globals |
+| `sync` | unsupported | partial | partial | partial | unsupported | `init` / `commit` / `push` honor `--dry-run`; `pull` rejects `--dry-run` (errors); `push` honors both `--yes` and `--force` to skip its confirmation prompt (`commands/sync/push.go`); `pull` (refresh prompt) honors `--yes` only; `status` / `log` do not use these globals |
 | `explain` | unsupported | unsupported | unsupported | unsupported | unsupported | |
 | `install` | unsupported | supported | unsupported | supported | supported | Large surface; `--dry-run` / `--verbose` used throughout `install.go` |
 | `kg` | partial | see [KG](#kg-command-family) | unsupported | unsupported | unsupported | Many handlers check `Flags.JSON`; not every leaf is JSON-first |
@@ -79,15 +79,18 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 ### Read-only / doc-style families
 
 For **`explain`**, **`review`**, and **`skills`**, all five globals are effectively
-**unsupported** (no-op) today while still appearing in root help. **`agents`**,
-**`hooks`**, **`mcp`**, **`rules`**, and **`settings`** are unsupported *except* their
-`remove` subcommands, which honor `--dry-run`/`--yes`/`--force`. Scripts must not rely
-on globals for the read-only paths.
+**unsupported** (no-op) today while still appearing in root help. **`hooks`**,
+**`mcp`**, **`rules`**, and **`settings`** are unsupported *except* their `remove`
+subcommands, which honor `--dry-run`/`--yes`/`--force`. **`agents`** is unsupported
+except `agents remove --purge`, which honors `--yes` only — `agents.GlobalFlags`
+has no `DryRun`/`Force` field, so those two globals are parsed but never read by
+any agents subcommand. Scripts must not rely on globals for the read-only paths.
 
 ### `sync` (partial)
 
 - **`--dry-run`:** **partial**—honored on `sync init`, `sync commit`, `sync push`; not honored on `sync status`, `sync log`. **`sync pull` now explicitly rejects `--dry-run`** with an error (`commands/sync/pull.go`) rather than silently pulling.
 - **`--yes`:** **partial**—honored for push, and `sync pull` consults `Flags.Yes` to auto-confirm its post-pull refresh prompt (`commands/sync/helpers.go`); not a universal non-interactive switch across `sync`.
+- **`--force`:** **partial**—`sync push` honors `Flags.Force` (alongside `Flags.Yes`) to skip its confirmation prompt (`commands/sync/push.go`); not read by `init`, `commit`, `status`, or `log`.
 
 ---
 
@@ -129,10 +132,14 @@ Root `--force` and `--verbose` are not shown in the workflow inventory table; tr
 This table is a **partial inventory** as of the 0.5.0 cut. Newer subcommands not yet
 individually rowed — `eligible`, `slots`, `complete`, `app-types`, `resolve-prompt`,
 `contract` (create/list), `delegation gate`, `bundle stages`, `commit`, `close-task`,
-`start-task`, `hook-sentinel`, `hook-outcome`, `archive-orphans` — inherit the same
-root-persistent globals; confirm a given leaf's support by its `deps.Flags.JSON()` /
-`deps.Flags.DryRun()` reads rather than assuming from this table. A full per-row
-re-inventory is tracked for a later pass.
+`start-task`, `hook-sentinel`, `hook-outcome`, `archive-orphans`, `plan archive`,
+`plan schedule`, `plan derive-scope`, `plan check-scope`, `fold-back update` — inherit
+the same root-persistent globals; confirm a given leaf's support by its
+`deps.Flags.JSON()` / `deps.Flags.DryRun()` reads rather than assuming from this
+table. `plan archive` additionally honors the global `--dry-run` for a genuine
+no-op preview (`runWorkflowPlanArchive`, `commands/workflow/plan_task.go:2106`) on
+top of its local `--force` (see the distinct-semantic-locals summary row below). A
+full per-row re-inventory is tracked for a later pass.
 
 ### Workflow `status` JSON shadowing — RESOLVED
 
@@ -177,8 +184,8 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 | Duplicate flag names | Prefer reading the global over a shadowing local; the historical `workflow status` + `da config` shadows are both **fixed** (now read `Flags.JSON`) |
 | `kg ingest` dry-run | Local `--dry-run` **OR-merged** with global `-n`; either form drives ingest dry-run |
 | OR-merge augment-locals | `kg ingest --dry-run`, `workflow commit --dry-run`, `workflow fold-back create --dry-run`, `hook-sentinel --json` each OR-merge their global rather than shadow it (not violations) |
-| Distinct-semantic locals | Some locals reuse a global's long name with a **different, command-specific** meaning: `agents promote --force` (`commands/agents/cmd.go:86`, replace an existing real directory at the canonical path), `workflow plan archive --force` (`commands/workflow/cmd.go:318`, skip the completed-status guard), `workflow contract create --force` (`commands/workflow/contract.go:296`, overwrite an existing delegation contract), and `workflow app-types --verbose` (`commands/workflow/cmd.go:1117`, show per-`app_type` source + recommendation detail) |
-| Read-only families | `explain`, `review`, `skills`: globals **unsupported** (no-op). `agents`/`hooks` are unsupported except their `remove` subcommands, which honor `--yes`/`--dry-run`/`--force` |
+| Distinct-semantic locals | Some locals reuse a global's long name with a **different, command-specific** meaning: `agents promote --force` (`commands/agents/cmd.go:86`, replace an existing real directory at the canonical path), `workflow plan archive --force` (`commands/workflow/cmd.go:318`, skip the completed-status guard), `workflow contract create --force` (`commands/workflow/contract.go:296`, overwrite an existing delegation contract), and `workflow app-types --verbose` (`commands/workflow/cmd.go:1118`, show per-`app_type` source + recommendation detail) |
+| Read-only families | `explain`, `review`, `skills`: globals **unsupported** (no-op). `hooks`/`mcp`/`rules`/`settings` are unsupported except their `remove` subcommands, which honor `--yes`/`--dry-run`/`--force`. `agents` is unsupported except `agents remove --purge`, which honors `--yes` only (`agents.GlobalFlags` has no `DryRun`/`Force` field) |
 | `sync pull` + `--dry-run` | **Rejected** (errors) — no longer a silent pull; `--yes` auto-confirms the post-pull refresh |
 | Workflow `sweep` | Plan/run semantics via **`--apply`**; globals `--dry-run` / `--yes` are not the primary contract |
 

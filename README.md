@@ -31,15 +31,17 @@ Every AI coding agent has its own config location and format:
 | Agent | Instruction / rule files | Format |
 |-------|--------------------------|--------|
 | Cursor | `.cursor/rules/*.mdc` (also `AGENTS.md`) | MDC / Markdown |
-| Claude Code | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md` | Markdown, JSON |
+| Claude Code | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `CLAUDE.local.md` | Markdown, JSON |
 | Codex | `AGENTS.md`, `AGENTS.override.md` | Markdown |
-| OpenCode | `AGENTS.md` (also `CLAUDE.md`), `.opencode/agent/*.md` | Markdown |
+| OpenCode | `AGENTS.md` (also `CLAUDE.md`) | Markdown |
 | GitHub Copilot | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md` | Markdown |
 
 Beyond the base instruction file, each agent supports more specific rule files —
-Cursor's per-rule `.mdc` files, Claude's nested `.claude/rules/*.md`, and Copilot's
-path-scoped `.github/instructions/**/*.instructions.md`; dot-agents projects all of
-them from one canonical source. See `docs/PLATFORM_DIRS_DOCS.md` for the full matrix.
+Cursor's per-rule `.mdc` files and Claude's nested `.claude/rules/*.md` are both
+projected by dot-agents from one canonical source. Copilot's path-scoped
+`.github/instructions/**/*.instructions.md` is vendor-documented too, but dot-agents
+doesn't wire it yet — only the single `.github/copilot-instructions.md` is managed
+today. See `docs/PLATFORM_DIRS_DOCS.md` for the full matrix.
 
 This leads to:
 - **Duplicated rules** across every repository
@@ -107,7 +109,9 @@ Then **symlinks and hard links** distribute configs to your projects automatical
 ├── .cursor/rules/
 │   ├── global--coding-style.mdc  → ~/.agents/rules/global/...
 │   └── myproject--api-patterns.mdc → ~/.agents/rules/myproject/...
-├── CLAUDE.md                     → ~/.agents/rules/global/claude-code.mdc
+├── .claude/rules/
+│   └── myproject--api-patterns.md → ~/.agents/rules/myproject/...
+├── AGENTS.md                     → ~/.agents/rules/global/agents.md
 └── (your code)
 ```
 
@@ -195,7 +199,7 @@ Downloads the prebuilt `da` binary onto your `PATH` — no Go toolchain required
 
 ```bash
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.sh | bash
+curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/AGOrcha/dot-agents/master/scripts/install.sh | bash
 ```
 
 ```powershell
@@ -541,11 +545,18 @@ Hard links share the same file content (same inode), so edits in either location
 
 ### Claude Code / Codex (Symlinks)
 
-For `CLAUDE.md` and `AGENTS.md`, standard symlinks work:
+Claude Code project rules are standard symlinks into `.claude/rules/`, one per
+canonical rule (same idea as the Cursor rules above, but symlinks instead of hard
+links). Global rules don't need a per-project link at all: `~/.claude/CLAUDE.md` is
+symlinked once at user scope, and Claude Code walks up the directory tree
+concatenating every `CLAUDE.md` it finds, so that single link covers every project.
+
+Codex's `AGENTS.md` is a standard project-root symlink instead — the global rule by
+default, replaced by a project-scoped override when one exists:
 
 ```bash
-CLAUDE.md  → ~/.agents/rules/global/claude-code.mdc
-AGENTS.md  → ~/.agents/rules/global/agents.md
+.claude/rules/myproject--api-patterns.md  → ~/.agents/rules/myproject/api-patterns.md
+AGENTS.md                                 → ~/.agents/rules/global/agents.md
 ```
 
 Codex also gets agent definitions (rendered to `.codex/agents/*.toml`), settings (`.codex/config.toml`), and hooks (`.codex/hooks.json`).
@@ -576,11 +587,11 @@ da add ~/Github/myproject  # Re-link your projects
 
 | Agent | Status | Config Files |
 |-------|--------|--------------|
-| **Cursor** | ✅ Full | `.cursor/rules/*.mdc` |
-| **Claude Code** | ✅ Full | `CLAUDE.md`, `.claude/CLAUDE.md`, `.claude/rules/*.md`, `.claude/` |
-| **Codex** | ✅ Full | `AGENTS.md`, `AGENTS.override.md`, `.codex/config.toml`, `.codex/agents/*.toml`, `.codex/hooks.json` |
-| **OpenCode** | ⚠️ Basic | `AGENTS.md`, `opencode.json`, `.opencode/agent/*.md` |
-| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/instructions/**/*.instructions.md`, `.github/agents/*.agent.md` |
+| **Cursor** | ✅ Full | `.cursor/rules/*.mdc`, `.cursor/settings.json`, `.cursor/mcp.json`, `.cursor/hooks.json`, `.cursorignore`, `.claude/agents/` (subagent compat) |
+| **Claude Code** | ✅ Full | `.claude/rules/*.md`, `.claude/settings.local.json`, `.mcp.json`, `.claude/agents/`, `.claude/skills/`, `.agents/skills/`, `~/.claude/CLAUDE.md` (user scope) |
+| **Codex** | ✅ Full | `AGENTS.md`, `.codex/config.toml`, `.codex/agents/*.toml` (+ `~/.codex/agents/*.toml` user scope), `.codex/hooks.json` (+ `~/.codex/hooks.json` user scope), `.agents/skills/` |
+| **OpenCode** | ⚠️ Basic | `opencode.json`, `.opencode/agent/*.md`, `.agents/skills/` |
+| **GitHub Copilot** | ✅ Full | `.github/copilot-instructions.md`, `.github/agents/*.agent.md`, `.agents/skills/`, `.vscode/mcp.json`, `.claude/settings.local.json` (hooks compat), `.github/hooks/*.json` |
 | **Antigravity** | 🧪 Probe | `.antigravity/settings.json`, `.antigravity/mcp_config.json`, `.antigravity/hooks.json`, `.antigravity/skills/`, `.antigravity/agents/` |
 
 ## Requirements
@@ -594,21 +605,41 @@ da add ~/Github/myproject  # Re-link your projects
 
 ### config.json
 
+`~/.agents/config.json` is the SYNCED portable identity registry — safe to commit to a
+git-tracked `~/.agents/` (see [Syncing Across Machines](#syncing-across-machines)).
+Absolute paths never appear here; they live in the machine-local, gitignored
+`~/.agents/local/bindings.json` instead, keyed by the same project id.
+
 ```json
 {
-  "schema_version": "1.0",
+  "version": 2,
   "projects": {
+    "myproject": {
+      "repo_id": "github.com/you/myproject"
+    }
+  },
+  "defaults": {
+    "agent": "claude"
+  },
+  "features": {
+    "tasks": false,
+    "history": false,
+    "sync": false
+  }
+}
+```
+
+`~/.agents/local/bindings.json` (machine-local, not synced) resolves each project id
+to its absolute path on this machine:
+
+```json
+{
+  "version": 2,
+  "bindings": {
     "myproject": {
       "path": "/Users/you/Github/myproject",
       "added": "2026-01-10T10:00:00Z"
     }
-  },
-  "defaults": {
-    "link_type": "auto"
-  },
-  "features": {
-    "tasks": false,
-    "history": false
   }
 }
 ```
