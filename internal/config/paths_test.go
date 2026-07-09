@@ -53,6 +53,11 @@ func TestPreflightUserHome_ResolvableHomeSucceeds(t *testing.T) {
 func TestPreflightUserHome_UnresolvableHomeHardFails(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "")
 	t.Setenv("HOME", "")
+	// os.UserHomeDir resolves via USERPROFILE (then HOMEDRIVE+HOMEPATH) on
+	// Windows, so clear those too to force the failure cross-platform.
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 	err := PreflightUserHome()
 	if err == nil {
 		t.Fatal("expected a hard error when home is unresolvable and AGENTS_HOME is unset")

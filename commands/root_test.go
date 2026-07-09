@@ -97,6 +97,11 @@ func TestNewRootCommand_PreRun_AgentsHomeOverrideBypassesHomeCheck(t *testing.T)
 func TestNewRootCommand_PreRun_HomeUnresolvableHardFails(t *testing.T) {
 	t.Setenv("AGENTS_HOME", "")
 	t.Setenv("HOME", "")
+	// os.UserHomeDir resolves via USERPROFILE (then HOMEDRIVE+HOMEPATH) on
+	// Windows, so clear those too to force the failure cross-platform.
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 	root := NewRootCommand()
 	err := root.PersistentPreRunE(root, nil)
 	if err == nil {

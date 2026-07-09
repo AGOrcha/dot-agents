@@ -199,6 +199,11 @@ func TestKGHome_OverrideBypassesHomeResolution(t *testing.T) {
 func TestKGHome_UnresolvableHomeHardFails(t *testing.T) {
 	t.Setenv("KG_HOME", "")
 	t.Setenv("HOME", "")
+	// os.UserHomeDir resolves via USERPROFILE (then HOMEDRIVE+HOMEPATH) on
+	// Windows, so clear those too to force the failure cross-platform.
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
 	orig := kgHomeExit
 	var gotErr error
 	kgHomeExit = func(err error) { gotErr = err }
