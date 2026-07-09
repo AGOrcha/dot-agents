@@ -3,12 +3,17 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
+
+	"github.com/go-git/go-git/v6"
 
 	"github.com/AGOrcha/dot-agents/internal/events"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
 )
 
@@ -24,31 +29,59 @@ import (
 // leave repo_id blank rather than fabricate one (spec §5.3 fallback).
 var gitRemoteOriginURL = gitremote.ReadOriginURL
 
-// DeriveRepoIDFromGit returns the canonical repo_id for the project at
-// repoPath, derived from its `origin` git remote. The canonical form is
-// `<host>/<path>` with the `.git` suffix stripped and the host lowercased,
-// e.g. `github.com/acme/po-core-api-se` (per org-config-resolution §5.2).
-//
-// Accepted remote forms:
-//   - SSH:    git@github.com:acme/repo.git              → github.com/acme/repo
-//   - SCP-style with user: ssh://git@github.com/acme/repo.git → github.com/acme/repo
-//   - HTTPS:  https://github.com/acme/repo.git          → github.com/acme/repo
-//   - HTTP:   http://gitlab.acme.internal/g/r           → gitlab.acme.internal/g/r
-//   - git://: git://github.com/acme/repo.git            → github.com/acme/repo
-//
 // Returns "" (no error) when:
 //   - the directory is not a git checkout
 //   - the repo has no `origin` remote (e.g. `git init` only)
 //   - the remote URL cannot be parsed into a host+path pair
+//   - the repo exists but its `.git/config` is genuinely corrupt (a
+//     structured warning is emitted in this case via warnOnCorruptGitConfig,
+//     but the "" fallback contract below still holds)
 //
 // Per spec §5.3 git derivation is a FALLBACK — callers must not overwrite
 // an explicit repo_id set in the manifest. See MergeGenerateAgentsRC.
 func DeriveRepoIDFromGit(repoPath string) string {
 	raw, err := gitRemoteOriginURL(repoPath)
-	if err != nil || raw == "" {
+	if err != nil {
+		warnOnCorruptGitConfig(repoPath, err)
+		return ""
+	}
+	if raw == "" {
 		return ""
 	}
 	return gitremote.CanonicalRepoID(raw)
+}
+
+// warnOnCorruptGitConfig emits a structured warning when gitRemoteOriginURL
+// fails for a reason other than the two documented, legitimately non-fatal
+// cases: gitremote.ErrNoOrigin (repo exists, no `origin` remote configured)
+// and git.ErrRepositoryNotExists (repoPath is not a git checkout at all).
+// Anything else reaching here is most commonly a malformed .git/config that
+// go-git's Config() parse rejects during Open — a genuine corruption that
+// DeriveRepoIDFromGit's "" fallback (spec §5.3) was silently swallowing.
+// DeriveRepoIDFromGit still returns "" either way; this only adds a signal.
+func warnOnCorruptGitConfig(repoPath string, err error) {
+	if errors.Is(err, gitremote.ErrNoOrigin) || errors.Is(err, git.ErrRepositoryNotExists) {
+		return
+	}
+	env, envErr := events.NewEnvelope(
+		"event.config.git_origin_unreadable",
+		"config.DeriveRepoIDFromGit",
+		repoPath,
+		time.Time{},
+		[]byte(fmt.Sprintf(`{"repo_path":%q,"error":%q}`, repoPath, err.Error())),
+	)
+	if envErr != nil {
+		return
+	}
+	emitConfigWarning(env)
+}
+
+// emitConfigWarning is the seam that surfaces a structured config-warning
+// Envelope produced by warnOnCorruptGitConfig. Defaults to a single stderr
+// line; tests override the seam to assert a warning fired without depending
+// on process output.
+var emitConfigWarning = func(env events.Envelope) {
+	fmt.Fprintf(os.Stderr, "warning: %s: %s\n", env.Type, string(env.Payload))
 }
 
 // gitRemoteAllURLs is the seam returning every configured remote's URLs for a
@@ -108,10 +141,19 @@ func hasDivergentRemote(remotes map[string][]string, originID string) bool {
 	return false
 }
 
-// isDirEntry reports whether the path is a directory, following symlinks.
-func isDirEntry(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+// isDirEntry reports whether the path is a directory, following symlinks. A
+// legitimately absent path returns (false, nil); a real Stat error (e.g.
+// permission denied) is surfaced instead of being silently treated as
+// "not a directory".
+func isDirEntry(path string) (bool, error) {
+	info, found, err := fsops.StatAllowMissing(path)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	return info.IsDir(), nil
 }
 
 // StringsOrBool holds either a boolean flag (all/none) or a named list.
@@ -929,13 +971,14 @@ func AppendUnique(slice []string, s string) []string {
 }
 
 // GenerateAgentsRC inspects ~/.agents/ and builds a manifest for the given
-// project. It currently never returns a non-nil error: every scan it
-// performs (skills/rules/agents/hooks/mcp/settings dirs, git origin lookup)
-// swallows its own I/O failures and degrades to an empty/zero value rather
-// than propagating one. The error return is retained as the stable contract
-// callers rely on (e.g. WriteRefreshToLock's !IsNotExist bootstrap path,
-// commands/internal/lifecycle/install.go) so a future fallible step can be
-// added here without an API break.
+// project. It is fail-or-full: every scan it performs (skills/agents/rules/
+// hooks/mcp/settings dirs) distinguishes a legitimately absent resource from
+// a real I/O error (permission denied, unreadable directory, ...) via the
+// internal/fsops allow-missing helpers, and any real failure anywhere
+// aggregates (errors.Join) into a single (nil, err) return instead of
+// silently degrading to an empty/zero manifest. Git origin lookup
+// (DeriveRepoIDFromGit) keeps its own documented "" fallback per spec §5.3
+// and is not part of this aggregation.
 func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
@@ -952,12 +995,36 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	rc.RepoID = DeriveRepoIDFromGit(projectPath)
 
 	scopes := []string{"global", projectName}
-	rc.Skills = collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
-	rc.Agents = collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
-	rc.Rules = detectRuleScopes(agentsHome, projectName)
-	rc.Hooks = detectHookEvents(agentsHome, projectName)
-	rc.MCP = detectMCPServers(agentsHome, projectName)
-	rc.Settings = detectPlatformSettings(agentsHome, projectName)
+
+	var errs []error
+
+	skills, err := collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
+	errs = append(errs, err)
+	rc.Skills = skills
+
+	agentsList, err := collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
+	errs = append(errs, err)
+	rc.Agents = agentsList
+
+	rules, err := detectRuleScopes(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.Rules = rules
+
+	hooks, err := detectHookEvents(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.Hooks = hooks
+
+	mcp, err := detectMCPServers(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.MCP = mcp
+
+	settings, err := detectPlatformSettings(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.Settings = settings
+
+	if joined := errors.Join(errs...); joined != nil {
+		return nil, joined
+	}
 
 	return rc, nil
 }
@@ -1143,77 +1210,123 @@ func sourceMergeKey(s Source) string {
 	}
 }
 
-// collectScopedDirs returns unique entry names from resource subdirs that contain markerFile.
-func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) []string {
+// collectScopedDirs returns unique entry names from resource subdirs that
+// contain markerFile. A real I/O error (as opposed to a scope dir simply not
+// existing yet) is aggregated and returned alongside whatever entries were
+// found before the failure, so callers on the fail-or-full path (see
+// GenerateAgentsRC) can distinguish "no skills configured" from "couldn't
+// read the skills directory".
+func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) ([]string, error) {
 	var names []string
+	var errs []error
 	for _, scope := range scopes {
 		dir := filepath.Join(agentsHome, resourceType, scope)
-		entries, err := os.ReadDir(dir)
+		entries, found, err := fsops.ReadDirAllowMissing(dir)
 		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !found {
 			continue
 		}
 		for _, e := range entries {
 			entryPath := filepath.Join(dir, e.Name())
-			if !isDirEntry(entryPath) {
+			isDir, err := isDirEntry(entryPath)
+			if err != nil {
+				errs = append(errs, err)
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(entryPath, markerFile)); err == nil {
+			if !isDir {
+				continue
+			}
+			_, markerFound, err := fsops.StatAllowMissing(filepath.Join(entryPath, markerFile))
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if markerFound {
 				names = AppendUnique(names, e.Name())
 			}
 		}
 	}
-	return names
+	return names, errors.Join(errs...)
 }
 
-// detectHookEvents reads the project claude-code.json and returns a StringsOrBool
-// listing hook event names that have at least one entry.
-func detectHookEvents(agentsHome, projectName string) StringsOrBool {
+// detectHookEvents reads the project claude-code.json and returns a
+// StringsOrBool listing hook event names that have at least one entry. Real
+// I/O errors from either underlying check are aggregated and returned so a
+// chmod'd hooks or settings scope directory surfaces as a failure instead of
+// "no hooks configured".
+func detectHookEvents(agentsHome, projectName string) (StringsOrBool, error) {
+	var errs []error
 	for _, scope := range []string{projectName, "global"} {
-		if hasYAMLHooks(filepath.Join(agentsHome, "hooks", scope)) {
-			return StringsOrBool{All: true}
+		hasYAML, err := hasYAMLHooks(filepath.Join(agentsHome, "hooks", scope))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if hasYAML {
+			return StringsOrBool{All: true}, errors.Join(errs...)
 		}
 	}
 	for _, scope := range []string{projectName, "global"} {
-		if result := detectSettingsHookEvents(agentsHome, scope); result.IsEnabled() {
-			return result
+		result, err := detectSettingsHookEvents(agentsHome, scope)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if result.IsEnabled() {
+			return result, errors.Join(errs...)
 		}
 	}
-	return StringsOrBool{}
+	return StringsOrBool{}, errors.Join(errs...)
 }
 
-func hasYAMLHooks(hooksDir string) bool {
-	entries, err := os.ReadDir(hooksDir)
+func hasYAMLHooks(hooksDir string) (bool, error) {
+	entries, found, err := fsops.ReadDirAllowMissing(hooksDir)
 	if err != nil {
-		return false
+		return false, err
 	}
+	if !found {
+		return false, nil
+	}
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml")); err == nil {
-			return true
+		_, markerFound, err := fsops.StatAllowMissing(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml"))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if markerFound {
+			return true, errors.Join(errs...)
 		}
 	}
-	return false
+	return false, errors.Join(errs...)
 }
 
-func detectSettingsHookEvents(agentsHome, scope string) StringsOrBool {
+func detectSettingsHookEvents(agentsHome, scope string) (StringsOrBool, error) {
 	settingsPath := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
-	data, err := os.ReadFile(settingsPath)
+	data, found, err := fsops.ReadFileAllowMissing(settingsPath)
 	if err != nil {
-		return StringsOrBool{}
+		return StringsOrBool{}, err
+	}
+	if !found {
+		return StringsOrBool{}, nil
 	}
 	var settings map[string]any
 	if json.Unmarshal(data, &settings) != nil {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	hooksVal, ok := settings["hooks"]
 	if !ok {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	hooksMap, ok := hooksVal.(map[string]any)
 	if !ok {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	var hookEvents []string
 	for event, val := range hooksMap {
@@ -1222,30 +1335,42 @@ func detectSettingsHookEvents(agentsHome, scope string) StringsOrBool {
 		}
 	}
 	if len(hookEvents) == 0 {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	sort.Strings(hookEvents)
-	return StringsOrBool{Names: hookEvents}
+	return StringsOrBool{Names: hookEvents}, nil
 }
 
 // detectMCPServers scans MCP config files for the project and global scopes
 // and returns a StringsOrBool listing named server entries.
-func detectMCPServers(agentsHome, projectName string) StringsOrBool {
+func detectMCPServers(agentsHome, projectName string) (StringsOrBool, error) {
+	var errs []error
 	for _, scope := range []string{projectName, "global"} {
-		if result := readMCPScope(agentsHome, scope); result.IsEnabled() {
-			return result
+		result, err := readMCPScope(agentsHome, scope)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if result.IsEnabled() {
+			return result, errors.Join(errs...)
 		}
 	}
-	return StringsOrBool{}
+	return StringsOrBool{}, errors.Join(errs...)
 }
 
-// readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope directory
-// and returns the server list from the first readable file.
-func readMCPScope(agentsHome, scope string) StringsOrBool {
+// readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope
+// directory and returns the server list from the first readable file. A real
+// read error on any candidate file aborts immediately (rather than masking it
+// by falling through to the next filename) so a chmod'd mcp scope directory
+// surfaces as a failure.
+func readMCPScope(agentsHome, scope string) (StringsOrBool, error) {
 	for _, fname := range []string{"claude.json", "mcp.json", ".mcp.json"} {
 		mcpPath := filepath.Join(agentsHome, "mcp", scope, fname)
-		data, err := os.ReadFile(mcpPath)
+		data, found, err := fsops.ReadFileAllowMissing(mcpPath)
 		if err != nil {
+			return StringsOrBool{}, err
+		}
+		if !found {
 			continue
 		}
 		var mcpConfig map[string]any
@@ -1265,36 +1390,45 @@ func readMCPScope(agentsHome, scope string) StringsOrBool {
 		}
 		if len(names) > 0 {
 			sort.Strings(names)
-			return StringsOrBool{Names: names}
+			return StringsOrBool{Names: names}, nil
 		}
 		break // found a file, stop trying filenames
 	}
-	return StringsOrBool{}
+	return StringsOrBool{}, nil
 }
 
 // detectPlatformSettings returns true if a cursor.json settings file exists
 // for the project or global scope.
-func detectPlatformSettings(agentsHome, projectName string) bool {
+func detectPlatformSettings(agentsHome, projectName string) (bool, error) {
+	var errs []error
 	for _, scope := range []string{projectName, "global"} {
-		if _, err := os.Stat(filepath.Join(agentsHome, "settings", scope, "cursor.json")); err == nil {
-			return true
+		_, found, err := fsops.StatAllowMissing(filepath.Join(agentsHome, "settings", scope, "cursor.json"))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if found {
+			return true, errors.Join(errs...)
 		}
 	}
-	return false
+	return false, errors.Join(errs...)
 }
 
-func detectRuleScopes(agentsHome, projectName string) []string {
+func detectRuleScopes(agentsHome, projectName string) ([]string, error) {
 	scopes := []string{"global"}
 	projectRulesDir := filepath.Join(agentsHome, "rules", projectName)
-	entries, err := os.ReadDir(projectRulesDir)
+	entries, found, err := fsops.ReadDirAllowMissing(projectRulesDir)
 	if err != nil {
-		return scopes
+		return nil, err
+	}
+	if !found {
+		return scopes, nil
 	}
 	for _, entry := range entries {
 		ext := filepath.Ext(entry.Name())
 		if ext == ".md" || ext == ".mdc" || ext == ".txt" {
-			return append(scopes, "project")
+			return append(scopes, "project"), nil
 		}
 	}
-	return scopes
+	return scopes, nil
 }
