@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/events"
 )
@@ -300,7 +299,6 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 			{Type: "git", URL: "https://github.com/example/repo.git", Ref: "main"},
 		},
 	}
-	orig.SetRefreshMetadata("1.2.3", "abcdef12", "v1.2.3", time.Date(2026, 3, 31, 12, 0, 0, 0, time.UTC))
 
 	if err := orig.Save(tmp); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -335,11 +333,44 @@ func TestAgentsRCSaveLoadRoundtrip(t *testing.T) {
 	if len(got.Sources) != 2 || got.Sources[1].URL != orig.Sources[1].URL {
 		t.Errorf("Sources: got %+v, want %+v", got.Sources, orig.Sources)
 	}
-	if got.Refresh == nil {
-		t.Fatal("Refresh: got nil, want metadata")
+}
+
+// TestLoadAgentsRC_LegacyRefreshBlockIgnoredAndStripped is the back-compat
+// guard for refresh-metadata-to-lock: a manifest stamped by a pre-fix da
+// build still carries a top-level "refresh" object. LoadAgentsRC must load it
+// without error (the key has no AgentsRC field to decode into, so it is
+// silently dropped rather than erroring or leaking into ExtraFields), and a
+// subsequent Save must not re-emit it — the legacy key is stripped on the
+// next rewrite.
+func TestLoadAgentsRC_LegacyRefreshBlockIgnoredAndStripped(t *testing.T) {
+	tmp := t.TempDir()
+	legacy := `{
+  "version": 1,
+  "project": "myproject",
+  "sources": [{"type": "local"}],
+  "refresh": {"version": "0.9.0", "commit": "deadbeef", "describe": "v0.9.0", "refreshedAt": "2026-01-01T00:00:00Z"}
+}`
+	if err := os.WriteFile(filepath.Join(tmp, AgentsRCFile), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Refresh, orig.Refresh) {
-		t.Errorf("Refresh: got %+v, want %+v", got.Refresh, orig.Refresh)
+
+	rc, err := LoadAgentsRC(tmp)
+	if err != nil {
+		t.Fatalf("LoadAgentsRC on legacy refresh manifest: %v", err)
+	}
+	if len(rc.ExtraFields) != 0 {
+		t.Fatalf("legacy refresh block must not leak into ExtraFields: %+v", rc.ExtraFields)
+	}
+
+	if err := rc.Save(tmp); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, AgentsRCFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "refresh") {
+		t.Fatalf("re-saved manifest must strip the legacy refresh key: %s", data)
 	}
 }
 
@@ -438,23 +469,6 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 	out := MergeGenerateAgentsRC(existing, generated)
 	if len(out.ExtraFields) != 1 || string(out.ExtraFields["customExtension"]) != string(legacy) {
 		t.Errorf("ExtraFields not preserved: %#v", out.ExtraFields)
-	}
-}
-
-func TestMergeGenerateAgentsRCPreservesRefresh(t *testing.T) {
-	existing := &AgentsRC{
-		Version: 1,
-		Sources: []Source{{Type: testSourceTypeLocal}},
-	}
-	existing.SetRefreshMetadata("1.0.0", "abc", "v1.0.0", time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
-	generated := &AgentsRC{
-		Version: 1,
-		Skills:  []string{"s"},
-		Sources: []Source{{Type: testSourceTypeLocal}},
-	}
-	out := MergeGenerateAgentsRC(existing, generated)
-	if out.Refresh == nil || out.Refresh.Version != "1.0.0" || out.Refresh.RefreshedAt == "" {
-		t.Fatalf("Refresh not preserved: %+v", out.Refresh)
 	}
 }
 
@@ -1067,23 +1081,6 @@ func TestAgentsRCKG_MarshalRoundTrip(t *testing.T) {
 	}
 	if !rc2.KG.Bridge.Enabled {
 		t.Error("Bridge.Enabled false after round-trip")
-	}
-}
-
-func TestSetRefreshMetadata_NilSafe(t *testing.T) {
-	var a *AgentsRC
-	a.SetRefreshMetadata("v", "c", "d", time.Now())
-}
-
-func TestSetRefreshMetadata_UTC(t *testing.T) {
-	a := &AgentsRC{}
-	ts := time.Date(2026, 4, 1, 12, 0, 0, 0, time.FixedZone("EST", -5*3600))
-	a.SetRefreshMetadata("1.0", "abc", "v1", ts)
-	if a.Refresh == nil {
-		t.Fatal("Refresh nil")
-	}
-	if !strings.HasSuffix(a.Refresh.RefreshedAt, "Z") {
-		t.Errorf("RefreshedAt should be UTC RFC3339 (Z), got %q", a.Refresh.RefreshedAt)
 	}
 }
 

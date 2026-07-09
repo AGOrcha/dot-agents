@@ -238,36 +238,8 @@
       }
     },
     "refresh": {
-      "type": "object",
-      "description": "Latest da install/refresh metadata recorded on the project.",
-      "additionalProperties": false,
-      "required": ["version", "commit", "describe", "refreshedAt"],
-      "properties": {
-        "version": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 8,
-          "examples": ["v1.0.0"]
-        },
-        "commit": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 8,
-          "examples": ["ad213s5e"]
-        },
-        "describe": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 150,
-          "examples": ["Refreshed dot-agents project from ~/.agents/ into project directories."]
-        },
-        "refreshedAt": {
-          "type": "string",
-          "minLength": 1,
-          "format": "date-time",
-          "examples": ["2026-04-13T12:59:35Z"]
-        }
-      }
+      "deprecated": true,
+      "description": "DEPRECATED: refresh metadata (version/commit/describe/refreshedAt for the last da install/refresh) now lives in .agentsrc.lock's \"refresh\" section (see internal/config.RefreshMetadata / WriteRefreshLock), not the committed manifest. This property is unconstrained — any legacy shape (including a full 40-char commit SHA) still validates — because it is ignored on load and stripped on the next `da refresh`/manifest rewrite; never re-emitted."
     },
     "repo_id": {
       "type": "string",

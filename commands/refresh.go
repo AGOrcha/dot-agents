@@ -332,10 +332,10 @@ func recreatePlatformLinks(name, path string, enabledPlatforms []platform.Platfo
 // finalizeProjectRefresh writes the refresh metadata stamp when the project
 // finished cleanly. Returns true on a successful stamp (counted toward the
 // success total) and false on dry-run, partial application, or stamp failure.
-// Dry-run is treated as success for the counter but skips the manifest write.
+// Dry-run is treated as success for the counter but skips the lock write.
 func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit, refreshDescribe string) bool {
 	if Flags.DryRun {
-		msg := "Update .agentsrc.json refresh details"
+		msg := "Update .agentsrc.lock refresh details"
 		if refreshCommit != "" {
 			msg += " (commit=" + refreshCommit[:8] + ")"
 		}
@@ -346,8 +346,8 @@ func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit
 		ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
 		return false
 	}
-	if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+	if err := projectsync.WriteRefreshToLock(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("lock refresh metadata: %v", err))
 		return false
 	}
 	return true

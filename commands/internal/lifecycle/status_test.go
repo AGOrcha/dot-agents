@@ -1205,9 +1205,11 @@ func TestRunStatus_TextOmitsConfigInspection(t *testing.T) {
 		Version: 1,
 		Project: "p",
 		Skills:  []string{"s1"},
-		Refresh: &config.RefreshMetadata{RefreshedAt: "2026-05-01T12:30:00Z"},
 	}
 	if err := rc.Save(projPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRefreshLock(projPath, config.RefreshMetadata{RefreshedAt: "2026-05-01T12:30:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 
