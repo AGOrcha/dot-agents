@@ -152,7 +152,7 @@ Knowledge notes can reference code symbols through cross-reference links:
 - When a symbol changes, linked notes surface as potentially stale
 - When reviewing code, linked decisions provide rationale for why code exists
 
-This is stored as `note_symbol_links` in the database with relation types: `implements`, `documents`, `decides`, `references`.
+This is stored as `note_symbol_links` in the database with relation types: `mentions` (default), `implements`, `documents`, `decides`, `references`.
 
 ## Storage Architecture
 
@@ -198,7 +198,7 @@ The graph supports pluggable storage backends through a `GraphStore` interface.
 
 #### SQLite (default, solo developer)
 
-- Zero configuration — database file at `.code-review-graph/graph.db` in the repo root
+- Zero configuration — database file at `KG_HOME/ops/graphstore.db` by default (`KG_HOME` resolves from the `KG_HOME` env var, then `agentsrc.json`'s `kg.graph_home`, falling back to `~/knowledge-graph`)
 - WAL mode for concurrent reads (agent session + MCP server)
 - FTS5 for full-text search with porter stemming
 - Pure Go driver (`modernc.org/sqlite`), no CGO required
@@ -216,13 +216,13 @@ The graph supports pluggable storage backends through a `GraphStore` interface.
 #### Backend Selection
 
 ```yaml
-# KG_HOME/self/config.yaml or .agentsrc.json
+# .agentsrc.json (kg section)
 kg:
-  backend: sqlite
-  sqlite:
-    path: .code-review-graph/graph.db
-  postgres:
-    url: postgres://team@db.internal:5432/code_graph
+  graph_home: ~/knowledge-graph
+  backend: sqlite   # or "postgres" (requires KG_POSTGRES_URL env var)
+  bridge:
+    enabled: true
+    allowed_intents: []
 ```
 
 #### Migration Between Backends

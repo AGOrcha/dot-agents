@@ -1,7 +1,7 @@
 # Workflow Automation Follow-On Spec
 
-Status: Directional
-Last updated: 2026-04-10
+Status: Directional (Waves 2–7 below have shipped; MCP query surface and rollback/lifecycle controls remain backlog)
+Last updated: 2026-07-09
 Depends on: `docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`
 
 This document captures the next-wave and currently out-of-scope workflow automation ideas that follow the MVP contract in `docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md`.
@@ -9,6 +9,8 @@ This document captures the next-wave and currently out-of-scope workflow automat
 The MVP spec remains the source of truth for the first implementation wave.
 
 This follow-on spec exists so later planning does not need to re-synthesize the research backlog from scratch.
+
+**Status note (2026-07-09):** Waves 2 through 7 below have all shipped — see `.agents/history/workflow-automation-follow-on-spec/` for wave-by-wave completion records and `commands/workflow/` for the resulting CLI surface. Current post-MVP planning has grown well beyond this document's original wave list; the live set of in-flight design specs now lives under `.agents/workflow/specs/` (e.g. `workflow-commit-command`, `workflow-parallel-orchestration`, `session-handoff-journal`, `planner-evidence-backed-write-scope`, `verifier-reviewer-template-architecture`). This document remains the historical design record for Waves 2–7 and for the still-open MCP query surface and rollback/lifecycle backlog described below.
 
 ## Purpose
 
@@ -80,7 +82,7 @@ The next work naturally groups into six themes:
 
 ## Wave 2: Canonical Plan And Task Artifacts
 
-Status: Next wave
+Status: Shipped — canonical `.agents/workflow/plans/<id>/{PLAN,TASKS}.yaml` plus the `da workflow plan|task|advance|...` CLI surface are implemented in `commands/workflow/` (now with additional commands beyond this wave's original scope: `plan graph`, `plan schedule`, `plan derive-scope`, `plan check-scope`, `slices`, `eligible`, `slots`, `next`, `complete`)
 
 ### Problem
 
@@ -173,7 +175,7 @@ This wave is complete when an agent can determine the active plan, active task, 
 
 ## Wave 3: Structured Query And Health Surface
 
-Status: Next wave
+Status: Shipped (completed 2026-04-10) — `da workflow health`, `da workflow verify record`/`verify log`, and `--json` surfaces are implemented in `commands/workflow/`
 
 ### Problem
 
@@ -280,7 +282,7 @@ This wave is complete when an agent can retrieve the repo’s current workflow s
 
 ## Wave 4: Shared Preferences And Compatibility
 
-Status: Next wave
+Status: Shipped (completed 2026-04-10) — `da workflow prefs` is implemented in `commands/workflow/`
 
 ### Problem
 
@@ -342,11 +344,12 @@ The initial supported categories should be:
 
 ### CLI Surface
 
-This wave should add or extend:
+This wave shipped:
 
 - `da workflow prefs`
 - `da workflow prefs show`
 - `da workflow prefs set-local <key> <value>`
+- `da workflow prefs set-shared <key> <value>` (queues a shared-preference proposal directly, rather than requiring a hand-authored proposal file)
 
 Shared repo preference changes should still flow through proposal files and `da review`.
 
@@ -356,7 +359,7 @@ This wave is complete when an agent can discover repo workflow expectations from
 
 ## Wave 5: Knowledge-Graph Bridge And Integration Readiness
 
-Status: Next wave
+Status: Shipped (completed 2026-04-10) — `da workflow graph query|health` and `da kg bridge query|health|mapping` are implemented; the code-structure graph was ported from `code-review-graph` per the resolved decision below
 
 ### Problem
 
@@ -478,17 +481,17 @@ Skills are the primary consumers of bridge queries. The bridge enables skills to
 
 ### CLI Surface
 
-These are likely escape-hatch commands for the first bridge:
+These shipped as escape-hatch commands:
 
 - `da workflow graph query --intent ...`
 - `da workflow graph health`
 
 These map to `da kg` commands for direct access:
 
-- `da kg search <query>` — FTS across notes and symbols
+- `da kg query --intent <intent> [query string]` — intent-based query across notes and symbols (not a separate `search` command)
 - `da kg changes [--base <ref>]` — change detection
-- `da kg impact <symbol>` — impact radius
-- `da kg bridge query --intent <intent> <query>` — unified bridge query
+- `da kg impact [file...]` — blast radius for given files (or current diff); takes files, not a symbol name
+- `da kg bridge query --intent <intent> [query string]` — unified bridge query
 
 ### Acceptance Standard
 
@@ -496,7 +499,7 @@ This wave is complete when an agent can obtain graph-backed workflow context —
 
 ## Wave 6: Delegation And Merge-Back
 
-Status: Directional backlog
+Status: Shipped (completed 2026-04-10) — all 7 steps implemented and tested
 
 ### Problem
 
@@ -515,7 +518,7 @@ The research clearly shows subagents are a real workflow primitive, but the MVP 
 - `dot-agents` may assist with structure, but should not auto-resolve overlapping write scopes.
 - Hermes-style coordination semantics are in scope, but literal marker strings are not the canonical storage format.
 
-### Candidate Artifacts
+### Artifacts (Shipped)
 
 | Path | Purpose |
 |------|---------|
@@ -552,12 +555,15 @@ Chat-based transports may still render them as literal markers such as `[STATUS_
 
 belong to the transport adapter or runtime protocol, not to canonical repo storage.
 
-### Candidate CLI Surface
+### CLI Surface (Shipped)
 
-These are not committed yet, but are the likely escape-hatch commands:
+These shipped as the delegation escape-hatch commands, plus parent-side lifecycle helpers and loop-observation routing added alongside this wave:
 
 - `da workflow fanout`
 - `da workflow merge-back`
+- `da workflow delegation closeout` — archive completed merge-back artifacts and reconcile canonical task state
+- `da workflow delegation gate` — evaluate task-local review evidence into an accept/reject/escalate parent-gate outcome
+- `da workflow fold-back create|update|list` — route loop observations into TASKS.yaml notes, plan summary, or a proposal
 
 ### Blocking Risks
 
@@ -571,7 +577,7 @@ This wave should only start after the single-agent workflow model is stable and 
 
 ## Wave 7: Cross-Repo Sweep And Drift
 
-Status: Directional backlog
+Status: Shipped (completed 2026-04-11) — all 7 steps implemented and tested
 
 ### Problem
 
@@ -594,17 +600,19 @@ Users operate multiple repos, and the same workflow drift can recur across them:
 - default behavior is read-only reporting
 - mutating sweep actions should require explicit confirmation or proposal review
 
-### Candidate CLI Surface
+### CLI Surface (Shipped)
 
 - `da workflow sweep`
 - `da workflow drift`
 
-### Candidate Outputs
+### Outputs (Shipped)
 
 - missing or stale checkpoints
 - proposal backlog older than a threshold
-- inconsistent hook or workflow preference rollout
-- repos missing required active-plan structure
+- missing `.agents/workflow/` directory or missing `.agents/workflow/plans/` structure
+- plan-status hygiene: completed plans still sitting under `.agents/workflow/plans/`, and archived plans that should have moved out
+
+This pass does not track inconsistent hook or workflow-preference rollout across repos — that candidate output from the original design did not ship in this wave.
 
 ### Acceptance Standard
 
@@ -671,7 +679,7 @@ These ideas are interesting but should remain outside the committed roadmap unti
 
 ## Recommended Next Planning Order
 
-After MVP delivery, the planning order should be:
+After MVP delivery, the planning order was (and was followed to completion — see the per-wave status above):
 
 1. Wave 2: canonical plan and task artifacts
 2. Wave 3: structured query and health surface

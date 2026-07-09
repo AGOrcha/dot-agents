@@ -1,7 +1,7 @@
 # Workflow Automation Product Spec
 
-Status: Proposed
-Last updated: 2026-04-09
+Status: Active (MVP implemented; see `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` for shipped post-MVP waves)
+Last updated: 2026-07-09
 
 This document turns the workflow automation research and the preliminary plan in `/Users/nikashp/.claude/plans/happy-seeking-iverson.md` into an implementation-ready MVP contract for `dot-agents`.
 
@@ -483,17 +483,17 @@ Must deliver:
 
 ## Explicitly Deferred Work
 
-These items are acknowledged but not required for the MVP:
+These items were acknowledged but not required for the original MVP wave. Most have since shipped as follow-on work — see `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` for the wave that delivered each one:
 
-- canonical plan and task artifacts
-- runtime MCP query surface for workflow state
-- automatic tool-health and approval-state diagnostics beyond what existing commands already expose
-- persisted repo preferences
-- knowledge-graph bridge and integration readiness
-- delegation manifests, fan-out orchestration, or merge-back artifacts
-- structured intent-marker transport between multiple active agents
-- cross-repo workflow sweep commands
-- bash parity
+- canonical plan and task artifacts — shipped (Follow-On Spec Wave 2; `da workflow plan`/`task`/`advance` and related commands in `commands/workflow/`)
+- runtime MCP query surface for workflow state — still deferred; no workflow-state MCP server exists (the shipped `da kg serve` MCP server covers code-graph/knowledge-note queries only, not orient/checkpoint/proposal state)
+- automatic tool-health and approval-state diagnostics beyond what existing commands already expose — shipped (Follow-On Spec Wave 3; `da workflow health`)
+- persisted repo preferences — shipped (Follow-On Spec Wave 4; `da workflow prefs`)
+- knowledge-graph bridge and integration readiness — shipped (Follow-On Spec Wave 5; `da workflow graph`, `da kg bridge`)
+- delegation manifests, fan-out orchestration, or merge-back artifacts — shipped (Follow-On Spec Wave 6; `da workflow fanout`/`merge-back`/`delegation`)
+- structured intent-marker transport between multiple active agents — partially shipped: delegation contracts carry a canonical `pending_intent` enum field (`status_request`/`review_request`/`escalation_notice`/`ack`) and it is surfaced in `da workflow status`, but no command yet sets or transports it between agents
+- cross-repo workflow sweep commands — shipped (Follow-On Spec Wave 7; `da workflow sweep`/`drift`)
+- bash parity — still not required; the legacy shell tree is being actively pruned rather than brought to parity (see `.agents/workflow/specs/legacy-shell-prune-share-rehome/`)
 
 ## Implementation Guardrails
 

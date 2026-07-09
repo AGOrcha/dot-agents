@@ -43,6 +43,10 @@ The orchestrator should be a mixed system, not a single new super-agent.
   - recommend the next actionable canonical task
   - accept scoped completion filters via `--plan <id>[,<id>...]`
   - return `null` when every scoped plan is drained, blocked, or paused
+- `workflow eligible`
+  - list every unblocked, non-delegated task across active (optionally `--plan`-scoped) plans, annotated with write-scope conflict detection and scope-evidence confidence
+  - report `max_batch` / `conflict_graph` so a caller can safely fan out more than one task at once
+  - the primitive `isp` and `ralph-orchestrate` read via `workflow eligible --json` before deciding fanout size; `workflow next` remains the single-task selector
 - `workflow plan graph`
   - derive a dependency graph across plans, tasks, and blockers
 - `workflow slices`
@@ -124,7 +128,7 @@ Phase 8 models handoff as three layers (do not collapse into a single ad hoc pro
 2. **Project overlay** — repo-local files (plan locations, regression matrix, validation queue, project loop guidance).
 3. **Per-delegation bundle** — `.agents/active/delegation-bundles/<delegation_id>.yaml`, validated by [`schemas/workflow-delegation-bundle.schema.json`](../schemas/workflow-delegation-bundle.schema.json).
 
-**CLI status:** `workflow fanout` **writes** the delegation bundle to `.agents/active/delegation-bundles/<delegation_id>.yaml` (same `delegation_id` as the contract’s `id` field). Repeatable flags include `--delegate-profile`, `--project-overlay`, `--prompt`, `--prompt-file`, `--context-file`, `--feedback-goal`, `--scenario-tag`, `--regression-artifact`, `--validation-queue`, `--selection-reason`, plus optional `--require-negative-coverage` / `--sandbox-mutations` for `verification.evidence_policy`. File-backed flags must refer to paths inside the repo; `--regression-artifact` may name a not-yet-created file as long as it stays under the project tree.
+**CLI status:** `workflow fanout` **writes** the delegation bundle to `.agents/active/delegation-bundles/<delegation_id>.yaml` (same `delegation_id` as the contract’s `id` field). Repeatable flags include `--delegate-profile`, `--project-overlay`, `--prompt`, `--prompt-file`, `--context-file`, `--feedback-goal`, `--scenario-tag`, `--regression-artifact`, `--validation-queue`, `--selection-reason`, plus optional `--require-negative-coverage` / `--sandbox-mutations` / `--verifier-retry-max` / `--lens-retry-max` for `verification.evidence_policy` (the retry-max flags set `verifier_chain_max` / `lens_chain_max` when > 0). File-backed flags must refer to paths inside the repo; `--regression-artifact` may name a not-yet-created file as long as it stays under the project tree.
 
 **Manual workflow (optional):** you can still hand-edit a bundle after fanout if you need content the CLI does not yet model; prefer re-running fanout when possible so the contract and bundle stay aligned.
 
@@ -135,7 +139,7 @@ When you want `workflow fanout` to choose a verifier chain automatically, author
 - Put the task-specific value in `TASKS.yaml` as `app_type`.
 - Put the plan-wide fallback in `PLAN.yaml` as `default_app_type`.
 - `da workflow task add --app-type ...` writes the same `TASKS.yaml app_type` field.
-- The value must exactly match a key in `.agentsrc.json.app_type_verifier_map`.
+- The value must exactly match a key under `.agentsrc.json execution_profile.by_app_type`, and its `topology.verifier_sequence` slugs must each resolve under `stage_profiles.verifier` (per the `stage-profile-and-routing-consolidation` spec, shipped 2026-06-22). The flat `app_type_verifier_map` is a deprecated back-compat-only alias — legacy manifests still fold it into `execution_profile` on load, but it is no longer the mechanism to author against and is absent from this repo's live `.agentsrc.json`.
 - Prefer one shared stack key such as `go-http-service` or `next-frontend` over mixing stack keys and repo names.
 - If a Markdown plan, handoff, or design doc mentions verifier routing, repeat the exact YAML key being used instead of inventing a synonym.
 
@@ -143,8 +147,21 @@ Example:
 
 ```json
 {
-  "app_type_verifier_map": {
-    "go-http-service": ["unit", "api", "integration"]
+  "stage_profiles": {
+    "verifier": {
+      "unit": { "label": "Go unit tests", "prompt_files": [] },
+      "api": { "label": "API/contract verification", "prompt_files": [] },
+      "integration": { "label": "Integration suite", "prompt_files": [] }
+    }
+  },
+  "execution_profile": {
+    "by_app_type": {
+      "go-http-service": {
+        "topology": {
+          "verifier_sequence": ["unit", "api", "integration"]
+        }
+      }
+    }
   }
 }
 ```
@@ -166,7 +183,7 @@ tasks:
 da workflow task add example-service-rollout --id request-validation-fix --title "Fix request validation flow" --app-type go-http-service
 ```
 
-`workflow fanout --plan example-service-rollout --task request-validation-fix` will read `TASKS.yaml app_type` first, fall back to `PLAN.yaml default_app_type` if needed, and then do an exact lookup in `.agentsrc.json app_type_verifier_map`.
+`workflow fanout --plan example-service-rollout --task request-validation-fix` will read `TASKS.yaml app_type` first, fall back to `PLAN.yaml default_app_type` if needed, and then look up `execution_profile.by_app_type.<app_type>.topology.verifier_sequence` (validating each slug against `stage_profiles.verifier`).
 
 **Legacy full-slice closeout responsibilities** — bundle
 `closeout.worker_must` / `closeout.parent_must` describe the compatibility
@@ -256,6 +273,15 @@ Guardrails:
 - skip tasks whose dependencies are not completed
 - prefer canonical tasks over checkpoint `next_action`
 
+### Batch Selection Mode
+
+`workflow eligible` extends the same guardrails to multi-task, parallel-fanout selection instead of picking one best candidate:
+
+- returns every unblocked, non-delegated task across the (optionally `--plan`-scoped) active plans
+- annotates each task with `conflicts_with` (write-scope overlap detection), `has_evidence` / `evidence_confidence` (scope-evidence sidecar), and `write_scope_declared`
+- derives `max_batch`: the largest conflict-free subset of eligible tasks, bounded by the `execution.max_parallel_workers` preference or an explicit `--limit`
+- is the primitive `isp` and `ralph-orchestrate` read via `workflow eligible --json` to decide how many bundles to fan out in one pass
+
 ### Scoped Completion Mode
 
 `RALPH_RUN_PLAN` is the repo-level driver for plan-completion loops.
@@ -312,7 +338,7 @@ Bigger or shared-behavior changes:
 - repo-wide workflow defaults
 - cross-repo conventions
 
-Those should become review proposals in the queue selected by `.agents/rules/dot-agents/proposal-routing.md`.
+Those should become review proposals in the queue selected by `~/.agents/rules/dot-agents/proposal-routing.md`.
 
 ## KG / CRG Direction
 

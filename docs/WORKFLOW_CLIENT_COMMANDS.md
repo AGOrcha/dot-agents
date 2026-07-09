@@ -54,7 +54,7 @@ Every client command's `--help` `Example` block shows the call. The expanded seq
 ```text
 # What close-task does, expanded into the primitive pipeline it invokes:
 
-da workflow checkpoint --log-to-iter <N> --log-to-iter-role impl
+da workflow checkpoint --log-to-iter <N> --role impl
     # N picked by NextIterationNumber(iter-log-dir) — see iter_log_autoderive.go
 da score iteration <N> --recompute
     # writes iter-N.score.yaml; same writer as workflow-client-commands score-current task
@@ -138,8 +138,8 @@ sentinel ref) with the resolved reality:
   from the live `TASKS.yaml` when `gh` is unavailable. It corroborates the locus arm
   and status (medium trust) but never resolves authoritative coordinates.
 
-Task→PR matching reuses the bounded `branchMatchesTask` token rule, so a task id
-never resolves a sibling's PR.
+Task→PR matching reuses the bounded `strictBranchMatch` token rule, so a
+task id never resolves a sibling's PR.
 
 ```text
 da workflow journal snapshot          # capture current live state

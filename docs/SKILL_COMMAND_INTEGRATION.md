@@ -1,7 +1,7 @@
 # Skill ↔ Command Integration Map
 
 Status: Active
-Last updated: 2026-06-23
+Last updated: 2026-07-09
 Related:
 - `docs/KNOWLEDGE_GRAPH_SUBPROJECT_SPEC.md`
 - `docs/WORKFLOW_AUTOMATION_FOLLOW_ON_SPEC.md` (Wave 5)
@@ -201,6 +201,41 @@ so they land in every initialized home. They drive the `da workflow` /
 at orient time; deeper graph integration (scope derivation, impact-aware fanout)
 is tracked separately.
 
+### Additional shipped starter skills
+
+Four more starter skills ship under the same
+`internal/scaffold/home/starter/skills/global/` tree and `.agentsrc.json`
+registration as the workflow-orchestration set above, but sit outside that
+group's `da workflow`/`da kg` orchestration focus:
+
+- **kg-ideate** — KG-grounded front-end to the idea → spec → plan → execution
+  pipeline: a briefing producer (queries the graph, research corpus, and
+  lessons) feeds spec scaffolding, then plan scaffolding, then hands off to
+  fanout/ISP staged execution. Commands: `da kg query` for the briefing step;
+  hands off into the same `da workflow fanout`/`isp` surface as the
+  workflow-orchestration skills above.
+- **release-cut** — drives a tagged release through the project's release
+  workflow to a verified, signed publish, including infra-failure recovery
+  (stale-tag cleanup, sign/timestamp failure classification). Explicitly the
+  successor step to `release-docs-refresh` — it runs the version bump and
+  publish after docs are reconciled, not before. Commands: `da config
+  relevance` (preflight) plus the project's own release/tag tooling (not a
+  `da` subcommand).
+- **onboard** — gets a new `da` user from "just installed" to "editor linked,
+  project bound, health check green," detecting one of three setup paths
+  (adopt a shared/team home config, install an existing repo manifest, or
+  scaffold fresh). Commands: `da refresh`, `da status --audit`, `da doctor`.
+- **ideation-cycle** — fork-resolution loop for a HARD/OPEN design decision:
+  empirical prototype under a fidelity gate, independent cross-harness audit,
+  cross-brain judgment review, ratified decision + evidence sidecar. A
+  composable compound — dispatchable from `kg-ideate`'s spec-scaffold phase
+  for hard forks, or invocable standalone for a one-off design question. No
+  direct `da` command surface of its own; it orchestrates delegated worker
+  agents rather than calling commands.
+
+**Graph integration**: `kg-ideate` is the direct KG consumer of this group;
+the other three do not reference the graph.
+
 ### create-subagent (not yet shipped)
 
 **Purpose**: Create custom subagents for specialized tasks.
@@ -218,12 +253,23 @@ Commands can reference, inject, or trigger skills:
 
 ### da init
 
-**What it does**: Initialize a project with dot-agents config.
+**What it does**: Initialize the `~/.agents/` home directory (once per machine). Registering an individual project is `da add`'s job, not `da init`'s.
 
 **Skill integration**:
-- Generates skill files from the embedded scaffold templates under `internal/scaffold/templates/`
-- Should include graph-aware skills when CRG is available
-- Should register `kg serve` MCP server config for detected platforms
+- Scaffolds the full starter skill set (`build-graph`, `review-delta`, `skill-architect`, the `da workflow` orchestration skills, etc.) from the embedded starter-home tree (`internal/scaffold/home/starter/skills/global/`, copied via `scaffoldhome.CopyMissingStarterAssets`) — not `internal/scaffold/templates/`, which holds the blank `SKILL.md` template `da skills new` renders when scaffolding a brand-new skill.
+- Already registers `kg serve` MCP server configs for detected platforms, but only when a KG config already exists (`EnsureGlobalKGMCPConfigs`); no-ops otherwise.
+- Still aspirational: no CRG-conditional filtering of which starter skills ship — all starter skills are copied regardless of whether CRG is available.
+
+### da skills (list / new / promote)
+
+**What it does**: `commands/skills/` is the literal skill CRUD/promotion surface: `da skills list [project]`, `da skills new <name> [project]`, `da skills promote <name>`.
+
+**Skill integration**:
+- `list` — enumerates skills under `~/.agents/skills/<scope>/` (`projectsync.ListBucket`, keyed on `SKILL.md`).
+- `new` — scaffolds `~/.agents/skills/<scope>/<name>/`, writes a templated `SKILL.md` (`internal/scaffold/templates`, `scaffoldtemplates.RenderSkillManifest`); for a non-global scope it also appends the name to that project's `.agentsrc.json` `skills` list, and for global scope it immediately symlinks the skill into `~/.agents/skills/<name>` (Codex) and `~/.claude/skills/<name>` (Claude Code) without requiring `da refresh`.
+- `promote` — converts a repo-local `.agents/skills/<name>/` into the canonical `~/.agents/skills/<project>/<name>/`, replaces the repo-local path with a managed symlink, registers the name in `.agentsrc.json`, and re-runs the shared skill mirror plan (`.agents/skills/` + `.claude/skills/`) so every platform picks it up.
+
+**Graph integration**: None — `commands/kg/` never references the skills package or `~/.agents/skills/`.
 
 ### da add
 
@@ -235,11 +281,18 @@ Commands can reference, inject, or trigger skills:
 
 ### da refresh
 
-**What it does**: Update configs from sources.
+**What it does**: Re-applies links and config from `~/.agents/` into project directories — it re-projects already-resolved shared state, it does not re-fetch from upstream.
 
 **Skill integration**:
-- Pulls latest skill definitions from git sources
+- Re-links/mirrors skills already resolved into `~/.agents/skills/` onto each enabled platform's project-local skill dir (e.g. `.claude/skills/`) via the shared-target projection + `CreateLinks` pass — it does NOT pull skill definitions from git sources. A manifest with `git` sources prints a hint to run `da install` instead (`noteManifestGitSources`).
 - Should update graph skill templates when source skills change
+
+### da install
+
+**What it does**: Reads `.agentsrc.json` in the current directory and materializes declared skills/agents into `~/.agents/` from configured sources (including git), then applies the manifest to each installed platform — the same link pass as `da refresh`.
+
+**Skill integration**:
+- This — not `da refresh` — is the command that actually pulls skill definitions from configured (including git) sources into the shared `~/.agents/skills/` tree.
 
 ### da review approve
 

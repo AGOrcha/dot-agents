@@ -68,6 +68,8 @@ the original v1 settings (all v2 fields are optional, so a v1 manifest still val
 | `packages` | array | Executable **artifacts** (agents/skills bundles) to install. |
 | `features` | object | Feature-flag overrides (`features.*`). |
 | `execution_profile` | object | Workflow execution shape by `app_type` (see [Config Relevance](./CONFIG_RELEVANCE.md)). |
+| `locks` | object | Phase-1 authority locks this layer declares (`value_locks`, `deny_locks`) — read per layer, not value-merged. See [Locks and authority scopes](#locks-and-authority-scopes). |
+| `authority_grants` | object | Per-source scope grants this layer confers (`source-id: org\|team\|repo`) — read per layer, not value-merged; honored only when the granting layer's own authority strictly outranks the conferred scope. |
 
 A minimal v2 manifest:
 
@@ -163,6 +165,45 @@ swaps the whole list (ordered-replace).
 
 `repo_id` is **protected**: an imported layer can never set or change it.
 
+### Locks and authority scopes
+
+The precedence stack above is the **Phase 2** value-merge. A layer may also declare a `locks`
+block that runs in **Phase 1**, ahead of the merge, and can override which value wins for a field
+or which set-union member survives:
+
+```json
+{
+  "locks": {
+    "value_locks": { "kg.backend": "postgres" },
+    "deny_locks": ["skills:risky-skill"]
+  }
+}
+```
+
+- **`value_locks`** pins a dot-path field to a value; a lower-authority layer that writes a
+  different value has that write rejected (the lock wins).
+- **`deny_locks`** forces a set-union member out (`"field:member"`, e.g. `"skills:risky-skill"`),
+  even if a lower-authority layer added it.
+- **`force_allow` does not exist.** There is no way for a lower scope to punch a capability
+  through a higher deny; any `force_allow` entry is a fatal, resolve-aborting validation error —
+  like a malformed `locks`/`authority_grants` block (a typo'd key fails closed, never silently
+  no-ops).
+
+Who may **emit** a binding lock is a separate ordering from the value-precedence stack above — the
+`authority_rank` total order: `org > team > repo > user` (higher binds lower, deny-overrides). The
+built-in `repo-local` layer carries `repo` authority and `user-local` carries `user`, so a
+repo-committed lock always binds a personal override. A lock emitted from a zero-authority scope
+(`product`, `public`, `runtime`, `project-local`, or an ungranted `extends` layer) is recorded but
+dropped — it carries no authority to bind anything.
+
+An imported `extends` layer starts at zero authority (`public`) unless the manifest's
+`authority_grants` block confers it `org`/`team`/`repo` scope, and only a **strictly
+higher-ranked** scope may confer authority — a scope can never grant its own rank or bless itself
+(a resolve-time rejection, not a silent no-op). Org/team authority has no built-in bootstrap layer
+yet (that governance backend is deferred), so today `locks` is chiefly a repo-vs-user tool: a
+repo's committed `.agentsrc.json` can pin a field or deny a skill against every contributor's
+personal override.
+
 ### Seeing provenance
 
 `da config explain <field>` shows the effective value and the **full layer stack** that produced
@@ -184,6 +225,11 @@ it — which layers had a value, and which one won. The machine-readable shape (
 `active_layer` is the winning layer; exactly one entry in `layers[]` has `"active": true`.
 `--origin-only` prints just the winning layer identifier; `--value-only` prints just the effective
 value (JSON-encoded for non-scalars).
+
+A value-locked field's stack additionally marks the owning scope — `da config explain --all`
+annotates it inline (`[value-lock, owner repo]`) — and a rejected lower-scope write is surfaced as
+a **lock collision**: the attempted value, the winning (locked) value, and the owning scope,
+printed after the effective-configuration listing (nothing prints when no write was rejected).
 
 ### The lockfile (`.agentsrc.lock`)
 
@@ -541,6 +587,8 @@ $ echo $?
 | `packages` | array of `string` | Ref form `source-id:path@version`; resolves to `artifact` units; valid from any source (git/local/http/oci). |
 | `features` | object (map-merge) | Feature-flag overrides. |
 | `execution_profile` | object (map-merge) | Execution shape by `app_type` — see [Config Relevance](./CONFIG_RELEVANCE.md). |
+| `locks` | object `{ value_locks?, deny_locks? }` | Phase-1 authority pins/denies; read per layer, not value-merged — see [Locks and authority scopes](#locks-and-authority-scopes). |
+| `authority_grants` | object `{ source-id: scope }` | Confers `org`/`team`/`repo` authority on a source; granter must strictly outrank the conferred scope. |
 
 ### Layer stack (lowest → highest precedence)
 
@@ -549,6 +597,15 @@ $ echo $?
 3. imported `extends` (at locked digest)
 4. `repo-local` (`./.agentsrc.json`)
 5. `.agentsrc.local.json` (uncommitted overlay, if present)
+
+### Authority ranks (Phase 1, separate axis)
+
+Who may **lock** a field is a distinct ordering from the value-precedence stack above:
+`org` > `team` > `repo` > `user` — higher binds lower, deny-overrides, no force-allow.
+Zero-authority scopes (`product`, `public`, `runtime`, `project-local`, and an ungranted `extends`
+layer) may set values but never lock. `authority_grants` upgrades an `extends` layer from `public`
+to `org`/`team`/`repo`, but only when the granting layer's own authority strictly outranks the
+conferred scope.
 
 ### Merge categories
 
