@@ -1184,6 +1184,17 @@ func isJSONHookSyntaxError(err error) bool {
 	return errors.As(err, &syntaxErr)
 }
 
+// warnIfCorruptHookJSON emits a loud warning when a candidate hook/plugin
+// file failed to parse because of genuinely malformed JSON (a true syntax
+// error). Any other unmarshal error means "not a hook bundle / not a plugin
+// manifest" content and stays silent so unrelated managed files are not
+// flagged as corrupt.
+func warnIfCorruptHookJSON(path string, err error) {
+	if isJSONHookSyntaxError(err) {
+		ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
+	}
+}
+
 func canonicalHookBundleContentFromCopilotFile(path, hookName string) ([]byte, error) {
 	outputs, ok, err := canonicalHookBundleOutputsFromCopilotFile("ignored", path, hookName)
 	if err != nil {
@@ -1203,9 +1214,7 @@ func canonicalHookBundleOutputsFromCopilotFile(scope, path, hookName string) ([]
 
 	var payload importedCopilotHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
-		if isJSONHookSyntaxError(err) {
-			ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
-		}
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if len(payload.Hooks) == 0 {
@@ -1253,9 +1262,7 @@ func canonicalHookBundleOutputsFromCursorFile(scope, path string) ([]importOutpu
 	}
 	var payload importedCursorHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
-		if isJSONHookSyntaxError(err) {
-			ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
-		}
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if len(payload.Hooks) == 0 {
@@ -1296,9 +1303,7 @@ func canonicalHookBundleOutputsFromCodexFile(scope, path string) ([]importOutput
 	}
 	var payload importedClaudeHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
-		if isJSONHookSyntaxError(err) {
-			ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
-		}
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if len(payload.Hooks) == 0 {
@@ -1322,9 +1327,7 @@ func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]impor
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(content, &top); err != nil {
-		if isJSONHookSyntaxError(err) {
-			ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
-		}
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if !hasOnlyClaudeCompatKeys(top) {
