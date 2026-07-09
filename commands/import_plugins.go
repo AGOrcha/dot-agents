@@ -2,11 +2,14 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -442,6 +445,9 @@ func loadImportedPackagePluginManifest(path string) (importedPackagePluginManife
 	}
 	var manifest importedPackagePluginManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
+		if isJSONHookSyntaxError(err) {
+			ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
+		}
 		return importedPackagePluginManifest{}, false, nil
 	}
 	return manifest, true, nil

@@ -169,8 +169,16 @@ func TestLoadImportedPackagePluginManifest(t *testing.T) {
 	if err := os.WriteFile(bad, []byte("not json"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := loadImportedPackagePluginManifest(bad); err != nil || ok {
-		t.Errorf("invalid json: err=%v ok=%v, want (nil,false)", err, ok)
+	var badOK bool
+	var badErr error
+	out := captureRelinkStdout(t, func() {
+		_, badOK, badErr = loadImportedPackagePluginManifest(bad)
+	})
+	if badErr != nil || badOK {
+		t.Errorf("invalid json: err=%v ok=%v, want (nil,false)", badErr, badOK)
+	}
+	if !strings.Contains(out, "not valid JSON") {
+		t.Errorf("expected loud warning for genuinely malformed JSON, got:\n%s", out)
 	}
 
 	good := filepath.Join(dir, "plugin.json")
