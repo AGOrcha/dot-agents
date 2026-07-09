@@ -442,6 +442,7 @@ func loadImportedPackagePluginManifest(path string) (importedPackagePluginManife
 	}
 	var manifest importedPackagePluginManifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
+		warnIfCorruptHookJSON(path, err)
 		return importedPackagePluginManifest{}, false, nil
 	}
 	return manifest, true, nil

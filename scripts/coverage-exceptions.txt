@@ -29,7 +29,7 @@
 #                      must confirm-or-raise (not assume untestable).
 commands/add.go                                            # [legacy-tail] 93.84%; cg6 ratchet-loop raises to >=95%
 commands/agents/promote.go                                 # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
-commands/import_plugins.go                                 # [legacy-tail] 93.39%; cg6 ratchet-loop raises to >=95%
+commands/import_plugins.go                                 # [legacy-tail] 93.44%; cg6 ratchet-loop raises to >=95%
 commands/init.go                                           # [legacy-tail] 81.91%; cg6 ratchet-loop raises to >=95%
 commands/kg/query_lint_maintain.go                         # [legacy-tail] 92.47%; cg6 ratchet-loop raises to >=95%
 commands/refresh.go                                        # [legacy-tail] 93.53%; cg6 ratchet-loop raises to >=95%

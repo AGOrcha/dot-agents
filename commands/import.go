@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -420,9 +421,9 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string, dep
 
 	rel, err := filepath.Rel(c.sourceRoot, c.sourcePath)
 	if err == nil && supportsCanonicalImportPath(filepath.ToSlash(rel)) {
-		srcInfo, statErr := os.Stat(c.sourcePath)
-		if statErr != nil || srcInfo.IsDir() {
-			return importResult{}
+		srcInfo, skipResult, ok := statImportSourceCandidate(c)
+		if !ok {
+			return skipResult
 		}
 		if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo, deps); ok {
 			return result
@@ -430,9 +431,9 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string, dep
 		return importResult{}
 	}
 
-	srcInfo, err := os.Stat(c.sourcePath)
-	if err != nil || srcInfo.IsDir() {
-		return importResult{}
+	srcInfo, skipResult, ok := statImportSourceCandidate(c)
+	if !ok {
+		return skipResult
 	}
 
 	if result, ok := processCanonicalHookBundleImport(c, agentsHome, timestamp, srcInfo, deps); ok {
@@ -459,6 +460,31 @@ func processImportCandidate(c importCandidate, agentsHome, timestamp string, dep
 	}
 
 	return replaceImportCandidate(c, agentsHome, dest, timestamp, srcInfo, destInfo)
+}
+
+// statImportSourceCandidate stats the candidate's source path, distinguishing
+// a real Stat failure (permission denied, a directory made unreadable
+// mid-walk, a broken mount, ...) from legitimate absence. The candidate list
+// was built by an earlier directory scan, so by the time processing reaches
+// here the source may simply be gone (raced away, a transient scan
+// artifact) — that stays a silent no-op, mirroring the destination-side
+// os.IsNotExist branch in processImportCandidate. A real error is a
+// different signal entirely and must not vanish the same way: it is warned
+// and counted as a skip, mirroring the destination Stat's err != nil branch
+// just below.
+func statImportSourceCandidate(c importCandidate) (os.FileInfo, importResult, bool) {
+	srcInfo, err := os.Stat(c.sourcePath)
+	if os.IsNotExist(err) {
+		return nil, importResult{}, false
+	}
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("Failed to inspect %s: %v", config.DisplayPath(c.sourcePath), err))
+		return nil, importResult{skipped: 1}, false
+	}
+	if srcInfo.IsDir() {
+		return nil, importResult{}, false
+	}
+	return srcInfo, importResult{}, true
 }
 
 func isManagedImportSource(c importCandidate, agentsHome string) bool {
@@ -1146,6 +1172,29 @@ func githubHookBundleName(rel string) (string, bool) {
 	return strings.TrimSuffix(filepath.Base(rel), relJSONSuffix), true
 }
 
+// isJSONHookSyntaxError reports whether err represents genuinely malformed
+// JSON — a *json.SyntaxError — as opposed to well-formed JSON that simply
+// isn't shaped like the bundle the caller expects (an ordinary field-type
+// mismatch, or content this reader legitimately does not recognize as a
+// hook bundle). Only a true syntax error is loud-worthy: everything else is
+// "not a hook bundle" content and must stay silently false so unrelated
+// managed files aren't flagged as corrupt.
+func isJSONHookSyntaxError(err error) bool {
+	var syntaxErr *json.SyntaxError
+	return errors.As(err, &syntaxErr)
+}
+
+// warnIfCorruptHookJSON emits a loud warning when a candidate hook/plugin
+// file failed to parse because of genuinely malformed JSON (a true syntax
+// error). Any other unmarshal error means "not a hook bundle / not a plugin
+// manifest" content and stays silent so unrelated managed files are not
+// flagged as corrupt.
+func warnIfCorruptHookJSON(path string, err error) {
+	if isJSONHookSyntaxError(err) {
+		ui.Bullet("warn", fmt.Sprintf("%s is not valid JSON, skipping: %v", config.DisplayPath(path), err))
+	}
+}
+
 func canonicalHookBundleContentFromCopilotFile(path, hookName string) ([]byte, error) {
 	outputs, ok, err := canonicalHookBundleOutputsFromCopilotFile("ignored", path, hookName)
 	if err != nil {
@@ -1165,6 +1214,7 @@ func canonicalHookBundleOutputsFromCopilotFile(scope, path, hookName string) ([]
 
 	var payload importedCopilotHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if len(payload.Hooks) == 0 {
@@ -1212,6 +1262,7 @@ func canonicalHookBundleOutputsFromCursorFile(scope, path string) ([]importOutpu
 	}
 	var payload importedCursorHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if len(payload.Hooks) == 0 {
@@ -1252,6 +1303,7 @@ func canonicalHookBundleOutputsFromCodexFile(scope, path string) ([]importOutput
 	}
 	var payload importedClaudeHooksFile
 	if err := json.Unmarshal(content, &payload); err != nil {
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if len(payload.Hooks) == 0 {
@@ -1275,6 +1327,7 @@ func canonicalHookBundleOutputsFromClaudeCompatFile(scope, path string) ([]impor
 	}
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(content, &top); err != nil {
+		warnIfCorruptHookJSON(path, err)
 		return nil, false, nil
 	}
 	if !hasOnlyClaudeCompatKeys(top) {
