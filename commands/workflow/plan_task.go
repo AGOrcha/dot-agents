@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
@@ -540,6 +541,45 @@ func saveCanonicalTasks(projectPath string, tf *CanonicalTaskFile) error {
 		return err
 	}
 	return osWriteFile(filepath.Join(dir, workflowTasksFileName), content, 0644)
+}
+
+// tasksLockPath returns the sidecar-lock target for planID's TASKS.yaml — the
+// same path loadCanonicalTasks/saveCanonicalTasks read and write, since
+// agentslock.AcquireFileLock locks by the protected file's own path rather
+// than a caller-supplied sidecar name.
+func tasksLockPath(projectPath, planID string) string {
+	return filepath.Join(plansBaseDir(projectPath), planID, workflowTasksFileName)
+}
+
+// withTasksLock runs fn while holding the cross-process advisory lock on
+// planID's TASKS.yaml, serializing the load -> mutate -> save critical
+// section against every other da process mutating the same plan's canonical
+// task file. This closes the lost-update race between concurrent
+// `da workflow` invocations (two orchestrators, a parallel worker batch, …)
+// that would otherwise race loadCanonicalTasks/saveCanonicalTasks against
+// each other.
+//
+// This is an INTERIM band-aid: the strategic fix is the WorkStore/backend
+// storage abstraction (.agents/workflow/specs/work-tracking-storage-
+// abstraction/design.md D2/D5); file-locking the existing YAML
+// read-modify-write holds the line until that cutover lands.
+//
+// fn must perform the entire load, mutate, and save of planID's TASKS.yaml —
+// acquiring the lock any later, or releasing it any earlier, reopens the
+// race. A bounded acquisition timeout (agentslock's lockAcquireTimeout)
+// surfaces as a wrapped error rather than silently proceeding unlocked.
+func withTasksLock(projectPath, planID string, fn func() error) (err error) {
+	path := tasksLockPath(projectPath, planID)
+	release, lockErr := agentslock.AcquireFileLock(path)
+	if lockErr != nil {
+		return fmt.Errorf("TASKS.yaml locked by another process, timed out waiting: %w", lockErr)
+	}
+	defer func() {
+		if relErr := release(); relErr != nil && err == nil {
+			err = fmt.Errorf("release TASKS.yaml lock: %w", relErr)
+		}
+	}()
+	return fn()
 }
 
 func collectCanonicalPlans(projectPath string) ([]workflowCanonicalPlanSummary, []string) {
@@ -2014,17 +2054,24 @@ func runWorkflowAdvance(planID, taskID, newStatus string) error {
 	ok := false
 	defer func() { journalTier1(project.Path, journal.CmdAdvance, input, observed, ok) }()
 
-	tf, err := loadCanonicalTasks(project.Path, planID)
-	if err != nil {
-		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
-	}
-	observed.FromStatus = canonicalTaskStatusByID(tf, taskID)
-	taskTitle, err := applyTaskStatusTransition(tf, planID, taskID, newStatus)
-	if err != nil {
-		return err
-	}
-	if err := saveCanonicalTasks(project.Path, tf); err != nil {
-		return err
+	var tf *CanonicalTaskFile
+	var taskTitle string
+	lockErr := withTasksLock(project.Path, planID, func() error {
+		var loadErr error
+		tf, loadErr = loadCanonicalTasks(project.Path, planID)
+		if loadErr != nil {
+			return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, loadErr)
+		}
+		observed.FromStatus = canonicalTaskStatusByID(tf, taskID)
+		var transErr error
+		taskTitle, transErr = applyTaskStatusTransition(tf, planID, taskID, newStatus)
+		if transErr != nil {
+			return transErr
+		}
+		return saveCanonicalTasks(project.Path, tf)
+	})
+	if lockErr != nil {
+		return lockErr
 	}
 	plan, err := loadCanonicalPlan(project.Path, planID)
 	if err != nil {
@@ -2281,30 +2328,34 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 	if err != nil {
 		return err
 	}
-	tf, err := loadCanonicalTasks(project.Path, in.PlanID)
-	if err != nil {
-		return fmt.Errorf(errTasksForPlanNotFoundFmt, in.PlanID, err)
-	}
-	for _, t := range tf.Tasks {
-		if t.ID == in.TaskID {
-			return fmt.Errorf("task %q already exists in plan %q", in.TaskID, in.PlanID)
+	var task CanonicalTask
+	lockErr := withTasksLock(project.Path, in.PlanID, func() error {
+		tf, loadErr := loadCanonicalTasks(project.Path, in.PlanID)
+		if loadErr != nil {
+			return fmt.Errorf(errTasksForPlanNotFoundFmt, in.PlanID, loadErr)
 		}
-	}
-	task := CanonicalTask{
-		ID:                   in.TaskID,
-		Title:                in.Title,
-		Status:               "pending",
-		Owner:                in.Owner,
-		Notes:                in.Notes,
-		AppType:              in.AppType,
-		VerificationRequired: in.VerificationRequired,
-		DependsOn:            splitTrimmedCSV(in.DependsOn),
-		Blocks:               splitTrimmedCSV(in.Blocks),
-		WriteScope:           splitTrimmedCSV(in.WriteScope),
-	}
-	tf.Tasks = append(tf.Tasks, task)
-	if err := saveCanonicalTasks(project.Path, tf); err != nil {
-		return err
+		for _, t := range tf.Tasks {
+			if t.ID == in.TaskID {
+				return fmt.Errorf("task %q already exists in plan %q", in.TaskID, in.PlanID)
+			}
+		}
+		task = CanonicalTask{
+			ID:                   in.TaskID,
+			Title:                in.Title,
+			Status:               "pending",
+			Owner:                in.Owner,
+			Notes:                in.Notes,
+			AppType:              in.AppType,
+			VerificationRequired: in.VerificationRequired,
+			DependsOn:            splitTrimmedCSV(in.DependsOn),
+			Blocks:               splitTrimmedCSV(in.Blocks),
+			WriteScope:           splitTrimmedCSV(in.WriteScope),
+		}
+		tf.Tasks = append(tf.Tasks, task)
+		return saveCanonicalTasks(project.Path, tf)
+	})
+	if lockErr != nil {
+		return lockErr
 	}
 	emitWorkflowSuccess(project.Path, journal.CmdTaskAdd,
 		&journal.TaskAddInput{
@@ -2359,25 +2410,28 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope, dependsOn, 
 	if err != nil {
 		return err
 	}
-	tf, err := loadCanonicalTasks(project.Path, planID)
-	if err != nil {
-		return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, err)
-	}
-	found := false
 	changed := map[string]string{}
-	for i := range tf.Tasks {
-		if tf.Tasks[i].ID != taskID {
-			continue
+	lockErr := withTasksLock(project.Path, planID, func() error {
+		tf, loadErr := loadCanonicalTasks(project.Path, planID)
+		if loadErr != nil {
+			return fmt.Errorf(errTasksForPlanNotFoundFmt, planID, loadErr)
 		}
-		changed = applyTaskFieldUpdates(&tf.Tasks[i], title, notes, writeScope, dependsOn, blocks)
-		found = true
-		break
-	}
-	if !found {
-		return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
-	}
-	if err := saveCanonicalTasks(project.Path, tf); err != nil {
-		return err
+		found := false
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID != taskID {
+				continue
+			}
+			changed = applyTaskFieldUpdates(&tf.Tasks[i], title, notes, writeScope, dependsOn, blocks)
+			found = true
+			break
+		}
+		if !found {
+			return fmt.Errorf(errTaskNotFoundInPlanFmt, taskID, planID)
+		}
+		return saveCanonicalTasks(project.Path, tf)
+	})
+	if lockErr != nil {
+		return lockErr
 	}
 	emitWorkflowDelta(project.Path, journal.CmdTaskUpdate, planID, taskID, changed)
 	plan, err := loadCanonicalPlan(project.Path, planID)

@@ -10,9 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -4604,5 +4606,111 @@ func TestEligibleOutput_JSONRoundTrip(t *testing.T) {
 	}
 	if len(decoded.EligibleTasks) != 0 {
 		t.Fatalf("decoded mismatch: %+v", decoded)
+	}
+}
+
+// tasksYamlLockTestMutator performs the same load -> mutate -> save shape as
+// runWorkflowTaskUpdate, guarded by the production withTasksLock helper, but
+// deliberately widens the window between load and save with a short sleep.
+// That makes a would-be lost-update race manifest deterministically: without
+// serialization, a second goroutine's load (which starts immediately, since
+// load itself is near-instant) captures the pre-mutation snapshot, and its
+// later save clobbers whatever the first goroutine wrote. Under the lock, the
+// second goroutine's load cannot begin until the first's entire critical
+// section (including the save) has completed and released.
+func tasksYamlLockTestMutator(projectPath, planID, taskID, note string) error {
+	return withTasksLock(projectPath, planID, func() error {
+		tf, err := loadCanonicalTasks(projectPath, planID)
+		if err != nil {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+		found := false
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				tf.Tasks[i].Notes = note
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("task %q not found", taskID)
+		}
+		return saveCanonicalTasks(projectPath, tf)
+	})
+}
+
+// TestTasksYamlLock_ConcurrentUpdatesNoLostUpdate proves withTasksLock closes
+// the loadCanonicalTasks/saveCanonicalTasks lost-update race: two goroutines
+// concurrently mutate DIFFERENT tasks' notes in the SAME plan's TASKS.yaml;
+// without the lock serializing the read-modify-write, one goroutine's save
+// would clobber the other's update (see tasksYamlLockTestMutator). Run with
+// -race: go test ./commands/workflow/... -run TestTasksYamlLock -race -v
+func TestTasksYamlLock_ConcurrentUpdatesNoLostUpdate(t *testing.T) {
+	repo := setupTestProject(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := tasksYamlLockTestMutator(repo, "plan-001", "task-001", "note from A"); err != nil {
+			errs <- fmt.Errorf("goroutine A: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := tasksYamlLockTestMutator(repo, "plan-001", "task-002", "note from B"); err != nil {
+			errs <- fmt.Errorf("goroutine B: %w", err)
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent tasks-lock mutation failed: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "plan-001")
+	if err != nil {
+		t.Fatalf("reload tasks: %v", err)
+	}
+	var gotA, gotB string
+	for _, task := range tf.Tasks {
+		switch task.ID {
+		case "task-001":
+			gotA = task.Notes
+		case "task-002":
+			gotB = task.Notes
+		}
+	}
+	if gotA != "note from A" {
+		t.Errorf("task-001 update lost — got notes %q, want %q (lock failed to serialize)", gotA, "note from A")
+	}
+	if gotB != "note from B" {
+		t.Errorf("task-002 update lost — got notes %q, want %q (lock failed to serialize)", gotB, "note from B")
+	}
+}
+
+// TestTasksYamlLock_TimeoutWrapsClearError proves that when AcquireFileLock
+// cannot claim the TASKS.yaml lock (held by another caller), withTasksLock
+// surfaces a clear wrapped error instead of proceeding unlocked.
+func TestTasksYamlLock_TimeoutWrapsClearError(t *testing.T) {
+	repo := setupTestProject(t)
+	path := tasksLockPath(repo, "plan-001")
+	release, err := agentslock.AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+	t.Cleanup(func() { _ = release() })
+
+	err = withTasksLock(repo, "plan-001", func() error {
+		t.Fatal("fn must not run while the lock is held by another caller")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "TASKS.yaml locked by another process, timed out waiting") {
+		t.Fatalf("expected wrapped timeout message, got: %v", err)
 	}
 }
