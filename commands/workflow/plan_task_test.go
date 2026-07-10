@@ -1742,7 +1742,7 @@ func TestRunWorkflowTaskUpdate_UpdatesFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/"); err != nil {
+	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/", "", ""); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 
@@ -1777,7 +1777,7 @@ func TestRunWorkflowTaskUpdate_PreservesUnsetFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", "", "", ""); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "wave-2")
@@ -1794,9 +1794,71 @@ func TestRunWorkflowTaskUpdate_MissingTaskReturnsError(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "")
+	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("expected missing-task error; got: %v", err)
+	}
+}
+
+// TestRunWorkflowTaskUpdate_DependsOnAndBlocks verifies that --depends-on and
+// --blocks CSVs persist to TASKS.yaml with replace semantics matching `task
+// add`, and that the new depends_on edge is live in the schedule graph
+// without further plumbing.
+func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskAdd(taskAddInputs{
+		PlanID: "wave-2",
+		TaskID: "t4",
+		Title:  "new task with no deps",
+	}); err != nil {
+		t.Fatalf("runWorkflowTaskAdd: %v", err)
+	}
+
+	if err := runWorkflowTaskUpdate("wave-2", "t4", "", "", "", "t1", "t2"); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var t4 *CanonicalTask
+	t4Idx := -1
+	t1Idx := -1
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == "t4" {
+			t4 = &tf.Tasks[i]
+			t4Idx = i
+		}
+		if tf.Tasks[i].ID == "t1" {
+			t1Idx = i
+		}
+	}
+	if t4 == nil {
+		t.Fatal("t4 missing after update")
+	}
+	if len(t4.DependsOn) != 1 || t4.DependsOn[0] != "t1" {
+		t.Errorf("depends_on = %v, want [t1]", t4.DependsOn)
+	}
+	if len(t4.Blocks) != 1 || t4.Blocks[0] != "t2" {
+		t.Errorf("blocks = %v, want [t2]", t4.Blocks)
+	}
+
+	inDegree, adj := buildPlanScheduleGraph(tf)
+	if inDegree[t4Idx] != 1 {
+		t.Errorf("in-degree of t4 = %d, want 1 (edge from t1 not picked up)", inDegree[t4Idx])
+	}
+	found := false
+	for _, dst := range adj[t1Idx] {
+		if dst == t4Idx {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("adjacency of t1 = %v, want to contain t4's index %d", adj[t1Idx], t4Idx)
 	}
 }
 
@@ -3120,7 +3182,7 @@ func TestRunWorkflowTaskAdd_MissingPlan(t *testing.T) {
 func TestRunWorkflowTaskUpdate_MissingTask(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirForCov(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "")
+	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -3270,7 +3332,7 @@ func TestRunWorkflowTaskUpdate_SaveErr(t *testing.T) {
 	chdirForCov(t, repo)
 	sentinel := errors.New("yaml boom")
 	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
-	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "")
+	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "", "", "")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel, got %v", err)
 	}
@@ -3988,7 +4050,7 @@ func TestRunWorkflowAdvance_CompleteResetsFocus(t *testing.T) {
 func TestRunWorkflowTaskUpdate_UpdatesNotesAndWriteScope(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/"); err != nil {
+	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "plan-001")
@@ -4426,7 +4488,7 @@ func TestRunWorkflowTaskAdd_PlanMissingTasksFile(t *testing.T) {
 func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "")
+	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "ghost-task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -4435,7 +4497,7 @@ func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 func TestRunWorkflowTaskUpdate_PlanMissing(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "")
+	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "", "", "")
 	if err == nil {
 		t.Fatal("expected plan-not-found error")
 	}

@@ -2329,7 +2329,7 @@ func runWorkflowTaskAdd(in taskAddInputs) error {
 // applyTaskFieldUpdates mutates task in place for any non-empty field value that
 // differs from the current one, and returns the set of changed fields keyed by
 // field name (the value being the new value, used for the journal delta).
-func applyTaskFieldUpdates(task *CanonicalTask, title, notes, writeScope string) map[string]string {
+func applyTaskFieldUpdates(task *CanonicalTask, title, notes, writeScope, dependsOn, blocks string) map[string]string {
 	changed := map[string]string{}
 	if title != "" && title != task.Title {
 		task.Title = title
@@ -2343,10 +2343,18 @@ func applyTaskFieldUpdates(task *CanonicalTask, title, notes, writeScope string)
 		task.WriteScope = ws
 		changed["write_scope"] = writeScope
 	}
+	if do := splitTrimmedCSV(dependsOn); dependsOn != "" && strings.Join(do, ",") != strings.Join(task.DependsOn, ",") {
+		task.DependsOn = do
+		changed["depends_on"] = dependsOn
+	}
+	if bl := splitTrimmedCSV(blocks); blocks != "" && strings.Join(bl, ",") != strings.Join(task.Blocks, ",") {
+		task.Blocks = bl
+		changed["blocks"] = blocks
+	}
 	return changed
 }
 
-func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) error {
+func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope, dependsOn, blocks string) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
 		return err
@@ -2361,7 +2369,7 @@ func runWorkflowTaskUpdate(planID, taskID, title, notes, writeScope string) erro
 		if tf.Tasks[i].ID != taskID {
 			continue
 		}
-		changed = applyTaskFieldUpdates(&tf.Tasks[i], title, notes, writeScope)
+		changed = applyTaskFieldUpdates(&tf.Tasks[i], title, notes, writeScope, dependsOn, blocks)
 		found = true
 		break
 	}
