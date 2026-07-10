@@ -214,7 +214,7 @@ tasks:
       app_type: research
     - id: sq5-archive-on-pr-merge
       title: Archive plan when PR#10 merges (or closes without merge)
-      status: blocked
+      status: completed
       depends_on:
         - sq2-reliability-rating-fixes
         - sq3-security-hotspots-sweep
