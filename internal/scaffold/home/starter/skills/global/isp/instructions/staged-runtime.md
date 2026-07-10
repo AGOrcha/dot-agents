@@ -33,7 +33,9 @@ when one is configured.
 
 - Load `.agents/prompts/review-agent.project.md`.
 - Run as its own dedicated subagent session (medium).
-- Three-lens contract: spawn one reviewer per lens — `architecture-standards-reviewer`, `acceptance-invariants-reviewer`, `adversarial-reviewer` (see `~/.agents/agents/global/<lens>-reviewer/AGENT.md` and the lens definitions in `~/.agents/profiles/loop-worker.md` § "Review lenses"). Each lens emits its own findings + pass/fail verdict; the parent aggregates.
+- Four-lens contract: spawn one reviewer per lens — `architecture-standards-reviewer`, `acceptance-invariants-reviewer`, `adversarial-reviewer`, `cross-harness-adversarial-reviewer` (see `~/.agents/agents/global/<lens>-reviewer/AGENT.md` and the lens definitions in `~/.agents/profiles/loop-worker.md` § "Review lenses"). Each lens emits its own findings + pass/fail verdict; the parent aggregates.
+- `cross-harness-adversarial-reviewer` is not like the other three: still spawn it on every host, but it degrades to a documented non-blocking skip (its own AGENT.md `## Graceful skip` section) when no alternate agent harness — codex/cursor/opencode/copilot — is installed, returning `verdict: pass ... [SKIPPED: no alternate harness]` instead of a real cross-engine pass. Record that verdict as evidence for the lens, not as a missing lens.
+- Distinguish two different "skip" reasons; do not conflate them. (a) **Not wired up**: `da workflow resolve-prompt --kind reviewer --slug <lens>` reports `matched: false` (no `stage_profiles.reviewer.<lens>` entry in the effective config) — a fanout-configuration gap, not a reviewer verdict; do not spawn that lens, fix the missing profile entry instead of proceeding. (b) **Wired up, nothing to route to**: the profile is `matched: true` but `cross-harness-adversarial-reviewer`'s own alternate-harness probe finds nothing — spawn it as normal and accept the `[SKIPPED: no alternate harness]` verdict (previous bullet) as that lens's result.
 - Persist decision: `da workflow verify record --kind review`.
 - Write merge-back: `da workflow merge-back ...`
 - Produce `accept`, `reject`, or `escalate`, then stop.

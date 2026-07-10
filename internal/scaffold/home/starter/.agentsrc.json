@@ -1,0 +1,34 @@
+{
+  "stage_profiles": {
+    "reviewer": {
+      "acceptance-invariants": {
+        "label": "Acceptance-invariants lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/acceptance-invariants.md"
+        ]
+      },
+      "adversarial": {
+        "label": "Adversarial lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/adversarial.md"
+        ]
+      },
+      "architecture-standards": {
+        "label": "Architecture-standards lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/architecture-standards.md"
+        ]
+      },
+      "cross-harness-adversarial": {
+        "label": "Cross-harness adversarial lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/cross-harness-adversarial.md"
+        ]
+      }
+    }
+  }
+}
