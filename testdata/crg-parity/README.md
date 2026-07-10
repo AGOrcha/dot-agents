@@ -56,11 +56,20 @@ views (O6 item G rejected: it would break the §2.2/§5.2 no-raw-SQL invariant):
 - **impact-radius** — `ImpactRadiusFromStore` expands the persisted edge graph;
   `CompareImpactRadius` compares by node-id set equality (refinement C: "same
   node set, may differ in order").
-- **structural equivalence** — `PartitionAgreement` (community pair-agreement)
-  and `SpearmanTau` (rank-ordered derived tables) replace "bytes-equivalent"
-  (refinement C); both return an explicit `ok=false` when the two sides do not
-  cover the same node set (a missing node is a divergence, not a free pass).
-  These oracles are unit-tested even though community/flow parity itself is t6.
+- **flows / communities / postprocess** — the kg-native derived views live in
+  `internal/adapters/builtin/crg/postprocess.go` (`FlowsFromStore`,
+  `CommunitiesFromStore`, `RiskIndexFromStore`, `FTSFromStore`,
+  `PostprocessFromStore`), all computed from the namespace readback. The t6a
+  parity oracles (per O6 refinement C / the parity proposal §C — NOT the literal
+  §11.6 "bytes-equivalent" text) are: `flow_memberships` set equality
+  (`CompareFlowMemberships`), community partition equivalence
+  (`PartitionAgreement`, cluster ids may differ), `risk_index` Spearman rank
+  correlation ≥ τ (`SpearmanTau`), and FTS token-set equality (`CompareFTS`).
+  `PartitionAgreement` / `SpearmanTau` return an explicit `ok=false` when the two
+  sides do not cover the same node set (a missing node is a divergence, not a
+  free pass). `TestPostprocessParity_TenCommitDualRead` runs all four surfaces
+  across the 10 pinned commits and `TestPostprocessParity_CatchesDivergence`
+  proves the comparison is not tautological.
 
 ## Regenerating
 
