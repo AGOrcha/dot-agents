@@ -890,6 +890,7 @@ func newWorkflowFanoutCmd() *cobra.Command {
 	fanoutCmd.Flags().String("slice", "", "Slice ID from SLICES.yaml; auto-fills task and write scope")
 	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
 	fanoutCmd.Flags().String(workflowFlagWriteScope, "", "Comma-separated file/dir patterns this delegate may touch")
+	fanoutCmd.Flags().Bool("with-tests", false, "Auto-add each .go write_scope entry's sibling _test.go path (same directory, create-if-absent — the file need not exist yet)")
 	fanoutCmd.Flags().String("delegate-profile", defaultDelegateProfile, "Worker profile label stored in the delegation bundle")
 	fanoutCmd.Flags().StringSlice("project-overlay", nil, "Repeatable repo-relative project overlay guidance files")
 	fanoutCmd.Flags().StringSlice("prompt", nil, "Repeatable inline prompt lines for the delegate")
