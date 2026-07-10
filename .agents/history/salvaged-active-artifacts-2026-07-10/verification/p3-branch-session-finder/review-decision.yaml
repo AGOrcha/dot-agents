@@ -1,0 +1,88 @@
+schema_version: 1
+task_id: p3-branch-session-finder
+parent_plan_id: platform-session-integration
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+recorded_at: "2026-05-11T00:00:00Z"
+reviewer_notes: |-
+  Self-review of the artifact-refactor iteration that closes out the platform-session-integration plan.
+
+  ## KG Context (Step 0)
+
+  ### kg changes --brief
+  Analyzed 19 changed files; overall risk score 0.50. Score reflects already-staged P1-3 code
+  work from prior iterations; this iteration only mutates artifact files
+  (specs/plans/lessons). 36 untested symbols flagged are inherited from prior iterations,
+  not introduced here.
+
+  ### kg impact
+  Skipped — refactor changes are confined to non-code artifacts (.md/.yaml/.json schema unchanged in this iteration).
+
+  ## Per-artifact review
+
+  - .agents/workflow/specs/platform-session-integration/design.md
+    - Code-quality: Accept. Requirements section stripped of Go interface bodies, file paths,
+      and per-platform implementation prescriptions. Now contains behavioral contracts only,
+      satisfying workflow-artifact-model rule #3 ("specs do not grow into plans"). Done
+      Criteria rephrased to outcomes (no longer cites specific test names).
+    - Verdict: accept.
+
+  - .agents/workflow/plans/platform-session-integration/PLAN.yaml
+    - Code-quality: Accept. status pending→completed, summary mentions all four tiers
+      (P0-P3), updated_at refreshed to 2026-05-11, current_focus_task points at last
+      completed task.
+    - Verdict: accept.
+
+  - .agents/workflow/plans/platform-session-integration/TASKS.yaml
+    - Code-quality: Accept. P0 entry added as completed with blocks: [p1,p2,p3] and
+      write_scope listing actual P0 artifacts. P1/P2/P3 marked completed,
+      depends_on: [p0-session-reader-foundation]. Line-number references in P3 notes
+      replaced with relational anchors ("after preferences resolution", "sibling to other
+      renderOrient*Section"). Block scalars used for all multi-line notes (notes use |- —
+      colon-space rule from schema-usage.md honored).
+    - Verdict: accept.
+
+  - .agents/workflow/plans/platform-session-integration/platform-session-integration.plan.md
+    - Code-quality: Accept. Decisions reordered #1-#7 numerically. Added Reference
+      convention call-out at end documenting the symbol-only rule.
+    - Verdict: accept.
+
+  - .agents/lessons/symbol-only-references-in-artifacts/LESSON.md (+index.md)
+    - Code-quality: Accept. New lesson covers the rule, why (drift between sibling task
+      lands), and how-to-apply with worked examples. Indexed in lessons/index.md.
+    - Verdict: accept.
+
+  ## Code-quality / security / performance / gotchas
+  No executable code touched in this iteration. Smoke verified:
+    - go test ./commands/... ./internal/platform/... — all green.
+    - TestWorkflowIterLogEmbeddedSchemaMatchesCanonical — pass.
+    - da workflow orient — renders "Recent sessions on this branch" with 3 entries.
+    - da session stats — renders Cursor commit attribution and Claude Code per-model totals.
+
+  ## Section 1.6 telemetry envelope
+
+  ```yaml
+  resource_type: skill
+  resource_id: self-review
+  invoked_at: 2026-05-11T00:00:00Z
+  invoked_by: orchestrator
+  plan_id: platform-session-integration
+  task_id: p3-branch-session-finder
+  outcome:
+    declared: success
+    agent_self_assessment: Artifact reorganization aligns plan with workflow-artifact-model rule; lesson capture turns the line-number drift into reusable guidance applicable to all future plans.
+  post_invocation:
+    agent_actions_after_skill_returned: [workflow checkpoint --log-to-iter, /iteration-close]
+    user_corrections: []
+    retries_in_loop: 0
+  improvement_signals:
+    missing_in_skill: []
+    redundant_in_skill: []
+    tooling_gap:
+      present: true
+      note: "verify record --kind review hard-requires an active delegation contract; direct (non-delegated) iterations have no fallback CLI path and must hand-write review-decision.yaml. Consider --no-delegation flag or auto-detect."
+    script_gap: { present: false, note: "" }
+    instruction_gap: { present: false, note: "" }
+  ```

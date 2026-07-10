@@ -1,0 +1,99 @@
+schema_version: 1
+task_id: adhoc-2026-05-25T18-20-31Z
+parent_plan_id: adhoc
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: |-
+  ## KG Context (Step 0)
+
+  ### kg changes --brief
+
+  Change Impact
+  ----------------------------------------
+    Analyzed 62 changed file(s):
+    - 0 changed function(s)/class(es)
+    - 0 affected flow(s)
+    - 0 test gap(s)
+    - Overall risk score: 0.00
+    Note: run 'kg code-status' to verify the code graph is current.
+
+  This command observes all current worktree changes; the review and commit
+  below are intentionally limited to the 22 staged planning artifacts.
+
+  ### kg impact <staged files>
+
+  Impact Radius
+  ----------------------------------------
+    Blast radius for 22 changed file(s):
+    - 0 nodes directly changed
+    - 0 nodes impacted (within 2 hops)
+    - 0 additional files affected
+    Note: run 'kg code-status' to verify the code graph is current.
+
+  ## Per-file review
+
+  - .agents/proposals/loop-discipline-stop-hooks-scoping.md: accept; scope and promotion decisions are explicit.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/PLAN.yaml: accept; active status and criteria match the design.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/TASKS.yaml: accept; task dependency order and write scopes are bounded.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/loop-discipline-stop-hooks.plan.md: accept; implementation sequence is coherent.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p0-sentinel-cli.contract.md: accept; durable archival is specified.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p1a-mapper-extensions.contract.md: accept; gate-critical mapper scope is bounded.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p1b-canonical-when-values.contract.md: accept; wider event parity is separated.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p1c-matcher-verification.contract.md: accept; official-input verification is required.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p1d-claude-lifecycle-parity.contract.md: accept; lifecycle work is explicitly scoped.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p2-hook-scripts.contract.md: accept; enforcement requires observable evidence.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p3-starter-promotion.contract.md: accept; scaffold promotion has tests.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p3b-companion-discipline-skills.contract.md: accept; hook additions remain evidence-gated.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p4-sentinel-wiring.contract.md: accept; entry-point write timing is stated.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p5-e2e-integration.contract.md: accept; native remediation/advisory cases are covered.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p6-payout-backfill.contract.md: accept; payout migration is explicit and isolated.
+  - .agents/workflow/plans/loop-discipline-stop-hooks/tasks/p7-legacy-override-migration.contract.md: accept; downstream cleanup is last.
+  - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/PLAN.yaml: accept; follows completed R1 without reopening it.
+  - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/TASKS.yaml: accept; telemetry/scoring dependencies are ordered.
+  - .agents/workflow/plans/r1-5-hook-enforcement-telemetry/r1-5-hook-enforcement-telemetry.plan.md: accept; intended extension is documented.
+  - .agents/workflow/specs/loop-discipline-stop-hooks/design.html: accept; generated rendering is included with source.
+  - .agents/workflow/specs/loop-discipline-stop-hooks/design.md: accept; platform constraints and archive location are explicit.
+  - .agents/workflow/specs/r1-5-hook-enforcement-telemetry/design.md: accept; avoids transcript-content persistence.
+
+  ## Advisory board
+
+  - Security auditor: no finding; planning changes disclose no credentials and require transcript minimization.
+  - Performance engineer: no finding; no executable performance path is modified.
+  - Maintainability advocate: no finding; contracts decompose scope and establish task ordering.
+
+  ## Checklist
+
+  - `git diff --cached --check`: pass.
+  - `go test ./...`: pass.
+  - Staged secret/debug-marker scan: pass.
+  - Focused staged scope: pass; unrelated worktree content is excluded.
+
+  ## Section 1.6 telemetry envelope
+
+  ```yaml
+  resource_type: skill
+  resource_id: self-review
+  invoked_at: "2026-05-25T18:20:31Z"
+  invoked_by: user
+  task_id: adhoc-2026-05-25T18-20-31Z
+
+  outcome:
+    declared: success
+    agent_self_assessment: "Planning artifacts are internally consistent, parse successfully, and introduce no executable-code risk."
+
+  post_invocation:
+    agent_actions_after_skill_returned: []
+    user_corrections: []
+    retries_in_loop: 0
+
+  improvement_signals:
+    missing_in_skill: []
+    redundant_in_skill: []
+    tooling_gap: { present: false, note: "" }
+    script_gap: { present: false, note: "" }
+    instruction_gap: { present: false, note: "" }
+  ```
+recorded_at: "2026-05-25T18:20:31Z"
+recorded_by: self-review (skill)
