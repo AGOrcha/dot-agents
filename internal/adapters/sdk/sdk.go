@@ -134,6 +134,12 @@ type Store interface {
 type SDK struct {
 	adapter string
 	store   Store
+	// validator is the reads_from gate auto-bound by For when the store is
+	// registry-aware (implements ReadsFromValidator). MaterializeView falls
+	// back to it when no explicit gate is passed, so a registry-backed store
+	// enforces the §11.2 migration_only rule without the caller threading the
+	// registry through every call.
+	validator ReadsFromValidator
 	// predicatesFired records env-predicate fire calls (§8.4.1
 	// declare_predicate_fired) so the dogfood can assert on them without a
 	// live driver. Production wires this to the scoped-KG driver bus.
@@ -150,7 +156,18 @@ type FiredPredicate struct {
 // is the only constructor a bootstrap skill uses; it cannot reach storage any
 // other way (§8.2: direct DB connections are forbidden by contract).
 func For(adapter string, store Store) *SDK {
-	return &SDK{adapter: adapter, store: store}
+	s := &SDK{adapter: adapter, store: store}
+	// Auto-bind the §11.2 reads_from gate when the store is registry-aware: a
+	// store that also implements ReadsFromValidator (e.g. the production
+	// gcc-backed store wrapping the live registry) supplies the migration_only
+	// consult MaterializeView needs, so callers need not thread the registry
+	// through every call. An explicit gate passed to MaterializeView overrides
+	// this; a store that provides no validator leaves MaterializeView to fail
+	// closed on a nil gate.
+	if v, ok := store.(ReadsFromValidator); ok {
+		s.validator = v
+	}
+	return s
 }
 
 // Adapter returns the namespace this SDK is bound to.
@@ -215,15 +232,20 @@ type ReadsFromValidator interface {
 // MaterializeView computes and persists a view (§8.4.1 sdk.materialize_view).
 // gate enforces the §11.2 migration_only rule against readsFrom BEFORE the
 // runner executes or anything is written — pass the live *registry.Registry
-// (or an equivalent ReadsFromValidator); a nil gate is rejected rather than
-// silently skipping the check. The SDK derives a multi-namespace token from
+// (or an equivalent ReadsFromValidator). A nil gate falls back to the
+// validator auto-bound by For from a registry-aware store; if neither is
+// present the call is rejected rather than skipping the check. The SDK
+// derives a multi-namespace token from
 // readsFrom: {adapter, write} plus {dep, read} for each dependency. This is
 // the ONLY surface that may read cross-namespace (§8.3). readNotes lets the
 // runner pull a dependency's notes; the store rejects any namespace not in
 // readsFrom.
 func (s *SDK) MaterializeView(name string, readsFrom []string, gate ReadsFromValidator, runner ViewRunner) error {
 	if gate == nil {
-		return fmt.Errorf("sdk: MaterializeView %q: a ReadsFromValidator is required so the §11.2 migration_only rule is enforced (pass the live registry)", name)
+		gate = s.validator
+	}
+	if gate == nil {
+		return fmt.Errorf("sdk: MaterializeView %q: a ReadsFromValidator is required so the §11.2 migration_only rule is enforced (pass the live registry or construct the SDK with a registry-aware store)", name)
 	}
 	if err := gate.ValidateReadsFrom(s.adapter, readsFrom); err != nil {
 		return fmt.Errorf("sdk: MaterializeView %q: reads_from rejected: %w", name, err)
