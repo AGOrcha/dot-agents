@@ -40,15 +40,46 @@ func (StdInstallDeps) LoadConfig() (*config.Config, error)          { return con
 
 const installLockSection = "install"
 
-// installInexact opts out of the EXACT/PRUNE shared-target projection
-// (config-v2-coherence §7A.5 / D10), mirroring refreshInexact in
-// commands/refresh.go. Default false ⇒ install projects the resolved set AND
-// prunes managed outputs no longer in it, so the repo tree converges to exactly
-// what the lock declares. True (`--inexact`) keeps the additive behavior: write
-// the wanted set, leave stale managed outputs in place. Set from the cobra
-// `--inexact` flag in NewInstallCmd's RunE so the helpers in this file read it
-// the same way they read Flags / Version / Commit (the t01 package-var seam).
-var installInexact bool
+// installOptions carries the install-specific invocation state this file
+// threads through the install pipeline: the EXACT/PRUNE opt-out (previously the
+// install-local `installInexact` mutable package var) and the build-stamp
+// values (Version/Commit/Describe) finalizeInstall records in the lock section.
+//
+// t17 removes the install-local mutable seam and the direct build-stamp global
+// reads inside the pipeline by passing this struct explicitly. The broader
+// lifecycle Flags / ErrorWithHintsFn package-var seams are intentionally left
+// in place per the t01 SHAPE.md "PRESERVE current package-var seams" decision.
+//
+// NewInstallCmd's RunE builds one from live state; the exported RunInstall /
+// RunInstallGenerate entrypoints fall back to installOptionsFromGlobals() so
+// callers outside this file stay source-compatible.
+type installOptions struct {
+	// inexact opts out of the EXACT/PRUNE shared-target projection
+	// (config-v2-coherence §7A.5 / D10), mirroring refreshInexact in
+	// commands/refresh.go. Default false ⇒ install projects the resolved set AND
+	// prunes managed outputs no longer in it, so the repo tree converges to
+	// exactly what the lock declares. True (`--inexact`) keeps the additive
+	// behavior: write the wanted set, leave stale managed outputs in place.
+	inexact bool
+	// version/commit/describe are the build-stamp values finalizeInstall writes
+	// into the install lock section, sourced from the lifecycle Version/Commit/
+	// Describe package vars (populated by applyDepsToGlobals) at invocation time.
+	version  string
+	commit   string
+	describe string
+}
+
+// installOptionsFromGlobals snapshots the current lifecycle build-stamp package
+// vars into an installOptions with the default (exact) projection. The exported
+// RunInstall / RunInstallGenerate entrypoints use it so callers outside this
+// file need not thread opts themselves.
+func installOptionsFromGlobals() installOptions {
+	return installOptions{
+		version:  Version,
+		commit:   Commit,
+		describe: Describe,
+	}
+}
 
 type installLockStamp struct {
 	Project  string `json:"project"`
@@ -106,11 +137,12 @@ unknown JSON keys are preserved.`,
 		Args: deps.NoArgsWithHints("Run install from the target repository directory instead of passing a path."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			applyDepsToGlobals(deps)
-			installInexact = inexact
+			opts := installOptionsFromGlobals()
+			opts.inexact = inexact
 			if generate {
-				return RunInstallGenerate(StdInstallDeps{})
+				return runInstallGenerate(StdInstallDeps{}, opts)
 			}
-			return RunInstall(strict, StdInstallDeps{})
+			return runInstall(strict, StdInstallDeps{}, opts)
 		},
 	}
 	cmd.Flags().BoolVar(&generate, "generate", false, "Create .agentsrc.json from current ~/.agents/ state")
@@ -122,6 +154,10 @@ unknown JSON keys are preserved.`,
 // ─── RunInstall ──────────────────────────────────────────────────────────────
 
 func RunInstall(strict bool, deps InstallDeps) error {
+	return runInstall(strict, deps, installOptionsFromGlobals())
+}
+
+func runInstall(strict bool, deps InstallDeps, opts installOptions) error {
 	projectPath, err := deps.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
@@ -158,10 +194,10 @@ func RunInstall(strict bool, deps InstallDeps) error {
 		return err
 	}
 
-	if err := createInstallPlatformLinks(projectName, projectPath); err != nil {
+	if err := createInstallPlatformLinks(projectName, projectPath, opts); err != nil {
 		return err
 	}
-	if err := finalizeInstall(projectName, projectPath); err != nil {
+	if err := finalizeInstall(projectName, projectPath, opts); err != nil {
 		return err
 	}
 
@@ -298,15 +334,15 @@ func RegisterInstallProject(projectName, projectPath string, deps InstallDeps) e
 	return nil
 }
 
-func createInstallPlatformLinks(projectName, projectPath string) error {
-	return createInstallPlatformLinksFor(projectName, projectPath, platform.All())
+func createInstallPlatformLinks(projectName, projectPath string, opts installOptions) error {
+	return createInstallPlatformLinksFor(projectName, projectPath, platform.All(), opts)
 }
 
-func createInstallPlatformLinksFor(projectName, projectPath string, platforms []platform.Platform) error {
+func createInstallPlatformLinksFor(projectName, projectPath string, platforms []platform.Platform, opts installOptions) error {
 	ui.Section("Creating platform links")
 	config.SetWindowsMirrorContext(projectPath)
 
-	if err := runInstallSharedTargetsFor(projectName, projectPath, platforms); err != nil {
+	if err := runInstallSharedTargetsFor(projectName, projectPath, platforms, opts); err != nil {
 		return err
 	}
 
@@ -320,18 +356,18 @@ func createInstallPlatformLinksFor(projectName, projectPath string, platforms []
 
 // runInstallSharedTargets runs the shared-target projection across all
 // installed platforms and surfaces the resulting plan or warning lines.
-func runInstallSharedTargets(projectName, projectPath string) error {
-	return runInstallSharedTargetsFor(projectName, projectPath, platform.All())
+func runInstallSharedTargets(projectName, projectPath string, opts installOptions) error {
+	return runInstallSharedTargetsFor(projectName, projectPath, platform.All(), opts)
 }
 
-func runInstallSharedTargetsFor(projectName, projectPath string, platforms []platform.Platform) error {
+func runInstallSharedTargetsFor(projectName, projectPath string, platforms []platform.Platform, opts installOptions) error {
 	var installed []platform.Platform
 	for _, p := range platforms {
 		if p.IsInstalled() {
 			installed = append(installed, p)
 		}
 	}
-	lines, err := platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, !installInexact)
+	lines, err := platform.RunSharedTargetProjectionExact(projectName, projectPath, installed, Flags.DryRun, !opts.inexact)
 	if err != nil {
 		return fmt.Errorf("shared targets: %w", err)
 	}
@@ -361,7 +397,7 @@ func createInstallPlatformLink(p platform.Platform, projectName, projectPath str
 	return nil
 }
 
-func finalizeInstall(projectName, projectPath string) error {
+func finalizeInstall(projectName, projectPath string, opts installOptions) error {
 	if Flags.DryRun {
 		return nil
 	}
@@ -371,9 +407,9 @@ func finalizeInstall(projectName, projectPath string) error {
 	}
 	if err := lf.SetSection(installLockSection, installLockStamp{
 		Project:  projectName,
-		Version:  Version,
-		Commit:   Commit,
-		Describe: Describe,
+		Version:  opts.version,
+		Commit:   opts.commit,
+		Describe: opts.describe,
 		Stamped:  time.Now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		return fmt.Errorf("stage install lock stamp: %w", err)
@@ -388,6 +424,10 @@ func finalizeInstall(projectName, projectPath string) error {
 // ─── RunInstallGenerate ──────────────────────────────────────────────────────
 
 func RunInstallGenerate(deps InstallDeps) error {
+	return runInstallGenerate(deps, installOptionsFromGlobals())
+}
+
+func runInstallGenerate(deps InstallDeps, opts installOptions) error {
 	projectPath, err := deps.Getwd()
 	if err != nil {
 		return fmt.Errorf("getting working directory: %w", err)
