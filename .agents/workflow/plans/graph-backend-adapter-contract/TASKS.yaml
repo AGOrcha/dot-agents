@@ -260,7 +260,7 @@ tasks:
         (resolved). The recoverable case falls through via §10.3.3.
     - id: t6-bridge-decommission
       title: Bridge decommissioning — close §11.4 gate
-      status: pending
+      status: blocked
       depends_on:
         - t4-crg-dual-read
       blocks: []
@@ -419,4 +419,64 @@ tasks:
         - internal/adapters/sdk/
       verification_required: true
       notes: Codex review of t4 (#172) found SDK.MaterializeView accepts arbitrary readsFrom without consulting the registry, so the migration_only reads_from gate (registry.EnforceReadsFrom, wired at load in t4) does not cover the materialized-view path. Wire EnforceReadsFrom (or an equivalent registry consult) into SDK.MaterializeView so a view reading a migration_only adapter is rejected. Add an integration test; mutation-verify the gate.
+      app_type: go-cli
+    - id: t6a-parity-surfaces
+      title: CRG native parity surfaces for flows communities and postprocess
+      status: pending
+      depends_on:
+        - t4-crg-dual-read
+      blocks:
+        - t6b-gate-automation
+        - t6d-final-bridge-deletion
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/builtin/crg/
+        - testdata/crg-parity/
+      verification_required: true
+      notes: 'First buildable bridge-decommission slice: implement the remaining kg-native CRG parity surfaces still owned by the bridge (flows, communities, postprocess) with focused dual-read/parity tests. No bridge deletion, router preference flip, or CI soak policy in this slice. Open decision: postprocess parity oracle (byte-for-byte vs structural ranking) — default to preserving current bridge behavior unless a narrower spec citation overrides.'
+      app_type: go-cli
+    - id: t6b-gate-automation
+      title: Promote CRG parity matrix and behavior harness into CI
+      status: pending
+      depends_on:
+        - t6a-parity-surfaces
+      blocks:
+        - t6d-final-bridge-deletion
+      owner: dot-agents
+      write_scope:
+        - .github/workflows/ci.yml
+        - testdata/crg-parity/
+      verification_required: true
+      notes: 'Wire corrected parity matrix + behavior-preservation harness into CI so the decommission soak clock can start. Starts the evidence clock; does NOT claim the multi-week gate satisfied. Anti-scope: no bridge deletion; do not mark soak complete in the same change that introduces the gate.'
+      app_type: go-cli
+    - id: t6c-consumer-audit
+      title: Audit bridge consumers and cutover readiness
+      status: pending
+      depends_on:
+        - t4-crg-dual-read
+      blocks:
+        - t6d-final-bridge-deletion
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+        - docs/
+        - scripts/
+      verification_required: true
+      notes: 'Prove what still depends on the CRG bridge; enumerate managed + named out-of-tree consumer sets; make the drift audit reproducible. Anti-scope: no final deletion; if any consumer still needs reads_from:[crg-bridge], keep the bridge.'
+      app_type: go-cli
+    - id: t6d-final-bridge-deletion
+      title: Delete CRG bridge after parity soak and consumer migration
+      status: pending
+      depends_on:
+        - t6a-parity-surfaces
+        - t6b-gate-automation
+        - t6c-consumer-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/graphstore/
+        - internal/adapters/builtin/crg-bridge/
+        - internal/adapters/builtin/crg/
+      verification_required: true
+      notes: 'Destructive final stage only after native parity, CI soak evidence, and consumer migration proof are complete. Remove bridge registration/callers + delete Python subprocess machinery; docs/gates stop referencing the bridge as an active surface. Precondition: t6a+t6b+t6c landed and their evidence gates satisfied.'
       app_type: go-cli
