@@ -41,21 +41,33 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
+          # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22); Node 20
+          # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
           node-version: '22'
-          cache: npm
-          cache-dependency-path: docs/web/package-lock.json
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) + --ignore-scripts
+        # (S6505: lifecycle scripts); pnpm is pure JS. Mirrors test.yml.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
 
       - name: Install dependencies
         working-directory: docs/web
-        # --ignore-scripts: per Sonar S6505; the Playwright browser binaries are
-        # installed explicitly in the next step, so install-time scripts are not
-        # needed here.
-        run: npm ci --ignore-scripts
+        # --frozen-lockfile: install matches the committed pnpm-lock.yaml exactly.
+        # --ignore-scripts (Sonar S6505): Playwright browser binaries are installed
+        # explicitly in the next step; native build deps are rebuilt below.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native deps (sharp/esbuild/workerd)
+        working-directory: docs/web
+        # Native postinstall binaries skipped by --ignore-scripts above — sharp
+        # (image processing), esbuild (vite), workerd (miniflare). These are the
+        # pnpm-workspace.yaml allowBuilds entries the astro build / gate test need.
+        run: pnpm rebuild sharp esbuild workerd
 
       - name: Install Playwright browser
         working-directory: docs/web
         # Run the already-installed, version-pinned Playwright binary directly
-        # from node_modules/.bin (installed by `npm ci` above). This is NOT an
+        # from node_modules/.bin (installed by `pnpm install` above). This is NOT an
         # npm/npx package install — it neither resolves nor fetches a package and
         # runs no install-time lifecycle scripts — so S6505/S8543 do not apply;
         # it only downloads the browser binaries Playwright needs.
@@ -65,7 +77,7 @@ jobs:
         working-directory: docs/web
         # playwright.config.ts builds (DEPLOY_TARGET=cloudflare) and static-serves
         # dist itself, so this step is fully hermetic.
-        run: npm run test:e2e
+        run: pnpm run test:e2e
 
   link-check:
     # Link-rot guard for the rendered docs. Builds the PUBLIC site and runs
@@ -86,20 +98,34 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
+          # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22); Node 20
+          # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
           node-version: '22'
-          cache: npm
-          cache-dependency-path: docs/web/package-lock.json
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) + --ignore-scripts
+        # (S6505: lifecycle scripts); pnpm is pure JS. Mirrors test.yml.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
 
       - name: Install dependencies
         working-directory: docs/web
-        run: npm ci --ignore-scripts
+        # --frozen-lockfile matches the committed pnpm-lock.yaml; --ignore-scripts
+        # per Sonar S6505 (native build deps rebuilt below).
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native deps (sharp/esbuild/workerd)
+        working-directory: docs/web
+        # Native postinstall binaries skipped by --ignore-scripts above — sharp
+        # (image processing), esbuild (vite), workerd (miniflare). These are the
+        # pnpm-workspace.yaml allowBuilds entries the astro build / gate test need.
+        run: pnpm rebuild sharp esbuild workerd
 
       - name: Build public site
         working-directory: docs/web
         env:
           # Root-relative ('/') base URLs so the built links match production.
           DEPLOY_TARGET: cloudflare
-        run: npm run build:public
+        run: pnpm run build:public
 
       - name: Check links with lychee
         # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.
@@ -133,17 +159,28 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
+          # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22); Node 20
+          # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
           node-version: '22'
-          cache: npm
-          cache-dependency-path: docs/web/package-lock.json
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) + --ignore-scripts
+        # (S6505: lifecycle scripts); pnpm is pure JS. Mirrors test.yml.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
 
       - name: Install dependencies
         working-directory: docs/web
-        # --ignore-scripts: per Sonar S6505; we control the deps + their
-        # postinstall scripts via package-lock.json, so install-time scripts
-        # are not needed for CI builds. The 'astro build' step below runs
-        # the real build (the only script we need).
-        run: npm ci --ignore-scripts
+        # --frozen-lockfile: install matches the committed pnpm-lock.yaml exactly.
+        # --ignore-scripts per Sonar S6505; native build deps (sharp/esbuild/
+        # workerd, the pnpm-workspace.yaml allowBuilds) are rebuilt explicitly below.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native deps (sharp/esbuild/workerd)
+        working-directory: docs/web
+        # Native postinstall binaries skipped by --ignore-scripts above — sharp
+        # (image processing), esbuild (vite), workerd (miniflare). These are the
+        # pnpm-workspace.yaml allowBuilds entries the astro build / gate test need.
+        run: pnpm rebuild sharp esbuild workerd
 
       - name: Build site (both passes) + merge internal into dist
         working-directory: docs/web
@@ -154,13 +191,13 @@ jobs:
         # build:merged runs both Astro passes then copies dist-internal/internal/
         # -> dist/internal/ (Option A single asset dir) while leaving dist's
         # clean public pagefind index untouched. The Worker gates /internal/*.
-        run: npm run build:merged
+        run: pnpm run build:merged
 
       - name: Gate test (Cloudflare Access leak guard)
         working-directory: docs/web
         # Proves unauthenticated /internal/* is blocked (401) while public +
         # /schemas/* serve unauth. Fails the deploy if the gate ever regresses.
-        run: npm test
+        run: pnpm test
 
       - name: Deploy to Cloudflare Workers
         # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.
