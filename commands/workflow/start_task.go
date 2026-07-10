@@ -38,6 +38,7 @@ type startTaskResult struct {
 	FocusedTask    bool   `json:"focused_task"`
 	DerivedScope   bool   `json:"derived_scope"`
 	WorkflowCommit bool   `json:"workflow_commit"`
+	DryRun         bool   `json:"dry_run"`
 }
 
 func newWorkflowStartTaskCmd() *cobra.Command {
@@ -56,7 +57,8 @@ func newWorkflowStartTaskCmd() *cobra.Command {
 			"--task, run `plan derive-scope` to write the evidence sidecar the worker\n" +
 			"stage will consume, then `workflow commit` the state mutation. --no-derive-\n" +
 			"scope is the escape hatch when the operator wants to hand-author the\n" +
-			"sidecar; --no-commit batches the state commit elsewhere.\n\n" +
+			"sidecar; --no-commit batches the state commit elsewhere. --dry-run (or the\n" +
+			"global -n) previews the chain without touching disk or the journal.\n\n" +
 			"Fanout is intentionally not wired here — the orchestrator typically\n" +
 			"decides direct-vs-delegated explicitly via `da workflow fanout` as a\n" +
 			"separate step.",
@@ -64,6 +66,7 @@ func newWorkflowStartTaskCmd() *cobra.Command {
 			"  da workflow start-task my-plan --task t1",
 			"  da workflow start-task my-plan --task t1 --no-derive-scope",
 			"  da workflow start-task my-plan --task t1 --seed-symbol RunWorkflowFanout",
+			"  da workflow start-task my-plan --task t1 --dry-run",
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -74,6 +77,7 @@ func newWorkflowStartTaskCmd() *cobra.Command {
 				noCommit:      noCommit,
 				seedSymbols:   seedSymbols,
 				seedPaths:     seedPaths,
+				dryRun:        startTaskDryRun(cmd),
 			})
 		},
 	}
@@ -82,8 +86,19 @@ func newWorkflowStartTaskCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noCommit, "no-commit", false, "Skip the workflow-state commit step")
 	cmd.Flags().StringSliceVar(&seedSymbols, "seed-symbol", nil, "Symbol seed for derive-scope (repeatable; same as `plan derive-scope`)")
 	cmd.Flags().StringSliceVar(&seedPaths, "seed-path", nil, "Path seed for derive-scope (repeatable; same as `plan derive-scope`)")
+	cmd.Flags().Bool("dry-run", false, "Preview the chain without activating the plan, focusing the task, deriving scope, or committing")
 	_ = cmd.MarkFlagRequired("task")
 	return cmd
+}
+
+// startTaskDryRun reports whether start-task should preview its chain
+// instead of running it. The local --dry-run flag is OR-merged with the
+// global -n/--dry-run so `da -n workflow start-task ...` is honored the
+// same way as every other mutating command (sibling of foldBackDryRun /
+// commit's dry-run wiring).
+func startTaskDryRun(cmd *cobra.Command) bool {
+	local, _ := cmd.Flags().GetBool("dry-run")
+	return local || safeDryRun()
 }
 
 // startTask*-prefixed function-var seams let tests trigger each step's
@@ -99,13 +114,37 @@ type startTaskOpts struct {
 	taskID        string
 	noDeriveScope bool
 	noCommit      bool
+	dryRun        bool
 	seedSymbols   []string
 	seedPaths     []string
 }
 
 // runWorkflowStartTask drives the chain. Each step's failure surfaces as
 // "start-task: <step>: ..." so log triage maps to the chain position.
+// opts.dryRun short-circuits before any primitive call — none of
+// startTaskPlanUpdate / startTaskDeriveScope / iterationCloseCommit are
+// dry-run aware, so calling them "to preview" would mutate for real; the
+// preview is built from opts alone and emits no journal event, mirroring
+// runFoldBackUpsertDryRun's no-write / no-journal guarantee.
 func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
+	if opts.dryRun {
+		result := startTaskResult{
+			PlanID:         opts.planID,
+			TaskID:         opts.taskID,
+			ActivatedPlan:  true,
+			FocusedTask:    true,
+			DerivedScope:   !opts.noDeriveScope,
+			WorkflowCommit: !opts.noCommit,
+			DryRun:         true,
+		}
+		if deps.Flags.JSON() {
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			return enc.Encode(result)
+		}
+		renderStartTaskSummary(out, result)
+		return nil
+	}
 	// start-task is a molecule: its constituent plan-update / derive-scope /
 	// commit calls journal their own typed events. This event records the
 	// molecule-level intent. The runner does not resolve a project itself, so we
@@ -161,6 +200,22 @@ func runWorkflowStartTask(out io.Writer, opts startTaskOpts) error {
 }
 
 func renderStartTaskSummary(out io.Writer, r startTaskResult) {
+	if r.DryRun {
+		fmt.Fprintf(out, "start-task %s/%s [dry-run]\n", r.PlanID, r.TaskID)
+		fmt.Fprintln(out, "  [dry-run] would activate plan")
+		fmt.Fprintf(out, "  [dry-run] would focus task %s\n", r.TaskID)
+		if r.DerivedScope {
+			fmt.Fprintln(out, "  [dry-run] would derive scope-evidence sidecar")
+		} else {
+			fmt.Fprintln(out, "  scope derivation skipped (--no-derive-scope)")
+		}
+		if r.WorkflowCommit {
+			fmt.Fprintln(out, "  [dry-run] would commit workflow state")
+		} else {
+			fmt.Fprintln(out, "  workflow state NOT committed (--no-commit)")
+		}
+		return
+	}
 	fmt.Fprintf(out, "start-task %s/%s\n", r.PlanID, r.TaskID)
 	fmt.Fprintln(out, "  plan activated + focused")
 	if r.DerivedScope {
