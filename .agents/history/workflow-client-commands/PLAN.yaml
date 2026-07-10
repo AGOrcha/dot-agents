@@ -1,7 +1,7 @@
 schema_version: 1
 id: workflow-client-commands
 title: da workflow close-task / start-task client commands + auto iter-log + scoring at close
-status: completed
+status: archived
 summary: |-
     Promote two recurring workflow sequences from "hand-typed each session" to first-class client commands that compose the existing fine-grained primitives:
 
@@ -23,7 +23,7 @@ summary: |-
     The plan is the natural integration point for R1 scoring: scoring runs inside close-task with sensible defaults, so every iteration gets a persisted, explainable outcome score as a byproduct of the normal close flow — not a separate ritual the operator has to remember. Older scores stay static once written (they're computed from immutable inputs); the default --score-recompute=current is therefore cheap. The recent-N and all flags exist for rubric or signal-shape changes that warrant backfill.
     Critically, this plan also closes the "no source = no score" gap by making iter-N.yaml an auto-derived artifact rather than a hand-edited one. Without that, R1's downstream chain (signals → scorer → persist → cli) has nothing to score on iterations where the operator forgot to write the log.
 created_at: "2026-05-23T22:26:51Z"
-updated_at: "2026-05-24T02:33:36Z"
+updated_at: "2026-07-10T04:25:15Z"
 owner: dot-agents
 success_criteria: |-
     - `da workflow close-task` runs end-to-end and produces (a) an
