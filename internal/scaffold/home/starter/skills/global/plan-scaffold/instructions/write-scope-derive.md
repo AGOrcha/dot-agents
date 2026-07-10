@@ -8,6 +8,6 @@ Rules for deriving each task's `write_scope`:
 - A task with an unknowable write-scope is a signal the spec still has an open question.
   Flag it and resolve the spec gap before locking the task.
 - Write-scopes are paths (files or directories), not intent. Example:
-  `write_scope: [internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/]`
+  `write_scope: [internal/scaffold/home/starter/skills/global/plan-scaffold/]`
 - Molecule sibling names for cross-referencing: `kg-brief`, `spec-scaffold`, `plan-scaffold`,
   `staged-execution-handoff`.

@@ -28,6 +28,9 @@ completed in a prior session, or when delegating Phase 2/3 to a planning subagen
 
 ## Steps
 
+Review failure points before starting.
+Load → `instructions/gotchas.md`
+
 5. **Prior decision review**
    Load → `instructions/decision-review.md`
    For each prior_decision in briefing: present it and ask whether it still applies

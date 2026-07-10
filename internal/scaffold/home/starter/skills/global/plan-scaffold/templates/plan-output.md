@@ -57,7 +57,7 @@ Rules:
   title: Author plan-scaffold SKILL.md
   status: pending
   write_scope:
-    - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/SKILL.md
+    - internal/scaffold/home/starter/skills/global/plan-scaffold/SKILL.md
   depends_on: []
   blocks: []
   verification_required: true
@@ -70,7 +70,7 @@ Rules:
   title: Author plan-scaffold instruction files
   status: pending
   write_scope:
-    - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/instructions/
+    - internal/scaffold/home/starter/skills/global/plan-scaffold/instructions/
   depends_on:
     - p0-skill-md
   blocks: []
@@ -83,7 +83,7 @@ Rules:
   title: Author plan-scaffold templates
   status: pending
   write_scope:
-    - internal/scaffold/home/starter/skills/global/kg-ideate/plan-scaffold/templates/
+    - internal/scaffold/home/starter/skills/global/plan-scaffold/templates/
   depends_on:
     - p0-skill-md
   blocks: []

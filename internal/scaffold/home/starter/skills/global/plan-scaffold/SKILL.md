@@ -44,6 +44,9 @@ Load → `instructions/plan-scaffolding.md`
 
 ## Workflow
 
+Review failure points before starting.
+Load → `instructions/gotchas.md`
+
 10. **Concurrency decision**
     Apply the heuristic above. State the chosen mode and why (which open questions, if any,
     block sequential→concurrent). This decision is itself recorded in the plan notes.
