@@ -410,7 +410,7 @@ tasks:
       app_type: release
     - id: t9-sdk-materializeview-readsfrom-gate
       title: Wire reads_from enforcement into SDK.MaterializeView
-      status: pending
+      status: completed
       depends_on:
         - t4-crg-dual-read
       blocks: []

@@ -1045,8 +1045,8 @@ tasks:
         unchanged.
       app_type: code-fix
     - id: t17-lifecycle-interface-di
-      title: 'Convert commands/internal/lifecycle/ from func-var seams to interface-DI (deferred from t15)'
-      status: pending
+      title: Convert commands/internal/lifecycle/ from func-var seams to interface-DI (deferred from t15)
+      status: in_progress
       depends_on:
         - t15-direct-followup-interface-di
       blocks: []
