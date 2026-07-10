@@ -375,7 +375,7 @@ tasks:
         - t3-ttrpg-dogfood
         - t4-crg-dual-read
         - t5-cross-adapter-reads-from
-        - t6-bridge-decommission
+        - t6d-final-bridge-deletion
         - t7-app-type-profiles-wiring
       blocks: []
       owner: dot-agents
