@@ -4,7 +4,7 @@ title: Managed worktree platform for delegation/branch isolation
 status: draft
 summary: First-class managed git worktree + sub-branch/merge-back lifecycle with recorded base refs; typed git layer; per-worktree index isolation; skills integration
 created_at: "2026-05-18T02:42:52Z"
-updated_at: "2026-06-30T18:37:04Z"
+updated_at: "2026-07-10T04:21:00Z"
 owner: dot-agents
 success_criteria: 'Delegated task gets isolated worktree+sub-branch with true base recorded (no hand-derived rebase); per-worktree index isolation proven (closes workflow-commit-command finding #3); deterministic prune; chosen git mechanism behind one typed interface; delegation-lifecycle/isp/loop-worker use it'
 verification_strategy: Spike the git-mechanism decision first; unit+integration tests for create/track/merge-back/prune incl. a deliberate stale-base catch and a concurrent-agent index-isolation test
