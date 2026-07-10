@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -145,7 +146,7 @@ func TestVerifySources(t *testing.T) {
 			if tc.sources != nil {
 				repo["sources"] = tc.sources
 			}
-			snap := &snapshot{layers: map[string]map[string]any{layerRepoLocal: repo}}
+			snap := &cfg.Snapshot{Layers: []cfg.ResolvedLayer{{ID: cfg.LayerRepoLocal, Raw: repo}}}
 			checks := verifySources(cwd, snap)
 			c, ok := findCheck(checks, tc.wantName)
 			if !ok {
@@ -303,19 +304,19 @@ func TestVerifySources_RemoteReferencedVsUnused(t *testing.T) {
 	gitSrc := map[string]any{"type": "git", "id": "acme", "url": "u"}
 
 	// referenced: an extends ref uses the source id
-	used := &snapshot{layers: map[string]map[string]any{layerRepoLocal: {
+	used := &cfg.Snapshot{Layers: []cfg.ResolvedLayer{{ID: cfg.LayerRepoLocal, Raw: map[string]any{
 		"sources": []any{gitSrc},
 		"extends": []any{"acme:org/base"},
-	}}}
+	}}}}
 	c, _ := findCheck(verifySources(cwd, used), "source:acme")
 	if c.Status != verifyPass || !strings.Contains(c.Detail, "verified in the locked-layers check") {
 		t.Fatalf("referenced remote should point to locked-layers, got %+v", c)
 	}
 
 	// unused: no extends references it
-	unused := &snapshot{layers: map[string]map[string]any{layerRepoLocal: {
+	unused := &cfg.Snapshot{Layers: []cfg.ResolvedLayer{{ID: cfg.LayerRepoLocal, Raw: map[string]any{
 		"sources": []any{gitSrc},
-	}}}
+	}}}}
 	c, _ = findCheck(verifySources(cwd, unused), "source:acme")
 	if c.Status != verifyPass || !strings.Contains(c.Detail, "unused") {
 		t.Fatalf("unreferenced remote should be flagged unused, got %+v", c)
@@ -398,14 +399,21 @@ func TestAbbrevSHA(t *testing.T) {
 
 // ---------- verifyPreconditionPolicies (Slice B5) ----------
 
-// snapForEffective builds a snapshot whose effective map is the given object,
-// the same flat shape loadFlatSnapshot produces, so the policy checks can be
-// driven without writing a manifest to disk.
-func snapForEffective(effective map[string]any) *snapshot {
-	return &snapshot{
-		layers:    map[string]map[string]any{layerRepoLocal: effective},
-		effective: effective,
+// snapForEffective builds a *cfg.Snapshot whose Effective config is the given
+// object, decoded through the same typed AgentsRC schema resolveLayered
+// produces, so the policy checks can be driven without writing a manifest to
+// disk or seeding a lockfile.
+func snapForEffective(t *testing.T, effective map[string]any) *cfg.Snapshot {
+	t.Helper()
+	data, err := json.Marshal(effective)
+	if err != nil {
+		t.Fatalf("marshal effective: %v", err)
 	}
+	var rc cfg.AgentsRC
+	if err := json.Unmarshal(data, &rc); err != nil {
+		t.Fatalf("unmarshal effective: %v", err)
+	}
+	return &cfg.Snapshot{Effective: rc}
 }
 
 // validPolicyConfig is the effective-config fragment for the built-in default
@@ -498,7 +506,7 @@ func TestVerifyPreconditionPolicies(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			checks := verifyPreconditionPolicies(snapForEffective(tc.effective))
+			checks := verifyPreconditionPolicies(snapForEffective(t, tc.effective))
 			assertPolicyCheck(t, checks, tc.wantStatus, tc.wantCheck, tc.wantDetail)
 		})
 	}
@@ -528,8 +536,8 @@ func assertPolicyCheck(t *testing.T, checks []VerifyCheck, wantStatus, wantCheck
 	}
 }
 
-// TestVerifyPreconditionPolicies_NilSnapshot exercises the nil-snapshot guard in
-// decodeEffectivePolicyConfig (no panic, no checks).
+// TestVerifyPreconditionPolicies_NilSnapshot exercises the nil-snapshot guard
+// in verifyPreconditionPolicies (no panic, no checks).
 func TestVerifyPreconditionPolicies_NilSnapshot(t *testing.T) {
 	if got := verifyPreconditionPolicies(nil); got != nil {
 		t.Fatalf("expected nil checks for nil snapshot, got %+v", got)
@@ -552,7 +560,7 @@ func TestVerifyPreconditionPolicies_AllErrorsSurface(t *testing.T) {
 			},
 		},
 	}
-	checks := verifyPreconditionPolicies(snapForEffective(eff))
+	checks := verifyPreconditionPolicies(snapForEffective(t, eff))
 	if _, ok := findCheck(checks, "precondition-policy:verifier/unit"); !ok {
 		t.Fatalf("missing dangling-reference check in %+v", checks)
 	}
@@ -584,6 +592,56 @@ func TestBuildVerifyReport_PolicyFailFlipsOK(t *testing.T) {
 	}
 }
 
+// TestBuildVerifyReport_RealLockedExtendsLayerPolicyResolves is the
+// end-to-end proof that `da config verify` now resolves through the SAME
+// layered path `da config explain` / `workflow app-types` use: a project that
+// `extends` a layer carrying precondition_policies (a team-source's
+// verifier_chain registry), with a populated .agentsrc.lock + on-disk layer
+// cache, must resolve a repo-local stage_profile's reference to that imported
+// policy. Under the retired loadFlatSnapshot (product-defaults -> user-local
+// -> repo-local only) the imported registry was invisible, so this exact
+// reference would have failed as "undeclared precondition policy".
+func TestBuildVerifyReport_RealLockedExtendsLayerPolicyResolves(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "org"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "org", "policies.json"), []byte(`{
+  "precondition_policies": {
+    "org-default": {"predicates": [{"signal": "event.pr.open"}]}
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, cfg.AgentsRCFile), []byte(`{
+  "project":"svc","version":2,
+  "sources":[{"id":"acme","type":"local","path":`+strconv.Quote(src)+`}],
+  "extends":["acme:org/policies.json"],
+  "stage_profiles": {"verifier": {"unit": {"precondition_policy": "org-default"}}}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed .agentsrc.lock + the layer cache via one online (local-disk)
+	// resolve — the same seeding pattern
+	// TestWorkflowAppTypesRealLockedExtendsLayer uses.
+	if _, err := cfg.NewLayeredResolver().Resolve(repo); err != nil {
+		t.Fatalf("seed online resolve: %v", err)
+	}
+
+	report := buildVerifyReport(mustVerifyOptions(repo, false, okProbe))
+	if c, ok := findCheck(report.Checks, "precondition-policy:verifier/unit"); ok {
+		t.Fatalf("expected no dangling-reference check once the imported layer's policy is visible, got %+v", c)
+	}
+	if c, ok := findCheck(report.Checks, "precondition-policies"); !ok || c.Status != verifyPass {
+		t.Fatalf("expected precondition-policies to pass once the imported layer supplies org-default, got %+v", report.Checks)
+	}
+}
+
 // TestRunVerify_PolicyFailReturnsError proves the command path maps a Slice-B5
 // failure to a non-zero exit (a non-nil error from runVerify).
 func TestRunVerify_PolicyFailReturnsError(t *testing.T) {
@@ -598,40 +656,23 @@ func TestRunVerify_PolicyFailReturnsError(t *testing.T) {
 	}
 }
 
-// TestDecodeEffectivePolicyConfig covers the decode helper's branches: nil
-// snapshot, absent keys, and a populated round-trip.
-func TestDecodeEffectivePolicyConfig(t *testing.T) {
-	if rc, err := decodeEffectivePolicyConfig(nil); err != nil || rc == nil {
-		t.Fatalf("nil snapshot: rc=%v err=%v", rc, err)
+// TestBuildVerifyReport_MalformedPolicyShapeFailsManifest covers what was the
+// decode-failure branch pre-migration: a precondition_policies value of the
+// wrong JSON shape (a string, not an object map) used to marshal but fail to
+// unmarshal into the typed registry inside verifyPreconditionPolicies itself,
+// degrading to a warn. Snapshot resolution now decodes the WHOLE manifest
+// through the typed AgentsRC schema up front (resolveLayered), so a malformed
+// precondition_policies shape fails snapshot resolution itself — the same
+// "manifest" short-circuit an unparseable .agentsrc.json produces — rather
+// than surfacing as an isolated per-check warn.
+func TestBuildVerifyReport_MalformedPolicyShapeFailsManifest(t *testing.T) {
+	project := withRepoLayer(t, `{"precondition_policies": "not-an-object"}`, "")
+	report := buildVerifyReport(mustVerifyOptions(project, false, okProbe))
+	if report.OK {
+		t.Fatalf("expected OK=false for a malformed precondition_policies shape, got %+v", report)
 	}
-	if rc, err := decodeEffectivePolicyConfig(snapForEffective(map[string]any{"project": "x"})); err != nil || len(rc.PreconditionPolicies) != 0 {
-		t.Fatalf("absent keys should decode empty: rc=%+v err=%v", rc, err)
-	}
-	rc, err := decodeEffectivePolicyConfig(snapForEffective(validPolicyConfig()))
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(rc.PreconditionPolicies["default"].Predicates) != 4 {
-		t.Fatalf("expected 4 predicates round-tripped, got %+v", rc.PreconditionPolicies)
-	}
-	if rc.StageProfiles["verifier"]["unit"].PreconditionPolicy != "default" {
-		t.Fatalf("expected profile reference round-tripped, got %+v", rc.StageProfiles)
-	}
-}
-
-// TestVerifyPreconditionPolicies_DecodeErrorWarns covers the decode-failure
-// branch: a precondition_policies value of the wrong JSON shape (a string, not
-// an object map) marshals but fails to unmarshal into the typed registry, so the
-// check degrades to a warn rather than a hard fail or a panic.
-func TestVerifyPreconditionPolicies_DecodeErrorWarns(t *testing.T) {
-	eff := map[string]any{"precondition_policies": "not-an-object"}
-	checks := verifyPreconditionPolicies(snapForEffective(eff))
-	c, ok := findCheck(checks, "precondition-policies")
-	if !ok || c.Status != verifyWarn {
-		t.Fatalf("expected a precondition-policies warn on malformed config, got %+v", checks)
-	}
-	if !strings.Contains(c.Detail, "could not decode") {
-		t.Fatalf("warn detail should explain the decode failure, got %q", c.Detail)
+	if c, ok := findCheck(report.Checks, "manifest"); !ok || c.Status != verifyFail {
+		t.Fatalf("expected the manifest check to fail, got %+v", report.Checks)
 	}
 }
 
@@ -652,7 +693,7 @@ func TestVerifyPolicyReferences_EmptyNameSkipped(t *testing.T) {
 			},
 		},
 	}
-	checks := verifyPreconditionPolicies(snapForEffective(eff))
+	checks := verifyPreconditionPolicies(snapForEffective(t, eff))
 	for _, c := range checks {
 		if c.Status == verifyFail {
 			t.Fatalf("a profile without a precondition_policy must not fail, got %+v", checks)

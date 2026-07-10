@@ -929,104 +929,11 @@ func TestFeatureFlagNames_SortedUnion(t *testing.T) {
 	}
 }
 
-// ---------- legacy flat-snapshot helpers (shared with relevance/verify) ----------
+// ---------- small pure helpers retained from the pre-cfg.Snapshot explain path ----------
 //
-// loadFlatSnapshot, mergeLayers, lookup, splitFieldPath, decodeJSONFile,
-// fileExists, and sortedKeys are the raw-layer reader surface the sibling
-// `relevance` and `verify` commands still consume. explain no longer routes
-// through them (it uses the auto-lock cfg.Snapshot seam), but they live in
-// explain.go so they are unit-tested here to keep the file's behavior pinned.
-
-func TestLoadFlatSnapshot_MissingRepoManifestIsSchemaError(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("HOME", filepath.Join(root, "home"))
-	t.Setenv("AGENTS_HOME", filepath.Join(root, "home", ".agents"))
-	_, code, err := loadFlatSnapshot(filepath.Join(root, "project"))
-	if err == nil {
-		t.Fatal("expected error for missing manifest")
-	}
-	if code != exitSchemaErr {
-		t.Errorf("expected exitSchemaErr (%d), got %d", exitSchemaErr, code)
-	}
-}
-
-func TestLoadFlatSnapshot_RepoLayerOnly(t *testing.T) {
-	project := withRepoLayer(t, `{"version":2,"project":"demo","repo_id":"github.com/x/y"}`, "")
-	snap, code, err := loadFlatSnapshot(project)
-	if err != nil || code != exitOK {
-		t.Fatalf("unexpected: code=%d err=%v", code, err)
-	}
-	if snap.effective["project"] != "demo" {
-		t.Errorf("expected project=demo, got %v", snap.effective["project"])
-	}
-	if snap.layers[layerUserLocal] != nil {
-		t.Errorf("expected user-local nil, got %v", snap.layers[layerUserLocal])
-	}
-}
-
-func TestLoadFlatSnapshot_UserLocalOverlay(t *testing.T) {
-	project := withRepoLayer(t,
-		`{"version":2,"project":"demo","features":{"a":"repo"}}`,
-		`{"version":2,"features":{"a":"user","b":"user-only"}}`,
-	)
-	snap, _, err := loadFlatSnapshot(project)
-	if err != nil {
-		t.Fatalf("loadFlatSnapshot: %v", err)
-	}
-	// repo wins for the top-level features map (last-writer-wins flat overlay).
-	feat := snap.effective["features"].(map[string]any)
-	if feat["a"] != "repo" {
-		t.Errorf("repo-local should win for features.a, got %v", feat["a"])
-	}
-	if _, ok := feat["b"]; ok {
-		t.Errorf("flat overlay should replace top-level features map; got merged: %v", feat)
-	}
-}
-
-func TestLoadFlatSnapshot_InvalidRepoJSONIsSchemaError(t *testing.T) {
-	project := withRepoLayer(t, `{not-json`, "")
-	_, code, err := loadFlatSnapshot(project)
-	if err == nil || code != exitSchemaErr {
-		t.Fatalf("expected schema error, got code=%d err=%v", code, err)
-	}
-}
-
-func TestLoadFlatSnapshot_InvalidUserJSONIsSchemaError(t *testing.T) {
-	project := withRepoLayer(t, `{"version":2}`, `not-json`)
-	_, code, err := loadFlatSnapshot(project)
-	if err == nil || code != exitSchemaErr {
-		t.Fatalf("expected schema error, got code=%d err=%v", code, err)
-	}
-}
-
-func TestMergeLayers_AllNil(t *testing.T) {
-	out := mergeLayers(map[string]map[string]any{
-		layerProductDefaults: nil,
-		layerUserLocal:       nil,
-		layerRepoLocal:       nil,
-	})
-	if len(out) != 0 {
-		t.Errorf("expected empty merge, got %v", out)
-	}
-}
-
-func TestLookup_TraversalGuards(t *testing.T) {
-	if v, ok := lookup(nil, []string{"x"}); ok || v != nil {
-		t.Error("nil layer should miss")
-	}
-	if v, ok := lookup(map[string]any{"x": 1}, nil); ok || v != nil {
-		t.Error("empty parts should miss")
-	}
-	if v, ok := lookup(map[string]any{"x": "string-value"}, []string{"x", "child"}); ok || v != nil {
-		t.Error("descending into a non-object should miss")
-	}
-	if v, ok := lookup(map[string]any{"x": map[string]any{}}, []string{"x", "missing"}); ok || v != nil {
-		t.Error("missing key should miss")
-	}
-	if v, ok := lookup(map[string]any{"x": map[string]any{"y": "z"}}, []string{"x", "y"}); !ok || v != "z" {
-		t.Errorf("nested hit should resolve, got %v/%v", v, ok)
-	}
-}
+// fileExists is still used in production by verify.go's local-source check.
+// splitFieldPath and sortedKeys predate explain's cfg.Snapshot migration and
+// are exercised here to keep their behavior pinned.
 
 func TestSplitFieldPath_EmptyAndParts(t *testing.T) {
 	if got := splitFieldPath(""); got != nil {
@@ -1048,47 +955,9 @@ func TestSortedKeys(t *testing.T) {
 	}
 }
 
-func TestDecodeJSONFile_NotFound(t *testing.T) {
-	if _, err := decodeJSONFile("/nonexistent/path/agentsrc.json"); err == nil {
-		t.Error("expected error for missing file")
-	}
-}
-
-func TestDecodeJSONFile_BadJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte("{not-json"), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	if _, err := decodeJSONFile(path); err == nil {
-		t.Error("expected json decode error")
-	}
-}
-
-func TestDecodeJSONFile_OK(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "ok.json")
-	if err := os.WriteFile(path, []byte(`{"a":1}`), 0o644); err != nil {
-		t.Fatalf("write: %v", err)
-	}
-	m, err := decodeJSONFile(path)
-	if err != nil || m["a"] != float64(1) {
-		t.Errorf("expected {a:1}, got %v err=%v", m, err)
-	}
-}
-
 func TestFileExists_FalseForMissing(t *testing.T) {
 	if fileExists(filepath.Join(t.TempDir(), "no-such-file")) {
 		t.Error("expected false for missing")
-	}
-}
-
-func TestOrderedLayers_StableSequence(t *testing.T) {
-	want := []string{layerProductDefaults, layerUserLocal, layerRepoLocal}
-	for i, w := range want {
-		if orderedLayers[i] != w {
-			t.Errorf("orderedLayers[%d] = %q, want %q", i, orderedLayers[i], w)
-		}
 	}
 }
 
