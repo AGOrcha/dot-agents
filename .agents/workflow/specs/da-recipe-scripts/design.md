@@ -1,6 +1,7 @@
 # `da` recipe scripts — Product Contract
 
-**Status:** draft
+**Status:** shipped — `da run <file>` is live (`commands/run.go`, registered `commands/root.go:222`);
+all done criteria (§4) hold. Plan: `.agents/workflow/plans/da-recipe-scripts/` (status: completed).
 **Written:** 2026-07-03
 **Plan:** da-recipe-scripts
 **Graduated from:** `.agents/proposals/da-shebang-scriptability.md`
@@ -67,15 +68,17 @@ mechanical sequences become versionable artifacts executed identically by every 
 - Dogfood: at least one real meta-loop mechanical sequence is expressed as a shipped `.da`
   recipe and exercised.
 
-## 5. Open questions
+## 5. Open questions — resolved
 
-- **OQ1.** v1 variable support — env-substitution only (recommended), or also positional args
-  (`$1`, `$@`)? Recommendation: env-only for v1; add positionals only if the dogfood needs them.
-- **OQ2.** Where do shipped recipes live and what is the convention (`.da` extension; a
-  `recipes/` or `src/share/recipes/` dir; scaffolded into user homes like skills)?
-- **OQ3.** Relationship to the JS `Workflow` orchestration engine: recipes are *`da`-command*
-  sequences (mechanical); workflows are *agent fan-out*. They are distinct — confirm no
-  overlap is intended and document the boundary.
+- **OQ1 (resolved).** Env-substitution only (`$VAR`/`${VAR}`) for v1; no positional args. The p5
+  dogfoods (`checkpoint-advance.da`, `scaffold-plan.da`) both needed only named env vars, so the
+  recommendation stood without amendment.
+- **OQ2 (resolved).** Shipped recipes live under `src/share/recipes/*.da`, executable (chmod
+  0755), one real subcommand invocation per line.
+- **OQ3 (resolved).** Recipes are fixed-shape `da`-command sequences (D2/D3: no loops, no
+  branching on outcomes) — distinct from the JS `Workflow` engine's agent fan-out. A recipe may
+  be called from a skill for its mechanical spine; it never replaces the judgment a skill or the
+  Workflow engine applies. No overlap.
 
 ## 6. Deferred (out of scope for v1)
 
