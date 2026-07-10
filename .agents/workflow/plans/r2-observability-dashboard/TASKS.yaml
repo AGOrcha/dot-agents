@@ -249,7 +249,7 @@ tasks:
       app_type: go-cli
     - id: t07-standalone-service-bin
       title: Standalone dashboard service (cmd/da-dashboard) for dev + pre-R3 use
-      status: pending
+      status: completed
       depends_on:
         - t03-handlers-rest
         - t05-sse-handler
@@ -347,7 +347,7 @@ tasks:
       app_type: web
     - id: t10-feature-per-run-drilldown
       title: Per-run drill-down view (iteration timeline + breakdown + integrity)
-      status: pending
+      status: completed
       depends_on:
         - t08-frontend-skeleton
         - t03-handlers-rest
@@ -381,7 +381,7 @@ tasks:
       app_type: web
     - id: t11-frontend-sse-integration
       title: Connect frontend to /api/v1/observability/events and invalidate queries on events
-      status: pending
+      status: completed
       depends_on:
         - t08-frontend-skeleton
         - t05-sse-handler
