@@ -29,3 +29,13 @@ directly and merged.
   write_scope, a system signal). See active/findings/git-ref-reconciliation-model.md.
 - App-type pipeline (Phase B): swarm was go-cli-hardcoded; make it profile-driven; author web/
   docs-web/meta profiles (+ coming daemon). See swarm-run/design/phase-b-app-types.md.
+
+## Phase B (app-type pipeline) — LANDED
+- Profile-driven pipeline: swarm-run/design/profile-driven.swarm.yaml (validated, 10 waves,
+  fold-back via pipeline target_count).
+- App_type profiles MERGED (#388 -> master a0e675af): web / docs-web / meta / daemon +
+  15 stage_profiles + self-sufficient .project.md overlays. All resolve via da config relevance.
+  web raises the delivery bar (ui-e2e proof: screenshots+video linked in PR). meta = broad
+  self-improvement surface. daemon = stub (HBHF comms + auth-proxy + secure handling + KG).
+- Ready to launch: `TASK=<plan>/<task> omp-swarm profile-driven.swarm.yaml` (owner-held merges;
+  workers produce artifacts, Main reconciles the board; versioned-CAS ref writes).
