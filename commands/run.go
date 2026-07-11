@@ -2,7 +2,10 @@ package commands
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -95,12 +98,315 @@ func runRecipe(path string, dispatch recipeDispatcher) error {
 	if err != nil {
 		return err
 	}
-	for i, line := range effectiveLines(string(data)) {
-		if err := dispatchStep(i+1, line, dispatch); err != nil {
+	nodes, err := parseNodes(effectiveLines(string(data)))
+	if err != nil {
+		return err
+	}
+	step := 0
+	return execNodes(nodes, dispatch, &step)
+}
+
+// maxBlockNesting bounds how deeply `for … in … end` and `if … end` blocks may
+// nest. Mechanical loops let a recipe fan a fixed body over a
+// statically-discovered set (every file in a folder); a shallow, data-driven
+// conditional lets a recipe skip a body when a file/flag is absent. Both stay
+// mechanical — the iteration set and the condition are filesystem/env STATE
+// resolved before dispatch, never a reaction to a command's outcome (that stays
+// skill territory, spec D3). A strict 1–2 level cap keeps a recipe readable and
+// its cost obviously bounded; deeper nesting wants a skill or the Workflow engine.
+const maxBlockNesting = 2
+
+// recipeNode is one parsed unit of a recipe: a single command line (line set),
+// a `for … in … end` loop (loop set), or an `if … end` conditional (cond set).
+type recipeNode struct {
+	line string
+	loop *loopNode
+	cond *condNode
+}
+
+// loopNode is a parsed `for <var> in <pattern>` … `end` block. pattern is kept
+// un-expanded; it is env-expanded and glob-resolved at execution time so the
+// iteration set reflects the filesystem when the recipe runs.
+type loopNode struct {
+	varName string
+	pattern string
+	body    []recipeNode
+	srcLine string // original header line, for error messages
+}
+
+// condNode is a parsed `if [not] <pred> <arg>` … `end` block. The predicate is
+// data-driven and evaluated before dispatch: `exists <glob>` (≥1 path matches)
+// or `set <NAME>` (env var non-empty). `not` negates. There is deliberately no
+// predicate over a command's exit status — outcome branching stays skill
+// territory (spec D3).
+type condNode struct {
+	pred    string // "exists" | "set"
+	arg     string // un-expanded glob (exists) or env var name (set)
+	negate  bool
+	body    []recipeNode
+	srcLine string
+}
+
+// parseNodes turns the flat effective lines into a node tree, recognizing
+// `for … in … / end` loops and `if … / end` conditionals. It enforces the
+// nesting cap and balanced open/`end` pairing; any structural error aborts
+// before dispatch.
+func parseNodes(lines []string) ([]recipeNode, error) {
+	// parseBlock at depth 0 either errors (dangling `end`, unterminated block, or
+	// nesting-cap) or returns with next == len(lines); there is no other nil-error
+	// shape, so the returned index needs no separate check.
+	nodes, _, err := parseBlock(lines, 0, 0, "")
+	return nodes, err
+}
+
+// parseBlock parses lines[start:] at the given nesting depth. opener is the
+// header line of the enclosing block ("" at depth 0), used for a precise
+// unterminated-block error. It returns the nodes, the index just past this
+// block's terminating `end` (or len(lines) at depth 0), and any structural error.
+func parseBlock(lines []string, start, depth int, opener string) ([]recipeNode, int, error) {
+	var nodes []recipeNode
+	i := start
+	for i < len(lines) {
+		line := lines[i]
+		if strings.TrimSpace(line) == "end" {
+			if depth == 0 {
+				return nil, 0, fmt.Errorf("recipe: 'end' without a matching 'for' or 'if'")
+			}
+			return nodes, i + 1, nil
+		}
+		node, next, opened, err := tryOpenBlock(lines, i, depth)
+		if err != nil {
+			return nil, 0, err
+		}
+		if opened {
+			nodes = append(nodes, node)
+			i = next
+			continue
+		}
+		nodes = append(nodes, recipeNode{line: line})
+		i++
+	}
+	if depth > 0 {
+		return nil, 0, fmt.Errorf("recipe %q: unterminated block (missing 'end')", opener)
+	}
+	return nodes, i, nil
+}
+
+// tryOpenBlock recognizes a `for`/`if` header at lines[i]. On a match it parses
+// the block body and returns the assembled node, the index past the block's
+// `end`, opened=true, and any error. A non-header line returns opened=false so
+// the caller dispatches it as a plain command line.
+func tryOpenBlock(lines []string, i, depth int) (recipeNode, int, bool, error) {
+	line := lines[i]
+	if v, pat, ok := parseForHeader(line); ok {
+		body, next, err := openBlockBody(lines, i, depth, line)
+		if err != nil {
+			return recipeNode{}, 0, true, err
+		}
+		return recipeNode{loop: &loopNode{varName: v, pattern: pat, body: body, srcLine: line}}, next, true, nil
+	}
+	if c, ok := parseIfHeader(line); ok {
+		body, next, err := openBlockBody(lines, i, depth, line)
+		if err != nil {
+			return recipeNode{}, 0, true, err
+		}
+		c.body = body
+		return recipeNode{cond: c}, next, true, nil
+	}
+	return recipeNode{}, 0, false, nil
+}
+
+// openBlockBody enforces the nesting cap for the block opened by the header at
+// lines[i] and parses its body (the lines up to the matching `end`).
+func openBlockBody(lines []string, i, depth int, header string) ([]recipeNode, int, error) {
+	if depth+1 > maxBlockNesting {
+		return nil, 0, fmt.Errorf("recipe %q: block nesting exceeds the depth cap of %d", header, maxBlockNesting)
+	}
+	return parseBlock(lines, i+1, depth+1, header)
+}
+
+// parseForHeader recognizes `for <var> in <pattern>`. The pattern is the
+// remainder after " in " (verbatim, un-expanded). ok=false for a malformed
+// line, which then falls through to normal dispatch and fails loudly.
+func parseForHeader(line string) (varName, pattern string, ok bool) {
+	trimmed := strings.TrimSpace(line)
+	fields := strings.Fields(trimmed)
+	if len(fields) < 4 || fields[0] != "for" || fields[2] != "in" {
+		return "", "", false
+	}
+	idx := strings.Index(trimmed, " in ")
+	if idx < 0 {
+		return "", "", false
+	}
+	varName = fields[1]
+	pattern = strings.TrimSpace(trimmed[idx+len(" in "):])
+	if varName == "" || pattern == "" {
+		return "", "", false
+	}
+	return varName, pattern, true
+}
+
+// parseIfHeader recognizes `if [not] exists <glob>` or `if [not] set <NAME>`.
+// Returns ok=false for anything else so a malformed `if` line dispatches (and
+// fails) rather than silently mis-parsing.
+func parseIfHeader(line string) (*condNode, bool) {
+	trimmed := strings.TrimSpace(line)
+	fields := strings.Fields(trimmed)
+	if len(fields) < 3 || fields[0] != "if" {
+		return nil, false
+	}
+	c := &condNode{srcLine: line}
+	rest := fields[1:]
+	if rest[0] == "not" {
+		c.negate = true
+		rest = rest[1:]
+	}
+	if len(rest) < 2 || (rest[0] != "exists" && rest[0] != "set") {
+		return nil, false
+	}
+	c.pred = rest[0]
+	idx := strings.Index(trimmed, " "+c.pred+" ")
+	if idx < 0 {
+		return nil, false
+	}
+	c.arg = strings.TrimSpace(trimmed[idx+len(c.pred)+2:])
+	if c.arg == "" {
+		return nil, false
+	}
+	return c, true
+}
+
+// execNodes dispatches a node tree in order, threading a monotonic step counter
+// so error messages (and flat-recipe step numbering) stay stable: every
+// dispatched command increments step, including each loop-body iteration.
+func execNodes(nodes []recipeNode, dispatch recipeDispatcher, step *int) error {
+	for _, n := range nodes {
+		switch {
+		case n.loop != nil:
+			if err := execLoop(n.loop, dispatch, step); err != nil {
+				return err
+			}
+		case n.cond != nil:
+			if err := execCond(n.cond, dispatch, step); err != nil {
+				return err
+			}
+		default:
+			*step++
+			if err := dispatchStep(*step, n.line, dispatch); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// execLoop resolves the loop's pattern (env-expand, then glob) into a sorted,
+// static iteration set and runs the body once per match with the loop variable
+// bound in the environment. An empty match set runs the body zero times — a
+// folder with no matching files is a clean no-op, not an error. The prior value
+// of the loop variable is restored afterward. Determinism (sorted matches, no
+// branching on command outcomes) keeps the loop mechanical per spec D3.
+func execLoop(l *loopNode, dispatch recipeDispatcher, step *int) error {
+	matches, err := expandGlob(expandEnv(l.pattern))
+	if err != nil {
+		return fmt.Errorf("recipe %q: invalid loop pattern: %w", l.srcLine, err)
+	}
+	sort.Strings(matches)
+	prev, had := os.LookupEnv(l.varName)
+	defer func() {
+		if had {
+			_ = os.Setenv(l.varName, prev)
+		} else {
+			_ = os.Unsetenv(l.varName)
+		}
+	}()
+	for _, m := range matches {
+		if err := os.Setenv(l.varName, m); err != nil {
+			return fmt.Errorf("recipe %q: binding loop variable %s: %w", l.srcLine, l.varName, err)
+		}
+		if err := execNodes(l.body, dispatch, step); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// execCond evaluates the conditional's data-driven predicate and runs the body
+// only when it holds. The predicate reads filesystem/env STATE (never a command
+// outcome), so a recipe stays mechanical (spec D3).
+func execCond(c *condNode, dispatch recipeDispatcher, step *int) error {
+	ok, err := evalCond(c)
+	if err != nil {
+		return fmt.Errorf("recipe %q: %w", c.srcLine, err)
+	}
+	if c.negate {
+		ok = !ok
+	}
+	if !ok {
+		return nil
+	}
+	return execNodes(c.body, dispatch, step)
+}
+
+// evalCond resolves a data predicate: `exists <glob>` is true iff the env-expanded
+// pattern matches ≥1 path; `set <NAME…>` is true iff EVERY named env var (one or
+// more, space-separated) is non-empty.
+func evalCond(c *condNode) (bool, error) {
+	if c.pred == "exists" {
+		matches, err := expandGlob(expandEnv(c.arg))
+		if err != nil {
+			return false, fmt.Errorf("invalid 'exists' pattern: %w", err)
+		}
+		return len(matches) > 0, nil
+	}
+	// pred == "set" (parseIfHeader admits only exists|set): true iff EVERY named
+	// env var is non-empty (whitespace-only counts as unset; ≥1 name guaranteed).
+	for _, name := range strings.Fields(c.arg) {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// expandGlob resolves a loop/predicate pattern to matching paths. It extends
+// filepath.Glob with a single `**` segment meaning "this directory and any
+// descendant": `base/**/<filepat>` matches <filepat> against the basename of
+// every file under base at any depth (base's own children included). Patterns
+// without `**` use filepath.Glob unchanged. Filesystem errors during the walk are
+// skipped (mirroring Glob's ignore-errors contract) and a missing base yields an
+// empty set; the caller sorts results for determinism. Only the first `**` is
+// honored and the tail is a filename pattern (no embedded '/').
+func expandGlob(pattern string) ([]string, error) {
+	if !strings.Contains(pattern, "**") {
+		return filepath.Glob(pattern)
+	}
+	i := strings.Index(pattern, "**")
+	base := strings.TrimRight(pattern[:i], "/")
+	if base == "" {
+		base = "."
+	}
+	tail := strings.TrimLeft(pattern[i+2:], "/")
+	if tail == "" {
+		tail = "*"
+	}
+	if _, err := filepath.Match(tail, ""); err != nil {
+		return nil, err // ErrBadPattern — mirror filepath.Glob's bad-pattern contract
+	}
+	var out []string
+	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil // skip unreadable subtrees, like Glob ignores fs errors
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if ok, _ := filepath.Match(tail, filepath.Base(p)); ok {
+			out = append(out, p)
+		}
+		return nil
+	})
+	return out, nil
 }
 
 // expandEnv applies $VAR and ${VAR} substitution to a recipe line using

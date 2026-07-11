@@ -92,3 +92,57 @@ mechanical sequences become versionable artifacts executed identically by every 
 Graduates the `da-shebang-scriptability` proposal. Distinct from **skills** (judgment
 sequences) and the **Workflow** engine (agent fan-out); sits as the mechanical-recipe layer
 below skills. Done criteria trace to this spec; the plan resolves OQ1–OQ3 in its task notes.
+
+## 8. Amendment (2026-07-11): mechanical loops + shallow data-driven conditionals
+
+D3/OQ3/§6 originally barred **all** loops and branching ("Loops over
+dynamically-discovered sets → skill"). Practice showed the flat-only form can't
+express a common *mechanical* need — "ingest every file in a folder" — without
+pushing an otherwise-deterministic sequence into a skill. This amendment relaxes
+the boundary to admit **mechanical** control flow while keeping the D3 principle
+that matters intact.
+
+- **D7 — Mechanical `for … in <glob> … end` loop.** A recipe may iterate a fixed
+  body over a **statically-discovered** set: the loop header `for <VAR> in
+  <PATTERN>` env-expands `<PATTERN>` and resolves it with `filepath.Glob` **once**
+  at loop entry, binds `<VAR>` per match (sorted for cross-OS determinism, R4),
+  and runs the body per match. An empty match set runs the body zero times (a
+  folder with no matching files is a clean no-op, not an error). The iteration set
+  is filesystem STATE captured up front — it cannot grow based on what the body
+  does, so the loop is bounded and deterministic.
+- **D8 — Shallow data-driven `if [not] <pred> <arg> … end` conditional.** A recipe
+  may guard a body on a **data/state** predicate evaluated before dispatch:
+  `exists <glob>` (≥1 path matches) or `set <NAME…>` (one or more space-separated
+  names, all non-empty); `not`
+  negates. This is not a general expression language and, critically, there is **no
+  predicate over a command's exit status**.
+- **D9 — The preserved D3 line: no branching on OUTCOMES.** The thing D3 forbids —
+  and still forbids — is reacting to a *step's result* (retry, if-failed-then,
+  continue-on-error). That is genuine judgment and stays **skill / Workflow-engine**
+  territory; recipes remain fail-fast (D4). D7/D8 branch only on *inputs* (the
+  filesystem/env before the step runs), never on *results*.
+- **D10 — Strict depth cap.** `for` and `if` blocks share a **maximum nesting depth
+  of 2** (`maxBlockNesting`, `commands/run.go`). Deeper nesting is rejected at parse
+  time (before any dispatch) with a `depth cap` error. Rationale: a 1–2 level cap
+  keeps a recipe readable and its cost obviously bounded; anything deeper is a
+  signal the work wants a skill, not a recipe.
+
+**Grammar (line-oriented, extends D2):** `for <VAR> in <PATTERN>` / `if [not]
+exists <PATTERN>` / `if [not] set <NAME…>` (all names non-empty) open a block; a lone `end` closes the
+nearest open block. Balanced open/`end` pairing and the depth cap are validated
+before dispatch; a structural error aborts with no side effects. Malformed headers
+(e.g. `for` with no `in`) are not recognized as blocks — they fall through to
+normal dispatch and fail loudly there. Everything else (shebang, `#` comments,
+blank lines, env-substitution, quote-blind tokenization, fail-fast, in-process
+no-shell dispatch) is unchanged from D1–D6.
+
+**§6 deferrals updated:** "loops over dynamically-discovered sets" and
+"conditionals" are **no longer deferred** for the *mechanical* case above.
+Outcome-branching, `on_error` policies, parallel steps, and general expressions
+remain deferred / skill territory. OQ3's "no loops, no branching on outcomes" now
+reads: *no branching on outcomes* (mechanical loops + input-predicated conditionals
+are in).
+
+**Tests:** `commands/run_test.go` — loop iteration order/empty-set/var-restore/
+fail-fast, `if exists`/`set`/`not` gating, nesting-cap + unterminated + dangling-`end`
+parse errors. **Dogfood:** `.agents/recipes/kg-ingest.da` (folder ingestion).
