@@ -333,3 +333,25 @@ func TestEnsureManagedGitignore_WriteErrorIsPropagated(t *testing.T) {
 		t.Error("expected a write error in a read-only repo root, got nil")
 	}
 }
+
+// TestEnsureManagedGitignore_UnchangedRerunSkipsWrite proves the content guard:
+// a second identical call is a true no-op. The dir is made read-only before the
+// re-run, so ANY write attempt (temp+rename) would fail — the call returning nil
+// proves the guard skipped the write when the rendered block was unchanged.
+func TestEnsureManagedGitignore_UnchangedRerunSkipsWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits do not gate writes the same way on windows")
+	}
+	root := t.TempDir()
+	inputs := []string{".claude/", ".cursor/"}
+	if err := links.EnsureManagedGitignore(root, inputs); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(root, 0o755)
+	if err := links.EnsureManagedGitignore(root, inputs); err != nil {
+		t.Errorf("identical re-run must be a no-op (unchanged-content guard), got %v", err)
+	}
+}

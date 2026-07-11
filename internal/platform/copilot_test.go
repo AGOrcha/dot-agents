@@ -821,3 +821,28 @@ func TestCopilotManagedOutputs_CoversSharedTargets(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectManagedOutputs_ReporterAndStaticBranches covers both arms of
+// CollectManagedOutputs: a ManagedOutputReporter platform (copilot, dynamic) and
+// a static-table platform (cursor). Pins the D14 collector's coverage.
+func TestCollectManagedOutputs_ReporterAndStaticBranches(t *testing.T) {
+	got := CollectManagedOutputs([]Platform{NewCopilot(), NewCursor()})
+	has := func(want string) bool {
+		for _, g := range got {
+			if g == want {
+				return true
+			}
+		}
+		return false
+	}
+	// copilot (ManagedOutputReporter) dynamic outputs:
+	for _, w := range []string{".agents/skills/", ".github/hooks/*.json"} {
+		if !has(w) {
+			t.Errorf("CollectManagedOutputs missing copilot reporter output %q; got %v", w, got)
+		}
+	}
+	// cursor (static table) output:
+	if !has(cursorDir + "/") {
+		t.Errorf("CollectManagedOutputs missing cursor static output %q; got %v", cursorDir+"/", got)
+	}
+}

@@ -113,6 +113,13 @@ func EnsureManagedGitignore(repoRoot string, ignorePaths []string) error {
 	}
 	outside := stripManagedGitignoreBlock(existing)
 	next := joinManagedGitignore(outside, renderManagedGitignoreBlock(ignorePaths))
+	// Skip the write when the rendered result is byte-identical to what is
+	// already on disk: a `da refresh` where the managed section did not change
+	// must be a true no-op (no mtime churn, no spurious VCS diff), not just a
+	// convergent rewrite.
+	if next == existing {
+		return nil
+	}
 	if err := fsops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("links: gitignore auto-fill: mkdir %s: %w", filepath.Dir(path), err)
 	}

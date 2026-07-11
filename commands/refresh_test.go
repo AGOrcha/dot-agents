@@ -1497,3 +1497,33 @@ func TestCollectManagedOutputs_CopilotDynamicAndStaticPlatforms(t *testing.T) {
 		}
 	}
 }
+
+// TestEnsureManagedGitignoreForRefresh_DryRunAndError covers the D14 refresh
+// wiring's two uncovered branches: dry-run (preview, no write, no failure) and
+// the error path (EnsureManagedGitignore fails -> returns true so the caller
+// withholds the success stamp).
+func TestEnsureManagedGitignoreForRefresh_DryRunAndError(t *testing.T) {
+	prev := Flags.DryRun
+	defer func() { Flags.DryRun = prev }()
+
+	// Dry-run: previews without touching the file and reports no failure.
+	Flags.DryRun = true
+	dir := t.TempDir()
+	if ensureManagedGitignoreForRefresh(dir, nil) {
+		t.Error("dry-run must not report a write failure")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create .gitignore, stat err=%v", err)
+	}
+
+	// Error path: a directory where .gitignore must be makes the read fail, so
+	// the helper reports failure.
+	Flags.DryRun = false
+	errDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(errDir, ".gitignore"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !ensureManagedGitignoreForRefresh(errDir, nil) {
+		t.Error("expected failure when .gitignore cannot be read (it is a directory)")
+	}
+}
