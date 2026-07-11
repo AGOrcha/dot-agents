@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 68
+date: "2026-07-07"
+wave: agent-ops-hardening
+task_id: p5-routing-doc-cross-harness-evidence
+commit: 295b0f719194eb42217354fbc979157083603eb6
+files_changed: 1
+lines_added: 52
+lines_removed: 31
+checkpoint_at: "2026-07-07T12:53:00Z"
+impl:
+    item: ""
+    summary: ""
+    scope_note: ""
+    feedback_goal: Update AGENT_TOOL_ROUTING.md with cross-harness evidence, blocking-gate policy, rescue patterns, and per-file/cross-OS gate friction.
+    retries: 0
+    focused_tests_added: 0
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p5-routing-doc-cross-harness-evidence/review-decision.yaml
+    verify_record_appended: false

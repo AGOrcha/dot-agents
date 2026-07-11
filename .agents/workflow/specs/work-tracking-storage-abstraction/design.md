@@ -278,3 +278,78 @@ agent's side of the projection.
   node type that result nodes correlate against (§3A); cleaner primitives ⇒ a cleaner feedback graph.
 - **Motivating failure** — the wave-engine re-dispatch storm (5×p1c) is the canonical regression test
   for done-criterion #2.
+
+## 9. Amendment (2026-07-11): the `git-ref` backend + read-from-master shim
+
+**Provenance.** kg-ideate run on proposal `.agents/proposals/read-task-state-from-master-source.md`
+(owner ask: "read task state from a master source"). Phase-1 briefing: KG has no SDD
+decision nodes for this topic yet (code-graph only), so this grounds in §1–§8 above +
+lessons `worktree-isolation-defeats-status-tracking`, `stale-local-master-ref`,
+`stale-local-checkout-mass-drift`, `single-source-of-truth-across-specs-and-plans`.
+This section **adds** a backend; it does not revise D1–D8.
+
+The §2 backend ladder jumps from `local` (per-worktree files, **no** shared SOT) straight
+to `kg` (needs the `da service` daemon + graph store). That gap is the common case: a team
+wants cross-worktree **atomic status** (the D2/D5 re-dispatch fix) without standing up the
+KG/DO daemon. A **git-native shared SOT** fills it.
+
+- **D9 — `git-ref` WorkStore backend (git-native shared SOT).** Coordination state lives on
+  a dedicated ref — `refs/agents/state` (configurable) — **orthogonal to the code branch**:
+  worktrees on `feature/x`, `feature/y`, or detached HEAD all resolve status against the one
+  ref. **Read:** via git (`git cat-file`/`show <ref>:<path>`), or a single shared linked
+  worktree of the ref that all agents read — this is D2 ("status reads resolve against the
+  backend, not the per-worktree YAML") in pure git. **Write:** a transition commits the
+  changed state file(s) to the ref via atomic compare-and-swap (`git update-ref <ref> <new>
+  <old>`, retry-on-mismatch) — the interprocess-safe RMW that today's `agentslock` only
+  half-covers (only `plan_task.go` locks; `delegation.go`/`contract.go`/`eligible_accounting.go`
+  don't), now serialized at the ref. **Conflict granularity:** split status into **per-task
+  state files** under the ref so two workers transitioning *different* tasks never hit a
+  line-level `TASKS.yaml` conflict (this also realizes D5's per-task lease/claim); the
+  ref-level CAS-retry loop is the fallback. Rides the same `WorkStore` interface (D3) and the
+  same D8 scope ladder — the backend value becomes
+  `work_tracking.backend = local | git-ref | kg | cloudflare-do | jira | linear`. **This is
+  the sane default upgrade from `local`:** no daemon, no external service, works offline (local
+  ref is the degenerate SOT), and a team graduates `local → git-ref → kg` without changing the
+  agent-facing file interface.
+
+- **D10 — the state ref is NOT merged into the default (code) branch (answers the sync question).**
+  It is a **parallel lineage** (like `refs/notes/*`), never an ancestor/descendant of `main`.
+  Merging it into `main` would re-entangle the two planes D1 separates — pollute code history
+  with status churn and force merges between two unrelated trees. What *does* sync:
+  - **ref ↔ remote:** push/fetch `refs/agents/state` to/from `origin` so every clone/host shares
+    one authority (`git push origin refs/agents/state`, a configured refspec). This is
+    "replicate the ref," not "merge the ref into a branch."
+  - **cross-worktree on one host:** nothing to sync — linked worktrees share the same object
+    store + refs, so all worktrees see the ref natively (one ref, many worktrees).
+  - **optional one-way audit snapshot:** if a human-readable copy in the code tree is wanted
+    (D1′: "committed YAML is a periodic snapshot for audit, never the authority"), project the
+    ref → a periodic snapshot commit/export on `main` — **one-way, never a merge back**; the ref
+    stays the authority. This resolves §6's "Git vs backend double-tracking" for `git-ref`.
+
+- **§3B compliance.** The git-ref backend still **projects into a readable file path** (a shared
+  linked worktree of the state ref, or a read-through checkout into `.agents/workflow/`), so an
+  agent keeps reading/editing a plain file with zero new semantics. The ref, the CAS write, and
+  the remote sync are **system-side** (D4-style reconciliation, but git instead of a daemon) —
+  the projection remains the agent's interface, honoring §3B's net rule.
+
+- **Near-term read-from-master shim (ship first).** Before the full `WorkStore`/git-ref backend
+  lands, add `work_tracking.read_from = worktree|master`: when `master`, `loadCanonicalTasks`
+  (`commands/workflow/plan_task.go`) and the scout's eligibility/next read resolve `TASKS.yaml`
+  from the canonical ref / `origin/<default-branch>` instead of the per-worktree working copy;
+  writes land as today. Read-side-only, but it kills the re-dispatch storm (done-criterion #2's
+  motivating 5×p1c failure) at the cost of one `git show`-backed read path — worth doing
+  regardless of the full backend.
+
+- **Resolves/re-scopes the commit-scope thread.** With coordination state on its own ref, task
+  state is no longer committed into **code** branches at all — the whole-store-vs-task-scoped
+  commit problem (`obs-da-workflow-commit-scope-safety.md`; payout `worker-bundle-authoring`
+  tasks `commit-1-task-pathset`/`commit-2-cli-scoped-mode`) largely evaporates. Those tasks
+  should be re-scoped as "write coordination state to the state ref," not "scope the code-branch
+  commit." Recorded so the two planes get separate lineages.
+
+**Added open question (§6):** CAS contention granularity under high fan-out — per-task state
+files (preferred) vs ref-level CAS-retry — and whether the shared linked-worktree projection or
+a read-through checkout is the cleaner §3B-compliant read path. Not blocking the read-from-master
+shim.
+
+**Execution:** plan `git-ref-work-backend` (dot-agents) carries the tasks; see its `.plan.md`.

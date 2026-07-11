@@ -19,10 +19,9 @@
 #                     `if set KG_LINK_MANIFEST` + `if exists` (da-recipe-scripts §8),
 #                     so an unset or missing manifest is a clean no-op (never a bad run).
 #
-# To preview without writing, invoke the command directly with --dry-run —
-# `da run`'s steps do NOT inherit its global -n (clean per-step flag state), so a
-# `da run … --dry-run` would still apply. Preview via the command itself:
-#   da kg link import <manifest> --dry-run
+# Dry-run the whole recipe to preview without writing — `da run --dry-run`
+# propagates -n to every step (incl. `kg link import`), so:
+#   KG_LINK_MANIFEST=links.tsv da run .agents/recipes/kg-link-bulk.da --dry-run
 #
 # Requires `da run` (0.5.0+). Directly executable when chmod +x.
 if set KG_LINK_MANIFEST

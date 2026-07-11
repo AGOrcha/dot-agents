@@ -1,0 +1,8 @@
+schema_version: 1
+id: da-workflow-commit-scope-safety
+plan_id: swallowed-errors-loud-atomic
+task_id: ""
+observation: 'da workflow commit (via start-task/close-task) stages the ENTIRE managed workflow store, sweeping unrelated dirty state from other plans/agents into one commit (observed 45 paths, only 3 mine). Scope the commit to the active task''s write_scope + its own plan/evidence artifacts (level 1, doable now); ideal is patch/hunk-level via per-task change lineage (not-ready graph feature). Interim: --no-commit + scoped manual commit.'
+classification: proposal
+routed_to: proposal:obs-da-workflow-commit-scope-safety.md
+created_at: "2026-07-09T03:00:53Z"
