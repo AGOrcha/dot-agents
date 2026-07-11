@@ -152,14 +152,11 @@ type condNode struct {
 // nesting cap and balanced open/`end` pairing; any structural error aborts
 // before dispatch.
 func parseNodes(lines []string) ([]recipeNode, error) {
-	nodes, next, err := parseBlock(lines, 0, 0, "")
-	if err != nil {
-		return nil, err
-	}
-	if next != len(lines) {
-		return nil, fmt.Errorf("recipe: 'end' without a matching 'for' or 'if'")
-	}
-	return nodes, nil
+	// parseBlock at depth 0 either errors (dangling `end`, unterminated block, or
+	// nesting-cap) or returns with next == len(lines); there is no other nil-error
+	// shape, so the returned index needs no separate check.
+	nodes, _, err := parseBlock(lines, 0, 0, "")
+	return nodes, err
 }
 
 // parseBlock parses lines[start:] at the given nesting depth. opener is the
@@ -355,25 +352,21 @@ func execCond(c *condNode, dispatch recipeDispatcher, step *int) error {
 // pattern matches ≥1 path; `set <NAME…>` is true iff EVERY named env var (one or
 // more, space-separated) is non-empty.
 func evalCond(c *condNode) (bool, error) {
-	switch c.pred {
-	case "exists":
+	if c.pred == "exists" {
 		matches, err := expandGlob(expandEnv(c.arg))
 		if err != nil {
 			return false, fmt.Errorf("invalid 'exists' pattern: %w", err)
 		}
 		return len(matches) > 0, nil
-	case "set":
-		// true iff EVERY named env var is non-empty (whitespace-only counts as unset);
-		// parseIfHeader guarantees ≥1 name. A single name preserves the original behavior.
-		for _, name := range strings.Fields(c.arg) {
-			if strings.TrimSpace(os.Getenv(name)) == "" {
-				return false, nil
-			}
-		}
-		return true, nil
-	default:
-		return false, fmt.Errorf("unknown predicate %q", c.pred)
 	}
+	// pred == "set" (parseIfHeader admits only exists|set): true iff EVERY named
+	// env var is non-empty (whitespace-only counts as unset; ≥1 name guaranteed).
+	for _, name := range strings.Fields(c.arg) {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // expandGlob resolves a loop/predicate pattern to matching paths. It extends

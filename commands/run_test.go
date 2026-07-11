@@ -982,3 +982,91 @@ func TestExpandGlob_MissingBaseIsEmpty(t *testing.T) {
 		t.Fatalf("expected empty set, got %v", got)
 	}
 }
+
+// ----- error-path / edge coverage -----
+
+func TestRunRecipe_ParseErrorSurfacesThroughRunRecipe(t *testing.T) {
+	f := writeTempRecipe(t, "for F in x\nkg warm\n") // no matching `end`
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err == nil || !strings.Contains(err.Error(), "unterminated") {
+		t.Fatalf("expected unterminated-block error from runRecipe, got: %v", err)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("no step should dispatch when parsing fails: %v", rec.calls)
+	}
+}
+
+func TestParseForHeader_RejectsMalformed(t *testing.T) {
+	for _, line := range []string{"for x", "for x y z", "notfor a in b"} {
+		if _, _, ok := parseForHeader(line); ok {
+			t.Errorf("expected %q rejected as a for-header", line)
+		}
+	}
+	if v, p, ok := parseForHeader("for F in dir/*.md"); !ok || v != "F" || p != "dir/*.md" {
+		t.Errorf("valid header mis-parsed: v=%q p=%q ok=%v", v, p, ok)
+	}
+}
+
+func TestParseIfHeader_RejectsMalformed(t *testing.T) {
+	for _, line := range []string{"if", "if set", "if bogus X", "notif set X", "if not"} {
+		if _, ok := parseIfHeader(line); ok {
+			t.Errorf("expected %q rejected as an if-header", line)
+		}
+	}
+	if c, ok := parseIfHeader("if not exists dir/*.md"); !ok || !c.negate || c.pred != "exists" {
+		t.Errorf("valid negated header mis-parsed: %+v ok=%v", c, ok)
+	}
+}
+
+func TestRunRecipe_ForBadGlobPatternErrors(t *testing.T) {
+	f := writeTempRecipe(t, "for F in [\nkg warm\nend\n")
+	if err := runRecipe(f, (&recordingDispatcher{failAt: -1}).dispatch); err == nil {
+		t.Fatal("expected error from a malformed loop glob")
+	}
+}
+
+func TestRunRecipe_IfBadGlobPatternErrors(t *testing.T) {
+	f := writeTempRecipe(t, "if exists [\nkg warm\nend\n")
+	if err := runRecipe(f, (&recordingDispatcher{failAt: -1}).dispatch); err == nil {
+		t.Fatal("expected error from a malformed exists glob")
+	}
+}
+
+func TestRunRecipe_LoopVarWithEqualsErrors(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "a.md")
+	t.Setenv("DIR", dir)
+	// `a=b` is an invalid env var name → os.Setenv fails → execLoop errors.
+	f := writeTempRecipe(t, "for a=b in ${DIR}/*.md\nkg warm\nend\n")
+	if err := runRecipe(f, (&recordingDispatcher{failAt: -1}).dispatch); err == nil {
+		t.Fatal("expected error binding an invalid loop-var name")
+	}
+}
+
+func TestExpandGlob_BadPatternAndDefaults(t *testing.T) {
+	if _, err := expandGlob("dir/**/["); err == nil {
+		t.Fatal("expected ErrBadPattern for a malformed ** tail")
+	}
+	if _, err := expandGlob("["); err == nil {
+		t.Fatal("expected ErrBadPattern for a malformed plain glob")
+	}
+	// trailing `**` → tail defaults to "*" and matches every file under base.
+	dir := t.TempDir()
+	touchFiles(t, dir, "x.md", "y.txt")
+	got, err := expandGlob(filepath.Join(dir, "**"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("dir/** (tail defaults to *) should match both files, got %v", got)
+	}
+}
+
+func TestParseNodes_NestedIfDepthCapErrors(t *testing.T) {
+	// for → if → if is depth 3 (>cap 2); exercises the if-header path in
+	// tryOpenBlock and openBlockBody's cap error.
+	lines := []string{"for F in x", "if set A", "if set B", "kg warm", "end", "end", "end"}
+	if _, err := parseNodes(lines); err == nil || !strings.Contains(err.Error(), "depth cap") {
+		t.Fatalf("expected depth-cap error via nested if, got: %v", err)
+	}
+}
