@@ -965,26 +965,13 @@ func runKGLinkImport(deps Deps, _ *cobra.Command, args []string) error {
 	}
 	rows, failures := parseLinkManifest(string(data))
 
-	applied := 0
+	applied := len(rows)
 	if deps.Flags.DryRun {
-		for _, r := range rows {
-			ui.Bullet("info", fmt.Sprintf("would link: %s -[%s]-> %s", r.noteID, r.kind, r.symbol))
-		}
-		applied = len(rows)
+		previewLinkRows(rows)
 	} else {
-		store, oerr := openKGStore(kgHome())
-		if oerr != nil {
-			return fmt.Errorf(warmStoreOpenErrFmt, oerr)
-		}
-		defer store.Close()
-		for _, r := range rows {
-			if _, uerr := store.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{
-				NoteID: r.noteID, QualifiedName: r.symbol, LinkKind: r.kind,
-			}); uerr != nil {
-				failures = append(failures, fmt.Sprintf("%s -[%s]-> %s: %v", r.noteID, r.kind, r.symbol, uerr))
-				continue
-			}
-			applied++
+		var aerr error
+		if applied, failures, aerr = applyLinkRows(rows, failures); aerr != nil {
+			return aerr
 		}
 	}
 
@@ -1000,6 +987,35 @@ func runKGLinkImport(deps Deps, _ *cobra.Command, args []string) error {
 		return fmt.Errorf("kg link import: %d row(s) failed", len(failures))
 	}
 	return nil
+}
+
+// previewLinkRows prints the dry-run preview line for each parsed manifest row.
+func previewLinkRows(rows []linkManifestRow) {
+	for _, r := range rows {
+		ui.Bullet("info", fmt.Sprintf("would link: %s -[%s]-> %s", r.noteID, r.kind, r.symbol))
+	}
+}
+
+// applyLinkRows idempotently upserts each parsed row, returning the applied
+// count and the failure list (extended from the parse failures with any per-row
+// upsert error). A store-open failure aborts before any write.
+func applyLinkRows(rows []linkManifestRow, failures []string) (int, []string, error) {
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return 0, failures, fmt.Errorf(warmStoreOpenErrFmt, err)
+	}
+	defer store.Close()
+	applied := 0
+	for _, r := range rows {
+		if _, uerr := store.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{
+			NoteID: r.noteID, QualifiedName: r.symbol, LinkKind: r.kind,
+		}); uerr != nil {
+			failures = append(failures, fmt.Sprintf("%s -[%s]-> %s: %v", r.noteID, r.kind, r.symbol, uerr))
+			continue
+		}
+		applied++
+	}
+	return applied, failures, nil
 }
 
 // runKGLinkList shows all symbol links for a note.
