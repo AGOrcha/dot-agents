@@ -1,0 +1,72 @@
+# PROFILE-DRIVEN inner-loop pipeline (Phase B, item 1) — DRAFT, ready to run.
+# Replaces the go-cli-hardcoded D14 YAML. One YAML handles every app_type:
+# a profile-resolve stage reads the task's app_type and emits the stage plan;
+# fixed max slots (3 verifiers, 4 reviewers) each run their assigned slug or no-op.
+# Fold-back -> executor via pipeline mode (bounded target_count iterations):
+# iteration k reads k-1's gate verdict; on FOLD-BACK the executor re-enters with
+# the reject feedback; on READY, later iterations no-op. Honors layered-pr-fanout
+# §3.1 (verifier-green=eligibility, lens=merge-gate, reject=in_progress bounce).
+#
+# INPUT: TASK=<plan-id>/<task-id> exported before launch (profile-resolve reads it).
+# Coordination on refs/agents/state worktree (.agents/worktrees/_state); code in
+# .agents/worktrees/<slice> off origin/master; owner-held merge; no board mutation
+# by workers (Main reconciles). All per CONVENTIONS.md + phase-b-app-types.md.
+swarm:
+  name: da-inner-loop
+  workspace: /Users/nikashp/proj-docs/dot-agents
+  mode: pipeline
+  target_count: 3          # bounded fold-back iterations (fix-loop cap)
+  model: claude-opus-4-8
+  agents:
+
+    profile_resolve:
+      role: workflow profile resolver (app_type -> stage plan)
+      task: |
+        Read swarm-run/design/CONVENTIONS.md + phase-b-app-types.md. If a terminal
+        READY.md already exists in COORD (a prior iteration finished), write
+        COORD/profile.json unchanged and exit (later iterations are no-ops).
+        Else: resolve the task named by $TASK (or COORD/task.txt): app_type via
+        `da config relevance --filter topology --task <plan>/<task> --json` +
+        `--filter lenses`. Verify depends_on complete in TASKS.yaml (RULE 10: da
+        eligible is advisory). Read the prior iteration's COORD/GATE.md if present
+        (FOLD-BACK -> carry the reject feedback forward for the executor). Write
+        COORD/profile.json {app_type, verifier_sequence[], lens_set[],
+        lens_concurrency, fold_back_feedback?}. If unresolvable/blocked -> BLOCKED.
+
+    executor:
+      role: implementer for the resolved task's app_type
+      waits_for: [profile_resolve]
+      task: |
+        Read CONVENTIONS.md + COORD/profile.json. If BLOCKED or a READY.md exists,
+        write COORD/impl.md SKIP + exit. Create/reuse the slice worktree off
+        origin/master (git -C). Implement the task's write_scope; if
+        profile.fold_back_feedback is present, ADDRESS each reject point first.
+        Build da from source; focused tests (drive the production path, RULE 7);
+        commit (NO AI trailer). Emit COORD/impl.md (DONE|SKIP|FAIL + files/sha/feedback-addressed).
+
+    verify_1: { role: verifier slot 1, waits_for: [executor],  task: "Read CONVENTIONS.md + profile.json. Run verifier_sequence[0] (resolve-prompt --kind verifier --slug <it>) if it exists, else SKIP. Emit COORD/verify-1.md PASS|FAIL|SKIP + which slug + evidence. Gate on impl==DONE." }
+    verify_2: { role: verifier slot 2, waits_for: [verify_1],  task: "Read CONVENTIONS.md + profile.json. Run verifier_sequence[1] if present (gated on verify-1==PASS), else SKIP. Emit COORD/verify-2.md." }
+    verify_3: { role: verifier slot 3, waits_for: [verify_2],  task: "Read CONVENTIONS.md + profile.json. Run verifier_sequence[2] if present (gated on verify-2), else SKIP. Emit COORD/verify-3.md." }
+
+    review_1: { role: review lens slot 1, waits_for: [verify_3], task: "Read CONVENTIONS.md + profile.json. If any verifier FAILed -> SKIP. Run lens_set[0] (resolve-prompt --kind reviewer --slug <it>), read-only, mutation-verify + anti-patterns (RULE 7). Emit COORD/review-1.md APPROVE|REJECT|SKIP + the lens slug." }
+    review_2: { role: review lens slot 2, waits_for: [review_1], task: "Read CONVENTIONS.md + profile.json. Run lens_set[1] if present; if lens_concurrency=gated and review-1 REJECT -> SKIP. Emit COORD/review-2.md." }
+    review_3: { role: review lens slot 3, waits_for: [review_2], task: "Read CONVENTIONS.md + profile.json. Run lens_set[2] if present (gated on review-2). Emit COORD/review-3.md." }
+    review_4:
+      role: review lens slot 4 (cross-harness — different model when in lens_set)
+      waits_for: [review_3]
+      model: gpt-5.4
+      task: "Read CONVENTIONS.md + profile.json. Run lens_set[3] if present (typically cross-harness-adversarial; gated on review-3). DIFFERENT model on purpose (RULE 7). Emit COORD/review-4.md APPROVE|REJECT|SKIP."
+
+    gate:
+      role: ready gate + fold-back recorder + ref committer
+      waits_for: [review_4]
+      task: |
+        Read CONVENTIONS.md + all COORD verify-*/review-* signals + profile.json.
+        If impl==DONE ∧ all present verifiers PASS ∧ all present lenses APPROVE:
+        push + open PR (NO AI trailer), poll CI to the resolved app_type's gate
+        (default: pr.open ∧ ci green ∧ sonar ∧ new_violations=0), author merge-back
+        (RULE 11 frontmatter), write COORD/READY.md (terminal). Else write
+        COORD/GATE.md FOLD-BACK + per-blocker reasons (executor reads it next
+        iteration). NEVER merge (owner-held). NEVER mutate the board (Main
+        reconciles). Collate findings; commit .agents/worktrees/_state ->
+        refs/agents/state via CAS (`git update-ref refs/agents/state <new> <old>`).
