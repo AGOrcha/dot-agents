@@ -133,6 +133,12 @@ that matters intact.
   to each dispatched step (`withDryRun`, `commands/run.go`), so the whole recipe
   previews; steps that ignore `-n` are unaffected (every command accepts the
   global flag), and a nested `da run` step inherits it transitively.
+- **D12 — Cross-platform execution (Windows).** `da run <file>` behaves identically
+  on Windows, macOS, and Linux — recipes dispatch in-process with no shell (D5/R4),
+  and the shebang acceptance test runs on windows-latest via `da run <file>`. Direct
+  execution via the `#!/usr/bin/env -S da run` shebang + `chmod +x` (`./recipe.da`,
+  R5) is **POSIX-only** — Windows has no shebang mechanism, so on Windows a recipe
+  is invoked as `da run <file>`. The recipe *content* is portable either way.
 
 **Grammar (line-oriented, extends D2):** `for <VAR> in <PATTERN>` / `if [not]
 exists <PATTERN>` / `if [not] set <NAME…>` (all names non-empty) open a block; a lone `end` closes the

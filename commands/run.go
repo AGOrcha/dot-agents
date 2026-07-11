@@ -51,10 +51,13 @@ func newRunCmd(dispatch recipeDispatcher) *cobra.Command {
 
 Each non-blank, non-comment line is tokenized (with shell-like single/double
 quote handling) and dispatched in order as a da command. A leading shebang
-line (#!/...) is ignored. No shell is invoked; recipes are cross-platform.`,
+line (#!/...) is ignored. No shell is invoked, so "da run <file>" behaves
+identically on Windows, macOS, and Linux. Direct execution via the
+#!/usr/bin/env -S da run shebang (./recipe.da) is POSIX-only; on Windows,
+run the recipe with "da run <file>".`,
 		Example: ExampleBlock(
-			"  da run path/to/recipe.da",
-			"  ./recipe.da   # if the file is chmod +x with #!/usr/bin/env -S da run",
+			"  da run path/to/recipe.da   # all platforms (Windows, macOS, Linux)",
+			"  ./recipe.da                # POSIX only: chmod +x + #!/usr/bin/env -S da run",
 		),
 		Args: ExactArgsWithHints(1, "Provide the path to a .da recipe file."),
 		RunE: func(cmd *cobra.Command, args []string) error {
