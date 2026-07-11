@@ -32,16 +32,56 @@ const CATASTROPHIC: Record<string, true> = {
 	"${PWD}": true,
 };
 
+// `rm` as the command: optional VAR=val prefixes, optional sudo/command.
+const RM_COMMAND_PATTERN =
+	/^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:command\s+)?rm\s+(\S.*)$/;
+
+// Bare variable operand (quoted or not) with NO literal path component:
+// "$VAR" / $VAR / "${VAR}" — but NOT "$VAR/sub" (has a literal suffix).
+const BARE_VAR_PATTERN = /(?:^|\s)["']?\$\{?[A-Za-z_]\w*\}?["']?(?:\s|$)/;
+
+// findEmptyExpansionReason returns a block reason if argStr's rm operand can
+// expand to an empty path (deletes the CWD in this shell), or null if the
+// operand looks safe. Check order matches the original priority.
+function findEmptyExpansionReason(argStr: string, padded: string): string | null {
+	// Empty-quote operand: rm -rf ""  or  rm -rf ''
+	if (/(?:^|\s)(?:""|'')(?:\s|$)/.test(padded)) {
+		return 'Blocked: `rm` recursive/force with an empty-string argument ("" / \'\'). In this shell an empty target deletes the CURRENT DIRECTORY. Pass an explicit non-empty literal path.';
+	}
+	// Command substitution anywhere in the operands: $(...) or `...`
+	if (/\$\(|`/.test(argStr)) {
+		return "Blocked: `rm` recursive/force with a command-substitution target ($(...) or backticks). If it expands to empty it deletes the CURRENT DIRECTORY in this shell. Compute the path into a variable, verify it is non-empty, and delete an explicit literal path.";
+	}
+	if (BARE_VAR_PATTERN.test(padded)) {
+		return "Blocked: `rm` recursive/force on a bare variable target that can expand to empty (deletes the CURRENT DIRECTORY in this shell). Guard it (e.g. `${VAR:?must be set}`) or use an explicit literal path.";
+	}
+	return null;
+}
+
+// findMissingOrCatastrophicOperandReason returns a block reason if the rm
+// operands are absent entirely, or if any operand names a catastrophic
+// filesystem root (/, ~, ., .., *, $HOME, $PWD).
+function findMissingOrCatastrophicOperandReason(tokens: string[]): string | null {
+	const operands = tokens.filter((t) => !t.startsWith("-") && t !== "--");
+	if (operands.length === 0) {
+		return "Blocked: `rm` recursive/force with no explicit path operand (deletes the CURRENT DIRECTORY in this shell). Pass an explicit non-empty literal path.";
+	}
+	for (const op of operands) {
+		const stripped = op.replace(/^["']/, "").replace(/["']$/, "");
+		if (Object.hasOwn(CATASTROPHIC, stripped)) {
+			return `Blocked: \`rm\` recursive/force on ${op} (filesystem root / home / cwd).`;
+		}
+	}
+	return null;
+}
+
 // Returns a block reason if `command` contains a dangerous rm, else null.
 export function findDangerousRm(command: string): string | null {
 	// Segment into simple-commands so `rm` is judged as a command word, not as a
 	// substring of an unrelated argument (echo / commit message / etc.).
 	const segments = command.split(/\n|;|&&|\|\||\||&/);
 	for (const rawSeg of segments) {
-		// `rm` as the command: optional VAR=val prefixes, optional sudo/command.
-		const m = rawSeg.match(
-			/^\s*(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:sudo\s+)?(?:command\s+)?rm\s+(\S.*)$/,
-		);
+		const m = RM_COMMAND_PATTERN.exec(rawSeg);
 		if (!m) continue;
 		const argStr = m[1];
 		const tokens = argStr.split(/\s+/).filter((t) => t.length > 0);
@@ -52,32 +92,10 @@ export function findDangerousRm(command: string): string | null {
 			tokens.includes("--force");
 		if (!destructive) continue;
 
-		const padded = ` ${argStr} `;
-
-		// Empty-quote operand: rm -rf ""  or  rm -rf ''
-		if (/(?:^|\s)(?:""|'')(?:\s|$)/.test(padded)) {
-			return 'Blocked: `rm` recursive/force with an empty-string argument ("" / \'\'). In this shell an empty target deletes the CURRENT DIRECTORY. Pass an explicit non-empty literal path.';
-		}
-		// Command substitution anywhere in the operands: $(...) or `...`
-		if (/\$\(|`/.test(argStr)) {
-			return "Blocked: `rm` recursive/force with a command-substitution target ($(...) or backticks). If it expands to empty it deletes the CURRENT DIRECTORY in this shell. Compute the path into a variable, verify it is non-empty, and delete an explicit literal path.";
-		}
-		// Bare variable operand (quoted or not) with NO literal path component:
-		// "$VAR" / $VAR / "${VAR}" — but NOT "$VAR/sub" (has a literal suffix).
-		if (/(?:^|\s)["']?\$\{?[A-Za-z_][A-Za-z0-9_]*\}?["']?(?:\s|$)/.test(padded)) {
-			return "Blocked: `rm` recursive/force on a bare variable target that can expand to empty (deletes the CURRENT DIRECTORY in this shell). Guard it (e.g. `${VAR:?must be set}`) or use an explicit literal path.";
-		}
-
-		const operands = tokens.filter((t) => !t.startsWith("-") && t !== "--");
-		if (operands.length === 0) {
-			return "Blocked: `rm` recursive/force with no explicit path operand (deletes the CURRENT DIRECTORY in this shell). Pass an explicit non-empty literal path.";
-		}
-		for (const op of operands) {
-			const stripped = op.replace(/^["']/, "").replace(/["']$/, "");
-			if (Object.hasOwn(CATASTROPHIC, stripped)) {
-				return `Blocked: \`rm\` recursive/force on ${op} (filesystem root / home / cwd).`;
-			}
-		}
+		const reason =
+			findEmptyExpansionReason(argStr, ` ${argStr} `) ??
+			findMissingOrCatastrophicOperandReason(tokens);
+		if (reason) return reason;
 	}
 	return null;
 }

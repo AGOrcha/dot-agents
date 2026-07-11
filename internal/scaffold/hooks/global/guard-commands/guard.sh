@@ -17,11 +17,13 @@ cmd=""
 if command -v jq >/dev/null 2>&1; then
 	cmd="$(printf '%s' "$payload" | jq -r '[.. | objects | .command? // empty] | map(select(type=="string")) | .[0] // empty' 2>/dev/null || true)"
 fi
-[ -z "$cmd" ] && cmd="$payload"
+[[ -z "$cmd" ]] && cmd="$payload"
 
 block() {
-	printf 'blocked by guard-commands: %s\n' "$1" >&2
+	local msg="$1"
+	printf 'blocked by guard-commands: %s\n' "$msg" >&2
 	exit 2
+	return 2
 }
 
 # `rm` as a command word, carrying a recursive/force flag cluster.

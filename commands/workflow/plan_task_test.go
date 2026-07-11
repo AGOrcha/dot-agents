@@ -1827,21 +1827,12 @@ func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var t4 *CanonicalTask
-	t4Idx := -1
-	t1Idx := -1
-	for i := range tf.Tasks {
-		if tf.Tasks[i].ID == "t4" {
-			t4 = &tf.Tasks[i]
-			t4Idx = i
-		}
-		if tf.Tasks[i].ID == "t1" {
-			t1Idx = i
-		}
-	}
-	if t4 == nil {
+	t4Idx := taskIndexByID(tf, "t4")
+	t1Idx := taskIndexByID(tf, "t1")
+	if t4Idx == -1 {
 		t.Fatal("t4 missing after update")
 	}
+	t4 := &tf.Tasks[t4Idx]
 	if len(t4.DependsOn) != 1 || t4.DependsOn[0] != "t1" {
 		t.Errorf("depends_on = %v, want [t1]", t4.DependsOn)
 	}
@@ -1850,17 +1841,35 @@ func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
 	}
 
 	inDegree, adj := buildPlanScheduleGraph(tf)
-	if inDegree[t4Idx] != 1 {
-		t.Errorf("in-degree of t4 = %d, want 1 (edge from t1 not picked up)", inDegree[t4Idx])
+	assertScheduleEdge(t, inDegree, adj, t1Idx, t4Idx)
+}
+
+// taskIndexByID returns the index of the task with the given ID in tf.Tasks,
+// or -1 if not present.
+func taskIndexByID(tf *CanonicalTaskFile, id string) int {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// assertScheduleEdge fails t unless the schedule graph records exactly one
+// incoming edge into dst and adj[src] contains dst — i.e. src → dst is live.
+func assertScheduleEdge(t *testing.T, inDegree []int, adj [][]int, src, dst int) {
+	t.Helper()
+	if inDegree[dst] != 1 {
+		t.Errorf("in-degree of dst = %d, want 1 (edge from src not picked up)", inDegree[dst])
 	}
 	found := false
-	for _, dst := range adj[t1Idx] {
-		if dst == t4Idx {
+	for _, d := range adj[src] {
+		if d == dst {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("adjacency of t1 = %v, want to contain t4's index %d", adj[t1Idx], t4Idx)
+		t.Errorf("adjacency of src = %v, want to contain dst's index %d", adj[src], dst)
 	}
 }
 

@@ -983,7 +983,7 @@ func ensureTaskVerificationDir(projectPath, taskID string) error {
 func writeScopeImpliesNonTestGo(ws []string) bool {
 	for _, rel := range ws {
 		rel = filepath.ToSlash(filepath.Clean(rel))
-		if strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, "_test.go") {
+		if strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, atgTestFileSuffix) {
 			return true
 		}
 	}
@@ -1151,10 +1151,10 @@ func addSiblingTestFiles(paths []string) []string {
 	}
 	result := append([]string(nil), paths...)
 	for _, p := range paths {
-		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, atgTestFileSuffix) {
 			continue
 		}
-		sibling := strings.TrimSuffix(p, ".go") + "_test.go"
+		sibling := strings.TrimSuffix(p, ".go") + atgTestFileSuffix
 		if !present[sibling] {
 			result = append(result, sibling)
 			present[sibling] = true
@@ -1364,12 +1364,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if targetTask.Status == "pending" {
-		targetTask.Status = "in_progress"
-		if err := saveCanonicalTasks(project.Path, tf); err != nil {
-			ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
-		}
-	}
+	advanceFanoutTaskStatusIfPending(project.Path, tf, targetTask)
 
 	observed.DelegationPath = fmt.Sprintf(".agents/active/delegation/%s.yaml", taskID)
 	observed.BundlePath = fmt.Sprintf(".agents/active/delegation-bundles/%s.yaml", contract.ID)
@@ -1385,6 +1380,19 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Base branch: %s", fanoutBaseSummary(baseRes)),
 	)
 	return nil
+}
+
+// advanceFanoutTaskStatusIfPending flips a freshly-fanned-out task from
+// "pending" to "in_progress" and persists it. Save failures are non-fatal —
+// the delegation contract already exists, so we only warn.
+func advanceFanoutTaskStatusIfPending(projectPath string, tf *CanonicalTaskFile, targetTask *CanonicalTask) {
+	if targetTask.Status != "pending" {
+		return
+	}
+	targetTask.Status = "in_progress"
+	if err := saveCanonicalTasks(projectPath, tf); err != nil {
+		ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
+	}
 }
 
 // fanoutBaseSummary renders the resolved base for the fanout success box.
