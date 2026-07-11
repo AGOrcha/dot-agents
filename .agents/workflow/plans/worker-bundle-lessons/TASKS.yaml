@@ -1,0 +1,53 @@
+schema_version: 1
+plan_id: worker-bundle-lessons
+tasks:
+    - id: load-lessons-1-schema-selection-metadata
+      title: Add lesson-selection metadata to lesson.schema.json + selector
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - schemas/lesson.schema.json
+        - commands/config/relevance.go
+        - commands/config/relevance_lessons.go
+      verification_required: true
+      notes: 'lesson.schema.json is frontmatter-only (name/scope/description/type/tags/superseded_by, additionalProperties:false). Add SELECTION metadata: applies_to_app_types, touched-path/subject globs (repo-relative *,? in v1), scope discriminator (repo/user/team/org/public; extends legacy global|project-local). Selector already reads app_type/path/package frontmatter. Design: payout:worker-bundle-authoring load-lessons.design.md.'
+    - id: load-lessons-2-relevance-lessons-facet
+      title: Extend da config relevance lessons facet (tag select, layered)
+      status: pending
+      depends_on:
+        - load-lessons-1-schema-selection-metadata
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/config/relevance_lessons.go
+        - commands/config/relevance.go
+        - commands/config/relevance_lessons_test.go
+      verification_required: true
+      notes: 'relevance ALREADY has filterLessons + lessonsFacet + --path/--package (facet 5, shipped 688c9813). Extend: --lesson-tag selection, use new schema metadata for app_type+write_scope+tag matching, superseded-lesson auto-resolve (fail loud if replacement missing). CROSS-PLAN DEP: MUST read the LAYERED resolver, not loadFlatSnapshot — that migration is config-transitive-layering:layered-consumers-relevance-verify. Build on it.'
+    - id: load-lessons-3-bundle-required-reads
+      title: Bundle generation attaches relevance-selected lessons as required_reads
+      status: pending
+      depends_on:
+        - load-lessons-2-relevance-lessons-facet
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/workflow/fanout.go
+        - commands/workflow/delegation.go
+        - commands/workflow/plan_task.go
+      verification_required: true
+      notes: 'In fanout/bundle generation, run the lessons relevance query for the task (app_type+write_scope+tags) and attach matching LESSON.md as required_reads (single-source the text, not inlined). Interim/dogfood: filesystem match over .agents/lessons/. Reuse the required-read precedent (plan_task.go:40-65,460-485). This is the actual injection-into-bundles step.'
+    - id: load-lessons-4-kg-scoped-view
+      title: 'Full: query scoped-lessons KG view for selection (end-state)'
+      status: pending
+      depends_on:
+        - load-lessons-3-bundle-required-reads
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/config/relevance_lessons.go
+        - internal/graphstore/
+      verification_required: true
+      notes: 'End-state: replace filesystem scan with the scoped-lessons KG view (scoped-knowledge-graphs + sdd-entity-kg-schema specs) for precise scope-aware (repo/user/team/org/public) selection. When KG unavailable in full mode, REPORT fallback in JSON/bundle (don''t silently hide missing team/org lessons). Deferred until KG scoped-lessons ships.'
