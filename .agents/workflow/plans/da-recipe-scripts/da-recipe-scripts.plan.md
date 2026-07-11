@@ -1,7 +1,7 @@
 # Plan: da recipe scripts
 
 **Spec:** `.agents/workflow/specs/da-recipe-scripts/design.md`
-**Status:** draft · **Created:** 2026-07-03
+**Status:** completed · **Created:** 2026-07-03 · **Shipped:** 2026-07-10
 
 ## Goal
 
@@ -21,6 +21,14 @@ line-oriented recipe; `#!/usr/bin/env -S da run` makes a `.da` file directly exe
    (R4/R5).
 5. **p5** — dogfood a real mechanical meta-loop sequence as a shipped `.da` recipe; resolves OQ2
    (recipe home + convention) and validates the D3 skills/recipe boundary in practice.
+
+## Shipped recipes (`src/share/recipes/*.da`, per OQ2)
+
+- `checkpoint-advance.da` — p5's dogfood: the iteration-close checkpoint→advance spine.
+- `scaffold-plan.da` — a second dogfood added post-p5 covering the motivating plan/task-creation
+  use case: the `plan create` → `task add` → `plan update --status active --focus` bootstrap
+  chain from `docs/concepts/workflow-artifact-model.md`'s "Author plan" flow. Validated with
+  `da run` against a scratch repo (see merge-back evidence).
 
 ## Boundary (D3, load-bearing)
 

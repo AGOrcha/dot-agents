@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -33,15 +32,6 @@ const (
 	layerRepoLocal       = "repo-local"
 )
 
-// orderedLayers is the canonical precedence order used everywhere in this
-// package. Lowest precedence first; the last layer with a non-nil value for a
-// field wins. Mirrors spec config-distribution-model §6.
-var orderedLayers = []string{
-	layerProductDefaults,
-	layerUserLocal,
-	layerRepoLocal,
-}
-
 // LayerValue is one slot in a single field's provenance stack.
 //
 // Active=true on exactly one entry per field, except when no layer sets the
@@ -63,133 +53,11 @@ type FieldExplanation struct {
 	Layers      []LayerValue `json:"layers"`
 }
 
-// snapshot is the package-local view of layered config consumed by the sibling
-// `relevance` and `verify` surfaces (relevance.go, verify.go), which read raw
-// layers directly. In flat mode it holds three maps keyed by the layer
-// identifier. `da config explain` itself no longer builds a snapshot this way —
-// it consumes the canonical resolved cfg.Snapshot via the auto-lock seam (see
-// loadSnapshot / runExplain) so explain is the single effective-config truth
-// surface.
-type snapshot struct {
-	// layers maps layer-id -> decoded JSON object (or nil if the layer was
-	// not present on disk).
-	layers map[string]map[string]any
-	// effective is the merged result with last-writer-wins on scalar fields
-	// (sufficient for flat scope; richer merge categories arrive with p1b).
-	effective map[string]any
-}
-
-// loadFlatSnapshot constructs the flat-scope snapshot for the project at
-// projectPath. It walks (in precedence order):
-//
-//  1. product-defaults — currently an empty stub; reserved for p1 to populate
-//     when shipped built-in defaults are wired.
-//  2. user-local — ~/.agents/agentsrc.json (loaded as raw JSON; absence is
-//     not an error).
-//  3. repo-local — <projectPath>/.agentsrc.json (the canonical manifest).
-//
-// A schema parse error on the repo-local file is fatal (returned with
-// exitSchemaErr). Missing repo-local file is reported as "no manifest" — that
-// is also fatal because there is nothing to explain.
-//
-// This is the legacy raw-layer reader retained for the sibling relevance/verify
-// surfaces. `da config explain` resolves through loadSnapshot instead.
-func loadFlatSnapshot(projectPath string) (*snapshot, int, error) {
-	snap := &snapshot{
-		layers: map[string]map[string]any{
-			layerProductDefaults: nil,
-			layerUserLocal:       nil,
-			layerRepoLocal:       nil,
-		},
-	}
-
-	// user-local: ~/.agents/agentsrc.json (optional)
-	userHome := cfg.AgentsHome()
-	if userPath := filepath.Join(userHome, cfg.AgentsRCFile); fileExists(userPath) {
-		decoded, err := decodeJSONFile(userPath)
-		if err != nil {
-			// User-local parse errors are surfaced as schema errors but
-			// recorded with a layer hint so the operator knows which file
-			// to fix.
-			return nil, exitSchemaErr, fmt.Errorf("parsing user-local %s: %w", userPath, err)
-		}
-		snap.layers[layerUserLocal] = decoded
-	}
-
-	// repo-local: <projectPath>/.agentsrc.json (required for explain)
-	repoPath := filepath.Join(projectPath, cfg.AgentsRCFile)
-	if !fileExists(repoPath) {
-		return nil, exitSchemaErr, fmt.Errorf("no %s found at %s — run `da install --generate` first", cfg.AgentsRCFile, projectPath)
-	}
-	repoLayer, err := decodeJSONFile(repoPath)
-	if err != nil {
-		return nil, exitSchemaErr, fmt.Errorf("parsing %s: %w", repoPath, err)
-	}
-	snap.layers[layerRepoLocal] = repoLayer
-
-	snap.effective = mergeLayers(snap.layers)
-	return snap, exitOK, nil
-}
-
-// decodeJSONFile reads path and decodes it into a generic map. Returns an
-// error if the file does not parse as a JSON object.
-func decodeJSONFile(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
 // fileExists is a thin wrapper kept here (rather than inlined) so tests can
 // observe the exact "file missing" branch with a deterministic stat err.
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-// mergeLayers produces the effective config object by walking orderedLayers
-// (lowest precedence first) and overlaying each non-nil layer onto the
-// accumulating result with last-writer-wins on top-level scalar fields.
-func mergeLayers(layers map[string]map[string]any) map[string]any {
-	out := map[string]any{}
-	for _, layerID := range orderedLayers {
-		layer := layers[layerID]
-		if layer == nil {
-			continue
-		}
-		for k, v := range layer {
-			out[k] = v
-		}
-	}
-	return out
-}
-
-// lookup walks layer with parts and returns (value, true) if every step
-// resolved against an object key. Any non-object intermediate or missing key
-// short-circuits to (nil, false). Retained for the sibling relevance/verify
-// surfaces.
-func lookup(layer map[string]any, parts []string) (any, bool) {
-	if layer == nil || len(parts) == 0 {
-		return nil, false
-	}
-	var cur any = layer
-	for _, p := range parts {
-		obj, ok := cur.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		v, present := obj[p]
-		if !present {
-			return nil, false
-		}
-		cur = v
-	}
-	return cur, true
 }
 
 // splitFieldPath splits a dot-separated path into traversal parts. Empty input
@@ -233,6 +101,24 @@ func loadSnapshot(projectPath string) (*cfg.Snapshot, int, error) {
 		return nil, exitSchemaErr, err
 	}
 	return res.Snapshot, exitOK, nil
+}
+
+// resolveLayered is the package-level (test-seam) surface `relevance` and
+// `verify` route through to resolve the effective-config Snapshot. It is the
+// SAME read-only, offline, units-lock-backed resolution path `da config
+// explain` and `workflow app-types` already consume
+// (cfg.NewLayeredResolver().ResolveLocked — see appTypeSnapshot in
+// commands/workflow/app_types.go), so relevance and verify now see `extends`
+// layers too (a team-source's execution_profile / verifier_chain), not just
+// the flat product-defaults -> user-local -> repo-local stack the retired
+// loadFlatSnapshot used to read.
+//
+// For a project declaring no `extends`, ResolveLocked degrades to the FLAT
+// layer set via its embedded FlatResolver, so a flat-only project resolves
+// exactly as it did before this migration — the flat fallback is preserved by
+// construction (ResolveLocked's own degrade branch), not re-implemented here.
+var resolveLayered = func(projectPath string) (*cfg.Snapshot, error) {
+	return cfg.NewLayeredResolver().ResolveLocked(projectPath)
 }
 
 // explainField builds the FieldExplanation for a single dot-separated field

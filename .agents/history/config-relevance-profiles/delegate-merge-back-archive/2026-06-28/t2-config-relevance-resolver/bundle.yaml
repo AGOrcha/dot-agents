@@ -1,0 +1,29 @@
+schema_version: 1
+delegation_id: del-t2-config-relevance-resolver-1780554684
+plan_id: config-relevance-profiles
+task_id: t2-config-relevance-resolver
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-04T06:31:24Z"
+scope:
+    write_scope:
+        - commands/config/relevance.go
+        - commands/config/relevance_test.go
+        - commands/config/cmd.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

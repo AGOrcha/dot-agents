@@ -1,12 +1,14 @@
 ---
 name: "orchestrator-session-start"
-description: "Orchestrator turn (not the worker): pre-flight → eligible-orientation (workflow eligible --json) → orient/next → pick task → KG readback → decide (fanout or direct) → if fanout, write constraints into TASKS.yaml notes and produce bundle, then chain ISP skill for staged runtime. The orchestrator does not implement the delegated slice. Use in repos with .agents/workflow/ and active.loop.md present."
+description: "Orchestrator turn (not the worker): pre-flight → eligible-orientation (workflow eligible --json) → orient/next → pick task → KG readback → decide (fanout or direct) → if fanout, write constraints into TASKS.yaml notes and produce bundle, then chain ISP skill for staged runtime. The orchestrator does not implement the delegated slice. Use when starting a session in repos with .agents/workflow/ and active.loop.md present — run this first; once its pre-flight and eligible-orientation steps have completed this session, subsequent wave/phase picks can use the lighter plan-wave-picker skill instead of repeating this flow."
 argument-hint: "[--plan <plan-id>[,<plan-id>...]] [--task <task-id>]"
 ---
 
 # Orchestrator Session Start
 
 Start a loop orchestration pass **above** the focused worker agent, gather eligible task context, then hand off to the `isp` skill for staged runtime. The orchestrator's job ends when the bundle exists and TASKS.yaml notes are up to date.
+
+Once pre-flight (step 0) and eligible orientation (step 2) have run this session, `plan-wave-picker` is the lighter-weight tool for any subsequent wave/phase pick in the same session — the two skills are sequenced, not competing alternatives.
 
 ## Workflow
 

@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -117,7 +116,7 @@ func runVerify(opts *runVerifyOptions, deps Deps) error {
 func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 	checks := make([]VerifyCheck, 0, 4)
 
-	snap, _, err := loadFlatSnapshot(opts.cwd)
+	snap, err := resolveLayered(opts.cwd)
 	if err != nil {
 		checks = append(checks, VerifyCheck{"manifest", verifyFail, err.Error()})
 		return VerifyReport{OK: false, Checks: checks}
@@ -154,8 +153,8 @@ func buildVerifyReport(opts *runVerifyOptions) VerifyReport {
 // `extends` layer actually references them — referenced sources are verified in
 // detail by the locked-layers check; unreferenced ones are flagged as unused so
 // the output never promises a "below" section that isn't there.
-func verifySources(cwd string, snap *snapshot) []VerifyCheck {
-	repo := snap.layers[layerRepoLocal]
+func verifySources(cwd string, snap *cfg.Snapshot) []VerifyCheck {
+	repo := repoLocalRaw(snap)
 	raw, ok := repo["sources"].([]any)
 	if !ok || len(raw) == 0 {
 		return []VerifyCheck{{"config-layers", verifyPass, "no external layers declared"}}
@@ -167,6 +166,24 @@ func verifySources(cwd string, snap *snapshot) []VerifyCheck {
 		checks = append(checks, verifyOneSource(i, item, cwd, referenced))
 	}
 	return checks
+}
+
+// repoLocalRaw returns the raw (un-merged) repo-local layer object from a
+// resolved Snapshot's layer stack. verifySources reads `sources` from the raw
+// repo-local layer — not the merged Effective config — because `sources` is a
+// CategoryScalar field declared once, repo-local only (org-config-resolution
+// §4); it never merges across layers. Returns nil when snap is nil or carries
+// no repo-local layer.
+func repoLocalRaw(snap *cfg.Snapshot) map[string]any {
+	if snap == nil {
+		return nil
+	}
+	for _, layer := range snap.Layers {
+		if layer.ID == cfg.LayerRepoLocal {
+			return layer.Raw
+		}
+	}
+	return nil
 }
 
 // verifyOneSource verifies a single declared source entry and returns its
@@ -295,8 +312,10 @@ func recordedInputsDigest(cwd string) string {
 }
 
 // verifyPreconditionPolicies fail-closed-validates the verifier precondition
-// policy config (verifier-precondition-policy plan, Slice B5) against the merged
-// effective snapshot:
+// policy config (verifier-precondition-policy plan, Slice B5) against the
+// resolved layered Snapshot's effective config (snap.Effective) — so a policy
+// registry supplied only by an imported `extends` layer (a team-source's
+// verifier_chain) is validated exactly like a repo-local one:
 //
 //   - a StageProfile.precondition_policy naming a key absent from the top-level
 //     precondition_policies registry → fail (the resolver degrades such a profile
@@ -306,13 +325,17 @@ func recordedInputsDigest(cwd string) string {
 //     fail-closed at verify-transition time, but the operator should learn at
 //     config time, not when a task is stuck at the gate).
 //
-// Returns nil when the project declares no precondition policies and no profile
-// references one — there is nothing to add to the report.
-func verifyPreconditionPolicies(snap *snapshot) []VerifyCheck {
-	rc, err := decodeEffectivePolicyConfig(snap)
-	if err != nil {
-		return []VerifyCheck{{"precondition-policies", verifyWarn, "could not decode policy config: " + err.Error()}}
+// Snapshot resolution already decodes precondition_policies/stage_profiles
+// through the typed AgentsRC schema — a malformed shape fails resolveLayered
+// itself, before this is ever reached — so there is no decode-error branch
+// here. Returns nil when snap is nil, or the project declares no precondition
+// policies and no profile references one — there is nothing to add to the
+// report.
+func verifyPreconditionPolicies(snap *cfg.Snapshot) []VerifyCheck {
+	if snap == nil {
+		return nil
 	}
+	rc := &snap.Effective
 	if len(rc.PreconditionPolicies) == 0 && !anyProfileNamesPolicy(rc.StageProfiles) {
 		return nil
 	}
@@ -322,35 +345,6 @@ func verifyPreconditionPolicies(snap *snapshot) []VerifyCheck {
 		return []VerifyCheck{{"precondition-policies", verifyPass, "all policy references and signal kinds resolve"}}
 	}
 	return checks
-}
-
-// decodeEffectivePolicyConfig projects the merged snapshot's precondition_policies
-// and stage_profiles into the typed cfg.AgentsRC via a JSON round-trip, so the
-// struct's json tags (the canonical layer shape) drive the mapping — the same
-// pattern resolveExecutionProfile uses. A nil snapshot or absent keys yield an
-// empty (non-nil) AgentsRC so callers need no nil checks.
-func decodeEffectivePolicyConfig(snap *snapshot) (*cfg.AgentsRC, error) {
-	rc := &cfg.AgentsRC{}
-	if snap == nil {
-		return rc, nil
-	}
-	subset := map[string]any{}
-	for _, key := range []string{"precondition_policies", "stage_profiles"} {
-		if v, ok := snap.effective[key]; ok && v != nil {
-			subset[key] = v
-		}
-	}
-	if len(subset) == 0 {
-		return rc, nil
-	}
-	data, err := json.Marshal(subset)
-	if err != nil {
-		return nil, fmt.Errorf("re-encoding precondition policy config: %w", err)
-	}
-	if err := json.Unmarshal(data, rc); err != nil {
-		return nil, fmt.Errorf("decoding precondition policy config: %w", err)
-	}
-	return rc, nil
 }
 
 // anyProfileNamesPolicy reports whether any stage profile references a

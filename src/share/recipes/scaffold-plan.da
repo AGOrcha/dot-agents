@@ -1,0 +1,34 @@
+#!/usr/bin/env -S da run
+# scaffold-plan.da — mechanical plan + first-task bootstrap sequence.
+#
+# The re-improvised pain this dogfoods: every plan-authoring pass hand-types
+# the same `workflow plan create` -> `workflow task add` -> `workflow plan
+# update --status active --focus <task>` chain documented as the canonical
+# "Author plan" flow in docs/concepts/workflow-artifact-model.md. This recipe
+# is that chain, fixed at exactly one plan + one first task (spec D3:
+# mechanical only — no loop over a dynamic task count, no branching on
+# outcomes). Add further tasks afterward with `da workflow task add`; each
+# additional task is its own bespoke `da` call, not something this recipe
+# can predict.
+#
+# Env vars (all required — v1 env-substitution is quote-blind (D6): an
+# unset var silently expands to "", which would pass an EMPTY flag value
+# rather than falling back to a command default, so there is no optional
+# subset here):
+#   PLAN_ID                     canonical plan id (slug)
+#   PLAN_TITLE                  plan title
+#   PLAN_SUMMARY                one-line plan summary
+#   PLAN_SUCCESS_CRITERIA       observable condition that proves the plan is done
+#   PLAN_VERIFICATION_STRATEGY  how completion will be verified
+#   TASK_ID                     first task id (slug)
+#   TASK_TITLE                  first task title
+#   TASK_NOTES                  first task implementation notes
+#
+# Caveat: expansion happens before tokenization and is quote-blind (D6/D5) —
+# a value containing a double-quote character will break tokenization of
+# that line. Keep values free of literal double quotes.
+#
+# Directly executable when chmod +x (p4 shebang contract), or via: da run <file>.
+workflow plan create ${PLAN_ID} --title "${PLAN_TITLE}" --summary "${PLAN_SUMMARY}" --success-criteria "${PLAN_SUCCESS_CRITERIA}" --verification-strategy "${PLAN_VERIFICATION_STRATEGY}"
+workflow task add ${PLAN_ID} --id ${TASK_ID} --title "${TASK_TITLE}" --notes "${TASK_NOTES}"
+workflow plan update ${PLAN_ID} --status active --focus ${TASK_ID}

@@ -141,19 +141,14 @@ func runRecompute(opts *runRelevanceOptions, deps Deps) error {
 		)
 	}
 
-	snap, _, err := loadFlatSnapshot(opts.cwd)
+	snap, err := resolveLayered(opts.cwd)
 	if err != nil {
 		return deps.ErrorWithHints(err.Error(),
 			"Run `da install --generate` to create .agentsrc.json from current state.",
 		)
 	}
 
-	profile, err := resolveExecutionProfile(snap)
-	if err != nil {
-		return deps.ErrorWithHints(err.Error(),
-			"The execution_profile layer in .agentsrc.json is not shaped as expected; see .agents/proposals/skill-relevance-filter.md §2.",
-		)
-	}
+	profile := resolveExecutionProfile(snap)
 
 	corpus, err := loadScoredCorpus(opts.cwd)
 	if err != nil {

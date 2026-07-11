@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/dashboard/events"
 	"github.com/AGOrcha/dot-agents/internal/dashboard/store"
 )
 
@@ -63,6 +64,11 @@ type Deps struct {
 	// Logger receives the per-request structured log lines and store
 	// failure warnings. Optional; nil defaults to a discard logger.
 	Logger *slog.Logger
+	// Broker is the SSE fan-out seam the /events endpoint subscribes to
+	// (t04). Optional: when nil the REST routes still serve and GET
+	// {base}/events replies 503 (streaming unavailable in this
+	// composition), so REST-only wirings need not construct a broker.
+	Broker *events.Broker
 }
 
 // Mount is the dashboard REST API as a plain http.Handler. Construct it with
@@ -73,6 +79,7 @@ type Mount struct {
 	mux    *http.ServeMux
 	store  store.Store
 	logger *slog.Logger
+	broker *events.Broker
 }
 
 // New builds a Mount over deps with all six REST routes registered.
@@ -88,6 +95,7 @@ func New(deps Deps) (*Mount, error) {
 		mux:    http.NewServeMux(),
 		store:  deps.Store,
 		logger: logger,
+		broker: deps.Broker,
 	}
 	m.routes()
 	return m, nil
@@ -113,6 +121,7 @@ func (m *Mount) routes() {
 	m.handle("GET "+basePath+"/iterations/{n}", m.handleGetIteration)
 	m.handle("GET "+basePath+"/rubric", m.handleRubric)
 	m.handle("GET "+basePath+"/health", m.handleHealth)
+	m.handle("GET "+basePath+"/events", m.handleEvents)
 }
 
 // handle wires one route through the request-logging middleware.
@@ -144,6 +153,15 @@ type statusRecorder struct {
 func (r *statusRecorder) WriteHeader(code int) {
 	r.status = code
 	r.ResponseWriter.WriteHeader(code)
+}
+
+// Flush forwards to the wrapped ResponseWriter when it is an http.Flusher,
+// keeping the logged middleware transparent to the long-lived SSE stream
+// (t05's /events handler asserts http.Flusher on the writer it receives).
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // handleListRuns serves GET {base}/runs (API.md §3.1).

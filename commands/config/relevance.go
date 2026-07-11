@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -279,19 +278,14 @@ func runRelevance(opts *runRelevanceOptions, deps Deps) error {
 		return err
 	}
 
-	snap, _, err := loadFlatSnapshot(opts.cwd)
+	snap, err := resolveLayered(opts.cwd)
 	if err != nil {
 		return deps.ErrorWithHints(err.Error(),
 			"Run `da install --generate` to create .agentsrc.json from current state.",
 		)
 	}
 
-	profile, err := resolveExecutionProfile(snap)
-	if err != nil {
-		return deps.ErrorWithHints(err.Error(),
-			"The execution_profile layer in .agentsrc.json is not shaped as expected; see .agents/proposals/skill-relevance-filter.md §2.",
-		)
-	}
+	profile := resolveExecutionProfile(snap)
 
 	appType, source, err := resolveAppType(opts, deps)
 	if err != nil {
@@ -326,25 +320,18 @@ func normalizeFilter(opts *runRelevanceOptions, deps Deps) error {
 	}
 }
 
-// resolveExecutionProfile extracts the effective execution_profile sub-object
-// from the merged snapshot and decodes it into the typed cfg.ExecutionProfile.
-// Decoding goes through a JSON round-trip so the struct's json tags (the
-// canonical layer shape) drive the mapping. A missing layer yields a non-nil
-// empty profile so every caller resolves to safe defaults without nil checks.
-func resolveExecutionProfile(snap *snapshot) (*cfg.ExecutionProfile, error) {
-	raw, ok := snap.effective["execution_profile"]
-	if !ok || raw == nil {
-		return &cfg.ExecutionProfile{}, nil
+// resolveExecutionProfile extracts the effective execution_profile from the
+// resolved layered Snapshot. Snapshot resolution already decodes the manifest
+// through the typed AgentsRC schema — a malformed execution_profile shape
+// fails resolveLayered itself, before this is ever reached — so there is
+// nothing left to decode or that can fail here. A missing layer still yields a
+// non-nil empty profile so every caller resolves to safe defaults without nil
+// checks.
+func resolveExecutionProfile(snap *cfg.Snapshot) *cfg.ExecutionProfile {
+	if snap == nil || snap.Effective.ExecutionProfile == nil {
+		return &cfg.ExecutionProfile{}
 	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("re-encoding execution_profile layer: %w", err)
-	}
-	var profile cfg.ExecutionProfile
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return nil, fmt.Errorf("decoding execution_profile layer: %w", err)
-	}
-	return &profile, nil
+	return snap.Effective.ExecutionProfile
 }
 
 // resolveAppType applies the design's selector precedence (§3): the named

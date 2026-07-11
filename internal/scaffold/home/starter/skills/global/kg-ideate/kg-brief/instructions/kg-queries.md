@@ -20,7 +20,7 @@ Rules for Phase 1 KG traversal:
   decision list. Label it accordingly in the briefing.
 - If semantic results return > 10 nodes, narrow to top 5 by relevance score.
 - get_impact_radius_tool: only call if topic explicitly names a file, function, or module.
-  Its output also seeds Phase 3 write-scopes (instructions/plan-scaffolding.md step 12).
+  Its output also seeds Phase 3 write-scopes (`plan-scaffold`'s `instructions/plan-scaffolding.md` step 12).
 - If no KG nodes match, note "KG has no prior decisions on this topic" — do not fabricate.
 - When the active profile selects `dotagents-builtin:graph/citation@^1.0`, prefer
   structural traversal via the adapter's named queries (`claims_citing_source`,

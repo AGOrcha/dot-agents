@@ -24,6 +24,9 @@ downstream kg-ideate phases and by a spawned subagent planner.
 
 ## Phase 1 — Briefing Producer
 
+Review failure points before starting.
+Load → `instructions/gotchas.md`
+
 1. **KG traversal**
    Load → `instructions/kg-queries.md`
    Run semantic_search_nodes_tool + query_graph_tool in parallel against the topic.

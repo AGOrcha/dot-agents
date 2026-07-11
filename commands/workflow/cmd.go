@@ -431,6 +431,7 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 
 func newWorkflowTaskUpdateCmd() *cobra.Command {
 	var taskUpdateID, taskUpdateNotes, taskUpdateWriteScope, taskUpdateTitle string
+	var taskUpdateDependsOn, taskUpdateBlocks string
 	taskUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
 		Short: "Update notes, write-scope, or title for an existing task",
@@ -439,13 +440,15 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope)
+			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope, taskUpdateDependsOn, taskUpdateBlocks)
 		},
 	}
 	taskUpdateCmd.Flags().StringVar(&taskUpdateID, "task", "", "Task ID to update (required)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateTitle, "title", "", "New task title")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateNotes, "notes", "", "New implementation notes (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks (replaces existing)")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 	return taskUpdateCmd
 }
@@ -887,6 +890,7 @@ func newWorkflowFanoutCmd() *cobra.Command {
 	fanoutCmd.Flags().String("slice", "", "Slice ID from SLICES.yaml; auto-fills task and write scope")
 	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
 	fanoutCmd.Flags().String(workflowFlagWriteScope, "", "Comma-separated file/dir patterns this delegate may touch")
+	fanoutCmd.Flags().Bool("with-tests", false, "Auto-add each .go write_scope entry's sibling _test.go path (same directory, create-if-absent — the file need not exist yet)")
 	fanoutCmd.Flags().String("delegate-profile", defaultDelegateProfile, "Worker profile label stored in the delegation bundle")
 	fanoutCmd.Flags().StringSlice("project-overlay", nil, "Repeatable repo-relative project overlay guidance files")
 	fanoutCmd.Flags().StringSlice("prompt", nil, "Repeatable inline prompt lines for the delegate")
