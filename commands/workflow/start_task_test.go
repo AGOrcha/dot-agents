@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -232,6 +233,19 @@ func TestStartTaskSubcommandExecute(t *testing.T) {
 // startTaskTreeSnapshot walks root (skipping .git) and returns a sorted
 // "path|size|mtime" fingerprint per entry, letting dry-run tests assert
 // zero on-disk mutation with a single before/after string compare.
+//
+// Every entry is re-stat'd directly via os.Lstat rather than trusting
+// fs.DirEntry.Info(): per the io/fs docs, Info() "may be from the time of
+// the original directory read" — on Windows, os.ReadDir populates each
+// entry's FileInfo from the FindNextFile data captured at the READDIR call,
+// not a live query. A parent directory's own on-disk LastWriteTime can lag
+// microseconds behind a child file write it should already reflect (NTFS
+// directory-index commit is not synchronous with the child's MFT update),
+// so a "before" walk taken moments after setup can observe a stale parent
+// mtime that a later "after" walk (same real state, no new mutation) then
+// observes correctly — a false-positive "mutation" with zero code involved.
+// Forcing a live stat closes that window without weakening what is
+// compared: same path|size|mtime triple, just sourced authoritatively.
 func startTaskTreeSnapshot(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string
@@ -249,7 +263,7 @@ func startTaskTreeSnapshot(t *testing.T, root string) []string {
 		if d.IsDir() && d.Name() == ".git" {
 			return filepath.SkipDir
 		}
-		info, infoErr := d.Info()
+		info, infoErr := os.Lstat(path)
 		if infoErr != nil {
 			return infoErr
 		}
