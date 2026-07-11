@@ -109,7 +109,8 @@ that matters intact.
   does, so the loop is bounded and deterministic.
 - **D8 — Shallow data-driven `if [not] <pred> <arg> … end` conditional.** A recipe
   may guard a body on a **data/state** predicate evaluated before dispatch:
-  `exists <glob>` (≥1 path matches) or `set <NAME>` (env var non-empty); `not`
+  `exists <glob>` (≥1 path matches) or `set <NAME…>` (one or more space-separated
+  names, all non-empty); `not`
   negates. This is not a general expression language and, critically, there is **no
   predicate over a command's exit status**.
 - **D9 — The preserved D3 line: no branching on OUTCOMES.** The thing D3 forbids —
@@ -124,7 +125,7 @@ that matters intact.
   signal the work wants a skill, not a recipe.
 
 **Grammar (line-oriented, extends D2):** `for <VAR> in <PATTERN>` / `if [not]
-exists <PATTERN>` / `if [not] set <NAME>` open a block; a lone `end` closes the
+exists <PATTERN>` / `if [not] set <NAME…>` (all names non-empty) open a block; a lone `end` closes the
 nearest open block. Balanced open/`end` pairing and the depth cap are validated
 before dispatch; a structural error aborts with no side effects. Malformed headers
 (e.g. `for` with no `in`) are not recognized as blocks — they fall through to

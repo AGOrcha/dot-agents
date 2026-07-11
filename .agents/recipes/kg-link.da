@@ -8,10 +8,14 @@
 # step deterministically and confirms it via `kg link list`.
 #
 # Env vars:
-#   KG_NOTE_ID    the knowledge-note id to link (required). The body is guarded by
-#                 `if set KG_NOTE_ID`, so an unset id is a clean no-op.
+#   KG_NOTE_ID    the knowledge-note id to link (required).
 #   KG_SYMBOL     the fully-qualified code symbol, e.g. internal/dashboard/handlers.handleEvents
 #                 (required; quoted below so a symbol with spaces stays one token).
+#                 NOTE_ID and SYMBOL are guarded TOGETHER by `if set KG_NOTE_ID KG_SYMBOL`
+#                 (multi-var: true only when BOTH are non-empty). This matters because
+#                 `kg link add` accepts an empty qualified-name and would otherwise persist
+#                 a junk empty-symbol link — the guard makes an unset/empty either one a
+#                 clean no-op instead.
 #   KG_LINK_KIND  optional link kind: mentions | implements | documents | decides | references.
 #                 When unset the recipe omits --kind and `kg link add` applies its default
 #                 (`mentions`) — handled by the `if set` / `if not set` pair below (da-recipe-
@@ -24,7 +28,7 @@
 #
 # Requires `da run` (0.5.0+; the 0.4.2 binary lacks it — devs: `go run ./cmd/da run
 # .agents/recipes/kg-link.da`). Directly executable when chmod +x.
-if set KG_NOTE_ID
+if set KG_NOTE_ID KG_SYMBOL
   if set KG_LINK_KIND
     kg link add ${KG_NOTE_ID} "${KG_SYMBOL}" --kind ${KG_LINK_KIND}
   end

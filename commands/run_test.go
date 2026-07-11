@@ -914,6 +914,27 @@ func TestRunRecipe_IfNotNegatesPredicate(t *testing.T) {
 	assertCallSlice(t, rec.calls, [][]string{{"kg", "warm"}})
 }
 
+func TestRunRecipe_IfSetMultiVarRequiresAllNonEmpty(t *testing.T) {
+	f := writeTempRecipe(t, "if set A B\nstatus\nend\n")
+	// both non-empty → body runs.
+	t.Setenv("A", "x")
+	t.Setenv("B", "y")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"status"}})
+	// one empty → whole guard false → body skipped (the empty-arg footgun kg-link.da relies on).
+	t.Setenv("B", "")
+	rec2 := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec2.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rec2.calls) != 0 {
+		t.Fatalf("multi-var `set` must skip when any var is empty, got %v", rec2.calls)
+	}
+}
+
 // ----- recursive glob (base/**/<filepat>) tests -----
 
 func TestRunRecipe_ForLoopRecursiveGlob(t *testing.T) {

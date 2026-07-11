@@ -334,9 +334,9 @@ func execCond(c *condNode, dispatch recipeDispatcher, step *int) error {
 	return execNodes(c.body, dispatch, step)
 }
 
-// evalCond resolves a data predicate: `exists <glob>` is true iff the
-// env-expanded pattern matches ≥1 path; `set <NAME>` is true iff the env var is
-// non-empty.
+// evalCond resolves a data predicate: `exists <glob>` is true iff the env-expanded
+// pattern matches ≥1 path; `set <NAME…>` is true iff EVERY named env var (one or
+// more, space-separated) is non-empty.
 func evalCond(c *condNode) (bool, error) {
 	switch c.pred {
 	case "exists":
@@ -346,7 +346,14 @@ func evalCond(c *condNode) (bool, error) {
 		}
 		return len(matches) > 0, nil
 	case "set":
-		return strings.TrimSpace(os.Getenv(c.arg)) != "", nil
+		// true iff EVERY named env var is non-empty (whitespace-only counts as unset);
+		// parseIfHeader guarantees ≥1 name. A single name preserves the original behavior.
+		for _, name := range strings.Fields(c.arg) {
+			if strings.TrimSpace(os.Getenv(name)) == "" {
+				return false, nil
+			}
+		}
+		return true, nil
 	default:
 		return false, fmt.Errorf("unknown predicate %q", c.pred)
 	}
