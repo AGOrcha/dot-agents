@@ -1,0 +1,8 @@
+schema_version: 1
+id: da-task-update-depends-on
+plan_id: swallowed-errors-loud-atomic
+task_id: ""
+observation: da workflow task update has no --depends-on/--blocks flag; correcting a task's dependency graph requires hand-editing TASKS.yaml (hit while flattening an over-serialized layered-PR plan). Add --depends-on/--blocks to 'workflow task update' so dep edits are CLI-driven.
+classification: proposal
+routed_to: proposal:obs-da-task-update-depends-on.md
+created_at: "2026-07-09T03:00:53Z"
