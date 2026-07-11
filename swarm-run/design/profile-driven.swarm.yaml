@@ -1,18 +1,18 @@
-# PROFILE-DRIVEN inner-loop pipeline (Phase B, item 1) — DRAFT, ready to run.
-# Replaces the go-cli-hardcoded D14 YAML. One YAML handles every app_type:
-# a profile-resolve stage reads the task's app_type and emits the stage plan;
-# fixed max slots (3 verifiers, 4 reviewers) each run their assigned slug or no-op.
+# PROFILE-DRIVEN per-task inner pipeline — one workflow slot, bounded correction loop.
+# This is NOT the N-plan scheduler. Main + da's outer loop owns active-plan discovery,
+# `workflow slots` / `eligible` / conflict-free waves, fanout lineage, delegation
+# lifecycle, serialized canonical-board writes, fold-back/proposal routing, and scoring.
+# One instance handles one task selected by that outer loop. It resolves the task's
+# app_type and runs the configured verifier sequence and reviewer lenses.
 # Fold-back -> executor via pipeline mode (bounded target_count iterations):
 # iteration k reads k-1's gate verdict; on FOLD-BACK the executor re-enters with
 # the reject feedback; on READY, later iterations no-op. Honors layered-pr-fanout
 # §3.1 (verifier-green=eligibility, lens=merge-gate, reject=in_progress bounce).
 #
-# INPUT: TASK=<plan-id>/<task-id> exported before launch (profile-resolve reads it).
-# Coordination on refs/agents/state worktree (.agents/worktrees/_state); code in
-# .agents/worktrees/<slice> off origin/master; owner-held merge; no board mutation
-# by workers (Main reconciles). All per CONVENTIONS.md + phase-b-app-types.md.
+# INPUT: TASK=<plan-id>/<task-id> plus the da delegation/lineage prepared by Main.
+# Workers emit evidence and merge-back drafts. Main alone reconciles plans/tasks.
 swarm:
-  name: da-inner-loop
+  name: da-per-task-profile-pipeline
   workspace: /Users/nikashp/proj-docs/dot-agents
   mode: pipeline
   target_count: 3          # bounded fold-back iterations (fix-loop cap)
@@ -58,7 +58,7 @@ swarm:
       task: "Read CONVENTIONS.md + profile.json. Run lens_set[3] if present (typically cross-harness-adversarial; gated on review-3). DIFFERENT model on purpose (RULE 7). Emit COORD/review-4.md APPROVE|REJECT|SKIP."
 
     gate:
-      role: ready gate + fold-back recorder + ref committer
+      role: ready gate + merge-back/refinement artifact producer
       waits_for: [review_4]
       task: |
         Read CONVENTIONS.md + all COORD verify-*/review-* signals + profile.json.
@@ -67,6 +67,9 @@ swarm:
         (default: pr.open ∧ ci green ∧ sonar ∧ new_violations=0), author merge-back
         (RULE 11 frontmatter), write COORD/READY.md (terminal). Else write
         COORD/GATE.md FOLD-BACK + per-blocker reasons (executor reads it next
-        iteration). NEVER merge (owner-held). NEVER mutate the board (Main
-        reconciles). Collate findings; commit .agents/worktrees/_state ->
-        refs/agents/state via CAS (`git update-ref refs/agents/state <new> <old>`).
+        iteration). Collate candidate task/plan observations and cross-cutting
+        refinement signals into COORD/refinement.md with evidence and stable slugs.
+        NEVER merge. NEVER mutate PLAN/TASKS, run fold-back/proposal commands, or
+        close a delegation. Main serially reconciles those through da after the wave.
+        Commit coordination artifacts to refs/agents/state via CAS
+        (`git update-ref refs/agents/state <new> <old>`).
