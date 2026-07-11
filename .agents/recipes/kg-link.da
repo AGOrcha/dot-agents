@@ -1,0 +1,35 @@
+#!/usr/bin/env -S da run
+# kg-link.da — mechanically record ONE note→code-symbol link, then show the note's links.
+#
+# `kg link add` is a JUDGMENT operation: deciding that note X `documents`/`implements`/
+# `references` symbol Y is not mechanical, so this recipe does NOT auto-link. It is the
+# mechanical EXECUTION of a link the caller (an agent or a skill) has already decided —
+# same shape as scaffold-plan.da: the caller exports the values, the recipe runs the
+# step deterministically and confirms it via `kg link list`.
+#
+# Env vars:
+#   KG_NOTE_ID    the knowledge-note id to link (required). The body is guarded by
+#                 `if set KG_NOTE_ID`, so an unset id is a clean no-op.
+#   KG_SYMBOL     the fully-qualified code symbol, e.g. internal/dashboard/handlers.handleEvents
+#                 (required; quoted below so a symbol with spaces stays one token).
+#   KG_LINK_KIND  optional link kind: mentions | implements | documents | decides | references.
+#                 When unset the recipe omits --kind and `kg link add` applies its default
+#                 (`mentions`) — handled by the `if set` / `if not set` pair below (da-recipe-
+#                 scripts §8 data-driven conditionals; nesting depth cap = 2, honored as if→if).
+#
+# Scope: this recipe is the note→symbol linking step only. Building/refreshing the CODE
+# graph the symbols come from (`kg build` / `kg update`) and rebuilding derived views
+# (`kg postprocess`) are CRG-toolchain-coupled and belong in a SEPARATE follow-on recipe,
+# not here. `kg link add` itself needs no CRG.
+#
+# Requires `da run` (0.5.0+; the 0.4.2 binary lacks it — devs: `go run ./cmd/da run
+# .agents/recipes/kg-link.da`). Directly executable when chmod +x.
+if set KG_NOTE_ID
+  if set KG_LINK_KIND
+    kg link add ${KG_NOTE_ID} "${KG_SYMBOL}" --kind ${KG_LINK_KIND}
+  end
+  if not set KG_LINK_KIND
+    kg link add ${KG_NOTE_ID} "${KG_SYMBOL}"
+  end
+  kg link list ${KG_NOTE_ID}
+end
