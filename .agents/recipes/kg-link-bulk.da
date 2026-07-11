@@ -1,0 +1,32 @@
+#!/usr/bin/env -S da run
+# kg-link-bulk.da — bulk-apply a manifest of note→code-symbol links.
+#
+# The mechanical batch companion to kg-link.da (one link). Which note documents/
+# implements/references which symbol is a JUDGMENT call the caller (an agent or a
+# skill) makes when authoring the manifest; this recipe just executes the batch via
+# `da kg link import`, which applies every valid row (idempotent upsert), reports any
+# bad rows, and exits non-zero if any failed.
+#
+# Manifest format (one link per line, whitespace-separated; `#` comments + blank
+# lines skipped):
+#   <note-id> <qualified-name> [kind]      # kind ∈ mentions|implements|documents|decides|references (default mentions)
+# e.g.:
+#   dec-use-cobra internal/dashboard/handlers.handleEvents documents
+#   src-note       internal/foo.Bar
+#
+# Env vars:
+#   KG_LINK_MANIFEST  path to the manifest file (required). Guarded by
+#                     `if set KG_LINK_MANIFEST` + `if exists` (da-recipe-scripts §8),
+#                     so an unset or missing manifest is a clean no-op (never a bad run).
+#
+# To preview without writing, invoke the command directly with --dry-run —
+# `da run`'s steps do NOT inherit its global -n (clean per-step flag state), so a
+# `da run … --dry-run` would still apply. Preview via the command itself:
+#   da kg link import <manifest> --dry-run
+#
+# Requires `da run` (0.5.0+). Directly executable when chmod +x.
+if set KG_LINK_MANIFEST
+  if exists ${KG_LINK_MANIFEST}
+    kg link import "${KG_LINK_MANIFEST}"
+  end
+end
