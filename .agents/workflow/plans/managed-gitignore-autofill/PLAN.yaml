@@ -1,0 +1,11 @@
+schema_version: 1
+id: managed-gitignore-autofill
+title: Wire D14/R8 managed-gitignore auto-fill for per-platform generated outputs
+status: active
+summary: 'Wire EnsureManagedGitignore into da refresh so per-platform generated/projected outputs (incl. copilot .github/hooks/*.json) land in the dot-agents-managed .gitignore block; retire #381''s ad-hoc root rules and fix the .agentsrc.lock neverIgnored contract violation.'
+created_at: "2026-07-11T18:00:10Z"
+updated_at: "2026-07-11T18:02:00Z"
+owner: dot-agents
+success_criteria: 'da refresh writes/updates a single ''# >>> dot-agents managed (project outputs) >>>'' block containing every enabled platform''s generated outputs; .github/hooks/*.json is ignored via that block (not a root rule); .agentsrc.lock is NOT ignored and is committed; #381''s ad-hoc root rules removed; classify-generated-files-before-cleanup lesson corrected.'
+verification_strategy: go test ./internal/links/... ./internal/platform/... ./commands/... ; dogfood da refresh in a temp project + this repo, assert managed block contents + that git status is clean with hooks ignored and .agentsrc.lock tracked.
+current_focus_task: wire-managed-gitignore-autofill
