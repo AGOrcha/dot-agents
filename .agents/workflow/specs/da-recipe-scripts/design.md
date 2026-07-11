@@ -126,6 +126,13 @@ that matters intact.
   time (before any dispatch) with a `depth cap` error. Rationale: a 1–2 level cap
   keeps a recipe readable and its cost obviously bounded; anything deeper is a
   signal the work wants a skill, not a recipe.
+- **D11 — `da run --dry-run` propagates to every step.** Recipe steps dispatch
+  with clean per-step flag state (a fresh command tree each), so `-n` on the
+  `da run` invocation would not otherwise reach them — a mutating recipe would
+  apply for real. `da run --dry-run <recipe>` now prepends the global `--dry-run`
+  to each dispatched step (`withDryRun`, `commands/run.go`), so the whole recipe
+  previews; steps that ignore `-n` are unaffected (every command accepts the
+  global flag), and a nested `da run` step inherits it transitively.
 
 **Grammar (line-oriented, extends D2):** `for <VAR> in <PATTERN>` / `if [not]
 exists <PATTERN>` / `if [not] set <NAME…>` (all names non-empty) open a block; a lone `end` closes the
