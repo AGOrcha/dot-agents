@@ -177,28 +177,12 @@ func parseBlock(lines []string, start, depth int, opener string) ([]recipeNode, 
 			}
 			return nodes, i + 1, nil
 		}
-		if v, pat, ok := parseForHeader(line); ok {
-			if depth+1 > maxBlockNesting {
-				return nil, 0, fmt.Errorf("recipe %q: block nesting exceeds the depth cap of %d", line, maxBlockNesting)
-			}
-			body, next, err := parseBlock(lines, i+1, depth+1, line)
-			if err != nil {
-				return nil, 0, err
-			}
-			nodes = append(nodes, recipeNode{loop: &loopNode{varName: v, pattern: pat, body: body, srcLine: line}})
-			i = next
-			continue
+		node, next, opened, err := tryOpenBlock(lines, i, depth)
+		if err != nil {
+			return nil, 0, err
 		}
-		if c, ok := parseIfHeader(line); ok {
-			if depth+1 > maxBlockNesting {
-				return nil, 0, fmt.Errorf("recipe %q: block nesting exceeds the depth cap of %d", line, maxBlockNesting)
-			}
-			body, next, err := parseBlock(lines, i+1, depth+1, line)
-			if err != nil {
-				return nil, 0, err
-			}
-			c.body = body
-			nodes = append(nodes, recipeNode{cond: c})
+		if opened {
+			nodes = append(nodes, node)
 			i = next
 			continue
 		}
@@ -209,6 +193,39 @@ func parseBlock(lines []string, start, depth int, opener string) ([]recipeNode, 
 		return nil, 0, fmt.Errorf("recipe %q: unterminated block (missing 'end')", opener)
 	}
 	return nodes, i, nil
+}
+
+// tryOpenBlock recognizes a `for`/`if` header at lines[i]. On a match it parses
+// the block body and returns the assembled node, the index past the block's
+// `end`, opened=true, and any error. A non-header line returns opened=false so
+// the caller dispatches it as a plain command line.
+func tryOpenBlock(lines []string, i, depth int) (recipeNode, int, bool, error) {
+	line := lines[i]
+	if v, pat, ok := parseForHeader(line); ok {
+		body, next, err := openBlockBody(lines, i, depth, line)
+		if err != nil {
+			return recipeNode{}, 0, true, err
+		}
+		return recipeNode{loop: &loopNode{varName: v, pattern: pat, body: body, srcLine: line}}, next, true, nil
+	}
+	if c, ok := parseIfHeader(line); ok {
+		body, next, err := openBlockBody(lines, i, depth, line)
+		if err != nil {
+			return recipeNode{}, 0, true, err
+		}
+		c.body = body
+		return recipeNode{cond: c}, next, true, nil
+	}
+	return recipeNode{}, 0, false, nil
+}
+
+// openBlockBody enforces the nesting cap for the block opened by the header at
+// lines[i] and parses its body (the lines up to the matching `end`).
+func openBlockBody(lines []string, i, depth int, header string) ([]recipeNode, int, error) {
+	if depth+1 > maxBlockNesting {
+		return nil, 0, fmt.Errorf("recipe %q: block nesting exceeds the depth cap of %d", header, maxBlockNesting)
+	}
+	return parseBlock(lines, i+1, depth+1, header)
 }
 
 // parseForHeader recognizes `for <var> in <pattern>`. The pattern is the
