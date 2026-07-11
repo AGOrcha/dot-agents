@@ -12,10 +12,19 @@ master → junk". There are at least three kinds, with opposite correct handling
    iteration-logs, fold-back deferrals, research, verification results) →
    **persist** them (commit), never delete — losing a lesson breaks the
    self-improvement loop.
-3. **Live per-machine generated config/wiring** (hook manifests with absolute
-   `$HOME` paths, lock files) → **neither delete nor archive**; `git clean`
-   strips live wiring until the next `da refresh`. The right hygiene is
-   **gitignore**, because absolute local paths can't be meaningfully tracked.
+3. **Live per-machine generated WIRING** (hook manifests with absolute
+   `$HOME` gate.sh paths) → **neither delete nor archive**; `git clean`
+   strips live wiring until the next `da refresh`. The right hygiene is to
+   **ignore it via the da-managed `.gitignore` block** that `da refresh` writes
+   (`# >>> dot-agents managed (project outputs) >>>`, `internal/links/gitignore.go`),
+   never an ad-hoc root rule — the block is regenerated from the resolved set so
+   the ignore surface converges with what refresh actually materializes.
+4. **Committed resolved-state contract** (`.agentsrc.lock`, the `uv.lock`
+   analog; `.agentsrc.json`) → **TRACK it (commit)**, never ignore. It is a
+   deterministic digest record (not machine-specific wiring), the model depends
+   on it being versioned, and `links.EnsureManagedGitignore` explicitly filters
+   it back OUT of the managed block (`neverIgnored`) so a stray attempt to
+   ignore the lock is a bug, not hygiene.
 
 ## Root cause of the miss
 
@@ -34,8 +43,11 @@ question — the answer was "no, live config," reached only by reading them.
   check master-tracking of its *category dir* (`git ls-tree origin/master`),
   read a sample (config vs telemetry vs stale?), and check mtimes (one-shot
   generated vs accumulated).
-- Distinguish **wiring** (regenerated, per-machine, absolute paths → gitignore)
-  from **telemetry/history** (firing records, outcomes → keep/archive) from
+- Distinguish **per-machine wiring** (regenerated hook manifests, absolute
+  `$HOME` paths → ignore via the da-managed `.gitignore` block, not an ad-hoc
+  root rule) from the **committed resolved-state contract** (`.agentsrc.lock`/
+  `.agentsrc.json` → TRACK; deterministic, `neverIgnored`) from
+  **telemetry/history** (firing records, outcomes → keep/archive) from
   **stale sentinels** (old-session leftovers → archive if historical, else drop).
 - Snapshot first (`git diff --binary > patch`, tar the untracked) so any
   misclassification is reversible.
@@ -45,4 +57,4 @@ question — the answer was "no, live config," reached only by reading them.
 Cleanup checklist before `clean`/`reset`:
 1. `git status --short` + `git diff --binary HEAD > /tmp/dirty.patch`; tar untracked.
 2. For each untracked path: `git ls-tree -r origin/master -- <dir>` (does master track this category?) + read a sample + `ls -lt` (mtime pattern).
-3. Route: on-master-dup → delete; authored-in-tracked-category → commit; per-machine wiring/lock → gitignore; stale history → archive.
+3. Route: on-master-dup → delete; authored-in-tracked-category → commit; committed contract lockfile (`.agentsrc.lock`/`.agentsrc.json`) → commit (never ignore); per-machine wiring → ignore via the da-managed `.gitignore` block; stale history → archive.

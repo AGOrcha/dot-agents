@@ -7,6 +7,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
 	"github.com/AGOrcha/dot-agents/internal/ui"
@@ -263,7 +264,37 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
 		projectFailed = true
 	}
+	if ensureManagedGitignoreForRefresh(path, enabledPlatforms) {
+		projectFailed = true
+	}
 	return projectFailed
+}
+
+// ensureManagedGitignoreForRefresh writes the dot-agents-managed .gitignore
+// block (config-distribution-model §15 / D14 / R8) so every enabled platform's
+// projected/generated repo-local outputs are ignored while the committed
+// .agentsrc.json/.agentsrc.lock contract stays tracked. The output set is
+// collected from the platforms themselves (platform.CollectManagedOutputs), not
+// hardcoded here, so refresh never has to know each platform's surface. It is
+// keyed off the config-enabled set (not install state) so the committed block
+// is byte-stable across machines regardless of which platforms are installed.
+// links.EnsureManagedGitignore regenerates (not appends) a sorted, de-duplicated
+// block and preserves user-authored ignores outside the markers, so re-running
+// refresh is idempotent. Dry-run previews the update without touching the file.
+// Returns true when a non-dry-run write failed so the caller withholds the
+// success stamp.
+func ensureManagedGitignoreForRefresh(path string, enabledPlatforms []platform.Platform) bool {
+	if Flags.DryRun {
+		ui.DryRun("Update dot-agents managed .gitignore block")
+		return false
+	}
+	outputs := platform.CollectManagedOutputs(enabledPlatforms)
+	if err := links.EnsureManagedGitignore(path, outputs); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
+		return true
+	}
+	ui.Bullet("ok", "managed .gitignore block updated")
+	return false
 }
 
 // ensureLockFreshForRefresh runs the §7A.5 lock half (config.EnsureResolved)

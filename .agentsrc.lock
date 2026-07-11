@@ -1,0 +1,36 @@
+{
+  "inputs_digest": "sha256:9c38e287702c09b28d91b918fadd54a7f161cd8099d9b8f80a3fd4758657f294",
+  "lock_version": 1,
+  "units": {
+    "repo-local:execution-profile:docs": {
+      "kind": "profile",
+      "digest": "sha256:784e935a7078d7234dc9edf9d2737f2cd13e0af678ddfbda35a5f78c2a01c5ad",
+      "fetched_at": "2026-07-11T19:04:22Z",
+      "last_checked_at": "2026-07-11T19:04:22Z"
+    },
+    "repo-local:execution-profile:go-cli": {
+      "kind": "profile",
+      "digest": "sha256:9cffbf6ce5f3c2db21ef0086ad60fdaa05d72de3246ac44719740563f445ad4f",
+      "fetched_at": "2026-07-11T19:04:22Z",
+      "last_checked_at": "2026-07-11T19:04:22Z"
+    },
+    "repo-local:execution-profile:ideation": {
+      "kind": "profile",
+      "digest": "sha256:23d8c91d21ebbe59c9acd24063190f0d474aa2c49d747e9f59dc9c0c5b34b777",
+      "fetched_at": "2026-07-11T19:04:22Z",
+      "last_checked_at": "2026-07-11T19:04:22Z"
+    },
+    "repo-local:stage-profile:reviewer": {
+      "kind": "profile",
+      "digest": "sha256:cc6941892370e70763ef189eee6cc6bd2830003a0815bd7843ca79b524882eae",
+      "fetched_at": "2026-07-11T19:04:22Z",
+      "last_checked_at": "2026-07-11T19:04:22Z"
+    },
+    "repo-local:stage-profile:verifier": {
+      "kind": "profile",
+      "digest": "sha256:3481029ba10c79bcb0345d9597c4f3f6cf9a69c5ef3368ccbf5dce1ab68b0842",
+      "fetched_at": "2026-07-11T19:04:22Z",
+      "last_checked_at": "2026-07-11T19:04:22Z"
+    }
+  }
+}
