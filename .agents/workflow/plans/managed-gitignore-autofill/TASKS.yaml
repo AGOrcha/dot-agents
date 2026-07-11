@@ -2,8 +2,8 @@ schema_version: 1
 plan_id: managed-gitignore-autofill
 tasks:
     - id: wire-managed-gitignore-autofill
-      title: Wire EnsureManagedGitignore into da refresh + retire #381 ad-hoc root rules + fix .agentsrc.lock contract
-      status: pending
+      title: Wire EnsureManagedGitignore into da refresh + retire
+      status: completed
       depends_on: []
       blocks: []
       owner: NikashPrakash
@@ -18,7 +18,6 @@ tasks:
         - .agents/lessons/classify-generated-files-before-cleanup/LESSON.md
         - .agents/lessons/index.md
       verification_required: true
-      app_type: go-cli
       notes: |-
         D14/R8 of config-distribution-model/design.md §15. THE gap: internal/links/gitignore.go
         EnsureManagedGitignore(repoRoot, ignorePaths) already writes the idempotent delimited block
@@ -54,3 +53,4 @@ tasks:
         `da refresh` in a temp project + this repo — assert the managed block contains copilot
         .github/hooks/*.json, that `git status` is clean with hooks ignored via the block, that
         .agentsrc.lock is tracked (not ignored), and that re-running refresh is byte-stable. NO AI trailers.
+      app_type: go-cli
