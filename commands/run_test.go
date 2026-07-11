@@ -1070,3 +1070,41 @@ func TestParseNodes_NestedIfDepthCapErrors(t *testing.T) {
 		t.Fatalf("expected depth-cap error via nested if, got: %v", err)
 	}
 }
+
+// ----- --dry-run propagation tests -----
+
+func TestWithDryRun_PrependsDryRunFlag(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	if err := withDryRun(rec.dispatch)([]string{"kg", "link", "import", "m"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertStringSlice(t, rec.calls[0], []string{"--dry-run", "kg", "link", "import", "m"})
+}
+
+func TestNewRunCmd_DryRunFlagPropagatesToEveryStep(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	runCmd := newRunCmd(rec.dispatch)
+	runCmd.Flags().Bool("dry-run", false, "") // stand in for the inherited global -n
+	f := writeTempRecipe(t, "kg warm\nstatus\n")
+	runCmd.SetArgs([]string{"--dry-run", f})
+	if err := runCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	wantCalls := [][]string{
+		{"--dry-run", "kg", "warm"},
+		{"--dry-run", "status"},
+	}
+	assertCallSlice(t, rec.calls, wantCalls)
+}
+
+func TestNewRunCmd_NoDryRunDispatchesUnchanged(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	runCmd := newRunCmd(rec.dispatch)
+	runCmd.Flags().Bool("dry-run", false, "")
+	f := writeTempRecipe(t, "kg warm\n")
+	runCmd.SetArgs([]string{f})
+	if err := runCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"kg", "warm"}})
+}

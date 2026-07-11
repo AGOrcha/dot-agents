@@ -51,15 +51,35 @@ func newRunCmd(dispatch recipeDispatcher) *cobra.Command {
 
 Each non-blank, non-comment line is tokenized (with shell-like single/double
 quote handling) and dispatched in order as a da command. A leading shebang
-line (#!/...) is ignored. No shell is invoked; recipes are cross-platform.`,
+line (#!/...) is ignored. No shell is invoked, so "da run <file>" behaves
+identically on Windows, macOS, and Linux. Direct execution via the
+#!/usr/bin/env -S da run shebang (./recipe.da) is POSIX-only; on Windows,
+run the recipe with "da run <file>".`,
 		Example: ExampleBlock(
-			"  da run path/to/recipe.da",
-			"  ./recipe.da   # if the file is chmod +x with #!/usr/bin/env -S da run",
+			"  da run path/to/recipe.da   # all platforms (Windows, macOS, Linux)",
+			"  ./recipe.da                # POSIX only: chmod +x + #!/usr/bin/env -S da run",
 		),
 		Args: ExactArgsWithHints(1, "Provide the path to a .da recipe file."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runRecipe(args[0], dispatch)
+			d := dispatch
+			if dryRun, _ := cmd.Flags().GetBool("dry-run"); dryRun {
+				d = withDryRun(d)
+			}
+			return runRecipe(args[0], d)
 		},
+	}
+}
+
+// withDryRun wraps a dispatcher so every recipe step is dispatched with the
+// global --dry-run flag prepended. Recipe steps run with clean per-step flag
+// state (defaultDispatcher builds a fresh command tree per step), so without
+// this the -n on `da run --dry-run <recipe>` would NOT reach the steps and a
+// mutating recipe would apply for real. Prepending the global persistent
+// --dry-run makes each step preview; steps that ignore -n are unaffected (every
+// command accepts the flag), and a nested `da run` step inherits it transitively.
+func withDryRun(inner recipeDispatcher) recipeDispatcher {
+	return func(args []string) error {
+		return inner(append([]string{"--dry-run"}, args...))
 	}
 }
 
