@@ -102,6 +102,30 @@ func TestEnsureManagedGitignore_NeverIgnoresCommittedContract(t *testing.T) {
 	}
 }
 
+func TestEnsureManagedGitignore_NeverIgnoredContractSurvivesPatterns(t *testing.T) {
+	root := t.TempDir()
+	// Gitignore GLOBS that would each match a committed-contract file must be
+	// filtered out — the contract holds against patterns, not just exact
+	// literals (BLOCKER 2). A dir-anchored pattern that does NOT match a root
+	// contract file must survive (no false positive).
+	err := links.EnsureManagedGitignore(root, []string{
+		"*.lock", ".agentsrc.*", "/.agentsrc.lock", "**/*.lock", "**/.agentsrc.json",
+		".github/hooks/*.json",
+	})
+	if err != nil {
+		t.Fatalf("EnsureManagedGitignore: %v", err)
+	}
+	section := managedSection(t, readGitignore(t, root))
+	for _, forbidden := range []string{"*.lock", ".agentsrc.*", ".agentsrc.lock", "/.agentsrc.lock", "**/*.lock", "**/.agentsrc.json"} {
+		if strings.Contains(section, "\n"+forbidden+"\n") {
+			t.Errorf("pattern %q would ignore a committed contract file; must be filtered:\n%s", forbidden, section)
+		}
+	}
+	if !strings.Contains(section, ".github/hooks/*.json") {
+		t.Errorf("dir-anchored output pattern must survive (no false positive):\n%s", section)
+	}
+}
+
 func TestEnsureManagedGitignore_ConvergesOnRerun(t *testing.T) {
 	root := t.TempDir()
 	inputs := []string{".cursor/rules", ".claude/", "AGENTS.md"}

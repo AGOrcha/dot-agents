@@ -646,6 +646,11 @@ func (c *copilot) ManagedOutputs() []string {
 		copilotGitHubDir + "/" + copilotHooksDir + "/*.json",
 		copilotVSCodeDir + "/" + copilotMCPJSON,
 		copilotClaudeDir + "/" + copilotSettingsLocalJSON,
+		// Shared skill mirror copilot writes via SharedTargetIntents ->
+		// BuildSharedSkillMirrorIntents(project, copilotAgentsDir/"skills"); also
+		// counted as copilot-managed by CountLinks. Authoritative per
+		// docs/PLATFORM_DIRS_DOCS.md ("GitHub Copilot" impl-audit row).
+		copilotAgentsDir + "/skills/",
 	}
 }
 
