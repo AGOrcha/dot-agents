@@ -650,7 +650,7 @@ func (c *copilot) ManagedOutputs() []string {
 		// BuildSharedSkillMirrorIntents(project, copilotAgentsDir/"skills"); also
 		// counted as copilot-managed by CountLinks. Authoritative per
 		// docs/PLATFORM_DIRS_DOCS.md ("GitHub Copilot" impl-audit row).
-		copilotAgentsDir + "/skills/",
+		copilotAgentsDir + skillsSubdir,
 	}
 }
 

@@ -115,6 +115,10 @@ type ManagedOutputReporter interface {
 // by links.EnsureManagedGitignore, so it is never listed here even though
 // refresh materializes the lock. Platforms with a dynamic surface implement
 // ManagedOutputReporter instead of appearing here (see copilot).
+// skillsSubdir is the repo-relative shared-skills mirror suffix several
+// platforms project; a named const avoids the S1192 duplicate-literal smell.
+const skillsSubdir = "/skills/"
+
 var staticManagedOutputs = map[string][]string{
 	"cursor": {cursorDir + "/", ".cursorrules", ".cursorignore"},
 	"claude": {
@@ -122,10 +126,10 @@ var staticManagedOutputs = map[string][]string{
 		claudeMCPFile,
 		"CLAUDE.md",
 		claudeAgentsBucketDir + "/agents/",
-		claudeAgentsBucketDir + "/skills/",
+		claudeAgentsBucketDir + skillsSubdir,
 	},
-	"codex":       {codexDir + "/", codexAgentsMarkdown, codexAgentsDir + "/skills/"},
-	"opencode":    {opencodeDir + "/", opencodeJSON, opencodeAgentsDir + "/skills/"},
+	"codex":       {codexDir + "/", codexAgentsMarkdown, codexAgentsDir + skillsSubdir},
+	"opencode":    {opencodeDir + "/", opencodeJSON, opencodeAgentsDir + skillsSubdir},
 	"antigravity": {antigravityDir + "/"},
 }
 

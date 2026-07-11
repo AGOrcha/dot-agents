@@ -1440,18 +1440,11 @@ func TestRunRefresh_WritesManagedGitignoreBlock(t *testing.T) {
 		t.Errorf("user-authored ignore not preserved outside markers:\n%s", content)
 	}
 
-	// Copilot's dynamic hook fanout + the always-ignored overlay live inside.
-	for _, want := range []string{".github/hooks/*.json", ".agentsrc.local.json"} {
-		if !strings.Contains(block, want) {
-			t.Errorf("managed block missing %q:\n%s", want, block)
-		}
-	}
-	// The committed resolved-state contract is never ignored (neverIgnored).
-	for _, forbidden := range []string{".agentsrc.lock", ".agentsrc.json"} {
-		if strings.Contains(block, forbidden) {
-			t.Errorf("managed block must not ignore committed contract %q:\n%s", forbidden, block)
-		}
-	}
+	// Copilot's dynamic hook fanout + the always-ignored overlay live inside;
+	// the committed resolved-state contract is never ignored (neverIgnored).
+	assertManagedGitignoreBlock(t, block,
+		[]string{".github/hooks/*.json", ".agentsrc.local.json"},
+		[]string{".agentsrc.lock", ".agentsrc.json"})
 
 	// Byte-stable: a second refresh regenerates the identical file.
 	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
@@ -1463,6 +1456,23 @@ func TestRunRefresh_WritesManagedGitignoreBlock(t *testing.T) {
 	}
 	if string(second) != content {
 		t.Errorf("managed .gitignore not byte-stable across refreshes:\nfirst:\n%s\nsecond:\n%s", content, second)
+	}
+}
+
+// assertManagedGitignoreBlock asserts every wantAll entry is present in the
+// managed block and every wantNone entry is absent. Extracted so its callers
+// stay under the cognitive-complexity gate.
+func assertManagedGitignoreBlock(t *testing.T, block string, wantAll, wantNone []string) {
+	t.Helper()
+	for _, w := range wantAll {
+		if !strings.Contains(block, w) {
+			t.Errorf("managed block missing %q:\n%s", w, block)
+		}
+	}
+	for _, f := range wantNone {
+		if strings.Contains(block, f) {
+			t.Errorf("managed block must not contain %q:\n%s", f, block)
+		}
 	}
 }
 

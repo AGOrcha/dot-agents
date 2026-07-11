@@ -807,19 +807,24 @@ func TestCopilotManagedOutputs_CoversSharedTargets(t *testing.T) {
 	}
 	outs := r.ManagedOutputs()
 	for _, in := range intents {
-		target := strings.ReplaceAll(in.TargetPath, `\`, "/")
-		covered := false
-		for _, o := range outs {
-			dir := strings.TrimSuffix(strings.ReplaceAll(o, `\`, "/"), "/")
-			if target == dir || strings.HasPrefix(target, dir+"/") {
-				covered = true
-				break
-			}
-		}
-		if !covered {
-			t.Errorf("copilot shared-target %q not covered by any ManagedOutputs entry %v; managed .gitignore would leak it", target, outs)
+		if !managedOutputsCover(outs, in.TargetPath) {
+			t.Errorf("copilot shared-target %q not covered by any ManagedOutputs entry %v; managed .gitignore would leak it", in.TargetPath, outs)
 		}
 	}
+}
+
+// managedOutputsCover reports whether some managed-output pattern covers target
+// (an exact dir match or a path under a dir pattern). Extracted to keep the
+// caller under the cognitive-complexity gate.
+func managedOutputsCover(outs []string, target string) bool {
+	target = strings.ReplaceAll(target, `\`, "/")
+	for _, o := range outs {
+		dir := strings.TrimSuffix(strings.ReplaceAll(o, `\`, "/"), "/")
+		if target == dir || strings.HasPrefix(target, dir+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // TestCollectManagedOutputs_ReporterAndStaticBranches covers both arms of
