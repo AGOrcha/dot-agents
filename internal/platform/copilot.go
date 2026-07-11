@@ -629,6 +629,26 @@ func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) 
 	return append(skills, agents...), nil
 }
 
+// ManagedOutputs implements ManagedOutputReporter for copilot: the repo-relative
+// .gitignore patterns for every output `da refresh` projects/generates for the
+// GitHub Copilot platform (config-distribution-model §15 / D14 / R8). Copilot
+// is not a single owned directory like the other platforms — it fans out across
+// .github/ and .vscode/ and renders a per-machine .github/hooks/*.json manifest
+// (createProjectHookFiles via renderCopilotHookFile) whose absolute $HOME
+// gate.sh paths are non-portable, so the hooks must be ignored via the managed
+// block rather than an ad-hoc root rule (retiring the #381 .github/hooks/*.json
+// rule). .claude/settings.local.json is copilot's rendered claude-compat hook
+// settings (createClaudeCompatLinks), also per-machine.
+func (c *copilot) ManagedOutputs() []string {
+	return []string{
+		copilotGitHubDir + "/" + copilotInstructionsMD,
+		copilotGitHubDir + "/agents/",
+		copilotGitHubDir + "/" + copilotHooksDir + "/*.json",
+		copilotVSCodeDir + "/" + copilotMCPJSON,
+		copilotClaudeDir + "/" + copilotSettingsLocalJSON,
+	}
+}
+
 // CountLinks implements LinkCounter for the copilot platform: returns the
 // (ok, broken) tally of managed links under the project's repo. Mirrors the
 // per-platform inline counter that previously lived in status.go's
