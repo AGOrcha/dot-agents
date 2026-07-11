@@ -1,0 +1,169 @@
+swarm:
+  name: da-inner-loop-d14
+  workspace: /Users/nikashp/proj-docs/dot-agents
+  mode: sequential
+  target_count: 1
+  model: claude-opus-4-8
+  agents:
+
+    readiness:
+      role: dot-agents readiness gate (RULE 9 — verify vs canonical ref before impl)
+      task: |
+        Read .agents/worktrees/_state/swarm-run/design/CONVENTIONS.md FIRST. You are the READINESS gate.
+        1. `git -C . fetch origin master`.
+        2. RECONCILE (record, never rescope silently): grep for production callers of
+           `EnsureManagedGitignore` in internal/ + commands/ (confirm it is truly unwired); AND check
+           whether `config-v2-coherence` already shipped a DIFFERENT ".gitignore auto-fill (§6.1)"
+           (search internal/config, commands/config, .agents/workflow/specs/config-v2-coherence,
+           `git log --oneline -- internal/links/gitignore.go`). Decide: is the D14 task still valid as
+           written, or does it need rescoping? Write the verdict.
+        3. KG blast-radius: `da kg impact internal/links/gitignore.go --json` and
+           `da kg impact commands/refresh.go --json` (do NOT call kg build/update/postprocess — broken
+           venv). Summarize impacted surface; if kg impact errors, note it as a finding and continue.
+        4. Create the code worktree OFF origin/master (git -C, never cd):
+           `git -C . worktree add -b swarm/managed-gitignore-autofill .agents/worktrees/d14 origin/master`.
+           If `.venv` exists at repo root, symlink it: `ln -s "$(pwd)/.venv" .agents/worktrees/d14/.venv`.
+        5. Write `.agents/worktrees/_state/active/coordination/readiness.md`: line 1 `READY` or
+           `BLOCKED: <why>`; then the reconciliation verdict, KG impact summary, worktree path + branch,
+           and pointer to swarm-run/research/prior-d14-attempt.patch.
+        Append any da<->omp friction to .agents/worktrees/_state/active/findings/omp-platform-readiness.md.
+
+    impl:
+      role: dot-agents go-cli implementer (executor stage) for the D14/R8 managed-gitignore task
+      waits_for: [readiness]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/readiness.md — if line 1 is not READY, write
+        active/coordination/impl.md with line 1 `SKIP` (reason: gated on readiness) and exit 0.
+        You OWN the .agents/worktrees/d14 worktree (single writer). All code work there via `git -C` /
+        `(cd .agents/worktrees/d14 && …)`. Honor the readiness reconciliation verdict.
+        1. Build da from source: `(cd .agents/worktrees/d14 && go build -o bin/da ./cmd/da)`.
+        2. Implement ALL 5 items from the task notes
+           (.agents/workflow/plans/managed-gitignore-autofill/TASKS.yaml → wire-managed-gitignore-autofill):
+           (a) per-platform generated-output surface (a Platform seam or reuse resource_plan/intent
+           collection — do NOT hardcode paths in refresh.go); (b) wire EnsureManagedGitignore into
+           `da refresh` (one call, idempotent/byte-stable, preserve user ignores outside markers);
+           (c) REMOVE both #381 root .gitignore rules (.github/hooks/*.json AND .agentsrc.lock);
+           (d) .agentsrc.lock is neverIgnored → ensure NOT ignored and COMMIT this repo's .agentsrc.lock;
+           (e) fix the classify-generated-files-before-cleanup lesson (body + index row).
+           Add tests that DRIVE the production path (RULE 7), not line-executors.
+        3. Focused verify in-worktree: `(cd .agents/worktrees/d14 && go build ./... && go vet ./commands/... ./internal/... && go test ./internal/links/... ./internal/platform/... ./commands/...)`.
+        4. Commit on the slice branch, NO AI trailer:
+           `git -C .agents/worktrees/d14 add -A && git -C .agents/worktrees/d14 commit -m "<conventional msg>"`.
+        5. Write active/coordination/impl.md: line 1 `DONE` (or `FAIL: <why>`); list files changed, the
+           commit sha, self-test results, and how each of the 5 items was addressed.
+        Append friction to active/findings/omp-platform-impl.md. prior-d14-attempt.patch is optional reference only.
+
+    verify_unit:
+      role: go-cli `unit` verifier (verifier_sequence[0])
+      waits_for: [impl]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/impl.md — if line 1 != DONE, write
+        active/coordination/verify-unit.md line 1 `SKIP` (gated) and exit 0.
+        Resolve your configured prompt and follow it:
+        `.agents/worktrees/d14/bin/da --json workflow resolve-prompt --kind verifier --slug unit`.
+        Run `(cd .agents/worktrees/d14 && go test -race -count=1 ./internal/links/... ./internal/platform/... ./commands/...)`.
+        MUTATION-VERIFY the new tests: would they fail if the impl were reverted? Reject line-executing
+        or tautological tests. Write active/coordination/verify-unit.md: line 1 `PASS` or `FAIL`; test
+        output digest; mutation-verify judgment; coverage note. Append omp-platform-verify-unit.md.
+
+    verify_cli_runner:
+      role: go-cli `cli-runner` verifier (verifier_sequence[1]) — isolated e2e dogfood
+      waits_for: [verify_unit]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/verify-unit.md — if line 1 != PASS, write
+        active/coordination/verify-cli-runner.md line 1 `SKIP` (gated) and exit 0.
+        Resolve prompt: `.agents/worktrees/d14/bin/da --json workflow resolve-prompt --kind verifier --slug cli-runner`.
+        ISOLATED dogfood (NEVER touch the main tree): make a fresh temp project dir (mktemp -d) with a
+        minimal .agentsrc.json enabling copilot, run the slice-built da (`.agents/worktrees/d14/bin/da refresh`)
+        there, and ASSERT: (1) the `# >>> dot-agents managed (project outputs) >>>` block contains copilot
+        `.github/hooks/*.json`; (2) `git status` is clean with hooks ignored VIA that block; (3) `.agentsrc.lock`
+        is TRACKED (not ignored); (4) re-running `da refresh` is byte-stable (no diff). Write
+        active/coordination/verify-cli-runner.md: line 1 `PASS` or `FAIL`; the 4 assertion results + exact
+        commands used. Append omp-platform-verify-cli-runner.md.
+
+    review_architecture_standards:
+      role: review lens — architecture-standards
+      waits_for: [verify_cli_runner]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/verify-cli-runner.md — if line 1 != PASS, write
+        active/coordination/review-architecture-standards.md line 1 `SKIP` (gated) and exit 0.
+        Resolve prompt: `.agents/worktrees/d14/bin/da --json workflow resolve-prompt --kind reviewer --slug architecture-standards`.
+        Review READ-ONLY: `git -C .agents/worktrees/d14 diff origin/master` + read changed files. Judge the
+        change against architecture standards (the per-platform output seam design, single EnsureManagedGitignore
+        call, neverIgnored contract respected, no hardcoded paths). Write
+        active/coordination/review-architecture-standards.md: line 1 `APPROVE` or `REJECT`; findings.
+        Append omp-platform-review-architecture-standards.md.
+
+    review_acceptance_invariants:
+      role: review lens — acceptance-invariants (gated on architecture-standards)
+      waits_for: [review_architecture_standards]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/review-architecture-standards.md — if line 1 is
+        REJECT or SKIP, write active/coordination/review-acceptance-invariants.md line 1 `SKIP`
+        (reason: gated upstream lens) and exit 0. Else resolve prompt (--kind reviewer --slug
+        acceptance-invariants) and review READ-ONLY that the task's acceptance criteria are actually met
+        (managed block contains hooks, .agentsrc.lock tracked, byte-stable refresh, lesson corrected,
+        both #381 root rules removed). Write review-acceptance-invariants.md: line 1 APPROVE|REJECT + findings.
+        Append omp-platform-review-acceptance-invariants.md.
+
+    review_adversarial:
+      role: review lens — adversarial (gated on acceptance-invariants)
+      waits_for: [review_acceptance_invariants]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/review-acceptance-invariants.md — if REJECT/SKIP,
+        write active/coordination/review-adversarial.md line 1 `SKIP` (gated) and exit 0. Else resolve
+        prompt (--kind reviewer --slug adversarial) and adversarially probe: edge cases (no platforms
+        enabled, pre-existing user .gitignore content, .github/hooks absent), idempotency corner cases,
+        whether the neverIgnored contract can be bypassed, test gaps. Write review-adversarial.md: line 1
+        APPROVE|REJECT + the specific holes. Append omp-platform-review-adversarial.md.
+
+    review_cross_harness_adversarial:
+      role: CROSS-HARNESS adversarial reviewer (different model — the reliable catch, RULE 7)
+      waits_for: [review_adversarial]
+      model: gpt-5.4
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/review-adversarial.md — if REJECT/SKIP, write
+        active/coordination/review-cross-harness-adversarial.md line 1 `SKIP` (gated) and exit 0.
+        You run on a DIFFERENT model than the implementer ON PURPOSE — catch what same-model review
+        rubber-stamps. Resolve prompt (--kind reviewer --slug cross-harness-adversarial). READ-ONLY.
+        Focus: (1) MUTATION-VERIFY — for each new test, would it fail if the production impl were reverted?
+        Flag tautological / lifecycle-hand-driven / callable-but-uncalled tests. (2) Does the code DRIVE
+        the production path (da refresh actually calls the new collection+EnsureManagedGitignore)? (3)
+        new_duplicated_lines_density risk. (4) the neverIgnored .agentsrc.lock contract genuinely holds.
+        Write review-cross-harness-adversarial.md: line 1 APPROVE|REJECT + the blocking findings.
+        Append omp-platform-review-cross-harness-adversarial.md (note diff-model review ergonomics).
+
+    ready_gate:
+      role: READY gate + coordination-ref committer (owner-held merge; no board mutation)
+      waits_for: [review_cross_harness_adversarial]
+      task: |
+        Read CONVENTIONS.md. Read active/coordination/{impl,verify-unit,verify-cli-runner,
+        review-architecture-standards,review-acceptance-invariants,review-adversarial,
+        review-cross-harness-adversarial}.md.
+        IF impl==DONE and both verify==PASS and ALL 4 reviews==APPROVE:
+          1. Push + open PR (NO AI trailer): `git -C .agents/worktrees/d14 push -u origin
+             swarm/managed-gitignore-autofill`; `gh pr create --repo AGOrcha/dot-agents --base master
+             --head swarm/managed-gitignore-autofill --title "feat(config): wire D14/R8 managed-gitignore
+             auto-fill" --body "<summary of the 5 items; fixes #381 ad-hoc rules + .agentsrc.lock contract>"`.
+          2. Poll CI to green (`gh run watch` on the branch's run) and assert the go-cli DEFAULT gate:
+             PR open ∧ CI rollup green ∧ SonarCloud quality gate ∧ new_code_issues==0
+             (`gh pr checks <n>` + SonarCloud PR API `/api/qualitygates/project_status?pullRequest=<n>`).
+          3. Author the merge-back artifact with FULL schema_version=1 frontmatter (RULE 11) at
+             .agents/worktrees/_state/active/merge-back/wire-managed-gitignore-autofill.md (schema_version,
+             task_id, title, summary, files_changed [] or block list, result{status,summary},
+             integration_notes, created_at quoted RFC3339; block scalars |- for text with ': ').
+          4. Write active/coordination/READY.md line 1:
+             `PR #<n> · READY · <N>/<N> checks · gate OK · new_code_issues 0` + the run URL.
+          Do NOT merge (owner-held). Do NOT run `da workflow advance/closeout/merge-back` (0.4.2 store race —
+          the human orchestrator reconciles the board after the owner merges).
+        ELSE: write active/coordination/FOLD-BACK.md with each blocking verdict + the failing stage's detail.
+        THEN ALWAYS:
+          5. Collate active/findings/omp-platform-*.md → active/findings/CONSOLIDATED.md (findings for
+             omp-platform-handling, git-ref-work-backend D9/D10 manual operation, and the execution-profile
+             ↔ swarm mapping — INCLUDING the recorded divergence: lens_concurrency `gated` was realized as a
+             sequential lens chain with defensive upstream-verdict SKIP, since the swarm has no native
+             short-circuit).
+          6. Commit the coordination ref: `git -C .agents/worktrees/_state add -A && git -C
+             .agents/worktrees/_state commit -m "swarm run da-inner-loop-d14: coordination + findings"` then
+             `git update-ref refs/agents/state $(git -C .agents/worktrees/_state rev-parse HEAD)`.
+        Append omp-platform-ready-gate.md.
