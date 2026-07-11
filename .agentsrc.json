@@ -133,6 +133,95 @@
           ],
           "lens_concurrency": "parallel"
         }
+      },
+      "web": {
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 2,
+          "reviewers": "per_verifier",
+          "verifier_sequence": [
+            "unit",
+            "integration",
+            "ui-e2e"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants",
+            "adversarial",
+            "cross-harness-adversarial",
+            "web-a11y"
+          ],
+          "lens_concurrency": "gated"
+        }
+      },
+      "docs/web": {
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 1,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "citation-check",
+            "link-check",
+            "build-site"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants"
+          ],
+          "lens_concurrency": "parallel"
+        }
+      },
+      "meta": {
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 1,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "pipeline-lint",
+            "eval-fidelity"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants",
+            "adversarial",
+            "scientific-method-fidelity"
+          ],
+          "lens_concurrency": "gated"
+        }
+      },
+      "daemon": {
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 2,
+          "reviewers": "per_verifier",
+          "verifier_sequence": [
+            "unit",
+            "race",
+            "integration",
+            "comms-contract",
+            "auth-proxy-security",
+            "kg-integration",
+            "load-soak"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "adversarial",
+            "cross-harness-adversarial",
+            "concurrency-safety",
+            "security"
+          ],
+          "lens_concurrency": "gated"
+        }
       }
     },
     "default_class": "situational"
@@ -215,6 +304,94 @@
           "verifiers/unit.md",
           "verifiers/unit.project.md"
         ]
+      },
+      "integration": {
+        "label": "Integration (http/API)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/integration.md",
+          "verifiers/integration.project.md"
+        ]
+      },
+      "ui-e2e": {
+        "label": "UI e2e (browser, proof-capture)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/ui-e2e.md",
+          "verifiers/ui-e2e.project.md"
+        ]
+      },
+      "link-check": {
+        "label": "Link check (docs)",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/link-check.md",
+          "verifiers/link-check.project.md"
+        ]
+      },
+      "build-site": {
+        "label": "Docs-site build",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/build-site.md",
+          "verifiers/build-site.project.md"
+        ]
+      },
+      "pipeline-lint": {
+        "label": "Pipeline/agent-def lint",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/pipeline-lint.md",
+          "verifiers/pipeline-lint.project.md"
+        ]
+      },
+      "eval-fidelity": {
+        "label": "Eval/experiment fidelity",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/eval-fidelity.md",
+          "verifiers/eval-fidelity.project.md"
+        ]
+      },
+      "race": {
+        "label": "Race detector",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/race.md",
+          "verifiers/race.project.md"
+        ]
+      },
+      "comms-contract": {
+        "label": "HBHF comms contract",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/comms-contract.md",
+          "verifiers/comms-contract.project.md"
+        ]
+      },
+      "auth-proxy-security": {
+        "label": "Auth-proxy + secure handling",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/auth-proxy-security.md",
+          "verifiers/auth-proxy-security.project.md"
+        ]
+      },
+      "kg-integration": {
+        "label": "KG integration",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/kg-integration.md",
+          "verifiers/kg-integration.project.md"
+        ]
+      },
+      "load-soak": {
+        "label": "Load/soak",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/load-soak.md",
+          "verifiers/load-soak.project.md"
+        ]
       }
     },
     "reviewer": {
@@ -248,6 +425,38 @@
           "reviewers/reviewer.base.md",
           "reviewers/cross-harness-adversarial.md",
           "reviewers/cross-harness-adversarial.project.md"
+        ]
+      },
+      "web-a11y": {
+        "label": "Web accessibility lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/web-a11y.md",
+          "reviewers/web-a11y.project.md"
+        ]
+      },
+      "scientific-method-fidelity": {
+        "label": "Scientific-method / fidelity lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/scientific-method-fidelity.md",
+          "reviewers/scientific-method-fidelity.project.md"
+        ]
+      },
+      "concurrency-safety": {
+        "label": "Concurrency-safety lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/concurrency-safety.md",
+          "reviewers/concurrency-safety.project.md"
+        ]
+      },
+      "security": {
+        "label": "Security lens",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/security.md",
+          "reviewers/security.project.md"
         ]
       }
     }
