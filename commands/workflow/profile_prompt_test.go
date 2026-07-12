@@ -89,7 +89,20 @@ func TestDecodeProfileModelRoute(t *testing.T) {
 		t.Fatalf("route = %q/%q, want gpt-5.4/gpt", model, family)
 	}
 	if model, family := decodeProfileModelRoute(raw, profileKindReviewer, "ghost"); model != "" || family != "" {
-		t.Fatalf("missing route = %q/%q, want empty", model, family)
+		t.Fatalf("missing slug route = %q/%q, want empty", model, family)
+	}
+	// missing stage map
+	if model, family := decodeProfileModelRoute(raw, profileKindVerifier, "unit"); model != "" || family != "" {
+		t.Fatalf("missing stage route = %q/%q, want empty", model, family)
+	}
+	// no stage_profiles key at all
+	if model, family := decodeProfileModelRoute(map[string]any{}, profileKindReviewer, "x"); model != "" || family != "" {
+		t.Fatalf("absent stage_profiles route = %q/%q, want empty", model, family)
+	}
+	// present profile with no model/family fields → empty strings, still matched elsewhere
+	partial := map[string]any{"stage_profiles": map[string]any{"verifier": map[string]any{"unit": map[string]any{"label": "U"}}}}
+	if model, family := decodeProfileModelRoute(partial, profileKindVerifier, "unit"); model != "" || family != "" {
+		t.Fatalf("model-less profile route = %q/%q, want empty", model, family)
 	}
 }
 
