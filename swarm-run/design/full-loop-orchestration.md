@@ -176,3 +176,10 @@ This split uses da's existing plan store and lifecycle semantics as the source o
 - `commands/workflow/eligible_accounting.go`, `delegation.go`, `types.go`, `cmd.go`, `prefs.go`
 - `swarm-run/research/loop-slots-nplan.md`
 - `swarm-run/research/loop-metaloop-foldback.md`
+
+## Implementation status — LANDED (#389, master b83189a5)
+- Explicit per-stage model routing (`model`/`model_family` on StageProfile + schema + resolve-prompt); Claude-family volume, GPT-family blocking cross-family lens; docs de-Codex-harnessed.
+- Runtime under `.agents/workflow/runtime/full-loop/`: per-task `profile-driven.swarm.yaml` (7 verifier + 4 routine + 1 GPT cross-family slots) + sequential `reconcile.swarm.yaml`.
+- N-plan driver `bin/tests/omp-full-loop` (+ test): slots/eligible/max_batch/fanout waves, barrier, reconcile; crash/stale-lock/fanout-refusal recovery; no vendor CLI.
+- Canonical plan `full-loop-orchestration-runtime`: 6/7 tasks complete; `migrate-workflow-state-ref` stays pending, cross-plan-gated on `git-ref-work-backend/document-and-default-git-ref`.
+- Temporary `.agents/active/state-ref-transition.md`: worktree state canonical, ref coordination-only until git-ref backend ships.
