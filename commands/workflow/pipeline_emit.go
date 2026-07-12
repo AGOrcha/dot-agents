@@ -159,6 +159,15 @@ func runWorkflowPipelineEmit(cmd *cobra.Command, platformID, appType, plan strin
 		return renderPipelineEmit(cmd, result, true)
 	}
 
+	if err := writePipelineArtifacts(outDir, artifacts); err != nil {
+		return err
+	}
+	return renderPipelineEmit(cmd, result, false)
+}
+
+// writePipelineArtifacts materializes the emitted artifacts under outDir,
+// creating the runtime directory first.
+func writePipelineArtifacts(outDir string, artifacts []platform.PipelineArtifact) error {
 	if err := fsops.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create runtime dir %s: %w", outDir, err)
 	}
@@ -168,7 +177,7 @@ func runWorkflowPipelineEmit(cmd *cobra.Command, platformID, appType, plan strin
 			return fmt.Errorf("write %s: %w", target, err)
 		}
 	}
-	return renderPipelineEmit(cmd, result, false)
+	return nil
 }
 
 func renderPipelineEmit(cmd *cobra.Command, result pipelineEmitResult, dryRun bool) error {

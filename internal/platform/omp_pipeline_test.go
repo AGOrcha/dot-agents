@@ -96,6 +96,30 @@ func TestOMPEmitMatchesCheckedInSemantics(t *testing.T) {
 	}
 	checked := mustParseSwarm(t, string(raw))
 
+	assertInnerSwarmSemantics(t, emitted, checked)
+
+	// Reconcile YAML semantics.
+	rawR, err := os.ReadFile("../../.agents/workflow/runtime/full-loop/reconcile.swarm.yaml")
+	if err != nil {
+		t.Fatalf("read checked-in reconcile YAML: %v", err)
+	}
+	emittedR := mustParseSwarm(t, arts[1].Content)
+	checkedR := mustParseSwarm(t, string(rawR))
+	if emittedR.Swarm.Mode != checkedR.Swarm.Mode || emittedR.Swarm.Model != checkedR.Swarm.Model {
+		t.Fatalf("reconcile semantics differ: emit mode=%q model=%q checked mode=%q model=%q",
+			emittedR.Swarm.Mode, emittedR.Swarm.Model, checkedR.Swarm.Mode, checkedR.Swarm.Model)
+	}
+	if len(emittedR.Swarm.Agents) != 1 || emittedR.Swarm.Agents["reconcile"].Model == "" {
+		t.Fatalf("reconcile agents = %v", emittedR.Swarm.Agents)
+	}
+}
+
+// assertInnerSwarmSemantics checks the emitted inner swarm agrees with the
+// checked-in YAML on name, mode, target_count, model, and per-agent model +
+// waits_for topology (the workspace path and generated header are documented
+// deltas and are not compared here).
+func assertInnerSwarmSemantics(t *testing.T, emitted, checked swarmDoc) {
+	t.Helper()
 	if emitted.Swarm.Name != checked.Swarm.Name {
 		t.Fatalf("name: emit=%q checked=%q", emitted.Swarm.Name, checked.Swarm.Name)
 	}
@@ -122,21 +146,6 @@ func TestOMPEmitMatchesCheckedInSemantics(t *testing.T) {
 		if strings.Join(got.WaitsFor, ",") != strings.Join(want.WaitsFor, ",") {
 			t.Fatalf("agent %q waits_for: emit=%v checked=%v", name, got.WaitsFor, want.WaitsFor)
 		}
-	}
-
-	// Reconcile YAML semantics.
-	rawR, err := os.ReadFile("../../.agents/workflow/runtime/full-loop/reconcile.swarm.yaml")
-	if err != nil {
-		t.Fatalf("read checked-in reconcile YAML: %v", err)
-	}
-	emittedR := mustParseSwarm(t, arts[1].Content)
-	checkedR := mustParseSwarm(t, string(rawR))
-	if emittedR.Swarm.Mode != checkedR.Swarm.Mode || emittedR.Swarm.Model != checkedR.Swarm.Model {
-		t.Fatalf("reconcile semantics differ: emit mode=%q model=%q checked mode=%q model=%q",
-			emittedR.Swarm.Mode, emittedR.Swarm.Model, checkedR.Swarm.Mode, checkedR.Swarm.Model)
-	}
-	if len(emittedR.Swarm.Agents) != 1 || emittedR.Swarm.Agents["reconcile"].Model == "" {
-		t.Fatalf("reconcile agents = %v", emittedR.Swarm.Agents)
 	}
 }
 

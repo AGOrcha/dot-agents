@@ -117,18 +117,14 @@ func (s PipelineSpec) Validate() error {
 	if len(s.Verifiers) > maxPipelineVerifiers {
 		return fmt.Errorf("pipeline spec: %d verifiers exceeds cap %d (craft §4: BLOCK, never truncate)", len(s.Verifiers), maxPipelineVerifiers)
 	}
-	for i, v := range s.Verifiers {
-		if err := v.validate(fmt.Sprintf("verifier slot %d", i+1)); err != nil {
-			return err
-		}
+	if err := validateStageRoutes(s.Verifiers, "verifier"); err != nil {
+		return err
 	}
 	if len(s.RoutineLenses) > maxPipelineRoutineLenses {
 		return fmt.Errorf("pipeline spec: %d routine lenses exceeds cap %d (craft §4: BLOCK, never truncate)", len(s.RoutineLenses), maxPipelineRoutineLenses)
 	}
-	for i, l := range s.RoutineLenses {
-		if err := l.validate(fmt.Sprintf("routine lens slot %d", i+1)); err != nil {
-			return err
-		}
+	if err := validateStageRoutes(s.RoutineLenses, "routine lens"); err != nil {
+		return err
 	}
 	if s.CrossFamily != nil {
 		if err := s.CrossFamily.validate("cross-family lens"); err != nil {
@@ -136,6 +132,17 @@ func (s PipelineSpec) Validate() error {
 		}
 		if s.CrossFamily.ModelFamily == s.Executor.ModelFamily {
 			return fmt.Errorf("pipeline spec: cross-family lens family %q must differ from executor family %q (craft §2 RULE-7)", s.CrossFamily.ModelFamily, s.Executor.ModelFamily)
+		}
+	}
+	return nil
+}
+
+// validateStageRoutes refuses any route in the slot group whose model or
+// model_family is empty, labelling the offending slot 1-indexed within the group.
+func validateStageRoutes(routes []StageRoute, label string) error {
+	for i, r := range routes {
+		if err := r.validate(fmt.Sprintf("%s slot %d", label, i+1)); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -242,21 +249,7 @@ func BuildPipelineSpec(workspace, appType string, stageProfiles map[string]map[s
 	}
 
 	if spec.AppType == "" {
-		// Maximal skeleton: every verify/routine slot carries the executor route
-		// (runtime profile_resolve binds concrete verifier/lens routes per task),
-		// and the cross-family gate is always present.
-		for range maxPipelineVerifiers {
-			spec.Verifiers = append(spec.Verifiers, executor)
-		}
-		for range maxPipelineRoutineLenses {
-			spec.RoutineLenses = append(spec.RoutineLenses, executor)
-		}
-		cross, err := resolveCrossFamily(stageProfiles, executor)
-		if err != nil {
-			return PipelineSpec{}, err
-		}
-		spec.CrossFamily = cross
-		return spec, nil
+		return buildSkeletonSpec(spec, stageProfiles)
 	}
 
 	if ep == nil || len(ep.ByAppType) == 0 {
@@ -266,22 +259,11 @@ func BuildPipelineSpec(workspace, appType string, stageProfiles map[string]map[s
 	if !ok {
 		return PipelineSpec{}, fmt.Errorf("execution_profile.by_app_type has no entry for app_type %q", spec.AppType)
 	}
-	if len(prof.Topology.VerifierSequence) == 0 {
-		return PipelineSpec{}, fmt.Errorf("app_type %q topology declares no verifier_sequence", spec.AppType)
+	verifiers, err := resolveVerifierRoutes(stageProfiles, prof.Topology.VerifierSequence, spec.AppType)
+	if err != nil {
+		return PipelineSpec{}, err
 	}
-	if len(prof.Topology.VerifierSequence) > maxPipelineVerifiers {
-		return PipelineSpec{}, fmt.Errorf("app_type %q verifier_sequence has %d entries, exceeds cap %d (craft §4: BLOCK)", spec.AppType, len(prof.Topology.VerifierSequence), maxPipelineVerifiers)
-	}
-	for _, slug := range prof.Topology.VerifierSequence {
-		route, ok := lookupStageRoute(stageProfiles, stageVerifier, slug)
-		if !ok {
-			return PipelineSpec{}, fmt.Errorf("app_type %q verifier %q has no stage_profiles.verifier entry", spec.AppType, slug)
-		}
-		if err := route.validate(fmt.Sprintf("verifier %q", slug)); err != nil {
-			return PipelineSpec{}, err
-		}
-		spec.Verifiers = append(spec.Verifiers, route)
-	}
+	spec.Verifiers = verifiers
 
 	routine, cross, err := resolveLensRoutes(stageProfiles, prof.Lenses.LensSet, executor, spec.AppType)
 	if err != nil {
@@ -290,6 +272,48 @@ func BuildPipelineSpec(workspace, appType string, stageProfiles map[string]map[s
 	spec.RoutineLenses = routine
 	spec.CrossFamily = cross
 	return spec, nil
+}
+
+// buildSkeletonSpec fills the maximal app_type-agnostic skeleton: every verify
+// and routine slot carries the executor route (runtime profile_resolve binds the
+// concrete per-task routes) and the cross-family gate is always present.
+func buildSkeletonSpec(spec PipelineSpec, stageProfiles map[string]map[string]config.StageProfile) (PipelineSpec, error) {
+	for range maxPipelineVerifiers {
+		spec.Verifiers = append(spec.Verifiers, spec.Executor)
+	}
+	for range maxPipelineRoutineLenses {
+		spec.RoutineLenses = append(spec.RoutineLenses, spec.Executor)
+	}
+	cross, err := resolveCrossFamily(stageProfiles, spec.Executor)
+	if err != nil {
+		return PipelineSpec{}, err
+	}
+	spec.CrossFamily = cross
+	return spec, nil
+}
+
+// resolveVerifierRoutes resolves an app_type's verifier_sequence into explicit
+// verifier routes in declared order, enforcing the ≤7 cap (craft §4: BLOCK,
+// never truncate) and refusing an unmapped or empty-route slug.
+func resolveVerifierRoutes(stageProfiles map[string]map[string]config.StageProfile, sequence []string, appType string) ([]StageRoute, error) {
+	if len(sequence) == 0 {
+		return nil, fmt.Errorf("app_type %q topology declares no verifier_sequence", appType)
+	}
+	if len(sequence) > maxPipelineVerifiers {
+		return nil, fmt.Errorf("app_type %q verifier_sequence has %d entries, exceeds cap %d (craft §4: BLOCK)", appType, len(sequence), maxPipelineVerifiers)
+	}
+	var verifiers []StageRoute
+	for _, slug := range sequence {
+		route, ok := lookupStageRoute(stageProfiles, stageVerifier, slug)
+		if !ok {
+			return nil, fmt.Errorf("app_type %q verifier %q has no stage_profiles.verifier entry", appType, slug)
+		}
+		if err := route.validate(fmt.Sprintf("verifier %q", slug)); err != nil {
+			return nil, err
+		}
+		verifiers = append(verifiers, route)
+	}
+	return verifiers, nil
 }
 
 // resolveLensRoutes partitions an app_type's lens_set into routine lens routes
