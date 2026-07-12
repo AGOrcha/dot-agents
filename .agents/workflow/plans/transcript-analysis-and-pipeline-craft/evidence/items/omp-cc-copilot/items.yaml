@@ -1,0 +1,370 @@
+# Evidence items — omp-cc-copilot corpus (harness: omp, claude-code, copilot)
+# Built per evidence-rubric.md §2 (E1-E5) + §2b (R1-R5). Digests = sha256 of raw anchored line(s).
+# R5: sensitive sessions contribute aggregate counts only (no excerpt).
+items:
+  - item_id: "omp-usagelimit-zero-output-failure"
+    claim: "OMP session 019f3cbc produced zero productive output: both of its 2 assistant turns terminated without tokens — one aborted by the user, the next erroring with codex usage_limit_reached — before the session was disposed."
+    class: failure
+    anchors:
+      - ref: "omp:2026-07-07T13-19-53-265Z_019f3cbc-2db0-7000-a699-bfbf1274aa01:019f3cbc-2db0-7000-a699-bfbf1274aa01#L9"
+        digest: "sha256:0320bbf04214de1eda331c5133a9392f4cb878f4e9a1fa717c4a76fa6adeeee0"
+        excerpt: "role=assistant usage.totalTokens=0 stopReason=aborted errorMessage=\"Interrupted by user\""
+      - ref: "omp:2026-07-07T13-19-53-265Z_019f3cbc-2db0-7000-a699-bfbf1274aa01:019f3cbc-2db0-7000-a699-bfbf1274aa01#L12"
+        digest: "sha256:8b36655070557c8411698bf990070961683ca610b6472c305fe029b32a15b673"
+        excerpt: "role=assistant usage.totalTokens=0 stopReason=error errorMessage=\"Codex error event: The usage limit has been reached (code=usage_limit_reached)\" duration=1154ms"
+      - ref: "omp:2026-07-07T13-19-53-265Z_019f3cbc-2db0-7000-a699-bfbf1274aa01:019f3cbc-2db0-7000-a699-bfbf1274aa01#L13"
+        digest: "sha256:11084a5f610551ee4c41682ebfe33cc0e5b192f916760c0978cb9a8084ff9c43"
+        excerpt: "custom session_exit reason=dispose kind=normal"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-provider-model-switch-midsession"
+    claim: "OMP sessions switch model/provider mid-session via model_change records: 019f3cbc flipped from anthropic/claude-opus-4-8 to openai-codex/gpt-5.4 seconds after start; sensitive OMP sessions show 3-6 distinct models per run."
+    class: mechanism
+    anchors:
+      - ref: "omp:2026-07-07T13-19-53-265Z_019f3cbc-2db0-7000-a699-bfbf1274aa01:019f3cbc-2db0-7000-a699-bfbf1274aa01#L6"
+        digest: "sha256:af9ff84f49aa9207f1ef2471fa72776b5a9e1ff89adedc34c6a659664fe1ced4"
+        excerpt: "model_change model=\"openai-codex/gpt-5.4\" role=\"default\" (prior record L3 = anthropic/claude-opus-4-8)"
+      - ref: "omp:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02#L3"
+        digest: "sha256:0dea6ecaf5ac7a21185ae18d445c3c145b4e8d2db09f27d315f06a66029d8eea"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+      - ref: "omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9#L3"
+        digest: "sha256:86f30b50d05feb61854e74f052c82773b979d13d0eaf2b79653d7130aee73250"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-cost-totals-019f3cf2"
+    claim: "OMP session 019f3cf2 (07-07T14-19 dot-agents, complete): 353 assistant turns, 88,877,412 total tokens, $40.75 cost (input $3.74 / output $3.32 / cacheRead $26.34 / cacheWrite $7.35); cacheRead tokens 85,882,324 = 97% of tokens and 65% of dollar cost."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9#L1"
+        digest: "sha256:5299ac125280b40cfaaca785bef2573079797f04ab73ab2b8e4164ea898290ec"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-cost-totals-019f3f23"
+    claim: "OMP session 019f3f23 (07-08 payout, complete): 1457 assistant turns, 707,823,313 total tokens, $491.84 cost (input $3.41 / output $75.02 / cacheRead $339.24 / cacheWrite $74.17); cacheRead tokens 691,620,449 = 98% of tokens and 69% of dollar cost."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-08T00-32-22-093Z_019f3f23-da4d-7000-8465-d94a0d720d5b:019f3f23-da4d-7000-8465-d94a0d720d5b#L1"
+        digest: "sha256:40275b3eea2d4e42035ee6dd5814807e41a8383c75887fd19b54d48d208f6f3d"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-cost-totals-019f4eda"
+    claim: "OMP session 019f4eda (07-11T01-46 payout, cutoff): 341 assistant turns, 104,872,253 total tokens, $81.78 cost (input $0.17 / output $8.67 / cacheRead $50.45 / cacheWrite $22.50); cacheRead tokens 100,892,159 = 96% of tokens and 62% of dollar cost."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-11T01-46-34-249Z_019f4eda-dd88-7000-b275-af8a46192d29:019f4eda-dd88-7000-b275-af8a46192d29#L1"
+        digest: "sha256:018a218ccf38823639c702d0d0175e375408c00b5688c97683b32660d63485c1"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-cost-totals-019f4eea"
+    claim: "OMP session 019f4eea (07-11T02-03 dot-agents, cutoff): 981 assistant turns, 405,390,538 total tokens, $319.66 cost (input $15.88 / output $30.16 / cacheRead $202.57 / cacheWrite $71.05); cacheRead tokens 390,224,170 = 96% of tokens and 63% of dollar cost."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02#L1"
+        digest: "sha256:0fa32eda74bb2edccf517c4ae5a9f93f93d06dd37c55aad73c5b3902d4d0c111"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cost-cacheread-dominates-context"
+    claim: "Cache-read dwarfs fresh input in long agent turns: a mid-run CC turn (1699c371 L28) billed input_tokens=2 against cache_read=28,175 + cache_creation=10,726; across all 4 sensitive OMP mega-sessions cacheRead is 96-98% of tokens and 61-69% of dollar cost."
+    class: cost
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L28"
+        digest: "sha256:e43e2776222d1921a554ec4b0028d2196cce1d0e8fbe03ed7a3eeb04422cfb41"
+        excerpt: "usage input_tokens=2 cache_read_input_tokens=28175 cache_creation_input_tokens=10726 output_tokens=556"
+      - ref: "omp:2026-07-08T00-32-22-093Z_019f3f23-da4d-7000-8465-d94a0d720d5b:019f3f23-da4d-7000-8465-d94a0d720d5b#L1"
+        digest: "sha256:40275b3eea2d4e42035ee6dd5814807e41a8383c75887fd19b54d48d208f6f3d"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-cost-cursor-routed-zero-dollar"
+    claim: "In OMP session 019f3cf2 the cursor-routed model turns recorded $0.00 cost (gpt-5.4-high 5 turns/146,909 tok $0.00; glm-5.2-high, claude-sonnet-5-high, gpt-5.5-medium 1 turn each $0.00) while codex/anthropic-routed turns did bill (gpt-5.4 $22.03; claude-opus-4-8 $18.72) — i.e. dollar cost is only recorded for some provider routes."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9#L1"
+        digest: "sha256:5299ac125280b40cfaaca785bef2573079797f04ab73ab2b8e4164ea898290ec"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: medium
+    inference_flags: ["provider->cost-attribution causal link inferred from per-model cost=0"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-session-exit-distribution"
+    claim: "Of the 5 OMP sessions, exit outcomes split: 1 disposed normally after a usage-limit error (019f3cbc), 2 ended on an OS signal/SIGHUP with pending tool calls, and 2 have no session_exit record at all (true cutoffs); the 2 signal exits were recorded ~2s apart (01:06:39.810Z and 01:06:41.648Z)."
+    class: failure
+    anchors:
+      - ref: "omp:2026-07-07T13-19-53-265Z_019f3cbc-2db0-7000-a699-bfbf1274aa01:019f3cbc-2db0-7000-a699-bfbf1274aa01#L13"
+        digest: "sha256:11084a5f610551ee4c41682ebfe33cc0e5b192f916760c0978cb9a8084ff9c43"
+        excerpt: "custom session_exit reason=dispose kind=normal"
+      - ref: "omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9#L1"
+        digest: "sha256:5299ac125280b40cfaaca785bef2573079797f04ab73ab2b8e4164ea898290ec"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+      - ref: "omp:2026-07-08T00-32-22-093Z_019f3f23-da4d-7000-8465-d94a0d720d5b:019f3f23-da4d-7000-8465-d94a0d720d5b#L1"
+        digest: "sha256:40275b3eea2d4e42035ee6dd5814807e41a8383c75887fd19b54d48d208f6f3d"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: internal
+    confidence: high
+    inference_flags: ["single terminal/tmux restart as common cause of the 2 near-simultaneous SIGHUP exits is inferred from timestamp proximity"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-turn-duration-shape-019f3cf2"
+    claim: "OMP session 019f3cf2 per-turn API duration (aggregate, n=350): median 10s, max 732s, summed 1.5h of model time."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9#L1"
+        digest: "sha256:5299ac125280b40cfaaca785bef2573079797f04ab73ab2b8e4164ea898290ec"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: high
+    inference_flags: ["summed per-turn durations reconstructed from message.duration; may overlap with background jobs"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "omp-turn-duration-shape-019f3f23"
+    claim: "OMP session 019f3f23 per-turn API duration (aggregate, n=1445): median 24s, max 239s, summed 13.2h of model time."
+    class: cost
+    anchors:
+      - ref: "omp:2026-07-08T00-32-22-093Z_019f3f23-da4d-7000-8465-d94a0d720d5b:019f3f23-da4d-7000-8465-d94a0d720d5b#L1"
+        digest: "sha256:40275b3eea2d4e42035ee6dd5814807e41a8383c75887fd19b54d48d208f6f3d"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: sensitive
+    confidence: high
+    inference_flags: ["summed per-turn durations reconstructed from message.duration; may overlap with background jobs"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "copilot-tooldef-fixed-overhead"
+    claim: "A trivial copilot session ('What is 2+2?') carried heavy fixed context overhead: of a 24,342-token context, tool definitions were 16,290 tokens (67%) and system prompt 7,853, leaving 196 for conversation; it billed 29,271 input / 119 output tokens over 1 premium request / 2,681ms."
+    class: cost
+    anchors:
+      - ref: "copilot:23e45a55-b230-439a-9efb-4cc6cfa08f0e:23e45a55-b230-439a-9efb-4cc6cfa08f0e#L8"
+        digest: "sha256:29db831a3d55c360e3b4155e3bd2cf52de0d998c124a5f53a19a47ab12ad4382"
+        excerpt: "session.shutdown totalPremiumRequests=1 totalApiDurationMs=2681 usage.inputTokens=29271 outputTokens=119 currentTokens=24342 systemTokens=7853 toolDefinitionsTokens=16290 conversationTokens=196"
+      - ref: "copilot:23e45a55-b230-439a-9efb-4cc6cfa08f0e:23e45a55-b230-439a-9efb-4cc6cfa08f0e#L4"
+        digest: "sha256:6ef5e581347c40e5cc6f3bca6bd60b698a2de6092306ea6f1a0ee9273069a2b1"
+        excerpt: "user.message content=\"What is 2+2?\""
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "copilot-trivial-smoke-outcome"
+    claim: "The single copilot session in the corpus is a minimal smoke test (haiku-4.5, one Q/A, answer '4', zero code changes, routine shutdown) — a non-workflow control point rather than a loop run."
+    class: outcome
+    anchors:
+      - ref: "copilot:23e45a55-b230-439a-9efb-4cc6cfa08f0e:23e45a55-b230-439a-9efb-4cc6cfa08f0e#L4"
+        digest: "sha256:6ef5e581347c40e5cc6f3bca6bd60b698a2de6092306ea6f1a0ee9273069a2b1"
+        excerpt: "user.message content=\"What is 2+2?\""
+      - ref: "copilot:23e45a55-b230-439a-9efb-4cc6cfa08f0e:23e45a55-b230-439a-9efb-4cc6cfa08f0e#L8"
+        digest: "sha256:29db831a3d55c360e3b4155e3bd2cf52de0d998c124a5f53a19a47ab12ad4382"
+        excerpt: "session.shutdown shutdownType=routine codeChanges.linesAdded=0 linesRemoved=0 filesModified=[]"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-workflow-cli-drives-taskstate"
+    claim: "Task state is driven through the da workflow CLI rather than hand-edited: sessions call `da workflow eligible --json` to read the queue, `da workflow advance <plan> --task <t> --status completed` to progress it, and `da workflow plan create` to open plans."
+    class: craft
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L23"
+        digest: "sha256:118bc690a30fabcae0b6b4d84fdcdf9f7352f8dac9960aa0632c20cc882e84f7"
+        excerpt: "Bash tool_use command=\"da workflow eligible --json 2>/dev/null | head -80 || echo \\\"eligible failed\\\"\""
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L150"
+        digest: "sha256:5b94e8ea249025c305deb3857d570034c00918431fa097a7e365ca63aa2f8090"
+        excerpt: "Bash command=\"da workflow advance config-v2-migration --task p4-config-explain-cli --status completed -y\""
+      - ref: "claude-code:~-proj-docs-dot-agents/50a19fee-138b-4eb4-b173-5e39a56c84b6:50a19fee-138b-4eb4-b173-5e39a56c84b6#L295"
+        digest: "sha256:09c9534ca0bf2d43402a6654e4c8a9ac0b58e35a70d2d9b6522c5108fdce1e4c"
+        excerpt: "Bash command=\"go run ./cmd/da workflow plan create stage-profile-and-routing-consolidation --title \\\"Stage-profile & routing consolidation (supersedes PR #40)\\\"\""
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-orchestrator-skill-overnight"
+    claim: "An overnight staged run is bootstrapped by invoking the orchestrator-session-start skill with explicit multi-plan goals, showing the prescribed orchestrator skill is actually used to open a work session."
+    class: craft
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L858"
+        digest: "sha256:efdf71cfcece1a3e9ec2101a7d64e9fe76d4d109a92d7875b4d69a861733bbfb"
+        excerpt: "Skill tool_use skill=\"orchestrator-session-start\" args=\"Overnight staged run. Goals: (1) resolve stale/reconciliation items ...\""
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-wave-parallel-delegation-agent"
+    claim: "Delegation is done via the Agent tool spawning named parallel wave workers with isolation and background flags (e.g. 'Wave1 worker p4e', 'Wave1 worker p2'); the internal session 1699c371 issued 66 Agent calls, and sensitive orchestrator sessions issued 235 (151d7271) and 210 (327154c6)."
+    class: craft
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L934"
+        digest: "sha256:4d8c41714e0d0497c77218b8642f00e74d2b177e6f2780e3682b4d50bc484679"
+        excerpt: "Agent tool_use description=\"Wave1 worker p4e\" input-keys=[description,subagent_type,name,isolation,run_in_background,prompt]"
+      - ref: "claude-code:~-proj-docs-dot-agents/151d7271-b941-4eb5-aa23-94215e70d810:151d7271-b941-4eb5-aa23-94215e70d810#L1"
+        digest: "sha256:046c40adaca36bd19b45a885c421fa627f7ba33656316e7740d23a5d3f858210"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+      - ref: "claude-code:~-proj-docs-dot-agents/327154c6-3b96-4f48-b9c5-237263d27ec2:327154c6-3b96-4f48-b9c5-237263d27ec2#L1"
+        digest: "sha256:59d88718e975bdb956e0e18ac4c5f4185000b205c5beac3223e40a4638423f0a"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-workflow-tool-runs-scripts"
+    claim: "The Claude-Code harness exposes a first-class Workflow tool that runs inline/loaded JS scripts — e.g. an inline 'reconcile-task-status' read-only audit of every non-completed task, and a loaded 'ultracode-wave-engine.mjs' — not just shell commands."
+    class: mechanism
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/438f47a4-d325-46cf-8546-ffba224e9b8a:438f47a4-d325-46cf-8546-ffba224e9b8a#L2743"
+        digest: "sha256:db919ec58bd51e04e7135ad5bb604d8ee4bb4fb7d56a0c89d51d5d31b2cd5e88"
+        excerpt: "Workflow tool_use script=\"export const meta = {name:'reconcile-task-status', description:'Read-only audit of every non-completed task across active plans ...'}\""
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-single-session-multi-pr"
+    claim: "A single Claude-Code session drives many GitHub PRs: internal session 1699c371 references 36 distinct PR numbers and 50a19fee opened PR #45; sensitive orchestrator sessions reached 162 (327154c6) and 150 (151d7271) distinct PRs."
+    class: outcome
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/50a19fee-138b-4eb4-b173-5e39a56c84b6:50a19fee-138b-4eb4-b173-5e39a56c84b6#L1011"
+        digest: "sha256:c39d7c7b7a41ccea2a93abbb53c5fb245f5d74323badfbc76aca6569facf6944"
+        excerpt: "pr-link prNumber=45 prRepository=\"dot-agents\" prUrl=https://github.com/dot-agents/pull/45"
+      - ref: "claude-code:~-proj-docs-dot-agents/327154c6-3b96-4f48-b9c5-237263d27ec2:327154c6-3b96-4f48-b9c5-237263d27ec2#L1"
+        digest: "sha256:59d88718e975bdb956e0e18ac4c5f4185000b205c5beac3223e40a4638423f0a"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+      - ref: "claude-code:~-proj-docs-dot-agents/151d7271-b941-4eb5-aa23-94215e70d810:151d7271-b941-4eb5-aa23-94215e70d810#L1"
+        digest: "sha256:046c40adaca36bd19b45a885c421fa627f7ba33656316e7740d23a5d3f858210"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-tokens-recorded-no-dollar-cost"
+    claim: "Claude-Code sessions record token usage (input/output/cache_read/cache_creation per assistant turn) but carry no dollar-cost field — all 50 CC sessions have has_cost=false — unlike OMP and copilot which record cost."
+    class: cost
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L28"
+        digest: "sha256:e43e2776222d1921a554ec4b0028d2196cce1d0e8fbe03ed7a3eeb04422cfb41"
+        excerpt: "usage input_tokens=2 cache_read_input_tokens=28175 cache_creation_input_tokens=10726 output_tokens=556 (no cost field)"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-synthetic-turns-compaction"
+    claim: "Long CC sessions periodically inject '<synthetic>' assistant turns (model=='<synthetic>') that mark context-compaction boundaries; counts scale with length (327154c6: 96 over 26,099 records; 1699c371: 2)."
+    class: mechanism
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L7154"
+        digest: "sha256:f6a68fe4befb6d524e4c6fc5bc2c19e80f27e72677daee8d427074cdb20e5499"
+        excerpt: "assistant record message.model=\"<synthetic>\" (compaction-boundary turn)"
+      - ref: "claude-code:~-proj-docs-dot-agents/327154c6-3b96-4f48-b9c5-237263d27ec2:327154c6-3b96-4f48-b9c5-237263d27ec2#L1"
+        digest: "sha256:59d88718e975bdb956e0e18ac4c5f4185000b205c5beac3223e40a4638423f0a"
+        excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["'<synthetic>'==compaction boundary is inferred from placement/cadence, not a labelled field"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-async-overnight-primitives"
+    claim: "CC sessions use async scheduling primitives to run unattended: ScheduleWakeup defers work (e.g. delaySeconds=1500 to poll for Docker recovery / a user PR merge before pushing queued branches), alongside Cron/Monitor/PushNotification tools."
+    class: mechanism
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L9097"
+        digest: "sha256:28a97b7f1ea6028f201ba29a7084a9518d2d8f5a8f5047acf7b7263665ede7d9"
+        excerpt: "ScheduleWakeup delaySeconds=1500 reason=\"Polling for Docker recovery + whether the user merged PR #5; push queued branches and open PRs once the gate is usable\""
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-mcp-quality-gates-inloop"
+    claim: "Verification/review is wired into the loop via MCP: sessions call sonarqube (quality-gate status, security hotspots, duplications) and code-review-graph tools against specific PRs during work."
+    class: mechanism
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L61"
+        digest: "sha256:cbd39b48c2b9a7ef5c6feb363713549fda5bd18b296d478acc84a0f6570bcd9c"
+        excerpt: "mcp__sonarqube__get_project_quality_gate_status input={projectKey:<project>_dot-agents, pullRequest:\"200\"}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-cutoff-ends-midturn"
+    claim: "Sessions flagged cutoff end without a clean close: payout session 2c9ee562 (status=cutoff) has its last assistant turn at L1166 followed only by metadata records (ai-title/mode/permission-mode/bridge-session) to L1179 — no completion marker."
+    class: failure
+    anchors:
+      - ref: "claude-code:~-proj-docs-payout/2c9ee562-f13a-4e38-b12f-e9c069ce9c6a:2c9ee562-f13a-4e38-b12f-e9c069ce9c6a#L1166"
+        digest: "sha256:90cd0a1f372be14f09cf70a7b20c5646424b797dec03ea0812d651b66c26380e"
+        excerpt: "last assistant record before file tail; records L1167-1179 are metadata-only (status=cutoff)"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-empty-metadata-stub-sessions"
+    claim: "Several CC session files are metadata-only stubs with zero assistant turns: 999f872a has 28 records (12 user-type, 0 assistant) and 403af2d2 has 15 (3 user, 0 assistant); these log setup/attachments/file-snapshots but no model output."
+    class: mechanism
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/999f872a-1542-4651-9e1f-540062330cd5:999f872a-1542-4651-9e1f-540062330cd5#L1"
+        digest: "sha256:882a8c3312e9ba9f004e79ffcebcb84d392ab3d6f485d530f87af6bb0f0407da"
+        excerpt: "last-prompt record; file has 0 assistant records across 28 lines"
+      - ref: "claude-code:~-dot-agents/403af2d2-4706-49e9-b17f-05266a2cb94d:403af2d2-4706-49e9-b17f-05266a2cb94d#L1"
+        digest: "sha256:9daa044fd2a83c233e21dfbe48b07c46885fcf68c4d08f6eaf1d8e873efa27ca"
+        excerpt: "first record of a 15-line file with 0 assistant records"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["assistant turns may live in a forked/resumed sibling file; absence is within-file only"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-longlived-multiday-sessions"
+    claim: "CC workflow sessions are long-lived across days: internal 1699c371 spans 2026-05-30T03:52 to 2026-06-03T02:59 (~95h) while remaining a single session file; sensitive sessions span up to ~372h (327154c6) and ~289h (c0d52153)."
+    class: mechanism
+    anchors:
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L5"
+        digest: "sha256:34e63b77f08544bd74d4057444bfa3e22463b0424786bf5de4459229470e9be9"
+        excerpt: "first timestamped record ts=2026-05-30T03:52:21.870Z"
+      - ref: "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5#L13179"
+        digest: "sha256:a64a62a96bcfd8d0dc05a28d3b86bd1e53b56a25f531cb495c4a791f305c5bf5"
+        excerpt: "last record ts=2026-06-03T02:59:24.714Z (~95h span)"
+    sensitivity: internal
+    confidence: high
+    inference_flags: ["multi-day span implies resume/idle gaps, not continuous compute"]
+    rubric_version: null
+    related_prior: []
+  - item_id: "cc-d12-hopchain-experiment-batch"
+    claim: "18 of the 20 sessions under the D12 scratchpad path are context-depth experiment trials, not workflow loops: each is one 'HOP N of 12 fresh agents' that runs in a fresh context, may read ONLY its own level/delegation-bundle file, and does a single Read+Write to build one shared artifact — a telephone-chain test of information propagation across fresh-context agents (the other 2 are metadata-only stubs)."
+    class: craft
+    anchors:
+      - ref: "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/096bddb0-2cba-4100-aa47-eb91ede0477c:096bddb0-2cba-4100-aa47-eb91ede0477c#L4"
+        digest: "sha256:6df862c9b1e2a0f41a37b9463a6479db933949a1e449157d8029f05aef3f3ded"
+        excerpt: "user prompt: \"You are HOP 8 of 12 fresh agents collaboratively building ONE release-note artifact. You run in a FRESH context and may read ONLY your own level file ...\""
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []

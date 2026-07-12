@@ -1,0 +1,1784 @@
+# Codex evidence items — task evidence-extraction (harness=codex, 134 sessions)
+# Rubric: evidence-rubric.md §2 (E1-E5) + §2b redaction gate (R1-R5).
+# Every item carries >=1 anchor in an internal/public-ok session (R5); digests are sha256 of raw anchored jsonl line(s).
+# Anchors/paths emitted in ~-relative form; machine temp dirs -> <tmp>, ephemeral codex ids -> <id>.
+items:
+  - item_id: cx-mech-fullauto-01
+    claim: "Codex ran full-auto (approval_policy=never): tool calls execute with no per-command human approval gate."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-19T00-46-45-019da410-0075-7c12-845f-859f9544e7b0:019da410-0075-7c12-845f-859f9544e7b0#L5"
+        digest: sha256:4c8087198ac01ef3f6c07e865e87606c5345423eefcdab94253066eeaede03d9
+        excerpt: "model=gpt-5.4-mini effort=high approval=never mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-fullauto-02
+    claim: "Codex ran full-auto (approval_policy=never): tool calls execute with no per-command human approval gate."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-05-26T19-06-19-019e6689-fc5a-7593-92e1-11d4aa70dc75:019e6689-fc5a-7593-92e1-11d4aa70dc75#L5"
+        digest: sha256:87f1cfa2f95715fdba7c95f0ae4d14e2ec7a98410e71861ac5fa6e547c4864d5
+        excerpt: "model=codex-auto-review effort=low approval=never mode=default network_access=None"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-fullauto-03
+    claim: "Codex ran full-auto (approval_policy=never): tool calls execute with no per-command human approval gate."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-14T13-09-56-019ec71c-8745-7ef0-88e7-b9ad0bf36baf:019ec71c-8745-7ef0-88e7-b9ad0bf36baf#L5"
+        digest: sha256:a3d31a4621ac9be602b6f4f2975001389d86f0fb7605490e44678492fde9da78
+        excerpt: "model=gpt-5.4 effort=high approval=never mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-fullauto-04
+    claim: "Codex ran full-auto (approval_policy=never): tool calls execute with no per-command human approval gate."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-14T22-10-55-019ec90b-d1a3-7e81-972d-a6fb520312f0:019ec90b-d1a3-7e81-972d-a6fb520312f0#L5"
+        digest: sha256:d973672381149f6eaad5bcce24c0a7f8b384b0a9dfc337ea8ae59fbcfb031426
+        excerpt: "model=gpt-5.4 effort=high approval=never mode=default network_access=None"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-fullauto-05
+    claim: "Codex ran full-auto (approval_policy=never): tool calls execute with no per-command human approval gate."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-24T11-24-30-019efa3b-992c-7291-9c7a-a825834932d8:019efa3b-992c-7291-9c7a-a825834932d8#L5"
+        digest: sha256:1497ef33a96d7835fcac136e32a7fe67645db27c5e3312f787f78629262eef8b
+        excerpt: "model=codex-auto-review effort=low approval=never mode=default network_access=None"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-fullauto-06
+    claim: "Codex ran full-auto (approval_policy=never): tool calls execute with no per-command human approval gate."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L5"
+        digest: sha256:bdc97182a43372c917a943520387be54022fc5ae2f8f43761db607139e22706d
+        excerpt: "model=gpt-5.5 effort=high approval=never mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-01
+    claim: "Codex reads dot-agents workflow artifacts as context (161 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L15"
+        digest: sha256:e421ec92dea43ca3602fe1a0e9125317baf83a8127b5cc23a423ef1859f3b4f9
+        excerpt: "pwd && git status --short --branch && test -f .agents/workflow/active.loop.md && printf 'active.loop: yes\\n' || printf 'active.loop: no\\n'"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-02
+    claim: "Codex reads dot-agents workflow artifacts as context (58 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4#L30"
+        digest: sha256:edc5e93881fb952dfb258bb0b01cc947e704bb857b1681e2f10c3bd89c0642d6
+        excerpt: "sed -n '1,260p' .agents/active/active.loop.md"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-03
+    claim: "Codex reads dot-agents workflow artifacts as context (42 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-11T09-50-13-019d7cce-b173-7de2-8871-47a8dce5af22:019d7cce-b173-7de2-8871-47a8dce5af22#L12"
+        digest: sha256:35c3f314f2bfc7d04f2ba115696c5f7159f4116eea6daf78b1a874cf908c02f5
+        excerpt: "sed -n '1,260p' .agents/active/loop-state.md"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-04
+    claim: "Codex reads dot-agents workflow artifacts as context (29 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L12"
+        digest: sha256:5e3ac067c1aa97217549c8af6e63198130f1450e80c4aea08e229de086f1f968
+        excerpt: "sed -n '1,220p' .agents/active/websocket-hub-parallel-slices.plan.md"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-05
+    claim: "Codex reads dot-agents workflow artifacts as context (29 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-12T18-35-21-019d83d5-d2b7-75b2-861c-215717258746:019d83d5-d2b7-75b2-861c-215717258746#L24"
+        digest: sha256:b695479ca2900e9e8165389f367d4e4fee087d160af44075554cc89f57f837a1
+        excerpt: "sed -n '1,260p' .agents/workflow/plans/loop-orchestrator-layer/loop-orchestrator-layer.plan.md"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-06
+    claim: "Codex reads dot-agents workflow artifacts as context (21 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-12T01-06-56-019d8015-f740-7360-a60c-e7d42c19ac82:019d8015-f740-7360-a60c-e7d42c19ac82#L17"
+        digest: sha256:8b1a7941292352d93098348dc851f7657689376b6c54461069985b3346071b3c
+        excerpt: "sed -n '1,260p' .agents/active/active.loop.md"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-07
+    claim: "Codex reads dot-agents workflow artifacts as context (14 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L39"
+        digest: sha256:954113f3d820d1e8992db2ede13db4322ea49cfbc1ed4118156a068f82e21253
+        excerpt: "sed -n '1,240p' .agents/active/config-comparison-go-updates.plan.md"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-loopbridge-08
+    claim: "Codex reads dot-agents workflow artifacts as context (13 reads of .agents/workflow|active plan files) but never invokes the `da workflow` CLI (0 real `da` invocations corpus-wide across 134 sessions)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-12T12-01-13-019d826c-fca9-78a2-8d62-6bbd92d26274:019d826c-fca9-78a2-8d62-6bbd92d26274#L162"
+        digest: sha256:5c19f0d22b979300fab6b2315a7c0b9cde17ca8b109432b51600174230520709
+        excerpt: "rg --files .agents/workflow/plans/typescript-port docs | sort"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-model-01
+    claim: "Codex session ran model gpt-5.3-codex at reasoning_effort=medium (approval=on-request, sandbox network=False)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L8"
+        digest: sha256:4b0fafc7fb49250e0fc41cdbd5562f2020855c1e4b2078bb64539c4997474e32
+        excerpt: "model=gpt-5.3-codex effort=medium approval=on-request mode=plan network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-model-02
+    claim: "Codex session ran model gpt-5.4 at reasoning_effort=medium (approval=on-request, sandbox network=False)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e#L6"
+        digest: sha256:177824f702b80e6588ba7a6a80f20f7e9263dc6ed7cee1d19d82fbadf5cce07f
+        excerpt: "model=gpt-5.4 effort=medium approval=on-request mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-model-03
+    claim: "Codex session ran model gpt-5.4-mini at reasoning_effort=high (approval=on-request, sandbox network=False)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-37-52-019d40e5-7438-7b81-aa31-2b82c654832d:019d40e5-7438-7b81-aa31-2b82c654832d#L6"
+        digest: sha256:cc5ab242e16f4a86112585c33f2056787ec8686cf2acb5a116932997f8d9645e
+        excerpt: "model=gpt-5.4 effort=high approval=on-request mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-model-04
+    claim: "Codex session ran model gpt-5.5 at reasoning_effort=high (approval=on-request, sandbox network=False)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-24T00-40-45-019dbdca-5037-7ad1-b65c-db927f74ede6:019dbdca-5037-7ad1-b65c-db927f74ede6#L5"
+        digest: sha256:2189c261e8a428264978cdd4da439a75a9a4c810c1cb5b16d0cb793087239710
+        excerpt: "model=gpt-5.5 effort=high approval=on-request mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-origin-cc-01
+    claim: "Codex session was launched by the Claude Code companion runtime (originator='Claude Code'): a cross-harness bridge where CC delegates to Codex."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-14T13-09-56-019ec71c-8745-7ef0-88e7-b9ad0bf36baf:019ec71c-8745-7ef0-88e7-b9ad0bf36baf#L1"
+        digest: sha256:01231b018391394892907235e740ef56b6b5eb90dc68216ee9abb56bd322cfff
+        excerpt: "originator=Claude Code cli=0.135.0 provider=openai cwd=~/Documents/payout"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-origin-cc-02
+    claim: "Codex session was launched by the Claude Code companion runtime (originator='Claude Code'): a cross-harness bridge where CC delegates to Codex."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-14T22-10-55-019ec90b-d1a3-7e81-972d-a6fb520312f0:019ec90b-d1a3-7e81-972d-a6fb520312f0#L1"
+        digest: sha256:5da6db0a9910b9d06c74c8026a0bc393582fc7c2c7d0fe4fcdc7d29d7f27be87
+        excerpt: "originator=Claude Code cli=0.135.0 provider=openai cwd=~/Documents/payout"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-origin-cc-03
+    claim: "Codex session was launched by the Claude Code companion runtime (originator='Claude Code'): a cross-harness bridge where CC delegates to Codex."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L1"
+        digest: sha256:a91ad1bc67b69b87aa57e68074bbe369295a42f6c8a390d90964a653f0053452
+        excerpt: "originator=Claude Code cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents/.claude/worktrees/agent-acde5c2ab70d82f2a"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-origin-exec-01
+    claim: "Codex ran headless/non-interactive (originator='codex_exec'), the automation entrypoint for delegated/scripted runs."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-19T00-46-45-019da410-0075-7c12-845f-859f9544e7b0:019da410-0075-7c12-845f-859f9544e7b0#L1"
+        digest: sha256:70e0680e5bbd3a4e4c5843fad151eaa9d68cba47210e871747231caa1c7170b9
+        excerpt: "originator=codex_exec cli=0.121.0 provider=openai cwd=~/Documents/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-origin-exec-02
+    claim: "Codex ran headless/non-interactive (originator='codex_exec'), the automation entrypoint for delegated/scripted runs."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-25T18-19-35-019f00dd-fb6e-75b2-9563-c4f5d61b6183:019f00dd-fb6e-75b2-9563-c4f5d61b6183#L1"
+        digest: sha256:55858fffb9fc2f53c2a6047a2ca6882d5219d0243aa2a79428e9bfb962ba394c
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents/.claude/worktrees/agent-aa68802890471e6ef"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-origin-exec-03
+    claim: "Codex ran headless/non-interactive (originator='codex_exec'), the automation entrypoint for delegated/scripted runs."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-25T20-47-14-019f0165-288c-7503-b2e1-b9a210e91afb:019f0165-288c-7503-b2e1-b9a210e91afb#L1"
+        digest: sha256:ba5329cee3dcc80485b0989b029c7408079f88e1dab084b017531a712bd9bf52
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents/.claude/worktrees/agent-ab819e6c47a85c4f9"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-planmode-01
+    claim: "Codex switched into its built-in plan collaboration_mode (read-only planning before execution)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L8"
+        digest: sha256:4b0fafc7fb49250e0fc41cdbd5562f2020855c1e4b2078bb64539c4997474e32
+        excerpt: "model=gpt-5.3-codex effort=medium approval=on-request mode=plan network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-planmode-02
+    claim: "Codex switched into its built-in plan collaboration_mode (read-only planning before execution)."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-02T15-32-05-019cb040-3ca4-7021-ab77-ab0f215e0f89:019cb040-3ca4-7021-ab77-ab0f215e0f89#L8"
+        digest: sha256:7afb3f940e9199dea77baeee435d62d884cc1f13e54279ac4362ec6c7156088a
+        excerpt: "model=gpt-5.3-codex effort=None approval=on-request mode=default network_access=False"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-01
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 12 spawn_agent / 3 wait_agent / 6 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e#L314"
+        digest: sha256:9f9d1ae438001b836e30e30189c5bbaef6d64ddf55648e5b3a73db57c14305d8
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: Implement Phase 4 of the client-ui structural refactor in your branch workspace. You own only these files: `client-ui/src/app/lib/api/createApiClient.ts`, `client-ui/src/app/lib/api/pa …"
+      - ref: "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e#L322"
+        digest: sha256:6b40eef39cb258bc05cf06396c09eb8a01dbe1389dd1979bf243408db4453c88
+        excerpt: "name=wait_agent args={\"ids\":[\"<id>\",\"<id>\"],\"timeout_ms\":300000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-02
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 1 spawn_agent / 0 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-37-52-019d40e5-7438-7b81-aa31-2b82c654832d:019d40e5-7438-7b81-aa31-2b82c654832d#L75"
+        digest: sha256:a4bf559cb464bfb8cd0906d507baf26c6bbf6c3c10e2beacc2ca299bc9834c3f
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: You are Worker 1. Ownership: `commands/agents.go` only. The repo is dirty; you are not alone in the codebase. Do not revert or overwrite edits made by others. Fix the Sonar issue in th …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-03
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 15 spawn_agent / 0 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-37-52-019d40e5-74cc-75b0-85a1-bb0d104e8823:019d40e5-74cc-75b0-85a1-bb0d104e8823#L75"
+        digest: sha256:6358018ebf4b08d6d2cbbed906d74da8e0c7c3257c72bcb9b155d48949008410
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: You are Worker 1. Ownership: `commands/agents.go` only. The repo is dirty; you are not alone in the codebase. Do not revert or overwrite edits made by others. Fix the Sonar issue in th …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-04
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 17 spawn_agent / 1 wait_agent / 2 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-38-30-019d40e6-09c6-7821-b414-8138db97cd33:019d40e6-09c6-7821-b414-8138db97cd33#L75"
+        digest: sha256:eee2b7fec015e62767c86f07ec8da6bf34f99832d35cf47b7921f5482f22d578
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: You are Worker 1. Ownership: `commands/agents.go` only. The repo is dirty; you are not alone in the codebase. Do not revert or overwrite edits made by others. Fix the Sonar issue in th …"
+      - ref: "codex:rollout-2026-03-30T18-38-30-019d40e6-09c6-7821-b414-8138db97cd33:019d40e6-09c6-7821-b414-8138db97cd33#L109"
+        digest: sha256:09b0eab628ef02a696873920910b734bc769b3007446fbbc421fceb59851bc72
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\",\"<id>\",\"<id>\",\"<id>\",\"<id>\"],\"timeout_ms\":120000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-05
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 19 spawn_agent / 2 wait_agent / 5 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-38-48-019d40e6-50a6-74c0-8310-630737ab8f4e:019d40e6-50a6-74c0-8310-630737ab8f4e#L75"
+        digest: sha256:8bd51ccfdffd8b8788539faa48ff009d1446fd25b769f2e2d677fbe6847ba8c0
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: You are Worker 1. Ownership: `commands/agents.go` only. The repo is dirty; you are not alone in the codebase. Do not revert or overwrite edits made by others. Fix the Sonar issue in th …"
+      - ref: "codex:rollout-2026-03-30T18-38-48-019d40e6-50a6-74c0-8310-630737ab8f4e:019d40e6-50a6-74c0-8310-630737ab8f4e#L109"
+        digest: sha256:3e2261c990a11fc8ff7c7ffd22605d57b4d962047f8447b6272a53474ecaae1f
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\",\"<id>\",\"<id>\",\"<id>\",\"<id>\"],\"timeout_ms\":120000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-06
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 3 spawn_agent / 4 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T19-06-38-019d40ff-cb41-7bd1-a57a-9e5db6ece347:019d40ff-cb41-7bd1-a57a-9e5db6ece347#L252"
+        digest: sha256:ba5b0f3ead8fc8737481c21781fe9ffe67f4950e7c1ae4f54895352499b0278b
+        excerpt: "name=spawn_agent agent_type=explorer fork_context=False :: Analyze past Claude Code sessions for workflow patterns. You are inspecting local user data only. Focus on files under ~/.claude, especially history.jsonl, plans/, tasks/, file-hist …"
+      - ref: "codex:rollout-2026-03-30T19-06-38-019d40ff-cb41-7bd1-a57a-9e5db6ece347:019d40ff-cb41-7bd1-a57a-9e5db6ece347#L314"
+        digest: sha256:eeeb0032901b03cdc187e112d0fc0db5589601d1a9863e0dc6317783e5cded70
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\",\"<id>\"],\"timeout_ms\":10000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-07
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 5 spawn_agent / 2 wait_agent / 3 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L1035"
+        digest: sha256:d60a5d9210683d92a8c029d75e23aec76a02822ce67207d9f584144d63ba8009
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: Implement OpenCode native plugin support for the new canonical plugins bucket. You own only these files: internal/platform/opencode.go and a new test file under internal/platform for t …"
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L1109"
+        digest: sha256:5be3f06a37d2bfccb1e2297b6b7a80689a6a1a181acda1f41d3990a3a53c141d
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\"],\"timeout_ms\":1000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-08
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 4 spawn_agent / 6 wait_agent / 4 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-58-24-019d4166-1bea-7ca1-87eb-ad2598228d91:019d4166-1bea-7ca1-87eb-ad2598228d91#L150"
+        digest: sha256:1b457fb575072ac1cd852edf15e982e3c09e9c9feb5ebd63c5c0f7dae894e728
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: You are Worker A for dot-agents plugin Phase 5F mapping. Ownership: only edit `commands/import.go`, `commands/import_test.go`, `commands/refresh.go`, `commands/refresh_test.go`. Do not …"
+      - ref: "codex:rollout-2026-03-30T20-58-24-019d4166-1bea-7ca1-87eb-ad2598228d91:019d4166-1bea-7ca1-87eb-ad2598228d91#L187"
+        digest: sha256:5127f0b84068f2d5c0e11c5bbb3be88aa3c93bb61db232b6a6a0b540c75ae62c
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\"],\"timeout_ms\":120000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-09
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 2 spawn_agent / 0 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-03-30T21-03-46-019d416b-05fa-7092-a0df-9f7ee15ec1a0:019d416b-05fa-7092-a0df-9f7ee15ec1a0#L125"
+        digest: sha256:fea6a1d500b668b39c820f4f89a771e834839aed299c085c4b9465694a7f1ece
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: You are Worker A for dot-agents plugin Phase 5F mapping. Ownership: only edit `commands/import.go`, `commands/import_test.go`, `commands/refresh.go`, `commands/refresh_test.go`. Do not …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-10
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 7 spawn_agent / 14 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L449"
+        digest: sha256:c56037d213cee304912567a415d4dd7662f37d80ba35b9025a7a54d291ed240c
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: Implement Wave 1B from .agents/active/websocket-hub-parallel-slices.plan.md in your forked workspace."
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L473"
+        digest: sha256:774ba04f43a86029de176e8b22c7e7712c9ab3b676ccc85db7b14b705e1e2e4f
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\",\"<id>\"],\"timeout_ms\":30000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-11
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 4 spawn_agent / 9 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-06T22-37-53-019d65cd-b6cb-7af0-8f93-d28f25cd2457:019d65cd-b6cb-7af0-8f93-d28f25cd2457#L359"
+        digest: sha256:b20c5118963e6425c73f599036a2f386963bd43f8c1056a94ae54423824df65e
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: Implement Wave 1B from .agents/active/websocket-hub-parallel-slices.plan.md in your forked workspace."
+      - ref: "codex:rollout-2026-04-06T22-37-53-019d65cd-b6cb-7af0-8f93-d28f25cd2457:019d65cd-b6cb-7af0-8f93-d28f25cd2457#L377"
+        digest: sha256:1feb6476aa2a1b2147ce265111dc8c2458dd693cc310cbd4f789b459fd7e759d
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\",\"<id>\"],\"timeout_ms\":30000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-12
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 2 spawn_agent / 0 wait_agent / 0 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-12T01-06-56-019d8015-f740-7360-a60c-e7d42c19ac82:019d8015-f740-7360-a60c-e7d42c19ac82#L166"
+        digest: sha256:ec55620bbb0726bad9460213f0cf1958bacaa2f52fd76544cba8872f118be21a
+        excerpt: "name=spawn_agent agent_type=worker fork_context=True :: Read `~/Documents/dot-agents/.agents/active/active.loop.md` first and use it as your operating loop prompt for this task."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-spawn-13
+    claim: "Codex orchestrates parallel subagents through its native multi_agent_v1 primitive: 15 spawn_agent / 15 wait_agent / 7 close_agent calls in one session, not the dot-agents `da workflow` CLI."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L812"
+        digest: sha256:53f116505dc87fbf31195912d17b889e2c20d8f55f031668a1c8a2fc74c7c787
+        excerpt: "name=spawn_agent agent_type=loop-worker fork_context=True :: Delegation bundle: /tmp/dot-agents-loop-master/.agents/active/delegation-bundles/del-t03-handlers-rest-1783377598.yaml"
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L854"
+        digest: sha256:1d2ffa6c8af508d2908dc76625d83541baec098b9741c4e2656a52de5799a9a2
+        excerpt: "name=wait_agent args={\"targets\":[\"<id>\",\"<id>\"],\"timeout_ms\":60000}"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-updateplan-01
+    claim: "Codex tracks task decomposition with its built-in update_plan tool (4 calls), independent of dot-agents TASKS.yaml/PLAN.yaml."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-11T09-50-13-019d7cce-b173-7de2-8871-47a8dce5af22:019d7cce-b173-7de2-8871-47a8dce5af22#L42"
+        digest: sha256:32fb592cb7bd8f3821de78b50c3a52fbdc72bdb15d5b1f43f51d418d6aab1f28
+        excerpt: "update_plan 3 steps [in_p;pend;pend] :: Selected the next actionable wave and narrowed this iteration to the first unchecked Phase 2 item in resource-intent-centralization: define the internal ResourceIntent shape. I’ll inspect the RFC and …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-updateplan-02
+    claim: "Codex tracks task decomposition with its built-in update_plan tool (3 calls), independent of dot-agents TASKS.yaml/PLAN.yaml."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-19T09-15-16-019da5e1-8fa1-7ad0-95d0-7ea484853490:019da5e1-8fa1-7ad0-95d0-7ea484853490#L43"
+        digest: sha256:07dbc912dcfd6fd69828d55f00d552ef0bd96dddcbba22f6afb6ec70bbf8564f
+        excerpt: "update_plan 3 steps [comp;in_p;pend] :: Updating only forward-looking docs/rules that still present `.agents/active/*.plan.md` as canonical contributor guidance."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-updateplan-03
+    claim: "Codex tracks task decomposition with its built-in update_plan tool (3 calls), independent of dot-agents TASKS.yaml/PLAN.yaml."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-19T17-49-35-019da7b8-702b-72f2-bde7-3c38011c87ae:019da7b8-702b-72f2-bde7-3c38011c87ae#L42"
+        digest: sha256:1168a4031c420f2f305d679c90249ec2a41b158ba2a6024548002633889e771a
+        excerpt: "update_plan 4 steps [comp;in_p;pend;pend] :: Unit verification follows the repo verifier prompt: scoped packages first, then the full Go suite only if the scoped slice is green, then record the verification artifact."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-updateplan-04
+    claim: "Codex tracks task decomposition with its built-in update_plan tool (5 calls), independent of dot-agents TASKS.yaml/PLAN.yaml."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-04-27T08-13-03-019dcedb-78bd-7ff1-9571-3dc5726e2938:019dcedb-78bd-7ff1-9571-3dc5726e2938#L79"
+        digest: sha256:e27cf8b1f61891830e36801bf64421c8246034238bdf9af2479ac51d7efd4a04
+        excerpt: "update_plan 5 steps [in_p;pend;pend;pend;pend] ::"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-updateplan-05
+    claim: "Codex tracks task decomposition with its built-in update_plan tool (3 calls), independent of dot-agents TASKS.yaml/PLAN.yaml."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-05-25T14-16-20-019e605a-24a1-7863-adc2-86e948545f5b:019e605a-24a1-7863-adc2-86e948545f5b#L226"
+        digest: sha256:00b3dbc02eb5eed6c46f046c8e43d453a47b5f9760e2f210e5a8df5b15b0cb51
+        excerpt: "update_plan 4 steps [in_p;pend;pend;pend] :: Bounded planner slice for companion orchestration skills; parent-owned loop-discipline and R1.5 artifacts remain read-only."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-mech-updateplan-06
+    claim: "Codex tracks task decomposition with its built-in update_plan tool (3 calls), independent of dot-agents TASKS.yaml/PLAN.yaml."
+    class: mechanism
+    anchors:
+      - ref: "codex:rollout-2026-06-14T13-09-56-019ec71c-8745-7ef0-88e7-b9ad0bf36baf:019ec71c-8745-7ef0-88e7-b9ad0bf36baf#L22"
+        digest: sha256:f34003949c819234acedb0f39a9b5fc32da03767dc22926447dcee922d1a8537
+        excerpt: "update_plan 3 steps [in_p;pend;pend] :: Implement the manager-se atomic order-entry slice with minimal file touch count, then verify and report exact command output."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-01
+    claim: "Codex session ended cutoff (last record event_msg/turn_aborted); task_complete count=16 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L1748"
+        digest: sha256:1d7b4c78beb128fdcddcfbde0ea73e6d5f0a3b2adc9ceefa45644b0abb15e05d
+        excerpt: "[event_msg/turn_aborted] {\"type\": \"turn_aborted\", \"turn_id\": \"<id>\", \"reason\": \"interrupted\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-02
+    claim: "Codex session ended cutoff (last record event_msg/turn_aborted); task_complete count=2 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-17T14-28-35-019d9cb3-b0dd-7f02-a202-9afba6d3b54c:019d9cb3-b0dd-7f02-a202-9afba6d3b54c#L179"
+        digest: sha256:7d6c39c5d11bee8b3b584245786c040055ec12fa559fa5725f13ebb5230622db
+        excerpt: "[event_msg/turn_aborted] {\"type\": \"turn_aborted\", \"turn_id\": \"<id>\", \"reason\": \"interrupted\", \"completed_at\": 1776456700, \"duration_ms\": 3402535}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-03
+    claim: "Codex session ended cutoff (last record event_msg/turn_aborted); task_complete count=0 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-19T23-21-05-019da8e7-efcd-7993-9b0a-c0caf0f909db:019da8e7-efcd-7993-9b0a-c0caf0f909db#L234"
+        digest: sha256:d0e19a30066414f683552adb2c45de4b9485045ada83873ea94da4efbaff6832
+        excerpt: "[event_msg/turn_aborted] {\"type\": \"turn_aborted\", \"turn_id\": \"<id>\", \"reason\": \"interrupted\", \"completed_at\": 1776655860, \"duration_ms\": 81534}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-04
+    claim: "Codex session ended cutoff (last record event_msg/turn_aborted); task_complete count=0 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-20T08-18-27-019daad3-e7c6-7662-bc15-7a711b059c54:019daad3-e7c6-7662-bc15-7a711b059c54#L122"
+        digest: sha256:2bc27c0a5aba7c27527bb507c5e8c26ca4878aa6e32602b4c20b9d4a7b1e7e40
+        excerpt: "[event_msg/turn_aborted] {\"type\": \"turn_aborted\", \"turn_id\": \"<id>\", \"reason\": \"interrupted\", \"completed_at\": 1776687899, \"duration_ms\": 391732}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-05
+    claim: "Codex session ended cutoff (last record event_msg/task_started); task_complete count=0 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-27T19-00-12-019f0b4f-e237-74b2-ba9d-f893b8c39d57:019f0b4f-e237-74b2-ba9d-f893b8c39d57#L2"
+        digest: sha256:1a03f148ef9fcb5308e595f58e05f6679f8c5596f9dbb3bb3637c8ab2d2e43ed
+        excerpt: "[event_msg/task_started] {\"type\": \"task_started\", \"turn_id\": \"<id>\", \"started_at\": 1782601213, \"model_context_window\": 258400, \"collaboration_mode_kind\": \"default\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-06
+    claim: "Codex session ended cutoff (last record response_item/function_call_output); task_complete count=0 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-28T13-20-00-019f0f3e-c7d4-7e12-80e6-8271a871c697:019f0f3e-c7d4-7e12-80e6-8271a871c697#L162"
+        digest: sha256:e5c8545f3f4bce23609764cddec78932a576fbb5ac62d8152e5ceb6e96f830a8
+        excerpt: "[response_item/function_call_output] {\"type\": \"function_call_output\", \"call_id\": \"call_UWw8NwFAjU5houiWZEf850Nc\", \"output\": \"Chunk ID: e43d58\\nWall time: 0.2262 seconds\\nProcess exited with code 0\\nOriginal token count: 720\\nOutput:\\ngit"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-cutoff-07
+    claim: "Codex session ended cutoff (last record event_msg/turn_aborted); task_complete count=1 — work not cleanly finalized."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-07-02T23-37-13-019f260d-4a65-7693-a2d8-461447a09747:019f260d-4a65-7693-a2d8-461447a09747#L16"
+        digest: sha256:9b06f1562a68db07c8287c7fec60c4620e087a98f22e5c7edb5573f09c448f25
+        excerpt: "[event_msg/turn_aborted] {\"type\": \"turn_aborted\", \"turn_id\": \"<id>\", \"reason\": \"interrupted\", \"completed_at\": 1783050193, \"duration_ms\": 7387}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-01
+    claim: "Codex hit a rate-limit wall: primary window reached 100.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-19T00-46-45-019da410-0075-7c12-845f-859f9544e7b0:019da410-0075-7c12-845f-859f9544e7b0#L8"
+        digest: sha256:0c5188d70ffb51458255c2e70439ce5550029e8f6a773f4739b2be9e4c473dcf
+        excerpt: "primary=100.0% (window 300m) secondary=46.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-02
+    claim: "Codex hit a rate-limit wall: primary window reached 100.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-26T18-41-47-019f0618-a92f-73e1-b54b-e17ff196ae47:019f0618-a92f-73e1-b54b-e17ff196ae47#L12"
+        digest: sha256:fed18b6ab2602d174508c7ff6bc53884876658651b3a5d995272e72cfd14647e
+        excerpt: "primary=100.0% (window 300m) secondary=66.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-03
+    claim: "Codex hit a rate-limit wall: primary window reached 100.0% used (plan=team, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-30T00-52-08-019f16de-cf92-72e1-8457-41ede9bccd54:019f16de-cf92-72e1-8457-41ede9bccd54#L17"
+        digest: sha256:5d625dec305faeee79479eddf378a2eb21afe9b337399424252d28c96036c31c
+        excerpt: "primary=100.0% (window 300m) secondary=16.0% (window 10080m) plan=team"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-04
+    claim: "Codex hit a rate-limit wall: primary window reached 100.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L922"
+        digest: sha256:c49e7da7934edb30006485dddb223fc9fd12c47b766ace4cd6a42d33dacd9e8f
+        excerpt: "primary=100.0% (window 300m) secondary=66.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-05
+    claim: "Codex hit a rate-limit wall: secondary window reached 97.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-20T08-26-16-019daadb-0ed7-7a42-8514-3ee888c94fc9:019daadb-0ed7-7a42-8514-3ee888c94fc9#L8"
+        digest: sha256:b7373a87bcc3859687cb524fd8467f083c1f3541d552ae29e69cb8f06dcf1b1f
+        excerpt: "primary=31.0% (window 300m) secondary=97.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-06
+    claim: "Codex hit a rate-limit wall: primary window reached 97.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-25T21-12-32-019f017c-51ea-71b2-bc4f-fa4cd21a0178:019f017c-51ea-71b2-bc4f-fa4cd21a0178#L167"
+        digest: sha256:2f6c436acaf2a2cf0a327b19a85068a5a5e78e9ab274d0c9b7e726355b28f50c
+        excerpt: "primary=97.0% (window 300m) secondary=39.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-07
+    claim: "Codex hit a rate-limit wall: primary window reached 97.0% used (plan=team, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-29T11-45-55-019f140f-0295-7c03-97f4-c07364fb35d8:019f140f-0295-7c03-97f4-c07364fb35d8#L81"
+        digest: sha256:ee8b527390841d6c54d0fc6bbe76fd473660eedea8e4089344555ccc9988a394
+        excerpt: "primary=97.0% (window 300m) secondary=31.0% (window 10080m) plan=team"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-08
+    claim: "Codex hit a rate-limit wall: secondary window reached 96.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-12T18-35-21-019d83d5-d2b7-75b2-861c-215717258746:019d83d5-d2b7-75b2-861c-215717258746#L258"
+        digest: sha256:4a847a6fdc65b87b8398862a11fde47371814ff19f7a5b799a6a6119bdf277a3
+        excerpt: "primary=22.0% (window 300m) secondary=96.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-09
+    claim: "Codex hit a rate-limit wall: secondary window reached 96.0% used (plan=plus, status=cutoff)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-20T08-18-27-019daad3-e7c6-7662-bc15-7a711b059c54:019daad3-e7c6-7662-bc15-7a711b059c54#L8"
+        digest: sha256:3acb3428cd53c5b1adbedc34b0a729a2d3e92a4de77be254263ce20923d4f11d
+        excerpt: "primary=26.0% (window 300m) secondary=96.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-10
+    claim: "Codex hit a rate-limit wall: secondary window reached 96.0% used (plan=team, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-07-02T20-11-10-019f2550-a595-76a3-81d9-7b038a05b7ba:019f2550-a595-76a3-81d9-7b038a05b7ba#L150"
+        digest: sha256:255117fa2bf213dfb95e73019353cd00f8d02e5dc83cff062f28546c35b2584a
+        excerpt: "primary=89.0% (window 300m) secondary=96.0% (window 10080m) plan=team"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-11
+    claim: "Codex hit a rate-limit wall: primary window reached 96.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-07-03T15-09-14-019f2962-9694-7392-98f2-81bcbf7240a7:019f2962-9694-7392-98f2-81bcbf7240a7#L146"
+        digest: sha256:4527e5b5ab141ba81c2b8a29c6a20f4fdb0ca06f5f70bb94adeddd10e89a7edd
+        excerpt: "primary=96.0% (window 300m) secondary=15.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-12
+    claim: "Codex hit a rate-limit wall: primary window reached 95.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-07-04T15-15-40-019f2e8e-d6e2-7661-9309-21d2d34c21bc:019f2e8e-d6e2-7661-9309-21d2d34c21bc#L103"
+        digest: sha256:49f02bb2143071343692b86e0a27896a2624cb5968fda7c550f4ae84a818de98
+        excerpt: "primary=95.0% (window 300m) secondary=48.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-13
+    claim: "Codex hit a rate-limit wall: secondary window reached 94.0% used (plan=plus, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-04-12T18-21-44-019d83c9-5962-7f00-91d2-cc8c18ca4df5:019d83c9-5962-7f00-91d2-cc8c18ca4df5#L93"
+        digest: sha256:9b58a9c69010847264e52a72d7b913ed7f3f5cfe11f92d0eac9e4e734697d679
+        excerpt: "primary=12.0% (window 300m) secondary=94.0% (window 10080m) plan=plus"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-fail-ratelimit-14
+    claim: "Codex hit a rate-limit wall: primary window reached 94.0% used (plan=team, status=complete)."
+    class: failure
+    anchors:
+      - ref: "codex:rollout-2026-06-30T00-11-48-019f16b9-e0a4-7e41-bfb9-feb0acd5c2a6:019f16b9-e0a4-7e41-bfb9-feb0acd5c2a6#L129"
+        digest: sha256:8f1c60a9e2c50b02827d7cd7da3d1636e50119d716147fb378cf621d1ab268f1
+        excerpt: "primary=94.0% (window 300m) secondary=15.0% (window 10080m) plan=team"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-01
+    claim: "Negative-control cost row: total_tokens=3,404,860 (cached 80%), slug=~/Documents/dot-agents, model=gpt-5.4 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-03-30T19-06-38-019d40ff-cb41-7bd1-a57a-9e5db6ece347:019d40ff-cb41-7bd1-a57a-9e5db6ece347#L398"
+        digest: sha256:f3071016895da33a4dfa48f4e089431e03b47407200ad3ccfac0c5c4e668302a
+        excerpt: "total=3404860 input=3375077 cached=2707456 output=29783 reasoning=8682"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-02
+    claim: "Negative-control cost row: total_tokens=2,932,276 (cached 93%), slug=~/Documents/dot-agents, model=gpt-5.3-codex,gpt-5.4,gpt-5.4-mini — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-03-30T21-03-46-019d416b-05fa-7092-a0df-9f7ee15ec1a0:019d416b-05fa-7092-a0df-9f7ee15ec1a0#L265"
+        digest: sha256:a303dc69b8d8ba1c5199760ba8f5e203b309dfaf835679f57f1ead7df99976a8
+        excerpt: "total=2932276 input=2894337 cached=2686592 output=37939 reasoning=27132"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-03
+    claim: "Negative-control cost row: total_tokens=567,507 (cached 92%), slug=~/Documents/dot-agents, model=gpt-5.4 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-04-20T08-18-27-019daad3-e7c6-7662-bc15-7a711b059c54:019daad3-e7c6-7662-bc15-7a711b059c54#L118"
+        digest: sha256:e63653d5b94239d595c1bc7b33ff07d899aa977a8590d26affd68089edd73a79
+        excerpt: "total=567507 input=562395 cached=519040 output=5112 reasoning=1474"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-04
+    claim: "Negative-control cost row: total_tokens=136,198 (cached 81%), slug=~/Documents/dot-agents, model=gpt-5.4-mini — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-04-20T08-26-16-019daadb-0ed7-7a42-8514-3ee888c94fc9:019daadb-0ed7-7a42-8514-3ee888c94fc9#L36"
+        digest: sha256:bb1c6f368074935fae700651f7f1b1875f8af40082a03f9ed32ca7f552c5fb61
+        excerpt: "total=136198 input=135250 cached=109440 output=948 reasoning=201"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-05
+    claim: "Negative-control cost row: total_tokens=5,970,645 (cached 98%), slug=~/Documents/payout, model=gpt-5.4 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-14T13-09-56-019ec71c-8745-7ef0-88e7-b9ad0bf36baf:019ec71c-8745-7ef0-88e7-b9ad0bf36baf#L457"
+        digest: sha256:457c195124d89563344b04aa823db63a4afd10faf50e6a9dbc9f65c69736352c
+        excerpt: "total=5970645 input=5932230 cached=5790720 output=38415 reasoning=22351"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-06
+    claim: "Negative-control cost row: total_tokens=149,108 (cached 77%), slug=scratchpad/depth-exp, model=gpt-5.5 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-26T12-19-40-019f04ba-d189-7920-8879-98ec0b176e50:019f04ba-d189-7920-8879-98ec0b176e50#L40"
+        digest: sha256:88153524081b9a3f9e11a53c3091e6f17b3823a2fb16bb9b0414ce6f94839933
+        excerpt: "total=149108 input=147225 cached=112768 output=1883 reasoning=1053"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-07
+    claim: "Negative-control cost row: total_tokens=105,225 (cached 94%), slug=scratchpad/depth-exp-v2, model=gpt-5.5 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-26T14-52-50-019f0547-0f6f-7ff1-b92d-8b7a37c0ded7:019f0547-0f6f-7ff1-b92d-8b7a37c0ded7#L32"
+        digest: sha256:0b2d867e8c5fb9b842c03648803915d9a1e72d80426b36e3ddbd908260a4d2a4
+        excerpt: "total=105225 input=102699 cached=96128 output=2526 reasoning=1906"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-08
+    claim: "Negative-control cost row: total_tokens=1,193,475 (cached 90%), slug=~/proj-docs/dot-agents, model=gpt-5.5 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-27T16-16-28-019f0ab9-fb01-7852-b758-4bcf0001e1b9:019f0ab9-fb01-7852-b758-4bcf0001e1b9#L135"
+        digest: sha256:1a9d184d5cd20ac9d5337ef0ef0d31fcb22dc81d0620f7467cf9712e99c5808b
+        excerpt: "total=1193475 input=1184864 cached=1061120 output=8611 reasoning=4154"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-09
+    claim: "Negative-control cost row: total_tokens=88,109 (cached 63%), slug=scratchpad/gate-227, model=codex-auto-review — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-30T00-02-21-019f16b1-3b51-7341-8554-4d3b6f9afb35:019f16b1-3b51-7341-8554-4d3b6f9afb35#L39"
+        digest: sha256:4147efa1e3ef0af1ff902f2507c5789e5f7965e503dd358763d8175d36a2c954
+        excerpt: "total=88109 input=87886 cached=55296 output=223 reasoning=151"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-10
+    claim: "Negative-control cost row: total_tokens=781,903 (cached 88%), slug=scratchpad/gate-227, model=gpt-5.5 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-30T00-11-48-019f16b9-e0a4-7e41-bfb9-feb0acd5c2a6:019f16b9-e0a4-7e41-bfb9-feb0acd5c2a6#L129"
+        digest: sha256:8f1c60a9e2c50b02827d7cd7da3d1636e50119d716147fb378cf621d1ab268f1
+        excerpt: "total=781903 input=774379 cached=683776 output=7524 reasoning=2023"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-11
+    claim: "Negative-control cost row: total_tokens=967,850 (cached 86%), slug=scratchpad/regate2-287, model=gpt-5.5 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-03T12-53-05-019f28e5-e7e2-7813-877c-c19ad2e32ebf:019f28e5-e7e2-7813-877c-c19ad2e32ebf#L154"
+        digest: sha256:1eec8db1a4901d91e19d1b478bf57027a394d4b076cf1ed59fa4b3ec75faab00
+        excerpt: "total=967850 input=957487 cached=822656 output=10363 reasoning=3500"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-negctrl-12
+    claim: "Negative-control cost row: total_tokens=520,552 (cached 77%), slug=scratchpad/bg-gate-328, model=gpt-5.5 — tests whether cost patterns generalize beyond workflow-heavy sessions."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-04T14-25-03-019f2e60-7eb3-7771-a57a-e29212ffdb55:019f2e60-7eb3-7771-a57a-e29212ffdb55#L120"
+        digest: sha256:9184ce5fd29865d47232bdf31b667ddefa596f0e1978c4c0f8e52363bc3a0809
+        excerpt: "total=520552 input=508220 cached=391552 output=12332 reasoning=6584"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-permodel-01
+    claim: "Cross-harness cost row (model gpt-5.4): total_tokens=62,156,886, cached/input=95%, output+reasoning=277,199 (the non-cached productive spend)."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L3526"
+        digest: sha256:516d89cf6eeca3404a3ca10fbad5fbec0e45225e3fc8b38c3a4cf850bc0f0883
+        excerpt: "total=62156886 input=61960105 cached=59128960 output=196781 reasoning=80418"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-permodel-02
+    claim: "Cross-harness cost row (model gpt-5.5): total_tokens=33,718,670, cached/input=98%, output+reasoning=66,013 (the non-cached productive spend)."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4#L1869"
+        digest: sha256:be4c62d33a7992d186461581461fd8f2eaa52cfb1f72c3a41a11798218aea4fa
+        excerpt: "total=33718670 input=33662199 cached=32970752 output=56471 reasoning=9542"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-permodel-03
+    claim: "Cross-harness cost row (model gpt-5.4-mini): total_tokens=31,491,218, cached/input=94%, output+reasoning=292,878 (the non-cached productive spend)."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L1854"
+        digest: sha256:4e54500efe17bf9de1cae1ce7661d7102df4a670f715e42fe6f824f71e77f2c6
+        excerpt: "total=31491218 input=31293999 cached=29541376 output=197219 reasoning=95659"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-permodel-04
+    claim: "Cross-harness cost row (model gpt-5.3-codex): total_tokens=23,397,798, cached/input=97%, output+reasoning=140,099 (the non-cached productive spend)."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L2099"
+        digest: sha256:01eb0bcd299a8811b2f62c4c8f6d73304f3f2cc0be43ca25af7fc4837fc920de
+        excerpt: "total=23397798 input=23287197 cached=22490368 output=110601 reasoning=29498"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-01
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-22T21-39-15-019ef221-b57d-7ea2-b97e-5002bf5083e8:019ef221-b57d-7ea2-b97e-5002bf5083e8#L1"
+        digest: sha256:4f3353aef04ce23f9c8ff644e34bad9019024def0d7ac4ea5a6e274be3183146
+        excerpt: "originator=Codex Desktop cli=0.140.0-alpha.2 provider=openai cwd=~/Documents/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-02
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=10); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-26T18-55-45-019f0625-72bb-7d03-bae8-3801ebead09d:019f0625-72bb-7d03-bae8-3801ebead09d#L1"
+        digest: sha256:56bfef007598f1394848e5250ed054eb46fe2918ece61fe6ae4474345514a912
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=<tmp>/scratchpad/depth-exp-v4"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-03
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=11); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-26T19-18-10-019f0639-fa58-7633-aec6-cf8e63ddb048:019f0639-fa58-7633-aec6-cf8e63ddb048#L1"
+        digest: sha256:88d762704f1422d36df2755cbfb4513ad4555608afc502aa36fc71fcb3837b34
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-04
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=2); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-27T19-00-12-019f0b4f-e237-74b2-ba9d-f893b8c39d57:019f0b4f-e237-74b2-ba9d-f893b8c39d57#L1"
+        digest: sha256:5fedb1704e14595d4e9ccd45ece1663f5dfe5efa6cd2330e5d4d2baf12cc3758
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-05
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-29T00-54-47-019f11ba-e0a2-7930-a56b-83672f37e92a:019f11ba-e0a2-7930-a56b-83672f37e92a#L1"
+        digest: sha256:a441bf5e2633d06c29d7606b8bf9afbda6e6174fd75cf520fac27460a129a55b
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=<tmp>"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-06
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=10); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-30T00-56-15-019f16e2-923e-7451-8554-cfe48a5c8fd8:019f16e2-923e-7451-8554-cfe48a5c8fd8#L1"
+        digest: sha256:cfe1171dab10a4e5e9ff9810facc67f2d85bd0573fd997ade38bd945a3638611
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-07
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=16); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-02T23-37-13-019f260d-4a65-7693-a2d8-461447a09747:019f260d-4a65-7693-a2d8-461447a09747#L1"
+        digest: sha256:25bcc15bba5ac6f961a066fb04af5680c06d0d8654a068a8a0e8fd09c10a87cb
+        excerpt: "originator=codex-tui cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-08
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-02T23-53-31-019f261c-309d-7ce1-a6b6-e50a96634b7b:019f261c-309d-7ce1-a6b6-e50a96634b7b#L1"
+        digest: sha256:051c76196c0bb402abab5d8422d17776f678e895c8bef827018f206832f7b992
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=<tmp>/scratchpad/gate-285d"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-09
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-03T01-21-41-019f266c-ee28-74a3-8a58-efeb2a2196eb:019f266c-ee28-74a3-8a58-efeb2a2196eb#L1"
+        digest: sha256:e6c9d24c9d9897006fbcb7e333a5de4599916e2b8fb3f4aaa96050f21349c2cf
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=<tmp>/scratchpad/bg-gate3-285"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-10
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-03T01-52-29-019f2689-1c9f-7360-bdee-4a9b07975467:019f2689-1c9f-7360-bdee-4a9b07975467#L1"
+        digest: sha256:9ee0a8a689ca63b5f5a8e802732bb4fe0a4b9bc2c15b67dd9b1d8abc532b9987
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=<tmp>/scratchpad/bg-gate4-285"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-11
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=10); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-03T03-22-27-019f26db-7973-7a93-b1f8-3a16794be93d:019f26db-7973-7a93-b1f8-3a16794be93d#L1"
+        digest: sha256:9a570bbffc223a27c84fbb811fa59f768d91bbb58415f12f88749391137a54a5
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-12
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=10); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-03T03-52-19-019f26f6-d819-7f61-b35e-286321ae7633:019f26f6-d819-7f61-b35e-286321ae7633#L1"
+        digest: sha256:5d50f5c3fafbeb766218bdd57f9c3eb043e0a9f88fa3201c066c1c281cef529c
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-13
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-03T09-23-14-019f2825-c780-7bf1-96ac-24aab34268ab:019f2825-c780-7bf1-96ac-24aab34268ab#L1"
+        digest: sha256:7808341a820abdacbd050d5e06a55a1d4556d0a367f38b7f1fcd126d37f79209
+        excerpt: "originator=codex_exec cli=0.142.0 provider=openai cwd=<tmp>/scratchpad/s3-gate-285"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-tokengap-14
+    claim: "TOKEN-GAP row: session records rate-limit % but no token totals (has_tokens=false, rc=9); usable only on the rate-limit axis, not token cost."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-06T18-54-23-019f39a3-ca34-7f10-93f5-f9084cd5da65:019f39a3-ca34-7f10-93f5-f9084cd5da65#L1"
+        digest: sha256:79cbd8edd67df2148534972139256540947e2a6cec4027d26f52b7ac3c2e93ed
+        excerpt: "originator=codex-tui cli=0.142.5 provider=openai cwd=~/proj-docs/dot-agents"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: ["token totals absent — cannot feed cost-per-session comparison"]
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-01
+    claim: "Codex session total_tokens=62,156,886 (input=61,960,105, cached=59,128,960, output=196,781, reasoning=80,418); slug=~/proj-docs/dot-agents, model=gpt-5.4,gpt-5.5."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L3526"
+        digest: sha256:516d89cf6eeca3404a3ca10fbad5fbec0e45225e3fc8b38c3a4cf850bc0f0883
+        excerpt: "total=62156886 input=61960105 cached=59128960 output=196781 reasoning=80418"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-02
+    claim: "Codex session total_tokens=33,718,670 (input=33,662,199, cached=32,970,752, output=56,471, reasoning=9,542); slug=~/Documents/dot-agents, model=gpt-5.5."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4#L1869"
+        digest: sha256:be4c62d33a7992d186461581461fd8f2eaa52cfb1f72c3a41a11798218aea4fa
+        excerpt: "total=33718670 input=33662199 cached=32970752 output=56471 reasoning=9542"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-03
+    claim: "Codex session total_tokens=31,491,218 (input=31,293,999, cached=29,541,376, output=197,219, reasoning=95,659); slug=~/Documents/dot-agents, model=gpt-5.4,gpt-5.4-mini."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L1854"
+        digest: sha256:4e54500efe17bf9de1cae1ce7661d7102df4a670f715e42fe6f824f71e77f2c6
+        excerpt: "total=31491218 input=31293999 cached=29541376 output=197219 reasoning=95659"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-04
+    claim: "Codex session total_tokens=25,388,321 (input=25,293,082, cached=22,336,256, output=95,239, reasoning=33,517); slug=~/Documents/payout, model=gpt-5.4."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L1744"
+        digest: sha256:cc0c238cea9394802973ce9691ba2a5d435436000e9d22df5e5e82f6681838ab
+        excerpt: "total=25388321 input=25293082 cached=22336256 output=95239 reasoning=33517"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-05
+    claim: "Codex session total_tokens=23,397,798 (input=23,287,197, cached=22,490,368, output=110,601, reasoning=29,498); slug=~/Documents/payout, model=gpt-5.3-codex."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L2099"
+        digest: sha256:01eb0bcd299a8811b2f62c4c8f6d73304f3f2cc0be43ca25af7fc4837fc920de
+        excerpt: "total=23397798 input=23287197 cached=22490368 output=110601 reasoning=29498"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-06
+    claim: "Codex session total_tokens=15,170,208 (input=15,119,222, cached=13,791,616, output=50,986, reasoning=19,302); slug=~/Documents/payout, model=gpt-5.4."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-04-06T22-37-53-019d65cd-b6cb-7af0-8f93-d28f25cd2457:019d65cd-b6cb-7af0-8f93-d28f25cd2457#L802"
+        digest: sha256:fbbc314987ab7e076af2bf3418fa83aef097202a0745d1d279f3ea7f26c3170e
+        excerpt: "total=15170208 input=15119222 cached=13791616 output=50986 reasoning=19302"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-07
+    claim: "Codex session total_tokens=13,299,581 (input=13,201,234, cached=12,082,688, output=98,347, reasoning=17,579); slug=~/Documents/dot-agents, model=gpt-5.5."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-05-25T14-16-20-019e605a-24a1-7863-adc2-86e948545f5b:019e605a-24a1-7863-adc2-86e948545f5b#L326"
+        digest: sha256:38380aeb35e6aadace4bce6c97049994c49494d673eb938055a538204aae005b
+        excerpt: "total=13299581 input=13201234 cached=12082688 output=98347 reasoning=17579"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-08
+    claim: "Codex session total_tokens=10,766,070 (input=10,696,934, cached=10,280,576, output=69,136, reasoning=41,801); slug=~/Documents/dot-agents, model=gpt-5.4,gpt-5.4-mini."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-04-12T12-01-20-019d826d-164f-7cf2-b102-f65830ef293f:019d826d-164f-7cf2-b102-f65830ef293f#L431"
+        digest: sha256:3ac9ec577d29b943a7dff621dc8718d7bcd52a6faa62e257d82dcf2b3da01509
+        excerpt: "total=10766070 input=10696934 cached=10280576 output=69136 reasoning=41801"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-09
+    claim: "Codex session total_tokens=10,467,560 (input=10,423,196, cached=10,196,096, output=44,364, reasoning=14,109); slug=~/proj-docs/dot-agents/.claude/worktrees/agent-acde5c2ab70d82f2a, model=gpt-5.5."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L632"
+        digest: sha256:2f98522f56af5e6c0bb3562d8c2f3c783b6af611450c2519abf4e65f3c6c76a7
+        excerpt: "total=10467560 input=10423196 cached=10196096 output=44364 reasoning=14109"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-10
+    claim: "Codex session total_tokens=9,920,244 (input=9,867,301, cached=9,515,136, output=52,943, reasoning=5,877); slug=~/Documents/dot-agents, model=gpt-5.4."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-05-04T21-28-11-019df5bf-f48f-7950-b782-66e91a211966:019df5bf-f48f-7950-b782-66e91a211966#L603"
+        digest: sha256:e363392f92f392b6880d8140b8bc1b3fafadedfb5e9cf7e5063e310c91c666a2
+        excerpt: "total=9920244 input=9867301 cached=9515136 output=52943 reasoning=5877"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-11
+    claim: "Codex session total_tokens=6,854,983 (input=6,815,865, cached=5,741,440, output=39,118, reasoning=8,650); slug=~/Documents/payout, model=gpt-5.4."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e#L484"
+        digest: sha256:c44645052abe13b18bd7127b38676bbd7a081cc1c5464ad6f1f4867448497b91
+        excerpt: "total=6854983 input=6815865 cached=5741440 output=39118 reasoning=8650"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-cost-top-12
+    claim: "Codex session total_tokens=6,724,395 (input=6,700,527, cached=6,189,696, output=23,868, reasoning=10,085); slug=~/Documents/dot-agents, model=gpt-5.3-codex,gpt-5.4."
+    class: cost
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-58-24-019d4166-1bea-7ca1-87eb-ad2598228d91:019d4166-1bea-7ca1-87eb-ad2598228d91#L561"
+        digest: sha256:237768162da76e7e218f06850cfea93bc7b84db64c26108c9da63f7636bb7b31
+        excerpt: "total=6724395 input=6700527 cached=6189696 output=23868 reasoning=10085"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-01
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-05-26T19-06-19-019e6689-fc5a-7593-92e1-11d4aa70dc75:019e6689-fc5a-7593-92e1-11d4aa70dc75#L46"
+        digest: sha256:59a6a6518abec3e842ae39373b1833434808e4a6757b76dfde4b7f1bb99f2101
+        excerpt: "{\"risk_level\":\"low\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"Repo-local documentation and prompt text updates are low-risk, reversible consistency edits explicitly within the user’s requested review and cleanup scope.\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-02
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-24T11-24-30-019efa3b-992c-7291-9c7a-a825834932d8:019efa3b-992c-7291-9c7a-a825834932d8#L28"
+        digest: sha256:1b325c185ef13a71d5ead63fdcf014472aed707a651226ccac0efc9a054fa5b1
+        excerpt: "{\"risk_level\":\"medium\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"Posting the prepared review comment to the specified PR is a scoped external write explicitly requested by the user, with limited and reversible side effects. …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-03
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-25T20-47-14-019f0165-288c-7503-b2e1-b9a210e91afb:019f0165-288c-7503-b2e1-b9a210e91afb#L9"
+        digest: sha256:7adc36e1a1793702f02f1f7899c47619a8e3c53bbf46fcd7cd14afeb0a7b4f46
+        excerpt: "{\"outcome\":\"allow\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-04
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-29T11-08-46-019f13ec-ff32-7d61-a351-16f1b9fca3af:019f13ec-ff32-7d61-a351-16f1b9fca3af#L9"
+        digest: sha256:670186aa6bdb594a2ae37e598c3917d55b53030b90eaf711a013e7c7b1409289
+        excerpt: "{\"outcome\":\"allow\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-05
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-30T00-02-21-019f16b1-3b51-7341-8554-4d3b6f9afb35:019f16b1-3b51-7341-8554-4d3b6f9afb35#L9"
+        digest: sha256:70974332bd0fbe92cdbff3be98944baf80c45e2c400b0074bda5158136239741
+        excerpt: "{\"outcome\":\"allow\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-06
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-30T08-28-38-019f1880-be1a-7512-8258-22d994b35c1c:019f1880-be1a-7512-8258-22d994b35c1c#L55"
+        digest: sha256:a438de094cf404fec4aeb8c5f97bfb1ae1bad65a36dab49ac177bdde92373498
+        excerpt: "{\"risk_level\":\"low\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"Read-only retrieval and filtering of GitHub Actions logs for the repository to verify the user-requested deck accuracy claim is routine and narrowly scoped.\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-07
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-30T10-23-52-019f18ea-3e71-7021-b4ee-47e24a629949:019f18ea-3e71-7021-b4ee-47e24a629949#L9"
+        digest: sha256:c7b4462a034c094028495e23a282fea5831761a5ea3ddedab9d44cb6fd68c8fe
+        excerpt: "{\"risk_level\":\"medium\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"Installing dependencies in the repo’s docs/web directory is a bounded, user-requested local mutation needed to run the requested build verification, and it do …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-autoreview-08
+    claim: "Codex gated a tool escalation through its codex-auto-review model, emitting a structured risk_level/user_authorization/outcome/rationale verdict before allowing the action."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-30T10-31-13-019f18f0-f7a3-7ff2-bfc8-03e9b80f30d6:019f18f0-f7a3-7ff2-bfc8-03e9b80f30d6#L9"
+        digest: sha256:8d650bd2981bc1ec73574e63f43398e78e7e11ebc5a47d706fbdddd5de4e3a58
+        excerpt: "{\"risk_level\":\"medium\",\"user_authorization\":\"high\",\"outcome\":\"allow\",\"rationale\":\"Running `npm install` in the requested docs site directory is user-authorized and mainly causes bounded local dependency installation plus registry access, wi …"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-ghmcp-01
+    claim: "Codex used a GitHub MCP tool (PR info / changed-files / issue comments / CI logs) to ground a review or CI-fix task in live PR state."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-37-52-019d40e5-7438-7b81-aa31-2b82c654832d:019d40e5-7438-7b81-aa31-2b82c654832d#L25"
+        digest: sha256:65e3cf5e36771f3ddaf9a67ceba1ad80d266da4d44fc09cc5c2df7d96a1da956
+        excerpt: "name=mcp__codex_apps__github_get_pr_info args={\"pr_number\":5,\"repository_full_name\":\"<owner>/dot-agents\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-ghmcp-02
+    claim: "Codex used a GitHub MCP tool (PR info / changed-files / issue comments / CI logs) to ground a review or CI-fix task in live PR state."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-37-52-019d40e5-74cc-75b0-85a1-bb0d104e8823:019d40e5-74cc-75b0-85a1-bb0d104e8823#L25"
+        digest: sha256:7b9a67f50cbd0319c51d41ac63ae44d9cbfcd81517bc26946ae10d807b97a99d
+        excerpt: "name=mcp__codex_apps__github_get_pr_info args={\"pr_number\":5,\"repository_full_name\":\"<owner>/dot-agents\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-ghmcp-03
+    claim: "Codex used a GitHub MCP tool (PR info / changed-files / issue comments / CI logs) to ground a review or CI-fix task in live PR state."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-38-30-019d40e6-09c6-7821-b414-8138db97cd33:019d40e6-09c6-7821-b414-8138db97cd33#L25"
+        digest: sha256:f4d500f8be79bfb7d1dcef0650bbceebf9409c3fa513e150bd7574ad7ba31600
+        excerpt: "name=mcp__codex_apps__github_get_pr_info args={\"pr_number\":5,\"repository_full_name\":\"<owner>/dot-agents\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-ghmcp-04
+    claim: "Codex used a GitHub MCP tool (PR info / changed-files / issue comments / CI logs) to ground a review or CI-fix task in live PR state."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-03-30T18-38-48-019d40e6-50a6-74c0-8310-630737ab8f4e:019d40e6-50a6-74c0-8310-630737ab8f4e#L25"
+        digest: sha256:2d47a7a029e8c7d33453c9d11f568b329faf3174a83c1412085f8120ff46fab4
+        excerpt: "name=mcp__codex_apps__github_get_pr_info args={\"pr_number\":5,\"repository_full_name\":\"<owner>/dot-agents\"}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-ghmcp-05
+    claim: "Codex used a GitHub MCP tool (PR info / changed-files / issue comments / CI logs) to ground a review or CI-fix task in live PR state."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L595"
+        digest: sha256:6b97cbc015808fbd5d96d8e6944ae2c568304339ac48a42e26c1f6c828d8763a
+        excerpt: "name=_fetch_file args={\"repository_full_name\":\"<owner>/dot-agents\",\"path\":\"commands/config/relevance.go\",\"ref\":\"master\",\"start_line\":1,\"end_line\":2}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-sonar-01
+    claim: "Codex used the SonarQube MCP (security-hotspot / quality-gate tools) as an external code-quality verification step."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-04-24T00-40-45-019dbdca-5037-7ad1-b65c-db927f74ede6:019dbdca-5037-7ad1-b65c-db927f74ede6#L103"
+        digest: sha256:9d5c92d17cb716f281a7baf4bd83d7491c05018a3e24499956b0c3cb2ca0cf4a
+        excerpt: "name=search_sonar_issues_in_projects args={\"projects\":[\"<org>_po-core-api-se\",\"<org>_client-se\",\"<org>_manager-se\",\"<org>_manager-ui\",\"<org>_sync-engine\"],\"impactSoftwareQualities\":[\"SECURITY\"],\"issueStatuses\":[\"OPEN\",\"CONFIRMED\"],\"ps\":100}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-sonar-02
+    claim: "Codex used the SonarQube MCP (security-hotspot / quality-gate tools) as an external code-quality verification step."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4#L498"
+        digest: sha256:faa51a212ec07bd590235a57c665facccbc98c60eb61ddd8eed171a90cb8358a
+        excerpt: "name=search_security_hotspots args={\"projectKey\":\"<owner>_dot-agents\",\"pullRequest\":\"10\",\"status\":[\"TO_REVIEW\"],\"ps\":100}"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-01
+    claim: "Codex ran self-verification: 29 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4#L256"
+        digest: sha256:dd0157cdb3750d040af86d999ba87af2a79792c51ab10507b6e67b8705579e51
+        excerpt: "go test ./commands/workflow -run 'TestCheckpointLogToIter'"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-02
+    claim: "Codex ran self-verification: 25 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L133"
+        digest: sha256:b4737f91f959347226effd79231a5b1c08dfe8643730ef0c82bd9c6b1702173b
+        excerpt: "go test ./internal/platform ./commands"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-03
+    claim: "Codex ran self-verification: 23 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L56"
+        digest: sha256:96f0fe5aaba8d88dc1693ad042bb4e26be1fe84b5b73ea94d54c77f48753a05c
+        excerpt: "ps aux | rg -i 'codex|claude|dot-agents|da workflow|go test|gh pr|agent' | rg -v 'rg -i|Code Helper|com.apple'"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-04
+    claim: "Codex ran self-verification: 18 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L251"
+        digest: sha256:721c3487295306d86eed5c70dd21580a503323971a697ea64ad528f60b899877
+        excerpt: "tmp=$(mktemp -d <tmp> && GOCACHE=\"$tmp/cache\" GOTMPDIR=\"$tmp/tmp\" mkdir -p \"$tmp/cache\" \"$tmp/tmp\" && GOCACHE=\"$tmp/cache\" GOTMPDIR=\"$tmp/tmp\" go test ./commands/config"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-05
+    claim: "Codex ran self-verification: 17 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-06-14T13-09-56-019ec71c-8745-7ef0-88e7-b9ad0bf36baf:019ec71c-8745-7ef0-88e7-b9ad0bf36baf#L60"
+        digest: sha256:7e073ad92a1612b95e6be7c8f7bae285e4a6ed528c1456682b02d9998fbd6b55
+        excerpt: "rg --files manager-se | rg 'test.*order|order.*test|tests/.+service|conftest|pytest'"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-06
+    claim: "Codex ran self-verification: 16 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L437"
+        digest: sha256:1b0227edabc2b705c5d62af0ed44afbc689dd5dcc243bfca8468beb40fe99232
+        excerpt: "go test ./..."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-07
+    claim: "Codex ran self-verification: 12 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L285"
+        digest: sha256:596110a63b603144b43f8a75bfed60021d5843dd77d3798627f0894724776e6b
+        excerpt: "go test ./internal/client -run 'TestSplitcheck|TestSplitcheckBuild'"
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-craft-verify-08
+    claim: "Codex ran self-verification: 11 test/build/lint command(s) in-session before completion."
+    class: craft
+    anchors:
+      - ref: "codex:rollout-2026-03-02T15-32-05-019cb040-3ca4-7021-ab77-ab0f215e0f89:019cb040-3ca4-7021-ab77-ab0f215e0f89#L95"
+        digest: sha256:7b1be081f9ecde3e17cad6557f2fc4e9bb33518b73408ccde73eada4dbafb306
+        excerpt: "go test ./swarmcd/..."
+    sensitivity: internal
+    confidence: medium
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-01
+    claim: "Codex session self-reported completion with edits applied (apply_patch=73); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L1855"
+        digest: sha256:4d71774a4f05a8ed37bd2dc1f4a68e2724fa6a261d0234f4714649ee36bf77a1
+        excerpt: "Implemented package-plugin emitters for Claude and Cursor in [claude.go](~/Documents/dot-agents/internal/platform/claude.go#L273) and [cursor.go](~/Documents/dot-agents/internal/platform/cursor.go#L170). Both now emit repo-local package-plu …"
+      - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L121"
+        digest: sha256:11d92e1ac8ffc66c27eb25fe9b31ace95a6f5c8b474ecc5e559b49dbe558fd8d
+        excerpt: "apply_patch -> ~/Documents/dot-agents/docs/PLATFORM_DIRS_DOCS.md"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-02
+    claim: "Codex session self-reported completion with edits applied (apply_patch=19); last_agent_message summarizes changes+validation for slug=~/Documents/payout."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L1676"
+        digest: sha256:898f78ca398f6aec5829af7a5974cb73fac99e762b059c8964ec11cb1d08c4f3
+        excerpt: "I updated [go-modular-monolith-migration.plan.md](~/Documents/payout/.agents/active/go-modular-monolith-migration.plan.md) so its status claims now line up with the focused active plans. What changed: - refreshed the top-level snapshot and …"
+      - ref: "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f#L277"
+        digest: sha256:5c0b2eb7883cfd30f12786aff0eb43683a81459fd910e7877bc15fef533aa5e6
+        excerpt: "apply_patch -> ~/Documents/payout/po-core-api-se/internal/client/user_store.go; ~/Documents/payout/po-core-api-se/internal/client/testing_fakes_test.go; ~/Documents/payout/po-core-api-se/internal/client/splitcheck.go; ~/Documents/payout/po- …"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-03
+    claim: "Codex session self-reported completion with edits applied (apply_patch=94); last_agent_message summarizes changes+validation for slug=~/Documents/payout."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L2100"
+        digest: sha256:d95f4e29900e98d41ca7c44621f4b02c8ee6e954e47474698c3ccdbe0739c3df
+        excerpt: "The auth task group docs are updated. I revised the auth section in [go-modular-monolith-migration.plan.md](~/Documents/payout/.agents/active/go-modular-monolith-migration.plan.md) to mark TOTP and recover/reset as complete, narrow the rema …"
+      - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L276"
+        digest: sha256:b0b9cc40856daf1a71b711dd2d4963bf1328db4a2c895e404a18b4c8a75fd921
+        excerpt: "apply_patch -> .agents/active/config-comparison-go-updates.plan.md"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-04
+    claim: "Codex session self-reported completion with edits applied (apply_patch=8); last_agent_message summarizes changes+validation for slug=~/Documents/payout."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-04-06T22-37-53-019d65cd-b6cb-7af0-8f93-d28f25cd2457:019d65cd-b6cb-7af0-8f93-d28f25cd2457#L803"
+        digest: sha256:01333df46ba7f89c497205bd83e5691282609803851495c1265e1b7eedb451b3
+        excerpt: "I audited both plans against the current worktree and updated both, because both were out of sync. For [config-comparison-go-updates.plan.md](~/Documents/payout/.agents/active/config-comparison-go-updates.plan.md), the code already implemen …"
+      - ref: "codex:rollout-2026-04-06T22-37-53-019d65cd-b6cb-7af0-8f93-d28f25cd2457:019d65cd-b6cb-7af0-8f93-d28f25cd2457#L215"
+        digest: sha256:d3ae7d231b955460a65e8b51c0c663d16d62052e73e541104517c014169fc3da
+        excerpt: "apply_patch -> ~/Documents/payout/po-core-api-se/internal/client/user_store.go; ~/Documents/payout/po-core-api-se/internal/client/testing_fakes_test.go; ~/Documents/payout/po-core-api-se/internal/client/splitcheck.go; ~/Documents/payout/po- …"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-05
+    claim: "Codex session self-reported completion with edits applied (apply_patch=2); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-05-25T14-16-20-019e605a-24a1-7863-adc2-86e948545f5b:019e605a-24a1-7863-adc2-86e948545f5b#L327"
+        digest: sha256:1b3f62b32152588fb4b422861c9c19c57a70ad8d537283d399d53defa65ff412
+        excerpt: "Drafted the separate follow-up at: - [design.md](~/Documents/dot-agents/.agents/workflow/specs/orchestration-companion-stop-hooks/design.md) - [PLAN.yaml](~/Documents/dot-agents/.agents/workflow/plans/orchestration-companion-stop-hooks/PLAN …"
+      - ref: "codex:rollout-2026-05-25T14-16-20-019e605a-24a1-7863-adc2-86e948545f5b:019e605a-24a1-7863-adc2-86e948545f5b#L291"
+        digest: sha256:5db500b33d0d241d232bea3d2b10e7435ee9342c061e924ecc1c5655f3adb070
+        excerpt: "apply_patch -> ~/Documents/dot-agents/.agents/workflow/specs/orchestration-companion-stop-hooks/design.md; ~/Documents/dot-agents/.agents/workflow/plans/orchestration-companion-stop-hooks/PLAN.yaml; ~/Documents/dot-agents/.agents/workflow/p …"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-06
+    claim: "Codex session self-reported completion with edits applied (apply_patch=16); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-04-12T12-01-20-019d826d-164f-7cf2-b102-f65830ef293f:019d826d-164f-7cf2-b102-f65830ef293f#L432"
+        digest: sha256:d392c1aa300ba4a791d1c92c6729a4a59d096e686a6658822367f9d8909eb0de
+        excerpt: "Implemented the coordinator-side Stage 2 bucket slice without touching the platform-specific emitter lanes. I added a shared bucket registry in `internal/platform/buckets.go`, scaffolded the new bucket roots in `commands/init.go`, taught `c …"
+      - ref: "codex:rollout-2026-04-12T12-01-20-019d826d-164f-7cf2-b102-f65830ef293f:019d826d-164f-7cf2-b102-f65830ef293f#L273"
+        digest: sha256:0fcca643c05a35a53cb9da75a9a3666de9a6fca19a389081097334b266b6bf3b
+        excerpt: "apply_patch -> ~/Documents/dot-agents/internal/platform/buckets.go"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-07
+    claim: "Codex session self-reported completion with edits applied (apply_patch=2); last_agent_message summarizes changes+validation for slug=~/proj-docs/dot-agents/.claude/worktrees/agent-acde5c2ab70d82f2a."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L633"
+        digest: sha256:9da185e482840cb615c6676ea277ebabb2845bb8824238994f8854a068f7ceb6
+        excerpt: "Implemented and committed locally, but I could not complete the push/PR step in this environment. Local branch/commit: `<tmp> `feat/da-config-relevance-lessons-facet` `688c9813abf753137433428aff134f90a071c9da feat(config): add lessons relev …"
+      - ref: "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2#L181"
+        digest: sha256:cf11b67bb311d25570100236204a714299656bc6782648f3474df93d36d85fba
+        excerpt: "apply_patch -> <tmp>"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-08
+    claim: "Codex session self-reported completion with edits applied (apply_patch=13); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-05-04T21-28-11-019df5bf-f48f-7950-b782-66e91a211966:019df5bf-f48f-7950-b782-66e91a211966#L604"
+        digest: sha256:8a26d5178c8497374add66a83880b7ebcc32b2d1e5a431740c30bbe31a6390e3
+        excerpt: "I checked the live SonarCloud PR `10` metric. As of May 4, 2026, `new_duplicated_lines_density` is `1.1178735560799902%` on `48,306` new lines, which is below the `<= 3%` gate threshold. Source: `https://sonarcloud.io/api/measures/component …"
+      - ref: "codex:rollout-2026-05-04T21-28-11-019df5bf-f48f-7950-b782-66e91a211966:019df5bf-f48f-7950-b782-66e91a211966#L176"
+        digest: sha256:8e2558caf9347d673346937d8e21087f721cabde97a409aacb0b9b88522de52a
+        excerpt: "apply_patch -> .agents/active/pr10-sq3-ci-fixes.plan.md"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-09
+    claim: "Codex session self-reported completion with edits applied (apply_patch=16); last_agent_message summarizes changes+validation for slug=~/Documents/payout."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e#L485"
+        digest: sha256:f059ef30cd1e761722390d94199bb749301c4b53eb316f870e2977b8efc3d07e
+        excerpt: "Relevant `client-se` touchpoints are concentrated in [`auth.py`](~/Documents/payout/client-se/src/payout/client_se/controller/auth.py), [`table.py`](~/Documents/payout/client-se/src/payout/client_se/controller/table.py), and one adjacent se …"
+      - ref: "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e#L84"
+        digest: sha256:c8337dea9aeaf50a07d015899f3f6e45b379842a8f36d5e0d9f9d2e888b33c88
+        excerpt: "apply_patch -> ~/Documents/payout/client-ui/src/app/lib/providers/AppProviders.tsx; ~/Documents/payout/client-ui/src/app/lib/providers/DiningProvider.tsx; ~/Documents/payout/client-ui/src/app/lib/providers/index.ts; ~/Documents/payout/clien …"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-10
+    claim: "Codex session self-reported completion with edits applied (apply_patch=5); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-03-30T20-58-24-019d4166-1bea-7ca1-87eb-ad2598228d91:019d4166-1bea-7ca1-87eb-ad2598228d91#L562"
+        digest: sha256:fb106c06d27d821fd67508bc2e6c109b7fd1b6243653328d9db80cad339d608b
+        excerpt: "Added the “Next 3 Actions” section to [platform-dir-unification.plan.md](~/Documents/dot-agents/.agents/active/platform-dir-unification.plan.md) with concrete follow-ups for Phase 5B, 5E, and 5G. If you want, I can start executing Action 1 …"
+      - ref: "codex:rollout-2026-03-30T20-58-24-019d4166-1bea-7ca1-87eb-ad2598228d91:019d4166-1bea-7ca1-87eb-ad2598228d91#L114"
+        digest: sha256:2cfcc79c3a9d33e30c4d51ee57692cfaab388b027d46c0081cdc5b45b6d020bd
+        excerpt: "apply_patch -> ~/Documents/dot-agents/.agents/active/handoffs/2026-03-30-plugin-support-next.md"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-11
+    claim: "Codex session self-reported completion with edits applied (apply_patch=20); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-04-11T09-50-13-019d7cce-b173-7de2-8871-47a8dce5af22:019d7cce-b173-7de2-8871-47a8dce5af22#L562"
+        digest: sha256:9e01368ab26696485cfe2571fd16a7276dfdb80b7a9daa2d89f85fd00567bc2a
+        excerpt: "Yes. The current planning breaks the other resources into three tiers. **1. In the `ResourceIntent` model now** The framework is meant to describe all current Stage 1 canonical buckets, not just skills. The RFC’s bucket list is `skills`, `a …"
+      - ref: "codex:rollout-2026-04-11T09-50-13-019d7cce-b173-7de2-8871-47a8dce5af22:019d7cce-b173-7de2-8871-47a8dce5af22#L95"
+        digest: sha256:f5bf0ab9370fde791fa650ba0e93092e6beaca11aac695a999a636bfb5ad7160
+        excerpt: "apply_patch -> ~/Documents/dot-agents/internal/platform/resource_intent.go"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []
+  - item_id: cx-outcome-complete-12
+    claim: "Codex session self-reported completion with edits applied (apply_patch=6); last_agent_message summarizes changes+validation for slug=~/Documents/dot-agents."
+    class: outcome
+    anchors:
+      - ref: "codex:rollout-2026-04-19T00-46-45-019da410-0075-7c12-845f-859f9544e7b0:019da410-0075-7c12-845f-859f9544e7b0#L363"
+        digest: sha256:43d105d5f1d3497f4df1e1c58b90cec3ef439a567f4ea85153945f27449e3cac
+        excerpt: "Implemented the scoped plan-completion plumbing on the Go side and verified it end to end. What changed: - Added `workflow complete` handling plus blank-`--plan` rejection in [commands/workflow/cmd.go](~/Documents/dot-agents/commands/workfl …"
+      - ref: "codex:rollout-2026-04-19T00-46-45-019da410-0075-7c12-845f-859f9544e7b0:019da410-0075-7c12-845f-859f9544e7b0#L212"
+        digest: sha256:2bbf43f91bc80cf0f86a111937c7c6677dc51b15435eb5bcf169ea3723e98456
+        excerpt: "apply_patch -> ~/Documents/dot-agents/commands/workflow/cmd.go"
+    sensitivity: internal
+    confidence: high
+    inference_flags: []
+    rubric_version: null
+    related_prior: []

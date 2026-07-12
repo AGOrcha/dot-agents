@@ -130,3 +130,22 @@ pip-delete-this-directory.txt
 
 # terraform plan outputs
 *.tfplan
+# >>> dot-agents managed (project outputs) >>>
+.agents/agents/
+.agents/skills/
+.agentsrc.local.json
+.antigravity/
+.claude/
+.claude/settings.local.json
+.codex/
+.cursor/
+.cursorignore
+.cursorrules
+.github/agents/
+.github/copilot-instructions.md
+.github/hooks/*.json
+.mcp.json
+.vscode/mcp.json
+AGENTS.md
+CLAUDE.md
+# <<< dot-agents managed (project outputs) <<<

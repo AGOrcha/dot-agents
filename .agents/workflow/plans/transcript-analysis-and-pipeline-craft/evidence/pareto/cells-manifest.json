@@ -1,0 +1,440 @@
+{
+  "generated_for": "transcript-analysis-and-pipeline-craft / pareto historical pass",
+  "unit": "one row per (session_id, iteration) where derivable; else session-level flagged",
+  "live_rubric_version": "3.0.0",
+  "note": "HISTORICAL pass = hypothesis-generation ONLY (pareto-measurement-rubric.md:42-46). No dominance/frontier/accuracy conclusions are drawn from these cells.",
+  "cell_axes": {
+    "model_family": [
+      "anthropic",
+      "openai-codex",
+      "cursor-routed",
+      "mixed",
+      "unknown"
+    ],
+    "task_class": [
+      "orchestration-impl",
+      "impl-slice",
+      "recovery",
+      "review",
+      "experiment",
+      "experiment-gate",
+      "codex-session",
+      "smoke",
+      "failure"
+    ],
+    "cache_regime": {
+      "cache-hot": ">=85% cache-read of input/tokens",
+      "cache-warm": "50-84%",
+      "cache-cold": "<50%",
+      "unknown": "no cache accounting"
+    },
+    "retry_regime": {
+      "no-retry": "retries==0",
+      "retried": "retries>=1",
+      "unknown": "not recorded per row"
+    }
+  },
+  "axis_value_counts": {
+    "model_family": {
+      "mixed": 4,
+      "anthropic": 5,
+      "openai-codex": 121,
+      "cursor-routed": 1,
+      "unknown": 67
+    },
+    "task_class": {
+      "failure": 1,
+      "orchestration-impl": 7,
+      "smoke": 1,
+      "codex-session": 65,
+      "experiment-gate": 25,
+      "experiment": 22,
+      "review": 8,
+      "impl-slice": 68,
+      "recovery": 1
+    },
+    "cache_regime": {
+      "unknown": 71,
+      "cache-hot": 83,
+      "cache-cold": 5,
+      "cache-warm": 39
+    },
+    "retry_regime": {
+      "unknown": 128,
+      "no-retry": 66,
+      "retried": 4
+    }
+  },
+  "row_counts": {
+    "total": 198,
+    "by_source": {
+      "omp": 8,
+      "copilot": 1,
+      "codex-census": 120,
+      "iter-log": 69
+    }
+  },
+  "source_axis_coverage": {
+    "omp": {
+      "rows": 8,
+      "cost_recorded": 8,
+      "tokens": 8,
+      "model_attributed": 8,
+      "cache_regime": 4
+    },
+    "copilot": {
+      "rows": 1,
+      "tokens": 1,
+      "cache_regime": 1,
+      "model_attributed": 1,
+      "wall_recorded": 1,
+      "retry_known": 1
+    },
+    "codex-census": {
+      "rows": 120,
+      "tokens": 120,
+      "cache_regime": 120,
+      "model_attributed": 120
+    },
+    "iter-log": {
+      "rows": 69,
+      "score": 66,
+      "retry_known": 69,
+      "tokens": 2,
+      "cache_regime": 2,
+      "model_attributed": 2
+    }
+  },
+  "cells": [
+    {
+      "cell": {
+        "model_family": "unknown",
+        "task_class": "impl-slice",
+        "cache_regime": "unknown",
+        "retry_regime": "no-retry"
+      },
+      "n": 62,
+      "row_ids_sample": [
+        "iter-1",
+        "iter-2",
+        "iter-4",
+        "iter-5",
+        "iter-6",
+        "iter-7"
+      ],
+      "row_ids_total": 62
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "codex-session",
+        "cache_regime": "cache-hot",
+        "retry_regime": "unknown"
+      },
+      "n": 51,
+      "row_ids_sample": [
+        "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0",
+        "codex:rollout-2026-03-19T12-10-11-019d06dc-9040-74f3-ad3b-9659b753d96d:019d06dc-9040-74f3-ad3b-9659b753d96d",
+        "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4",
+        "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31",
+        "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f",
+        "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de"
+      ],
+      "row_ids_total": 51
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "codex-session",
+        "cache_regime": "cache-warm",
+        "retry_regime": "unknown"
+      },
+      "n": 14,
+      "row_ids_sample": [
+        "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e",
+        "codex:rollout-2026-03-30T19-06-38-019d40ff-cb41-7bd1-a57a-9e5db6ece347:019d40ff-cb41-7bd1-a57a-9e5db6ece347",
+        "codex:rollout-2026-06-26T09-38-34-019f0427-53e7-7d91-9af7-0105007165cd:019f0427-53e7-7d91-9af7-0105007165cd",
+        "codex:rollout-2026-04-17T14-28-35-019d9cb3-b0dd-7f02-a202-9afba6d3b54c:019d9cb3-b0dd-7f02-a202-9afba6d3b54c",
+        "codex:rollout-2026-06-28T22-11-54-019f1125-c1cd-74f3-9f2b-0a1683c6d80c:019f1125-c1cd-74f3-9f2b-0a1683c6d80c",
+        "codex:rollout-2026-06-25T18-19-35-019f00dd-fb6e-75b2-9563-c4f5d61b6183:019f00dd-fb6e-75b2-9563-c4f5d61b6183"
+      ],
+      "row_ids_total": 14
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "experiment-gate",
+        "cache_regime": "cache-hot",
+        "retry_regime": "unknown"
+      },
+      "n": 13,
+      "row_ids_sample": [
+        "codex:rollout-2026-06-29T18-24-45-019f157c-24ee-7f72-b0c3-5a63cb0615c3:019f157c-24ee-7f72-b0c3-5a63cb0615c3",
+        "codex:rollout-2026-07-02T05-50-24-019f223c-99bd-77b1-b618-6e8e068a3f02:019f223c-99bd-77b1-b618-6e8e068a3f02",
+        "codex:rollout-2026-06-30T00-02-20-019f16b1-3861-7821-963c-610257afa6e6:019f16b1-3861-7821-963c-610257afa6e6",
+        "codex:rollout-2026-07-01T08-22-47-019f1da1-bb0d-7ea3-bf2d-c1438ab8960b:019f1da1-bb0d-7ea3-bf2d-c1438ab8960b",
+        "codex:rollout-2026-07-02T20-11-10-019f2550-a595-76a3-81d9-7b038a05b7ba:019f2550-a595-76a3-81d9-7b038a05b7ba",
+        "codex:rollout-2026-07-03T11-29-47-019f2899-abd7-76d1-9510-22690605e66d:019f2899-abd7-76d1-9510-22690605e66d"
+      ],
+      "row_ids_total": 13
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "experiment",
+        "cache_regime": "cache-hot",
+        "retry_regime": "unknown"
+      },
+      "n": 13,
+      "row_ids_sample": [
+        "codex:rollout-2026-06-26T14-50-50-019f0545-3a56-7492-a70d-85b4773dba36:019f0545-3a56-7492-a70d-85b4773dba36",
+        "codex:rollout-2026-06-26T14-50-02-019f0544-7e10-7222-a62e-6ffa47ecd1ef:019f0544-7e10-7222-a62e-6ffa47ecd1ef",
+        "codex:rollout-2026-06-26T12-21-26-019f04bc-7309-7ec2-936c-c7109e8f2980:019f04bc-7309-7ec2-936c-c7109e8f2980",
+        "codex:rollout-2026-06-26T12-21-03-019f04bc-1619-7900-a1cd-0e77e7bbf73d:019f04bc-1619-7900-a1cd-0e77e7bbf73d",
+        "codex:rollout-2026-06-26T18-20-54-019f0605-8c99-7b70-84dc-0f12f3f52d56:019f0605-8c99-7b70-84dc-0f12f3f52d56",
+        "codex:rollout-2026-06-26T12-16-16-019f04b7-b63e-7b01-9713-0d17e186c2a0:019f04b7-b63e-7b01-9713-0d17e186c2a0"
+      ],
+      "row_ids_total": 13
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "experiment-gate",
+        "cache_regime": "cache-warm",
+        "retry_regime": "unknown"
+      },
+      "n": 12,
+      "row_ids_sample": [
+        "codex:rollout-2026-07-02T12-59-14-019f23c5-2e3d-7cb1-a27a-fe2a39d5535b:019f23c5-2e3d-7cb1-a27a-fe2a39d5535b",
+        "codex:rollout-2026-07-01T09-18-56-019f1dd5-282b-75b2-9fbf-8cce44930c46:019f1dd5-282b-75b2-9fbf-8cce44930c46",
+        "codex:rollout-2026-07-04T08-42-20-019f2d26-baed-7761-9b20-242185925096:019f2d26-baed-7761-9b20-242185925096",
+        "codex:rollout-2026-06-30T08-37-37-019f1888-f83b-7be0-924a-e4b741951d30:019f1888-f83b-7be0-924a-e4b741951d30",
+        "codex:rollout-2026-07-04T14-25-03-019f2e60-7eb3-7771-a57a-e29212ffdb55:019f2e60-7eb3-7771-a57a-e29212ffdb55",
+        "codex:rollout-2026-06-30T00-52-08-019f16de-cf92-72e1-8457-41ede9bccd54:019f16de-cf92-72e1-8457-41ede9bccd54"
+      ],
+      "row_ids_total": 12
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "experiment",
+        "cache_regime": "cache-warm",
+        "retry_regime": "unknown"
+      },
+      "n": 8,
+      "row_ids_sample": [
+        "codex:rollout-2026-06-26T17-28-11-019f05d5-4974-7333-8ee0-ae2ba514310b:019f05d5-4974-7333-8ee0-ae2ba514310b",
+        "codex:rollout-2026-06-26T12-20-38-019f04bb-b4a9-7931-bba2-f584582ed1f5:019f04bb-b4a9-7931-bba2-f584582ed1f5",
+        "codex:rollout-2026-06-26T12-19-40-019f04ba-d189-7920-8879-98ec0b176e50:019f04ba-d189-7920-8879-98ec0b176e50",
+        "codex:rollout-2026-06-26T12-23-47-019f04be-983a-7302-8061-2fa990249daf:019f04be-983a-7302-8061-2fa990249daf",
+        "codex:rollout-2026-06-26T14-52-23-019f0546-a39a-71c3-9765-9ec334bb0edd:019f0546-a39a-71c3-9765-9ec334bb0edd",
+        "codex:rollout-2026-06-26T18-41-47-019f0618-a92f-73e1-b54b-e17ff196ae47:019f0618-a92f-73e1-b54b-e17ff196ae47"
+      ],
+      "row_ids_total": 8
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "review",
+        "cache_regime": "cache-warm",
+        "retry_regime": "unknown"
+      },
+      "n": 5,
+      "row_ids_sample": [
+        "codex:rollout-2026-06-30T08-28-38-019f1880-be1a-7512-8258-22d994b35c1c:019f1880-be1a-7512-8258-22d994b35c1c",
+        "codex:rollout-2026-06-30T00-02-21-019f16b1-3b51-7341-8554-4d3b6f9afb35:019f16b1-3b51-7341-8554-4d3b6f9afb35",
+        "codex:rollout-2026-06-25T20-47-14-019f0165-288c-7503-b2e1-b9a210e91afb:019f0165-288c-7503-b2e1-b9a210e91afb",
+        "codex:rollout-2026-06-30T10-31-13-019f18f0-f7a3-7ff2-bfc8-03e9b80f30d6:019f18f0-f7a3-7ff2-bfc8-03e9b80f30d6",
+        "codex:rollout-2026-06-29T11-08-46-019f13ec-ff32-7d61-a351-16f1b9fca3af:019f13ec-ff32-7d61-a351-16f1b9fca3af"
+      ],
+      "row_ids_total": 5
+    },
+    {
+      "cell": {
+        "model_family": "unknown",
+        "task_class": "impl-slice",
+        "cache_regime": "unknown",
+        "retry_regime": "retried"
+      },
+      "n": 4,
+      "row_ids_sample": [
+        "iter-3",
+        "iter-17",
+        "iter-52",
+        "iter-53"
+      ],
+      "row_ids_total": 4
+    },
+    {
+      "cell": {
+        "model_family": "mixed",
+        "task_class": "orchestration-impl",
+        "cache_regime": "cache-hot",
+        "retry_regime": "unknown"
+      },
+      "n": 3,
+      "row_ids_sample": [
+        "omp:019f3cf2",
+        "omp:019f3f23",
+        "omp:019f4eea"
+      ],
+      "row_ids_total": 3
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "review",
+        "cache_regime": "cache-cold",
+        "retry_regime": "unknown"
+      },
+      "n": 3,
+      "row_ids_sample": [
+        "codex:rollout-2026-05-26T19-06-19-019e6689-fc5a-7593-92e1-11d4aa70dc75:019e6689-fc5a-7593-92e1-11d4aa70dc75",
+        "codex:rollout-2026-06-24T11-24-30-019efa3b-992c-7291-9c7a-a825834932d8:019efa3b-992c-7291-9c7a-a825834932d8",
+        "codex:rollout-2026-06-30T10-23-52-019f18ea-3e71-7021-b4ee-47e24a629949:019f18ea-3e71-7021-b4ee-47e24a629949"
+      ],
+      "row_ids_total": 3
+    },
+    {
+      "cell": {
+        "model_family": "anthropic",
+        "task_class": "impl-slice",
+        "cache_regime": "cache-hot",
+        "retry_regime": "no-retry"
+      },
+      "n": 2,
+      "row_ids_sample": [
+        "iter-63",
+        "iter-64"
+      ],
+      "row_ids_total": 2
+    },
+    {
+      "cell": {
+        "model_family": "mixed",
+        "task_class": "failure",
+        "cache_regime": "unknown",
+        "retry_regime": "unknown"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "omp:019f3cbc"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "anthropic",
+        "task_class": "orchestration-impl",
+        "cache_regime": "cache-hot",
+        "retry_regime": "unknown"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "omp:019f4eda"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "orchestration-impl",
+        "cache_regime": "unknown",
+        "retry_regime": "unknown"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "omp:019f3cf2:gpt-5.4"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "anthropic",
+        "task_class": "orchestration-impl",
+        "cache_regime": "unknown",
+        "retry_regime": "unknown"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "omp:019f3cf2:claude-opus-4-8"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "cursor-routed",
+        "task_class": "orchestration-impl",
+        "cache_regime": "unknown",
+        "retry_regime": "unknown"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "omp:019f3cf2:gpt-5.4-high"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "anthropic",
+        "task_class": "smoke",
+        "cache_regime": "cache-cold",
+        "retry_regime": "no-retry"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "copilot:23e45a55"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "openai-codex",
+        "task_class": "experiment",
+        "cache_regime": "cache-cold",
+        "retry_regime": "unknown"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "codex:rollout-2026-06-26T18-10-32-019f05fc-0c58-7a13-bd8e-35a4afda52d1:019f05fc-0c58-7a13-bd8e-35a4afda52d1"
+      ],
+      "row_ids_total": 1
+    },
+    {
+      "cell": {
+        "model_family": "unknown",
+        "task_class": "recovery",
+        "cache_regime": "unknown",
+        "retry_regime": "no-retry"
+      },
+      "n": 1,
+      "row_ids_sample": [
+        "iter-67"
+      ],
+      "row_ids_total": 1
+    }
+  ],
+  "exclusions": {
+    "rules_applied": [
+      "rubric-version mismatch: ALL 66 iter-log score sidecars are rubric_version 2.1.0 (historical); live rubric is 3.0.0. Every historical accuracy value carries accuracy_live_comparable=false and is EXCLUDED from any cross-version accuracy pooling with future live 3.0.0 rows.",
+      "cutoff sessions: OMP 019f4eda/019f4eea + codex 7 cutoffs flagged cutoff_accuracy_unreliable; token/cost axes retained (recorded), accuracy proxy degraded.",
+      "mixed-model without boundaries: OMP mega-sessions ARE mixed-model but DO carry model_change records -> retained as model_family=mixed (blended $), per-model attribution only where extracted (019f3cf2 sub-rows). Codex comma-model rows flagged mixed_model_no_change_boundary_in_table.",
+      "model-unattributed: 67 iter-log rows have no agent.model -> excluded from model_family cells (model_family=unknown); retained for accuracy/retry-regime hypothesis generation only."
+    ],
+    "tallies": {
+      "mixed_model_blended": 20,
+      "cutoff_accuracy_unreliable": 2,
+      "no_cost_axis_codex": 120,
+      "rubric_version_2.1.0_not_live_3.0.0": 66,
+      "model_unattributed": 67,
+      "no_token_axis_iterlog": 67
+    }
+  },
+  "derivability_summary": {
+    "cost_usd_recorded": "OMP only (5 session rows + 3 per-model sub-rows). codex/iter-log/copilot: NO usd cost field; synthesis via tokens x published-rate DEFERRED (no authoritative rate-card in evidence base) -> not fabricated.",
+    "token_volume": "OMP (all), codex census (120), copilot (1), iter-log (2 of 69: iter-63/64). 67 iter rows have no token axis.",
+    "cache_regime_derivable": "OMP 4 large (96-98%), codex 120 (per cached%), iter-63/64 (0.992). Rest unknown.",
+    "accuracy_proxy": "iter-log 66 scored (2.1.0) + verifier/retry; OMP/codex/copilot: outcome/status only (low-res).",
+    "wallclock": "recorded only: copilot 2.681s; OMP model-time summed [INF] for 019f3cf2/019f3f23; codex/iter session-span [INF] not extracted."
+  }
+}
