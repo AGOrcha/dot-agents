@@ -246,3 +246,29 @@ OMP figures are **unchanged**: cacheRead 96-98% of tokens (96.20-97.71%) and 62-
 observational priors — **not** dominance, frontier, or accuracy conclusions; the live paired contrasts
 (rubric step 4) are still the only settlement. The correction *widens* the codex uncached-volume prior and
 SHOULD be re-checked by the adversarial cross-family reviewer before any live-wave sizing leans on it.
+
+---
+
+## Erratum 2 (Claude Code JSONL field fidelity) — 2026-07-12
+
+External reference (`evidence/prior/external-references-2026-07-12.md` §1; Gille 2026-02-24,
+PRELIMINARY per author) reports CC JSONL `usage.input_tokens` as a streaming placeholder
+(their corpus: 75% ≤1, input under-recorded 102-174×), `output_tokens` partially placeholder
+and thinking-exclusive, with 51-55% duplicate `requestId` entries; only
+`cache_read_input_tokens`/`cache_creation_input_tokens` match the accurate statusbar source (~1×).
+
+**Local verification (this machine, 2026-07-12, 400 CC project files, 35,515 assistant usage
+entries):** input≤1 = **12%** (placeholder severity far below their 75% — version/era-dependent),
+output≤1 = 0%, but **76% of requestIds appear more than once** — a naive per-entry sum overcounts
+CC tokens ~2.4×.
+
+**Impact on this corpus:** the CC-derived token figures in inventory/items (`has_tokens` for
+claude-code sessions, the CC cache-share item `input=2 / cache_read=28,175`) were computed
+WITHOUT requestId dedup and with no placeholder exclusion. No rows.jsonl codex/OMP/iter figures
+are affected (different harnesses). Field-trust rule going forward:
+- CC high-trust fields: `cache_read_input_tokens`, `cache_creation_input_tokens`.
+- CC low-trust fields: `input_tokens` (12% placeholders locally; possibly under-recorded),
+  `output_tokens` (excludes thinking).
+- MANDATORY: dedup by last-entry-per-`requestId` before any CC summation.
+- CC rows feeding any live-wave sizing must be recomputed under this rule or excluded; the
+  capability matrix entry for claude-code downgrades to "tokens: low-fidelity (cache fields only)".

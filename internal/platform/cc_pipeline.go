@@ -280,6 +280,24 @@ export function assertCrossFamily(m) {
   return cf
 }
 
+// parseVerdict extracts the outcome token from an agent's unstructured return
+// text. Tokens are case-sensitive and the LAST occurrence wins (the agent's
+// final word is its verdict). Text naming no token is FAIL-safe 'UNKNOWN': it
+// never short-circuits downstream stages but is still reported to the gate.
+export function parseVerdict(text) {
+  const s = typeof text === 'string' ? text : text == null ? '' : String(text)
+  let best = 'UNKNOWN'
+  let at = -1
+  for (const tok of ['PASS', 'FAIL', 'SKIP', 'APPROVE', 'REJECT']) {
+    const i = s.lastIndexOf(tok)
+    if (i > at) {
+      at = i
+      best = tok
+    }
+  }
+  return best
+}
+
 // stageSequence materializes the ordered per-task pipeline from the manifest:
 // profile_resolve → executor → verify×N → routine-lens×M → cross-family? → gate.
 // Each descriptor carries the resolved model/family route the driver pins the
@@ -325,6 +343,15 @@ export function stagePrompt(st, m, task) {
   }
 }
 
+// stagePromptWithPrior prepends the serialized prior-stage verdicts so every
+// stage after profile_resolve — and the evidence gate especially — decides from
+// driver-visible state, not only the $COORD files. profile_resolve runs against
+// an empty ledger, so it receives the bare prompt.
+export function stagePromptWithPrior(st, m, task, verdicts) {
+  const base = stagePrompt(st, m, task)
+  return Object.keys(verdicts).length ? 'Prior outcomes: ' + JSON.stringify(verdicts) + '\n' + base : base
+}
+
 const harnessReady =
   typeof agent === 'function' &&
   typeof parallel === 'function' &&
@@ -335,57 +362,91 @@ if (harnessReady) {
   const task = WF_ARGS.task || '(bundle-selected)'
   const seq = stageSequence(MANIFEST)
   const verdicts = {}
-  // Resolve + Execute (sequential).
+  // runStage runs one agent stage with the accumulated prior outcomes prepended
+  // and folds the parsed verdict back into the ledger the next prompt reads.
+  const runStage = async (st, opts) =>
+    parseVerdict(await agent(stagePromptWithPrior(st, MANIFEST, task, verdicts), opts))
+  // Resolve + Execute (sequential): profile_resolve's parsed outcome flows into
+  // every subsequent stage prompt via the shared verdicts ledger.
   for (const st of seq.filter((s) => s.kind === 'profile_resolve' || s.kind === 'executor')) {
     phase(st.phase)
     log(st.kind + ': ' + st.model + ' (' + st.family + ')')
-    verdicts[st.kind] = await agent(stagePrompt(st, MANIFEST, task), {
+    verdicts[st.kind] = await runStage(st, {
       label: st.kind + ':' + task,
       phase: st.phase,
       model: st.model,
       agentType: st.kind === 'executor' ? 'loop-worker' : 'task',
     })
   }
-  // Verify slots (sequential — each gates on the prior slot PASS).
+  // Verify slots (sequential — each gates on the prior slot PASS). The first FAIL
+  // short-circuits: no further verify slot launches and the remaining slots are
+  // recorded SKIPPED:downstream-of-FAIL so the gate sees where verification died.
   phase('Verify')
+  let verifyFailed = false
   for (const st of seq.filter((s) => s.kind === 'verify')) {
+    if (verifyFailed) {
+      verdicts['verify_' + st.index] = 'SKIPPED:downstream-of-FAIL'
+      log('verify ' + st.index + '/' + MANIFEST.verifiers.length + ': skipped (downstream of FAIL)')
+      continue
+    }
     log('verify ' + st.index + '/' + MANIFEST.verifiers.length + ': ' + st.model + ' (' + st.family + ')')
-    verdicts['verify_' + st.index] = await agent(stagePrompt(st, MANIFEST, task), {
+    const v = await runStage(st, {
       label: 'verify:' + task + ':' + st.index,
       phase: 'Verify',
       model: st.model,
     })
+    verdicts['verify_' + st.index] = v
+    if (v === 'FAIL') verifyFailed = true
   }
-  // Routine lenses (parallel — independent read-only reviews, capped ≤4).
+  // Routine lenses (parallel — independent read-only reviews, capped ≤4). They
+  // review WORKING code, so a verify FAIL skips the whole group.
   const routine = seq.filter((s) => s.kind === 'routine')
   if (routine.length) {
     phase('Review')
-    verdicts.routine = await parallel(
-      routine.map((st) => () =>
-        agent(stagePrompt(st, MANIFEST, task), {
-          label: 'review:' + task + ':' + st.index,
-          phase: 'Review',
-          model: st.model,
-        })
+    if (verifyFailed) {
+      routine.forEach((st) => {
+        verdicts['routine_' + st.index] = 'SKIPPED:downstream-of-FAIL'
+      })
+      log('routine review: skipped (downstream of verify FAIL)')
+    } else {
+      const rets = await parallel(
+        routine.map((st) => () =>
+          agent(stagePromptWithPrior(st, MANIFEST, task, verdicts), {
+            label: 'review:' + task + ':' + st.index,
+            phase: 'Review',
+            model: st.model,
+          })
+        )
       )
-    )
+      routine.forEach((st, i) => {
+        verdicts['routine_' + st.index] = parseVerdict(rets[i])
+      })
+    }
   }
-  // Blocking cross-family gate (sequential, after the routine lenses).
+  // Blocking cross-family gate (sequential, after the routine lenses). Skipped on
+  // a verify FAIL; a REJECT is recorded but NEVER skips the evidence gate.
   const cross = seq.find((s) => s.kind === 'cross_family')
   if (cross) {
     phase('Review')
-    log('cross-family: ' + cross.model + ' (' + cross.family + ') via slug ' + cross.slug)
-    verdicts.crossFamily = await agent(stagePrompt(cross, MANIFEST, task), {
-      label: 'review-cross-family:' + task,
-      phase: 'Review',
-      model: cross.model,
-    })
+    if (verifyFailed) {
+      verdicts.crossFamily = 'SKIPPED:downstream-of-FAIL'
+      log('cross-family: skipped (downstream of verify FAIL)')
+    } else {
+      log('cross-family: ' + cross.model + ' (' + cross.family + ') via slug ' + cross.slug)
+      verdicts.crossFamily = await runStage(cross, {
+        label: 'review-cross-family:' + task,
+        phase: 'Review',
+        model: cross.model,
+      })
+    }
   }
-  // Evidence gate.
+  // Evidence gate — ALWAYS runs (the fold-back writer). Its prompt already
+  // carries the serialized verdicts via stagePromptWithPrior, so GATE.md/READY.md
+  // decide from driver-visible state incl. any FAIL/REJECT, not only $COORD files.
   const gate = seq.find((s) => s.kind === 'gate')
   phase('Gate')
   log('gate: ' + gate.model + ' (' + gate.family + ')')
-  verdicts.gate = await agent(stagePrompt(gate, MANIFEST, task), {
+  verdicts.gate = await runStage(gate, {
     label: 'gate:' + task,
     phase: 'Gate',
     model: gate.model,

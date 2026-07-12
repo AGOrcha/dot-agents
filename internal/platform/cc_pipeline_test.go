@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -319,10 +320,7 @@ func harnessEvalForm(content string) string {
 // the real artifact bytes — including the trailing return — in the injected
 // function scope the harness runs them in. Skips when node is unavailable.
 func TestCCEmittedMjsHarnessFormPassesNodeCheck(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node not available; skipping syntax validation")
-	}
+	node := ccNode(t)
 	dir := t.TempDir()
 	for i, art := range emitCC(t, skeletonSpec("/repo")) {
 		// The raw artifact is NOT node --check-clean (top-level return idiom);
@@ -342,15 +340,8 @@ func TestCCEmittedMjsHarnessFormPassesNodeCheck(t *testing.T) {
 // assertCrossFamily must throw on a same-family or mis-slugged cross lens
 // (RULE-7 refusal on the JS side). Skips when node is unavailable.
 func TestCCRunnerExecutesUnderNode(t *testing.T) {
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node not available; skipping runtime exercise")
-	}
-	dir := t.TempDir()
-	module := filepath.Join(dir, "module.mjs")
-	if err := os.WriteFile(module, []byte(stripTrailingReturn(emitCC(t, skeletonSpec("/repo"))[0].Content)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	node := ccNode(t)
+	dir, _ := ccStrippedModule(t)
 	driver := filepath.Join(dir, "driver.mjs")
 	driverSrc := "import { MANIFEST, stageSequence, assertCrossFamily } from './module.mjs'\n" +
 		"const kinds = stageSequence(MANIFEST).map((s) => s.kind)\n" +
@@ -383,5 +374,151 @@ func TestCCRunnerExecutesUnderNode(t *testing.T) {
 	}
 	if !res.Rule7Slug {
 		t.Fatal("assertCrossFamily must throw on a mis-slugged cross lens")
+	}
+}
+
+// ccNode resolves the node binary or skips: every CC runner exercise validates
+// the emitted JS against the real interpreter, never a mock of node itself.
+func ccNode(t *testing.T) string {
+	t.Helper()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not available; skipping runner exercise")
+	}
+	return node
+}
+
+// ccStrippedModule writes the emitted skeleton pipeline as an importable ES
+// module (the harness-only trailing return removed) into a fresh temp dir and
+// returns the dir plus the module path.
+func ccStrippedModule(t *testing.T) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	module := filepath.Join(dir, "module.mjs")
+	body := stripTrailingReturn(emitCC(t, skeletonSpec("/repo"))[0].Content)
+	if err := os.WriteFile(module, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir, module
+}
+
+// ccMockResult is the driver-visible state a mock CC runner surfaces: the ordered
+// agent labels that actually launched and the evidence gate's rendered prompt.
+type ccMockResult struct {
+	Labels     []string `json:"labels"`
+	GatePrompt string   `json:"gatePrompt"`
+}
+
+// ccMockRun evaluates the emitted pipeline in the harness-eval form with mocked
+// agent/parallel/phase/log globals, so the real runner-body gating logic runs
+// under node. agentBody is the mock agent's return statement(s); the mock records
+// every launched stage's label so the test can assert which stages were skipped.
+func ccMockRun(t *testing.T, agentBody string) ccMockResult {
+	t.Helper()
+	node := ccNode(t)
+	dir := t.TempDir()
+	content := emitCC(t, skeletonSpec("/repo"))[0].Content
+	driverSrc := "const calls = []\n" +
+		"globalThis.phase = () => {}\n" +
+		"globalThis.log = () => {}\n" +
+		"globalThis.parallel = async (thunks) => Promise.all(thunks.map((fn) => fn()))\n" +
+		"globalThis.agent = async (prompt, opts) => {\n" +
+		"  const label = (opts && opts.label) || ''\n" +
+		"  calls.push({ label, prompt })\n" +
+		"  " + agentBody + "\n" +
+		"}\n" +
+		harnessEvalForm(content) +
+		"\nawait __wf__({ task: 'T1' })\n" +
+		"const gate = calls.find((c) => c.label === 'gate:T1')\n" +
+		"process.stdout.write(JSON.stringify({ labels: calls.map((c) => c.label), gatePrompt: gate ? gate.prompt : '' }))\n"
+	driver := filepath.Join(dir, "gating.mjs")
+	if err := os.WriteFile(driver, []byte(driverSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, driver).CombinedOutput()
+	if err != nil {
+		t.Fatalf("mock runner failed: %v\n%s", err, out)
+	}
+	var res ccMockResult
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("mock runner output does not parse: %v\n%s", err, out)
+	}
+	return res
+}
+
+// TestCCParseVerdictUnderNode exercises the pure verdict parser: case-sensitive
+// tokens, last-occurrence-wins, and FAIL-safe UNKNOWN for text naming no token.
+func TestCCParseVerdictUnderNode(t *testing.T) {
+	node := ccNode(t)
+	dir, _ := ccStrippedModule(t)
+	driver := filepath.Join(dir, "verdict.mjs")
+	src := "import { parseVerdict } from './module.mjs'\n" +
+		"process.stdout.write(JSON.stringify({\n" +
+		"  lastWins: parseVerdict('slot checks PASS then FAIL'),\n" +
+		"  rejectWins: parseVerdict('APPROVE early, REJECT late'),\n" +
+		"  caseSensitive: parseVerdict('everything looks pass here'),\n" +
+		"  noToken: parseVerdict('inconclusive run'),\n" +
+		"  skip: parseVerdict('SKIP this slot'),\n" +
+		"  nonString: parseVerdict(null),\n" +
+		"}))\n"
+	if err := os.WriteFile(driver, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(node, driver).CombinedOutput()
+	if err != nil {
+		t.Fatalf("parseVerdict driver failed: %v\n%s", err, out)
+	}
+	var got map[string]string
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("parseVerdict output does not parse: %v\n%s", err, out)
+	}
+	want := map[string]string{
+		"lastWins":      "FAIL",
+		"rejectWins":    "REJECT",
+		"caseSensitive": "UNKNOWN",
+		"noToken":       "UNKNOWN",
+		"skip":          "SKIP",
+		"nonString":     "UNKNOWN",
+	}
+	for k, w := range want {
+		if got[k] != w {
+			t.Fatalf("parseVerdict %s = %q, want %q", k, got[k], w)
+		}
+	}
+}
+
+// TestCCRunnerGatingUnderNode drives the real runner body with mocked agents to
+// prove the S4-H7 gating contract: a verify FAIL short-circuits the remaining
+// verify slots + routine + cross-family (the gate still runs with the FAIL in its
+// serialized prompt), and a cross-family REJECT is recorded without skipping the
+// gate.
+func TestCCRunnerGatingUnderNode(t *testing.T) {
+	verifyFail := ccMockRun(t, "if (label === 'verify:T1:1') return 'ran checks; FAIL'\n  return 'looks good; PASS'")
+	for _, skipped := range []string{"verify:T1:2", "review:T1:1", "review-cross-family:T1"} {
+		if slices.Contains(verifyFail.Labels, skipped) {
+			t.Fatalf("stage %q must be skipped after a verify FAIL; labels=%v", skipped, verifyFail.Labels)
+		}
+	}
+	if !slices.Contains(verifyFail.Labels, "gate:T1") {
+		t.Fatalf("evidence gate must ALWAYS run; labels=%v", verifyFail.Labels)
+	}
+	if !strings.HasPrefix(verifyFail.GatePrompt, "Prior outcomes: ") {
+		t.Fatalf("gate prompt must carry the serialized prior-outcomes ledger; got %q", verifyFail.GatePrompt)
+	}
+	if !strings.Contains(verifyFail.GatePrompt, `"verify_1":"FAIL"`) {
+		t.Fatalf("gate prompt must report the verify FAIL; got %q", verifyFail.GatePrompt)
+	}
+	if !strings.Contains(verifyFail.GatePrompt, "SKIPPED:downstream-of-FAIL") {
+		t.Fatalf("gate prompt must record the skipped downstream slots; got %q", verifyFail.GatePrompt)
+	}
+
+	crossReject := ccMockRun(t, "if (label === 'review-cross-family:T1') return 'BLOCKER present; REJECT'\n  return 'looks good; PASS'")
+	for _, ran := range []string{"review-cross-family:T1", "gate:T1"} {
+		if !slices.Contains(crossReject.Labels, ran) {
+			t.Fatalf("stage %q must run when verify passes; labels=%v", ran, crossReject.Labels)
+		}
+	}
+	if !strings.Contains(crossReject.GatePrompt, `"crossFamily":"REJECT"`) {
+		t.Fatalf("gate prompt must report the cross-family REJECT; got %q", crossReject.GatePrompt)
 	}
 }

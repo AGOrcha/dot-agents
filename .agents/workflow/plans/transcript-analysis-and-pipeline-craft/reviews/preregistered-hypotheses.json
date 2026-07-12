@@ -96,6 +96,12 @@
      "statement": "Per-stage model routing never reaches a launched swarm: the driver (bin/tests/omp-full-loop) always launches the unspecialized profile-driven.swarm.yaml, and buildSkeletonSpec pins every verify/routine slot to the executor model, so custom Sonnet/Haiku/Terra stage routes either mismatch at runtime or silently run on the executor model; specialized app-type YAMLs are emitted but never selected.",
      "test": "grep -n 'profile-driven' bin/tests/omp-full-loop | head; grep -n 'Model' internal/platform/pipeline_projection.go | sed -n '1,40p'; then emit a fixture agentsrc with executor=claude-opus-4-8, one verifier stage model=claude-sonnet-5, one reviewer lens model=gpt-5.6-terra; run da workflow pipeline emit --platform omp (skeleton AND --app-type) and diff the models in both YAMLs; check which filename the driver would read.",
      "note": "added mid-review by parent (advisory), pre-registered before any fix work started"
+    },
+    {
+     "id": "S4-H7",
+     "statement": "The CC runner does not gate on prior stage outcomes: ccPipelineRunnerBody stores agent returns in `verdicts` but never passes them to later prompts, never short-circuits verify/routine/cross stages on FAIL/REJECT, and never applies profile_resolve output; the gate stage always launches regardless.",
+     "test": "grep -n 'verdicts' internal/platform/cc_pipeline.go; node-mock agent/parallel returning verify FAIL and cross-family REJECT; assert later stages stop or receive the failure and the gate prompt carries prior outcomes.",
+     "note": "added mid-review by parent (advisory) after fix-wave 1; pre-registered before fix-wave 2"
     }
    ]
   },
