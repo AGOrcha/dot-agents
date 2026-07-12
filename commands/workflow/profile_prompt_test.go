@@ -73,6 +73,26 @@ func TestDecodeProfilePromptFiles(t *testing.T) {
 	}
 }
 
+func TestDecodeProfileModelRoute(t *testing.T) {
+	raw := map[string]any{
+		"stage_profiles": map[string]any{
+			"reviewer": map[string]any{
+				"cross-harness-adversarial": map[string]any{
+					"model":        " gpt-5.4 ",
+					"model_family": " gpt ",
+				},
+			},
+		},
+	}
+	model, family := decodeProfileModelRoute(raw, profileKindReviewer, "cross-harness-adversarial")
+	if model != "gpt-5.4" || family != "gpt" {
+		t.Fatalf("route = %q/%q, want gpt-5.4/gpt", model, family)
+	}
+	if model, family := decodeProfileModelRoute(raw, profileKindReviewer, "ghost"); model != "" || family != "" {
+		t.Fatalf("missing route = %q/%q, want empty", model, family)
+	}
+}
+
 func TestResolvePromptRef(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
@@ -162,7 +182,7 @@ func TestComposeProfilePrompt_VerifierBaseFirst(t *testing.T) {
 	write(home, "prompts/verifiers/cli-runner.md")
 	write(project, ".agents/prompts/verifiers/cli-runner.project.md")
 
-	snapshotWithProfiles(t, `{"cli-runner":{"prompt_files":["verifiers/verifier.base.md","verifiers/cli-runner.md","verifiers/cli-runner.project.md"]}}`, "")
+	snapshotWithProfiles(t, `{"cli-runner":{"model":"claude-opus-4-8","model_family":"claude","prompt_files":["verifiers/verifier.base.md","verifiers/cli-runner.md","verifiers/cli-runner.project.md"]}}`, "")
 
 	view, err := composeProfilePrompt(project, home, profileKindVerifier, "cli-runner")
 	if err != nil {
@@ -170,6 +190,9 @@ func TestComposeProfilePrompt_VerifierBaseFirst(t *testing.T) {
 	}
 	if !view.Matched || len(view.Entries) != 3 {
 		t.Fatalf("matched=%t entries=%d, want matched 3", view.Matched, len(view.Entries))
+	}
+	if view.Model != "claude-opus-4-8" || view.ModelFamily != "claude" {
+		t.Fatalf("route = %q/%q, want claude-opus-4-8/claude", view.Model, view.ModelFamily)
 	}
 	// base-first order preserved; scopes resolved per file (base/per-type shared, overlay repo)
 	wantScope := []string{"shared-home", "shared-home", "repo-local"}

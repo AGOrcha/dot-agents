@@ -652,15 +652,21 @@ func (r *PromptFileRef) UnmarshalJSON(data []byte) error {
 }
 
 // StageProfile is one named entry in an AgentsRC.StageProfiles stage map
-// (executor | verifier | reviewer | orchestrator). A profile is a label for
-// display plus a base-first ordered prompt_files composition. The same type
-// serves every stage — the stage is the outer map key — so the four agentic
-// stages are uniform, composable primitives. PromptFiles is source-aware (see
-// PromptFileRef) so an org layer can pin a prompt to a remote config source
-// while a repo keeps the legacy local string form.
+// (executor | verifier | reviewer | orchestrator). A profile is a label,
+// explicit OMP model route, and base-first ordered prompt_files composition.
+// The same type serves every stage — the stage is the outer map key — so the
+// four agentic stages are uniform, composable primitives. PromptFiles is
+// source-aware (see PromptFileRef) so an org layer can pin a prompt to a remote
+// config source while a repo keeps the legacy local string form.
 type StageProfile struct {
 	// Label is the human-readable profile name shown in fanout/explain output.
 	Label string `json:"label,omitempty"`
+	// Model is the concrete OMP model identifier used to run this stage.
+	Model string `json:"model,omitempty"`
+	// ModelFamily is the semantic family used for cross-family diversity gates.
+	// It is intentionally open-ended; diversity requires inequality, not a
+	// closed vendor list.
+	ModelFamily string `json:"model_family,omitempty"`
 	// PromptFiles is the base-first ordered prompt composition for the profile.
 	PromptFiles []PromptFileRef `json:"prompt_files,omitempty"`
 	// PreconditionPolicy names the verifier precondition policy (a key in the
@@ -1120,6 +1126,8 @@ func cloneStageProfiles(m map[string]map[string]StageProfile) map[string]map[str
 		for slug, p := range profiles {
 			inner[slug] = StageProfile{
 				Label:              p.Label,
+				Model:              p.Model,
+				ModelFamily:        p.ModelFamily,
 				PromptFiles:        append([]PromptFileRef(nil), p.PromptFiles...),
 				PreconditionPolicy: p.PreconditionPolicy,
 			}

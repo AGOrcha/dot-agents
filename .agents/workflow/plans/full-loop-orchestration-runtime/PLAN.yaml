@@ -1,0 +1,11 @@
+schema_version: 1
+id: full-loop-orchestration-runtime
+title: Full-loop OMP orchestration runtime
+status: active
+summary: Drive eligible tasks across all active plans through profile-resolved OMP pipelines under da slot, delegation, fold-back, and scoring contracts.
+created_at: "2026-07-11T23:43:16Z"
+updated_at: "2026-07-12T00:30:08Z"
+owner: dot-agents
+success_criteria: One OMP-native driver repeatedly dispatches conflict-free cross-plan waves within the da slot budget; model family is explicit per stage; lifecycle and refinement artifacts reconcile through da; migration to refs/agents/state is gated by verified git-ref backend support.
+verification_strategy: Focused Go config/CLI tests, shell driver self-tests with fixture plans and fake omp-swarm, swarm schema validation, then a dry controlled multi-plan run before state-ref migration.
+current_focus_task: ""

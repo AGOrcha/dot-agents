@@ -1764,6 +1764,8 @@ func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
     "verifier": {
       "cli-runner": {
         "label": "CLI runner",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
         "prompt_files": [
           "verifiers/verifier.base.md",
           {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
@@ -1782,7 +1784,7 @@ func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
 		t.Fatalf("stage_profiles leaked into ExtraFields instead of the typed field")
 	}
 	prof := rc.StageProfiles["verifier"]["cli-runner"]
-	if prof.Label != "CLI runner" || len(prof.PromptFiles) != 2 {
+	if prof.Label != "CLI runner" || prof.Model != "claude-opus-4-8" || prof.ModelFamily != "claude" || len(prof.PromptFiles) != 2 {
 		t.Fatalf("verifier profile decode wrong: %+v", prof)
 	}
 	if prof.PromptFiles[0].Source != "" || prof.PromptFiles[0].Path != "verifiers/verifier.base.md" {
@@ -1805,8 +1807,9 @@ func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(out, &rc2); err != nil {
 		t.Fatalf("re-unmarshal: %v", err)
 	}
-	if rc2.StageProfiles["verifier"]["cli-runner"].PromptFiles[1].Source != "acme" {
-		t.Fatalf("round-trip lost typed prompt provenance: %+v", rc2.StageProfiles)
+	roundTrip := rc2.StageProfiles["verifier"]["cli-runner"]
+	if roundTrip.PromptFiles[1].Source != "acme" || roundTrip.Model != "claude-opus-4-8" || roundTrip.ModelFamily != "claude" {
+		t.Fatalf("round-trip lost profile model route or prompt provenance: %+v", rc2.StageProfiles)
 	}
 }
 
