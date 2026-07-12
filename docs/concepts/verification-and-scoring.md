@@ -189,9 +189,9 @@ lenses in one pass). The lens set is selected by app_type via
   criteria* (not merely "tests green"), and do platform invariants survive design → implemented work?
 - **adversarial** — red-team: assume the change is wrong until proven right (security, broken
   invariants, concurrency, swallowed errors, data-loss/clobber, POSIX/Windows divergence).
-- **cross-harness-adversarial** — the *second-brain* gate. Instead of reviewing with its own model,
-  it routes the adversarial pass to a **different agent harness than the one running the session**.
-
+- **cross-harness-adversarial** — the compatibility name for the *second-brain* gate. It runs the
+  adversarial pass through OMP on a model family different from the implementer/routine reviewers.
+  It does not require or imply a different CLI harness.
 Each lens emits a single verdict line — **`verdict: pass | fail`** — and `fail` is *required* if
 any BLOCKER or HIGH finding is present. The lens writes its findings to
 `.agents/active/review/<task_id>-<lens>.md`. Those per-lens `pass | fail` verdicts are what the
@@ -210,14 +210,13 @@ overall. As shipped:
 | `docs` | architecture-standards, acceptance-invariants | `parallel` |
 
 The **cross-harness** lens is the one most worth understanding for an adversarial-assurance
-posture. It detects the host engine from environment markers (`CLAUDECODE`, `CURSOR_SESSION_ID`,
-`CODEX_SESSION_ID`, …), enumerates the *other* agent CLIs available on `PATH`
-(`codex > cursor > opencode > copilot > claude`), and dispatches a read-only adversarial brief to
-the first available one — *"you do not review with your own brain… the value is the disagreement."*
-The running reviewer then reconciles the second engine's findings and owns the final `pass | fail`.
-If no alternate harness is installed it emits a single explicit skip note and a non-blocking
-`pass … [SKIPPED: no alternate harness]` rather than fabricating a result — a graceful degrade that
-is itself recorded.
+posture. Despite its retained slug, current routing is explicit in the resolved stage profile:
+`model` selects the concrete OMP model and `model_family` proves that the blocking reviewer differs
+from the implementation family. Both Claude- and GPT-family stages run through OMP. Selecting a
+GPT-family model does not invoke Codex CLI and does not inherit its sandbox or permission-whitelist
+rules. Direct Codex CLI routing remains a legacy/explicit integration concern only. If the
+configured different-family model cannot run, the gate blocks explicitly rather than silently
+passing, skipping, or substituting a same-family reviewer.
 
 > **No SOUND/NOT-SOUND.** The verdict vocabulary across every lens — cross-harness included — is
 > binary `pass | fail`. (A separate `SOUND`/`NOT-SOUND` verdict exists only in the unrelated
@@ -335,10 +334,11 @@ schema-validated `…/verification/<task>/<kind>.result.yaml`. Had either failed
 with evidence — not 90% done, blocked.
 
 **4. The review lenses run — each binary.** architecture-standards, acceptance-invariants,
-adversarial, and the cross-harness lens (routed to `codex` because the session runs on `claude`)
-each return `verdict: pass`. The acceptance-invariants lens specifically checks the change against
-the spec's done criterion, not just "tests green." The consolidated `review-decision.yaml` records
-`overall_decision: accept` with empty `failed_gates`.
+adversarial, and the compatibility-named cross-harness lens each return `verdict: pass`. The first
+three resolve to their configured Claude-family OMP model; the blocking cross-family lens resolves
+to its configured GPT-family OMP model. The acceptance-invariants lens specifically checks the
+change against the spec's done criterion, not just "tests green." The consolidated
+`review-decision.yaml` records `overall_decision: accept` with empty `failed_gates`.
 
 **5. CI confirms mechanically.** On the PR, the merged-profile coverage gate confirms the new files
 are ≥ 95%, the Sonar gate confirms zero new issues, fsguard confirms no raw `os.*` mutators crept

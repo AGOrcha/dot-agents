@@ -15,6 +15,9 @@ Once pre-flight (step 0) and eligible orientation (step 2) have run this session
 0. **Pre-flight checks**
    Load -> `instructions/preflight.md`
    Check pending proposals, active bundles, and worker loop context before running any workflow commands. If a bundle already exists for the task `workflow next` will select, skip to step 3.
+   If `.agents/active/state-ref-transition.md` exists, read and obey it before
+   selecting or mutating workflow state. It is a repo-local temporary backend
+   transition contract; absence means no transition override is active.
 
 1. **Review failure points**
    Load -> `instructions/gotchas.md`

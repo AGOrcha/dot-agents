@@ -3,6 +3,8 @@
     "reviewer": {
       "acceptance-invariants": {
         "label": "Acceptance-invariants lens",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
         "prompt_files": [
           "reviewers/reviewer.base.md",
           "reviewers/acceptance-invariants.md"
@@ -10,6 +12,8 @@
       },
       "adversarial": {
         "label": "Adversarial lens",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
         "prompt_files": [
           "reviewers/reviewer.base.md",
           "reviewers/adversarial.md"
@@ -17,6 +21,8 @@
       },
       "architecture-standards": {
         "label": "Architecture-standards lens",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
         "prompt_files": [
           "reviewers/reviewer.base.md",
           "reviewers/architecture-standards.md"
@@ -24,6 +30,8 @@
       },
       "cross-harness-adversarial": {
         "label": "Cross-harness adversarial lens",
+        "model": "gpt-5.4",
+        "model_family": "gpt",
         "prompt_files": [
           "reviewers/reviewer.base.md",
           "reviewers/cross-harness-adversarial.md"
