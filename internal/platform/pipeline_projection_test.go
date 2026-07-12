@@ -113,6 +113,15 @@ func TestStageRouteValidate(t *testing.T) {
 	}
 }
 
+func assertGenericSharedRoutes(t *testing.T, label string, routes []StageRoute) {
+	t.Helper()
+	for i, r := range routes {
+		if r.Slug != "" || r.Model != "claude-opus-4-8" || r.ModelFamily != "claude" {
+			t.Fatalf("%s slot %d = %+v, want generic shared route", label, i, r)
+		}
+	}
+}
+
 func TestBuildPipelineSpecSkeleton(t *testing.T) {
 	spec, err := BuildPipelineSpec("/repo", "", skeletonStageProfiles(), nil)
 	if err != nil {
@@ -130,16 +139,8 @@ func TestBuildPipelineSpecSkeleton(t *testing.T) {
 	// Skeleton slots are GENERIC (no slug — runtime profile_resolve binds the
 	// per-task slug) and carry the shared model of their stage group, not blindly
 	// the executor route.
-	for i, v := range spec.Verifiers {
-		if v.Slug != "" || v.Model != "claude-opus-4-8" || v.ModelFamily != "claude" {
-			t.Fatalf("verifier slot %d = %+v, want generic shared route", i, v)
-		}
-	}
-	for i, l := range spec.RoutineLenses {
-		if l.Slug != "" || l.Model != "claude-opus-4-8" || l.ModelFamily != "claude" {
-			t.Fatalf("routine slot %d = %+v, want generic shared route", i, l)
-		}
-	}
+	assertGenericSharedRoutes(t, "verifier", spec.Verifiers)
+	assertGenericSharedRoutes(t, "routine", spec.RoutineLenses)
 	if spec.CrossFamily == nil {
 		t.Fatal("skeleton must have a cross-family gate")
 	}
