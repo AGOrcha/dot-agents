@@ -295,23 +295,44 @@ func stripTrailingReturn(content string) string {
 	return ccTrailingReturn.ReplaceAllString(content, "\n")
 }
 
-// TestCCEmittedMjsPassesNodeCheck validates the emitted runner's syntax with
-// `node --check` (acceptance: validate a node-executable runner). Skips cleanly
-// when node is unavailable.
-func TestCCEmittedMjsPassesNodeCheck(t *testing.T) {
+// harnessEvalForm rewrites an emitted artifact into the form the Claude-Code
+// workflow harness actually evaluates: the harness injects agent/parallel/... as
+// globals, wraps the file body in an (async) function scope, and consumes the
+// authored trailing top-level `return` as the run result (the ultracode-wave-engine
+// idiom). A raw ES module rejects that top-level return and a bare function body
+// rejects the module-level exports, so NEITHER raw form is node --check-clean by
+// design. Mirroring the harness — strip the module-only `export` keywords and wrap
+// the whole body (INCLUDING the trailing return) in an async function — yields the
+// exact bytes the harness runs in a scope where they are legal, so node --check
+// validates the real artifact, return and all.
+func harnessEvalForm(content string) string {
+	body := strings.ReplaceAll(content, "\nexport ", "\n")
+	return "async function __wf__(args) {\n" + body + "\n}\n"
+}
+
+// TestCCEmittedMjsHarnessFormPassesNodeCheck validates each emitted artifact IN
+// THE FORM THE HARNESS EVALUATES IT, not raw. Decision (documented here so no
+// later reader mistakes the intent): the artifact deliberately follows the
+// authored ultracode-wave-engine top-level-return idiom, so a RAW `node --check`
+// fails by design and no artifact/header claims raw node-check validity. We
+// instead node --check the harness-eval form (harnessEvalForm), which exercises
+// the real artifact bytes — including the trailing return — in the injected
+// function scope the harness runs them in. Skips when node is unavailable.
+func TestCCEmittedMjsHarnessFormPassesNodeCheck(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("node not available; skipping syntax validation")
 	}
 	dir := t.TempDir()
 	for i, art := range emitCC(t, skeletonSpec("/repo")) {
+		// The raw artifact is NOT node --check-clean (top-level return idiom);
+		// validate the harness-eval form the CC harness actually evaluates.
 		path := filepath.Join(dir, art.Name)
-		if err := os.WriteFile(path, []byte(stripTrailingReturn(art.Content)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(harnessEvalForm(art.Content)), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		out, err := exec.Command(node, "--check", path).CombinedOutput()
-		if err != nil {
-			t.Fatalf("node --check failed for artifact %d (%s): %v\n%s", i, art.Name, err, out)
+		if out, err := exec.Command(node, "--check", path).CombinedOutput(); err != nil {
+			t.Fatalf("node --check (harness-eval form) failed for artifact %d (%s): %v\n%s", i, art.Name, err, out)
 		}
 	}
 }

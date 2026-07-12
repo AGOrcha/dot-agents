@@ -97,7 +97,7 @@ PY
   : > "$WAVE_DIR/RECONCILED"
   : > "$state/done"
 else
-  printf 'inner %s\n' "$TASK" >> "$state/omp-calls"
+  printf 'inner %s %s\n' "$TASK" "$yaml" >> "$state/omp-calls"
   mkdir -p "$COORD"
   if [[ "$scenario" == "failure" && "$TASK" == "plan-a/task-a" ]]; then
     exit 7
@@ -210,4 +210,31 @@ FULL_LOOP_RUN_ID="fanout-failure" \
 "$DRIVER" --max-waves 3 > "$STATE_FANOUT/output"
 [[ -f "$RUNS_FANOUT/fanout-failure/wave-1/RECONCILED" ]]
 [[ "$(grep -c '^inner ' "$STATE_FANOUT/omp-calls")" -eq 1 ]]
+
+# A task with an app_type selects its specialized profile-driven.<app_type>.swarm.yaml
+# when present; a task without one falls back to the app_type-agnostic skeleton.
+# No FULL_LOOP_INNER_YAML override here, so the driver resolves the inner pipeline
+# per task from the fake repo's runtime dir.
+REPO_SPECIALIZED="$TMP/repo-specialized"
+STATE_SPECIALIZED="$TMP/state-specialized"
+RUNS_SPECIALIZED="$TMP/runs-specialized"
+FULL_LOOP_DIR="$REPO_SPECIALIZED/.agents/workflow/runtime/full-loop"
+mkdir -p "$REPO_SPECIALIZED/.agents/active/delegation" "$REPO_SPECIALIZED/.agents/active/delegation-bundles" \
+  "$STATE_SPECIALIZED" "$FULL_LOOP_DIR"
+printf 'skeleton\n' > "$FULL_LOOP_DIR/profile-driven.swarm.yaml"
+printf 'go-cli-specialized\n' > "$FULL_LOOP_DIR/profile-driven.go-cli.swarm.yaml"
+printf 'reconcile\n' > "$FULL_LOOP_DIR/reconcile.swarm.yaml"
+PATH="$FAKES:$PATH" \
+FAKE_STATE="$STATE_SPECIALIZED" \
+FAKE_SCENARIO="normal" \
+FULL_LOOP_REPO_ROOT="$REPO_SPECIALIZED" \
+FULL_LOOP_DA_BIN="$FAKES/da" \
+OMP_SWARM_BIN="$FAKES/omp-swarm" \
+FULL_LOOP_RUN_ROOT="$RUNS_SPECIALIZED" \
+FULL_LOOP_RUN_ID="specialized" \
+"$DRIVER" --max-waves 3 > "$STATE_SPECIALIZED/output"
+# task-a (app_type go-cli) runs the specialized projection; task-b (app_type web,
+# with no specialized file present) falls back to the skeleton.
+grep -q '^inner plan-a/task-a .*/profile-driven\.go-cli\.swarm\.yaml$' "$STATE_SPECIALIZED/omp-calls"
+grep -q '^inner plan-b/task-b .*/profile-driven\.swarm\.yaml$' "$STATE_SPECIALIZED/omp-calls"
 echo "omp-full-loop tests: PASS"

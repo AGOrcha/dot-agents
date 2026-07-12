@@ -39,6 +39,27 @@ func fixtureStageProfiles() map[string]map[string]config.StageProfile {
 	}
 }
 
+// skeletonStageProfiles is a model-CONSISTENT fixture (every verifier and every
+// non-cross reviewer shares the claude-opus-4-8/claude route; cross-family on
+// gpt) mirroring the repo's real all-opus stage_profiles, so the app_type-agnostic
+// skeleton binds one shared model per stage group. fixtureStageProfiles, by
+// contrast, is deliberately model-diverse and drives the skeleton refusal path.
+func skeletonStageProfiles() map[string]map[string]config.StageProfile {
+	return map[string]map[string]config.StageProfile{
+		stageExecutor: {"default": claudeProfile()},
+		stageVerifier: {
+			"unit":        claudeProfile(),
+			"cli-runner":  claudeProfile(),
+			"integration": claudeProfile(),
+		},
+		stageReviewer: {
+			"architecture-standards":    claudeProfile(),
+			"acceptance-invariants":     claudeProfile(),
+			"cross-harness-adversarial": {Model: "gpt-5.4", ModelFamily: "gpt"},
+		},
+	}
+}
+
 func fixtureExecProfile() *config.ExecutionProfile {
 	return &config.ExecutionProfile{
 		ByAppType: map[string]config.AppTypeProfile{
@@ -93,7 +114,7 @@ func TestStageRouteValidate(t *testing.T) {
 }
 
 func TestBuildPipelineSpecSkeleton(t *testing.T) {
-	spec, err := BuildPipelineSpec("/repo", "", fixtureStageProfiles(), nil)
+	spec, err := BuildPipelineSpec("/repo", "", skeletonStageProfiles(), nil)
 	if err != nil {
 		t.Fatalf("skeleton build: %v", err)
 	}
@@ -105,6 +126,19 @@ func TestBuildPipelineSpecSkeleton(t *testing.T) {
 	}
 	if got := len(spec.RoutineLenses); got != maxPipelineRoutineLenses {
 		t.Fatalf("skeleton routine lenses = %d, want %d", got, maxPipelineRoutineLenses)
+	}
+	// Skeleton slots are GENERIC (no slug — runtime profile_resolve binds the
+	// per-task slug) and carry the shared model of their stage group, not blindly
+	// the executor route.
+	for i, v := range spec.Verifiers {
+		if v.Slug != "" || v.Model != "claude-opus-4-8" || v.ModelFamily != "claude" {
+			t.Fatalf("verifier slot %d = %+v, want generic shared route", i, v)
+		}
+	}
+	for i, l := range spec.RoutineLenses {
+		if l.Slug != "" || l.Model != "claude-opus-4-8" || l.ModelFamily != "claude" {
+			t.Fatalf("routine slot %d = %+v, want generic shared route", i, l)
+		}
 	}
 	if spec.CrossFamily == nil {
 		t.Fatal("skeleton must have a cross-family gate")
@@ -165,6 +199,36 @@ func TestBuildPipelineSpecMixedModels(t *testing.T) {
 	}
 }
 
+// TestBuildPipelineSpecSkeletonModelDiverseRefused proves the app_type-agnostic
+// skeleton refuses a model-diverse stage group rather than guessing or truncating
+// (the no-silent-truncation rule). fixtureStageProfiles mixes claude and gpt
+// verifier routes, so the skeleton cannot bind one shared model.
+func TestBuildPipelineSpecSkeletonModelDiverseRefused(t *testing.T) {
+	_, err := BuildPipelineSpec("/repo", "", fixtureStageProfiles(), nil)
+	if err == nil || !strings.Contains(err.Error(), "model-diverse stage_profiles require --app-type") {
+		t.Fatalf("want model-diverse refusal, got %v", err)
+	}
+}
+
+// TestBuildPipelineSpecSkeletonRoutineDiverseRefused proves the shared-model rule
+// applies to routine review lenses too: shared verifiers pass, but a model-diverse
+// non-cross reviewer group (the cross-family slug is excluded) refuses the skeleton.
+func TestBuildPipelineSpecSkeletonRoutineDiverseRefused(t *testing.T) {
+	sp := map[string]map[string]config.StageProfile{
+		stageExecutor: {"default": claudeProfile()},
+		stageVerifier: {"unit": claudeProfile(), "cli-runner": claudeProfile()},
+		stageReviewer: {
+			"architecture-standards":    claudeProfile(),
+			"security":                  {Model: "gpt-5.4-mini", ModelFamily: "gpt"},
+			"cross-harness-adversarial": {Model: "gpt-5.4", ModelFamily: "gpt"},
+		},
+	}
+	_, err := BuildPipelineSpec("/repo", "", sp, nil)
+	if err == nil || !strings.Contains(err.Error(), "model-diverse stage_profiles require --app-type") {
+		t.Fatalf("want routine-lens model-diverse refusal, got %v", err)
+	}
+}
+
 func TestBuildPipelineSpecErrors(t *testing.T) {
 	sp := fixtureStageProfiles()
 	ep := fixtureExecProfile()
@@ -179,6 +243,7 @@ func TestBuildPipelineSpecErrors(t *testing.T) {
 		{"executor-empty-model", "", map[string]map[string]config.StageProfile{stageExecutor: {"default": {Model: "", ModelFamily: "claude"}}}, nil, "empty model"},
 		{"skeleton-no-cross", "", map[string]map[string]config.StageProfile{stageExecutor: {"default": claudeProfile()}}, nil, "cross-harness-adversarial is not defined"},
 		{"skeleton-cross-same-family", "", map[string]map[string]config.StageProfile{stageExecutor: {"default": claudeProfile()}, stageReviewer: {"cross-harness-adversarial": claudeProfile()}}, nil, "must differ from executor family"},
+		{"skeleton-verifier-empty-model", "", map[string]map[string]config.StageProfile{stageExecutor: {"default": claudeProfile()}, stageVerifier: {"unit": {Model: "", ModelFamily: "claude"}}}, nil, "empty model"},
 		{"specialize-nil-ep", "go-cli", sp, nil, "no execution_profile.by_app_type"},
 		{"specialize-missing-apptype", "nope", sp, ep, "no entry for app_type"},
 		{"specialize-no-seq", "noseq", sp, ep, "no verifier_sequence"},
@@ -293,8 +358,8 @@ func TestPipelineSpecValidate(t *testing.T) {
 }
 
 func TestPipelineSpecDigestDeterministicAndSensitive(t *testing.T) {
-	specA, _ := BuildPipelineSpec("/repo", "", fixtureStageProfiles(), nil)
-	specB, _ := BuildPipelineSpec("/other-repo", "", fixtureStageProfiles(), nil)
+	specA, _ := BuildPipelineSpec("/repo", "", skeletonStageProfiles(), nil)
+	specB, _ := BuildPipelineSpec("/other-repo", "", skeletonStageProfiles(), nil)
 	if specA.Digest() != specB.Digest() {
 		t.Fatal("digest must ignore workspace (config digest only)")
 	}

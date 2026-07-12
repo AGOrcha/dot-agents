@@ -40,7 +40,7 @@ Consumed by `evidence_id` / finding-ID only (rubric R1; no raw transcripts).
 - **`EFF`** — AI-assisted delivery-efficiency-gains synthesis (provadm-agc).
 - **`BEH`** — Provider-Admin + Roosevelt agent-behavior case-study record.
 - **`PLAN`** — ProvAdm analysis-tooling + config-promotion companion note.
-- **`OH-A1..E3`** — 15 open hypotheses the priors raised but never tested (`prior/open-hypotheses.md`).
+- **`OH-A1..E3`** — 14 open hypotheses the priors raised but never tested (`prior/open-hypotheses.md`).
 - **Method deltas** — `prior/methodology-deltas.md` (their toolkit vs our rubrics).
 
 ### 1.3 Per-harness capability (drives §4 confidence and theme (e))
@@ -205,7 +205,7 @@ Unanchored or unresolved claims land here (rubric §3, template §5); these are 
 
 ## 6. Actionable outcomes (theme → outcome map)
 
-Detailed numbered outcomes, confidence grades, consumers, and the full 15-row OH-* reconciliation are
+Detailed numbered outcomes, confidence grades, consumers, and the full 14-row OH-* reconciliation are
 in **`actionable-outcomes.md`**. Summary of the theme→outcome routing (only ≥medium themes qualify,
 `evidence-rubric.md:67`):
 

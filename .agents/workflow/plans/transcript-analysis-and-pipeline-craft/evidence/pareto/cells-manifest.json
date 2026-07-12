@@ -3,6 +3,19 @@
   "unit": "one row per (session_id, iteration) where derivable; else session-level flagged",
   "live_rubric_version": "3.0.0",
   "note": "HISTORICAL pass = hypothesis-generation ONLY (pareto-measurement-rubric.md:42-46). No dominance/frontier/accuracy conclusions are drawn from these cells.",
+  "token_normalization": {
+    "erratum": "2026-07-12 token-accounting correction (see historical-hypotheses.md ## Erratum). Supersedes the codex/iter-log 'productive = output + reasoning' figure, which double-counted reasoning (reasoning_output_tokens is a SUBSET of output_tokens, already inside it and NOT added to total) and omitted non-cached input entirely.",
+    "productive_definition": "productive_tokens = total - cache_read = uncached_input + (cache_creation) + output. The uncached/fresh volume billed at full (non-cache) rates. reasoning_output_tokens is counted once inside output_tokens, never added again.",
+    "model_generated_tokens": "output_tokens only (reasoning is a subset). This is the true model-WORK slice that bears accuracy/quality; distinct from productive_tokens (which also includes uncached context/prefill the model reads but does not generate).",
+    "per_source_token_mapping": {
+      "codex-census": "total = input + output; cached_input_tokens is a SUBSET of input; uncached_input_tokens = input - cached_input; no cache_creation category; productive_tokens = output + uncached_input = total - cached_input. Exact cached_input/output/reasoning extracted from raw rollout token_count.info.total_token_usage (was previously a rounded pct estimate).",
+      "omp": "anthropic/openai via OMP harness: total = input + output + cache_read + cache_creation; input EXCLUDES cache; uncached_input = input; cached_input_tokens = cache_read; productive_tokens = total - cache_read (already correct in prior pass). reasoning_output_tokens is a subset of output.",
+      "iter-log": "claude-code, anthropic-style like omp: total = input + output + cache_read + cache_creation; productive_tokens = total - cache_read (prior productive_est was output-only, understated).",
+      "copilot": "single-turn trivial query, no cache axis: cached_input=0, productive_tokens = uncached_input + output = total."
+    },
+    "component_sum_check": "Every row carries token_components_sum_check. 128 token-bearing rows partition exactly (ok:true); 70 rows (3 OMP cost/model-partition + 67 tokenless iter-log) have no token split (ok:null, flagged). Zero rows fail the partition.",
+    "cache_regime_reassignment": "1 codex row (session 019d3bd9) moved cache-hot -> cache-warm: rounded pct was 85 (hot), exact cached_input/input = 84.88% (warm). axis_value_counts and the codex-session cells below reflect this."
+  },
   "cell_axes": {
     "model_family": [
       "anthropic",
@@ -55,9 +68,9 @@
     },
     "cache_regime": {
       "unknown": 71,
-      "cache-hot": 83,
+      "cache-hot": 82,
       "cache-cold": 5,
-      "cache-warm": 39
+      "cache-warm": 40
     },
     "retry_regime": {
       "unknown": 128,
@@ -131,7 +144,7 @@
         "cache_regime": "cache-hot",
         "retry_regime": "unknown"
       },
-      "n": 51,
+      "n": 50,
       "row_ids_sample": [
         "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0",
         "codex:rollout-2026-03-19T12-10-11-019d06dc-9040-74f3-ad3b-9659b753d96d:019d06dc-9040-74f3-ad3b-9659b753d96d",
@@ -140,7 +153,7 @@
         "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f",
         "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de"
       ],
-      "row_ids_total": 51
+      "row_ids_total": 50
     },
     {
       "cell": {
@@ -149,7 +162,7 @@
         "cache_regime": "cache-warm",
         "retry_regime": "unknown"
       },
-      "n": 14,
+      "n": 15,
       "row_ids_sample": [
         "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e",
         "codex:rollout-2026-03-30T19-06-38-019d40ff-cb41-7bd1-a57a-9e5db6ece347:019d40ff-cb41-7bd1-a57a-9e5db6ece347",
@@ -158,7 +171,7 @@
         "codex:rollout-2026-06-28T22-11-54-019f1125-c1cd-74f3-9f2b-0a1683c6d80c:019f1125-c1cd-74f3-9f2b-0a1683c6d80c",
         "codex:rollout-2026-06-25T18-19-35-019f00dd-fb6e-75b2-9563-c4f5d61b6183:019f00dd-fb6e-75b2-9563-c4f5d61b6183"
       ],
-      "row_ids_total": 14
+      "row_ids_total": 15
     },
     {
       "cell": {

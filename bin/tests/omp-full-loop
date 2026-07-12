@@ -10,7 +10,9 @@ set -m
 REPO_ROOT="${FULL_LOOP_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 DA_BIN="${FULL_LOOP_DA_BIN:-$REPO_ROOT/bin/da}"
 OMP_SWARM_BIN="${OMP_SWARM_BIN:-omp-swarm}"
-INNER_YAML="${FULL_LOOP_INNER_YAML:-$REPO_ROOT/.agents/workflow/runtime/full-loop/profile-driven.swarm.yaml}"
+INNER_YAML_OVERRIDE="${FULL_LOOP_INNER_YAML:-}"
+INNER_YAML_SKELETON="$REPO_ROOT/.agents/workflow/runtime/full-loop/profile-driven.swarm.yaml"
+INNER_YAML="${INNER_YAML_OVERRIDE:-$INNER_YAML_SKELETON}"
 RECONCILE_YAML="${FULL_LOOP_RECONCILE_YAML:-$REPO_ROOT/.agents/workflow/runtime/full-loop/reconcile.swarm.yaml}"
 RUN_ROOT="${FULL_LOOP_RUN_ROOT:-$REPO_ROOT/.agents/worktrees/_state/full-loop-runs}"
 PLAN_SCOPE="${FULL_LOOP_PLAN_SCOPE:-}"
@@ -146,6 +148,31 @@ field_from_json() {
   python3 -c 'import json,sys; value=json.loads(sys.argv[2]).get(sys.argv[1], ""); print(value)' "$key" "$payload"
 }
 
+# select_inner_yaml resolves the inner per-task pipeline for a task's app_type.
+# FULL_LOOP_INNER_YAML (the override) wins for every task. Otherwise a task with
+# an app_type runs its specialized projection when one has been emitted
+# (profile-driven.<app_type>.swarm.yaml, "/"->"-" like the emitter), so per-stage
+# model routes actually reach the launched swarm. When no specialized file
+# exists the app_type-agnostic skeleton is the fallback; the emitter refuses a
+# model-diverse skeleton, so a model-diverse config with no specialized file has
+# no skeleton to fall back to and the startup check fails loudly rather than
+# launching wrong models.
+select_inner_yaml() {
+  local app_type="$1"
+  if [[ -n "$INNER_YAML_OVERRIDE" ]]; then
+    printf '%s\n' "$INNER_YAML_OVERRIDE"
+    return
+  fi
+  if [[ -n "$app_type" ]]; then
+    local specialized="$REPO_ROOT/.agents/workflow/runtime/full-loop/profile-driven.${app_type//\//-}.swarm.yaml"
+    if [[ -f "$specialized" ]]; then
+      printf '%s\n' "$specialized"
+      return
+    fi
+  fi
+  printf '%s\n' "$INNER_YAML_SKELETON"
+}
+
 bundle_for_task() {
   local task_id="$1" contract="$REPO_ROOT/.agents/active/delegation/$task_id.yaml"
   python3 - "$contract" "$REPO_ROOT" <<'PY'
@@ -274,6 +301,8 @@ while :; do
     index=$((index + 1))
     plan_id="$(field_from_json plan_id "$item")"
     task_id="$(field_from_json task_id "$item")"
+    app_type="$(field_from_json app_type "$item")"
+    inner_yaml="$(select_inner_yaml "$app_type")"
     key="${plan_id//\//_}__${task_id//\//_}"
     coord="$tasks_dir/$key"
     owner="omp-full-loop-$RUN_ID-$index"
@@ -293,7 +322,7 @@ while :; do
     (
       set +e
       TASK="$plan_id/$task_id" BUNDLE="$bundle" COORD="$coord" \
-        "$OMP_SWARM_BIN" "$INNER_YAML" > "$coord/omp.log" 2>&1
+        "$OMP_SWARM_BIN" "$inner_yaml" > "$coord/omp.log" 2>&1
       rc=$?
       printf '%s\n' "$rc" > "$coord/exit-code"
       exit "$rc"

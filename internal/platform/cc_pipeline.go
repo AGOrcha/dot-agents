@@ -235,6 +235,13 @@ const ccPipelineHeaderDoc = `//
 // (craft §7 anti-pattern: hand-edited emitted artifacts). The GENERATED MANIFEST
 // block below is the only spec-dependent region; the STABLE RUNNER beneath it is
 // a fixed template, byte-identical for every profile.
+//
+// NODE VALIDATION: this is NOT a plain ES module and does not pass a raw
+// node --check. Like the authored .claude/workflows/ultracode-wave-engine.mjs it
+// ends with a top-level return the harness consumes as the run result after
+// wrapping the file in an injected (async) function scope; a raw module rejects
+// that return by design. Validate the harness-eval form, never the raw module
+// (internal/platform/cc_pipeline_test.go).
 
 `
 
@@ -398,6 +405,10 @@ const ccReconcileHeaderDoc = `//
 // agnostic, so only the workspace and the executor model route come from the
 // spec; the prose is fixed driver logic. GENERATED build artifact: regenerate
 // with da workflow pipeline emit --platform claude-code; do not hand-edit.
+//
+// NODE VALIDATION: not a plain ES module — the harness consumes the trailing
+// top-level return, which a raw node --check rejects by design. Validate the
+// harness-eval form, never the raw module (internal/platform/cc_pipeline_test.go).
 
 `
 

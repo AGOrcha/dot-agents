@@ -7,13 +7,20 @@ observational and confounded (task mix, cache state, retries, prompt drift co-va
 (rubric step 4) settles. Rows cited by `row_id` in `rows.jsonl`; prior findings by their index ID.
 
 Anchoring corpus facts (all from `rows.jsonl` / `items/*`):
-- **Cache-read dominates $ and volume.** OMP: cacheRead = **96-98%** of tokens and **62-69%** of $
-  across the 4 large sessions (`omp:019f3cf2/019f3f23/019f4eda/019f4eea`; items `omp-cost-totals-*`,
-  `cost-cacheread-dominates-context`). Codex: median cached **88%** (`codex:*`, item block
-  `cx-cost-permodel-*`).
-- **Productive work is a tiny token slice.** Codex productive (output+reasoning) median **12,070
-  tok = 1.26%** of total (max 5.14%); OMP productive ≈ **2-4%** of tokens. >95% of every session's
-  token/$ footprint is re-sent cached context, not model work.
+- **Cache-read dominates $ and volume — unevenly.** OMP/anthropic mega-sessions: cacheRead = **96-98%**
+  of tokens and **62-69%** of $ across the 4 large sessions (`omp:019f3cf2/019f3f23/019f4eda/019f4eea`;
+  items `omp-cost-totals-*`, `cost-cacheread-dominates-context`). Codex census: cached_input/input median
+  **88.8%**, cached/total median **87.7%** — but with a wide spread (**16-98%** of total; 48/120 rows below
+  the 85% cache-hot line); cache-cold review turns run 45-82% cached (`codex:*`, item block
+  `cx-cost-permodel-*`). The uniform ">95% cached" read holds only for the cache-saturated OMP/CC
+  mega-sessions, not the codex census.
+- **The model-generated slice is tiny; the uncached/fresh slice is not (and the two were conflated).**
+  *Model-generated output* (the accuracy-bearing work; reasoning is a SUBSET of output, never added
+  again): codex median **8,567 tok = 0.93%** of total (max 4.05%). *Uncached/fresh volume*
+  (`productive_tokens = total − cache_read`, billed at full non-cache rates): codex median **12.3%** of
+  total (max ~84% on cache-cold turns); OMP **2-4%**. The superseded figure — codex "productive
+  (output+reasoning) median 12,070 tok = 1.26%" — **double-counted reasoning and omitted non-cached
+  input**; see `## Erratum (token normalization)`.
 - **Fixed per-request tax is large on short tasks.** Copilot trivial query: tool defs **16,290 /
   24,342 ctx tokens = 67%** (`copilot:23e45a55`; item `copilot-tooldef-fixed-overhead`).
 - **Wall-clock is tool/turn-heavy.** OMP summed model time **1.5h** (019f3cf2) / **13.2h**
@@ -27,16 +34,19 @@ Anchoring corpus facts (all from `rows.jsonl` / `items/*`):
 20 populated cells (`cells-manifest.json`). Grouped by which axes each can feed:
 
 ### openai-codex cells (census; 120 rows, cache_regime derivable, NO $/accuracy axis)
-- **`openai-codex / codex-session / cache-hot / unknown` (n=51)** and **`… / cache-warm /…`
-  (n=14):** the bulk of the codex census. Feeds **token-volume + cache-regime** priors only
-  (median cached 88%; productive 1.26% of total). No $ (codex has no cost field —
+- **`openai-codex / codex-session / cache-hot / unknown` (n=50)** and **`… / cache-warm /…`
+  (n=15):** the bulk of the codex census. Feeds **token-volume + cache-regime** priors only
+  (median cached_input/input 88.8%; model-generated output median 0.93% of total; uncached/fresh
+  volume median 12.3%). No $ (codex has no cost field —
   `no_dollar_cost_axis_codex`), no rubric-matched accuracy. Retry unknown.
 - **`openai-codex / experiment{,-gate} / cache-{hot,warm}` (n=13+13+12+8=46):** depth-exp &
   scratchpad-gate trials — short, high-cache, structurally unlike the workflow loop; volume/cache
   only.
 - **`openai-codex / review / cache-{warm,cold}` (n=5+3=8):** `codex-auto-review` turns — very low
-  productive tokens (220-720), lower cached% (46-63%). This is the historical analogue of a cheap
-  **review-stage** cell (feeds H6).
+  **model-generated output (145-1036 tok, median 326**: the lowest generation workload of any codex
+  class), but cache-warm/cold (cached_input/input **45-82%**) so their uncached/fresh volume is *high*
+  (median 27,090, up to 172,149; 18.5-54.8% of total), NOT low. This is the historical analogue of a
+  cheap **review-stage** cell (feeds H6 — leverage is on accuracy risk, not volume).
 
 ### mixed / cursor-routed cells (OMP; $ recorded, model blended)
 - **`mixed / orchestration-impl / cache-hot / unknown` (n=3):** OMP `019f3cf2`, `019f3f23`,
@@ -78,13 +88,14 @@ Live contrasts (rubric step 4 — identical disposable-task snapshots, swap ONE 
 | **C2** | `claude-opus-4-8` → `claude-haiku-4-5` (SECONDARY, anthropic) | executor |
 | **C3** | `claude-opus-4-8` → `gpt-5.6-terra` (PRIMARY, cross-family) | executor |
 | **C4** | `claude-opus-4-8` → `gpt-5.6-sol` (SECONDARY, cross-family) | executor |
-| **C5** | PRIMARY (`sonnet-5`/`terra`) vs SECONDARY (`haiku-4-5`/`sol`), stratified by productive-fraction | executor |
+| **C5** | PRIMARY (`sonnet-5`/`terra`) vs SECONDARY (`haiku-4-5`/`sol`), stratified by generated-output fraction | executor |
 | **C6** | reviewer/verifier stage → cheap tier (`haiku-4-5` or `gpt-5.6-sol`), executor held at baseline; cross-family gate (RULE 7) | review |
 
 ### H1 — token-volume is near-invariant under an executor swap → **C1**
 **Prior (effect size):** at a fixed snapshot (same bundle, same tool outputs) an executor model swap
-moves **token volume by ≤ ~4%**, because the productive fraction is ≤4% (codex median 1.26%; OMP
-2-4%) and the cache-read volume (96-98%) is set by context size, not model. Source: `omp-cost-totals-*`,
+moves **token volume by ≤ ~4%**, because the model directly *generates* only its output (codex median
+output **0.93%** of total, max 4.05%); the uncached-input (~11%) and cache-read (codex ~88% / OMP 96-98%)
+volume are set by context/pipeline size, not the model. Source: `omp-cost-totals-*`,
 codex census, `cost-cacheread-dominates-context`; extends `OH-A2` (context-cost proxy) onto the
 volume axis.
 **Refuted if:** the C1 paired token-volume delta has a CI whose magnitude exceeds 4% — i.e. the
@@ -122,25 +133,27 @@ shortest tasks yield the least. Source: `copilot-tooldef-fixed-overhead`, `cx-co
 **Refuted if:** C4's cheap-tier fractional $ savings on short disposable tasks ≥ on long/
 context-heavy ones (fixed tax would then be scaling with model quality — it does not).
 
-### H5 — cheap-tier accuracy risk is localized to the productive fraction → **C5**
-**Prior (effect size):** the model's actual work (output+reasoning) is **≤~4%** of tokens (codex
-median 1.26% = 12,070 tok); the other ≥95% is quality-neutral context re-transmission. So a weaker
-model degrades accuracy **only** in proportion to a task's productive fraction: expect PRIMARY
+### H5 — cheap-tier accuracy risk is localized to the generated-output fraction → **C5**
+**Prior (effect size):** the model's actual work is the **generated output** (reasoning is a SUBSET of
+output, not additive) — codex median **0.93% = 8,567 tok** (max 4.05%); the other ~99% (cache-read ~88% +
+uncached input ~11%) is context the model *reads*, not generates — quality-neutral. So a weaker
+model degrades accuracy **only** in proportion to a task's generated-output fraction: expect PRIMARY
 (`sonnet-5`/`terra`) accuracy within its own CI of baseline on most task classes, and SECONDARY
-(`haiku-4-5`/`sol`) accuracy drop to **grow with productive fraction**, staying ≈baseline on
-low-productive (context-shuffling/review) work. Source: codex productive-fraction census, `OH-A3`
+(`haiku-4-5`/`sol`) accuracy drop to **grow with generated-output fraction**, staying ≈baseline on
+low-output (context-shuffling/review) work. Source: codex generated-output census, `OH-A3`
 (cheap-tier-on-frontier, untested). **Historical accuracy cannot test this** (2.1.0 only, no model
 attribution) — C5 is the first identification.
-**Refuted if:** SECONDARY matches baseline accuracy (CI-overlapping) on high-productive task classes,
-**or** PRIMARY underperforms SECONDARY, **or** the accuracy drop is uniform across productive-fraction
+**Refuted if:** SECONDARY matches baseline accuracy (CI-overlapping) on high-output task classes,
+**or** PRIMARY underperforms SECONDARY, **or** the accuracy drop is uniform across generated-output-fraction
 strata (would break the localization mechanism).
 
 ### H6 — the review/verifier stage is the highest-leverage cheap-routing target → **C6**
 **Prior (effect size):** historical review turns (`codex-auto-review`, cell `…/review/…`) carry
-**very low productive tokens (220-720)** and high fixed/cached context — a classification, not a
+**very low model-generated output (145-1036 tok, median 326)** — the lowest generation workload of any
+codex class; being cache-cold their uncached *volume* is high, not low — the leverage is a classification, not a
 generation, workload. So routing the **review stage** to the cheap tier should change review-stage
 $ ≈ by the cheap tier's rate ratio at **near-zero accuracy risk**, more cheaply than swapping the
-executor. Source: codex review cells (`cx-craft-autoreview-*`), productive-fraction census. Must
+executor. Source: codex review cells (`cx-craft-autoreview-*`), codex generated-output census. Must
 preserve the cross-family adversarial gate (RULE 7 / `falsification-review-rubric.md:23-25`).
 **Refuted if:** the cheap reviewer's verdicts diverge from the baseline reviewer's beyond CI on the
 cross-family gate (accuracy cost), **or** the review-stage $/latency saving is within CI of zero
@@ -156,3 +169,80 @@ cross-family gate (accuracy cost), **or** the review-stage $/latency saving is w
 - Every hypothesis is **falsifiable with a stated numeric prior** and maps **1:1** to a single live
   contrast that swaps exactly one stage's model among the pre-registered candidates. No dominance or
   frontier claim is made here; those are live-only.
+
+---
+
+## Erratum (token normalization) — 2026-07-12
+
+A telemetry-accounting audit found the codex-census (and iter-log) `productive` figure was computed as
+**`output + reasoning`**, which is wrong two ways:
+1. **Double-counts reasoning.** For every codex row `total == input + output` exactly (verified 120/120,
+   0 exceptions); `reasoning_output_tokens` is a **subset of `output_tokens`** (already inside it, never
+   added to `total`). Adding it again inflates the figure.
+2. **Omits non-cached input.** The uncached (fresh, non-cache-read) input the model actually processes was
+   left out entirely. For codex, `input` INCLUDES the cache-read portion, so
+   `uncached_input = input − cached_input`.
+
+**Corrected definitions** (applied to `rows.jsonl`, `cells-manifest.json`; `preregistration.md` left frozen):
+- `output_tokens` = model-generated tokens (`= total − input` for codex). `reasoning_output_tokens` ⊆ output
+  (flag `reasoning_output_tokens_subset_of_output: true`); never added to any sum.
+- `uncached_input_tokens` = `input − cached_input` (codex) / `input` (anthropic OMP & iter-log, whose `input`
+  already excludes cache).
+- `productive_tokens` = `total − cache_read` = uncached_input (+ cache_creation) + output — the uncached/fresh
+  volume billed at full (non-cache) rates. OMP's prior `productive_est` already used this (unchanged); codex
+  and iter-log did not.
+- `model_generated_tokens` = `output_tokens`, reported separately as the accuracy-bearing "model work" slice
+  (distinct from productive/uncached volume). Every row now carries `token_components_sum_check`.
+
+Worked example (top codex row, session 019f38ed): total 62,156,886 = input 61,960,105 + output 196,781;
+cached_input 59,128,960; uncached_input 2,831,145; reasoning 80,418 (⊆ output). Old productive =
+196,781 + 80,418 = **277,199**; corrected productive = 196,781 + 2,831,145 = **3,027,926**.
+
+### Numbers changed (old → corrected)
+| figure | old | corrected |
+|---|---|---|
+| codex "productive" median | 12,070 tok (out+reas) | **124,297 tok** (out+uncached_input) |
+| codex "productive" max | 292,878 tok | **3,059,313 tok** |
+| codex productive % of total, median | 1.26% | **12.28%** |
+| codex productive % of total, max | 5.14% | **83.77%** |
+| codex model-generated output, median (new field) | — (hidden inside 1.26%) | **8,567 tok = 0.93%** (max 4.05%) |
+| codex cached, median | "88%" | cached/input **88.8%**; cached/total **87.7%** (range 16.2-97.8%) |
+| review-cell "productive" | "220-720" (out+reas; true 220-1921) | generated output **145-1036** (median 326); uncached vol **8,540-172,149** (median 27,090) |
+| review cached% | "46-63%" | cached/input **45.6-82.0%**; cached/total 45.2-81.5% |
+| iter-63 productive | 494,666 (output-only) | **2,101,525** (total−cache_read) |
+| iter-64 productive | 62,641 (output-only) | **146,087** |
+| cache_regime: cache-hot / cache-warm | 83 / 39 | **82 / 40** (session 019d3bd9: rounded 85% → exact 84.88% = warm) |
+| codex-session/cache-hot cell n | 51 | **50** |
+| codex-session/cache-warm cell n | 14 | **15** |
+
+OMP figures are **unchanged**: cacheRead 96-98% of tokens (96.20-97.71%) and 62-69% of $; productive 2-4%
+(2.29-3.80%) — OMP `productive_est` was already `total − cache_read`.
+
+### Hypothesis priors touched
+- **H1** (volume near-invariant): the ≤~4% prior stands, but is now grounded on the **model-generated
+  output fraction** (codex median 0.93%, max 4.05%), not the superseded "productive 1.26%". Uncached-input
+  volume (~11%) is pipeline-set, not model-set — consistent with "to move volume, change the pipeline, not
+  the model."
+- **H5** (accuracy risk localized): restated onto **generated output** (codex median 0.93% = 8,567 tok; max
+  4.05%), replacing "output+reasoning 1.26% = 12,070 tok". The quality-bearing slice is smaller and cleaner
+  than reported — the mechanism strengthens.
+- **H6** (review = cheap-routing target): review turns have very low **generated output** (145-1036 tok),
+  carrying the accuracy-risk argument; but they are cache-cold, so their **uncached volume is high** (median
+  27,090, up to 54.8% of total), **not** low. The "very low productive tokens" framing was doubly misleading
+  and is corrected: the review-stage leverage is on accuracy risk, not on token volume.
+- **H2, H3, H4**: no numbers shifted (OMP $ shares, wall-clock, copilot fixed-tax are unaffected).
+
+### Headline claims, re-verified honestly
+- **"cache-read ~89-99% of volume":** HOLDS for the OMP/CC/anthropic mega-sessions (96-98% of tokens; iter
+  63/64 96.1/98.7%). For the **codex census it weakens** — cached/total median 87.7%, range **16.2-97.8%**,
+  48/120 rows below the 85% cache-hot line, cache-cold tail (3 review + 1 experiment turn) below 50%. Not a
+  single 89-99% band; it is source- and task-dependent.
+- **"productive ~1-4%":** TRUE only when "productive" means the **model-generated output** (codex median
+  0.93%, max 4.05%; OMP <1%). Under the corrected **uncached/fresh-volume** definition it is **2-4% for OMP
+  but ~12% median (up to ~84%) for codex** — materially higher, because codex sessions accumulate less cache
+  than the OMP mega-sessions. The old "1.26%" matched neither definition.
+
+**Cross-family review advisory (RULE 7 / `falsification-review-rubric.md:23-25`).** These remain corrected
+observational priors — **not** dominance, frontier, or accuracy conclusions; the live paired contrasts
+(rubric step 4) are still the only settlement. The correction *widens* the codex uncached-volume prior and
+SHOULD be re-checked by the adversarial cross-family reviewer before any live-wave sizing leans on it.

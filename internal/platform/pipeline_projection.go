@@ -275,14 +275,26 @@ func BuildPipelineSpec(workspace, appType string, stageProfiles map[string]map[s
 }
 
 // buildSkeletonSpec fills the maximal app_type-agnostic skeleton: every verify
-// and routine slot carries the executor route (runtime profile_resolve binds the
-// concrete per-task routes) and the cross-family gate is always present.
+// and routine slot is a GENERIC placeholder (empty slug — the runtime
+// profile_resolve stage binds the concrete per-task slug), so its model must be
+// app_type-independent. skeletonSlotRoute enforces that: when every configured
+// slug in the stage group shares one model route the generic slots carry it;
+// model-diverse groups are refused (never guessed, never truncated). The
+// cross-family gate is always present.
 func buildSkeletonSpec(spec PipelineSpec, stageProfiles map[string]map[string]config.StageProfile) (PipelineSpec, error) {
+	verify, err := skeletonSlotRoute(stageProfiles, stageVerifier, spec.Executor, "verifier")
+	if err != nil {
+		return PipelineSpec{}, err
+	}
 	for range maxPipelineVerifiers {
-		spec.Verifiers = append(spec.Verifiers, spec.Executor)
+		spec.Verifiers = append(spec.Verifiers, verify)
+	}
+	routine, err := skeletonSlotRoute(stageProfiles, stageReviewer, spec.Executor, "routine review lens")
+	if err != nil {
+		return PipelineSpec{}, err
 	}
 	for range maxPipelineRoutineLenses {
-		spec.RoutineLenses = append(spec.RoutineLenses, spec.Executor)
+		spec.RoutineLenses = append(spec.RoutineLenses, routine)
 	}
 	cross, err := resolveCrossFamily(stageProfiles, spec.Executor)
 	if err != nil {
@@ -290,6 +302,42 @@ func buildSkeletonSpec(spec PipelineSpec, stageProfiles map[string]map[string]co
 	}
 	spec.CrossFamily = cross
 	return spec, nil
+}
+
+// skeletonSlotRoute resolves the GENERIC model route every skeleton slot in a
+// stage group binds to. Skeleton slots carry no slug (runtime profile_resolve
+// picks the concrete slug per task), so the route must be app_type-independent:
+// when every configured slug in the group shares one (model, family) it is safe
+// to bind that shared route; when they DIVERGE the app_type-agnostic skeleton
+// cannot pick one without guessing, so it is refused (craft §4: never silently
+// truncate/guess) — the operator must project a specialized pipeline with
+// --app-type. When no slug is configured the executor route is the documented
+// fallback. The reviewer group excludes the named cross-family slug, which the
+// cross-family gate resolves separately.
+func skeletonSlotRoute(stageProfiles map[string]map[string]config.StageProfile, stage string, executor StageRoute, group string) (StageRoute, error) {
+	slugs := make([]string, 0, len(stageProfiles[stage]))
+	for slug := range stageProfiles[stage] {
+		if stage == stageReviewer && slug == crossFamilyLensSlug {
+			continue
+		}
+		slugs = append(slugs, slug)
+	}
+	if len(slugs) == 0 {
+		return executor, nil
+	}
+	sort.Strings(slugs)
+	shared, _ := lookupStageRoute(stageProfiles, stage, slugs[0])
+	for _, slug := range slugs[1:] {
+		route, _ := lookupStageRoute(stageProfiles, stage, slug)
+		if route.Model != shared.Model || route.ModelFamily != shared.ModelFamily {
+			return StageRoute{}, fmt.Errorf("model-diverse stage_profiles require --app-type: %s slugs route to different models (%q/%q vs %q/%q); the app_type-agnostic skeleton cannot bind one", group, shared.Model, shared.ModelFamily, route.Model, route.ModelFamily)
+		}
+	}
+	generic := StageRoute{Model: shared.Model, ModelFamily: shared.ModelFamily}
+	if err := generic.validate(group); err != nil {
+		return StageRoute{}, err
+	}
+	return generic, nil
 }
 
 // resolveVerifierRoutes resolves an app_type's verifier_sequence into explicit

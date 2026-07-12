@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -36,7 +37,7 @@ func mustParseSwarm(t *testing.T, content string) swarmDoc {
 }
 
 func skeletonSpec(workspace string) PipelineSpec {
-	spec, err := BuildPipelineSpec(workspace, "", fixtureStageProfiles(), nil)
+	spec, err := BuildPipelineSpec(workspace, "", skeletonStageProfiles(), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -186,6 +187,42 @@ func TestOMPEmitSpecializedNaming(t *testing.T) {
 	}
 	if verifies != 2 {
 		t.Fatalf("go-cli verify slots = %d, want 2", verifies)
+	}
+}
+
+// TestOMPEmitSpecializedCarriesPerStageModels proves the load-bearing fix: a
+// specialized app_type projection carries each stage's OWN configured model route
+// into the emitted swarm YAML (never the executor model), so per-stage routes
+// actually reach the launched swarm once the driver selects the specialized file.
+func TestOMPEmitSpecializedCarriesPerStageModels(t *testing.T) {
+	sp := fixtureStageProfiles()
+	sp[stageVerifier]["sonnet-verif"] = config.StageProfile{Model: "claude-sonnet-5", ModelFamily: "claude"}
+	sp[stageReviewer]["sol-lens"] = config.StageProfile{Model: "gpt-5.6-sol", ModelFamily: "gpt"}
+	ep := fixtureExecProfile()
+	ep.ByAppType["perstage"] = config.AppTypeProfile{
+		Topology: config.Topology{VerifierSequence: []string{"sonnet-verif", "unit"}},
+		Lenses:   config.Lenses{LensSet: []string{"sol-lens", "architecture-standards", "cross-harness-adversarial"}},
+	}
+	spec, err := BuildPipelineSpec("/repo", "perstage", sp, ep)
+	if err != nil {
+		t.Fatalf("perstage build: %v", err)
+	}
+	arts := emitOMP(t, spec)
+	if arts[0].Name != "profile-driven.perstage.swarm.yaml" {
+		t.Fatalf("specialized inner name = %q", arts[0].Name)
+	}
+	for _, want := range []string{"claude-sonnet-5", "gpt-5.6-sol"} {
+		if !strings.Contains(arts[0].Content, want) {
+			t.Fatalf("specialized YAML missing per-stage model %q:\n%s", want, arts[0].Content)
+		}
+	}
+	// The models also parse onto their slots (verify_1 = sonnet, routine_1 = sol).
+	doc := mustParseSwarm(t, arts[0].Content)
+	if doc.Swarm.Agents["verify_1"].Model != "claude-sonnet-5" {
+		t.Fatalf("verify_1 model = %q, want claude-sonnet-5", doc.Swarm.Agents["verify_1"].Model)
+	}
+	if doc.Swarm.Agents["review_routine_1"].Model != "gpt-5.6-sol" {
+		t.Fatalf("review_routine_1 model = %q, want gpt-5.6-sol", doc.Swarm.Agents["review_routine_1"].Model)
 	}
 }
 

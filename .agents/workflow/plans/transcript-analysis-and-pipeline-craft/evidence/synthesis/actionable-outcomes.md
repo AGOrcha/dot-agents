@@ -196,7 +196,7 @@ baseline. Historical data can only *propose* this (frontier forbidden from obser
 
 ---
 
-## OH-* reconciliation (all 15 hypotheses)
+## OH-* reconciliation (all 14 hypotheses)
 
 Status by **local evidence only**: `confirmed` (local evidence upholds it), `refuted`, `still-open`
 (local corpus cannot settle it — mostly efficiency/causal claims the pareto rubric forbids from
@@ -220,6 +220,6 @@ without closing it). None are outright refuted.
 | **OH-E2** | mtime fallback anchors are accurate enough to order cases | **partial (concern upheld)** | cursor records **zero** timestamps (`cursor-gap-no-timestamps`), so for the one harness where mtime would be the only anchor, ordering is unvalidatable → supports our mtime ban (`evidence-rubric.md:16`); direct divergence test not run. |
 | **OH-E3** | coarse substring scorer is a safe prioritizer | **confirmed unsafe** | cursor self-reports `## Result`/`verification` text with **zero** `tool_result` (`cursor-completion-reports`, `cursor-gap-no-tool-results`) → substring-present but unverifiable = the gameable counter-example; routes to O11. |
 
-Tally: **confirmed 1** (OH-E3), **partial 3** (OH-D1, OH-E1, OH-E2), **still-open 11**, **refuted 0**.
+Tally: **confirmed 1** (OH-E3), **partial 3** (OH-D1, OH-E1, OH-E2), **still-open 10**, **refuted 0**.
 The still-open efficiency/routing set (OH-A1/A2/A3) and correction-attribution set (OH-B*/C*) are the
 mandate for `pareto-live-waves` and `falsification-review` respectively.

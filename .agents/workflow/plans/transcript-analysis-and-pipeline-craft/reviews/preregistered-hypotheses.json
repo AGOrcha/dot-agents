@@ -1,0 +1,123 @@
+{
+ "reviewer_model_family": "gpt",
+ "model": "gpt-5.4-mini (smol) via completion; codex-rescue CLI harness resource_exhausted x3",
+ "ordering_note": "hypotheses generated from slice DESCRIPTIONS only, before any artifact content was shown to the reviewer model",
+ "slices": [
+  {
+   "slice": "S1 evidence base",
+   "hypotheses": [
+    {
+     "id": "S1-H1",
+     "statement": "inventory.jsonl does NOT actually support the claim of 806 unique sessions across 5 harnesses plus 1927 folded subagent files (2733 total .jsonl census).",
+     "test": "python - <<'PY'\nimport json, pathlib, sys\np = pathlib.Path('evidence/inventory/inventory.jsonl')\nrows = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]\n# expect explicit fields for session counts / harnesses / folded files; fail if missing or mismatched\nvals = {k: set() for k in ['session_id','harness','file_path']}\nfor r in rows:\n    for k in vals:\n        if k in r:\n            vals[k].add(r[k])\nprint('rows', len(rows), 'unique_sessions', len(vals['session_id']), 'unique_harnesses', len(vals['harness']), 'files', len(vals['file_path']))\nassert len(vals['session_id']) == 806\nassert len(vals['harness']) == 5\nassert len(vals['file_path']) == 2733\nPY"
+    },
+    {
+     "id": "S1-H2",
+     "statement": "evidence/items/ does NOT contain exactly 195 anchored items with sha256 line digests, or at least one item is missing a digest/anchor/redaction boundary.",
+     "test": "python - <<'PY'\nimport json, pathlib, re\nroot = pathlib.Path('evidence/items')\nfiles = sorted(root.glob('**/*'))\njsonl = [p for p in files if p.suffix == '.jsonl']\ncount = 0\nbad = []\nfor p in jsonl:\n    for i, line in enumerate(p.read_text().splitlines(), 1):\n        if not line.strip():\n            continue\n        count += 1\n        r = json.loads(line)\n        txt = json.dumps(r, sort_keys=True)\n        if 'sha256' not in txt and not re.search(r'\\b[a-f0-9]{64}\\b', txt):\n            bad.append((p, i, 'missing sha256-like digest'))\n        if not any(k in r for k in ('anchor','anchors','anchored','anchor_id')):\n            bad.append((p, i, 'missing anchor field'))\nprint('anchored_items', count, 'bad', len(bad))\nassert count == 195\nassert not bad\nPY"
+    },
+    {
+     "id": "S1-H3",
+     "statement": "the redaction claim is overstated: at least one file under evidence/ contains raw transcript text, a user path, or non-aggregate sensitive-session detail.",
+     "test": "python - <<'PY'\nimport pathlib, re, sys\nroot = pathlib.Path('evidence')\npatterns = [re.compile(r'/Users/[^\\s\"\\']+'), re.compile(r'(?i)raw transcript'), re.compile(r'(?i)user path'), re.compile(r'(?i)session id[:=]'), re.compile(r'(?i)prompt:.*'), re.compile(r'(?i)assistant:.*')]\nhits = []\nfor p in root.rglob('*'):\n    if p.is_file() and p.suffix in {'.jsonl','.json','.md','.txt','.csv','.yaml','.yml'}:\n        txt = p.read_text(errors='ignore')\n        for pat in patterns:\n            if pat.search(txt):\n                hits.append((str(p), pat.pattern))\n                break\nprint('hits', hits[:20])\nassert not hits\nPY"
+    }
+   ]
+  },
+  {
+   "slice": "S2 synthesis",
+   "hypotheses": [
+    {
+     "id": "S2-H1",
+     "statement": "synthesis-report.md does NOT actually contain 18 themes with confidence grades distributed as 14 high and 4 medium.",
+     "test": "python - <<'PY'\nimport re, pathlib, sys\np = pathlib.Path('evidence/synthesis/synthesis-report.md')\ntext = p.read_text()\n# count headings that look like themes\nthemes = re.findall(r'^#+\\s+Theme\\b', text, flags=re.M)\nhigh = len(re.findall(r'(?im)^.*confidence.*high.*$', text))\nmed = len(re.findall(r'(?im)^.*confidence.*medium.*$', text))\nprint('themes', len(themes), 'high', high, 'med', med)\nassert len(themes) == 18\nassert high == 14\nassert med == 4\nPY"
+    },
+    {
+     "id": "S2-H2",
+     "statement": "actionable-outcomes.md does NOT list 14 outcomes each at least medium confidence.",
+     "test": "python - <<'PY'\nimport re, pathlib\np = pathlib.Path('evidence/synthesis/actionable-outcomes.md')\ntext = p.read_text()\noutcomes = re.findall(r'^#+\\s+Outcome\\b', text, flags=re.M)\nlow = re.findall(r'(?im)^.*confidence.*low.*$', text)\nprint('outcomes', len(outcomes), 'low_lines', len(low))\nassert len(outcomes) == 14\nassert len(low) == 0\nPY"
+    },
+    {
+     "id": "S2-H3",
+     "statement": "OH-1..15 reconciliation is not exactly 1 confirmed, 3 partial, 10 open, 0 refuted.",
+     "test": "python - <<'PY'\nimport re, pathlib, collections\np = pathlib.Path('evidence/synthesis/synthesis-report.md')\ntext = p.read_text()\ncounts = collections.Counter(re.findall(r'(?im)^\\s*OH-(\\d+)\\b.*?\\b(confirmed|partial|open|refuted)\\b', text))\nstatus = collections.Counter(m.group(1) for m in re.finditer(r'\\b(confirmed|partial|open|refuted)\\b', text, flags=re.I))\nprint('status_counts', dict(status))\nassert status['confirmed'] == 1\nassert status['partial'] == 3\nassert status['open'] == 10\nassert status['refuted'] == 0\nPY"
+    }
+   ]
+  },
+  {
+   "slice": "S3 pareto-historical",
+   "hypotheses": [
+    {
+     "id": "S3-H1",
+     "statement": "preregistration.md was not frozen before rows.jsonl, i.e. its mtime is not earlier than rows.jsonl or it contains post-hoc frontier language contrary to the claim.",
+     "test": "python - <<'PY'\nfrom pathlib import Path\nimport os, re\npre = Path('evidence/pareto/preregistration.md')\nrows = Path('evidence/pareto/rows.jsonl')\nprint('mtime_pre', pre.stat().st_mtime, 'mtime_rows', rows.stat().st_mtime)\nassert pre.stat().st_mtime < rows.stat().st_mtime\ntext = pre.read_text(errors='ignore')\nassert not re.search(r'(?i)frontier|dominance', text)\nPY"
+    },
+    {
+     "id": "S3-H2",
+     "statement": "rows.jsonl does NOT have 198 fully anchored rows.",
+     "test": "python - <<'PY'\nimport json, pathlib\np = pathlib.Path('evidence/pareto/rows.jsonl')\nrows = [json.loads(l) for l in p.read_text().splitlines() if l.strip()]\nmissing = [i for i,r in enumerate(rows,1) if not any(k in r for k in ('anchor','anchors','anchor_id'))]\nprint('rows', len(rows), 'missing_anchor', len(missing))\nassert len(rows) == 198\nassert not missing\nPY"
+    },
+    {
+     "id": "S3-H3",
+     "statement": "the corrected pareto artifacts still contain a dominance/frontier claim somewhere, contradicting the rubric.",
+     "test": "python - <<'PY'\nimport pathlib, re\nroot = pathlib.Path('evidence/pareto')\ntexts = ''\nfor p in root.rglob('*'):\n    if p.is_file() and p.suffix in {'.md','.jsonl','.json','.txt','.csv'}:\n        texts += '\\n' + p.read_text(errors='ignore')\nassert not re.search(r'(?i)dominance|frontier', texts)\nprint('no dominance/frontier terms found')\nPY"
+    }
+   ]
+  },
+  {
+   "slice": "S4 projection layer (Go, load-bearing)",
+   "hypotheses": [
+    {
+     "id": "S4-H1",
+     "statement": "pipeline_projection.go does NOT enforce cap limits of <=7 verify and <=4 routine, or Validate permits over-cap specs.",
+     "test": "go test ./internal/platform -run 'Test.*Pipeline.*Validate|Test.*Caps|Test.*Projection' -count=1"
+    },
+    {
+     "id": "S4-H2",
+     "statement": "RULE-7 is violated: a named cross-harness-adversarial lens can be constructed with model_family equal to executor family, and validation does not hard-error.",
+     "test": "go test ./internal/platform -run 'Test.*RULE.?7|Test.*Adversarial.*Lens|Test.*ModelFamily.*ExecutorFamily' -count=1"
+    },
+    {
+     "id": "S4-H3",
+     "statement": "the emitters are not byte-idempotent or their digest includes unstable fields beyond routing+topology.",
+     "test": "go test ./internal/platform -run 'Test.*Emitter|Test.*Idempotent|Test.*Digest|Test.*Reemit' -count=1"
+    },
+    {
+     "id": "S4-H4",
+     "statement": "CC .mjs generation is not semantically stable across profiles, or node --check is not part of validation and fails on generated output.",
+     "test": "bash -lc 'go test ./internal/platform -run \"Test.*CC.*MJS|Test.*NodeCheck|Test.*ManifestRegion|Test.*StableRunner\" -count=1 && node --check $(find . -path \"*cc_pipeline*.mjs\" -o -path \"*generated*.mjs\" | head -n 1)'"
+    },
+    {
+     "id": "S4-H5",
+     "statement": "the CLI command pipeline_emit.go does not expose the documented flags (--platform, --app-type, --dry-run, --json) or fails to emit valid output for one platform.",
+     "test": "go test ./commands/workflow -run 'Test.*PipelineEmit|Test.*CLI.*Platform|Test.*DryRun|Test.*JSON' -count=1"
+    },
+    {
+     "id": "S4-H6",
+     "statement": "Per-stage model routing never reaches a launched swarm: the driver (bin/tests/omp-full-loop) always launches the unspecialized profile-driven.swarm.yaml, and buildSkeletonSpec pins every verify/routine slot to the executor model, so custom Sonnet/Haiku/Terra stage routes either mismatch at runtime or silently run on the executor model; specialized app-type YAMLs are emitted but never selected.",
+     "test": "grep -n 'profile-driven' bin/tests/omp-full-loop | head; grep -n 'Model' internal/platform/pipeline_projection.go | sed -n '1,40p'; then emit a fixture agentsrc with executor=claude-opus-4-8, one verifier stage model=claude-sonnet-5, one reviewer lens model=gpt-5.6-terra; run da workflow pipeline emit --platform omp (skeleton AND --app-type) and diff the models in both YAMLs; check which filename the driver would read.",
+     "note": "added mid-review by parent (advisory), pre-registered before any fix work started"
+    }
+   ]
+  },
+  {
+   "slice": "S5 pipeline-architect skill",
+   "hypotheses": [
+    {
+     "id": "S5-H1",
+     "statement": "the skill directory contains unanchored prescriptions: at least one rule is missing a [craft SN; anchors] tag.",
+     "test": "python - <<'PY'\nfrom pathlib import Path\nimport re\nroot = Path('.agents/skills/pipeline-architect')\ntext = ''\nfor p in root.rglob('*'):\n    if p.is_file() and p.suffix in {'.md','.yaml','.yml','.txt'}:\n        text += '\\n' + p.read_text(errors='ignore')\n# any imperative/bullet rule line without anchor tag\nbad = [ln for ln in text.splitlines() if re.match(r'^\\s*[-*]\\s+|^\\s*\\d+\\.\\s+', ln) and '[craft ' not in ln and 'anchors' not in ln]\nprint('bad_rules', bad[:20])\nassert not bad\nPY"
+    },
+    {
+     "id": "S5-H2",
+     "statement": "the skill does NOT preserve 39 architect rules 1:1 from craft/full-loop-craft.md.",
+     "test": "python - <<'PY'\nfrom pathlib import Path\nimport re\ncraft = Path('craft/full-loop-craft.md').read_text(errors='ignore')\nskill = ''.join(p.read_text(errors='ignore') for p in Path('.agents/skills/pipeline-architect').rglob('*.md'))\n# crude but executable: compare counted rule markers\nc = len(re.findall(r'(?m)^\\s*[-*]\\s+|^\\s*\\d+\\.\\s+', craft))\ns = len(re.findall(r'(?m)^\\s*[-*]\\s+|^\\s*\\d+\\.\\s+', skill))\nprint('craft_rules', c, 'skill_rules', s)\nassert c == 39\nassert s == 39\nPY"
+    },
+    {
+     "id": "S5-H3",
+     "statement": "the Verify section commands in SKILL.md are not actually executable from repo root.",
+     "test": "bash -lc 'python - <<\"PY\"\nfrom pathlib import Path\nimport re, subprocess, shlex, sys\ntext = Path(\".agents/skills/pipeline-architect/SKILL.md\").read_text(errors=\"ignore\")\ncmds = []\nin_verify = False\nfor line in text.splitlines():\n    if line.startswith(\"## Verify\"):\n        in_verify = True\n        continue\n    if in_verify and line.startswith(\"## \"):\n        break\n    if in_verify and line.strip().startswith(\"`\"):\n        cmds.append(line.strip().strip(\"`\"))\nfor cmd in cmds:\n    print(\"RUN\", cmd)\n    subprocess.run(cmd, shell=True, check=True)\nPY'"
+    }
+   ]
+  }
+ ]
+}
