@@ -1,0 +1,5 @@
+*.out
+*.err
+timer.log
+phase2-brief.md
+phase1-hypotheses.json

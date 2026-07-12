@@ -59,8 +59,18 @@ Requiring the opposite-family flip: C3, C4, C5-gpt-legs, C6-`haiku-4-5`-gate-leg
 ## Still outstanding (separate, not this validation)
 
 - **True cross-family adversarial gate** (falsification-review-rubric §5, GPT-family reviewer):
-  OUTSTANDING — blocked on the Codex/GPT backend `usage_limit_reached`. Mechanical validation ≠ the
-  blocking gate; run it when the backend recovers.
+  PREPARED + ARMED, not handed off. Re-probed 2026-07-12T16:30Z — GPT/Codex quota still capped on
+  every cheaply-reachable path (completion API ~213 min; codex Plus account "try again ~3:08 PM";
+  Business account unreachable non-interactively and its usage display is untrustworthy). A blind
+  **two-phase** harness lives in `reviews/cross-family-gate/` (phase 1 = blind pre-registration in
+  `/tmp`, no repo; phase 2 = `-s read-only` execution of the FROZEN hypotheses on the repo), so the
+  gate honors pre-registration-before-inspection. `run.sh` parses the verdict FIRST and only treats
+  a cap phrase as BLOCKED on a parse miss (the reviewer cats artifacts containing
+  `resource_exhausted`/`usage_limit_reached`, so a pre-parse cap check would false-discard a valid
+  verdict). A background timer auto-runs it after the ~3.5h reset (retries ≤4×); the verdict lands
+  at `reviews/cross-family-review.json`. Run manually anytime:
+  `bash reviews/cross-family-gate/run.sh`. This mechanical Claude-family validation is NOT a
+  substitute for that GPT-family gate.
 - **`pareto-live-waves`**: pre-execution DESIGN gate is cleared, but the live A/B runs remain
   **user-gated** (cost). The paired-run harness is ready; live execution awaits explicit go.
 - **Filed observation** (`.agents/proposals/obs-config-verify-staleness-message-misroutes.md`):
