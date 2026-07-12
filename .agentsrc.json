@@ -333,6 +333,16 @@
           "reviewers/cross-harness-adversarial.project.md"
         ]
       },
+      "cross-harness-adversarial-claude": {
+        "label": "Cross-harness adversarial lens (claude-family, for gpt-family executors)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/cross-harness-adversarial.md",
+          "reviewers/cross-harness-adversarial.project.md"
+        ]
+      },
       "scientific-method-fidelity": {
         "label": "Scientific-method / fidelity lens",
         "model": "claude-opus-4-8",

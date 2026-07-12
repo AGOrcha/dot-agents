@@ -16,10 +16,12 @@ local verification where run.
   placeholders (≤1); `analyze_tokens.py` validates via statusbar deltas — confirms
   `total_input_tokens` EXCLUDES cache_creation (no double count) and `total_output_tokens`
   INCLUDES thinking (1.0× vs API).
-- **Local verification (this machine, 400 CC files, 35,515 usage entries):** input≤1 = 12%
-  (NOT 75% — placeholder severity is version/era-dependent), output≤1 = 0%, but
-  **76% of requestIds appear >1× — naive summation overcounts ~2.4×.** Our CC evidence rows
-  did NOT dedup by requestId.
+- **Local verification (this machine, 50 primary CC files / 1,680 incl subagents, 35,515 usage
+  entries):** input≤1 = 12% (NOT 75% — placeholder severity is version/era-dependent),
+  output≤1 = 0%, but **76% of requestIds appear >1×.** Two distinct overcount ratios follow: the
+  naive-vs-deduped **entry count is 2.39×**, while the **per-field token** overcount differs by
+  field — input 3.01×, output 3.02×, cacheRead 2.38×, cacheCreate 3.04× (the "~2.4×" headline is
+  coincidentally correct only for cacheRead). Our CC evidence rows did NOT dedup by requestId.
 - **Consumer:** pareto erratum #2 (CC token normalization: dedup-by-requestId last-entry rule,
   placeholder exclusion, cache fields treated as the only high-trust CC fields); evidence-rubric
   amendment for CC-source rows; capability matrix note (CC "has_tokens" ⇒ *low-fidelity* tokens).
@@ -55,8 +57,11 @@ local verification where run.
 - Writer-agent must never self-review; multiple reviewers with different instructions AND
   different model providers (cites Verga et al. "juries over judges"); qa-swarm (4 lenses) +
   review-triage (actionable/nit/ambiguous) + bounded outer loop (≤3 iterations); StampHog
-  deterministic gates (deny-list keywords, ≤500 lines/20 files, PR state) before LLM check —
-  1/3 of merged PRs auto-stamped, fail-closed; "verify by observation, not reasoning" —
+  deterministic gates (deny-list keywords, size cap, PR state) before LLM check — the size cap
+  rejects PRs over **>800 substantive lines OR >30 files** (per the authoritative StampHog
+  README, which is the authority here; the newsletter's "≤500 lines/20 files" is a stale figure
+  the digest inherited); 1/3 of merged PRs auto-stamped, fail-closed; "verify by observation,
+  not reasoning" —
   decompose into stacked observable PRs, screenshots/GIFs as review evidence.
 - **Consumer:** direct validation of RULE-7 + our lens architecture (their 4-lens qa-swarm ≈
   our verifier/lens chains); StampHog's deterministic-gate-before-LLM pattern is a candidate
@@ -79,7 +84,8 @@ local verification where run.
   editing" as the first architect question.
 
 ## 6. Thariq (Anthropic): A Field Guide to Fable — Finding Your Unknowns (2026-07-03)
-X 2073100352921215386 (mirror: rattibha; now on Claude blog)
+X 2073100352921215386 (mirror: rattibha; now on Claude blog:
+`https://claude.com/blog/a-field-guide-to-claude-fable-finding-your-unknowns`)
 - Map-vs-territory: quality bottlenecked by clarifying unknowns (known/unknown × known/
   unknown grid). Techniques: blind-spot pass, brainstorm/prototype before wiring, one-question
   interviews prioritized by "answer would change architecture", references-as-source-code,

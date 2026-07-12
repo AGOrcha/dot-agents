@@ -81,7 +81,7 @@ anchors from ≥2 local harnesses, **or** ≥1 local-harness primary + ≥1 conv
 | **T-b3** | Cutoffs / mid-turn termination recur across harnesses (no clean close) | cc, codex, cursor | EFF-LC4 | **high** |
 | **T-b4** | Redaction gap: a committed cursor item excerpt leaks a `/home/<user>/` absolute path (R3 violation in a sibling artifact) | cursor | (R3 rubric) | **medium** |
 | **T-b5** | Cursor persists **no** `tool_result`: tool outcomes/exit-codes/errors unrecoverable; failures visible only as narration | cursor | — | **high** |
-| **T-c1** | Cache-read dominates token volume 89–99% across every telemetry-bearing harness | omp, cc, codex | EFF-LC1 | **high** |
+| **T-c1** | Cache-read dominates token volume — 96–98% on OMP/CC/anthropic mega-sessions, but the codex census weakens (median 87.7%, range 16.2–97.8%, 48/120 rows below the 85% cache-hot line) | omp, cc, codex | EFF-LC1 | **high** |
 | **T-c2** | Dollar-cost attribution is gappy: only OMP+copilot record cost; CC/codex tokens-only; cursor records nothing; some OMP provider routes bill $0 | omp, cc, codex, cursor, copilot | EFF-LC1, EFF-RI1 | **high** |
 | **T-c3** | Per-harness telemetry capability is uneven → dictates which harness can feed which Pareto axis | all 5 | EFF-S2, PLAN-G1 | **high** |
 | **T-c4** | Fixed context overhead (tool defs + system prompt) is large: 67% of a trivial copilot task's context was tool definitions | copilot | — | **medium** |
@@ -155,12 +155,14 @@ Local record timestamps only (mtime banned, `evidence-rubric.md:16`); reconstruc
 
 Per rubric §3, with cross-corpus independence folded in (§2 table).
 
-- **High-confidence themes (10):** T-a1, T-a2, T-b1, T-b3, T-b5, T-c1, T-c2, T-c3, T-d1, T-d2, T-d3,
+- **High-confidence themes (14):** T-a1, T-a2, T-b1, T-b3, T-b5, T-c1, T-c2, T-c3, T-d1, T-d2, T-d3,
   T-d4, T-e1, T-e2 — each carries independent primary anchors from ≥2 local harnesses and/or a
-  convergent prior finding. The cache-read dominance (T-c1) is the single strongest cross-harness
-  quantitative convergence: OMP 96–98% (`omp-cost-totals-*`), CC turn `input=2 / cache_read=28,175`
-  (`cost-cacheread-dominates-context`), codex median cached/input 89% with productive-token median
-  ~12k vs ~692k total (`cx-cost-permodel-*`, `items/codex/notes.md`).
+  convergent prior finding. The cache-read dominance (T-c1) is the theme with the broadest
+  cross-harness anchoring, strongest on the OMP/CC/anthropic mega-sessions: OMP 96–98%
+  (`omp-cost-totals-*`), CC turn `input=2 / cache_read=28,175` (`cost-cacheread-dominates-context`).
+  Codex is the variable leg — cached/input median 89% but cached/total median 87.7% with a wide
+  spread (range 16.2–97.8%, 48/120 rows below the 85% cache-hot line; erratum #1), productive-token
+  median 124,297 tok (12.28% of total) (`cx-cost-permodel-*`, `items/codex/notes.md`).
 - **Medium-confidence themes (4):** T-a3 (omp+codex, no prior), T-b2 (omp-only + tmux inference),
   T-b4 (single artifact, but directly verifiable), T-c4 (copilot-only, n=1 smoke).
 - **Mixed-version note (E4):** no score-sidecar comparisons are made here; all local items carry

@@ -55,6 +55,42 @@ Never compare rows across cells; the frontier is per-cell first, pooled second.
 6. Exclusions: rows missing rubric-version match, rows from `cutoff` sessions (unless the
    cutoff is itself the finding), mixed-model iterations without `model_change` boundaries.
 
+## Cross-family adversarial gate — validity stage (live-wave amendment 2026-07-12)
+
+The blocking cross-family adversarial gate (RULE 7; `falsification-review-rubric.md:23-25`) is a
+**review-validity stage, not a measured routing axis.** This resolves the RULE-7 self-collision that
+would otherwise make contrasts C3/C4/C5-gpt-legs/C6-haiku-leg unexecutable (a gpt-family executor with
+the historically-fixed gpt-family adversarial lens → `reviewer.family == executor.family` →
+`pipeline_projection.go:409` and `cc_pipeline.go:277` hard-refuse the gate). The code gate is correct
+and stays unweakened; the fix is in how the live protocol assigns the gate's route:
+
+7. **The adversarial gate's `model_family` is a DEPENDENT variable, pinned OPPOSITE the executor family
+   per contrast** — never a constant family, never an independently-swept axis. Concretely:
+   claude-family executor → gpt-family adversarial gate (existing `cross-harness-adversarial`,
+   `gpt-5.4`/`gpt`); gpt-family executor → claude-family adversarial gate
+   (`cross-harness-adversarial-claude`, `claude-opus-4-8`/`claude`). This SATISFIES RULE-7 (families
+   differ both sides); it is the correct application of the anti-collusion rule, not an exception to it.
+   The opposite-family flip is a *consequence* of the executor swap, so the "swap ONE stage's model,
+   unchanged lenses" identity (step 4) still holds for the **measured** stages (executor + verifiers +
+   routine review lenses). C6 corollary: when the cheapened stage IS the adversarial gate, the cheap
+   model must be from the opposite family (claude executor → `gpt-5.6-sol`); the `haiku-4-5` leg of C6
+   is valid only for cheapening a *routine* verifier/lens slot (no family constraint), never the gate.
+8. **The adversarial gate's own stage-run (tokens/$/wall-clock) is EXCLUDED from the frontier
+   cost/accuracy cell** and reported separately as review-validity overhead. The frontier cell is
+   attributed to the **first-pass** executor + verifier stage-runs. Adversarial-gate-INDUCED re-work
+   (extra executor iterations triggered by a gate REJECT) is a separate stage-run, reported per-contrast,
+   NOT summed into the executor cell.
+9. **Known limitation — per-contrast gate-strictness confound.** Because the gate's family flips between
+   claude-executor contrasts (gpt gate) and gpt-executor contrasts (claude gate), a family-dependent
+   difference in gate strictness (reject/block rate) could induce different re-work rates that would leak
+   into the measured cell if re-work were summed in. To keep it visible: **every contrast MUST report the
+   gate's verdict distribution (accept/reject/block counts) and induced re-work iteration count alongside
+   the cell.** A frontier claim is invalid if the executor-swap delta cannot be separated from the
+   gate-strictness delta at the reported block rates. Executable-as-preregistered without the flip:
+   C1, C2, C5-claude-legs (`sonnet-5`/`haiku-4-5`), C6-`gpt-5.6-sol`-leg. Requiring the flip: C3, C4,
+   C5-gpt-legs (`terra`/`sol`), C6-`haiku-4-5`-leg. Deterministic per-contrast route map:
+   `evidence/pareto/live-contrast-lens-map.md`.
+
 ## Deliverable
 
 `evidence/pareto/frontier-report.md` + raw rows (`rows.jsonl`) + cell manifest, each row

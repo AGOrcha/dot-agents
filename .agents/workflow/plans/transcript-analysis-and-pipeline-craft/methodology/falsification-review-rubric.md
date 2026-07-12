@@ -22,7 +22,14 @@ not-performed.**
    refuting evidence attached.
 5. **Cross-family gate.** For substantive slices, the blocking adversarial review runs on a
    different model family than the executor (RULE 7; `cross-harness-adversarial` lens). Same
-   family both sides = review invalid.
+   family both sides = review invalid. The lens family is **pinned opposite the executor
+   family**, never fixed to a constant: a claude-family executor takes the gpt-family lens
+   (`cross-harness-adversarial`, `gpt-5.4`/`gpt`); a gpt-family executor takes the claude-family
+   lens (`cross-harness-adversarial-claude`, `claude-opus-4-8`/`claude`). Opposite-pinning is the
+   correct application of RULE 7 (families differ both sides), not an exception to it — it is
+   exactly what avoids the same-family invalidity. For the Pareto live waves this is a
+   review-VALIDITY stage excluded from the measured frontier cell; see
+   `pareto-measurement-rubric.md` "Cross-family adversarial gate — validity stage".
 
 ## Reviewer output schema (per review)
 

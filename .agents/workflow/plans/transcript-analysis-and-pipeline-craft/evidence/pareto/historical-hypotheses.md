@@ -257,14 +257,18 @@ PRELIMINARY per author) reports CC JSONL `usage.input_tokens` as a streaming pla
 and thinking-exclusive, with 51-55% duplicate `requestId` entries; only
 `cache_read_input_tokens`/`cache_creation_input_tokens` match the accurate statusbar source (~1×).
 
-**Local verification (this machine, 2026-07-12, 400 CC project files, 35,515 assistant usage
-entries):** input≤1 = **12%** (placeholder severity far below their 75% — version/era-dependent),
-output≤1 = 0%, but **76% of requestIds appear more than once** — a naive per-entry sum overcounts
-CC tokens ~2.4×.
+**Local verification (this machine, 2026-07-12, 50 primary CC project files / 1,680 incl
+subagents, 35,515 assistant usage entries):** input≤1 = **12%** (placeholder severity far below
+their 75% — version/era-dependent), output≤1 = 0%, but **76% of requestIds appear more than
+once**. Two overcount ratios follow: the naive-vs-deduped **entry count is 2.39×**, while the
+**per-field token** overcount differs by field — input 3.01×, output 3.02×, cacheRead 2.38×,
+cacheCreate 3.04× (the "~2.4×" headline is coincidentally correct only for cacheRead).
 
 **Impact on this corpus:** the CC-derived token figures in inventory/items (`has_tokens` for
-claude-code sessions, the CC cache-share item `input=2 / cache_read=28,175`) were computed
-WITHOUT requestId dedup and with no placeholder exclusion. No rows.jsonl codex/OMP/iter figures
+claude-code sessions) were summed WITHOUT requestId dedup and with no placeholder exclusion. The
+cited CC cache-share item `input=2 / cache_read=28,175` is a **single verified turn** (one usage
+entry), so requestId dedup is irrelevant to it — it is quoted to illustrate CC's cache-dominated
+field shape, not as an instance of the dedup defect. No rows.jsonl codex/OMP/iter figures
 are affected (different harnesses). Field-trust rule going forward:
 - CC high-trust fields: `cache_read_input_tokens`, `cache_creation_input_tokens`.
 - CC low-trust fields: `input_tokens` (12% placeholders locally; possibly under-recorded),

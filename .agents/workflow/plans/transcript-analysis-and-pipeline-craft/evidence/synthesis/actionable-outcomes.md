@@ -40,14 +40,15 @@ mask so a cell is never scored on an axis its harness cannot supply.
 **CONSUMER.** plan-task + config → `pareto-historical` / `pareto-live-waves`; cell manifest under
 `evidence/pareto/` *(new)*; rule addendum to `methodology/pareto-measurement-rubric.md` §"Unit".
 
-## O3 — Normalize cross-harness token cost on productive tokens (output+reasoning + non-cached input), not raw totals
+## O3 — Normalize cross-harness token cost on productive tokens (output + non-cached input; reasoning ⊆ output, never added), not raw totals
 
-**Statement.** Cache-read is 89–99% of token volume in **every** telemetry-bearing harness, so raw
-`total_tokens` overstates codex cost ~50×. The token-volume and token-cost axes must be computed on
-the productive figure (output+reasoning and non-cached input), reporting raw + cache-adjusted per the
-rubric.
+**Statement.** Cache-read dominates token volume — 96–98% on the OMP/CC/anthropic mega-sessions,
+but the codex census weakens to a median 87.7% (range 16.2–97.8%, 48/120 rows below the 85%
+cache-hot line) — so raw `total_tokens` overstates codex cost ~5.6×. The token-volume and
+token-cost axes must be computed on the productive figure (output + non-cached input; reasoning is
+a subset of output, never added again), reporting raw + cache-adjusted per the rubric.
 **Supporting.** `cost-cacheread-dominates-context` (CC `input=2 / cache_read=28,175`),
-`cx-cost-permodel-01..04` (median cached/input 89%; productive median ~12k vs ~692k total),
+`cx-cost-permodel-01..04` (median cached/input 89%; productive median 124,297 tok = 12.28% of total),
 `cx-cost-top-01..12`, `omp-cost-totals-019f3cf2/019f3f23/019f4eda/019f4eea` (cacheRead 96–98% of
 tokens, 61–69% of $); EFF-LC1 (T-c1).
 **Confidence.** high (omp + cc + codex).
