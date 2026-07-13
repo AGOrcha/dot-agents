@@ -1,8 +1,0 @@
-schema_version: 1
-id: craft-doc-stable-location
-plan_id: transcript-analysis-and-pipeline-craft
-task_id: ""
-observation: OPEN (e2e pipeline audit 2026-07-13) — the pipeline-architect skill hardcodes .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/full-loop-craft.md (§1-§7 anchors currently correct), but plan archive will move that file to .agents/history/ and break the skill's citation. Trigger — at plan closeout, either relocate full-loop-craft.md to a stable non-plan-scoped home (docs/ or a promoted reference) or update pipeline-architect's pointer as part of the archive step.
-classification: small
-routed_to: plan_summary:transcript-analysis-and-pipeline-craft
-created_at: "2026-07-13T06:22:34Z"
