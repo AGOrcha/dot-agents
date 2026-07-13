@@ -83,7 +83,7 @@ grep -q "coverage-gate: PASS" <<<"$out2" \
 set +e
 COVERAGE_EXCEPTIONS="$tmp/exc.txt" bash "$gate" merge-enforce "$tmp/local.out" "$tmp/local.out" >/dev/null 2>&1; rc2b=$?
 set -e
-chk "$rc2b" "1" "control: no Windows credit -> foo_windows.go <95% -> FAIL"
+chk "$rc2b" "1" "control: no Windows credit -> foo_windows.go below 100% -> FAIL"
 
 echo "== case 3: unreachable box -> loud-skip, exit 0 =="
 set +e
