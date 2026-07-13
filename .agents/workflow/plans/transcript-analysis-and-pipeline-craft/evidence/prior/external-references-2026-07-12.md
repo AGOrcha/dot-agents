@@ -16,12 +16,29 @@ local verification where run.
   placeholders (≤1); `analyze_tokens.py` validates via statusbar deltas — confirms
   `total_input_tokens` EXCLUDES cache_creation (no double count) and `total_output_tokens`
   INCLUDES thinking (1.0× vs API).
-- **Local verification (this machine, 50 primary CC files / 1,680 incl subagents, 35,515 usage
-  entries):** input≤1 = 12% (NOT 75% — placeholder severity is version/era-dependent),
-  output≤1 = 0%, but **76% of requestIds appear >1×.** Two distinct overcount ratios follow: the
-  naive-vs-deduped **entry count is 2.39×**, while the **per-field token** overcount differs by
-  field — input 3.01×, output 3.02×, cacheRead 2.38×, cacheCreate 3.04× (the "~2.4×" headline is
-  coincidentally correct only for cacheRead). Our CC evidence rows did NOT dedup by requestId.
+- **Local verification — CORRECTED 2026-07-12 by independent re-derivation** (red-team RT-2,
+  from-scratch scripts over the full on-disk corpus: 36 primary + 1,134 subagent files, 93,493
+  usage entries; the originally-quoted corpus "50 primary / 1,680 incl subagents / 35,515
+  entries" is unreconstructable — partial scan):
+  - requestId duplication REPRODUCED: 74-81% of requestIds appear >1× (band across slices).
+  - Per-field naive/dedup overcount REPRODUCED **on the primary-files slice only** (primary =
+    `*.jsonl` directly under the project dir, 0 `isSidechain`): input 2.98×, output 3.02×,
+    cacheRead 2.49×, cacheCreate 3.01×. Pooling subagent files dilutes (output → 1.76×). Any
+    consumer of these ratios MUST pin the slice.
+  - Placeholder rates corrected: **input≤1 = 5.3% full / 0.69% primary** (the earlier "12%"
+    measured the OUTPUT field — output≤1 = 11.97% naive full corpus; the earlier "output≤1 =
+    0%" is false on every slice).
+  - Dedup rule STRENGTHENED: last entry = max in 100% of 33,194 dup groups; requestIds never
+    span files → last-entry-wins is well-defined.
+  - Our CC evidence rows did NOT dedup by requestId (unchanged finding; erratum #2 stands).
+- **Corroboration (added 2026-07-12): devforth mitmproxy ground truth**
+  (`https://devforth.io/insights/claude-code-usage-significantly-overestimates-output-tokens/`,
+  `research/articles/devforth-cc-usage-overestimates-output-tokens.md`): live `/v1/messages`
+  capture proves the API charges once per `requestId` — one stream emitting two tool calls with
+  `output_tokens: 101` becomes two local rows claiming 101 each (naive sum 202, actual charge
+  101); `/usage` reported 5.1M output vs 1.88M deduplicated on their corpus (CC 2.1.195). The
+  duplication mechanism is cumulative streaming usage snapshots copied onto one row per content
+  block. Validates dedup-by-requestId as matching real billing, not just internal consistency.
 - **Consumer:** pareto erratum #2 (CC token normalization: dedup-by-requestId last-entry rule,
   placeholder exclusion, cache fields treated as the only high-trust CC fields); evidence-rubric
   amendment for CC-source rows; capability matrix note (CC "has_tokens" ⇒ *low-fidelity* tokens).
@@ -107,10 +124,52 @@ X 2073100352921215386 (mirror: rattibha; now on Claude blog:
 - **Token accounting:** every external source converges on our T-c1 finding from a different
   angle — raw harness token fields are unreliable or misleading (CC placeholders+dups, codex
   cache-dominance, copilot credits-not-USD). The productive-token normalization MUST also
-  specify per-harness field-trust rules (erratum #2).
+  specify per-harness field-trust rules (graduated to evidence-rubric clause E6; corrected
+  numbers in historical-hypotheses Erratum 3).
 - **Review:** three independent sources (PostHog, honey judge panel, our RULE-7) converge on
   cross-model/cross-family review with writer≠reviewer — strengthens falsification-review
   rubric from convention to externally-corroborated practice.
 - **Cost:** two levers, not one — model routing (our Pareto axis) and output-volume behavior
   (infracost/honey). H1 predicts routing moves volume ≤4%; the volume lever is where the other
   ~96% lives (pipeline change, CLI predicate pushdown, output format).
+
+---
+
+## 2026-07-13 addendum — operating-contract batch (post-archival; corroboration-first)
+
+Processed after the red-team disposition and fold-back archival: nothing below reopens a
+settled wave decision. Full evaluation: `research/articles-evaluation-kg-and-adjacent.md`
+Part K. All numeric claims in this batch are linkless/secondhand → [UNVERIFIED] until chased.
+
+## 8. sairahul1: Fable brain backup — instruction distillation + trap test (X, 2026-07-12)
+- Distill a stronger model's procedures into trigger→action standing orders for a cheaper
+  model; PROVE the transfer with a planted-defect trap task; on failure, regenerate only the
+  vague section (bounded).
+- **Consumer:** `evidence/pareto/disposable-tasks.md` Tier B — trap-test transfer check when
+  a stage prompt runs on a SECONDARY-tier model in a contrast arm (fold-back
+  `lens-transfer-trap-test`, resolved same day). Readback health-check corroborates the
+  bundle-readback step; trigger→action executability is the lens/skill prompt authoring bar.
+
+## 9. 0xmiraqle: GPT 5.6 god-mode contract (X, 2026-07-09)
+- Builder never grades its own work — 5.6 system card reportedly admits grader-gaming "at the
+  highest rate ever measured on a public model" [UNVERIFIED]; loop never contains the model's
+  right to declare itself finished; house-rules fence; evidence-per-"done" checkable in under
+  a minute; traces as private training set; ~1-in-400 off-script [UNVERIFIED].
+- **Consumer:** RULE-7 prior art — FOURTH independent invention of fresh-context
+  builder≠grader (PostHog, honey, RULE-7, this), first with a measured-behavior
+  justification. CHASE: 5.6 system card grader-gaming section → if confirmed, cite in
+  `methodology/falsification-review-rubric.md`. Rest corroborates verdict-gate termination,
+  rules-as-fence, merge-back verification_status, and the transcript-pipeline thesis.
+
+## 10. prajwaltomar: two scoreboards — GPT 5.6 launch read (X, 2026-07-10)
+- Public benchmark (Sol 80, +2.8 over Fable) vs Every's private senior-engineer benchmark
+  (Fable 91, Sol 56) — both true; different task classes. "Benchmarks are marketing — run
+  both on YOUR work." Anthropic's own orchestrator numbers: 96% performance at 46% cost for
+  big-model-orchestrates/cheap-executes [UNVERIFIED]. Effort dial > adjacent-model choice.
+  METR: highest-measured reward-hacking rate on Sol — "especially on tests it wrote itself."
+- **Consumer:** external statement of the plan's epistemics (own-cell preregistered contrasts
+  over public benchmarks). CHASE: the 96%/46% primary source → candidate effect-size prior
+  for C1/C2, belongs here with provenance if located. Reasoning-effort tier logged as a
+  candidate FUTURE blocking axis (open question — not a mid-freeze cell change). METR flag
+  joins #9 as grader-integrity justification; the frozen-verifier ground-truth rule in
+  disposable-tasks.md already guards "tests it wrote itself."

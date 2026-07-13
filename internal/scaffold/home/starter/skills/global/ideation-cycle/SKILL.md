@@ -24,8 +24,8 @@ calls:
   - empirical-pass
   - fidelity-gate
   - cross-brain
-  - converge-decision
-  - dogfood-decision
+  - converge
+  - dogfood
 # Deep multi-hop delegation must be DRIVER-ORCHESTRATED hop-by-hop (fresh Agent per hop, relay
 # via on-disk artifact), NOT recursively nested — nested Agent-tool delegation collapses past
 # ~hop 4 on the CURRENT harness (reproduced; re-assess per harness). Reuse of an

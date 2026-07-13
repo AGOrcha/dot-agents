@@ -91,6 +91,21 @@ and stays unweakened; the fix is in how the live protocol assigns the gate's rou
    C5-gpt-legs (`terra`/`sol`), C6-`haiku-4-5`-leg. Deterministic per-contrast route map:
    `evidence/pareto/live-contrast-lens-map.md`.
 
+## C0 null contrast — gating amendment (2026-07-12)
+
+10. **Step 4a — C0 (A/A null) runs before every other contrast.** Baseline vs baseline
+    (`claude-opus-4-8` both arms), identical disposable-task snapshot, **n≥5 repeats**, on the
+    cheapest task from `evidence/pareto/disposable-tasks.md`. C0 measures what no historical
+    cell can: pure same-config repeat variance (the null distribution all step-4 CIs ride on),
+    an empirical per-run $ figure for wave budgeting, production burn-in of rubric 3.0.0
+    (shadow-reconciled 2026-07-12: 11/12 historical iters within ±0.004 of 2.1.0, one
+    explainable band change — `evidence/pareto/scorer-3.0.0-shadow-burn-in.md`), and a
+    resumability exercise (T-b1). **Gate:** if C0's paired delta CI exceeds half the smallest
+    active hypothesis threshold (H1 restated: ±7%, see historical-hypotheses Erratum 3 —
+    so gate = 3.5% volume), C1-C6 do NOT launch as designed; redesign first (larger thresholds,
+    productive-tokens-only volume axis, or a repeat count derived from C0's measured CV).
+    Rationale + empirical basis: `reviews/red-team-premortem-2026-07-12.md` RT-7/F1.
+
 ## Deliverable
 
 `evidence/pareto/frontier-report.md` + raw rows (`rows.jsonl`) + cell manifest, each row

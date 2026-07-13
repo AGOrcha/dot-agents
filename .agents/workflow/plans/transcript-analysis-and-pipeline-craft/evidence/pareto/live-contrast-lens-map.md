@@ -25,6 +25,15 @@ Both compose the same (model-agnostic) prompt files
 `reviewers/cross-harness-adversarial.project.md`); the lens routes to a different *harness* at
 runtime regardless, so the declared `model_family` is purely the static gate proxy.
 
+**Operational note (2026-07-13 audit).** The "flip" is MANUAL, by construction: no code path
+selects `cross-harness-adversarial-claude` automatically (`resolveCrossFamily` /
+`profile_prompt.go` take an explicit slug; verified — zero non-config references to the
+`-claude` key). A gpt-family executor arm whose lens_set still names plain
+`cross-harness-adversarial` hits the family-equality refusal and blocks (fail-safe, but the
+arm dies). Therefore every C3/C4/C5-gpt-leg/C6-gpt-gate arm config MUST pin
+`cross-harness-adversarial-claude` in its lens_set at wave prep. Auto family-swap wiring is
+tracked as an open fold-back (`cross-family-lens-autoswap`), not assumed.
+
 ## Per-contrast map
 
 Baseline executor = `claude-opus-4-8` (`claude`). "Swap" = the single measured-stage change.
@@ -38,7 +47,9 @@ Baseline executor = `claude-opus-4-8` (`claude`). "Swap" = the single measured-s
 | **C5** | executor (stratified) | PRIMARY `sonnet-5`(claude)/`terra`(gpt) vs SECONDARY `haiku-4-5`(claude)/`sol`(gpt) | per leg: claude leg → `cross-harness-adversarial` (gpt); gpt leg → `cross-harness-adversarial-claude` (claude) | ✓ per leg | claude legs **YES**; gpt legs need flip |
 | **C6** | review (cheapen), executor held `opus-4-8` (claude) | `claude-opus-4-8` (claude), fixed | if the cheapened stage IS the adversarial gate → opposite-family cheap model `gpt-5.6-sol` (gpt); the `haiku-4-5` leg is valid ONLY for a **routine** verifier/lens slot (no family constraint), never the gate | ✓ | `gpt-5.6-sol`-gate leg **YES**; `haiku-4-5` only on a routine slot |
 
-**Executable now, no flip:** C1, C2, C5-claude-legs (`sonnet-5`/`haiku-4-5`), C6-`gpt-5.6-sol`-gate-leg.
+| **C0** | none — A/A null (2026-07-12 amendment; rubric step 4a) | `claude-opus-4-8` (claude), both arms | `cross-harness-adversarial` / `gpt-5.4` / gpt | gpt ≠ claude ✓ | **YES — runs FIRST, gates C1-C6** |
+
+**Executable now, no flip:** **C0 (first, gating)**, C1, C2, C5-claude-legs (`sonnet-5`/`haiku-4-5`), C6-`gpt-5.6-sol`-gate-leg.
 **Require the opposite-family flip (use `cross-harness-adversarial-claude`):** C3, C4,
 C5-gpt-legs (`terra`/`sol`), C6-`haiku-4-5`-gate-leg (illegal on the gate — reroute `haiku-4-5`
 to a routine verifier slot instead).

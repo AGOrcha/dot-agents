@@ -276,3 +276,37 @@ are affected (different harnesses). Field-trust rule going forward:
 - MANDATORY: dedup by last-entry-per-`requestId` before any CC summation.
 - CC rows feeding any live-wave sizing must be recomputed under this rule or excluded; the
   capability matrix entry for claude-code downgrades to "tokens: low-fidelity (cache fields only)".
+
+---
+
+## Erratum 3 (independent re-derivation corrections) — 2026-07-12
+
+Source: `reviews/red-team-premortem-2026-07-12.md` (RT-2/RT-3/RT-5/RT-7; two from-scratch
+auditors over raw logs) + devforth mitmproxy ground truth
+(`research/articles/devforth-cc-usage-overestimates-output-tokens.md`). Corrects Erratum 2's
+own local-verification figures and two corpus-wide bounds:
+
+1. **Erratum 2's CC numbers are slice-broken.** The quoted corpus ("50 primary / 1,680 incl
+   subagents / 35,515 entries") is unreconstructable (actual on-disk: 36 primary + 1,134
+   subagent files, 93,493 usage entries — the original scan was partial). "input≤1 = 12%" in
+   fact measured the OUTPUT field (input≤1 = 5.3% full / 0.69% primary; output≤1 = 11.97%
+   naive); "output≤1 = 0%" is false on every slice. The 2.98-3.04× per-field ratios hold on
+   the **primary-files slice only** (subagent pooling dilutes output to 1.76×). Duplication
+   (74-81% of requestIds) and last-entry-wins (last = max in 100% of 33,194 dup groups; zero
+   cross-file requestIds) are REPRODUCED and strengthened; devforth's HTTP capture proves the
+   API charges once per requestId (naive sum 202 vs actual charge 101 on a two-tool-call
+   stream). The field-trust rule stands, now as evidence-rubric clause **E6** with mandatory
+   slice pinning.
+2. **H1's boundary restated.** Full-corpus codex sweep (538/597 raw session files, vs the 120
+   sampled rows): output/total max **6.44%** excluding post-claim sessions (sampled max 4.05%
+   is correct for the sample). H1's refutation boundary moves from ±4% to **±7%** paired
+   volume delta on non-tail task classes; the median-based mechanism (~1% generated share) is
+   unchanged.
+3. **T-c1/H2 bands widen.** OMP mega-session cacheRead recomputes at **95.48-97.71%** of
+   tokens (019f4eda below the old 96-98% band) and **57.9-69.0%** of $. H2's cache-read $
+   coefficient is 0.58-0.69 session-dependent; direction unchanged. Line 218's "unchanged
+   96-98% / 62-69%" is superseded by these bands.
+4. **All H1-H6 thresholds are C0-relative.** Within-cell dispersion (IQR/median 64-218%) means
+   the thresholds are uninterpretable without a measured null distribution. Contrast **C0
+   (A/A null)** — added 2026-07-12 to `pareto-measurement-rubric.md` step 4a and the lens map
+   — runs FIRST and gates C1-C6.

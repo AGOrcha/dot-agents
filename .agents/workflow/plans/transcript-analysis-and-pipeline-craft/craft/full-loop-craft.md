@@ -26,14 +26,14 @@ agent harness (OMP here) owns only agent execution (`bin/tests/omp-full-loop:2-3
 **The wave algorithm (as implemented, `bin/tests/omp-full-loop`).** One iteration = one wave:
 
 1. **Slots.** `da --json workflow slots` yields `available`/`occupied`; `available == 0` ⇒ quiescent
-   break, never a spin (`:241-247`). Occupancy is a typed predicate, not a guess:
+   break, never a spin (`:269-273`). Occupancy is a typed predicate, not a guess:
    `countsAgainstParallelTasks` holds a slot for exactly `in_progress` + `awaiting_agent_review`;
    everything else (incl. `awaiting_owner_review`, `blocked-on:*`) frees it
    (`commands/workflow/eligible_accounting.go:45-57`). The budget defaults to
    `NumCPU − reserve`, not a fixed 7 (`eligible_accounting.go:277-279`).
 2. **Eligible.** `da --json workflow eligible --limit <available>` yields `eligible_tasks`,
    `max_batch`, `conflict_graph`, `total_eligible` (`commands/workflow/plan_task.go:1180-1187`);
-   `total_eligible == 0` ⇒ break (`:249-254`). Dependency satisfaction is a typed rule
+   `total_eligible == 0` ⇒ break (`:277-282`). Dependency satisfaction is a typed rule
    (`completed` or `awaiting_owner_review` satisfies; `in_progress` does **not**),
    so downstream velocity decouples from merge latency (`eligible_accounting.go:72-74`).
 3. **max_batch (conflict-free selection).** The driver intersects `eligible_tasks` with the
@@ -69,7 +69,7 @@ reconcile, zero conflicting-task dispatch, a `RECONCILED` sentinel, and no wave-
 - Gate every dispatch on `max_batch`: dispatch only write-scope-disjoint tasks in one wave.
   [`plan_task.go:1197-1231`, `bin/tests/omp-full-loop:120-142`]
 - Treat `available == 0` and `total_eligible == 0` as clean quiescent stops, never busy-waits.
-  [`bin/tests/omp-full-loop:241-254`]
+  [`bin/tests/omp-full-loop:269-282`]
 - Use the typed slot predicates: a slot is held only by `in_progress`/`awaiting_agent_review`; a dep
   is satisfied by `completed`/`awaiting_owner_review`, not `in_progress`.
   [`eligible_accounting.go:45-57,72-74`]
@@ -114,7 +114,7 @@ family than the executor; same family both sides ⇒ review invalid (**RULE 7**,
 `cross-harness-adversarial` lens, never to a numeric slot index: `profile_resolve` partitions that
 slug into `cross_family_lens` and requires `cross_family_lens.family ≠ executor/default.family`
 (`profile-driven.swarm.yaml:17-20`); `review_cross_family` requires `slug=cross-harness-adversarial`,
-`family=gpt`, family-differs-from-executor, and rejects on any BLOCKER/HIGH (`:103-113`). This is O6 —
+`family=gpt`, family-differs-from-executor, and rejects on any BLOCKER/HIGH (`:105-115`). This is O6 —
 a `review-gate` stage kind that projects to each harness's native gate while satisfying the
 cross-family rule (**T-d2**; `cx-craft-autoreview-*`, `cursor-sonar-mcp-discipline`,
 `cc-mcp-quality-gates-inloop`; DA-C10/DA-G3).
@@ -148,13 +148,13 @@ DA-C4/DA-C5) and its durability lesson: merge-back survives late worker failure 
 after confirming commit + verification when the worker env became inaccessible (DA-C5/DA-L4).
 
 **Fold-back re-entry is bounded.** The inner pipeline's `target_count` is a hard iteration ceiling
-(`profile-driven.swarm.yaml:6`, = 3). A retryable verifier/lens rejection re-enters the **executor
+(`profile-driven.swarm.yaml:8`, = 3). A retryable verifier/lens rejection re-enters the **executor
 inside the same active delegation** — it does NOT fan the task out again
-(`reconcile.swarm.yaml:25-34`). `FOLD-BACK` is the *terminal* result after that bounded budget is
+(`reconcile.swarm.yaml:27-36`). `FOLD-BACK` is the *terminal* result after that bounded budget is
 exhausted: reconcile records each item via `da workflow fold-back create` (task-scoped or
 plan-scoped), persists a failed merge-back, closes out `decision=reject`, and the canonical task
 becomes `blocked` with its slot freed; a later explicit unblock/replan creates a fresh delegation
-(`reconcile.swarm.yaml:25-34`). Bounded re-entry is why the loop converges instead of looping forever.
+(`reconcile.swarm.yaml:27-36`). Bounded re-entry is why the loop converges instead of looping forever.
 
 **Crash / stale-lock / fanout-refusal reconciliation.** Every failure mode routes back through
 reconcile, never to abandonment (`reconcile.swarm.yaml:36-43`):
@@ -183,7 +183,7 @@ runtime must checkpoint before signal-class kills and treat each as resumable, n
 
 **Architect rules.**
 - Bound inner re-entry with `target_count`; a retryable rejection re-enters the executor inside the
-  same delegation and NEVER re-fans an active task. [`profile-driven.swarm.yaml:6`, `reconcile.swarm.yaml:25-34`]
+  same delegation and NEVER re-fans an active task. [`profile-driven.swarm.yaml:8`, `reconcile.swarm.yaml:27-36`]
 - Route crash / non-zero / missing-exit through reconcile as a recoverable lifecycle failure: record a
   fold-back, close out `reject`, free the slot — never claim success or orphan an `in_progress`
   delegation. [`reconcile.swarm.yaml:36-43`, DA-C5/DA-L4]

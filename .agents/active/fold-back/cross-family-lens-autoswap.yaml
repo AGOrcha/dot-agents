@@ -1,0 +1,8 @@
+schema_version: 1
+id: cross-family-lens-autoswap
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: pareto-live-waves
+observation: OPEN (e2e pipeline audit 2026-07-13) — no code path auto-selects cross-harness-adversarial-claude; resolveCrossFamily/profile_prompt.go take an explicit slug and the -claude stage_profiles key has zero non-config references. A gpt-family executor arm that keeps the plain lens hits the family-equality refusal and blocks (fail-safe but the arm dies). Operational note added to evidence/pareto/live-contrast-lens-map.md — C3/C4/C5-gpt-legs/C6-gpt-gate arm configs MUST pin the -claude lens at wave prep. Optional post-wave wiring — automatic opposite-family lens selection keyed on executor family. Additive, gate-neutral, no wave decision reopened.
+classification: small
+routed_to: task_note:transcript-analysis-and-pipeline-craft/pareto-live-waves
+created_at: "2026-07-13T06:22:34Z"

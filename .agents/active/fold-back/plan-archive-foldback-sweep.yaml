@@ -1,0 +1,8 @@
+schema_version: 1
+id: plan-archive-foldback-sweep
+plan_id: agent-ops-hardening
+task_id: ""
+observation: OPEN (e2e pipeline audit 2026-07-13) — archiveSinglePlan (commands/workflow/plan_task.go) never touches the flat .agents/active/fold-back/ dir, so fold-back artifacts of archived plans rot in the active queue; the isDMAFile 'fold-back' path segment (commands/workflow/fs.go) is an unreachable leftover from a plan-nested design. Manual sweep done today — 8 artifacts of archived plans (graphstore-concurrency-contract, config-architecture-impl, swallowed-errors-loud-atomic x4, workflow-client-commands x2 incl. the now-verified-fixed foldback-create-dryrun-has-side-effects) moved to .agents/history/<plan>/fold-backs/[<task>/]; 7 legacy .md fold-backs without plan_id frontmatter left in place. Wanted — plan archive sweeps matching fold-back artifacts (RESOLVED ones plus any belonging to the archived plan), and the dead fs.go branch removed or made live. Trigger — next workflow-CLI hardening pass.
+classification: small
+routed_to: plan_summary:agent-ops-hardening
+created_at: "2026-07-13T06:22:20Z"

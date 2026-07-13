@@ -1,0 +1,8 @@
+schema_version: 1
+id: da-cli-agent-path-predicate-tabular
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: ""
+observation: da CLI agent path — add predicate pushdown flags (--fields/--filter and friends) plus a token-efficient tabular output mode on workflow eligible/tasks so agent callers stop post-processing JSON envelopes. External anchor — Infracost minus-79-percent output tokens with accuracy 45-to-100 percent (Part J.2; digest item 2). Complements H1 — volume moves via pipeline/tool surface, not model swaps.
+classification: proposal
+routed_to: proposal:obs-da-cli-agent-path-predicate-tabular.md
+created_at: "2026-07-12T23:38:34Z"

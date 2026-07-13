@@ -2,9 +2,11 @@ schema_version: 1
 id: transcript-analysis-and-pipeline-craft
 title: Local transcript analysis + pipeline craft extraction
 status: draft
-summary: Structured evidence run over this machine's transcripts (OMP/CC/Codex/Cursor/Copilot), synthesized with the prior payout+provadm analyses; extract full-loop pipeline craft into a pipeline-architect skill, platform projection layer (OMP + CC dynamic workflows), and a 4-axis Pareto experiment harness for model-stage routing.
+summary: |-
+    Structured evidence run over this machine's transcripts (OMP/CC/Codex/Cursor/Copilot), synthesized with the prior payout+provadm analyses; extract full-loop pipeline craft into a pipeline-architect skill, platform projection layer (OMP + CC dynamic workflows), and a 4-axis Pareto experiment harness for model-stage routing.
+    - (fb:craft-doc-stable-location) OPEN (e2e pipeline audit 2026-07-13) — the pipeline-architect skill hardcodes .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/full-loop-craft.md (§1-§7 anchors currently correct), but plan archive will move that file to .agents/history/ and break the skill's citation. Trigger — at plan closeout, either relocate full-loop-craft.md to a stable non-plan-scoped home (docs/ or a promoted reference) or update pipeline-architect's pointer as part of the archive step.
 created_at: "2026-07-12T04:25:44Z"
-updated_at: "2026-07-12T08:17:34Z"
+updated_at: "2026-07-13T06:22:34Z"
 owner: dot-agents
 success_criteria: Rubric-conformant, redaction-gated evidence artifacts; synthesis with >=medium-confidence actionable outcomes routed to proposals; pipeline-architect skill promoted; OMP projection layer emitting swarm YAML from canonical IR with CC-workflows consumer; Pareto frontier report with CI-backed live contrasts; all substantive slices pass falsification-first cross-family review.
 verification_strategy: Rubric-conformant evidence artifacts validated against schemas; falsification-first review with recorded hypothesis outcomes; Pareto harness rows reproducible from raw transcripts; Go tests + config lint for any code-touching slices.

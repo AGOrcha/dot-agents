@@ -15,6 +15,16 @@ no accuracy value was computed by this pass. The accuracy values consumed are th
 Order of operations (auditable by file mtime):
 `preregistration.md` → `rows.jsonl` → `cells-manifest.json` → `historical-hypotheses.md`.
 
+**Ordering addendum (2026-07-12).** The mtime audit mechanism above is superseded (red-team
+RT-8): the initial emission landed atomically in commit `c049747d` (mtimes were the only
+witness), and the bounded regeneration (`24c8bdf1`, validated by four independent audits +
+`reviews/evidence-validation-2026-07-12.md`) re-emitted `rows.jsonl` AFTER
+`historical-hypotheses.md` was last authored — current mtimes no longer reflect the freeze
+order. The ordering witness is now the commit chain
+(`c049747d` → `3dcf753b` → `b1f5f5a0` → `24c8bdf1`) plus the reproduction check in
+`reviews/red-team-premortem-2026-07-12.md` RT-4 (regenerated rows reproduce this pass's cited
+medians exactly). All frozen content above is unchanged.
+
 ## 1. Accuracy proxy (FROZEN — no direct accuracy field exists)
 
 Per rubric axis table (`pareto-measurement-rubric.md:19`) the proxy = score sidecar `value/band`

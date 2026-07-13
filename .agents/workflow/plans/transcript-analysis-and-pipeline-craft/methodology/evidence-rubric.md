@@ -40,6 +40,23 @@ or `evidence_id@<timestamp>`. Rules:
   aggregates MUST be flagged.
 - **E5 — provenance over inference**: `[INFERENCE]` tag on any reconstructed value (e.g.
   stage timing rebuilt from tool `wallTimeMs`); inferred values never silently mix with recorded.
+- **E6 — per-harness token-field trust (added 2026-07-12; graduates pareto erratum #2).** Every
+  token/cost row states which raw fields it trusts, per this table, and pins its corpus slice:
+
+  | harness | trust rules |
+  |---|---|
+  | claude-code | **Never sum raw usage rows.** Dedup by `requestId`, LAST entry wins (empirically: last = max in 100% of 33,194 dup groups; requestIds never span files). Exclude `<=1` placeholder values from rate stats. `cache_read`/`cache_creation` are the highest-trust fields. Naive-sum overcount is **slice-dependent**: ~3× per field on PRIMARY session files, diluted (output ~1.8×) when `subagents/` files are pooled — a row MUST state which slice it used ("primary" = `*.jsonl` directly under the project dir; 0 `isSidechain`). |
+  | omp | `usage.{input,output,cacheRead,cacheWrite,cost}` recorded per turn — highest-fidelity source; cacheRead ≈ 95-98% of tokens but only ≈ 58-69% of $ (never conflate the two shares). |
+  | codex | token_count events cumulative; per-session total = LAST cumulative value, not a sum. No $ field. |
+  | cursor | records NO tokens/$/wallclock/model — hard-excluded from those axes (O2). |
+  | copilot | premium-request credits, not USD; never convert silently. |
+
+  Ground truth for the CC rules: devforth mitmproxy capture (API charges once per `requestId`:
+  one stream, two tool-call rows, `output_tokens: 101` charged once not 202 —
+  `research/articles/devforth-cc-usage-overestimates-output-tokens.md`), Gille's
+  placeholder/undercount analysis (`gille-claude-code-jsonl-undercount-tokens.md`), and the
+  2026-07-12 independent re-derivation (93,493 usage entries;
+  `reviews/red-team-premortem-2026-07-12.md` RT-2).
 
 ## 2b. Data handling / redaction gate (blocking)
 
