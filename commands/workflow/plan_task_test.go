@@ -100,7 +100,7 @@ func TestArchiveSinglePlan_ArchivesLinkedSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 
@@ -122,7 +122,7 @@ func TestArchiveSinglePlan_ArchivesLinkedSpec(t *testing.T) {
 func TestArchiveSinglePlan_NoLinkedSpecNoop(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "nospec", "completed")
-	if err := archiveSinglePlan(proj, "nospec", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "nospec", false, false, true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(proj, ".agents", "history", "nospec", "design.md")); !os.IsNotExist(err) {
