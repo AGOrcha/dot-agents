@@ -1,6 +1,13 @@
 schema_version: 1
 id: kg-ideate-skill
-status: draft
+status: promoted
+promoted_at: "2026-06-25T00:00:00Z"
+promoted_to_spec: .agents/workflow/specs/kg-ideate-skill/design.md
+promoted_to_plan: .agents/workflow/plans/kg-ideate-skill/
+# Promoted 2026-06-25 to a canonical spec + plan. The ideation *profile*
+# (verifiers/reviewers/relevance) remains owned by ideation-execution-profile (single-source);
+# this proposal's bodies (SKILL.md draft, per-molecule instructions/templates) are retained
+# here as the implementation reference for the kg-ideate-skill plan tasks.
 type: skill
 action: create
 # Destined for the starter scaffold (planned starter skill — ships via `da init` to all

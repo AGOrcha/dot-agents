@@ -8,9 +8,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -691,7 +693,16 @@ func countSharedKeywords(a, b map[string]bool) int {
 func lintIntegrityViolations(io kgIO, kgHomeDir string, notes map[string]*GraphNote) []LintResult {
 	m, err := loadManifest(io, kgHomeDir)
 	if err != nil {
-		return nil // manifest unreadable → skip check
+		// loadManifest already treats a missing manifest as legitimate absence
+		// (empty manifest, nil error); reaching here means a REAL error — a
+		// corrupt manifest.json or an unreadable file. Surface it instead of
+		// silently skipping the integrity check (which would defeat its purpose).
+		return []LintResult{{
+			Check:    "integrity_manifest_unreadable",
+			Severity: "error",
+			Message:  fmt.Sprintf("integrity manifest unreadable, skipping integrity check: %v", err),
+			Path:     integrityManifestPath(kgHomeDir),
+		}}
 	}
 	var results []LintResult
 	for id, note := range notes {
@@ -924,22 +935,56 @@ func renderLintReportText(report *LintReport) {
 // ── Phase 4: Maintenance operations ──────────────────────────────────────────
 
 func runKGReweave(io kgIO, kgHomeDir string) error {
+	// Content-delta event: record link repair counts + the ids of the notes whose
+	// frontmatter changed — counts/ids only, never note bodies (D4).
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "maintain reweave"}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGMaintainReweave, input, observed, ok) }()
+
 	adj, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
+	// removed/added accumulate ONLY for notes whose repair actually persisted, so
+	// the journaled counts + ids reflect durable changes — not attempted ones
+	// (the success-only-after-the-mutation-lands invariant, applied per note).
 	removed, added := 0, 0
+	attempted, persisted := 0, 0
+	var changedIDs []string
+	var lastErr error
 	for id, note := range notes {
 		validLinks, removedHere, addedHere, changed := repairNoteLinks(adj[id], note, notes)
-		removed += removedHere
-		added += addedHere
 		if !changed {
 			continue
 		}
+		attempted++
 		note.Links = validLinks
 		note.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		persistReweavedNote(io, kgHomeDir, id, note)
+		if perr := persistReweavedNote(io, kgHomeDir, id, note); perr != nil {
+			// The write did not land — do not journal a repair that did not
+			// happen. Skip this note (a malformed/unwritable note must not abort
+			// the whole pass) but remember the failure.
+			lastErr = perr
+			ui.Warn(fmt.Sprintf("reweave: skip %s: %v", id, perr))
+			continue
+		}
+		persisted++
+		removed += removedHere
+		added += addedHere
+		changedIDs = append(changedIDs, id)
 	}
+	// Every attempted repair failed to persist: nothing durable happened, so the
+	// command failed — return an error and let the deferred tail record a FAILED
+	// event (input only) rather than a success that claims un-happened repairs.
+	if attempted > 0 && persisted == 0 {
+		return fmt.Errorf("reweave: no notes persisted (%d attempted): %w", attempted, lastErr)
+	}
+	sort.Strings(changedIDs)
+	observed.Counts = map[string]int{"links_removed": removed, "links_added": added}
+	observed.IDs = changedIDs
+	ok = true
 	ui.Success(fmt.Sprintf("Reweave complete: %d broken links removed, %d source_ref links added", removed, added))
 	return nil
 }
@@ -984,36 +1029,53 @@ func containsLinkID(links []string, refID string) bool {
 // persistReweavedNote writes the repaired note back to disk while preserving
 // the existing note body. It reads the current body off disk and passes it
 // through to updateGraphNote so reweave only rewrites frontmatter (links).
-func persistReweavedNote(io kgIO, kgHomeDir, id string, note *GraphNote) {
+//
+// It RETURNS its error so the caller can record a repair in the journal only
+// for notes whose write actually landed: updateGraphNote is the path that
+// rewrites the note file and the index, and a swallowed failure there would let
+// the journal claim a repair that never happened (a journal that asserts an
+// un-happened change is worse than none). A read/parse failure on a malformed
+// note is still non-fatal to the overall pass — the caller skips that note —
+// but it is no longer silently counted as a successful repair.
+func persistReweavedNote(io kgIO, kgHomeDir, id string, note *GraphNote) error {
 	path := filepath.Join(kgHomeDir, "notes", noteSubdir(note.Type), id+".md")
-	// Intentional silence: this is a best-effort repair path. If the note
-	// can't be read or parsed there is nothing to preserve — skip rather
-	// than abort the reweave pass (a malformed note is surfaced by lint).
 	existing, readErr := io.ReadFile(path)
 	if readErr != nil {
-		return
+		return readErr
 	}
 	_, body, parseErr := parseGraphNote(existing)
 	if parseErr != nil {
-		return
+		return parseErr
 	}
-	_ = updateGraphNote(io, kgHomeDir, note, body)
+	return updateGraphNote(io, kgHomeDir, note, body)
 }
 
 func runKGMarkStale(io kgIO, kgHomeDir string, threshold time.Duration) error {
+	// Content-delta event: record how many notes were marked stale + their ids —
+	// counts/ids only, never note bodies (D4).
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "maintain mark-stale"}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGMaintainStale, input, observed, ok) }()
+
 	_, notes, err := buildLinkGraph(io, kgHomeDir)
 	if err != nil {
 		return err
 	}
 
 	cutoff := time.Now().UTC().Add(-threshold)
-	count := 0
+	var staleIDs []string
 	for id, note := range notes {
 		if markNoteStale(io, kgHomeDir, id, note, cutoff) {
-			count++
+			staleIDs = append(staleIDs, id)
 		}
 	}
-	ui.Success(fmt.Sprintf("Marked %d notes as stale", count))
+	sort.Strings(staleIDs)
+	observed.Counts = map[string]int{"marked_stale": len(staleIDs)}
+	observed.IDs = staleIDs
+	ok = true
+	ui.Success(fmt.Sprintf("Marked %d notes as stale", len(staleIDs)))
 	return nil
 }
 
@@ -1043,6 +1105,14 @@ func markNoteStale(io kgIO, kgHomeDir, id string, note *GraphNote, cutoff time.T
 }
 
 func runKGCompact(io kgIO, kgHomeDir string) error {
+	// Content-delta event: record how many notes were archived + their ids —
+	// counts/ids only, never note bodies (D4).
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "maintain compact"}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGMaintainCompact, input, observed, ok) }()
+
 	archiveDir := filepath.Join(kgHomeDir, "notes", "_archived")
 	if err := io.MkdirAll(archiveDir, 0755); err != nil {
 		return err
@@ -1053,12 +1123,17 @@ func runKGCompact(io kgIO, kgHomeDir string) error {
 		return err
 	}
 
-	count := 0
+	var archivedIDs []string
 	for id, note := range notes {
 		if archiveCompactedNote(kgHomeDir, archiveDir, id, note) {
-			count++
+			archivedIDs = append(archivedIDs, id)
 		}
 	}
+	sort.Strings(archivedIDs)
+	count := len(archivedIDs)
+	observed.Counts = map[string]int{"archived": count}
+	observed.IDs = archivedIDs
+	ok = true
 	_ = appendLogEntry(io, kgHomeDir, fmt.Sprintf("compact | archived %d notes", count))
 	ui.Success(fmt.Sprintf("Compacted %d notes to %s", count, archiveDir))
 	return nil

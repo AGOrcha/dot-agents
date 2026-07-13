@@ -10,7 +10,7 @@ import (
 
 // embedded contains starter shared-home assets scaffolded by `da init`.
 //
-//go:embed starter starter/** starter/.gitignore
+//go:embed starter starter/** starter/.gitignore starter/.agentsrc.json
 var embedded embed.FS
 
 // copyStarterEntry copies a single embedded starter entry to dstRoot.

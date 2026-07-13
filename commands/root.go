@@ -6,17 +6,21 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/commands/config"
+	"github.com/AGOrcha/dot-agents/commands/eval"
 	"github.com/AGOrcha/dot-agents/commands/internal/cmdutil"
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/commands/internal/mcp"
 	"github.com/AGOrcha/dot-agents/commands/internal/rules"
 	"github.com/AGOrcha/dot-agents/commands/internal/settings"
+	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/spf13/cobra"
 )
 
 // rootConfigDeps builds the config.Deps passed to config.NewConfigCmd. The
-// config subtree only needs the hint-emitting UX helpers from root — it does
-// not consume DryRun/Force/Yes today because explain is read-only.
+// config subtree threads the hint-emitting UX helpers plus the resolved global
+// --json/--dry-run getters from root. The mutating `da config sync` consumes
+// DryRun — it short-circuits the force re-resolve + lock rewrite in preview
+// mode; the read-only siblings (explain/verify/lint) ignore it.
 func rootConfigDeps() config.Deps {
 	return config.Deps{
 		ErrorWithHints:        ErrorWithHints,
@@ -24,7 +28,42 @@ func rootConfigDeps() config.Deps {
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
 		ExactArgsWithHints:    ExactArgsWithHints,
 		JSON:                  func() bool { return Flags.JSON },
+		DryRun:                func() bool { return Flags.DryRun },
 	}
+}
+
+// rootEvalCmd builds the `da eval` group, wiring the gen/run/ls RunE handlers
+// here in package commands. The handlers are defined as named functions (below)
+// rather than injected closures so internal/globalflagcov can statically trace
+// their global-flag reads: that analyzer indexes a fixed set of command
+// packages that excludes commands/eval, so a RunE defined there resolves to an
+// "unresolved closure". Reading Flags.JSON directly in runEvalRun/runEvalLs
+// keeps the --json coverage analysable.
+func rootEvalCmd() *cobra.Command {
+	return eval.NewCmd(runEvalGen, runEvalRun, runEvalLs)
+}
+
+// runEvalGen is the `da eval gen` RunE handler; it threads the global --json
+// flag so gen emits the TaskSpec as structured JSON (YAML otherwise). The read
+// happens here so internal/globalflagcov can statically trace it (see
+// rootEvalCmd).
+func runEvalGen(cmd *cobra.Command, _ []string) error {
+	return eval.RunGen(cmd, Flags.JSON)
+}
+
+// runEvalRun is the `da eval run` RunE handler; it threads the global --json and
+// -n/--dry-run flags into the run pipeline. --dry-run makes the run resolve and
+// preview the task without invoking the agent, provisioning a sandbox, or
+// writing a run dir. Both reads happen here so internal/globalflagcov can
+// statically trace them (see rootEvalCmd).
+func runEvalRun(cmd *cobra.Command, _ []string) error {
+	return eval.RunEval(cmd, Flags.JSON, Flags.DryRun)
+}
+
+// runEvalLs is the `da eval ls` RunE handler; it threads the global --json flag
+// into the run listing.
+func runEvalLs(cmd *cobra.Command, _ []string) error {
+	return eval.RunLs(cmd, Flags.JSON)
 }
 
 // rootMCPDeps builds the mcp.Deps passed to mcp.NewCmd. Inlined here after
@@ -171,7 +210,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(mcp.NewCmd(rootMCPDeps()))
 	root.AddCommand(settings.NewCmd(rootSettingsDeps()))
 	root.AddCommand(config.NewConfigCmd(rootConfigDeps()))
-	root.AddCommand(NewReviewCmd())
+	root.AddCommand(withReviewAdmin(NewReviewCmd()))
 	root.AddCommand(NewSyncCmd())
 	root.AddCommand(NewExplainCmd())
 	root.AddCommand(lifecycle.NewInstallCmd(buildLifecycleDeps()))
@@ -179,13 +218,15 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(NewWorkflowCmd())
 	root.AddCommand(NewKGCmd())
 	root.AddCommand(NewScoreCmd())
+	root.AddCommand(rootEvalCmd())
+	root.AddCommand(NewRunCmd())
 
 	root.SetErr(os.Stderr)
 	root.SetOut(os.Stdout)
 	ConfigureRootCommandUX(root)
 
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		return nil
+		return cfg.PreflightUserHome()
 	}
 	cobra.EnableCommandSorting = false
 

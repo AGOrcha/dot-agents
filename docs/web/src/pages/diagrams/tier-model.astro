@@ -1,9 +1,8 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro';
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 import tierModel from '../../data/tier-model.json';
 ---
-<BaseLayout title="Tier model" description={tierModel.description}>
-  <h1>{tierModel.title}</h1>
+<StarlightPage frontmatter={{ title: tierModel.title, description: tierModel.description }}>
   <p>{tierModel.description}</p>
 
   <div class="tier-grid">
@@ -11,18 +10,16 @@ import tierModel from '../../data/tier-model.json';
       <div class="tier-card" data-target={`tier-${tier.id}`} role="button" tabindex="0">
         <div class="scope">Tier {i + 1} · {tier.scope}</div>
         <h3>{tier.name}</h3>
-        <div style="font-size:0.78rem; color:var(--text-dim); font-family:monospace; margin-top:4px;">
-          {tier.lives_in}
-        </div>
+        <div class="lives-in">{tier.lives_in}</div>
       </div>
     ))}
   </div>
 
   {tierModel.tiers.map((tier) => (
     <div id={`tier-${tier.id}`} class="tier-detail">
-      <h2 style="margin-top:0;">{tier.name} — {tier.scope}</h2>
+      <h2>{tier.name} — {tier.scope}</h2>
       <p>{tier.summary}</p>
-      <p style="font-family:monospace; font-size:0.85rem; color:var(--text-dim);">
+      <p class="lives-in-line">
         <strong>Lives in:</strong> {tier.lives_in}
       </p>
 
@@ -43,35 +40,101 @@ import tierModel from '../../data/tier-model.json';
   → implementation            — code, tests
   → verification              — tests pass, smoke verified
   → archive (history/)        — permanent record`}</code></pre>
+</StarlightPage>
 
-  <script>
-    function setup() {
-      const cards = document.querySelectorAll('.tier-card');
-      const details = document.querySelectorAll('.tier-detail');
-      const open = (targetId) => {
-        details.forEach((d) => d.classList.toggle('open', d.id === targetId));
-        const el = document.getElementById(targetId);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      };
-      cards.forEach((card) => {
-        const targetId = card.getAttribute('data-target');
-        if (!targetId) return;
-        card.addEventListener('click', () => open(targetId));
-        card.addEventListener('keydown', (e) => {
-          if (e instanceof KeyboardEvent && (e.key === 'Enter' || e.key === ' ')) {
-            e.preventDefault();
-            open(targetId);
-          }
-        });
+<style>
+  .tier-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+  }
+
+  .tier-card {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    padding: 0.9rem;
+    cursor: pointer;
+    background: var(--sl-color-gray-7, var(--sl-color-gray-6));
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+
+  .tier-card:hover,
+  .tier-card:focus-visible {
+    border-color: var(--sl-color-accent);
+    transform: translateY(-2px);
+    outline: none;
+  }
+
+  .tier-card .scope {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--sl-color-gray-3);
+  }
+
+  .tier-card h3 {
+    margin: 0.35rem 0 0;
+    font-size: 1.05rem;
+  }
+
+  .tier-card .lives-in {
+    font-size: 0.78rem;
+    color: var(--sl-color-gray-3);
+    font-family: var(--__sl-font-mono, monospace);
+    margin-top: 0.25rem;
+    word-break: break-word;
+  }
+
+  .tier-detail {
+    display: none;
+    border-left: 3px solid var(--sl-color-accent);
+    padding-left: 1rem;
+    margin: 1.25rem 0;
+  }
+
+  .tier-detail.open {
+    display: block;
+  }
+
+  .tier-detail h2 {
+    margin-top: 0;
+  }
+
+  .tier-detail .lives-in-line {
+    font-family: var(--__sl-font-mono, monospace);
+    font-size: 0.85rem;
+    color: var(--sl-color-gray-3);
+  }
+</style>
+
+<script>
+  function setup() {
+    const cards = document.querySelectorAll<HTMLElement>('.tier-card');
+    const details = document.querySelectorAll<HTMLElement>('.tier-detail');
+    const open = (targetId: string) => {
+      details.forEach((d) => d.classList.toggle('open', d.id === targetId));
+      const el = document.getElementById(targetId);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    cards.forEach((card) => {
+      const targetId = card.getAttribute('data-target');
+      if (!targetId) return;
+      card.addEventListener('click', () => open(targetId));
+      card.addEventListener('keydown', (e) => {
+        if (e instanceof KeyboardEvent && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          open(targetId);
+        }
       });
-      // open the first tier by default
-      const first = details[0];
-      if (first) first.classList.add('open');
-    }
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', setup);
-    } else {
-      setup();
-    }
-  </script>
-</BaseLayout>
+    });
+    // open the first tier by default
+    const first = details[0];
+    if (first) first.classList.add('open');
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+  } else {
+    setup();
+  }
+</script>

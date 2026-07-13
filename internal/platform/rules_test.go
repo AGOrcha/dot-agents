@@ -3,6 +3,7 @@ package platform
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/testutil"
@@ -116,5 +117,28 @@ func TestResolveCanonicalRuleFileMissing(t *testing.T) {
 func TestListCanonicalRuleFilesMissing(t *testing.T) {
 	if _, err := ListCanonicalRuleFiles(t.TempDir(), "global"); err == nil {
 		t.Error("expected error for missing scope dir")
+	}
+}
+
+// TestResolveCanonicalRuleFileStatErrorSurfaced covers the real-error branch:
+// a candidate whose immediate parent directory is unreadable must surface a
+// distinct error, not the generic "rule not found" message a legitimately
+// missing rule produces.
+func TestResolveCanonicalRuleFileStatErrorSurfaced(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	scope := "g"
+	testutil.WriteScopeFile(t, agentsHome, "rules", scope, "rules.mdc", []byte("x"))
+	testutil.MakeDirUnreadable(t, filepath.Join(agentsHome, "rules", scope))
+
+	_, err := ResolveCanonicalRuleFile(agentsHome, scope, "rules")
+	if err == nil {
+		t.Fatal("expected an error for the unreadable scope dir")
+	}
+	if os.IsNotExist(err) {
+		t.Fatalf("real stat error must not read as not-exist, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "checking rule candidate") {
+		t.Errorf("expected the real-error message, got %q", err.Error())
 	}
 }

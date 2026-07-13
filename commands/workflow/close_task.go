@@ -27,6 +27,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 	"github.com/spf13/cobra"
 )
@@ -126,6 +127,10 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	if err != nil {
 		return err
 	}
+	input := &journal.CloseTaskInput{Plan: opts.planID, Task: opts.taskID, NextFocus: opts.nextFocus}
+	observed := &journal.CloseTaskObserved{ToStatus: "completed"}
+	ok := false
+	defer func() { journalTier1(setup.project.Path, journal.CmdCloseTask, input, observed, ok) }()
 	if err := closeTaskCheckpoint(setup.n, DefaultIterationRole(), ""); err != nil {
 		return fmt.Errorf("close-task: checkpoint --log-to-iter %d: %w", setup.n, err)
 	}
@@ -148,6 +153,9 @@ func runWorkflowCloseTask(out io.Writer, opts closeTaskOpts) error {
 	if err != nil {
 		return err
 	}
+	observed.NextFocusSet = nextFocus != ""
+	observed.Committed = committed
+	ok = true
 	return emitCloseTaskResult(out, closeTaskResult{
 		PlanID:         opts.planID,
 		TaskID:         opts.taskID,

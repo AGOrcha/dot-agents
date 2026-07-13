@@ -9,6 +9,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 const codexAgentMarkdownFile = "AGENT.md"
@@ -806,4 +807,355 @@ func TestCodexBrokenLinks_HealthyAGENTSMDIgnored(t *testing.T) {
 // cannot silently regress.
 func TestCodexBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*codex)(nil)
+}
+
+// ---------- OrphanCanonicalReporter implementation (P4) ----------
+
+// Named setup helpers for TestCodexOrphanCanonicals — kept as top-level funcs
+// (not inline table closures) so their branching is not counted into the test
+// function's cognitive complexity (go:S3776).
+func setupCodexPlainOrphan(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "alpha"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return "alpha", false
+}
+
+func setupCodexLinkedBackLink(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	canonical := filepath.Join(agentsHome, "agents", "proj", "beta")
+	if err := os.MkdirAll(canonical, 0755); err != nil {
+		t.Fatal(err)
+	}
+	repoLocal := filepath.Join(projectPath, ".agents", "agents")
+	if err := os.MkdirAll(repoLocal, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, canonical, filepath.Join(repoLocal, "beta"))
+	return "", false
+}
+
+func setupCodexMispointedBackLink(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	if err := os.MkdirAll(filepath.Join(agentsHome, "agents", "proj", "gamma"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(agentsHome, "agents", "otherproj", "delta")
+	if err := os.MkdirAll(other, 0755); err != nil {
+		t.Fatal(err)
+	}
+	repoLocal := filepath.Join(projectPath, ".agents", "agents")
+	if err := os.MkdirAll(repoLocal, 0755); err != nil {
+		t.Fatal(err)
+	}
+	linktest.Link(t, other, filepath.Join(repoLocal, "gamma"))
+	return "gamma", true
+}
+
+func setupCodexUnownedSkillsBucket(t *testing.T, agentsHome, projectPath string) (string, bool) {
+	if err := os.MkdirAll(filepath.Join(agentsHome, "skills", "proj", "orphan-skill"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return "", false
+}
+
+// TestCodexOrphanCanonicals is the table-driven cover for codex's
+// OrphanCanonicalReporter: it owns only the "agents" bucket (claude owns
+// "skills"), reporting plain + mis-pointed orphans and skipping non-owned
+// buckets so the doctor fan-out never double-counts.
+func TestCodexOrphanCanonicals(t *testing.T) {
+	tests := []struct {
+		name      string
+		bucket    string
+		setup     func(t *testing.T, agentsHome, projectPath string) (wantName string, wantNote bool)
+		wantCount int
+	}{
+		{name: "plain orphan in owned agents bucket", bucket: "agents", setup: setupCodexPlainOrphan, wantCount: 1},
+		{name: "correctly-linked back-link not orphaned", bucket: "agents", setup: setupCodexLinkedBackLink, wantCount: 0},
+		{name: "mis-pointed back-link is orphan with note", bucket: "agents", setup: setupCodexMispointedBackLink, wantCount: 1},
+		{name: "skills bucket not owned by codex", bucket: "skills", setup: setupCodexUnownedSkillsBucket, wantCount: 0},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			projectPath := filepath.Join(tmp, "proj")
+			if err := os.MkdirAll(projectPath, 0755); err != nil {
+				t.Fatal(err)
+			}
+			wantName, wantNote := tc.setup(t, agentsHome, projectPath)
+
+			c := &codex{io: stdPlatformIO{}}
+			got := c.OrphanCanonicals("proj", projectPath, agentsHome, tc.bucket)
+			assertOrphanCanonicals(t, tc.bucket, got, tc.wantCount, wantName, wantNote)
+		})
+	}
+}
+
+// TestCodexOrphanCanonicals_InterfaceConformance pins compile-time conformance
+// with OrphanCanonicalReporter for the codex platform.
+func TestCodexOrphanCanonicals_InterfaceConformance(t *testing.T) {
+	var _ OrphanCanonicalReporter = (*codex)(nil)
+}
+
+// ---------- UserConfigReporter implementation (P4) ----------
+
+// TestCodexUserBrokenLinks is the table-driven cover for codex's
+// UserConfigReporter broken-link surface (~/.codex/agents/*). Every reported
+// link carries PlatformID="codex".
+func TestCodexUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken codex agent",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".codex", "agents", "missing"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "healthy codex agent symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "agents", "global", "a")
+				if err := os.MkdirAll(target, 0755); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".codex", "agents", "a"))
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &codex{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "codex", got, tc.wantCount)
+		})
+	}
+}
+
+// TestCodexUserBadge covers the codex user-config badge over ~/.codex/hooks.json,
+// ~/.codex/agents/, and ~/.agents/skills/.
+func TestCodexUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present healthy hooks.json",
+			setup: func(t *testing.T, home string) {
+				codexHome := filepath.Join(home, ".codex")
+				if err := os.MkdirAll(codexHome, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(codexHome, "hooks.json"), []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken agent surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".codex", "agents", "missing"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &codex{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Codex" {
+				t.Errorf("UserBadge.Name = %q, want Codex", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestCodexUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the codex platform.
+func TestCodexUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*codex)(nil)
+}
+
+// TestCodexLinkCodexAgentsMD_GlobalCandidateRealErrorPropagates covers the
+// swallow fixed in se9-platform-shared: a permission-denied Stat on a
+// global-scope AGENTS.md candidate must abort with a wrapped error, never
+// be silently read as "this candidate doesn't exist" and skipped.
+func TestCodexLinkCodexAgentsMD_GlobalCandidateRealErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	testutil.MakeDirUnreadable(t, globalRules)
+
+	c := NewCodex().(*codex)
+	if err := c.linkCodexAgentsMD("proj", tmp, agentsHome); err == nil {
+		t.Fatal("expected a real Stat error on the global candidates, got nil")
+	}
+}
+
+// TestCodexLinkCodexAgentsMD_ProjectOverrideRealErrorPropagates isolates the
+// second (project-override) Stat loop: the global bucket is genuinely
+// absent (legitimate absence, loop 1 completes cleanly), but the
+// project-scope rules dir is unreadable, so loop 2 must abort with a
+// wrapped error instead of silently falling through to "no override".
+func TestCodexLinkCodexAgentsMD_ProjectOverrideRealErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	projectRules := filepath.Join(agentsHome, "rules", "proj")
+	mustMkdirAllT(t, projectRules)
+	testutil.MakeDirUnreadable(t, projectRules)
+
+	c := NewCodex().(*codex)
+	if err := c.linkCodexAgentsMD("proj", tmp, agentsHome); err == nil {
+		t.Fatal("expected a real Stat error on the project override, got nil")
+	}
+}
+
+// TestCodexLinkCodexAgentsMD_LegitimateAbsenceNoError guards the sibling
+// path: neither the global bucket nor the project override exists, so
+// linkCodexAgentsMD is still a silent no-op, not an error.
+func TestCodexLinkCodexAgentsMD_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	mustMkdirAllT(t, agentsHome)
+	repo := filepath.Join(tmp, "repo")
+	mustMkdirAllT(t, repo)
+
+	c := NewCodex().(*codex)
+	if err := c.linkCodexAgentsMD("proj", repo, agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent AGENTS.md sources, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(repo, codexAgentsMarkdown)); !os.IsNotExist(err) {
+		t.Errorf("expected no AGENTS.md link created, lstat err = %v", err)
+	}
+}
+
+// TestCodexCreateLinks_UnreadableAgentsMDSourceLeavesExistingLink is the
+// se2-contract survival check: CreateLinks succeeds once with a real global
+// AGENTS.md source, creating the repo-root AGENTS.md managed link. Once
+// that source directory becomes unreadable, a second CreateLinks call must
+// abort with an error and leave the pre-existing managed link alone.
+func TestCodexCreateLinks_UnreadableAgentsMDSourceLeavesExistingLink(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	src := filepath.Join(globalRules, "agents.md")
+	if err := os.WriteFile(src, []byte("# agents\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(repo, codexAgentsMarkdown)
+	if !links.IsManagedLink(dst, src) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, src)
+	}
+
+	testutil.MakeDirUnreadable(t, globalRules)
+	if err := NewCodex().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the AGENTS.md source is unreadable")
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Errorf("existing AGENTS.md managed link must survive the aborted sync")
+	}
+}
+
+// TestCodexEnsureUserAgents_RealStatErrorPropagates covers the swallow
+// fixed in se9-platform-shared: a permission-denied Stat on the global
+// agents bucket itself must abort with a wrapped error rather than being
+// silently read as "no agents to link".
+func TestCodexEnsureUserAgents_RealStatErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	agentsBucket := filepath.Join(agentsHome, "agents")
+	globalAgents := filepath.Join(agentsBucket, "global")
+	mustMkdirAllT(t, globalAgents)
+	// Block traversal into the "agents" bucket itself so Stat(globalAgents)
+	// fails with a real permission error, not ENOENT.
+	testutil.MakeDirUnreadable(t, agentsBucket)
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserAgents(agentsHome); err == nil {
+		t.Fatal("expected a real Stat error, got nil")
+	}
+}
+
+// TestCodexEnsureUserAgents_LegitimateAbsenceNoError guards the sibling
+// path: a genuinely absent global agents bucket is still a silent no-op.
+func TestCodexEnsureUserAgents_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	mustMkdirAllT(t, agentsHome)
+
+	c := NewCodex().(*codex)
+	if err := c.ensureUserAgents(agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent global agents bucket, got %v", err)
+	}
+}
+
+// TestCodexCreateLinks_UnreadableAgentsSourceLeavesExistingAgentToml is the
+// se2-contract survival check for the native .codex/agents/*.toml family:
+// CreateLinks succeeds once with a real global agent, rendering the toml
+// under the user's ~/.codex/agents/. Once the source bucket becomes
+// unreadable, a second CreateLinks call must abort and leave the
+// pre-existing rendered toml alone.
+func TestCodexCreateLinks_UnreadableAgentsSourceLeavesExistingAgentToml(t *testing.T) {
+	agentsHome, repo := setupAgentsHome(t)
+	agentsBucket := filepath.Join(agentsHome, "agents")
+	agentDir := filepath.Join(agentsBucket, "global", "reviewer")
+	mustMkdirAllT(t, agentDir)
+	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewCodex().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(os.Getenv("HOME"), codexDir, "agents", "reviewer.toml")
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("expected rendered toml at %s: %v", dst, err)
+	}
+
+	testutil.MakeDirUnreadable(t, agentsBucket)
+	if err := NewCodex().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the agents source bucket is unreadable")
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Errorf("existing rendered agent toml %s must survive the aborted sync: %v", dst, err)
+	}
 }

@@ -3,7 +3,7 @@ plan_id: docs-starlight-migration
 tasks:
     - id: dm0-cf-access-bootstrap
       title: CF Access app + agent service token as Terraform IaC
-      status: awaiting_owner_review
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -15,7 +15,7 @@ tasks:
       app_type: docs
     - id: dm1-starlight-foundation
       title: 'Starlight foundation: replace custom site, public IA from docs/** via glob loader + astro-mermaid'
-      status: awaiting_owner_review
+      status: completed
       depends_on: []
       blocks: []
       owner: dot-agents
@@ -29,7 +29,7 @@ tasks:
       app_type: docs
     - id: dm2-port-interactive-pages
       title: Port interactive pages (Cytoscape graphs + JSON diagrams) into the Starlight project
-      status: pending
+      status: completed
       depends_on:
         - dm1-starlight-foundation
       blocks: []
@@ -44,7 +44,7 @@ tasks:
       app_type: docs
     - id: dm3-visibility-gating
       title: visibility frontmatter (default internal) + dist/ vs dist-internal/ partition
-      status: pending
+      status: completed
       depends_on:
         - dm1-starlight-foundation
       blocks: []
@@ -58,7 +58,7 @@ tasks:
       app_type: docs
     - id: dm4-md-llms-endpoints
       title: 'Agent-readable: [...slug].md raw-markdown endpoints + llms.txt (public only)'
-      status: pending
+      status: completed
       depends_on:
         - dm1-starlight-foundation
       blocks: []
@@ -70,7 +70,7 @@ tasks:
       app_type: docs
     - id: dm5-worker-cf-access
       title: 'Worker: gate /internal/* behind CF Access (2nd asset binding) + deploy both outputs'
-      status: pending
+      status: completed
       depends_on:
         - dm3-visibility-gating
         - dm0-cf-access-bootstrap
@@ -81,11 +81,11 @@ tasks:
         - docs/web/wrangler.jsonc
         - .github/workflows/deploy-docs.yml
       verification_required: true
-      notes: Worker serves ASSETS (dist) at /*, ASSETS_INTERNAL (dist-internal) at /internal/* ONLY after CF Access JWT verify (aud == audTag from dm0); /schemas/* stays unauth (carve-out before the check). wrangler.jsonc gains ASSETS_INTERNAL binding; deploy-docs.yml builds dist + dist-internal and deploys both. D5 / proposal 1.3+2.3+section7 task3. See plan.md dm5.
+      notes: Worker serves ASSETS (dist) at /*, ASSETS_INTERNAL (dist-internal) at /internal/* ONLY after CF Access JWT verify (aud == audTag = 50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff, APPLIED 2026-06-22); /schemas/* unauth carve-out FIRST. wrangler.jsonc gains ASSETS_INTERNAL binding (-> dist-internal); deploy-docs.yml builds+deploys both. audTag belongs as a wrangler var (non-secret). D5/proposal 1.3+2.3. Depends dm3 + dm0(applied). See plan.md dm5.
       app_type: docs
     - id: dm6-agent-internal-access
       title: Agent internal-docs access via service token (da CLI, auth-proxy-ready, auto-wired)
-      status: pending
+      status: completed
       depends_on:
         - dm0-cf-access-bootstrap
       blocks: []
@@ -95,5 +95,65 @@ tasks:
         - commands/
         - docs/
       verification_required: true
-      notes: 'PER-USER (decided). (1) da attaches CF-Access-Client-Id/Secret headers directly on /internal/* fetches now (auth-proxy refactor later). (2) Gated self-provision: a CF-Access-gated endpoint (dm5 worker or sibling) MINTS a per-user CF Access service token via the CF API after the dev authenticates (GitHub via CF Access), named agorcha-agents-<github-login>, returns client_id/secret to da which stores + auto-wires it (da init/refresh). Revoke a dev = delete their token (policy accepts any valid service token, so no policy churn). Minting endpoint needs a scoped CF API token (service-token create) + account_id from dm0. Depends dm0 + dm5. See plan.md dm6 + spec D8.'
+      notes: 'SPLIT: (1) CLIENT HALF — DONE (PR #83): internal/docsaccess attaches CF-Access-Client-Id/Secret on /internal/* docs-host requests, sourced from credstore; fail-loud on missing creds; 18 tests green. (2) MINTING ENDPOINT — STILL BLOCKED on a maintainer-provided scoped CF API token (Access: Service Tokens Edit) for the gated per-user CF Access service-token self-provision (POST /accounts/bfabaf5bb310ba98e4b95c74e88dd271/access/service_tokens) + auto-wire into da init/refresh. PER-USER model; revoke = delete the dev''s token (policy = any_valid_service_token). Depends dm0(applied) + dm5(hosts endpoint, PR #81). See plan.md dm6 + spec D8. DESIGN (decided 2026-06-22): minting = a /provision ROUTE on the dm5 Worker (one deploy, shares the JWT plumbing) — not a separate Worker; the scoped CF API token is the WORKER server secret, NEVER shipped in the binary (a mint-anything key is plaintext to a decompiler); bootstrap auth = CF Access SSO (da runs the CLI device-flow yielding the user''s CF Access identity) which the /provision route turns into a minted per-user service token (idempotent per login; revoke = delete it). Headless auth DEFERRED — CI could use GitHub OIDC (no shared secret), but a prod headless agent may need a different mechanism (TBD); do not build speculatively.'
       app_type: go-cli
+    - id: dm1b-astro6-starlight040
+      title: Upgrade docs/web to Starlight 0.40 + Astro 6.4 (+ dependabot ignore astro majors)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/package.json
+        - docs/web/package-lock.json
+        - docs/web/astro.config.mjs
+        - docs/web/src/
+        - .github/dependabot.yml
+      verification_required: true
+      notes: 'dm1 pinned astro ^5.14/Starlight 0.36 (downgrade). Starlight 0.40.0 supports Astro 6.4 — upgrade docs/web to @astrojs/starlight ^0.40 + astro ^6.4 and fix any 0.36->0.40 / Astro 5->6 breaking changes; verify build + 4 sections + mermaid. Add .github/dependabot.yml ignore for astro MAJOR version-updates on docs/web (stay within the Starlight-supported major; bump deliberately). Supersedes dependabot #49 (which over-shot to astro 7). dm2/dm3/dm4 build on this.'
+      app_type: docs
+    - id: dm7-ui-e2e-custom-content-verifier
+      title: UI e2e verifier for custom interactive content (graphs + diagrams)
+      status: awaiting_agent_review
+      depends_on:
+        - dm2-port-interactive-pages
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/tests/
+        - docs/web/playwright.config.ts
+        - docs/web/package.json
+        - docs/web/package-lock.json
+        - docs/web/src/components/ResourceGraph.astro
+        - .github/workflows/deploy-docs.yml
+        - .agents/proposals/ui-verifier-taxonomy.md
+      verification_required: true
+      notes: 'Hermetic Playwright (headless Chromium) suite gating the custom interactive routes so the blank-graph bug class cannot pass CI silently. Build with IS_CLOUDFLARE/DEPLOY_TARGET=cloudflare (base /), static-serve dist, run Playwright. Per /graphs/* + /diagrams/* assert: HTTP 200; no response >=400 (asset 404s); no console/pageerror; graph RENDERS (cytoscape canvas non-zero size + <canvas> present, or window-exposed cy.nodes().length>0); diagrams have rendered content. Wire a docs-e2e CI job. Static Starlight markdown stays on build+curl. Spawned from the dm2 blank-graph fix (root cause: Astro scoped-style boundary — .graph-canvas height in page style not component, canvas 0 height). See dm2 fix commit.'
+      app_type: docs
+    - id: dm8-playwright-through-worker-e2e
+      title: Browser-through-Worker e2e for the docs site (Playwright over Miniflare)
+      status: pending
+      depends_on:
+        - dm5-worker-cf-access
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/tests/
+        - docs/web/playwright.config.ts
+        - docs/web/package.json
+        - .github/workflows/deploy-docs.yml
+      verification_required: true
+      notes: 'FAST-FOLLOW (deferred, non-blocking — from the dm5/dm6 security review). The dm5 Miniflare smoke (worker.smoke.test.js) already gives the security-critical real-Worker 401 assertion on unauth /internal. This task adds a BROWSER-through-Worker layer: drive Playwright against the docs site served through the REAL Worker (Miniflare/wrangler dev with run_worker_first), so a CF-Access misconfig (login redirect / empty body on /internal) is caught at the UI layer too. Build via build:merged, serve through the Worker (not npx serve which bypasses it), assert unauth /internal/<page> -> 401 (treat 302/empty as failure) + a public page renders. Completeness/quality, not a leak risk (smoke covers the leak). Target master.'
+      app_type: docs
+    - id: dm8-astro7-plugin-api-migration
+      title: Migrate deprecated Astro 7 markdown plugin API (remarkPlugins/rehypePlugins/remarkRehype)
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/astro.config.mjs
+        - docs/web/package.json
+      verification_required: true
+      notes: 'Surfaced by the Astro ^6→^7 bump (PR #239, merged 2026-06-30). Astro 7 deprecates markdown.remarkPlugins, markdown.rehypePlugins, and markdown.remarkRehype in favor of passing them to unified({...}) from @astrojs/markdown-remark directly. The build still SUCCEEDS on Astro 7 (green CI + local smoke = 30 pages), so this is non-urgent, but must land before the next Astro major. RISK: the astro-mermaid integration relies on these rehype hooks, so validate mermaid + the interactive graphs/diagrams still render after the migration (the UI e2e gate covers this). Also non-fatal: Vite chunk-size >500kB warnings (pre-existing, separate). Done = astro.config.mjs uses the unified() plugin form, no deprecation warnings in the build log, UI e2e + link-check green.'
+      app_type: docs

@@ -72,6 +72,51 @@ func TestRunSyncPush_DefaultMessage(t *testing.T) {
 	}
 }
 
+// TestRunSyncPush_CommitFailureAbortsBeforePush ensures a real (non-"nothing
+// to commit") git commit failure surfaces as an error and the command never
+// reaches the confirm/push step. Before this fix, stageAndCommit discarded
+// both the `git add -A` and `git commit` errors, so `da sync push` would
+// report success (and could push a stale HEAD) even when the new changes
+// were never actually committed.
+func TestRunSyncPush_CommitFailureAbortsBeforePush(t *testing.T) {
+	agentsHome, remote := setupPushPullPair(t)
+	if err := os.WriteFile(filepath.Join(agentsHome, "should-not-push.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	beforeHead, err := execabs.Command("git", "-C", agentsHome, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+
+	stripGitIdentity(t)
+
+	deps := Deps{Flags: GlobalFlags{Yes: true}, RunRefresh: func(string) error { return nil }}
+	pushErr := runSyncPush(deps, "should-not-push")
+	if pushErr == nil {
+		t.Skip("git accepted the commit even with no identity (likely a CI git build with implicit defaults); cannot exercise the error path here")
+	}
+	if strings.Contains(pushErr.Error(), "nothing to commit") {
+		t.Fatalf("expected a real commit failure, got the nothing-to-commit sentinel: %v", pushErr)
+	}
+
+	afterHead, err := execabs.Command("git", "-C", agentsHome, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	if string(beforeHead) != string(afterHead) {
+		t.Errorf("HEAD advanced despite the commit failure: before=%s after=%s", beforeHead, afterHead)
+	}
+
+	remoteOut, err := execabs.Command("git", "-C", remote, "log", "--oneline").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log on bare: %v\n%s", err, remoteOut)
+	}
+	if strings.Contains(string(remoteOut), "should-not-push") {
+		t.Errorf("push step ran despite the aborted commit: remote log contains the message:\n%s", remoteOut)
+	}
+}
+
 func TestRunSyncPush_NewPushCmdMetadata(t *testing.T) {
 	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
 	cmd := newPushCmd(deps)
@@ -99,8 +144,53 @@ func TestPrintPendingPushCommits_WithPending(t *testing.T) {
 func TestStageAndCommit_NothingToCommit(t *testing.T) {
 	agentsHome := setupAgentsHomeRepo(t)
 	initEmptyRepo(t, agentsHome)
-	// No files staged — should not panic / write a noisy error.
-	stageAndCommit(agentsHome, "no-changes")
+	// No files staged — the "nothing to commit" sentinel must be treated as
+	// non-fatal, not surfaced as an error.
+	if err := stageAndCommit(agentsHome, "no-changes"); err != nil {
+		t.Fatalf("stageAndCommit: %v", err)
+	}
+}
+
+// TestStageAndCommit_CommitFailureSurfacesError ensures a real (non-"nothing
+// to commit") git commit failure is returned instead of silently discarded.
+// Before this fix, stageAndCommit had no error return at all.
+func TestStageAndCommit_CommitFailureSurfacesError(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "change.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	stripGitIdentity(t)
+
+	err := stageAndCommit(agentsHome, "should-fail")
+	if err == nil {
+		t.Skip("git accepted the commit even with no identity (likely a CI git build with implicit defaults); cannot exercise the error path here")
+	}
+	if strings.Contains(err.Error(), "nothing to commit") {
+		t.Fatalf("expected a real commit failure, got the nothing-to-commit sentinel: %v", err)
+	}
+}
+
+// TestStageAndCommit_GitAddFailureSurfacesError ensures the previously
+// discarded `git add -A` error is now returned before git commit even runs.
+func TestStageAndCommit_GitAddFailureSurfacesError(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "change.txt"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the index so `git add -A` fails before it ever reaches commit.
+	if err := os.WriteFile(filepath.Join(agentsHome, ".git", "index"), []byte("not-a-real-index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := stageAndCommit(agentsHome, "should-fail")
+	if err == nil {
+		t.Fatal("expected stageAndCommit to surface the git add failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "git add") {
+		t.Errorf("expected a git add error, got %q", err)
+	}
 }
 
 // ── pull subcommand ─────────────────────────────────────────────────

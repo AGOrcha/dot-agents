@@ -2,6 +2,12 @@
 
 Worker-specific failure modes. Read before implementing.
 
+## Stop-Gate Sentinel
+
+- **Skipping the sentinel-write step** — `da workflow hook-sentinel write loop-worker` (startup Step 4) is required, not optional. The SubagentStop gate diffs your edits against the sentinel's recorded `write_scope`; with no sentinel it exits 0 and scope enforcement never runs for your turn. Write it after reading the bundle, before any scoped edit.
+- **Incomplete or wrong `--write-scope`** — pass one `--write-scope` per bundle entry, copied verbatim. If the sentinel scope is narrower than the bundle, the gate hard-remediates legitimate edits; if it is wider, real scope escapes go undetected. The sentinel must mirror the bundle exactly.
+- **Changing governed worker actions without updating the gate** — if you alter the worker's governed surface (closeout sequence, write-scope confinement, the forbidden orchestrator commands), update the matching `loop-worker-gate` HOOK.yaml/gate.sh contract and its tests in the same change. A skill edit that drifts from the gate silently disables enforcement. No instruction here permits hard remediation on transcript-only facts (e.g. proving `workflow advance` ran) without verified trace input.
+
 ## Typed Stage Misrouting
 
 - **Using `loop-worker` for an ISP typed stage** — This skill is legacy/full-slice compatibility only. If the bundle identifies an `impl`, verifier, or reviewer stage, return it to the parent for named stage dispatch; do not inject `/iteration-close` or merge-back into that child.

@@ -1,3 +1,10 @@
+---
+title: Hooks
+description: Store agent lifecycle hooks once and wire them into every platform that supports them.
+sidebar:
+  order: 1
+---
+
 # Hooks
 
 Hooks let your AI agents run a command automatically at a point in their
@@ -43,7 +50,7 @@ hook content into this same layout.
 
 Hooks are distributed only to platforms that can represent them. Coverage
 today (consistent with the Hook Wiring Audit in
-[PLATFORM_DIRS_DOCS.md](PLATFORM_DIRS_DOCS.md)):
+[PLATFORM_DIRS_DOCS.md](./PLATFORM_DIRS_DOCS.md)):
 
 | Platform | Where hooks land | Status |
 |----------|------------------|--------|
@@ -52,6 +59,7 @@ today (consistent with the Hook Wiring Audit in
 | Codex | `.codex/hooks.json` | Wired (project `.codex/hooks.json` is rendered from the canonical hook spec and removed again on project teardown) |
 | GitHub Copilot | `.github/hooks/*.json` plus Claude-compatible settings | Wired (canonical hooks fan out to `.github/hooks/*.json`; legacy single-file hooks still emit) |
 | OpenCode | — | No dedicated hook file is documented upstream, so none is created |
+| Antigravity | `.antigravity/hooks.json` (project) and `~/.antigravity/hooks.json` (user) | Wired (F4/DC0 probe: rendered from the canonical hook spec via `renderAntigravityHookConfig`; managed regular file / hard link, not a symlink) |
 
 If a platform cannot represent a particular hook, it is skipped for that
 platform rather than emitted incorrectly.
@@ -78,22 +86,27 @@ event and the renderer omits it for that platform (the
 `hookRequiredOnPlatform` fall-through is the right behavior — if you
 mark such a hook `required_on` that vendor, the renderer errors).
 
-| Canonical `When`              | Claude Code        | Codex               | Cursor                  | GitHub Copilot         |
-|-------------------------------|--------------------|---------------------|-------------------------|------------------------|
-| `pre_tool_use`                | `PreToolUse`       | `PreToolUse`        | `preToolUse`            | `preToolUse`           |
-| `post_tool_use`               | `PostToolUse`      | `PostToolUse`       | `postToolUse`           | `postToolUse`          |
-| `post_tool_use_failure`       | `PostToolUseFailure` |                   | `postToolUseFailure`    | `postToolUseFailure`   |
-| `user_prompt_submit`          | `UserPromptSubmit` | `UserPromptSubmit`  | `beforeSubmitPrompt`    | `userPromptSubmitted`  |
-| `notification`                | `Notification`     |                     |                         | `notification`         |
-| `session_start`               | `SessionStart`     | `SessionStart`      | `sessionStart`          | `sessionStart`         |
-| `session_end`                 | `SessionEnd`       |                     | `sessionEnd`            | `sessionEnd`           |
-| `stop`                        | `Stop`             | `Stop`              | `stop`                  | `agentStop`            |
-| `subagent_start`              | `SubagentStart`    | `SubagentStart`     | `subagentStart`         | `subagentStart`        |
-| `subagent_stop`               | `SubagentStop`     | `SubagentStop`      | `subagentStop`          | `subagentStop`         |
-| `pre_compact`                 | `PreCompact`       | `PreCompact`        | `preCompact`            | `preCompact`           |
-| `post_compact`                | `PostCompact`      | `PostCompact`       |                         |                        |
-| `permission_request`          | `PermissionRequest`| `PermissionRequest` |                         | `permissionRequest`    |
-| `error_occurred`              |                    |                     |                         | `errorOccurred`        |
+| Canonical `When`              | Claude Code        | Codex               | Cursor                  | GitHub Copilot         | Antigravity   |
+|-------------------------------|--------------------|---------------------|-------------------------|------------------------|---------------|
+| `pre_tool_use`                | `PreToolUse`       | `PreToolUse`        | `preToolUse`            | `preToolUse`           | `PreToolUse`  |
+| `post_tool_use`               | `PostToolUse`      | `PostToolUse`       | `postToolUse`           | `postToolUse`          | `PostToolUse` |
+| `post_tool_use_failure`       | `PostToolUseFailure` |                   | `postToolUseFailure`    | `postToolUseFailure`   |               |
+| `user_prompt_submit`          | `UserPromptSubmit` | `UserPromptSubmit`  | `beforeSubmitPrompt`    | `userPromptSubmitted`  |               |
+| `notification`                | `Notification`     |                     |                         | `notification`         |               |
+| `session_start`               | `SessionStart`     | `SessionStart`      | `sessionStart`          | `sessionStart`         |               |
+| `session_end`                 | `SessionEnd`       |                     | `sessionEnd`            | `sessionEnd`           |               |
+| `stop`                        | `Stop`             | `Stop`              | `stop`                  | `agentStop`            | `Stop`        |
+| `subagent_start`              | `SubagentStart`    | `SubagentStart`     | `subagentStart`         | `subagentStart`        |               |
+| `subagent_stop`               | `SubagentStop`     | `SubagentStop`      | `subagentStop`          | `subagentStop`         |               |
+| `pre_compact`                 | `PreCompact`       | `PreCompact`        | `preCompact`            | `preCompact`           |               |
+| `post_compact`                | `PostCompact`      | `PostCompact`       |                         |                        |               |
+| `permission_request`          | `PermissionRequest`| `PermissionRequest` |                         | `permissionRequest`    |               |
+| `error_occurred`              |                    |                     |                         | `errorOccurred`        |               |
+
+> Antigravity is the F4/DC0 probe platform and maps only the three events with a
+> confirmed canonical analog (`pre_tool_use` / `post_tool_use` / `stop`); its
+> native `PreInvocation` / `PostInvocation` events have no canonical equivalent
+> yet (`internal/platform/antigravity.go`).
 
 ### Claude-wider surface (Claude-only canonical values)
 
@@ -160,10 +173,11 @@ mappers no-op for these values.
 A single canonical `HookSpec` is portable to every vendor whose mapper
 documents the event. If you author a cross-platform hook bundle, use
 the canonical values from the table above and accept that **not every
-vendor will implement every non-critical event**. The `Stop` /
-`SubagentStop` terminal events are documented on every supported
-platform; the wider lifecycle surface is uneven and will stay uneven
-until vendors converge.
+vendor will implement every non-critical event**. `Stop` (or its vendor
+equivalent) is documented on every supported hook platform, and
+`SubagentStop` on all except the Antigravity probe (which maps only
+`pre_tool_use` / `post_tool_use` / `stop`); the wider lifecycle surface is
+uneven and will stay uneven until vendors converge.
 
 If a hook is genuinely required on a platform that does not document
 the event, set `required_on:` for that platform — the renderer will
@@ -192,6 +206,35 @@ contract (gate-script wiring lands in plan task `p2-hook-scripts`).
 Terminal events — `Stop`, `SubagentStop`, Copilot's `agentStop` — remain
 the authoritative artifact-validation point.
 
+### Session-handoff: crash-survivable compaction recovery
+
+Two bundles wire the session-handoff journal (`da workflow journal`) into the
+compaction lifecycle so a context compaction is survivable: the verifiable
+*live state* (task↔PR↔merge, locks, recent durable deltas) that the
+auto-summary drops is captured before compaction and re-injected, re-verified,
+after it.
+
+- **`session-handoff-snapshot`** fires on `PreCompact` (no matcher — every
+  compaction) and runs `da workflow journal snapshot`, capturing a fresh
+  deterministic snapshot to durable, non-git-tracked state that *survives*
+  compaction. It writes nothing into the context (that context is about to be
+  discarded). Enabled on `claude`, `codex`, `cursor` — every platform that
+  maps `pre_compact`.
+- **`session-handoff-recover`** fires on `SessionStart` narrowed to the
+  `compact` start source (the manifest's `match.expression: compact`) and runs
+  `da workflow journal recover`, printing the **verified recovery view** on
+  stdout. A `SessionStart` hook's stdout re-enters the fresh post-compaction
+  context, which is exactly how the recovered state comes back. A normal
+  `startup` / `resume` / `clear` session start is untouched. Enabled on
+  `claude` and `codex` — the two platforms whose `SessionStart` surface
+  documents the `compact` source (see the [start-source matcher table](#matcher-support-which-renderer-emits-a-non-empty-matcher)).
+
+Both hooks are **strictly best-effort**: a journal failure (or a `da` binary
+that predates the journal surface) must never block compaction or session
+start. Each script reports failures on stderr only and always exits 0. They
+reuse the existing `pre_compact` / `session_start` event model — no new
+canonical event was required.
+
 ### `PostToolUse` and `PostToolUseFailure` are observation candidates
 
 Per [decision D9 in the design spec][d9], `post_tool_use` and
@@ -202,7 +245,7 @@ scored signal was **evaluated and deferred to R1.5.1** in
 (PR #97): the four boundary criteria (payload stability, workflow-command
 filter, redaction, dedup) did not all clear v1. As a result, no
 `observe_tool_result` records contribute to the v1 `hook_outcomes`
-sub-score — see [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b).
+sub-score — see [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](./OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b).
 These events are also **not** implicit blocking hooks: a failed workflow
 command produces useful improvement evidence, but recording an error is
 not by itself proof that the session should be blocked. Any future
@@ -241,14 +284,14 @@ deduplicate to the more severe result, and which rule-ID families
 contribute to v1 scoring versus which are persisted as audit-only
 observation. See:
 
-- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](OUTCOME_SCORING_RUBRIC.md#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
+- [`OUTCOME_SCORING_RUBRIC.md` — `hook_outcomes` signal](./OUTCOME_SCORING_RUBRIC.md#6-hook_outcomes--hook-gate-outcomes-weight-010-r15)
   for the sub-score mapping and dedup rule.
-- [`OUTCOME_SCORING_RUBRIC.md` — approved rules](OUTCOME_SCORING_RUBRIC.md#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6)
+- [`OUTCOME_SCORING_RUBRIC.md` — approved rules](./OUTCOME_SCORING_RUBRIC.md#approved-rules-feeding-the-v1-sub-score-per-r15-design-d6)
   for the rule-ID families that vote in v1.
-- [`OUTCOME_SCORING_RUBRIC.md` — sidecar retention](OUTCOME_SCORING_RUBRIC.md#hook-outcome-sidecar-retention-r15)
+- [`OUTCOME_SCORING_RUBRIC.md` — sidecar retention](./OUTCOME_SCORING_RUBRIC.md#hook-outcome-sidecar-retention-r15)
   for the indefinite-retention policy and the deferred admin-only prune
   command spec.
-- [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b)
+- [`OUTCOME_SCORING_RUBRIC.md` — post-tool deferral](./OUTCOME_SCORING_RUBRIC.md#post-tool-observation-evaluation-r15-t1b)
   for why `post_tool_use` records do not contribute to v1 scoring.
 
 ## `when_events` — multi-event hook bundles
@@ -442,5 +485,5 @@ every platform that supports them.
 ## See also
 
 - [README — Hooks](../README.md#hooks) — quick command summary
-- [PLATFORM_DIRS_DOCS.md](PLATFORM_DIRS_DOCS.md) — full per-platform resource
+- [PLATFORM_DIRS_DOCS.md](./PLATFORM_DIRS_DOCS.md) — full per-platform resource
   locations and the Hook Wiring Audit

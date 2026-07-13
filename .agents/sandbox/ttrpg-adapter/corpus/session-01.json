@@ -1,0 +1,25 @@
+{
+  "session": { "number": 1, "title": "Smoke over Ironhold", "played_at": "2026-01-04" },
+  "notes": [
+    { "id": "loc:ironhold", "type": "location", "fields": { "name": "Ironhold", "region": "Vael", "kind": "city" } },
+    { "id": "loc:emberdeep", "type": "location", "fields": { "name": "Emberdeep", "region": "Vael", "kind": "dungeon" } },
+    { "id": "fac:wardens", "type": "faction", "fields": { "name": "The Wardens", "kind": "order", "stance": "friendly", "seat": "loc:ironhold" } },
+    { "id": "char:mara", "type": "character", "fields": { "name": "Mara Veil", "kind": "pc", "status": "alive", "stated_location": "loc:ironhold", "allegiance": "fac:wardens" } },
+    { "id": "char:doran", "type": "character", "fields": { "name": "Doran Hale", "kind": "pc", "status": "alive", "stated_location": "loc:ironhold", "allegiance": "fac:wardens" } },
+    { "id": "char:sera", "type": "character", "fields": { "name": "Sera Quill", "kind": "pc", "status": "alive", "stated_location": "loc:ironhold" } },
+    { "id": "evt:s1-muster", "type": "event", "fields": { "summary": "The party musters at the Warden hall", "session": 1, "occurred_in": "loc:ironhold" } }
+  ],
+  "edges": [
+    { "type": "located_in", "from": "fac:wardens", "to": "loc:ironhold" },
+    { "type": "controls", "from": "fac:wardens", "to": "loc:ironhold" },
+    { "type": "member_of", "from": "char:mara", "to": "fac:wardens" },
+    { "type": "member_of", "from": "char:doran", "to": "fac:wardens" },
+    { "type": "present_at", "from": "char:mara", "to": "evt:s1-muster" },
+    { "type": "present_at", "from": "char:doran", "to": "evt:s1-muster" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s1-muster" },
+    { "type": "involves", "from": "evt:s1-muster", "to": "char:mara" },
+    { "type": "occurred_at", "from": "evt:s1-muster", "to": "loc:ironhold" },
+    { "type": "connects_to", "from": "loc:ironhold", "to": "loc:emberdeep" },
+    { "type": "knows", "from": "char:mara", "to": "char:doran" }
+  ]
+}

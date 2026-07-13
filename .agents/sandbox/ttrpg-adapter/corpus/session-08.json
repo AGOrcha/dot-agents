@@ -1,0 +1,18 @@
+{
+  "session": { "number": 8, "title": "Return to Ironhold", "played_at": "2026-02-22" },
+  "notes": [
+    { "id": "char:mara", "type": "character", "fields": { "name": "Mara Veil", "kind": "pc", "status": "alive", "stated_location": "loc:ironhold", "allegiance": "fac:wardens" } },
+    { "id": "char:sera", "type": "character", "fields": { "name": "Sera Quill", "kind": "pc", "status": "alive", "stated_location": "loc:ironhold", "allegiance": "fac:wardens" } },
+    { "id": "evt:s8-return", "type": "event", "fields": { "summary": "The party returns to Ironhold to rally the Wardens", "session": 8, "occurred_in": "loc:ironhold" } },
+    { "id": "quest:rally", "type": "quest", "fields": { "title": "Rally the Wardens", "status": "open", "giver": "char:mara" } }
+  ],
+  "edges": [
+    { "type": "present_at", "from": "char:mara", "to": "evt:s8-return" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s8-return" },
+    { "type": "involves", "from": "evt:s8-return", "to": "char:mara" },
+    { "type": "occurred_at", "from": "evt:s8-return", "to": "loc:ironhold" },
+    { "type": "member_of", "from": "char:sera", "to": "fac:wardens" },
+    { "type": "targets", "from": "quest:rally", "to": "char:mara" },
+    { "type": "advances", "from": "evt:s8-return", "to": "quest:rally" }
+  ]
+}

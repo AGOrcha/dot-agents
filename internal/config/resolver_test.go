@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -545,7 +546,7 @@ func TestLayeredResolverGitMockedViaFakeFetcher(t *testing.T) {
 		t.Errorf("skills = %v, want [from-git]", got)
 	}
 	// The lockfile records the git-resolved SHA.
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +583,12 @@ func TestLayeredResolverProtectedFieldDroppedFromImportedLayer(t *testing.T) {
 	}
 }
 
-func TestLayeredResolverTierConstraintOCIFails(t *testing.T) {
+// TestLayeredResolverOCILayerResolvesEndToEnd asserts an OCI-sourced config
+// layer resolves through extends and merges like any other layer
+// (config-distribution-model §15 D13: full source/kind orthogonality). An
+// ociLayerFetcher with a fake puller serves the layer blob with the config-layer
+// media type; the resolver merges it with no special-casing.
+func TestLayeredResolverOCILayerResolvesEndToEnd(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	repo := t.TempDir()
 	writeManifest(t, repo, `{
@@ -590,7 +596,44 @@ func TestLayeredResolverTierConstraintOCIFails(t *testing.T) {
 		"sources": [{"id": "reg", "type": "oci", "url": "oci://example/reg"}],
 		"extends": ["reg:org/base.json"]
 	}`)
-	_, err := NewLayeredResolver().Resolve(repo)
+	body := []byte(`{"skills":["from-oci"]}`)
+	digest := "sha256:" + sha256Hex(body)
+	fetcher := &ociLayerFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
+		return ociBlob{Data: body, Digest: digest, MediaType: ociLayerMediaType}, nil
+	}}
+	snap, err := NewLayeredResolver().WithFetcher("oci", fetcher).Resolve(repo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got := activeValue(findProvenance(snap, "skills")); !reflect.DeepEqual(got, []any{"from-oci"}) {
+		t.Errorf("skills = %v, want [from-oci]", got)
+	}
+	// The lockfile records the OCI-resolved digest as the layer's resolved SHA.
+	locked, err := readLockedLayersFromUnits(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if locked["reg:org/base.json"].ResolvedSHA != digest {
+		t.Errorf("locked sha = %q, want %q", locked["reg:org/base.json"].ResolvedSHA, digest)
+	}
+}
+
+// TestLayeredResolverOCILayerRejectsArtifactMediaType asserts the kind guard
+// flows through the resolver: an extends ref whose OCI blob carries the
+// artifact-bundle media type fails as a schema error (the layer fetcher's guard).
+func TestLayeredResolverOCILayerRejectsArtifactMediaType(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "reg", "type": "oci", "url": "oci://example/reg"}],
+		"extends": ["reg:org/base.json"]
+	}`)
+	body := []byte("artifact-bundle")
+	fetcher := &ociLayerFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
+		return ociBlob{Data: body, Digest: "sha256:" + sha256Hex(body), MediaType: ociArtifactMediaType}, nil
+	}}
+	_, err := NewLayeredResolver().WithFetcher("oci", fetcher).Resolve(repo)
 	var ie *ImportError
 	if !errors.As(err, &ie) {
 		t.Fatalf("expected *ImportError, got %v", err)
@@ -723,7 +766,12 @@ func TestLayeredResolverNoExtendsBehavesLikeFlat(t *testing.T) {
 	assertLockfileSections(t, repo, nil)
 }
 
-func TestLayeredResolverTTLExpiryRecorded(t *testing.T) {
+// TestLayeredResolverUnitsLockDropsClockTTL pins the §7A clean-cutover decision:
+// the units lock is content-hash driven and does NOT persist the clock-based
+// cache-TTL (ttl_expires_at). A source with cache_ttl still records its
+// fetched_at and content cache_key in the units lock, but no TTL — staleness is
+// driven by the inputs_digest/cache_key content axes, not a wall clock.
+func TestLayeredResolverUnitsLockDropsClockTTL(t *testing.T) {
 	t.Setenv("AGENTS_HOME", t.TempDir())
 	repo := t.TempDir()
 	src := localLayerSourcePath(t)
@@ -737,7 +785,7 @@ func TestLayeredResolverTTLExpiryRecorded(t *testing.T) {
 	if _, err := r.Resolve(repo); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	locked, err := readLockedLayers(repo)
+	locked, err := readLockedLayersFromUnits(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -745,8 +793,8 @@ func TestLayeredResolverTTLExpiryRecorded(t *testing.T) {
 	if got.FetchedAt != "2026-04-19T14:00:00Z" {
 		t.Errorf("fetched_at = %q", got.FetchedAt)
 	}
-	if got.TTLExpiresAt != "2026-04-19T18:00:00Z" {
-		t.Errorf("ttl_expires_at = %q, want +4h", got.TTLExpiresAt)
+	if got.TTLExpiresAt != "" {
+		t.Errorf("ttl_expires_at = %q, want empty (units lock drops the clock TTL)", got.TTLExpiresAt)
 	}
 }
 
@@ -964,10 +1012,17 @@ func TestReadAllLimitedOverLimit(t *testing.T) {
 }
 
 func TestWriteConfigLockFlushError(t *testing.T) {
-	// A non-existent project dir means Flush cannot write the lockfile.
-	missing := filepath.Join(t.TempDir(), "no", "such", "dir")
-	if err := WriteConfigLock(missing, map[string]LockedLayer{}); err == nil {
-		t.Fatal("expected error writing lock into a non-existent dir")
+	// Flush now MkdirAll's the lock's parent, so a merely-absent project dir is
+	// created on demand (fixing the Windows mkdir-lock failure). To still cover
+	// the Flush error-return wiring, place the project under a regular FILE so
+	// the parent cannot be made a directory — portable across OSes.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(blocker, "dir")
+	if err := WriteConfigLock(project, map[string]LockedLayer{}); err == nil {
+		t.Fatal("expected error writing lock when the lock parent cannot be created")
 	}
 }
 
@@ -976,7 +1031,7 @@ func TestReadLockedLayersCorrupt(t *testing.T) {
 	if err := os.WriteFile(AgentsLockPath(repo), []byte(`{"config": "not-an-object"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readLockedLayers(repo); err == nil {
+	if _, err := readLockedLayersFromUnits(repo); err == nil {
 		t.Fatal("expected decode error for corrupt config section")
 	}
 }
@@ -1031,6 +1086,271 @@ func TestLayeredResolverSnapshotAPIConsumer(t *testing.T) {
 	}
 }
 
+// --- cache-key consumption tests --------------------------------------------
+
+// TestLayeredResolverRefreshForcesRevalidationOffline covers the --refresh force
+// escape threaded through WithRefresh -> effectiveCacheKey -> EffectiveCacheKey:
+// offline cannot revalidate, so the offline serve fails loudly when the effective
+// key is the AlwaysRevalidate sentinel (fetchLayer §7A.4 gate). The control case
+// (offline, no --refresh) still serves the cached SHA.
+func TestLayeredResolverRefreshForcesRevalidationOffline(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_ttl": "1h"}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000001",
+	}
+	// Online resolve to populate lock + cache.
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+
+	// Offline WITHOUT --refresh: cache key is the kind default, not stale, so the
+	// cached SHA is served.
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	if _, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo); err != nil {
+		t.Fatalf("offline (no refresh) Resolve: %v", err)
+	}
+
+	// Offline WITH --refresh: effective key becomes AlwaysRevalidate, so the
+	// offline serve must fail rather than serve possibly-stale content.
+	refreshFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	_, err := NewLayeredResolver().
+		WithFetcher("git", refreshFake).
+		WithOffline(true).
+		WithRefresh(true).
+		Resolve(repo)
+	if err == nil {
+		t.Fatal("offline + --refresh should fail: revalidation required but offline")
+	}
+	if refreshFake.calls != 0 {
+		t.Errorf("offline must not contact fetcher, got %d calls", refreshFake.calls)
+	}
+	if !strings.Contains(err.Error(), "revalidation required") {
+		t.Errorf("error = %q, want revalidation-required message", err)
+	}
+}
+
+// TestLayeredResolverAlwaysRevalidateSourceForcesRevalidationOffline covers the
+// config-declared always_revalidate force escape (the CacheKeys.AlwaysRevalidate
+// half of R6) reaching the same offline gate as --refresh.
+func TestLayeredResolverAlwaysRevalidateSourceForcesRevalidationOffline(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{
+			"id": "acme",
+			"type": "git",
+			"url": "https://example/repo.git",
+			"ref": "main",
+			"cache_ttl": "1h",
+			"cache_keys": {"always_revalidate": true}
+		}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000002",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	_, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo)
+	if err == nil {
+		t.Fatal("offline + always_revalidate source should fail: revalidation required")
+	}
+	if !strings.Contains(err.Error(), "revalidation required") {
+		t.Errorf("error = %q, want revalidation-required message", err)
+	}
+}
+
+// TestLayeredResolverOfflineCacheMissFails covers the offline serve path where
+// the lock records a SHA whose cached bytes are gone (fetchLayer readCachedLayer
+// miss): a non-force-escape effective key passes the staleness gate, but the
+// content is no longer on disk, so the resolve fails.
+func TestLayeredResolverOfflineCacheMissFails(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_ttl": "1h"}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000003",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("online Resolve: %v", err)
+	}
+
+	// Evict the cached bytes while keeping the lock entry, so offline finds a
+	// recorded SHA but no cache file.
+	cacheDir := layerCacheDir("acme", "org/base.json")
+	if err := os.RemoveAll(filepath.Join(cacheDir, fake.sha)); err != nil {
+		t.Fatal(err)
+	}
+
+	offlineFake := &fakeFetcher{fetchErr: errors.New("network down")}
+	_, err := NewLayeredResolver().WithFetcher("git", offlineFake).WithOffline(true).Resolve(repo)
+	if err == nil {
+		t.Fatal("offline with evicted cache should fail")
+	}
+	if !strings.Contains(err.Error(), "not in cache") {
+		t.Errorf("error = %q, want not-in-cache message", err)
+	}
+}
+
+// TestLayeredResolverGathersDirSelectorFacts covers gatherOverrideFacts' {dir}
+// branch: a source whose cache_keys declares a dir selector must have the dir's
+// presence folded into the effective key, so the lock records a composite
+// override key (not the bare kind default).
+func TestLayeredResolverGathersDirSelectorFacts(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	markerDir := filepath.Join(t.TempDir(), "marker")
+	if err := os.MkdirAll(markerDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{
+			"id": "acme",
+			"type": "git",
+			"url": "https://example/repo.git",
+			"ref": "main",
+			"cache_ttl": "1h",
+			"cache_keys": {"dir": ["`+jsonPath(markerDir)+`"]}
+		}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "abc0000000000000000000000000000000000004",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	locked, err := readLockedLayersFromUnits(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotKey := locked["acme:org/base.json"].CacheKey
+	if gotKey == "" {
+		t.Fatal("expected a recorded cache key")
+	}
+	// With a dir selector present, the key is the composite override, which must
+	// differ from the bare git kind default over the same resolved SHA.
+	defaultKey := DefaultCacheKey(SourceKindGit, CacheKeyInputs{ResolvedCommit: fake.sha})
+	if gotKey == defaultKey {
+		t.Errorf("dir selector ignored: cache key %q equals kind default", gotKey)
+	}
+}
+
+// TestLayeredResolverGathersEnvSelectorFacts covers the {env} branch of
+// gatherOverrideFacts and confirms a changed env value yields a different
+// recorded cache key (the consumption point that makes a cache_keys override
+// stop being a silent no-op).
+func TestLayeredResolverGathersEnvSelectorFacts(t *testing.T) {
+	manifest := `{
+		"version": 2,
+		"sources": [{
+			"id": "acme",
+			"type": "git",
+			"url": "https://example/repo.git",
+			"ref": "main",
+			"cache_ttl": "1h",
+			"cache_keys": {"env": ["DA_CACHE_TEST_TOKEN"]}
+		}],
+		"extends": ["acme:org/base.json"]
+	}`
+	resolveKey := func(t *testing.T, envVal string) string {
+		t.Helper()
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		t.Setenv("DA_CACHE_TEST_TOKEN", envVal)
+		repo := t.TempDir()
+		writeManifest(t, repo, manifest)
+		fake := &fakeFetcher{
+			files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+			sha:   "abc0000000000000000000000000000000000005",
+		}
+		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		locked, err := readLockedLayersFromUnits(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return locked["acme:org/base.json"].CacheKey
+	}
+	keyA := resolveKey(t, "tokenA")
+	keyB := resolveKey(t, "tokenB")
+	if keyA == "" || keyB == "" {
+		t.Fatal("expected recorded cache keys for both env values")
+	}
+	if keyA == keyB {
+		t.Errorf("env selector ignored: same key %q for differing env values", keyA)
+	}
+}
+
+// TestWithResolvedSHA covers withResolvedSHA: an empty SHA returns inputs
+// unchanged (early return), and a non-empty SHA backfills only the empty
+// kind-primary facts while preserving already-populated ones.
+func TestWithResolvedSHA(t *testing.T) {
+	// Empty SHA: inputs unchanged, primary facts stay empty.
+	got := withResolvedSHA(CacheKeyInputs{}, "")
+	if got.ResolvedCommit != "" || got.ContentDigest != "" || got.OCIDigest != "" {
+		t.Errorf("empty SHA must not backfill, got %+v", got)
+	}
+
+	// Non-empty SHA backfills empties but preserves a populated fact.
+	in := CacheKeyInputs{ContentDigest: "precise-etag-hash"}
+	got = withResolvedSHA(in, "sha-xyz")
+	if got.ResolvedCommit != "sha-xyz" || got.OCIDigest != "sha-xyz" {
+		t.Errorf("expected empty primary facts backfilled from SHA, got %+v", got)
+	}
+	if got.ContentDigest != "precise-etag-hash" {
+		t.Errorf("populated fact must be preserved, got %q", got.ContentDigest)
+	}
+}
+
+// TestCacheKeyStaleForLayer covers the resolver-side staleness consumer: a
+// matching recorded key is not stale, a force escape (--refresh) is always stale,
+// and a cache_keys override edit that reshapes the key is detected as stale from
+// the same recorded SHA facts.
+func TestCacheKeyStaleForLayer(t *testing.T) {
+	src := Source{ID: "acme", Type: "git"}
+	locked := LockedLayer{ResolvedSHA: "sha-abc"}
+	locked.CacheKey = NewLayeredResolver().effectiveCacheKey(src, locked.cacheKeyInputs())
+
+	// Same source + recorded key: not stale.
+	if NewLayeredResolver().CacheKeyStaleForLayer(src, locked) {
+		t.Error("matching recorded key should not be stale")
+	}
+
+	// --refresh force escape: AlwaysRevalidate never matches the recorded key.
+	refreshed := NewLayeredResolver().WithRefresh(true)
+	if !refreshed.CacheKeyStaleForLayer(src, locked) {
+		t.Error("--refresh should always report stale")
+	}
+
+	// cache_keys override edit (adds an env selector): reshapes the key from the
+	// same SHA facts, so the recorded default key no longer matches.
+	edited := Source{ID: "acme", Type: "git", CacheKeys: &CacheKeys{Env: []string{"SOME_TOKEN"}}}
+	if !NewLayeredResolver().CacheKeyStaleForLayer(edited, locked) {
+		t.Error("a cache_keys override edit should be detected as stale")
+	}
+}
+
 // --- test helpers -----------------------------------------------------------
 
 func layerIDs(layers []ResolvedLayer) []string {
@@ -1067,23 +1387,31 @@ func jsonPath(p string) string {
 	return string(b[1 : len(b)-1])
 }
 
+// assertLockfileSections asserts the AUTHORITATIVE §7A lock shape after the
+// units-lock cutover (section-7a-units-lock-wiring): the lockfile carries the
+// "units" section (with a UnitKindLayer + resolved SHA per wanted ref) and a
+// top-level inputs_digest. The legacy "config"/"packages" sections are no longer
+// written.
 func assertLockfileSections(t *testing.T, repo string, wantLayerRefs []string) {
 	t.Helper()
 	lf, err := agentslock.Open(AgentsLockPath(repo))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cfg map[string]LockedLayer
-	if ok, _ := lf.Section(LockSectionConfig, &cfg); !ok {
-		t.Fatal("lockfile missing config section")
+	var units map[string]LockedUnit
+	if ok, _ := lf.Section(LockSectionUnits, &units); !ok {
+		t.Fatal("lockfile missing units section")
 	}
 	for _, ref := range wantLayerRefs {
-		if cfg[ref].ResolvedSHA == "" {
-			t.Errorf("lockfile config missing resolved_sha for %q", ref)
+		u, ok := units[ref]
+		if !ok || u.Digest == "" {
+			t.Errorf("lockfile units missing resolved digest for %q: %+v", ref, units[ref])
+		}
+		if u.Kind != UnitKindLayer {
+			t.Errorf("unit %q kind = %q, want %q", ref, u.Kind, UnitKindLayer)
 		}
 	}
-	var pkgs map[string]json.RawMessage
-	if ok, _ := lf.Section(LockSectionPackages, &pkgs); !ok {
-		t.Error("lockfile missing empty packages stub section")
+	if digest, ok := lf.InputsDigest(); !ok || digest == "" {
+		t.Error("lockfile missing inputs_digest")
 	}
 }

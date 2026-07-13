@@ -272,7 +272,9 @@ func isAllowlistedSharedMirrorTarget(targetPath string) bool {
 		strings.HasPrefix(normalized, ".codex/agents/") ||
 		strings.HasPrefix(normalized, ".opencode/plugins/") ||
 		strings.HasPrefix(normalized, ".opencode/agent/") ||
-		strings.HasPrefix(normalized, ".github/agents/")
+		strings.HasPrefix(normalized, ".github/agents/") ||
+		strings.HasPrefix(normalized, ".antigravity/skills/") ||
+		strings.HasPrefix(normalized, ".antigravity/agents/")
 }
 
 func BuildSharedSkillMirrorIntents(project string, targetRoots ...string) ([]ResourceIntent, error) {
@@ -646,29 +648,37 @@ func (p ResourcePlan) PruneStaleSharedTargets(repoPath, agentsHome string) ([]st
 	for _, dir := range dirs {
 		entries, err := osReadDir(dir)
 		if err != nil {
-			if os.IsNotExist(err) {
-				continue
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("listing managed dir %s: %w", dir, err))
 			}
-			errs = append(errs, fmt.Errorf("listing managed dir %s: %w", dir, err))
 			continue
 		}
-		for _, entry := range entries {
-			candidate := filepath.Join(dir, entry.Name())
-			if wanted[candidate] {
-				continue
-			}
-			if !links.IsManagedLinkUnder(candidate, agentsHome) {
-				continue
-			}
-			if err := removeIfSymlinkUnder(candidate, agentsHome); err != nil {
-				errs = append(errs, fmt.Errorf("prune managed target %s: %w", candidate, err))
-				continue
-			}
-			pruned = append(pruned, candidate)
-		}
+		dirPruned, dirErrs := pruneManagedEntries(dir, entries, wanted, agentsHome)
+		pruned = append(pruned, dirPruned...)
+		errs = append(errs, dirErrs...)
 	}
 	sort.Strings(pruned)
 	return pruned, errors.Join(errs...)
+}
+
+// pruneManagedEntries removes the managed outputs in a single scanned directory
+// that are no longer wanted by the plan. It is the per-directory body lifted out
+// of PruneStaleSharedTargets so the prune loop carries no nested entry logic:
+// entries that are wanted, or not managed links under agentsHome, are skipped;
+// the rest are removed (best-effort, accumulating errors).
+func pruneManagedEntries(dir string, entries []fs.DirEntry, wanted map[string]bool, agentsHome string) (pruned []string, errs []error) {
+	for _, entry := range entries {
+		candidate := filepath.Join(dir, entry.Name())
+		if wanted[candidate] || !links.IsManagedLinkUnder(candidate, agentsHome) {
+			continue
+		}
+		if err := removeIfSymlinkUnder(candidate, agentsHome); err != nil {
+			errs = append(errs, fmt.Errorf("prune managed target %s: %w", candidate, err))
+			continue
+		}
+		pruned = append(pruned, candidate)
+	}
+	return pruned, errs
 }
 
 // staleManagedTargets is the read-only scan PruneStaleSharedTargets and the

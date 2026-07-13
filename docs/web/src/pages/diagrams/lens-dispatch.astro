@@ -1,30 +1,9 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro';
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/lens-dispatch.json';
 ---
-<BaseLayout title="Lens dispatch (stub)">
-  <h1>Lens reviewer dispatch flow</h1>
-  <div class="callout-warn">
-    <strong>Stubbed for follow-up.</strong> This page will render the
-    <code>lens-agents</code> dispatch flow (architect / adversarial / behavior /
-    delivery lenses → per-lens prompt overlay → reviewer agent → consolidated
-    review).
-  </div>
-  <p>
-    Tracked in the <code>pr-a-lens-agents</code> worktree and the
-    <code>thermo-nuclear-lens-evaluation</code> task. Once that work lands,
-    a structured graph view will replace this stub.
-  </p>
-  <p>
-    Until then, the source-of-truth for the lens dispatch contract is the
-    <strong>Review stage</strong> section of the <code>isp</code> skill at
-    <code>internal/scaffold/home/starter/skills/global/isp/instructions/staged-runtime.md</code>
-    (three-lens contract: spawn one reviewer per lens), and the per-lens agent
-    definitions under
-    <code>internal/scaffold/home/starter/agents/global/&lt;lens&gt;-reviewer/AGENT.md</code>
-    (<code>architecture-standards-reviewer</code>,
-    <code>acceptance-invariants-reviewer</code>,
-    <code>adversarial-reviewer</code>). Note: <code>commands/review.go</code> is
-    the <code>da review</code> proposal-approval command — a different surface,
-    not the lens dispatch contract.
-  </p>
-</BaseLayout>
+<StarlightPage frontmatter={{ title: graph.title, description: graph.description }}>
+  <p>{graph.description}</p>
+  <ResourceGraph graph={graph} graphId="lens-dispatch" layoutName={graph.layout} />
+</StarlightPage>

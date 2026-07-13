@@ -1,8 +1,13 @@
 # Spec: managed worktree platform for delegation/branch isolation
 
-Status: active / git-layer decision VERIFIED (wt0 spike, 2026-05-28).
-Decision A (pure go-git v6) confirmed feasible incl. all 4 residuals —
-see "wt0 spike findings" below. Ready to graduate to wt1 implementation.
+Status: active / **wt0 + wt1 VERIFIED COMPLETE** (spike merged via PR #171,
+2026-05-28; typed interface merged via PR #181, 2026-05-29 — both
+re-confirmed against the actual repo, not just TASKS.yaml, on 2026-07-10).
+`internal/gitwt` ships a tested `Manager`/`Worktree` implementation richer
+than the "seam for wt1" this doc originally sketched. go-git version
+re-checked current (no bump) 2026-07-10. wt2-wt6 + release-minor refreshed
+and groomed to implementation-ready — see "Refresh: wt0/wt1 reality check"
+below and TASKS.yaml.
 
 ## Problem
 
@@ -28,15 +33,21 @@ Secondary: the few Go git call sites (`commands/sync.go`,
 
 ## Honest scoping note
 
-The dot-agents **Go binary barely does git today** (3 files). The
-worktree/sub-branch usage that hurts is in the **orchestration + skill
-layer and manual operator steps**, not the binary. So this is mostly a
-**net-new subsystem**, not a refactor of existing shell-git. Whether it
-lives as a `da worktree`/git package in the binary (consumed by skills)
-vs purely in the skill/runtime layer is itself a scoping decision the
-plan must make. `go-git` is **not currently a dependency** — adopting
-it is a sizable new supply-chain surface (cf. the maintainer's own
-testcontainers concern).
+**Corrected 2026-07-10 — this note predates wt0/wt1 shipping.** `go-git`
+**is** now a dependency (pinned in `go.mod` since wt0/wt1), and the binary
+has a real typed git surface: `internal/gitwt/{gitwt.go,gogit.go}` (merged
+PR #181) plus one live consumer, `internal/eval/sandbox/worktree.go` (the
+unrelated R4 eval-harness's sandbox — its `doc.go` names *this plan's*
+managed-worktree provider as the intended future swap-in). The shell-git
+call sites (`commands/sync.go`, `status.go`, `explain.go`) are unchanged
+and still untyped.
+
+What is **still** true: `internal/gitwt` is a low-level, single-repo
+lifecycle seam only — no registry (branch/purpose/parent-PR/created-at —
+wt2), no sub-branch/merge-back workflow (wt3), no config provisioning
+(wt2/wt3), and — verified by grep — **zero callers in `commands/workflow/`
+or the delegation/fanout skills**. wt2-wt5 remain a genuine net-new
+subsystem, not a refactor.
 
 ## Decisions
 
@@ -160,6 +171,103 @@ git-only; provisioning is never wired inside the `Manager`.
 - be idempotent (safe on a partially-provisioned or already-clean worktree);
 - integrate with the existing auto-prune-if-unchanged path so an unchanged
   worktree's config is also reclaimed.
+
+## Refresh: wt0/wt1 reality check + go-git currency (2026-07-10)
+
+**wt0 + wt1 are genuinely COMPLETE, not stale-vs-reality (unlike the
+da-recipe precedent this task was modeled on).** Verified directly
+against the repo, not TASKS.yaml's say-so:
+
+- `internal/gitwt/gitwt.go` + `gogit.go` exist, `go build
+  ./internal/gitwt/... ./internal/eval/sandbox/...` is clean, and 14
+  tests in `gitwt_test.go` cover exactly the wt0 residuals:
+  `TestAddBranch`/`TestAddBranchErrors` (Residual 1, branch-mode
+  create), `TestAddDetached`, `TestList`, `TestRemove`, `TestPrune`,
+  `TestBaseRefRecordRead`, `TestOpenError`,
+  `TestAdminDir_RealStatErrorSurfaces`, and — critically —
+  `TestIndexIsolation` (Residual 2: commits a file only in worktree A,
+  asserts it never appears in worktree B's status or the main repo's
+  status, and that only A's branch advances). PR #171 (wt0, merged
+  2026-05-28) and PR #181 (wt1, merged 2026-05-29) are both real,
+  resolvable merge commits.
+- **The shipped interfaces are richer than the "seam for wt1" this doc
+  sketched** — see the corrected code block below. `RecordBaseRef`/
+  `BaseRef` and `Prune` landed as **wt1** primitives, not deferred to
+  wt2 as originally implied. This shrinks wt2's real remaining scope.
+- `internal/eval/sandbox` (R4 eval-harness sandbox, separate plan,
+  already merged) is a **live consumer** of `gitwt`: `NewWorktreeSandbox`
+  opens a `gitwt.Manager`, calls `AddDetached` + `Prune`, and layers its
+  **own** bespoke registry on top — a YAML marker sidecar
+  (`RunID`/`WorktreeName`/`BaseCommit`/`ProvisionedAt`) plus a
+  retention-window `PruneStale` — because wt2 does not exist yet. It
+  does not call `gitwt.RecordBaseRef`/`BaseRef` at all, duplicating that
+  bookkeeping itself. `internal/eval/sandbox/doc.go` says explicitly:
+  *"the worktree-platform plan's managed-worktree provider... can
+  replace the v1 implementation without any caller change."* wt2 should
+  treat this marker/TTL pattern as a second reference implementation
+  (alongside swarm-cd) to generalize from, and plan a follow-up to move
+  `eval/sandbox` onto the wt2 registry rather than maintaining a
+  parallel bookkeeping scheme indefinitely.
+- **`commands/workflow/` and the delegation skills do not consume
+  `gitwt` at all today.** `workflow fanout` does not create git
+  worktrees (grep confirms zero `gitwt`/worktree-creation references in
+  `commands/workflow/*.go`; the only "worktree" hits are directory-name
+  skip-lists for symbol scanning). `delegation-lifecycle`/`isp`/
+  `loop-worker`'s instructions contain no "isolated"/"isolation"
+  language either. The worktree isolation actually in play today for
+  delegated subagents is the **outer coding harness's** own
+  isolated-worktree execution mode (`task(..., isolated: true)`) —
+  external to dot-agents, not something this repo implements or can
+  refresh. Decision #1's "mirroring the harness `isolation:worktree`
+  behavior" phrase is therefore an **external precedent to emulate**,
+  not existing dot-agents behavior to refactor — wt5-skills-integration
+  is still fully net-new.
+- Worktree config provisioning (`RegisterInstallProject`/`RunInstall` in
+  `commands/internal/lifecycle/install.go`) — re-verified present with
+  unchanged signatures; still fully unimplemented for worktrees, exactly
+  as scoped to wt2/wt3/wt5 below (not wt1, correctly).
+- The lesson `dead-worker-wip-reconcile-on-pickup`, cited in this plan's
+  own `refresh-ideate-worktree-platform` task notes, **does not exist**
+  under `.agents/lessons/` (checked the index plus a repo-wide grep — no
+  hits). Treat that citation as aspirational/mistaken. The real siblings
+  already in the lessons index that wt2/wt3's cleanup/registry design
+  should reconcile against instead: `concurrent-workers-one-worktree`
+  (one active writer per worktree; orchestrator polls, workers never
+  self-arm), `worktree-isolation-defeats-status-tracking` (an isolated
+  worker's status updates are invisible to the main-repo scout — wt2's
+  registry must be readable from OUTSIDE the worktree that wrote it,
+  e.g. under the main repo's own admin dir, not something only the
+  linked worktree can see), `parallel-worker-branch-drift` (pre-commit
+  hooks can land a worker's commit on a sibling worktree's branch via
+  stash/restore — wt3's merge-back must verify branch HEAD matches the
+  expected commit post-op), and `stale-local-checkout-mass-drift`
+  (backup-branch + hard-sync recovery — relevant to wt2/wt3
+  failure-recovery design).
+
+**go-git version: no bump.** Re-checked
+`https://github.com/go-git/go-git/tags` directly (not a cached search)
+on 2026-07-10: `v6.0.0-alpha.4` (2026-05-18) is still the newest go-git
+v6 tag — no alpha.5/beta/rc/stable has shipped upstream since the wt0
+pin (v5 line separately cut `v5.19.1` the same day; irrelevant, we're on
+v6). `go.mod`/`go.sum` are unchanged (`go-git/go-git/v6 v6.0.0-alpha.4`,
+`go-git/go-billy/v6 v6.0.0-alpha.1`). `go build ./internal/gitwt/...
+./internal/eval/sandbox/...` is clean against the pinned version, and
+the `x/plumbing/worktree` exported API used by both packages
+(`New`/`Add`/`Remove`/`List`/`Prune`/`Open`,
+`WithCommit`/`WithDetachedHead`, the typed `ErrWorktree*` errors) is
+unchanged from what wt0/wt1 verified. **Decision: keep the pin.**
+Re-check before wt6-verify-close in case upstream ships a stable
+v6.0.0 in the interim.
+
+**swarm-cd reference: still current.** Re-read
+`swarm-cd/swarmcd/worktree.go` on 2026-07-10 (path is now
+`~/proj-docs/payout/swarm-cd/...` — the operator's home dir reorganized
+from `~/Documents/payout` to `~/proj-docs/payout`; the file itself is
+byte-for-byte the same pattern: same imports, same
+`gitworktree.New(repo.Storer)` → `Add`/`Remove`/`Open`).
+`swarm-cd/go.mod` still pins the exact pseudo-version noted in the wt0
+findings (`go-git/v6 v6.0.0-20260305211659-2083cf940afa`, `go-billy/v6
+v6.0.0-20260226131633-45bd0956d66f`) — no drift to reconcile.
 
 ## Skills integration
 
@@ -315,31 +423,89 @@ Notes for the implementer:
 - `osfs.New(path)` (`go-git/go-billy/v6/osfs`) is the `billy.Filesystem`
   passed to `Add`/`Open`, matching swarm-cd.
 
-### Typed interface seam for wt1 (derived from the verified API)
+### Typed interface, AS SHIPPED (wt1, PR #181, merged 2026-05-29)
+
+`internal/gitwt/gitwt.go` shipped a richer interface than the seam
+sketched above — `RecordBaseRef`/`BaseRef` and `Prune` landed as **wt1**
+primitives instead of being deferred to wt2, and `Remove` takes the
+working-tree `path` directly (matching the "wraps mgr.Remove +
+os.RemoveAll(path)" comment literally — no adapter needed):
 
 ```go
 // internal/gitwt — implementation wraps go-git v6 x/plumbing/worktree.
 type Manager interface {
-    // Create a linked worktree at path on a NEW branch (branch name derived
-    // from name; must match ^[a-zA-Z0-9-]+$). Records base in the wt2 registry.
     AddBranch(name, path string, base plumbing.Hash) error
-    // Create detached (swarm-cd style), for read-only/ephemeral checkouts.
     AddDetached(name, path string, commit plumbing.Hash) error
-    Remove(name string) error          // wraps mgr.Remove + os.RemoveAll(path)
-    List() ([]string, error)           // wraps mgr.List()
-    Open(path string) (Worktree, error)// wraps mgr.Open -> repo.Worktree (own index)
+    Remove(name, path string) error
+    List() ([]string, error)
+    Prune() ([]string, error)          // admin-metadata cleanup for dirs gone from disk
+    Open(path string) (Worktree, error)
+    RecordBaseRef(name string, base plumbing.Hash) error
+    BaseRef(name string) (plumbing.Hash, error)
+}
+
+// Worktree — per-worktree index/status/commit/branch ops. Shipped in wt1;
+// TestIndexIsolation proves Stage/Commit here never touches another
+// worktree's index or the main repo's.
+type Worktree interface {
+    Stage(path string) error
+    Status() (git.Status, error)
+    Commit(message string, opts *CommitOptions) (plumbing.Hash, error)
+    Head() (*plumbing.Reference, error)
+    Branch() (string, error)
 }
 ```
+
+Note `Manager.Prune()` is narrower than wt2's "auto-prune-if-unchanged"
+goal: it only reclaims admin metadata for worktrees whose **directory is
+already gone from disk** (manual/out-of-band deletion), mirroring
+`internal/eval/sandbox`'s `PruneStale` pattern. It does **not** decide
+"unchanged" (no commits past the recorded base) — that staleness policy,
+plus the rich metadata (purpose, parent PR, created-at, last-used), is
+still wt2's job, now layered on top of `RecordBaseRef`/`BaseRef` rather
+than inventing base-ref storage itself.
 
 wt1 binds callers to `Manager`; the go-git mechanism stays behind it so
 a future swap (or the hybrid fallback, which this spike showed is **not
 needed**) is invisible.
 
-## Relationships
+## Relationships (reconciled 2026-07-10)
 
-- **Unblocks `workflow-commit-command`** (index isolation) — that plan
-  should depend on this; its atomicity/locking finding is largely
-  subsumed.
+- **`workflow-commit-command` already shipped (`status: completed`,
+  through `wc-verify-close`) — WITHOUT waiting on this plan.** Its own
+  spec (`specs/workflow-commit-command/design.md`) still declares
+  "Blocked-by / unblocked-by `worktree-platform` (`wt4-index-isolation`)"
+  and "sequence after worktree-platform wt4", but wt4 is still `pending`
+  here — that declared dependency was never actually honored. In
+  practice `commit_pathset.go`/`commit_cmd.go` solved "concurrent agents
+  race the shared index" with **deterministic scoped path-set
+  derivation** inside the single main index/worktree (never `-A`,
+  managed-root allowlist), not physical per-worktree isolation. So the
+  original "unblocks" framing below was aspirational for that specific
+  plan — corrected here rather than repeated.
+- **wt4-index-isolation's core guarantee is already proven by wt1**
+  (`TestIndexIsolation` — see "Refresh" above). wt4's genuine residual
+  is a real **concurrent** (goroutine + `-race`) version of that test
+  (today's is sequential) plus formalizing it as a done-criterion — not
+  a from-scratch build. Its actual future consumer is
+  wt5-skills-integration (and transitively any worker-bundle-authoring
+  commit-2 caller running inside a linked worktree), not
+  `workflow-commit-command`.
+- **New: `worker-bundle-authoring` plan (payout workspace) tasks
+  `commit-1-task-pathset` + `commit-2-cli-scoped-mode`** (both
+  `pending`) extend the *same files* wt3's write_scope also touches
+  (`commands/workflow/commit_pathset.go`, `commit_cmd.go`) with
+  **task-scoped** staging (`--scope task`: only the active task's
+  write_scope, not every managed-root path) — still inside the single
+  main index, no worktree/gitwt dependency. No write_scope collision
+  today (wt2-wt4 stay in `internal/gitwt/`), but a real sequencing
+  opportunity: once wt5 moves delegated workers into linked worktrees,
+  each worker's `da workflow commit` step should call commit-2's
+  `--scope task` mode rather than wt5 re-inventing path scoping. **wt5
+  should depend on / consume `commit-2-cli-scoped-mode`'s CLI surface
+  once it ships**, not duplicate it; if wt5 becomes ready first, land a
+  thin scoped-commit call the delegation skill can swap onto commit-2
+  later.
 - Sibling of `graphstore-concurrency-contract` (same "concurrent
   short-lived agents" theme, different resource).
 - If the typed git layer becomes an injected dependency, it follows

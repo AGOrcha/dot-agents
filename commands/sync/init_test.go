@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/sys/execabs"
 )
 
 func TestRunSyncInit_FreshRepo(t *testing.T) {
@@ -18,8 +20,16 @@ func TestRunSyncInit_FreshRepo(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(agentsHome, ".git")); err != nil {
 		t.Errorf("expected .git directory: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(agentsHome, ".gitignore")); err != nil {
-		t.Errorf("expected .gitignore created: %v", err)
+	gi, err := os.ReadFile(filepath.Join(agentsHome, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .gitignore created: %v", err)
+	}
+	// The machine-local sync boundary must exclude both the binding table
+	// (local/) and the materialized caches (cache/) — defects 2 & 5, R7.
+	for _, want := range []string{"local/", "cache/"} {
+		if !strings.Contains(string(gi), want) {
+			t.Errorf(".gitignore missing machine-local entry %q:\n%s", want, gi)
+		}
 	}
 }
 
@@ -41,6 +51,114 @@ func TestRunSyncInit_ExistingRepoNoRemote(t *testing.T) {
 	if err := runSyncInit(deps); err != nil {
 		t.Fatalf("runSyncInit on existing repo: %v", err)
 	}
+	// An already-initialized home is upgraded with the machine-local boundary.
+	gi, err := os.ReadFile(filepath.Join(agentsHome, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .gitignore on existing repo: %v", err)
+	}
+	for _, want := range []string{"local/", "cache/"} {
+		if !strings.Contains(string(gi), want) {
+			t.Errorf("existing-home .gitignore missing %q:\n%s", want, gi)
+		}
+	}
+}
+
+// TestRunSyncInit_ExistingRepoGitignoreError covers runSyncInit's error branch
+// when the in-place .gitignore repair fails (here: .gitignore is a directory).
+func TestRunSyncInit_ExistingRepoGitignoreError(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+	if err := os.Mkdir(filepath.Join(agentsHome, ".gitignore"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	if err := runSyncInit(deps); err == nil {
+		t.Error("expected error when .gitignore cannot be written")
+	}
+}
+
+// TestRunSyncInit_ExistingRepoDryRunSkipsRepair covers the existing-repo dry-run
+// branch: the in-place gitignore/untrack repair must be skipped, leaving the
+// repo untouched.
+func TestRunSyncInit_ExistingRepoDryRunSkipsRepair(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+
+	deps := Deps{Flags: GlobalFlags{DryRun: true}, RunRefresh: func(string) error { return nil }}
+	if err := runSyncInit(deps); err != nil {
+		t.Fatalf("runSyncInit dry-run on existing repo: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(agentsHome, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not write .gitignore on existing repo: err=%v", err)
+	}
+}
+
+// TestRunSyncInit_UntracksAlreadyTrackedMachineLocal proves Fix 3: a home that
+// already committed local/ and cache/ (before the gitignore fix) must have those
+// paths UNTRACKED by `sync init` — the gitignore alone only stops new tracking,
+// so an in-place repair must `git rm --cached` the machine-local state. The
+// working-tree files are preserved; only the index entries are removed.
+func TestRunSyncInit_UntracksAlreadyTrackedMachineLocal(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+
+	// Simulate the pre-fix state: machine-local files committed into the repo.
+	for _, rel := range []string{"local/bindings.json", "cache/config/foo"} {
+		full := filepath.Join(agentsHome, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte("machine-local"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, agentsHome, "add", "-A")
+	runGit(t, agentsHome, "commit", "-m", "pre-fix: tracked machine-local state")
+
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	if err := runSyncInit(deps); err != nil {
+		t.Fatalf("runSyncInit: %v", err)
+	}
+
+	tracked, err := execabs.Command("git", "-C", agentsHome, "ls-files").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, leak := range []string{"local/", "cache/"} {
+		if strings.Contains(string(tracked), leak) {
+			t.Errorf("%s still tracked after repair:\n%s", leak, tracked)
+		}
+	}
+	// The working-tree files must survive the untrack (--cached, not -f).
+	for _, rel := range []string{"local/bindings.json", "cache/config/foo"} {
+		if _, err := os.Stat(filepath.Join(agentsHome, rel)); err != nil {
+			t.Errorf("untrack deleted the working-tree file %s: %v", rel, err)
+		}
+	}
+}
+
+// TestRunSyncInit_UntrackFailureSurfacesError proves the previously-discarded
+// `git rm --cached` error in untrackMachineLocalState is now surfaced: a
+// corrupt index makes the untrack step fail, and runSyncInit must report
+// that failure instead of silently proceeding to report success.
+func TestRunSyncInit_UntrackFailureSurfacesError(t *testing.T) {
+	agentsHome := setupAgentsHomeRepo(t)
+	initEmptyRepo(t, agentsHome)
+
+	// Corrupt the index so `git rm --cached` fails with a real git error.
+	indexPath := filepath.Join(agentsHome, ".git", "index")
+	if err := os.WriteFile(indexPath, []byte("not-a-real-index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
+	err := runSyncInit(deps)
+	if err == nil {
+		t.Fatal("expected runSyncInit to surface the git rm --cached failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "untracking machine-local state") {
+		t.Errorf("expected an untrack error, got %q", err)
+	}
 }
 
 func TestRunSyncInit_ExistingRepoWithRemote(t *testing.T) {
@@ -61,6 +179,31 @@ func TestRunSyncInit_ExistingRepoWithRemote(t *testing.T) {
 	}
 }
 
+// stripGitIdentity removes every git identity source in scope for the
+// current test's git commands, so a subsequent `git commit` fails
+// deterministically ("Author identity unknown") instead of falling back to a
+// real developer's ~/.gitconfig. HOME + XDG_CONFIG_HOME point at empty dirs
+// (no ~/.gitconfig), GIT_CONFIG_* vars are unset, and GIT_AUTHOR_*/
+// GIT_COMMITTER_* are cleared so git falls back to the (also unset)
+// user.email/user.name. Shared by push/commit/init tests that need a real
+// (not "nothing to commit") git commit failure.
+func stripGitIdentity(t *testing.T) {
+	t.Helper()
+	tmp := t.TempDir()
+	emptyHome := filepath.Join(tmp, "empty-home")
+	if err := os.MkdirAll(emptyHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", emptyHome)
+	t.Setenv("XDG_CONFIG_HOME", emptyHome)
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(emptyHome, ".no-such-config"))
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(emptyHome, ".no-such-system"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
+		t.Setenv(k, "")
+	}
+}
+
 // TestRunSyncInit_GitCommitFailureSurfacesError ensures the friendly error
 // path fires when git refuses to commit because user.email/user.name are
 // unset. The previous code swallowed the .Run() error and lied to the user
@@ -74,23 +217,7 @@ func TestRunSyncInit_GitCommitFailureSurfacesError(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("AGENTS_HOME", agentsHome)
-
-	// Strip every git identity source so the commit must fail. HOME +
-	// XDG_CONFIG_HOME point at empty dirs (no ~/.gitconfig). GIT_CONFIG_*
-	// vars are unset. GIT_AUTHOR_*/GIT_COMMITTER_* are unset so git falls
-	// back to user.email/user.name (which is also unset).
-	emptyHome := filepath.Join(tmp, "empty-home")
-	if err := os.MkdirAll(emptyHome, 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", emptyHome)
-	t.Setenv("XDG_CONFIG_HOME", emptyHome)
-	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(emptyHome, ".no-such-config"))
-	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(emptyHome, ".no-such-system"))
-	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"} {
-		t.Setenv(k, "")
-	}
+	stripGitIdentity(t)
 
 	deps := Deps{Flags: GlobalFlags{}, RunRefresh: func(string) error { return nil }}
 	err := runSyncInit(deps)

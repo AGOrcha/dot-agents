@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -134,7 +135,33 @@ func runWorkflowArchiveOrphans(cmd *cobra.Command, projectPath string, dryRun bo
 		result.Actions = append(result.Actions, action)
 	}
 
+	emitArchiveOrphansJournal(projectPath, result)
 	return renderArchiveOrphansResult(cmd, result)
+}
+
+// emitArchiveOrphansJournal records the orphan resolutions that were actually
+// applied. A dry-run moves nothing, and an empty action set is a no-op, so
+// neither journals (spec R1: record what happened).
+func emitArchiveOrphansJournal(projectPath string, result archiveOrphansResult) {
+	if result.DryRun || len(result.Actions) == 0 {
+		return
+	}
+	actions := make([]journal.OrphanAction, 0, len(result.Actions))
+	for _, a := range result.Actions {
+		resolution := "applied"
+		if !a.Applied {
+			resolution = "skipped"
+		}
+		actions = append(actions, journal.OrphanAction{
+			Artifact:   a.TaskID,
+			Class:      string(a.Class),
+			Resolution: resolution,
+			DestPath:   a.Target,
+		})
+	}
+	emitWorkflowSuccess(projectPath, journal.CmdArchiveOrphans,
+		&journal.ArchiveOrphansInput{DryRun: result.DryRun},
+		&journal.ArchiveOrphansObserved{Actions: actions})
 }
 
 // orphanCandidate is one active/<task>.{md,yaml} file under inspection.

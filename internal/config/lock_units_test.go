@@ -118,7 +118,8 @@ func TestReadUnitsMigratesLegacyV1(t *testing.T) {
     "acme:org/base": {
       "resolved_sha": "sha256:base",
       "fetched_at": "2026-05-01T00:00:00Z",
-      "ttl_expires_at": "2026-05-02T00:00:00Z"
+      "ttl_expires_at": "2026-05-02T00:00:00Z",
+      "cache_key": "ck:git:sha256:base"
     }
   },
   "packages": {
@@ -147,6 +148,11 @@ func TestReadUnitsMigratesLegacyV1(t *testing.T) {
 	// last_checked_at (review-nudge basis).
 	if layer.Digest != digestBase || layer.LastCheckedAt != "2026-05-01T00:00:00Z" {
 		t.Fatalf("layer migration mismatch: %+v", layer)
+	}
+	// cache_key MUST survive legacy→units migration so the §7A.4 cache-key
+	// staleness gate keeps working on an upgraded lock; ttl_expires_at must NOT.
+	if layer.CacheKey != "ck:git:sha256:base" {
+		t.Fatalf("cache_key dropped in migration: %+v", layer)
 	}
 	art := got.Units[refArtifact]
 	if art.Kind != UnitKindArtifact || art.Digest != "sha256:fmt" {
@@ -244,9 +250,17 @@ func TestWriteUnitsLockOpenError(t *testing.T) {
 }
 
 func TestWriteUnitsLockFlushError(t *testing.T) {
-	// Parent dir does not exist → Flush's atomic write fails.
-	missing := filepath.Join(t.TempDir(), "no-such-dir")
-	if err := WriteUnitsLock(missing, UnitsLock{}); err == nil {
-		t.Fatal("expected flush error when project dir is missing")
+	// Flush now MkdirAll's the lock's parent, so a merely-absent project dir is
+	// auto-created and is no longer an error (that was the Windows mkdir bug).
+	// To still cover the Flush error-return wiring, make the project path's
+	// parent a regular FILE: MkdirAll of the lock parent then fails because an
+	// intermediate component is not a directory — portable across OSes.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("not a dir"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(blocker, "project") // parent "blocker" is a file
+	if err := WriteUnitsLock(project, UnitsLock{}); err == nil {
+		t.Fatal("expected flush error when the lock parent cannot be created")
 	}
 }

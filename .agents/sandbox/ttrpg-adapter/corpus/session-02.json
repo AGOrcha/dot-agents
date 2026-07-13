@@ -1,0 +1,25 @@
+{
+  "session": { "number": 2, "title": "The Emberdeep Descent", "played_at": "2026-01-11" },
+  "notes": [
+    { "id": "char:vesh", "type": "character", "fields": { "name": "Vesh the Hollow", "kind": "npc", "status": "alive", "stated_location": "loc:emberdeep", "allegiance": "fac:cinder" } },
+    { "id": "fac:cinder", "type": "faction", "fields": { "name": "Cinder Pact", "kind": "cult", "stance": "hostile", "seat": "loc:emberdeep" } },
+    { "id": "item:emberkey", "type": "item", "fields": { "name": "The Ember Key", "rarity": "rare", "held_by": "char:vesh" } },
+    { "id": "evt:s2-descent", "type": "event", "fields": { "summary": "The party descends into Emberdeep and meets Vesh", "session": 2, "occurred_in": "loc:emberdeep" } },
+    { "id": "quest:emberkey", "type": "quest", "fields": { "title": "Recover the Ember Key", "status": "open", "giver": "char:mara" } }
+  ],
+  "edges": [
+    { "type": "located_in", "from": "fac:cinder", "to": "loc:emberdeep" },
+    { "type": "controls", "from": "fac:cinder", "to": "loc:emberdeep" },
+    { "type": "member_of", "from": "char:vesh", "to": "fac:cinder" },
+    { "type": "present_at", "from": "char:mara", "to": "evt:s2-descent" },
+    { "type": "present_at", "from": "char:doran", "to": "evt:s2-descent" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s2-descent" },
+    { "type": "present_at", "from": "char:vesh", "to": "evt:s2-descent" },
+    { "type": "involves", "from": "evt:s2-descent", "to": "char:vesh" },
+    { "type": "occurred_at", "from": "evt:s2-descent", "to": "loc:emberdeep" },
+    { "type": "targets", "from": "quest:emberkey", "to": "char:vesh" },
+    { "type": "rewards", "from": "quest:emberkey", "to": "item:emberkey" },
+    { "type": "advances", "from": "evt:s2-descent", "to": "quest:emberkey" },
+    { "type": "allied_with", "from": "fac:cinder", "to": "fac:wardens" }
+  ]
+}

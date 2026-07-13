@@ -1,147 +1,260 @@
 schema_version: 1
 plan_id: worktree-platform
 tasks:
-  - id: wt0-spike-git-mechanism
-    title: 'Spike: VERIFY go-git v6 x/plumbing/worktree (+ mine swarm-cd)'
-    status: completed
-    depends_on: []
-    blocks:
-      - wt1-typed-git-iface
-    owner: dot-agents
-    write_scope:
-      - .agents/workflow/specs/worktree-platform/design.md
-    verification_required: true
-    notes: |-
-      DONE — MERGED via #171 (spec design.md: "VERIFIED 2026-05-28, all 4
-      residuals confirmed"). Decision A is pure go-git v6; all 4 residuals
-      confirmed PASS against the pinned version: (1) branch-mode worktree
-      create/branch creation PASS; (2) per-worktree index isolation via
-      mgr.Open(...).Worktree() PASS; (3) List support native PASS; (4)
-      version pinned go-git/v6 v6.0.0-alpha.4 (go-billy/v6 v6.0.0-alpha.1).
-      No hybrid fallback needed — pure go-git v6, zero shell-git. The
-      typed Manager seam derived from the verified API landed in wt1 (#181).
-  - id: wt1-typed-git-iface
-    title: 'Typed git/worktree interface (the contract callers bind to)'
-    status: pending
-    depends_on:
-      - wt0-spike-git-mechanism
-    blocks:
-      - wt2-worktree-registry
-      - wt4-index-isolation
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-    verification_required: true
-    notes: |-
-      One typed Go interface: worktree create/list/remove/prune, branch
-      ops, base-ref record/read, index/status/commit. Implementation
-      behind it per the wt0 decision. Callers/skills bind to the
-      interface only (so a later mechanism swap is invisible).
-  - id: wt2-worktree-registry
-    title: 'Managed registry + deterministic prune-if-unchanged'
-    status: pending
-    depends_on:
-      - wt1-typed-git-iface
-    blocks:
-      - wt3-subbranch-mergeback
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-    verification_required: true
-    notes: |-
-      Registry record per worktree: branch, TRUE base ref, parent PR,
-      purpose, created-at. Deterministic cleanup mirroring the harness
-      isolation:worktree auto-prune-if-unchanged. Registry is the
-      single source of truth for a worktree's base.
-  - id: wt3-subbranch-mergeback
-    title: 'Sub-branch -> merge-back/rebase using the recorded base'
-    status: pending
-    depends_on:
-      - wt2-worktree-registry
-    blocks:
-      - wt5-skills-integration
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-      - commands/
-    verification_required: true
-    notes: |-
-      First-class create-sub-branch and merge-back/rebase that use the
-      registry's recorded base — never re-derive via git merge-base.
-      Regression test: a force-pushed parent + a deliberate stale-base
-      scenario must be caught/handled (the recurring trap this kills).
-  - id: wt4-index-isolation
-    title: 'Per-worktree index isolation contract (unblocks workflow-commit-command)'
-    status: pending
-    depends_on:
-      - wt1-typed-git-iface
-    blocks:
-      - wt5-skills-integration
-    owner: dot-agents
-    write_scope:
-      - internal/gitwt/
-    verification_required: true
-    notes: |-
-      Expose/prove that each managed worktree has its own index so a
-      commit in one cannot stage another's tree. This is the seam the
-      workflow-commit-command plan binds to (closes its adversarial
-      finding #3). Concurrent-agent isolation test.
-  - id: wt5-skills-integration
-    title: 'delegation-lifecycle / isp / loop-worker consume the platform'
-    status: pending
-    depends_on:
-      - wt3-subbranch-mergeback
-      - wt4-index-isolation
-    owner: dot-agents
-    write_scope:
-      - .agents/skills/
-    verification_required: true
-    notes: |-
-      Orchestration skills create/track/merge-back delegated slices via
-      the platform so isolation + recorded-base are automatic, not
-      manual. No raw git in the delegation skill paths.
-  - id: wt6-verify-close
-    title: 'Verify done-criteria + close'
-    status: pending
-    depends_on:
-      - wt5-skills-integration
-    owner: dot-agents
-    write_scope: []
-    verification_required: true
-    notes: |-
-      All spec done-criteria: stale-base catch, concurrent-agent index
-      isolation, deterministic prune, single typed interface. go
-      build/test/gate green. Archive plan; notify workflow-commit-command
-      its blocker (finding #3) is cleared.
-  - id: release-minor
-    title: 'Release: bump VERSION + finalize CHANGELOG for the worktree-platform minor'
-    status: pending
-    depends_on:
-      - wt0-spike-git-mechanism
-      - wt1-typed-git-iface
-      - wt2-worktree-registry
-      - wt3-subbranch-mergeback
-      - wt4-index-isolation
-      - wt5-skills-integration
-      - wt6-verify-close
-    blocks: []
-    owner: dot-agents
-    write_scope:
-      - VERSION
-      - CHANGELOG.md
-    verification_required: true
-    notes: |-
-      Release-gated tail task (hybrid convention, MINOR path; see
-      [[release-gated-plans-convention]]). This plan delivers user-visible
-      delegated-work isolation — managed git worktrees with recorded-base
-      sub-branch/merge-back and per-worktree index isolation consumed by the
-      orchestration skills. New user-visible capability = MINOR (no public
-      surface removed or incompatibly changed).
-      Target version = next minor computed from current VERSION at ready-time
-      (do NOT hardcode). Resolve from VERSION when this task becomes ready;
-      if another minor ships first, a rebase recomputes the number.
-      Action: bump VERSION to the resolved next minor and finalize the
-      CHANGELOG "## [<target>]" section, moving the worktree-platform entries
-      out of Unreleased, plus the required docs-accuracy pass. Merge to master
-      fires auto-release.yml (tag + publish).
-    app_type: release
+    - id: wt0-spike-git-mechanism
+      title: 'Spike: VERIFY go-git v6 x/plumbing/worktree (+ mine swarm-cd)'
+      status: completed
+      depends_on: []
+      blocks:
+        - wt1-typed-git-iface
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/worktree-platform/design.md
+      verification_required: true
+      notes: |-
+        DONE — MERGED via #171 (spec design.md: "VERIFIED 2026-05-28, all 4
+        residuals confirmed"). Decision A is pure go-git v6; all 4 residuals
+        confirmed PASS against the pinned version: (1) branch-mode worktree
+        create/branch creation PASS; (2) per-worktree index isolation via
+        mgr.Open(...).Worktree() PASS; (3) List support native PASS; (4)
+        version pinned go-git/v6 v6.0.0-alpha.4 (go-billy/v6 v6.0.0-alpha.1).
+        No hybrid fallback needed — pure go-git v6, zero shell-git. The
+        typed Manager seam derived from the verified API landed in wt1 (#181).
+        RECONFIRMED 2026-07-10 (refresh-ideate-worktree-platform): PR #171 is
+        a real, resolvable merge commit dated 2026-05-28; go-git v6 pin is
+        STILL current (v6.0.0-alpha.4 remains the newest v6 tag as of
+        2026-07-10, checked directly against github.com/go-git/go-git/tags —
+        no bump needed).
+    - id: wt1-typed-git-iface
+      title: Typed git/worktree interface (the contract callers bind to)
+      status: completed
+      depends_on:
+        - wt0-spike-git-mechanism
+      blocks:
+        - wt2-worktree-registry
+        - wt4-index-isolation
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/
+      verification_required: true
+      notes: |-
+        One typed Go interface: worktree create/list/remove/prune, branch
+        ops, base-ref record/read, index/status/commit. Implementation
+        behind it per the wt0 decision. Callers/skills bind to the
+        interface only (so a later mechanism swap is invisible).
+        RECONFIRMED 2026-07-10 (refresh-ideate-worktree-platform): genuinely
+        shipped, not stale-vs-reality — internal/gitwt/{gitwt.go,gogit.go}
+        exist, `go build ./internal/gitwt/...` is clean, PR #181 is a real
+        merge commit dated 2026-05-29, and gitwt_test.go carries 14 tests
+        incl. TestAddBranch/TestAddBranchErrors/TestAddDetached/TestList/
+        TestRemove/TestPrune/TestBaseRefRecordRead/TestIndexIsolation. The
+        shipped Manager already includes Prune()+RecordBaseRef()/BaseRef() —
+        richer than the design doc's original "seam for wt1" sketch — which
+        shrinks wt2's remaining scope (base-ref storage is NOT wt2's job;
+        rich metadata + staleness policy is). One live consumer exists:
+        internal/eval/sandbox (R4 eval-harness, separate plan, already
+        merged) — see wt2 notes for what to reconcile with it.
+    - id: wt2-worktree-registry
+      title: Rich worktree metadata registry + auto-prune-if-unchanged (layered on wt1's Prune/BaseRef)
+      status: pending
+      depends_on:
+        - wt1-typed-git-iface
+      blocks:
+        - wt3-subbranch-mergeback
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/registry.go
+        - internal/gitwt/registry_test.go
+      verification_required: true
+      notes: |-
+        GROOMED 2026-07-10. Scope shrank from the original sketch: wt1
+        already ships RecordBaseRef/BaseRef (persisted under
+        .git/worktrees/<name>/base-ref) and Prune() (admin-metadata cleanup
+        for worktrees whose dir is already gone from disk). wt2 adds ONLY:
+        (1) a per-worktree metadata sidecar — purpose, parent PR, created-at,
+        last-used — keyed by worktree name so it reconciles 1:1 with
+        Manager.List() (per wt0 Residual 3); persist it under the same
+        .git/worktrees/<name>/ admin dir as the base-ref file (visible from
+        the MAIN repo regardless of which worktree a process is currently
+        in — required by the `worktree-isolation-defeats-status-tracking`
+        lesson: a registry only the linked worktree itself can read is
+        useless to an orchestrator scanning from the main checkout).
+        (2) auto-prune-if-unchanged: a NEW staleness check — current branch
+        tip via Worktree.Head()/Branch() vs the wt1-recorded BaseRef — that
+        Prune() does not do (Prune only checks "dir gone", not "no commits
+        since base"). Policy: (no commits past base) AND (idle past a
+        last-used TTL) => eligible for prune; commits past base are NEVER
+        auto-pruned even if idle (that's abandoned work, not idle work —
+        surface it, don't delete it).
+        Reference implementations to mine (do not re-invent from scratch):
+        swarm-cd's TTL/last-used-marker scan (mined for wt0) AND
+        internal/eval/sandbox's marker.go pattern (sandbox.yaml sidecar +
+        PruneStale, merged separately, already live) — eval/sandbox
+        duplicates base-ref bookkeeping itself today because wt2 doesn't
+        exist yet; note the follow-up (separate task, NOT in this scope) to
+        move it onto this registry instead of two parallel schemes.
+        Acceptance: registry create/read/update round-trip keyed on name;
+        List()-registry reconciliation test (registry entry for a name
+        gitwt.List() no longer returns is detected, not silently kept);
+        prune-if-unchanged test matrix — (unchanged, expired) => pruned,
+        (changed, expired) => kept, (unchanged, fresh) => kept.
+    - id: wt3-subbranch-mergeback
+      title: 'da worktree create/merge-back CLI: sub-branch -> merge-back/rebase using the recorded base'
+      status: pending
+      depends_on:
+        - wt2-worktree-registry
+      blocks:
+        - wt5-skills-integration
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/mergeback.go
+        - commands/worktree/
+        - commands/root.go
+      verification_required: true
+      notes: |-
+        GROOMED 2026-07-10. First-class create-sub-branch (wraps
+        gitwt.AddBranch) and merge-back/rebase that read the base EXCLUSIVELY
+        from wt2's registry (via wt1's BaseRef) — never re-derive via git
+        merge-base (kills the recurring bad-boundary trap this whole plan
+        exists to fix). New `commands/worktree/` package (matches sibling
+        subsystem convention: commands/workflow/, commands/kg/,
+        commands/eval/ — each gets its own NewCmd() wired into
+        commands/root.go's root.AddCommand(...) block); no existing
+        commands/worktree/ dir today (verified: does not exist).
+        Regression test: a force-pushed parent + a deliberate stale-base
+        scenario must be caught/handled (the recurring trap this kills).
+        Also honor the `parallel-worker-branch-drift` lesson: after
+        merge-back, verify the worktree's branch HEAD still matches the
+        expected commit (a pre-commit hook stash/restore can silently land
+        a commit on a sibling worktree's branch) — fail loud, don't assume.
+    - id: wt4-index-isolation
+      title: Concurrent-agent index isolation proof + formal done-criterion close (residual after wt1)
+      status: pending
+      depends_on:
+        - wt1-typed-git-iface
+      blocks:
+        - wt5-skills-integration
+      owner: dot-agents
+      write_scope:
+        - internal/gitwt/index_isolation_concurrent_test.go
+      verification_required: true
+      notes: |-
+        GROOMED 2026-07-10 — scope shrank sharply. wt1's
+        TestIndexIsolation (gitwt_test.go) already proves the core
+        guarantee: a commit in worktree A never appears in worktree B's or
+        the main repo's status, and only A's branch advances. That test is
+        SEQUENTIAL, not concurrent. The genuine residual here is a real
+        concurrent test — N goroutines, each opening its own linked
+        worktree and writing/staging/committing in parallel — run under
+        `go test -race`, formalized as this plan's done-criterion ("per-
+        worktree index proven isolated, concurrent agents cannot
+        cross-stage"). NOT a from-scratch build.
+        Consumer correction: workflow-commit-command already shipped
+        (status: completed) WITHOUT this — it solved the shared-index race
+        with scoped path-set derivation inside the single main index, not
+        physical worktree isolation (see design.md Relationships,
+        reconciled 2026-07-10). So this no longer literally unblocks that
+        plan. Its real consumers are wt5-skills-integration and,
+        transitively, any worker-bundle-authoring commit-2-cli-scoped-mode
+        caller that ends up running inside a linked worktree.
+    - id: wt5-skills-integration
+      title: delegation-lifecycle / isp / loop-worker consume the platform
+      status: pending
+      depends_on:
+        - wt3-subbranch-mergeback
+        - wt4-index-isolation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+      verification_required: true
+      notes: |-
+        GROOMED 2026-07-10 — write_scope corrected. `.agents/skills/` in
+        this repo is a set of SYMLINKS into the local AGENTS_HOME
+        (~/.agents/skills/dot-agents/<name>), not the canonical source —
+        editing there touches a generated/synced copy outside the repo, not
+        what ships. The real shippable source is
+        internal/scaffold/home/starter/skills/global/<name>/ (verified path
+        for delegation-lifecycle/isp/loop-worker); `da refresh` re-links
+        from there. Verified today: none of the three skills' instructions
+        currently mention "isolated"/"isolation" or reference gitwt/da
+        worktree — this is genuinely net-new orchestration wiring, not a
+        refactor. Orchestration skills create/track/merge-back delegated
+        slices via `da worktree` (wt3) so isolation + recorded-base are
+        automatic, not manual; no raw git in the delegation skill paths.
+        Also reconcile with worker-bundle-authoring's commit-2-cli-scoped-
+        mode (payout workspace plan, dot-agents-repo write_scope
+        commands/workflow/commit_cmd.go): once a delegated worker runs
+        inside a wt3-created linked worktree, its `da workflow commit` step
+        should call commit-2's `--scope task` mode rather than this task
+        re-inventing path scoping — depend on / consume that CLI surface
+        once it ships (land a thin scoped-commit call now that swaps onto
+        commit-2 later if wt5 goes first).
+    - id: wt6-verify-close
+      title: Verify done-criteria + close
+      status: pending
+      depends_on:
+        - wt5-skills-integration
+      blocks: []
+      owner: dot-agents
+      write_scope: []
+      verification_required: true
+      notes: |-
+        All spec done-criteria: stale-base catch (wt3), concurrent-agent
+        index isolation (wt4), deterministic prune-if-unchanged (wt2),
+        single typed interface (wt1), config-provisioning round-trip (wt2/
+        wt3/wt5 — parent project's registration+config provably untouched
+        after a create+remove cycle). go build/test/gate green. Before
+        closing, re-verify the go-git v6 pin is still the latest tag
+        (github.com/go-git/go-git/tags) in case a stable v6.0.0 shipped
+        during implementation. Archive plan. workflow-commit-command
+        already shipped independently (see design.md Relationships,
+        reconciled 2026-07-10) — do NOT block this close on notifying it;
+        instead confirm wt4's concurrent-isolation proof is available for
+        any future consumer that wants it.
+    - id: release-minor
+      title: 'Release: bump VERSION + finalize CHANGELOG for the worktree-platform minor'
+      status: pending
+      depends_on:
+        - wt0-spike-git-mechanism
+        - wt1-typed-git-iface
+        - wt2-worktree-registry
+        - wt3-subbranch-mergeback
+        - wt4-index-isolation
+        - wt5-skills-integration
+        - wt6-verify-close
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - VERSION
+        - CHANGELOG.md
+      verification_required: true
+      notes: |-
+        Release-gated tail task (hybrid convention, MINOR path; see
+        [[release-gated-plans-convention]]). This plan delivers user-visible
+        delegated-work isolation — managed git worktrees with recorded-base
+        sub-branch/merge-back and per-worktree index isolation consumed by the
+        orchestration skills. New user-visible capability = MINOR (no public
+        surface removed or incompatibly changed).
+        Target version = next minor computed from current VERSION at ready-time
+        (do NOT hardcode). Resolve from VERSION when this task becomes ready;
+        if another minor ships first, a rebase recomputes the number.
+        Action: bump VERSION to the resolved next minor and finalize the
+        CHANGELOG "## [<target>]" section, moving the worktree-platform entries
+        out of Unreleased, plus the required docs-accuracy pass. Merge to master
+        fires auto-release.yml (tag + publish).
+      app_type: release
+    - id: refresh-ideate-worktree-platform
+      title: Refresh + re-ideate the worktree-platform spec against today's facts; groom wt2-wt6
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - .agents/workflow/specs/worktree-platform/design.md
+        - .agents/workflow/plans/worktree-platform/
+      verification_required: true
+      notes: 'Spec is ~2mo old (go-git decision 2026-05-17, alpha.4 pin 2026-05-18). Refresh against today: (1) go-git v6 version (alpha.4 -> current releases, decide bump); (2) VERIFY wt0/wt1 actual completion vs plan status (no internal/gitwt exists yet -> wt1 ''completed'' may be stale-vs-reality, like da-recipe); (3) current harness/delegation worktree usage (isolated agents, fanout bundles, the massive session cleanup + lesson dead-worker-wip-reconcile-on-pickup); (4) workflow-commit-command relationship + reconcile with NEW worker-bundle-authoring commit-1/commit-2 scoped-commit tasks (overlap); (5) swarm-cd/worktree.go reference currency. Then re-ideate stale decisions + groom wt2-wt6 to implementation-ready.'
+      app_type: ideation

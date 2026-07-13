@@ -68,6 +68,7 @@ preferences, fanout artifacts, and bridge queries.`,
 		newWorkflowHookSentinelCmd(),
 		newWorkflowHookOutcomeCmd(),
 		newWorkflowArchiveOrphansCmd(),
+		newWorkflowJournalCmd(),
 	)
 	return cmd
 }
@@ -274,12 +275,21 @@ func newWorkflowPlanUpdateCmd() *cobra.Command {
 func newWorkflowPlanArchiveCmd() *cobra.Command {
 	var planArchivePlanIDs string
 	var planArchiveForce bool
+	var planArchiveNoCommit bool
 	planArchiveCmd := &cobra.Command{
 		Use:   "archive",
 		Short: "Archive one or more completed canonical plans",
+		Long: "Moves each completed plan from .agents/workflow/plans/<id> into\n" +
+			".agents/history/<id>, stamps status=archived, and — by default —\n" +
+			"commits the move as a single workflow-state commit so it survives the\n" +
+			"fresh-clone / worktree loop model (an uncommitted move is discarded\n" +
+			"before it lands on master). Pass --no-commit to leave the archived tree\n" +
+			"uncommitted (for batching); the commit.disable workflow preference is\n" +
+			"honored regardless.",
 		Example: deps.ExampleBlock(
 			"  da workflow plan archive --plan repo-cleanup",
 			"  da workflow plan archive --plan plan-a,plan-b --force",
+			"  da workflow plan archive --plan repo-cleanup --no-commit",
 			"  da -n workflow plan archive --plan repo-cleanup",
 		),
 		Args: deps.NoArgsWithHints("Use --plan to specify one or more plan IDs (comma-separated)."),
@@ -301,11 +311,12 @@ func newWorkflowPlanArchiveCmd() *cobra.Command {
 					"Pass --plan with one or more comma-separated plan IDs, for example --plan my-plan.",
 				)
 			}
-			return runWorkflowPlanArchive(project.Path, cleaned, planArchiveForce, deps.Flags.DryRun())
+			return runWorkflowPlanArchive(project.Path, cleaned, planArchiveForce, deps.Flags.DryRun(), planArchiveNoCommit)
 		},
 	}
 	planArchiveCmd.Flags().StringVar(&planArchivePlanIDs, "plan", "", "Comma-separated plan IDs to archive (required)")
 	planArchiveCmd.Flags().BoolVar(&planArchiveForce, "force", false, "Skip completed-status guard and archive regardless of plan status")
+	planArchiveCmd.Flags().BoolVar(&planArchiveNoCommit, "no-commit", false, "Do not commit the archive move (leave the archived tree staged for a manual/batched commit)")
 	_ = planArchiveCmd.MarkFlagRequired("plan")
 	return planArchiveCmd
 }
@@ -420,6 +431,7 @@ func newWorkflowTaskAddCmd() *cobra.Command {
 
 func newWorkflowTaskUpdateCmd() *cobra.Command {
 	var taskUpdateID, taskUpdateNotes, taskUpdateWriteScope, taskUpdateTitle string
+	var taskUpdateDependsOn, taskUpdateBlocks string
 	taskUpdateCmd := &cobra.Command{
 		Use:   "update <plan-id>",
 		Short: "Update notes, write-scope, or title for an existing task",
@@ -428,13 +440,15 @@ func newWorkflowTaskUpdateCmd() *cobra.Command {
 		),
 		Args: deps.ExactArgsWithHints(1, "Pass the canonical plan ID that owns the task."),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope)
+			return runWorkflowTaskUpdate(args[0], taskUpdateID, taskUpdateTitle, taskUpdateNotes, taskUpdateWriteScope, taskUpdateDependsOn, taskUpdateBlocks)
 		},
 	}
 	taskUpdateCmd.Flags().StringVar(&taskUpdateID, "task", "", "Task ID to update (required)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateTitle, "title", "", "New task title")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateNotes, "notes", "", "New implementation notes (replaces existing)")
 	taskUpdateCmd.Flags().StringVar(&taskUpdateWriteScope, workflowFlagWriteScope, "", "New comma-separated write-scope patterns (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateDependsOn, "depends-on", "", "Comma-separated list of task IDs this task depends on (replaces existing)")
+	taskUpdateCmd.Flags().StringVar(&taskUpdateBlocks, "blocks", "", "Comma-separated list of task IDs this task blocks (replaces existing)")
 	_ = taskUpdateCmd.MarkFlagRequired("task")
 	return taskUpdateCmd
 }
@@ -876,6 +890,7 @@ func newWorkflowFanoutCmd() *cobra.Command {
 	fanoutCmd.Flags().String("slice", "", "Slice ID from SLICES.yaml; auto-fills task and write scope")
 	fanoutCmd.Flags().String("owner", "", "Delegate agent identity")
 	fanoutCmd.Flags().String(workflowFlagWriteScope, "", "Comma-separated file/dir patterns this delegate may touch")
+	fanoutCmd.Flags().Bool("with-tests", false, "Auto-add each .go write_scope entry's sibling _test.go path (same directory, create-if-absent — the file need not exist yet)")
 	fanoutCmd.Flags().String("delegate-profile", defaultDelegateProfile, "Worker profile label stored in the delegation bundle")
 	fanoutCmd.Flags().StringSlice("project-overlay", nil, "Repeatable repo-relative project overlay guidance files")
 	fanoutCmd.Flags().StringSlice("prompt", nil, "Repeatable inline prompt lines for the delegate")
@@ -893,6 +908,7 @@ func newWorkflowFanoutCmd() *cobra.Command {
 	fanoutCmd.Flags().String("verifier-sequence", "", "Comma-separated verifier profile ids (overrides app_type resolution from .agentsrc.json)")
 	fanoutCmd.Flags().Bool("skip-tdd-gate", false, "Skip pre-verifier check that Go write_scope has *_test.go coverage")
 	fanoutCmd.Flags().Bool("skip-evidence-check", false, "Suppress scope-evidence sidecar warnings (missing sidecar or low confidence)")
+	fanoutCmd.Flags().Bool("skip-asserting-test-gate", false, "Skip §0d asserting-test-scope gate (for doc-only or deliberate cross-scope changes)")
 	fanoutCmd.Flags().String("base-branch", "", "Override layered base-resolution (§4): branch the new bundle off this base instead of the resolved/master default; required to sequence multiple in-flight dep PRs (read by fanoutResolveBase)")
 	_ = fanoutCmd.MarkFlagRequired("plan")
 	return fanoutCmd
@@ -953,6 +969,7 @@ func newWorkflowFoldBackCmd() *cobra.Command {
 	foldBackCreateCmd.Flags().String("observation", "", "Observation text (required)")
 	foldBackCreateCmd.Flags().String("slug", "", "Stable id for create-or-update (D2.a); one tagged line per slug in TASKS/plan notes")
 	foldBackCreateCmd.Flags().Bool("propose", false, "Route as proposal rather than inline task note")
+	foldBackCreateCmd.Flags().Bool("dry-run", false, "Print the routing decision and paths without writing anything")
 	_ = foldBackCreateCmd.MarkFlagRequired("plan")
 	_ = foldBackCreateCmd.MarkFlagRequired("observation")
 	foldBackUpdateCmd := &cobra.Command{

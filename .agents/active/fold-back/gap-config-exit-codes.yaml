@@ -1,0 +1,8 @@
+schema_version: 1
+id: gap-config-exit-codes
+plan_id: config-v2-migration
+task_id: p4-config-explain-cli
+observation: 'config-distribution-model §10 publishes a 0/1/2/3 exit-code contract for ''da config explain'' (schema=2, layer-fetch=1, auth=3). loadSnapshot (commands/config/explain.go:230) already RETURNS exitSchemaErr=2 today for parse/schema failures and explain_test.go:842/926 assert it, but runExplain (explain.go:344) discards it (''_ = code'') and cmd/da/main.go:13 collapses every non-nil error to os.Exit(1). So the reachable code 2 is silently downgraded to 1 — a code violation, not deferral. Sibling scan: no OTHER command defines a differentiated 0/1/2/3 contract (grep of commands/ found none); the gap is isolated to the config-explain family. Codes 1/3 are legitimately deferred to p1b layered-fetch and the spec/constants may note that, but code 2 is live. Fix: introduce a typed error carrying the resolved exit int, have main() translate it (RenderCommandError currently has no exit-code carrier; SilenceErrors is set at root.go:151), and stop discarding code in runExplain. Threatens the config-distribution-model promise that explain exit codes are scriptable. Note: a sibling doc auditor documents CURRENT reality (exit 1) in ERROR_MESSAGE_CONTRACT.md — this task owns the code/spec side only.'
+classification: small
+routed_to: task_note:config-v2-migration/p4-config-explain-cli
+created_at: "2026-06-23T17:15:21Z"

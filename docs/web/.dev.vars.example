@@ -3,7 +3,15 @@
 # Copy to `.dev.vars` (gitignored) and fill in any locally needed values.
 # Wrangler loads this file automatically when running `wrangler dev`.
 #
-# The production agorcha.dev deploy is a pure static-asset Worker — no
-# runtime secrets are required today. This file is a stub for future
-# bindings (e.g. when we add API routes).
+# The Worker (src/worker.js) gates /internal/* behind a Cloudflare Access JWT.
+# The two public identifiers below are also set as non-secret `vars` in
+# wrangler.jsonc; override them here only for local experimentation.
 ENVIRONMENT=development
+
+# Cloudflare Access application audTag the JWT must carry (NOT a secret).
+CF_ACCESS_AUD=50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff
+
+# Zero Trust team domain (NOT a secret). The JWKS endpoint and the expected
+# `iss` claim are derived from it. TODO(maintainer): replace the placeholder
+# with the real <team>.cloudflareaccess.com.
+CF_ACCESS_TEAM_DOMAIN=REPLACE-ME.cloudflareaccess.com

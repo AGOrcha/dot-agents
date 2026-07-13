@@ -1,0 +1,21 @@
+{
+  "notes": [
+    { "id": "sym:auth-login", "type": "symbol", "fields": {
+      "qualified_name": "auth.Login", "kind": "Function", "language": "go",
+      "file_path": "auth/login.go", "line_start": 12, "content_hash": "h-login-2",
+      "stale": { "reason": "source", "because": ["commit:abc123"], "fired_at": "2026-04-01T00:00:00Z" }
+    } },
+    { "id": "sym:auth-logout", "type": "symbol", "fields": {
+      "qualified_name": "auth.Logout", "kind": "Function", "language": "go",
+      "file_path": "auth/logout.go", "line_start": 30, "content_hash": "h-logout-1"
+    } },
+    { "id": "sym:data-retain", "type": "symbol", "fields": {
+      "qualified_name": "data.Retain", "kind": "Function", "language": "go",
+      "file_path": "data/retain.go", "line_start": 5, "content_hash": "h-retain-2",
+      "stale": { "reason": "source", "because": ["commit:def456"], "fired_at": "2026-04-02T00:00:00Z" }
+    } }
+  ],
+  "edges": [
+    { "type": "CALLS", "from": "sym:auth-login", "to": "sym:auth-logout" }
+  ]
+}

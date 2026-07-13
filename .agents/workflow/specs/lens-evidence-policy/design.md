@@ -3,9 +3,21 @@
 **Status:** accepted (graduated from project-local proposal
 `.agents/proposals/lens-evidence-policy-renderings.md`, user-accepted
 2026-05-28 with three inline addenda). This document is the canonical
-contract; the proposal is preserved for historical context and for
-its empirical renderings across the dot-agents / payout / ResumeAgent
-project shapes.
+contract **for the lens *concurrency/routing policy*** (parallel / gated /
+tiered, `lens_chain`, `lens_tier_gate`, `lens_routing`); the proposal is
+preserved for historical context and for its empirical renderings across
+the dot-agents / payout / ResumeAgent project shapes.
+
+> **Single-source note (2026-06-25).** The *set of registered lens slugs* and the
+> `lens_set` → `stage_profiles.reviewer` reference model are owned by
+> `[[stage-profile-and-routing-consolidation]]` §3 (D2). This spec owns only the
+> *dispatch policy* over whatever lens set resolves. The registered reviewer
+> lenses are now **four** (`architecture-standards`, `acceptance-invariants`,
+> `adversarial`, `cross-harness-adversarial` — the last added in PR #149); this
+> spec's three-lens *default* (§2.5) is unchanged — `cross-harness-adversarial`,
+> like thermo-nuclear, is opt-in per-project, not in the default set. The live
+> dot-agents `go-cli` profile opts into all four with `lens_concurrency: gated`
+> (an instance of §4.1, not the §2.1 default).
 
 **Companion spec (co-designed):** `[[layered-pr-fanout]]`. Lens dispatch
 defined here happens INSIDE the `awaiting_agent_review` substatus

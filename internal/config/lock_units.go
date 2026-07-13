@@ -17,6 +17,20 @@ const LockSectionUnits = "units"
 const (
 	UnitKindLayer    = "layer"
 	UnitKindArtifact = "artifact"
+	// UnitKindProjectSet is the §15 D13/A2 synced identity-registry unit: the
+	// portable project IDENTITY (id + portable key, NO path). It is a first-class
+	// unit — scope- and manifest-referenceable, locked, and a member of
+	// inputs_digest when locally authored — under the same selector-merge law as
+	// every other unit. The machine-local BINDING table (id → absolute-path) is
+	// NOT this unit and is never synced/scoped/projected (see IsSyncedUnitKind).
+	UnitKindProjectSet = "project-set"
+	// UnitKindDescriptor is the §15 D3/A3 CONDITIONAL fourth behavior: declarative,
+	// non-merging, non-installing projection data. It stays Go-internal / NOT a
+	// §15 unit (no lock entry, not projected) until a descriptor becomes
+	// source-shipped (gated by the multi-harness F4 probe). The constant reserves
+	// the kind so the resolver/lock recognize and fail-closed on a descriptor unit
+	// today rather than mis-resolving it (see IsProjectableKind).
+	UnitKindDescriptor = "descriptor"
 )
 
 // LockedUnit is one entry in the lockfile's "units" section (§7A.3). The map key
@@ -35,6 +49,15 @@ type LockedUnit struct {
 	// re-check; it powers a doctor/explain review-nudge and never drives
 	// auto-invalidation (§7A.3). Empty when never re-checked since fetch.
 	LastCheckedAt string `json:"last_checked_at,omitempty"`
+	// CacheKey is the effective content cache key the unit resolved at
+	// (config-distribution-model §7A.4). It is the cache-key staleness axis —
+	// orthogonal to the content-hash driver events — that CacheKeyStaleForLayer
+	// compares on a later resolve. Carried on the units model (not just the
+	// retired legacy "config" section) so the §7A units-lock cutover does NOT
+	// drop the §7A.4 cache-key gate: a `--refresh`/always_revalidate force escape
+	// and a cache_keys override edit both still register. Omitted for a unit
+	// resolved without a cache key (e.g. a legacy lock migrated on read).
+	CacheKey string `json:"cache_key,omitempty"`
 }
 
 // UnitsLock is the config-owned view of the lockfile under the §7A model: the
@@ -48,26 +71,47 @@ type UnitsLock struct {
 	// InputsDigest is the top-level whole-normalized local-scope hash. Empty
 	// when no local scope has been hashed yet.
 	InputsDigest string
+	// ProfileUnits is the kind:profile contribution (R2): the resolved profile
+	// fragments projected to LockedUnit entries (ProfileLockUnits), keyed by the
+	// profile's namespaced key. It is folded INTO the persisted "units" section by
+	// WriteUnitsLock so a kind:profile unit is a first-class lock entry alongside
+	// layer/artifact units — making a profile resolution reproducible from the lock
+	// without re-resolving. Nil for a caller that records no profiles (the section
+	// then carries only Units, exactly as before).
+	ProfileUnits map[string]LockedUnit
+}
+
+// allUnits returns the full unit set to persist: the base Units plus the
+// ProfileUnits contribution folded in. A profile key never collides with a layer/
+// artifact ref (profile keys are <source>:profile:… or authored:…), so the fold is
+// purely additive; on the impossible collision the profile entry wins, keeping the
+// kind:profile lock authoritative.
+func (l UnitsLock) allUnits() map[string]LockedUnit {
+	out := make(map[string]LockedUnit, len(l.Units)+len(l.ProfileUnits))
+	for ref, u := range l.Units {
+		out[ref] = u
+	}
+	for key, u := range l.ProfileUnits {
+		out[key] = u
+	}
+	return out
 }
 
 // WriteUnitsLock writes the resolved units state and inputs_digest to
 // .agentsrc.lock via the shared agentslock writer, preserving any sibling
-// sections (e.g. "adapters") another writer populated (§7A.3). It is the §7A
-// successor to WriteConfigLock; a later resolver task wires it into the
-// two-pass engine.
+// sections (e.g. "adapters") another writer populated (§7A.3). The persisted
+// "units" section is the base Units folded with the ProfileUnits contribution
+// (R2), so profile units land in the lock through this one funnel — no parallel
+// profile-lock machinery. It is the §7A successor to WriteConfigLock.
 func WriteUnitsLock(projectPath string, lock UnitsLock) error {
 	lf, err := agentslock.Open(AgentsLockPath(projectPath))
 	if err != nil {
 		return err
 	}
-	units := lock.Units
-	if units == nil {
-		units = map[string]LockedUnit{}
-	}
 	// SetSection cannot fail here: "units" is not a reserved key and a
 	// map[string]LockedUnit always marshals (mirrors agentslock.setVersion's
 	// impossible-marshal convention). Errors surface from the atomic Flush.
-	_ = lf.SetSection(LockSectionUnits, units)
+	_ = lf.SetSection(LockSectionUnits, lock.allUnits())
 	lf.SetInputsDigest(lock.InputsDigest)
 	return lf.Flush()
 }
@@ -132,6 +176,7 @@ func mergeLegacySection(lf *agentslock.Lockfile, section, kind string, units map
 			Digest:        l.ResolvedSHA,
 			FetchedAt:     l.FetchedAt,
 			LastCheckedAt: l.FetchedAt,
+			CacheKey:      l.CacheKey,
 		}
 	}
 	return nil

@@ -1,0 +1,59 @@
+schema_version: 1
+plan_id: config-transitive-layering
+tasks:
+    - id: org-config-spec-transitive-scope
+      title: Spec org→team→repo transitive extends + source scope/owner routing
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - .agents/workflow/specs/org-config-resolution/design.md
+        - .agents/workflow/specs/config-distribution-model/design.md
+        - docs/LAYERED_CONFIG_GUIDE.md
+      verification_required: true
+      notes: 'Spec repo→team→org transitive extends with POST-ORDER precedence (org before team before repo-local); define sources[].scope (public|org|team|repo) + owner as ROUTING metadata (NOT authority — authority stays authority_grants; imported layers default AuthPublic per authority_apply.go:44-103). Worked PA example: repo declares ONLY the PA source, inherits Roos org transitively. Design lives in payout:platform-config-layering.plan.md §Schema Api Shape.'
+    - id: config-source-scope-schema
+      title: Add Source.Scope/Owner typed schema surface
+      status: pending
+      depends_on:
+        - org-config-spec-transitive-scope
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - internal/config/agentsrc_test.go
+        - internal/config/schema_roundtrip_test.go
+      verification_required: true
+      notes: 'Source.Scope (enum public|org|team|repo) + Source.Owner (string) as ROUTING metadata. schema $defs.source.properties.scope enum + owner. Round-trip; legacy v1 sources (no scope) byte-stable. Comment: routing, not authority. Target agentsrc.schema.json:440-510.'
+    - id: config-transitive-extends-resolver
+      title: 'CORE: resolve layer-declared sources/extends transitively'
+      status: pending
+      depends_on:
+        - config-source-scope-schema
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - internal/config/resolver.go
+        - internal/config/resolver_test.go
+        - internal/config/resolver_extra_test.go
+        - internal/config/lock_units.go
+        - internal/config/units_lock_wiring_test.go
+      verification_required: true
+      notes: 'THE key gap. Current LayeredResolver resolves only repo-local extends (config-v2-migration p1b). Add resolveExtendsGraph: for each extends entry, decode the fetched layer''s OWN sources+extends, extend a child sourceEnv, recurse; return CHILDREN FIRST (org before team before repo-local); dedupe by ref+digest (fail loudly on ref→different-digest); detect cycles (A→B→A, don''t silently drop); LOCK all transitive layer units (writeUnitsLock) so offline/locked reproduces the full stack. Algorithm+types in payout:platform-config-layering.plan.md §Schema Api Shape.transitive_extends_api.'
+    - id: layered-consumers-relevance-verify
+      title: Make relevance/verify/verifier dispatch read layered snapshots
+      status: pending
+      depends_on:
+        - config-transitive-extends-resolver
+      blocks: []
+      owner: NikashPrakash
+      write_scope:
+        - commands/config/relevance.go
+        - commands/config/explain.go
+        - commands/workflow/
+        - internal/config/precondition_resolve.go
+        - docs/CONFIG_RELEVANCE.md
+      verification_required: true
+      notes: da config relevance resolves through legacy loadFlatSnapshot (commands/config/explain.go) — product-defaults→user-local→repo-local, NEVER extends → org-through-team app_types show matched:false. Migrate relevance + prompt-driven verifier dispatch onto the layered/locked resolver. SHARED prerequisite for worker-bundle-lessons:load-lessons-2. Consumer gap documented in payout/po-agents-config/README.md:103-108.

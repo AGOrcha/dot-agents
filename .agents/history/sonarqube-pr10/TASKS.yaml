@@ -1,0 +1,263 @@
+schema_version: 1
+plan_id: sonarqube-pr10
+tasks:
+    - id: sq1-current-state-audit
+      title: Audit current SonarCloud state on PR#10; classify remaining findings
+      status: completed
+      depends_on: []
+      blocks:
+        - sq2-reliability-rating-fixes
+        - sq3-security-hotspots-sweep
+        - sq4-duplication-debt-decision
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/sonarqube-pr10/findings.md
+      verification_required: false
+      notes: |-
+        Tier: T1 (molecule — research + memo).
+
+        Concrete deliverable: .agents/workflow/plans/sonarqube-pr10/findings.md
+        captures the current state of PR#10's quality gate:
+          * Per failing condition (reliability/duplication/security-hotspots):
+            current value, target, gap, list of contributing files (top 10)
+          * Classification of each top-finding cluster:
+              - "fixable in this PR" (scoped, mechanical)
+              - "branch-wide debt" (defer to follow-up plan)
+              - "false positive / waiver candidate" (justification required)
+          * Recommended split between sq2/sq3/sq4 task scope vs deferred plan
+
+        Use sonarqube MCP tools where helpful:
+          mcp__sonarqube__get_project_quality_gate_status
+          mcp__sonarqube__search_sonar_issues_in_projects
+          mcp__sonarqube__search_security_hotspots
+          mcp__sonarqube__get_duplications
+
+        Hard test:
+          findings.md exists with three classified sections; counts in
+          findings.md match the live SonarCloud PR analysis page
+          (re-check at task start since metrics drift across pushes).
+
+        Common false positive:
+          findings.md uses local-replay metrics (e.g. golint run locally)
+          instead of SonarCloud's actual analysis — the gap is in the
+          incremental-vs-full analysis logic, not in raw lint output.
+
+        ISP routing:
+          mode: direct (research; produces a single memo; uses MCP tools)
+          verifier: manual (memo well-formed and faithful to live SonarCloud)
+          review: doc review
+          anti-scope: do NOT make code fixes in this task. Audit-only.
+          bundle-context (if fanout): the source .agents/active/sonarqube-pr10.plan.md (now copied here as sonarqube-pr10.plan.md), SonarCloud project URL, current branch tip
+          output contract: findings.md with per-condition classifications + recommended task-scope split
+      app_type: research
+    - id: sq2-reliability-rating-fixes
+      title: Address new_reliability_rating findings classified as fixable
+      status: completed
+      depends_on:
+        - sq1-current-state-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/
+        - scripts/
+        - tests/
+        - .github/workflows/
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — touches multiple files; size depends on sq1
+        findings).
+
+        Per the source plan: the actionable cluster includes
+        scripts/setup_homebrew_cask_release_secrets.sh,
+        tests/test-kg-real-crg-build.sh, .github/workflows/test.yml.
+        Recent commits (cb3c197 print ci test command output, f3ff375
+        sonarqube fixes pt.1) addressed parts of this; sq1 audit will
+        clarify what's left.
+
+        For each finding marked "fixable in this PR" by sq1:
+          * Apply fix
+          * Run local verification per task
+          * Confirm SonarCloud picks it up after push
+
+        If finding scope balloons beyond ~3 commits, escalate to a
+        follow-up plan via fold-back rather than continuing to drag
+        this task open.
+
+        Hard test:
+          new_reliability_rating moves below the failing threshold OR
+          remaining issues are explicitly tagged as won't-fix with
+          justification.
+
+        Common false positive:
+          Local lint passes but SonarCloud's incremental diff still
+          flags because of base-branch divergence. Verify against the
+          live PR analysis after each push, not just local replay.
+
+        ISP routing:
+          mode: fanout-amenable per finding cluster (each cluster has its own files; subagent can implement one cluster at a time)
+          verifier: smoke (relevant local tests pass) + integration (push + check SonarCloud)
+          review: code review per cluster (does the fix address the underlying smell, or just suppress the rule?)
+          anti-scope: do NOT add suppression comments without justification. Do NOT touch unrelated code in the same cluster.
+          bundle-context (if fanout): sq1's findings.md, the specific cluster's file list, SonarCloud rule docs (mcp__sonarqube__show_rule)
+          output contract: lower new_reliability_rating; merge-back captures per-cluster fix rationale
+      app_type: code-fix
+    - id: sq3-security-hotspots-sweep
+      title: Review and resolve security hotspots flagged on PR#10
+      status: completed
+      depends_on:
+        - sq1-current-state-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/
+        - scripts/
+        - tests/
+        - .github/workflows/
+      verification_required: true
+      notes: |-
+        Tier: T2 (compound — security review per hotspot).
+
+        Source plan notes: reviewing one hotspot moved
+        new_security_hotspots_reviewed from 0.0 to 2.8 — implying ~35-40
+        hotspots remain to reach an acceptable threshold (depends on
+        SonarCloud's threshold for the failing gate condition).
+
+        Use read-only SonarCloud checks (quality gate + hotspot search/show)
+        to triage and verify. Do NOT use agent-side
+        mcp__sonarqube__change_security_hotspot_status writes for SQ3 while
+        this plan is in CI-driven mode; hotspot status changes should come
+        from the CI/manual-scan process or explicit human UI action.
+
+        Hard test:
+          new_security_hotspots_reviewed moves above the failing
+          threshold AND every changed status carries a one-line
+          justification visible in SonarCloud.
+
+        CI/manual-scan operating mode:
+          After each CI run, re-check SonarCloud PR #10 for updated
+          security-hotspot and quality-gate metrics. Continue
+          polling/checking CI-produced analysis until the project switches
+          to manual scan triggers; once manual scan triggers are enabled,
+          treat explicit manual scans as the source of truth for SQ3
+          verification. Agents may read SonarCloud state but must not
+          directly update hotspot statuses unless this note is explicitly
+          changed.
+
+        Common false positive:
+          Mass-marking hotspots as SAFE without genuine review. Defeats
+          the purpose. Each hotspot must be inspected; the per-hotspot
+          rationale lives in SonarCloud's status-change comment.
+
+        ISP routing:
+          mode: direct (orchestrator-driven triage with MCP tools; per-hotspot judgment)
+          verifier: smoke (status changes land in SonarCloud); review = decision-quality (rationale per hotspot)
+          review: decision-quality + code review for any hotspots that triggered actual code fixes
+          anti-scope: do NOT mass-mark without review. Do NOT change rule severity or threshold to paper over the failure.
+          bundle-context (if fanout): sq1's hotspot list, SonarCloud project URL
+          output contract: new_security_hotspots_reviewed above threshold; per-hotspot rationale visible in SonarCloud
+        - (fb:sq3-ci-driven-hotspot-verification) 2026-05-04 final read-only SonarCloud check after CI on 85266c0: new_security_hotspots_reviewed=100.0%, 0 TO_REVIEW hotspots. Direct hotspot writes were not used for the successful closeout path. Code remediation removed the TS hotspots through parser/test changes and the Go PATH hotspots through execabs-backed command invocation hardening. Quality gate still fails only on new_duplicated_lines_density, which sq4/ADR-0008 waives as branch-wide debt.
+      app_type: code-fix
+    - id: sq4-duplication-debt-decision
+      title: Decide scope on new_duplicated_lines_density (this PR vs follow-up plan)
+      status: completed
+      depends_on:
+        - sq1-current-state-audit
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/adr/0008-pr10-duplication-scope.md
+        - docs/adr/README.md
+        - .agents/workflow/plans/sonarqube-pr10/findings.md
+      verification_required: false
+      notes: |-
+        Tier: T2 (compound — load-bearing decision affecting PR#10
+        merge readiness).
+
+        Per the source plan: duplication is branch-wide debt across
+        324 commits / 893 changed files vs base. Mass-fixing in this
+        PR would balloon scope; deferring may block merge if reviewer
+        rejects. ADR-0008 documents the decision either way.
+
+        Options:
+          (A) Fix duplication in this PR — opens scope significantly;
+              risks PR being held open longer than is healthy
+          (B) Accept duplication failure as a known waiver for this PR
+              with a follow-up plan tracking the cleanup; merge anyway
+              if reviewer agrees
+          (C) Block PR#10 merge until a follow-up duplication-cleanup
+              plan ships; keep this plan active
+
+        Whichever path is chosen, ADR-0008 records:
+          * Context (the 324-commit / 893-file scope; what mass-fix would entail)
+          * Decision (chosen option)
+          * Consequences
+          * If (B) or (C): the follow-up plan id and a rough scope estimate
+
+        Hard test:
+          ADR-0008 written, indexed, accepted. PR#10 has a clear merge
+          path forward (either duplication addressed, or waived with
+          maintainer agreement, or blocked-with-tracker).
+
+        Common false positive:
+          ADR captures "decide later" without actually deciding.
+          Sub-merit-able. Each option's tradeoffs must be explicit.
+
+        ISP routing:
+          mode: direct (ADR + index update)
+          verifier: manual (decision-quality)
+          review: decision-quality
+          anti-scope: do NOT start mass-deduping in this task — that's option (A)'s implementation, which would spawn its own plan
+          bundle-context (if fanout): sq1's findings.md (duplication numbers), SonarCloud project URL, PR#10 description for scope context
+          output contract: docs/adr/0008-*.md + index updated + a concrete answer in findings.md "duplication path forward"
+      app_type: research
+    - id: sq5-archive-on-pr-merge
+      title: Archive plan when PR#10 merges (or closes without merge)
+      status: completed
+      depends_on:
+        - sq2-reliability-rating-fixes
+        - sq3-security-hotspots-sweep
+        - sq4-duplication-debt-decision
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/sonarqube-pr10/
+      verification_required: false
+      notes: |-
+        STATUS 2026-06-30: PR#10 disposition is now DONE (PR#10/#14 retired,
+        pr6-typescript-port + pr5-followup cancelled, pr10-branch-split plan
+        completed). The remaining blocker is NOT the PR state any more — it is the
+        `da workflow plan archive` non-persistence bug (diagnosed 2026-06-30):
+        archive moves the plan dir to history/ in the working tree but never
+        git-commits it (no --commit-state path, unlike advance/merge-back), so in
+        the fresh-clone/worktree loop model the move is discarded before it lands on
+        master. This task unblocks once archive gains a commit step. The stale
+        "(gate:pr-open-2026-05-04) PR#10 is still OPEN" note below is superseded.
+
+        Tier: T1 (molecule — archival + outcome note).
+
+        This task is gated on PR#10 transitioning state.
+        On merge: archive plan to .agents/history/sonarqube-pr10/ with
+          a closeout note describing what was fixed in this PR vs
+          deferred to follow-up plans.
+        On close-without-merge: archive with a note about why the PR
+          was abandoned and what becomes of any outstanding tasks.
+
+        Hard test:
+          PR#10 status is merged or closed; .agents/history/sonarqube-pr10/
+          exists with PLAN.yaml, TASKS.yaml, .plan.md, and a closeout
+          note linking to the merged/closed PR.
+
+        Common false positive:
+          Plan archived prematurely while PR is still open and reviewing.
+          Verify PR state via `gh pr view 10` before archiving.
+
+        ISP routing:
+          mode: direct (CLI commands + small note; not implementation)
+          verifier: smoke (gh pr view 10 confirms state; archive complete)
+          review: closeout review
+          anti-scope: do NOT archive while PR is open
+          bundle-context (if fanout): not applicable — orchestrator's closeout turn
+          output contract: history dir populated; PLAN.yaml status flipped to completed
+      app_type: workflow

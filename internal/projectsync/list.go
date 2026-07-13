@@ -35,8 +35,11 @@ func ListBucket(scope string, spec BucketSpec) error {
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		ui.Info(fmt.Sprintf("No %ss found in ~/.agents/%s/%s/", spec.Singular, spec.Bucket, scope))
-		return nil
+		if os.IsNotExist(err) {
+			ui.Info(fmt.Sprintf("No %ss found in ~/.agents/%s/%s/", spec.Singular, spec.Bucket, scope))
+			return nil
+		}
+		return fmt.Errorf("listing %ss in ~/.agents/%s/%s/: %w", spec.Singular, spec.Bucket, scope, err)
 	}
 
 	ui.Header(fmt.Sprintf("%s (%s)", spec.Plural, scope))

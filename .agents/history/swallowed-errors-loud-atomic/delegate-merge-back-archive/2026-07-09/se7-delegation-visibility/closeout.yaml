@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se7-delegation-visibility
+delegation_id: del-se7-delegation-visibility-1783570867
+decision: accept
+closed_at: "2026-07-09T04:32:47Z"

@@ -1,0 +1,102 @@
+# Hard-test oracle (graph-backend-adapter-contract §13.3 "Hard test").
+#
+# This file is the machine-checkable truth the dogfood asserts. It SUBSTITUTES
+# for "DM-validated results" (the human-in-the-loop step is deferred — see PR
+# body). ttrpg_dogfood_test.go bootstraps the corpus through the SDK, runs each
+# named query, and asserts these exact counts/results. If the corpus changes,
+# regenerate via the test (it fails loud on drift), not by hand-editing.
+
+# --- bootstrap counts ---------------------------------------------------------
+# Distinct note ids and (type,from,to) edges after idempotent upsert across all
+# 10 sessions. session notes (10) and documents edges (10, one per event) are
+# synthesized by the bootstrap as provenance anchors.
+bootstrap:
+  sessions_parsed: 10
+  note_count: 40
+  edge_count: 92
+  notes_by_type:
+    character: 6
+    event: 10
+    faction: 3
+    item: 2
+    location: 5
+    quest: 4
+    session: 10
+  edges_by_type:
+    advances: 7
+    allied_with: 3
+    connects_to: 4
+    controls: 3
+    documents: 10
+    involves: 12
+    knows: 3
+    located_in: 3
+    member_of: 6
+    occurred_at: 10
+    present_at: 25
+    rewards: 2
+    targets: 4
+
+# --- named-query results ------------------------------------------------------
+queries:
+  # Q1 bare-ref read: Mara's stated_location ref id (no JOIN).
+  character_location:
+    params: { character_id: char:mara }
+    rows:
+      - { name: Mara Veil, stated_location: loc:ironhold }
+
+  # Q2 ref-traversal in WHERE, required source → NULL-location chars excluded.
+  characters_in_region:
+    Vael:
+      params: { region: Vael }
+      ids: [char:doran, char:mara, char:sera, char:thane, char:vesh]
+    Coriane:
+      params: { region: Coriane }
+      ids: [char:pell]
+
+  # Q3 single edge traversal.
+  faction_members:
+    wardens:
+      params: { faction_id: fac:wardens }
+      ids: [char:doran, char:mara, char:sera]
+    cinder:
+      params: { faction_id: fac:cinder }
+      ids: [char:thane, char:vesh]
+
+  # Q4 variable-length pattern *1..3, returns destination + hop_count.
+  reachable_locations:
+    from_ironhold:
+      params: { location_id: loc:ironhold }
+      dest_hops:
+        loc:emberdeep: 1
+        loc:saltmarch: 1
+        loc:hollowcourt: 2
+        loc:coriane: 2
+
+  # Q5 coalesce param-normalization in WHERE.
+  events_since:
+    all:
+      params: {}                # min_session omitted → coalesce($min_session,0)
+      count: 10
+    since_7:
+      params: { min_session: 7 }
+      ids: [evt:s10-key, evt:s7-stirring, evt:s8-return, evt:s9-siege]
+
+  # Q6 count(*) aggregate.
+  faction_member_count:
+    counts:
+      fac:cinder: 2
+      fac:silverhand: 1
+      fac:wardens: 3
+
+  # Q7 OPTIONAL source, predicate hoists to ON → all living chars preserved,
+  # hostile-faction name NULL for those without one. No living character is in a
+  # hostile faction in this corpus, so every row has a NULL faction name —
+  # exactly the null-preserving behavior the hoist guarantees.
+  living_characters_hostile_seat:
+    living_ids: [char:mara, char:pell, char:sera]
+    hostile_faction_names_present: 0   # all NULL (none in a hostile faction)
+
+  # Q8 open quests with giver name (ref-traversal).
+  open_quests:
+    ids: [quest:rally]

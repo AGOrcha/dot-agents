@@ -1,0 +1,10 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/da-resources.json';
+---
+<BaseLayout title="da resources" description={graph.description}>
+  <h1>{graph.title}</h1>
+  <p>{graph.description}</p>
+  <ResourceGraph graph={graph} graphId="da-resources" layoutName={graph.layout} />
+</BaseLayout>

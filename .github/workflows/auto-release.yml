@@ -5,6 +5,10 @@ on:
     branches: [master]
     paths:
       - 'VERSION'
+  # Manual trigger so a release that failed on infra (e.g. a signing-tool
+  # regression) can be re-run from master WITHOUT a version bump; honors the
+  # 'Check if release exists' guard so it no-ops if the version already shipped.
+  workflow_dispatch:
 
 concurrency:
   group: release
@@ -37,7 +41,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0  # Need full history for tagging
 
@@ -64,7 +68,7 @@ jobs:
 
       - name: Set up Go
         if: steps.check.outputs.exists == 'false'
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.x'
 
@@ -100,25 +104,38 @@ jobs:
         env:
           HOME: ${{ env.SMOKE_HOME }}
           AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/.kg
         run: |
           ./bin/da --version
           ./bin/da --help
           ./bin/da init --yes
           test -d "${HOME}/.agents"
+          # Reshaped read-only status/doctor surface.
           ./bin/da status
+          ./bin/da status --json
+          ./bin/da status --audit
           ./bin/da doctor
+          ./bin/da doctor --json
+          # Full config-v2 (layering/lock/dry-run/install) + kg NOTE-lane
+          # surface with content assertions, against the built ./bin/da.
+          # scripts/verify.sh builds its own isolated HOME/AGENTS_HOME/KG_HOME,
+          # so a broken config-v2 or kg release binary is caught here. The
+          # release path deliberately uses the NOTE lane only — it does NOT
+          # install code-review-graph, so no flaky crg dependency is added to
+          # releases (the crg CODE lane is exercised in test.yml).
+          bash scripts/verify.sh
 
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and fails the
       # scan). Paired with sonar.scanner.skipJreProvisioning below.
       - name: Set up Java (Sonar scanner JRE)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
       - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
@@ -133,7 +150,7 @@ jobs:
 
       - name: Install GoReleaser
         if: steps.check.outputs.exists == 'false'
-        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: latest
@@ -149,24 +166,79 @@ jobs:
       # referenced here — no credential values live in the workflow.
       - name: Azure login (OIDC, for Trusted Signing)
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Set up .NET (for the dotnet sign tool)
+      - name: Install jsign (Windows Authenticode signing)
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
-        with:
-          dotnet-version: '8.0.x'
+        # jsign is a JVM tool (Linux-native, no .NET/kernel32 dependency) that
+        # natively supports Azure Trusted Signing (--storetype TRUSTEDSIGNING),
+        # replacing the dotnet `sign` tool that crashed on Linux with a
+        # kernel32.dll DllNotFoundException (dotnet/sign#711) and broke 0.4.0.
+        # The JRE is already on the runner (Set up Java, above). Pinned +
+        # checksum-verified per supply-chain norm; bump both together to upgrade.
+        env:
+          JSIGN_VERSION: '7.4'
+          JSIGN_SHA256: 2abf2ade9ea322acc2d60c24794eadc465ff9380938fca4c932d09e0b25f1c28
+        run: |
+          curl -sSL --proto '=https' --proto-redir '=https' -o /tmp/jsign.jar "https://github.com/ebourg/jsign/releases/download/${JSIGN_VERSION}/jsign-${JSIGN_VERSION}.jar"
+          echo "${JSIGN_SHA256}  /tmp/jsign.jar" | sha256sum -c -
+          echo "JSIGN_JAR=/tmp/jsign.jar" >> "${GITHUB_ENV}"
 
-      - name: Install Trusted Signing CLI (dotnet sign)
+      - name: Acquire Trusted Signing access token
         if: steps.check.outputs.exists == 'false' && vars.TRUSTED_SIGNING_PROFILE != ''
-        # NOTE: --version is intentionally unpinned (only a prerelease exists
-        # today); pin it when a stable release is chosen. The whole signing path
-        # is dormant until the repo variables are populated.
-        run: dotnet tool install --global sign --prerelease
+        # jsign authenticates to Trusted Signing with an Azure access token for
+        # the codesigning resource, used as the keystore password. The az CLI is
+        # already logged in via the azure/login OIDC step above (no long-lived
+        # secret is stored: the runner exchanges its short-lived GitHub OIDC token
+        # for the Azure token at job time).
+        #
+        # The minted token is written ONLY to a runner-local file with 0600 perms
+        # and NEVER to $GITHUB_ENV, a CLI arg, or an echo. jsign reads it via its
+        # `--storepass file:<path>` convention (see scripts/sign-windows.sh), so
+        # the secret never lands in a process argument list, a `set -x` trace, or
+        # the GoReleaser child-process environment. We still ::add-mask:: it as a
+        # belt-and-suspenders guard against any incidental log line.
+        #
+        # The file lives under RUNNER_TEMP (ephemeral, wiped with the runner) and
+        # is removed in the always() cleanup step at the end of the job. It is
+        # never uploaded as an artifact.
+        run: |
+          set -euo pipefail
+          token_file="${RUNNER_TEMP}/trusted-signing-token"
+          # Create with restrictive perms BEFORE writing the secret into it.
+          install -m 600 /dev/null "${token_file}"
+          token="$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)"
+          echo "::add-mask::${token}"
+          printf '%s' "${token}" > "${token_file}"
+          unset token
+          # Hand jsign a file reference, not the token value.
+          echo "TRUSTED_SIGNING_TOKEN_FILE=${token_file}" >> "${GITHUB_ENV}"
+
+      # --- macOS Developer ID signing via quill (gated) ---
+      # quill (https://github.com/anchore/quill) signs/notarizes Mach-O binaries
+      # from Linux, so darwin binaries are Developer ID-signed on this ubuntu
+      # runner — the macOS counterpart to the jsign path above. Gated on
+      # MACOS_SIGNING_ENABLED so it stays dormant (and scripts/sign-macos.sh
+      # no-ops on empty QUILL_SIGN_P12) until the cert + secrets are configured.
+      - name: Install quill (macOS Developer ID signing)
+        if: steps.check.outputs.exists == 'false' && vars.MACOS_SIGNING_ENABLED == 'true'
+        # Pinned, checksum-verified release binary — reproducible (no @version
+        # dependency resolution, no remote script piped to a shell). Bump both
+        # QUILL_VERSION and QUILL_SHA256 together to adopt a newer quill.
+        env:
+          QUILL_VERSION: 0.7.1
+          QUILL_SHA256: e58c6f86378a22507c1123e24412afd4ee2d3bb32ebd94d6059827dc0c1b3fbf
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -sSL --proto '=https' --proto-redir '=https' -o /tmp/quill.tar.gz "https://github.com/anchore/quill/releases/download/v${QUILL_VERSION}/quill_${QUILL_VERSION}_linux_amd64.tar.gz"
+          echo "${QUILL_SHA256}  /tmp/quill.tar.gz" | sha256sum -c -
+          tar -C "$HOME/.local/bin" -xzf /tmp/quill.tar.gz quill
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/quill" version
 
       - name: Import Homebrew tap signing key
         if: steps.check.outputs.exists == 'false'
@@ -191,12 +263,26 @@ jobs:
           HOMEBREW_TAP_SSH_KEY: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
           # Trusted Signing (gated): empty until the repo variables are set, which
           # makes scripts/sign-windows.sh a no-op. NAMES referenced, not values.
+          # jsign signs against these via the TRUSTEDSIGNING storetype, reading the
+          # access token through `--storepass file:${TRUSTED_SIGNING_TOKEN_FILE}`
+          # (path set by the "Acquire Trusted Signing access token" step) and using
+          # JSIGN_JAR as the pinned jar. The token VALUE is never placed in this
+          # env block, so it is not exported into the GoReleaser child process.
           TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
           TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          TRUSTED_SIGNING_TSA: ${{ vars.TRUSTED_SIGNING_TSA }}
           AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          # macOS Developer ID signing/notarization via quill (gated): these are
+          # empty until the QUILL_* secrets are set, which makes
+          # scripts/sign-macos.sh a no-op. quill reads them from the environment.
+          QUILL_SIGN_P12: ${{ secrets.QUILL_SIGN_P12 }}
+          QUILL_SIGN_PASSWORD: ${{ secrets.QUILL_SIGN_PASSWORD }}
+          QUILL_NOTARY_KEY: ${{ secrets.QUILL_NOTARY_KEY }}
+          QUILL_NOTARY_KEY_ID: ${{ secrets.QUILL_NOTARY_KEY_ID }}
+          QUILL_NOTARY_ISSUER: ${{ secrets.QUILL_NOTARY_ISSUER }}
         run: |
           # Ensure an annotated tag for this version exists
           git config user.name "github-actions[bot]"
@@ -228,3 +314,10 @@ jobs:
       - name: Cleanup smoke home
         if: always()
         run: rm -rf "${SMOKE_HOME}"
+
+      - name: Cleanup Trusted Signing token file
+        if: always()
+        # Defense-in-depth: RUNNER_TEMP is ephemeral and wiped when the runner is
+        # torn down, but remove the minted-token file explicitly so it does not
+        # outlive the signing step within the job. Never fails the release.
+        run: rm -f "${RUNNER_TEMP}/trusted-signing-token"

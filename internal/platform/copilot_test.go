@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 // TestCopilotSharedTargetIntentsPopulated drives the skills+agents combination.
@@ -166,14 +168,17 @@ func TestCopilotResolveInstructionsSrcFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewCopilot().(*copilot)
-	got := c.resolveInstructionsSrc("proj", tmp)
+	got, err := c.resolveInstructionsSrc("proj", tmp)
+	if err != nil {
+		t.Fatalf("resolveInstructionsSrc: %v", err)
+	}
 	if !strings.HasSuffix(got, "rules.md") {
 		t.Errorf("expected rules.md fallback, got %q", got)
 	}
 
-	// Missing → empty.
-	if got := c.resolveInstructionsSrc("proj", filepath.Join(tmp, "no-such")); got != "" {
-		t.Errorf("expected empty for missing rules, got %q", got)
+	// Missing → empty, no error.
+	if got, err := c.resolveInstructionsSrc("proj", filepath.Join(tmp, "no-such")); got != "" || err != nil {
+		t.Errorf("expected (\"\", nil) for missing rules, got (%q, %v)", got, err)
 	}
 }
 
@@ -190,8 +195,69 @@ func TestCopilotResolveInstructionsSrcDirectFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewCopilot().(*copilot)
-	if got := c.resolveInstructionsSrc("proj", tmp); got != src {
-		t.Errorf("got %q, want %q", got, src)
+	if got, err := c.resolveInstructionsSrc("proj", tmp); got != src || err != nil {
+		t.Errorf("got (%q, %v), want (%q, nil)", got, err, src)
+	}
+}
+
+// TestCopilotResolveInstructionsSrc_RealStatErrorPropagates covers the
+// swallow fixed in se9-platform-shared: a permission-denied Stat on a
+// candidate must abort the search with a wrapped error, never be silently
+// read as "this candidate doesn't exist" and skipped to the next one.
+func TestCopilotResolveInstructionsSrc_RealStatErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	projectRules := filepath.Join(tmp, "rules", "proj")
+	mustMkdirAllT(t, projectRules)
+	testutil.MakeDirUnreadable(t, projectRules)
+
+	c := NewCopilot().(*copilot)
+	got, err := c.resolveInstructionsSrc("proj", tmp)
+	if err == nil {
+		t.Fatalf("expected a real Stat error, got (%q, nil)", got)
+	}
+	if got != "" {
+		t.Errorf("expected empty src alongside the error, got %q", got)
+	}
+}
+
+// TestCopilotCreateLinks_UnreadableInstructionsSourceLeavesExistingLink is
+// the se2-contract survival check: CreateLinks succeeds once with a real
+// global instructions source, creating .github/copilot-instructions.md.
+// Once that source directory becomes unreadable, a second CreateLinks call
+// must abort with an error and leave the pre-existing managed link alone —
+// never delete it because the resolver misread the permission error as
+// "nothing to link".
+func TestCopilotCreateLinks_UnreadableInstructionsSourceLeavesExistingLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+	mustMkdirAllT(t, repo)
+
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	src := filepath.Join(globalRules, copilotInstructionsMD)
+	if err := os.WriteFile(src, []byte("# instructions\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(repo, copilotGitHubDir, copilotInstructionsMD)
+	if !links.IsManagedLink(dst, src) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, src)
+	}
+
+	testutil.MakeDirUnreadable(t, globalRules)
+	if err := NewCopilot().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the instructions source is unreadable")
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Errorf("existing managed link %s must survive the aborted sync", dst)
 	}
 }
 
@@ -408,4 +474,380 @@ func TestCopilotBrokenLinks_PlainFilesIgnored(t *testing.T) {
 // TestCopilotBrokenLinks_InterfaceConformance pins compile-time conformance.
 func TestCopilotBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*copilot)(nil)
+}
+
+// ---------- UserConfigReporter implementation (P4b) ----------
+
+// writeCopilotUserHook writes a plausible rendered copilot hook file under
+// ~/.copilot/hooks/, mirroring the bytes createUserHomeHookFiles emits. Keeps
+// the table-driven setup closures terse (low cognitive complexity).
+func writeCopilotUserHook(t *testing.T, home, name string) {
+	t.Helper()
+	dir := copilotUserHooksDir(home)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"x"}]}}`)
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCopilotUserBrokenLinks is the table-driven cover for copilot's
+// UserConfigReporter broken-link surface (~/.copilot/hooks/*). Every reported
+// link carries PlatformID="copilot"; a rendered file is silently skipped.
+func TestCopilotUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken hook dir entry",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(copilotUserHooksDir(home), "ghost.json"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "rendered hook file ignored",
+			setup: func(t *testing.T, home string) {
+				writeCopilotUserHook(t, home, "prompt-log.json")
+			},
+			wantCount: 0,
+		},
+		{
+			name: "healthy hook symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "hooks", "global", "prompt-log.json")
+				mkdirAllT(t, filepath.Dir(target))
+				if err := os.WriteFile(target, []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(copilotUserHooksDir(home), "prompt-log.json"))
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &copilot{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "copilot", got, tc.wantCount)
+		})
+	}
+}
+
+// TestCopilotUserBadge covers the copilot user-config badge over
+// ~/.copilot/hooks/: Present reflects any managed rendered hook and Broken
+// reflects any dangling managed link.
+func TestCopilotUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present rendered hook",
+			setup: func(t *testing.T, home string) {
+				writeCopilotUserHook(t, home, "prompt-log.json")
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken hook surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(copilotUserHooksDir(home), "ghost.json"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &copilot{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Copilot" {
+				t.Errorf("UserBadge.Name = %q, want Copilot", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestCopilotUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the copilot platform.
+func TestCopilotUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*copilot)(nil)
+}
+
+// TestCopilotCreateUserHomeHookFiles proves CreateLinks wires a global-scope
+// canonical hook into ~/.copilot/hooks/ (the user-home fanout), and that the
+// freshly rendered file is reported present/clean by the badge.
+func TestCopilotCreateUserHomeHookFiles(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(home, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := NewCopilot().(*copilot)
+	if err := c.createUserHomeHookFiles("proj", agentsHome); err != nil {
+		t.Fatalf("createUserHomeHookFiles: %v", err)
+	}
+	out := filepath.Join(copilotUserHooksDir(home), "prompt-log.json")
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("expected user-home hook at %s: %v", out, err)
+	}
+
+	badge := c.UserBadge(home)
+	if !badge.Present || badge.Broken {
+		t.Errorf("UserBadge = %+v, want Present=true Broken=false", badge)
+	}
+}
+
+// seedCopilotGlobalHook writes a global-scope canonical HOOK.yaml that renders
+// to a single ~/.copilot/hooks/<name>.json file, mirroring the fixture used by
+// TestCopilotCreateUserHomeHookFiles. Keeps the user-home wiring tests terse.
+func seedCopilotGlobalHook(t *testing.T, agentsHome string) {
+	t.Helper()
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	mkdirAllT(t, filepath.Dir(manifest))
+	if err := os.WriteFile(manifest, []byte("name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCopilotCreateUserHomeHookFiles_Errors drives the two error returns of
+// createUserHomeHookFiles: a malformed global HOOK.yaml fails the canonical
+// collect, and a MkdirAll fault on the ~/.copilot/hooks/ target fails the
+// per-home-root emit (a seeded valid hook makes that fanout non-empty).
+func TestCopilotCreateUserHomeHookFiles_Errors(t *testing.T) {
+	tests := []struct {
+		name  string
+		seed  func(t *testing.T, agentsHome string)
+		ioErr string
+	}{
+		{
+			name: "collect error: malformed manifest",
+			seed: func(t *testing.T, agentsHome string) {
+				manifest := filepath.Join(agentsHome, "hooks", "global", "bad", "HOOK.yaml")
+				mkdirAllT(t, filepath.Dir(manifest))
+				if err := os.WriteFile(manifest, []byte("name: [unterminated\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name:  "emit error: mkdir fault on user hooks dir",
+			seed:  seedCopilotGlobalHook,
+			ioErr: ".copilot",
+		},
+	}
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			t.Setenv("AGENTS_HOME", agentsHome)
+			t.Setenv("HOME", filepath.Join(tmp, "home"))
+			mkdirAllT(t, filepath.Join(tmp, "home"))
+			tc.seed(t, agentsHome)
+
+			c := &copilot{io: stdPlatformIO{}}
+			if tc.ioErr != "" {
+				c.io = withMkdirAllError(t, tc.ioErr)
+			}
+			if err := c.createUserHomeHookFiles("proj", agentsHome); err == nil {
+				t.Fatal("expected createUserHomeHookFiles to return an error")
+			}
+		})
+	}
+}
+
+// TestCopilotCreateLinks_WiresUserHomeHooks drives CreateLinks end to end with a
+// seeded global hook and a real HOME, proving the user-home fanout call wires
+// ~/.copilot/hooks/<name>.json alongside the repo-scope links.
+func TestCopilotCreateLinks_WiresUserHomeHooks(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	if err := NewCopilot().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("CreateLinks: %v", err)
+	}
+	for _, expect := range []string{
+		filepath.Join(repo, ".github", "hooks", "prompt-log.json"),
+		filepath.Join(copilotUserHooksDir(home), "prompt-log.json"),
+	} {
+		if _, err := os.Stat(expect); err != nil {
+			t.Errorf("expected %s: %v", expect, err)
+		}
+	}
+}
+
+// TestCopilotCreateLinks_ProjectHookFilesMkdirError covers CreateLinks' repo-
+// scope hooks error return: a MkdirAll fault scoped to .github/hooks lets
+// every earlier step (instructions, skills, agents, mcp, claude-compat)
+// succeed, then fails createProjectHookFiles so CreateLinks propagates the
+// error instead of continuing to the user-home hooks step.
+func TestCopilotCreateLinks_ProjectHookFilesMkdirError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	c := &copilot{io: withMkdirAllError(t, filepath.Join(".github", "hooks"))}
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to surface the .github/hooks MkdirAll fault")
+	}
+}
+
+// TestCopilotCreateLinks_UserHomeHookError covers CreateLinks' user-home error
+// return: a MkdirAll fault scoped to the ~/.copilot/hooks/ path lets every
+// earlier repo-scope link succeed, then fails the trailing createUserHomeHookFiles
+// call so CreateLinks propagates the error.
+func TestCopilotCreateLinks_UserHomeHookError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mkdirAllT(t, home)
+	seedCopilotGlobalHook(t, agentsHome)
+
+	repo := filepath.Join(tmp, "repo")
+	mkdirAllT(t, repo)
+	c := &copilot{io: withMkdirAllError(t, filepath.Join(".copilot", "hooks"))}
+	if err := c.CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to surface the user-home MkdirAll fault")
+	}
+}
+
+// TestCopilotManagedOutputs_CoversSharedTargets pins the BLOCKER-1 root cause
+// (drift): every repo-local target copilot PROJECTS via SharedTargetIntents
+// (e.g. the .agents/skills/ mirror, .github/agents/*.agent.md) must be covered
+// by some ManagedOutputs() pattern, or `da refresh` leaves it un-ignored. This
+// catches a FUTURE output added without updating ManagedOutputs, not just the
+// one omission the cross-harness reviewer found. Authoritative output set:
+// docs/PLATFORM_DIRS_DOCS.md ("GitHub Copilot" impl-audit row).
+func TestCopilotManagedOutputs_CoversSharedTargets(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	for _, p := range [][]string{
+		{"skills", "proj", "alpha", "SKILL.md"},
+		{"agents", "proj", "reviewer", "AGENT.md"},
+	} {
+		dir := filepath.Join(append([]string{agentsHome}, p[:3]...)...)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, p[3]), []byte("body"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := NewCopilot()
+	intents, err := c.SharedTargetIntents("proj")
+	if err != nil {
+		t.Fatalf("SharedTargetIntents: %v", err)
+	}
+	if len(intents) == 0 {
+		t.Fatal("expected non-zero shared-target intents")
+	}
+	r, ok := c.(ManagedOutputReporter)
+	if !ok {
+		t.Fatal("copilot must implement ManagedOutputReporter")
+	}
+	outs := r.ManagedOutputs()
+	for _, in := range intents {
+		if !managedOutputsCover(outs, in.TargetPath) {
+			t.Errorf("copilot shared-target %q not covered by any ManagedOutputs entry %v; managed .gitignore would leak it", in.TargetPath, outs)
+		}
+	}
+}
+
+// managedOutputsCover reports whether some managed-output pattern covers target
+// (an exact dir match or a path under a dir pattern). Extracted to keep the
+// caller under the cognitive-complexity gate.
+func managedOutputsCover(outs []string, target string) bool {
+	target = strings.ReplaceAll(target, `\`, "/")
+	for _, o := range outs {
+		dir := strings.TrimSuffix(strings.ReplaceAll(o, `\`, "/"), "/")
+		if target == dir || strings.HasPrefix(target, dir+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCollectManagedOutputs_ReporterAndStaticBranches covers both arms of
+// CollectManagedOutputs: a ManagedOutputReporter platform (copilot, dynamic) and
+// a static-table platform (cursor). Pins the D14 collector's coverage.
+func TestCollectManagedOutputs_ReporterAndStaticBranches(t *testing.T) {
+	got := CollectManagedOutputs([]Platform{NewCopilot(), NewCursor()})
+	has := func(want string) bool {
+		for _, g := range got {
+			if g == want {
+				return true
+			}
+		}
+		return false
+	}
+	// copilot (ManagedOutputReporter) dynamic outputs:
+	for _, w := range []string{".agents/skills/", ".github/hooks/*.json"} {
+		if !has(w) {
+			t.Errorf("CollectManagedOutputs missing copilot reporter output %q; got %v", w, got)
+		}
+	}
+	// cursor (static table) output:
+	if !has(cursorDir + "/") {
+		t.Errorf("CollectManagedOutputs missing cursor static output %q; got %v", cursorDir+"/", got)
+	}
 }

@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-24
+
+A cross-platform reliability release: first-run lock acquisition now works on
+Windows, and `da config migrate` lands as the opt-in v1→v2 manifest migrator.
+
+### Fixed
+
+- **First-run lock acquisition on Windows.** `da config explain` / `da install`
+  no longer fail with "The system cannot find the file specified" — `agentslock`
+  acquire now creates the lock file's parent directory (`MkdirAll`) before
+  acquiring, so first-run lock acquisition succeeds cross-platform (#148).
+
+### Added
+
+- **`da config migrate`** — an opt-in v1→v2 `.agentsrc.json` migrator. It backs up
+  the original to `.agentsrc.json.v1.bak`, is idempotent, and supports `--dry-run`
+  to preview without writing. The `da init` deprecation hint now points at this
+  real command (#138).
+
+### Internal
+
+- First-run absent-parent lock smoke test across the OS matrix, guarding the #148
+  escape (#152).
+- A `fsguard` lint enforcing that filesystem mutations route through
+  `internal/fsops` (#151).
+
+## [0.4.0] - 2026-06-23
+
+The config-v2 release: a layered configuration model with a content-addressed
+lockfile, a `da config` command surface to inspect and reconcile it, and a
+reshaped status/doctor/install/refresh lifecycle built on it.
+
+### Added
+
+- **Layered configuration (config-v2).** A `.agentsrc.json` manifest can now
+  `extends` config layers sourced from local paths, git, or HTTP via
+  `source-id:path@version`. Layers are merged by winning-layer precedence and the
+  resolved set is pinned in a unified `.agentsrc.lock` — one `units` section keyed
+  by `source:path@version` plus a top-level `inputs_digest`. `kind` (layer vs
+  artifact) governs merge/trust; source is orthogonal to kind.
+- **`da config sync`** — re-fetch the declared layers and rewrite the
+  `.agentsrc.lock` `units` section (the explicit upstream re-check). Honors
+  `--dry-run` (previews without writing the lock).
+- **`da config lint`** — validate the repo manifest and each declared `extends`
+  layer against the AgentsRC layer schema; non-zero exit on any invalid layer.
+- **`da config relevance`** — resolve a task's execution profile
+  (units / topology / lenses) by `app_type` (`--app-type`/`--task`/`--stage`/`--json`).
+- **Unified artifact sourcing.** Executable `packages` (artifacts) may be sourced
+  from git, local, HTTP, or OCI via `source:path@version` — not OCI-only.
+- **Content-driven staleness + `cache_keys`.** Re-resolution is driven by an
+  `inputs_digest` over local scopes and per-source cache keys (no clock); a
+  source's `cache_keys` now actually governs online re-fetch.
+- **`internal/docsaccess` client** — attaches Cloudflare Access service-token
+  headers so `da` can reach the maintainer-only internal-docs surface.
+
+### Changed
+
+- **`da config explain` is the effective-config truth surface** and now
+  **auto-locks** (writes the lock to stay current, like `uv tree`), showing each
+  field's value and provenance (winning layer) across the resolved stack.
+- **`da status` and `da doctor` reshaped.** `status` is now fleet / link-health
+  only — config inspection moved to `da config explain`. `doctor` is **read-only**:
+  it reports problems and the command to fix them (`da refresh` / `da config sync`)
+  and **no longer repairs**.
+- **`da install` and `da refresh` prune by default** (exact projection: converge
+  the managed tree to exactly what the lock declares, removing stale managed
+  links). Pass `--inexact` to keep the additive behavior.
+- **Concurrency-safe lockfile writes.** An interprocess lock on `.agentsrc.lock`
+  prevents lost updates when multiple `da` processes write concurrently, with
+  stale-lock reclaim so a crashed writer cannot wedge future writes.
+
 ## [0.3.4] - 2026-06-02
 
 ### Added

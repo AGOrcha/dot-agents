@@ -5,18 +5,44 @@
   // account_id is injected from the CLOUDFLARE_ACCOUNT_ID secret in CI
   // (see .github/workflows/deploy-docs.yml). Do NOT hardcode it here.
   //
-  // Static-asset Worker: src/worker.js is a thin pass-through that serves
-  // ./dist via the ASSETS binding. This shape works on all modern Wrangler
-  // versions; a bare `assets` block without `main` is only supported on
-  // very recent wrangler releases and breaks older CI runners.
+  // Cloudflare Access gate: src/worker.js path-routes requests. Public pages
+  // and /schemas/* serve unauthenticated from the single ASSETS binding;
+  // /internal/* is served ONLY after a valid Cloudflare Access JWT verifies.
+  // Cloudflare allows only ONE static-assets binding per Worker, so internal
+  // pages live under the same ./dist at /internal/* (the deploy's merge step
+  // copies dist-internal/internal/ -> dist/internal/ while keeping dist's
+  // clean public pagefind index).
   "main": "src/worker.js",
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
-    "not_found_handling": "404-page"
+    "not_found_handling": "404-page",
+    // SECURITY: static assets bypass the Worker by default, which would serve an
+    // internal page WITHOUT the JWT check (silent leak). We FAIL CLOSED: the
+    // fetch handler runs before assets for EVERY request, so the gate always
+    // applies and there is no per-route pattern that an encoded/non-canonical
+    // path could slip past (a per-route array like ["/internal/*"] does not match
+    // the bare "/internal" nor "/internal%2f..." reliably). The handler still
+    // fast-paths public + allowlisted /schemas straight to ASSETS, so the only
+    // cost is one cheap classification per request.
+    "run_worker_first": true
   },
   "vars": {
-    "ENVIRONMENT": "development"
+    "ENVIRONMENT": "development",
+    // Public Cloudflare Access identifiers (NOT secrets):
+    //   CF_ACCESS_AUD          — the Access application audTag the JWT must carry
+    //   CF_ACCESS_TEAM_DOMAIN  — the Zero Trust team domain; the JWKS + iss are
+    //                            derived from it.
+    "CF_ACCESS_AUD": "50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff",
+    // Account id for the /internal/provision self-provision endpoint (dm6),
+    // which mints a per-user CF Access service token via the CF API. NOT a
+    // secret (account ids are not sensitive). The scoped API token it calls
+    // with is the CF_PROVISION_API_TOKEN Worker secret (set in CI, never here).
+    "CF_PROVISION_ACCOUNT_ID": "bfabaf5bb310ba98e4b95c74e88dd271",
+    // The Zero Trust team domain (<team>.cloudflareaccess.com) — the JWKS
+    // endpoint and the expected `iss` claim are both derived from it. NOT a
+    // secret (it is a public Zero Trust identifier, like CF_ACCESS_AUD above).
+    "CF_ACCESS_TEAM_DOMAIN": "usepayout.cloudflareaccess.com"
   },
   // Production-only routes: agorcha.dev custom_domain. Preview deploys
   // (PR branches) skip this env entirely and land at
@@ -33,7 +59,10 @@
         { "pattern": "agorcha.dev", "custom_domain": true }
       ],
       "vars": {
-        "ENVIRONMENT": "production"
+        "ENVIRONMENT": "production",
+        "CF_ACCESS_AUD": "50476bf0ad28d003fbf4cfb1d36ed2554907f7f2e0e6c699f5fb4bc4b8d1a6ff",
+        "CF_PROVISION_ACCOUNT_ID": "bfabaf5bb310ba98e4b95c74e88dd271",
+        "CF_ACCESS_TEAM_DOMAIN": "usepayout.cloudflareaccess.com"
       }
     }
   }

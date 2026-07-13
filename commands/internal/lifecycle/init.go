@@ -131,6 +131,7 @@ var InitCmdExample = strings.Join([]string{
 	"  da init",
 	"  da init --dry-run",
 	"  da init --force",
+	"  da init --from git@github.com:you/agents-config.git",
 }, "\n")
 
 // RunInit is the exported entry the shim's RunE closure calls. It
@@ -190,6 +191,11 @@ func NewInitCmd(deps Deps) *cobra.Command {
 			return RunInit(cmd, args)
 		},
 	}
+	// --from <home-source> bootstraps ~/.agents from a remote home (git URL) —
+	// the L3 cross-machine adoption path (init_from.go). Read at RunE time via
+	// initFromValue so a bare lifecycle-only test command (no --from registered)
+	// safely falls back to the fresh-local scaffold.
+	cmd.Flags().String(initFromFlag, "", "Bootstrap ~/.agents from a remote home source (git URL) — cross-machine adoption")
 	return cmd
 }
 
@@ -250,22 +256,39 @@ func initNoArgs(hints ...string) cobra.PositionalArgs {
 	}
 }
 
+// reportExistingInstall logs the existing-~/.agents state and returns true if
+// init should halt (a home already exists and --force was not given).
+func reportExistingInstall(agentsHome string) bool {
+	ui.Step("Checking existing installation...")
+	if _, err := os.Stat(agentsHome); err != nil {
+		ui.Bullet("none", "No existing ~/.agents/ found")
+		return false
+	}
+	if !InitForceFn() {
+		ui.Bullet("found", "Existing ~/.agents/ directory found")
+		fmt.Fprintln(os.Stdout, "\n  Use --force to reinitialize (creates backup first)")
+		return true
+	}
+	ui.Bullet("warn", "Will reinitialize (--force)")
+	return false
+}
+
 func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
+	// `da init --from <home-source>` is the L3 cross-machine bootstrap: it clones
+	// a remote home into ~/.agents and re-materializes the user surface, instead
+	// of scaffolding a fresh-local home from embedded starters (init_from.go).
+	if from := initFromValue(cmd); from != "" {
+		return runInitFrom(cmd, from, deps)
+	}
+
 	agentsHome := config.AgentsHome()
 
 	ui.Header("da init")
 
-	// Check existing
-	ui.Step("Checking existing installation...")
-	if _, err := os.Stat(agentsHome); err == nil {
-		if !InitForceFn() {
-			ui.Bullet("found", "Existing ~/.agents/ directory found")
-			fmt.Fprintln(os.Stdout, "\n  Use --force to reinitialize (creates backup first)")
-			return nil
-		}
-		ui.Bullet("warn", "Will reinitialize (--force)")
-	} else {
-		ui.Bullet("none", "No existing ~/.agents/ found")
+	warnLegacyManifestInCwd()
+
+	if reportExistingInstall(agentsHome) {
+		return nil
 	}
 
 	if InitDryRunFn() {
@@ -314,9 +337,14 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 		return err
 	}
 
-	// State dir — best-effort idempotent create.
-	_ = deps.MkdirAll(config.AgentsStateDir(), 0755)
-	ui.Bullet("ok", "Created state directory")
+	// State dir — best-effort idempotent create; a real failure here must not
+	// be reported as "ok" (MkdirAll already no-ops when the dir exists, so
+	// any error is a genuine I/O/permission fault, not legitimate absence).
+	if err := deps.MkdirAll(config.AgentsStateDir(), 0755); err != nil {
+		ui.Warn(fmt.Sprintf("could not create state directory %s: %v", config.AgentsStateDir(), err))
+	} else {
+		ui.Bullet("ok", "Created state directory")
+	}
 
 	ui.SuccessBox("Initialization complete!",
 		"Add your first project: da add ~/path/to/project",
@@ -326,6 +354,26 @@ func runInit(cmd *cobra.Command, args []string, deps initDirMaker) error {
 		"Check health: da doctor",
 	)
 	return nil
+}
+
+// warnLegacyManifestInCwd surfaces a v1 deprecation notice when the current
+// working directory holds a legacy (pre-v2) .agentsrc.json. da init bootstraps
+// the shared store and writes v2-shaped manifests, so a v1 file in the repo
+// being initialized is worth flagging — the file still loads, the warning only
+// nudges toward v2 (config-v2 §15.3). Best-effort: a missing/unreadable
+// manifest is silent (the common fresh-repo case).
+func warnLegacyManifestInCwd() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	rc, err := config.LoadAgentsRC(cwd)
+	if err != nil {
+		return
+	}
+	if w := config.DetectV1Deprecation(rc); w.Detected {
+		ui.Bullet("warn", w.Message()+"  hint: da config migrate")
+	}
 }
 
 // sidecarBackupFile preserves an unmanaged occupant before links replaces it
@@ -392,8 +440,16 @@ func createInitialAgentsDirs(agentsHome string, deps initDirMaker) error {
 // pre-populated registry.
 func seedInitialConfig(agentsHome string) error {
 	cfgPath := filepath.Join(agentsHome, "config.json")
-	if _, err := os.Stat(cfgPath); !(os.IsNotExist(err) || InitForceFn()) {
-		return nil
+	_, statErr := os.Stat(cfgPath)
+	switch {
+	case statErr == nil && !InitForceFn():
+		return nil // config.json already exists; not forcing overwrite.
+	case statErr != nil && !os.IsNotExist(statErr) && !InitForceFn():
+		// A real Stat error (permission denied, etc.) is not the same as
+		// "config.json doesn't exist yet" — surface it instead of silently
+		// skipping config creation (da init would otherwise report success
+		// without writing the foundational config file).
+		return fmt.Errorf("checking for existing config.json: %w", statErr)
 	}
 	cfg := &config.Config{
 		Version:  1,

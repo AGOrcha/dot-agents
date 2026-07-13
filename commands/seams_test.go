@@ -776,11 +776,13 @@ func TestRunRefresh_ProjectFilterNotFound(t *testing.T) {
 		return &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}, nil
 	}}
 	deps := fakeRefreshConfigLoader{loadConfig: func() (*config.Config, error) {
-		return &config.Config{
-			Version:  1,
-			Projects: map[string]config.Project{"real": {Path: filepath.Join(tmp, "real")}},
+		c := &config.Config{
+			Version:  2,
+			Projects: map[string]config.Project{"real": {}},
 			Agents:   map[string]config.Agent{},
-		}, nil
+		}
+		c.BindProject("real", filepath.Join(tmp, "real"))
+		return c, nil
 	}}
 
 	saved := Flags

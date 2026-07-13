@@ -1,5 +1,5 @@
 {
-  "$schema": "https://dot-agents.dev/schemas/agentsrc.json",
+  "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
   "version": 1,
   "project": "legacy-project",
   "skills": ["build-graph"],

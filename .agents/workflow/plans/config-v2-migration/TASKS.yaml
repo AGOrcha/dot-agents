@@ -211,7 +211,7 @@ tasks:
       app_type: go-cli
     - id: p4-config-explain-cli
       title: 'Phase 4: da config explain command + da config subtree'
-      status: in_progress
+      status: completed
       depends_on:
         - p1-resolver-core-flat
       blocks: []
@@ -276,7 +276,7 @@ tasks:
       app_type: go-cli
     - id: p4c-config-sync-lint
       title: 'Phase 4c: da config sync + da config lint + da config verify commands'
-      status: in_progress
+      status: completed
       depends_on:
         - p4-config-explain-cli
         - p1b-resolver-extends-tier1
@@ -343,7 +343,7 @@ tasks:
       app_type: go-cli
     - id: p6-packages-pass2-cli
       title: 'Phase 6: Tier 2 packages resolution (pass 2) + da packages subtree'
-      status: pending
+      status: cancelled
       depends_on:
         - p5-source-types-http-oci
         - p4c-config-sync-lint
@@ -360,35 +360,14 @@ tasks:
         - commands/packages/install_test.go
         - commands/root.go
       verification_required: true
-      notes: |-
-        Per spec §6 (pass 2) + §7 (lockfile packages section) + §13.2 (da packages subtree).
-
-        Resolver pass-2:
-        - read effective config 'packages' field from p1 snapshot
-        - per ref: resolve version spec ({semver|tag|pinned:digest}) against OCI registry
-        - content-addressed cache lookup by digest; on miss fetch blob
-        - write resolved digest to .agentsrc.lock packages section
-        - skipped if no packages declared
-
-        CLI:
-        - da packages install — install all; write lock packages section
-        - da packages update [ref] — re-resolve semver ranges; write new digests
-        - da packages list — show installed (resolved tag + digest + cache presence)
-        - da packages publish <type> <path> — publish to declared OCI source (replaces conceptual 'da publish agent|verifier|skill|bundle')
-
-        Per spec §11: error contract identifies which entry failed and category {transport|auth|content|schema|not_found}.
-
-        Acceptance:
-        - end-to-end test: install a fake-OCI package (digest-pinned) -> verify cache layout -> 'packages list' shows it -> 'packages update' is a no-op for pinned refs
-        - semver-range package re-resolves and writes new lockfile digest on update
-        - publish dry-run constructs the OCI manifest without uploading (live publish gated behind --confirm)
+      notes: 'SUPERSEDED by config-distribution-model §15 (D3/D8). The config/packages tier wall collapsed into one units model: D3 retires the parallel ''da packages'' command tree (one CRUD surface via --scope/--source instead); D8 retires the OCI-only constraint (any source serves any kind). The surviving pass-2 artifact-resolution mechanic is now owned by config-v2-coherence/ce-unified-artifact-sourcing, built on p4f (units-lock wiring) + p5 (source types). No code was written for this task.'
       app_type: go-cli
     - id: p7-v1-deprecation-warnings
       title: 'Phase 7: v1 surface deprecation warnings (post-soak)'
-      status: pending
+      status: completed
       depends_on:
-        - p6-packages-pass2-cli
         - p4b-app-types-snapshot-refactor
+        - p4f-units-lock-7a-wiring
       blocks: []
       owner: dot-agents
       write_scope:
@@ -420,6 +399,8 @@ tasks:
         - existing v1 file continues to load (with warning)
 
         Open question for the user: how long is the soak window? Recommended: 2 minor releases. Document in §5 of dependency-map proposal.
+
+        Landed: merged to master via PR #123 (wave-2 state sync).
       app_type: go-cli
     - id: p1c-verifier-profile-source-aware
       title: 'Phase 1c (optional): source-aware verifier_profile.prompt_files'
@@ -449,7 +430,7 @@ tasks:
       app_type: go-cli
     - id: p7b-v1-auto-migrator
       title: 'Phase 7b: v1→v2 auto-migrator with 1-day sunset'
-      status: pending
+      status: completed
       depends_on:
         - p7-v1-deprecation-warnings
       blocks: []
@@ -471,10 +452,17 @@ tasks:
         5. Idempotent: running on already-v2 file is a no-op
 
         After this phase ships + the 1-day sunset window passes, v1 loading is REMOVED entirely (becomes a separate small PR after p7b proves the migrator covers).
+
+        Landed: `da config migrate` (opt-in v1→v2; v1.bak backup; folds legacy keys into
+        stage_profiles/execution_profile; idempotent; --dry-run) merged to master via PR #138
+        (2026-06-25) and shipped in the 0.4.1 release (#154, CHANGELOG ## [0.4.1] - 2026-06-24).
+        Implemented as the OPT-IN migrator with a 2-release soak (NOT a 1-day forced sunset — the
+        title is historical); v1 loading still works with a deprecation warning and is removed in a
+        later release. commands/config/migrate.go + internal/config/migrate.go.
       app_type: go-cli
     - id: p4d-da-install-repurpose
       title: 'Phase 4d: repurpose da install per spec §13.3'
-      status: pending
+      status: cancelled
       depends_on:
         - p4-config-explain-cli
       blocks: []
@@ -484,18 +472,11 @@ tasks:
         - commands/install_test.go
         - commands/lifecycle/install.go
       verification_required: true
-      notes: |-
-        Q4 ruling: repurpose `da install` to run combined sequence per spec §13.3:
-          da install ≡ da config sync && da packages install (+ existing install flow)
-
-        User-contract change. Document migration in CHANGELOG. Tests must cover:
-        - Backward compat: existing install args still work
-        - New combined flow: config sync runs first, then packages install, then traditional install
-        - Failure modes: config sync failure → don't proceed to packages install (atomic semantics)
+      notes: 'DEFERRED out of the config-v2 critical path (per the config-v2-dependency-map proposal''s own recommendation: do not couple v2 to repurposing existing verbs; defer to a separate plan). Under §15, ''da install'' repurpose is a D12 command-intent concern, separable from the v2 substrate. Re-file as its own plan when picked up. No code was written for this task.'
       app_type: go-cli
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the config-v2 minor'
-      status: pending
+      status: completed
       depends_on:
         - p0-schema-additive-extension
         - p0b-repo-id-bootstrap
@@ -507,11 +488,12 @@ tasks:
         - p4b-app-types-snapshot-refactor
         - p4c-config-sync-lint
         - p5-source-types-http-oci
-        - p6-packages-pass2-cli
-        - p7-v1-deprecation-warnings
+        - p4f-units-lock-7a-wiring
         - p1c-verifier-profile-source-aware
-        - p7b-v1-auto-migrator
-        - p4d-da-install-repurpose
+        - p4g-da-install-units-sync
+        - p4h-agentslock-interprocess-lock
+        - config-v2-coherence/ce-unified-artifact-sourcing
+        - config-v2-coherence/ck-command-reshape
       blocks: []
       owner: dot-agents
       write_scope:
@@ -519,34 +501,32 @@ tasks:
         - CHANGELOG.md
       verification_required: true
       notes: |-
-        Release-gated tail task (hybrid convention, MINOR path). Added per
-        maintainer ruling 2026-05-28 (plan now committed on this branch).
-        This plan delivers a new user-visible capability — the v2
-        config-distribution model: the `da config explain` command plus the
-        two-pass effective-config resolver, lockfile, layered sources/extends,
-        and packages tier. That is additive, no public surface removed, so a
-        MINOR.
-        Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). Maintainer ruling 2026-05-28 revised the
-        release lineup: the accumulated infra/docs/distribution work (#145)
-        ships as PATCH 0.3.3, NOT 0.4.0 — 0.4.0 is reserved for the next
-        genuine feature land. config-v2 (da config explain + resolver) IS that
-        feature, so this tail is expected to claim 0.4.0 (next minor after
-        0.3.3). config-explain/#162 holds for THIS tail -> 0.4.0, NOT 0.3.3.
-        Resolve the exact number from VERSION when this task becomes ready
-        (expected 0.4.0); serialize at the VERSION bump if another feature
-        plan's minor tail ships first (then this becomes 0.5.0).
-        Action: bump VERSION to the resolved next minor and finalize the
-        CHANGELOG "## [<target>]" section, documenting the v2 config model
-        and `da config explain`. Merge to master fires auto-release.yml.
-        Caution: this plan has in-flight tasks (p1 + p4 in_progress) — the
-        tail only becomes eligible once every dependency is completed.
+        Release-gated tail task (hybrid convention, MINOR path).
+        0.4.0 SCOPE (decided 2026-06-22) = the COMPLETE config-v2 §15 surface:
+        the effective-config resolver + unified units lockfile (one units
+        section + inputs_digest, clean cutover), da config explain/sync/lint/
+        verify, unified artifact sourcing (ce), the --scope/--source command
+        reshape (ck), and the re-scoped da install (p4g). Additive, no public
+        surface removed -> MINOR. v1 deprecation (p7/p7b) is DEFERRED to 0.5.0
+        (ships with that release's other work) and is NOT a 0.4.0 gate; da
+        install repurpose is IN 0.4.0 (p4g), not deferred.
+        Target version = next minor computed from VERSION at ready-time (do NOT
+        hardcode; expected 0.4.0) — serialize at the VERSION bump if another
+        feature minor lands first (then this claims the next number).
+        Action: bump VERSION + finalize the CHANGELOG "## [<target>]" section
+        documenting the v2 config model. Merge to master fires auto-release.yml.
+        Becomes eligible only once every dependency is completed.
+
+        Landed: 0.4.0 PUBLISHED (VERSION=0.4.0, CHANGELOG ## [0.4.0] - 2026-06-23) via
+        release PR #114. ARCHIVE-eligible (wave-2 state sync).
       app_type: release
     - id: p4f-units-lock-7a-wiring
       title: 'Phase 4f: wire §7A units lock (inputs_digest + units) into resolve/sync; verify tracks local-scope drift'
-      status: pending
+      status: completed
       depends_on:
-        - p4e-config-explain-lockfile
+        - p4-config-explain-cli
+        - config-v2-coherence/ca-units-lock-schema
+        - config-v2-coherence/cd-ensure-resolved-seam
       blocks: []
       owner: dot-agents
       write_scope:
@@ -561,21 +541,220 @@ tasks:
         Wire the dormant §7A seam (EnsureResolved/ComputeInputsDigest/WriteUnitsLock) into da config
         sync and da install so every resolved project — including flat/local-only — gets a lockfile
         carrying inputs_digest plus the units section. Migrate verify/explain/doctor to read units and
-        compare ComputeInputsDigest against the lock to report local-scope drift; deprecate the §7
-        config section. Makes local sources first-class (managed, often git-backed). Full design in
+        compare ComputeInputsDigest against the lock to report local-scope drift. Full design in
         .agents/proposals/section-7a-units-lock-wiring.md.
 
-        Adversarial review (2026-06-03) surfaced three concrete split-brain failures that MUST be
-        resolved before wiring any production caller to EnsureResolved:
-        (1) Stale-repair split-brain: EnsureResolved detects staleness via Staleness()/ReadUnits but
-            the stale path dispatches into LayeredResolver.Resolve which only calls WriteConfigLock
-            (legacy config section) and never WriteUnitsLock or refreshes inputs_digest. Fix: make
-            the stale path write the 7A lock model or dual-write from one authoritative code path.
-        (2) Offline reader breakage: ResolveLocked and VerifyLayerLocks still unmarshal only
-            LockSectionConfig; a units-only lockfile will appear empty, causing offline resolution to
-            fail with 'no resolved SHA' and da config verify to report unpinned layers. Fix: dual-read
-            both legacy config section and 7A units during migration, then retire the legacy reader.
-        (3) verify invisibility: da config verify never calls Staleness() or compares inputs_digest,
-            so local-scope drift that 7A was designed to catch is invisible on the primary contract
-            check. Fix: add a first-class staleness check backed by Staleness()/ReadUnits to verify.
+        MIGRATION = CLEAN CUTOVER (decided 2026-06-22). Pre-1.0 and the lock is regenerable, so do
+        NOT build a dual-write/dual-read window. The lock is units-only; a one-time on-read migration
+        converts any legacy `config`-section lock into `units` on first read, then the legacy reader is
+        REMOVED in this task. The §7 config lock section is retired here (ships in 0.4.0), not deferred.
+
+        Three correctness fixes the cutover MUST honor (adversarial review 2026-06-03):
+        (1) Stale-repair: the stale path (LayeredResolver.Resolve) currently calls only
+            WriteConfigLock. Route ALL writes through one authoritative path that calls WriteUnitsLock
+            + refreshes inputs_digest — leave no legacy WriteConfigLock behind.
+        (2) Offline reader: ResolveLocked and VerifyLayerLocks currently unmarshal only
+            LockSectionConfig. Switch them to read the `units` section; the one-time on-read migration
+            upgrades any old config-section lock so offline resolve never sees an 'empty' lock.
+        (3) verify invisibility: da config verify never calls Staleness()/compares inputs_digest. Add
+            a first-class staleness check backed by Staleness()/ReadUnits so local-scope drift shows
+            on the primary contract check.
+      app_type: go-cli
+    - id: p4g-da-install-units-sync
+      title: 'Phase 4g: re-scope da install onto EnsureResolved + exact/prune projection (§15)'
+      status: completed
+      depends_on:
+        - p4f-units-lock-7a-wiring
+        - p4c-config-sync-lint
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/install.go
+        - commands/internal/lifecycle/install.go
+        - commands/internal/lifecycle/install_test.go
+      verification_required: true
+      notes: |-
+        Replaces the CANCELLED p4d, whose 'da install == da config sync && da packages install'
+        framing died with §15 (there is no da packages install; artifacts are kind:artifact units
+        resolved by the same resolver). Re-scope da install onto the unified seam.
+
+        Target flow: load manifest -> EnsureResolved(project) (staleness check; if stale, re-resolve
+        local scopes + write the units lock) -> create ~/.agents project dirs -> register project in
+        ~/.agents/config.json -> shared-target projection EXACT/PRUNE (reuse
+        RunSharedTargetProjectionExact, same path as refresh) -> platform links (Claude/Cursor/Codex/
+        Copilot) -> record the resolution stamp (version/commit/describe) in the LOCK, NOT
+        .agentsrc.json. da install stays the canonical 'make everything current'; the only step
+        required on a fresh clone.
+
+        INPUT/OUTPUT rule (decided 2026-06-22): .agentsrc.json is the hand-authored INPUT manifest and
+        must never be machine-stamped; all resolution OUTPUT (per-unit digests AND the version/commit/
+        describe stamp) lives in the lock. So REMOVE the current finalizeInstall .agentsrc.json write
+        and record the stamp in the units lock instead (coordinate the lock-header stamp field with
+        p4f's units-lock schema). This also makes installs reproducible: the lock fully describes what
+        was resolved.
+
+        Simplifications the units model enables (analyzed 2026-06-22; size S, ~10-20 lines of wiring):
+        - Collapse bespoke resolveInstallSources + linkInstallResources into ONE EnsureResolved call
+          (the resolver owns all unit resolution + the units lock write).
+        - Reuse RunSharedTargetProjectionExact (one exact/prune projection path; drop the additive-only
+          install projection).
+        - Dedupe vs da config sync: both call EnsureResolved, differing by intent/flags — install adds
+          ~/.agents projection + platform links + project registration; config sync does not.
+        - First-resolve is hermetic (fresh machine, no lock -> deterministic create-on-first-resolve).
+        Boundary: upstream re-check is explicit-only (da config sync --refresh); install resolves
+        local scopes only (D10). Depends on p4f so EnsureResolved writes the UNITS lock (clean
+        cutover), not the legacy config section. SEE the Codex constraints below.
+
+        Codex adversarial-review constraints (2026-06-22) that MUST be honored in this collapse:
+        (F-007) Before collapsing resolveInstallSources + linkInstallResources into EnsureResolved,
+            PROVE the units resolver materializes EVERY resource type linkInstallResources handles
+            (agents/skills/commands/hooks/mcp). If EnsureResolved does not materialize all of them, a
+            fresh clone with manifest-only sources would project nothing — so keep resource
+            materialization as an EXPLICIT post-EnsureResolved step rather than assuming the resolver
+            covers it. Verify with a fresh-clone test that asserts every resource type lands.
+        (F-008) EnsureResolved updates the lock BEFORE projection/platform-link runs, so a failed
+            projection would otherwise leave the lock 'current' while outputs are stale/partial. Make
+            projection AND platform-link failures HARD errors in the install path (non-zero exit), or
+            write an explicit incomplete-stamp to the lock instead of a success stamp. Do NOT keep the
+            legacy behavior of treating link/projection failures as warnings that still finalize
+            success. Test: a forced projection failure must fail the install (or stamp incomplete),
+            never report success with a current lock.
+
+        Landed: merged to master via PR #92 (install.go uses config.EnsureResolved +
+        RunSharedTargetProjectionExact with --inexact opt-out, fb6caf36). Status was stale
+        awaiting_agent_review from the #126 sync; reconciled to completed (wave-2 state sync).
+      app_type: go-cli
+    - id: p4h-agentslock-interprocess-lock
+      title: 'Phase 4h: agentslock interprocess lost-update protection (.agentsrc.lock)'
+      status: completed
+      depends_on:
+        - p4f-units-lock-7a-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/agentslock/lockfile.go
+        - internal/agentslock/lockfile_test.go
+      verification_required: true
+      notes: |-
+        Codex adversarial review F-006 (2026-06-22), GATED INTO 0.4.0. internal/agentslock/lockfile.go
+        has only an in-process sync.Mutex; there is NO interprocess protection. Two concurrent `da`
+        processes each Open a snapshot of the whole document, mutate their own section, and Flush via
+        temp-file + atomic rename (fsops.WriteFileAtomic) — the later rename silently DISCARDS the
+        earlier process's writes to sibling sections (a whole section + inputs_digest can vanish).
+
+        This is a data-integrity defect, NOT a p4f blocker (p4f's on-read migration is idempotent, so a
+        racing read yields a recoverable stale-read). But 0.4.0 GROWS the concurrency surface:
+        EnsureResolved auto-syncs on more commands, and the handoff PreCompact hook will run `da`
+        concurrently with the agent's own `da` against the SAME per-project lock — so ship the fix in
+        0.4.0.
+
+        Fix (choose one, document the choice): either (a) an interprocess advisory lock (e.g. flock on a
+        sidecar) held across Open..Flush, or (b) a compare-and-merge-retry: immediately before the
+        atomic rename, re-read the on-disk file; if it changed since Open, re-merge this process's
+        section deltas onto the latest on-disk sibling sections and retry (bounded). Preserve the atomic
+        temp+rename. The agentslock package is shared (KG lockfile, units lock, config lock) so keep the
+        public API stable.
+
+        Acceptance: a concurrent-writer test that launches two writers racing on the same .agentsrc.lock
+        (each setting a DIFFERENT section, e.g. one writes units + inputs_digest, the other writes a KG
+        or adapters section) and asserts BOTH sections AND inputs_digest survive after both Flush — i.e.
+        no lost update. Must be deterministic (no sleeps; use real goroutine/process contention with a
+        barrier).
+      app_type: go-cli
+    - id: lint-validate-locked-remote-layers
+      title: 'Fast-follow: da config lint validates locked+cached remote layers (not blanket-skip)'
+      status: completed
+      depends_on:
+        - p4c-config-sync-lint
+        - p4f-units-lock-7a-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher.go
+        - internal/config/cache_keys.go
+        - commands/config/lint.go
+        - commands/config/lint_test.go
+        - internal/config/fetcher_test.go
+      verification_required: true
+      notes: |-
+        Codex adversarial review F-005 (2026-06-22), fast-follow (NOT a 0.4.0 release gate). Today
+        `da config lint` skips ALL non-local (git/http/oci) layers by source type
+        (commands/config/lint.go: `if src.Type != "local"` -> lintSkip), so a CORRUPT remote layer's
+        JSON stays unvalidated while lint still exits OK — lint claims a clean bill it did not check.
+
+        Fix: for a LOCKED remote layer (a units-lock entry with a recorded digest whose bytes are in the
+        local cache), read the cached bytes AT THE LOCKED DIGEST and validate them against the AgentsRC
+        schema, exactly like a local layer. Skip ONLY when the layer is unlocked OR its bytes are not
+        cached (then keep the 'run da config sync then lint' skip note). This requires EXPORTING a
+        cache-read-by-digest helper from internal/config (the cache helpers — cachedLayerPath /
+        readCachedLayer / layerCacheDir — are currently unexported); lint then resolves each locked
+        remote layer's digest via the units lock (cfg.ReadUnits / ReadLockedUnits) and reads the cached
+        layer.json at that digest.
+
+        Target 0.4.0 IF it lands without churn, else 0.4.1. It is lint-completeness ('lint must not
+        report OK on layers it never validated'), not a correctness/security blocker, so it is NOT in
+        release-minor depends_on. Depends on p4f for the units-lock digest surface and p4c for the lint
+        command.
+
+        Acceptance: a fixture with a locked remote (git) layer whose CACHED bytes are corrupt JSON makes
+        lint FAIL (not skip); an unlocked/uncached remote layer still SKIPs with the sync hint; a valid
+        cached remote layer PASSes.
+
+        Landed: merged to master via PR #127 (wave-2 state sync).
+      app_type: go-cli
+    - id: p8-payout-wrk-v2-upgrade
+      title: Payout-wrk v1->v2 upgrade + fresh install-from-git validation (0.4.1)
+      status: ready
+      depends_on:
+        - p7b-v1-auto-migrator
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/history/config-v2-migration/payout-wrk-v2-upgrade-readback.md
+      verification_required: true
+      notes: |-
+        BROUGHT FORWARD for the 0.4.1 release at maintainer request. This is the
+        "payout upgrade": migrate the payout workspace repo NikashPrakash/payout-wrk
+        (org PayoutPos, has submodules, Windows machine) from a v1 .agentsrc.json to
+        v2, then prove a fresh install-from-git-source resolves correctly.
+
+        SCOPE (dot-agents-side readiness here; LIVE execution runs on the Windows box
+        against payout-wrk, NOT in this repo):
+        (a) Run `da config migrate` on payout-wrk (v1->v2). Per PR #138 the ORIGINAL
+            manifest is copied to `.agentsrc.json.v1.bak` before the v2 file is
+            written (recoverable), legacy keys are folded into stage_profiles /
+            execution_profile, version bumped to 2, idempotent on re-run.
+        (b) Verify a fresh install-from-git-source resolves correctly for payout-wrk's
+            configured git source (clean clone + `da install` / `da refresh` -> local
+            source resolves, units lock + layer stack resolve without error).
+        (c) DIAGNOSE the "failed to get the local" error the maintainer hit on Windows
+            BEFORE running (a)/(b). It is most plausibly the local-source resolve step
+            (internal/config/local_source.go emits "local source: ..." errors) reached
+            via the install-from-git path, which on Windows shells out to a real git
+            binary (commands/internal/lifecycle/install.go CloneGitSource uses
+            exec.LookPath("git") + `git clone`). Candidate root causes to confirm: git
+            not on PATH on the Windows box; submodule handling in the shallow clone;
+            or local `~/.agents` source dir not initialized/openable. The
+            config-v2-migration fold-back `fb:consolidate-clone-on-gogit` (migrate
+            CloneGitSource to in-process go-git, removing the git-binary/PATH
+            dependency) is the likely durable fix if PATH/clone is the cause -- treat
+            it as a candidate blocker to land first IF diagnosis confirms it blocks.
+
+        DEPENDENCY PICTURE (maintainer: assume no deps unless a REAL blocker):
+        - #124 (loop-discipline e2e smoke) is MERGED (2026-06-24) -- the earlier
+          work-plan "p6-payout-backfill depends on #124" dep is SATISFIED. (Note:
+          that p6 task is a DIFFERENT scope -- hook-discipline backfill to the LOCAL
+          /Users/nikashp/Documents/payout -- not this payout-wrk v1->v2 upgrade.)
+        - REAL BLOCKER: `da config migrate` does NOT exist on master yet. PR #138
+          (feat/config-migrate-command, task p7b-v1-auto-migrator) is OPEN, awaiting
+          owner review/merge. Step (a) cannot run until #138 merges. This task's
+          depends_on: p7b-v1-auto-migrator encodes that.
+        - CANDIDATE BLOCKER (to diagnose): the Windows "failed to get the local"
+          error -- step (c). If it blocks install-from-git, resolve before (b).
+        - Requires Windows access to the payout-wrk box for live execution.
+
+        Readback artifact records: pre-migration v1 manifest shape + resolved layers,
+        the `da config migrate` invocation + the v1.bak backup path, the v2 manifest
+        delta, the fresh install-from-git resolution result, and the Windows
+        local-fetch diagnosis (root cause + fix or confirmed non-blocker).
       app_type: go-cli

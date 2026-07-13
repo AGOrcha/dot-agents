@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/config"
 	"github.com/go-git/go-git/v6/plumbing"
@@ -258,6 +259,11 @@ func runWorkflowCommit(out io.Writer, git gitOps, dryRun bool, includes []string
 	if err := git.Commit(message); err != nil {
 		return fmt.Errorf(commitErrFmt, err)
 	}
+	if project, perr := currentWorkflowProject(); perr == nil {
+		emitWorkflowSuccess(project.Path, journal.CmdCommit,
+			&journal.CommitInput{Includes: includes, DryRun: dryRun},
+			&journal.CommitObserved{StagedPaths: paths})
+	}
 	fmt.Fprintf(out, "workflow commit: staged %d path(s) and committed\n", len(paths))
 	return nil
 }
@@ -315,7 +321,14 @@ func commitDisabledFromPrefs() (bool, string) {
 	}
 	prefs, err := resolvePreferences(project.Path, project.Name)
 	if err != nil {
-		return false, ""
+		// resolvePreferences already treats a missing preferences.yaml as
+		// legitimate absence (nil error) — reaching here means a REAL error,
+		// e.g. corrupt YAML or permission denied. Silently returning
+		// "not disabled" would let the auto-commit flow run even though the
+		// operator's actual (unreadable) preference might be
+		// commit.disable=true — the unsafe direction. Fail safe: skip the
+		// auto-commit and say why, instead of silently overriding it.
+		return true, fmt.Sprintf("workflow preferences unreadable, commit.disable unknown: %v", err)
 	}
 	if prefs.Commit.Disable != nil && *prefs.Commit.Disable {
 		return true, "commit.disable=true in workflow preferences"

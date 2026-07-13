@@ -1,0 +1,15 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/workspace-state.json';
+---
+<BaseLayout title="Workspace state" description={graph.description}>
+  <h1>{graph.title}</h1>
+  <p>{graph.description}</p>
+  <p style="color:var(--text-dim); font-size:0.85rem;">
+    Snapshot captured: <code>{graph.captured_at}</code>.
+    Live JSON ingestion is a follow-up task — see the
+    <a href={`${import.meta.env.BASE_URL.replace(/\/$/, '')}/about/`}>about page</a>.
+  </p>
+  <ResourceGraph graph={graph} graphId="workspace-state" layoutName={graph.layout} />
+</BaseLayout>

@@ -1,0 +1,21 @@
+{
+  "session": { "number": 5, "title": "The Silver Caravan", "played_at": "2026-02-01" },
+  "notes": [
+    { "id": "loc:saltmarch", "type": "location", "fields": { "name": "Saltmarch", "region": "Coriane", "kind": "town" } },
+    { "id": "fac:silverhand", "type": "faction", "fields": { "name": "Silverhand Caravan", "kind": "guild", "stance": "neutral", "seat": "loc:saltmarch" } },
+    { "id": "char:pell", "type": "character", "fields": { "name": "Pell Arden", "kind": "npc", "status": "alive", "stated_location": "loc:saltmarch", "allegiance": "fac:silverhand" } },
+    { "id": "evt:s5-caravan", "type": "event", "fields": { "summary": "The party joins the Silverhand caravan to Coriane", "session": 5, "occurred_in": "loc:saltmarch" } }
+  ],
+  "edges": [
+    { "type": "connects_to", "from": "loc:ironhold", "to": "loc:saltmarch" },
+    { "type": "located_in", "from": "fac:silverhand", "to": "loc:saltmarch" },
+    { "type": "member_of", "from": "char:pell", "to": "fac:silverhand" },
+    { "type": "present_at", "from": "char:mara", "to": "evt:s5-caravan" },
+    { "type": "present_at", "from": "char:sera", "to": "evt:s5-caravan" },
+    { "type": "present_at", "from": "char:pell", "to": "evt:s5-caravan" },
+    { "type": "involves", "from": "evt:s5-caravan", "to": "char:pell" },
+    { "type": "occurred_at", "from": "evt:s5-caravan", "to": "loc:saltmarch" },
+    { "type": "allied_with", "from": "fac:silverhand", "to": "fac:wardens" },
+    { "type": "knows", "from": "char:mara", "to": "char:pell" }
+  ]
+}

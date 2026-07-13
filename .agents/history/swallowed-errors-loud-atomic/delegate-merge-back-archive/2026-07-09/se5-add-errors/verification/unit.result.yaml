@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: se5-add-errors
+parent_plan_id: swallowed-errors-loud-atomic
+verifier_type: unit
+status: pass
+summary: 'go build/vet green; go test ./commands/sync/... green (incl. new TestCommit_AddStagingErrorPropagates, TestStageAndCommit_GenuineFailurePropagates, TestStageAndCommit_AddFailurePropagates, TestRunSyncPush_CommitFailureStopsBeforePush); gocognit -over 15 clean on commit.go+push.go; per-file coverage gate PASS at 95%: commit.go 95.83% (23/24 stmts), push.go 97.67% (42/43 stmts), no exceptions entry needed'
+recorded_at: "2026-07-09T12:07:05Z"
+delegation_id: del-se5-add-errors-1783598819
+recorded_by: da workflow verify record
+commands:
+    - go build ./... && go test ./commands/sync/... && go vet ./commands/sync/... && gocognit -over 15 commands/sync/{commit,push}.go && COVERAGE_FILE_MODE=enforce scripts/coverage-gate.sh

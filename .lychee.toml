@@ -1,0 +1,37 @@
+# Lychee link-checker config — validates the BUILT docs site (docs/web/dist).
+# Used by the "Link check" job in .github/workflows/deploy-docs.yml. Catches the
+# bare-filename 404 class (a docs link that loses its `docs/` prefix) and any
+# in-site page-to-page link that points at a route the build never produced.
+
+# Network politeness / flake resistance for the external github.com blob URLs
+# the docs link-rewriter emits for non-public targets.
+max_retries = 3
+retry_wait_time = 2
+timeout = 20
+
+# 2xx = ok; 429 = rate-limited (github.com throttles anonymous CI) — treat as OK
+# so a throttled external host can never fail the internal-link gate. A genuine
+# 404 (e.g. a docs link that lost its `docs/` prefix) still fails the check.
+accept = ["200..=299", "429"]
+
+# Hosts/paths that cannot be resolved from CI.
+exclude = [
+  # The site's OWN origin. A page's canonical/og self-URL (and any absolute
+  # in-site link) points at https://agorcha.dev/<route>, which 404s for any page
+  # not yet DEPLOYED — every new-page PR adds routes that exist in dist/ but not
+  # on the live site until this PR merges + deploys (a deploy-lagging chicken-and-
+  # egg). In-site links are already validated offline against dist/ via the
+  # rewriter's relative paths, and the routes are proven by the build, so the
+  # live-deployment check is the wrong tool for the site's own pages. (Subsumes
+  # the Cloudflare-Access-gated /internal section, which also 401s the checker.)
+  "^https://agorcha\\.dev",
+  # Placeholder / loopback hosts that appear in prose examples.
+  "^https?://(localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|example\\.(com|org|net))",
+  # Vendor doc rot: OpenCode removed /docs/modes/ (folded into /docs/agents/).
+  # Excluded so it can't fail the gate; the prose in PLATFORM_DIRS_DOCS.md is
+  # tracked for a content refresh via the platform-docs-refresh skill.
+  "^https://opencode\\.ai/docs/modes/?$",
+]
+
+# mailto: links are not checked (include_mail defaults to false; left explicit).
+include_mail = false

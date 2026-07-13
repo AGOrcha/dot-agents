@@ -1,0 +1,153 @@
+schema_version: 1
+plan_id: dm6-da-sso-autowire
+tasks:
+    - id: t1-credstore-write-path
+      title: 'Credstore write path for docsaccess ids (atomic, auto-wire)'
+      status: pending
+      depends_on:
+        - docs-starlight-migration/dm6-agent-internal-access
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/credstore/
+        - internal/docsaccess/
+      verification_required: true
+      notes: |-
+        Add/confirm an all-or-nothing write of the pair cf-access-client-id / cf-access-client-secret into the
+        existing encrypted, keychain-wrapped credstore (no new format/file/loader). Mirror the attach client's
+        "never half-set" invariant: both ids written or neither. Prove auto-wire with a test that writes via this
+        path then resolves through the standard loader chain and feeds internal/docsaccess.Decorate successfully.
+        Spec section 5. No new privileged key in the binary (section 7).
+      app_type: go-cli
+    - id: t2-cloudflared-sso-seam
+      title: 'CF Access JWT acquisition seam (cloudflared access + paste fallback)'
+      status: pending
+      depends_on:
+        - docs-starlight-migration/dm6-agent-internal-access
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/docsaccess/
+      verification_required: true
+      notes: |-
+        Implement the SSO leg per spec section 2 (two-horizon). NEAR-TERM = Option A: obtain a CF Access app JWT by
+        shelling to `cloudflared access login <app-url>` then `cloudflared access token --app=<app-url>`; detect
+        cloudflared absence and degrade to a paste-fallback (Option C) + install hint; never crash. CRITICAL: put the
+        acquirer behind a swappable interface-DI seam (a JWTAcquirer interface; the exec runner injected) so the
+        command/consumer code is unchanged when the mechanism becomes Option B (loopback browser->127.0.0.1 callback,
+        the gh/VS Code/Claude pattern) on the future daemon + auth-proxy. JWT held only for the provision call, never
+        persisted by da, never logged (section 7). OQ-1: A now, B later via the seam.
+      app_type: go-cli
+    - id: t3-provision-client
+      title: 'Provision HTTP client: POST /internal/provision, status mapping'
+      status: pending
+      depends_on:
+        - docs-starlight-migration/dm6-agent-internal-access
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/docsaccess/
+      verification_required: true
+      notes: |-
+        HTTPS-only client (ErrInsecureScheme parity, section 7) that POSTs the JWT to /internal/provision on the
+        configured docs host (default agorcha.dev, override DA_DOCS_HOST) and parses {client_id, client_secret, name}.
+        Map each Worker status to a distinct, actionable, secret-free error: 401 re-login, 422 no-identity, 503
+        mint-unconfigured (server gap), 502 backend failure (surface reason code only). httptest-driven tests for every
+        branch. Contract = PR #93 worker.js response/status shape. Spec sections 4, 9.
+      app_type: go-cli
+    - id: t4-da-docs-login-command
+      title: 'da docs login command (interactive default + paste + status modes)'
+      status: pending
+      depends_on:
+        - t1-credstore-write-path
+        - t2-cloudflared-sso-seam
+        - t3-provision-client
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+      verification_required: true
+      notes: |-
+        New `da docs login` (sibling to obs `da observability login`); NOT a flag on init/refresh (section 3). Wires
+        t2 SSO -> t3 provision -> t1 store. Supplies a sanitized device suffix (hostname or stable local device id) so
+        the minted token is per-device (section 6). Modes: interactive default; paste-JWT fallback; status/check
+        (reports whether stored creds exist, authenticate, AND time-to-expiry per the TTL, mints nothing); local-clear
+        (remove the two ids). Honor global dry-run/yes/verbose/force; dry-run mints+writes nothing but describes the
+        flow. Output prints only the token NAME + the credential ids, never client_secret / JWT (section 3 UX,
+        done-criteria 7,10). Persist the non-secret expiry so status can warn before expiry. Register in commands/root.go.
+      app_type: go-cli
+    - id: t5-init-refresh-hints
+      title: 'init/refresh: non-fatal unprovisioned hint; never mint or prompt'
+      status: pending
+      depends_on:
+        - t4-da-docs-login-command
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/internal/lifecycle/
+      verification_required: true
+      notes: |-
+        Confirm da init and da refresh stay non-interactive and never mint (section 5). At most surface a non-fatal
+        hint pointing at `da docs login` when docsaccess creds are absent; init/refresh still succeed. A missing-cred
+        error on an /internal/* fetch stays fail-loud (existing attach-client behavior) with the same hint. Tests
+        assert no browser/prompt and that absence is hint-not-hang. Done-criteria 3.
+      app_type: go-cli
+    - id: t6-worker-per-device-rotate-ttl
+      title: 'Worker route: per-device naming + delete-then-create rotate + TTL'
+      status: pending
+      depends_on:
+        - t4-da-docs-login-command
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/web/src/worker.js
+        - docs/web/tests/worker.test.js
+        - docs/web/wrangler.jsonc
+      verification_required: true
+      notes: |-
+        OQ-2 RESOLVED = per-device model (section 6). Extend the merged dm6 /internal/provision route (#93):
+        (a) accept an optional client-supplied device suffix in the POST body, sanitize it, and append to the
+        JWT-derived user slug -> agorcha-agents-<user-slug>-<device> (user part still ONLY from the verified JWT, never
+        client-supplied, to prevent impersonation); (b) delete-then-create that exact name so re-provision on a device
+        rotates rather than duplicates (list service_tokens, delete the match, then create); (c) set a server-enforced
+        duration (~720h / 30 days) on the mint call so secrets expire (freshness + leak blast-radius) — TTL as a Worker
+        const/var, NOT client-overridable. Confirm the CF API duration format + any min/max against the live API. Add
+        worker tests for device-suffix derivation, rotate (delete-then-create) and the duration in the mint body.
+        Tokens accumulate across devices by design; revoke = delete by name/prefix.
+      app_type: docs
+    - id: t8-da-docs-consumer
+      title: 'da docs get/sync consumer + gated internal .md endpoints'
+      status: pending
+      depends_on:
+        - t4-da-docs-login-command
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/
+        - internal/docsaccess/
+        - docs/web/
+      verification_required: true
+      notes: |-
+        Close the consumer gap (section 3a): the attach client (#83) has no caller today, so a provisioned token does
+        nothing. Add `da docs get <path>` / `da docs sync` that fetch the gated /internal/* surface THROUGH da so the
+        attach client adds the service-token headers (raw agent WebFetch is unauthenticated -> 401). Extend dm4's .md
+        emission to also produce the INTERNAL pages raw markdown behind the dm5 gate (agent-readable shape; public .md
+        surface unchanged). HTTPS-only, DA_DOCS_HOST override, fail-loud on missing creds; on 401 (expired/stale per
+        TTL) point at `da docs login`. Tests: httptest consumer with injected attach client; gated .md endpoint
+        excludes from public, included under /internal/. Done-criteria 2.
+      app_type: go-cli
+    - id: t7-onboarding-docs
+      title: 'Developer onboarding docs for internal-docs self-provision'
+      status: pending
+      depends_on:
+        - t4-da-docs-login-command
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: false
+      notes: |-
+        Document the end-to-end developer flow (run da docs login -> agents read /internal/*), the cloudflared
+        prerequisite + paste fallback, the status/check and local-clear modes, and the rotation/revocation story from
+        t6. Lives on the internal docs surface. Section 11 done-criteria become the doc's "verify it worked" steps.
+      app_type: docs

@@ -41,7 +41,11 @@ func (r *LayeredResolver) ResolveLocked(projectPath string) (*Snapshot, error) {
 		return r.flat.Resolve(projectPath)
 	}
 
-	locked, err := readLockedLayers(projectPath)
+	// §7A units read: the authoritative units section is read through the
+	// one-time on-read migration (ReadUnits upgrades a legacy config-only lock),
+	// so a units-only lock resolves offline and a pre-§7A lock is upgraded on
+	// first read — no permanent dual-read of the legacy section.
+	locked, err := readLockedLayersFromUnits(projectPath)
 	if err != nil {
 		return nil, err
 	}

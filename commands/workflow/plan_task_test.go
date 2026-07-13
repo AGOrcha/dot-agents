@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -63,7 +67,7 @@ func TestArchiveSinglePlan_RenameWhenNoHistory(t *testing.T) {
 	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Source should be gone, destination should exist
@@ -143,7 +147,7 @@ func TestArchiveSinglePlan_MergeWithDMASkip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -191,7 +195,7 @@ func TestArchiveSinglePlan_IdenticalHashSkipped(t *testing.T) {
 	future := time.Now().Add(time.Hour)
 	_ = os.Chtimes(dstExtra, future, future)
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -232,7 +236,7 @@ func TestArchiveSinglePlan_DifferingFileOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -273,7 +277,7 @@ func TestArchiveSinglePlan_HistoryNewerSkipped(t *testing.T) {
 	}
 	// dst mtime is now (newer than src)
 
-	if err := archiveSinglePlan(proj, "myplan", false, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -294,7 +298,7 @@ func TestArchiveSinglePlan_DryRun(t *testing.T) {
 	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
 
-	if err := archiveSinglePlan(proj, "myplan", false, true); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", false, true, true); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -321,7 +325,7 @@ func TestArchiveSinglePlan_NonCompletedGuard(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "myplan", "active")
 
-	err := archiveSinglePlan(proj, "myplan", false, false)
+	err := archiveSinglePlan(proj, "myplan", false, false, true)
 	if err == nil {
 		t.Fatal("expected error for non-completed plan without --force")
 	}
@@ -335,7 +339,7 @@ func TestArchiveSinglePlan_ForceBypassesGuard(t *testing.T) {
 	proj := t.TempDir()
 	setupArchivePlan(t, proj, "myplan", "active")
 
-	if err := archiveSinglePlan(proj, "myplan", true, false); err != nil {
+	if err := archiveSinglePlan(proj, "myplan", true, false, true); err != nil {
 		t.Fatalf("--force should bypass status guard; got: %v", err)
 	}
 	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
@@ -381,7 +385,7 @@ func TestRunWorkflowPlanArchive_Bulk(t *testing.T) {
 	setupArchivePlan(t, proj, "plan-a", "completed")
 	setupArchivePlan(t, proj, "plan-b", "completed")
 
-	err := runWorkflowPlanArchive(proj, []string{"plan-a", "plan-b"}, false, false)
+	err := runWorkflowPlanArchive(proj, []string{"plan-a", "plan-b"}, false, false, true)
 	if err != nil {
 		t.Fatalf("bulk archive should succeed for both: %v", err)
 	}
@@ -400,7 +404,7 @@ func TestRunWorkflowPlanArchive_BulkPartialFailure(t *testing.T) {
 	// plan-ok is good, plan-bad does not exist
 	setupArchivePlan(t, proj, "plan-ok", "completed")
 
-	err := runWorkflowPlanArchive(proj, []string{"plan-bad", "plan-ok"}, false, false)
+	err := runWorkflowPlanArchive(proj, []string{"plan-bad", "plan-ok"}, false, false, true)
 	// Should return the first error
 	if err == nil {
 		t.Fatal("expected error from missing plan-bad")
@@ -411,6 +415,180 @@ func TestRunWorkflowPlanArchive_BulkPartialFailure(t *testing.T) {
 	if _, err := os.Stat(dstDir); err != nil {
 		t.Errorf("plan-ok should still be archived after plan-bad failure: %v", err)
 	}
+}
+
+// ── archive-commit (non-persistence fix) tests ─────────────────────────────────
+
+// Commit-by-default: archiveSinglePlan invokes iterationCloseCommit once, and
+// only AFTER the working tree is in its final archived state (source dir gone,
+// history dir populated) so the deletion + addition are staged together as one
+// commit. Uses the iterationCloseCommit test seam — the same seam advance /
+// merge-back tests rebind — so no real git repo is needed to prove invocation.
+func TestArchiveSinglePlan_InvokesCommitByDefault(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+
+	var calls int
+	var srcGoneAtCommit, dstPresentAtCommit bool
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error {
+		calls++
+		// The commit hook must fire with the tree already in its final state.
+		if _, err := os.Stat(srcDir); os.IsNotExist(err) {
+			srcGoneAtCommit = true
+		}
+		if _, err := os.Stat(filepath.Join(dstDir, "PLAN.yaml")); err == nil {
+			dstPresentAtCommit = true
+		}
+		return nil
+	}
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	if err := archiveSinglePlan(proj, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected commit hook invoked exactly once, got %d", calls)
+	}
+	if !srcGoneAtCommit {
+		t.Error("commit hook fired before the source plan dir was removed")
+	}
+	if !dstPresentAtCommit {
+		t.Error("commit hook fired before the history dir was populated")
+	}
+}
+
+// A commit-hook failure aborts the archive with a wrapped error so the operator
+// learns the move did not persist.
+func TestArchiveSinglePlan_CommitFailurePropagates(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { return errors.New("commit boom") }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	err := archiveSinglePlan(proj, "myplan", false, false, false)
+	if err == nil || !strings.Contains(err.Error(), "commit archive move") {
+		t.Fatalf("expected wrapped commit error, got %v", err)
+	}
+}
+
+// --no-commit suppresses the commit hook entirely while still performing the
+// filesystem move.
+func TestArchiveSinglePlan_NoCommitSkipsCommit(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+	srcDir := filepath.Join(proj, ".agents", "workflow", "plans", "myplan")
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+
+	var calls int
+	prior := iterationCloseCommit
+	iterationCloseCommit = func(io.Writer) error { calls++; return nil }
+	t.Cleanup(func() { iterationCloseCommit = prior })
+
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("--no-commit must not invoke the commit hook, got %d calls", calls)
+	}
+	// The move still happens; only the commit is suppressed.
+	if _, err := os.Stat(srcDir); !os.IsNotExist(err) {
+		t.Error("source dir should be removed even with --no-commit")
+	}
+	if _, err := os.Stat(dstDir); err != nil {
+		t.Errorf("history dir should exist even with --no-commit: %v", err)
+	}
+}
+
+// End-to-end proof of the fix: in a real git repo where the plan dir is tracked,
+// a default (commit-enabled) archive stages the deletion of plans/<id> AND the
+// addition of history/<id> as one real commit, leaving `git status` CLEAN. This
+// is the exact scenario the fresh-clone / worktree loop model requires: without
+// the commit the move is discarded before it lands on master.
+func TestArchiveSinglePlan_RealGitCommitLeavesCleanTree(t *testing.T) {
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
+
+	setupArchivePlan(t, dir, "myplan", "completed")
+	// Track the plan dir so the archive produces a real deletion side.
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "seed plan")
+	headBefore := gitOut(t, dir, "rev-parse", "HEAD")
+
+	if err := archiveSinglePlan(dir, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+
+	// The move landed on disk.
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "workflow", "plans", "myplan")); !os.IsNotExist(err) {
+		t.Error("source plan dir should be gone")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agents", "history", "myplan", "PLAN.yaml")); err != nil {
+		t.Errorf("history PLAN.yaml should exist: %v", err)
+	}
+	// The key assertion: a new commit landed AND the tree is clean, so the move
+	// would persist through a push (no uncommitted residue to be discarded).
+	if gitOut(t, dir, "rev-parse", "HEAD") == headBefore {
+		t.Error("expected a new commit for the archive move; HEAD did not advance")
+	}
+	if status := gitOut(t, dir, "status", "--porcelain"); status != "" {
+		t.Errorf("working tree should be clean after archive commit, got:\n%s", status)
+	}
+}
+
+// commit.disable=true flows through to the real commit hook: the move happens
+// but no commit lands, leaving the tree dirty (the operator opted out).
+func TestArchiveSinglePlan_CommitDisabledLeavesUncommitted(t *testing.T) {
+	dir := gogitTestRepoWithCommit(t)
+	t.Chdir(dir)
+
+	setupArchivePlan(t, dir, "myplan", "completed")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "seed plan")
+	headBefore := gitOut(t, dir, "rev-parse", "HEAD")
+
+	priorDisabled := commitDisabled
+	commitDisabled = func() (bool, string) { return true, "commit.disable=true in workflow preferences" }
+	t.Cleanup(func() { commitDisabled = priorDisabled })
+
+	if err := archiveSinglePlan(dir, "myplan", false, false, false); err != nil {
+		t.Fatalf("archiveSinglePlan: %v", err)
+	}
+	// No commit landed (opt-out honored inside runWorkflowCommit).
+	if gitOut(t, dir, "rev-parse", "HEAD") != headBefore {
+		t.Error("commit.disable=true should not advance HEAD")
+	}
+	// Move still happened, so the tree is dirty (uncommitted).
+	if gitOut(t, dir, "status", "--porcelain") == "" {
+		t.Error("expected dirty tree when commit is disabled (move uncommitted)")
+	}
+}
+
+// gitRun runs a git command in dir, failing the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_DATE=2026-05-23T00:00:00Z", "GIT_COMMITTER_DATE=2026-05-23T00:00:00Z",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// gitOut runs a git command in dir and returns trimmed stdout, failing on error.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // ── selectAllEligibleTasks tests ───────────────────────────────────────────────
@@ -935,6 +1113,43 @@ func TestAnnotateEligibleTasks_WriteScopeDeclaredTrue(t *testing.T) {
 	}
 }
 
+// TestAnnotateEligibleTasks_UnreadableSidecar drives the REAL read-error
+// branch (plan_task.go: sidecarPath os.ReadFile): the sidecar file exists but
+// cannot be read (not "doesn't exist"). has_evidence/evidence_confidence must
+// still degrade to false/"none" (the task list can't block on it), but the
+// failure must be surfaced via ui.Warn instead of silently looking identical
+// to "no sidecar ever written".
+func TestAnnotateEligibleTasks_UnreadableSidecar(t *testing.T) {
+	proj := t.TempDir()
+	planID, taskID := "plan-locked", "t1"
+	sidecarPath := deriveScopeEvidencePath(proj, planID, taskID)
+	if err := os.MkdirAll(filepath.Dir(sidecarPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecarPath, []byte("confidence: high\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	chmodUnreadable(t, sidecarPath)
+
+	tasks := []workflowNextTaskSuggestion{
+		{PlanID: planID, TaskID: taskID, WriteScope: []string{"commands/"}},
+	}
+	out, _ := captureCovStdout(t, func() error {
+		annotated := annotateEligibleTasks(proj, tasks)
+		at := annotated[0]
+		if at.HasEvidence {
+			t.Error("HasEvidence should be false when sidecar is unreadable")
+		}
+		if at.EvidenceConfidence != "none" {
+			t.Errorf("EvidenceConfidence should be 'none' on unreadable sidecar; got %q", at.EvidenceConfidence)
+		}
+		return nil
+	})
+	if !strings.Contains(out, "evidence sidecar unreadable") {
+		t.Errorf("expected an 'unreadable' warning on stdout, got %q", out)
+	}
+}
+
 // TestEligibleOutput_HasMaxBatchField verifies that eligibleOutput marshals to
 // JSON with a max_batch field (present even when empty).
 func TestEligibleOutput_HasMaxBatchField(t *testing.T) {
@@ -1432,6 +1647,31 @@ func TestRunWorkflowPlanCreate_RejectsExisting(t *testing.T) {
 	}
 }
 
+// TestRunWorkflowPlanCreate_StatErrorSurfaced drives the REAL Stat-error
+// branch on the collision check (plan_task.go: os.Stat(dir) in
+// runWorkflowPlanCreate): the plans/ directory itself is unreadable, so
+// Stat-ing the candidate plan dir fails with something other than
+// IsNotExist. That must surface as an error distinct from "already exists"
+// instead of being silently treated as "no collision, proceed".
+func TestRunWorkflowPlanCreate_StatErrorSurfaced(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	chmodUnreadableDir(t, plansBaseDir(repo))
+
+	err := runWorkflowPlanCreate("brand-new-plan", "T", "S", "O", "SC", "VS")
+	if err == nil {
+		t.Fatal("expected an error when the plans dir cannot be stat-ed")
+	}
+	if strings.Contains(err.Error(), "already exists") {
+		t.Errorf("a real Stat error must not be reported as 'already exists': %v", err)
+	}
+	if !strings.Contains(err.Error(), "check for existing plan") {
+		t.Errorf("expected a 'check for existing plan' error, got: %v", err)
+	}
+}
+
 // ── runWorkflowPlanUpdate ────────────────────────────────────────────────────
 
 // TestRunWorkflowPlanUpdate_UpdatesMutableFields verifies that plan update
@@ -1547,7 +1787,7 @@ func TestRunWorkflowTaskUpdate_UpdatesFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/"); err != nil {
+	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/", "", ""); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 
@@ -1582,7 +1822,7 @@ func TestRunWorkflowTaskUpdate_PreservesUnsetFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", "", "", ""); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "wave-2")
@@ -1599,9 +1839,80 @@ func TestRunWorkflowTaskUpdate_MissingTaskReturnsError(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "")
+	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("expected missing-task error; got: %v", err)
+	}
+}
+
+// TestRunWorkflowTaskUpdate_DependsOnAndBlocks verifies that --depends-on and
+// --blocks CSVs persist to TASKS.yaml with replace semantics matching `task
+// add`, and that the new depends_on edge is live in the schedule graph
+// without further plumbing.
+func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskAdd(taskAddInputs{
+		PlanID: "wave-2",
+		TaskID: "t4",
+		Title:  "new task with no deps",
+	}); err != nil {
+		t.Fatalf("runWorkflowTaskAdd: %v", err)
+	}
+
+	if err := runWorkflowTaskUpdate("wave-2", "t4", "", "", "", "t1", "t2"); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t4Idx := taskIndexByID(tf, "t4")
+	t1Idx := taskIndexByID(tf, "t1")
+	if t4Idx == -1 {
+		t.Fatal("t4 missing after update")
+	}
+	t4 := &tf.Tasks[t4Idx]
+	if len(t4.DependsOn) != 1 || t4.DependsOn[0] != "t1" {
+		t.Errorf("depends_on = %v, want [t1]", t4.DependsOn)
+	}
+	if len(t4.Blocks) != 1 || t4.Blocks[0] != "t2" {
+		t.Errorf("blocks = %v, want [t2]", t4.Blocks)
+	}
+
+	inDegree, adj := buildPlanScheduleGraph(tf)
+	assertScheduleEdge(t, inDegree, adj, t1Idx, t4Idx)
+}
+
+// taskIndexByID returns the index of the task with the given ID in tf.Tasks,
+// or -1 if not present.
+func taskIndexByID(tf *CanonicalTaskFile, id string) int {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// assertScheduleEdge fails t unless the schedule graph records exactly one
+// incoming edge into dst and adj[src] contains dst — i.e. src → dst is live.
+func assertScheduleEdge(t *testing.T, inDegree []int, adj [][]int, src, dst int) {
+	t.Helper()
+	if inDegree[dst] != 1 {
+		t.Errorf("in-degree of dst = %d, want 1 (edge from src not picked up)", inDegree[dst])
+	}
+	found := false
+	for _, d := range adj[src] {
+		if d == dst {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("adjacency of src = %v, want to contain dst's index %d", adj[src], dst)
 	}
 }
 
@@ -2925,7 +3236,7 @@ func TestRunWorkflowTaskAdd_MissingPlan(t *testing.T) {
 func TestRunWorkflowTaskUpdate_MissingTask(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirForCov(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "")
+	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -3032,7 +3343,7 @@ func TestRunWorkflowPlanGraph_LoadError(t *testing.T) {
 func TestRunWorkflowPlanArchive_PlanNotFound(t *testing.T) {
 	repo := t.TempDir()
 	chdirForCov(t, repo)
-	err := runWorkflowPlanArchive(repo, []string{"no-such"}, false, true)
+	err := runWorkflowPlanArchive(repo, []string{"no-such"}, false, true, true)
 	if err == nil {
 		t.Fatal("expected plan-not-found error")
 	}
@@ -3075,7 +3386,7 @@ func TestRunWorkflowTaskUpdate_SaveErr(t *testing.T) {
 	chdirForCov(t, repo)
 	sentinel := errors.New("yaml boom")
 	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
-	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "")
+	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "", "", "")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel, got %v", err)
 	}
@@ -3793,7 +4104,7 @@ func TestRunWorkflowAdvance_CompleteResetsFocus(t *testing.T) {
 func TestRunWorkflowTaskUpdate_UpdatesNotesAndWriteScope(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/"); err != nil {
+	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "plan-001")
@@ -3804,7 +4115,7 @@ func TestRunWorkflowTaskUpdate_UpdatesNotesAndWriteScope(t *testing.T) {
 
 func TestArchiveSinglePlan_RefusesNonCompletedWithoutForce(t *testing.T) {
 	repo := setupTestProject(t)
-	err := archiveSinglePlan(repo, "plan-001", false, false)
+	err := archiveSinglePlan(repo, "plan-001", false, false, true)
 	if err == nil || !strings.Contains(err.Error(), "completed") {
 		t.Fatalf("expected non-completed guard error, got %v", err)
 	}
@@ -3942,7 +4253,7 @@ func TestRunWorkflowTaskAdd_WithFullCSVFields(t *testing.T) {
 func TestRunWorkflowPlanArchive_EmptyList(t *testing.T) {
 	repo := setupTestProject(t)
 
-	if err := runWorkflowPlanArchive(repo, nil, false, false); err != nil {
+	if err := runWorkflowPlanArchive(repo, nil, false, false, true); err != nil {
 		t.Fatalf("empty plan archive should be a no-op, got %v", err)
 	}
 }
@@ -4231,7 +4542,7 @@ func TestRunWorkflowTaskAdd_PlanMissingTasksFile(t *testing.T) {
 func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "")
+	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "ghost-task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -4240,7 +4551,7 @@ func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 func TestRunWorkflowTaskUpdate_PlanMissing(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "")
+	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "", "", "")
 	if err == nil {
 		t.Fatal("expected plan-not-found error")
 	}
@@ -4347,5 +4658,111 @@ func TestEligibleOutput_JSONRoundTrip(t *testing.T) {
 	}
 	if len(decoded.EligibleTasks) != 0 {
 		t.Fatalf("decoded mismatch: %+v", decoded)
+	}
+}
+
+// tasksYamlLockTestMutator performs the same load -> mutate -> save shape as
+// runWorkflowTaskUpdate, guarded by the production withTasksLock helper, but
+// deliberately widens the window between load and save with a short sleep.
+// That makes a would-be lost-update race manifest deterministically: without
+// serialization, a second goroutine's load (which starts immediately, since
+// load itself is near-instant) captures the pre-mutation snapshot, and its
+// later save clobbers whatever the first goroutine wrote. Under the lock, the
+// second goroutine's load cannot begin until the first's entire critical
+// section (including the save) has completed and released.
+func tasksYamlLockTestMutator(projectPath, planID, taskID, note string) error {
+	return withTasksLock(projectPath, planID, func() error {
+		tf, err := loadCanonicalTasks(projectPath, planID)
+		if err != nil {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+		found := false
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				tf.Tasks[i].Notes = note
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("task %q not found", taskID)
+		}
+		return saveCanonicalTasks(projectPath, tf)
+	})
+}
+
+// TestTasksYamlLock_ConcurrentUpdatesNoLostUpdate proves withTasksLock closes
+// the loadCanonicalTasks/saveCanonicalTasks lost-update race: two goroutines
+// concurrently mutate DIFFERENT tasks' notes in the SAME plan's TASKS.yaml;
+// without the lock serializing the read-modify-write, one goroutine's save
+// would clobber the other's update (see tasksYamlLockTestMutator). Run with
+// -race: go test ./commands/workflow/... -run TestTasksYamlLock -race -v
+func TestTasksYamlLock_ConcurrentUpdatesNoLostUpdate(t *testing.T) {
+	repo := setupTestProject(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := tasksYamlLockTestMutator(repo, "plan-001", "task-001", "note from A"); err != nil {
+			errs <- fmt.Errorf("goroutine A: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := tasksYamlLockTestMutator(repo, "plan-001", "task-002", "note from B"); err != nil {
+			errs <- fmt.Errorf("goroutine B: %w", err)
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent tasks-lock mutation failed: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "plan-001")
+	if err != nil {
+		t.Fatalf("reload tasks: %v", err)
+	}
+	var gotA, gotB string
+	for _, task := range tf.Tasks {
+		switch task.ID {
+		case "task-001":
+			gotA = task.Notes
+		case "task-002":
+			gotB = task.Notes
+		}
+	}
+	if gotA != "note from A" {
+		t.Errorf("task-001 update lost — got notes %q, want %q (lock failed to serialize)", gotA, "note from A")
+	}
+	if gotB != "note from B" {
+		t.Errorf("task-002 update lost — got notes %q, want %q (lock failed to serialize)", gotB, "note from B")
+	}
+}
+
+// TestTasksYamlLock_TimeoutWrapsClearError proves that when AcquireFileLock
+// cannot claim the TASKS.yaml lock (held by another caller), withTasksLock
+// surfaces a clear wrapped error instead of proceeding unlocked.
+func TestTasksYamlLock_TimeoutWrapsClearError(t *testing.T) {
+	repo := setupTestProject(t)
+	path := tasksLockPath(repo, "plan-001")
+	release, err := agentslock.AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+	t.Cleanup(func() { _ = release() })
+
+	err = withTasksLock(repo, "plan-001", func() error {
+		t.Fatal("fn must not run while the lock is held by another caller")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "TASKS.yaml locked by another process, timed out waiting") {
+		t.Fatalf("expected wrapped timeout message, got: %v", err)
 	}
 }

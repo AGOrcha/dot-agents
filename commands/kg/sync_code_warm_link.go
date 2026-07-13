@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/execabs"
@@ -48,6 +49,16 @@ func runKGSyncIO(io kgIO, cmd *cobra.Command, _ []string) error {
 
 	push, _ := cmd.Flags().GetBool("push")
 
+	// kg sync moves a git remote and is not locally snapshot-recoverable, so it
+	// is journaled fully (KGSyncObserved). ok flips true the moment the git op
+	// lands; a post-pull lint error is reported to the operator but does not undo
+	// the pull, so it still records success (mirrors p3a's ok-after-mutation).
+	repoPath := crgRepoRoot()
+	input := &journal.KGSyncInput{Push: push}
+	observed := &journal.KGSyncObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGSync, input, observed, ok) }()
+
 	var gitArgs []string
 	if push {
 		gitArgs = []string{"-C", home, "push"}
@@ -69,9 +80,13 @@ func runKGSyncIO(io kgIO, cmd *cobra.Command, _ []string) error {
 	}
 
 	if push {
+		observed.PushStatus = "ok"
+		ok = true
 		ui.Success("Graph pushed.")
 		return nil
 	}
+	observed.PullStatus = "ok"
+	ok = true
 
 	// After pull, run lint to surface any content drift
 	ui.Info("Running kg lint after pull ...")
@@ -121,6 +136,14 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
+	// KG decision event: record the build outcome + resulting graph counts
+	// (KGDecisionObserved), never node/edge bodies (D4). repoPath is the graphed
+	// repo itself.
+	input := &journal.KGDecisionInput{Repo: root}
+	observed := &journal.KGDecisionObserved{}
+	ok := false
+	defer func() { journalKG(root, journal.CmdKGBuild, input, observed, ok) }()
+
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
 		return err
@@ -135,6 +158,9 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	observed.Outcome = report.Outcome
+	setDecisionGraphCounts(observed, report.Status)
+	ok = true
 	if commandJSON(cmd) {
 		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -156,6 +182,19 @@ func runKGBuild(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// setDecisionGraphCounts copies the post-operation node/edge/file counts from a
+// CRG status onto a KG decision-event observed payload (pointer fields so an
+// absent status omits them). It records counts only — never node/edge bodies (D4).
+func setDecisionGraphCounts(observed *journal.KGDecisionObserved, status *graphstore.CRGStatus) {
+	if status == nil {
+		return
+	}
+	nodes, edges, files := status.Nodes, status.Edges, status.Files
+	observed.Nodes = &nodes
+	observed.Edges = &edges
+	observed.Files = &files
+}
+
 func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	root, _ := cmd.Flags().GetString("repo")
 	if root == "" {
@@ -175,6 +214,13 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	skipFlows, _ := cmd.Flags().GetBool("skip-flows")
 	skipPost, _ := cmd.Flags().GetBool("skip-postprocess")
 
+	// Journal only once we know the tool is present (the graceful no-op above
+	// mutates nothing). Decision event: outcome + graph counts, never bodies (D4).
+	input := &journal.KGDecisionInput{Repo: root, Base: base}
+	observed := &journal.KGDecisionObserved{}
+	ok := false
+	defer func() { journalKG(root, journal.CmdKGUpdate, input, observed, ok) }()
+
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
 		return err
@@ -190,6 +236,9 @@ func runKGUpdate(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	observed.Outcome = report.Outcome
+	setDecisionGraphCounts(observed, report.Status)
+	ok = true
 	if commandJSON(cmd) {
 		data, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
@@ -247,12 +296,26 @@ func crgStatusState(root string) string {
 	return status.State
 }
 
+// crgBridgeStatus is a seam over CRGBridge.Status for tests to inject a
+// real-error response (production Status() never returns a non-nil error
+// today, but callers must not silently swallow one if that changes).
+var crgBridgeStatus = func(root string) (*graphstore.CRGStatus, error) {
+	return (&graphstore.CRGBridge{RepoRoot: root}).Status()
+}
+
 // checkCRGReadiness calls Status() and emits warnings for unbuilt/busy states.
 // When requireGraph is true and the graph is not ready, an error is returned.
 func checkCRGReadiness(root string, requireGraph bool) error {
-	status, err := (&graphstore.CRGBridge{RepoRoot: root}).Status()
+	status, err := crgBridgeStatus(root)
 	if err != nil {
-		// Status() failed — CRG may not be installed; warn but don't block.
+		// Status() failed — this is a REAL error (permission/db/I-O fault), not
+		// "CRG not installed" (that case is reported via status.State/Message
+		// with a nil error, handled below). Warn, and — critically — do not let
+		// --require-graph silently pass when readiness could not be determined.
+		ui.WarnBox("Code graph status unavailable", fmt.Sprintf("could not determine code graph readiness: %v", err))
+		if requireGraph {
+			return fmt.Errorf("code graph readiness unknown: %w", err)
+		}
 		return nil
 	}
 	switch status.State {
@@ -437,16 +500,34 @@ func runKGPostprocess(cmd *cobra.Command, _ []string) error {
 	noCommunities, _ := cmd.Flags().GetBool("no-communities")
 	noFTS, _ := cmd.Flags().GetBool("no-fts")
 
+	// Decision event: postprocess rebuilds derived data; record the outcome, not
+	// the rebuilt flow/community bodies (D4).
+	input := &journal.KGDecisionInput{Repo: root}
+	observed := &journal.KGDecisionObserved{Outcome: "postprocessed"}
+	ok := false
+	defer func() { journalKG(root, journal.CmdKGPostprocess, input, observed, ok) }()
+
 	bridge, err := graphstore.NewCRGBridge(root)
 	if err != nil {
 		return err
 	}
 	ui.Info(fmt.Sprintf("Running post-processing on %s ...", root))
-	return bridge.Postprocess(graphstore.PostprocessOptions{
+	if err := bridge.Postprocess(graphstore.PostprocessOptions{
 		NoFlows:       noFlows,
 		NoCommunities: noCommunities,
 		NoFTS:         noFTS,
-	})
+	}); err != nil {
+		return err
+	}
+	// Postprocess returns no report, so read the resulting graph status to record
+	// the same node/edge/file counts build/update journal (the KGDecisionObserved
+	// contract). Status is best-effort: if it fails the postprocess still landed,
+	// so we keep Outcome and just omit the counts rather than fail the command.
+	if status, serr := bridge.Status(); serr == nil {
+		setDecisionGraphCounts(observed, status)
+	}
+	ok = true
+	return nil
 }
 
 func runKGChanges(deps Deps, cmd *cobra.Command, _ []string) error {
@@ -607,6 +688,17 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 	noteTypeFilter, _ := cmd.Flags().GetString("type")
 	includeCode, _ := cmd.Flags().GetBool("include-code")
 
+	// Content-delta event: record how many notes were indexed/skipped (counts
+	// only, never note bodies — D4). The optional type filter is the only target.
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "warm"}
+	if noteTypeFilter != "" {
+		input.Targets = []string{noteTypeFilter}
+	}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGWarm, input, observed, ok) }()
+
 	store, err := openKGStore(home)
 	if err != nil {
 		return fmt.Errorf(warmStoreOpenErrFmt, err)
@@ -625,10 +717,20 @@ func runKGWarm(cmd *cobra.Command, _ []string) error {
 
 	_ = store.SetMetadata("last_warm_sync", time.Now().UTC().Format(time.RFC3339))
 
+	// Build the observed counts AFTER the code lane so the event reflects the
+	// full mutation: --include-code upserts code nodes/edges into the warm store,
+	// and even a partial import (nodes before an edge-read error) is a real
+	// change that must be journaled, not just the note lane (D4: counts, no bodies).
+	counts := map[string]int{"indexed": indexed, "skipped": skipped}
 	codeMsg := ""
 	if includeCode {
-		codeMsg = warmCodeLane(store)
+		codeNodes, codeEdges, msg := warmCodeLane(store)
+		codeMsg = msg
+		counts["code_nodes"] = codeNodes
+		counts["code_edges"] = codeEdges
 	}
+	observed.Counts = counts
+	ok = true
 
 	lines := []string{
 		"da kg link add <note-id> <symbol> — link a note to a code symbol",
@@ -724,19 +826,37 @@ func warmNotesInDir(io kgIO, store graphstore.Store, dir string, adjust func(*gr
 	return indexed, skipped
 }
 
-// warmCodeLane runs the optional code-lane import from CRG and returns a
-// summary line for inclusion in the SuccessBox body, or "" on failure.
-// store is the published contract (gcc3 binding).
-func warmCodeLane(store graphstore.Store) string {
+// warmCodeLane runs the optional code-lane import from CRG and returns the
+// number of code nodes/edges actually upserted plus a summary line for the
+// SuccessBox body (empty on failure). store is the published contract (gcc3
+// binding).
+//
+// The counts are returned even when the import errors: runKGWarmCodeImport
+// upserts nodes before reading edges, so an edge-read failure still leaves real
+// node mutations behind. The caller journals these so the warm event reflects
+// the FULL mutation (note lane + code lane), not just the note lane.
+func warmCodeLane(store graphstore.Store) (nodes, edges int, summary string) {
 	repoRoot, _ := os.Getwd()
 	nodesIn, edgesIn, cerr := runKGWarmCodeImport(store, repoRoot)
 	if cerr != nil {
 		ui.Warn(fmt.Sprintf("code-lane import skipped: %v", cerr))
-		return ""
+		return nodesIn, edgesIn, ""
 	}
 	_ = store.SetMetadata("last_code_import", time.Now().UTC().Format(time.RFC3339))
-	return fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
+	return nodesIn, edgesIn, fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
 }
+
+// validLinkKinds is the set of accepted note→symbol link kinds, shared by
+// `kg link add` and `kg link import`.
+var validLinkKinds = map[string]bool{
+	"mentions": true, "implements": true, "documents": true,
+	"decides": true, "references": true,
+}
+
+// validLinkKindList is the human-readable comma-separated form for errors.
+const validLinkKindList = "mentions, implements, documents, decides, references"
+
+func isValidLinkKind(k string) bool { return validLinkKinds[k] }
 
 // runKGLinkAdd creates a note→symbol link.
 func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
@@ -748,15 +868,25 @@ func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	if kind == "" {
 		kind = "mentions"
 	}
-	validLinkKinds := map[string]bool{
-		"mentions": true, "implements": true, "documents": true,
-		"decides": true, "references": true,
-	}
-	if !validLinkKinds[kind] {
+	if !isValidLinkKind(kind) {
 		return kgUsageError(deps,
-			fmt.Sprintf("invalid link kind %q: valid values are mentions, implements, documents, decides, references", kind),
-			"Pass one of: mentions, implements, documents, decides, references.")
+			fmt.Sprintf("invalid link kind %q: valid values are %s", kind, validLinkKindList),
+			"Pass one of: "+validLinkKindList+".")
 	}
+	if deps.Flags.DryRun {
+		ui.InfoBox("Dry run — would create link",
+			fmt.Sprintf("%s -[%s]-> %s", args[0], kind, args[1]))
+		return nil
+	}
+
+	// Content-delta event: record the link add as a count + the affected ids
+	// (note id, symbol, link id) — never bodies (D4). Armed after flag validation
+	// so a usage error is a pre-mutation rejection, not a journaled attempt.
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "link add", Targets: []string{args[0], args[1]}}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGLinkAdd, input, observed, ok) }()
 
 	store, err := openKGStore(kgHome())
 	if err != nil {
@@ -773,8 +903,119 @@ func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("create link: %w", err)
 	}
+	observed.Counts = map[string]int{"links_added": 1}
+	observed.IDs = []string{fmt.Sprintf("%d", id)}
+	ok = true
 	ui.Success(fmt.Sprintf("Link created (id=%d): %s -[%s]-> %s", id, args[0], kind, args[1]))
 	return nil
+}
+
+// linkManifestRow is one parsed `kg link import` manifest line.
+type linkManifestRow struct {
+	noteID string
+	symbol string
+	kind   string
+}
+
+// parseLinkManifest parses a link manifest: each non-comment, non-blank line is
+// `<note-id> <qualified-name> [<kind>]` (whitespace-separated; kind defaults to
+// "mentions"). It returns the valid rows plus a per-line error slice (bad shape
+// or invalid kind) so every problem can be reported at once.
+func parseLinkManifest(content string) ([]linkManifestRow, []string) {
+	var rows []linkManifestRow
+	var errs []string
+	for n, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 || len(fields) > 3 {
+			errs = append(errs, fmt.Sprintf("line %d: expected `<note-id> <qualified-name> [kind]` (2 or 3 fields), got %d in %q", n+1, len(fields), line))
+			continue
+		}
+		kind := "mentions"
+		if len(fields) >= 3 {
+			kind = fields[2]
+		}
+		if !isValidLinkKind(kind) {
+			errs = append(errs, fmt.Sprintf("line %d: invalid kind %q (valid: %s)", n+1, kind, validLinkKindList))
+			continue
+		}
+		rows = append(rows, linkManifestRow{noteID: fields[0], symbol: fields[1], kind: kind})
+	}
+	return rows, errs
+}
+
+// runKGLinkImport bulk-applies note→symbol links from a manifest file. Deciding
+// which note documents/implements/references which symbol is a judgment call the
+// caller (agent/skill) makes when authoring the manifest; this command is the
+// mechanical batch execution. Invalid rows are collected and reported while the
+// valid rows are still applied (upsert is idempotent); the command exits
+// non-zero if any row failed so the caller sees every problem in one pass. With
+// --dry-run it validates + previews without writing.
+func runKGLinkImport(deps Deps, _ *cobra.Command, args []string) error {
+	if len(args) < 1 {
+		return kgUsageError(deps, "kg link import expects 1 argument",
+			"Usage: da kg link import <manifest-file>.")
+	}
+	data, err := os.ReadFile(args[0])
+	if err != nil {
+		return fmt.Errorf("read manifest %q: %w", args[0], err)
+	}
+	rows, failures := parseLinkManifest(string(data))
+
+	applied := len(rows)
+	if deps.Flags.DryRun {
+		previewLinkRows(rows)
+	} else {
+		var aerr error
+		if applied, failures, aerr = applyLinkRows(rows, failures); aerr != nil {
+			return aerr
+		}
+	}
+
+	verb := "linked"
+	if deps.Flags.DryRun {
+		verb = "would link"
+	}
+	ui.Success(fmt.Sprintf("%s %d note→symbol link(s); %d row(s) failed", verb, applied, len(failures)))
+	for _, f := range failures {
+		ui.Bullet("error", f)
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("kg link import: %d row(s) failed", len(failures))
+	}
+	return nil
+}
+
+// previewLinkRows prints the dry-run preview line for each parsed manifest row.
+func previewLinkRows(rows []linkManifestRow) {
+	for _, r := range rows {
+		ui.Bullet("info", fmt.Sprintf("would link: %s -[%s]-> %s", r.noteID, r.kind, r.symbol))
+	}
+}
+
+// applyLinkRows idempotently upserts each parsed row, returning the applied
+// count and the failure list (extended from the parse failures with any per-row
+// upsert error). A store-open failure aborts before any write.
+func applyLinkRows(rows []linkManifestRow, failures []string) (int, []string, error) {
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return 0, failures, fmt.Errorf(warmStoreOpenErrFmt, err)
+	}
+	defer store.Close()
+	applied := 0
+	for _, r := range rows {
+		if _, uerr := store.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{
+			NoteID: r.noteID, QualifiedName: r.symbol, LinkKind: r.kind,
+		}); uerr != nil {
+			failures = append(failures, fmt.Sprintf("%s -[%s]-> %s: %v", r.noteID, r.kind, r.symbol, uerr))
+			continue
+		}
+		applied++
+	}
+	return applied, failures, nil
 }
 
 // runKGLinkList shows all symbol links for a note.
@@ -815,6 +1056,14 @@ func runKGLinkRemove(deps Deps, _ *cobra.Command, args []string) error {
 			fmt.Sprintf("invalid link ID %q: expected an integer", args[0]),
 			"Pass the numeric link ID shown by `da kg link list`.")
 	}
+	// Content-delta event: record the link removal as a count + the removed link
+	// id — never bodies (D4). Armed after the id-parse validation.
+	repoPath := crgRepoRoot()
+	input := &journal.KGContentDeltaInput{Operation: "link remove", Targets: []string{args[0]}}
+	observed := &journal.KGContentDeltaObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGLinkRemove, input, observed, ok) }()
+
 	store, err := openKGStore(kgHome())
 	if err != nil {
 		return fmt.Errorf(warmStoreOpenErrFmt, err)
@@ -824,6 +1073,9 @@ func runKGLinkRemove(deps Deps, _ *cobra.Command, args []string) error {
 	if err := store.DeleteNoteSymbolLink(id); err != nil {
 		return fmt.Errorf("remove link: %w", err)
 	}
+	observed.Counts = map[string]int{"links_removed": 1}
+	observed.IDs = []string{args[0]}
+	ok = true
 	ui.Success(fmt.Sprintf("Link %d removed", id))
 	return nil
 }

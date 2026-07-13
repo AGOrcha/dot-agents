@@ -3,6 +3,8 @@ package platform
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
 
@@ -204,6 +207,41 @@ func (o *opencode) BrokenLinks(_, repoPath, _ string) []BrokenLink {
 	}}
 }
 
+// PrintAudit implements AuditPrinter for the opencode platform: it renders the
+// opencode.json link and the .opencode/agent/ link directory. Moved verbatim
+// (output preserved) from the lifecycle-side printOpenCodeAudit in Phase 5.
+func (o *opencode) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sOpenCode%s\n", ui.Cyan, ui.Reset)
+	opencodePrintConfigLink(w, filepath.Join(repoPath, opencodeJSON))
+
+	agentDir := filepath.Join(repoPath, opencodeDir, "agent")
+	if _, err := os.ReadDir(agentDir); err == nil {
+		printSymlinkDirAudit(w, agentDir, ".opencode/agent/", ".opencode/agent/%s")
+	} else {
+		fmt.Fprintf(w, "      %s(no .opencode/)%s\n", ui.Dim, ui.Reset)
+	}
+	fmt.Fprintln(w)
+}
+
+// opencodePrintConfigLink renders the opencode.json audit line to w. An absent
+// file prints nothing (preserving the historical printOpenCodeAudit behavior);
+// a managed link prints ✓/✗ with its resolved target; a present non-link is a
+// local file rendered with the ○ marker.
+func opencodePrintConfigLink(w io.Writer, opencodeJSONPath string) {
+	if _, err := os.Lstat(opencodeJSONPath); err != nil {
+		return
+	}
+	state, raw := classifyManagedLink(opencodeJSONPath)
+	switch state {
+	case linkStateNotALink:
+		fmt.Fprintf(w, "      %s○%s opencode.json %s(local file)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+	case linkStateBroken:
+		fmt.Fprintf(w, "      %s✗%s opencode.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest(opencodeJSONPath, raw), ui.Reset)
+	default:
+		fmt.Fprintf(w, "      %s✓%s opencode.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest(opencodeJSONPath, raw), ui.Reset)
+	}
+}
+
 func (o *opencode) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(opencodeAgentsDir, "skills"))
 	if err != nil {
@@ -242,5 +280,28 @@ func (o *opencode) CountLinks(_, repoPath, _ string) (ok, broken int) {
 // Badge implements StatusBadger for the opencode platform.
 func (o *opencode) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	ok, broken := o.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "OpenCode", Present: ok > 0, Broken: broken > 0}
+}
+
+// opencodeUserConfigDirs returns the managed directories opencode maintains
+// under the user's home directory: ~/.opencode/agent/. opencode has no
+// user-home single-file config layer (no orphan-canonical bucket either),
+// matching the legacy lifecycle opencode user-config block.
+func opencodeUserConfigDirs(home string) []string {
+	return []string{filepath.Join(home, opencodeDir, "agent")}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the opencode platform: it
+// reports the broken managed links under ~/.opencode/agent/ (the only managed
+// user-home surface opencode owns). Every entry carries PlatformID="opencode".
+func (o *opencode) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("opencode", nil, opencodeUserConfigDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the opencode platform: the
+// user-config badge over ~/.opencode/agent/. Mirrors the legacy lifecycle
+// countPlatformHealth("OpenCode", ...) badge math.
+func (o *opencode) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(nil, opencodeUserConfigDirs(home))
 	return PlatformBadge{Name: "OpenCode", Present: ok > 0, Broken: broken > 0}
 }

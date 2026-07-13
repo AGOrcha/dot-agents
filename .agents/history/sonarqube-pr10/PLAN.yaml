@@ -1,0 +1,45 @@
+schema_version: 1
+id: sonarqube-pr10
+title: SonarQube — PR#10 Quality Gate Clearance
+status: archived
+summary: |-
+    Reduce or clear the remaining SonarCloud failures on PR #10
+    (projectsync extraction; base feature/workflow-auto-operator). The
+    quality gate currently fails on three conditions:
+      * new_reliability_rating
+      * new_duplicated_lines_density (branch-wide debt; ~324 commits and
+        893 changed files vs base)
+      * new_security_hotspots_reviewed (one hotspot reviewed moved metric
+        from 0.0 to 2.8; needs broader sweep)
+    Most actionable findings cluster in scripts/setup_homebrew_cask_release_secrets.sh,
+    tests/test-kg-real-crg-build.sh, and .github/workflows/test.yml — already
+    addressed in recent commits per the source plan markdown.
+    Promoted from .agents/active/sonarqube-pr10.plan.md (orphan working
+    note) to canonical plan so eligible/orient surface it correctly while
+    PR #10 is open. Closes when PR merges.
+created_at: "2026-05-03T22:30:00Z"
+updated_at: "2026-07-10T04:17:11Z"
+owner: dot-agents
+success_criteria: |-
+    Hard test: SonarCloud quality gate on PR #10 passes (or, if not
+    practical for this PR's branch-wide debt, the failing conditions are
+    explicitly documented as out-of-scope-for-this-PR with rationale,
+    accepted by the maintainer, and tracked as a follow-up plan).
+    `go test ./...` passes locally on the branch tip. `bash -n` clean
+    on all touched shell scripts. YAML loads clean on touched workflows.
+
+    Common false positive: local fixes appear to clear findings but
+    SonarCloud's incremental analysis (vs base branch) still flags them
+    because of how the PR's diff is computed. Verify against the live
+    PR analysis page, not against locally-replayed lint passes.
+verification_strategy: |-
+    Iterative: each task addresses a specific failing condition or
+    finding cluster, runs the relevant local verifications named in
+    the source plan markdown, then pushes and re-checks SonarCloud.
+    For SQ3 security hotspots, after each CI run poll/check SonarCloud
+    PR #10 for updated hotspot and quality-gate metrics until manual
+    scan triggers are enabled; once manual triggers are enabled, use
+    the explicit manual scan result as the verification source of truth.
+    Plan archives when PR #10 merges; if PR is closed without merge,
+    plan archives with a note about scope deferral.
+current_focus_task: ""

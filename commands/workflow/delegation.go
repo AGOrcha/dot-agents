@@ -4,7 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +17,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -149,16 +154,41 @@ func saveDelegationContract(projectPath string, c *DelegationContract) error {
 	return osWriteFile(filepath.Join(dir, c.ParentTaskID+".yaml"), data, 0644)
 }
 
+// listDelegationContracts loads every delegation contract file in the
+// delegation directory. A per-entry read/parse failure is not silently
+// dropped: listDelegationContractsWithWarnings logs one ui.Warn line per
+// skipped entry (visible to every caller of this wrapper — including the
+// active-delegation/plan-lock accounting in loadActiveDelegationTaskSet and
+// the workflow-state delegation summary) while still excluding the corrupt
+// entry from the returned slice, preserving the historical best-effort
+// signature those callers depend on. checkFanoutWriteScopeConflicts, which
+// must not let a corrupt contract silently defeat write-scope-conflict
+// detection, calls listDelegationContractsWithWarnings directly so it can
+// fail closed instead of proceeding as if the corrupt entry never existed.
 func listDelegationContracts(projectPath string) ([]DelegationContract, error) {
+	contracts, warnings, err := listDelegationContractsWithWarnings(projectPath)
+	for _, w := range warnings {
+		ui.Warn(w)
+	}
+	return contracts, err
+}
+
+// listDelegationContractsWithWarnings is listDelegationContracts's core
+// implementation. Alongside the successfully loaded contracts it returns one
+// warning string per contract file that could not be read or parsed, so a
+// caller that cannot tolerate an unknown write_scope can fail closed rather
+// than silently excluding the corrupt entry from its accounting.
+func listDelegationContractsWithWarnings(projectPath string) ([]DelegationContract, []string, error) {
 	dir := delegationDir(projectPath)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var contracts []DelegationContract
+	var warnings []string
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -166,11 +196,15 @@ func listDelegationContracts(projectPath string) ([]DelegationContract, error) {
 		taskID := strings.TrimSuffix(e.Name(), ".yaml")
 		c, err := loadDelegationContract(projectPath, taskID)
 		if err != nil {
+			warnings = append(warnings, fmt.Sprintf(
+				"delegation contract %s is unreadable/corrupt, excluded from write-scope and plan-lock accounting: %v",
+				e.Name(), err,
+			))
 			continue
 		}
 		contracts = append(contracts, *c)
 	}
-	return contracts, nil
+	return contracts, warnings, nil
 }
 
 func writeScopeOverlaps(existing []DelegationContract, newScope []string, excludeTaskID string) []string {
@@ -479,18 +513,40 @@ func validateFoldBackPriorAgreement(prior *foldBackArtifact, in *foldBackUpsertI
 	return nil
 }
 
-func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(notes string) string) error {
+// findTaskInPlan loads the canonical TASKS.yaml for planID and returns the file
+// together with the index of taskID within tf.Tasks. It reports errLoadTasksForPlanFmt
+// on load failure and errTaskNotFoundInPlanShort when the task is absent, mirroring the
+// precondition the fold-back task-note write path enforces. It performs no writes.
+func findTaskInPlan(projectPath, planID, taskID string) (*CanonicalTaskFile, int, error) {
 	tf, err := loadCanonicalTasks(projectPath, planID)
 	if err != nil {
-		return fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
+		return nil, 0, fmt.Errorf(errLoadTasksForPlanFmt, planID, err)
 	}
 	for i := range tf.Tasks {
 		if tf.Tasks[i].ID == taskID {
-			tf.Tasks[i].Notes = mutate(tf.Tasks[i].Notes)
-			return saveCanonicalTasks(projectPath, tf)
+			return tf, i, nil
 		}
 	}
-	return fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+	return nil, 0, fmt.Errorf(errTaskNotFoundInPlanShort, taskID, planID)
+}
+
+func updateTaskFoldBackNote(projectPath, planID, taskID string, mutate func(notes string) string) error {
+	tf, idx, err := findTaskInPlan(projectPath, planID, taskID)
+	if err != nil {
+		return err
+	}
+	tf.Tasks[idx].Notes = mutate(tf.Tasks[idx].Notes)
+	return saveCanonicalTasks(projectPath, tf)
+}
+
+// assertFoldBackTaskExists mirrors, read-only, the precondition the task-note write
+// path enforces: updateTaskFoldBackNote loads TASKS.yaml and requires taskID to exist
+// before editing. Running it on the --dry-run path surfaces the same load / missing-task
+// error the real create would hit, so the preview reflects reality instead of a
+// false-green. It performs no writes.
+func assertFoldBackTaskExists(projectPath, planID, taskID string) error {
+	_, _, err := findTaskInPlan(projectPath, planID, taskID)
+	return err
 }
 
 func updatePlanFoldBackSummary(projectPath, planID, createdAt string, mutate func(summary string) string) error {
@@ -680,6 +736,45 @@ func renderFoldBackList(out io.Writer, artifacts []foldBackArtifact) error {
 	return nil
 }
 
+// foldBackDryRun reports whether the fold-back create command should preview
+// its routing without writing. The local --dry-run flag (create only; GetBool
+// tolerates its absence on update, returning false) is OR-merged with the
+// global -n/--dry-run so `da -n workflow fold-back create` is honored like every
+// other mutating command (sibling of commit / archive-orphans dry-run wiring).
+func foldBackDryRun(cmd *cobra.Command) bool {
+	local, _ := cmd.Flags().GetBool("dry-run")
+	return local || safeDryRun()
+}
+
+// prepareFoldBackUpsert runs the read-only preamble shared by the write and
+// dry-run paths — plan existence check, prior-artifact load, agreement
+// validation, and artifact identity assignment — without touching disk.
+func prepareFoldBackUpsert(projectPath string, in *foldBackUpsertInputs, updateOnly bool, createdAt string, ts int64) (foldBackArtifact, *foldBackArtifact, bool, error) {
+	if _, err := loadCanonicalPlan(projectPath, in.planID); err != nil {
+		return foldBackArtifact{}, nil, false, fmt.Errorf("plan %s not found: %w", in.planID, err)
+	}
+	prior, priorExists, err := loadPriorFoldBackArtifact(projectPath, in.slug)
+	if err != nil {
+		return foldBackArtifact{}, nil, false, err
+	}
+	if updateOnly && !priorExists {
+		return foldBackArtifact{}, nil, false, fmt.Errorf("no fold-back artifact with slug %q", in.slug)
+	}
+	if priorExists {
+		if err := validatePriorFoldBack(prior, in); err != nil {
+			return foldBackArtifact{}, nil, false, err
+		}
+	}
+	artifact := foldBackArtifact{
+		SchemaVersion: 1,
+		PlanID:        in.planID,
+		Observation:   in.observation,
+		CreatedAt:     createdAt,
+	}
+	assignFoldBackArtifactIdentity(&artifact, prior, priorExists, in.slug, ts)
+	return artifact, prior, priorExists, nil
+}
+
 func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	project, err := currentWorkflowProject()
 	if err != nil {
@@ -690,34 +785,31 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		return err
 	}
 
-	if _, err := loadCanonicalPlan(project.Path, in.planID); err != nil {
-		return fmt.Errorf("plan %s not found: %w", in.planID, err)
-	}
-
 	now := time.Now().UTC()
 	createdAt := now.Format(time.RFC3339)
 	ts := now.UnixNano()
 
-	prior, priorExists, err := loadPriorFoldBackArtifact(project.Path, in.slug)
+	// --dry-run previews the routing decision and returns before any disk write
+	// (proposal file, artifact YAML, note/summary edit) OR journal event.
+	if foldBackDryRun(cmd) {
+		return runFoldBackUpsertDryRun(cmd, project.Path, in, updateOnly, createdAt, ts)
+	}
+
+	command := journal.CmdFoldBackCreate
+	action := "create"
+	if updateOnly {
+		command = journal.CmdFoldBackUpdate
+		action = "update"
+	}
+	input := &journal.FoldBackInput{Plan: in.planID, Task: in.taskID, Observation: in.observation, Slug: in.slug, Propose: in.propose}
+	observed := &journal.FoldBackObserved{Action: action}
+	ok := false
+	defer func() { journalTier1(project.Path, command, input, observed, ok) }()
+
+	artifact, prior, priorExists, err := prepareFoldBackUpsert(project.Path, in, updateOnly, createdAt, ts)
 	if err != nil {
 		return err
 	}
-	if updateOnly && !priorExists {
-		return fmt.Errorf("no fold-back artifact with slug %q", in.slug)
-	}
-	if priorExists {
-		if err := validatePriorFoldBack(prior, in); err != nil {
-			return err
-		}
-	}
-
-	artifact := foldBackArtifact{
-		SchemaVersion: 1,
-		PlanID:        in.planID,
-		Observation:   in.observation,
-		CreatedAt:     createdAt,
-	}
-	assignFoldBackArtifactIdentity(&artifact, prior, priorExists, in.slug, ts)
 
 	if err := dispatchFoldBackUpsert(project.Path, in, prior, priorExists, ts, createdAt, &artifact); err != nil {
 		return err
@@ -726,6 +818,11 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 	if err := writeFoldBackArtifact(project.Path, artifact); err != nil {
 		return err
 	}
+	observed.ArtifactID = artifact.ID
+	if artifact.RoutedTo != "" {
+		observed.RoutedTo = []string{artifact.RoutedTo}
+	}
+	ok = true
 
 	out := cmd.OutOrStdout()
 	if deps.Flags.JSON() {
@@ -739,6 +836,111 @@ func runWorkflowFoldBackUpsert(cmd *cobra.Command, updateOnly bool) error {
 		verb = "Updated"
 	}
 	fmt.Fprintf(out, "  %s fold-back %s (%s) → %s\n", verb, artifact.ID, artifact.Classification, artifact.RoutedTo)
+	return nil
+}
+
+// foldBackDryRunResult is the machine-readable --dry-run payload: the artifact
+// the command WOULD record plus the disk targets it WOULD touch. dry_run is
+// always true here (this shape is emitted only on the dry-run path).
+type foldBackDryRunResult struct {
+	DryRun     bool             `json:"dry_run"`
+	Artifact   foldBackArtifact `json:"artifact"`
+	WouldWrite []string         `json:"would_write"`
+}
+
+// planFoldBackRouting mirrors dispatchFoldBackUpsert as a pure, read-only
+// computation: it assigns the classification / task / routed_to the write path
+// would produce and returns a human description of each disk target that would
+// be touched — without writing anything.
+func planFoldBackRouting(projectPath string, in *foldBackUpsertInputs, prior *foldBackArtifact, priorExists bool, ts int64, artifact *foldBackArtifact) ([]string, error) {
+	tasksPath := filepath.Join(plansBaseDir(projectPath), in.planID, workflowTasksFileName)
+	planPath := filepath.Join(plansBaseDir(projectPath), in.planID, workflowPlanFileName)
+	switch {
+	case priorExists && prior.Classification == "proposal":
+		artifact.Classification = "proposal"
+		artifact.TaskID = prior.TaskID
+		artifact.RoutedTo = prior.RoutedTo
+		propPath, err := proposalAbsPathFromRoutedTo(prior.RoutedTo)
+		if err != nil {
+			return nil, err
+		}
+		return []string{"update proposal " + propPath}, nil
+	case priorExists && prior.Classification == "small":
+		artifact.Classification = "small"
+		if prior.TaskID != "" {
+			artifact.TaskID = prior.TaskID
+			artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, in.planID, prior.TaskID)
+			return []string{fmt.Sprintf("edit task note %s in %s", prior.TaskID, tasksPath)}, nil
+		}
+		artifact.TaskID = ""
+		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, in.planID)
+		return []string{"edit plan summary in " + planPath}, nil
+	case !priorExists && in.propose:
+		artifact.Classification = "proposal"
+		artifact.TaskID = strings.TrimSpace(in.taskID)
+		proposalName := fmt.Sprintf("obs-%d.md", ts)
+		if in.slug != "" {
+			proposalName = fmt.Sprintf("obs-%s.md", in.slug)
+		}
+		artifact.RoutedTo = delegationProposalRoutePfx + proposalName
+		return []string{"create proposal " + filepath.Join(config.AgentsHome(), "proposals", proposalName)}, nil
+	case !priorExists:
+		artifact.Classification = "small"
+		taskID := strings.TrimSpace(in.taskID)
+		artifact.TaskID = taskID
+		if taskID != "" {
+			artifact.RoutedTo = fmt.Sprintf(delegationTaskNoteRouteFmt, in.planID, taskID)
+			return []string{fmt.Sprintf("edit task note %s in %s", taskID, tasksPath)}, nil
+		}
+		artifact.RoutedTo = fmt.Sprintf(delegationPlanSummaryRteFmt, in.planID)
+		return []string{"edit plan summary in " + planPath}, nil
+	default:
+		return nil, fmt.Errorf("internal fold-back routing error (slug=%q propose=%v priorExists=%v)", in.slug, in.propose, priorExists)
+	}
+}
+
+// runFoldBackUpsertDryRun previews the routing decision and the paths the
+// command WOULD write, then returns without any disk change: no proposal file,
+// no fold-back artifact YAML, no TASKS.yaml/PLAN.yaml note edit, and no journal
+// event. It runs the same read-only preamble as the write path so the preview
+// reflects the real decision and surfaces the same validation errors.
+func runFoldBackUpsertDryRun(cmd *cobra.Command, projectPath string, in *foldBackUpsertInputs, updateOnly bool, createdAt string, ts int64) error {
+	artifact, prior, priorExists, err := prepareFoldBackUpsert(projectPath, in, updateOnly, createdAt, ts)
+	if err != nil {
+		return err
+	}
+	wouldWrite, err := planFoldBackRouting(projectPath, in, prior, priorExists, ts, &artifact)
+	if err != nil {
+		return err
+	}
+	// Accurate preview: the task-note route (classification small with a task target)
+	// is the one route whose write path enforces a precondition planFoldBackRouting only
+	// formats — updateTaskFoldBackNote requires the task to exist. Mirror that check
+	// read-only so a dry-run against a missing task surfaces the real error instead of a
+	// false-green preview.
+	if artifact.Classification == "small" && artifact.TaskID != "" {
+		if err := assertFoldBackTaskExists(projectPath, in.planID, artifact.TaskID); err != nil {
+			return err
+		}
+	}
+	// The write path always persists the fold-back artifact YAML alongside the route.
+	wouldWrite = append(wouldWrite, "write fold-back artifact "+foldBackArtifactFile(projectPath, artifact.ID))
+
+	out := cmd.OutOrStdout()
+	if deps.Flags.JSON() {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(foldBackDryRunResult{DryRun: true, Artifact: artifact, WouldWrite: wouldWrite})
+	}
+
+	verb := "record"
+	if priorExists {
+		verb = "update"
+	}
+	fmt.Fprintf(out, "  [dry-run] would %s fold-back %s (%s) → %s\n", verb, artifact.ID, artifact.Classification, artifact.RoutedTo)
+	for _, w := range wouldWrite {
+		fmt.Fprintf(out, "  [dry-run] would %s\n", w)
+	}
 	return nil
 }
 
@@ -781,7 +983,7 @@ func ensureTaskVerificationDir(projectPath, taskID string) error {
 func writeScopeImpliesNonTestGo(ws []string) bool {
 	for _, rel := range ws {
 		rel = filepath.ToSlash(filepath.Clean(rel))
-		if strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, "_test.go") {
+		if strings.HasSuffix(rel, ".go") && !strings.HasSuffix(rel, atgTestFileSuffix) {
 			return true
 		}
 	}
@@ -935,10 +1137,52 @@ func resolveFanoutWriteScope(seed []string, csv string, explicit bool, fallback 
 	return seed
 }
 
+// addSiblingTestFiles returns writeScope with each .go entry's sibling
+// <name>_test.go path (same directory) appended when not already present.
+// It is create-if-absent: no os.Stat check is performed, since a delegated
+// TDD worker is expected to write the sibling test file fresh rather than
+// touch one that already exists. Non-.go entries (dirs, globs, docs) and
+// entries already ending in _test.go are left as-is and never used as the
+// basis for a sibling, so this never double-adds a test file to itself.
+func addSiblingTestFiles(paths []string) []string {
+	present := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		present[p] = true
+	}
+	result := append([]string(nil), paths...)
+	for _, p := range paths {
+		if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, atgTestFileSuffix) {
+			continue
+		}
+		sibling := strings.TrimSuffix(p, ".go") + atgTestFileSuffix
+		if !present[sibling] {
+			result = append(result, sibling)
+			present[sibling] = true
+		}
+	}
+	return result
+}
+
+// checkFanoutWriteScopeConflicts refuses a fanout whose write_scope overlaps
+// an existing pending/active delegation. It uses
+// listDelegationContractsWithWarnings (not the listDelegationContracts
+// wrapper) so a corrupt/unreadable contract is never silently excluded from
+// this safety check: since its write_scope and status cannot be parsed, we
+// cannot know whether it would have conflicted, so the check fails closed
+// rather than approving a fanout past an unknown scope.
 func checkFanoutWriteScopeConflicts(projectPath string, writeScope []string, taskID string) error {
-	existing, err := listDelegationContracts(projectPath)
+	existing, warnings, err := listDelegationContractsWithWarnings(projectPath)
 	if err != nil {
 		return fmt.Errorf("list delegations: %w", err)
+	}
+	if len(warnings) > 0 {
+		for _, w := range warnings {
+			ui.Warn(w)
+		}
+		return fmt.Errorf(
+			"delegation rejected: %d existing delegation contract(s) unreadable/corrupt, cannot verify write-scope conflicts (see warnings above); fix or remove them before fanout",
+			len(warnings),
+		)
 	}
 	conflicts := writeScopeOverlaps(existing, writeScope, taskID)
 	if len(conflicts) == 0 {
@@ -964,7 +1208,9 @@ func persistFanoutBundle(projectPath string, contract *DelegationContract, bundl
 func persistFanoutBundleWithBase(projectPath string, contract *DelegationContract, bundle *delegationBundleYAML, res *baseResolution) error {
 	if err := saveDelegationBundleWithBase(projectPath, bundle, res); err != nil {
 		contractPath := filepath.Join(delegationDir(projectPath), contract.ParentTaskID+".yaml")
-		_ = os.Remove(contractPath)
+		if rmErr := os.Remove(contractPath); rmErr != nil {
+			ui.Warn(fmt.Sprintf("bundle save failed and rollback could not remove orphaned delegation contract %s: %v", contractPath, rmErr))
+		}
 		return fmt.Errorf("save delegation bundle: %w", err)
 	}
 	return nil
@@ -995,6 +1241,7 @@ type fanoutInputs struct {
 	owner              string
 	writeScopeCSV      string
 	writeScopeExplicit bool
+	withTests          bool
 }
 
 func parseFanoutInputs(cmd *cobra.Command) fanoutInputs {
@@ -1003,6 +1250,7 @@ func parseFanoutInputs(cmd *cobra.Command) fanoutInputs {
 	sliceID, _ := cmd.Flags().GetString("slice")
 	owner, _ := cmd.Flags().GetString("owner")
 	writeScopeCSV, _ := cmd.Flags().GetString("write-scope")
+	withTests, _ := cmd.Flags().GetBool("with-tests")
 	return fanoutInputs{
 		planID:             planID,
 		taskID:             taskID,
@@ -1010,6 +1258,7 @@ func parseFanoutInputs(cmd *cobra.Command) fanoutInputs {
 		owner:              owner,
 		writeScopeCSV:      writeScopeCSV,
 		writeScopeExplicit: cmd.Flags().Changed("write-scope"),
+		withTests:          withTests,
 	}
 }
 
@@ -1034,6 +1283,19 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	}
 	in := parseFanoutInputs(cmd)
 
+	delegateProfile, _ := cmd.Flags().GetString("delegate-profile")
+	baseBranchFlag, _ := cmd.Flags().GetString("base-branch")
+	verifierSeq, _ := cmd.Flags().GetString("verifier-sequence")
+	input := &journal.FanoutInput{
+		Plan:             in.planID,
+		DelegateProfile:  delegateProfile,
+		BaseBranch:       baseBranchFlag,
+		VerifierSequence: splitTrimmedCSV(verifierSeq),
+	}
+	observed := &journal.FanoutObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdFanout, input, observed, ok) }()
+
 	plan, err := loadCanonicalPlan(project.Path, in.planID)
 	if err != nil {
 		return fmt.Errorf("plan %s not found: %w", in.planID, err)
@@ -1043,6 +1305,7 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	input.Task = taskID
 
 	tf, err := loadCanonicalTasks(project.Path, in.planID)
 	if err != nil {
@@ -1058,6 +1321,10 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	}
 
 	writeScope = resolveFanoutWriteScope(writeScope, in.writeScopeCSV, in.writeScopeExplicit, targetTask.WriteScope)
+	if in.withTests {
+		writeScope = addSiblingTestFiles(writeScope)
+	}
+	input.WriteScope = writeScope
 
 	if err := ensureTaskVerificationDir(project.Path, taskID); err != nil {
 		return fmt.Errorf("prepare verification directory: %w", err)
@@ -1071,6 +1338,11 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 	checkFanoutScopeEvidenceWarnings(project.Path, in.planID, taskID, skipEvidenceCheck)
 
 	if err := checkFanoutWriteScopeConflicts(project.Path, writeScope, taskID); err != nil {
+		return err
+	}
+
+	skipATGate, _ := cmd.Flags().GetBool("skip-asserting-test-gate")
+	if err := checkFanoutAssertingTestScope(project.Path, writeScope, skipATGate); err != nil {
 		return err
 	}
 
@@ -1092,12 +1364,13 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	if targetTask.Status == "pending" {
-		targetTask.Status = "in_progress"
-		if err := saveCanonicalTasks(project.Path, tf); err != nil {
-			ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
-		}
-	}
+	advanceFanoutTaskStatusIfPending(project.Path, tf, targetTask)
+
+	observed.DelegationPath = fmt.Sprintf(".agents/active/delegation/%s.yaml", taskID)
+	observed.BundlePath = fmt.Sprintf(".agents/active/delegation-bundles/%s.yaml", contract.ID)
+	observed.ResolvedBaseBranch = baseRes.BaseBranch
+	observed.ResolvedWriteScope = writeScope
+	ok = true
 
 	ui.SuccessBox(
 		fmt.Sprintf("Delegation created for task %s", taskID),
@@ -1107,6 +1380,19 @@ func runWorkflowFanout(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Base branch: %s", fanoutBaseSummary(baseRes)),
 	)
 	return nil
+}
+
+// advanceFanoutTaskStatusIfPending flips a freshly-fanned-out task from
+// "pending" to "in_progress" and persists it. Save failures are non-fatal —
+// the delegation contract already exists, so we only warn.
+func advanceFanoutTaskStatusIfPending(projectPath string, tf *CanonicalTaskFile, targetTask *CanonicalTask) {
+	if targetTask.Status != "pending" {
+		return
+	}
+	targetTask.Status = "in_progress"
+	if err := saveCanonicalTasks(projectPath, tf); err != nil {
+		ui.Warn(fmt.Sprintf("delegation created but failed to advance task status: %v", err))
+	}
 }
 
 // fanoutBaseSummary renders the resolved base for the fanout success box.
@@ -1176,6 +1462,15 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	summary, _ := cmd.Flags().GetString("summary")
 	verificationStatus, _ := cmd.Flags().GetString("verification-status")
 	integrationNotes, _ := cmd.Flags().GetString("integration-notes")
+	commitState, _ := cmd.Flags().GetBool(workflowFlagCommitState)
+
+	input := &journal.MergeBackInput{Task: taskID, Summary: summary, VerificationStatus: verificationStatus}
+	if commitState {
+		input.CommitState = "true"
+	}
+	observed := &journal.MergeBackObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdMergeBack, input, observed, ok) }()
 
 	if !isValidVerificationStatus(verificationStatus) {
 		return fmt.Errorf("invalid verification status %q (expected pass, fail, partial, or unknown)", verificationStatus)
@@ -1206,6 +1501,11 @@ func runWorkflowMergeBack(cmd *cobra.Command, _ []string) error {
 	if err := saveDelegationContract(project.Path, contract); err != nil {
 		ui.Warn(fmt.Sprintf("merge-back created but failed to update delegation status: %v", err))
 	}
+
+	observed.ArtifactPath = fmt.Sprintf(".agents/active/merge-back/%s.md", taskID)
+	observed.FilesChanged = filesChanged
+	observed.Verdict = verificationStatus
+	ok = true
 
 	ui.SuccessBox(
 		fmt.Sprintf("Merge-back created for task %s", taskID),
@@ -1773,7 +2073,9 @@ func materializeFanoutContractAndBundle(cmd *cobra.Command, req fanoutMaterializ
 	})
 	if err != nil {
 		contractPath := filepath.Join(delegationDir(req.Project.Path), req.TaskID+".yaml")
-		_ = os.Remove(contractPath)
+		if rmErr := os.Remove(contractPath); rmErr != nil {
+			ui.Warn(fmt.Sprintf("bundle build failed and rollback could not remove orphaned delegation contract %s: %v", contractPath, rmErr))
+		}
 		return nil, err
 	}
 	if err := persistFanoutBundleWithBase(req.Project.Path, contract, bundle, req.BaseRes); err != nil {
@@ -1972,6 +2274,10 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	note, _ := cmd.Flags().GetString("note")
 
 	decision = strings.ToLower(strings.TrimSpace(decision))
+	input := &journal.DelegationCloseoutInput{Plan: planID, Task: taskID, Decision: decision, Note: strings.TrimSpace(note)}
+	observed := &journal.DelegationCloseoutObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdDelegationCloseout, input, observed, ok) }()
 	if decision != "accept" && decision != "reject" {
 		return fmt.Errorf(`--decision must be "accept" or "reject"`)
 	}
@@ -1995,7 +2301,7 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		ClosedAt:      time.Now().UTC().Format(time.RFC3339),
 	}
 
-	_, dateStr, err := archiveCloseoutArtifacts(project.Path, taskID, planID, decision, contract, closeout)
+	archiveDir, dateStr, err := archiveCloseoutArtifacts(project.Path, taskID, planID, decision, contract, closeout)
 	if err != nil {
 		return err
 	}
@@ -2003,6 +2309,9 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 	if err := applyCloseoutDecisionToTasks(project.Path, planID, taskID, closeout); err != nil {
 		return err
 	}
+	observed.ArchivedPaths = []string{config.DisplayPath(archiveDir)}
+	observed.ReconciledTaskStatus = closeoutReconciledStatus(decision)
+	ok = true
 
 	if deps.Flags.JSON() {
 		enc := json.NewEncoder(os.Stdout)
@@ -2015,4 +2324,406 @@ func runWorkflowDelegationCloseout(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Archived under .agents/history/%s/delegate-merge-back-archive/%s/%s/", planID, dateStr, taskID),
 	)
 	return nil
+}
+
+// closeoutReconciledStatus maps a closeout decision to the task status
+// applyCloseoutDecisionToTasks lands it in, so the journal records the resolved
+// state without re-deriving it.
+func closeoutReconciledStatus(decision string) string {
+	if decision == "reject" {
+		return "blocked"
+	}
+	return "completed"
+}
+
+// ── §0d asserting-test-scope gate ────────────────────────────────────────────
+//
+// Implements delegation-lifecycle §0d (coverage-delta forecast) mechanically:
+// for every Go symbol declared in the write_scope, find *_test.go files OUTSIDE
+// write_scope that reference it, then classify each such file:
+//
+//   - EXPAND (warn, non-blocking): the test lives in the SAME package directory
+//     as a declaring symbol but is not itself listed in write_scope. It is part
+//     of the same disjoint slice, so the orchestrator merely needs to widen the
+//     scope to include it.
+//   - REFUSE (hard error, aborts fanout): the test references an EXPORTED symbol
+//     declared in a DIFFERENT package. Silently widening scope across packages
+//     shatters the disjoint-slice invariant, so the bundle is bounced back.
+//
+// Matching is AST-based: each *_test.go is parsed with go/ast and its referenced
+// identifiers are collected, which inherently excludes names appearing only in
+// comments or string literals. This is a name-level match — precise per-type
+// resolution (disambiguating an unrelated method that shares a scope symbol's
+// name) is the FUTURE graph-based pass noted in the task; AST-over-bytes is the
+// mechanical floor.
+//
+// Scope: Go / *_test.go only. Non-Go write_scopes yield no exported symbols and
+// fall through; the manifest/snapshot-test coverage check for scaffold-shaped
+// scopes is a separately-tracked future extension.
+
+const (
+	atgViolationExpand  = "expand"
+	atgViolationRefuse  = "refuse"
+	atgSkipFlag         = "--skip-asserting-test-gate"
+	atgTestFileSuffix   = "_test.go"
+	atgExpandWarnHeader = "warning: asserting-test scope gate: test file(s) in a write_scope package assert on scope symbols but are not listed in write_scope (consider widening scope to include them):\n"
+	atgRefuseHeader     = "fanout asserting-test scope gate: write_scope changes exported symbol(s) referenced by test file(s) in OTHER packages (cannot fix within scope — would shatter the disjoint-slice invariant):\n"
+)
+
+// skippedDirNames are directories the symbol/caller walks never descend into.
+var skippedDirNames = map[string]bool{
+	"vendor":    true,
+	".git":      true,
+	"testdata":  true,
+	".claude":   true,
+	"worktrees": true,
+}
+
+// atgScopeSymbol is an identifier declared in the fanout write_scope.
+type atgScopeSymbol struct {
+	Name     string
+	DeclDir  string // absolute path to declaring package directory
+	Exported bool
+}
+
+// atgViolation is one out-of-scope *_test.go file that references scope
+// symbols, classified as EXPAND or REFUSE. Symbols holds every matched name
+// that drove the classification (see atgClassifyTestFile).
+type atgViolation struct {
+	TestFile string
+	Symbols  []string
+	Kind     string // atgViolationExpand or atgViolationRefuse
+}
+
+// atgScope models write_scope membership for a candidate test file: explicit
+// file entries are in scope by exact path; directory entries cover everything
+// beneath them recursively.
+type atgScope struct {
+	files map[string]bool // absolute paths explicitly listed in write_scope
+	dirs  []string        // absolute directory prefixes (recursive coverage)
+}
+
+// checkFanoutAssertingTestScope enforces delegation-lifecycle §0d. See the
+// section comment above for the EXPAND-vs-REFUSE contract. Use
+// --skip-asserting-test-gate for doc-only or deliberate cross-scope changes.
+func checkFanoutAssertingTestScope(projectPath string, writeScope []string, skip bool) error {
+	if skip {
+		return nil
+	}
+	symbols := atgEnumerateScopeSymbols(projectPath, writeScope)
+	if len(symbols) == 0 {
+		// No Go symbols in scope (non-Go scope or empty package); skip gate.
+		return nil
+	}
+	scope := atgParseScope(projectPath, writeScope)
+	violations := atgFindCallers(projectPath, symbols, scope)
+	if len(violations) == 0 {
+		return nil
+	}
+	return atgClassifyAndReport(violations)
+}
+
+// atgParseScope splits write_scope into explicit file entries and recursive
+// directory prefixes so a test file can be tested for membership.
+func atgParseScope(projectPath string, writeScope []string) atgScope {
+	s := atgScope{files: make(map[string]bool)}
+	for _, p := range writeScope {
+		abs := filepath.Join(projectPath, filepath.Clean(filepath.FromSlash(p)))
+		if strings.HasSuffix(p, ".go") {
+			s.files[abs] = true
+		} else {
+			s.dirs = append(s.dirs, abs)
+		}
+	}
+	return s
+}
+
+// contains reports whether testAbs is explicitly in write_scope (exact file
+// entry) or beneath a directory-scope entry. A test in the SAME directory as a
+// scoped FILE but not itself listed is NOT contained — it is an EXPAND
+// candidate, not an in-scope file.
+func (s atgScope) contains(testAbs string) bool {
+	if s.files[testAbs] {
+		return true
+	}
+	testDir := filepath.Dir(testAbs)
+	for _, d := range s.dirs {
+		if testDir == d || strings.HasPrefix(testDir, d+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// atgEnumerateScopeSymbols collects top-level identifiers declared by non-test
+// .go files reachable from the write_scope paths. Directory entries are walked
+// RECURSIVELY (a scope of "commands/" covers "commands/workflow/…");
+// file entries contribute only that single file.
+func atgEnumerateScopeSymbols(projectPath string, writeScope []string) []atgScopeSymbol {
+	var symbols []atgScopeSymbol
+	for _, p := range writeScope {
+		abs := filepath.Join(projectPath, filepath.FromSlash(p))
+		atgCollectFromPath(abs, &symbols)
+	}
+	return symbols
+}
+
+// isNonTestGoFile reports whether name is a non-test Go source file.
+func isNonTestGoFile(name string) bool {
+	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, atgTestFileSuffix)
+}
+
+// atgCollectFromPath collects symbols from an absolute path (file or directory).
+func atgCollectFromPath(absPath string, out *[]atgScopeSymbol) {
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return
+	}
+	if info.IsDir() {
+		atgCollectFromDirRecursive(absPath, out)
+		return
+	}
+	if isNonTestGoFile(info.Name()) {
+		atgCollectFromFile(absPath, out)
+	}
+}
+
+// atgCollectFromDirRecursive walks a directory scope and parses every non-test
+// .go file beneath it, skipping vendor/.git/testdata/.claude/worktrees sub-trees.
+func atgCollectFromDirRecursive(absDir string, out *[]atgScopeSymbol) {
+	_ = filepath.WalkDir(absDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // defensive: skip unreadable entries rather than abort enumeration
+		}
+		if d.IsDir() {
+			if skippedDirNames[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isNonTestGoFile(d.Name()) {
+			atgCollectFromFile(path, out)
+		}
+		return nil
+	})
+}
+
+// atgCollectFromFile parses a Go file and appends top-level symbols.
+func atgCollectFromFile(absPath string, out *[]atgScopeSymbol) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, absPath, nil, 0)
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(absPath)
+	for _, decl := range f.Decls {
+		atgCollectFromDecl(decl, dir, out)
+	}
+}
+
+// atgCollectFromDecl extracts names from a single top-level declaration.
+func atgCollectFromDecl(decl ast.Decl, dir string, out *[]atgScopeSymbol) {
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		*out = append(*out, atgScopeSymbol{Name: d.Name.Name, DeclDir: dir, Exported: d.Name.IsExported()})
+	case *ast.GenDecl:
+		atgCollectFromGenDecl(d, dir, out)
+	}
+}
+
+// atgCollectFromGenDecl extracts names from a GenDecl (type/var/const).
+func atgCollectFromGenDecl(d *ast.GenDecl, dir string, out *[]atgScopeSymbol) {
+	for _, spec := range d.Specs {
+		switch s := spec.(type) {
+		case *ast.TypeSpec:
+			*out = append(*out, atgScopeSymbol{Name: s.Name.Name, DeclDir: dir, Exported: s.Name.IsExported()})
+		case *ast.ValueSpec:
+			for _, name := range s.Names {
+				*out = append(*out, atgScopeSymbol{Name: name.Name, DeclDir: dir, Exported: name.IsExported()})
+			}
+		}
+	}
+}
+
+// atgSymbolDecl preserves where a matched symbol was declared and whether it is
+// visible across package boundaries.
+type atgSymbolDecl struct {
+	DeclDir  string
+	Exported bool
+}
+
+// atgSymbolDecls maps each scope-symbol name to the declarations behind it. A
+// name may be declared in more than one package when the same identifier appears
+// across multiple scoped directories.
+func atgSymbolDecls(symbols []atgScopeSymbol) map[string][]atgSymbolDecl {
+	m := make(map[string][]atgSymbolDecl)
+	for _, s := range symbols {
+		m[s.Name] = append(m[s.Name], atgSymbolDecl{DeclDir: s.DeclDir, Exported: s.Exported})
+	}
+	return m
+}
+
+// atgWalkTestFiles walks projectPath and calls visit for every *_test.go file,
+// skipping vendor/.git/testdata/.claude/worktrees sub-trees.
+func atgWalkTestFiles(projectPath string, visit func(path string) error) error {
+	return filepath.WalkDir(projectPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // defensive: skip unreadable entries rather than abort the walk
+		}
+		if d.IsDir() {
+			if skippedDirNames[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, atgTestFileSuffix) {
+			return nil
+		}
+		return visit(path)
+	})
+}
+
+// atgReferencedIdents parses a Go test file and returns the set of identifier
+// names it references. Using go/ast (not raw-byte scanning) means identifiers
+// inside comments and string literals are excluded automatically. Method and
+// qualified references are covered: ast.Inspect visits a SelectorExpr's Sel as
+// an *ast.Ident, and the explicit SelectorExpr case below documents that intent.
+//
+// This is a name-level match: an unrelated method sharing a scope symbol's name
+// (e.g. a .String() on a different type) can still match. Precise per-type
+// resolution is the FUTURE graph-based pass (per the task note).
+func atgReferencedIdents(path string) map[string]bool {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil
+	}
+	idents := make(map[string]bool)
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.Ident:
+			idents[x.Name] = true
+		case *ast.SelectorExpr:
+			idents[x.Sel.Name] = true
+		}
+		return true
+	})
+	return idents
+}
+
+// atgMatchedNames returns the sorted set of scope-symbol names referenced by the
+// test file at path.
+func atgMatchedNames(path string, decls map[string][]atgSymbolDecl) []string {
+	idents := atgReferencedIdents(path)
+	var matched []string
+	for name := range decls {
+		if idents[name] {
+			matched = append(matched, name)
+		}
+	}
+	sort.Strings(matched)
+	return matched
+}
+
+// atgClassifyTestFile splits an out-of-scope test file's matched symbols into
+// same-package and cross-package sets and returns the STRICTEST violation:
+// REFUSE if ANY matched exported symbol is declared in another package (listing
+// all cross-package offenders), otherwise EXPAND for same-package matches.
+// Unexported names never drive cross-package REFUSE: another package cannot
+// legally assert on them, and common names like helper/setup would false-positive.
+// REFUSE always wins so a same-dir match cannot mask a cross-package break in
+// the same file.
+func atgClassifyTestFile(testPath string, matched []string, decls map[string][]atgSymbolDecl) (atgViolation, bool) {
+	testDir := filepath.Dir(testPath)
+	var crossPkg, samePkg []string
+	for _, name := range matched {
+		same, exportedCross := atgClassifySymbolForTestDir(testDir, decls[name])
+		if exportedCross {
+			crossPkg = append(crossPkg, name)
+		} else if same {
+			samePkg = append(samePkg, name)
+		}
+	}
+	if len(crossPkg) > 0 {
+		return atgViolation{TestFile: testPath, Symbols: crossPkg, Kind: atgViolationRefuse}, true
+	}
+	if len(samePkg) > 0 {
+		return atgViolation{TestFile: testPath, Symbols: samePkg, Kind: atgViolationExpand}, true
+	}
+	return atgViolation{}, false
+}
+
+func atgClassifySymbolForTestDir(testDir string, decls []atgSymbolDecl) (same, exportedCross bool) {
+	for _, decl := range decls {
+		if decl.DeclDir == testDir {
+			same = true
+			continue
+		}
+		if decl.Exported {
+			exportedCross = true
+		}
+	}
+	return same, exportedCross
+}
+
+// atgFindCallers walks all *_test.go files and returns one classified violation
+// per out-of-scope test file that references a scope symbol.
+func atgFindCallers(projectPath string, symbols []atgScopeSymbol, scope atgScope) []atgViolation {
+	decls := atgSymbolDecls(symbols)
+	var violations []atgViolation
+	_ = atgWalkTestFiles(projectPath, func(path string) error {
+		if scope.contains(path) {
+			return nil
+		}
+		matched := atgMatchedNames(path, decls)
+		if len(matched) == 0 {
+			return nil
+		}
+		if v, ok := atgClassifyTestFile(path, matched, decls); ok {
+			violations = append(violations, v)
+		}
+		return nil
+	})
+	return violations
+}
+
+// atgClassifyAndReport emits an EXPAND warning (stderr, non-blocking) for
+// same-package callers and returns a REFUSE error for cross-package callers.
+// REFUSE, when present, is the return value; EXPAND-only returns nil.
+func atgClassifyAndReport(violations []atgViolation) error {
+	var expand, refuse []atgViolation
+	for _, v := range violations {
+		if v.Kind == atgViolationRefuse {
+			refuse = append(refuse, v)
+		} else {
+			expand = append(expand, v)
+		}
+	}
+	if len(expand) > 0 {
+		atgWarnExpand(expand)
+	}
+	if len(refuse) == 0 {
+		return nil
+	}
+	return atgRefuseError(refuse)
+}
+
+// atgWarnExpand emits a non-blocking stderr warning for same-package asserters
+// not explicitly listed in write_scope.
+func atgWarnExpand(expand []atgViolation) {
+	fmt.Fprint(os.Stderr, atgExpandWarnHeader)
+	for _, v := range expand {
+		fmt.Fprintf(os.Stderr, "  - %s (asserts on %s)\n", v.TestFile, strings.Join(v.Symbols, ", "))
+	}
+}
+
+// atgRefuseError constructs the REFUSE error listing offending files and symbols.
+func atgRefuseError(refuse []atgViolation) error {
+	var sb strings.Builder
+	sb.WriteString(atgRefuseHeader)
+	for _, v := range refuse {
+		fmt.Fprintf(&sb, "  - %s → %s\n", v.TestFile, strings.Join(v.Symbols, ", "))
+	}
+	sb.WriteString("use " + atgSkipFlag + " for deliberate cross-scope changes or an additive-helper approach")
+	return errors.New(sb.String())
 }

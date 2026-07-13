@@ -1,10 +1,9 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro';
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 import ResourceGraph from '../../components/ResourceGraph.astro';
 import graph from '../../data/workflow-resources.json';
 ---
-<BaseLayout title="Workflow resources" description={graph.description}>
-  <h1>{graph.title}</h1>
+<StarlightPage frontmatter={{ title: graph.title, description: graph.description }}>
   <p>{graph.description}</p>
   <ResourceGraph graph={graph} graphId="workflow-resources" layoutName={graph.layout} />
-</BaseLayout>
+</StarlightPage>

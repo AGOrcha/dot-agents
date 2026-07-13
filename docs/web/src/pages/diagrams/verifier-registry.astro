@@ -1,22 +1,9 @@
 ---
-import BaseLayout from '../../layouts/BaseLayout.astro';
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import ResourceGraph from '../../components/ResourceGraph.astro';
+import graph from '../../data/verifier-registry.json';
 ---
-<BaseLayout title="Verifier registry (stub)">
-  <h1>Verifier profile registry &amp; app_type dispatch</h1>
-  <div class="callout-warn">
-    <strong>Stubbed for follow-up.</strong> This page will render the verifier
-    profile registry (<code>unit</code>, <code>api</code>, <code>batch</code>,
-    <code>pr-ci</code>, <code>docs</code>) and the
-    <code>app_type_verifier_map</code> dispatch table that picks a verifier
-    profile based on the delegation bundle's <code>verification.app_type</code>
-    field.
-  </div>
-  <p>
-    The full design lives in
-    <a href="https://github.com/AGOrcha/dot-agents/blob/master/docs/WORKFLOW_AUTOMATION_PRODUCT_SPEC.md" target="_blank" rel="noopener">
-      WORKFLOW_AUTOMATION_PRODUCT_SPEC.md</a>
-    and the lesson
-    <a href="https://github.com/AGOrcha/dot-agents/blob/master/.agents/lessons/verifier-owns-ci-watch-shift-left/LESSON.md" target="_blank" rel="noopener">
-      verifier-owns-ci-watch-shift-left</a>.
-  </p>
-</BaseLayout>
+<StarlightPage frontmatter={{ title: graph.title, description: graph.description }}>
+  <p>{graph.description}</p>
+  <ResourceGraph graph={graph} graphId="verifier-registry" layoutName={graph.layout} />
+</StarlightPage>

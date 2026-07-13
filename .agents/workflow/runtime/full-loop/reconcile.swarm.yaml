@@ -1,0 +1,56 @@
+# One reconciliation pass after an outer-loop wave barrier.
+swarm:
+  name: da-full-loop-wave-reconcile
+  workspace: /Users/nikashp/proj-docs/dot-agents
+  mode: sequential
+  target_count: 1
+  model: claude-opus-4-8
+  agents:
+    reconcile:
+      role: serialized da lifecycle and meta-loop reconciler
+      model: claude-opus-4-8
+      task: |
+        Read $WAVE_MANIFEST and process its task results in manifest order, one at a time.
+        Use the repository-HEAD da binary for every workflow mutation. Re-read the task,
+        delegation, PR, slots, and eligible state before each mutation; never edit PLAN.yaml or
+        TASKS.yaml directly.
+
+        READY result:
+        - Validate merge-back frontmatter and evidence; perform delegation gate readback.
+        - Leave the PR owner-held. If owner outcome is not present, preserve
+          awaiting_owner_review and continue; do not consume a slot.
+        - If an owner merge/reject is present, run the corresponding da delegation closeout and
+          checkpoint/advance sequence exactly once.
+
+        FOLD-BACK result:
+        - This is the terminal result after the inner pipeline exhausted its bounded target_count;
+          retryable lens/verifier rejection already re-entered the executor inside that one active
+          delegation. Do not fan the task out again while its delegation is active.
+        - For each task-scoped item run `da workflow fold-back create --plan <P> --task <T>
+          --observation <text> --slug <stable>`; refine existing slugs with fold-back update.
+          Plan-scoped items omit --task. Confirm routed_to through fold-back list.
+        - Persist a failed merge-back/readback artifact as required, evaluate the delegation gate,
+          then close out with decision=reject and the fold-back evidence. The canonical task becomes
+          blocked and its slot is freed. A later explicit unblock/replan creates a fresh delegation.
+
+        FAILED/UNKNOWN/BLOCKED result:
+        - Treat a non-zero or missing inner exit as a recoverable lifecycle failure, never as a
+          reason to abandon the already-created delegation. Record an idempotent task fold-back
+          containing the exit/result and available logs.
+        - Persist the required failed merge-back/readback artifact, evaluate the parent gate, and
+          close out decision=reject so the task becomes blocked and the occupied slot is freed.
+          A recovered crash with no terminal artifact follows this same path. Never claim success
+          or leave an orphaned in_progress delegation.
+
+        REFINEMENT candidates:
+        - First/local occurrence stays a task_note or plan_summary.
+        - Confirmed recurring/cross-cutting candidates run fold-back create --propose with a stable
+          slug. Shared preference changes use prefs set-shared and remain human-gated by da review.
+        - Never approve a proposal during the run that produced it.
+
+        Record verification/checkpoint/hook outcomes and recompute the iteration score when the
+        lifecycle preconditions are satisfied. Preserve the iteration-close archived-mergeback
+        sentinel workaround. After every canonical write, re-run `da --json workflow slots` and
+        `da --json workflow eligible`; append the observed transition to $WAVE_DIR/reconcile.md.
+        Emit $WAVE_DIR/RECONCILED only after every result has either transitioned or has an explicit
+        owner/external wait reason. Any ambiguous state blocks the next wave.

@@ -1,0 +1,29 @@
+# Tier 2 package descriptor for the ttrpg-campaign-bootstrap skill
+# (graph-backend-adapter-contract §9; external-agent-sources packages surface).
+#
+# This is the `packages:` entry an org/team layer would add to .agentsrc.json to
+# pull the bootstrap skill. SCAFFOLD ONLY — the ref points at a placeholder
+# registry path; no live registry is published for this task.
+name: ttrpg-campaign-bootstrap
+version: 1.0.0
+tier: 2
+artifact_type: application/vnd.dotagents.bootstrap-skill.v1+json
+
+# OCI ref the consumer pins. Digest pinning is required for Tier 2 (high blast
+# radius, §9). The digest here is a placeholder; a real publish recomputes it.
+oci_ref: oci://registry.example.com/dotagents/ttrpg-campaign-bootstrap:1.0.0
+digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+# The adapter this skill bootstraps. `da` cross-checks that the resolved
+# adapter's bootstrap_skill ref (schema.yaml) matches this package.
+adapter:
+  name: ttrpg
+  version: ^1.0
+
+# Execution contract (§8.4.3 failure modes).
+execution:
+  entrypoint: bootstrap.Run
+  sdk: da-adapter-sdk          # storage access is SDK-only (§8.2)
+  namespace: ttrpg             # bootstrap token grants {ttrpg, write} only
+  timeout: 30m                 # §8.4.3 default; non-zero exit reverts activation
+  reads_from: []               # no cross-adapter reads (§8.3)

@@ -1,0 +1,19 @@
+session_id: "sess-a"
+rubric_version: "3.0.0"
+iterations: [1, 2, 3]
+scored: true
+value: 0.8
+band: "good"
+per_iteration:
+  - iteration: 1
+    scored: true
+    value: 0.9
+    band: "excellent"
+  - iteration: 2
+    scored: true
+    value: 0.8
+    band: "good"
+  - iteration: 3
+    scored: true
+    value: 0.7
+    band: "good"

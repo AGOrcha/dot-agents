@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"go.yaml.in/yaml/v3"
 )
@@ -140,32 +141,44 @@ type copilotRenderedAction struct {
 	TimeoutSec int    `json:"timeoutSec,omitempty"`
 }
 
-func resolveHookSpec(agentsHome string, buckets []string, project string, names ...string) *HookSpec {
+func resolveHookSpec(agentsHome string, buckets []string, project string, names ...string) (*HookSpec, error) {
 	return resolveHookSpecInScopes(agentsHome, buckets, scopedNames(project), names...)
 }
 
-func resolveHookSpecInScope(agentsHome string, buckets []string, scope string, names ...string) *HookSpec {
+func resolveHookSpecInScope(agentsHome string, buckets []string, scope string, names ...string) (*HookSpec, error) {
 	return resolveHookSpecInScopes(agentsHome, buckets, []string{scope}, names...)
 }
 
-func resolveHookSpecInScopes(agentsHome string, buckets []string, scopes []string, names ...string) *HookSpec {
+// resolveHookSpecInScopes searches scope × bucket × name candidates in order
+// and returns the first that exists. A confirmed-absent candidate
+// (fsops.StatAllowMissing found=false, err=nil) is skipped and the search
+// continues; a real Stat error (permission denied, I/O failure, ...) aborts
+// the whole search immediately and propagates — it must never be treated as
+// "this candidate doesn't exist" and silently skipped, since that is exactly
+// the swallow that let a source-read error masquerade as "nothing to render"
+// upstream in emitPreferredHookFile.
+func resolveHookSpecInScopes(agentsHome string, buckets []string, scopes []string, names ...string) (*HookSpec, error) {
 	for _, scope := range scopes {
 		for _, bucket := range buckets {
 			for _, name := range names {
 				src := filepath.Join(agentsHome, bucket, scope, name)
-				if _, err := os.Stat(src); err == nil {
+				_, found, err := fsops.StatAllowMissing(src)
+				if err != nil {
+					return nil, err
+				}
+				if found {
 					return &HookSpec{
 						Name:         strings.TrimSuffix(name, filepath.Ext(name)),
 						Scope:        scope,
 						SourcePath:   src,
 						SourceBucket: bucket,
 						SourceKind:   HookSourceLegacyFile,
-					}
+					}, nil
 				}
 			}
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // ListHookSpecs returns hook entries under ~/.agents/hooks/<scope>/: canonical bundles
@@ -175,6 +188,17 @@ func ListHookSpecs(agentsHome, scope string) ([]HookSpec, error) {
 	root := filepath.Join(agentsHome, "hooks", scope)
 	entries, err := os.ReadDir(root)
 	if err != nil {
+		// Distinguish "bucket absent" (legitimate no-op; callers swallow via
+		// os.IsNotExist) from "bucket exists but is not a listable directory"
+		// (a regular file masquerading as the bucket, EACCES, EIO — real
+		// corruption that must surface). This must be OS-independent: Windows
+		// os.ReadDir on a regular-file path maps to a NotExist-class error,
+		// which would otherwise silently hide the corruption. The %v (not %w)
+		// deliberately breaks the fs.ErrNotExist chain so the fault propagates
+		// on every OS.
+		if _, statErr := os.Lstat(root); statErr == nil {
+			return nil, fmt.Errorf("hooks bucket %s exists but is not a listable directory (%v)", root, err)
+		}
 		return nil, err
 	}
 
@@ -614,7 +638,7 @@ func validateHookWhenEvents(manifestPath string, manifest hookManifest) ([]strin
 // render the event, the load must fail loudly rather than silently emit
 // nothing on every platform.
 func isKnownCanonicalEvent(name string) bool {
-	for _, table := range []map[string]string{claudeEventTable, codexEventTable, cursorEventTable, copilotEventTable} {
+	for _, table := range []map[string]string{claudeEventTable, codexEventTable, cursorEventTable, copilotEventTable, antigravityEventTable} {
 		if _, ok := table[name]; ok {
 			return true
 		}

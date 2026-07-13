@@ -1,0 +1,13 @@
+iteration: 3
+rubric_version: "3.0.0"
+scored: true
+value: 0.7
+band: "good"
+breakdown:
+  - signal: landed
+    label: "Landed on master"
+    present: true
+    sub_score: 1
+    nominal_weight: 0.2
+    effective_weight: 1
+    contribution: 0.7

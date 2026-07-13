@@ -27,14 +27,14 @@
                 "VBSEnclave"
             ],
             "metadata": {
-                "description": "Public Trust is required to distribute .exe to the public; PublicTrustTest needs no identity validation and is useful for a dry run."
+                "description": "Public Trust is required to distribute .exe to the public; PublicTrustTest chains to a Microsoft test root for a dry run (do not distribute test-signed binaries)."
             }
         },
         "identityValidationId": {
             "type": "string",
             "defaultValue": "",
             "metadata": {
-                "description": "Id of the COMPLETED identity validation. Required for PublicTrust/PrivateTrust; leave empty for PublicTrustTest."
+                "description": "Id of the COMPLETED identity validation (copy from the portal — Identity validations pane; there is no CLI/ARM list API). Required for all trust profile types; an empty value is rejected as 'IdentityValidationId property value is invalid', including for PublicTrustTest."
             }
         }
     },

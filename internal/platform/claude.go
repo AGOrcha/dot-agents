@@ -4,13 +4,18 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 type claude struct {
@@ -259,7 +264,9 @@ func (c *claude) CreateLinks(project, repoPath string) error {
 	if err := c.createRulesLinks(project, repoPath, agentsHome); err != nil {
 		return err
 	}
-	c.linkProjectSettings(project, repoPath, agentsHome)
+	if err := c.linkProjectSettings(project, repoPath, agentsHome); err != nil {
+		return err
+	}
 	if err := c.linkProjectMCP(project, repoPath, agentsHome); err != nil {
 		return err
 	}
@@ -284,21 +291,25 @@ func (c *claude) prepareLinks(repoPath, agentsHome string) error {
 	return c.io.MkdirAll(filepath.Join(repoPath, claudeDir, "rules"), 0755)
 }
 
-func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) {
+func (c *claude) linkProjectSettings(project, repoPath, agentsHome string) error {
 	target := filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON)
 	projectBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), project)
 	if err != nil {
-		return
+		return err
 	}
 	globalBundles, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
 	if err != nil {
-		return
+		return err
 	}
-	_ = emitPreferredHookFile(
+	spec, err := findClaudeSettingsHookSpec(agentsHome, project)
+	if err != nil {
+		return err
+	}
+	return emitPreferredHookFile(
 		c.io,
 		target,
 		renderClaudeHookSettings,
-		findClaudeSettingsHookSpec(agentsHome, project),
+		spec,
 		directSymlinkHookMode,
 		func(p string) error { return removeRenderedClaudeHookSettings(c.io, p) },
 		projectBundles,
@@ -314,7 +325,7 @@ func (c *claude) linkProjectMCP(project, repoPath, agentsHome string) error {
 	return nil
 }
 
-func findClaudeSettingsHookSpec(agentsHome, scope string) *HookSpec {
+func findClaudeSettingsHookSpec(agentsHome, scope string) (*HookSpec, error) {
 	return resolveHookSpecInScope(agentsHome, []string{"hooks", "settings"}, scope, claudeCodeJSON)
 }
 
@@ -322,8 +333,11 @@ func (c *claude) createRulesLinks(project, repoPath, agentsHome string) error {
 	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
 	projectRulesDir := filepath.Join(agentsHome, "rules", project)
 
-	entries, err := os.ReadDir(projectRulesDir)
+	entries, found, err := fsops.ReadDirAllowMissing(projectRulesDir)
 	if err != nil {
+		return err
+	}
+	if !found {
 		return c.pruneProjectRuleLinks(rulesDir, project)
 	}
 	wanted := map[string]string{}
@@ -385,8 +399,11 @@ func (c *claude) pruneProjectRuleLinks(rulesDir, project string, wanted ...map[s
 
 func (c *claude) ensureUserAgents(agentsHome string) error {
 	globalAgents := filepath.Join(agentsHome, "agents", "global")
-	entries, err := os.ReadDir(globalAgents)
+	entries, found, err := fsops.ReadDirAllowMissing(globalAgents)
 	if err != nil {
+		return err
+	}
+	if !found {
 		return nil
 	}
 
@@ -436,10 +453,18 @@ func (c *claude) ensureUserRules(agentsHome string) error {
 		filepath.Join(agentsHome, "rules", "global", "rules.txt"),
 	}
 
+	// A confirmed-absent candidate is skipped and the search continues; a
+	// real Stat error (permission denied, I/O failure, ...) aborts the
+	// search and propagates immediately — it must never be treated as
+	// "this candidate doesn't exist" and silently skipped.
 	var src string
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			src = c
+	for _, cand := range candidates {
+		_, found, err := fsops.StatAllowMissing(cand)
+		if err != nil {
+			return fmt.Errorf("checking claude global rules candidate %s: %w", cand, err)
+		}
+		if found {
+			src = cand
 			break
 		}
 	}
@@ -474,24 +499,29 @@ func (c *claude) ensureUserSettings(agentsHome string) error {
 		return emitRenderedHookFileToUserHomes(c.io, globalBundles, filepath.Join(claudeDir, claudeSettingsJSON), renderClaudeHookSettings)
 	}
 
-	spec := findClaudeSettingsHookSpec(agentsHome, "global")
-	if spec == nil {
-		for _, homeRoot := range config.UserHomeRoots() {
-			_ = removeManagedFileIf(c.io, filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings)
-		}
-		return nil
+	spec, err := findClaudeSettingsHookSpec(agentsHome, "global")
+	if err != nil {
+		return err
 	}
+	if spec == nil {
+		var errs []error
+		for _, homeRoot := range config.UserHomeRoots() {
+			errs = append(errs, removeManagedFileIf(c.io, filepath.Join(homeRoot, claudeDir, claudeSettingsJSON), isLikelyRenderedClaudeHookSettings))
+		}
+		return errors.Join(errs...)
+	}
+	var errs []error
 	for _, homeRoot := range config.UserHomeRoots() {
 		target := filepath.Join(homeRoot, claudeDir, claudeSettingsJSON)
 		if isPreExistingManagedLink(target, spec.SourcePath) {
 			continue // already a managed link, leave it
 		}
-		_ = emitHookSpec(c.io, spec, target, HookEmissionMode{
+		errs = append(errs, emitHookSpec(c.io, spec, target, HookEmissionMode{
 			Shape:     HookShapeDirect,
 			Transport: HookTransportSymlink,
-		})
+		}))
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func (c *claude) ensureUserSkills(agentsHome string) error {
@@ -518,8 +548,7 @@ func (c *claude) createSkillsLinks(project, repoPath, agentsHome string) error {
 	// Shared repo targets (.claude/skills/*, .agents/skills/*) are now written
 	// by CollectAndExecuteSharedTargetPlan at the command layer before
 	// CreateLinks is called. This method only handles user-home skill links.
-	c.ensureUserSkills(agentsHome)
-	return nil
+	return c.ensureUserSkills(agentsHome)
 }
 
 func (c *claude) RemoveLinks(project, repoPath string) error {
@@ -718,6 +747,23 @@ func (c *claude) brokenMCPLink(_, repoPath, _ string) []BrokenLink {
 	}}
 }
 
+// PrintAudit implements AuditPrinter for the claude platform: it renders the
+// per-project `.claude/rules/` link directory and the `.mcp.json` link. Moved
+// verbatim (output preserved) from the lifecycle-side printClaudeAudit in
+// Phase 5.
+func (c *claude) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
+	rulesDir := filepath.Join(repoPath, claudeDir, "rules")
+	if _, err := os.ReadDir(rulesDir); err != nil {
+		fmt.Fprintf(w, "      %s(no %s/rules/)%s\n", ui.Dim, claudeDir, ui.Reset)
+		fmt.Fprintln(w)
+		return
+	}
+	printSymlinkDirAudit(w, rulesDir, claudeDir+"/rules/", "%s")
+	printSymlinkAudit(w, filepath.Join(repoPath, claudeMCPFile), claudeMCPFile)
+	fmt.Fprintln(w)
+}
+
 func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project,
 		filepath.Join(claudeDir, "skills"),
@@ -749,7 +795,7 @@ func (c *claude) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 func (c *claude) CountLinks(_, repoPath, _ string) (ok, broken int) {
 	ok, broken = claudeCountRules(filepath.Join(repoPath, claudeDir, "rules"))
 	addManagedFileCounts(&ok, &broken, []string{
-		filepath.Join(repoPath, ".mcp.json"),
+		filepath.Join(repoPath, claudeMCPFile),
 		filepath.Join(repoPath, claudeDir, claudeSettingsLocalJSON),
 	})
 	addManagedDirCounts(&ok, &broken, []string{
@@ -763,6 +809,179 @@ func (c *claude) CountLinks(_, repoPath, _ string) (ok, broken int) {
 func (c *claude) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	ok, broken := c.CountLinks(project, repoPath, agentsHome)
 	return PlatformBadge{Name: "Claude", Present: ok > 0, Broken: broken > 0}
+}
+
+// claudeOrphanBucket is the single canonical bucket claude owns for orphan
+// reporting. Each OrphanCanonicalReporter owns a disjoint bucket so the
+// doctor-side iterator (reportOrphanCanonicals) never double-counts a
+// canonical entry: claude reports the skills bucket, codex reports agents.
+const claudeOrphanBucket = "skills"
+
+// OrphanCanonicals implements OrphanCanonicalReporter for the claude platform.
+//
+// claude owns the "skills" canonical bucket: it enumerates entries under
+// <agentsHome>/skills/<project>/ that have no live back-link at
+// <projectPath>/.agents/skills/<name>. A non-matching bucket returns nil so
+// the doctor iterator can fan out over every (reporter, bucket) pair without
+// any single canonical entry being reported twice (codex owns "agents").
+//
+// The detection logic is shared with codex via scanOrphanCanonicals — the
+// only platform-specific input is which bucket each owns.
+func (c *claude) OrphanCanonicals(project, projectPath, agentsHome, bucket string) []OrphanCanonical {
+	if bucket != claudeOrphanBucket {
+		return nil
+	}
+	return scanOrphanCanonicals(project, projectPath, agentsHome, bucket)
+}
+
+// scanOrphanCanonicals enumerates the entries under
+// <agentsHome>/<bucket>/<project>/ that have no live back-link at
+// <projectPath>/.agents/<bucket>/<name>. Shared by the claude + codex
+// OrphanCanonicalReporter implementations (each owns a disjoint bucket).
+//
+// An absent canonical bucket dir yields nil (not present, not orphaned). A
+// missing back-link is a plain orphan (DisplayNote == ""); a back-link that
+// is a resolvable managed link pointing at a different canonical is a
+// mis-pointed orphan whose DisplayNote carries the formatted suffix; any
+// other present back-link (real dir, or a hard link with no reparse point) is
+// a live reference and not reported.
+func scanOrphanCanonicals(project, projectPath, agentsHome, bucket string) []OrphanCanonical {
+	canonicalDir := filepath.Join(agentsHome, bucket, project)
+	entries, err := os.ReadDir(canonicalDir)
+	if err != nil {
+		return nil
+	}
+	var orphans []OrphanCanonical
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if oc, ok := classifyOrphanCanonical(projectPath, canonicalDir, bucket, e.Name()); ok {
+			orphans = append(orphans, oc)
+		}
+	}
+	return orphans
+}
+
+// classifyOrphanCanonical decides whether a single canonical entry is an
+// orphan and returns the OrphanCanonical to record plus true when it is.
+// Extracted from scanOrphanCanonicals to keep the loop flat for cognitive
+// complexity. The branch semantics mirror the legacy lifecycle
+// classifyCanonicalOrphan exactly (plain orphan / mis-pointed orphan / live
+// reference) — only the return shape differs (typed OrphanCanonical instead
+// of an annotated string).
+func classifyOrphanCanonical(projectPath, canonicalDir, bucket, name string) (OrphanCanonical, bool) {
+	backLink := filepath.Join(projectPath, ".agents", bucket, name)
+	if _, err := os.Lstat(backLink); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return OrphanCanonical{Name: name}, true
+		}
+		return OrphanCanonical{}, false
+	}
+	raw, ok := links.ManagedLinkTarget(backLink)
+	if !ok {
+		// A non-resolvable back-link (real dir, or a hard-linked entry with no
+		// reparse point) is a live reference, not an orphan.
+		return OrphanCanonical{}, false
+	}
+	target := raw
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(backLink), target)
+	}
+	expected := filepath.Join(canonicalDir, name)
+	if filepath.Clean(target) != filepath.Clean(expected) {
+		return OrphanCanonical{Name: name, DisplayNote: "  (mis-pointed: " + target + ")"}, true
+	}
+	return OrphanCanonical{}, false
+}
+
+// claudeUserConfigFiles returns the managed single-file references claude
+// maintains under the user's home directory: ~/.claude/CLAUDE.md and
+// ~/.claude/settings.json.
+func claudeUserConfigFiles(home string) []string {
+	claudeHome := filepath.Join(home, claudeDir)
+	return []string{
+		filepath.Join(claudeHome, "CLAUDE.md"),
+		filepath.Join(claudeHome, claudeSettingsJSON),
+	}
+}
+
+// claudeUserConfigDirs returns the managed directories claude maintains under
+// the user's home directory: ~/.claude/agents/ and ~/.claude/skills/.
+func claudeUserConfigDirs(home string) []string {
+	claudeHome := filepath.Join(home, claudeDir)
+	return []string{
+		filepath.Join(claudeHome, "agents"),
+		filepath.Join(claudeHome, "skills"),
+	}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the claude platform: it
+// reports the broken managed links under the user's home directory. The
+// surface mirrors the legacy lifecycle collectBrokenUserLinks claude block
+// (CLAUDE.md, settings.json, agents/*, skills/*) and every entry carries
+// PlatformID="claude" so doctor's JSON/text consumers self-describe.
+func (c *claude) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("claude", claudeUserConfigFiles(home), claudeUserConfigDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the claude platform: it returns
+// the user-config badge summarizing whether claude has any managed user-level
+// state and whether any of it is broken. Mirrors the legacy lifecycle
+// countPlatformHealth("Claude", ...) badge math.
+func (c *claude) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(claudeUserConfigFiles(home), claudeUserConfigDirs(home))
+	return PlatformBadge{Name: "Claude", Present: ok > 0, Broken: broken > 0}
+}
+
+// scanUserBrokenLinks classifies each managed file path and each entry under
+// every managed dir, returning the resolvable-but-broken links tagged with
+// platformID. Shared by the claude/codex/opencode UserConfigReporter
+// implementations. DisplayDest is rendered via config.DisplayPath so the
+// home-relative display matches the legacy lifecycle collectBrokenUserLinks
+// output.
+func scanUserBrokenLinks(platformID string, files, dirs []string) []BrokenLink {
+	var broken []BrokenLink
+	for _, path := range files {
+		broken = appendUserBrokenLink(broken, platformID, path)
+	}
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			broken = appendUserBrokenLink(broken, platformID, filepath.Join(dir, e.Name()))
+		}
+	}
+	return broken
+}
+
+// appendUserBrokenLink appends a BrokenLink for path when it is a resolvable
+// managed link whose target is missing. A plain file, absent path, or healthy
+// link is silently skipped — matching the legacy managedLinkBroken contract
+// the user-config audit enforced.
+func appendUserBrokenLink(broken []BrokenLink, platformID, path string) []BrokenLink {
+	state, raw := classifyManagedLink(path)
+	if state != linkStateBroken {
+		return broken
+	}
+	return append(broken, BrokenLink{
+		PlatformID:  platformID,
+		LinkPath:    path,
+		Dest:        raw,
+		DisplayDest: config.DisplayPath(absolutizeDest(path, raw)),
+	})
+}
+
+// scanUserConfigCounts tallies (ok, broken) for the managed user-config files
+// and dirs of one platform, reusing the project-scope managed-count helpers so
+// the present/broken semantics stay identical to Badge/CountLinks. Shared by
+// the claude/codex/opencode UserBadge implementations.
+func scanUserConfigCounts(files, dirs []string) (ok, broken int) {
+	addManagedFileCounts(&ok, &broken, files)
+	addManagedDirCounts(&ok, &broken, dirs)
+	return ok, broken
 }
 
 // claudeCountRules walks the .claude/rules directory and reports ok/broken

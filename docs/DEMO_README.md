@@ -1,3 +1,10 @@
+---
+title: Overview
+description: A one-minute overview of what dot-agents is and the problem it solves.
+sidebar:
+  order: 3
+---
+
 # dot-agents — One-Minute Overview
 
 > **Audience:** anyone seeing dot-agents for the first time.
@@ -54,11 +61,14 @@ You edit **one** file in `~/.agents/`. Every project, every agent picks it up.
 - **Workflow primitives** — canonical plans, tasks, slices, checkpoints,
   verification logs, fanout/merge-back, fold-back, proposal review. Full
   design in [`LOOP_ORCHESTRATION_SPEC.md`](./LOOP_ORCHESTRATION_SPEC.md).
+- **Layered config (`da config`)** — `da config` explains, syncs, lints, and
+  verifies the layered `.agentsrc.json` + `.agentsrc.lock`, where `extends`
+  layers resolve from git/local/http/oci and pin by SHA.
 
 ## Try it in 90 seconds
 
 ```bash
-# 1. Install (assumes Go 1.24+)
+# 1. Install (assumes Go 1.26.2+)
 go install ./cmd/da
 # installs the `da` binary onto your Go bin PATH
 

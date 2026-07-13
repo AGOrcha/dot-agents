@@ -1,0 +1,284 @@
+schema_version: 1
+plan_id: config-v2-coherence
+tasks:
+    - id: c0-governance-interface
+      title: Governance/editability interface (policy-backend-agnostic)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/editability.go
+        - internal/config/editability_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.6 + the §8 governance open decision. Define the policy-backend-AGNOSTIC governance interface that
+        answers "can principal P write source S?" — the seam org/team policy backends plug into (adapter-contract
+        pattern). Ship the interface + a default impl: local always writable (personal); team/org return "governed"
+        via a pluggable backend (none wired yet -> deny-or-prompt default); project derives (team/org-owned -> that
+        governance, else personal/local-writable). First task of the plan; downstream routing (ch) consumes it.
+      app_type: go-cli
+    - id: ca-units-lock-schema
+      title: 'Lock schema: collapse config/packages into one units section + inputs_digest'
+      status: completed
+      depends_on:
+        - config-v2-migration/p1b-resolver-extends-tier1
+        - config-v2-migration/p1d-resolver-offline-read-seam
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/agentslock/lockfile.go
+        - internal/agentslock/lockfile_test.go
+        - internal/config/lock_units.go
+        - internal/config/lock_units_test.go
+      verification_required: true
+      notes: |-
+        Per spec config-distribution-model §7A.2/§7A.3 (authoritative over §7). Replace the per-section
+        config+packages lock shape with ONE units map keyed by "source:path@version" -> {kind: layer|artifact,
+        digest, fetched_at, last_checked_at}; add top-level inputs_digest. adapters section stays separate
+        (graph lifecycle owns it; do not touch). Add a v1->v2 lock migration (old config/packages + resolved_sha
+        + ttl_expires_at -> units + digest + last_checked_at) with a round-trip fixture. Keep the shared
+        agentslock writer atomic + sibling-preserving. Land-it-once: fold onto PR #205 (p1d) where the read seam
+        consumes the lock. Write new units logic in internal/config/lock_units.go, NOT resolver.go.
+      app_type: go-cli
+    - id: cb-content-hash-staleness
+      title: Content-hash driver-event staleness + TTL demotion to review-nudge
+      status: completed
+      depends_on:
+        - ca-units-lock-schema
+        - config-v2-migration/p2-lockfile-doctor-status
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/staleness.go
+        - internal/config/staleness_test.go
+        - internal/config/lockstatus.go
+        - internal/config/lockstatus_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.3/§7A.4. Compute inputs_digest over ALL local scopes (user-local + project-local overlay +
+        repo-local committed), whole-normalized. Staleness = inputs_digest mismatch OR declared extends/packages
+        set changed OR a recorded digest no longer matches — NO clock. Demote cache_ttl: it never auto-invalidates;
+        last_checked_at (per source) powers a doctor/explain "last re-checked N ago -> da config sync" nudge.
+        Reshape p2's LockDrift to driver-event drift + nudge axis. Land-it-once: fold onto PR #206 (p2).
+      app_type: go-cli
+    - id: cc-cache-keys-per-source
+      title: Per-source cache_keys (uv model) + per-kind staleness defaults
+      status: completed
+      depends_on:
+        - cb-content-hash-staleness
+        - config-v2-migration/p5-source-types-http-oci
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/cache_keys.go
+        - internal/config/cache_keys_test.go
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: |-
+        Per §7A.4. Default content key per source kind: git -> resolved commit; local -> resolved commit PLUS
+        working-tree content (catches uncommitted authoring); http -> ETag/Last-Modified else digest; oci -> digest.
+        Add Source.cache_keys ({file}/glob, {git:{commit,tags}}, {env}, {dir}) per [[schema-usage]] four-place
+        AgentsRC rule + schema. Force escapes: per-unit --refresh and an always-revalidate marker. Land-it-once:
+        fold onto PR #209 (p5).
+        - (fb:cache-keys-unconsumed) cc was marked completed but cache_keys is inert — EffectiveCacheKey and DefaultCacheKey have zero non-test callers, and the fetcher (http/oci) plus resolver never consult cache keys or per-kind staleness, so setting cache_keys in .agentsrc.json is a silent no-op. Completed is terminal so cc stays completed and the gap is carried forward via follow-up task cl-cache-keys-consume.
+      app_type: go-cli
+    - id: cd-ensure-resolved-seam
+      title: EnsureResolved auto-sync seam + --locked/--frozen/--no-sync/--offline
+      status: completed
+      depends_on:
+        - cb-content-hash-staleness
+        - config-v2-migration/p1d-resolver-offline-read-seam
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/ensure_resolved.go
+        - internal/config/ensure_resolved_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.5. One seam EnsureResolved(projectPath, opts): cheap inputs_digest + declared-set check ->
+        fresh = no-op (no network, no write) -> stale = re-resolve + rewrite lock -> (caller applies outputs half).
+        Flags: --locked (assert; non-zero exit if the lock would change), --frozen (use lock as-is, skip check),
+        --no-sync (skip outputs apply), --offline (lock/cache only). Builds on p1d ResolveLocked for the read path.
+        Land-it-once: fold the seam onto PR #205 alongside ca-units-lock-schema.
+      app_type: go-cli
+    - id: ce-unified-artifact-sourcing
+      title: 'Unified artifact sourcing: git/local valid for artifacts via @version'
+      status: completed
+      depends_on:
+        - config-v2-migration/p5-source-types-http-oci
+        - config-v2-migration/p4f-units-lock-7a-wiring
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_git_artifact.go
+        - internal/config/fetcher_local_artifact.go
+        - internal/config/fetcher_test.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: |-
+        Per §4 (relaxed) + §7A.1/§7A.2. Relax the tier-constraint: packages/artifacts may reference git/local/http/oci
+        via source:path@version; only extends still rejects oci. Kind (layer|artifact) governs merge/trust, not which
+        source is permitted. Absorbs the artifact-resolution mechanic of the retired p6 (§15 D3/D8: one units model,
+        any source serves any kind, OCI is one source not the definition; no parallel `da packages` command tree).
+        SCOPE CORRECTED 2026-06-23 (worker assessment): the schema source enum is ALREADY unified (local/git/http/oci,
+        no per-tier exclusion) and extends-rejects-oci is ALREADY correct in resolver.go via SelectFetcher — so the
+        original write_scope (agentsrc.go/resolver.go/resolver_test.go) had nothing to change. The real work lives in
+        the fetchers: relax SelectPackageFetcher in fetcher_oci.go (today rejects git/local), ADD net-new git + local
+        artifact-fetcher implementations of the FetchArtifact interface (only http+oci implement it today), and update
+        fetcher_test.go TestSelectPackageFetcherTierConstraint (currently asserts git/local REJECTED) + add accept
+        tests. SEQUENCING: collides with PR #96 (cl online cache_keys) on fetcher.go/fetcher_test.go — land #96 first,
+        then rebase. Build on p5 (source types) + p4f (units-lock wiring).
+      app_type: go-cli
+    - id: cf-local-source-autosetup
+      title: 'Git-backed local source: auto-bootstrap so local units version by ref'
+      status: completed
+      depends_on:
+        - ca-units-lock-schema
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/local_source.go
+        - internal/config/local_source_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.1. The local source is the git-synced ~/.agents repo. On first resolve / init, ensure it is
+        git-initialized + resolvable so a local skill/agent/layer carries a real version (the local repo ref) and
+        the lock records local:<path>@<ref> -> digest uniformly. One asset dir; remote-materialized units are
+        gitignored from the local source so da sync never commits fetched assets (provenance = the unit's source).
+      app_type: go-cli
+    - id: cg-project-local-overlay
+      title: Project-local overlay scope (.agentsrc.local.json, gitignored)
+      status: completed
+      depends_on:
+        - cb-content-hash-staleness
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/resolver.go
+        - internal/config/overlay.go
+        - internal/config/overlay_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.1 (Axis A). Add an 8th scope between repo-local committed and runtime: a da-managed, gitignored
+        .agentsrc.local.json in the repo (the .git/config analog — personal, machine-local, per-project, not committed).
+        It merges above repo-local committed and is a local input hashed into inputs_digest (coordinate with
+        cb-content-hash-staleness). Honor protected-field rules.
+      app_type: go-cli
+    - id: ch-scope-source-routing
+      title: CRUD/sync --scope/--source routing (consumes the governance interface)
+      status: completed
+      depends_on:
+        - cf-local-source-autosetup
+        - c0-governance-interface
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/internal/cmdutil/source_routing.go
+        - commands/internal/cmdutil/source_routing_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.6. Add a --scope/--source <id> flag to CRUD (skills/agents/hooks/rules/mcp/settings) and sync that
+        routes the op to a source plus an editability check that CONSUMES the c0-governance-interface (does NOT
+        redefine it) — NO per-store command trees. local always writable; team/org via the pluggable governance
+        backend; project derives. Wiring into each CRUD command is a follow-on; this task owns the routing flag +
+        the call into the governance seam.
+      app_type: go-cli
+    - id: ci-gitignore-autofill
+      title: Managed .gitignore auto-fill in consuming projects
+      status: completed
+      depends_on:
+        - cd-ensure-resolved-seam
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/links/gitignore.go
+        - internal/links/gitignore_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.5. Maintain a da-owned, idempotent delimited block in the project .gitignore: ignore projected
+        outputs + .agentsrc.local.json; keep .agentsrc.json/.agentsrc.lock committed. Source of truth = lock +
+        commands, never leaked git state. Re-runs regenerate the block (converge, never append-duplicate).
+      app_type: go-cli
+    - id: cj-outputs-exact-prune
+      title: 'Outputs (sync) half: exact/prune projection in refresh/install'
+      status: completed
+      depends_on:
+        - cd-ensure-resolved-seam
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/resource_plan.go
+        - internal/platform/resource_plan_test.go
+        - commands/refresh.go
+        - commands/refresh_test.go
+      verification_required: true
+      notes: |-
+        Per §7A.5. The sync (outputs) half: project the asset-store union into the repo EXACT/PRUNE by default
+        (delete managed outputs no longer in the resolved set); --inexact opts out. refresh ensures the lock is
+        fresh (EnsureResolved) before projecting; install is the full lock+outputs+setup-contract entry. refresh
+        stays distinct from config sync (spec §13.3).
+      app_type: go-cli
+    - id: ck-command-reshape
+      title: 'Command reshape: config explain auto-locks + absorbs status; doctor nudges'
+      status: completed
+      depends_on:
+        - cd-ensure-resolved-seam
+        - config-v2-migration/p4f-units-lock-7a-wiring
+        - config-v2-migration/p2-lockfile-doctor-status
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/config/explain.go
+        - commands/config/explain_test.go
+        - commands/internal/lifecycle/status.go
+        - commands/internal/lifecycle/doctor.go
+      verification_required: true
+      notes: |-
+        Per §7A.6 (supersedes §13.4). config explain auto-locks (like uv tree) and becomes the single
+        effective-config truth surface, ABSORBING status's config inspection; status becomes fleet/link-health only;
+        doctor is read-only health + driver-event + TTL review-nudges (never repairs). Build on p4f (explain consumes
+        the units lock / ResolveLocked; auto-lock) + p2 (drift/nudge). Land-it-once: coordinate edits with PR #206 (p2)
+        and the p4f branch.
+      app_type: go-cli
+    - id: cl-cache-keys-consume
+      title: Consume cache_keys + per-kind staleness in fetcher/resolver (cc was inert)
+      status: completed
+      depends_on:
+        - cc-cache-keys-per-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/cache_keys.go
+        - internal/config/staleness.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_http.go
+        - internal/config/fetcher_oci.go
+        - internal/config/resolver.go
+        - internal/config/fetcher_test.go
+        - internal/config/staleness_test.go
+      verification_required: true
+      notes: Wire the parsed cache_keys primitive into behavior. EffectiveCacheKey and DefaultCacheKey have no non-test callers today; the http/oci fetchers and resolver must consult per-source cache keys and per-kind staleness defaults when computing cache paths and staleness, so cache_keys in .agentsrc.json stops being a silent no-op. See fold-back cache-keys-unconsumed. Depends on cc (the parser, completed).
+      app_type: go-cli
+    - id: cl-cache-keys-consume
+      title: Consume cache_keys + per-kind staleness in fetcher/resolver (cc was inert)
+      status: awaiting_owner_review
+      depends_on:
+        - cc-cache-keys-per-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/cache_keys.go
+        - internal/config/staleness.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_http.go
+        - internal/config/fetcher_oci.go
+        - internal/config/resolver.go
+        - internal/config/fetcher_test.go
+        - internal/config/staleness_test.go
+      verification_required: true
+      notes: Wire the parsed cache_keys primitive into behavior. EffectiveCacheKey and DefaultCacheKey have no non-test callers today; the http/oci fetchers and resolver must consult per-source cache keys and per-kind staleness defaults when computing cache paths and staleness, so cache_keys in .agentsrc.json stops being a silent no-op. See fold-back cache-keys-unconsumed. Depends on cc (the parser, completed).
+      app_type: go-cli

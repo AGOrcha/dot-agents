@@ -18,10 +18,9 @@ tasks:
         TaskSpec; D5 eval outcomes feed R1 unchanged; D6 sibling
         sidecar persistence; D7 CLI-first.
       app_type: research
-
     - id: taskspec-and-registry
       title: Define versioned TaskSpec, generator interface, language registry
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -42,11 +41,14 @@ tasks:
         language registry. Pure Go data + interfaces, no I/O.
         Difficulty enum (easy|medium|hard) + difficulty_signals map.
         YAML round-trip.
+        SHIPPED (coherence 2026-06-25): internal/eval/{taskspec,registry,
+        doc}.go + tests landed via commit aa12da79 ("feat(eval):
+        versioned TaskSpec + generator interface + language registry").
+        Marked completed; kg-query-layer and the generators build on it.
       app_type: go-cli
-
     - id: kg-query-layer
       title: KG query helpers for the task generator
-      status: pending
+      status: completed
       depends_on:
         - taskspec-and-registry
       blocks:
@@ -64,11 +66,26 @@ tasks:
         ComplexityProxy(symbol). Pure consumer of the published Store
         contract; no writes. Mock-backed unit tests using a tiny
         in-memory fake (existing testutil patterns).
+        EDGE-KIND RULING (recorded 2026-07-02; reviewer-flagged
+        ambiguity, checked against the spec on master):
+        NeighborhoodFor(qualifiedName, depth) traverses ALL edge
+        kinds, NOT CALLS-only. Basis: r4 spec requirement R2 computes
+        the difficulty band from generic "node count, edge count, a
+        cyclomatic-complexity proxy" KG signals with no edge-kind
+        restriction; the plan-level TaskSpec example publishes a
+        plain difficulty_signals.edge_count; graphstore defines seven
+        edge kinds (CALLS, IMPORTS_FROM, INHERITS, IMPLEMENTS,
+        CONTAINS, TESTED_BY, DEPENDS_ON) and the spec never narrows
+        the set. The spec D4.1 "exercises real call graphs" line is
+        rationale, not a requirement. A template that wants
+        call-graph-only context filters by kind at the TEMPLATE level
+        (generator-* tasks), not inside NeighborhoodFor — so the
+        difficulty contract (difficulty-derivation) stays defined
+        over the full neighborhood and stays reproducible per R2.
       app_type: go-cli
-
     - id: difficulty-derivation
       title: KG-derived difficulty signals + bucketing
-      status: pending
+      status: completed
       depends_on:
         - kg-query-layer
       blocks:
@@ -85,10 +102,9 @@ tasks:
         is a deliberate diff. Documented as the canonical difficulty
         contract.
       app_type: go-cli
-
     - id: generator-go
-      title: Go task generator (per-language adapter #1)
-      status: pending
+      title: Go task generator (per-language adapter
+      status: completed
       depends_on:
         - kg-query-layer
         - difficulty-derivation
@@ -106,10 +122,9 @@ tasks:
         cmd, returns a TaskSpec. Registers in the language registry.
         Fixture-driven tests against a tiny seed KG.
       app_type: go-cli
-
     - id: generator-python
-      title: Python task generator (per-language adapter #2)
-      status: pending
+      title: Python task generator (per-language adapter
+      status: completed
       depends_on:
         - kg-query-layer
         - difficulty-derivation
@@ -127,10 +142,9 @@ tasks:
         The "Go-first then port" sequencing means a stable interface
         and avoids retroactive churn on the registry.
       app_type: go-cli
-
     - id: generator-typescript
-      title: TypeScript task generator (per-language adapter #3)
-      status: pending
+      title: TypeScript task generator (per-language adapter
+      status: completed
       depends_on:
         - kg-query-layer
         - difficulty-derivation
@@ -147,10 +161,9 @@ tasks:
         node --test or vitest invocation pattern. Same template
         surface. Closes the spec's "≥3 languages" gate.
       app_type: go-cli
-
     - id: sandbox-worktree
       title: Worktree sandbox primitive (Sandbox interface + v1 impl)
-      status: pending
+      status: completed
       depends_on:
         - taskspec-and-registry
       blocks:
@@ -167,10 +180,9 @@ tasks:
         point; DockerSandbox + worktree-platform managed-worktree
         provider can land later without caller change.
       app_type: go-cli
-
     - id: verifier-go
       title: Go verifier (build + test) inside sandbox
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
         - generator-go
@@ -185,10 +197,9 @@ tasks:
         workdir, captures pass/fail + stdout/stderr + duration, returns
         a typed VerifyResult. Timeout enforced via context.
       app_type: go-cli
-
     - id: verifier-python
       title: Python verifier
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
         - generator-python
@@ -203,10 +214,9 @@ tasks:
         Mirrors verifier-go for pytest/unittest. Sequenced after
         verifier-go so the VerifyResult shape stabilizes first.
       app_type: go-cli
-
     - id: verifier-typescript
       title: TypeScript verifier
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
         - generator-typescript
@@ -221,10 +231,9 @@ tasks:
         tsc --noEmit + node --test / vitest. Closes the per-language
         verifier trio.
       app_type: go-cli
-
     - id: agent-runner
       title: AgentRunner interface + claude / codex bindings
-      status: pending
+      status: completed
       depends_on:
         - sandbox-worktree
       blocks:
@@ -241,10 +250,9 @@ tasks:
         codexrunner that shells out; the per-platform binding mirrors
         commands/agents/ conventions.
       app_type: go-cli
-
     - id: scoring-bridge
       title: Emit R1-shaped iteration record + invoke scoring pipeline
-      status: pending
+      status: completed
       depends_on:
         - taskspec-and-registry
       blocks:
@@ -262,10 +270,9 @@ tasks:
         iter-log dir. Does NOT introduce a new rubric path or version.
         Unit-tested via a tiny EvalRun fixture.
       app_type: go-cli
-
     - id: harness-driver
       title: End-to-end harness wiring (gen → sandbox → run → verify → score)
-      status: pending
+      status: completed
       depends_on:
         - generator-go
         - verifier-go
@@ -285,10 +292,9 @@ tasks:
         all heavy lifting lives in the seam packages. Integration test
         against fakeRunner + verifier-go on a fixture KG.
       app_type: go-cli
-
     - id: persistence
       title: EvalRun + TaskSpec sidecar persistence
-      status: pending
+      status: completed
       depends_on:
         - harness-driver
       blocks:
@@ -305,10 +311,9 @@ tasks:
         atomic-rename. Tests pin the layout so R2 has a stable
         contract.
       app_type: go-cli
-
     - id: cli-eval
       title: '`da eval` CLI command tree'
-      status: pending
+      status: completed
       depends_on:
         - harness-driver
         - persistence
@@ -327,10 +332,9 @@ tasks:
         line (`da eval run --language go produces an R1-scored
         outcome`) is the Hard Test.
       app_type: go-cli
-
     - id: r2-visibility-contract
       title: R2 visibility contract — documented join + fixture
-      status: pending
+      status: completed
       depends_on:
         - persistence
       blocks:
@@ -346,10 +350,9 @@ tasks:
         frozen fixture run R2 can build against without re-running
         the harness. No code in R2 itself — that's R2's plan.
       app_type: go-cli
-
     - id: docs
-      title: 'docs/EVAL_HARNESS.md + rubric-cross-link'
-      status: pending
+      title: docs/EVAL_HARNESS.md + rubric-cross-link
+      status: completed
       depends_on:
         - cli-eval
         - r2-visibility-contract
@@ -365,7 +368,6 @@ tasks:
         feed R1. Cross-link from OUTCOME_SCORING_RUBRIC.md noting
         "eval-source" iterations are scored under the same rubric.
       app_type: go-cli
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the eval-harness minor'
       status: pending
@@ -401,9 +403,10 @@ tasks:
         feeding R1-scored outcomes into R2. New command + new capability,
         MINOR not MAJOR (no public surface removed or incompatibly changed).
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        minor is 0.4.0, but resolve from VERSION when this task becomes
-        ready; serialize at the VERSION bump if another minor ships first.
+        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
+        shipped), so the next minor is 0.5.0; resolve from VERSION when this
+        task becomes ready; serialize at the VERSION bump if another minor
+        ships first.
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, moving the eval-harness entries
         out of Unreleased. Merge to master fires auto-release.yml.

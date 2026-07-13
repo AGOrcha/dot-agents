@@ -1,9 +1,7 @@
 package lifecycle
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,11 +65,14 @@ func NewDoctorCmd(deps Deps) *cobra.Command {
 		Long: `Audits the local da installation, installed platforms, manifest health,
 and managed project links using the same managed paths as da install and
 refresh. Doctor is the fastest way to detect drift after manual edits, moved
-repositories, or partial setup on a new machine.`,
+repositories, or partial setup on a new machine.
+
+Doctor is read-only: it reports problems but never repairs them. When it finds
+broken links or drift it tells you which command to run (for example da refresh
+to relink, or da config sync to reconcile the lockfile).`,
 		Example: deps.ExampleBlock(
 			"  da doctor",
 			"  da doctor --verbose",
-			"  da doctor --dry-run",
 		),
 		Args: deps.NoArgsWithHints("`da doctor` audits the current installation and does not take a project argument."),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -113,13 +114,13 @@ func runDoctor(cmd *cobra.Command, args []string, deps DoctorConfigLoader) error
 	}
 
 	reportProjectInventory(cfg, names)
-	totalFixed, anyBroken := reportLinkHealth(cfg, names, agentsHome)
+	anyBroken := reportLinkHealth(cfg, names, agentsHome)
 	reportManifestHealth(cfg, names)
 	reportLockHealth(cfg, names)
 	reportOrphanCanonicals(cfg, names, agentsHome)
 	reportPluginHealth(cfg, names, agentsHome)
 
-	finalizeDoctorRun(anyBroken, totalFixed)
+	finalizeDoctorRun(anyBroken)
 	return nil
 }
 
@@ -197,30 +198,27 @@ func reportProjectInventory(cfg *config.Config, names []string) {
 }
 
 // reportLinkHealth prints the "Link Health" section: per-project broken/OK
-// counts, broken-link detail (or full audit in verbose mode), and triggers
-// repair when needed. Returns the cumulative platform-repair count and
-// whether any broken links were observed (drives finalizeDoctorRun).
-func reportLinkHealth(cfg *config.Config, names []string, agentsHome string) (int, bool) {
+// counts and broken-link detail (or full audit in verbose mode). It is
+// read-only — doctor never repairs (§7A.6); it returns whether any broken
+// links were observed so finalizeDoctorRun can point the user at da refresh.
+func reportLinkHealth(cfg *config.Config, names []string, agentsHome string) bool {
 	ui.Section("Link Health")
-	totalFixed := 0
 	anyBroken := false
 	for _, name := range names {
 		path := cfg.GetProjectPath(name)
 		if _, err := os.Stat(path); err != nil {
 			continue
 		}
-		broken := reportOneProjectLinkHealth(name, path, agentsHome, cfg)
-		if broken {
+		if reportOneProjectLinkHealth(name, path, agentsHome, cfg) {
 			anyBroken = true
-			totalFixed += repairManagedProject(name, path)
 		}
 	}
-	return totalFixed, anyBroken
+	return anyBroken
 }
 
 // reportOneProjectLinkHealth handles the link-health audit for a single
-// project. Returns true when broken links were observed (caller triggers
-// repair); false for empty or fully-healthy projects.
+// project. Returns true when broken links were observed; false for empty or
+// fully-healthy projects.
 func reportOneProjectLinkHealth(name, path, agentsHome string, cfg *config.Config) bool {
 	brokenLinks := collectBrokenLinks(name, path, agentsHome)
 	ok, _ := countProjectLinks(name, path, agentsHome)
@@ -284,11 +282,15 @@ func reportOneProjectManifestHealth(name, path string) bool {
 		}
 		return true
 	}
+	legacy := reportManifestDeprecation(name, rc)
 	missingGit, presentGit := partitionManifestGitSources(rc)
 	if len(missingGit) > 0 {
 		for _, url := range missingGit {
 			ui.Bullet("warn", fmt.Sprintf("%s — git source not yet fetched: %s  hint: da install", name, url))
 		}
+		return true
+	}
+	if legacy {
 		return true
 	}
 	if len(presentGit) > 0 {
@@ -297,6 +299,20 @@ func reportOneProjectManifestHealth(name, path string) bool {
 		ui.Bullet("ok", fmt.Sprintf("%s — manifest ok (local)", name))
 	}
 	return false
+}
+
+// reportManifestDeprecation emits a warn bullet when the manifest uses a
+// legacy v1 shape (old schema version or deprecated v1 keys folded silently on
+// load). It is read-only — doctor only surfaces the deprecation (config-v2
+// §15.3); the file still loads. Returns true when a warning was emitted so the
+// caller can mark the manifest section as having an issue.
+func reportManifestDeprecation(name string, rc *config.AgentsRC) bool {
+	w := config.DetectV1Deprecation(rc)
+	if !w.Detected {
+		return false
+	}
+	ui.Bullet("warn", fmt.Sprintf("%s — %s  hint: da config migrate", name, w.Message()))
+	return true
 }
 
 // partitionManifestGitSources splits the manifest's git sources into two
@@ -485,9 +501,10 @@ func reportOnePluginSpec(spec platform.PluginSpec, cfg *config.Config, names []s
 }
 
 // finalizeDoctorRun prints the closing tip/summary line based on the
-// link-health audit. Healthy run: optional verbose tip. Broken run:
-// dry-run hint or repair summary.
-func finalizeDoctorRun(anyBroken bool, totalFixed int) {
+// link-health audit. Doctor is read-only (§7A.6): a healthy run prints an
+// optional verbose tip; a broken run points the user at da refresh rather than
+// repairing anything itself.
+func finalizeDoctorRun(anyBroken bool) {
 	fmt.Fprintln(os.Stdout)
 	if !anyBroken {
 		if !Flags.Verbose {
@@ -495,79 +512,8 @@ func finalizeDoctorRun(anyBroken bool, totalFixed int) {
 		}
 		return
 	}
-	if Flags.DryRun {
-		ui.Info("Run without --dry-run to apply repairs.")
-	} else if totalFixed > 0 {
-		ui.Success(fmt.Sprintf("Repaired links in %d platform(s). Run 'da status --audit' to verify.", totalFixed))
-		fmt.Fprintln(os.Stdout)
-	}
-}
-
-// doctorInstalledPlatforms returns every installed platform, matching the
-// installed-only scoping used by add/install/import when they drive a full
-// CreateLinks pass. Exposed as a package var so doctor_test can substitute a
-// deterministic platform set for the new repair branch.
-var doctorInstalledPlatforms = func() []platform.Platform {
-	var installed []platform.Platform
-	for _, p := range platform.All() {
-		if p.IsInstalled() {
-			installed = append(installed, p)
-		}
-	}
-	return installed
-}
-
-// repairManagedProject runs the full repair pass for one managed project whose
-// link health audit found at least one broken link. It is NOT a symlink-only
-// repair: for the project it (a) runs the shared-target projection to fix
-// broken/missing projected artifacts (repo .codex/agents/*.toml, Claude
-// shared-skills projection) and (b) re-runs CreateLinks for every installed
-// platform — not merely the platforms whose links were already detected
-// broken — so that every managed da entity is (re)linked. This mirrors the
-// established call shape on master (refresh.go, add.go, install.go,
-// import.go relink) with warn-and-continue error handling.
-//
-// Idempotence: this only runs for projects the audit already flagged as
-// broken, so a healthy managed project produces no spurious changes and no
-// noisy output (doctor's diagnostic UX is preserved). Within a repaired
-// project, RunSharedTargetProjection.Execute and Platform.CreateLinks are
-// themselves idempotent — they re-establish managed state and are no-ops when
-// that state is already correct — so re-running doctor on an
-// already-repaired project is also a no-op. It returns the number of platforms
-// successfully (re)linked, for the run-summary counter.
-func repairManagedProject(name, path string) int {
-	installed := doctorInstalledPlatforms()
-
-	if Flags.DryRun {
-		ui.DryRun("re-run shared-target projection to repair projected artifacts")
-		for _, p := range installed {
-			ui.DryRun(fmt.Sprintf("re-run %s CreateLinks to repair", p.DisplayName()))
-		}
-		return 0
-	}
-
-	config.SetWindowsMirrorContext(path)
-
-	// (a) Shared-target projection: fixes broken/missing projected
-	// shared-target artifacts (repo .codex/agents/*.toml, Claude
-	// shared-skills projection). Warn-and-continue so a projection failure
-	// does not block the link repair below.
-	if _, err := platform.RunSharedTargetProjection(name, path, installed, false); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("repair shared targets: %v", err))
-	}
-
-	// (b) Full installed-platform CreateLinks pass: relinks ALL managed da
-	// entities, not only the links detected as broken.
-	fixed := 0
-	for _, p := range installed {
-		if err := p.CreateLinks(name, path); err != nil {
-			ui.Bullet("warn", fmt.Sprintf("repair %s: %v", p.DisplayName(), err))
-			continue
-		}
-		ui.Bullet("ok", fmt.Sprintf("repaired %s links", p.DisplayName()))
-		fixed++
-	}
-	return fixed
+	ui.Info("Broken links detected. Run 'da refresh' to relink managed entities, then 'da status --audit' to verify.")
+	fmt.Fprintln(os.Stdout)
 }
 
 // collectOrphanCanonicals returns the resource names under
@@ -575,56 +521,28 @@ func repairManagedProject(name, path string) int {
 // (symlink or real dir) at <projectPath>/.agents/<bucket>/<name>.
 // These are leftovers when a user manually deleted the repo-local source
 // after a promote, leaving the canonical copy orphaned.
+//
+// Per platform-driven-diagnostics P4, the orphan-detection logic now lives in
+// internal/platform behind the OrphanCanonicalReporter sister interface
+// (claude owns the "skills" bucket, codex owns "agents"). doctor delegates by
+// type-assertion and does no orphan classification of its own — each canonical
+// bucket is owned by exactly one platform, so iterating every reporter is
+// double-count free. The returned []OrphanCanonical is flattened back to the
+// annotated-string shape callers (and the orphan-warning printer) already
+// expect: "<name>" for a plain orphan, "<name>  (mis-pointed: <target>)" for
+// a mis-pointed back-link.
 func collectOrphanCanonicals(projectName, projectPath, agentsHome, bucket string) []string {
-	canonicalDir := filepath.Join(agentsHome, bucket, projectName)
-	entries, err := os.ReadDir(canonicalDir)
-	if err != nil {
-		return nil
-	}
 	var orphans []string
-	for _, e := range entries {
-		if !e.IsDir() {
+	for _, p := range platform.All() {
+		r, ok := p.(platform.OrphanCanonicalReporter)
+		if !ok {
 			continue
 		}
-		if entry, ok := classifyCanonicalOrphan(projectPath, canonicalDir, bucket, e.Name()); ok {
-			orphans = append(orphans, entry)
+		for _, oc := range r.OrphanCanonicals(projectName, projectPath, agentsHome, bucket) {
+			orphans = append(orphans, oc.Name+oc.DisplayNote)
 		}
 	}
 	return orphans
-}
-
-// classifyCanonicalOrphan decides whether a single canonical entry is an
-// orphan. It returns the display string to record and true when it is. A
-// missing back-link is a plain orphan; a back-link that is a resolvable
-// managed link pointing elsewhere is a mis-pointed orphan; any other present
-// back-link is a live reference (not an orphan).
-func classifyCanonicalOrphan(projectPath, canonicalDir, bucket, name string) (string, bool) {
-	backLink := filepath.Join(projectPath, ".agents", bucket, name)
-	if _, err := os.Lstat(backLink); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return name, true
-		}
-		return "", false
-	}
-	// If the back-link is a resolvable managed link (POSIX symlink /
-	// Windows junction), verify it points at THIS canonical. A link that
-	// resolves to a different canonical (or anywhere else) is still an
-	// orphan — the canonical here has no live reference. A non-resolvable
-	// entry (real dir, or a hard-linked file with no reparse point) is a
-	// live back-reference and not an orphan.
-	raw, ok := links.ManagedLinkTarget(backLink)
-	if !ok {
-		return "", false
-	}
-	target := raw
-	if !filepath.IsAbs(target) {
-		target = filepath.Join(filepath.Dir(backLink), target)
-	}
-	expected := filepath.Join(canonicalDir, name)
-	if filepath.Clean(target) != filepath.Clean(expected) {
-		return name + "  (mis-pointed: " + target + ")", true
-	}
-	return "", false
 }
 
 func hasPluginPlatform(platforms []string, want string) bool {
@@ -705,7 +623,18 @@ func collectBrokenLinks(name, path, agentsHome string) []brokenLink {
 	return broken
 }
 
-// collectBrokenUserLinks returns all broken managed user-level links in the home directory.
+// collectBrokenUserLinks returns all broken managed user-level links in the
+// home directory.
+//
+// Per platform-driven-diagnostics P4, the per-platform user-home enumeration
+// now lives in internal/platform behind the UserConfigReporter sister
+// interface. doctor resolves the home directory once, delegates by
+// type-assertion, and flattens each platform's []platform.BrokenLink into the
+// lifecycle brokenLink shape. The link path is rendered home-relative and the
+// dest via DisplayPath, identical to the prior inline implementation.
+// claude/codex/opencode/cursor report real managed user-home links; copilot
+// implements UserConfigReporter but reports nothing because dot-agents does not
+// yet wire its (documented) user-config layer (tracked in PLATFORM_DIRS_DOCS).
 func collectBrokenUserLinks(_ string) []brokenLink {
 	var broken []brokenLink
 
@@ -718,37 +647,19 @@ func collectBrokenUserLinks(_ string) []brokenLink {
 		return strings.TrimPrefix(p, displayBase)
 	}
 
-	addBrokenSingle := func(platformID, linkPath string) {
-		if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink && isBroken {
+	for _, p := range platform.All() {
+		r, ok := p.(platform.UserConfigReporter)
+		if !ok {
+			continue
+		}
+		for _, bl := range r.UserBrokenLinks(homeDir) {
 			broken = append(broken, brokenLink{
-				platformID: platformID,
-				linkPath:   rel(linkPath),
-				dest:       config.DisplayPath(dest),
+				platformID: bl.PlatformID,
+				linkPath:   rel(bl.LinkPath),
+				dest:       bl.DisplayDest,
 			})
 		}
 	}
-	addBrokenDir := func(platformID, dir string) {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return
-		}
-		for _, e := range entries {
-			addBrokenSingle(platformID, filepath.Join(dir, e.Name()))
-		}
-	}
-
-	// Claude: ~/.claude/CLAUDE.md, settings.json, agents/*, skills/*
-	claudeHome := filepath.Join(homeDir, doctorClaudeDir)
-	addBrokenSingle("claude", filepath.Join(claudeHome, "CLAUDE.md"))
-	addBrokenSingle("claude", filepath.Join(claudeHome, "settings.json"))
-	addBrokenDir("claude", filepath.Join(claudeHome, "agents"))
-	addBrokenDir("claude", filepath.Join(claudeHome, "skills"))
-
-	// Codex: ~/.codex/agents/*
-	addBrokenDir("codex", filepath.Join(homeDir, ".codex", "agents"))
-
-	// OpenCode: ~/.opencode/agent/*
-	addBrokenDir("opencode", filepath.Join(homeDir, doctorOpenCodeDir, "agent"))
 
 	return broken
 }

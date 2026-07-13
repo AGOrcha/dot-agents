@@ -1,6 +1,13 @@
+---
+title: Error Message Contract
+description: The supported contract for human-facing CLI failures: message shape, hints, and usage.
+sidebar:
+  order: 3
+---
+
 # Error message contract (dot-agents CLI)
 
-**Status:** Contract draft updated from the 2026-04-19 inventory in [`docs/research/error-message-inventory.md`](./research/error-message-inventory.md).  
+**Status:** Contract draft updated from the 2026-04-19 error-message inventory.  
 **Scope:** Defines the supported contract for human-facing CLI failures: primary message shape, hints, usage rendering, finite-domain validation, and the current limitation that most error paths are not machine-readable.
 
 ## Shared error UX surface
@@ -139,6 +146,35 @@ Some commands already support `--json` on success. That does not change the fail
 | Unknown command / unknown flag | root parse path | yes | yes | Keep Cobra detail, add help hint |
 | Execution/runtime failure with no immediate recovery | wrapped error or `CLIError` | no | optional | Avoid misleading usage dumps |
 
+## Exit codes
+
+The current public exit-code contract is **binary**:
+
+- **`0`** on success.
+- **`1`** on any error.
+
+`cmd/da/main.go` flattens every non-nil error from `root.Execute()` to
+`os.Exit(1)`. Every process-exit path resolves to `os.Exit(1)` — including the
+one direct exit outside `main`, in `da kg lint --json`
+(`commands/kg/query_lint_maintain.go`, after emitting its JSON report when
+`ErrorCount > 0`), which also exits `1`:
+
+```go
+if err := root.Execute(); err != nil {
+    commands.RenderCommandError(os.Stderr, root, os.Args[1:], err)
+    os.Exit(1)
+}
+```
+
+`commands/config/explain.go` defines differentiated constants
+(`exitOK=0`, `exitLayerFetchErr=1`, `exitSchemaErr=2`, `exitAuthErr=3`), but
+these are **internal/reserved and NOT a public contract today**. They are only
+ever returned as an informational second value from the snapshot loaders and are
+discarded by the caller (`_ = code`); `main.go` then exits `1` for any error
+regardless. So even a `config` schema error exits `1`, not `2`. Automation must
+treat every failure as exit `1`. (Wiring those constants through to the process
+exit status is tracked separately as a code change.)
+
 ## Automation note
 
 Error rendering is still **human-first** today.
@@ -179,5 +215,5 @@ The strongest current examples to preserve are:
 
 ## Related documents
 
-- [Error Message Compliance plan](../.agents/workflow/plans/error-message-compliance/error-message-compliance.plan.md)
+- [Error Message Compliance plan](../.agents/history/error-message-compliance/)
 - [Global Flag Contract](./GLOBAL_FLAG_CONTRACT.md)

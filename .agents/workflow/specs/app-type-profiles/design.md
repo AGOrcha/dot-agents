@@ -1,8 +1,27 @@
 # App Type and Verifier Profiles — Design Spec
 
-**Status:** draft; staged-dispatch review inputs added 2026-05-26
+**Status:** draft; staged-dispatch review inputs added 2026-05-26; config-architecture readiness revised 2026-06-30 (see note below)
 **Written:** 2026-04-22
-**Plan:** (not yet created)
+**Plan:** (not yet created — plan-ready once the §12 owner rulings clear)
+
+> **Config-architecture readiness (revised 2026-06-30).** This spec's foundation
+> has now SHIPPED. `config-architecture-impl` L1 (`unified-config-profiles`,
+> selector-merge through §15) + L1 follow-ups (R2 lock-file profile units, R7/R8
+> projection+drift, authored-profiles key) are merged — so the **profile model and
+> selector-merge resolution** this spec assumes (§3 schema, §4 composite
+> resolution) exist in the resolver today, not just on paper. L2
+> (`distributable-config-manifest`, `init --from`) and L3 (home-config
+> machine-local split + `kind:project-set` identity registry) are merged too, so a
+> `verifier_profiles` package can ride the same distribution + lock path.
+> **Still gating:** the §12 owner rulings (seed-profile naming/shape OR-1, and the
+> public-source-runs-private-corpus privacy confirm OR-2) before the plan is
+> created. **Upcoming dependency:** L4 multi-harness (descriptor schema,
+> owner-gated) is the natural home for the multi-profile-app case in §1.2 — payout's
+> `po-core-api-se` (API/batch/streaming modes). Mirror the payout backfill framing:
+> consume the shipped L1-L3 substrate now; design for L4 without blocking on it.
+> NOTE: a newer copy of this spec in the working tree carries the 2026-06-28
+> ideation fork-resolution (§12 D2.7-D2.10); reconcile this readiness note into it
+> when that lands.
 
 **Related:**
 - [config-distribution-model](../config-distribution-model/design.md) — `app_type_verifier_map` field surface (§10), command gating (§13.6). This spec defines the schema and lifecycle behind the `app_type` name.
@@ -481,6 +500,420 @@ If all four resolve correctly through the schema and produce valid delegation bu
 
 ---
 
+## 8A. Starter profile catalog (expanded app-types)
+
+**Status:** added 2026-06-25 to cover the app-types the R-series obs/eval/access
+platform and the dot-agents project itself now exercise. These are **known
+starter profiles**, not a closed set — §2 / schema v3 keep `app_type` an open
+vocabulary; this catalog ships generic defaults that any consumer overrides or
+forks. The dot-agents-specific profiles (`graph-knowledge` here, plus the
+project's own `go-cli`/`ideation`/`docs` overrides) are **not** carried inline in
+this spec's catalog beyond the one generic worked example below — they are
+layered in via the project's own config source per
+[da-project-specifics-source](../da-project-specifics-source/design.md). This spec
+owns the *generic starter shape*; the project source owns *its specifics*. (SoT:
+one home per concern — the project profiles live in the project source, not
+duplicated here.)
+
+**Canonical roster + single-source pointer:** §8A.1a is the **authoritative
+starter-set roster**. It is the one place the documented starter `app_type`
+values are enumerated; every other surface (notably the SDD entity/KG schema's
+`known_starter_values`) **references it rather than copying the list**, so the
+catalog cannot drift (Finding 8). See §8A.1a for the roster, the
+`http-service`/`go-http-service` alias rule, the starter-children-are-selectable
+reconciliation (Finding 7), and the `meta` custom-for-now ruling.
+
+### 8A.0 Two vocabularies, one app-type name
+
+The shipped CLI today carries the per-app-type execution shape under
+`execution_profile.by_app_type` (`internal/config/execution_profile.go`):
+`relevance` (unit noise filter per stage), `topology`
+(executors / verifiers_per_executor / reviewers / **`verifier_sequence`**), and
+`lenses` (`lens_set` / `lens_concurrency`). The forward **profile** schema in §3
+of this spec carries the richer pinned surface (`verifier_chain` with versions +
+`on_fail`, `review_kind`, `review_skill`, `graph_backend`, typed
+`write_scope_kind`). These are the same `app_type` name viewed at two maturities:
+
+| Concern | Shipped `execution_profile` field | Forward profile field (§3) |
+|---|---|---|
+| Ordered verifiers | `topology.verifier_sequence` (ids → `stage_profiles.verifier`) | `verifier_chain` (name + version + `on_fail`) |
+| Review lenses / kind | `lenses.lens_set`, `review` relevance | `review_kind` + `review_skill` |
+| Relevance (skills/agents) | `relevance.{orchestrate,verify,review}.{core,situational,noise}` | `impl_defaults.context_packs` + relevance overlay |
+| Graph backend | (implicit `crg`) | `graph_backend` adapter ref |
+
+Each catalog entry below gives **both** views so a profile is adoptable today
+(via `execution_profile.by_app_type`) and forward-compatible with the §3 profile
+schema. The mapping is non-normative glue, not a third model — the canonical
+verifier-id → prompt-file binding stays in `stage_profiles` (owned by
+[stage-profile-and-routing-consolidation](../stage-profile-and-routing-consolidation/design.md));
+the canonical units/lock model stays in
+[config-distribution-model §15](../config-distribution-model/design.md#15-coherence-model-v2-scopes-sources-units-and-the-lock).
+This catalog references those; it does not restate them.
+
+### 8A.1 Starter set alignment (http / api / ui / streaming / batch / db)
+
+The §3.2 composite example already names `api`, `batch`, `streaming` as child
+profiles. This catalog confirms and fills the generic starter set so a composite
+like `po-core-api-se` resolves against published children, and adds the
+app-types the R-series needs but the original set lacked (`http-service`, `db`,
+`ui`). The relationship:
+
+| Starter profile | Relationship | Primary need it carries |
+|---|---|---|
+| `http-service` / `go-http-service` | the §8.1 baseline, generalized | API-contract + integration verifiers |
+| `api` | the request/response slice of an HTTP service | contract + schema verifiers |
+| `streaming` | long-lived / pushed / concurrent | concurrency + `-race` + replay/idempotence verifiers |
+| `batch` | leased-job / retry surface | lease-retry + idempotence verifiers |
+| `db` | persistence / migration surface | migration + schema + rollback verifiers |
+| `ui` | browser-rendered surface | build + a11y + e2e (Playwright) verifiers |
+
+`api`, `batch`, and `streaming` keep the shapes the §3.2 / §8.2 composite already
+implies; the three new entries (`http-service`, `db`, `ui`) are specified in
+full below because the R-series introduces them.
+
+### 8A.1a Canonical starter-set roster (the single source of truth)
+
+**This subsection is the authoritative starter catalog.** Every starter profile
+`da` ships in the published `dotagents-builtin` layer (Q10) is listed here, with
+exactly one home per concern. Prose elsewhere — including the SDD entity/KG
+schema's `known_starter_values` (work-tracking-storage-abstraction
+`sdd-entity-kg-schema-draft.md` §1.0) — **references this roster rather than
+re-listing it**, so the two surfaces cannot drift (Finding 8). The roster does
+not close the vocabulary: §2 / schema v3 keep `app_type` an OPEN string with
+`custom_allowed: true`; this is the *documented, non-exhaustive starter set*,
+not an enum.
+
+| Starter `app_type` | Kind | Selectable directly? | Notes |
+|---|---|---|---|
+| `go-cli` | code | yes | the project's own CLI baseline (`.agentsrc.json` key) |
+| `ideation` | non-code | yes | the project's ideation stage (`.agentsrc.json` key) |
+| `docs` | non-code | yes | documentation work (§8.5 / project docs profile) |
+| `http-service` | code | yes | §8A.2; **`go-http-service` is an alias** of `http-service` (Go is the project language), not a separate starter |
+| `api` | code | yes | §8A.1 / §3.2 — request/response slice; **independently selectable AND composable** |
+| `ui` | code | yes | §8A.5 — browser-rendered surface; **independently selectable AND composable** |
+| `streaming` | code | yes | §8A.3 — pushed/long-lived/concurrent; **independently selectable AND composable** |
+| `batch` | code | yes | §8A — leased-job/retry surface; **independently selectable AND composable** |
+| `db` | code | yes | §8A.4 — persistence/migration; specify-ahead (Q11), no consumer references it until the `Store` forward door lands |
+| `graph-knowledge` | code | yes | §8B — graph/KG/CRG work; ships generic here, adopted via the project source |
+| `research` | non-code | yes | §8.3 — citation-backed research |
+| `resume-ideation` | non-code | yes | §8.4 — artifact-set ideation |
+| `po-core-api-se` | code (composite) | yes | §8.2 — `composes: [api, batch, streaming]`; a worked composite, not itself a starter child |
+
+**Starter children are independently selectable (Finding 7 reconciliation).**
+`api`, `ui`, `streaming`, and `batch` are **both** standalone starter profiles
+**and** valid composite children. The earlier "COMPOSITE-MEMBER, not
+independently selectable" framing carried by the SDD schema draft is **dropped
+for starter children**: a profile being usable as a `composes:` child does not
+remove it from the selectable starter set — `app_type: api` is a legitimate
+repo-level selection for a pure request/response service, exactly as `app_type:
+streaming` is for a pure event surface. (`po-core-api-se` remains a *worked
+composite example*, distinct from the starter children it composes.)
+
+**`http-service` carries the `go-http-service` alias.** The §8.1 baseline name
+`go-http-service` and the generalized §8A.2 name `http-service` denote one
+starter profile; the Go-specific spelling is an alias, not a second roster entry.
+A consumer may select either name and resolves to the same published profile.
+
+**`meta` is custom-for-now, NOT a fixed starter (owner ruling 2026-06-25).**
+Meta-work (the project working on its own workflow/agent machinery) is treated as
+**emergent / custom**: it currently **reuses the `docs` profile** rather than
+shipping a dedicated `meta` starter. `meta` is therefore deliberately **absent
+from the published starter set** above; a repo that wants a distinct meta shape
+declares it as a custom `app_type` via the open-vocab ref form (§7.1) and layers
+it in through its own config source. If meta-work later stabilizes into a
+recurring distinct verifier surface, promoting it to a starter is a visible act
+(a new roster row + a published-layer minor bump), not a silent addition.
+
+**`db` timing.** `db` is on the roster but specify-ahead (§8A.4 / Q11): the
+profile exists so it is ready when the `Store` forward door is taken; until then
+no `.agentsrc.json` references it. Listing it here keeps the roster complete
+without implying a live SQLite surface.
+
+### 8A.2 `http-service` (a.k.a. `go-http-service`) — HTTP API surface
+
+Grounded in **R3** (`da service` long-running HTTP host: `service run`, foreground
++ `-d/--detach`, graceful shutdown, mounted route handlers; r3 §D1) and **R2**
+(handlers whose responses must validate against a shipped JSON schema —
+contract test fails CI on drift; r2 done-criteria 5; r5 mounts more routes on the
+same host). An HTTP service's distinctive verification is **API-contract** (the
+wire schema doesn't drift) and **integration** (the route actually serves against
+a started host), beyond the baseline unit/lint/coverage.
+
+Forward profile (§3 schema):
+
+```yaml
+name: http-service          # alias: go-http-service (Go is the project's language)
+version: 0.1.0
+write_scope_kind: code
+impl_output_kind: code_change
+verifier_chain:
+  - { name: unit,         version: ^1.0, on_fail: hard }
+  - { name: lint,         version: ^1.0, on_fail: hard }
+  - { name: api-contract, version: ^1.0, on_fail: hard }   # response ⊨ shipped JSON schema (r2 DC5)
+  - { name: integration,  version: ^1.0, on_fail: hard }   # route served by a started host (r3)
+  - { name: coverage,     version: ^1.1, on_fail: soft }
+review_kind: code-review
+review_skill: review-pr@^1.0
+graph_backend: dotagents-builtin:graph/crg@^1.0
+impl_defaults:
+  allowed_tools: [read, edit, bash, grep, glob]
+  model_preference: [sonnet, opus]
+metadata: { domain: code, stability: draft }
+```
+
+Shipped `execution_profile.by_app_type` view (adoptable today):
+
+```yaml
+http-service:
+  relevance:
+    verify:  { core: [verifier, test-runner] }
+    review:  { core: [review-pr, architecture-standards, acceptance-invariants], situational: [adversarial] }
+  topology:
+    executors: 1
+    verifiers_per_executor: 3
+    reviewers: per_verifier
+    verifier_sequence: [unit, lint, api-contract, integration, coverage]
+  lenses:
+    lens_set: [architecture-standards, acceptance-invariants, adversarial]
+    lens_concurrency: gated
+```
+
+New verifier ids (`api-contract`, `integration`) require `stage_profiles.verifier`
+prompt-file entries; that binding is owned by stage-profile-and-routing-consolidation.
+
+### 8A.3 `streaming` — pushed / long-lived / concurrent surface
+
+Grounded in **R3** (the publish/subscribe **event bus** — `Publish(topic, payload)`,
+fan-out to subscribers, a global mutex with a recorded forward door to per-topic
+locking; goroutine-lifecycle owned by the scheduler; r3 §D3/§D4.1) and **R2** (the
+**server-pushed** real-time channel — SSE broker with fan-out + heartbeat + a
+bounded buffer that disconnects slow clients; r2 §D2.2, t-push-broker, OQ5). The
+distinctive verification is **concurrency correctness** (`go test -race`),
+**replay/idempotence** (a redelivered or re-read event does not double-apply —
+the §3.2 composite already names `webhook-replay`), and **backpressure** (a slow
+subscriber is dropped, not allowed to wedge the publisher; r2 done-criterion on
+backpressure, r3 R8 "slow consumers do not block publishers").
+
+```yaml
+name: streaming
+version: 0.1.0
+write_scope_kind: code
+impl_output_kind: code_change
+verifier_chain:
+  - { name: unit,           version: ^1.0, on_fail: hard }
+  - { name: lint,           version: ^1.0, on_fail: hard }
+  - { name: race,           version: ^1.0, on_fail: hard }   # go test -race (r3 goroutine bus)
+  - { name: stream-replay,  version: ^1.0, on_fail: hard }   # redelivery idempotence (r2/r3)
+  - { name: backpressure,   version: ^1.0, on_fail: soft }   # slow-consumer drop (r2 OQ5, r3 R8)
+review_kind: code-review
+review_skill: review-pr@^1.0
+graph_backend: dotagents-builtin:graph/crg@^1.0
+impl_defaults: { allowed_tools: [read, edit, bash, grep, glob], model_preference: [sonnet, opus] }
+metadata: { domain: code, stability: draft }
+```
+
+Shipped view: same `relevance`/`lenses` shape as `http-service`; `verifier_sequence:
+[unit, lint, race, stream-replay, backpressure]`; `lens_concurrency: gated`
+(concurrency review wants serialized adversarial passes).
+
+### 8A.4 `db` — persistence / migration surface
+
+Grounded in **R4** (the eval sandbox's reproducibility + cleanup contract — a
+scoped temp working tree, retention window, no leaked trees; r4 R8/DC) and the
+**R3/R4/R5 SQLite forward-door** (R2/R4/R5 all defer a denormalized/SQLite store
+behind a `Store` interface — r2 §D2.1 forward door, r5 §D5.1 "SQLite mirror can be
+added later"). When that store lands, schema changes become the regression
+vector §6 exists to catch. A `db` profile's distinctive verification is **forward
+migration applies**, **schema validates**, and **rollback/round-trips** (a
+migration is reversible or the down-path is exercised), plus the standard unit/lint.
+
+```yaml
+name: db
+version: 0.1.0
+write_scope_kind: code
+impl_output_kind: code_change
+verifier_chain:
+  - { name: unit,            version: ^1.0, on_fail: hard }
+  - { name: lint,            version: ^1.0, on_fail: hard }
+  - { name: migration-apply, version: ^1.0, on_fail: hard }   # up migration applies clean
+  - { name: schema-validate, version: ^1.0, on_fail: hard }   # post-migration schema ⊨ expected
+  - { name: migration-roundtrip, version: ^1.0, on_fail: soft } # down/up round-trips (reversibility)
+review_kind: code-review
+review_skill: review-pr@^1.0
+graph_backend: dotagents-builtin:graph/crg@^1.0
+impl_defaults: { allowed_tools: [read, edit, bash, grep, glob], model_preference: [sonnet, opus] }
+metadata: { domain: code, stability: draft }
+```
+
+Shipped view: `verifier_sequence: [unit, lint, migration-apply, schema-validate,
+migration-roundtrip]`; `db` reuses `schema-check` from `stage_profiles` if the
+project prefers the existing artifact-validation verifier over a new
+`schema-validate` (project choice, layered in the project source).
+
+**Open-vocab note:** the project may currently have *no* SQLite surface (R2/R4/R5
+defer it). `db` is specified now so the profile exists when the forward door is
+taken; until then no `.agentsrc.json` references it. Specifying-ahead is cheap and
+keeps the catalog complete.
+
+### 8A.5 `ui` — browser-rendered surface
+
+Grounded in **R2** (the dashboard SPA — static frontend built and `go:embed`-ed
+into the binary, no SSR, TanStack-Query client, push subscription, dev-mode HMR
+asset-proxy flag; r2 §D2.3/§D2.4, t-frontend-shell..t-embed-bundle, e2e via
+Playwright; r2 done-criterion 3 measured "by Playwright or an integration test").
+A `ui` profile's distinctive verification is **build** (the bundle compiles and
+embeds), **a11y** (accessibility gates on the rendered surface), and **e2e**
+(Playwright drives the live page — the project already ships a `playwright` skill).
+
+```yaml
+name: ui
+version: 0.1.0
+write_scope_kind: code
+impl_output_kind: code_change
+verifier_chain:
+  - { name: ui-build,  version: ^1.0, on_fail: hard }   # bundle builds + go:embed succeeds (r2 t-embed-bundle)
+  - { name: lint,      version: ^1.0, on_fail: hard }
+  - { name: a11y,      version: ^1.0, on_fail: soft }    # accessibility gate
+  - { name: e2e,       version: ^1.0, on_fail: hard }    # Playwright drives live page (r2 DC3)
+review_kind: code-review
+review_skill: review-pr@^1.0
+graph_backend: dotagents-builtin:graph/crg@^1.0
+impl_defaults:
+  allowed_tools: [read, edit, bash, grep, glob]
+  context_packs: [ui-style-guide]
+  model_preference: [sonnet, opus]
+metadata: { domain: code, stability: draft }
+```
+
+Shipped view: `relevance.verify.core: [verifier, test-runner]`,
+`relevance.review.situational: [playwright]` (the e2e skill becomes relevant, not
+noise, under `ui`); `verifier_sequence: [ui-build, lint, a11y, e2e]`.
+
+### 8A.6 `service` composite (R-series obs/eval/access host)
+
+The R-series ships **one Go binary** that is simultaneously an HTTP host (R3), a
+streaming push surface (R2/R3 bus + SSE), an embedded UI (R2), an access/audit
+layer (R5), and — when the forward door opens — a `db` surface. This is exactly
+the multi-profile-app case §2.1 / §3.2 motivates. Rather than one flat app_type,
+the binary's repo composes the relevant children:
+
+```yaml
+name: da-obs-service
+version: 0.1.0
+composes:
+  - http-service@^0.1
+  - streaming@^0.1
+  - ui@^0.1
+review_kind: code-review                              # all children agree
+graph_backend: dotagents-builtin:graph/crg@^1.0       # all children agree
+additional_verifier_chain:
+  - { name: audit-chain, version: ^1.0, on_fail: hard } # R5 hash-chained audit-log integrity (r5 §D5.4)
+  - { name: auth-rbac,   version: ^1.0, on_fail: hard } # R5 bearer-token role enforcement (r5 §D5.3)
+metadata: { domain: code, stability: draft, maintainer: dot-agents/core }
+```
+
+Resolution (§4.1) unions the three children's chains, de-dups `unit`/`lint`, and
+appends `audit-chain` + `auth-rbac`. The two R5-specific verifiers are
+**composite-additional**, not their own child profile, because they only exist
+where the access layer is mounted — they don't generalize to a standalone
+starter. If a later repo needs RBAC standalone, fork them into an `access` child.
+This composite is **dot-agents-specific** and therefore lives in the project's
+config source (da-project-specifics-source §), not in this generic catalog — it is
+shown here only as the worked composition that validates the new children resolve.
+
+### 8A.7 New verifier ids introduced (binding owned elsewhere)
+
+| Verifier id | Carried by | Stage-profile binding owner |
+|---|---|---|
+| `api-contract`, `integration` | `http-service` | stage-profile-and-routing-consolidation |
+| `race`, `stream-replay`, `backpressure` | `streaming` | ″ |
+| `migration-apply`, `schema-validate`, `migration-roundtrip` | `db` | ″ |
+| `ui-build`, `a11y`, `e2e` | `ui` | ″ |
+| `audit-chain`, `auth-rbac` | `da-obs-service` composite | ″ |
+
+This spec **names** the verifier ids each profile needs and **why** (cited above).
+It does not author the prompt files or the executable verifier contract — those
+are owned by stage-profile-and-routing-consolidation and Q2 respectively. Listing
+them here is the contract the binding owner is accountable to.
+
+---
+
+## 8B. Dot-agents graph-knowledge app-type
+
+**Status:** added 2026-06-25. This profile is **dot-agents-specific** — it is the
+project's own graph/KG/CRG work (the Tree-sitter code-review graph, the scoped
+KG, the graph-backend adapters). Per SoT it is **defined here as the generic
+graph-knowledge shape** but **adopted via the project's config source**
+([da-project-specifics-source](../da-project-specifics-source/design.md)); the
+project does not carry it inline in `.agentsrc.json` once that source exists.
+
+### 8B.1 What it is for
+
+Work that builds, queries, or evolves a knowledge graph: the CRG build/update
+path (`mcp__code-review-graph__build_or_update_graph_tool`, the git-hook
+auto-update), the graph-backend adapters (`graph-backend-adapter-contract`), the
+scoped-KG storage (`scoped-knowledge-graphs`), and the R4 KG-derived task
+generator (r4 §D4.1 generates tasks from the Tree-sitter KG). Its distinctive
+property among code app-types: **the graph itself is the product**, so the
+verifier surface checks graph correctness, not just code correctness.
+
+### 8B.2 Profile
+
+```yaml
+name: graph-knowledge
+version: 0.1.0
+write_scope_kind: code
+impl_output_kind: code_change
+verifier_chain:
+  - { name: unit,             version: ^1.0, on_fail: hard }
+  - { name: lint,             version: ^1.0, on_fail: hard }
+  - { name: graph-schema,     version: ^1.0, on_fail: hard }   # note/edge types ⊨ adapter schema (gbac §10)
+  - { name: graph-parity,     version: ^1.0, on_fail: hard }   # CRG dual-read parity (gbac §11.6)
+  - { name: impact-radius-query, version: ^1.0, on_fail: soft } # named queries validate vs adapter DSL (app-type-profiles §7.3)
+review_kind: code-review
+review_skill: review-pr@^1.0
+# A graph-knowledge profile uniquely names a NON-crg-default graph_backend when
+# the work targets a specific adapter; for the CRG path itself it is crg.
+graph_backend: dotagents-builtin:graph/crg@^1.0
+impl_defaults:
+  allowed_tools: [read, edit, bash, grep, glob]
+  context_packs: [graph-adapter-contract]
+  model_preference: [opus, sonnet]
+metadata: { domain: code, stability: draft, maintainer: dot-agents/core }
+```
+
+Shipped view:
+
+```yaml
+graph-knowledge:
+  relevance:
+    orchestrate: { core: [build-graph], situational: [kg-ideate] }
+    verify:      { core: [verifier, test-runner] }
+    review:      { core: [review-pr, architecture-standards, acceptance-invariants], situational: [adversarial] }
+  topology:
+    executors: 1
+    verifiers_per_executor: 3
+    reviewers: per_verifier
+    verifier_sequence: [unit, lint, graph-schema, graph-parity, impact-radius-query]
+  lenses:
+    lens_set: [architecture-standards, acceptance-invariants, adversarial]
+    lens_concurrency: gated
+```
+
+### 8B.3 Why not just `go-cli` with extra verifiers
+
+The project already ships `go-cli`. Graph-knowledge work *is* Go, but its
+verifier surface (`graph-schema`, `graph-parity`, `impact-radius-query`) and its
+relevant orchestration unit (`build-graph` becomes **core**, not noise) diverge
+enough that folding it into `go-cli` would either bloat every CLI task with
+graph verifiers or leave graph tasks under-verified. A distinct profile keeps
+both clean — and is exactly the open-vocab extension §2 anticipates. The
+graph-specific verifier ids bind to `stage_profiles` (owner:
+stage-profile-and-routing-consolidation) and their contracts cite
+[graph-backend-adapter-contract §10/§11](../graph-backend-adapter-contract/design.md).
+
+---
+
 ## 9. Migration from `app_type_verifier_map`
 
 ### 9.1 Today's shape
@@ -546,6 +979,64 @@ Closed by [graph-backend-adapter-contract §10](../graph-backend-adapter-contrac
 ### Q8: v1.5 trigger budget threshold tuning
 
 Defined in [graph-backend-adapter-contract §12](../graph-backend-adapter-contract/design.md). Thresholds (5 / 8 points) are judgment-based defaults; re-tune after the first 3 months of TTRPG dogfood data and after the compliance-register adapter ships.
+
+### Q10: Should the starter catalog (§8A) ship as a published config layer or stay inline in this spec? → RESOLVED (owner ruling 2026-06-25: published `dotagents-builtin` layer)
+
+§8A specifies generic starter profiles. **Resolved: they ship as a published
+`dotagents-builtin` config layer** — one versioned source everyone `extends`, so a
+starter-set bump propagates instead of each consumer copying the shape. This is the
+single-source-of-truth choice the §6 behavior-preservation guarantee needs to have
+teeth (there is one versioned artifact to bump and diff). Project-custom and
+project-specific profiles still layer **on top** locally via the
+`da-project-specifics-source` (which stays local/private); only the *generic*
+starter set graduates to the public layer. This also resolves
+`da-project-specifics-source` §8 Q1 ("publish a public starter source") to **yes**,
+and makes §4.3's promotion path "generic-goes-public, project-stays-local."
+
+The roster of what that published layer ships is enumerated once in **§8A.1a**
+(the canonical starter-set roster). `known_starter_values` in the SDD entity/KG
+schema must **point at §8A.1a, not duplicate it** — see Q13 for the tracked
+schema-side follow-up.
+
+### Q13: SDD schema `known_starter_values` must reference §8A.1a, not copy it → OPEN (schema-side follow-up; owner of `sdd-entity-kg-schema-draft.md`)
+
+Finding 8 (single-source the starter catalog). §8A.1a is now the authoritative
+roster. The SDD entity/KG schema draft
+(work-tracking-storage-abstraction/`sdd-entity-kg-schema-draft.md` §1.0)
+currently inlines a `known_starter_values: [go-cli, ideation, go-http-service,
+api, ui, streaming, batch, po-core-api-se, research, resume-ideation]` list and
+marks `api/ui/streaming/batch` as "COMPOSITE-MEMBER, not independently
+selectable." Both must be reconciled against §8A.1a:
+
+1. Replace the inlined `known_starter_values` array with a **reference** to
+   app-type-profiles §8A.1a (e.g. `known_starter_values_ref:
+   app-type-profiles#8A.1a`), so the list lives in exactly one place.
+2. Drop the "not independently selectable" annotation on `api/ui/streaming/batch`
+   — per §8A.1a these are both standalone-selectable starters and composite
+   children.
+3. Align the documented set with the §8A.1a roster: it should additionally carry
+   `http-service` (with the `go-http-service` alias), `db`, `graph-knowledge`,
+   and `docs`; and must **not** add a fixed `meta` entry (`meta` is custom-for-now
+   per §8A.1a).
+
+**This edit is owned by the worker holding `sdd-entity-kg-schema-draft.md`** —
+this spec does not edit that file. Flagged as a cross-spec follow-up so the
+pointer lands once that file is free.
+
+### Q11: `db` profile timing — specify-ahead vs land-with-store
+
+§8A.4 specifies `db` before any SQLite surface exists (R2/R4/R5 all defer it).
+Open: is specifying-ahead the right call, or should `db` wait until the `Store`
+forward door is actually taken? Lean: keep it specified (cheap, completes the
+starter set, no consumer references it until the store lands). Autonomous.
+
+### Q12: `da-obs-service` composite home and child granularity
+
+§8A.6 places the R-series composite in the project source and makes `audit-chain` /
+`auth-rbac` composite-additional rather than an `access` child. Open: if a second
+repo ever needs RBAC standalone, do we retro-fork an `access` child (visible major
+act per §2.2)? Lean: yes, fork-when-second-consumer. Autonomous until a second
+consumer appears.
 
 ### Q9: Cross-adapter view dependency `accepts_breaking_changes` opt-out
 

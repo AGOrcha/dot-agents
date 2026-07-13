@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,10 +32,12 @@ func failProbe(string) error { return os.ErrNotExist }
 
 func mustVerifyOptions(project string, json bool, probe func(string) error) *runVerifyOptions {
 	return &runVerifyOptions{
-		jsonOut:  json,
-		stdout:   &bytes.Buffer{},
-		stderr:   &bytes.Buffer{},
-		cwd:      project,
+		runContext: runContext{
+			jsonOut: json,
+			stdout:  &bytes.Buffer{},
+			stderr:  &bytes.Buffer{},
+			cwd:     project,
+		},
 		crgProbe: probe,
 	}
 }
@@ -143,7 +146,7 @@ func TestVerifySources(t *testing.T) {
 			if tc.sources != nil {
 				repo["sources"] = tc.sources
 			}
-			snap := &snapshot{layers: map[string]map[string]any{layerRepoLocal: repo}}
+			snap := &cfg.Snapshot{Layers: []cfg.ResolvedLayer{{ID: cfg.LayerRepoLocal, Raw: repo}}}
 			checks := verifySources(cwd, snap)
 			c, ok := findCheck(checks, tc.wantName)
 			if !ok {
@@ -301,19 +304,19 @@ func TestVerifySources_RemoteReferencedVsUnused(t *testing.T) {
 	gitSrc := map[string]any{"type": "git", "id": "acme", "url": "u"}
 
 	// referenced: an extends ref uses the source id
-	used := &snapshot{layers: map[string]map[string]any{layerRepoLocal: {
+	used := &cfg.Snapshot{Layers: []cfg.ResolvedLayer{{ID: cfg.LayerRepoLocal, Raw: map[string]any{
 		"sources": []any{gitSrc},
 		"extends": []any{"acme:org/base"},
-	}}}
+	}}}}
 	c, _ := findCheck(verifySources(cwd, used), "source:acme")
 	if c.Status != verifyPass || !strings.Contains(c.Detail, "verified in the locked-layers check") {
 		t.Fatalf("referenced remote should point to locked-layers, got %+v", c)
 	}
 
 	// unused: no extends references it
-	unused := &snapshot{layers: map[string]map[string]any{layerRepoLocal: {
+	unused := &cfg.Snapshot{Layers: []cfg.ResolvedLayer{{ID: cfg.LayerRepoLocal, Raw: map[string]any{
 		"sources": []any{gitSrc},
-	}}}
+	}}}}
 	c, _ = findCheck(verifySources(cwd, unused), "source:acme")
 	if c.Status != verifyPass || !strings.Contains(c.Detail, "unused") {
 		t.Fatalf("unreferenced remote should be flagged unused, got %+v", c)
@@ -391,6 +394,326 @@ func TestAbbrevSHA(t *testing.T) {
 	}
 	if abbrevSHA("short") != "short" {
 		t.Fatalf("short sha changed: %q", abbrevSHA("short"))
+	}
+}
+
+// ---------- verifyPreconditionPolicies (Slice B5) ----------
+
+// snapForEffective builds a *cfg.Snapshot whose Effective config is the given
+// object, decoded through the same typed AgentsRC schema resolveLayered
+// produces, so the policy checks can be driven without writing a manifest to
+// disk or seeding a lockfile.
+func snapForEffective(t *testing.T, effective map[string]any) *cfg.Snapshot {
+	t.Helper()
+	data, err := json.Marshal(effective)
+	if err != nil {
+		t.Fatalf("marshal effective: %v", err)
+	}
+	var rc cfg.AgentsRC
+	if err := json.Unmarshal(data, &rc); err != nil {
+		t.Fatalf("unmarshal effective: %v", err)
+	}
+	return &cfg.Snapshot{Effective: rc}
+}
+
+// validPolicyConfig is the effective-config fragment for the built-in default
+// policy: every signal kind is registered and the verifier profile's reference
+// resolves. Used as the clean-pass baseline.
+func validPolicyConfig() map[string]any {
+	return map[string]any{
+		"precondition_policies": map[string]any{
+			"default": map[string]any{"predicates": []any{
+				map[string]any{"signal": "event.pr.open"},
+				map[string]any{"signal": "signal.ci.rollup", "args": map[string]any{"equals": "GREEN"}},
+				map[string]any{"signal": "gate.quality.sonar"},
+				map[string]any{"signal": "metric.new_code_issues", "args": map[string]any{"equals": "0"}},
+			}},
+		},
+		"stage_profiles": map[string]any{
+			"verifier": map[string]any{
+				"unit": map[string]any{"precondition_policy": "default"},
+			},
+		},
+	}
+}
+
+func TestVerifyPreconditionPolicies(t *testing.T) {
+	cases := []struct {
+		name       string
+		effective  map[string]any
+		wantStatus string // status expected on the named check; "" ⇒ expect no checks
+		wantCheck  string // check Name to assert (substring-anchored detail below)
+		wantDetail string // substring required in that check's detail
+	}{
+		{
+			name:       "nothing declared yields no checks",
+			effective:  map[string]any{"project": "demo"},
+			wantStatus: "",
+		},
+		{
+			name:       "valid config passes",
+			effective:  validPolicyConfig(),
+			wantStatus: verifyPass,
+			wantCheck:  "precondition-policies",
+			wantDetail: "all policy references and signal kinds resolve",
+		},
+		{
+			name: "profile references undeclared policy fails",
+			effective: map[string]any{
+				"precondition_policies": map[string]any{
+					"strict": map[string]any{"predicates": []any{
+						map[string]any{"signal": "event.pr.open"},
+					}},
+				},
+				"stage_profiles": map[string]any{
+					"verifier": map[string]any{
+						"unit": map[string]any{"precondition_policy": "lenient"},
+					},
+				},
+			},
+			wantStatus: verifyFail,
+			wantCheck:  "precondition-policy:verifier/unit",
+			wantDetail: `references undeclared precondition policy "lenient"`,
+		},
+		{
+			name: "predicate names unregistered signal kind fails",
+			effective: map[string]any{
+				"precondition_policies": map[string]any{
+					"strict": map[string]any{"predicates": []any{
+						map[string]any{"signal": "event.pr.open"},
+						map[string]any{"signal": "bogus.signal.kind"},
+					}},
+				},
+			},
+			wantStatus: verifyFail,
+			wantCheck:  "precondition-signal:strict",
+			wantDetail: `unregistered signal kind "bogus.signal.kind"`,
+		},
+		{
+			name: "dangling reference with empty registry still validated",
+			effective: map[string]any{
+				"stage_profiles": map[string]any{
+					"verifier": map[string]any{
+						"unit": map[string]any{"precondition_policy": "ghost"},
+					},
+				},
+			},
+			wantStatus: verifyFail,
+			wantCheck:  "precondition-policy:verifier/unit",
+			wantDetail: `undeclared precondition policy "ghost"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			checks := verifyPreconditionPolicies(snapForEffective(t, tc.effective))
+			assertPolicyCheck(t, checks, tc.wantStatus, tc.wantCheck, tc.wantDetail)
+		})
+	}
+}
+
+// assertPolicyCheck validates a verifyPreconditionPolicies result against a
+// case's expectations: an empty wantStatus means no checks should be produced;
+// otherwise the named check must exist with the expected status and (when
+// wantDetail is set) a detail containing that substring.
+func assertPolicyCheck(t *testing.T, checks []VerifyCheck, wantStatus, wantCheck, wantDetail string) {
+	t.Helper()
+	if wantStatus == "" {
+		if len(checks) != 0 {
+			t.Fatalf("expected no checks, got %+v", checks)
+		}
+		return
+	}
+	c, ok := findCheck(checks, wantCheck)
+	if !ok {
+		t.Fatalf("missing check %q in %+v", wantCheck, checks)
+	}
+	if c.Status != wantStatus {
+		t.Fatalf("check %q status = %q, want %q (%+v)", wantCheck, c.Status, wantStatus, c)
+	}
+	if wantDetail != "" && !strings.Contains(c.Detail, wantDetail) {
+		t.Fatalf("check %q detail = %q, want substring %q", wantCheck, c.Detail, wantDetail)
+	}
+}
+
+// TestVerifyPreconditionPolicies_NilSnapshot exercises the nil-snapshot guard
+// in verifyPreconditionPolicies (no panic, no checks).
+func TestVerifyPreconditionPolicies_NilSnapshot(t *testing.T) {
+	if got := verifyPreconditionPolicies(nil); got != nil {
+		t.Fatalf("expected nil checks for nil snapshot, got %+v", got)
+	}
+}
+
+// TestVerifyPreconditionPolicies_AllErrorsSurface confirms multiple distinct
+// failures (a dangling reference AND an unregistered signal) are all reported,
+// not just the first.
+func TestVerifyPreconditionPolicies_AllErrorsSurface(t *testing.T) {
+	eff := map[string]any{
+		"precondition_policies": map[string]any{
+			"a": map[string]any{"predicates": []any{
+				map[string]any{"signal": "not.a.kind"},
+			}},
+		},
+		"stage_profiles": map[string]any{
+			"verifier": map[string]any{
+				"unit": map[string]any{"precondition_policy": "missing"},
+			},
+		},
+	}
+	checks := verifyPreconditionPolicies(snapForEffective(t, eff))
+	if _, ok := findCheck(checks, "precondition-policy:verifier/unit"); !ok {
+		t.Fatalf("missing dangling-reference check in %+v", checks)
+	}
+	if _, ok := findCheck(checks, "precondition-signal:a"); !ok {
+		t.Fatalf("missing unregistered-signal check in %+v", checks)
+	}
+	for _, c := range checks {
+		if c.Status == verifyFail {
+			return
+		}
+	}
+	t.Fatalf("expected at least one failed check, got %+v", checks)
+}
+
+// TestBuildVerifyReport_PolicyFailFlipsOK proves a Slice-B5 failure flips the
+// top-level report OK to false (so `da config verify` exits non-zero).
+func TestBuildVerifyReport_PolicyFailFlipsOK(t *testing.T) {
+	manifest := `{
+	  "sources": [{"type":"local"}],
+	  "stage_profiles": {"verifier": {"unit": {"precondition_policy": "nope"}}}
+	}`
+	project := withRepoLayer(t, manifest, "")
+	report := buildVerifyReport(mustVerifyOptions(project, false, okProbe))
+	if report.OK {
+		t.Fatalf("expected OK=false when a profile names an undeclared policy, got %+v", report)
+	}
+	if c, ok := findCheck(report.Checks, "precondition-policy:verifier/unit"); !ok || c.Status != verifyFail {
+		t.Fatalf("expected a failed policy-reference check, got %+v", report.Checks)
+	}
+}
+
+// TestBuildVerifyReport_RealLockedExtendsLayerPolicyResolves is the
+// end-to-end proof that `da config verify` now resolves through the SAME
+// layered path `da config explain` / `workflow app-types` use: a project that
+// `extends` a layer carrying precondition_policies (a team-source's
+// verifier_chain registry), with a populated .agentsrc.lock + on-disk layer
+// cache, must resolve a repo-local stage_profile's reference to that imported
+// policy. Under the retired loadFlatSnapshot (product-defaults -> user-local
+// -> repo-local only) the imported registry was invisible, so this exact
+// reference would have failed as "undeclared precondition policy".
+func TestBuildVerifyReport_RealLockedExtendsLayerPolicyResolves(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "org"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "org", "policies.json"), []byte(`{
+  "precondition_policies": {
+    "org-default": {"predicates": [{"signal": "event.pr.open"}]}
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, cfg.AgentsRCFile), []byte(`{
+  "project":"svc","version":2,
+  "sources":[{"id":"acme","type":"local","path":`+strconv.Quote(src)+`}],
+  "extends":["acme:org/policies.json"],
+  "stage_profiles": {"verifier": {"unit": {"precondition_policy": "org-default"}}}
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed .agentsrc.lock + the layer cache via one online (local-disk)
+	// resolve — the same seeding pattern
+	// TestWorkflowAppTypesRealLockedExtendsLayer uses.
+	if _, err := cfg.NewLayeredResolver().Resolve(repo); err != nil {
+		t.Fatalf("seed online resolve: %v", err)
+	}
+
+	report := buildVerifyReport(mustVerifyOptions(repo, false, okProbe))
+	if c, ok := findCheck(report.Checks, "precondition-policy:verifier/unit"); ok {
+		t.Fatalf("expected no dangling-reference check once the imported layer's policy is visible, got %+v", c)
+	}
+	if c, ok := findCheck(report.Checks, "precondition-policies"); !ok || c.Status != verifyPass {
+		t.Fatalf("expected precondition-policies to pass once the imported layer supplies org-default, got %+v", report.Checks)
+	}
+}
+
+// TestRunVerify_PolicyFailReturnsError proves the command path maps a Slice-B5
+// failure to a non-zero exit (a non-nil error from runVerify).
+func TestRunVerify_PolicyFailReturnsError(t *testing.T) {
+	manifest := `{
+	  "sources": [{"type":"local"}],
+	  "precondition_policies": {"p": {"predicates": [{"signal": "no.such.kind"}]}}
+	}`
+	project := withRepoLayer(t, manifest, "")
+	opts := mustVerifyOptions(project, false, okProbe)
+	if err := runVerify(opts, testDeps()); err == nil {
+		t.Fatalf("expected error when a predicate names an unregistered signal kind")
+	}
+}
+
+// TestBuildVerifyReport_MalformedPolicyShapeFailsManifest covers what was the
+// decode-failure branch pre-migration: a precondition_policies value of the
+// wrong JSON shape (a string, not an object map) used to marshal but fail to
+// unmarshal into the typed registry inside verifyPreconditionPolicies itself,
+// degrading to a warn. Snapshot resolution now decodes the WHOLE manifest
+// through the typed AgentsRC schema up front (resolveLayered), so a malformed
+// precondition_policies shape fails snapshot resolution itself — the same
+// "manifest" short-circuit an unparseable .agentsrc.json produces — rather
+// than surfacing as an isolated per-check warn.
+func TestBuildVerifyReport_MalformedPolicyShapeFailsManifest(t *testing.T) {
+	project := withRepoLayer(t, `{"precondition_policies": "not-an-object"}`, "")
+	report := buildVerifyReport(mustVerifyOptions(project, false, okProbe))
+	if report.OK {
+		t.Fatalf("expected OK=false for a malformed precondition_policies shape, got %+v", report)
+	}
+	if c, ok := findCheck(report.Checks, "manifest"); !ok || c.Status != verifyFail {
+		t.Fatalf("expected the manifest check to fail, got %+v", report.Checks)
+	}
+}
+
+// TestVerifyPolicyReferences_EmptyNameSkipped covers the name=="" continue
+// branch: a profile that declares no precondition_policy is not a dangling
+// reference and must not be reported.
+func TestVerifyPolicyReferences_EmptyNameSkipped(t *testing.T) {
+	eff := map[string]any{
+		"precondition_policies": map[string]any{
+			"default": map[string]any{"predicates": []any{
+				map[string]any{"signal": "event.pr.open"},
+			}},
+		},
+		"stage_profiles": map[string]any{
+			"verifier": map[string]any{
+				"unit":     map[string]any{"label": "Unit"}, // no precondition_policy
+				"contract": map[string]any{"precondition_policy": "default"},
+			},
+		},
+	}
+	checks := verifyPreconditionPolicies(snapForEffective(t, eff))
+	for _, c := range checks {
+		if c.Status == verifyFail {
+			t.Fatalf("a profile without a precondition_policy must not fail, got %+v", checks)
+		}
+	}
+	if c, ok := findCheck(checks, "precondition-policies"); !ok || c.Status != verifyPass {
+		t.Fatalf("expected a clean pass when all references resolve, got %+v", checks)
+	}
+}
+
+func TestSortedMapKeys(t *testing.T) {
+	got := sortedMapKeys(map[string]int{"b": 2, "a": 1, "c": 3})
+	want := []string{"a", "b", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sortedMapKeys = %v, want %v", got, want)
+		}
 	}
 }
 

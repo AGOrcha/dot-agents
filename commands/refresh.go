@@ -7,6 +7,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
 	"github.com/AGOrcha/dot-agents/internal/ui"
@@ -24,10 +25,9 @@ var refreshImport bool
 // resolved asset-store union AND prunes managed outputs no longer in the
 // resolved set, so the repo tree converges to exactly what the lock declares.
 // True (`--inexact`) keeps the additive behavior: write the wanted set, leave
-// stale managed outputs in place. The cobra flag that toggles this lives in
-// commands/internal/lifecycle/refresh.go (out of this task's write scope); see
-// .agents/active/fold-back for the deferred flag wiring. The default already
-// satisfies the spec's exact-by-default contract.
+// stale managed outputs in place. The cobra `--inexact` flag is registered in
+// commands/internal/lifecycle/refresh.go and threaded here via the RunRefresh
+// closure in NewRefreshCmd.
 var refreshInexact bool
 
 // refreshConfigLoader is the narrow collaborator refresh.go's
@@ -55,8 +55,9 @@ func NewRefreshCmd() *cobra.Command {
 	return lifecycle.NewRefreshCmd(lifecycle.Deps{
 		ExampleBlock:          ExampleBlock,
 		MaximumNArgsWithHints: MaximumNArgsWithHints,
-		RunRefresh: func(projectFilter string, importAlso bool) error {
+		RunRefresh: func(projectFilter string, importAlso, inexact bool) error {
 			refreshImport = importAlso
+			refreshInexact = inexact
 			return runRefresh(projectFilter, stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{})
 		},
 	})
@@ -170,7 +171,7 @@ func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string,
 	if projectFilter == "" {
 		return cfg.ListProjects(), nil
 	}
-	if cfg.GetProjectPath(projectFilter) == "" {
+	if !cfg.IsProjectKnown(projectFilter) {
 		return nil, ErrorWithHints(
 			fmt.Sprintf("project not found: %s", projectFilter),
 			"Run `da status` to see the registered project names.",
@@ -183,12 +184,28 @@ func resolveRefreshProjects(cfg *config.Config, projectFilter string) ([]string,
 // real, present directory. It emits the user-facing warn on skip so callers
 // just consult the bool.
 func checkRefreshProjectPath(name, path string) bool {
-	if path == "" || path == "." {
-		ui.Warn("Skipping " + name + ": path not found")
+	const skipPrefix = "Skipping "
+	if path == "" {
+		// Known in the synced identity registry but with no machine-local
+		// binding — report it explicitly rather than silently skip-as-missing
+		// (R4). This is the expected machine-B state before `da add` rebinds it.
+		ui.Warn(name + ": known but unbound on this machine — run `da add <path>` to bind it")
+		return false
+	}
+	if path == "." {
+		ui.Warn(skipPrefix + name + ": path not found")
 		return false
 	}
 	if _, err := os.Stat(path); err != nil {
-		ui.Warn("Skipping " + name + ": directory not found at " + path)
+		if os.IsNotExist(err) {
+			ui.Warn(skipPrefix + name + ": directory not found at " + path)
+		} else {
+			// A REAL Stat error (permission denied, TOCTOU) is not the same
+			// as "directory not found" — the path may well exist. Say so
+			// instead of sending the operator hunting for a directory that's
+			// actually just inaccessible.
+			ui.Warn(skipPrefix + name + ": could not access " + path + ": " + err.Error())
+		}
 		return false
 	}
 	return true
@@ -247,7 +264,37 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
 		projectFailed = true
 	}
+	if ensureManagedGitignoreForRefresh(path, enabledPlatforms) {
+		projectFailed = true
+	}
 	return projectFailed
+}
+
+// ensureManagedGitignoreForRefresh writes the dot-agents-managed .gitignore
+// block (config-distribution-model §15 / D14 / R8) so every enabled platform's
+// projected/generated repo-local outputs are ignored while the committed
+// .agentsrc.json/.agentsrc.lock contract stays tracked. The output set is
+// collected from the platforms themselves (platform.CollectManagedOutputs), not
+// hardcoded here, so refresh never has to know each platform's surface. It is
+// keyed off the config-enabled set (not install state) so the committed block
+// is byte-stable across machines regardless of which platforms are installed.
+// links.EnsureManagedGitignore regenerates (not appends) a sorted, de-duplicated
+// block and preserves user-authored ignores outside the markers, so re-running
+// refresh is idempotent. Dry-run previews the update without touching the file.
+// Returns true when a non-dry-run write failed so the caller withholds the
+// success stamp.
+func ensureManagedGitignoreForRefresh(path string, enabledPlatforms []platform.Platform) bool {
+	if Flags.DryRun {
+		ui.DryRun("Update dot-agents managed .gitignore block")
+		return false
+	}
+	outputs := platform.CollectManagedOutputs(enabledPlatforms)
+	if err := links.EnsureManagedGitignore(path, outputs); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("managed .gitignore: %v", err))
+		return true
+	}
+	ui.Bullet("ok", "managed .gitignore block updated")
+	return false
 }
 
 // ensureLockFreshForRefresh runs the §7A.5 lock half (config.EnsureResolved)
@@ -325,10 +372,10 @@ func recreatePlatformLinks(name, path string, enabledPlatforms []platform.Platfo
 // finalizeProjectRefresh writes the refresh metadata stamp when the project
 // finished cleanly. Returns true on a successful stamp (counted toward the
 // success total) and false on dry-run, partial application, or stamp failure.
-// Dry-run is treated as success for the counter but skips the manifest write.
+// Dry-run is treated as success for the counter but skips the lock write.
 func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit, refreshDescribe string) bool {
 	if Flags.DryRun {
-		msg := "Update .agentsrc.json refresh details"
+		msg := "Update .agentsrc.lock refresh details"
 		if refreshCommit != "" {
 			msg += " (commit=" + refreshCommit[:8] + ")"
 		}
@@ -339,8 +386,8 @@ func finalizeProjectRefresh(name, path string, projectFailed bool, refreshCommit
 		ui.Bullet("warn", "skipping refresh metadata for "+name+" — refresh was partial")
 		return false
 	}
-	if err := projectsync.WriteRefreshToAgentsRC(name, path, Version, refreshCommit, refreshDescribe); err != nil {
-		ui.Bullet("warn", fmt.Sprintf("manifest refresh metadata: %v", err))
+	if err := projectsync.WriteRefreshToLock(name, path, Version, refreshCommit, refreshDescribe); err != nil {
+		ui.Bullet("warn", fmt.Sprintf("lock refresh metadata: %v", err))
 		return false
 	}
 	return true

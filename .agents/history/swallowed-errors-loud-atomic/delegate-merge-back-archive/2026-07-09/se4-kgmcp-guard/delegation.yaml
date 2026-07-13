@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-se4-kgmcp-guard-1783565714
+mode: delegated
+parent_plan_id: swallowed-errors-loud-atomic
+parent_task_id: se4-kgmcp-guard
+title: 'Slice 4: kgmcp WriteKGMCPConfigFile corrupt-overwrite guard'
+summary: 'Delegated from plan Swallowed errors: loud + atomic'
+write_scope:
+    - commands/internal/lifecycle/kgmcp.go
+    - commands/internal/lifecycle/kgmcp_test.go
+success_criteria: |-
+    On json.Unmarshal failure of an EXISTING claude.json/cursor.json/mcp.json,
+    abort the write + return error instead of overwriting with the empty/
+    partial map (destroys other MCP entries). Convert the `_ = json.Unmarshal`
+    into a checked early-return. Test: seed corrupt claude.json -> returns
+    error, on-disk bytes untouched. PR base master,
+    head swallowed/4-kgmcp-guard.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: Swallowed4Kgmcp
+status: completed
+created_at: "2026-07-09T02:55:14Z"
+updated_at: "2026-07-09T03:00:46Z"

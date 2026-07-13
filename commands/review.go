@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -150,6 +151,16 @@ func runReviewShow(id string) error {
 }
 
 func runReviewApprove(id string, deps reviewDeps) error {
+	// Review decision event (TierReview → durable_delta): record the approve
+	// outcome after the proposal is applied + archived. ok flips true once the
+	// archive lands; a failure on any earlier step records an input-only failed
+	// event (mirrors p3a's deferred Tier-1 tail). Best-effort, never fatal.
+	repoPath := reviewJournalRepo()
+	input := &journal.ReviewInput{ProposalID: id}
+	observed := &journal.ReviewObserved{Decision: "approved"}
+	ok := false
+	defer func() { journalReview(repoPath, journal.CmdReviewApprove, input, observed, ok) }()
+
 	proposal, err := config.LoadProposal(id)
 	if err != nil {
 		return err
@@ -184,12 +195,24 @@ func runReviewApprove(id string, deps reviewDeps) error {
 		return err
 	}
 
+	observed.Applied = true
+	observed.RefreshTriggered = true
+	ok = true
 	ui.Success("Proposal approved")
 	fmt.Fprintf(os.Stdout, fmtIndentedLine, proposal.ID)
 	return nil
 }
 
 func runReviewReject(id, reason string, deps reviewDeps) error {
+	// Review decision event (TierReview → durable_delta): record the reject
+	// outcome after the proposal is archived. A reject neither applies the
+	// proposal nor triggers a refresh, so both flags stay false.
+	repoPath := reviewJournalRepo()
+	input := &journal.ReviewInput{ProposalID: id, Reason: reason}
+	observed := &journal.ReviewObserved{Decision: "rejected"}
+	ok := false
+	defer func() { journalReview(repoPath, journal.CmdReviewReject, input, observed, ok) }()
+
 	proposal, err := config.LoadProposal(id)
 	if err != nil {
 		return err
@@ -204,6 +227,7 @@ func runReviewReject(id, reason string, deps reviewDeps) error {
 	if err := deps.ArchiveProposal(proposal); err != nil {
 		return err
 	}
+	ok = true
 	ui.Success("Proposal rejected")
 	fmt.Fprintf(os.Stdout, fmtIndentedLine, proposal.ID)
 	return nil
@@ -232,6 +256,60 @@ func captureProposalRollback(targetPath string, deps reviewDeps) (func() error, 
 		}
 		return nil
 	}, nil
+}
+
+// ── session-handoff journal wiring (p3b) ────────────────────────────────────────
+//
+// The review commands are the only journaled mutators in package commands, so the
+// emit seam + helpers live here rather than in a shared file (mirroring p3a's
+// commands/workflow/journal_emit.go in spirit, replicated minimally to avoid a
+// cross-package import). Emission is BEST-EFFORT and NON-FATAL: a journal error
+// is warned and swallowed — it must never turn a successful decision into a failed
+// command. A blank repoPath skips emission.
+
+// reviewJournalEmit is the append seam over journal.Emit, overridable in tests so
+// they can capture the typed envelope (or inject an append failure) without
+// touching the real per-repo state dir.
+var reviewJournalEmit = journal.Emit
+
+// reviewJournalRepo resolves the repo the review ran in (the journal key). The
+// CLI has no project handle here, so the cwd is the repo identity; a getwd
+// failure yields "" which skips emission.
+func reviewJournalRepo() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return dir
+}
+
+// emitReviewEvent runs build (NewEvent / NewFailedEvent) and appends the result
+// best-effort. A build or append error is warned, never returned; a blank
+// repoPath is a no-op.
+func emitReviewEvent(repoPath, command string, build func() (journal.Envelope, error)) {
+	if repoPath == "" {
+		return
+	}
+	ev, err := build()
+	if err == nil {
+		err = reviewJournalEmit(repoPath, ev)
+	}
+	if err != nil {
+		ui.Warn(fmt.Sprintf("journal: %s: %v", command, err))
+	}
+}
+
+// journalReview is the deferred tail a review runner registers: on success it
+// records the decision outcome (durable_delta); on failure (the decision did not
+// complete) it records an input-only failed event. ok flips true only once the
+// proposal archive has landed, so a render error after still records success.
+func journalReview(repoPath, command string, input, observed any, ok bool) {
+	emitReviewEvent(repoPath, command, func() (journal.Envelope, error) {
+		if ok {
+			return journal.NewEvent(command, journal.ActorMain, input, observed)
+		}
+		return journal.NewFailedEvent(command, journal.ActorMain, input)
+	})
 }
 
 func oneLine(s string) string {

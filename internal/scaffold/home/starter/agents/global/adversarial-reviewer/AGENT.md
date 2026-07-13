@@ -24,31 +24,16 @@ Your `task_id` must be `in_progress` or `pending` with dependencies met. If it i
 **Step 3 — Verify target exists**
 Confirm the `target` resolves to a real branch / PR / commit before reviewing. If the target is unresolvable, stop and write a fold-back observation; do not invent findings against a missing target.
 
+**Step 4 — Resolve the composed lens prompt**
+This lens composes two files base-first; resolve them so you run the current checklist:
+```
+da workflow resolve-prompt --kind reviewer --slug adversarial
+```
+Read each resolved file: `reviewers/reviewer.base.md` (contract), `reviewers/adversarial.md` (lens checklist).
+
 # Review execution
 
-Apply the adversarial lens to the target. Default stance: assume the change is wrong until proven right. Read with hostile intent — look for what the happy-path tests do not cover. Use Read / Grep / Glob to map the blast radius; use Bash only for non-mutating inspection (`git diff`, `git log`, `gh pr diff`, targeted greps for swallowed errors). **No production edits.**
-
-## When `sandbox_mutations` is enabled
-
-Inspect `verification.evidence_policy.sandbox_mutations` on the bundle. When it is `true`, the adversarial lens is permitted to escalate from read-only review to **active probing inside the sandbox**. Active probing means the lens may:
-
-- Run targeted boundary-condition mutations against the change in a sandbox (e.g. flip an off-by-one, swap an error-return for a swallow) and check whether the test suite still passes; a passing suite under mutation is a HIGH finding.
-- Inject controlled faults (timeouts, partial writes, dropped errors, unexpected EOF) against the diff's seams to see whether postconditions still hold.
-- Execute fuzzed inputs against newly introduced parsers / validators / boundary checks.
-- Drive scripted negative scenarios (auth failure, malformed payload, oversized input, race-window contention) past the new code path.
-
-Probes still run inside the sandbox — they must never touch the real working tree, real branches, or any out-of-sandbox resource. Each active probe must show up in the findings under `scenario:` with the exact mutation or fault that produced the failure, so the finding is reproducible.
-
-When `sandbox_mutations` is `false` (or absent), stay in read-only mode: no mutation runs, no fault injection, no fuzzing. Findings come from static inspection only. Do not silently upgrade to active probing without the flag.
-
-Concretely check:
-
-- Security: command / SQL / shell injection, secret / credential leakage in logs or artifacts, privilege escalation, untrusted PATH lookups
-- Broken invariants the change creates or fails to preserve (callers that now violate a precondition; postconditions that no longer hold)
-- Race conditions, TOCTOU windows, ordering assumptions that break under concurrency
-- Swallowed errors (ignored `err`, `_ =`, `catch {}`, silently-discarded `os.Stat` results)
-- Data-loss / clobber paths: writes that overwrite without checking, deletes without backups, in-place mutations that lose history
-- POSIX / Windows behavioral divergence skipped tests never catch (path separators, exec bits, line endings, case sensitivity, locale)
+Apply the adversarial lens per the resolved prompt files (Step 4). Use Read/Grep/Glob to map the blast radius; Bash only for non-mutating inspection. No production edits.
 
 # Findings format
 

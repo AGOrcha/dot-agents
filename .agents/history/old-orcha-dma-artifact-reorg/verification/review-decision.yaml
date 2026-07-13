@@ -1,0 +1,45 @@
+schema_version: 1
+task_id: old-orcha-dma-artifact-reorg
+parent_plan_id: adhoc
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: |-
+  ## KG Context (Step 0)
+
+  WARN: KG bridge unavailable for Step 0; this old worktree has no ./bin/da.
+
+  ## Per-file review
+
+  - Ownership was derived from delegation parent_plan_id and parent_task_id or canonical TASKS metadata.
+  - Exact duplicate verification and review artifacts were removed only after byte-for-byte comparison with canonical history copies.
+  - Differing stale delegation records were preserved beside canonical records with an explicit stale-active suffix.
+  - New archive YAML parses successfully; active DMA and temporary salvage buckets contain no files.
+  - Security and performance: no runtime code, secrets, dependencies, or executable behavior changed.
+  - Maintainability: the resulting plan/date/task hierarchy is consistent and review artifacts are nested under verification.
+
+  ## §1.6 telemetry envelope
+
+  ```yaml
+  resource_type: skill
+  resource_id: self-review
+  invoked_at: "2026-07-13T00:28:45Z"
+  invoked_by: user
+  task_id: old-orcha-dma-artifact-reorg
+  outcome:
+    declared: success
+    agent_self_assessment: "Artifact-only reorganization is structurally complete and preserves non-identical provenance."
+  post_invocation:
+    agent_actions_after_skill_returned: []
+    user_corrections: []
+    retries_in_loop: 0
+  improvement_signals:
+    missing_in_skill: []
+    redundant_in_skill: []
+    tooling_gap: { present: true, note: "Old worktree has no ./bin/da for KG context." }
+    script_gap: { present: false, note: "" }
+    instruction_gap: { present: false, note: "" }
+  ```
+recorded_at: "2026-07-13T00:28:45Z"
+recorded_by: self-review (skill)

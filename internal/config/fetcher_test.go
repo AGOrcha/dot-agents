@@ -2,14 +2,19 @@ package config
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -17,7 +22,9 @@ import (
 	"github.com/go-git/go-billy/v6/memfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing/object"
+	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/storage/memory"
+	cryptossh "golang.org/x/crypto/ssh"
 )
 
 // withPackagesCache points the tier-2 packages cache root (~/.agents/cache) at a
@@ -149,20 +156,70 @@ func TestParsePackageRef(t *testing.T) {
 
 // --- package fetcher selection (tier constraint) ---------------------------
 
-func TestSelectPackageFetcherTierConstraint(t *testing.T) {
-	if _, err := SelectPackageFetcher("oci"); err != nil {
-		t.Errorf("SelectPackageFetcher(oci) = %v, want fetcher", err)
+func TestSelectPackageFetcherAcceptsAllSourceTypes(t *testing.T) {
+	// config-distribution-model §4 (relaxed) / §15 D3+D8: any source type may
+	// serve any artifact kind. All four source types must select a fetcher.
+	cases := map[string]any{
+		"oci":   &ociFetcher{},
+		"http":  &httpArtifactFetcher{},
+		"git":   &gitArtifactFetcher{},
+		"local": &localArtifactFetcher{},
 	}
-	if _, err := SelectPackageFetcher("http"); err != nil {
-		t.Errorf("SelectPackageFetcher(http) = %v, want fetcher", err)
-	}
-	for _, typ := range []string{"git", "local"} {
-		if _, err := SelectPackageFetcher(typ); err == nil {
-			t.Errorf("SelectPackageFetcher(%q) = nil, want tier rejection", typ)
+	for typ, want := range cases {
+		got, err := SelectPackageFetcher(typ)
+		if err != nil {
+			t.Errorf("SelectPackageFetcher(%q) = %v, want fetcher", typ, err)
+			continue
+		}
+		if fmt.Sprintf("%T", got) != fmt.Sprintf("%T", want) {
+			t.Errorf("SelectPackageFetcher(%q) = %T, want %T", typ, got, want)
 		}
 	}
 	if _, err := SelectPackageFetcher("bogus"); err == nil {
 		t.Error("SelectPackageFetcher(bogus) = nil, want unsupported error")
+	}
+}
+
+// TestSelectFetcherAcceptsAllSourceTypes asserts full source/kind orthogonality
+// (config-distribution-model §15 D13): every source type — including oci — is
+// valid for extends (config layers), mirroring SelectPackageFetcher for
+// packages. There is no remaining source/kind asymmetry.
+func TestSelectFetcherAcceptsAllSourceTypes(t *testing.T) {
+	cases := map[string]any{
+		"git":   &gitFetcher{},
+		"http":  &httpFetcher{},
+		"local": &localFetcher{},
+		"oci":   &ociLayerFetcher{},
+	}
+	for typ, want := range cases {
+		got, err := SelectFetcher(typ)
+		if err != nil {
+			t.Errorf("SelectFetcher(%q) = %v, want fetcher", typ, err)
+			continue
+		}
+		if fmt.Sprintf("%T", got) != fmt.Sprintf("%T", want) {
+			t.Errorf("SelectFetcher(%q) = %T, want %T", typ, got, want)
+		}
+	}
+	if _, err := SelectFetcher("bogus"); err == nil {
+		t.Error("SelectFetcher(bogus) = nil, want unsupported error")
+	}
+}
+
+// TestOCIFetcherRejectsLayerMediaType is the mirror of the layer fetcher's
+// guard: a `packages` pull that resolves to a config-layer media type must fail
+// with a schema error so a layer blob is never installed as an artifact, even
+// though oci now serves both kinds (config-distribution-model §15 D13).
+func TestOCIFetcherRejectsLayerMediaType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("layer-doc-served-to-packages")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociLayerMediaType}, nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema media-type error, got %v", err)
 	}
 }
 
@@ -237,12 +294,12 @@ func TestOCIFetcherPullsAndCaches(t *testing.T) {
 	blob := []byte("artifact-bytes")
 	digest := "sha256:" + sha256Hex(blob)
 	pulls := 0
-	f := &ociFetcher{puller: func(_ context.Context, ref ociRef, _ []byte) ([]byte, string, error) {
+	f := &ociFetcher{puller: func(_ context.Context, ref ociRef, _ []byte) (ociBlob, error) {
 		pulls++
 		if ref.Registry != "reg.example" {
 			t.Fatalf("registry = %q", ref.Registry)
 		}
-		return blob, digest, nil
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example/base"}
 	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
@@ -272,9 +329,9 @@ func TestOCIFetcherDigestPinCacheHit(t *testing.T) {
 		t.Fatal(err)
 	}
 	pulled := false
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
 		pulled = true
-		return nil, "", errors.New("should not pull")
+		return ociBlob{}, errors.New("should not pull")
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
 	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
@@ -293,8 +350,8 @@ func TestOCIFetcherDigestMismatch(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("served")
 	served := "sha256:" + sha256Hex(blob)
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, served, nil
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: served, MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example"}
 	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:sha256:deadbeef"})
@@ -310,8 +367,8 @@ func TestOCIFetcherDigestMismatch(t *testing.T) {
 func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("no-digest-from-reg")
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, "", nil // registry omits digest
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, MediaType: ociArtifactMediaType}, nil // registry omits digest
 	}}
 	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err != nil {
@@ -324,8 +381,8 @@ func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
 
 func TestOCIFetcherPullError(t *testing.T) {
 	withPackagesCache(t)
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return nil, "", errors.New("registry down")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{}, errors.New("registry down")
 	}}
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	var ie *ImportError
@@ -347,8 +404,8 @@ func TestOCIFetcherParseError(t *testing.T) {
 func TestOCIFetcherRequiredPostureFails(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("blob")
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, "sha256:" + sha256Hex(blob), nil
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType}, nil
 	}}
 	src := Source{URL: "oci://reg.example", Auth: json.RawMessage(`{"signing":"required"}`)}
 	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
@@ -383,8 +440,8 @@ func TestOCIFetcherCacheWriteError(t *testing.T) {
 		t.Fatal(err)
 	}
 	blob := []byte("b")
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) ([]byte, string, error) {
-		return blob, "sha256:" + sha256Hex(blob), nil
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType}, nil
 	}}
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
@@ -393,8 +450,8 @@ func TestOCIFetcherCacheWriteError(t *testing.T) {
 }
 
 func TestOCIPullNotWired(t *testing.T) {
-	// The default (real) puller is a deterministic transport error in p5.
-	_, _, err := ociPull(context.Background(), ociRef{Registry: "r", Repository: "x"}, nil)
+	// The default (real) puller is a deterministic transport error until wired.
+	_, err := ociPull(context.Background(), ociRef{Registry: "r", Repository: "x"}, nil)
 	if err == nil {
 		t.Fatal("expected not-wired error from default oci puller")
 	}
@@ -613,14 +670,14 @@ func TestParseLayerRef(t *testing.T) {
 	}
 }
 
-func TestSelectFetcherTierConstraint(t *testing.T) {
-	for _, typ := range []string{"git", "http", "local"} {
+// TestSelectFetcherSourceTypes asserts every known source type — including oci
+// after D13 — selects a fetcher, and an unknown type is rejected. Acceptance of
+// each concrete fetcher type is asserted by TestSelectFetcherAcceptsAllSourceTypes.
+func TestSelectFetcherSourceTypes(t *testing.T) {
+	for _, typ := range []string{"git", "http", "local", "oci"} {
 		if _, err := SelectFetcher(typ); err != nil {
 			t.Errorf("SelectFetcher(%q) = error %v, want fetcher", typ, err)
 		}
-	}
-	if _, err := SelectFetcher("oci"); err == nil {
-		t.Error("SelectFetcher(\"oci\") = nil error, want schema rejection (oci is packages-only)")
 	}
 	if _, err := SelectFetcher("bogus"); err == nil {
 		t.Error("SelectFetcher(\"bogus\") = nil error, want unsupported-type error")
@@ -997,5 +1054,1150 @@ func TestGitFetcherReadError(t *testing.T) {
 	_, err := f.Fetch(Source{Type: "git", URL: "file:///r", Ref: "main"}, LayerRefParts{LayerPath: "missing.json"}, t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "git read") {
 		t.Fatalf("expected git read error, got %v", err)
+	}
+}
+
+// --- cache_keys consumption (cl-cache-keys-consume) ------------------------
+//
+// These tests prove cache_keys / the per-kind cache-key default is no longer a
+// silent no-op: the fetchers now surface the facts the key derives from, and the
+// resolver records EffectiveCacheKey in the lock and lets a force escape change
+// the offline-serve decision.
+
+// TestHTTPFetcherCapturesCacheKeyValidators proves the http layer fetcher now
+// surfaces the upstream ETag / Last-Modified validators (and the content digest)
+// that the §7A.4 http cache-key default keys on — previously dropped on the floor.
+func TestHTTPFetcherCapturesCacheKeyValidators(t *testing.T) {
+	body := `{"rules":["r"]}`
+	const etag = `"abc123"`
+	const lastMod = "Wed, 21 Oct 2026 07:28:00 GMT"
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Last-Modified", lastMod)
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+
+	f := &httpFetcher{client: srv.Client()}
+	got, err := f.Fetch(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if got.KeyInputs.ETag != etag {
+		t.Errorf("KeyInputs.ETag = %q, want %q", got.KeyInputs.ETag, etag)
+	}
+	if got.KeyInputs.LastModified != lastMod {
+		t.Errorf("KeyInputs.LastModified = %q, want %q", got.KeyInputs.LastModified, lastMod)
+	}
+	if got.KeyInputs.ContentDigest != contentHash([]byte(body)) {
+		t.Errorf("KeyInputs.ContentDigest = %q, want content hash", got.KeyInputs.ContentDigest)
+	}
+	// The default http key prefers the ETag validator (strong validator wins).
+	if k := DefaultCacheKey(SourceKindHTTP, got.KeyInputs); k != cacheKeyPrefix+"http:etag="+etag {
+		t.Errorf("DefaultCacheKey = %q, want etag-keyed", k)
+	}
+}
+
+// TestLocalFetcherCapturesWorktreeCacheKey proves the local fetcher marks the
+// worktree dirty and supplies its content hash, so a local source's effective
+// key tracks uncommitted authoring (§7A.4 / D6) instead of the kind default
+// collapsing to nothing.
+func TestLocalFetcherCapturesWorktreeCacheKey(t *testing.T) {
+	srcDir := t.TempDir()
+	full := filepath.Join(srcDir, "base.json")
+	body := []byte(`{"skills":["x"]}`)
+	if err := os.WriteFile(full, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &localFetcher{}
+	got, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if !got.KeyInputs.WorktreeDirty {
+		t.Error("local fetch should mark worktree dirty")
+	}
+	if got.KeyInputs.WorktreeContentHash != contentHash(body) {
+		t.Errorf("WorktreeContentHash = %q, want content hash", got.KeyInputs.WorktreeContentHash)
+	}
+	// Editing the working tree changes the local default key (negative -> positive).
+	keyA := DefaultCacheKey(SourceKindLocal, got.KeyInputs)
+	if err := os.WriteFile(full, []byte(`{"skills":["x","y"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got2, err := f.Fetch(Source{Type: "local", Path: srcDir}, LayerRefParts{LayerPath: "base.json"}, filepath.Join(t.TempDir(), "cache2"))
+	if err != nil {
+		t.Fatalf("Fetch (2nd): %v", err)
+	}
+	if keyA == DefaultCacheKey(SourceKindLocal, got2.KeyInputs) {
+		t.Errorf("local key did not change after worktree edit: both %q", keyA)
+	}
+}
+
+// TestOCIFetcherCapturesDigestCacheKey proves the oci fetcher surfaces the
+// manifest digest as the cache-key fact, so the content-addressed oci default
+// keys on it.
+func TestOCIFetcherCapturesDigestCacheKey(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	digest := artifactDigest(blob)
+	f := &ociFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
+	}}
+	got, err := f.FetchArtifact(Source{Type: "oci", URL: "oci://reg.test/base"}, PackageRefParts{SourceID: "acme", ArtifactPath: "skill/x", VersionSpec: "1.0.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.KeyInputs.OCIDigest != digest {
+		t.Errorf("KeyInputs.OCIDigest = %q, want %q", got.KeyInputs.OCIDigest, digest)
+	}
+	if k := DefaultCacheKey(SourceKindOCI, got.KeyInputs); k != cacheKeyPrefix+"oci:"+digest {
+		t.Errorf("DefaultCacheKey = %q, want digest-keyed", k)
+	}
+}
+
+// TestLayeredResolverRecordsCacheKeyInLock proves the resolver derives and
+// records EffectiveCacheKey in the lock — the primitive is consumed, not inert.
+func TestLayeredResolverRecordsCacheKeyInLock(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["from-git"]}`},
+		sha:   "deadbeefcafe0000000000000000000000000000",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	locked, err := readLockedLayersFromUnits(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := locked["acme:org/base.json"].CacheKey
+	// The git default keys on the resolved commit the fake reported.
+	want := cacheKeyPrefix + "git:" + fake.sha
+	if got != want {
+		t.Errorf("recorded cache_key = %q, want %q", got, want)
+	}
+}
+
+// TestLayeredResolverAlwaysRevalidateRecordsSentinel proves a source declaring
+// cache_keys.always_revalidate records the AlwaysRevalidate sentinel instead of
+// the kind default — a non-default cache_keys demonstrably changes the lock.
+func TestLayeredResolverAlwaysRevalidateRecordsSentinel(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	repo := t.TempDir()
+	writeManifest(t, repo, `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"always_revalidate": true}}],
+		"extends": ["acme:org/base.json"]
+	}`)
+	fake := &fakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["from-git"]}`},
+		sha:   "deadbeefcafe0000000000000000000000000000",
+	}
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	locked, err := readLockedLayersFromUnits(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := locked["acme:org/base.json"].CacheKey; got != AlwaysRevalidate {
+		t.Errorf("recorded cache_key = %q, want AlwaysRevalidate sentinel %q", got, AlwaysRevalidate)
+	}
+}
+
+// TestLayeredResolverCacheKeyOffline drives the headline behavior change: with
+// the same lock + cache, a default source serves offline (negative: cache_keys
+// inert path) while always_revalidate / --refresh force a revalidation failure
+// offline (positive: cache_keys now changes behavior).
+func TestLayeredResolverCacheKeyOffline(t *testing.T) {
+	seed := func(t *testing.T, manifest string) (repo string, sha string) {
+		t.Helper()
+		t.Setenv("AGENTS_HOME", t.TempDir())
+		repo = t.TempDir()
+		writeManifest(t, repo, manifest)
+		fake := &fakeFetcher{
+			files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+			sha:   "feedface000000000000000000000000000000aa",
+		}
+		if _, err := NewLayeredResolver().WithFetcher("git", fake).Resolve(repo); err != nil {
+			t.Fatalf("online seed Resolve: %v", err)
+		}
+		return repo, fake.sha
+	}
+
+	const defaultManifest = `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"}],
+		"extends": ["acme:org/base.json"]
+	}`
+	const revalManifest = `{
+		"version": 2,
+		"sources": [{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main", "cache_keys": {"always_revalidate": true}}],
+		"extends": ["acme:org/base.json"]
+	}`
+
+	// Negative: default cache_keys -> offline serves the cached layer.
+	t.Run("default serves offline", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		offline := &fakeFetcher{fetchErr: errors.New("network down")}
+		snap, err := NewLayeredResolver().WithFetcher("git", offline).WithOffline(true).Resolve(repo)
+		if err != nil {
+			t.Fatalf("offline Resolve: %v", err)
+		}
+		if offline.calls != 0 {
+			t.Errorf("offline called fetcher %d times, want 0", offline.calls)
+		}
+		if !hasWarning(snap.Warnings, "acme:org/base.json", "cache_hit_offline") {
+			t.Errorf("expected cache_hit_offline warning, got %+v", snap.Warnings)
+		}
+	})
+
+	// Positive: always_revalidate -> offline refuses to serve and fails loudly.
+	t.Run("always_revalidate blocks offline serve", func(t *testing.T) {
+		repo, _ := seed(t, revalManifest)
+		offline := &fakeFetcher{fetchErr: errors.New("network down")}
+		_, err := NewLayeredResolver().WithFetcher("git", offline).WithOffline(true).Resolve(repo)
+		if err == nil || !strings.Contains(err.Error(), "revalidation required") {
+			t.Fatalf("expected offline revalidation-required error, got %v", err)
+		}
+	})
+
+	// Positive: --refresh force escape blocks offline serve even with a default
+	// source (the runtime half of the R6 force escape).
+	t.Run("refresh blocks offline serve", func(t *testing.T) {
+		repo, _ := seed(t, defaultManifest)
+		offline := &fakeFetcher{fetchErr: errors.New("network down")}
+		_, err := NewLayeredResolver().WithFetcher("git", offline).WithOffline(true).WithRefresh(true).Resolve(repo)
+		if err == nil || !strings.Contains(err.Error(), "revalidation required") {
+			t.Fatalf("expected --refresh offline revalidation error, got %v", err)
+		}
+	})
+}
+
+// refreshFakeFetcher is a refresh-aware Fetcher that records whether the resolver
+// asked it to bypass its cache (forceRefresh). It serves a cached SHA on a
+// repeat fetch unless forceRefresh is set, mirroring the real git/http fetchers,
+// so a test can assert the online resolve path consults the cache key.
+type refreshFakeFetcher struct {
+	files       map[string]string
+	sha         string
+	calls       int
+	refreshSeen []bool // forceRefresh value per call
+}
+
+func (f *refreshFakeFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, cacheDir, false)
+}
+
+func (f *refreshFakeFetcher) FetchRefresh(_ Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+	f.calls++
+	f.refreshSeen = append(f.refreshSeen, forceRefresh)
+	body, ok := f.files[parts.LayerPath]
+	if !ok {
+		return FetchedLayer{}, errors.New("fake: no such layer " + parts.LayerPath)
+	}
+	sha := f.sha
+	if sha == "" {
+		sha = contentHash([]byte(body))
+	}
+	if !forceRefresh {
+		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+		}
+	}
+	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+		return FetchedLayer{}, err
+	}
+	return FetchedLayer{Data: []byte(body), ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+}
+
+// cacheKeyManifest is a git source manifest with the given cache_keys JSON
+// fragment spliced into the source ("" for none), used to drive the online
+// re-resolve cases below from a table without repeating the JSON literal.
+func cacheKeyManifest(cacheKeys string) string {
+	src := `{"id": "acme", "type": "git", "url": "https://example/repo.git", "ref": "main"`
+	if cacheKeys != "" {
+		src += `, "cache_keys": ` + cacheKeys
+	}
+	src += `}`
+	return `{"version": 2, "sources": [` + src + `], "extends": ["acme:org/base.json"]}`
+}
+
+// newCacheKeyFetcher returns a refresh-aware fake whose resolved SHA is fixed, so
+// a re-resolve derives the same kind-default key and only a force escape / an
+// override edit can make the recorded cache key stale.
+func newCacheKeyFetcher() *refreshFakeFetcher {
+	return &refreshFakeFetcher{
+		files: map[string]string{"org/base.json": `{"skills":["online"]}`},
+		sha:   "feedface000000000000000000000000000000aa",
+	}
+}
+
+// resolveOnce writes the manifest, resolves once with a fresh fake fetcher, and
+// returns the forceRefresh flag the fetcher observed on its single call.
+func resolveOnce(t *testing.T, repo, manifest string, refresh bool) bool {
+	t.Helper()
+	writeManifest(t, repo, manifest)
+	fake := newCacheKeyFetcher()
+	if _, err := NewLayeredResolver().WithFetcher("git", fake).WithRefresh(refresh).Resolve(repo); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(fake.refreshSeen) != 1 {
+		t.Fatalf("fetcher calls = %d, want 1 (refreshSeen=%v)", len(fake.refreshSeen), fake.refreshSeen)
+	}
+	return fake.refreshSeen[0]
+}
+
+// TestLayeredResolverCacheKeyForcesOnlineRefetch is the headline online behavior
+// change: with a prior lock + cache, a default source serves the cache on the
+// second online resolve (negative: cache_keys inert path), while a force escape
+// (always_revalidate or --refresh) or a cache_keys override edit forces the
+// fetcher to bypass its cache and re-validate upstream (positive: cache_keys now
+// changes the online resolve). Reverting the fetchLayer wiring flips every
+// positive case's observed forceRefresh to false, so the test fails.
+func TestLayeredResolverCacheKeyForcesOnlineRefetch(t *testing.T) {
+	cases := []struct {
+		name      string
+		seed      string // manifest the first (lock-recording) resolve uses
+		reresolve string // manifest the second resolve uses (== seed unless an edit)
+		refresh   bool   // --refresh force escape on the second resolve
+		want      bool   // forceRefresh the fetcher must observe on the second resolve
+	}{
+		{
+			name: "default serves cache on re-resolve",
+			seed: cacheKeyManifest(""),
+			want: false, // kind-default key still matches the recorded key
+		},
+		{
+			name: "always_revalidate forces refresh",
+			seed: cacheKeyManifest(`{"always_revalidate": true}`),
+			want: true, // sentinel never matches the recorded key
+		},
+		{
+			name:      "override edit forces refresh",
+			seed:      cacheKeyManifest(""),
+			reresolve: cacheKeyManifest(`{"env": ["MY_TOKEN"]}`),
+			want:      true, // adding an {env} selector changes the key shape
+		},
+		{
+			name:    "refresh flag forces refresh",
+			seed:    cacheKeyManifest(""),
+			refresh: true, // runtime half of the R6 force escape
+			want:    true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AGENTS_HOME", t.TempDir())
+			repo := t.TempDir()
+			// First resolve records the lock + cache (forceRefresh always false:
+			// no prior lock to compare against).
+			resolveOnce(t, repo, tc.seed, false)
+			reresolve := tc.reresolve
+			if reresolve == "" {
+				reresolve = tc.seed
+			}
+			if got := resolveOnce(t, repo, reresolve, tc.refresh); got != tc.want {
+				t.Fatalf("re-resolve forceRefresh = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGitFetcherRefreshBypassesCache proves the real git fetcher's FetchRefresh
+// bypasses the SHA-addressed cache serve when forceRefresh is set: a cached layer
+// whose on-disk bytes differ from the worktree is re-read on a forced refresh and
+// served from cache otherwise.
+func TestGitFetcherRefreshBypassesCache(t *testing.T) {
+	fresh := []byte(`{"skills":["fresh"]}`)
+	url, branch, sha := makeGitFixture(t, "org/base.json", fresh)
+	f := &gitFetcher{}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	src := Source{Type: "git", URL: url, Ref: branch}
+	parts := LayerRefParts{LayerPath: "org/base.json"}
+	// Pre-seed the cache at the resolved SHA with STALE bytes the fetcher would
+	// serve on a normal fetch.
+	stale := []byte(`{"skills":["stale"]}`)
+	if err := writeCachedLayer(cacheDir, sha, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without forceRefresh: serves the cached (stale) bytes.
+	got, err := f.FetchRefresh(src, parts, cacheDir, false)
+	if err != nil {
+		t.Fatalf("FetchRefresh(false): %v", err)
+	}
+	if !got.CacheHit || string(got.Data) != string(stale) {
+		t.Fatalf("FetchRefresh(false) = hit %v data %q, want cached stale bytes", got.CacheHit, got.Data)
+	}
+
+	// With forceRefresh: bypasses the cache and re-reads the fresh worktree bytes.
+	got2, err := f.FetchRefresh(src, parts, cacheDir, true)
+	if err != nil {
+		t.Fatalf("FetchRefresh(true): %v", err)
+	}
+	if got2.CacheHit || string(got2.Data) != string(fresh) {
+		t.Fatalf("FetchRefresh(true) = hit %v data %q, want fresh bytes", got2.CacheHit, got2.Data)
+	}
+}
+
+// TestHTTPFetcherRefreshBypassesCache proves the real http layer fetcher's
+// FetchRefresh rewrites the cache from the upstream response when forceRefresh is
+// set, instead of returning the cached-SHA fast path.
+func TestHTTPFetcherRefreshBypassesCache(t *testing.T) {
+	body := `{"rules":["r"]}`
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	f := &httpFetcher{client: srv.Client()}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	sha := contentHash([]byte(body))
+	if err := writeCachedLayer(cacheDir, sha, []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Without forceRefresh: the matching SHA serves from cache (CacheHit true).
+	got, err := f.FetchRefresh(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, false)
+	if err != nil {
+		t.Fatalf("FetchRefresh(false): %v", err)
+	}
+	if !got.CacheHit {
+		t.Fatalf("FetchRefresh(false) CacheHit = false, want cache serve")
+	}
+
+	// With forceRefresh: bypasses the cache serve and reports a fresh fetch.
+	got2, err := f.FetchRefresh(Source{Type: "http", URL: srv.URL}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, true)
+	if err != nil {
+		t.Fatalf("FetchRefresh(true): %v", err)
+	}
+	if got2.CacheHit {
+		t.Fatalf("FetchRefresh(true) CacheHit = true, want cache bypass")
+	}
+}
+
+// TestFetchWithRefreshFallsBackToFetch proves fetchWithRefresh routes a plain
+// (non-refresh-aware) Fetcher through Fetch and ignores the forceRefresh signal,
+// so legacy fetchers and the cache-less local fetcher keep working.
+func TestFetchWithRefreshFallsBackToFetch(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+	plain := &fakeFetcher{files: map[string]string{"org/base.json": `{"skills":["x"]}`}, sha: "abc0000000000000000000000000000000000000"}
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	got, err := fetchWithRefresh(plain, Source{Type: "git"}, LayerRefParts{LayerPath: "org/base.json"}, cacheDir, true)
+	if err != nil {
+		t.Fatalf("fetchWithRefresh: %v", err)
+	}
+	if got.ResolvedSHA != plain.sha {
+		t.Fatalf("ResolvedSHA = %q, want %q", got.ResolvedSHA, plain.sha)
+	}
+	if plain.calls != 1 {
+		t.Fatalf("plain fetcher calls = %d, want 1", plain.calls)
+	}
+}
+
+// --- git artifact fetcher --------------------------------------------------
+
+func TestGitArtifactFetcherClonesAndCaches(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte(`{"skill":"review-pr"}`)
+	url, branch, _ := makeGitFixture(t, "skill/review-pr.json", body)
+	wantDigest := "sha256:" + sha256Hex(body)
+
+	f := &gitArtifactFetcher{}
+	got, err := f.FetchArtifact(Source{Type: "git", URL: url, Ref: branch}, PackageRefParts{SourceID: "acme", ArtifactPath: "skill/review-pr.json", VersionSpec: branch})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Digest != wantDigest {
+		t.Fatalf("digest = %q, want %q", got.Digest, wantDigest)
+	}
+	if string(got.Data) != string(body) {
+		t.Fatalf("data = %q, want %q", got.Data, body)
+	}
+	if got.CacheHit {
+		t.Fatal("first fetch should not be a cache hit")
+	}
+	if got.Posture != PostureUnsigned {
+		t.Fatalf("posture = %q", got.Posture)
+	}
+	if got.KeyInputs.ResolvedCommit == "" {
+		t.Fatal("expected resolved commit in key inputs")
+	}
+	if _, ok := readCachedArtifact(wantDigest); !ok {
+		t.Fatal("expected artifact cached by digest")
+	}
+}
+
+func TestGitArtifactFetcherDigestPinCacheHit(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinned-git-blob")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	cloned := false
+	f := &gitArtifactFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+		cloned = true
+		return nil, nil, errors.New("should not clone")
+	}}
+	got, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit || got.Digest != digest {
+		t.Fatalf("expected cache hit, got %+v", got)
+	}
+	if cloned {
+		t.Fatal("pinned cache hit must not clone")
+	}
+}
+
+func TestGitArtifactFetcherDigestMismatch(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte("served-git")
+	url, branch, _ := makeGitFixture(t, "a.json", body)
+	f := &gitArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: url, Ref: branch}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "pinned:sha256:deadbeef"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherCloneError(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+		return nil, nil, errors.New("clone boom")
+	}}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///x", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonTransport {
+		t.Fatalf("want transport error, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherBadURL(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "ht!tp://%zz"}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherHeadError(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{cloner: emptyRepoCloner()}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///x", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonNotFound {
+		t.Fatalf("want not_found error, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherMissingPath(t *testing.T) {
+	withPackagesCache(t)
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
+	f := &gitArtifactFetcher{cloner: committedRepoFS(t, dir, nil)}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "missing.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonNotFound {
+		t.Fatalf("want not_found error, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherOversized(t *testing.T) {
+	withPackagesCache(t)
+	big := make([]byte, maxLayerBytes+1)
+	for i := range big {
+		big[i] = 'a'
+	}
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "big.json", big)
+	f := &gitArtifactFetcher{cloner: committedRepoFS(t, dir, map[string][]byte{"big.json": big})}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "big.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content (oversized) error, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherCacheWriteError(t *testing.T) {
+	dir := t.TempDir()
+	makeGitFixtureAt(t, dir, "x.json", []byte("{}"))
+	// Point AGENTS_HOME at a path whose cache parent is a regular file so
+	// writeCachedArtifact's MkdirAll fails after a successful read.
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", blocker)
+	f := &gitArtifactFetcher{cloner: committedRepoFS(t, dir, map[string][]byte{"x.json": []byte("{}")})}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "x.json", VersionSpec: "1"})
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestGitArtifactFetcherRequiredPostureFails(t *testing.T) {
+	withPackagesCache(t)
+	url, branch, _ := makeGitFixture(t, "a.json", []byte("blob"))
+	f := &gitArtifactFetcher{}
+	src := Source{Type: "git", URL: url, Ref: branch, Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: branch})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want auth error for required posture, got %v", err)
+	}
+}
+
+func TestGitArtifactRefResolution(t *testing.T) {
+	if got := gitArtifactRef(Source{Ref: "src-ref"}, PackageRefParts{VersionSpec: "1.2.3"}); got != "1.2.3" {
+		t.Fatalf("version spec ref = %q, want 1.2.3", got)
+	}
+	if got := gitArtifactRef(Source{Ref: "src-ref"}, PackageRefParts{VersionSpec: "pinned:sha256:abc"}); got != "src-ref" {
+		t.Fatalf("pinned -> source ref = %q, want src-ref", got)
+	}
+	if got := gitArtifactRef(Source{}, PackageRefParts{VersionSpec: "pinned:sha256:abc"}); got != "main" {
+		t.Fatalf("pinned -> main fallback = %q, want main", got)
+	}
+}
+
+// --- local artifact fetcher ------------------------------------------------
+
+func TestLocalArtifactFetcherReadsAndCaches(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte(`{"agent":"local"}`)
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "skill", "x.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wantDigest := "sha256:" + sha256Hex(body)
+
+	f := &localArtifactFetcher{}
+	got, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "dev", ArtifactPath: "skill/x.json", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Digest != wantDigest || string(got.Data) != string(body) || got.CacheHit {
+		t.Fatalf("unexpected result %+v", got)
+	}
+	if !got.KeyInputs.WorktreeDirty || got.KeyInputs.WorktreeContentHash != wantDigest {
+		t.Fatalf("expected dirty worktree key inputs, got %+v", got.KeyInputs)
+	}
+	if _, ok := readCachedArtifact(wantDigest); !ok {
+		t.Fatal("expected artifact cached by digest")
+	}
+}
+
+func TestLocalArtifactFetcherURLFallback(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte("via-url")
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "a.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &localArtifactFetcher{}
+	got, err := f.FetchArtifact(Source{Type: "local", URL: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if string(got.Data) != string(body) {
+		t.Fatalf("data = %q", got.Data)
+	}
+}
+
+func TestLocalArtifactFetcherNotFound(t *testing.T) {
+	withPackagesCache(t)
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: t.TempDir()}, PackageRefParts{SourceID: "s", ArtifactPath: "nope.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonNotFound {
+		t.Fatalf("want not_found error, got %v", err)
+	}
+}
+
+func TestLocalArtifactFetcherDigestPinCacheHit(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinned-local")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &localArtifactFetcher{}
+	// A non-existent path proves the pinned cache fast path runs before any read.
+	got, err := f.FetchArtifact(Source{Type: "local", Path: "/no/such/dir"}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit || got.Digest != digest {
+		t.Fatalf("expected cache hit, got %+v", got)
+	}
+}
+
+func TestLocalArtifactFetcherDigestMismatch(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte("served-local")
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "a.json"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "pinned:sha256:deadbeef"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error, got %v", err)
+	}
+}
+
+func TestLocalArtifactFetcherRequiredPostureFails(t *testing.T) {
+	withPackagesCache(t)
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "a.json"), []byte("blob"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := &localArtifactFetcher{}
+	src := Source{Type: "local", Path: srcDir, Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want auth error for required posture, got %v", err)
+	}
+}
+
+func TestLocalArtifactFetcherCacheWriteError(t *testing.T) {
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "a.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(t.TempDir(), "afile")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", blocker)
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "1"})
+	if err == nil {
+		t.Fatal("expected cache-write error")
+	}
+}
+
+func TestLocalArtifactFetcherPinnedCacheHitRequiredPostureFails(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinned-required")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &localArtifactFetcher{}
+	src := Source{Type: "local", Path: t.TempDir(), Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "pinned:" + digest})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want auth error on pinned cache hit, got %v", err)
+	}
+}
+
+func TestLocalArtifactFetcherReadError(t *testing.T) {
+	withPackagesCache(t)
+	// Pointing ArtifactPath at a directory makes os.ReadFile fail with a
+	// non-IsNotExist error, covering the content-read error branch.
+	srcDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(srcDir, "adir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "adir", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error reading a directory, got %v", err)
+	}
+}
+
+func TestGitArtifactFetcherPinnedCacheHitRequiredPostureFails(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("pinned-git-required")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &gitArtifactFetcher{cloner: func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+		return nil, nil, errors.New("should not clone")
+	}}
+	src := Source{Type: "git", URL: "file:///r", Auth: json.RawMessage(`{"signing":"required"}`)}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a.json", VersionSpec: "pinned:" + digest})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonAuth {
+		t.Fatalf("want auth error on pinned cache hit, got %v", err)
+	}
+}
+
+func TestValidateGitSourceURL(t *testing.T) {
+	parts := PackageRefParts{SourceID: "s", ArtifactPath: "a.json"}
+	// A well-formed remote URL parses cleanly (the err==nil branch).
+	if err := validateGitSourceURL("https://github.com/acme/repo.git", parts); err != nil {
+		t.Fatalf("remote url: %v", err)
+	}
+	// A file:// path classifies as ErrNotRemote, which is allowed (local fixture).
+	if err := validateGitSourceURL("file:///tmp/repo", parts); err != nil {
+		t.Fatalf("file url: %v", err)
+	}
+	// A malformed URL is a hard parse failure -> schema ImportError.
+	err := validateGitSourceURL("ht!tp://%zz", parts)
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for malformed url, got %v", err)
+	}
+}
+
+// --- exported locked-layer read helpers ------------------------------------
+
+// TestReadCachedLayerBytes covers the exported offline cache read used by lint:
+// a hit returns the seeded bytes, and an absent SHA returns ok=false.
+func TestReadCachedLayerBytes(t *testing.T) {
+	withPackagesCache(t)
+	body := []byte(`{"version":2,"skills":["s"]}`)
+	if err := writeCachedLayer(layerCacheDir("acme", "org/base.json"), "deadbeef", body); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	got, ok := ReadCachedLayerBytes("acme", "org/base.json", "deadbeef")
+	if !ok || string(got) != string(body) {
+		t.Fatalf("hit = %q (ok=%v), want %q", got, ok, body)
+	}
+	if _, ok := ReadCachedLayerBytes("acme", "org/base.json", "nope"); ok {
+		t.Fatalf("absent SHA should miss")
+	}
+}
+
+// TestLockedRemoteLayerBytes drives the locked-layer cache resolution: a locked
+// ref whose bytes are cached returns them; an unlocked ref, a lock with an empty
+// SHA, and a locked-but-uncached ref all miss (ok=false) so lint skips them.
+func TestLockedRemoteLayerBytes(t *testing.T) {
+	withPackagesCache(t)
+	parts, err := ParseLayerRef("acme:org/base.json")
+	if err != nil {
+		t.Fatalf("parse ref: %v", err)
+	}
+	body := []byte(`{"version":2}`)
+	if err := writeCachedLayer(layerCacheDir("acme", "org/base.json"), "sha1", body); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	locked := map[string]LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "sha1"},
+		"acme:org/empty":     {ResolvedSHA: ""},
+		"acme:org/uncached":  {ResolvedSHA: "sha-missing"},
+	}
+
+	if got, ok := LockedRemoteLayerBytes(parts, "acme:org/base.json", locked); !ok || string(got) != string(body) {
+		t.Fatalf("locked+cached = %q (ok=%v), want %q", got, ok, body)
+	}
+	if _, ok := LockedRemoteLayerBytes(parts, "acme:org/unlocked", locked); ok {
+		t.Errorf("unlocked ref should miss")
+	}
+	if _, ok := LockedRemoteLayerBytes(parts, "acme:org/empty", locked); ok {
+		t.Errorf("empty-SHA lock should miss")
+	}
+	uncachedParts, _ := ParseLayerRef("acme:org/uncached")
+	if _, ok := LockedRemoteLayerBytes(uncachedParts, "acme:org/uncached", locked); ok {
+		t.Errorf("locked-but-uncached ref should miss")
+	}
+}
+
+// TestReadLockedLayers projects a written lock (legacy config section, migrated on
+// read) into the LockedLayer set keyed by extends ref.
+func TestReadLockedLayers(t *testing.T) {
+	withPackagesCache(t)
+	project := t.TempDir()
+	if err := WriteConfigLock(project, map[string]LockedLayer{
+		"acme:org/base.json": {ResolvedSHA: "abc123", FetchedAt: "2026-06-02T00:00:00Z"},
+	}); err != nil {
+		t.Fatalf("write lock: %v", err)
+	}
+	got, err := ReadLockedLayers(project)
+	if err != nil {
+		t.Fatalf("ReadLockedLayers: %v", err)
+	}
+	if l, ok := got["acme:org/base.json"]; !ok || l.ResolvedSHA != "abc123" {
+		t.Fatalf("locked layer = %+v (ok=%v), want resolved_sha abc123", l, ok)
+	}
+}
+
+// --- git ssh auth (layered agent -> default-key fallback) ------------------
+//
+// go-git v6 leaves ClientOptions unset -> ssh.NewSSHAgentAuth unconditionally,
+// which hard-fails with "SSH agent requested but SSH_AUTH_SOCK not-specified"
+// the instant SSH_AUTH_SOCK is unset, even when the user has a perfectly
+// usable unencrypted default key and their own `git` works fine. gitSSHAuth
+// (consumed by gitCloneShallow, shared by gitFetcher and gitArtifactFetcher)
+// layers: SSH agent when present, else the OpenSSH default identity files
+// (honoring ~/.ssh/config IdentityFile first), else a clear actionable error.
+
+// setTestHomeDir points os.UserHomeDir() at dir for the duration of the
+// test. Go's UserHomeDir reads $HOME on unix/darwin but %USERPROFILE% on
+// Windows, so a plain t.Setenv("HOME", dir) is silently ignored on the
+// windows-latest CI runner — set both so the fixture is honored everywhere.
+func setTestHomeDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
+// writeTestSSHKey writes an OpenSSH-format ed25519 private key to
+// <sshDir>/<name>, optionally passphrase-protected, and returns its path.
+// Generated entirely via golang.org/x/crypto/ssh (no ssh-keygen subprocess),
+// so the fixture is hermetic and needs no external binary.
+func writeTestSSHKey(t *testing.T, sshDir, name, passphrase string) string {
+	t.Helper()
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	var block *pem.Block
+	if passphrase == "" {
+		block, err = cryptossh.MarshalPrivateKey(priv, "")
+	} else {
+		block, err = cryptossh.MarshalPrivateKeyWithPassphrase(priv, "", []byte(passphrase))
+	}
+	if err != nil {
+		t.Fatalf("MarshalPrivateKey: %v", err)
+	}
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll sshDir: %v", err)
+	}
+	path := filepath.Join(sshDir, name)
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatalf("WriteFile key: %v", err)
+	}
+	return path
+}
+
+// TestGitSSHAuthNonSSHURLIsNoop proves https/file sources are completely
+// unaffected by this fetcher's auth building: no ClientOptions, no error.
+func TestGitSSHAuthNonSSHURLIsNoop(t *testing.T) {
+	for _, url := range []string{"https://github.com/acme/repo.git", "file:///tmp/repo", "http://example.com/x"} {
+		auth, err := gitSSHAuth(url)
+		if err != nil || auth != nil {
+			t.Fatalf("gitSSHAuth(%q) = (%v, %v), want (nil, nil)", url, auth, err)
+		}
+	}
+}
+
+// TestGitSSHAuthPrefersAgentWhenAvailable proves the SSH_AUTH_SOCK branch is
+// still tried first (preserving prior behavior) and never falls through to
+// the default-key path when an agent is configured, even if that agent turns
+// out to be unreachable.
+//
+// Skipped on windows: go-git's sshagent.Available() there checks for a
+// running Pageant (a named pipe), never SSH_AUTH_SOCK
+// (plumbing/transport/ssh/sshagent/sshagent_windows.go), so faking
+// SSH_AUTH_SOCK cannot exercise the "agent present" branch on that platform.
+func TestGitSSHAuthPrefersAgentWhenAvailable(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("go-git's sshagent.Available() checks Pageant on windows, not SSH_AUTH_SOCK")
+	}
+	t.Setenv("SSH_AUTH_SOCK", filepath.Join(t.TempDir(), "not-a-real-agent.sock"))
+	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err == nil {
+		t.Fatal("expected an error dialing the fake agent socket")
+	}
+	if strings.Contains(err.Error(), "no default SSH key") {
+		t.Fatalf("agent branch should not fall through to the default-key error, got: %v", err)
+	}
+}
+
+// TestGitSSHAuthFallsBackToDefaultKeyFile is the headline fix: no agent, but
+// an unencrypted default key exists — exactly the reported scenario.
+func TestGitSSHAuthFallsBackToDefaultKeyFile(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if auth == nil {
+		t.Fatal("expected non-nil auth built from the default id_ed25519 key")
+	}
+}
+
+// TestGitSSHAuthUsesURLUserOrDefault proves the ssh user comes from the URL
+// when present, else falls back to git.DefaultUsername ("git").
+func TestGitSSHAuthUsesURLUserOrDefault(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "")
+
+	auth, err := gitSSHAuth("ssh://custom-user@example.com/acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	pk, ok := auth.(*gogitssh.PublicKeys)
+	if !ok {
+		t.Fatalf("auth type = %T, want *ssh.PublicKeys", auth)
+	}
+	if pk.User != "custom-user" {
+		t.Fatalf("User = %q, want custom-user", pk.User)
+	}
+
+	auth2, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if pk2 := auth2.(*gogitssh.PublicKeys); pk2.User != "git" {
+		t.Fatalf("User = %q, want git (DefaultUsername)", pk2.User)
+	}
+}
+
+// TestGitSSHAuthPassphraseProtectedKeyErrorsClearly proves a passphrase-
+// protected key with no agent surfaces an actionable error instead of
+// go-git's raw "SSH_AUTH_SOCK not-specified".
+func TestGitSSHAuthPassphraseProtectedKeyErrorsClearly(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	writeTestSSHKey(t, filepath.Join(home, ".ssh"), "id_ed25519", "s3cret")
+
+	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err == nil {
+		t.Fatal("expected an error for a passphrase-protected key with no agent")
+	}
+	if !strings.Contains(err.Error(), "passphrase") {
+		t.Fatalf("expected a passphrase-specific error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh-agent") {
+		t.Fatalf("expected actionable ssh-agent guidance, got: %v", err)
+	}
+}
+
+// TestGitSSHAuthNoKeyFoundErrorsClearly proves the "nothing at all to try"
+// case is also a clear, actionable error rather than a silent auth failure.
+func TestGitSSHAuthNoKeyFoundErrorsClearly(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+
+	_, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err == nil {
+		t.Fatal("expected an error when no agent and no default key exist")
+	}
+	if !strings.Contains(err.Error(), "no default SSH key found") {
+		t.Fatalf("expected a 'no default SSH key' error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ssh-agent") {
+		t.Fatalf("expected actionable ssh-agent guidance, got: %v", err)
+	}
+}
+
+// TestGitSSHAuthHonorsSSHConfigIdentityFile proves a ~/.ssh/config
+// IdentityFile for the host is tried even when none of the OpenSSH default
+// filenames (id_ed25519/id_rsa/id_ecdsa) exist.
+func TestGitSSHAuthHonorsSSHConfigIdentityFile(t *testing.T) {
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	sshDir := filepath.Join(home, ".ssh")
+	writeTestSSHKey(t, sshDir, "custom_key", "")
+	cfg := "Host github.com\n  IdentityFile ~/.ssh/custom_key\n"
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("WriteFile config: %v", err)
+	}
+
+	auth, err := gitSSHAuth("git@github.com:acme/repo.git")
+	if err != nil {
+		t.Fatalf("gitSSHAuth: %v", err)
+	}
+	if auth == nil {
+		t.Fatal("expected auth built from the ssh_config IdentityFile")
+	}
+}
+
+// TestSSHConfigIdentityFiles unit-tests the ssh_config(5) subset the fetcher
+// relies on: literal/glob Host matching, multiple IdentityFile lines in file
+// order, tilde expansion, and non-matching hosts yielding nothing.
+func TestSSHConfigIdentityFiles(t *testing.T) {
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+	sshDir := filepath.Join(home, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	cfg := strings.Join([]string{
+		"# a comment, and a blank line below",
+		"",
+		"Host bitbucket.org",
+		"  IdentityFile ~/.ssh/bb_key",
+		"",
+		"Host *.github.com github.com",
+		"  IdentityFile ~/.ssh/gh_key1",
+		"  IdentityFile /abs/gh_key2",
+		"",
+		"Host gitlab.com",
+		"  IdentityFile ~/.ssh/gl_key",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte(cfg), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	got := sshConfigIdentityFiles(sshDir, "github.com")
+	wantGh1 := filepath.Join(home, ".ssh", "gh_key1")
+	if len(got) != 2 || got[0] != wantGh1 || got[1] != "/abs/gh_key2" {
+		t.Fatalf("sshConfigIdentityFiles(github.com) = %v", got)
+	}
+
+	if got := sshConfigIdentityFiles(sshDir, "sub.github.com"); len(got) != 2 || got[0] != wantGh1 || got[1] != "/abs/gh_key2" {
+		t.Fatalf("wildcard Host match: got %v", got)
+	}
+
+	if got := sshConfigIdentityFiles(sshDir, "unknown.example.com"); got != nil {
+		t.Fatalf("expected no match for an unconfigured host, got %v", got)
+	}
+}
+
+// TestSSHConfigIdentityFilesMissingFile proves a missing ~/.ssh/config is not
+// an error — it just yields nothing to add to the default identity list.
+func TestSSHConfigIdentityFilesMissingFile(t *testing.T) {
+	if got := sshConfigIdentityFiles(filepath.Join(t.TempDir(), ".ssh"), "github.com"); got != nil {
+		t.Fatalf("expected nil for a missing config file, got %v", got)
+	}
+}
+
+// TestGitFetcherSSHNoAgentNoKeyErrorsClearly is the end-to-end proof: the
+// same actionable error surfaces through the real gitFetcher.Fetch path
+// (FetchRefresh -> clone -> gitCloneShallow -> gitSSHAuth), not just the
+// unit-level gitSSHAuth call, and fails before any network clone attempt.
+func TestGitFetcherSSHNoAgentNoKeyErrorsClearly(t *testing.T) {
+	withPackagesCache(t)
+	t.Setenv("SSH_AUTH_SOCK", "")
+	home := t.TempDir()
+	setTestHomeDir(t, home)
+
+	f := &gitFetcher{}
+	_, err := f.Fetch(
+		Source{Type: "git", URL: "git@github.com:acme/does-not-matter.git", Ref: "main"},
+		LayerRefParts{LayerPath: "layer.json"},
+		filepath.Join(t.TempDir(), "cache"),
+	)
+	if err == nil {
+		t.Fatal("expected an ssh auth error")
+	}
+	if !strings.Contains(err.Error(), "no default SSH key found") {
+		t.Fatalf("expected the actionable ssh auth error, got: %v", err)
 	}
 }

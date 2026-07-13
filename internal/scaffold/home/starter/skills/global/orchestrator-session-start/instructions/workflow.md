@@ -61,32 +61,33 @@ Use this skill when the session needs an architect/product-owner pass before han
 
    Use `rg` only after the graph surfaces are absent, stale, or insufficient for the exact question.
 
-4. Pre-fanout sanity checks (run for every candidate task before deciding fanout vs. direct).
+4. Run the CANONICAL pre-fanout gate for every candidate task before deciding fanout vs. direct.
 
-   These prevent the most common wasted-spawn patterns:
+   → Load **`delegation-lifecycle`** → **`instructions/workflow.md` § 0**. That is the single source of truth for all four MUST checks: (0a) task status vs shipped PRs, (0b) write_scope exists on HEAD, (0c) code-graph + grep caller walk, (0d) coverage-delta forecast (an asserting `*_test.go` outside write_scope fails the gate), (0e) no overlapping active delegation. Do not re-implement those checks here — clear the gate, then return.
 
-   a. **Cross-check task status vs shipped PRs.** `workflow eligible` reports `status: pending|in_progress` from TASKS.yaml, which drifts behind merged PRs after parallel-worker batches:
-      ```bash
-      gh pr list --state merged --search "<task-id>" --limit 5
-      git log --oneline --all | grep -i "<task-id>" | head -5
-      ```
-      If the work shipped, run `da workflow delegation closeout --plan <plan> --task <task> --decision accept` instead of fanout (this advances status AND archives the contract in one step — do not also call `workflow advance`).
-
-   b. **Validate write_scope against HEAD.** Confirm every file in the proposed `--write-scope` exists on the current tree. Then enumerate symbol callers via the code graph + `grep -rln '<symbol>\b'` to catch test-file or cross-package callers the static plan notes missed. Add missed-caller files to write_scope upfront rather than forcing the worker into a fold-back.
-
-   c. **Confirm no overlapping active delegation.** `ls .agents/active/delegation-bundles/` — if one already exists for this task, do not re-fanout. Hand off to `delegation-lifecycle` with that bundle path.
-
-5. Decide between direct execution and delegated fanout.
+5. Decide between delegated fanout and the direct-execution path.
 
    ```
    Does a bundle already exist for the selected task?
    ├── YES → Go to delegation-lifecycle with the existing bundle. Do not re-fanout.
    └── NO  → Can the task be bounded by write_scope AND no active delegation overlaps it?
              ├── YES → workflow fanout  (see command below)
-             └── NO  → Direct execution in-session (small changes, single-owner writes)
+             └── NO  → Dispatch a general-purpose worker for the un-bounded work
+                       (the orchestrator does not implement it in-session)
    ```
 
-   If you are unsure: default to **direct** for changes touching ≤ 5 files with no cross-owner scope; default to **fanout** for anything larger or multi-session.
+   **The `orchestrator` agent type never edits a slice itself — even a one-file
+   change is dispatched.** Bounded work goes to `loop-worker` via fanout;
+   un-bounded / cross-cutting hygiene goes to a `general-purpose` worker. There is
+   no "small enough to do inline" threshold for the orchestrator agent. *Direct
+   in-session editing is the **main-session / general-purpose** path*, not the
+   orchestrator's — if you are running under the `orchestrator` AGENT.md you have
+   no `Edit`/`Write` and must dispatch.
+
+   When the direct path IS taken (in the main session, not the orchestrator
+   agent), still bound it with `workflow contract create --direct` for the audit
+   trail — that is dispatch bookkeeping, not a license for the orchestrator to
+   self-edit.
 
    Fanout creates the delegation contract **and** a persisted bundle (same `delegation_id` as the contract's `id`). Prefer flags that capture profile, overlays, prompts, verifier sequence, and verification metadata up front:
 
@@ -156,7 +157,7 @@ The `loop-worker` subagent loads `AGENT.md` as its system prompt — no inlined 
 - The scope is "every file flagged for X" rather than an enforceable `write_scope`
 - A `loop-worker` will REFUSE such work by design — that refusal is correct
 
-If **no fanout** (direct execution in-repo): you may stay in one session for small changes, but still avoid collapsing "choose work" and "implement everything" without bounds — see `instructions/gotchas.md`.
+If **no fanout**: the `orchestrator` agent still does not implement in-session — it dispatches a `general-purpose` worker (the orchestrator has no `Edit`/`Write`). Direct in-repo editing belongs to the main session / general-purpose path, and even there must avoid collapsing "choose work" and "implement everything" without bounds — see `instructions/gotchas.md`.
 
 ### Verifier and reviewer chain (between worker and parent closeout)
 

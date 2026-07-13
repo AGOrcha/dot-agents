@@ -1,0 +1,13 @@
+name: session-handoff-snapshot
+description: Capture a fresh session-handoff journal snapshot before the context is compacted
+when: pre_compact
+match:
+  tools: []
+  expression: ""
+run:
+  command: ./snapshot.sh
+  timeout_ms: 10000
+enabled_on:
+  - claude
+  - codex
+  - cursor

@@ -1,0 +1,15 @@
+# Terraform working directory and plugin cache
+.terraform/
+# .terraform.lock.hcl IS committed (pins exact provider version + checksums)
+
+# State — local state for v1 is gitignored (never commit state; it holds secrets)
+*.tfstate
+*.tfstate.*
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Variable files (may carry account/zone IDs or secrets)
+*.tfvars
+*.tfvars.json

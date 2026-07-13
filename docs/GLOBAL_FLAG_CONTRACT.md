@@ -1,11 +1,18 @@
+---
+title: Global Flag Contract
+description: Observed semantics of the dot-agents CLI's persistent root flags and their footguns.
+sidebar:
+  order: 2
+---
+
 # Global flag contract (dot-agents CLI)
 
-**Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md).  
+**Status:** Contract text aligned with **§ Inventory (2026-04-13)** in [`.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md`](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md).  
 **Scope:** Describes **observed** semantics of persistent root flags and known footguns. Implementation and help-text changes are tracked under the global-flag-compliance plan.
 
 ## Persistent globals
 
-The root command registers these **persistent** flags (bound to `commands.Flags` in `cmd/da/main.go`):
+The root command registers these **persistent** flags in `commands/root.go` (`NewRootCommand`), bound to the `commands.GlobalFlags` struct `commands.Flags` declared in `commands/flags.go`. (`cmd/da/main.go` only calls `commands.NewRootCommand()`; it registers no flags itself.)
 
 | Long | Short | Purpose (intended) |
 |------|-------|-------------------|
@@ -15,7 +22,12 @@ The root command registers these **persistent** flags (bound to `commands.Flags`
 | `--yes` | `-y` | Non-interactive assent to prompts |
 | `--json` | | Machine-readable output where implemented |
 
-Nested subcommands may define **local** flags with the same long name. A local would **shadow** the root binding for that subcommand only; the project's direction is to avoid that (read the global instead — e.g. `da config`/`workflow status` now read `Flags.JSON`). See [`kg ingest` dry-run](#kg-ingest-dry-run-vs-global-dry-run) for the one remaining local that intentionally augments a global.
+Nested subcommands may define **local** flags with the same long name. A local would **shadow** the root binding for that subcommand only; the project's direction is to avoid that (read the global instead — e.g. `da config`/`workflow status` now read `Flags.JSON`). Four locals intentionally **augment** (OR-merge) a global rather than shadow it — they are not violations:
+
+- **`kg ingest --dry-run`** — OR-merged with the global `-n` (`commands/kg/kg.go`); see [`kg ingest` dry-run](#kg-ingest-dry-run-vs-global-dry-run).
+- **`workflow commit --dry-run`** — OR-merged with the global `--dry-run` (`commands/workflow/commit_cmd.go:211-218`): `effectiveDryRun = dryRun || deps.Flags.DryRun()`.
+- **`workflow fold-back create --dry-run`** — OR-merged with the global `-n` (`commands/workflow/delegation.go:706-713`): `local || safeDryRun()`.
+- **`hook-sentinel --json`** — OR-merged with the global `--json` (`commands/workflow/hook_sentinel.go:858,1050`): emits the sentinel as JSON if either the local `--json` or the global `--json` is set.
 
 ## Legend
 
@@ -41,7 +53,7 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 |----------------|----------|-------------|---------|-----------|-------------|-------|
 | `init` | unsupported | supported | supported | supported | unsupported | |
 | `add` | unsupported | supported | supported | supported | unsupported | |
-| `config` | supported | unsupported | unsupported | unsupported | unsupported | Read-only inspect (`explain`/`verify`); honors the global `--json` like every other command |
+| `config` | supported | partial | unsupported | unsupported | unsupported | Subtree is `explain`/`sync`/`lint`/`verify`/`relevance`/`migrate`; **not** read-only — `config sync` is mutating (rewrites the lock). Honors the global `--json` like every other command |
 | `remove` | unsupported | supported | partial | supported | unsupported | `--yes` / `--force` skip removal prompt |
 | `refresh` | unsupported | supported | unsupported | unsupported | unsupported | |
 | `import` | unsupported | supported | supported | unsupported | unsupported | |
@@ -54,13 +66,15 @@ Direct children of `da`. Unless noted, all five globals are parsed.
 | `rules` | unsupported | partial | partial | partial | unsupported | `rules remove` honors `--dry-run`/`--yes`/`--force` |
 | `settings` | unsupported | partial | partial | partial | unsupported | `settings remove` honors `--dry-run`/`--yes`/`--force` |
 | `score` | supported | unsupported | unsupported | unsupported | unsupported | Reads `Flags.JSON` (`commands/score.go`); locals `--no-write`/`--recompute` |
-| `session` | (not yet inventoried) | | | | | Registered (`root.go`); global-flag support not yet audited |
+| `session` | unsupported | unsupported | unsupported | unsupported | unsupported | `session stats` renders human-only platform usage; reads no globals |
 | `workflow` | unsupported | unsupported | unsupported | unsupported | unsupported | Per-subcommand; see [Workflow](#workflow-subcommands) |
 | `review` | unsupported | unsupported | unsupported | unsupported | unsupported | |
 | `sync` | unsupported | partial | partial | unsupported | unsupported | `init` / `commit` / `push` honor `--dry-run`; `pull` rejects `--dry-run` (errors); `push` + `pull` (refresh prompt) honor `--yes`; `status` / `log` do not use these globals |
 | `explain` | unsupported | unsupported | unsupported | unsupported | unsupported | |
 | `install` | unsupported | supported | unsupported | supported | supported | Large surface; `--dry-run` / `--verbose` used throughout `install.go` |
 | `kg` | partial | see [KG](#kg-command-family) | unsupported | unsupported | unsupported | Many handlers check `Flags.JSON`; not every leaf is JSON-first |
+| `eval` | supported | partial | unsupported | unsupported | unsupported | `gen`/`run`/`ls` read the global `--json`; `eval run` also reads the global `--dry-run` (resolve + preview, no agent). Reads live in `commands/root.go` handlers |
+| `run` | unsupported | unsupported | unsupported | unsupported | unsupported | Recipe dispatcher (`da run <file>`); dispatches inner `da` commands, reads no globals itself |
 
 ### Read-only / doc-style families
 
@@ -108,8 +122,17 @@ Parent `workflow` does not read globals; behavior is per subcommand.
 | `delegation closeout` | supported | unsupported | unsupported | |
 | `drift` | supported | unsupported | unsupported | |
 | `sweep` | unsupported | unsupported | partial | Uses **`--apply`** for real runs (default is dry plan). Globals `--dry-run` / `--yes` are not wired; `--yes` skips per-action prompts when `sweep --apply` runs |
+| `journal` (snapshot/recover/show/prune/append) | supported | partial | unsupported | Session-handoff journal; subcommands read the global `--json` (`commands/workflow/journal.go:217,268,424,481`); `prune` honors the global `-n` |
 
 Root `--force` and `--verbose` are not shown in the workflow inventory table; treat as **unsupported** for workflow subcommands unless a future inventory row documents otherwise.
+
+This table is a **partial inventory** as of the 0.5.0 cut. Newer subcommands not yet
+individually rowed — `eligible`, `slots`, `complete`, `app-types`, `resolve-prompt`,
+`contract` (create/list), `delegation gate`, `bundle stages`, `commit`, `close-task`,
+`start-task`, `hook-sentinel`, `hook-outcome`, `archive-orphans` — inherit the same
+root-persistent globals; confirm a given leaf's support by its `deps.Flags.JSON()` /
+`deps.Flags.DryRun()` reads rather than assuming from this table. A full per-row
+re-inventory is tracked for a later pass.
 
 ### Workflow `status` JSON shadowing — RESOLVED
 
@@ -153,6 +176,8 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 |-------|----------|
 | Duplicate flag names | Prefer reading the global over a shadowing local; the historical `workflow status` + `da config` shadows are both **fixed** (now read `Flags.JSON`) |
 | `kg ingest` dry-run | Local `--dry-run` **OR-merged** with global `-n`; either form drives ingest dry-run |
+| OR-merge augment-locals | `kg ingest --dry-run`, `workflow commit --dry-run`, `workflow fold-back create --dry-run`, `hook-sentinel --json` each OR-merge their global rather than shadow it (not violations) |
+| Distinct-semantic locals | Some locals reuse a global's long name with a **different, command-specific** meaning: `agents promote --force` (`commands/agents/cmd.go:86`, replace an existing real directory at the canonical path), `workflow plan archive --force` (`commands/workflow/cmd.go:318`, skip the completed-status guard), `workflow contract create --force` (`commands/workflow/contract.go:296`, overwrite an existing delegation contract), and `workflow app-types --verbose` (`commands/workflow/cmd.go:1117`, show per-`app_type` source + recommendation detail) |
 | Read-only families | `explain`, `review`, `skills`: globals **unsupported** (no-op). `agents`/`hooks` are unsupported except their `remove` subcommands, which honor `--yes`/`--dry-run`/`--force` |
 | `sync pull` + `--dry-run` | **Rejected** (errors) — no longer a silent pull; `--yes` auto-confirms the post-pull refresh |
 | Workflow `sweep` | Plan/run semantics via **`--apply`**; globals `--dry-run` / `--yes` are not the primary contract |
@@ -161,6 +186,6 @@ Per inventory: **`RenderCommandError` / usage** paths render errors in human-ori
 
 ## Related documents
 
-- [Generated coverage matrix](../generated/GLOBAL_FLAG_COVERAGE.md) — **machine-generated** table of `commands.Flags` reads per CLI command (`go run ./cmd/globalflag-coverage -markdown -o docs/generated/GLOBAL_FLAG_COVERAGE.md`).
-- [Global Flag Compliance plan (inventory)](../.agents/workflow/plans/global-flag-compliance/global-flag-compliance.plan.md) — source matrices for this contract
+- **Generated coverage matrix** — `docs/generated/GLOBAL_FLAG_COVERAGE.md` is **not checked in**; it is generated on demand by the `cmd/globalflag-coverage` tool, which emits a per-command `commands.Flags` reads matrix. Generate it with `go run ./cmd/globalflag-coverage -markdown -o docs/generated/GLOBAL_FLAG_COVERAGE.md`.
+- [Global Flag Compliance plan (inventory)](../.agents/history/global-flag-compliance/global-flag-compliance.plan.md) — source matrices for this contract
 - [Loop Orchestration Spec](./LOOP_ORCHESTRATION_SPEC.md) — delegation bundles, `workflow graph query` + `--json` forwarding to `kg bridge query`

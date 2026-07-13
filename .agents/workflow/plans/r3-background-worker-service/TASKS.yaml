@@ -22,10 +22,9 @@ tasks:
         (asynq/river/cron-only/standalone-binary/sidecar) and the
         per-task watermark protocol for restart-safe state.
       app_type: research
-
     - id: scheduler-core
       title: In-process scheduler with interval + fsnotify triggers
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -52,11 +51,15 @@ tasks:
         watermark logic (per-task in tasks/).
         Reviewer verifies: race detector clean, panic recovery test,
         Stop honors ctx cancellation, fsnotify coalesces rapid events.
+        SHIPPED (coherence 2026-06-25): internal/service/scheduler/
+        (scheduler.go + trigger.go + tests) landed via commit 0a57f0b6
+        ("feat(service): in-process scheduler core") with the SonarCloud
+        follow-up f9ea6632. Marked completed.
+        - (fb:fsnotify-rearm-flake) TestFSNotifyTriggerReArmDuringBurst fails ~40 percent locally under -race on unmodified master (macOS); timing-sensitive re-arm window. Needs the deterministic-seam treatment (like the hangup/partial-identity fixes) rather than timing luck. Found during service-runtime integration (#272).
       app_type: go-cli
-
     - id: event-bus
       title: In-process pub/sub bus for task → consumer events
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -83,15 +86,21 @@ tasks:
         reads canonical state from sidecars), NO cross-process IPC.
         Reviewer verifies: drop-oldest semantics under back-pressure,
         unsubscribe closes channel cleanly, race detector clean.
+        SHIPPED (coherence 2026-06-25): internal/service/events/
+        (events.go + tests) landed via PR #172 (commits 7cd41916
+        "feat(service): in-process event bus" + 594d0e75 Sonar fix).
+        The shipped surface is Publish(topic, payload) +
+        Subscribe(topic) (<-chan Event, func()) per D4; R2 t04-sse-broker
+        and R5 collection-endpoint bind to it. Marked completed.
       app_type: go-cli
-
     - id: http-server
-      title: HTTP server with mount points for R2/R5 + /healthz + /api/tasks
-      status: pending
+      title: Service transport layer — UDS/named-pipe control plane + HTTP/SSE edge (mounts for R2/R5, /healthz, /api/tasks)
+      status: completed
       depends_on:
         - design-doc
         - scheduler-core
         - event-bus
+        - event-bus-interface-seam
       blocks:
         - service-runtime
       owner: dot-agents
@@ -99,28 +108,57 @@ tasks:
         - internal/service/http/
       verification_required: true
       notes: |-
-        net/http (no framework dep). Server{addr, mux, scheduler,
-        bus}. Built-in routes: GET /healthz (200 ok), GET /api/tasks
-        (scheduler.State() as JSON). RegisterMount(prefix, handler)
-        stitches a sub-handler under an arbitrary prefix — R2 calls
-        with "/api" + dashboard handler, R5 with "/api/reviews" +
-        review handler. Graceful shutdown via
-        http.Server.Shutdown(ctx) wired to the runtime ctx.
+        RESCOPED 2026-07-02 (§2A coherence, PR #162): OQ5 is ruled —
+        option (B) UDS-first + HTTP edge (spec §2A). This task is a
+        TRANSPORT LAYER, not an HTTP-everywhere server. NOT
+        HTTP-by-default; each surface follows the §2A surface→transport
+        map and selection rule ("Use HTTP for a surface when it is
+        browser-facing, OR cross-machine, OR consumed by an external
+        tool that speaks HTTP. Otherwise use the local high-efficiency
+        transport."). Two listeners:
+        (1) Local control plane — Unix-domain socket (named pipe on
+        Windows) behind one small dialer abstraction. Serves
+        `da service status`/`stop` and the §D6 CLI-routes-when-present
+        path. Stop/admin is authorized by socket file permission +
+        peer-credential check (SO_PEERCRED on Linux, LOCAL_PEERCRED on
+        macOS, named-pipe client token on Windows) — this REPLACES the
+        old "POST /admin/stop gated on loopback" network-ACL shape
+        (OQ4). Named-pipe path must be exercised on the Windows box,
+        not assumed to mirror UDS (§2A cross-platform note).
+        (2) HTTP/SSE edge — net/http (no framework dep), mounted ONLY
+        for the browser/dashboard surface (R2) and the explicit
+        external bind (OQ3 default loopback 127.0.0.1:7878; external
+        requires explicit --addr opt-in). Serves GET /healthz (200 ok)
+        and GET /api/tasks (scheduler.State() as JSON).
+        RegisterMount(prefix, handler) stitches a sub-handler under an
+        arbitrary prefix on this edge — R2 calls with "/api" +
+        dashboard handler, R5 with "/api/reviews" + review handler.
+        Graceful shutdown via http.Server.Shutdown(ctx) wired to the
+        runtime ctx; the control-plane listener closes on the same ctx.
+        Dependencies: takes the §D4.1 EventBus INTERFACE (see
+        event-bus-interface-seam), never the concrete *events.Bus.
         Anti-scope: NO R2 endpoints, NO R5 endpoints (only the mount
         machinery + stub test that proves RegisterMount routes
-        correctly). NO authn/authz (R5 plan owns RBAC).
-        Reviewer verifies: /healthz returns 200, /api/tasks JSON shape
-        matches scheduler.State(), RegisterMount with overlapping
-        prefixes errors deterministically, graceful shutdown completes
-        within ctx deadline.
+        correctly). NO authn/authz (R5 plan owns RBAC). NO
+        worker-dispatch wire (scheduler→task RunFns stay in-process Go
+        calls per the §2A map). NO external EventBus adapters.
+        Reviewer verifies: /healthz returns 200 and /api/tasks JSON
+        shape matches scheduler.State() on the HTTP edge; control
+        endpoints answered over the UDS/named-pipe listener
+        (integration test against a *socket* listener, not TCP, per
+        the §2A verifier-chain note); peer-credential gate enforced on
+        stop; RegisterMount with overlapping prefixes errors
+        deterministically; graceful shutdown of both listeners
+        completes within ctx deadline.
+        - (fb:windows-named-pipe-control-plane) The UDS control plane (status/stop) is stubbed fail-fast on Windows (control_windows.go): da service will not start on Windows at all. Deferred at the transport layer (#249) and composition layer (#272) because §2A requires the named-pipe path be exercised on a REAL Windows box, not assumed, and go-winio is only an indirect dep. OWNER-RELEVANT: the maintainer's work PC is Windows, so da service is unusable there until this lands. Needs a named-pipe listener/dialer + Windows peer-identity (named-pipe client token per §2A) behind the existing per-OS listenControl/dialControl/defaultPeerUID seam, validated on real Windows CI.
       app_type: go-cli
-
     - id: tasks-iterlog-ingester
       title: Iter-log ingester task — fsnotify trigger, calls R1 scorer, publishes event
-      status: pending
+      status: completed
       depends_on:
         - scheduler-core
         - event-bus
+        - event-bus-interface-seam
       blocks:
         - service-runtime
       owner: dot-agents
@@ -130,6 +168,13 @@ tasks:
         - internal/service/state/
       verification_required: true
       notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): publish via the §D4.1
+        EventBus INTERFACE (see event-bus-interface-seam), not the
+        concrete *events.Bus, and assume only the §D4.2 G1-G4 floor —
+        a missed event is recoverable from the sidecar + watermark
+        (§D3), never from the bus. No transport wire here:
+        scheduler→task dispatch is an in-process Go call per the §2A
+        surface→transport map (worker-dispatch row).
         FSNotify trigger on .agents/active/iteration-log/. On a new
         or modified iter-N.yaml: call into internal/scoring (use
         ScoreIteration which is the same entrypoint
@@ -153,13 +198,13 @@ tasks:
         and coalesce of rapid fsnotify events; absent watermark on
         first run.
       app_type: go-cli
-
     - id: tasks-rescore
       title: Rescore-on-rubric-bump task — interval trigger, rescores when RubricVersion changes
-      status: pending
+      status: completed
       depends_on:
         - scheduler-core
         - event-bus
+        - event-bus-interface-seam
       blocks:
         - service-runtime
       owner: dot-agents
@@ -168,6 +213,11 @@ tasks:
         - internal/service/tasks/rescore_test.go
       verification_required: true
       notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): publish events.RescoreDone
+        via the §D4.1 EventBus INTERFACE (see event-bus-interface-seam),
+        not the concrete *events.Bus; assume only the §D4.2 G1-G4
+        floor. No transport wire here — scheduler→task dispatch is an
+        in-process Go call per the §2A map.
         Interval trigger (default 60s, configurable). Reads watermark
         .agents/active/service-state/rescore.watermark.yaml; compares
         scoring.RubricVersion to the recorded value. If different,
@@ -183,10 +233,9 @@ tasks:
         before event publish to keep the bus eventually-consistent
         with disk.
       app_type: go-cli
-
     - id: service-runtime
       title: Service runtime that composes scheduler + http + bus + tasks
-      status: pending
+      status: completed
       depends_on:
         - http-server
         - tasks-iterlog-ingester
@@ -201,24 +250,34 @@ tasks:
         - internal/service/config_test.go
       verification_required: true
       notes: |-
-        Run(ctx, Config) wires everything: build bus, build scheduler,
-        register iterlog-ingester + rescore tasks (each receives the
-        bus), build http.Server (receives scheduler + bus),
-        scheduler.Start, server.Serve. On ctx.Done() cancel scheduler,
-        Shutdown server. Config: {Addr, IterLogDir, RepoDir,
-        RescoreInterval, EnabledTasks []string}. Sensible defaults
-        match the rest of the CLI (.agents/active/iteration-log; cwd
-        for repo).
+        RESCOPED 2026-07-02 (§2A coherence): compose to the §2A/§D4
+        shape, not the old HTTP-everywhere shape.
+        Run(ctx, Config) wires everything: build the EventBus (the
+        §D4.1 INTERFACE; v1 constructs the in-process builtin §D4.3
+        directly — no config-selected external backends yet, per the
+        OQ6 interface-only ruling), build scheduler, register
+        iterlog-ingester + rescore tasks (each receives the EventBus
+        interface), build the transport layer from http-server (UDS/
+        named-pipe control listener + HTTP/SSE edge; the edge receives
+        scheduler + bus), scheduler.Start, serve both listeners. On
+        ctx.Done() cancel scheduler, close the control-plane listener,
+        Shutdown the HTTP edge.
+        Config: {ControlSocket (UDS path / named-pipe name, sensible
+        per-repo default), HTTPAddr (default loopback 127.0.0.1:7878
+        per OQ3; explicit non-loopback = deliberate external opt-in),
+        IterLogDir, RepoDir, RescoreInterval, EnabledTasks []string}.
+        Sensible defaults match the rest of the CLI
+        (.agents/active/iteration-log; cwd for repo).
         Integration test: spin up Run in a goroutine against a temp
-        iter-log dir, drop iter-1.yaml, subscribe to bus, assert
-        iteration.scored event arrives within 2s and sidecar exists,
-        cancel ctx, assert Run returns within 5s.
+        iter-log dir, drop iter-1.yaml, subscribe via the EventBus
+        interface, assert iteration.scored event arrives within 2s and
+        sidecar exists, cancel ctx, assert Run returns within 5s.
         Anti-scope: NO cobra here (that's the next task); NO os.Exit
         — return clean errors so the cobra layer can render.
-        Reviewer verifies: clean shutdown, integration test green,
-        all goroutines exit (use goleak or manual wait).
+        Reviewer verifies: clean shutdown of BOTH listeners,
+        integration test green, all goroutines exit (use goleak or
+        manual wait).
       app_type: go-cli
-
     - id: cobra-surface
       title: '`da service run|status|stop` cobra subcommand'
       status: pending
@@ -232,26 +291,42 @@ tasks:
         - commands/root.go
       verification_required: true
       notes: |-
+        RESCOPED 2026-07-02 (§2A coherence): control-plane commands
+        ride the UDS/named-pipe control socket, not TCP/HTTP (spec §2A
+        map — local control plane row; OQ4 stop becomes a socket-
+        permission + peer-credential check, not a loopback network
+        ACL). Also reconciled to spec D1: `-d`/`--detach` self-
+        backgrounding + pidfile IS in scope — the earlier "no
+        daemonization / no PID file" anti-scope contradicted D1 and
+        the spec's done criteria.
         Pattern after commands/score.go: NewServiceCmd() returns the
         command group; wire into commands/root.go alongside
         NewScoreCmd. Subcommands:
           - `da service run`   — foreground; SIGINT/SIGTERM → graceful
-            shutdown. Flags: --addr (default :7878), --iter-log-dir,
+            shutdown. Flags: --addr (HTTP edge bind, default loopback
+            127.0.0.1:7878 per OQ3; explicit non-loopback = deliberate
+            external opt-in), --control-socket, --iter-log-dir,
             --repo-dir, --rescore-interval, --task (repeatable
             allow-list). --json prints startup banner as JSON.
-          - `da service status` — GET http://addr/api/tasks against
-            a running instance; renders the task table (mirror score
-            command's render style). --json passes through.
-          - `da service stop`  — POST /admin/stop (server registers
-            this internally, gated on loopback only) for clean
-            shutdown without sending a signal.
-        Anti-scope: NO daemonization (no double-fork, no PID file —
-        deployment is systemd/launchd's job, called out in design.md).
-        Reviewer verifies: --help text accurate; status renders;
-        SIGINT triggers graceful shutdown in <5s; root.go test still
-        passes.
+          - `da service run -d` (alias `--detach`) — self-backgrounds,
+            writes a pidfile, returns immediately (spec D1 + done
+            criteria; systemd/launchd supervision of the foreground
+            mode coexists).
+          - `da service status` — queries the running instance over
+            the control socket (UDS / named pipe) and renders the task
+            table (mirror score command's render style); --json passes
+            through; helpful error when no service is running.
+          - `da service stop`  — stop request over the control socket,
+            authorized by socket file permission + peer credential
+            (SO_PEERCRED / LOCAL_PEERCRED / named-pipe client token) —
+            NOT a POST /admin/stop loopback endpoint.
+        Reviewer verifies: --help text accurate; status renders over
+        the socket; stop refused for a non-owner peer where the
+        platform supports the check; `-d` writes a pidfile and returns
+        immediately; SIGINT triggers graceful shutdown in <5s; root.go
+        test still passes; named-pipe path exercised on the Windows
+        box (§2A cross-platform note).
       app_type: go-cli
-
     - id: docs-and-verification
       title: Operator docs + umbrella verification (status, restart-preserves-state)
       status: pending
@@ -283,7 +358,6 @@ tasks:
         verification clauses are proven by test assertions, not
         just prose.
       app_type: go-cli
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the da service minor'
       status: pending
@@ -291,6 +365,7 @@ tasks:
         - design-doc
         - scheduler-core
         - event-bus
+        - event-bus-interface-seam
         - http-server
         - tasks-iterlog-ingester
         - tasks-rescore
@@ -311,10 +386,51 @@ tasks:
         command + new surface, MINOR not MAJOR (no public surface removed
         or incompatibly changed).
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        minor is 0.4.0, but resolve from VERSION when this task becomes
-        ready; if another minor ships first, rebase recomputes (0.5.0, etc.).
+        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
+        shipped), so the next minor is 0.5.0; resolve from VERSION when this
+        task becomes ready; if another minor ships first, rebase recomputes.
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, moving the da-service entries out
         of Unreleased. Merge to master fires auto-release.yml (tag + publish).
       app_type: release
+    - id: event-bus-interface-seam
+      title: EventBus interface seam over the shipped concrete events.Bus (spec D4.1)
+      status: completed
+      depends_on:
+        - event-bus
+      blocks:
+        - http-server
+        - tasks-iterlog-ingester
+        - tasks-rescore
+      owner: dot-agents
+      write_scope:
+        - internal/service/events/
+      verification_required: true
+      notes: |-
+        ADDED 2026-07-02 (2A/D4 coherence, PR #162 reconciliation).
+        The shipped internal/service/events bus (PR #172) is a CONCRETE
+        *events.Bus; spec D4.1 requires the transport seam to be an
+        EventBus INTERFACE that publishers and subscribers bind to --
+        never the concrete channel implementation. http-server, the
+        scheduler task publishers, R2 t04-sse-broker/t13 and R5
+        collection-endpoint all sit downstream of this seam.
+        Deliverable: define EventBus in internal/service/events per D4.1
+          Publish(topic string, payload any) error
+          Subscribe(topic string) (<-chan Event, func(), error)
+          Close() error
+        and adapt the existing channel Bus into the builtin backend
+        behind it (D4.3, dotagents-builtin:eventbus/inproc@^1.0). The
+        interface promises ONLY the D4.2 G1-G4 floor (at-most-once
+        best-effort delivery; best-effort per-topic order; bounded-buffer
+        drop-oldest, publishers never block; no cross-publish atomicity)
+        -- callers MUST NOT assume more. Ship the D4.6
+        backend-conformance suite (takes a backend constructor, asserts
+        Publish/Subscribe/Close semantics + the G1-G4 floor), anchored by
+        the in-process builtin as the seam integration-test backend.
+        Anti-scope: NO external adapters (Kafka/NATS/Redis) -- OQ6 is
+        RESOLVED interface-only for v1; the event_bus config selection
+        field (D4.4) is post-v1, demand-gated. Do NOT pre-optimize the
+        single mutex (D4.5 per-topic locking is trigger-gated).
+        Reviewer verifies: conformance suite green against the builtin;
+        race detector clean; no caller left binding to *events.Bus.
+      app_type: go-cli

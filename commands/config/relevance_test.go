@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+
+	cfg "github.com/AGOrcha/dot-agents/internal/config"
 )
 
 // relevanceRepoBody is a fixture .agentsrc.json carrying a fully-populated
@@ -36,7 +39,8 @@ const relevanceRepoBody = `{
         "lenses": {
           "lens_set": ["architecture-standards", "adversarial"],
           "lens_concurrency": "gated"
-        }
+        },
+        "graph_backend": "dotagents-builtin:graph/none@^1.0"
       },
       "ideation": {
         "topology": {"executors": 3, "verifiers_per_executor": 0, "reviewers": "0"},
@@ -140,14 +144,11 @@ func assertUnknownFilterError(t *testing.T, in string, err error) {
 
 func TestResolveExecutionProfile_Present(t *testing.T) {
 	project := withRepoLayer(t, relevanceRepoBody, "")
-	snap, _, err := loadFlatSnapshot(project)
+	snap, err := resolveLayered(project)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	profile, err := resolveExecutionProfile(snap)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	profile := resolveExecutionProfile(snap)
 	if profile == nil || profile.ByAppType == nil {
 		t.Fatalf("expected populated profile, got %+v", profile)
 	}
@@ -161,14 +162,11 @@ func TestResolveExecutionProfile_Present(t *testing.T) {
 
 func TestResolveExecutionProfile_Absent(t *testing.T) {
 	project := withRepoLayer(t, `{"repo_id":"x"}`, "")
-	snap, _, err := loadFlatSnapshot(project)
+	snap, err := resolveLayered(project)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	profile, err := resolveExecutionProfile(snap)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	profile := resolveExecutionProfile(snap)
 	if profile == nil {
 		t.Fatalf("expected non-nil empty profile")
 	}
@@ -179,28 +177,25 @@ func TestResolveExecutionProfile_Absent(t *testing.T) {
 
 func TestResolveExecutionProfile_NullLayer(t *testing.T) {
 	project := withRepoLayer(t, `{"execution_profile": null}`, "")
-	snap, _, err := loadFlatSnapshot(project)
+	snap, err := resolveLayered(project)
 	if err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
-	profile, err := resolveExecutionProfile(snap)
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
+	profile := resolveExecutionProfile(snap)
 	if profile == nil || profile.ByAppType != nil {
 		t.Fatalf("expected empty profile for null layer, got %+v", profile)
 	}
 }
 
-func TestResolveExecutionProfile_MalformedShape(t *testing.T) {
-	// execution_profile is a string, not an object — JSON decode into the
-	// struct fails, surfacing the decode error branch.
+// TestResolveExecutionProfile_MalformedShapeFailsSnapshotLoad covers what was
+// previously an isolated resolveExecutionProfile decode-error branch:
+// execution_profile is a string, not an object. Snapshot resolution now
+// decodes the WHOLE manifest through the typed AgentsRC schema up front
+// (resolveLayered), so a malformed execution_profile shape fails snapshot
+// resolution itself, before resolveExecutionProfile is ever reached.
+func TestResolveExecutionProfile_MalformedShapeFailsSnapshotLoad(t *testing.T) {
 	project := withRepoLayer(t, `{"execution_profile": "oops"}`, "")
-	snap, _, err := loadFlatSnapshot(project)
-	if err != nil {
-		t.Fatalf("snapshot: %v", err)
-	}
-	if _, err := resolveExecutionProfile(snap); err == nil {
+	if _, err := resolveLayered(project); err == nil {
 		t.Fatalf("expected decode error for malformed execution_profile")
 	}
 }
@@ -375,8 +370,8 @@ func loadFixtureProfile(t *testing.T) (project string) {
 
 func TestBuildUnitsFacet_AllStages(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "go-cli")
 	units := buildUnitsFacet(profile, prof, "go-cli", "")
 	if units.DefaultClass != "situational" {
@@ -392,8 +387,8 @@ func TestBuildUnitsFacet_AllStages(t *testing.T) {
 
 func TestBuildUnitsFacet_OneStage(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "go-cli")
 
 	units := buildUnitsFacet(profile, prof, "go-cli", "review")
@@ -413,8 +408,8 @@ func TestBuildUnitsFacet_OneStage(t *testing.T) {
 
 func TestBuildUnitsFacet_NoRelevance(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "ideation") // ideation has no relevance map
 	units := buildUnitsFacet(profile, prof, "ideation", "")
 	if len(units.ByStage) != 0 {
@@ -424,8 +419,8 @@ func TestBuildUnitsFacet_NoRelevance(t *testing.T) {
 
 func TestBuildTopologyAndLensesFacet(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 	prof := appTypeProfile(profile, "go-cli")
 
 	topo := buildTopologyFacet(prof)
@@ -455,8 +450,8 @@ func TestBuildTopologyAndLensesFacet(t *testing.T) {
 
 func TestAppTypeMatchedAndProfile(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 
 	if !appTypeMatched(profile, "go-cli") {
 		t.Fatalf("expected go-cli matched")
@@ -485,33 +480,36 @@ func TestAppTypeMatchedAndProfile(t *testing.T) {
 
 func TestBuildRelevanceResult_Filters(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 
 	cases := []struct {
-		filter    string
-		wantUnits bool
-		wantTopo  bool
-		wantLens  bool
+		filter      string
+		wantUnits   bool
+		wantTopo    bool
+		wantLens    bool
+		wantGraph   bool
+		wantLessons bool
 	}{
-		{filterUnits, true, false, false},
-		{filterTopology, false, true, false},
-		{filterLenses, false, false, true},
-		{filterAll, true, true, true},
+		{filterUnits, true, false, false, false, false},
+		{filterTopology, false, true, false, false, false},
+		{filterLenses, false, false, true, false, false},
+		{filterGraph, false, false, false, true, false},
+		{filterLessons, false, false, false, false, true},
+		{filterAll, true, true, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.filter, func(t *testing.T) {
-			opts := &runRelevanceOptions{filter: tc.filter, stage: "review"}
-			res := buildRelevanceResult(opts, profile, "go-cli", "flag")
-			if (res.Units != nil) != tc.wantUnits {
-				t.Fatalf("units presence %v want %v", res.Units != nil, tc.wantUnits)
+			opts := &runRelevanceOptions{filter: tc.filter, stage: "review", cwd: project}
+			res, err := buildRelevanceResult(opts, profile, "go-cli", "flag")
+			if err != nil {
+				t.Fatalf("buildRelevanceResult: %v", err)
 			}
-			if (res.Topology != nil) != tc.wantTopo {
-				t.Fatalf("topology presence %v want %v", res.Topology != nil, tc.wantTopo)
-			}
-			if (res.Lenses != nil) != tc.wantLens {
-				t.Fatalf("lenses presence %v want %v", res.Lenses != nil, tc.wantLens)
-			}
+			assertFacetPresence(t, "units", res.Units != nil, tc.wantUnits)
+			assertFacetPresence(t, "topology", res.Topology != nil, tc.wantTopo)
+			assertFacetPresence(t, "lenses", res.Lenses != nil, tc.wantLens)
+			assertFacetPresence(t, "graph", res.Graph != nil, tc.wantGraph)
+			assertFacetPresence(t, "lessons", res.Lessons != nil, tc.wantLessons)
 			if !res.Matched {
 				t.Fatalf("expected matched=true for go-cli")
 			}
@@ -519,13 +517,26 @@ func TestBuildRelevanceResult_Filters(t *testing.T) {
 	}
 }
 
+// assertFacetPresence checks one facet's presence against the table expectation,
+// keeping the per-case loop body flat (one call per facet rather than an inline
+// if per facet).
+func assertFacetPresence(t *testing.T, facet string, got, want bool) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s presence %v want %v", facet, got, want)
+	}
+}
+
 func TestBuildRelevanceResult_UnmatchedAppType(t *testing.T) {
 	project := loadFixtureProfile(t)
-	snap, _, _ := loadFlatSnapshot(project)
-	profile, _ := resolveExecutionProfile(snap)
+	snap, _ := resolveLayered(project)
+	profile := resolveExecutionProfile(snap)
 
-	opts := &runRelevanceOptions{filter: filterAll}
-	res := buildRelevanceResult(opts, profile, "unknown-app", "flag")
+	opts := &runRelevanceOptions{filter: filterAll, cwd: project}
+	res, err := buildRelevanceResult(opts, profile, "unknown-app", "flag")
+	if err != nil {
+		t.Fatalf("buildRelevanceResult: %v", err)
+	}
 	if res.Matched {
 		t.Fatalf("unknown app should not match")
 	}
@@ -562,6 +573,35 @@ func TestRunRelevance_JSON(t *testing.T) {
 		t.Fatalf("units payload mismatch: %+v", got.Units)
 	}
 	if got.Topology != nil || got.Lenses != nil {
+		t.Fatalf("non-requested facets should be omitted: %+v", got)
+	}
+}
+
+// TestRunRelevance_GraphJSON is the t7 hard test through the run path: a profile
+// declaring graph_backend: dotagents-builtin:graph/none@^1.0 resolves end-to-end
+// through config resolution to the registry's ref resolver — not just the direct
+// adapter path. The no-op none adapter resolves, so the facet reports it.
+func TestRunRelevance_GraphJSON(t *testing.T) {
+	project := withRepoLayer(t, relevanceRepoBody, "")
+	opts := mustRelevanceOptions(project)
+	opts.filter = filterGraph
+	opts.appType = "go-cli"
+	opts.jsonOut = true
+
+	if err := runRelevance(opts, testDeps()); err != nil {
+		t.Fatalf("runRelevance: %v", err)
+	}
+	var got relevanceResult
+	if err := json.Unmarshal([]byte(relevanceOut(opts)), &got); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, relevanceOut(opts))
+	}
+	if got.Filter != filterGraph || got.Graph == nil {
+		t.Fatalf("graph facet missing: %+v", got)
+	}
+	if !got.Graph.Resolved || got.Graph.Adapter != "none" || got.Graph.Version != "1.0.0" {
+		t.Fatalf("graph facet did not resolve the none adapter: %+v", got.Graph)
+	}
+	if got.Units != nil || got.Topology != nil || got.Lenses != nil {
 		t.Fatalf("non-requested facets should be omitted: %+v", got)
 	}
 }
@@ -673,6 +713,80 @@ func TestRunRelevance_MalformedProfile(t *testing.T) {
 	err := runRelevance(opts, testDeps())
 	if err == nil {
 		t.Fatalf("expected decode error surfaced")
+	}
+}
+
+// TestRunRelevance_RealLockedExtendsLayer is the end-to-end proof that
+// `da config relevance` now resolves through the SAME layered path
+// `da config explain` / `workflow app-types` use: a project that `extends` a
+// layer carrying execution_profile.by_app_type (a team-source profile), with a
+// populated .agentsrc.lock + on-disk layer cache, must surface that imported
+// app_type's topology/verifier_sequence. Under the retired loadFlatSnapshot
+// (product-defaults -> user-local -> repo-local only) this app_type would
+// never have matched — extends layers were invisible to relevance.
+func TestRunRelevance_RealLockedExtendsLayer(t *testing.T) {
+	t.Setenv("AGENTS_HOME", t.TempDir())
+
+	// A local source dir is a pure-disk extends source (no network): the
+	// online Resolve below reads it straight off disk while populating the
+	// cache + lock, after which the real (unstubbed) resolveLayered seam
+	// (ResolveLocked) replays it offline — the same production path
+	// runRelevance drives.
+	src := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(src, "org"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "org", "base.json"), []byte(`{
+  "execution_profile": {
+    "by_app_type": {
+      "org-shared-svc": {
+        "topology": {
+          "executors": 2,
+          "verifiers_per_executor": 1,
+          "verifier_sequence": ["org-unit", "org-api"]
+        }
+      }
+    }
+  }
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, cfg.AgentsRCFile), []byte(`{
+  "project":"svc","version":2,
+  "sources":[{"id":"acme","type":"local","path":`+strconv.Quote(src)+`}],
+  "extends":["acme:org/base.json"]
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Seed .agentsrc.lock + the layer cache via one online (local-disk)
+	// resolve — the same seeding pattern
+	// TestWorkflowAppTypesRealLockedExtendsLayer uses.
+	if _, err := cfg.NewLayeredResolver().Resolve(repo); err != nil {
+		t.Fatalf("seed online resolve: %v", err)
+	}
+
+	opts := mustRelevanceOptions(repo)
+	opts.filter = filterTopology
+	opts.appType = "org-shared-svc"
+	opts.jsonOut = true
+	if err := runRelevance(opts, testDeps()); err != nil {
+		t.Fatalf("runRelevance: %v", err)
+	}
+	var got relevanceResult
+	if err := json.Unmarshal([]byte(relevanceOut(opts)), &got); err != nil {
+		t.Fatalf("decode json: %v\n%s", err, relevanceOut(opts))
+	}
+	if !got.Matched {
+		t.Fatalf("expected the imported app_type to match, got %+v", got)
+	}
+	if got.Topology == nil || got.Topology.Executors != 2 || got.Topology.VerifiersPerExecutor != 1 {
+		t.Fatalf("imported topology facet missing/mismatched: %+v", got.Topology)
+	}
+	if strings.Join(got.Topology.VerifierSequence, ",") != "org-unit,org-api" {
+		t.Fatalf("imported verifier_sequence mismatch: %+v", got.Topology)
 	}
 }
 

@@ -1,0 +1,250 @@
+schema_version: 1
+plan_id: agent-ops-hardening
+tasks:
+    - id: p0-codex-gocache-sandbox
+      title: 'P0: pre-set GOCACHE/GOTMPDIR/TMPDIR + da-write perms in the review-agent sandbox'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .codex/
+      verification_required: true
+      notes: |-
+        DONE: granted the EXISTING go cache (~/Library/Caches/go-build + ~/go/pkg/mod) as writable_roots in
+        [sandbox_workspace_write] in ~/.codex/config.toml (no /tmp redirect). Kills the biggest tax (1,222 GOCACHE=/tmp
+        workarounds across 159 secondary review-agent sessions); legitimate da refresh / KG / git writes stop
+        triggering per-command escalation.
+      app_type: config
+    - id: p0-sonar-scanner-exclusions
+      title: 'P0: exclude dist/ + .scannerwork from sonar-scanner (stop pre-push flake)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - sonar-project.properties
+      verification_required: true
+      notes: |-
+        The sonar pre-push gate walked dist/ + .scannerwork created mid-session -> 1562 scannerwork hits -> 461
+        --no-verify reaches. Add dist/ and .scannerwork to sonar.exclusions (and confirm the pre-push scanner config).
+        Removes the root reason workers bypass the local gate.
+        Landed: merged to master via PR #121 (wave-2 state sync).
+      app_type: config
+    - id: p0-move-repo-out-of-documents
+      title: 'P0: migration to move repo out of ~/Documents (preserve primary-agent history)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+      verification_required: false
+      notes: |-
+        The ~/Documents TCC lock cost 190 hits (primary agent) + the review-agent worktree-escape/reconstruction. Only protected
+        folders are Documents/Desktop/Downloads/iCloud, so a repo at ~/dot-agents needs no FDA at all (brew-cdhash
+        grants are upgrade-fragile; a detached tmux server is its own responsible process). Provide a migration script
+        that: mv the repo; move ~/.claude/projects/<old-encoded>/ -> <new-encoded> (carries transcripts + memory/);
+        merge the ~/.claude.json projects["<old abs path>"] entry into the new key; backup first. MAINTAINER runs it.
+
+        Landed: merged to master via PR #129 (migrate-project.sh) (wave-2 state sync).
+      app_type: ops
+    - id: p1-safe-push-skill
+      title: 'P1: extend precommit-mandate.sh + safe-push lesson (SSH keepalive + ref-land verify)'
+      status: completed
+      depends_on:
+        - p0-sonar-scanner-exclusions
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+        - .agents/lessons/
+      verification_required: true
+      notes: |-
+        No new skill — the cleanup/retry already lives in scripts/precommit-mandate.sh (≈line 95: cleans .scannerwork,
+        retries Sonar CE flakes, prefers the native scanner -> parallel-push safer). Net-new bits only: add SSH-keepalive
+        (GIT_SSH_COMMAND ServerAliveInterval) + post-push ref-land verification, sourced from the existing ssh-keepalive
+        lesson. Extend the script + capture/extend a safe-push lesson. Removes the most expensive recurring loop.
+
+        Landed: merged to master via PR #131 (safe-push wrapper) (wave-2 state sync).
+      app_type: config
+    - id: p1-delegation-brief-hardening-skill
+      title: 'P1: operationalize pre-fanout bundle hardening (make validate-bundle-against-head + bundle-scope-via-code-graph mandatory in orchestrator-session-start/delegation-lifecycle)'
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+      verification_required: true
+      notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
+        Extend existing skills, do NOT create a new sibling skill. The behavior already exists as instruction units
+        validate-bundle-against-head + bundle-scope-via-code-graph in orchestrator-session-start; the gap is making them
+        MANDATORY pre-fanout (in orchestrator-session-start/delegation-lifecycle), adding a coverage-delta-forecast
+        bullet (walk all *_test.go callers of changed/deleted symbols -> the co-commit wall; refuse a bundle whose
+        asserting tests fall outside scope), and a brief-template line. Retires the largest fold-back cluster.
+
+        Impl done; delivered with PR #134 (orchestrator agent-type + consolidated pre-fanout gate), open, awaiting owner merge.
+      app_type: skill
+    - id: p1-release-cut-skill
+      title: 'P1 skill (the one new standalone skill): release-cut-monitor-retry + split-out pin-toolchain CI step'
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/release-cut/
+        - .github/workflows/
+      verification_required: true
+      notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored). The release-cut skill dir does NOT exist yet under internal/scaffold/home/starter/skills/global/ — it must be CREATED there.
+
+        KEEP as a real new skill (app_type: skill) — multi-step branching judgment justifies it. The 0.4.0 release
+        burned 4 PRs + multiple failed runs on latent infra (unpinned dotnet sign -> kernel32 Linux crash; non-retryable
+        workflow; stale-tag-on-retry; jsign tsmode). Skill: preflight pin-check the signing toolchain on Linux -> cut ->
+        monitor auto-release.yml -> on infra failure clean the stale tag + workflow_dispatch re-drive -> classify known
+        failures (kernel32, DLSequence cast). SPLIT the "fail-if-toolchain-installs-unpinned" half OUT as a plain CI step
+        under .github/workflows/ (not part of the skill). release-patch-train is a standing plan, so this pays off every
+        release.
+
+        Impl done; PR #135 (release-cut skill + pin-toolchain CI guard) open, awaiting owner merge.
+      app_type: skill
+    - id: p1-reconcile-eligible-and-preload-tools
+      title: 'P1: fold reconcile bullet into orchestrator-session-start preflight (guarded git fetch) + preload toolset via tools: frontmatter'
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+        - .agents/active/orchestrator.loop.md
+      verification_required: true
+      notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
+        Not a new skill. Reconcile is ALREADY in orchestrator-session-start preflight §3 (merged-task sweep); only
+        missing a GUARDED `git fetch origin master` bullet (note: a bare fetch in a skill is too side-effectful — guard
+        it / make it explicit/opt-in) so the eligible set is never derived off the divergent local branch. Stale-queue
+        re-discovery cost 483 "already done" hits + wasted spawns. Preload-tools = declare the deferred orchestrator
+        toolset (SendMessage/TaskStop/Monitor/PushNotification/sonarqube gate-status) in the orchestrator agent's
+        `tools:` frontmatter / profile (config, zero procedure) so they aren't ToolSearch-refetched (~70 calls/run).
+
+        Impl done; delivered with PR #134 (orchestrator agent-type + consolidated pre-fanout gate), open, awaiting owner merge.
+      app_type: config
+    - id: p1-helper-skills
+      title: 'P1: helper scripts / verifier-profile content (NOT skills)'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+        - .agents/prompts/verifiers/
+        - docs/
+      verification_required: false
+      notes: |-
+        None of these is a skill. (1) pr-gate-wait duplicates the verifier-owns-ci-watch-shift-left lesson / pr-ci
+        verifier profile -> fold there (or a thin CLI wrapper); replaces the 283 ad-hoc poll loops. (2)
+        locate-and-tail-claude-session -> ops script under scripts/, coupled to the move-repo script (the ~/.claude path
+        encoding changes on repo move); replaces the unbounded find ~/.claude. (3) sonar-issue-fetch -> a paragraph in
+        the pr-ci / CI-debugging guidance: use mcp__sonarqube, NOT curl (kills the curl/DNS loop).
+
+        Landed: merged to master via PR #130 (pr-gate-wait + find-claude-session helpers + CI debugging note) (wave-2 state sync).
+      app_type: docs
+    - id: p2-lessons
+      title: 'P2: capture the 3 un-captured lessons'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/lessons/
+      verification_required: false
+      notes: |-
+        New lessons: pin-release-toolchain-and-make-releases-retryable (no lesson exists for the biggest churn
+        cluster); hermetic-home-for-state-resolving-tests (the flaky-test root; generalizes the keychain lesson — any
+        test resolving $HOME/graph-home/keychain must t.Setenv an isolated temp env); gates-must-be-locally-reproducible.
+        Update .agents/lessons/index.md.
+
+        Landed: merged to master via PR #125 (was stale `pending` from the #126 sync; lessons are on master) (wave-2 state sync).
+      app_type: docs
+    - id: p2-brief-template-hardening
+      title: 'P2: harden the delegation brief/bundle template'
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/delegation-lifecycle/
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/
+      verification_required: false
+      notes: |-
+        skill source lives in internal/scaffold/...; it materializes to ~/.agents via `da refresh`. Editing `.agents/skills/` directly is not committable (gitignored).
+
+        Bake into the standard delegation bundle/brief: (1) keep functions under Sonar cognitive-complexity 15
+        (extract helpers; gocognit != Sonar); (2) write_scope MUST include the tests a change breaks; (3) front-load a
+        read-only boundary for plan/review tasks; (4) a skipped/tagged cross-platform test is UNVERIFIED until its CI
+        shard is green; (5) sanitize FS paths for Windows (no : * ? etc.); (6) never --no-verify (fix/isolate the test).
+
+        Impl done; delivered with PR #134 (orchestrator agent-type + consolidated pre-fanout gate), open, awaiting owner merge.
+      app_type: docs
+    - id: p2-scrub-stealth-leak
+      title: 'P2: scrub agent-tool session-author leak in worktree handoffs'
+      status: cancelled
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/
+      verification_required: false
+      notes: 'Cancelled: project policy relaxed to allow factual AI references; harness/model/created_by are legitimate operational metadata. PR #122 closed unmerged.'
+      app_type: docs
+    - id: p3-tool-routing-doc
+      title: 'P3: document primary-agent vs secondary-review-agent work routing'
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/
+      verification_required: false
+      notes: |-
+        Per the cross-tool analysis: route to the secondary review agent = adversarial/second-opinion review
+        (read-only, cited), cross-tool resume of rate-limited primary-agent sessions, bounded staged delegation (its
+        native spawn/wait/close); keep on the primary agent = heavy iterative Go build-test loops (until P0 env taxes
+        fixed, after which either). Short routing doc/reference.
+
+        Landed: merged to master via PR #137 (Claude-vs-Codex tool routing doc) (wave-2 state sync).
+      app_type: docs
+    - id: p4-fanout-gate-enforcement
+      title: 'P4: mechanical refuse-check in da workflow fanout for out-of-scope asserting test callers'
+      status: completed
+      depends_on:
+        - p1-delegation-brief-hardening-skill
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/
+        - internal/
+      verification_required: true
+      notes: |-
+        Add a mechanical refuse-check to `da workflow fanout` — reject a bundle whose
+        asserting *_test.go callers of changed/deleted symbols fall outside write_scope
+        (expand-only-if-same-package, else refuse). The skill prose is now mandatory
+        (PR #134); this is the code enforcement. Future: drive the symbol/caller lineage
+        from the graph (scoped-KG derivation), not just grep.
+      app_type: go-cli
+    - id: p5-routing-doc-cross-harness-evidence
+      title: Update AGENT_TOOL_ROUTING.md with cross-harness wave evidence + blocking-gate policy
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/AGENT_TOOL_ROUTING.md
+      verification_required: true
+      notes: '2026-06-25 graph-chain wave produced fresh Claude-vs-Codex data: Codex adversarial review caught a BLOCKER or HIGH in every Claude impl PR (tautological parity, papered lifecycle, unwired gate) AND caught incomplete fixes on re-review; same-model Claude review missed them. Codex impl was clean but could not self-publish/run per-file gate (sandbox tax) — Claude rescued. Update the routing doc: codex=review (recommend BLOCKING gate on substantive work), claude=impl + publish/gate-running; document the rescue patterns and the per-file/cross-OS gate-repro friction.'
+      app_type: docs

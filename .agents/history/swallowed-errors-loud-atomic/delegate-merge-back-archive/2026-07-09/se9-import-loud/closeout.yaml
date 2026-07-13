@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se9-import-loud
+delegation_id: del-se9-import-loud-1783577626
+decision: accept
+closed_at: "2026-07-09T17:30:30Z"

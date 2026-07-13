@@ -1,0 +1,137 @@
+# graph-backend: ttrpg.v1.0.0
+#
+# First dogfood adapter (graph-backend-adapter-contract §13.3). A TTRPG
+# campaign graph: characters, factions, locations, events, items, quests, and
+# the session log that produced them. Open-ended domain on purpose — DMs invent
+# new relationships every session, which is the stress test the compliance
+# register (stable frameworks) cannot provide.
+#
+# Authored entirely within the v1 DSL grammar (§5.1). No grammar extensions
+# (Anti-scope). Friction notes feeding the §12 budget live in WISHLIST.md and
+# AUTHOR-UX-NOTES.md — signals only, no pre-emptive grammar growth.
+name: ttrpg
+version: 1.0.0
+description: |-
+  Campaign worldbuilding graph for tabletop RPGs. Tracks characters,
+  factions, locations, events, items, and quests across session logs.
+  Bootstrapped from a corpus of session logs; named queries surface
+  continuity, allegiance, and "what happened to X" for the DM mid-session.
+
+note_types:
+  # 1. character — PCs and NPCs. stated_location is a typed single-valued ref
+  #    (a character is "currently" in one place); allegiance is a ref to the
+  #    faction the character is loyal to.
+  - name: character
+    fields:
+      - { name: name,            type: string, required: true }
+      - { name: kind,            type: enum, values: [pc, npc], required: true }
+      - { name: status,          type: enum, values: [alive, dead, missing, unknown], required: true }
+      - { name: stated_location, type: ref<location> }
+      - { name: allegiance,      type: ref<faction>, derivation: true }
+
+  # 2. faction — political/social blocs. seat is the faction's home location.
+  - name: faction
+    fields:
+      - { name: name,    type: string, required: true }
+      - { name: kind,    type: enum, values: [guild, kingdom, cult, order, clan, syndicate], required: false }
+      - { name: stance,  type: enum, values: [friendly, neutral, hostile, unknown], required: true }
+      - { name: seat,    type: ref<location> }
+
+  # 3. location — places. region is a plain field (not a ref) so location is a
+  #    leaf for ref-chains, keeping the depth-2 cap (§5.4.1) reachable.
+  - name: location
+    fields:
+      - { name: name,    type: string, required: true }
+      - { name: region,  type: string, required: false }
+      - { name: kind,    type: enum, values: [city, town, dungeon, wilderness, fortress, ruin], required: false }
+
+  # 4. event — things that happened. occurred_in is the location ref; session
+  #    is the source session number for continuity queries.
+  - name: event
+    fields:
+      - { name: summary,      type: string, required: true }
+      - { name: session,      type: int,    required: true }
+      - { name: occurred_in,  type: ref<location> }
+
+  # 5. item — notable objects. held_by is the character ref currently holding
+  #    it (single-valued; an item is in one pair of hands at a time).
+  - name: item
+    fields:
+      - { name: name,      type: string, required: true }
+      - { name: rarity,    type: enum, values: [common, uncommon, rare, legendary, artifact], required: false }
+      - { name: held_by,   type: ref<character> }
+
+  # 6. quest — objectives. status drives the "open quests" query.
+  - name: quest
+    fields:
+      - { name: title,    type: string, required: true }
+      - { name: status,   type: enum, values: [open, active, completed, failed, abandoned], required: true }
+      - { name: giver,    type: ref<character> }
+
+  # 7. session — the source artifact each note derives from. session notes are
+  #    the provenance anchor; source_mutation on a session re-derives its
+  #    downstream notes (§7.3 via the documents edge, declared derivation).
+  - name: session
+    fields:
+      - { name: number,   type: int,    required: true }
+      - { name: title,    type: string, required: false }
+      - { name: played_at, type: date,  required: false }
+
+edge_types:
+  # 13 edge types. Edges (not refs) for many-to-many, signed, or
+  # metadata-bearing relationships (§5.6 modeling guidance).
+  #  1
+  - { name: present_at,    from: character, to: event,    cardinality: many-to-many }
+  #  2 — signed: positive = ally, negative = rival, on the same edge type.
+  - { name: allied_with,   from: faction,   to: faction,  cardinality: many-to-many, signed: true }
+  #  3
+  - { name: member_of,     from: character, to: faction,  cardinality: many-to-many }
+  #  4
+  - { name: located_in,    from: faction,   to: location, cardinality: many-to-many }
+  #  5
+  - { name: occurred_at,   from: event,     to: location, cardinality: many-to-many }
+  #  6
+  - { name: involves,      from: event,     to: character, cardinality: many-to-many }
+  #  7
+  - { name: targets,       from: quest,     to: character, cardinality: many-to-many }
+  #  8
+  - { name: rewards,       from: quest,     to: item,      cardinality: many-to-many }
+  #  9
+  - { name: connects_to,   from: location,  to: location,  cardinality: many-to-many, weight_field: travel_days }
+  # 10
+  - { name: controls,      from: faction,   to: location,  cardinality: many-to-many }
+  # 11
+  - { name: knows,         from: character, to: character, cardinality: many-to-many, signed: true }
+  # 12 — provenance: a session documents the notes it produced. derivation:
+  #      true so re-parsing a session re-derives its downstream notes (§7.3).
+  - { name: documents,     from: session,   to: event,     cardinality: many-to-many, derivation: true }
+  # 13
+  - { name: advances,      from: event,     to: quest,     cardinality: many-to-many }
+
+# impact_radius — when a node is touched (a character flips status, a location
+# falls), what's the blast radius? Within v1 grammar: directed, positive-hop,
+# no ORDER BY, no paths-as-objects.
+impact_radius:
+  query: |-
+    MATCH (changed:character)
+    OPTIONAL MATCH (changed)-[:present_at]->(ev:event)
+    OPTIONAL MATCH (changed)-[:member_of]->(fac:faction)
+    OPTIONAL MATCH (q:quest)-[:targets]->(changed)
+    WHERE changed.id IN $changed_ids
+    RETURN ev.id, fac.id, q.id, changed.stated_location.region, hop_count
+  max_depth: 3
+  algorithm_hint: bidirectional_bfs
+
+# All five scoped-KG drivers are relevant to an evolving campaign:
+#   source_mutation     — a session log is re-parsed (content hash changes)
+#   derivation_mutation  — re-parsed session re-derives its events (documents edge)
+#   explicit_revocation  — DM retcons a fact (revokes: <note-id>)
+#   contradiction_arrival — two sessions disagree (continuity flag)
+#   environmental_trigger — none in v1 (no time-based expiry in a campaign)
+staleness_drivers:
+  - source_mutation
+  - derivation_mutation
+  - explicit_revocation
+  - contradiction_arrival
+
+bootstrap_skill: ttrpg-campaign-bootstrap@^1.0

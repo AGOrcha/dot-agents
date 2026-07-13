@@ -300,6 +300,152 @@ func TestClaudeEnsureUserRules_PreExistingSymlinkSkipped(t *testing.T) {
 	}
 }
 
+// TestClaudeEnsureUserRules_RealStatErrorPropagates covers the swallow
+// fixed in se9-platform-shared: a permission-denied Stat on a global-rules
+// candidate must abort the search with a wrapped error, never be silently
+// read as "this candidate doesn't exist" and skipped to the next one.
+func TestClaudeEnsureUserRules_RealStatErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	testutil.MakeDirUnreadable(t, globalRules)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserRules(agentsHome); err == nil {
+		t.Fatal("expected a real Stat error, got nil")
+	}
+}
+
+// TestClaudeEnsureUserRules_LegitimateAbsenceNoError guards the sibling
+// path the fix above must not regress: a genuinely absent global rules
+// bucket is still a silent no-op, not an error.
+func TestClaudeEnsureUserRules_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserRules(agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent global rules, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, claudeDir, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Errorf("expected no CLAUDE.md link created, lstat err = %v", err)
+	}
+}
+
+// TestClaudeCreateLinks_UnreadableGlobalRulesLeavesExistingLink is the
+// se2-contract survival check: CreateLinks succeeds once with a real global
+// rules source, creating ~/.claude/CLAUDE.md. Once that source directory
+// becomes unreadable, a second CreateLinks call must abort with an error
+// and leave the pre-existing managed link alone.
+func TestClaudeCreateLinks_UnreadableGlobalRulesLeavesExistingLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+	mustMkdirAllT(t, repo)
+
+	globalRules := filepath.Join(agentsHome, "rules", "global")
+	mustMkdirAllT(t, globalRules)
+	src := filepath.Join(globalRules, "rules.md")
+	if err := os.WriteFile(src, []byte("# rules\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewClaude().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(home, claudeDir, "CLAUDE.md")
+	if !links.IsManagedLink(dst, src) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, src)
+	}
+
+	testutil.MakeDirUnreadable(t, globalRules)
+	if err := NewClaude().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the global rules source is unreadable")
+	}
+	if !links.IsManagedLink(dst, src) {
+		t.Errorf("existing CLAUDE.md managed link must survive the aborted sync")
+	}
+}
+
+// TestClaudeEnsureUserAgents_RealReadDirErrorPropagates covers the swallow
+// fixed in se9-platform-shared: a permission-denied ReadDir on the global
+// agents bucket must abort with a wrapped error rather than being silently
+// read as "no agents to link".
+func TestClaudeEnsureUserAgents_RealReadDirErrorPropagates(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	globalAgents := filepath.Join(agentsHome, "agents", "global")
+	mustMkdirAllT(t, globalAgents)
+	testutil.MakeDirUnreadable(t, globalAgents)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserAgents(agentsHome); err == nil {
+		t.Fatal("expected a real ReadDir error, got nil")
+	}
+}
+
+// TestClaudeEnsureUserAgents_LegitimateAbsenceNoError guards the sibling
+// path: a genuinely absent global agents bucket is still a silent no-op.
+func TestClaudeEnsureUserAgents_LegitimateAbsenceNoError(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+
+	c := NewClaude().(*claude)
+	if err := c.ensureUserAgents(agentsHome); err != nil {
+		t.Fatalf("expected nil for legitimately absent global agents bucket, got %v", err)
+	}
+}
+
+// TestClaudeCreateLinks_UnreadableGlobalAgentsLeavesExistingLink is the
+// se2-contract survival check for the user-agent link family: CreateLinks
+// succeeds once with a real global agent, creating the managed link under
+// ~/.claude/agents/. Once the source bucket becomes unreadable, a second
+// CreateLinks call must abort and leave the pre-existing managed link alone.
+func TestClaudeCreateLinks_UnreadableGlobalAgentsLeavesExistingLink(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	home := filepath.Join(tmp, "home")
+	repo := filepath.Join(tmp, "repo")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	t.Setenv("HOME", home)
+	mustMkdirAllT(t, home)
+	mustMkdirAllT(t, repo)
+
+	globalAgents := filepath.Join(agentsHome, "agents", "global")
+	agentDir := filepath.Join(globalAgents, "reviewer")
+	mustMkdirAllT(t, agentDir)
+	if err := os.WriteFile(filepath.Join(agentDir, "AGENT.md"), []byte("# reviewer\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewClaude().CreateLinks("proj", repo); err != nil {
+		t.Fatalf("initial CreateLinks: %v", err)
+	}
+	dst := filepath.Join(home, claudeDir, "agents", "reviewer")
+	if !links.IsManagedLink(dst, agentDir) {
+		t.Fatalf("expected %s to be a managed link to %s", dst, agentDir)
+	}
+
+	testutil.MakeDirUnreadable(t, globalAgents)
+	if err := NewClaude().CreateLinks("proj", repo); err == nil {
+		t.Fatal("expected CreateLinks to abort once the global agents source is unreadable")
+	}
+	if !links.IsManagedLink(dst, agentDir) {
+		t.Errorf("existing user-agent managed link must survive the aborted sync")
+	}
+}
+
 // TestClaudeEnsureUserSettings_LegacyPathWithExistingSymlink covers the
 // settings.json continue-on-existing-symlink branch.
 func TestClaudeEnsureUserSettings_PreExistingSymlinkSkipped(t *testing.T) {
@@ -1147,4 +1293,290 @@ func TestClaudeBrokenLinks_HealthyRuleNotLink(t *testing.T) {
 // will not silently regress.
 func TestClaudeBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*claude)(nil)
+}
+
+// ---------- OrphanCanonicalReporter implementation (P4) ----------
+
+// TestClaudeOrphanCanonicals is the table-driven cover for claude's
+// OrphanCanonicalReporter: it owns only the "skills" bucket and reports plain
+// orphans (no back-link), mis-pointed orphans (back-link resolves elsewhere),
+// while skipping correctly-linked entries and any non-owned bucket.
+func TestClaudeOrphanCanonicals(t *testing.T) {
+	tests := []struct {
+		name      string
+		bucket    string
+		setup     func(t *testing.T, agentsHome, projectPath string) (wantName string, wantNote bool)
+		wantCount int
+	}{
+		{
+			name:   "plain orphan in owned skills bucket",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				mkdirAllT(t, filepath.Join(agentsHome, "skills", "proj", "alpha"))
+				return "alpha", false
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "correctly-linked back-link not orphaned",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				canonical := filepath.Join(agentsHome, "skills", "proj", "beta")
+				mkdirAllT(t, canonical)
+				repoLocal := filepath.Join(projectPath, ".agents", "skills")
+				mkdirAllT(t, repoLocal)
+				linktest.Link(t, canonical, filepath.Join(repoLocal, "beta"))
+				return "", false
+			},
+			wantCount: 0,
+		},
+		{
+			name:   "mis-pointed back-link is orphan with note",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				mkdirAllT(t, filepath.Join(agentsHome, "skills", "proj", "gamma"))
+				other := filepath.Join(agentsHome, "skills", "otherproj", "delta")
+				mkdirAllT(t, other)
+				repoLocal := filepath.Join(projectPath, ".agents", "skills")
+				mkdirAllT(t, repoLocal)
+				linktest.Link(t, other, filepath.Join(repoLocal, "gamma"))
+				return "gamma", true
+			},
+			wantCount: 1,
+		},
+		{
+			name:   "agents bucket not owned by claude",
+			bucket: "agents",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				mkdirAllT(t, filepath.Join(agentsHome, "agents", "proj", "orphan-agent"))
+				return "", false
+			},
+			wantCount: 0,
+		},
+		{
+			name:   "absent canonical bucket yields nothing",
+			bucket: "skills",
+			setup: func(t *testing.T, agentsHome, projectPath string) (string, bool) {
+				return "", false
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			agentsHome := filepath.Join(tmp, ".agents")
+			projectPath := filepath.Join(tmp, "proj")
+			mkdirAllT(t, projectPath)
+			wantName, wantNote := tc.setup(t, agentsHome, projectPath)
+
+			c := &claude{io: stdPlatformIO{}}
+			got := c.OrphanCanonicals("proj", projectPath, agentsHome, tc.bucket)
+			assertOrphanCanonicals(t, tc.bucket, got, tc.wantCount, wantName, wantNote)
+		})
+	}
+}
+
+// assertOrphanCanonicals verifies an OrphanCanonicals result against the
+// expected count, name, and mis-pointed note. Extracted from the table loops in
+// TestClaudeOrphanCanonicals / TestCodexOrphanCanonicals to keep each test body
+// flat (low cognitive complexity).
+func assertOrphanCanonicals(t *testing.T, bucket string, got []OrphanCanonical, wantCount int, wantName string, wantNote bool) {
+	t.Helper()
+	if len(got) != wantCount {
+		t.Fatalf("OrphanCanonicals(%q) = %d entries %+v, want %d", bucket, len(got), got, wantCount)
+	}
+	if wantCount == 0 {
+		return
+	}
+	if got[0].Name != wantName {
+		t.Errorf("orphan Name = %q, want %q", got[0].Name, wantName)
+	}
+	if wantNote && !strings.Contains(got[0].DisplayNote, "mis-pointed") {
+		t.Errorf("expected mis-pointed DisplayNote, got %q", got[0].DisplayNote)
+	}
+	if !wantNote && got[0].DisplayNote != "" {
+		t.Errorf("expected empty DisplayNote for plain orphan, got %q", got[0].DisplayNote)
+	}
+}
+
+// TestClaudeOrphanCanonicals_InterfaceConformance pins compile-time
+// conformance with OrphanCanonicalReporter so doctor.collectOrphanCanonicals's
+// type assertion cannot silently regress.
+func TestClaudeOrphanCanonicals_InterfaceConformance(t *testing.T) {
+	var _ OrphanCanonicalReporter = (*claude)(nil)
+}
+
+// ---------- UserConfigReporter implementation (P4) ----------
+
+// TestClaudeUserBrokenLinks is the table-driven cover for claude's
+// UserConfigReporter broken-link surface (CLAUDE.md, settings.json, agents/*,
+// skills/*). Every reported link must carry PlatformID="claude".
+func TestClaudeUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken CLAUDE.md",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "CLAUDE.md"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "broken settings.json",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "settings.json"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "broken agents dir entry",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "agents", "ghost.md"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "broken skills dir entry",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "skills", "ghost"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "healthy CLAUDE.md symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "rules", "global", "claude-code.md")
+				mkdirAllT(t, filepath.Dir(target))
+				if err := os.WriteFile(target, []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".claude", "CLAUDE.md"))
+			},
+			wantCount: 0,
+		},
+		{
+			name: "plain CLAUDE.md ignored",
+			setup: func(t *testing.T, home string) {
+				claudeHome := filepath.Join(home, ".claude")
+				mkdirAllT(t, claudeHome)
+				if err := os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &claude{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "claude", got, tc.wantCount)
+		})
+	}
+}
+
+// assertUserBrokenLinks verifies a UserBrokenLinks result: the expected count
+// plus, for every reported link, the platform tag and non-empty path fields.
+// Shared by the claude/codex/opencode UserBrokenLinks table tests to keep each
+// test body flat (low cognitive complexity).
+func assertUserBrokenLinks(t *testing.T, platformID string, got []BrokenLink, wantCount int) {
+	t.Helper()
+	if len(got) != wantCount {
+		t.Fatalf("UserBrokenLinks = %d %+v, want %d", len(got), got, wantCount)
+	}
+	for _, bl := range got {
+		if bl.PlatformID != platformID {
+			t.Errorf("PlatformID = %q, want %s", bl.PlatformID, platformID)
+		}
+		if bl.LinkPath == "" || bl.DisplayDest == "" {
+			t.Errorf("LinkPath/DisplayDest unset: %+v", bl)
+		}
+	}
+}
+
+// TestClaudeUserBadge is the table-driven cover for claude's UserBadge:
+// Present reflects any managed user-config presence and Broken reflects any
+// dangling managed link.
+func TestClaudeUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present healthy CLAUDE.md",
+			setup: func(t *testing.T, home string) {
+				claudeHome := filepath.Join(home, ".claude")
+				mkdirAllT(t, claudeHome)
+				if err := os.WriteFile(filepath.Join(claudeHome, "CLAUDE.md"), []byte("x"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken settings surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".claude", "settings.json"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &claude{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Claude" {
+				t.Errorf("UserBadge.Name = %q, want Claude", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestClaudeUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the claude platform.
+func TestClaudeUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*claude)(nil)
+}
+
+// mkdirAllT is a small test helper that os.MkdirAll's path and fails the test
+// on error, keeping the table-driven setup closures terse.
+func mkdirAllT(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
 }

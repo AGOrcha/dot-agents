@@ -11,6 +11,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 	"github.com/AGOrcha/dot-agents/internal/platform"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
@@ -313,8 +314,8 @@ func TestRunInit_FreshInstallCreatesStructure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Version != 1 {
-		t.Errorf("expected config version 1, got %d", loaded.Version)
+	if loaded.Version != 2 {
+		t.Errorf("expected config version 2, got %d", loaded.Version)
 	}
 	if loaded.Projects == nil {
 		t.Error("expected initialized projects map")
@@ -352,8 +353,8 @@ func TestRunInit_ForceReinitializes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if loaded.Version != 1 {
-		t.Errorf("expected config version 1 after force, got %d", loaded.Version)
+	if loaded.Version != 2 {
+		t.Errorf("expected config version 2 after force, got %d", loaded.Version)
 	}
 }
 
@@ -1050,6 +1051,99 @@ func TestSeedInitialConfig_ExistingConfigNoForceIsNoop(t *testing.T) {
 	}
 	if string(got) != string(preserved) {
 		t.Errorf("seedInitialConfig should not have rewritten config.json; got %q", string(got))
+	}
+}
+
+// A real Stat error on config.json (permission denied on the parent
+// directory) is not the same as "config.json doesn't exist yet" — without
+// --force, seedInitialConfig must surface it instead of silently returning
+// nil (which would leave `da init` reporting success without ever writing
+// the foundational config.json).
+func TestSeedInitialConfig_StatPermissionError_NoForce_ReturnsError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission-denial semantics")
+	}
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, agentsHome)
+
+	defer resetInitSeams()
+	// initForce = false (default).
+
+	err := seedInitialConfig(agentsHome)
+	if err == nil {
+		t.Fatal("expected a non-nil error for a real Stat failure on config.json, got nil (silent false success)")
+	}
+	if !strings.Contains(err.Error(), "checking for existing config.json") {
+		t.Errorf("expected the Stat-error wrap, got: %v", err)
+	}
+}
+
+// --force must still bypass the early-return guard and attempt to write
+// config.json even when the pre-flight Stat failed with a real error — the
+// fix must not change this case-6 behavior (see seedInitialConfig's switch).
+// The write itself then fails for its OWN reason (unwritable directory),
+// proving the new Stat-error branch did not short-circuit the force path.
+func TestSeedInitialConfig_StatPermissionError_WithForce_StillAttemptsSave(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission-denial semantics")
+	}
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, agentsHome)
+
+	defer resetInitSeams()
+	initForce = true
+
+	err := seedInitialConfig(agentsHome)
+	if err == nil {
+		t.Fatal("expected an error (unwritable config dir), got nil")
+	}
+	if strings.Contains(err.Error(), "checking for existing config.json") {
+		t.Errorf("--force must skip the pre-flight Stat-error short-circuit, got: %v", err)
+	}
+}
+
+// A state-dir MkdirAll failure during runInit must be warned about, not
+// silently reported as "ok" — and must not fail runInit overall (the state
+// dir is best-effort).
+func TestRunInit_StateDirMkdirAllError_WarnsButSucceeds(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	defer resetInitSeams()
+	initYes = true
+
+	stateDir := config.AgentsStateDir()
+	fake := fakeInitDirMaker{mkdirAll: func(path string, perm os.FileMode) error {
+		if path == stateDir {
+			return fmt.Errorf("mkdir denied")
+		}
+		return os.MkdirAll(path, perm)
+	}}
+
+	out := captureDoctorOutput(t, func() {
+		if err := runInit(newInitCmdForTest(), nil, fake); err != nil {
+			t.Fatalf("runInit should not fail on a best-effort state-dir MkdirAll error, got: %v", err)
+		}
+	})
+	if !strings.Contains(out, "could not create state directory") {
+		t.Errorf("expected a warning about the failed state directory creation, got: %q", out)
+	}
+	if strings.Contains(out, "Created state directory") {
+		t.Errorf("must not print a false 'ok' bullet when state-dir creation failed, got: %q", out)
 	}
 }
 

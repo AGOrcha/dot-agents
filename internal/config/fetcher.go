@@ -17,6 +17,10 @@ import (
 	"github.com/go-git/go-billy/v6/memfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/client"
+	"github.com/go-git/go-git/v6/plumbing/transport"
+	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
+	"github.com/go-git/go-git/v6/plumbing/transport/ssh/sshagent"
 	"github.com/go-git/go-git/v6/storage/memory"
 
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -45,6 +49,30 @@ func readAllLimited(r io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("layer exceeds %d bytes", maxLayerBytes)
 	}
 	return data, nil
+}
+
+// ReadLockedLayers reads the project's locked extends-layer set from
+// .agentsrc.lock, keyed by the as-declared extends ref. It reads through the §7A
+// units view (ReadUnits, which migrates a legacy config-only lock on read) and
+// projects only the `layer` units, so callers get the same offline lock surface
+// the resolver and verify paths consume. A missing/empty lock yields an empty
+// (non-nil) map; a malformed lock surfaces an error. It performs NO fetch.
+func ReadLockedLayers(projectPath string) (map[string]LockedLayer, error) {
+	return readLockedLayersFromUnits(projectPath)
+}
+
+// LockedRemoteLayerBytes resolves the cached bytes of a LOCKED remote layer:
+// given the parsed ref parts and the locked set, it returns the cached layer.json
+// bytes at the recorded SHA. ok is false (and bytes nil) when the ref is not
+// locked, has no resolved SHA, or its bytes are not in the local cache — the
+// caller then treats the layer as an unlocked/uncached remote (skip + sync hint).
+// It is read-only and never fetches.
+func LockedRemoteLayerBytes(parts LayerRefParts, ref string, locked map[string]LockedLayer) ([]byte, bool) {
+	lock, ok := locked[ref]
+	if !ok || lock.ResolvedSHA == "" {
+		return nil, false
+	}
+	return ReadCachedLayerBytes(parts.SourceID, parts.LayerPath, lock.ResolvedSHA)
 }
 
 // ImportFailReason classifies a config-layer import failure, mapping 1:1 to the
@@ -132,6 +160,12 @@ type FetchedLayer struct {
 	ResolvedSHA string
 	// CacheHit reports whether Data came from the local cache.
 	CacheHit bool
+	// KeyInputs carries the resolved facts the fetcher observed for this source
+	// (git commit, http ETag/Last-Modified/digest, local commit + worktree
+	// state), so the resolver can derive the source's effective content cache key
+	// (config-distribution-model §7A.4) via EffectiveCacheKey without re-running
+	// the fetch. A zero value falls back to the kind default keyed on ResolvedSHA.
+	KeyInputs CacheKeyInputs
 }
 
 // Fetcher fetches a config layer's bytes from a resolved source. One impl per
@@ -146,9 +180,39 @@ type Fetcher interface {
 	Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error)
 }
 
+// refreshingFetcher is the optional cache-key-aware extension of Fetcher
+// (config-distribution-model §7A.4 / R6). When the resolver determines a
+// layer's recorded cache key is stale — a `--refresh` / always_revalidate force
+// escape, or a cache_keys override edit that changes the key shape — it asks the
+// fetcher to bypass its SHA-addressed cache serve and re-read the upstream, so
+// the consumption of cache_keys actually re-validates online instead of silently
+// serving the cached bytes. A Fetcher that does not implement this is treated as
+// always cache-serving (forceRefresh is a no-op for it), preserving the existing
+// behavior for fakes and the cache-less local fetcher.
+type refreshingFetcher interface {
+	// FetchRefresh behaves like Fetch but, when forceRefresh is true, skips the
+	// cached-SHA fast path and re-reads from the upstream so a stale cache key
+	// re-validates. forceRefresh=false is identical to Fetch.
+	FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error)
+}
+
+// fetchWithRefresh dispatches to a fetcher's refresh-aware path when it supports
+// one, falling back to the plain Fetch otherwise. It is the single point the
+// resolver routes a layer fetch through, so the force-refresh signal threads to
+// every refresh-aware fetcher uniformly while plain Fetchers stay unaffected.
+func fetchWithRefresh(f Fetcher, src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
+	if rf, ok := f.(refreshingFetcher); ok {
+		return rf.FetchRefresh(src, parts, cacheDir, forceRefresh)
+	}
+	return f.Fetch(src, parts, cacheDir)
+}
+
 // SelectFetcher returns the Fetcher for a source type, or an error for an
-// unsupported or tier-invalid type. oci is valid only for packages (pass 2),
-// never for extends, so it is rejected here as a schema violation.
+// unsupported type. Per config-distribution-model §15 D13 there is no
+// source/kind asymmetry: every source type — git, http, local, and oci — is
+// valid for extends (config layers), just as every type is valid for packages.
+// An oci layer is pulled over the same plumbing as an oci artifact, guarded by
+// the config-layer media type (ociLayerFetcher), so `kind` stays meaningful.
 func SelectFetcher(sourceType string) (Fetcher, error) {
 	switch sourceType {
 	case "git":
@@ -158,7 +222,7 @@ func SelectFetcher(sourceType string) (Fetcher, error) {
 	case "local":
 		return &localFetcher{}, nil
 	case "oci":
-		return nil, fmt.Errorf("source type %q is not valid for extends (oci is packages-only)", sourceType)
+		return &ociLayerFetcher{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}
@@ -178,8 +242,22 @@ func layerCacheDir(sourceID, layerPath string) string {
 }
 
 // cachedLayerPath is the absolute path of a cached layer.json for a given SHA.
+// The SHA is mapped through digestDir so an OCI source's "sha256:<hex>" digest
+// (D13) becomes a colon-free directory segment — a colon is an illegal path
+// char on Windows. git/http/local SHAs are already bare hex, so this is a no-op
+// for them; the on-disk layout matches the packages/artifact cache.
 func cachedLayerPath(cacheDir, sha string) string {
-	return filepath.Join(cacheDir, sha, "layer.json")
+	return filepath.Join(cacheDir, digestDir(sha), "layer.json")
+}
+
+// ReadCachedLayerBytes returns the cached layer.json bytes for a source+layer at
+// the given resolved SHA/digest, read from the content-addressed layer cache with
+// NO fetch. ok is false when nothing is cached at that SHA. It is the exported,
+// offline read commands use to validate a LOCKED remote layer against the bytes
+// already on disk (e.g. `da config lint`), mirroring the resolver's offline
+// cache-hit path (readOneLockedLayer) without re-exposing the internal layout.
+func ReadCachedLayerBytes(sourceID, layerPath, sha string) ([]byte, bool) {
+	return readCachedLayer(layerCacheDir(sourceID, layerPath), sha)
 }
 
 // readCachedLayer returns the cached layer bytes for sha, or (nil,false) if not
@@ -192,9 +270,12 @@ func readCachedLayer(cacheDir, sha string) ([]byte, bool) {
 	return data, true
 }
 
-// writeCachedLayer persists layer bytes under <cacheDir>/<sha>/layer.json.
+// writeCachedLayer persists layer bytes under <cacheDir>/<sha>/layer.json. The
+// SHA segment is mapped through digestDir (see cachedLayerPath) so an OCI
+// "sha256:<hex>" digest never embeds a colon in a path segment (illegal on
+// Windows); the read path uses the same mapping.
 func writeCachedLayer(cacheDir, sha string, data []byte) error {
-	dir := filepath.Join(cacheDir, sha)
+	dir := filepath.Join(cacheDir, digestDir(sha))
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating layer cache dir: %w", err)
 	}
@@ -227,9 +308,18 @@ func (f *gitFetcher) clone(ctx context.Context, url, ref string) (*gogit.Reposit
 // billy filesystem, so nothing is written to disk and no temp dir cleanup is
 // needed. Returns the repository (for HEAD) and the worktree filesystem.
 func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, billy.Filesystem, error) {
+	auth, err := gitSSHAuth(url)
+	if err != nil {
+		return nil, nil, err
+	}
+	var clientOpts []client.Option
+	if auth != nil {
+		clientOpts = []client.Option{client.WithSSHAuth(auth)}
+	}
 	fs := memfs.New()
 	repo, err := gogit.CloneContext(ctx, memory.NewStorage(), fs, &gogit.CloneOptions{
 		URL:           url,
+		ClientOptions: clientOpts,
 		ReferenceName: plumbing.ReferenceName(ref),
 		SingleBranch:  true,
 		Depth:         1,
@@ -241,7 +331,136 @@ func gitCloneShallow(ctx context.Context, url, ref string) (*gogit.Repository, b
 	return repo, fs, nil
 }
 
+// gitSSHAuth builds go-git's SSH ClientConfig for an ssh:// (or SCP-style
+// git@host:path) rawURL, so a `git` config/package source authenticates the
+// same way the user's own `git clone`/`git push` for that URL already does —
+// no separate `eval $(ssh-agent) && ssh-add` just to run da.
+//
+// go-git v6 has no such fallback on its own: leaving ClientOptions unset
+// makes it call ssh.NewSSHAgentAuth unconditionally, which hard-fails with
+// "SSH agent requested but SSH_AUTH_SOCK not-specified" the instant
+// SSH_AUTH_SOCK is unset — even when the user has a perfectly usable
+// unencrypted default key (the common case: a plain shell often does not
+// have SSH_AUTH_SOCK exported even though a keychain/GUI agent exists and
+// `git clone`/`git push` for the same URL work fine).
+//
+// The preference order mirrors OpenSSH's own client:
+//  1. A running SSH agent (SSH_AUTH_SOCK set) — unchanged from before.
+//  2. Default identity files, in the order ssh(1) tries them, with any
+//     ~/.ssh/config `IdentityFile` for the host tried first (a more specific
+//     match than the bare defaults).
+//
+// A passphrase-protected key with no agent available surfaces a clear,
+// actionable error instead of go-git's raw "SSH_AUTH_SOCK not-specified".
+//
+// Returns (nil, nil) for a non-ssh URL: the caller then leaves ClientOptions
+// unset, so http(s)/file sources are completely unaffected by this fetcher's
+// auth building.
+func gitSSHAuth(rawURL string) (client.SSHAuth, error) {
+	u, err := transport.ParseURL(rawURL)
+	if err != nil || u.Scheme != "ssh" {
+		return nil, nil
+	}
+	user := gogitssh.DefaultUsername
+	if u.User != nil {
+		if name := u.User.Username(); name != "" {
+			user = name
+		}
+	}
+
+	if sshagent.Available() {
+		return gogitssh.NewSSHAgentAuth(user)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and $HOME is unavailable to locate a default key: %w; run `eval $(ssh-agent) && ssh-add`, or export SSH_AUTH_SOCK", rawURL, err)
+	}
+	sshDir := filepath.Join(home, ".ssh")
+	candidates := append(sshConfigIdentityFiles(sshDir, u.Hostname()),
+		filepath.Join(sshDir, "id_ed25519"),
+		filepath.Join(sshDir, "id_rsa"),
+		filepath.Join(sshDir, "id_ecdsa"),
+	)
+
+	var lastErr error
+	for _, path := range candidates {
+		if _, statErr := os.Stat(path); statErr != nil {
+			continue
+		}
+		keyAuth, keyErr := gogitssh.NewPublicKeysFromFile(user, path, "")
+		if keyErr == nil {
+			return keyAuth, nil
+		}
+		lastErr = fmt.Errorf("%s: %w", path, keyErr)
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and the default SSH key needs a passphrase da cannot prompt for; run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent: %w", rawURL, lastErr)
+	}
+	return nil, fmt.Errorf("git ssh auth for %s: no SSH agent (SSH_AUTH_SOCK unset) and no default SSH key found in %s (looked for id_ed25519, id_rsa, id_ecdsa); run `eval $(ssh-agent) && ssh-add` first, or export SSH_AUTH_SOCK to your running agent", rawURL, sshDir)
+}
+
+// sshConfigIdentityFiles returns the IdentityFile paths <sshDir>/config
+// declares for host, in file order, tilde-expanded. It implements just the
+// slice of ssh_config(5) this fetcher needs — literal/glob (`*`/`?`) `Host`
+// patterns naming one or more `IdentityFile` lines — instead of pulling in a
+// full config-parser dependency. A missing config file or no matching block
+// yields nil, so the caller falls through to the OpenSSH default identity
+// list unchanged.
+func sshConfigIdentityFiles(sshDir, host string) []string {
+	data, err := os.ReadFile(filepath.Join(sshDir, "config"))
+	if err != nil {
+		return nil
+	}
+	home, _ := os.UserHomeDir() // best-effort tilde-expansion below
+
+	var files []string
+	matched := false
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || strings.HasPrefix(fields[0], "#") {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "host":
+			matched = hostPatternMatches(fields[1:], host)
+		case "identityfile":
+			if matched {
+				files = append(files, expandTildePath(fields[1], home))
+			}
+		}
+	}
+	return files
+}
+
+// hostPatternMatches reports whether any of an ssh_config `Host` line's
+// literal/glob (`*`/`?`) patterns matches host.
+func hostPatternMatches(patterns []string, host string) bool {
+	for _, pat := range patterns {
+		if ok, _ := filepath.Match(pat, host); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// expandTildePath expands a leading "~/" in path against home. Returns path
+// unchanged when it has no such prefix or home is unknown.
+func expandTildePath(path, home string) string {
+	if home == "" || !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	return filepath.Join(home, path[2:])
+}
+
 func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, cacheDir, false)
+}
+
+// FetchRefresh resolves the ref→SHA, then serves the SHA-addressed cache unless
+// forceRefresh is set (a stale cache key), in which case it re-reads the layer
+// from the freshly cloned worktree and rewrites the cache.
+func (f *gitFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
 	ref := parts.Version
 	if ref == "" {
 		ref = src.Ref
@@ -277,8 +496,10 @@ func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (Fe
 	if sha == "" {
 		return FetchedLayer{}, fmt.Errorf("git ref %q not found at %s", ref, src.URL)
 	}
-	if cached, ok := readCachedLayer(cacheDir, sha); ok {
-		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true}, nil
+	if !forceRefresh {
+		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
+		}
 	}
 
 	fh, err := wfs.Open(filepath.FromSlash(parts.LayerPath))
@@ -294,7 +515,7 @@ func (f *gitFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (Fe
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
-	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
+	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: CacheKeyInputs{ResolvedCommit: sha}}, nil
 }
 
 // gitFullRef expands a bare branch/tag name to a full refs/heads/<name> so
@@ -319,6 +540,13 @@ type httpFetcher struct {
 }
 
 func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (FetchedLayer, error) {
+	return f.FetchRefresh(src, parts, cacheDir, false)
+}
+
+// FetchRefresh GETs the layer, then serves the SHA-addressed cache unless
+// forceRefresh is set (a stale cache key), in which case it rewrites the cache
+// with the freshly fetched bytes so the upstream is re-validated.
+func (f *httpFetcher) FetchRefresh(src Source, parts LayerRefParts, cacheDir string, forceRefresh bool) (FetchedLayer, error) {
 	url := strings.TrimRight(src.URL, "/") + "/" + strings.TrimLeft(parts.LayerPath, "/")
 	if !strings.HasPrefix(strings.ToLower(url), "https://") {
 		return FetchedLayer{}, fmt.Errorf("http source url must be https: %q", url)
@@ -346,13 +574,24 @@ func (f *httpFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (F
 		return FetchedLayer{}, fmt.Errorf("reading %s: %w", url, err)
 	}
 	sha := contentHash(data)
-	if cached, ok := readCachedLayer(cacheDir, sha); ok {
-		return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true}, nil
+	// Capture the upstream validators (ETag / Last-Modified) the http cache-key
+	// default prefers over a content digest (config-distribution-model §7A.4), so
+	// the resolver can derive an effective key that re-checks on a validator
+	// change even when the SHA-addressed bytes are still cached.
+	keyInputs := CacheKeyInputs{
+		ETag:          resp.Header.Get("ETag"),
+		LastModified:  resp.Header.Get("Last-Modified"),
+		ContentDigest: sha,
+	}
+	if !forceRefresh {
+		if cached, ok := readCachedLayer(cacheDir, sha); ok {
+			return FetchedLayer{Data: cached, ResolvedSHA: sha, CacheHit: true, KeyInputs: keyInputs}, nil
+		}
 	}
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
-	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
+	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: keyInputs}, nil
 }
 
 // --- local fetcher ---------------------------------------------------------
@@ -376,8 +615,13 @@ func (f *localFetcher) Fetch(src Source, parts LayerRefParts, cacheDir string) (
 		return FetchedLayer{}, fmt.Errorf("reading local layer %s: %w", path, err)
 	}
 	sha := contentHash(data)
+	// A local source has no committed SHA to pin against, so its working-tree
+	// content IS the content (config-distribution-model §7A.4 / D6): mark the tree
+	// dirty and supply the content hash as the precise worktree key, so authoring
+	// before a commit still derives a distinct effective cache key.
+	keyInputs := CacheKeyInputs{WorktreeDirty: true, WorktreeContentHash: sha}
 	if err := writeCachedLayer(cacheDir, sha, data); err != nil {
 		return FetchedLayer{}, err
 	}
-	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false}, nil
+	return FetchedLayer{Data: data, ResolvedSHA: sha, CacheHit: false, KeyInputs: keyInputs}, nil
 }

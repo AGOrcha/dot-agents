@@ -191,19 +191,51 @@ func resolveSnapshot(layers []ResolvedLayer) (*Snapshot, error) {
 		}
 	}
 
+	// §15 D1a policy-authority pass (Phase 1): apply the AUTHORITY-RANK total
+	// order, the source-authority registry write-guard, and any surviving
+	// value-locks / deny-locks BEFORE the effective config is decoded. It runs
+	// here so BOTH the flat and layered resolvers honor it from one path; it is
+	// additive (a no-op when no layer declares `locks` or `authority_grants`),
+	// so shipped value-merge behavior is unchanged. A self-blessing grant or a
+	// force-allow lock aborts the resolve fail-closed.
+	collisions, authViols, err := applyAuthority(layers, merged)
+	if err != nil {
+		return nil, err
+	}
+
 	effective, err := decodeEffective(merged)
 	if err != nil {
 		return nil, err
 	}
 
 	snap := &Snapshot{
-		Effective:  effective,
-		Provenance: map[string]FieldProvenance{},
-		Layers:     layers,
-		Warnings:   warnings,
+		Effective:           effective,
+		Provenance:          map[string]FieldProvenance{},
+		Layers:              layers,
+		Warnings:            warnings,
+		LockCollisions:      normalizeCollisions(collisions),
+		AuthorityViolations: normalizeViolations(authViols),
 	}
 	snap.populateProvenance()
 	return snap, nil
+}
+
+// normalizeCollisions guarantees a non-nil slice so the Snapshot marshals
+// lock_collisions to [] not null.
+func normalizeCollisions(c []LockCollision) []LockCollision {
+	if c == nil {
+		return []LockCollision{}
+	}
+	return c
+}
+
+// normalizeViolations guarantees a non-nil slice so the Snapshot marshals
+// authority_violations to [] not null.
+func normalizeViolations(v []AuthorityViolation) []AuthorityViolation {
+	if v == nil {
+		return []AuthorityViolation{}
+	}
+	return v
 }
 
 // populateProvenance fills snap.Provenance with the per-field layer stack for
@@ -385,6 +417,30 @@ type LockedLayer struct {
 	// source cache_ttl. Empty means never re-check automatically (requires an
 	// explicit `da config sync`).
 	TTLExpiresAt string `json:"ttl_expires_at,omitempty"`
+	// CacheKey is the effective content cache key the layer resolved at
+	// (config-distribution-model §7A.4), derived from the source's cache_keys
+	// override and the kind default via EffectiveCacheKey. On a later resolve it is
+	// compared against the freshly-derived key (CacheKeyStale): a mismatch — or the
+	// AlwaysRevalidate sentinel from a `--refresh` / always_revalidate force escape
+	// — means the SHA-addressed cache may no longer be served and the upstream must
+	// be re-checked. Omitted for a pre-cache-key lock (treated as stale on read).
+	CacheKey string `json:"cache_key,omitempty"`
+}
+
+// cacheKeyInputs reconstructs the minimal CacheKeyInputs an offline re-derive
+// needs from the recorded SHA, so re-running EffectiveCacheKey against the same
+// lock yields the same kind-default key (config-distribution-model §7A.4). The
+// recorded SHA is the git commit (git), content hash (http/local), or manifest
+// digest (oci); it is mirrored into every kind's default field so whichever kind
+// reads it gets the recorded value. Offline has no fresh validators or selector
+// facts, so override selectors that depend on live inputs derive their "absent"
+// contribution — only a force escape (handled separately) flips the result.
+func (l LockedLayer) cacheKeyInputs() CacheKeyInputs {
+	return CacheKeyInputs{
+		ResolvedCommit: l.ResolvedSHA,
+		ContentDigest:  l.ResolvedSHA,
+		OCIDigest:      l.ResolvedSHA,
+	}
 }
 
 // WriteConfigLock writes the resolved config-layer state to .agentsrc.lock via
@@ -411,29 +467,56 @@ func WriteConfigLock(projectPath string, layers map[string]LockedLayer) error {
 	return lf.Flush()
 }
 
-// readLockedLayers loads the "config" section of an existing lockfile, or an
-// empty map when the file or section is absent. It is the offline / TTL source
-// of last-resolved SHAs.
-func readLockedLayers(projectPath string) (map[string]LockedLayer, error) {
-	lf, err := agentslock.Open(AgentsLockPath(projectPath))
+// readLockedLayersFromUnits is the single offline read of last-resolved layer
+// SHAs after the §7A cutover (section-7a-units-lock-wiring). It reads through
+// ReadUnits — the one-time on-read migration entry point: a lockfile that
+// already carries the authoritative "units" section is read directly; a legacy
+// "config"-only lock is transparently upgraded to the units model on this first
+// read (migrateLegacyUnits) and then read from units. There is NO permanent
+// dual-read of the legacy section — units is the steady state, and the legacy
+// section's only remaining reader is the migration step inside ReadUnits.
+//
+// It is the offline / cache source of last-resolved SHAs for ResolveLocked,
+// VerifyLayerLocks, and the offline branch of resolveExtends.
+func readLockedLayersFromUnits(projectPath string) (map[string]LockedLayer, error) {
+	units, err := ReadUnits(projectPath)
 	if err != nil {
 		return nil, err
 	}
-	locked := map[string]LockedLayer{}
-	if _, err := lf.Section(LockSectionConfig, &locked); err != nil {
-		return nil, err
+	return layersFromUnits(units.Units), nil
+}
+
+// layersFromUnits projects the §7A units map into the LockedLayer shape the
+// offline resolver/verify reader consumes, keeping only UnitKindLayer entries
+// (artifacts are not extends layers). The unit's content digest is the resolved
+// SHA the offline cache is keyed by, and FetchedAt + CacheKey carry through — so
+// the §7A.4 cache-key gate (CacheKeyStaleForLayer) keeps working on a units-only
+// lock. The clock-based TTLExpiresAt is intentionally NOT carried: §7A staleness
+// is content-hash driven (the §7A redesign retired the cache-TTL clock), so a
+// units-sourced layer has no TTL.
+func layersFromUnits(units map[string]LockedUnit) map[string]LockedLayer {
+	layers := make(map[string]LockedLayer, len(units))
+	for ref, u := range units {
+		if u.Kind != UnitKindLayer {
+			continue
+		}
+		layers[ref] = LockedLayer{
+			ResolvedSHA: u.Digest,
+			FetchedAt:   u.FetchedAt,
+			CacheKey:    u.CacheKey,
+		}
 	}
-	return locked, nil
+	return layers
 }
 
 // --- LayeredResolver --------------------------------------------------------
 
 // LayeredResolver extends the FLAT layer set with tier-1 `extends` imports
 // (spec §6 pass 1): product defaults → user-local → extends[] (left-to-right,
-// fetched over git/http/local) → repo-local. It resolves each extends ref to a
-// source, enforces the tier constraint (oci in extends is a schema error),
-// fetches + caches the layer content-addressed by SHA, validates it against the
-// layer schema, and records the resolved SHAs to .agentsrc.lock.
+// fetched over git/http/local/oci) → repo-local. It resolves each extends ref to
+// a source (any source type may supply a layer — config-distribution-model §15
+// D13), fetches + caches the layer content-addressed by SHA, validates it
+// against the layer schema, and records the resolved SHAs to .agentsrc.lock.
 type LayeredResolver struct {
 	flat *FlatResolver
 	// fetchers overrides the per-source-type Fetcher (test seam). When a type
@@ -442,6 +525,11 @@ type LayeredResolver struct {
 	// offline forces use of the last resolved SHA from the lockfile instead of
 	// contacting any source; a cache_hit_offline warning is emitted per layer.
 	offline bool
+	// refresh is the per-resolve `--refresh` force escape (config-distribution-
+	// model §7A.4 / R6): when true every source's effective cache key becomes the
+	// AlwaysRevalidate sentinel, so the offline cache may not be served and a fresh
+	// resolve re-checks upstream regardless of the recorded key.
+	refresh bool
 	// now is the clock seam for TTL math (test override). Nil uses time.Now.
 	now func() time.Time
 	// emitter receives config.* audit events emitted during resolution. Nil
@@ -477,6 +565,15 @@ func (r *LayeredResolver) WithFetcher(sourceType string, f Fetcher) *LayeredReso
 // WithOffline toggles offline mode (use last resolved SHA from the lockfile).
 func (r *LayeredResolver) WithOffline(offline bool) *LayeredResolver {
 	r.offline = offline
+	return r
+}
+
+// WithRefresh toggles the per-resolve `--refresh` force escape: when true every
+// source's effective cache key becomes AlwaysRevalidate, so the offline cache is
+// never served and an online resolve re-checks upstream unconditionally
+// (config-distribution-model §7A.4 / R6). Returns the receiver for chaining.
+func (r *LayeredResolver) WithRefresh(refresh bool) *LayeredResolver {
+	r.refresh = refresh
 	return r
 }
 
@@ -557,10 +654,68 @@ func (r *LayeredResolver) Resolve(projectPath string) (*Snapshot, error) {
 	emitFieldEvents(trace, snap)
 	trace.emit(effectiveProducedEvent(repoLayerID(snap), len(snap.Layers)))
 
-	if err := WriteConfigLock(projectPath, locked); err != nil {
-		return nil, fmt.Errorf("writing %s: %w", AgentsLockFile, err)
+	// §7A units-lock cutover (section-7a-units-lock-wiring): the units section +
+	// inputs_digest is now the AUTHORITATIVE lock. A single resolve writes it
+	// from one path here in Resolve — not split across EnsureResolved — so EVERY
+	// resolve caller (`da config sync`, `da install`, and the EnsureResolved
+	// stale-repair path that drives this same Resolve) emits the §7A lock model
+	// uniformly. Writing it here is what removes the stale-repair split-brain:
+	// staleness reads the units section + inputs_digest, so the resolve that
+	// repairs a stale lock must write exactly those. The legacy §7 `config`
+	// section is no longer written — units-only is the steady state; a legacy
+	// config-only lock is upgraded once on read (see ReadUnits).
+	if err := r.writeUnitsLock(projectPath, snap, locked); err != nil {
+		return nil, fmt.Errorf("writing %s units: %w", AgentsLockFile, err)
 	}
 	return snap, nil
+}
+
+// writeUnitsLock writes the authoritative §7A lock — the units section +
+// inputs_digest — from the resolved-layer set Resolve just produced. The units
+// map mirrors every resolved `extends` layer as a UnitKindLayer (its resolved
+// SHA → digest, its fetch timestamps carried verbatim); inputs_digest is the
+// whole-normalized hash of the local config scopes computed against the
+// resolver's own user-local seam, so a later staleness check compares
+// like-for-like. A flat/local-only project (no extends) still gets a lockfile
+// carrying a non-empty inputs_digest and an empty units map — the property §7A
+// wires in.
+func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, locked map[string]LockedLayer) error {
+	digest, err := ComputeInputsDigest(projectPath, r.effectiveUserLocalPath())
+	if err != nil {
+		return err
+	}
+	units := make(map[string]LockedUnit, len(locked))
+	for ref, l := range locked {
+		units[ref] = LockedUnit{
+			Kind:          UnitKindLayer,
+			Digest:        l.ResolvedSHA,
+			FetchedAt:     l.FetchedAt,
+			LastCheckedAt: l.FetchedAt,
+			CacheKey:      l.CacheKey,
+		}
+	}
+	// kind:profile units (R2): the resolved profile fragments are recorded as
+	// first-class lock units so a profile resolution reproduces from the lock
+	// without re-resolving. They are derived from the SAME snapshot the resolve just
+	// produced (no divergent re-derivation) and timestamped on the resolver's clock
+	// seam (r.clock(), test-overridable) — not a fresh time.Now() — so the lock is
+	// byte-stable under a fixed clock. A malformed layering_policy / authored profile
+	// fails the resolve closed here (R9), exactly as `da config explain` does, rather
+	// than silently writing a lock that omits the unit.
+	profileUnits, err := ProfileUnitsForSnapshot(snap, r.clock())
+	if err != nil {
+		return err
+	}
+	return WriteUnitsLock(projectPath, UnitsLock{Units: units, InputsDigest: digest, ProfileUnits: profileUnits})
+}
+
+// effectiveUserLocalPath returns the user-local manifest path the resolver
+// resolves against (the test seam when set, else the default
+// <AgentsHome>/.agentsrc.json), so inputs_digest is computed over the exact
+// same user-local scope the layer stack merged — staleness and resolution can
+// never disagree on which user-local file is authoritative.
+func (r *LayeredResolver) effectiveUserLocalPath() string {
+	return r.flat.userLocalPath
 }
 
 // emitFieldEvents emits config.field.overridden for every effective field that
@@ -668,11 +823,14 @@ func (r *LayeredResolver) resolveExtends(trace auditTrace, projectPath string, r
 	}
 
 	sources := indexSources(rc.Sources)
-	var prevLocked map[string]LockedLayer
-	if r.offline {
-		if prevLocked, err = readLockedLayers(projectPath); err != nil {
-			return nil, nil, nil, err
-		}
+	// Read the prior lock on every resolve, not just offline: the online path
+	// consults each layer's recorded cache key (CacheKeyStaleForLayer) to decide
+	// whether a force escape or a cache_keys override edit must force a
+	// cache-bypassing re-fetch (config-distribution-model §7A.4 / R6). A missing
+	// or legacy lock yields an empty map, so a first resolve fetches normally.
+	prevLocked, err := readLockedLayersFromUnits(projectPath)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	// Fetch all layers concurrently. Each goroutine writes its own result slot
@@ -741,8 +899,10 @@ func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sour
 	if !ok {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonNotFound, Err: fmt.Errorf("source %q not declared", parts.SourceID)}
 	}
-	// Tier constraint (spec §4): extends must reference git|http|local — oci is
-	// packages-only. Enforced before any fetch so the error surfaces early.
+	// Source selection (config-distribution-model §15 D13): any source type —
+	// git, http, local, or oci — may supply a config layer. An oci layer is
+	// guarded by the config-layer media type inside its fetcher, not rejected
+	// here. An unsupported source type still surfaces as a schema error.
 	fetcher, err := r.fetcherFor(src.Type)
 	if err != nil {
 		return ResolvedLayer{}, LockedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonSchema, Err: err}
@@ -765,7 +925,7 @@ func (r *LayeredResolver) resolveOneLayer(trace auditTrace, entry LayerRef, sour
 	warns = append(warns, schemaWarns...)
 
 	layer := ResolvedLayer{ID: entry.Ref, Present: true, Raw: sanitized}
-	lock := r.lockEntry(src, fetched.ResolvedSHA)
+	lock := r.lockEntry(src, fetched)
 	// The layer is validated and admitted to the stack: record its resolution
 	// with the number of top-level fields it contributes and its resolved SHA.
 	trace.emit(layerResolveEvent(entry.Ref, fetched.ResolvedSHA, len(sanitized)))
@@ -781,16 +941,45 @@ func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entr
 		if !ok || prev.ResolvedSHA == "" {
 			return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("offline and no resolved SHA in lockfile")}
 		}
+		// Cache-key staleness gate (config-distribution-model §7A.4). Offline cannot
+		// re-derive a source's live validators (an http ETag, a local worktree
+		// hash), so a recorded-vs-recomputed mismatch is unreliable here; only a
+		// force escape — `--refresh` or the source's always_revalidate marker, both
+		// of which make the effective key the AlwaysRevalidate sentinel — blocks an
+		// offline serve. The caller explicitly asked to revalidate, and offline
+		// cannot, so it fails loudly rather than silently serving stale content.
+		if r.effectiveCacheKey(src, prev.cacheKeyInputs()) == AlwaysRevalidate {
+			return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("offline and cache key revalidation required for %s", entry.Ref)}
+		}
 		data, ok := readCachedLayer(cacheDir, prev.ResolvedSHA)
 		if !ok {
 			return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: fmt.Errorf("offline and SHA %s not in cache", prev.ResolvedSHA)}
 		}
 		warns := []ProvenanceWarning{{FieldPath: entry.Ref, AttemptedByLayer: entry.Ref, Outcome: "cache_hit_offline"}}
 		trace.emit(sourceFetchEvent(parts.SourceID, prev.ResolvedSHA, true))
-		return FetchedLayer{Data: data, ResolvedSHA: prev.ResolvedSHA, CacheHit: true}, warns, nil
+		return FetchedLayer{Data: data, ResolvedSHA: prev.ResolvedSHA, CacheHit: true, KeyInputs: prev.cacheKeyInputs()}, warns, nil
 	}
-	fetched, err := fetcher.Fetch(src, parts, cacheDir)
+	// Cache-key consumption online (config-distribution-model §7A.4 / R6): when a
+	// previously-locked layer's recorded cache key is now stale — a `--refresh` /
+	// always_revalidate force escape, or a cache_keys override edit that changed
+	// the key shape — force the fetcher to bypass its SHA-addressed cache serve so
+	// the upstream is actually re-validated. Without this the recorded key would be
+	// written but never acted on online, leaving cache_keys a silent no-op on the
+	// resolve path. A first resolve (no prior lock) has nothing to compare and
+	// fetches normally.
+	forceRefresh := false
+	if prev, ok := prevLocked[entry.Ref]; ok && prev.ResolvedSHA != "" {
+		forceRefresh = r.CacheKeyStaleForLayer(src, prev)
+	}
+	fetched, err := fetchWithRefresh(fetcher, src, parts, cacheDir, forceRefresh)
 	if err != nil {
+		// A fetcher that already classified the failure (e.g. the oci media-type
+		// guard's schema error) keeps its reason; otherwise the cause is treated
+		// as a transport failure.
+		var ie *ImportError
+		if errors.As(err, &ie) {
+			return FetchedLayer{}, nil, err
+		}
 		return FetchedLayer{}, nil, &ImportError{Ref: entry.Ref, SourceID: parts.SourceID, Reason: ReasonTransport, Err: err}
 	}
 	trace.emit(sourceFetchEvent(parts.SourceID, fetched.ResolvedSHA, fetched.CacheHit))
@@ -798,17 +987,118 @@ func (r *LayeredResolver) fetchLayer(trace auditTrace, parts LayerRefParts, entr
 }
 
 // lockEntry builds the lockfile entry for a resolved layer, computing the TTL
-// expiry from the source cache_ttl. An unparseable or absent cache_ttl yields no
-// TTL (never auto-re-check), matching spec §7 "absent means never re-check".
-func (r *LayeredResolver) lockEntry(src Source, sha string) LockedLayer {
+// expiry from the source cache_ttl and the effective content cache key from the
+// source's cache_keys override + the fetched facts. An unparseable or absent
+// cache_ttl yields no TTL (never auto-re-check), matching spec §7 "absent means
+// never re-check". The recorded CacheKey is what a later resolve compares against
+// (CacheKeyStale) to decide whether the SHA-addressed cache may be served.
+func (r *LayeredResolver) lockEntry(src Source, fetched FetchedLayer) LockedLayer {
 	now := r.clock()
-	entry := LockedLayer{ResolvedSHA: sha, FetchedAt: now.UTC().Format(time.RFC3339)}
+	entry := LockedLayer{
+		ResolvedSHA: fetched.ResolvedSHA,
+		FetchedAt:   now.UTC().Format(time.RFC3339),
+		CacheKey:    r.effectiveCacheKey(src, withResolvedSHA(fetched.KeyInputs, fetched.ResolvedSHA)),
+	}
 	if src.CacheTTL != "" {
 		if d, err := time.ParseDuration(src.CacheTTL); err == nil && d > 0 {
 			entry.TTLExpiresAt = now.Add(d).UTC().Format(time.RFC3339)
 		}
 	}
 	return entry
+}
+
+// effectiveCacheKey derives the source's effective content cache key
+// (config-distribution-model §7A.4) from its declared cache_keys override, the
+// kind default for its type, and the facts the fetcher observed, threading the
+// resolver-level `--refresh` force escape through CacheKeyOptions. It is the
+// single point the resolver consults EffectiveCacheKey, so the recorded key and
+// the offline-serve staleness check derive identically.
+//
+// Before deriving, it gathers the live facts for the source's declared {env} and
+// {dir} selectors (the fetcher cannot know which env vars / dirs a source pins),
+// so an override that keys on a credential, feature flag, or marker dir actually
+// re-checks when that value changes — the consumption point that makes a non-
+// default cache_keys stop being a silent no-op.
+func (r *LayeredResolver) effectiveCacheKey(src Source, in CacheKeyInputs) string {
+	in = gatherOverrideFacts(src.CacheKeys, in)
+	return EffectiveCacheKey(SourceKindOf(src.Type), src.CacheKeys, in, CacheKeyOptions{Refresh: r.refresh})
+}
+
+// withResolvedSHA backfills the kind-primary cache-key facts from the resolved
+// SHA when the fetcher left them empty (config-distribution-model §7A.4). The
+// ResolvedSHA IS the git commit / http+local content hash / oci manifest digest,
+// so it is the authoritative content identity for every kind default; mirroring
+// it into each kind's primary field lets the resolver derive a stable, non-empty
+// key even from a fetcher that only reports ResolvedSHA. Already-populated facts
+// (e.g. a fetcher's ETag or precise worktree hash) are preserved.
+func withResolvedSHA(in CacheKeyInputs, sha string) CacheKeyInputs {
+	if sha == "" {
+		return in
+	}
+	if in.ResolvedCommit == "" {
+		in.ResolvedCommit = sha
+	}
+	if in.ContentDigest == "" {
+		in.ContentDigest = sha
+	}
+	if in.OCIDigest == "" {
+		in.OCIDigest = sha
+	}
+	return in
+}
+
+// gatherOverrideFacts folds the live values of a source's declared {env} and
+// {dir} cache-key selectors into the inputs, leaving already-populated facts
+// (e.g. the fetcher's FileContents) untouched. Env values are read from the
+// process environment and dir presence from the filesystem — the only override
+// selectors whose facts the resolver, not the fetcher, must supply. A nil/empty
+// override returns the inputs unchanged.
+func gatherOverrideFacts(keys *CacheKeys, in CacheKeyInputs) CacheKeyInputs {
+	if keys.IsZero() {
+		return in
+	}
+	if len(keys.Env) > 0 {
+		env := map[string]string{}
+		for _, name := range keys.Env {
+			if v, ok := os.LookupEnv(name); ok {
+				env[name] = v
+			}
+		}
+		in.EnvValues = env
+	}
+	if len(keys.Dir) > 0 {
+		present := map[string]bool{}
+		for _, dir := range keys.Dir {
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				present[dir] = true
+			}
+		}
+		in.DirPresent = present
+	}
+	return in
+}
+
+// CacheKeyStaleForLayer reports whether the lock's recorded cache key for a
+// resolved layer is stale (config-distribution-model §7A.4) given the source's
+// CURRENT declared cache_keys, without contacting the upstream. It re-derives the
+// effective key from the recorded SHA facts plus the live override and compares
+// it against the recorded key via CacheKeyStale, so it detects:
+//
+//   - a `--refresh` / always_revalidate force escape (AlwaysRevalidate is always
+//     stale); and
+//   - a cache_keys override edit that changes the key shape even from the same
+//     SHA facts — e.g. adding an {env}/{git:tags} selector switches a source from
+//     the kind default to a composite override key, which no longer matches.
+//
+// Live-validator drift an http ETag or a local worktree edit would cause is not
+// detectable here (those facts are not in the lock); that axis is the online
+// re-fetch's job. fetchLayer consults this on the online resolve path to force a
+// cache-bypassing re-fetch when the recorded key is stale, and doctor/sync use it
+// to nudge a re-resolve — it is the consumer that activates staleness.go's
+// CacheKeyStale on the cache-key axis.
+func (r *LayeredResolver) CacheKeyStaleForLayer(src Source, locked LockedLayer) bool {
+	effective := r.effectiveCacheKey(src, locked.cacheKeyInputs())
+	return CacheKeyStale(locked.CacheKey, effective)
 }
 
 // indexSources maps source id → Source for ref lookup. Sources without an id

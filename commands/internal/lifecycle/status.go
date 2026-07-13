@@ -1,7 +1,6 @@
 package lifecycle
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,25 +23,16 @@ const (
 	statusCodexDir                = ".codex"
 	statusAgentsDir               = ".agents"
 	statusOpenCodeDir             = ".opencode"
-	statusGitHubDir               = ".github"
 	statusLocalFileFmt            = "    %s○%s %s %s(local file)%s\n"
-	statusLocalFileIndentedFmt    = "      %s○%s %s %s(local file)%s\n"
-	statusCursorDir               = ".cursor"
-	statusAgentsMarkdown          = "AGENTS.md"
-	statusCopilotInstructions     = "copilot-instructions.md"
-	statusCopilotMCPJSON          = "mcp.json"
 	statusClaudeDir               = ".claude"
 	statusClaudeSettingsLocalJSON = "settings.local.json"
 	statusClaudeSettingsJSON      = "settings.json"
-	globalRulesPrefix             = "global--"
-	statusClaudeMCPJSON           = ".mcp.json"
-	statusCodexConfigToml         = "config.toml"
-	statusOpenCodeJSON            = "opencode.json"
-	statusVSCodeDir               = ".vscode"
 	// statusAuditLinkOkFormat and statusAuditLinkBrokenFormat are shared by
-	// the printSymlinkDirAudit / printSymlinkAudit helpers so per-platform
-	// audit output stays byte-identical across rules, MCP, agents, skills,
-	// hooks. Keep the 6-leading-space indentation; tests rely on it.
+	// the surviving printSymlinkDirAudit helper (still exported as
+	// PrintSymlinkDirAudit) so its audit output stays byte-identical. The
+	// per-platform audit renderers themselves moved to the
+	// internal/platform/<name>.go PrintAudit implementations in Phase 5.
+	// Keep the 6-leading-space indentation; tests rely on it.
 	statusAuditLinkOkFormat     = "      %s✓%s %s %s→ %s%s\n"
 	statusAuditLinkBrokenFormat = "      %s✗%s %s %s→ %s (broken)%s\n"
 )
@@ -84,26 +74,16 @@ type statusJSONPlatform struct {
 	Broken  bool   `json:"broken"`
 }
 
+// statusJSONProject is the fleet/link-health view of a managed project. Per
+// §7A.6, status sheds all config inspection (manifest presence, lockfile drift,
+// last-refresh metadata) — `da config explain` is the single effective-config
+// truth surface. This struct therefore carries only project identity and
+// per-platform link health.
 type statusJSONProject struct {
-	Name          string               `json:"name"`
-	Path          string               `json:"path"`
-	PathExists    bool                 `json:"path_exists"`
-	Platforms     []statusJSONPlatform `json:"platforms"`
-	ManifestFound bool                 `json:"manifest_found"`
-	LastRefreshed string               `json:"last_refreshed,omitempty"`
-	Lock          *statusJSONLock      `json:"lock,omitempty"`
-}
-
-// statusJSONLock summarizes a project's .agentsrc.lock state for the JSON
-// report (config-v2 p2). It is omitted entirely when the manifest declares no
-// `extends`/`packages` units (lock drift is not applicable). The total_layers/
-// drifted_layers JSON keys are retained for output-contract stability; they now
-// count units. DriftedLayers lists the non-OK unit refs so an AI agent can
-// reason about exactly which units need a re-sync.
-type statusJSONLock struct {
-	Present       bool     `json:"present"`
-	TotalLayers   int      `json:"total_layers"`
-	DriftedLayers []string `json:"drifted_layers,omitempty"`
+	Name       string               `json:"name"`
+	Path       string               `json:"path"`
+	PathExists bool                 `json:"path_exists"`
+	Platforms  []statusJSONPlatform `json:"platforms"`
 }
 
 // StatusConfigLoader is the narrow collaborator status.go's fault-injectable
@@ -228,11 +208,10 @@ func NewStatusCmd(deps Deps, jsonOutput func() bool) *cobra.Command {
 		Use:   "status",
 		Short: "Show managed projects and link health",
 		Long: `Summarizes the shared ~/.agents/ store, managed projects, and per-platform
-link health so you can quickly see whether configuration is present, stale, or broken.
+link health so you can quickly see whether the managed links are present or broken.
 
-The manifest line reflects declared skills, agents, hooks, MCP, and settings in
-.agentsrc.json; canonical hook bundle inventory on disk is da hooks list
-(or hooks show).
+Status is fleet/link-health only. For effective-config detail (manifest sources,
+declared skills/agents/hooks/MCP, lockfile state) run da config explain.
 
 Use --audit when you need file-level detail suitable for debugging or for an AI
 agent that must reason about the exact managed outputs.`,
@@ -388,91 +367,6 @@ func countClaudeRulesDir(rulesDir string) (int, int) {
 	return ok, warn
 }
 
-func printStatusProjectManifestSummary(path string) {
-	rc, rcErr := config.LoadAgentsRC(path)
-	if rcErr != nil {
-		fmt.Fprintf(os.Stdout, "  %s○%s manifest  %snot found — run: da install --generate%s\n",
-			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	sourceDesc := "local"
-	for _, src := range rc.Sources {
-		if src.Type == "git" && src.URL != "" {
-			u := src.URL
-			for _, prefix := range []string{"https://", "http://", "git@"} {
-				u = strings.TrimPrefix(u, prefix)
-			}
-			u = strings.TrimSuffix(u, ".git")
-			sourceDesc = "git: " + u
-			break
-		}
-	}
-	parts := []string{}
-	if len(rc.Skills) > 0 {
-		parts = append(parts, fmt.Sprintf("%d skill(s)", len(rc.Skills)))
-	}
-	if len(rc.Agents) > 0 {
-		parts = append(parts, fmt.Sprintf("%d agent(s)", len(rc.Agents)))
-	}
-	if rc.Hooks.IsEnabled() {
-		parts = append(parts, "hooks")
-	}
-	if rc.MCP.IsEnabled() {
-		parts = append(parts, "mcp")
-	}
-	detail := sourceDesc
-	if len(parts) > 0 {
-		detail += "  •  " + strings.Join(parts, "  ")
-	}
-	fmt.Fprintf(os.Stdout, "  %s✓%s manifest  %s%s%s\n",
-		ui.Green, ui.Reset, ui.Dim, detail, ui.Reset)
-}
-
-// printStatusProjectLockSummary renders the per-project .agentsrc.lock state:
-// a single line summarizing how many declared `extends`/`packages` units are
-// locked and whether any drift (missing/extra) exists (config-v2 p2). Projects
-// that declare no units, or whose manifest cannot be read, print nothing —
-// the manifest summary line already owns the missing/corrupt-manifest case and
-// a local-only manifest has no lock to report.
-func printStatusProjectLockSummary(path string) {
-	drift, err := config.LockDrift(path)
-	if err != nil || !drift.HasDeclaredUnits {
-		return
-	}
-	if !drift.LockPresent {
-		fmt.Fprintf(os.Stdout, "  %s!%s lock  %sno .agentsrc.lock — run: da install%s\n",
-			ui.Yellow, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	problems := drift.Problems()
-	if len(problems) == 0 {
-		fmt.Fprintf(os.Stdout, "  %s✓%s lock  %s%d unit(s) locked%s\n",
-			ui.Green, ui.Reset, ui.Dim, len(drift.Units), ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "  %s!%s lock  %s%d/%d unit(s) drifted — run: da config sync%s\n",
-		ui.Yellow, ui.Reset, ui.Dim, len(problems), len(drift.Units), ui.Reset)
-}
-
-// buildStatusJSONLock returns the JSON lock summary for one project, or nil
-// when the manifest declares no `extends`/`packages` units / cannot be read (lock drift
-// is not applicable). Read-only — it inspects the lock via config.LockDrift and
-// never writes.
-func buildStatusJSONLock(path string) *statusJSONLock {
-	drift, err := config.LockDrift(path)
-	if err != nil || !drift.HasDeclaredUnits {
-		return nil
-	}
-	out := &statusJSONLock{
-		Present:     drift.LockPresent,
-		TotalLayers: len(drift.Units),
-	}
-	for _, p := range drift.Problems() {
-		out.DriftedLayers = append(out.DriftedLayers, p.Ref)
-	}
-	return out
-}
-
 // RunStatus is the exported entry point used by the root commands/status.go
 // shim during the t08→t11 window. After t11 splits seams_test.go into
 // commands/lifecycle/seams_test.go, the only remaining caller is the shim
@@ -542,8 +436,10 @@ func runStatus(audit bool, agentFilter string, deps StatusConfigLoader, jsonOut 
 
 // printStatusProjectBlock prints one managed project's status entry:
 // header, optional path line (suppressed when path matches ~/name),
-// missing-directory bullet, badge row, manifest summary, last-refreshed
-// timestamp, and the audit block when requested.
+// missing-directory bullet, the per-platform link-health badge row, and the
+// audit block when requested. Per §7A.6 status is fleet/link-health only — it
+// no longer renders manifest, lockfile, or last-refreshed config inspection
+// (use `da config explain` for effective-config detail).
 func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string, audit bool, agentFilter string) {
 	path := cfg.GetProjectPath(name)
 	displayPath := config.DisplayPath(path)
@@ -563,12 +459,6 @@ func printStatusProjectBlock(name string, cfg *config.Config, agentsHome string,
 	}
 
 	printBadgeRow(collectProjectTextBadges(name, path, agentsHome, cfg))
-	printStatusProjectManifestSummary(path)
-	printStatusProjectLockSummary(path)
-
-	if ts := readRefreshTimestamp(path); ts != "" {
-		fmt.Fprintf(os.Stdout, "  %slast refreshed: %s%s\n", ui.Dim, ts, ui.Reset)
-	}
 
 	if audit {
 		printAudit(name, path, agentsHome, agentFilter, cfg)
@@ -605,13 +495,10 @@ func buildStatusJSONReport(cfg *config.Config, agentsHome, agentFilter string) (
 	for _, name := range names {
 		path := cfg.GetProjectPath(name)
 		project := statusJSONProject{
-			Name:          name,
-			Path:          path,
-			PathExists:    pathExists(path),
-			Platforms:     collectProjectPlatforms(name, path, agentsHome),
-			ManifestFound: pathExists(filepath.Join(path, config.AgentsRCFile)),
-			LastRefreshed: readRefreshTimestamp(path),
-			Lock:          buildStatusJSONLock(path),
+			Name:       name,
+			Path:       path,
+			PathExists: pathExists(path),
+			Platforms:  collectProjectPlatforms(name, path, agentsHome),
 		}
 		report.Projects = append(report.Projects, project)
 	}
@@ -627,6 +514,16 @@ func statusGitInfo(agentsHome string) statusJSONGit {
 	return statusJSONGit{Initialized: true, Branch: g.Branch, Remote: g.Remote}
 }
 
+// collectUserConfigPlatforms builds the JSON-mode user-config platform list by
+// delegating to each platform's UserBadge implementation (P4 platform-driven
+// diagnostics). The order is platform.All() filtered to the UserConfigReporter
+// implementors; copilot implements the interface but reports an empty/clean
+// badge (its documented user-config layer is not yet wired by dot-agents — see
+// PLATFORM_DIRS_DOCS), so appendPlatformIfPresent filters it out and the JSON
+// snapshot stays byte-identical to the pre-P4 inline implementation. cursor,
+// like claude/codex/opencode, reports its real managed ~/.cursor/hooks.json
+// user-home surface. agentFilter scopes the result by p.ID() the same way the
+// prior per-platform if-guards did.
 func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
 	homeDir, err := config.UserHomeDir()
 	if err != nil {
@@ -634,33 +531,20 @@ func collectUserConfigPlatforms(agentFilter string) []statusJSONPlatform {
 	}
 
 	var out []statusJSONPlatform
-	if agentFilter == "" || agentFilter == "claude" {
-		out = appendPlatformIfPresent(out, "Claude", countPlatformHealth(
-			[]string{
-				filepath.Join(homeDir, statusClaudeDir, "CLAUDE.md"),
-				filepath.Join(homeDir, statusClaudeDir, statusClaudeSettingsJSON),
-			},
-			[]string{
-				filepath.Join(homeDir, statusClaudeDir, "agents"),
-				filepath.Join(homeDir, statusClaudeDir, "skills"),
-			},
-		))
-	}
-	if agentFilter == "" || agentFilter == "codex" {
-		out = appendPlatformIfPresent(out, "Codex", countPlatformHealth(
-			[]string{
-				filepath.Join(homeDir, statusCodexDir, statusHooksJSON),
-			},
-			[]string{
-				filepath.Join(homeDir, statusCodexDir, "agents"),
-				filepath.Join(homeDir, statusAgentsDir, "skills"),
-			},
-		))
-	}
-	if agentFilter == "" || agentFilter == "opencode" {
-		out = appendPlatformIfPresent(out, "OpenCode", countPlatformHealth(nil, []string{
-			filepath.Join(homeDir, statusOpenCodeDir, "agent"),
-		}))
+	for _, p := range platform.All() {
+		if agentFilter != "" && agentFilter != p.ID() {
+			continue
+		}
+		r, ok := p.(platform.UserConfigReporter)
+		if !ok {
+			continue
+		}
+		badge := r.UserBadge(homeDir)
+		out = appendPlatformIfPresent(out, badge.Name, platformBadge{
+			name:    badge.Name,
+			present: badge.Present,
+			broken:  badge.Broken,
+		})
 	}
 	return out
 }
@@ -684,14 +568,13 @@ func collectProjectPlatforms(name, path, agentsHome string) []statusJSONPlatform
 	return out
 }
 
-// countPlatformHealth and platformStatus remain in place as collaborators of
-// collectUserConfigPlatforms and appendUserConfigPlatformBadge. The
-// user-config layer is still inlined here; P4 (orphan canonicals +
-// userconfig) is the next phase that moves those helpers into per-platform
-// UserBadge / UserBrokenLinks implementations. Both helpers are exercised
-// directly by status_test.go's countPlatformHealth/platformStatus block, so
-// they stay package-private but live in this file rather than being
-// re-derived ad hoc.
+// platformStatus remains in place as a collaborator of
+// appendPlatformIfPresent. The user-config badge math now lives in each
+// platform's UserBadge implementation (P4), so collectUserConfigPlatforms no
+// longer calls countPlatformHealth — it is kept only because status_test.go's
+// countPlatformHealth/platformStatus block exercises both helpers directly.
+// Both stay package-private but live in this file rather than being re-derived
+// ad hoc.
 func countPlatformHealth(files, dirs []string) platformBadge {
 	okCount, warnCount := 0, 0
 	addManagedCounts(&okCount, &warnCount, files, dirs)
@@ -896,42 +779,6 @@ func printBadgeRow(badges []platformBadge) {
 	fmt.Fprintln(os.Stdout)
 }
 
-// readRefreshTimestamp prefers refresh metadata in .agentsrc.json and falls back to
-// the legacy .agents-refresh marker.
-func readRefreshTimestamp(projectPath string) string {
-	if rc, err := config.LoadAgentsRC(projectPath); err == nil && rc.Refresh != nil && rc.Refresh.RefreshedAt != "" {
-		return formatRefreshDisplay(rc.Refresh.RefreshedAt)
-	}
-	return readLegacyRefreshTimestamp(projectPath)
-}
-
-func formatRefreshDisplay(ts string) string {
-	// Simplify ISO timestamp: 2026-03-12T05:18:11Z → 2026-03-12 05:18 UTC
-	ts = strings.Replace(ts, "T", " ", 1)
-	ts = strings.TrimSuffix(ts, "Z")
-	if len(ts) >= 16 {
-		ts = ts[:16] + " UTC"
-	}
-	return ts
-}
-
-func readLegacyRefreshTimestamp(projectPath string) string {
-	markerPath := filepath.Join(projectPath, ".agents-refresh")
-	f, err := os.Open(markerPath)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "refreshed_at=") {
-			return formatRefreshDisplay(strings.TrimPrefix(line, "refreshed_at="))
-		}
-	}
-	return ""
-}
-
 // PrintAudit is the exported entry point used by commands/doctor.go (still in
 // root before t09) to render the per-platform audit block. After t09 lands
 // doctor in this package, the only caller is intra-package and PrintAudit
@@ -940,23 +787,20 @@ func PrintAudit(name, path, agentsHome, agentFilter string, cfg *config.Config) 
 	printAudit(name, path, agentsHome, agentFilter, cfg)
 }
 
+// printAudit renders the per-platform audit block, dispatching over the
+// platform.AuditPrinter sister interface for every platform that survives the
+// agentFilter. Per Phase 5 of platform-driven-diagnostics the per-platform-
+// by-name helpers (printCursorAudit/printClaudeAudit/...) have moved into the
+// internal/platform/<name>.go PrintAudit implementations; this loop is the
+// single dispatch site, so adding a platform that implements AuditPrinter
+// surfaces in `da status --audit` and `da doctor --verbose` automatically.
 func printAudit(name, path, agentsHome, agentFilter string, cfg *config.Config) {
 	fmt.Fprintln(os.Stdout)
 
-	if agentFilter == "" || agentFilter == "cursor" {
-		printCursorAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "claude" {
-		printClaudeAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "codex" {
-		printCodexAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "opencode" {
-		printOpenCodeAudit(name, path, agentsHome)
-	}
-	if agentFilter == "" || agentFilter == "copilot" {
-		printCopilotAudit(name, path)
+	for _, p := range platform.Filter(platform.All(), agentFilter) {
+		if ap, ok := p.(platform.AuditPrinter); ok {
+			ap.PrintAudit(os.Stdout, name, path, agentsHome)
+		}
 	}
 	printSharedTargetRegistry(name, path, cfg)
 }
@@ -1097,87 +941,6 @@ func appendUserConfigPlatformBadge(badges []platformBadge, label, homeDir string
 	return badges
 }
 
-// cursorRuleSourceInfo classifies a cursor rule entry into srcType
-// ("global"|"project"|"local") and returns the user-display path it should
-// link to (empty for local files).
-func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo string) {
-	switch {
-	case strings.HasPrefix(entryName, globalRulesPrefix):
-		srcName := strings.TrimPrefix(entryName, globalRulesPrefix)
-		return "global", "~/.agents/rules/global/" + srcName
-	case strings.HasPrefix(entryName, projectName+"--"):
-		srcName := strings.TrimPrefix(entryName, projectName+"--")
-		return "project", "~/.agents/rules/" + projectName + "/" + srcName
-	}
-	return "local", ""
-}
-
-// printCursorRuleEntry renders one cursor rule entry's audit line.
-func printCursorRuleEntry(name, rulesDir, agentsHome string, entryName string) {
-	srcType, linkedTo := cursorRuleSourceInfo(entryName, name)
-	if srcType == "local" {
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
-		return
-	}
-	f := filepath.Join(rulesDir, entryName)
-	srcPath := strings.Replace(linkedTo, "~/.agents", agentsHome, 1)
-	srcPath = strings.Replace(srcPath, "~", os.Getenv("HOME"), 1)
-	if linked, _ := links.AreHardlinked(f, srcPath); linked {
-		fmt.Fprintf(os.Stdout, "      %s✓%s %s %s← %s%s\n", ui.Green, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s!%s %s %s(not linked to %s)%s\n", ui.Yellow, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
-	}
-}
-
-// printCursorRules renders all valid cursor rule entries in rulesDir; returns
-// the count of entries actually rendered (used to detect empty rule sets).
-func printCursorRules(name, rulesDir, agentsHome string, entries []os.DirEntry) int {
-	count := 0
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), ".dot-agents-backup") {
-			continue
-		}
-		printCursorRuleEntry(name, rulesDir, agentsHome, e.Name())
-		count++
-	}
-	return count
-}
-
-// printCursorMCPLink renders the .cursor/mcp.json audit line.
-func printCursorMCPLink(path string) {
-	cursorMCPPath := filepath.Join(path, statusCursorDir, statusCopilotMCPJSON)
-	if _, err := os.Lstat(cursorMCPPath); err != nil {
-		fmt.Fprintf(os.Stdout, "      %s-%s .cursor/mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	dest, isLink, isBroken := managedLinkBroken(cursorMCPPath)
-	if !isLink {
-		fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s(hard link or local file)%s\n", ui.Green, ui.Reset, ui.Dim, ui.Reset)
-		return
-	}
-	displayDest := config.DisplayPath(resolveLinkDest(cursorMCPPath, dest))
-	if isBroken {
-		fmt.Fprintf(os.Stdout, "      %s✗%s .cursor/mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s✓%s .cursor/mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-	}
-}
-
-func printCursorAudit(name, path, agentsHome string) {
-	fmt.Fprintf(os.Stdout, "    %sCursor%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, statusCursorDir, "rules")
-	entries, err := os.ReadDir(rulesDir)
-	if err != nil {
-		fmt.Fprintf(os.Stdout, "      %s(no .cursor/rules/)%s\n", ui.Dim, ui.Reset)
-		return
-	}
-	if printCursorRules(name, rulesDir, agentsHome, entries) == 0 {
-		fmt.Fprintf(os.Stdout, "      %s(no rules)%s\n", ui.Dim, ui.Reset)
-	}
-	printCursorMCPLink(path)
-	fmt.Fprintln(os.Stdout)
-}
-
 // PrintSymlinkDirAudit is the exported entry point used by
 // commands/seams_test.go (still in root before t11). Reversed when t11 splits
 // the test file per cluster.
@@ -1215,179 +978,4 @@ func printSymlinkDirAudit(dir, emptyLabel, nameFormat string) (int, int) {
 		fmt.Fprintf(os.Stdout, "      %s○%s %s %s(empty)%s\n", ui.Dim, ui.Reset, emptyLabel, ui.Dim, ui.Reset)
 	}
 	return okCount, brokenCount
-}
-
-// printSymlinkAudit reads a single symlink and prints its ✓/✗/(local file)/
-// (not linked) status with the supplied display label. A present path that is
-// not a managed link is a rendered/managed file on disk (e.g. .mcp.json,
-// .vscode/mcp.json), reported as "(local file)"; "(not linked)" is reserved
-// for a path that is truly absent.
-func printSymlinkAudit(linkPath, label string) {
-	if dest, isLink, isBroken := managedLinkBroken(linkPath); isLink {
-		displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
-		if isBroken {
-			fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-		} else {
-			fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-		}
-		return
-	}
-	if _, err := os.Lstat(linkPath); err == nil {
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-}
-
-func printClaudeAudit(_, path, _ string) {
-	fmt.Fprintf(os.Stdout, "    %sClaude Code%s\n", ui.Cyan, ui.Reset)
-	rulesDir := filepath.Join(path, statusClaudeDir, "rules")
-	if _, err := os.ReadDir(rulesDir); err != nil {
-		fmt.Fprintf(os.Stdout, "      %s(no %s/rules/)%s\n", ui.Dim, statusClaudeDir, ui.Reset)
-		fmt.Fprintln(os.Stdout)
-		return
-	}
-	printSymlinkDirAudit(rulesDir, statusClaudeDir+"/rules/", "%s")
-	// Claude MCP link (.mcp.json)
-	printSymlinkAudit(filepath.Join(path, statusClaudeMCPJSON), ".mcp.json")
-	fmt.Fprintln(os.Stdout)
-}
-
-func printCodexAudit(_, path, _ string) {
-	fmt.Fprintf(os.Stdout, "    %sCodex%s\n", ui.Cyan, ui.Reset)
-	printCodexAgentsMD(filepath.Join(path, statusAgentsMarkdown))
-	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusCodexConfigToml), ".codex/config.toml")
-	printCodexSymlinkAudit(filepath.Join(path, statusCodexDir, statusHooksJSON), ".codex/hooks.json")
-	printCodexSkillsAudit(filepath.Join(path, statusAgentsDir, "skills"))
-	printCodexAgentsAudit(filepath.Join(path, statusCodexDir, "agents"))
-	fmt.Fprintln(os.Stdout)
-}
-
-func printCodexAgentsMD(path string) {
-	if _, err := os.Lstat(path); err == nil {
-		if _, isLink, _ := managedLinkBroken(path); isLink {
-			printLinkedStatusLine(statusAgentsMarkdown, path)
-			return
-		}
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, statusAgentsMarkdown, ui.Dim, ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "      %s(no %s)%s\n", ui.Dim, statusAgentsMarkdown, ui.Reset)
-}
-
-func printCodexSymlinkAudit(path, label string) {
-	if _, isLink, _ := managedLinkBroken(path); isLink {
-		printLinkedStatusLine(label, path)
-		return
-	}
-	// A present-but-not-a-symlink path is a rendered/managed file on disk
-	// (e.g. .codex/hooks.json, .codex/config.toml), not an absent link.
-	// Only "(not linked)" when the path is truly absent.
-	if _, err := os.Lstat(path); err == nil {
-		fmt.Fprintf(os.Stdout, statusLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-		return
-	}
-	fmt.Fprintf(os.Stdout, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
-}
-
-func printCodexSkillsAudit(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	okCount, brokenCount := 0, 0
-	for _, entry := range entries {
-		linkPath := filepath.Join(dir, entry.Name())
-		if _, isLink, _ := managedLinkBroken(linkPath); !isLink {
-			continue
-		}
-		if printLinkedStatusLine(".agents/skills/"+entry.Name(), linkPath) {
-			okCount++
-		} else {
-			brokenCount++
-		}
-	}
-	if okCount == 0 && brokenCount == 0 {
-		fmt.Fprintf(os.Stdout, "      %s○%s .agents/skills/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
-}
-
-func printCodexAgentsAudit(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	okCount, brokenCount := 0, 0
-	for _, entry := range entries {
-		linkPath := filepath.Join(dir, entry.Name())
-		if _, err := os.Stat(linkPath); err == nil {
-			fmt.Fprintf(os.Stdout, "      %s✓%s .codex/agents/%s %s(native TOML)%s\n", ui.Green, ui.Reset, entry.Name(), ui.Dim, ui.Reset)
-			okCount++
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s✗%s .codex/agents/%s %s(unreadable)%s\n", ui.Red, ui.Reset, entry.Name(), ui.Dim, ui.Reset)
-			brokenCount++
-		}
-	}
-	if okCount == 0 && brokenCount == 0 {
-		fmt.Fprintf(os.Stdout, "      %s○%s .codex/agents/ %s(empty)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
-}
-
-func printLinkedStatusLine(label, linkPath string) bool {
-	dest, _, isBroken := managedLinkBroken(linkPath)
-	displayDest := config.DisplayPath(resolveLinkDest(linkPath, dest))
-	if !isBroken {
-		fmt.Fprintf(os.Stdout, statusAuditLinkOkFormat, ui.Green, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-		return true
-	}
-	fmt.Fprintf(os.Stdout, statusAuditLinkBrokenFormat, ui.Red, ui.Reset, label, ui.Dim, displayDest, ui.Reset)
-	return false
-}
-
-func printOpenCodeAudit(_, path, _ string) {
-	fmt.Fprintf(os.Stdout, "    %sOpenCode%s\n", ui.Cyan, ui.Reset)
-
-	// opencode.json symlink
-	opencodeJSON := filepath.Join(path, statusOpenCodeJSON)
-	if _, err := os.Lstat(opencodeJSON); err == nil {
-		if dest, isLink, isBroken := managedLinkBroken(opencodeJSON); isLink {
-			displayDest := config.DisplayPath(resolveLinkDest(opencodeJSON, dest))
-			if isBroken {
-				fmt.Fprintf(os.Stdout, "      %s✗%s opencode.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✓%s opencode.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			}
-		} else {
-			fmt.Fprintf(os.Stdout, "      %s○%s opencode.json %s(local file)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-		}
-	}
-
-	// .opencode/agent/ directory
-	opencodeAgentDir := filepath.Join(path, statusOpenCodeDir, "agent")
-	if _, err := os.ReadDir(opencodeAgentDir); err == nil {
-		printSymlinkDirAudit(opencodeAgentDir, ".opencode/agent/", ".opencode/agent/%s")
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s(no .opencode/)%s\n", ui.Dim, ui.Reset)
-	}
-	fmt.Fprintln(os.Stdout)
-}
-
-func printCopilotAudit(_, path string) {
-	fmt.Fprintf(os.Stdout, "    %sGitHub Copilot%s\n", ui.Cyan, ui.Reset)
-	instructionsPath := filepath.Join(path, statusGitHubDir, statusCopilotInstructions)
-	if _, err := os.Lstat(instructionsPath); err == nil {
-		if dest, isLink, isBroken := managedLinkBroken(instructionsPath); isLink {
-			displayDest := config.DisplayPath(resolveLinkDest(instructionsPath, dest))
-			if isBroken {
-				fmt.Fprintf(os.Stdout, "      %s✗%s .github/copilot-instructions.md %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			} else {
-				fmt.Fprintf(os.Stdout, "      %s✓%s .github/copilot-instructions.md %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest, ui.Reset)
-			}
-		}
-	} else {
-		fmt.Fprintf(os.Stdout, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
-	}
-	// Copilot MCP link (.vscode/mcp.json)
-	printSymlinkAudit(filepath.Join(path, statusVSCodeDir, statusCopilotMCPJSON), ".vscode/mcp.json")
-	fmt.Fprintln(os.Stdout)
 }

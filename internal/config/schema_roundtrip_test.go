@@ -150,7 +150,7 @@ func TestSchemaRoundTrip_AgentsRC(t *testing.T) {
 
 	// Minimal valid AgentsRC — sources must be non-empty by schema rule.
 	rc := &AgentsRC{
-		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:  "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version: 1,
 		Project: "my-proj",
 		Skills:  []string{"alpha"},
@@ -311,7 +311,7 @@ func compileAgentsRCSchema(t *testing.T) *jsonschema.Schema {
 		t.Fatalf("parse schema: %v", err)
 	}
 	c := jsonschema.NewCompiler()
-	const url = "https://dot-agents.dev/schemas/agentsrc.schema.json"
+	const url = "https://agorcha.dev/schemas/agentsrc.schema.json"
 	if err := c.AddResource(url, doc); err != nil {
 		t.Fatalf("compiler add: %v", err)
 	}

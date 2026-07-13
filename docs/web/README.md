@@ -1,59 +1,51 @@
-# docs/web — Interactive dot-agents Docs Site
+# docs/web — dot-agents Docs Site (Astro Starlight)
 
-Static, interactive HTML site that consumes the canonical markdown demo
-content from `docs/DEMO_*.md` and surfaces it as:
+The **public** dot-agents docs, built on [Astro](https://astro.build) +
+[Starlight](https://starlight.astro.build) (nav, search, dark mode, mobile).
+Content is sourced **live from the repo's canonical markdown** under `docs/**`
+via a custom glob loader — pages are never copied or forked.
 
-- **A. Structured markdown pages** — sidebar TOC, anchors, code highlighting,
-  Mermaid block rendering.
-- **B. Clickable resource graphs** — interactive node-link views of da
-  resources, workflow resources, and workspace state.
-- **C. Simpler navigable diagrams** — tier model, lens dispatch, verifier
-  registry.
+The IA is four curated sections (sidebar groups):
 
-## Tech stack — Astro + Cytoscape.js (decided 2026-05-28)
+| Section | Source docs (repo paths) |
+|---|---|
+| **Getting Started** | `README.md` (→ site root) |
+| **Guides** | `docs/HOOKS.md`, `docs/CONFIG_RELEVANCE.md`, `docs/DEMO_*.md` |
+| **Reference** | `docs/PLATFORM_DIRS_DOCS.md`, the `*_CONTRACT.md` docs, `docs/WORKFLOW_CLIENT_COMMANDS.md`, `docs/RELEASE_VERIFICATION.md` |
+| **Concepts** | `docs/PROJECT_DIAGRAMS.md` |
 
-**Framework: [Astro](https://astro.build) 5.x.**
+## How content is wired
 
-| Candidate | Why considered | Verdict |
-|---|---|---|
-| **Astro** | Markdown-native (frontmatter, MDX, code highlight, remark plugins), zero-JS by default with selective hydration ("islands"), tiny dep tree, ships static HTML. | **Chosen.** Best fit for "mostly docs, a few interactive widgets." |
-| VitePress | Vue-based, great MD, theming opinionated. | Interactive widgets would need Vue components; less freedom for arbitrary canvas-based graphs. |
-| Docusaurus | React + MDX, feature-rich. | Heaviest dep tree; overkill for ~5 pages + a few interactive panes. |
+`src/content.config.ts` defines Starlight's `docs` collection with a custom
+glob-style loader (`repoDocsLoader`) that reads the PUBLIC allowlist straight
+from the repo root, derives each entry's `title` from its **first H1** when the
+source has no frontmatter (the raw repo docs carry none), and assigns a
+section-prefixed id so the sidebar `autogenerate` groups pick it up. This is the
+production replacement for the spike's copy-prebuild — **no copy, no drift, no
+mass frontmatter edits**.
 
-**Graph library: [Cytoscape.js](https://js.cytoscape.org/) 3.x.**
+` ```mermaid ` fences render via the [`astro-mermaid`](https://www.npmjs.com/package/astro-mermaid)
+integration (configured in `astro.config.mjs`).
 
-| Candidate | Why considered | Verdict |
-|---|---|---|
-| **Cytoscape.js** | Framework-agnostic (no React/Vue coupling), good built-in layouts (cose, breadthfirst, dagre via extension), click/hover handlers, MIT. | **Chosen.** Pairs cleanly with Astro islands. |
-| React Flow | Excellent DX, but forces React. | Would inflate the dep tree for one widget. |
-| d3-force | Maximum flexibility. | Too much hand-rolled glue for the time budget. |
-
-## Source-of-truth strategy
-
-The markdown lives in `docs/DEMO_*.md` (canonical). The web site **does not
-duplicate** that content. Astro's content collection points at
-`../DEMO_*.md` relative to `docs/web/src/content/demos/`. When the canonical
-markdown lands on master via [PR #136](https://github.com/NikashPrakash/dot-agents/pull/136),
-this site picks it up automatically on next build.
-
-Until PR #136 merges, local builds need the files staged into
-`docs/DEMO_*.md` (e.g. via `git show origin/feature/docs-for-demo:docs/<file>.md`).
-The build will warn if any demo file is missing rather than failing hard.
+Internal artifacts (`.agents/**` lessons/specs/proposals, ADRs) are absent from
+the loader allowlist; public/internal visibility gating and the ported
+interactive graph/diagram pages (parked under `dm2-deferred/`) land in later
+slices of the docs-starlight-migration plan.
 
 ## Develop
 
 ```bash
 cd docs/web
-npm install
-npm run dev          # local dev server with HMR on http://localhost:4321
+pnpm install
+pnpm run dev          # local dev server with HMR on http://localhost:4321
 ```
 
 ## Build
 
 ```bash
 cd docs/web
-npm run build        # outputs static site to dist/  (GitHub-Pages base path)
-npm run preview      # serve dist/ locally to verify
+pnpm run build        # outputs static site to dist/  (GitHub-Pages base path)
+pnpm run preview      # serve dist/ locally to verify
 ```
 
 By default the build uses base `/dot-agents/` (suitable for
@@ -62,7 +54,7 @@ deploy at `agorcha.dev`, the CI workflow sets `DEPLOY_TARGET=cloudflare`
 so all asset URLs are root-relative:
 
 ```bash
-DEPLOY_TARGET=cloudflare npm run build
+DEPLOY_TARGET=cloudflare pnpm run build
 ```
 
 See the **Deploy** section below for the full Cloudflare flow.
@@ -72,61 +64,36 @@ See the **Deploy** section below for the full Cloudflare flow.
 ```
 docs/web/
   package.json
-  astro.config.mjs
+  astro.config.mjs          ← Starlight + astro-mermaid; base/site host logic
   tsconfig.json
   README.md                 ← you are here
   public/                   ← static assets served as-is
+  scripts/
+    copy-schemas.sh         ← prebuild: copies /schemas/*.json → public/schemas/
   src/
-    content/
-      config.ts             ← Astro content collection schemas
-      demos/                ← symlinks/aliases to ../../DEMO_*.md
-    data/
-      da-resources.json     ← hand-curated graph data: skills, agents, rules, hooks, MCP, plugins
-      workflow-resources.json ← graph: plans, tasks, slices, delegations, lessons
-      workspace-state.json  ← snapshot of .agents/active/ for the live-ish view
-      tier-model.json       ← spec/plan/tasks/history tier model
-    layouts/
-      BaseLayout.astro      ← shell: sidebar, header, theme
-    components/
-      Sidebar.astro
-      MermaidBlock.astro    ← renders ```mermaid blocks via mermaid 11
-      ResourceGraph.astro   ← Cytoscape island for da/workflow/workspace graphs
-      TierModel.astro       ← simpler expandable tier diagram
-    pages/
-      index.astro           ← landing
-      demos/[...slug].astro ← dynamic route for demo markdown pages
-      graphs/
-        da-resources.astro
-        workflow-resources.astro
-        workspace-state.astro
-      diagrams/
-        tier-model.astro
-        lens-dispatch.astro       ← stub for follow-up
-        verifier-registry.astro   ← stub for follow-up
-    styles/
-      global.css
-    lib/
-      load-markdown.ts      ← shared helper for ingesting ../DEMO_*.md
+    content.config.ts       ← Starlight `docs` collection + repo glob loader (H1 titles)
+    worker.js               ← thin static-asset Cloudflare Worker (serves dist/)
+  dm2-deferred/             ← interactive graph/diagram pages parked for dm2 (see its README)
 ```
 
-## What's in this first version vs follow-up
+Starlight owns navigation, the landing page, search, and the markdown render
+pipeline — there are no hand-written content routes or sidebar components.
 
-**This PR delivers:**
+## What's in this slice vs follow-up
 
-- All 5 DEMO pages render with sidebar + anchors + Mermaid + code highlight.
-- One fully interactive resource graph (**da resources** — skills, agents,
-  rules, hooks, MCP, plugins) with click-to-inspect side panel.
-- Workflow resources graph populated from the current active plans
-  (`.agents/active/`) — clickable, layout via cose.
-- Workspace state snapshot view (worktrees + in-flight delegations + eligible queue).
-- Tier model diagram (spec → plan → tasks → history) with click-to-expand.
+**This slice (dm1) delivers:**
 
-**Follow-up tasks (out of scope for this PR):**
+- Starlight site shell: the 4-section public IA, sourced live from `docs/**`.
+- Glob loader with first-H1 title derivation (no content fork, no frontmatter edits).
+- `astro-mermaid` so ` ```mermaid ` fences render.
 
-- Lens dispatch diagram (stub page only).
-- Verifier registry / app_type_verifier_map diagram (stub page only).
-- Live JSON ingestion for workspace state (currently a snapshot committed
-  into `src/data/workspace-state.json`).
+**Follow-up slices (out of scope here):**
+
+- **dm2** — port the Cytoscape `/graphs/*` + JSON `/diagrams/*` interactive pages
+  (parked under `dm2-deferred/`) into Starlight, linked from Concepts.
+- **dm3** — `visibility: public|internal` gating + `dist/` vs `dist-internal/`.
+- **dm4** — agent-readable `<path>.md` endpoints + `llms.txt`.
+- **dm5** — Worker CF Access gate for `/internal/*` + deploy both outputs.
 
 ## Deploy — Cloudflare Workers at agorcha.dev
 
@@ -187,11 +154,11 @@ After CI reports success:
 
 ```bash
 cd docs/web
-npm install
-npm run build                  # runs prebuild (copy-schemas) + astro build
-npm run preview                # serves dist/ via Astro's preview server
+pnpm install
+pnpm run build                  # runs prebuild (copy-schemas) + astro build
+pnpm run preview                # serves dist/ via Astro's preview server
 ```
 
 `wrangler dev` is also supported once `wrangler` is installed globally
 and `.dev.vars` is populated from `.dev.vars.example` — but the static
-output is identical, so `npm run preview` is usually sufficient.
+output is identical, so `pnpm run preview` is usually sufficient.

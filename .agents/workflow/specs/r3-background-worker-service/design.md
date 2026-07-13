@@ -86,20 +86,149 @@ work. A durable queue would be a heavier abstraction than the actual
 restart semantics require. The watermark is also human-readable, which is
 worth the cost over a binary checkpoint.
 
-### D4 — Event bus is in-process pub/sub only
+### D4 — Event bus behind a pluggable interface; in-process is the v1 builtin default
 
-`internal/service/events.Bus` is channel-based, bounded buffer per
-subscriber, drop-oldest on slow consumer, signature
-`Publish(topic string, payload any)`. No durable storage (consumers re-
-read canonical state from sidecars if they missed an event), no cross-
-process IPC.
+**The R3 scheduler and event surfaces depend on an `EventBus` *interface*,
+not on the concrete channel implementation.** v1 ships exactly one
+implementation — in-process channels, zero external deps — but it is wired
+in behind the interface from day one so an org's existing messaging system
+(Kafka, NATS, Redis) can be swapped in later as a config-selected adapter
+**without a rewrite of any subscriber or publisher**. This mirrors the
+`graph_backend` adapter pattern (`[[graph-backend-adapter-contract]]`):
+a stable contract, a builtin default, and config-selected external
+backends behind the same contract. §D4 is the **canonical home for the
+transport seam** (the `EventBus` interface + the delivery/ordering/
+backpressure guarantees it bounds); see §D4.0 for why the seam, not the
+payload, lives here.
 
-Rationale: events are "wake up and look at the new state on disk," not
-authoritative deliveries. R2 will subscribe via SSE; R5 will mount its
-collection endpoint as an HTTP handler that doesn't even need bus access
-for v1. Keeping the bus tiny preserves the cross-plan contract surface.
+> **System-side, not the agent's interface.** The `EventBus`/transport (§D4) is *system-side*
+> propagation + external integration; an agent never has to publish/subscribe to get its work
+> recorded — it writes the file-system projection and the system reconciles it afterward. See
+> `work-tracking-storage-abstraction` §3B (the canonical "Agent interface model").
 
-#### D4.1 — Concurrency: per-topic locking (deferred optimization, decision recorded)
+#### D4.0 — Where the transport seam is canonical (single-source)
+
+There are **two distinct contracts** and they live in two places — do not
+conflate them:
+
+| Contract | Owns | Canonical home |
+|---|---|---|
+| **`EventBus` transport seam** — *how* a payload travels: `Publish`/`Subscribe`, topic semantics, delivery + ordering + backpressure/drop guarantees, and the config-selected builtin-vs-external backend | the *transport* | **this spec, §D4** |
+| **Unified pluggable event-contract** — *what* travels: the common `{ type, source, occurred_at, idempotency_key, payload }` envelope + the typed-kind registry + table-driven dispatch | the *payload schema + registry* | `[[unified-pluggable-event-contract]]` |
+
+The proposal's own scope note (§5) already disclaims the transport ("does
+not define the wire" / "graduates into `r3-background-worker-service`") and
+its concurrency note already cross-refs §D4.5 for the bus impl — so the
+`EventBus` interface is single-sourced **here**, and the proposal
+**references** §D4 for the bus. The envelope payloads ride *over* this
+transport: the registry decides what a `payload any` is; the `EventBus`
+decides how it's published and delivered. Neither doc re-states the other.
+
+#### D4.1 — The `EventBus` interface (canonical contract)
+
+Subscribers and publishers (the scheduler, R2's SSE fan-out, R5's queue)
+bind to this interface, never to `*events.channelBus`:
+
+```go
+// internal/service/events: the transport seam.
+type EventBus interface {
+    // Publish delivers payload to all subscribers of topic. Non-blocking
+    // for the publisher (§D4.2 guarantee G3); MAY drop for a slow
+    // subscriber per the bounded-buffer / drop-oldest policy.
+    Publish(topic string, payload any) error
+    // Subscribe returns a receive-only stream for topic plus an
+    // unsubscribe func. Buffer is bounded; drop-oldest on overflow.
+    Subscribe(topic string) (<-chan Event, func(), error)
+    // Close drains and releases backend resources.
+    Close() error
+}
+```
+
+`Event` carries the unified envelope as its `payload` (the
+`[[unified-pluggable-event-contract]]` registry decides the typed shape);
+the bus treats it as opaque `any` and never inspects `type`.
+
+#### D4.2 — Contract guarantees the interface bounds (so app code is backend-agnostic)
+
+The interface promises **only** these, and app code MUST NOT depend on any
+stronger guarantee a particular backend happens to provide:
+
+- **G1 — At-most-once, best-effort delivery.** Events are "wake up and look
+  at the new state on disk," not authoritative deliveries. A missed event
+  is recoverable by re-reading the canonical sidecar (§D3). Backends that
+  *can* offer at-least-once or exactly-once (Kafka, JetStream, Redis
+  Streams) do not change this floor — the contract ceiling stays
+  at-most-once so a subscriber written against the builtin keeps working
+  against any backend.
+- **G2 — Per-topic ordering is best-effort, not guaranteed.** The in-process
+  builtin delivers in publish order per topic; a partitioned/sharded
+  external backend (Kafka partitions, NATS queue groups) MAY reorder across
+  partitions. App code that needs strict order re-derives it from the
+  sidecar state, not from arrival order.
+- **G3 — Backpressure = bounded buffer, drop-oldest; publishers never
+  block.** (R8: "slow consumers do not block publishers"; r2 OQ5 "bounded
+  buffer, disconnect-on-overflow".) External backends map this to their own
+  flow control (consumer-group lag, max-in-flight); the *app-visible*
+  contract is unchanged: a slow subscriber loses old events, never stalls
+  a publisher.
+- **G4 — No cross-publish atomicity / no transactions.** A `Publish` is a
+  single fire-and-forget; there is no multi-event transaction even on a
+  backend that supports one.
+
+A backend adapter that cannot meet *or exceed* G1–G4 (e.g. cannot offer
+non-blocking publish) is non-conformant. Backends are free to be
+*stronger*; the contract is the floor app code may assume.
+
+#### D4.3 — Builtin default: in-process channels (`dotagents-builtin:eventbus/inproc@^1.0`)
+
+The v1 builtin implementation is `internal/service/events`'s channel-based
+bus: bounded buffer per subscriber, drop-oldest on slow consumer, no
+durable storage (consumers re-read canonical state from sidecars if they
+missed an event), no cross-process IPC. It is the default backend when no
+`event_bus` adapter is configured, and it is the only backend that ships in
+v1. Rationale: events are notifications, not authoritative deliveries; R2
+subscribes via SSE; R5 mounts an HTTP handler that doesn't even need bus
+access for v1. Keeping the builtin tiny preserves the cross-plan contract
+surface — and putting it behind the interface means "tiny v1" and
+"swappable later" are not in tension.
+
+#### D4.4 — Pluggable external backends (config-selected adapters; post-v1, demand-gated)
+
+External backends are config-selected adapters behind the §D4.1 interface,
+selected exactly like `graph_backend`'s adapter-ref — a
+`source-id:domain/name@version` reference resolved through the existing
+`sources` + lockfile machinery, with builtins under the synthetic
+`dotagents-builtin` source. The selection field is `event_bus` (absent ⇒
+the §D4.3 builtin):
+
+```yaml
+# .agentsrc.json (illustrative)
+event_bus: dotagents-builtin:eventbus/inproc@^1.0      # default; omit ⇒ this
+# event_bus: acme-config:eventbus/nats@^1.0            # org-provided adapter
+```
+
+The adapter ref pins in the **`adapters` section of the shared
+`.agentsrc.lock`** (the same section and shared-writer discipline the
+graph-adapter contract uses, `[[graph-backend-adapter-contract]]` §10.1) —
+not a separate lockfile. Candidate external backends and the
+delivery/ordering/durability semantics each *adds* (all bounded down to
+G1–G4 at the app boundary per §D4.2):
+
+| Backend | Modes | Adds over the builtin | Bounded by the contract to |
+|---|---|---|---|
+| **Kafka** | partitioned log | durable replay, at-least-once, partition-keyed order | at-most-once, best-effort per-topic order (G1/G2) — durability is invisible to app code unless it opts into replay out-of-band |
+| **NATS** | core pub/sub + JetStream streams | core = fire-and-forget (near-builtin); JetStream = durable, replayable, at-least-once | same floor; JetStream's durability is a backend capability, not an app guarantee |
+| **Redis** | pub/sub + Streams | pub/sub = fire-and-forget; Streams = durable, consumer-group lag-based backpressure | same floor; Streams' consumer-group ack model maps onto G3's drop-oldest at the app edge |
+
+Because app code binds to the interface and may assume only G1–G4, swapping
+the builtin for any of these is a **config + adapter install, never a
+subscriber/publisher rewrite** — the whole point of seaming the bus on day
+one. An adapter author MUST document, per backend, how that backend's
+native semantics are clamped to G1–G4 (e.g. how Kafka's at-least-once is
+presented as at-most-once at the subscriber, how JetStream durability is
+*not* surfaced as an app guarantee).
+
+#### D4.5 — Concurrency: per-topic locking (deferred optimization, decision recorded)
 
 The v1 bus (shipped via the event-bus PR) guards the whole
 `subscribers map[string][]*subscriber` + the fan-out with a **single
@@ -125,6 +254,31 @@ bus. Per-topic delivery goroutines are a further option if ordering
 guarantees per topic are needed independently. (Per-subscriber buffer
 strategy — currently bounded drop-oldest — is a separate, already-decided
 axis; revisit only if a different back-pressure policy is wanted.)
+
+#### D4.6 — Backend-conformance test suite (proves the seam mechanically)
+
+The seam is proven, not asserted, by a **reusable backend-conformance test
+suite**: a contract/conformance suite that **any** `EventBus` implementation
+must pass. It exercises the §D4.1 interface (`Publish` / `Subscribe`
+semantics — topic routing, the unsubscribe func, `Close` drain) and asserts
+the §D4.2 G1–G4 floor (at-most-once best-effort delivery, best-effort
+per-topic order, non-blocking publish under a slow subscriber / drop-oldest,
+no cross-publish atomicity). The suite takes a backend constructor and runs
+the whole battery against it — so it is backend-agnostic by construction.
+
+- **v1 anchor: the in-process builtin (§D4.3).** The conformance suite is
+  driven by the channel bus in v1, which makes that builtin the seam's
+  **integration test backend** — the in-tree backend that exercises the
+  interface end-to-end and demonstrates the contract holds against a real,
+  shipping implementation. (The §5 `iteration.scored` / `rescore.done`
+  subscriber assertions are this integration test at the service boundary.)
+- **Future external adapters run the SAME suite.** When a Kafka/NATS/Redis
+  adapter (§D4.4) is built, it is validated by re-running this identical
+  conformance battery against the adapter's constructor — mechanical
+  validation that a new backend meets the floor, not a hand-written re-proof.
+  This is why the seam is proven from day one: the contract has executable
+  teeth, and "swappable later" is a config + adapter install that must pass a
+  test that already exists.
 
 ### D5 — HTTP surface is reservation, not implementation
 
@@ -168,6 +322,111 @@ Framing: `da`'s core is git-like (pure CLI, no daemon), its background/team
 features are docker-like (want a daemon) — so the service is optional-but-
 able-to-be-always-on, value-gated on obs/service features landing.
 
+## 2A. Transport & protocol (single source for the R-series)
+
+**This section is the single source of truth for how the service moves bytes
+on each surface.** R2 (`r2-observability-dashboard`) and the `streaming` /
+`http-service` app-type profiles reference it rather than re-deciding
+transport per surface. The governing principle is **not HTTP-by-default**:
+HTTP-over-TCP has genuine benefits *and* genuine drawbacks, and we pay them
+deliberately only where the benefit applies.
+
+> **System-side, not the agent's interface.** Everything in §2A (UDS/HTTP transport) is
+> *system-side* propagation / control plane; an agent does its work via the file-system
+> projection, not by speaking this transport — see `work-tracking-storage-abstraction` §3B
+> (the canonical "Agent interface model").
+
+### Why "not HTTP everywhere"
+
+HTTP-over-TCP buys us browser reach, proxy traversal, a ubiquitous client
+ecosystem, and a familiar request/response shape — real benefits on the
+edges that face browsers, other machines, or external tools. But on a
+same-host control path it is mostly cost: TCP connection + TLS handshake
+setup latency, header/framing overhead on every request, head-of-line
+blocking under HTTP/1.1 (and even HOL within a TCP stream under HTTP/2),
+ephemeral-port and bind-address management, and a request/response shape
+that fits poll-style reads better than dispatch or streaming. R3 already
+leans **loopback-only** (OQ3 default `127.0.0.1`, OQ4's `da service stop`
+locked to loopback) — so the cross-machine justification for HTTP is largely
+*absent* on the local control plane. Defaulting that path to HTTP would pay
+TCP/TLS/HTTP costs for a benefit (remote reach) we have explicitly scoped out.
+
+### Surface → transport map
+
+| Surface | Transport | Rationale |
+|---|---|---|
+| **Browser / dashboard** (R2 SPA, `/api/*`, the R2 push channel) | **HTTP + SSE** | Browsers speak HTTP natively; SSE is R2's server-push primitive (r2 §D2.2 "server-pushed, not polled"; survives reverse proxies without a special handshake). Genuinely fits — keep here. |
+| **Cross-machine / external-tool-consumed** (anything bound beyond loopback via the explicit `--addr` of OQ3; future external API clients) | **HTTP** (+ TLS / RBAC when R5 lands) | The one place HTTP-over-TCP's benefits (proxy traversal, ubiquitous clients) actually apply. Network exposure is gated behind OQ3's explicit opt-in and R5's RBAC. |
+| **Local control plane** (`da service status`/`stop`, `da` CLI→service routing per §D6 "CLI-routes-when-present", OQ4's loopback-only stop) | **Unix-domain socket** (named pipe on Windows); optionally gRPC-over-UDS or a length-prefixed framed protocol | Same-host only. UDS removes TCP/TLS/HTTP overhead and port management, and gives **peer-credential passing** (`SO_PEERCRED` / `LOCAL_PEERCRED`) — which makes OQ4's "loopback-only stop" a *filesystem-permission + peer-uid* check instead of a network-ACL guess. |
+| **Worker dispatch** (scheduler → task RunFns, §D2) | **In-process Go call** (no transport); UDS only if a task is ever hosted out-of-process | The v1 tasks are co-located goroutines (§D2, §D3). There is no wire here at all in v1; introducing one would be pure overhead. UDS is the escape hatch if/when D2's `river` re-evaluation moves a worker out-of-process. |
+| **Streaming / event bus** (§D4 `Publish(topic, payload)` → subscribers; R2's push fan-out) | **In-process channels internally** (§D4 is already in-process pub/sub); **SSE at the browser edge**; evaluate WebSocket / a binary framed stream only if a non-browser consumer needs bidirectional or binary framing | The bus itself never crosses a process boundary in v1 (§D4). The only externalized stream is R2's browser push, which SSE already covers. SSE vs WebSocket vs binary-framed is decided against the **backpressure / slow-consumer-drop** policy already specified (r2 OQ5 "bounded buffer, disconnect-on-overflow"; r3 R8 "slow consumers do not block publishers") — SSE's unidirectional server→client shape matches that drop-on-overflow model; WebSocket's bidirectionality buys nothing for a read-only v1 (r2 §D2.2). |
+
+### Local-host transport vs the pluggable event-bus backend (boundary call-out)
+
+Two distinct seams are easy to conflate; keep them apart:
+
+- **Local FS-projection / same-host control** (the "Local control plane" and
+  "Worker dispatch" rows above) stays **in-process + UDS / named pipe**. This
+  is the §2A transport layer (`http-server` task under OQ5 option B). It is
+  *not* pluggable per-org — it is dot-agents' own same-host plumbing and has
+  no reason to become Kafka.
+- **External org integration of the event stream** is the **`EventBus`
+  backend seam** (§D4.1 / §D4.4). When an org wants events to flow through
+  *their* Kafka/NATS/Redis, that is a config-selected `event_bus` adapter
+  behind the §D4.1 interface — **not** a change to the §2A local transport.
+
+**The bus seam (§D4) is precisely what enables org-system plug-in.** The §2A
+"In-process channels internally / SSE at the browser edge" row describes the
+*builtin* backend's wire (§D4.3); swapping that backend for an org's system
+swaps the bus adapter, leaving the local control plane (UDS) and the browser
+edge (SSE) untouched. A non-builtin backend may move events across a process
+or machine boundary, but the §D4.2 G1–G4 contract keeps every subscriber
+backend-agnostic — so the boundary an org plugs into is the `EventBus`
+interface, never the §2A local transport.
+
+### The selection rule (so future surfaces choose deliberately)
+
+> **Use HTTP for a surface when it is: browser-facing, OR cross-machine, OR
+> consumed by an external tool that speaks HTTP. Otherwise use the local
+> high-efficiency transport (Unix-domain socket on POSIX, named pipe on
+> Windows; or an in-process call when the peer is co-located).**
+
+Any new surface added to the service states which arm of this rule it falls
+under, so the transport is a recorded decision, not an accident of "the
+HTTP server was already there."
+
+### Cross-platform note
+
+The local high-efficiency transport is a **Unix-domain socket on POSIX** and a
+**named pipe** (`\\.\pipe\...`) on Windows — Go's `net.Listen("unix", ...)`
+vs `winio`/named-pipe equivalent behind one small dialer abstraction. Because
+the platform split is exactly where the prior **agentslock / TCC** failures
+bit (a same-host IPC path with OS-specific permission semantics), the named-
+pipe path **must be exercised on the Windows box**, not assumed to mirror the
+UDS path. Peer-credential checks differ too (`SO_PEERCRED` on Linux,
+`LOCAL_PEERCRED` on macOS, the named-pipe client token on Windows) — the
+loopback-only-stop guarantee (OQ4) is only as portable as that check.
+
+### Tie to the app-type profiles
+
+The `http-service` and `streaming` app-type profiles
+(`app-type-profiles` §8A.2 / §8A.3) attach verifier chains per surface, and
+those choices must reflect **which transport the surface actually uses**:
+
+- A surface that resolves to **HTTP/SSE** (browser/dashboard, external bind)
+  takes the `http-service` chain — `api-contract` (wire schema doesn't drift,
+  r2 DC5) + `integration` (route served by a started host).
+- A surface that resolves to the **local high-efficiency transport / event
+  bus** takes the `streaming` chain — `race` (`go test -race` over the
+  goroutine bus, §D4.5) + `stream-replay`/idempotence + `backpressure`
+  (slow-consumer drop, r2 OQ5 / r3 R8). A UDS control endpoint is verified by
+  `integration` against a *socket* listener, not a TCP one; an
+  in-process-only path needs neither `api-contract` nor a network
+  `integration` verifier — only `unit` + `race`.
+
+In other words: the verifier chain is selected by the surface's transport (via
+the selection rule above), not by the binary's name.
+
 ## 3. Requirements (behavioral, not implementation)
 
 1. The service runs continuously in the foreground and exits cleanly on
@@ -207,7 +466,72 @@ able-to-be-always-on, value-gated on obs/service features landing.
   /admin/stop ... gated on loopback only" — this is the only state-
   changing endpoint on the v1 server. Lock down to loopback even if D5
   later allows external bind. Tracked here because it cuts across `http-
-  server` and `cobra-surface`.
+  server` and `cobra-surface`. **Note:** §2A makes this cleaner — if the
+  control plane is on a UDS, `stop` is gated by socket file permission +
+  peer-uid (`SO_PEERCRED`) rather than a network-ACL check.
+- **OQ5 — Transport for the local control plane: HTTP-everywhere vs
+  UDS-first-with-HTTP-edge?** This is an **architecture decision and an
+  owner-decision** (see §2A for the full map and selection rule). The two
+  candidate shapes:
+  - *(A) HTTP-everywhere:* one TCP/HTTP listener serves browser, external,
+    *and* local control. Simplest single surface; pays TCP/TLS/HTTP cost on
+    the local path for a remote benefit R3 has scoped out (loopback-only
+    default, OQ3/OQ4).
+  - *(B) UDS-first + HTTP edge (recommended):* the local control plane and
+    `da`-routes-when-present (§D6) ride a Unix-domain socket (named pipe on
+    Windows); HTTP/SSE is mounted **only** on the browser/dashboard + the
+    explicit external-bind edge. Removes TCP/TLS/HTTP overhead, removes port
+    management, and turns OQ4's loopback-stop into a peer-credential check.
+  - **Recommendation: (B).** It follows directly from R3's existing
+    loopback-only posture and from the selection rule in §2A; HTTP stays
+    where it genuinely fits (R2's browser surface, external bind) and the
+    high-throughput same-host path drops the HTTP tax. The cost is one small
+    cross-platform dialer abstraction (UDS / named-pipe) that must be tested
+    on the Windows box (agentslock / TCC lesson). **Owner must rule** before
+    `http-server` lands, because the ruling determines what that task *is*
+    (see the frontier-task note below).
+- **OQ6 — Event-bus backend seam: ship a reference external adapter now, or
+  interface-only? — RESOLVED (option A, interface-only).** §D4 wires the
+  `EventBus` behind a pluggable interface from day one (forward-evolvability:
+  an org's existing Kafka/NATS/Redis may be requested "relatively soon"), but
+  the *external adapters themselves* are post-v1 work. The two candidate
+  shapes were:
+  - *(A) Interface-only in v1 (chosen):* v1 ships **only** the in-process
+    builtin (§D4.3) behind the §D4.1 interface. No external adapter, no new
+    runtime dep, no Kafka/NATS/Redis client in the tree. External adapters
+    land when an org actually requests one, scoped against that org's real
+    semantics.
+  - *(B) Spec + ship a reference NATS adapter in v1:* validates the seam
+    against a real external backend's quirks (JetStream durability, queue-group
+    reordering) before declaring the interface stable, at the cost of a new
+    dependency and ops surface v1 has no consumer for.
+  - **RESOLVED — (A) interface-only.** Matches D2's "don't force
+    Redis/Postgres for a use case that's absent" posture and the project's
+    no-pre-optimization stance, while still satisfying the maintainer
+    forward-evolvability requirement: the interface and the G1–G4 contract
+    (§D4.1/§D4.2) are the v1 deliverable, and they make any external backend a
+    config + adapter install later rather than a rewrite. The ruling stands on
+    three points:
+    - **The in-process channel bus (§D4.3) is the seam's integration test
+      backend.** It is the in-tree backend that exercises the `EventBus`
+      interface end-to-end and proves the G1–G4 floor — so "swappable" is
+      demonstrated by a real, shipping backend driving the contract, not
+      asserted. The §5 integration tests (the `iteration.scored` /
+      `rescore.done` subscriber assertions) ARE this seam's integration test:
+      they run the interface against the builtin.
+    - **A backend-conformance test suite is the mechanical seam proof
+      (§D4.6).** A reusable contract/conformance suite — `Publish`/`Subscribe`
+      semantics plus the G1–G4 floor — that **any** `EventBus` implementation
+      must pass, anchored by the in-process backend in v1. Every future
+      external adapter (Kafka/NATS/Redis) runs the **same** suite, so the seam
+      is proven from day one and a new backend is validated mechanically
+      rather than by hand. See §D4.6.
+    - **External adapters are prepped-but-not-built, demand-gated (future).**
+      The §D4.4 backend table stays as the prepped design, not v1 work. The
+      anticipated first external consumer is payout's future external-bus
+      integration (planned down the line); because the seam is prepped, payout
+      — and any organization that wants to plug in its own Kafka/NATS/Redis —
+      gets a drop-in adapter swap, not a rewrite, when the demand is real.
 
 ## 5. Done criteria
 
@@ -240,8 +564,13 @@ These trace back to umbrella spec
 - RBAC on HTTP endpoints — R5's plan owns this.
 - Frontend (R2 plan owns it).
 - Log rotation / structured logging beyond stderr (operator concern).
-- A second sibling Publisher interface for async/queue-backed events —
-  per `event-bus` task notes, that's a follow-up if/when needed.
+- **External `EventBus` backends (Kafka / NATS / Redis adapters)** — the
+  seam is in v1 (§D4.1 interface + §D4.4 selection model), the adapters are
+  not. Demand-gated post-v1 work per OQ6; v1 ships interface-only with the
+  in-process builtin (§D4.3). This subsumes the older "second sibling
+  Publisher interface for async/queue-backed events" follow-up note — that
+  capability is now expressed as a config-selected `event_bus` adapter behind
+  the one `EventBus` interface, not a parallel publisher type.
 
 ## 7. Relationship to other specs and plans
 
@@ -265,22 +594,27 @@ These trace back to umbrella spec
   poll CI independently and are not run as scheduler tasks. R3's
   scheduler is for repo-local file watchers and idempotent rescores,
   not for tasks that need their own polling loop.
-- **`[[validate-bundle-against-head]]`:** when this plan is fanned out,
-  verify `internal/service/` does not exist on HEAD (confirmed
-  2026-05-27 — `find /Users/nikashp/Documents/dot-agents/internal/
-  service` returns nothing). Task `scheduler-core` adds it.
+- **`[[validate-bundle-against-head]]`:** the 2026-05-27 note asserted
+  `internal/service/` did not exist on HEAD. STALE as of 2026-06-25:
+  `internal/service/scheduler/` (commit 0a57f0b6) and
+  `internal/service/events/` (PR #172) have since shipped — those two
+  tasks are now `completed`. The remaining tasks add
+  `internal/service/{http,tasks,state}` + `commands/service/`
+  (HEAD-verified absent 2026-06-25); re-validate write_scope before each
+  remaining fanout.
 
 ## Candidate canonical-plan tasks (appendix)
 
 These already exist in `TASKS.yaml` (HEAD-verified 2026-05-27 — task IDs
-match). This appendix is descriptive, not authoritative.
+match). This appendix is descriptive, not authoritative; `TASKS.yaml` is
+the single source for status. (Status column refreshed 2026-06-25.)
 
 | Task ID | Status | Notes |
 |---|---|---|
 | design-doc | completed | Replaced by this spec; in-plan design.md retained for archive context |
-| scheduler-core | pending | Add `fsnotify` dep; OQ2 (concurrency on tick overrun) must be answered before fanout |
-| event-bus | pending | Confirm D4 surface is exactly `Publish(topic, payload)` before fanout |
-| http-server | pending | OQ3 (loopback default) + OQ4 (`/admin/stop` lockdown) must be answered before fanout |
+| scheduler-core | completed | Shipped 2026-06-25 (commit 0a57f0b6); `fsnotify` dep added |
+| event-bus | completed | Shipped via PR #172; surface is `Publish(topic, payload)` + `Subscribe` per D4 |
+| http-server | pending | OQ3 (loopback default) + OQ4 (`/admin/stop` lockdown) + **OQ5 (transport)** must be answered before fanout. OQ5 reframes this task: under the recommended option (B), it is not an "HTTP server" but a **transport layer** — a UDS/named-pipe control listener (local plane + `da`-routes-when-present) with an **HTTP/SSE edge** mounted only for the browser/dashboard + explicit external bind. Under option (A) it stays a single HTTP listener. Owner ruling on OQ5 decides which. |
 | tasks-iterlog-ingester | pending | Must call into `internal/scoring`, not duplicate |
 | tasks-rescore | pending | Idempotent — no-op when rubric version unchanged |
 | service-runtime | pending | Composes scheduler+http+bus; integration test is the umbrella verifier |

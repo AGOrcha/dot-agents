@@ -83,7 +83,7 @@ tasks:
       app_type: go-cli
     - id: lpf-e-transitions-poll
       title: Verifier/lens/owner transition split + PR poll detector (§6, §3.2)
-      status: awaiting_owner_review
+      status: completed
       depends_on:
         - lpf-b-slot-dep-accounting
         - lpf-pr-producer

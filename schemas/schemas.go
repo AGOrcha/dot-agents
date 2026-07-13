@@ -24,6 +24,14 @@ var pluginSchemaBytes []byte
 //go:embed workflow-delegation-bundle.schema.json
 var workflowDelegationBundleSchemaBytes []byte
 
+//go:embed agentsrc.schema.json
+var agentsRCSchemaBytes []byte
+
+// AgentsRCSchemaJSON returns the canonical AgentsRC (.agentsrc.json) JSON schema
+// bytes. It is exported so command code can validate against the single canonical
+// schema without copying the file (go:embed cannot reach a sibling directory).
+func AgentsRCSchemaJSON() []byte { return agentsRCSchemaBytes }
+
 // Plugin is the embedded schema handle for PLUGIN.yaml.
 var Plugin = Schema{
 	name: "plugin.schema.json",

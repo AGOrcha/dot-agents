@@ -30,6 +30,21 @@ func newInitCmd(deps Deps) *cobra.Command {
 func runSyncInit(deps Deps) error {
 	agentsHome := config.AgentsHome()
 	if _, err := os.Stat(agentsHome + "/.git"); err == nil {
+		// Upgrade an already-initialized home's machine-local sync boundary so
+		// the binding table + caches are excluded even on a home that ran
+		// `sync init` before this fix landed (defects 2 & 5, R7).
+		if !deps.Flags.DryRun {
+			if err := ensureSyncGitignore(agentsHome + "/.gitignore"); err != nil {
+				return fmt.Errorf("writing .gitignore: %w", err)
+			}
+			// A .gitignore only stops NEW tracking — a home that already
+			// committed local/ or cache/ would keep pushing them. Untrack them
+			// (without deleting the working-tree files) so machine-local state
+			// stops syncing on an already-initialized home.
+			if err := untrackMachineLocalState(agentsHome); err != nil {
+				return fmt.Errorf("untracking machine-local state: %w", err)
+			}
+		}
 		return reportExistingSyncRepo(agentsHome)
 	}
 	if deps.Flags.DryRun {
@@ -74,8 +89,8 @@ func initSyncRepo(agentsHome string) error {
 	}
 
 	gitignorePath := agentsHome + "/.gitignore"
-	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
-		_ = os.WriteFile(gitignorePath, []byte("local/\n*.dot-agents-backup\n"), 0644)
+	if err := ensureSyncGitignore(gitignorePath); err != nil {
+		return fmt.Errorf("writing .gitignore: %w", err)
 	}
 
 	if addOut, err := execabs.Command("git", "-C", agentsHome, "add", ".").CombinedOutput(); err != nil {
@@ -92,6 +107,65 @@ func initSyncRepo(agentsHome string) error {
 	ui.Success("Initialized git repository in ~/.agents/")
 	fmt.Fprintln(os.Stdout)
 	printSyncNextSteps(agentsHome)
+	return nil
+}
+
+// syncGitignoreEntries are the machine-local sync-boundary directories that must
+// never enter the synced ~/.agents tree (home-config defects 2 & 5, R7):
+//   - local/ holds the machine-local binding table (id → absolute path).
+//   - cache/ holds the tier-1 config cache and tier-2 packages cache.
+//
+// *.dot-agents-backup keeps the legacy backup-file exclusion.
+var syncGitignoreEntries = []string{"local/", "cache/", "*.dot-agents-backup"}
+
+// ensureSyncGitignore guarantees every machine-local sync-boundary entry is
+// present in the home .gitignore. A missing file is created with the full set;
+// an existing file gains only the entries it lacks (so an already-initialized
+// home is upgraded to also exclude cache/ without clobbering user lines). This
+// is the mechanism half of the machine-local classification — without it the
+// binding table and caches would travel to machine B.
+func ensureSyncGitignore(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.WriteFile(path, []byte(strings.Join(syncGitignoreEntries, "\n")+"\n"), 0644)
+		}
+		return err
+	}
+	present := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		present[strings.TrimSpace(line)] = true
+	}
+	var missing []string
+	for _, e := range syncGitignoreEntries {
+		if !present[e] {
+			missing = append(missing, e)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	content := string(data)
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += strings.Join(missing, "\n") + "\n"
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
+// untrackMachineLocalState removes already-tracked machine-local paths (the
+// binding table under local/ and the materialized caches under cache/) from the
+// git index WITHOUT deleting the working-tree files. `--ignore-unmatch` keeps it
+// a no-op when nothing is tracked, so it is safe to run on every `sync init`.
+// This is the in-place repair counterpart to ensureSyncGitignore: the gitignore
+// stops new tracking, this stops the already-tracked ones from continuing to
+// push (defects 2 & 5, R7).
+func untrackMachineLocalState(agentsHome string) error {
+	out, err := execabs.Command("git", "-C", agentsHome, "rm", "--cached", "-r",
+		"--ignore-unmatch", "--quiet", "local/", "cache/").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git rm --cached: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
 	return nil
 }
 

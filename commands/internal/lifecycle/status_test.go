@@ -13,6 +13,7 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/linktest"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/execabs"
 )
 
 // testStatusDeps returns a lifecycle.Deps suitable for status_test exercises:
@@ -34,6 +35,11 @@ func testStatusDeps() Deps {
 		ExactArgsWithHints:    func(int, ...string) cobra.PositionalArgs { return accept },
 	}
 }
+
+// auditNameFmt is the default name format passed to printSymlinkDirAudit in
+// tests (the entry name is printed verbatim). Shared const so the literal is
+// not duplicated across cases (SonarCloud go:S1192).
+const auditNameFmt = "%s"
 
 // jsonOff is the default jsonOutput closure: emit text mode.
 func jsonOff() bool { return false }
@@ -129,6 +135,62 @@ func TestProbeAgentsHomeGit_BareGitDir(t *testing.T) {
 	}
 }
 
+// TestPrintAgentsHomeGitStatusLine_WithRemote drives the git-remote rendering
+// branch (status.go 254-259 canonicalize + 270-273 "with remote" line). It
+// initializes a real repo via `git init` and configures an origin URL so
+// gitremote.ReadOriginURL/CanonicalRepoID resolve to a non-empty remote.
+func TestPrintAgentsHomeGitStatusLine_WithRemote(t *testing.T) {
+	if _, err := execabs.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	tmp := t.TempDir()
+	run := func(args ...string) {
+		cmd := execabs.Command("git", append([]string{"-C", tmp}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+tmp)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init")
+	run("remote", "add", "origin", "git@github.com:AGOrcha/dot-agents.git")
+
+	probe := probeAgentsHomeGit(tmp)
+	if !probe.IsRepo {
+		t.Fatal("expected IsRepo=true for initialized repo")
+	}
+	if probe.Remote == "" {
+		t.Errorf("expected non-empty canonical remote, got %q", probe.Remote)
+	}
+	// Renders the "with remote" status line without panic.
+	printAgentsHomeGitStatusLine(tmp)
+	// statusGitInfo mirrors the same probe into JSON form.
+	if g := statusGitInfo(tmp); !g.Initialized || g.Remote == "" {
+		t.Errorf("expected initialized git info with remote, got %+v", g)
+	}
+}
+
+// TestCountClaudeRulesDir_HardlinkedRule covers the Windows-style hard-linked
+// managed rule branch (status.go 363-365: HasMultipleHardLinks → ok++). The
+// HasMultipleHardLinks seam is overridden so the branch is exercised on every
+// OS without relying on host hard-link semantics.
+func TestCountClaudeRulesDir_HardlinkedRule(t *testing.T) {
+	tmp := t.TempDir()
+	rulesDir := filepath.Join(tmp, ".claude", "rules")
+	os.MkdirAll(rulesDir, 0755)
+	// A plain regular file (not a managed symlink) so managedLinkBroken
+	// reports isLink=false and control falls through to the hard-link check.
+	os.WriteFile(filepath.Join(rulesDir, "hardrule.md"), []byte("x"), 0644)
+
+	prev := HasMultipleHardLinks
+	HasMultipleHardLinks = func(string) bool { return true }
+	defer func() { HasMultipleHardLinks = prev }()
+
+	ok, warn := countClaudeRulesDir(rulesDir)
+	if ok != 1 || warn != 0 {
+		t.Errorf("expected (1,0) for hard-linked managed rule, got (%d,%d)", ok, warn)
+	}
+}
+
 // ---------- statusGitInfo ----------
 
 func TestStatusGitInfo_EmptyWhenMissing(t *testing.T) {
@@ -195,52 +257,6 @@ func TestPathExists(t *testing.T) {
 	}
 	if pathExists(filepath.Join(tmp, "missing")) {
 		t.Error("expected pathExists=false for missing path")
-	}
-}
-
-// ---------- formatRefreshDisplay / readRefreshTimestamp ----------
-
-func TestFormatRefreshDisplay(t *testing.T) {
-	cases := []struct {
-		input string
-		want  string
-	}{
-		{"2026-03-12T05:18:11Z", "2026-03-12 05:18 UTC"},
-		{"short", "short"},
-	}
-	for _, c := range cases {
-		if got := formatRefreshDisplay(c.input); got != c.want {
-			t.Errorf("formatRefreshDisplay(%q) = %q, want %q", c.input, got, c.want)
-		}
-	}
-}
-
-func TestReadLegacyRefreshTimestamp(t *testing.T) {
-	tmp := t.TempDir()
-	marker := filepath.Join(tmp, ".agents-refresh")
-	os.WriteFile(marker, []byte("refreshed_at=2026-03-12T05:18:11Z\n"), 0644)
-	got := readLegacyRefreshTimestamp(tmp)
-	if got != "2026-03-12 05:18 UTC" {
-		t.Errorf("got %q, want 2026-03-12 05:18 UTC", got)
-	}
-}
-
-func TestReadLegacyRefreshTimestamp_NoFile(t *testing.T) {
-	tmp := t.TempDir()
-	if got := readLegacyRefreshTimestamp(tmp); got != "" {
-		t.Errorf("expected empty for missing marker, got %q", got)
-	}
-}
-
-// TestReadLegacyRefreshTimestamp_NoRefreshedAtLine covers the case where the
-// marker file exists but contains no `refreshed_at=` prefix — the scanner
-// loop falls through and returns "".
-func TestReadLegacyRefreshTimestamp_NoRefreshedAtLine(t *testing.T) {
-	tmp := t.TempDir()
-	marker := filepath.Join(tmp, ".agents-refresh")
-	os.WriteFile(marker, []byte("# unrelated\nother=value\n"), 0644)
-	if got := readLegacyRefreshTimestamp(tmp); got != "" {
-		t.Errorf("expected empty when no refreshed_at line, got %q", got)
 	}
 }
 
@@ -402,8 +418,8 @@ func TestRunStatus_JSONFlagEndToEnd(t *testing.T) {
 func TestCollectProjectPlatforms_StableLength(t *testing.T) {
 	tmp := t.TempDir()
 	got := collectProjectPlatforms("proj", tmp, t.TempDir())
-	if len(got) != 5 {
-		t.Errorf("expected 5 platforms (cursor/claude/codex/opencode/copilot), got %d", len(got))
+	if len(got) != 6 {
+		t.Errorf("expected 6 platforms (cursor/claude/codex/opencode/copilot/antigravity), got %d", len(got))
 	}
 }
 
@@ -440,8 +456,8 @@ func TestCollectProjectTextBadges_EmptyProject(t *testing.T) {
 	tmp := t.TempDir()
 	agentsHome := filepath.Join(tmp, ".agents")
 	got := collectProjectTextBadges("proj", tmp, agentsHome, nil)
-	if len(got) != 5 {
-		t.Fatalf("expected 5 badges, got %d (%+v)", len(got), got)
+	if len(got) != 6 {
+		t.Fatalf("expected 6 badges, got %d (%+v)", len(got), got)
 	}
 	for _, b := range got {
 		if b.present {
@@ -635,45 +651,6 @@ func TestCountManagedFileOK_BrokenSymlink(t *testing.T) {
 	}
 }
 
-// formatRefreshDisplay edge cases.
-func TestFormatRefreshDisplay_ShortAndExact(t *testing.T) {
-	if got := formatRefreshDisplay(""); got != "" {
-		t.Errorf("empty: got %q", got)
-	}
-	// Exactly long enough boundary
-	in := "2026-01-02T03:04"
-	want := "2026-01-02 03:04 UTC"
-	if got := formatRefreshDisplay(in); got != want {
-		t.Errorf("len16: got %q want %q", got, want)
-	}
-}
-
-// readRefreshTimestamp uses rc.Refresh if present.
-func TestReadRefreshTimestamp_PrefersAgentsRC(t *testing.T) {
-	tmp := t.TempDir()
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: "p",
-		Refresh: &config.RefreshMetadata{RefreshedAt: "2027-05-01T10:11:12Z"},
-	}
-	if err := rc.Save(tmp); err != nil {
-		t.Fatal(err)
-	}
-	got := readRefreshTimestamp(tmp)
-	if got != "2027-05-01 10:11 UTC" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestReadRefreshTimestamp_FallsBackToLegacy(t *testing.T) {
-	tmp := t.TempDir()
-	os.WriteFile(filepath.Join(tmp, ".agents-refresh"), []byte("refreshed_at=2024-12-31T23:59:00Z"), 0644)
-	got := readRefreshTimestamp(tmp)
-	if got != "2024-12-31 23:59 UTC" {
-		t.Errorf("got %q", got)
-	}
-}
-
 // printBadgeRow / printAgentsHomeGitStatusLine smoke tests (just exercise without panic).
 func TestPrintBadgeRow_VariousStates(t *testing.T) {
 	printBadgeRow([]platformBadge{
@@ -761,41 +738,12 @@ func TestPrintPluginsSection_WithPlugins(t *testing.T) {
 }
 
 // printStatusProjectManifestSummary: covers manifest missing + manifest present.
-func TestPrintStatusProjectManifestSummary_NoManifest(t *testing.T) {
-	tmp := t.TempDir()
-	printStatusProjectManifestSummary(tmp)
-}
-
-func TestPrintStatusProjectManifestSummary_PresentWithSkills(t *testing.T) {
-	tmp := t.TempDir()
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: "demo",
-		Skills:  []string{"s1", "s2"},
-		Agents:  []string{"a1"},
-		Sources: []config.Source{{Type: "git", URL: "https://example.com/foo.git"}},
-	}
-	if err := rc.Save(tmp); err != nil {
-		t.Fatal(err)
-	}
-	printStatusProjectManifestSummary(tmp)
-}
-
-// TestPrintStatusProjectManifestSummary_HooksAndMCPEnabled covers the
-// rc.Hooks.IsEnabled() + rc.MCP.IsEnabled() append branches.
-func TestPrintStatusProjectManifestSummary_HooksAndMCPEnabled(t *testing.T) {
-	tmp := t.TempDir()
-	rc := &config.AgentsRC{
-		Version: 1,
-		Project: "demo",
-		Hooks:   config.StringsOrBool{All: true},
-		MCP:     config.StringsOrBool{All: true},
-	}
-	if err := rc.Save(tmp); err != nil {
-		t.Fatal(err)
-	}
-	printStatusProjectManifestSummary(tmp)
-}
+// Per §7A.6 status no longer renders any manifest summary line — that config
+// inspection moved to `da config explain`. The former
+// TestPrintStatusProjectManifestSummary_* cases were removed with the
+// printStatusProjectManifestSummary helper they exercised. A text-mode
+// assertion that status emits NO manifest/lock/last-refreshed output lives in
+// TestRunStatus_TextOmitsConfigInspection below.
 
 // printUserConfigSection: empty home → exercises the "no managed user-level config" branch.
 func TestPrintUserConfigSection_NoConfig(t *testing.T) {
@@ -871,188 +819,6 @@ func TestSharedTargetRegistryPlanLines_EmptyPlatforms(t *testing.T) {
 	if err != nil || lines != nil {
 		t.Errorf("expected (nil, nil), got (%v, %v)", lines, err)
 	}
-}
-
-// printLinkedStatusLine: healthy and broken.
-func TestPrintLinkedStatusLine_HealthyAndBroken(t *testing.T) {
-	tmp := t.TempDir()
-	target := filepath.Join(tmp, "t")
-	os.WriteFile(target, []byte("x"), 0644)
-	link := filepath.Join(tmp, "l")
-	linktest.Link(t, target, link)
-	if !printLinkedStatusLine("label", link) {
-		t.Error("expected healthy symlink to return true")
-	}
-
-	broken := filepath.Join(tmp, "b")
-	linktest.DanglingLink(t, broken)
-	if printLinkedStatusLine("label", broken) {
-		t.Error("expected broken symlink to return false")
-	}
-}
-
-// printCodexAgentsMD: symlink, regular file, missing.
-func TestPrintCodexAgentsMD_Variants(t *testing.T) {
-	tmp := t.TempDir()
-	printCodexAgentsMD(filepath.Join(tmp, "AGENTS.md")) // missing
-
-	plain := filepath.Join(tmp, "AGENTS.md")
-	os.WriteFile(plain, []byte("rules"), 0644)
-	printCodexAgentsMD(plain) // regular file
-
-	link := filepath.Join(tmp, "AGENTS-link.md")
-	linktest.Link(t, plain, link)
-	printCodexAgentsMD(link) // symlink
-}
-
-func TestPrintCodexSymlinkAudit_Variants(t *testing.T) {
-	tmp := t.TempDir()
-	// not linked
-	printCodexSymlinkAudit(filepath.Join(tmp, "missing"), "label")
-
-	// linked
-	target := filepath.Join(tmp, "target")
-	os.WriteFile(target, []byte("x"), 0644)
-	link := filepath.Join(tmp, "link")
-	linktest.Link(t, target, link)
-	printCodexSymlinkAudit(link, "label")
-}
-
-func TestPrintCodexSkillsAudit_EmptyAndPopulated(t *testing.T) {
-	// no dir → no-op
-	tmp := t.TempDir()
-	printCodexSkillsAudit(filepath.Join(tmp, "missing"))
-
-	// empty dir
-	emptyDir := filepath.Join(tmp, "empty")
-	os.MkdirAll(emptyDir, 0755)
-	printCodexSkillsAudit(emptyDir)
-
-	// dir with healthy + broken symlinks
-	d := filepath.Join(tmp, "d")
-	os.MkdirAll(d, 0755)
-	target := filepath.Join(tmp, "skill-target")
-	os.WriteFile(target, []byte("x"), 0644)
-	linktest.Link(t, target, filepath.Join(d, "ok"))
-	linktest.DanglingLink(t, filepath.Join(d, "broken"))
-	printCodexSkillsAudit(d)
-}
-
-func TestPrintCodexAgentsAudit_Variants(t *testing.T) {
-	tmp := t.TempDir()
-	// missing dir
-	printCodexAgentsAudit(filepath.Join(tmp, "missing"))
-	// empty dir
-	emptyDir := filepath.Join(tmp, "empty")
-	os.MkdirAll(emptyDir, 0755)
-	printCodexAgentsAudit(emptyDir)
-	// populated
-	d := filepath.Join(tmp, "d")
-	os.MkdirAll(d, 0755)
-	os.WriteFile(filepath.Join(d, "agent.toml"), []byte("x"), 0644)
-	printCodexAgentsAudit(d)
-}
-
-// printCursorAudit / printClaudeAudit / printCodexAudit / printOpenCodeAudit / printCopilotAudit smoke tests.
-func TestPrintAuditFunctions_EmptyProject(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-	printCursorAudit("proj", tmp, agentsHome)
-	printClaudeAudit("proj", tmp, agentsHome)
-	printCodexAudit("proj", tmp, agentsHome)
-	printOpenCodeAudit("proj", tmp, agentsHome)
-	printCopilotAudit("proj", tmp)
-}
-
-func TestPrintCursorAudit_HealthyAndUnlinkedRule(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	src := filepath.Join(agentsHome, "rules", "global", "rule.mdc")
-	os.MkdirAll(filepath.Dir(src), 0755)
-	os.WriteFile(src, []byte("rule"), 0644)
-
-	rulesDir := filepath.Join(tmp, ".cursor", "rules")
-	os.MkdirAll(rulesDir, 0755)
-	// healthy hardlink
-	os.Link(src, filepath.Join(rulesDir, "global--rule.mdc"))
-	// unlinked managed-namespace file (will report "not linked")
-	os.WriteFile(filepath.Join(rulesDir, "proj--unlinked.mdc"), []byte("x"), 0644)
-	// local-file rule
-	os.WriteFile(filepath.Join(rulesDir, "local.mdc"), []byte("x"), 0644)
-	// non-mdc skipped
-	os.WriteFile(filepath.Join(rulesDir, "junk.txt"), []byte("x"), 0644)
-
-	// cursor mcp.json broken symlink
-	linktest.DanglingLink(t, filepath.Join(tmp, ".cursor", "mcp.json"))
-
-	printCursorAudit("proj", tmp, agentsHome)
-}
-
-func TestPrintClaudeAudit_HealthyAndBroken(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	target := filepath.Join(agentsHome, "rules", "proj", "agents.md")
-	os.MkdirAll(filepath.Dir(target), 0755)
-	os.WriteFile(target, []byte("# rules"), 0644)
-
-	rulesDir := filepath.Join(tmp, ".claude", "rules")
-	os.MkdirAll(rulesDir, 0755)
-	linktest.Link(t, target, filepath.Join(rulesDir, "ok.md"))
-	linktest.DanglingLink(t, filepath.Join(rulesDir, "broken.md"))
-
-	// .mcp.json healthy
-	mcpTarget := filepath.Join(agentsHome, "mcp.json")
-	os.WriteFile(mcpTarget, []byte("{}"), 0644)
-	linktest.Link(t, mcpTarget, filepath.Join(tmp, ".mcp.json"))
-
-	printClaudeAudit("proj", tmp, agentsHome)
-}
-
-func TestPrintOpenCodeAudit_HealthyAndBroken(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-
-	target := filepath.Join(agentsHome, "settings", "proj", "opencode.json")
-	os.MkdirAll(filepath.Dir(target), 0755)
-	os.WriteFile(target, []byte("{}"), 0644)
-	linktest.Link(t, target, filepath.Join(tmp, "opencode.json"))
-
-	agentDir := filepath.Join(tmp, ".opencode", "agent")
-	os.MkdirAll(agentDir, 0755)
-	agentTarget := filepath.Join(agentsHome, "agents", "proj", "ok", "AGENT.md")
-	os.MkdirAll(filepath.Dir(agentTarget), 0755)
-	os.WriteFile(agentTarget, []byte("ok"), 0644)
-	linktest.Link(t, agentTarget, filepath.Join(agentDir, "ok.md"))
-	linktest.DanglingLink(t, filepath.Join(agentDir, "broken.md"))
-
-	printOpenCodeAudit("proj", tmp, agentsHome)
-}
-
-func TestPrintCopilotAudit_HealthyAndBroken(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-
-	target := filepath.Join(agentsHome, "rules", "proj", "copilot-instructions.md")
-	os.MkdirAll(filepath.Dir(target), 0755)
-	os.WriteFile(target, []byte("# instructions"), 0644)
-	os.MkdirAll(filepath.Join(tmp, ".github"), 0755)
-	linktest.Link(t, target, filepath.Join(tmp, ".github", "copilot-instructions.md"))
-
-	mcpTarget := filepath.Join(agentsHome, "mcp", "proj", "mcp.json")
-	os.MkdirAll(filepath.Dir(mcpTarget), 0755)
-	os.WriteFile(mcpTarget, []byte("{}"), 0644)
-	os.MkdirAll(filepath.Join(tmp, ".vscode"), 0755)
-	linktest.Link(t, mcpTarget, filepath.Join(tmp, ".vscode", "mcp.json"))
-
-	printCopilotAudit("proj", tmp)
 }
 
 // printAudit (top-level) with no platforms enabled — should just emit headers.
@@ -1209,170 +975,19 @@ func TestBuildStatusJSONReport_WithPluginAndProjects(t *testing.T) {
 	if len(report.Projects) == 0 {
 		t.Error("expected at least one project entry")
 	}
-}
 
-// TestPrintCursorAudit_BrokenSymlinkAndLocalFile exercises the .cursor/mcp.json
-// branches: broken-symlink, hard-link-or-local-file, and (not linked).
-func TestPrintCursorAudit_BrokenSymlinkAndLocalFile(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-
-	// Project A: broken .cursor/mcp.json symlink + a local .mdc rule with no prefix.
-	projA := filepath.Join(tmp, "projA")
-	cursorDirA := filepath.Join(projA, ".cursor")
-	os.MkdirAll(filepath.Join(cursorDirA, "rules"), 0755)
-	// Local-file rule (no prefix → "local" branch).
-	os.WriteFile(filepath.Join(cursorDirA, "rules", "ad-hoc.mdc"), []byte("# local"), 0644)
-	// Broken symlink for .cursor/mcp.json.
-	linktest.DanglingLink(t, filepath.Join(cursorDirA, "mcp.json"))
-
-	// Project B: regular file (not symlink) at .cursor/mcp.json → "hard link or local file".
-	projB := filepath.Join(tmp, "projB")
-	cursorDirB := filepath.Join(projB, ".cursor")
-	os.MkdirAll(filepath.Join(cursorDirB, "rules"), 0755)
-	os.WriteFile(filepath.Join(cursorDirB, "mcp.json"), []byte("{}"), 0644)
-
-	// Project C: no .cursor at all → "not linked" early-return branch.
-	projC := filepath.Join(tmp, "projC")
-	os.MkdirAll(projC, 0755)
-
-	// Project D: rules dir present, no mcp.json → not-linked branch (1005-1007).
-	projD := filepath.Join(tmp, "projD")
-	os.MkdirAll(filepath.Join(projD, ".cursor", "rules"), 0755)
-
-	// Project E: rules dir present with global--*.mdc that's NOT hardlinked
-	// (warning branch 983).
-	projE := filepath.Join(tmp, "projE")
-	rulesE := filepath.Join(projE, ".cursor", "rules")
-	os.MkdirAll(rulesE, 0755)
-	os.WriteFile(filepath.Join(rulesE, "global--orphan.mdc"), []byte("not linked"), 0644)
-	os.WriteFile(filepath.Join(rulesE, "projE--also.mdc"), []byte("not linked"), 0644)
-
-	printCursorAudit("projA", projA, agentsHome)
-	printCursorAudit("projB", projB, agentsHome)
-	printCursorAudit("projC", projC, agentsHome)
-	printCursorAudit("projD", projD, agentsHome)
-	printCursorAudit("projE", projE, agentsHome)
-}
-
-// TestPrintClaudeAudit_BrokenAndHealthy exercises printSymlinkDirAudit broken
-// branch and printSymlinkAudit broken branch via printClaudeAudit.
-func TestPrintClaudeAudit_BrokenAndHealthy(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-
-	proj := filepath.Join(tmp, "p")
-	claudeRules := filepath.Join(proj, ".claude", "rules")
-	os.MkdirAll(claudeRules, 0755)
-
-	// Healthy symlink.
-	healthyTarget := filepath.Join(agentsHome, "rules", "p", "ok.md")
-	os.MkdirAll(filepath.Dir(healthyTarget), 0755)
-	os.WriteFile(healthyTarget, []byte("ok"), 0644)
-	linktest.Link(t, healthyTarget, filepath.Join(claudeRules, "p--ok.md"))
-
-	// Broken symlink.
-	linktest.DanglingLink(t, filepath.Join(claudeRules, "p--broken.md"))
-	// Non-symlink regular file in rules dir → triggers the Readlink-err continue branch.
-	os.WriteFile(filepath.Join(claudeRules, "raw-file.md"), []byte("not-a-link"), 0644)
-
-	// Broken .mcp.json symlink at project root.
-	linktest.DanglingLink(t, filepath.Join(proj, ".mcp.json"))
-
-	printClaudeAudit("p", proj, agentsHome)
-}
-
-// TestPrintCodexAudit_AllBranches covers printCodexAgentsMD (symlink, local, missing),
-// printCodexSymlinkAudit (linked + not linked), printCodexSkillsAudit and
-// printCodexAgentsAudit (healthy + broken).
-func TestPrintCodexAudit_AllBranches(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-
-	// Project 1: AGENTS.md is a healthy symlink, codex config.toml linked,
-	// hooks.json not linked, skills dir has healthy+broken+non-symlink entries,
-	// agents dir has readable + unreadable file.
-	proj := filepath.Join(tmp, "p1")
-	os.MkdirAll(filepath.Join(proj, ".codex", "agents"), 0755)
-	os.MkdirAll(filepath.Join(proj, ".agents", "skills"), 0755)
-
-	// AGENTS.md symlink → healthy target.
-	target := filepath.Join(agentsHome, "rules", "p1", "agents.md")
-	os.MkdirAll(filepath.Dir(target), 0755)
-	os.WriteFile(target, []byte("# a"), 0644)
-	linktest.Link(t, target, filepath.Join(proj, "AGENTS.md"))
-
-	// codex config.toml linked.
-	cfgT := filepath.Join(agentsHome, "settings", "p1", "codex.toml")
-	os.MkdirAll(filepath.Dir(cfgT), 0755)
-	os.WriteFile(cfgT, []byte("# toml"), 0644)
-	linktest.Link(t, cfgT, filepath.Join(proj, ".codex", "config.toml"))
-
-	// Skill: one healthy symlink + one broken + one non-symlink file (skipped).
-	skillTarget := filepath.Join(agentsHome, "skills", "p1", "x")
-	os.MkdirAll(skillTarget, 0755)
-	linktest.Link(t, skillTarget, filepath.Join(proj, ".agents", "skills", "x"))
-	linktest.DanglingLink(t, filepath.Join(proj, ".agents", "skills", "broken"))
-	os.WriteFile(filepath.Join(proj, ".agents", "skills", "regular.md"), []byte("not-a-symlink"), 0644)
-
-	// Codex agent file (readable) + a broken symlink → printCodexAgentsAudit ✗.
-	os.WriteFile(filepath.Join(proj, ".codex", "agents", "ok.toml"), []byte("name=ok"), 0644)
-	linktest.DanglingLink(t, filepath.Join(proj, ".codex", "agents", "broken.toml"))
-
-	printCodexAudit("p1", proj, agentsHome)
-
-	// Project 2: AGENTS.md is a regular file (local branch), no other dirs.
-	proj2 := filepath.Join(tmp, "p2")
-	os.MkdirAll(filepath.Join(proj2, ".codex"), 0755)
-	os.MkdirAll(filepath.Join(proj2, ".agents", "skills"), 0755)
-	os.WriteFile(filepath.Join(proj2, "AGENTS.md"), []byte("# local"), 0644)
-	printCodexAudit("p2", proj2, agentsHome)
-
-	// Project 3: no AGENTS.md at all → "(no AGENTS.md)" branch.
-	proj3 := filepath.Join(tmp, "p3")
-	os.MkdirAll(proj3, 0755)
-	printCodexAudit("p3", proj3, agentsHome)
-}
-
-// TestPrintOpenCodeAudit_LocalAndBroken covers opencode.json local-file +
-// broken-symlink branches and the missing-.opencode/ branch.
-func TestPrintOpenCodeAudit_LocalAndBroken(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	os.MkdirAll(agentsHome, 0755)
-
-	// Local-file opencode.json (not symlink).
-	projLocal := filepath.Join(tmp, "local")
-	os.MkdirAll(projLocal, 0755)
-	os.WriteFile(filepath.Join(projLocal, "opencode.json"), []byte("{}"), 0644)
-	printOpenCodeAudit("local", projLocal, agentsHome)
-
-	// Broken-symlink opencode.json + missing .opencode/agent dir.
-	projBroken := filepath.Join(tmp, "broken")
-	os.MkdirAll(projBroken, 0755)
-	linktest.DanglingLink(t, filepath.Join(projBroken, "opencode.json"))
-	printOpenCodeAudit("broken", projBroken, agentsHome)
-}
-
-// TestPrintCopilotAudit_BrokenAndNotLinked covers .github/copilot-instructions.md
-// broken-symlink and not-linked branches.
-func TestPrintCopilotAudit_BrokenAndNotLinked(t *testing.T) {
-	tmp := t.TempDir()
-
-	// Broken symlink.
-	projBroken := filepath.Join(tmp, "broken")
-	os.MkdirAll(filepath.Join(projBroken, ".github"), 0755)
-	linktest.DanglingLink(t, filepath.Join(projBroken, ".github", "copilot-instructions.md"))
-	printCopilotAudit("broken", projBroken)
-
-	// Not linked at all.
-	projEmpty := filepath.Join(tmp, "empty")
-	os.MkdirAll(projEmpty, 0755)
-	printCopilotAudit("empty", projEmpty)
+	// §7A.6: status JSON sheds all config inspection. The manifest_found,
+	// last_refreshed, and lock keys must no longer appear in the marshaled
+	// project entry — `da config explain` owns effective-config detail now.
+	data, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, gone := range []string{"manifest_found", "last_refreshed", `"lock"`} {
+		if strings.Contains(string(data), gone) {
+			t.Errorf("status JSON must not contain %s after §7A.6 reshape; got: %s", gone, string(data))
+		}
+	}
 }
 
 // TestPrintSymlinkDirAudit_EmptyDir covers the empty-label branch.
@@ -1383,6 +998,115 @@ func TestPrintSymlinkDirAudit_EmptyDir(t *testing.T) {
 	ok, broken := printSymlinkDirAudit(dir, ".some/path/", "%s")
 	if ok != 0 || broken != 0 {
 		t.Errorf("expected (0,0), got (%d,%d)", ok, broken)
+	}
+}
+
+// TestPrintSymlinkDirAudit_MissingDir covers the os.ReadDir error early-return
+// (a directory that does not exist returns (0,0) without printing).
+func TestPrintSymlinkDirAudit_MissingDir(t *testing.T) {
+	ok, broken := printSymlinkDirAudit(filepath.Join(t.TempDir(), "nope"), "empty", auditNameFmt)
+	if ok != 0 || broken != 0 {
+		t.Errorf("expected (0,0) for missing dir, got (%d,%d)", ok, broken)
+	}
+}
+
+// TestPrintSymlinkDirAudit_HealthyAndBroken drives the loop body: a healthy
+// managed symlink (ok++ / statusAuditLinkOkFormat branch), a broken managed
+// symlink (broken++ / statusAuditLinkBrokenFormat branch), and a plain
+// non-symlink file (isLink=false continue branch). This is the dispatch the
+// AuditPrinter refactor left under-covered.
+func TestPrintSymlinkDirAudit_HealthyAndBroken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// POSIX symlink semantics: this exercises printSymlinkDirAudit's
+		// healthy-link (ok++) branch, which requires links.ManagedLinkTarget
+		// to resolve a *file* link. On Windows a managed file link is a hard
+		// link with no reparse point, so ManagedLinkTarget returns ("",false)
+		// (isLink=false) and the ok++ branch is unreachable by design (see
+		// doctor.go managedLinkBroken doc). The audit lines stay covered by
+		// the Linux/macOS run in the merged multi-OS coverage profile.
+		t.Skip("POSIX symlink semantics: file links are reparse-point symlinks on POSIX, hard links on Windows")
+	}
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "agent")
+	os.MkdirAll(dir, 0755)
+
+	// Healthy managed symlink → ok++.
+	target := filepath.Join(tmp, "target")
+	os.WriteFile(target, []byte("x"), 0644)
+	linktest.Link(t, target, filepath.Join(dir, "good"))
+
+	// Broken managed symlink → broken++.
+	linktest.DanglingLink(t, filepath.Join(dir, "bad"))
+
+	// Plain file (not a managed link) → continue branch, neither counted.
+	os.WriteFile(filepath.Join(dir, "plain"), []byte("x"), 0644)
+
+	out := captureStatusStdout(t, func() {
+		ok, broken := printSymlinkDirAudit(dir, "empty", auditNameFmt)
+		if ok != 1 {
+			t.Errorf("expected ok=1, got %d", ok)
+		}
+		if broken != 1 {
+			t.Errorf("expected broken=1, got %d", broken)
+		}
+	})
+	if !strings.Contains(out, "good") || !strings.Contains(out, "bad") {
+		t.Errorf("expected both link names in audit output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "(broken)") {
+		t.Errorf("expected broken marker in output, got:\n%s", out)
+	}
+}
+
+// TestPrintSymlinkDirAudit_Exported pins the exported PrintSymlinkDirAudit
+// wrapper used by the legacy commands/seams_test callers — it must delegate to
+// the unexported impl and return the same counts.
+func TestPrintSymlinkDirAudit_Exported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// POSIX symlink semantics: same reason as
+		// TestPrintSymlinkDirAudit_HealthyAndBroken — the (1,0) assertion
+		// needs a healthy *file* link recognized by ManagedLinkTarget, which
+		// is a hard link (no reparse point) on Windows. The exported wrapper
+		// delegates to the same impl whose lines are covered on Linux/macOS.
+		t.Skip("POSIX symlink semantics: file links are reparse-point symlinks on POSIX, hard links on Windows")
+	}
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "agent")
+	os.MkdirAll(dir, 0755)
+	target := filepath.Join(tmp, "t")
+	os.WriteFile(target, []byte("x"), 0644)
+	linktest.Link(t, target, filepath.Join(dir, "good"))
+
+	ok, broken := PrintSymlinkDirAudit(dir, "empty", auditNameFmt)
+	if ok != 1 || broken != 0 {
+		t.Errorf("expected (1,0) from exported wrapper, got (%d,%d)", ok, broken)
+	}
+}
+
+// TestResolveLinkDest_Branches covers all three return paths of
+// resolveLinkDest: empty dest, already-absolute dest, and the relative-dest
+// branch (line 119) that joins against the link's directory. The relative
+// branch was previously only reachable on platforms whose symlinks resolve
+// relative, so this pins it directly.
+func TestResolveLinkDest_Branches(t *testing.T) {
+	if got := resolveLinkDest("/links/a", ""); got != "" {
+		t.Errorf("empty dest: expected \"\", got %q", got)
+	}
+	// Use a genuinely OS-absolute path so the already-absolute branch
+	// (filepath.IsAbs true) is hit on every platform. A bare-separator path
+	// like "\abs\target" is NOT absolute on Windows (no drive/UNC volume), so
+	// derive an absolute path from a real dir to stay portable.
+	abs := filepath.Join(t.TempDir(), "abs", "target")
+	if !filepath.IsAbs(abs) {
+		t.Fatalf("test setup: expected %q to be absolute", abs)
+	}
+	if got := resolveLinkDest("/links/a", abs); got != abs {
+		t.Errorf("abs dest: expected %q, got %q", abs, got)
+	}
+	linkPath := filepath.Join("links", "sub", "a")
+	want := filepath.Clean(filepath.Join("links", "sub", "rel", "target"))
+	if got := resolveLinkDest(linkPath, filepath.Join("rel", "target")); got != want {
+		t.Errorf("relative dest: expected %q, got %q", want, got)
 	}
 }
 
@@ -1463,10 +1187,12 @@ func TestRunStatus_JSONMode(t *testing.T) {
 	}
 }
 
-// TestRunStatus_LastRefreshedRender covers the "last refreshed" print branch
-// (389-391) by registering a project whose .agentsrc.json has a refresh
-// timestamp.
-func TestRunStatus_LastRefreshedRender(t *testing.T) {
+// TestRunStatus_TextOmitsConfigInspection is the positive coverage for §7A.6:
+// even when a project's manifest carries a refresh timestamp and declared
+// skills, text-mode status renders fleet/link-health only — it must NOT emit
+// any "last refreshed", "manifest", or "lock" config-inspection line (that
+// detail now belongs to `da config explain`).
+func TestRunStatus_TextOmitsConfigInspection(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	agentsHome := filepath.Join(tmp, ".agents")
@@ -1478,9 +1204,12 @@ func TestRunStatus_LastRefreshedRender(t *testing.T) {
 	rc := &config.AgentsRC{
 		Version: 1,
 		Project: "p",
-		Refresh: &config.RefreshMetadata{RefreshedAt: "2026-05-01T12:30:00Z"},
+		Skills:  []string{"s1"},
 	}
 	if err := rc.Save(projPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.WriteRefreshLock(projPath, config.RefreshMetadata{RefreshedAt: "2026-05-01T12:30:00Z"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1490,9 +1219,15 @@ func TestRunStatus_LastRefreshedRender(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cmd := NewStatusCmd(testStatusDeps(), jsonOff)
-	if err := cmd.Execute(); err != nil {
-		t.Errorf("runStatus with refresh ts: %v", err)
+	out := captureStatusStdout(t, func() {
+		if err := runStatus(false, "", stdStatusConfigLoader{}, false); err != nil {
+			t.Errorf("runStatus: %v", err)
+		}
+	})
+	for _, gone := range []string{"last refreshed", "manifest", "lock"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("status text must not contain %q after §7A.6 reshape; output:\n%s", gone, out)
+		}
 	}
 }
 
@@ -1622,92 +1357,12 @@ func captureStatusStdout(t *testing.T, fn func()) string {
 	return string(out)
 }
 
-// seedLockProject creates a project dir with a manifest and (optionally) a
-// committed .agentsrc.lock holding the given locked layers.
-func seedLockProject(t *testing.T, manifest string, layers map[string]config.LockedLayer) string {
-	t.Helper()
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, config.AgentsRCFile), []byte(manifest), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if layers != nil {
-		if err := config.WriteConfigLock(dir, layers); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
-
-func TestPrintStatusProjectLockSummary_NoExtendsSilent(t *testing.T) {
-	dir := seedLockProject(t, `{"version":2}`, nil)
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if out != "" {
-		t.Errorf("expected no output for manifest without extends, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_MissingManifestSilent(t *testing.T) {
-	dir := t.TempDir() // no manifest at all
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if out != "" {
-		t.Errorf("expected no output for missing manifest, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_NoLock(t *testing.T) {
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json"]}`, nil)
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "no .agentsrc.lock") {
-		t.Errorf("expected missing-lock notice, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_Locked(t *testing.T) {
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json"]}`, map[string]config.LockedLayer{
-		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
-	})
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "lock") || !strings.Contains(out, "1 unit(s) locked") {
-		t.Errorf("expected locked summary, got %q", out)
-	}
-}
-
-func TestPrintStatusProjectLockSummary_Drifted(t *testing.T) {
-	// Declared but not in lock → drift.
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
-		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
-	})
-	out := captureStatusStdout(t, func() { printStatusProjectLockSummary(dir) })
-	if !strings.Contains(out, "drifted") || !strings.Contains(out, "da config sync") {
-		t.Errorf("expected drift summary with sync hint, got %q", out)
-	}
-}
-
-func TestBuildStatusJSONLock_NotApplicable(t *testing.T) {
-	dir := seedLockProject(t, `{"version":2}`, nil)
-	if got := buildStatusJSONLock(dir); got != nil {
-		t.Errorf("expected nil lock JSON for no-extends manifest, got %+v", got)
-	}
-}
-
-func TestBuildStatusJSONLock_ReportsDrift(t *testing.T) {
-	dir := seedLockProject(t, `{"extends":["acme:org/base.json","acme:org/missing.json"]}`, map[string]config.LockedLayer{
-		"acme:org/base.json": {ResolvedSHA: "a1", FetchedAt: "t"},
-	})
-	got := buildStatusJSONLock(dir)
-	if got == nil {
-		t.Fatal("expected lock JSON, got nil")
-	}
-	if !got.Present {
-		t.Error("expected Present=true")
-	}
-	if got.TotalLayers != 2 {
-		t.Errorf("expected 2 total layers, got %d", got.TotalLayers)
-	}
-	if len(got.DriftedLayers) != 1 || got.DriftedLayers[0] != "acme:org/missing.json" {
-		t.Errorf("expected one drifted layer acme:org/missing.json, got %+v", got.DriftedLayers)
-	}
-}
+// Per §7A.6 status sheds lockfile inspection (printStatusProjectLockSummary /
+// buildStatusJSONLock removed). Lockfile drift is now surfaced by `da doctor`
+// (read-only) and reconciled by `da config sync`; the underlying drift logic is
+// covered by internal/config's LockDrift tests. The former
+// TestPrintStatusProjectLockSummary_* / TestBuildStatusJSONLock_* cases and
+// their seedLockProject helper were removed with the helpers they exercised.
 
 // ---------- D4: platform header gated on config-enabled ∧ installed ----------
 
@@ -1828,69 +1483,5 @@ func TestInstalledEnabledPlatformIDs(t *testing.T) {
 	}
 	if got["cursor"] {
 		t.Error("disabled cursor must not appear in the set")
-	}
-}
-
-// ---------- D4: present rendered files are not labeled absent ----------
-
-// TestPrintCodexSymlinkAudit_PresentFileIsLocalNotAbsent proves a present-but-
-// not-a-symlink rendered file (e.g. .codex/hooks.json) renders "(local file)"
-// rather than "(not linked)" (D4 bug #3), while a truly absent path still
-// renders "(not linked)".
-func TestPrintCodexSymlinkAudit_PresentFileIsLocalNotAbsent(t *testing.T) {
-	tmp := t.TempDir()
-	present := filepath.Join(tmp, "hooks.json")
-	os.WriteFile(present, []byte("{}"), 0644)
-
-	out := captureStatusStdout(t, func() { printCodexSymlinkAudit(present, ".codex/hooks.json") })
-	if !strings.Contains(out, "(local file)") {
-		t.Errorf("present rendered file should be labeled (local file), got %q", out)
-	}
-	if strings.Contains(out, "(not linked)") {
-		t.Errorf("present rendered file must not be labeled (not linked), got %q", out)
-	}
-
-	absent := captureStatusStdout(t, func() { printCodexSymlinkAudit(filepath.Join(tmp, "gone.json"), ".codex/gone.json") })
-	if !strings.Contains(absent, "(not linked)") {
-		t.Errorf("absent path should be labeled (not linked), got %q", absent)
-	}
-}
-
-// TestPrintSymlinkAudit_PresentFileIsLocalNotAbsent covers the same
-// distinction for the shared single-symlink auditor used by Claude (.mcp.json)
-// and Copilot (.vscode/mcp.json).
-func TestPrintSymlinkAudit_PresentFileIsLocalNotAbsent(t *testing.T) {
-	tmp := t.TempDir()
-	present := filepath.Join(tmp, ".mcp.json")
-	os.WriteFile(present, []byte("{}"), 0644)
-
-	out := captureStatusStdout(t, func() { printSymlinkAudit(present, ".mcp.json") })
-	if !strings.Contains(out, "(local file)") {
-		t.Errorf("present file should be (local file), got %q", out)
-	}
-	if strings.Contains(out, "(not linked)") {
-		t.Errorf("present file must not be (not linked), got %q", out)
-	}
-
-	absent := captureStatusStdout(t, func() { printSymlinkAudit(filepath.Join(tmp, "missing.json"), ".vscode/mcp.json") })
-	if !strings.Contains(absent, "(not linked)") {
-		t.Errorf("absent path should be (not linked), got %q", absent)
-	}
-
-	// Healthy symlink still renders ✓ → dest.
-	target := filepath.Join(tmp, "target.json")
-	os.WriteFile(target, []byte("{}"), 0644)
-	link := filepath.Join(tmp, "link.json")
-	linktest.Link(t, target, link)
-	healthy := captureStatusStdout(t, func() { printSymlinkAudit(link, ".mcp.json") })
-	if runtime.GOOS == "windows" {
-		// Windows managed file links are hard links (symlinks need privilege),
-		// indistinguishable from a local file via Lstat, so the audit renders
-		// "(local file)" rather than a target arrow.
-		if !strings.Contains(healthy, "(local file)") {
-			t.Errorf("windows hard link should render (local file), got %q", healthy)
-		}
-	} else if !strings.Contains(healthy, "→") {
-		t.Errorf("healthy symlink should render target arrow, got %q", healthy)
 	}
 }

@@ -570,3 +570,127 @@ func TestCursorBrokenLinks_UnmanagedEntriesIgnored(t *testing.T) {
 func TestCursorBrokenLinks_InterfaceConformance(t *testing.T) {
 	var _ BrokenLinkReporter = (*cursor)(nil)
 }
+
+// ---------- UserConfigReporter implementation (P4) ----------
+
+// TestCursorUserBrokenLinks is the table-driven cover for cursor's
+// UserConfigReporter broken-link surface (~/.cursor/hooks.json — the managed
+// user-home target writeUserHomeHooks emits). Every reported link carries
+// PlatformID="cursor".
+func TestCursorUserBrokenLinks(t *testing.T) {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, home string)
+		wantCount int
+	}{
+		{
+			name:      "empty home reports nothing",
+			setup:     func(t *testing.T, home string) {},
+			wantCount: 0,
+		},
+		{
+			name: "broken hooks.json",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".cursor", "hooks.json"))
+			},
+			wantCount: 1,
+		},
+		{
+			name: "healthy hooks.json symlink ignored",
+			setup: func(t *testing.T, home string) {
+				target := filepath.Join(home, ".agents", "hooks", "global", "cursor.json")
+				mkdirAllT(t, filepath.Dir(target))
+				if err := os.WriteFile(target, []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				linktest.Link(t, target, filepath.Join(home, ".cursor", "hooks.json"))
+			},
+			wantCount: 0,
+		},
+		{
+			name: "rendered hooks.json ignored",
+			setup: func(t *testing.T, home string) {
+				cursorHome := filepath.Join(home, ".cursor")
+				mkdirAllT(t, cursorHome)
+				if err := os.WriteFile(filepath.Join(cursorHome, "hooks.json"), []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantCount: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &cursor{io: stdPlatformIO{}}
+			got := c.UserBrokenLinks(home)
+			assertUserBrokenLinks(t, "cursor", got, tc.wantCount)
+		})
+	}
+}
+
+// TestCursorUserBadge covers the cursor user-config badge over
+// ~/.cursor/hooks.json: Present reflects a managed (rendered or linked) hooks
+// file, Broken reflects a dangling managed link.
+func TestCursorUserBadge(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, home string)
+		wantPresent bool
+		wantBroken  bool
+	}{
+		{
+			name:        "empty home: absent badge",
+			setup:       func(t *testing.T, home string) {},
+			wantPresent: false,
+			wantBroken:  false,
+		},
+		{
+			name: "present healthy hooks.json",
+			setup: func(t *testing.T, home string) {
+				cursorHome := filepath.Join(home, ".cursor")
+				mkdirAllT(t, cursorHome)
+				if err := os.WriteFile(filepath.Join(cursorHome, "hooks.json"), []byte("{}"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantPresent: true,
+			wantBroken:  false,
+		},
+		{
+			name: "broken hooks.json surfaces broken badge",
+			setup: func(t *testing.T, home string) {
+				linktest.DanglingLink(t, filepath.Join(home, ".cursor", "hooks.json"))
+			},
+			wantPresent: false,
+			wantBroken:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			tc.setup(t, home)
+
+			c := &cursor{io: stdPlatformIO{}}
+			got := c.UserBadge(home)
+			if got.Name != "Cursor" {
+				t.Errorf("UserBadge.Name = %q, want Cursor", got.Name)
+			}
+			if got.Present != tc.wantPresent || got.Broken != tc.wantBroken {
+				t.Errorf("UserBadge = %+v, want Present=%v Broken=%v", got, tc.wantPresent, tc.wantBroken)
+			}
+		})
+	}
+}
+
+// TestCursorUserConfig_InterfaceConformance pins compile-time conformance with
+// UserConfigReporter for the cursor platform.
+func TestCursorUserConfig_InterfaceConformance(t *testing.T) {
+	var _ UserConfigReporter = (*cursor)(nil)
+}

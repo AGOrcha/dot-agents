@@ -31,6 +31,7 @@
               "landed",
               "verifier",
               "tests",
+              "human_label",
               "correction_pressure",
               "scope",
               "hook_outcomes",

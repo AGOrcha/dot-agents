@@ -4,9 +4,9 @@
 // status will iterate over once consumers migrate (Phases 1+). Per the
 // proposal at .agents/proposals/platform-driven-diagnostics.md (D1), these are
 // sister interfaces — not extensions to the core Platform interface — so a
-// platform may implement only the readers that apply to it (e.g. cursor and
-// copilot have no user-config layer; only claude and codex expose orphan
-// canonicals). Doctor/status type-assert at the use site:
+// platform may implement only the readers that apply to it (e.g. only claude
+// and codex expose orphan canonicals). Doctor/status type-assert at the use
+// site:
 //
 //	if r, ok := p.(BrokenLinkReporter); ok {
 //	    broken = append(broken, r.BrokenLinks(name, repo, agentsHome)...)
@@ -18,7 +18,15 @@
 
 package platform
 
-import "io"
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+
+	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/ui"
+)
 
 // BrokenLink describes a single managed link that exists but does not
 // resolve to the expected canonical source. PlatformID is intentionally
@@ -102,9 +110,12 @@ type StatusBadger interface {
 	Badge(project, repoPath, agentsHome string) PlatformBadge
 }
 
-// UserConfigReporter is implemented by platforms that maintain a user-home
-// configuration layer (e.g. claude/codex/opencode). cursor and copilot do
-// not implement this.
+// UserConfigReporter is implemented by every platform that participates in the
+// user-home diagnostics path. claude/codex/opencode/cursor report real managed
+// user-home links; copilot implements it too but reports an empty/clean surface
+// because its documented user-config layer is not yet wired by dot-agents (the
+// user-scope wiring gap is tracked in PLATFORM_DIRS_DOCS). No platform lacks a
+// user-config layer — the distinction is whether dot-agents wires it yet.
 type UserConfigReporter interface {
 	// UserBrokenLinks returns broken managed links under the user's home
 	// directory for this platform. Consumer: doctor.collectBrokenUserLinks.
@@ -123,11 +134,112 @@ type OrphanCanonicalReporter interface {
 }
 
 // AuditPrinter is implemented by platforms that render the per-platform
-// audit block shown by `da status --audit`. Q2 of the proposal asks
-// whether this should take a *ui.Sink instead of io.Writer — that
-// decision is deferred to Phase 5 when the helpers actually move. Until
-// then io.Writer keeps the interface dependency-free at the platform
-// layer.
+// audit block shown by `da status --audit`. Resolved in Phase 5 (Q2): the
+// printer takes an io.Writer rather than a *ui.Sink — the platform layer
+// only needs the ANSI colour constants from internal/ui (plain strings),
+// so io.Writer keeps the dependency surface minimal while the lifecycle
+// layer supplies os.Stdout at the call site.
 type AuditPrinter interface {
 	PrintAudit(w io.Writer, project, repoPath, agentsHome string)
+}
+
+// Filter returns the subset of all whose ID() matches agentFilter, in the
+// original order. An empty agentFilter selects every platform (the
+// unfiltered `da status`/`da doctor --verbose` audit). This is the single
+// platform-selection primitive the lifecycle audit loop dispatches over,
+// replacing the per-platform `agentFilter == "" || agentFilter == "<id>"`
+// chain that previously lived in status.go's printAudit.
+func Filter(all []Platform, agentFilter string) []Platform {
+	if agentFilter == "" {
+		return all
+	}
+	var out []Platform
+	for _, p := range all {
+		if p.ID() == agentFilter {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// The audit-rendering primitives below were moved verbatim (byte-for-byte
+// output preserved) from commands/internal/lifecycle/status.go in Phase 5.
+// They render to an io.Writer using the ANSI colour constants from
+// internal/ui and the package-local link classification helpers
+// (classifyManagedLink, absolutizeDest) so the per-platform PrintAudit
+// implementations no longer reach back into the lifecycle package.
+
+const (
+	auditLocalFileIndentedFmt = "      %s○%s %s %s(local file)%s\n"
+	auditLinkOKFmt            = "      %s✓%s %s %s→ %s%s\n"
+	auditLinkBrokenFmt        = "      %s✗%s %s %s→ %s (broken)%s\n"
+)
+
+// displayDest formats a managed link's raw target for audit display:
+// absolutized then ~/-collapsed via config.DisplayPath.
+func displayDest(linkPath, raw string) string {
+	return config.DisplayPath(absolutizeDest(linkPath, raw))
+}
+
+// printSymlinkDirAudit reads dir for symlink entries and writes each entry's
+// status to w. nameFormat is a printf format applied to the entry name (e.g.
+// "%s" or ".opencode/agent/%s"). emptyLabel is shown after the ○ marker when
+// no symlinks were found. Returns the number of OK and broken entries.
+func printSymlinkDirAudit(w io.Writer, dir, emptyLabel, nameFormat string) (ok, broken int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0
+	}
+	for _, e := range entries {
+		linkPath := filepath.Join(dir, e.Name())
+		state, raw := classifyManagedLink(linkPath)
+		if state == linkStateNotALink {
+			continue
+		}
+		display := fmt.Sprintf(nameFormat, e.Name())
+		if state == linkStateBroken {
+			fmt.Fprintf(w, auditLinkBrokenFmt, ui.Red, ui.Reset, display, ui.Dim, displayDest(linkPath, raw), ui.Reset)
+			broken++
+		} else {
+			fmt.Fprintf(w, auditLinkOKFmt, ui.Green, ui.Reset, display, ui.Dim, displayDest(linkPath, raw), ui.Reset)
+			ok++
+		}
+	}
+	if ok == 0 && broken == 0 {
+		fmt.Fprintf(w, "      %s○%s %s %s(empty)%s\n", ui.Dim, ui.Reset, emptyLabel, ui.Dim, ui.Reset)
+	}
+	return ok, broken
+}
+
+// printSymlinkAudit reads a single symlink and writes its ✓/✗/(local file)/
+// (not linked) status with the supplied display label. A present path that is
+// not a managed link is a rendered/managed file on disk, reported as
+// "(local file)"; "(not linked)" is reserved for a path that is truly absent.
+func printSymlinkAudit(w io.Writer, linkPath, label string) {
+	if state, raw := classifyManagedLink(linkPath); state != linkStateNotALink {
+		if state == linkStateBroken {
+			fmt.Fprintf(w, auditLinkBrokenFmt, ui.Red, ui.Reset, label, ui.Dim, displayDest(linkPath, raw), ui.Reset)
+		} else {
+			fmt.Fprintf(w, auditLinkOKFmt, ui.Green, ui.Reset, label, ui.Dim, displayDest(linkPath, raw), ui.Reset)
+		}
+		return
+	}
+	if _, err := os.Lstat(linkPath); err == nil {
+		fmt.Fprintf(w, auditLocalFileIndentedFmt, ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+		return
+	}
+	fmt.Fprintf(w, "      %s-%s %s %s(not linked)%s\n", ui.Dim, ui.Reset, label, ui.Dim, ui.Reset)
+}
+
+// printLinkedStatusLine writes a managed link's ✓/✗ status line for label and
+// returns true when the link is healthy. Callers have already established that
+// linkPath is a managed link.
+func printLinkedStatusLine(w io.Writer, label, linkPath string) bool {
+	state, raw := classifyManagedLink(linkPath)
+	if state != linkStateBroken {
+		fmt.Fprintf(w, auditLinkOKFmt, ui.Green, ui.Reset, label, ui.Dim, displayDest(linkPath, raw), ui.Reset)
+		return true
+	}
+	fmt.Fprintf(w, auditLinkBrokenFmt, ui.Red, ui.Reset, label, ui.Dim, displayDest(linkPath, raw), ui.Reset)
+	return false
 }

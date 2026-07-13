@@ -3,6 +3,7 @@ package scoring
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -80,5 +81,35 @@ func TestScoreIterationSurfacesBuildSignalSetsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "build signal sets") {
 		t.Errorf("error should mention build step: %v", err)
+	}
+}
+
+// ScoreIterationWithSignals and ScoreIteration are one pipeline, not two:
+// the wrapper must produce byte-identical Score + IterationRecord results,
+// with the SignalSet as the only addition. This pins the R2 dashboard's
+// recompute-on-miss consumer (t06) to the same scores close-task writes —
+// any future divergence between the two calls is a bug, not evolution.
+func TestScoreIterationWithSignalsMatchesScoreIteration(t *testing.T) {
+	iterLogDir := filepath.Join("testdata", "iterlog")
+	repoDir := filepath.Join("..", "..")
+	if _, err := os.Stat(iterLogDir); err != nil {
+		t.Skipf("iter-log fixture not present: %v", err)
+	}
+	score, rec, err := ScoreIteration(iterLogDir, repoDir, 1)
+	if err != nil {
+		t.Fatalf("ScoreIteration: %v", err)
+	}
+	scoreWS, set, recWS, err := ScoreIterationWithSignals(iterLogDir, repoDir, 1)
+	if err != nil {
+		t.Fatalf("ScoreIterationWithSignals: %v", err)
+	}
+	if !reflect.DeepEqual(score, scoreWS) {
+		t.Errorf("scores diverge:\n ScoreIteration            = %+v\n ScoreIterationWithSignals = %+v", score, scoreWS)
+	}
+	if !reflect.DeepEqual(rec, recWS) {
+		t.Errorf("records diverge:\n ScoreIteration            = %+v\n ScoreIterationWithSignals = %+v", rec, recWS)
+	}
+	if set.Iteration != 1 {
+		t.Errorf("set.Iteration = %d, want 1", set.Iteration)
 	}
 }

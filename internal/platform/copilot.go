@@ -5,13 +5,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 )
 
 type copilot struct {
@@ -26,6 +30,8 @@ const (
 	copilotGitHubDir         = ".github"
 	copilotVSCodeDir         = ".vscode"
 	copilotAgentsDir         = ".agents"
+	copilotHomeDir           = ".copilot"
+	copilotHooksDir          = "hooks"
 )
 
 func NewCopilot() Platform { return &copilot{io: stdPlatformIO{}} }
@@ -208,34 +214,58 @@ func (c *copilot) CreateLinks(project, repoPath string) error {
 		return err
 	}
 
+	// ~/.copilot/hooks/{name}.json
+	if err := c.createUserHomeHookFiles(project, agentsHome); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (c *copilot) resolveInstructionsSrc(project, agentsHome string) string {
+// resolveInstructionsSrc returns the highest-priority canonical instructions
+// source under <agentsHome>/rules/, or ("", nil) when none of the candidates
+// exist. A confirmed-absent candidate (fsops.StatAllowMissing found=false,
+// err=nil) is skipped and the search continues to the next candidate; a real
+// Stat error (permission denied, I/O failure, ...) aborts the search
+// immediately and propagates — it must never be treated as "this candidate
+// doesn't exist" and silently skipped, which would mask a real error as
+// "nothing to link" upstream in createInstructionsLink.
+func (c *copilot) resolveInstructionsSrc(project, agentsHome string) (string, error) {
 	// Priority order per bash implementation
 	candidates := []string{
 		filepath.Join(agentsHome, "rules", project, copilotInstructionsMD),
 		filepath.Join(agentsHome, "rules", "global", copilotInstructionsMD),
 	}
 	for _, f := range candidates {
-		if _, err := os.Stat(f); err == nil {
-			return f
+		_, found, err := fsops.StatAllowMissing(f)
+		if err != nil {
+			return "", err
+		}
+		if found {
+			return f, nil
 		}
 	}
 	// Fallback: rules.(md|mdc|txt)
 	for _, scope := range []string{project, "global"} {
 		for _, ext := range []string{"md", "mdc", "txt"} {
 			f := filepath.Join(agentsHome, "rules", scope, "rules."+ext)
-			if _, err := os.Stat(f); err == nil {
-				return f
+			_, found, err := fsops.StatAllowMissing(f)
+			if err != nil {
+				return "", err
+			}
+			if found {
+				return f, nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
 func (c *copilot) createInstructionsLink(project, repoPath, agentsHome string) error {
-	src := c.resolveInstructionsSrc(project, agentsHome)
+	src, err := c.resolveInstructionsSrc(project, agentsHome)
+	if err != nil {
+		return err
+	}
 	if src == "" {
 		return nil
 	}
@@ -279,11 +309,15 @@ func (c *copilot) createClaudeCompatLinks(project, repoPath, agentsHome string) 
 	if err := c.io.MkdirAll(filepath.Join(repoPath, copilotClaudeDir), 0755); err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json")
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFile(
 		c.io,
 		target,
 		renderClaudeHookSettings,
-		resolveHookSpec(agentsHome, []string{"hooks", "settings"}, project, "claude-code.json"),
+		spec,
 		directSymlinkHookMode,
 		func(p string) error { return removeRenderedClaudeHookSettings(c.io, p) },
 		projectBundles,
@@ -318,6 +352,9 @@ func (c *copilot) emitCanonicalProjectHookFiles(specs []HookSpec, hooksDir strin
 func (c *copilot) emitLegacyProjectHookFiles(agentsHome, project, hooksDir string) error {
 	specs, err := ListHookSpecs(agentsHome, project)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
 		return pruneManagedRenderedFanoutExtras(c.io, hooksDir, map[string]bool{}, isLikelyRenderedCopilotHookFile)
 	}
 	if err := emitHookFanout(c.io, specs, hooksDir, HookEmissionMode{
@@ -358,6 +395,33 @@ func legacyCopilotHookNames(specs []HookSpec) map[string]bool {
 		wanted[spec.Name+".json"] = true
 	}
 	return wanted
+}
+
+// copilotUserHooksDir is the user-scope hook directory copilot loads
+// (~/.copilot/hooks/, the user equivalent of the repo .github/hooks/ fanout —
+// see PLATFORM_DIRS_DOCS GitHub Copilot "Hooks"; $COPILOT_HOME is the documented
+// override but, like cursor's ~/.cursor and codex's ~/.codex user-home targets,
+// dot-agents wires the default ~/.copilot location).
+func copilotUserHooksDir(home string) string {
+	return filepath.Join(home, copilotHomeDir, copilotHooksDir)
+}
+
+// createUserHomeHookFiles emits the global-scope canonical hooks as a rendered
+// fanout under ~/.copilot/hooks/ for every applicable user home root, mirroring
+// the repo-scope createProjectHookFiles fanout (and cursor/codex's
+// writeUserHomeHooks, which wire a single user-home hooks file). Only global
+// hooks are user-scope: project-scoped hooks stay in the repo's .github/hooks/.
+func (c *copilot) createUserHomeHookFiles(project, agentsHome string) error {
+	canonicalSpecs, err := collectCanonicalHookSpecsForPlatform(agentsHome, project, c.ID(), "global")
+	if err != nil {
+		return err
+	}
+	for _, homeRoot := range config.UserHomeRoots() {
+		if err := c.emitCanonicalProjectHookFiles(canonicalSpecs, copilotUserHooksDir(homeRoot)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *copilot) RemoveLinks(project, repoPath string) error {
@@ -524,6 +588,35 @@ func classifyCopilotSingleFile(linkPath string) []BrokenLink {
 	}}
 }
 
+// PrintAudit implements AuditPrinter for the copilot platform: it renders the
+// .github/copilot-instructions.md link and the .vscode/mcp.json link. Moved
+// verbatim (output preserved) from the lifecycle-side printCopilotAudit in
+// Phase 5. agentsHome is unused — copilot's audit surface is entirely
+// repo-relative.
+func (c *copilot) PrintAudit(w io.Writer, _, repoPath, _ string) {
+	fmt.Fprintf(w, "    %sGitHub Copilot%s\n", ui.Cyan, ui.Reset)
+	copilotPrintInstructionsLink(w, filepath.Join(repoPath, copilotGitHubDir, copilotInstructionsMD))
+	printSymlinkAudit(w, filepath.Join(repoPath, copilotVSCodeDir, copilotMCPJSON), ".vscode/mcp.json")
+	fmt.Fprintln(w)
+}
+
+// copilotPrintInstructionsLink renders the .github/copilot-instructions.md
+// audit line to w. A present managed link prints ✓/✗ with its resolved
+// target; a present non-link prints nothing (preserving the historical
+// printCopilotAudit behavior); an absent path prints "(not linked)".
+func copilotPrintInstructionsLink(w io.Writer, instructionsPath string) {
+	if _, err := os.Lstat(instructionsPath); err != nil {
+		fmt.Fprintf(w, "      %s-%s .github/copilot-instructions.md %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	switch state, raw := classifyManagedLink(instructionsPath); state {
+	case linkStateBroken:
+		fmt.Fprintf(w, "      %s✗%s .github/copilot-instructions.md %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest(instructionsPath, raw), ui.Reset)
+	case linkStateHealthy:
+		fmt.Fprintf(w, "      %s✓%s .github/copilot-instructions.md %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest(instructionsPath, raw), ui.Reset)
+	}
+}
+
 func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	skills, err := BuildSharedSkillMirrorIntents(project, filepath.Join(copilotAgentsDir, "skills"))
 	if err != nil {
@@ -534,6 +627,31 @@ func (c *copilot) SharedTargetIntents(project string) ([]ResourceIntent, error) 
 		return nil, err
 	}
 	return append(skills, agents...), nil
+}
+
+// ManagedOutputs implements ManagedOutputReporter for copilot: the repo-relative
+// .gitignore patterns for every output `da refresh` projects/generates for the
+// GitHub Copilot platform (config-distribution-model §15 / D14 / R8). Copilot
+// is not a single owned directory like the other platforms — it fans out across
+// .github/ and .vscode/ and renders a per-machine .github/hooks/*.json manifest
+// (createProjectHookFiles via renderCopilotHookFile) whose absolute $HOME
+// gate.sh paths are non-portable, so the hooks must be ignored via the managed
+// block rather than an ad-hoc root rule (retiring the #381 .github/hooks/*.json
+// rule). .claude/settings.local.json is copilot's rendered claude-compat hook
+// settings (createClaudeCompatLinks), also per-machine.
+func (c *copilot) ManagedOutputs() []string {
+	return []string{
+		copilotGitHubDir + "/" + copilotInstructionsMD,
+		copilotGitHubDir + "/agents/",
+		copilotGitHubDir + "/" + copilotHooksDir + "/*.json",
+		copilotVSCodeDir + "/" + copilotMCPJSON,
+		copilotClaudeDir + "/" + copilotSettingsLocalJSON,
+		// Shared skill mirror copilot writes via SharedTargetIntents ->
+		// BuildSharedSkillMirrorIntents(project, copilotAgentsDir/"skills"); also
+		// counted as copilot-managed by CountLinks. Authoritative per
+		// docs/PLATFORM_DIRS_DOCS.md ("GitHub Copilot" impl-audit row).
+		copilotAgentsDir + skillsSubdir,
+	}
 }
 
 // CountLinks implements LinkCounter for the copilot platform: returns the
@@ -563,5 +681,37 @@ func (c *copilot) CountLinks(_, repoPath, _ string) (ok, broken int) {
 // Badge implements StatusBadger for the copilot platform.
 func (c *copilot) Badge(project, repoPath, agentsHome string) PlatformBadge {
 	ok, broken := c.CountLinks(project, repoPath, agentsHome)
+	return PlatformBadge{Name: "Copilot", Present: ok > 0, Broken: broken > 0}
+}
+
+// copilotUserConfigDirs returns the managed user-home directories copilot
+// maintains: ~/.copilot/hooks/, a rendered fanout of the global-scope hooks
+// wired by createUserHomeHookFiles (the user equivalent of the repo
+// .github/hooks/ fanout — see PLATFORM_DIRS_DOCS GitHub Copilot "Hooks").
+// Copilot's broader documented user-config layer (~/.copilot/copilot-
+// instructions.md, ~/.copilot/skills/, ~/.copilot/agents/,
+// ~/.copilot/mcp-config.json) is NOT yet wired by dot-agents, so only the hooks
+// directory is reported today.
+func copilotUserConfigDirs(home string) []string {
+	return []string{copilotUserHooksDir(home)}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the copilot platform. The
+// managed user-home surface is the ~/.copilot/hooks/ fanout (the only user-scope
+// target createUserHomeHookFiles emits); every reported entry carries
+// PlatformID="copilot". A rendered managed file is silently skipped — only a
+// resolvable managed link whose target is missing is reported broken, matching
+// the shared scanUserBrokenLinks contract used by claude/codex/cursor/opencode.
+func (c *copilot) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("copilot", nil, copilotUserConfigDirs(home))
+}
+
+// UserBadge implements UserConfigReporter for the copilot platform: the
+// user-config badge over ~/.copilot/hooks/. Present is true when any managed
+// rendered hook file is present, Broken when one is a dangling managed link —
+// mirroring the cursor/codex UserBadge badge math over their own user-home
+// hook surfaces.
+func (c *copilot) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(nil, copilotUserConfigDirs(home))
 	return PlatformBadge{Name: "Copilot", Present: ok > 0, Broken: broken > 0}
 }

@@ -3,12 +3,13 @@ plan_id: graph-backend-adapter-contract
 tasks:
     - id: t1-none-adapter-end-to-end
       title: Built-in `none` adapter end-to-end pipeline
-      status: pending
+      status: completed
       depends_on: []
       blocks:
         - t2-compliance-read-only
         - t3-ttrpg-dogfood
         - t4-crg-dual-read
+        - t7-app-type-profiles-wiring
       owner: dot-agents
       write_scope:
         - internal/adapters/builtin/none/
@@ -17,18 +18,35 @@ tasks:
         - cmd/da/commands/kg/
       verification_required: true
       notes: |-
+        COMPLETED (#136 merge wave). SHIPPED reality:
+          * `none` adapter at internal/adapters/builtin/none/ (null backend)
+          * Adapter registry + ref resolver (internal/kg/registry/)
+          * Lockfile state machine + fail-closed reconciliation
+            (internal/kg/lockfile/)
+          * `da kg lockfile show` / `da kg lockfile reconcile`
+            (commands/kg/lockfile.go)
+          * graphstore C-Hybrid `Store` family (CodeGraphReader/Writer/
+            KGNoteStore/NoteSymbolLinkStore/Closer) + Path A ephemeral/bounded
+            provider; Path B daemon deferred (CONTRACT.md)
+
         Smallest possible adapter; exercises the whole pipeline (schema
         validation, namespace provisioning, lockfile init, query routing)
         with no real domain logic. Spec reference:
         graph-backend-adapter-contract §13.1.
 
-        Delivers:
-          * Adapter YAML loader + schema validator (§4)
-          * Namespace token issuance and storage validation (§8.2)
-          * Lockfile state machine init + reconciliation (§10.1)
-          * `da kg lockfile show`, `da kg lockfile reconcile` commands
-            (§10.1.4)
-          * Conformance tests T1-T5 (basic query forms) passing
+        O2 resolution (token signing) folded: namespace-token integrity uses
+        in-process HMAC with a per-process/per-daemon ephemeral key (N13);
+        asymmetric (Ed25519) deferred to the `http`-backend milestone. The MAC
+        is computed over the in-memory token (no lockfile-format change). NOTE
+        vs SHIPPED: namespace-token issuance/signing is NOT yet implemented in
+        internal/kg — it is design-resolved (O2) but unbuilt; the storage-layer
+        namespace check (N6-N9) remains the primary capability boundary. Any
+        follow-up that delivers the token path must implement HMAC per O2.
+
+        O7 resolution (executor vs Store seam) folded: query routing goes
+        THROUGH the role-segregated `Store` family (never around it); the
+        executor tier (§2.7) sits above the gcc `Store` seam. See the
+        executor-tier reconciliation note in graphstore-concurrency-contract.
 
         Hard test:
           A profile selecting `graph_backend: dotagents-builtin:graph/none@^1.0`
@@ -43,10 +61,9 @@ tasks:
                 clear-cut)
           verifier: integration tests
           review: code review
-
     - id: t2-compliance-read-only
       title: Compliance register adapter (read-only / stub bootstrap)
-      status: pending
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
@@ -82,9 +99,21 @@ tasks:
           T24 must reject — guard against accidentally allowing
           field-level computation).
 
+        O5 resolution (staleness drivers) folded: this task exercises all five
+        scoped-KG drivers with the pinned semantics — source mutation =
+        content-hash change; revocation = new note `revokes: <id>`; code-graph
+        derivation depth 1 hop (note→note unbounded, opt-in via §7.3
+        `derivation: true`); taint persists until `kg refresh --scope`;
+        edge-type allowlist = `documents`/`implements`/`decided_on` (not
+        `mentions`). Canonical: O5 + scoped-knowledge-graphs §4.1/§4.2.
+
+        STATE NOTE: the DSL package (internal/kg/dsl/) is NOT yet built as of
+        t1; this task delivers the first real DSL parser. Decision-complete
+        (O5 pins driver semantics) — activatable once t1's completion is
+        confirmed.
     - id: t3-ttrpg-dogfood
       title: TTRPG dogfood adapter — first real adapter author UX
-      status: pending
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks: []
@@ -118,10 +147,9 @@ tasks:
           No grammar extensions (§5.1) — TTRPG works within v1.
           Wishlist accumulates §12 budget signals; do NOT pre-emptively
           extend grammar.
-
     - id: t4-crg-dual-read
       title: CRG migration — dual-read mode with crg-bridge adapter
-      status: pending
+      status: completed
       depends_on:
         - t1-none-adapter-end-to-end
       blocks:
@@ -162,9 +190,27 @@ tasks:
           NO decommissioning in this task — bridge stays active.
           flows/communities/postprocess parity is t6.
 
+        O5 resolution folded: the `staleness_drivers: [source_mutation]` slice
+        fires on note content-hash change (per O5, not any-upsert).
+
+        O6 resolution (parity-matrix) folded: fold proposals A/C/D (the §11.1/
+        §11.6 testability-gap refinements) into the parity matrix BEFORE
+        building this task's parity surface, so t6's multi-week parity clock is
+        tested against the corrected matrix. REJECT G (SQL-callable views break
+        the §2.2/§5.2 no-raw-SQL invariant). OWNER-GATE: the exact §11.1/§11.6
+        edits A/C/D imply must be re-read against
+        .agents/proposals/crg-dual-read-parity-surface-2026-05.md before
+        ratification — the posture is resolved (O6) but A/C/D's specific
+        content was outside the dossier read set.
+
+        STATE NOTE: CRG ships today as a Python-subprocess provider behind the
+        `Store` seam (internal/graphstore/crg.go), NOT as an adapter. This task
+        builds the kg-native CRG adapter + crg-bridge mirror adapter. The
+        long-range Python→Go architecture question is owned here + §11
+        (go-native-code-graph-analysis is superseded-in-part by §11).
     - id: t5-cross-adapter-reads-from
       title: Cross-adapter `reads_from` — compliance view from CRG
-      status: pending
+      status: completed
       depends_on:
         - t2-compliance-read-only
         - t4-crg-dual-read
@@ -205,6 +251,13 @@ tasks:
           Cross-adapter writes attempted via materialized view —
           must be storage-layer rejected (N8).
 
+        O1 resolution (cutover gate) folded: NO `accepts_breaking_changes`
+        opt-out — the cutover gate is mechanical (§10.3). The hard test above
+        (incompatible CRG bump → view enters `dsl-update-required` and blocks
+        dependee activation until a fixed query ships) IS the mechanical-gate
+        behavior. Do NOT build an ack-command surface or an
+        `accepts_breaking_changes` lockfile field. Canonical: O1 + §14 Q2
+        (resolved). The recoverable case falls through via §10.3.3.
     - id: t6-bridge-decommission
       title: Bridge decommissioning — close §11.4 gate
       status: pending
@@ -246,7 +299,73 @@ tasks:
           Do NOT delete bridge until ALL §11.4 gate conditions are
           met. If even one consumer's lockfile still has
           `reads_from: [crg-bridge]`, keep the bridge.
+    - id: t7-app-type-profiles-wiring
+      title: Wire graph_backend adapter-ref selection into app-type-profiles
+      status: completed
+      depends_on:
+        - t1-none-adapter-end-to-end
+      blocks:
+        - release-minor
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/specs/app-type-profiles/design.md
+        - internal/config/
+        - cmd/da/commands/
+      verification_required: true
+      notes: |-
+        O3 (ACCEPTED 2026-06-24). Applies the app-type-profiles edits §15 of
+        graph-backend-adapter-contract defers (the "wiring" commit): replace the
+        closed graph_backend enum (crg|citation-graph|document-cross-ref|none)
+        with an adapter-ref that resolves via sources/extends and pins in the
+        lockfile (§9). Wire the profile-selection path so a profile declaring
+        `graph_backend: dotagents-builtin:graph/none@^1.0` resolves to the t1
+        none adapter end-to-end.
 
+        COUPLING (do NOT ratify independently of O4's schema): the KG schema
+        models `app_type` as an OPEN/extensible vocabulary (free string +
+        documented known-starter set), the same surface this task wires
+        (graph_backend enum → adapter-ref; app_type ref-form resolution). t7's
+        app-type-profiles edits and the KG schema's app_type /
+        plan.default_app_type / task.app_type fields must agree on the
+        open-vocabulary contract. See
+        work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md.
+
+        Hard test: a profile selecting the none adapter ref resolves, registers
+        in the lockfile, and the no-op impact_radius runs through the profile
+        path (not just the direct adapter path t1 exercised).
+
+        Anti-scope: no new adapters; uses the t1 none adapter as the proof.
+
+        ISP routing:
+          mode: fanout-amenable (bounded write_scope; config/profile surface)
+          verifier: integration tests
+          review: code review
+    - id: t8-tasks-schema-app-type-drift
+      title: Fix workflow-tasks.schema.json app_type drift (schema rejects a field code uses)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - schemas/workflow-tasks.schema.json
+      verification_required: true
+      notes: |-
+        O4 schema-v3 flagged drift (NOT fixed in #136). Real bug, not doc-lag:
+        schemas/workflow-tasks.schema.json sets `additionalProperties: false`
+        on each task item and does NOT list `app_type`, so a TASKS.yaml that
+        carries `app_type` — which CanonicalTask.AppType marshals
+        (commands/workflow/types.go, `app_type,omitempty`) and live plans like
+        docs-starlight-migration already write (`app_type: docs`/`go-cli`) —
+        FAILS schema validation.
+
+        Fix: add an optional open-string `app_type` property to the task-item
+        `properties` so the schema matches CanonicalTask + the live artifacts.
+        Scope: schemas/workflow-tasks.schema.json ONLY.
+        Verify: a TASKS.yaml carrying `app_type` validates.
+
+        Independent of the adapter pipeline (depends_on: []); can run any time.
+        Route via `da workflow` — recorded here per the O4 dossier
+        recommendation; intentionally NOT fixed in the docs-only coherence PR.
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the graph-backend minor'
       status: pending
@@ -257,6 +376,7 @@ tasks:
         - t4-crg-dual-read
         - t5-cross-adapter-reads-from
         - t6-bridge-decommission
+        - t7-app-type-profiles-wiring
       blocks: []
       owner: dot-agents
       write_scope:
@@ -278,11 +398,25 @@ tasks:
         completes once parity is proven — keeping the consumer-visible behavior
         identical, which is why it stays MINOR.
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        minor is 0.4.0, but resolve from VERSION when this task becomes
-        ready; serialize at the VERSION bump if another minor ships first.
+        ready-time (do NOT hardcode). VERSION is already 0.4.0 (that minor
+        shipped), so the next minor resolves to 0.5.0 — but always recompute
+        from the live VERSION when this task becomes ready rather than
+        hardcoding, and serialize at the VERSION bump if another minor ships
+        first.
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, documenting the bridge migration as
         an internal backend swap (no consumer-facing change). Merge to master
         fires auto-release.yml.
       app_type: release
+    - id: t9-sdk-materializeview-readsfrom-gate
+      title: Wire reads_from enforcement into SDK.MaterializeView
+      status: pending
+      depends_on:
+        - t4-crg-dual-read
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/adapters/sdk/
+      verification_required: true
+      notes: Codex review of t4 (#172) found SDK.MaterializeView accepts arbitrary readsFrom without consulting the registry, so the migration_only reads_from gate (registry.EnforceReadsFrom, wired at load in t4) does not cover the materialized-view path. Wire EnforceReadsFrom (or an equivalent registry consult) into SDK.MaterializeView so a view reading a migration_only adapter is rejected. Add an integration test; mutation-verify the gate.
+      app_type: go-cli

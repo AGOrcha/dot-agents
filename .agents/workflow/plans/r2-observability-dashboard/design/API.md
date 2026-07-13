@@ -75,8 +75,13 @@ returns an empty `data` array with 200. No `next`/`prev` links in v1.
 
 ### 1.5 Caching / ETag
 
-Each response sets a weak-ish `ETag` derived from the newest contributing file mtime + the
-resource key (e.g. `"runs:<max_mtime_unix>:<count>"`). A request carrying a matching
+Each response sets a strong `ETag` that is a stable content hash over the resource
+payload (RATIFIED 2026-07-02: the pinned Store interface exposes no raw file mtimes —
+iterations carry none — so the originally-sketched `"runs:<max_mtime_unix>:<count>"`
+mtime form is unimplementable against the shipped contract; a content hash is a strictly
+stronger cache validator and any mtime change surfaces in the payload anyway). The exact
+ETag string is opaque; only its cache-validity properties are contractual (same
+resource+content = same ETag; content change = new ETag). A request carrying a matching
 `If-None-Match` gets `304 Not Modified` with an empty body. The same etag is echoed in
 `meta.etag`. ETag is purely a read-cache optimisation; live invalidation is the SSE channel's job.
 
@@ -289,7 +294,7 @@ reconnect, **invalidates all queries** to recover any events missed while discon
 criteria 4). `seq` is not a durable cursor and must not be sent back as a resume token.
 
 **Backpressure (spec OQ5):** the broker (`t04`) holds one bounded buffered channel per subscriber.
-A subscriber that cannot drain within a 1s grace is dropped; the client reconnects and refetches.
+A subscriber whose buffer is full when an event arrives is disconnected immediately; the client reconnects and refetches. (Ratified 2026-07-02: a pre-drop grace is unsatisfiable under non-blocking publishers + gapless streams — arrival-on-full forces disconnect.)
 This is the "bounded buffer with disconnect-on-overflow" resolution of OQ5.
 
 ---

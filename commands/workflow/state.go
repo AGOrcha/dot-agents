@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"go.yaml.in/yaml/v3"
@@ -109,6 +110,10 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 	if err != nil {
 		return err
 	}
+	input := &journal.CheckpointInput{Message: message, VerificationStatus: verificationStatus}
+	observed := &journal.CheckpointObserved{}
+	ok := false
+	defer func() { journalTier1(project.Path, journal.CmdCheckpoint, input, observed, ok) }()
 	state, err := collectWorkflowState()
 	if err != nil {
 		return err
@@ -149,6 +154,8 @@ func runWorkflowCheckpoint(message, verificationStatus, verificationSummary stri
 	if err := appendWorkflowSessionLog(filepath.Join(contextDir, "session-log.md"), checkpoint); err != nil {
 		return err
 	}
+	observed.CheckpointID = checkpoint.Timestamp
+	ok = true
 
 	ui.Success("Checkpoint written")
 	fmt.Fprintf(os.Stdout, "  %s\n\n", config.DisplayPath(checkpointPath))

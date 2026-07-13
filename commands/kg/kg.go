@@ -13,6 +13,7 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
+	"github.com/AGOrcha/dot-agents/internal/journal"
 	"github.com/AGOrcha/dot-agents/internal/ui"
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -30,11 +31,27 @@ type KGConfig struct {
 	UpdatedAt       string   `json:"updated_at" yaml:"updated_at"`
 }
 
+// kgHomeExit is invoked by kgHome() when no KG_HOME override is set and the
+// process cannot resolve a home directory — the same "hard-fail instead of
+// a silent relative fallback" guard as config.PreflightUserHome (see
+// internal/config/paths.go), applied at this package's own home-resolution
+// site. Kept as a package var (rather than an inline os.Exit) purely so
+// tests can observe the failure without killing the test binary;
+// production callers print an actionable message and exit(1).
+var kgHomeExit = func(err error) {
+	ui.Errorf("cannot resolve home directory for the knowledge graph: %v — set $HOME or $KG_HOME and retry", err)
+	os.Exit(1)
+}
+
 func kgHome() string {
 	if v := os.Getenv("KG_HOME"); v != "" {
 		return v
 	}
-	home, _ := config.UserHomeDir()
+	home, err := config.UserHomeDir()
+	if err != nil {
+		kgHomeExit(err)
+		return ""
+	}
 	return filepath.Join(home, "knowledge-graph")
 }
 
@@ -1222,9 +1239,30 @@ func runKGIngest(deps Deps, cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	for _, sid := range sourceIDs {
-		runSingleIngest(deps, home, sid)
+	// Journal the ingest after the dry-run / empty-inbox short-circuits above:
+	// only a real ingest pass mutates the graph. Record counts + ids (D4), never
+	// note bodies. The per-source loop swallows individual errors, so ok flips
+	// true once the pass completes.
+	repoPath := crgRepoRoot()
+	input := &journal.KGIngestInput{All: opts.ingestAll, Type: opts.sourceType}
+	if len(args) > 0 {
+		input.File = args[0]
 	}
+	observed := &journal.KGIngestObserved{}
+	ok := false
+	defer func() { journalKG(repoPath, journal.CmdKGIngest, input, observed, ok) }()
+
+	for _, sid := range sourceIDs {
+		result := runSingleIngest(deps, home, sid)
+		if result == nil {
+			continue
+		}
+		observed.NotesCreated += len(result.NotesCreated)
+		observed.NotesUpdated += len(result.NotesUpdated)
+		observed.NoteIDs = append(observed.NoteIDs, result.NotesCreated...)
+		observed.NoteIDs = append(observed.NoteIDs, result.NotesUpdated...)
+	}
+	ok = true
 	return nil
 }
 
@@ -1339,18 +1377,20 @@ func previewSingleIngest(srcID, title, sourceType string, srcData []byte) {
 
 // runSingleIngest ingests one source and renders the human-readable summary
 // (or JSON, when requested) without short-circuiting the caller's loop on
-// per-source errors.
-func runSingleIngest(deps Deps, home, sid string) {
+// per-source errors. It returns the IngestResult so the caller can aggregate
+// the journaled counts/ids across a multi-source pass, or nil when this source
+// failed (the error is already surfaced to the user).
+func runSingleIngest(deps Deps, home, sid string) *IngestResult {
 	io := kgIOFrom(deps)
 	result, err := ingestSource(io, home, sid)
 	if err != nil {
 		ui.Error(fmt.Sprintf("ingest %s: %v", sid, err))
-		return
+		return nil
 	}
 	if deps.Flags.JSON {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		fmt.Println(string(data))
-		return
+		return result
 	}
 	ui.Success(fmt.Sprintf("Ingested %s", sid))
 	if len(result.NotesCreated) > 0 {
@@ -1362,6 +1402,7 @@ func runSingleIngest(deps Deps, home, sid string) {
 	for _, w := range result.Warnings {
 		ui.Warn(w)
 	}
+	return result
 }
 
 // ── kg queue subcommand ───────────────────────────────────────────────────────

@@ -1,0 +1,77 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import tierModel from '../../data/tier-model.json';
+---
+<BaseLayout title="Tier model" description={tierModel.description}>
+  <h1>{tierModel.title}</h1>
+  <p>{tierModel.description}</p>
+
+  <div class="tier-grid">
+    {tierModel.tiers.map((tier, i) => (
+      <div class="tier-card" data-target={`tier-${tier.id}`} role="button" tabindex="0">
+        <div class="scope">Tier {i + 1} · {tier.scope}</div>
+        <h3>{tier.name}</h3>
+        <div style="font-size:0.78rem; color:var(--text-dim); font-family:monospace; margin-top:4px;">
+          {tier.lives_in}
+        </div>
+      </div>
+    ))}
+  </div>
+
+  {tierModel.tiers.map((tier) => (
+    <div id={`tier-${tier.id}`} class="tier-detail">
+      <h2 style="margin-top:0;">{tier.name} — {tier.scope}</h2>
+      <p>{tier.summary}</p>
+      <p style="font-family:monospace; font-size:0.85rem; color:var(--text-dim);">
+        <strong>Lives in:</strong> {tier.lives_in}
+      </p>
+
+      <h3>Contains</h3>
+      <ul>{tier.contents.map((c) => <li>{c}</li>)}</ul>
+
+      <h3>Does not contain</h3>
+      <ul>{tier.does_not_contain.map((c) => <li>{c}</li>)}</ul>
+
+      <blockquote>{tier.authority}</blockquote>
+    </div>
+  ))}
+
+  <h2>Lifecycle</h2>
+  <pre><code>{`idea
+  → spec (design.md)          — what & why, decisions, open questions
+  → plan (PLAN.yaml + tasks)  — how & in what order, write scopes
+  → implementation            — code, tests
+  → verification              — tests pass, smoke verified
+  → archive (history/)        — permanent record`}</code></pre>
+
+  <script>
+    function setup() {
+      const cards = document.querySelectorAll('.tier-card');
+      const details = document.querySelectorAll('.tier-detail');
+      const open = (targetId) => {
+        details.forEach((d) => d.classList.toggle('open', d.id === targetId));
+        const el = document.getElementById(targetId);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+      cards.forEach((card) => {
+        const targetId = card.getAttribute('data-target');
+        if (!targetId) return;
+        card.addEventListener('click', () => open(targetId));
+        card.addEventListener('keydown', (e) => {
+          if (e instanceof KeyboardEvent && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            open(targetId);
+          }
+        });
+      });
+      // open the first tier by default
+      const first = details[0];
+      if (first) first.classList.add('open');
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setup);
+    } else {
+      setup();
+    }
+  </script>
+</BaseLayout>

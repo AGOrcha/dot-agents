@@ -128,13 +128,33 @@ This is a **design proposal**, not an implementation plan. It does not:
 - `[[monitor-pr-review-comment-routing]]` §4 + §8.6 — event schemas + the open item naming this task.
 - `[[hook-schema-extension-mechanism]]` — the hook-sentinel side of the same convergence (#157).
 - `[[schema-usage]]` — AgentsRC field-sync + open-registry discipline.
-- `[[r3-background-worker-service]]` — the spec this contract graduates into once stable (background-worker service / `da service`).
+- `[[r3-background-worker-service]]` — the spec this contract graduates into once stable (background-worker service / `da service`); §D4 is the canonical home for the `EventBus` transport seam this payload contract rides over (see §8).
+- `[[graph-backend-adapter-contract]]` — the swappable-backend-behind-a-stable-contract pattern that §D4's pluggable `EventBus` backend selection mirrors (config-selected `source-id:name@version` adapter ref + builtin default + shared lockfile `adapters` section).
+
+## §8. Transport boundary — this proposal owns the payload, not the bus
+
+This proposal defines the **payload contract** — the common envelope
+(`{ type, source, occurred_at, idempotency_key, payload }`), the typed-kind
+registry, and table-driven dispatch (*what* travels). It does **not** define
+the **transport** — how a payload is published, subscribed, delivered, ordered,
+or dropped. The transport seam is the `EventBus` interface, which is
+**canonically single-sourced in `[[r3-background-worker-service]]` §D4**
+(the `EventBus` interface §D4.1, the G1–G4 delivery/ordering/backpressure
+guarantees §D4.2, the in-process builtin §D4.3, and the config-selected
+pluggable backend model §D4.4 mirroring `[[graph-backend-adapter-contract]]`).
+
+The two compose cleanly: this proposal's envelope rides *over* the `EventBus`
+as the `payload any` the bus treats as opaque — the registry decides the typed
+shape, the `EventBus` decides delivery. **Do not restate the bus interface
+here**; reference §D4. Conversely, §D4 references this proposal for the
+envelope/registry it carries. One contract per home.
 
 ## Concurrency note: per-topic locking (cross-ref)
 
 As this contract multiplies the number of event/sentinel topics, the in-process
-event bus (`internal/service/events.Bus`) should move from its v1 single global
-mutex to **per-topic locking** (RWMutex on the topic registry + per-topic mutex
-for fan-out) so cross-topic publishes run concurrently. Design + trigger recorded
-in `[[r3-background-worker-service]]` §D4.1 — the topic growth this contract drives
-IS the trigger. Per-subscriber buffer policy (bounded drop-oldest) is a separate axis.
+event bus (the §D4.3 builtin `EventBus`, `internal/service/events`) should move
+from its v1 single global mutex to **per-topic locking** (RWMutex on the topic
+registry + per-topic mutex for fan-out) so cross-topic publishes run concurrently.
+Design + trigger recorded in `[[r3-background-worker-service]]` §D4.5 — the topic
+growth this contract drives IS the trigger. Per-subscriber buffer policy (bounded
+drop-oldest) is a separate axis.

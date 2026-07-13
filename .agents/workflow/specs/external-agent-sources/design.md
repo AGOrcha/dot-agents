@@ -115,6 +115,13 @@ Illustrative `.agentsrc` shapes (future integration). All package refs use the
 }
 ```
 
+> **Field-name note (verified 2026-06-25).** `verifier_profiles` is a **deprecated legacy key**
+> folded into `stage_profiles` on load (`internal/config/agentsrc.go` `foldLegacyProfiles`); the
+> live shape is `stage_profiles.<stage>.<id>`. The illustration above is preserved for the
+> package-ref syntax it shows (`source-id:artifact-path@version-spec`), which is unchanged — only the
+> wrapping field renamed. Canonical mapping:
+> [config-distribution-model §15](../config-distribution-model/design.md#15-coherence-model-v2-scopes-sources-units-and-the-lock).
+
 **Publish CLI:** `da packages publish agent|verifier|skill|bundle <path>` per artifact
 type — see
 [config-distribution-model §13.2](../config-distribution-model/design.md#132-new-command-subtree-da-packages).
@@ -146,9 +153,14 @@ This closes two ambiguities before canonical planning:
    The former distributes reusable dependency refs; the latter records one
    resolved task dispatch and must remain auditable in the repo.
 
-The canonical staged-profile-dispatch plan must identify the chosen type for
-every resolved component and persist its source/digest provenance for
-`da config explain` readback.
+**[Shipped, 2026-04-21]** The canonical staged-profile-dispatch plan demanded in this
+section has been implemented and archived: `stage-profile-and-routing-consolidation`
+(6/6 tasks completed). The Tier-1-vs-Tier-2 assignment ships as
+`execution_profile.by_app_type.<type>.topology` + `stage_profiles.<stage>.<slug>`
+(`internal/config/execution_profile.go`). `da config explain` emits per-field provenance
+and a `digest` (`commands/config/explain.go:431,519-533`). The two ambiguities from this
+section are now closed. Only artifact-side digest-provenance readback remains as a v2 item,
+gated on the unbuilt OCI-artifact resolver.
 
 ---
 
@@ -157,15 +169,32 @@ every resolved component and persist its source/digest provenance for
 - **Why OCI:** enterprise allowlists (Harbor, Artifactory, ECR, GHCR), mature token auth, cosign/sigstore alignment for later phases.
 - **v1.5:** **BYO** — customer points the tool at any OCI-compatible registry they operate.
 - **v2:** optional thin-wrapper server / richer discovery — only if demand warrants.
-- **Public default registry:** open question — see [Q2](#q2-public-default-registry).
+- **Public default registry:** BYO / no default for v1.5 (owner ruling 2026-07-04). See
+  [Q2](#q2--public-default-registry-ruling-byo-for-now-ratified-2026-07-04).
 
 ---
 
 ## 7. FIPS posture
 
-- **Single binary, no build variant** for v1.5: Go 1.24.3+ with `GOFIPS140=inprocess`; runtime opt-in `GODEBUG=fips140=on`.
-- **MIP-state** module acceptable per NIST IG D.G for many regulated deployments; documented risk acknowledgment.
-- **BoringCrypto / strict-validated** variant stays **persona-gated** — ship only if compliance requires CMVP-validated (not MIP). See [Q1](#q1-mip-vs-strict-validated-fips).
+- **Single binary, no build variant** for v1.5: Go 1.26.2 with `GOFIPS140=<version>` embedded
+  at build time; runtime opt-in via `GODEBUG=fips140=on`.
+- **MIP-state** module acceptable per NIST IG D.G for many regulated deployments; documented
+  risk acknowledgment.
+- **BoringCrypto / strict-validated** variant stays **persona-gated** — ship only if compliance
+  requires CMVP-validated (not MIP). See [Q1](#q1--fips-posture-ruling-ratified-2026-07-04).
+
+**Owner ruling, ratified 2026-07-04 — adopt opt-in single-binary FIPS posture.**
+
+FIPS 140-3 mode in Go is OPT-IN and NOT the default through Go 1.26. This repo is on go
+1.26.2; the default `GODEBUG` setting is `fips140=off`. The FIPS module is embedded at build
+time via `GOFIPS140=<version>` (the validated-module version pin) and enabled at runtime via
+`GODEBUG=fips140=on`. Decision: single-binary opt-in posture; no separate BoringCrypto/CGO
+build variant for v1.5. This is **aspirational with zero implementation today** — no
+`GOFIPS140` build flag is currently set in the build pipeline or release workflow.
+
+Maintainer confirmation (2026-07-04): "since we're go 1.26 isn't gofips140 default? if not
+yeah" — confirmed not default — opt-in adopted. Whether a CMVP-validated variant ever ships
+is gated on a regulated-customer engagement requiring it (see Q1 in §13).
 
 ---
 
@@ -217,13 +246,53 @@ every resolved component and persist its source/digest provenance for
 
 ## 13. Open questions
 
-### Q1 (MIP vs strict-validated FIPS)
+### Q1 — FIPS posture ruling (ratified 2026-07-04)
 
-Ask the insurance persona’s CMMC assessor: is **MIP-state** FIPS 140-3 acceptable per NIST IG D.G, or is **fully validated CMVP** required? Answer gates whether a BoringCrypto variant ever ships. Until confirmed: single binary + `GOFIPS140=inprocess`.
+**Ruling:** adopt opt-in single-binary FIPS posture. FIPS 140-3 mode is NOT the default in
+Go 1.26 (repo is on go 1.26.2; `fips140=off` is the default GODEBUG). The FIPS module is
+embedded at build via `GOFIPS140=<version>` and enabled at runtime via `GODEBUG=fips140=on`.
+Decision: no separate BoringCrypto/CGO build variant for v1.5 — aspirational with zero
+implementation today.
 
-### Q2 (public default registry)
+Remaining v2 open item: if a regulated-customer engagement requires CMVP-validated (not
+MIP-state) FIPS, a BoringCrypto/CGO variant would be needed. That gates on the insurance
+persona’s CMMC assessor confirming whether MIP-state per NIST IG D.G is acceptable. Until
+then single-binary opt-in holds.
 
-Where does the public default live? Candidates: GHCR under a `dot-agents` org; owned infra; or **no default** (explicit config only). Decision deferred to this design track, not to the loop-agent-pipeline implementation tasks.
+Maintainer words (2026-07-04): "since we’re go 1.26 isn’t gofips140 default? if not yeah"
+— confirmed not default — opt-in adopted.
+
+### Q2 — public default registry ruling (BYO for now, ratified 2026-07-04)
+
+**Ruling:** BYO / no default registry for v1.5.
+
+Maintainer words (2026-07-04): "byo / no default for now, later we might want to standup a
+‘public’ registry."
+
+v1.5 is BYO-registry by design — no default-registry consumer code exists today. A possible
+future maintainer-run public registry (GHCR under a `dot-agents` org is the leaning per D6
+in decisions.1.md) is a v2+ open possibility, not a committed roadmap item. The decision will
+be revisited when a `da packages publish` path exists and public consumption demand is
+confirmed.
+
+### Q3 — CLI surface / transport (mostly resolved)
+
+**[Mostly code-resolved]** The "TBD at integration time" surfaces from §3/§6 are largely
+shipped. Sources declared in `.agentsrc.json` `sources[]`, resolved via `EnsureResolved`;
+`da config` subtree ships as `explain`/`sync`/`lint`/`verify`/`relevance`/`migrate`
+(config-distribution-model §13.1; `commands/config/`); OCI-as-source is shipped
+(`extends-oci-relax` plan completed; `internal/config/fetcher_oci_layer.go`);
+per-transport verbs replaced by `--scope`/`--source` routing
+(`commands/internal/cmdutil/source_routing.go`). Only `da packages publish` is unbuilt —
+no `commands/packages/` dir; §13.2 was marked "Superseded by §15 (D3) — not shipped" in
+config-distribution-model. Publish is explicitly v2-deferred.
+
+### Q4 — staged-profile type mapping and provenance (mostly resolved)
+
+**[Mostly code-resolved]** Type mapping is done — the `stage-profile-and-routing-consolidation`
+plan completed (6/6 tasks; see §5.1 note). `da config explain` emits per-field provenance
+and a digest (`commands/config/explain.go:431,519-533`). Only artifact-side digest-provenance
+readback remains, gated on the unbuilt OCI-artifact resolver (a v2 work item for this fork).
 
 ---
 

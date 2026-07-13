@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -22,12 +21,14 @@ const (
 	filterUnits    = "units"
 	filterTopology = "topology"
 	filterLenses   = "lenses"
+	filterGraph    = "graph"
+	filterLessons  = "lessons"
 	filterAll      = "all"
 )
 
 // validFilters is the closed set accepted by --filter. Sorted form is used in
 // the usage hint so the error message lists the choices deterministically.
-var validFilters = []string{filterAll, filterLenses, filterTopology, filterUnits}
+var validFilters = []string{filterAll, filterGraph, filterLenses, filterLessons, filterTopology, filterUnits}
 
 // relevanceResult is the stable JSON shape emitted by
 // `da config relevance --json`. It reports the resolution context (resolved
@@ -66,6 +67,12 @@ type relevanceResult struct {
 	Topology *topologyFacet `json:"topology,omitempty"`
 	// Lenses is facet 3, present when --filter is lenses/all.
 	Lenses *lensesFacet `json:"lenses,omitempty"`
+	// Graph is facet 4 (the graph-backend adapter-ref selection), present when
+	// --filter is graph/all.
+	Graph *graphFacet `json:"graph,omitempty"`
+	// Lessons is facet 5 (repo-local lesson relevance), present when --filter
+	// is lessons/all.
+	Lessons *lessonsFacet `json:"lessons,omitempty"`
 }
 
 // unitsFacet is the per-stage core/situational/noise classification. When a
@@ -113,13 +120,54 @@ type lensesFacet struct {
 	LensConcurrency string   `json:"lens_concurrency,omitempty"`
 }
 
+// graphFacet reports the resolution of facet 4: the graph-backend adapter-ref
+// the app_type profile selects, and whether it resolves against the built-in
+// adapter registry (graph-backend-adapter-contract §4/§8). The ref flows from
+// the profile through config resolution to the registry's ref resolver (t1),
+// exactly mirroring how a profile's `graph_backend` selects a backend at
+// dispatch time.
+type graphFacet struct {
+	// Ref is the adapter-ref the profile declared (e.g.
+	// "dotagents-builtin:graph/none@^1.0"), or "" when the profile selects
+	// none and inherits the pipeline default.
+	Ref string `json:"ref,omitempty"`
+	// Resolved is true when Ref resolved to a registered adapter satisfying its
+	// version constraint. False with a non-empty Ref means the ref is set but
+	// did not resolve (the Error field carries the reason).
+	Resolved bool `json:"resolved"`
+	// Adapter is the resolved adapter's short name (e.g. "none"), present only
+	// when Resolved is true.
+	Adapter string `json:"adapter,omitempty"`
+	// Version is the resolved adapter's schema version, present only when
+	// Resolved is true.
+	Version string `json:"version,omitempty"`
+	// Error is the resolution failure reason, present only when Ref is non-empty
+	// and Resolved is false.
+	Error string `json:"error,omitempty"`
+}
+
+// lessonsFacet reports the lessons selected for the resolved app_type and
+// optional task/package/path scope.
+type lessonsFacet struct {
+	Items []lessonResult `json:"items"`
+}
+
+// lessonResult is the public JSON/human shape for one relevant lesson.
+type lessonResult struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Path        string `json:"path"`
+}
+
 // runRelevanceOptions captures one invocation's flag state. stdout/stderr/cwd
 // are injected so the run path is table-drivable without going through cobra.
 type runRelevanceOptions struct {
-	filter  string
-	appType string
-	stage   string
-	task    string
+	filter   string
+	appType  string
+	stage    string
+	task     string
+	paths    []string
+	packages []string
 	// recompute switches the command from the inspector path to the explicit
 	// driver-event path (design §5: `da config relevance --recompute [--write]`).
 	// It is a flag rather than a subcommand so the public surface matches the
@@ -138,15 +186,17 @@ func newRelevanceCmd(deps Deps) *cobra.Command {
 	opts := &runRelevanceOptions{}
 	cmd := &cobra.Command{
 		Use:   "relevance",
-		Short: "Resolve a task's execution profile (units, topology, lenses) by app_type",
+		Short: "Resolve a task's execution profile facets by app_type",
 		Long: `Resolve the effective execution_profile layer for a task and print the
-requested facet. The execution profile bundles three independently
+requested facet. The execution profile bundles independently
 scope-overridable facets per app_type (design
 .agents/proposals/skill-relevance-filter.md §2):
 
   units     facet 1 — per-stage core/situational/noise unit relevance
   topology  facet 2 — the executor:verifier:reviewer fan-out + verifier_sequence
   lenses    facet 3 — the review-lens set + concurrency
+  graph     facet 4 — the graph_backend adapter-ref + its registry resolution
+  lessons   facet 5 — relevant repo lessons for the resolved app_type + scope
 
 --filter slices the facet you want (default "all") so the command stays
 evolvable as new facets land. The app_type is selected by, in precedence order:
@@ -168,6 +218,8 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			"  da config relevance --filter units --app-type go-cli --stage review",
 			"  da config relevance --filter topology --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --filter lenses --app-type ideation",
+			"  da config relevance --filter graph --app-type go-cli",
+			"  da config relevance --filter lessons --task config-relevance-profiles/t2-config-relevance-resolver",
 			"  da config relevance --recompute --app-type go-cli",
 			"  da config relevance --recompute --app-type go-cli --write",
 			"  da config relevance --json",
@@ -187,10 +239,12 @@ D4). The recompute envelope is documented on the recomputeResult type.`,
 			return runRelevance(opts, deps)
 		},
 	}
-	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | all")
+	cmd.Flags().StringVar(&opts.filter, "filter", filterAll, "Facet to render: units | topology | lenses | graph | lessons | all")
 	cmd.Flags().StringVar(&opts.appType, "app-type", "", "app_type to resolve the profile for (overridden by --task's own app_type)")
 	cmd.Flags().StringVar(&opts.stage, "stage", "", "Restrict the units facet to one stage (e.g. orchestrate, verify, review)")
 	cmd.Flags().StringVar(&opts.task, "task", "", "Resolve app_type from a task: <plan-id>/<task-id> (or just <task-id> when --app-type names the plan context)")
+	cmd.Flags().StringArrayVar(&opts.paths, "path", nil, "Touched path to include when matching the lessons facet (repeatable; --task write_scope is included automatically)")
+	cmd.Flags().StringArrayVar(&opts.packages, "package", nil, "Touched package/import path to include when matching the lessons facet (repeatable)")
 	// recompute is the explicit driver event (design §5): it reads the scored
 	// iteration corpus and proposes relevance-class changes. It is a flag on this
 	// command (not a subcommand) so the public surface matches the design
@@ -224,26 +278,26 @@ func runRelevance(opts *runRelevanceOptions, deps Deps) error {
 		return err
 	}
 
-	snap, _, err := loadFlatSnapshot(opts.cwd)
+	snap, err := resolveLayered(opts.cwd)
 	if err != nil {
 		return deps.ErrorWithHints(err.Error(),
 			"Run `da install --generate` to create .agentsrc.json from current state.",
 		)
 	}
 
-	profile, err := resolveExecutionProfile(snap)
-	if err != nil {
-		return deps.ErrorWithHints(err.Error(),
-			"The execution_profile layer in .agentsrc.json is not shaped as expected; see .agents/proposals/skill-relevance-filter.md §2.",
-		)
-	}
+	profile := resolveExecutionProfile(snap)
 
 	appType, source, err := resolveAppType(opts, deps)
 	if err != nil {
 		return err
 	}
 
-	result := buildRelevanceResult(opts, profile, appType, source)
+	result, err := buildRelevanceResult(opts, profile, appType, source)
+	if err != nil {
+		return deps.ErrorWithHints(err.Error(),
+			"Check .agents/lessons/<name>/LESSON.md frontmatter and any --task write_scope values.",
+		)
+	}
 	return renderRelevance(opts, result)
 }
 
@@ -256,7 +310,7 @@ func normalizeFilter(opts *runRelevanceOptions, deps Deps) error {
 		opts.filter = filterAll
 	}
 	switch opts.filter {
-	case filterUnits, filterTopology, filterLenses, filterAll:
+	case filterUnits, filterTopology, filterLenses, filterGraph, filterLessons, filterAll:
 		return nil
 	default:
 		return deps.UsageError(
@@ -266,25 +320,18 @@ func normalizeFilter(opts *runRelevanceOptions, deps Deps) error {
 	}
 }
 
-// resolveExecutionProfile extracts the effective execution_profile sub-object
-// from the merged snapshot and decodes it into the typed cfg.ExecutionProfile.
-// Decoding goes through a JSON round-trip so the struct's json tags (the
-// canonical layer shape) drive the mapping. A missing layer yields a non-nil
-// empty profile so every caller resolves to safe defaults without nil checks.
-func resolveExecutionProfile(snap *snapshot) (*cfg.ExecutionProfile, error) {
-	raw, ok := snap.effective["execution_profile"]
-	if !ok || raw == nil {
-		return &cfg.ExecutionProfile{}, nil
+// resolveExecutionProfile extracts the effective execution_profile from the
+// resolved layered Snapshot. Snapshot resolution already decodes the manifest
+// through the typed AgentsRC schema — a malformed execution_profile shape
+// fails resolveLayered itself, before this is ever reached — so there is
+// nothing left to decode or that can fail here. A missing layer still yields a
+// non-nil empty profile so every caller resolves to safe defaults without nil
+// checks.
+func resolveExecutionProfile(snap *cfg.Snapshot) *cfg.ExecutionProfile {
+	if snap == nil || snap.Effective.ExecutionProfile == nil {
+		return &cfg.ExecutionProfile{}
 	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil, fmt.Errorf("re-encoding execution_profile layer: %w", err)
-	}
-	var profile cfg.ExecutionProfile
-	if err := json.Unmarshal(data, &profile); err != nil {
-		return nil, fmt.Errorf("decoding execution_profile layer: %w", err)
-	}
-	return &profile, nil
+	return snap.Effective.ExecutionProfile
 }
 
 // resolveAppType applies the design's selector precedence (§3): the named
@@ -376,7 +423,7 @@ func readYAMLFile(path string, out any) error {
 // buildRelevanceResult assembles the result envelope, attaching only the facets
 // the chosen --filter requested. Resolution against a missing app_type entry
 // renders defaults/empty facets and sets Matched=false.
-func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfile, appType, source string) relevanceResult {
+func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfile, appType, source string) (relevanceResult, error) {
 	result := relevanceResult{
 		AppType:       appType,
 		AppTypeSource: source,
@@ -396,7 +443,17 @@ func buildRelevanceResult(opts *runRelevanceOptions, profile *cfg.ExecutionProfi
 	if opts.filter == filterLenses || opts.filter == filterAll {
 		result.Lenses = buildLensesFacet(prof)
 	}
-	return result
+	if opts.filter == filterGraph || opts.filter == filterAll {
+		result.Graph = buildGraphFacet(prof)
+	}
+	if opts.filter == filterLessons || opts.filter == filterAll {
+		facet, err := buildLessonsFacet(opts, appType)
+		if err != nil {
+			return relevanceResult{}, err
+		}
+		result.Lessons = facet
+	}
+	return result, nil
 }
 
 // appTypeMatched reports whether the resolved app_type has an explicit entry in
@@ -498,6 +555,32 @@ func buildLensesFacet(prof cfg.AppTypeProfile) *lensesFacet {
 	}
 }
 
+// buildGraphFacet renders facet 4: it reads the profile's selected
+// graph_backend adapter-ref and resolves it through the built-in adapter
+// registry (graph-backend-adapter-contract §4/§8). An empty ref reports the
+// inherit-default case (Resolved=true, no adapter named); a non-empty ref that
+// fails to resolve carries the failure reason so the operator sees a missing or
+// version-incompatible backend before fanout, not at runtime.
+func buildGraphFacet(prof cfg.AppTypeProfile) *graphFacet {
+	ref := prof.GraphBackendRef()
+	if ref == "" {
+		// No backend selected: the profile inherits the pipeline default, which
+		// is a valid resolution (there is nothing to fail).
+		return &graphFacet{Resolved: true}
+	}
+	adapter, err := resolveGraphBackend(ref)
+	if err != nil {
+		return &graphFacet{Ref: ref, Resolved: false, Error: err.Error()}
+	}
+	schema := adapter.Schema()
+	return &graphFacet{
+		Ref:      ref,
+		Resolved: true,
+		Adapter:  schema.Name,
+		Version:  schema.Version,
+	}
+}
+
 // renderRelevance emits the result as JSON (stable envelope) or as the
 // human-readable facet view.
 func renderRelevance(opts *runRelevanceOptions, result relevanceResult) error {
@@ -524,6 +607,12 @@ func printRelevanceHuman(w io.Writer, result relevanceResult) error {
 	}
 	if result.Lenses != nil {
 		printLensesHuman(w, result.Lenses)
+	}
+	if result.Graph != nil {
+		printGraphHuman(w, result.Graph)
+	}
+	if result.Lessons != nil {
+		printLessonsHuman(w, result.Lessons)
 	}
 	return nil
 }
@@ -576,6 +665,43 @@ func printLensesHuman(w io.Writer, l *lensesFacet) {
 	fmt.Fprintf(w, "  lens_set         : %s\n", joinUnits(l.LensSet))
 	fmt.Fprintf(w, "  lens_concurrency : %s\n", emptyAsDash(l.LensConcurrency))
 	fmt.Fprintln(w)
+}
+
+func printGraphHuman(w io.Writer, g *graphFacet) {
+	fmt.Fprintln(w, "graph")
+	fmt.Fprintf(w, "  graph_backend : %s\n", graphRefLabel(g.Ref))
+	fmt.Fprintf(w, "  resolved      : %t\n", g.Resolved)
+	if g.Adapter != "" {
+		fmt.Fprintf(w, "  adapter       : %s@%s\n", g.Adapter, g.Version)
+	}
+	if g.Error != "" {
+		fmt.Fprintf(w, "  error         : %s\n", g.Error)
+	}
+	fmt.Fprintln(w)
+}
+
+func printLessonsHuman(w io.Writer, l *lessonsFacet) {
+	fmt.Fprintln(w, "lessons")
+	if len(l.Items) == 0 {
+		fmt.Fprintln(w, "  (no matching lessons)")
+		fmt.Fprintln(w)
+		return
+	}
+	for _, item := range l.Items {
+		fmt.Fprintf(w, "  - %s\n", item.Name)
+		fmt.Fprintf(w, "    description : %s\n", emptyAsDash(item.Description))
+		fmt.Fprintf(w, "    path        : %s\n", item.Path)
+	}
+	fmt.Fprintln(w)
+}
+
+// graphRefLabel renders an empty ref as "(inherit default)" so the no-backend
+// case reads as a deliberate inherit rather than a hanging blank.
+func graphRefLabel(ref string) string {
+	if ref == "" {
+		return "(inherit default)"
+	}
+	return ref
 }
 
 // joinUnits renders a unit list as a comma-joined string, or "-" when empty, so

@@ -1,0 +1,52 @@
+name: crg-bridge
+version: 0.1.0
+# MIGRATION ONLY (spec §11.2). Long-term adapters must not declare reads_from
+# against this adapter — the loader rejects that at load time.
+migration_only: true
+description: |-
+  Read-only adapter exposing the legacy Python CRG bridge state under a stable
+  mirror namespace (kg_crg-bridge.*), so migration tooling can compare bridge
+  output to the new kg-native CRG adapter via parity oracles. Retires when the
+  §11.4 decommissioning gate passes. Schema mirrors the kg-native crg adapter
+  one-to-one so parity comparisons MATCH the same shapes against both.
+note_types:
+  - name: symbol
+    fields:
+      - name: qualified_name
+        type: string
+        required: true
+      - name: kind
+        type: enum
+        required: true
+        values: [Function, Type]
+      - name: language
+        type: string
+        required: true
+      - name: file_path
+        type: string
+        required: true
+      - name: line_start
+        type: int
+        required: true
+      - name: content_hash
+        type: string
+        required: true
+edge_types:
+  - name: CALLS
+    from: symbol
+    to: symbol
+  - name: TESTED_BY
+    from: symbol
+    to: symbol
+  - name: IMPORTS
+    from: symbol
+    to: symbol
+# No drivers — bridge state mutation is observed externally, not tracked
+# through KG driver events (§11.2).
+staleness_drivers: []
+# No impact_radius use — this adapter is a parity read target, not a
+# review-pipeline backend. max_depth 0 returns the changed ids unchanged.
+impact_radius:
+  query: |-
+    RETURN $changed_ids AS id
+  max_depth: 0

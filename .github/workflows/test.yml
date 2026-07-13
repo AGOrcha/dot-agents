@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Validate YAML syntax
         run: |
@@ -57,6 +57,62 @@ jobs:
             -ignore 'SC2086:' \
             -ignore 'is too old to run'
 
+      - name: Release signing-toolchain pin guard
+        # Guards the 0.4.0 class of release failures: a signing tool that
+        # resolves to a fresh version at job time can break the cut (the
+        # dotnet `sign` kernel32 Linux crash; an unpinned timestamp lib's
+        # DLSequence cast). Every signing-tool install in auto-release.yml MUST
+        # be version+sha256 pinned. This targets the curl|install signing-tool
+        # steps (jsign/quill/cosign), NOT the SHA-pinned `uses:` actions, which
+        # carry their pin in the ref. See the release-cut skill + the lesson
+        # pin-release-toolchain-and-make-releases-retryable.
+        run: |
+          set -euo pipefail
+          WF=.github/workflows/auto-release.yml
+          fail=0
+
+          flag() { echo "::error file=${WF}::$1"; fail=1; }
+
+          # 1. The dotnet `sign` tool must never come back: it crashed on Linux
+          #    with a kernel32.dll DllNotFoundException and broke 0.4.0.
+          if grep -Eq 'dotnet[[:space:]]+tool[[:space:]]+install[^\n]*(\bsign\b|--global[[:space:]]+sign)|\bdotnet[[:space:]]+sign\b' "${WF}"; then
+            flag "dotnet 'sign' tool reintroduced (0.4.0 kernel32 Linux regression). Use jsign instead."
+          fi
+
+          # 2. No signing/build tool may be installed via --prerelease or @latest.
+          if grep -Eq -- '--prerelease' "${WF}"; then
+            flag "a --prerelease install is present on the release path; pin an exact version instead."
+          fi
+          if grep -Eni 'tool[[:space:]]+install|go[[:space:]]+install|curl' "${WF}" \
+              | grep -Eqi 'jsign|quill|cosign|goreleaser' \
+              && grep -Eni 'jsign|quill|cosign' "${WF}" | grep -Eq '@latest'; then
+            flag "a signing tool is installed with @latest; pin an exact version instead."
+          fi
+
+          # 3. Every signing-tool that is fetched via curl must verify a checksum.
+          #    For jsign/quill/cosign, require BOTH a *_VERSION and a *_SHA256 env
+          #    var so the fetched bytes are pinned and verified.
+          for tool in JSIGN QUILL; do
+            if grep -Eqi "${tool}_VERSION" "${WF}"; then
+              if ! grep -Eqi "${tool}_SHA256" "${WF}"; then
+                flag "${tool} is version-pinned but has no ${tool}_SHA256 checksum; pin version + sha256 together."
+              fi
+            fi
+          done
+
+          # A signing tool pulled by curl must be checksum-verified (sha256sum -c).
+          if grep -Eqi 'curl[^\n]*(jsign|quill)' "${WF}"; then
+            if ! grep -Eq 'sha256sum[[:space:]]+-c' "${WF}"; then
+              flag "a signing tool is fetched via curl but no 'sha256sum -c' verification is present."
+            fi
+          fi
+
+          if [ "${fail}" -ne 0 ]; then
+            echo "Release signing-toolchain pin guard FAILED. See errors above."
+            exit 1
+          fi
+          echo "Release signing-toolchain pin guard passed: signing tools are version+sha256 pinned, no dotnet 'sign', no --prerelease/@latest."
+
   test:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -71,7 +127,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history: the SonarQube Scan step in this job needs blame
           # / SCM data for new-code detection. A shallow clone makes
@@ -196,12 +252,24 @@ jobs:
       - name: Import boundary guard (commands/internal/* cross-leaf)
         run: go run ./tools/importguard ./...
 
+      # Mechanically enforces the leverage-cross-platform-fs-helpers lesson:
+      # filesystem mutations (os.{Mkdir,MkdirAll,Remove,RemoveAll,Rename,
+      # WriteFile}) must route through internal/fsops, which carries the
+      # Windows PowerShell fallbacks a raw os.* call lacks. A raw os.Mkdir
+      # against a missing parent is exactly the #148 Windows bug. Pre-existing
+      # call sites are grandfathered with reasons in tools/fsguard/allowlist.go;
+      # this gate ratchets so a NEW raw mutator in an un-grandfathered package
+      # fails the build. Runs before the coverage gate so the regression can't
+      # ride a green test suite into master.
+      - name: FS-helpers guard (raw os.* fs-mutators outside fsops)
+        run: go run ./tools/fsguard ./...
+
       - name: Go test
         run: go test $GO_TEST_FLAGS -covermode=atomic -coverprofile="coverage-${{ matrix.os }}.out" ./...
 
       - name: Upload coverage profile
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.os }}
           path: coverage-${{ matrix.os }}.out
@@ -252,7 +320,7 @@ jobs:
 
       - name: Install GoReleaser (Linux)
         if: matrix.os == 'ubuntu-latest'
-        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: "~> v2"
@@ -402,6 +470,55 @@ jobs:
         run: |
           ./bin/da kg --help
 
+      # ── Config-v2 surface (config-distribution-model) ────────────────────
+      # The full config-v2 + mutation + kg note-lane surface (with CONTENT
+      # assertions, not just exit 0) is exercised by scripts/verify.sh against
+      # the built ${DA_BIN}. verify.sh builds its OWN isolated HOME/AGENTS_HOME/
+      # KG_HOME under a temp dir, so it is hermetic regardless of the runner
+      # env. It discovers ./bin/da; on Windows DA_BIN is ./bin/da.exe, so a
+      # ./bin/da copy is provided for the discovery probe (the underlying exe
+      # is the same binary built above). Cross-OS: bash via the workflow shell.
+      - name: Test config-v2 + kg surface (verify.sh, content assertions)
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/.kg
+        run: |
+          if [ ! -x ./bin/da ] && [ -x "${DA_BIN}" ]; then
+            cp "${DA_BIN}" ./bin/da
+          fi
+          bash scripts/verify.sh
+
+      # ── KG CODE lane (requires code-review-graph) ────────────────────────
+      # The note lane (warm/query/bridge) above needs no crg. The CODE lane
+      # (build → code-status → impact) needs the real code-review-graph CLI,
+      # which the "Set up code-review-graph (.venv)" step installed earlier on
+      # non-Windows runners (Windows venv layout is .venv/Scripts and is not
+      # probed by DiscoverCRGBin, so the code lane is skipped there — same
+      # condition as that setup step). Assertions are on CONTENT: a built graph
+      # reports nodes>0 and `kg impact` returns real changed symbols.
+      - name: Test kg CODE lane (crg build + content assertions)
+        if: runner.os != 'Windows'
+        env:
+          HOME: ${{ env.SMOKE_HOME }}
+          AGENTS_HOME: ${{ env.SMOKE_AGENTS_HOME }}
+          KG_HOME: ${{ env.SMOKE_HOME }}/code-kg
+        run: |
+          "${DA_BIN}" init --yes
+          "${DA_BIN}" kg setup
+          "${DA_BIN}" kg build
+          # code-status JSON must report a non-empty, ready graph.
+          "${DA_BIN}" kg code-status --json > "${SMOKE_HOME}/code-status.json"
+          cat "${SMOKE_HOME}/code-status.json"
+          nodes="$(jq -r '.nodes' "${SMOKE_HOME}/code-status.json")"
+          ready="$(jq -r '.ready' "${SMOKE_HOME}/code-status.json")"
+          test "${ready}" = "true"
+          test "${nodes}" -gt 0
+          # kg impact on a real source file must return changed symbols.
+          "${DA_BIN}" kg impact commands/config/sync.go --json > "${SMOKE_HOME}/impact.json"
+          symbols="$(jq -r '.changed_nodes | length' "${SMOKE_HOME}/impact.json")"
+          test "${symbols}" -gt 0
+
       - name: Cleanup
         env:
           HOME: ${{ env.SMOKE_HOME }}
@@ -420,7 +537,7 @@ jobs:
     needs: test
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history: SonarQube (run here now) needs blame/SCM for
           # new-code detection; a shallow clone re-triggers the
@@ -438,7 +555,7 @@ jobs:
         run: go install github.com/wadey/gocovmerge@b5bfa59ec0adc420475f97f89b58045c721d761c
 
       - name: Download coverage profiles (all OS)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: coverage-*
           path: covprofiles
@@ -458,17 +575,57 @@ jobs:
           # (no scan-arg override needed).
           "$(go env GOPATH)/bin/gocovmerge" "${profiles[@]}" > coverage.out
 
+      # Generate dashboard (React/TS) vitest coverage so Sonar gets an lcov
+      # report for web/dashboard/src — without this the new TS lines land at
+      # 0% covered and trigger the new_coverage gate. The lcov is output to
+      # web/dashboard/coverage/lcov.info as configured in vite.config.ts and
+      # referenced by sonar.javascript.lcov.reportPaths in sonar-project.properties.
+      - name: Set up Node (dashboard vitest coverage)
+        # SHA-pinned per Sonar S8543 (mutable tag refs are security-sensitive).
+        # v6.4.0 is the same SHA used in deploy-docs.yml; node-version is set
+        # below so the action version does not constrain the Node runtime.
+        # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22), so Node 20
+        # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) and pass
+        # --ignore-scripts (S6505: lifecycle scripts). pnpm is pure JS so it
+        # functions correctly without running its own postinstall scripts.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
+
+      - name: Install pnpm workspace dependencies
+        # pnpm-lock.yaml lives at the repo root (workspace root).
+        # --frozen-lockfile ensures the install matches the committed lock exactly.
+        # --ignore-scripts per Sonar S6505. esbuild (in onlyBuiltDependencies)
+        # is rebuilt explicitly in the next step so vite/vitest find the binary.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild esbuild binary
+        # esbuild postinstall (binary download) was skipped by --ignore-scripts
+        # above. pnpm rebuild runs only the named package's build scripts so the
+        # vite and vitest invocations in the next step can locate the native binary.
+        # Filter to the dashboard package: the repo root has no package.json, so a
+        # bare `pnpm rebuild` errors ERR_PNPM_NO_IMPORTER_MANIFEST_FOUND.
+        run: pnpm --filter r2-observability-dashboard rebuild esbuild
+
+      - name: Run dashboard vitest with lcov coverage
+        # Produces web/dashboard/coverage/lcov.info consumed by sonar.javascript.lcov.reportPaths.
+        run: pnpm --filter r2-observability-dashboard test:coverage
+
       # Provide the scanner's JRE on the runner so it does NOT download one from
       # Sonar's CDN mid-run (that download intermittently 403s and failed this
       # gate). Paired with sonar.scanner.skipJreProvisioning below.
       - name: Set up Java (Sonar scanner JRE)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
       - name: SonarQube Scan (merged coverage)
-        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+        uses: SonarSource/sonarqube-scan-action@713881670b6b3676cda39549040e2d88c70d582e # v8.2.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:

@@ -1,0 +1,76 @@
+/* ===========================================================================
+ * Public docs readability overrides (Starlight content area).
+ *
+ * Two scoped fixes for content that is wider than the ~700px content column:
+ *
+ *   1. Wide Mermaid diagrams — astro-mermaid sizes rendered SVGs to fit the
+ *      column (`pre.mermaid svg { max-width: 100% }`), which scales a
+ *      4000px-wide flowchart down to ~0.15x and makes its labels illegible.
+ *      We pair `flowchart/state useMaxWidth:false` (astro.config.mjs) — which
+ *      makes Mermaid emit native pixel dimensions — with the rules below so the
+ *      diagram renders at full size and the container scrolls horizontally.
+ *
+ *   2. Wide tables — give them an obvious horizontal-scroll affordance so the
+ *      rightmost column isn't silently clipped off the right edge.
+ *
+ * Both are intentionally scoped to `.sl-markdown-content` (Starlight's rendered
+ * content wrapper) so nothing outside the article body is affected.
+ * ======================================================================== */
+
+/* --- 1. Wide Mermaid diagrams: native size + horizontal scroll ----------- */
+
+/* astro-mermaid renders into `<pre class="mermaid">` with
+   `display:flex; justify-content:center`. Centering a child that is wider than
+   its scroll container clips the left edge and makes it unreachable, so switch
+   to a block box that scrolls from the left. `text-align:center` keeps narrow
+   diagrams (which still fit the column) visually centered. */
+.sl-markdown-content pre.mermaid[data-processed] {
+  display: block;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+/* Let the rendered SVG keep its intrinsic (native) width instead of being
+   capped to the column. With useMaxWidth:false Mermaid sets explicit pixel
+   width/height attributes, so this only needs to defeat astro-mermaid's
+   `max-width:100%` cap. */
+.sl-markdown-content pre.mermaid[data-processed] svg {
+  max-width: none !important;
+  height: auto;
+}
+
+/* --- 2. Wide tables: visible horizontal-scroll affordance ---------------- */
+
+/* Starlight already wraps tables, but make the affordance explicit so readers
+   notice clipped columns. The wrapper scrolls; the table keeps its natural
+   width rather than squeezing text to illegibility. */
+.sl-markdown-content table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* --- Persistent horizontal-scroll affordance ----------------------------- */
+
+/* Force a visible (non-overlay) scrollbar on the wide-content scroll
+   containers so the clipped right edge is discoverable at rest, even on
+   platforms (e.g. macOS) that hide overlay scrollbars until interaction. */
+.sl-markdown-content pre.mermaid[data-processed],
+.sl-markdown-content table {
+  scrollbar-width: thin;
+}
+.sl-markdown-content pre.mermaid[data-processed]::-webkit-scrollbar,
+.sl-markdown-content table::-webkit-scrollbar {
+  height: 10px;
+}
+.sl-markdown-content pre.mermaid[data-processed]::-webkit-scrollbar-thumb,
+.sl-markdown-content table::-webkit-scrollbar-thumb {
+  background: var(--sl-color-gray-4);
+  border-radius: 5px;
+}
+.sl-markdown-content pre.mermaid[data-processed]::-webkit-scrollbar-track,
+.sl-markdown-content table::-webkit-scrollbar-track {
+  background: var(--sl-color-gray-6);
+}

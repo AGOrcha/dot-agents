@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,104 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/platform"
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
+
+// captureRefreshStdout runs fn with os.Stdout redirected and returns what it
+// wrote — used to assert the user-facing refresh resolution messages (item 5).
+func captureRefreshStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	fn()
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+// TestRefresh_KnownButUnboundReported models machine B after a sync: the project
+// identity is known (synced registry) but has no machine-local binding, so
+// refresh must report it as unbound-on-this-machine rather than silently
+// skip-as-missing or claim "No managed projects" (defect 3, R4).
+func TestRefresh_KnownButUnboundReported(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	if err := os.MkdirAll(agentsHome, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// A synced config.json carrying identity only (no binding table on disk).
+	synced := `{"version":2,"projects":{"svc":{"repo_id":"github.com/acme/repo"}}}`
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(synced), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true, DryRun: true}
+	defer func() { Flags = saved }()
+
+	out := captureRefreshStdout(t, func() {
+		if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+			t.Errorf("runRefresh: %v", err)
+		}
+	})
+	if strings.Contains(out, "No managed projects") {
+		t.Errorf("machine B must still see the synced project list, got:\n%s", out)
+	}
+	if !strings.Contains(out, "unbound on this machine") {
+		t.Errorf("expected known-but-unbound report, got:\n%s", out)
+	}
+}
+
+// TestCheckRefreshProjectPath_UnboundVsMissing pins the per-project resolution
+// branches: empty path → unbound-on-this-machine, present dir → ok (R4).
+func TestCheckRefreshProjectPath_UnboundVsMissing(t *testing.T) {
+	out := captureRefreshStdout(t, func() {
+		if checkRefreshProjectPath("svc", "") {
+			t.Error("empty path must not be treated as refreshable")
+		}
+	})
+	if !strings.Contains(out, "unbound on this machine") {
+		t.Errorf("empty-path message: %q", out)
+	}
+
+	dir := t.TempDir()
+	if !checkRefreshProjectPath("svc", dir) {
+		t.Error("present directory should be refreshable")
+	}
+}
+
+// TestCheckRefreshProjectPath_StatErrorVsMissing drives the REAL Stat-error
+// branch (refresh.go: os.Stat(path) in checkRefreshProjectPath): a path that
+// exists but cannot be verified (parent unreadable) must warn with a
+// distinct "could not access" message, not the generic "directory not
+// found" reserved for legitimate absence — the operator otherwise goes
+// hunting for a directory that is actually just inaccessible.
+func TestCheckRefreshProjectPath_StatErrorVsMissing(t *testing.T) {
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "proj")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	out := captureRefreshStdout(t, func() {
+		if checkRefreshProjectPath("svc", dir) {
+			t.Error("unverifiable directory must not be treated as refreshable")
+		}
+	})
+	if !strings.Contains(out, "could not access") {
+		t.Errorf("expected a 'could not access' warning distinct from 'not found', got: %q", out)
+	}
+	if strings.Contains(out, "directory not found") {
+		t.Errorf("a real Stat error must not be reported as the generic 'not found' message: %q", out)
+	}
+}
 
 const refreshCanonicalAgentPath = "agents/proj/my-agent/AGENT.md"
 
@@ -425,10 +525,11 @@ func TestRunRefresh_SkipsProjectWithoutPath(t *testing.T) {
 	os.MkdirAll(agentsHome, 0755)
 	t.Setenv("AGENTS_HOME", agentsHome)
 
-	// Manually write a config with a "." path
-	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{
-		"dot-project": {Path: "."},
+	// Manually write a config whose only project is bound to a "." path.
+	cfg := &config.Config{Version: 2, Projects: map[string]config.Project{
+		"dot-project": {},
 	}, Agents: map[string]config.Agent{}}
+	cfg.BindProject("dot-project", ".")
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -553,10 +654,11 @@ func TestRunRefresh_SkipsProjectWithEmptyPath(t *testing.T) {
 	t.Setenv("AGENTS_HOME", agentsHome)
 
 	cfg := &config.Config{
-		Version:  1,
-		Projects: map[string]config.Project{"weird": {Path: "."}},
+		Version:  2,
+		Projects: map[string]config.Project{"weird": {}},
 		Agents:   map[string]config.Agent{},
 	}
+	cfg.BindProject("weird", ".")
 	if err := cfg.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -647,10 +749,11 @@ func TestRunRefresh_RestoreFailureDoesNotStampMetadata(t *testing.T) {
 		t.Fatal("expected runRefresh to return non-zero error after swallowed restore failure")
 	}
 
-	// .agentsrc.json must NOT carry refresh metadata for the partially-applied project.
-	rc, loadErr := config.LoadAgentsRC(projectPath)
-	if loadErr == nil && rc.Refresh != nil {
-		t.Errorf("expected NO refresh metadata after partial restore, got %+v", rc.Refresh)
+	// .agentsrc.lock must NOT carry a refresh stamp for the partially-applied
+	// project — finalizeProjectRefresh skips WriteRefreshToLock entirely on
+	// projectFailed, so no lock is ever written for this project.
+	if _, statErr := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(statErr) {
+		t.Errorf("expected NO .agentsrc.lock refresh stamp after partial restore, stat err = %v", statErr)
 	}
 }
 
@@ -1139,5 +1242,298 @@ func TestEnsureLockFreshForRefresh_ResolveErrorWarnsNotFatal(t *testing.T) {
 	ensureLockFreshForRefresh(projectPath)
 	if _, err := os.Stat(filepath.Join(projectPath, ".agentsrc.lock")); !os.IsNotExist(err) {
 		t.Fatalf("a failed resolve must not leave a lock, stat err = %v", err)
+	}
+}
+
+// ─── p4b regression: refresh dispatch wires copilot user-home hooks ────────────
+//
+// These helpers + test close the end-to-end confidence gap for the copilot
+// user-home hooks feature (platform-driven-diagnostics / p4b-copilot-user-config,
+// commit 477ac596). The platform-package tests prove createUserHomeHookFiles in
+// isolation; this drives the real `da refresh` dispatch so the command path that
+// actually reaches copilot.CreateLinks is covered.
+
+// seedCopilotGlobalHookForRefresh writes the global-scope canonical HOOK.yaml
+// that copilot's user-home fanout renders into ~/.copilot/hooks/<name>.json.
+// Mirrors seedCopilotGlobalHook in internal/platform/copilot_test.go (test
+// helpers don't cross packages, so the shape is replicated, not imported).
+func seedCopilotGlobalHookForRefresh(t *testing.T, agentsHome string) {
+	t.Helper()
+	manifest := filepath.Join(agentsHome, "hooks", "global", "prompt-log", "HOOK.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "name: prompt-log\nwhen: user_prompt_submit\nrun:\n  command: /bin/echo\n"
+	if err := os.WriteFile(manifest, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeStaleCopilotUserHook pre-seeds a plausible rendered copilot hook under
+// ~/.copilot/hooks/, mirroring writeCopilotUserHook in copilot_test.go. Used to
+// prove refresh's exact-refresh prune removes an unmanaged-name hook file.
+func writeStaleCopilotUserHook(t *testing.T, home, name string) {
+	t.Helper()
+	dir := filepath.Join(home, ".copilot", "hooks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"version":1,"hooks":{"sessionStart":[{"type":"command","bash":"x"}]}}`)
+	if err := os.WriteFile(filepath.Join(dir, name), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunRefresh_MaterializesCopilotUserHomeHooks drives the real `da refresh`
+// dispatch end-to-end and asserts copilot's user-home hook (a) materializes at
+// $HOME/.copilot/hooks/prompt-log.json with the correct rendered CONTENT, (b)
+// prunes a pre-seeded stale $HOME/.copilot/hooks/ghost.json (exact-refresh), and
+// (c) is reported Present/clean by the copilot user-config badge. This is the
+// command-dispatch coverage the platform-package tests cannot give: those call
+// createUserHomeHookFiles directly; this proves refresh → CreateLinks reaches it.
+func TestRunRefresh_MaterializesCopilotUserHomeHooks(t *testing.T) {
+	// seedAllPlatformInstallSignals sets HOME and seeds copilot's install signal
+	// (~/.vscode/extensions/github.copilot-*) so it passes the installed+enabled
+	// filter in enabledPlatforms. Returns the temp HOME.
+	home := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	// Global canonical hook → copilot renders it into ~/.copilot/hooks/.
+	seedCopilotGlobalHookForRefresh(t, agentsHome)
+
+	// Pre-seed a stale rendered hook with an unmanaged name; exact-refresh prune
+	// must remove it.
+	writeStaleCopilotUserHook(t, home, "ghost.json")
+
+	projectPath := filepath.Join(home, "rp")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("rp", projectPath)
+	cfg.SetPlatformState("copilot", true, "")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	hooksDir := filepath.Join(home, ".copilot", "hooks")
+
+	// (a) the global hook materialized at ~/.copilot/hooks/prompt-log.json with
+	// the correct rendered shape (assert decoded content, not just os.Stat).
+	out := filepath.Join(hooksDir, "prompt-log.json")
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("expected refresh to materialize copilot user-home hook %s: %v", out, err)
+	}
+	var payload struct {
+		Version int `json:"version"`
+		Hooks   map[string][]struct {
+			Type string `json:"type"`
+			Bash string `json:"bash"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(b, &payload); err != nil {
+		t.Fatalf("rendered copilot hook is not valid JSON: %v\n%s", err, b)
+	}
+	if payload.Version != 1 {
+		t.Errorf("rendered hook version = %d, want 1", payload.Version)
+	}
+	// user_prompt_submit maps to copilot's "userPromptSubmitted" event.
+	actions, ok := payload.Hooks["userPromptSubmitted"]
+	if !ok || len(actions) != 1 {
+		t.Fatalf("rendered hook missing single userPromptSubmitted action: %s", b)
+	}
+	if actions[0].Type != "command" || actions[0].Bash != "/bin/echo" {
+		t.Errorf("rendered action = %+v, want {Type:command Bash:/bin/echo}", actions[0])
+	}
+
+	// (b) the stale, unmanaged hook is pruned by exact-refresh.
+	ghost := filepath.Join(hooksDir, "ghost.json")
+	if _, err := os.Stat(ghost); !os.IsNotExist(err) {
+		t.Errorf("expected stale %s pruned by exact-refresh, stat err = %v", ghost, err)
+	}
+
+	// (c) the copilot user-config badge reports Present/clean.
+	reporter, ok := platform.NewCopilot().(platform.UserConfigReporter)
+	if !ok {
+		t.Fatal("copilot platform does not implement UserConfigReporter")
+	}
+	badge := reporter.UserBadge(home)
+	if !badge.Present || badge.Broken {
+		t.Errorf("UserBadge = %+v, want Present=true Broken=false", badge)
+	}
+}
+
+// TestRunRefresh_WritesManagedGitignoreBlock proves the D14/R8 wiring end to
+// end: refresh collects the enabled platforms' generated outputs and writes the
+// single dot-agents-managed .gitignore block into the project. It drives the
+// real runRefresh → refreshOneProject → ensureManagedGitignoreForRefresh →
+// platform.CollectManagedOutputs → links.EnsureManagedGitignore path (RULE 7:
+// exercises the production seam, not a hand-rolled call). Copilot's per-machine
+// .github/hooks/*.json fanout must land INSIDE the block (retiring the #381
+// ad-hoc root rule), the committed .agentsrc.lock/.agentsrc.json contract must
+// never be ignored, a user-authored ignore outside the markers is preserved,
+// and a second refresh is byte-stable (regenerated, not appended).
+func TestRunRefresh_WritesManagedGitignoreBlock(t *testing.T) {
+	home := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(home, "gp")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A user-authored ignore that must survive outside the managed markers.
+	userLine := "my-secret-notes/\n"
+	if err := os.WriteFile(filepath.Join(projectPath, ".gitignore"), []byte(userLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("gp", projectPath)
+	cfg.SetPlatformState("copilot", true, "")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	gitignorePath := filepath.Join(projectPath, ".gitignore")
+	first, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("expected refresh to write %s: %v", gitignorePath, err)
+	}
+	content := string(first)
+	const begin = "# >>> dot-agents managed (project outputs) >>>"
+	const end = "# <<< dot-agents managed (project outputs) <<<"
+	bi := strings.Index(content, begin)
+	ei := strings.Index(content, end)
+	if bi < 0 || ei < 0 || ei < bi {
+		t.Fatalf("managed markers missing/malformed in .gitignore:\n%s", content)
+	}
+	block := content[bi:ei]
+
+	// The user-authored ignore is preserved outside the managed block.
+	if !strings.Contains(content[:bi], "my-secret-notes/") {
+		t.Errorf("user-authored ignore not preserved outside markers:\n%s", content)
+	}
+
+	// Copilot's dynamic hook fanout + the always-ignored overlay live inside;
+	// the committed resolved-state contract is never ignored (neverIgnored).
+	assertManagedGitignoreBlock(t, block,
+		[]string{".github/hooks/*.json", ".agentsrc.local.json"},
+		[]string{".agentsrc.lock", ".agentsrc.json"})
+
+	// Byte-stable: a second refresh regenerates the identical file.
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("second runRefresh: %v", err)
+	}
+	second, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("re-read .gitignore: %v", err)
+	}
+	if string(second) != content {
+		t.Errorf("managed .gitignore not byte-stable across refreshes:\nfirst:\n%s\nsecond:\n%s", content, second)
+	}
+}
+
+// assertManagedGitignoreBlock asserts every wantAll entry is present in the
+// managed block and every wantNone entry is absent. Extracted so its callers
+// stay under the cognitive-complexity gate.
+func assertManagedGitignoreBlock(t *testing.T, block string, wantAll, wantNone []string) {
+	t.Helper()
+	for _, w := range wantAll {
+		if !strings.Contains(block, w) {
+			t.Errorf("managed block missing %q:\n%s", w, block)
+		}
+	}
+	for _, f := range wantNone {
+		if strings.Contains(block, f) {
+			t.Errorf("managed block must not contain %q:\n%s", f, block)
+		}
+	}
+}
+
+// TestCollectManagedOutputs_CopilotDynamicAndStaticPlatforms verifies the
+// per-platform output surface feeding the managed block: copilot supplies its
+// dynamic fanout via ManagedOutputReporter (including the .github/hooks/*.json
+// pattern that must be ignored via the block, not an ad-hoc root rule), while a
+// table-driven platform (claude) supplies its static config outputs — both flow
+// through platform.CollectManagedOutputs so refresh never hardcodes paths. The
+// committed contract is intentionally absent (it is filtered by
+// links.EnsureManagedGitignore, not here).
+func TestCollectManagedOutputs_CopilotDynamicAndStaticPlatforms(t *testing.T) {
+	got := platform.CollectManagedOutputs([]platform.Platform{platform.NewCopilot(), platform.NewClaude()})
+	set := map[string]bool{}
+	for _, g := range got {
+		set[g] = true
+	}
+	for _, want := range []string{
+		".github/hooks/*.json",
+		".github/copilot-instructions.md",
+		".claude/",
+		".mcp.json",
+	} {
+		if !set[want] {
+			t.Errorf("CollectManagedOutputs missing %q; got %v", want, got)
+		}
+	}
+	// The committed contract must not be surfaced as an output to ignore.
+	for _, forbidden := range []string{".agentsrc.lock", ".agentsrc.json"} {
+		if set[forbidden] {
+			t.Errorf("CollectManagedOutputs must not list committed contract %q; got %v", forbidden, got)
+		}
+	}
+}
+
+// TestEnsureManagedGitignoreForRefresh_DryRunAndError covers the D14 refresh
+// wiring's two uncovered branches: dry-run (preview, no write, no failure) and
+// the error path (EnsureManagedGitignore fails -> returns true so the caller
+// withholds the success stamp).
+func TestEnsureManagedGitignoreForRefresh_DryRunAndError(t *testing.T) {
+	prev := Flags.DryRun
+	defer func() { Flags.DryRun = prev }()
+
+	// Dry-run: previews without touching the file and reports no failure.
+	Flags.DryRun = true
+	dir := t.TempDir()
+	if ensureManagedGitignoreForRefresh(dir, nil) {
+		t.Error("dry-run must not report a write failure")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create .gitignore, stat err=%v", err)
+	}
+
+	// Error path: a directory where .gitignore must be makes the read fail, so
+	// the helper reports failure.
+	Flags.DryRun = false
+	errDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(errDir, ".gitignore"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !ensureManagedGitignoreForRefresh(errDir, nil) {
+		t.Error("expected failure when .gitignore cannot be read (it is a directory)")
 	}
 }

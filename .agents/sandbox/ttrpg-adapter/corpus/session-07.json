@@ -1,0 +1,15 @@
+{
+  "session": { "number": 7, "title": "The Hollow King Stirs", "played_at": "2026-02-15" },
+  "notes": [
+    { "id": "char:vesh", "type": "character", "fields": { "name": "Vesh the Hollow", "kind": "npc", "status": "missing", "stated_location": "loc:hollowcourt", "allegiance": "fac:cinder" } },
+    { "id": "evt:s7-stirring", "type": "event", "fields": { "summary": "Vesh vanishes; the Cinder Pact masses at the Hollow Court", "session": 7, "occurred_in": "loc:hollowcourt" } }
+  ],
+  "edges": [
+    { "type": "present_at", "from": "char:thane", "to": "evt:s7-stirring" },
+    { "type": "involves", "from": "evt:s7-stirring", "to": "char:vesh" },
+    { "type": "involves", "from": "evt:s7-stirring", "to": "char:thane" },
+    { "type": "occurred_at", "from": "evt:s7-stirring", "to": "loc:hollowcourt" },
+    { "type": "advances", "from": "evt:s7-stirring", "to": "quest:avenge" },
+    { "type": "allied_with", "from": "fac:cinder", "to": "fac:silverhand" }
+  ]
+}

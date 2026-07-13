@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: t02-introduce-lifecycle-skeleton
-parent_plan_id: root-command-decomposition
-verifier_type: merge-back
-status: pass
-summary: 'PR #60 https://github.com/NikashPrakash/dot-agents/pull/60 on feature/t02-lifecycle-skeleton (commit 29ef51a5). Branch worktree at .agents/worktrees/t02-introduce-lifecycle-skeleton. Verification: go build green, go test green for commands/lifecycle ([no test files]) and parent commands package. gofmt clean. Pre-existing internal/graphstore CRG python-env test failure unrelated. Merge PR #60 before unblocking t03-t09.'
-recorded_at: "2026-05-24T23:06:20Z"
-delegation_id: del-t02-introduce-lifecycle-skeleton-1779663678

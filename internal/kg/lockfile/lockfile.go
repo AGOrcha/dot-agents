@@ -195,6 +195,140 @@ func saveWith(opener lockOpener, path string, lf *Lockfile) error {
 	return nil
 }
 
+// dependsOn reports whether the view records a dependency on dependee.
+func (v *View) dependsOn(dependee string) bool {
+	for _, d := range v.DependsOn {
+		if d.Adapter == dependee {
+			return true
+		}
+	}
+	return false
+}
+
+// RegisterView records a materialized view's initial lockfile state on the
+// consumer adapter as ready: the view was just compiled and (re)built against
+// the recorded dependency digests (§10.1). It creates the consumer adapter entry
+// if absent. Re-registering replaces the view's recorded dependencies and digest
+// and resets it to ready (a fresh build).
+func (lf *Lockfile) RegisterView(adapter, view, viewDigest string, deps []ViewDependency, now time.Time) {
+	if lf.Adapters == nil {
+		lf.Adapters = map[string]*Adapter{}
+	}
+	ad := lf.Adapters[adapter]
+	if ad == nil {
+		ad = &Adapter{}
+		lf.Adapters[adapter] = ad
+	}
+	if ad.MaterializedViews == nil {
+		ad.MaterializedViews = map[string]*View{}
+	}
+	v := &View{ViewDigest: viewDigest, DependsOn: append([]ViewDependency(nil), deps...)}
+	v.recordTransition(StatusReady, "registered", now)
+	v.LastRebuiltAt = now.UTC().Format(time.RFC3339)
+	ad.MaterializedViews[view] = v
+}
+
+// viewKey is the stable "adapter/view" identity used in cutover result slices.
+func viewKey(adapter, view string) string { return adapter + "/" + view }
+
+// ViewStatusOf returns a view's current status and whether it is recorded.
+func (lf *Lockfile) ViewStatusOf(adapter, view string) (ViewStatus, bool) {
+	v, err := lf.findView(adapter, view)
+	if err != nil {
+		return "", false
+	}
+	return v.ViewStatus, true
+}
+
+// findView resolves a view's state, erroring when the adapter or view is absent.
+func (lf *Lockfile) findView(adapter, view string) (*View, error) {
+	ad := lf.Adapters[adapter]
+	if ad == nil || ad.MaterializedViews[view] == nil {
+		return nil, fmt.Errorf("lockfile: no materialized view %s", viewKey(adapter, view))
+	}
+	return ad.MaterializedViews[view], nil
+}
+
+// MarkDependeeBumped freezes every ready view that depends_on dependee into
+// pending-recompat-check (§10.3 step 1: a dependee schema bump suspends its
+// dependents until each view's DSL is re-validated). It returns the affected
+// "adapter/view" keys in sorted order. Views not currently ready are left as-is
+// (a view already mid-cutover is not re-frozen).
+func (lf *Lockfile) MarkDependeeBumped(dependee string, now time.Time) []string {
+	var affected []string
+	for _, an := range lf.AdapterNames() {
+		ad := lf.Adapters[an]
+		for _, vn := range sortedViewNames(ad) {
+			v := ad.MaterializedViews[vn]
+			if v.ViewStatus == StatusReady && v.dependsOn(dependee) {
+				v.recordTransition(StatusPendingRecompatCheck, "dependee-bump:"+dependee, now)
+				affected = append(affected, viewKey(an, vn))
+			}
+		}
+	}
+	return affected
+}
+
+// ResolveRecompat applies the mechanical cutover gate result (§10.3) to a view
+// in pending-recompat-check: compatible → pending-rebuild (recording the new
+// dependency digests the view will rebuild against); incompatible →
+// dsl-update-required (the dependent must ship a new query; O1 — no
+// accepts_breaking_changes opt-out). It errors if the view is not in
+// pending-recompat-check (the only state from which recompat resolves).
+func (lf *Lockfile) ResolveRecompat(adapter, view string, compatible bool, deps []ViewDependency, now time.Time) error {
+	v, err := lf.findView(adapter, view)
+	if err != nil {
+		return err
+	}
+	if v.ViewStatus != StatusPendingRecompatCheck {
+		return fmt.Errorf("lockfile: view %s is %q, not pending-recompat-check", viewKey(adapter, view), v.ViewStatus)
+	}
+	v.LastValidationAt = now.UTC().Format(time.RFC3339)
+	if compatible {
+		v.DependsOn = append([]ViewDependency(nil), deps...)
+		v.recordTransition(StatusPendingRebuild, "recompat-pass", now)
+		return nil
+	}
+	v.recordTransition(StatusDSLUpdateRequired, "recompat-fail", now)
+	return nil
+}
+
+// MarkViewRebuilt transitions a pending-rebuild view to ready after the
+// bootstrap recomputes its rows (§10.3), recording the rebuilt view digest. It
+// errors if the view is not in pending-rebuild.
+func (lf *Lockfile) MarkViewRebuilt(adapter, view, viewDigest string, now time.Time) error {
+	v, err := lf.findView(adapter, view)
+	if err != nil {
+		return err
+	}
+	if v.ViewStatus != StatusPendingRebuild {
+		return fmt.Errorf("lockfile: view %s is %q, not pending-rebuild", viewKey(adapter, view), v.ViewStatus)
+	}
+	v.ViewDigest = viewDigest
+	v.LastRebuiltAt = now.UTC().Format(time.RFC3339)
+	v.recordTransition(StatusReady, "rebuilt", now)
+	return nil
+}
+
+// ActivationBlockers returns the dependent "adapter/view" keys in
+// dsl-update-required that depend_on dependee, in sorted order. A non-empty
+// result BLOCKS dependee (re)activation (§10.3 mechanical gate): the dependee
+// cannot go live until every incompatible dependent ships an updated query that
+// clears the block.
+func (lf *Lockfile) ActivationBlockers(dependee string) []string {
+	var blockers []string
+	for _, an := range lf.AdapterNames() {
+		ad := lf.Adapters[an]
+		for _, vn := range sortedViewNames(ad) {
+			v := ad.MaterializedViews[vn]
+			if v.ViewStatus == StatusDSLUpdateRequired && v.dependsOn(dependee) {
+				blockers = append(blockers, viewKey(an, vn))
+			}
+		}
+	}
+	return blockers
+}
+
 // Activate registers (or refreshes) an adapter's lockfile entry on
 // activation, initializing the per-adapter state machine. sourceDigest is
 // the digest of the adapter YAML; schemaDigest is the canonical schema hash.

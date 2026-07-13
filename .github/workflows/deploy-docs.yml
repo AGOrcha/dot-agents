@@ -4,60 +4,205 @@ on:
   push:
     branches: [master]
     paths:
-      - 'docs/web/**'
-      - 'docs/DEMO_*.md'
+      # docs/** covers docs/web/** and every rendered markdown doc the site
+      # sources live from docs/ (HOOKS.md, CONFIG_RELEVANCE.md, DEMO_*.md, …),
+      # so a content edit both redeploys and re-runs the link check.
+      - 'docs/**'
       - 'schemas/**'
+      - '.lychee.toml'
       - '.github/workflows/deploy-docs.yml'
   pull_request:
     paths:
-      - 'docs/web/**'
-      - 'docs/DEMO_*.md'
+      - 'docs/**'
       - 'schemas/**'
+      - '.lychee.toml'
       - '.github/workflows/deploy-docs.yml'
 
 concurrency:
   group: deploy-docs-${{ github.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-permissions:
-  contents: read
-  deployments: write
-
 jobs:
-  deploy:
-    name: Build and deploy
+  docs-e2e:
+    # Headless-browser guard for the custom interactive routes (/graphs/* +
+    # /diagrams/*). Catches the blank-graph bug class (0-height canvas / no
+    # rendered nodes) and asset 404s that the build and a plain curl both pass.
+    # Independent of `deploy` (does not gate it) so a deploy is never blocked on
+    # browser flakiness, while a regression still surfaces as a failing check.
+    name: UI e2e (graphs + diagrams)
     runs-on: ubuntu-latest
+    # Job-scoped permissions (Sonar S8233): this job only reads the repo.
+    permissions:
+      contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
+          # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22); Node 20
+          # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
           node-version: '22'
-          cache: npm
-          cache-dependency-path: docs/web/package-lock.json
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) + --ignore-scripts
+        # (S6505: lifecycle scripts); pnpm is pure JS. Mirrors test.yml.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
 
       - name: Install dependencies
         working-directory: docs/web
-        # --ignore-scripts: per Sonar S6505; we control the deps + their
-        # postinstall scripts via package-lock.json, so install-time scripts
-        # are not needed for CI builds. The 'astro build' step below runs
-        # the real build (the only script we need).
-        run: npm ci --ignore-scripts
+        # --frozen-lockfile: install matches the committed pnpm-lock.yaml exactly.
+        # --ignore-scripts (Sonar S6505): Playwright browser binaries are installed
+        # explicitly in the next step; native build deps are rebuilt below.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Build site
+      - name: Rebuild native deps (sharp/esbuild/workerd)
+        working-directory: docs/web
+        # Native postinstall binaries skipped by --ignore-scripts above — sharp
+        # (image processing), esbuild (vite), workerd (miniflare). These are the
+        # pnpm-workspace.yaml allowBuilds entries the astro build / gate test need.
+        run: pnpm rebuild sharp esbuild workerd
+
+      - name: Install Playwright browser
+        working-directory: docs/web
+        # Run the already-installed, version-pinned Playwright binary directly
+        # from node_modules/.bin (installed by `pnpm install` above). This is NOT an
+        # npm/npx package install — it neither resolves nor fetches a package and
+        # runs no install-time lifecycle scripts — so S6505/S8543 do not apply;
+        # it only downloads the browser binaries Playwright needs.
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        working-directory: docs/web
+        # playwright.config.ts builds (DEPLOY_TARGET=cloudflare) and static-serves
+        # dist itself, so this step is fully hermetic.
+        run: pnpm run test:e2e
+
+  link-check:
+    # Link-rot guard for the rendered docs. Builds the PUBLIC site and runs
+    # lychee over the emitted HTML so it validates BOTH in-site page-to-page
+    # links and the github.com blob URLs the link-rewriter produces. Catches the
+    # bare-filename 404 class (a docs link that loses its `docs/` prefix) and any
+    # cross-link that points at a route the build never produced. Independent of
+    # `deploy` so a transient external host can't block a deploy, while a real
+    # internal break still surfaces as a failing check.
+    name: Link check (built site)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22); Node 20
+          # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
+          node-version: '22'
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) + --ignore-scripts
+        # (S6505: lifecycle scripts); pnpm is pure JS. Mirrors test.yml.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
+
+      - name: Install dependencies
+        working-directory: docs/web
+        # --frozen-lockfile matches the committed pnpm-lock.yaml; --ignore-scripts
+        # per Sonar S6505 (native build deps rebuilt below).
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native deps (sharp/esbuild/workerd)
+        working-directory: docs/web
+        # Native postinstall binaries skipped by --ignore-scripts above — sharp
+        # (image processing), esbuild (vite), workerd (miniflare). These are the
+        # pnpm-workspace.yaml allowBuilds entries the astro build / gate test need.
+        run: pnpm rebuild sharp esbuild workerd
+
+      - name: Build public site
+        working-directory: docs/web
+        env:
+          # Root-relative ('/') base URLs so the built links match production.
+          DEPLOY_TARGET: cloudflare
+        run: pnpm run build:public
+
+      - name: Check links with lychee
+        # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.
+        # Update via: gh api repos/lycheeverse/lychee-action/git/refs/tags/<tag> -q .object.sha
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          # --root-dir resolves the site's root-relative ('/foo') links against
+          # the built output; the .lychee.toml at the repo root supplies the
+          # accept/exclude policy. fail=true gates on any broken link.
+          args: >-
+            --no-progress
+            --config .lychee.toml
+            --root-dir "${{ github.workspace }}/docs/web/dist"
+            "docs/web/dist/**/*.html"
+          fail: true
+          jobSummary: true
+          # Lets lychee verify github.com links via the API (no anon rate limits).
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    # Job-scoped permissions (Sonar S8233): deploy needs deployment write.
+    permissions:
+      contents: read
+      deployments: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          # Node 22: pnpm@11 uses node:sqlite (builtin from Node 22); Node 20
+          # crashes `pnpm install` with ERR_UNKNOWN_BUILTIN_MODULE.
+          node-version: '22'
+
+      - name: Install pnpm
+        # Pin exact version (S8543: locked resolved versions) + --ignore-scripts
+        # (S6505: lifecycle scripts); pnpm is pure JS. Mirrors test.yml.
+        run: npm install -g pnpm@11.9.0 --ignore-scripts
+
+      - name: Install dependencies
+        working-directory: docs/web
+        # --frozen-lockfile: install matches the committed pnpm-lock.yaml exactly.
+        # --ignore-scripts per Sonar S6505; native build deps (sharp/esbuild/
+        # workerd, the pnpm-workspace.yaml allowBuilds) are rebuilt explicitly below.
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Rebuild native deps (sharp/esbuild/workerd)
+        working-directory: docs/web
+        # Native postinstall binaries skipped by --ignore-scripts above — sharp
+        # (image processing), esbuild (vite), workerd (miniflare). These are the
+        # pnpm-workspace.yaml allowBuilds entries the astro build / gate test need.
+        run: pnpm rebuild sharp esbuild workerd
+
+      - name: Build site (both passes) + merge internal into dist
         working-directory: docs/web
         env:
           # Switches astro.config.mjs to root-base URLs for agorcha.dev
           # (GitHub Pages would use /dot-agents/ instead).
           DEPLOY_TARGET: cloudflare
-        run: npm run build
+        # build:merged runs both Astro passes then copies dist-internal/internal/
+        # -> dist/internal/ (Option A single asset dir) while leaving dist's
+        # clean public pagefind index untouched. The Worker gates /internal/*.
+        run: pnpm run build:merged
+
+      - name: Gate test (Cloudflare Access leak guard)
+        working-directory: docs/web
+        # Proves unauthenticated /internal/* is blocked (401) while public +
+        # /schemas/* serve unauth. Fails the deploy if the gate ever regresses.
+        run: pnpm test
 
       - name: Deploy to Cloudflare Workers
         # Pinned to a full commit SHA per Sonar S7637 / supply-chain best practice.
         # Update via: gh api repos/cloudflare/wrangler-action/commits/v3 -q .sha
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -71,3 +216,14 @@ jobs:
           # custom-domain routes. Master push uses --env production to
           # activate the agorcha.dev routes from env.production in wrangler.jsonc.
           command: ${{ github.event_name == 'pull_request' && 'deploy --name agorcha-dev-docs-preview' || 'deploy --env production' }}
+          # Worker secret for the /internal/provision endpoint (dm6): the scoped
+          # CF API token (Access: Service Tokens Edit) used to mint per-user
+          # service tokens. wrangler-action uploads it as a Worker secret as part
+          # of this deploy; the value comes from the job env below. If the
+          # endpoint reports 503 mint-unconfigured after deploy, the secret did
+          # not attach to the active (production) Worker — set it manually with
+          # `wrangler secret put CF_PROVISION_API_TOKEN --env production`.
+          secrets: |
+            CF_PROVISION_API_TOKEN
+        env:
+          CF_PROVISION_API_TOKEN: ${{ secrets.CF_PROVISION_API_TOKEN }}

@@ -136,6 +136,43 @@ func TestCheckCRGReadiness_UnbuiltRequireGraph(t *testing.T) {
 	})
 }
 
+// TestCheckCRGReadiness_StatusError_RequireGraphBlocks drives the should-be-
+// LOUD fix for the --require-graph correctness bug: when Status() itself
+// returns a REAL error (distinct from "CRG not installed", which Status()
+// reports via status.State with a nil error), requireGraph=true must abort
+// instead of silently returning nil and bypassing the flag's contract.
+func TestCheckCRGReadiness_StatusError_RequireGraphBlocks(t *testing.T) {
+	orig := crgBridgeStatus
+	t.Cleanup(func() { crgBridgeStatus = orig })
+	crgBridgeStatus = func(string) (*graphstore.CRGStatus, error) { return nil, fmt.Errorf("status seam failure") }
+
+	repo := t.TempDir()
+	out := captureStdout(t, func() {
+		if err := checkCRGReadiness(repo, true); err == nil {
+			t.Error("expected error when Status() fails and requireGraph=true")
+		}
+	})
+	if !strings.Contains(string(out), "unavailable") {
+		t.Errorf("expected a warning that code graph status is unavailable, got: %q", out)
+	}
+}
+
+// TestCheckCRGReadiness_StatusError_RequireGraphFalse asserts the
+// non-strict path still just warns and returns nil — unchanged behavior for
+// callers that don't pass --require-graph.
+func TestCheckCRGReadiness_StatusError_RequireGraphFalse(t *testing.T) {
+	orig := crgBridgeStatus
+	t.Cleanup(func() { crgBridgeStatus = orig })
+	crgBridgeStatus = func(string) (*graphstore.CRGStatus, error) { return nil, fmt.Errorf("status seam failure") }
+
+	repo := t.TempDir()
+	captureStdout(t, func() {
+		if err := checkCRGReadiness(repo, false); err != nil {
+			t.Errorf("unexpected error when requireGraph=false: %v", err)
+		}
+	})
+}
+
 // TestRunKGBuild_JSONOutput drives the build command through a fake CRG
 // binary and asserts the JSON shape.
 func TestRunKGBuild_JSONOutput(t *testing.T) {
@@ -686,7 +723,7 @@ func TestWarmCodeLane_CRGUnavailable(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Chdir(t.TempDir())
 	out := captureStdout(t, func() {
-		if got := warmCodeLane(store); got != "" {
+		if _, _, got := warmCodeLane(store); got != "" {
 			t.Errorf("expected empty summary when CRG missing, got %q", got)
 		}
 	})
@@ -1750,7 +1787,7 @@ func TestWarmCodeLane_EmptyDB(t *testing.T) {
 		t.Fatalf("openKGStore: %v", err)
 	}
 	defer store.Close()
-	msg := warmCodeLane(store)
+	_, _, msg := warmCodeLane(store)
 	if !strings.Contains(msg, "code-lane") {
 		t.Errorf("expected code-lane summary, got %q", msg)
 	}
@@ -2307,5 +2344,107 @@ func TestRunKGWarmStats_GetStatsError(t *testing.T) {
 	err := runKGWarmStats(&cobra.Command{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "get stats") {
 		t.Fatalf("expected get-stats error, got: %v", err)
+	}
+}
+
+// ----- kg link import + dry-run tests -----
+
+func testDepsDryRun() Deps {
+	d := testDeps()
+	d.Flags.DryRun = true
+	return d
+}
+
+func TestParseLinkManifest(t *testing.T) {
+	content := "# comment\n\nn1 pkg::A\nn2 pkg::B documents\n  n3   pkg::C   references  \nbad-one-field\nn4 pkg::D boguskind\nn5 pkg::E references extra\n"
+	rows, errs := parseLinkManifest(content)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 valid rows, got %d: %+v", len(rows), rows)
+	}
+	if rows[0] != (linkManifestRow{noteID: "n1", symbol: "pkg::A", kind: "mentions"}) {
+		t.Errorf("row0 = %+v (want default mentions)", rows[0])
+	}
+	if rows[1].kind != "documents" || rows[2].kind != "references" {
+		t.Errorf("explicit kinds = %q %q", rows[1].kind, rows[2].kind)
+	}
+	// errors: bad-one-field (<2), boguskind (invalid kind), "…references extra" (>3).
+	if len(errs) != 3 {
+		t.Fatalf("expected 3 row errors, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestRunKGLinkImport_AppliesValidRows(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = runKGWarm(newKGWarmCmdForTest(), nil)
+	manifest := filepath.Join(t.TempDir(), "links.tsv")
+	if err := os.WriteFile(manifest, []byte("dec-use-cobra pkg::A documents\ndec-use-cobra pkg::B\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runKGLinkImport(testDeps(), &cobra.Command{}, []string{manifest}); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	store, _ := openKGStore(home)
+	defer store.Close()
+	links, _ := store.GetLinksForNote("dec-use-cobra")
+	if len(links) != 2 {
+		t.Fatalf("expected 2 links, got %d", len(links))
+	}
+}
+
+func TestRunKGLinkImport_ReportsFailuresNonZero(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = runKGWarm(newKGWarmCmdForTest(), nil)
+	manifest := filepath.Join(t.TempDir(), "links.tsv")
+	// one valid row + one invalid-kind row.
+	if err := os.WriteFile(manifest, []byte("dec-use-cobra pkg::Good\ndec-use-cobra pkg::Bad wrongkind\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runKGLinkImport(testDeps(), &cobra.Command{}, []string{manifest}); err == nil {
+		t.Fatal("expected non-zero error when a row fails")
+	}
+	store, _ := openKGStore(home)
+	defer store.Close()
+	links, _ := store.GetLinksForNote("dec-use-cobra")
+	if len(links) != 1 {
+		t.Fatalf("the valid row must still apply: got %d links", len(links))
+	}
+}
+
+func TestRunKGLinkImport_DryRunNoWrites(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = runKGWarm(newKGWarmCmdForTest(), nil)
+	manifest := filepath.Join(t.TempDir(), "links.tsv")
+	if err := os.WriteFile(manifest, []byte("dec-use-cobra pkg::A documents\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runKGLinkImport(testDepsDryRun(), &cobra.Command{}, []string{manifest}); err != nil {
+		t.Fatalf("dry-run import: %v", err)
+	}
+	store, _ := openKGStore(home)
+	defer store.Close()
+	links, _ := store.GetLinksForNote("dec-use-cobra")
+	if len(links) != 0 {
+		t.Fatalf("dry-run must not write: got %d links", len(links))
+	}
+}
+
+func TestRunKGLinkImport_FileNotFound(t *testing.T) {
+	_ = setupKGWithNotes(t)
+	if err := runKGLinkImport(testDeps(), &cobra.Command{}, []string{filepath.Join(t.TempDir(), "nope.tsv")}); err == nil {
+		t.Fatal("expected error for a missing manifest file")
+	}
+}
+
+func TestRunKGLinkAdd_DryRunNoWrite(t *testing.T) {
+	home := setupKGWithNotes(t)
+	_ = runKGWarm(newKGWarmCmdForTest(), nil)
+	if err := runKGLinkAdd(testDepsDryRun(), newKGLinkAddCmdForTest("references"), []string{"dec-use-cobra", "pkg::A"}); err != nil {
+		t.Fatalf("dry-run add: %v", err)
+	}
+	store, _ := openKGStore(home)
+	defer store.Close()
+	links, _ := store.GetLinksForNote("dec-use-cobra")
+	if len(links) != 0 {
+		t.Fatalf("dry-run add must not write: got %d links", len(links))
 	}
 }

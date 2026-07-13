@@ -168,6 +168,55 @@ anecdotal:
 This is what closes `CLAUDE.md`'s self-improvement loop on data instead of memory: lessons, rules,
 skills, and `stage_profiles` stop being write-only and become nodes results are scored against.
 
+## 3B. Agent interface model — the file-system projection IS the agent's interface (zero new semantics)
+
+**This is the foundational principle of the whole storage model, stated once here as the
+single source. Every tier (§3 D1/D1′), the daemon (D4), the `WorkStore` facade (D3), and
+the R-series service surfaces are subordinate to it.**
+
+> **The file-system projection is the agent's primary interface — zero new semantics.**
+
+Agents live on the server and have direct file-system access. They operate by **reading and
+writing the projected files directly** — the `.agents/workflow/**` YAML/markdown, specs,
+plans, tasks, lessons, results. Those files are *just there and available*. An agent does
+**not** need to learn any `da` command, RPC, HTTP/UDS call, or event-bus API to do its work:
+its default and only required path is to read and edit the files. Editing a file is the act;
+nothing new must be invoked.
+
+**The system reconciles file changes after the fact.** When an agent writes a file, the
+**system** — the `da service` daemon (D4) ingesting + reconciling local edits into the KG /
+state / event log — picks up the change afterward and propagates it (status transition,
+graph node update, episodic event). The agent does not perform that propagation and does not
+wait on it; reconciliation is the system's job, downstream of the file write. This is exactly
+what D2 ("agents never block on the backend") and Requirement 2 ("agents read/edit the same
+local YAML/markdown — no agent-facing change") already assert; §3B names *why* it must hold:
+**the projection is the interface, so the interface must carry zero semantics beyond "it's a
+file."**
+
+### The boundary: agent-facing vs system-side
+
+| Plane | What it is | Who uses it | Required for the agent? |
+|---|---|---|---|
+| **Agent-facing** | The **FS projection** — `.agents/workflow/**` and the other projected files. Read/write a file; zero new semantics. | **Agents** (on the server, with FS access) | **Yes — this is the agent's interface.** |
+| **System-side** | `da` commands, UDS / HTTP (R3 §2A), the `EventBus` / transport (R3 §D4), and external integrations (Jira/Linear, CF DO). Propagation, control plane, external integration. | The **daemon / system / operators / external tools** | **No.** Optional sugar at most. |
+
+- **`da` commands are optional, not required.** A human or script *may* use `da workflow …`
+  for convenience (it writes through `WorkStore`, D7/D3), but an agent reaching the same
+  outcome by editing the projected file is the **default, fully-supported path** — the
+  daemon reconciles that edit identically. `da` is sugar over the file, never a gate in
+  front of it.
+- **UDS / HTTP / EventBus are system-side propagation, not the agent's interface.** R3 §2A's
+  local transport and R3 §D4's `EventBus` move bytes *between system components and to
+  external consumers*; they are the control plane and external-integration plane. An agent
+  never has to speak UDS, HTTP, or the bus to get its work recorded — it writes a file and
+  the system carries it onward.
+
+**Net rule for any design that touches this model:** if a change would require an agent to
+call a command, an RPC, or a transport to do ordinary work — instead of just reading/writing
+a projected file — it **violates §3B** and must be reworked so the file path remains the
+agent's interface. New semantics belong in the *system's* reconciliation, never on the
+agent's side of the projection.
+
 ## 4. Requirements (behavioral)
 
 1. The orchestrator/scout's eligibility reflects **authoritative** status — an in-flight /
@@ -240,6 +289,8 @@ skills, and `stage_profiles` stop being write-only and become nodes results are 
 - **external-agent-sources** — credential model + the credential-proxy daemon mode the backend auth
   reuses.
 - **r3-background-worker-service / workflow-orchestrator-daemon** — the daemon that runs the sync loop.
+  Its §2A local transport (UDS/HTTP) and §D4 `EventBus` are the **system-side** propagation/control
+  plane of §3B, not the agent's interface; R3 §2A/§D4 point back here for that boundary.
 - **layered-pr-fanout** — its `awaiting_review` status only actually gates the scout once a shared
   backend exists; today worktree isolation defeats it (this spec is the missing substrate).
 - **knowledge-architecture-graph-views** — the end-state this spec's `kg` backend converges on: one
@@ -252,3 +303,78 @@ skills, and `stage_profiles` stop being write-only and become nodes results are 
   node type that result nodes correlate against (§3A); cleaner primitives ⇒ a cleaner feedback graph.
 - **Motivating failure** — the wave-engine re-dispatch storm (5×p1c) is the canonical regression test
   for done-criterion #2.
+
+## 9. Amendment (2026-07-11): the `git-ref` backend + read-from-master shim
+
+**Provenance.** kg-ideate run on proposal `.agents/proposals/read-task-state-from-master-source.md`
+(owner ask: "read task state from a master source"). Phase-1 briefing: KG has no SDD
+decision nodes for this topic yet (code-graph only), so this grounds in §1–§8 above +
+lessons `worktree-isolation-defeats-status-tracking`, `stale-local-master-ref`,
+`stale-local-checkout-mass-drift`, `single-source-of-truth-across-specs-and-plans`.
+This section **adds** a backend; it does not revise D1–D8.
+
+The §2 backend ladder jumps from `local` (per-worktree files, **no** shared SOT) straight
+to `kg` (needs the `da service` daemon + graph store). That gap is the common case: a team
+wants cross-worktree **atomic status** (the D2/D5 re-dispatch fix) without standing up the
+KG/DO daemon. A **git-native shared SOT** fills it.
+
+- **D9 — `git-ref` WorkStore backend (git-native shared SOT).** Coordination state lives on
+  a dedicated ref — `refs/agents/state` (configurable) — **orthogonal to the code branch**:
+  worktrees on `feature/x`, `feature/y`, or detached HEAD all resolve status against the one
+  ref. **Read:** via git (`git cat-file`/`show <ref>:<path>`), or a single shared linked
+  worktree of the ref that all agents read — this is D2 ("status reads resolve against the
+  backend, not the per-worktree YAML") in pure git. **Write:** a transition commits the
+  changed state file(s) to the ref via atomic compare-and-swap (`git update-ref <ref> <new>
+  <old>`, retry-on-mismatch) — the interprocess-safe RMW that today's `agentslock` only
+  half-covers (only `plan_task.go` locks; `delegation.go`/`contract.go`/`eligible_accounting.go`
+  don't), now serialized at the ref. **Conflict granularity:** split status into **per-task
+  state files** under the ref so two workers transitioning *different* tasks never hit a
+  line-level `TASKS.yaml` conflict (this also realizes D5's per-task lease/claim); the
+  ref-level CAS-retry loop is the fallback. Rides the same `WorkStore` interface (D3) and the
+  same D8 scope ladder — the backend value becomes
+  `work_tracking.backend = local | git-ref | kg | cloudflare-do | jira | linear`. **This is
+  the sane default upgrade from `local`:** no daemon, no external service, works offline (local
+  ref is the degenerate SOT), and a team graduates `local → git-ref → kg` without changing the
+  agent-facing file interface.
+
+- **D10 — the state ref is NOT merged into the default (code) branch (answers the sync question).**
+  It is a **parallel lineage** (like `refs/notes/*`), never an ancestor/descendant of `main`.
+  Merging it into `main` would re-entangle the two planes D1 separates — pollute code history
+  with status churn and force merges between two unrelated trees. What *does* sync:
+  - **ref ↔ remote:** push/fetch `refs/agents/state` to/from `origin` so every clone/host shares
+    one authority (`git push origin refs/agents/state`, a configured refspec). This is
+    "replicate the ref," not "merge the ref into a branch."
+  - **cross-worktree on one host:** nothing to sync — linked worktrees share the same object
+    store + refs, so all worktrees see the ref natively (one ref, many worktrees).
+  - **optional one-way audit snapshot:** if a human-readable copy in the code tree is wanted
+    (D1′: "committed YAML is a periodic snapshot for audit, never the authority"), project the
+    ref → a periodic snapshot commit/export on `main` — **one-way, never a merge back**; the ref
+    stays the authority. This resolves §6's "Git vs backend double-tracking" for `git-ref`.
+
+- **§3B compliance.** The git-ref backend still **projects into a readable file path** (a shared
+  linked worktree of the state ref, or a read-through checkout into `.agents/workflow/`), so an
+  agent keeps reading/editing a plain file with zero new semantics. The ref, the CAS write, and
+  the remote sync are **system-side** (D4-style reconciliation, but git instead of a daemon) —
+  the projection remains the agent's interface, honoring §3B's net rule.
+
+- **Near-term read-from-master shim (ship first).** Before the full `WorkStore`/git-ref backend
+  lands, add `work_tracking.read_from = worktree|master`: when `master`, `loadCanonicalTasks`
+  (`commands/workflow/plan_task.go`) and the scout's eligibility/next read resolve `TASKS.yaml`
+  from the canonical ref / `origin/<default-branch>` instead of the per-worktree working copy;
+  writes land as today. Read-side-only, but it kills the re-dispatch storm (done-criterion #2's
+  motivating 5×p1c failure) at the cost of one `git show`-backed read path — worth doing
+  regardless of the full backend.
+
+- **Resolves/re-scopes the commit-scope thread.** With coordination state on its own ref, task
+  state is no longer committed into **code** branches at all — the whole-store-vs-task-scoped
+  commit problem (`obs-da-workflow-commit-scope-safety.md`; payout `worker-bundle-authoring`
+  tasks `commit-1-task-pathset`/`commit-2-cli-scoped-mode`) largely evaporates. Those tasks
+  should be re-scoped as "write coordination state to the state ref," not "scope the code-branch
+  commit." Recorded so the two planes get separate lineages.
+
+**Added open question (§6):** CAS contention granularity under high fan-out — per-task state
+files (preferred) vs ref-level CAS-retry — and whether the shared linked-worktree projection or
+a read-through checkout is the cleaner §3B-compliant read path. Not blocking the read-from-master
+shim.
+
+**Execution:** plan `git-ref-work-backend` (dot-agents) carries the tasks; see its `.plan.md`.

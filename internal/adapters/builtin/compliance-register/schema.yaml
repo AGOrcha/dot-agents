@@ -1,0 +1,72 @@
+name: compliance-register
+version: 1.0.0
+description: |-
+  GRC graph for controls, risks, findings, evidence, regulations.
+  Loads canonical SOC2/NIST/HIPAA frameworks at bootstrap; tracks
+  evidence expiry and policy review windows via environmental drivers.
+note_types:
+  - name: regulation
+    fields:
+      - { name: authority, type: string }
+      - { name: version, type: string }
+      - { name: jurisdiction, type: enum, values: [us, eu, uk, global] }
+      - { name: effective_date, type: date }
+  - name: control
+    fields:
+      - { name: control_id, type: string }
+      - { name: framework, type: string }
+      - { name: status, type: enum, values: [effective, degraded, failed, untested] }
+      - { name: owner, type: ref<owner> }
+      - { name: derives_from, type: ref<policy>, derivation: true }
+  - name: risk
+    fields:
+      - { name: severity, type: enum, values: [low, medium, high, critical] }
+      - { name: likelihood, type: enum, values: [rare, possible, likely, certain] }
+      - { name: status, type: enum, values: [open, accepted, mitigated, transferred] }
+      - { name: owner, type: ref<owner> }
+  - name: finding
+    fields:
+      - { name: source, type: enum, values: [audit, pentest, incident, self_assessment] }
+      - { name: severity, type: enum, values: [low, medium, high, critical] }
+      - { name: status, type: enum, values: [open, remediated, accepted, false_positive] }
+      - { name: opened_at, type: date }
+  - name: evidence
+    fields:
+      - { name: artifact_url, type: string }
+      - { name: collected_at, type: date }
+      - { name: expires_at, type: date }
+      - { name: type, type: enum, values: [screenshot, log, policy_doc, test_result, attestation] }
+  - name: policy
+    fields:
+      - { name: version, type: string }
+      - { name: last_reviewed_at, type: date }
+      - { name: review_window_days, type: int }
+  - name: owner
+    fields:
+      - { name: name, type: string }
+      - { name: team, type: string }
+      - { name: role, type: string }
+edge_types:
+  - { name: satisfies, from: control, to: regulation, cardinality: many-to-many }
+  - { name: mitigates, from: control, to: risk, cardinality: many-to-many }
+  - { name: cited_by, from: evidence, to: control, cardinality: many-to-many, derivation: true }
+  - { name: affects, from: finding, to: control, cardinality: many-to-many }
+  - { name: supersedes, from: regulation, to: regulation, cardinality: many-to-one, derivation: true }
+  - { name: contradicts, from: finding, to: control, cardinality: many-to-many }
+impact_radius:
+  query: |-
+    MATCH (changed:control)
+    OPTIONAL MATCH (changed)-[:satisfies]->(reg:regulation)
+    OPTIONAL MATCH (changed)-[:mitigates]->(r:risk)
+    OPTIONAL MATCH (f:finding)-[:affects]->(changed)
+    OPTIONAL MATCH (e:evidence)-[:cited_by]->(changed)
+    WHERE changed.id IN $changed_ids
+    RETURN reg.id, r.id, f.id, e.id, changed.owner.name
+  max_depth: 2
+  algorithm_hint: bidirectional_bfs
+staleness_drivers:
+  - source_mutation
+  - derivation_mutation
+  - environmental_trigger
+  - explicit_revocation
+  - contradiction_arrival

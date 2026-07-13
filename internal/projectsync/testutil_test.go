@@ -9,19 +9,6 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
 )
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || indexOf(s, substr) >= 0)
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}
-
 // duplicate of promoteEnv from promote_test.go scoped to this file to keep
 // the helper local without exporting it.
 func promoteEnvX(t *testing.T, projectName string) (agentsHome, projectPath string) {

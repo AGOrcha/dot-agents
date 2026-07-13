@@ -1,12 +1,26 @@
 # Loop-Discipline Stop Hooks — Design
 
 - spec-id: `loop-discipline-stop-hooks`
-- status: active (promotion of `.agents/proposals/loop-discipline-stop-hooks-scoping.md`)
-- date: 2026-05-25
+- status: active — core delivered, tail tasks open (promotion of `.agents/proposals/loop-discipline-stop-hooks-scoping.md`)
+- date: 2026-05-25 (coherence-reconciled 2026-06-25)
 - owner: dot-agents
 - predecessor: `.agents/proposals/loop-discipline-stop-hooks-scoping.md`
 - related plans: `r1-outcome-scoring` (completed scoring baseline),
   `r1-5-hook-enforcement-telemetry` (follow-up consumer of gate outcomes)
+
+> **Coherence note (2026-06-25).** The Problem-statement framing below ("none of
+> the three skills ship in the starter scaffold", "platform mapper has coverage
+> gaps") is the **2026-05-25 pre-implementation state** and is preserved as the
+> historical rationale that motivated the plan. It is no longer the shipped
+> reality: plan tasks `p0-sentinel-cli` … `p5-e2e-integration`, `p1e`, `p3-pre`,
+> and `p3b` are **completed** — the three discipline skills (`iteration-close`,
+> `isp`, `loop-worker`), the `loop-worker` AGENT.md, the `loop-worker` profile,
+> and the three gate bundles (`iteration-close-gate`, `isp-gate`,
+> `loop-worker-gate`) all ship under `internal/scaffold/`. The mapper
+> extensions (R6) landed. Only the downstream-migration / release tail
+> (`p6-payout-backfill`, `p7-legacy-override-migration`, `p6-rollback-plan`,
+> `r1-5-t4-integration`, `release-minor`) remains open. Read the requirements
+> below as the delivered contract, not as undone work.
 
 ## Problem statement
 

@@ -1,0 +1,98 @@
+schema_version: 1
+plan_id: local-gate-ci-parity
+tasks:
+    - id: t1-make-gate-single-source
+      title: make gate target + prek hook calls it + per-file coverage on changed files
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - Makefile
+        - scripts/precommit-mandate.sh
+        - .pre-commit-config.yaml
+        - scripts/
+      verification_required: true
+      notes: D1+D4+R1. Add make gate as single source of truth; prek pre-push hook invokes make gate (remove parallel gate logic from precommit-mandate.sh). Switch the coverage step from per-package to per-file enforce (COVERAGE_FILE_MODE=enforce) scoped to changed .go files (OQ2 diff base = merge-base origin/master HEAD). Must be deterministic.
+      app_type: go-cli
+    - id: t2-fast-proxies
+      title: Fast-tier offline sonar proxies (gocognit S3776 + dup-literal S1192)
+      status: pending
+      depends_on:
+        - t1-make-gate-single-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+        - Makefile
+      verification_required: true
+      notes: D3 fast tier. In make gate, run gocognit -over 15 (S3776) + a duplicated-literal scan (S1192) over changed Go files. Define the dup-literal threshold to match Sonar (same non-trivial literal repeated >=N). Instant, offline, deterministic.
+      app_type: go-cli
+    - id: t3-gate-cross-windows
+      title: 'make gate-cross: Windows-ssh tests for changed packages + merged multi-OS coverage'
+      status: completed
+      depends_on:
+        - t1-make-gate-single-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+        - Makefile
+      verification_required: true
+      notes: D2+D5+OQ3. make gate-cross ssh-runs changed-package tests on pap-h@pap-home.local and merges local+Windows coverage into the true multi-OS per-file profile. Define sync (rsync/git), Go cache on box, BatchMode key-only ssh, and unreachable-box semantics (loud-skip vs hard-fail).
+      app_type: go-cli
+    - id: t4-native-sonar-deterministic
+      title: Full native sonar in gate-cross; pristine-tree + .scannerwork/dist ignore+exclude
+      status: pending
+      depends_on:
+        - t3-gate-cross-windows
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/precommit-mandate.sh
+        - .gitignore
+        - sonar-project.properties
+      verification_required: true
+      notes: 'D3 backstop + R3. Run full native sonar-scanner in gate-cross (not every push). Extend the #147 pristine-tree fix; gitignore + scanner-exclude .scannerwork and dist so prek never sees a hook-modified file.'
+      app_type: go-cli
+    - id: t5-ci-shares-make-gate
+      title: CI invokes make gate / gate-cross (shared definition, no drift)
+      status: pending
+      depends_on:
+        - t1-make-gate-single-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .github/workflows/
+        - scripts/
+      verification_required: true
+      notes: D1+req3+OQ4. CI Coverage-gate job runs the same make target / underlying scripts; CI feeds its real Windows-matrix coverage into the multi-OS merge instead of ssh. Grep-assert no divergent coverage-mode constant between hook and CI.
+      app_type: go-cli
+    - id: t6-worker-contract
+      title: Worker brief/loop-worker self-gate references make gate; forbid --no-verify
+      status: pending
+      depends_on:
+        - t1-make-gate-single-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/
+      verification_required: true
+      notes: 'req7. Add ''run make gate before push'' to the loop-worker self-gate/brief template; document --no-verify as forbidden (hook is reliable). Dogfoods lesson-loading: attach gates-must-be-locally-reproducible + tests-must-drive-the-production-path.'
+      app_type: docs
+    - id: t7-verify-replay
+      title: 'Regression: replay #173/#174 pre-fix must fail make gate + determinism check'
+      status: pending
+      depends_on:
+        - t1-make-gate-single-source
+        - t2-fast-proxies
+        - t3-gate-cross-windows
+        - t4-native-sonar-deterministic
+        - t5-ci-shares-make-gate
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - scripts/
+      verification_required: true
+      notes: 'Done criteria. Prove a change failing CI per-file coverage / Windows tests / sonar-new-issues also fails make gate*/locally (replay #173 5-file + #174 windows pre-fix states). Assert make gate twice = identical PASS, no tree mutation.'
+      app_type: go-cli

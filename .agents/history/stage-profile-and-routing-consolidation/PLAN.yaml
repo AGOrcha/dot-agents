@@ -4,7 +4,7 @@ title: 'Stage-profile & routing consolidation (supersedes PR #40)'
 status: archived
 summary: Unify verifier_profiles+reviewer_profiles into one StageProfile under stage_profiles (4 stages); retire app_type_verifier_map into execution_profile.topology; read back-compat + migrate + deprecate.
 created_at: "2026-06-07T23:07:12Z"
-updated_at: "2026-06-08T03:20:59Z"
+updated_at: "2026-07-10T04:25:11Z"
 owner: dot-agents
 success_criteria: 'resolve-prompt resolves all 4 stages with verifier/reviewer parity; delegation/fanout resolves verifier_sequence via execution_profile with no app_type_verifier_map; legacy keys fold + round-trip to new keys; go test ./... + vet green; schema updated; PR #40 closed superseded.'
 verification_strategy: go test ./internal/config/... ./commands/...; go test ./...; go vet ./...; gofmt -l; da workflow resolve-prompt (4 kinds); da workflow app-types + fanout dry-run; per-file 95% coverage gate.

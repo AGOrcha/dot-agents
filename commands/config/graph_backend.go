@@ -1,0 +1,41 @@
+package config
+
+import (
+	"github.com/AGOrcha/dot-agents/internal/adapters/builtin/none"
+	"github.com/AGOrcha/dot-agents/internal/kg/registry"
+)
+
+// registerBuiltinGraphBackends registers every graph-backend adapter that ships
+// inside `da`. The `none` adapter is the only built-in today; later
+// graph-backend-adapter-contract tasks register their adapters here too. It is a
+// package var so a test can substitute a registry whose registration fails (a
+// path a fresh registry never hits in production), mirroring the seam in
+// commands/kg.
+var registerBuiltinGraphBackends = func(reg *registry.Registry) error {
+	return none.Register(reg)
+}
+
+// builtinGraphRegistry returns a registry pre-populated with the built-in
+// graph-backend adapters. It is the single construction point the config
+// command's graph_backend resolution uses, so the set of built-ins resolvable
+// from a profile's `graph_backend` ref stays in one place.
+func builtinGraphRegistry() (*registry.Registry, error) {
+	reg := registry.New()
+	if err := registerBuiltinGraphBackends(reg); err != nil {
+		return nil, err
+	}
+	return reg, nil
+}
+
+// resolveGraphBackend resolves a profile's graph_backend adapter-ref against the
+// built-in registry's ref resolver (graph-backend-adapter-contract §8 / the t1
+// registry). This is the config-side selection path: a profile declaring
+// `graph_backend: dotagents-builtin:graph/none@^1.0` resolves to the registered
+// `none` adapter end-to-end, the same resolver dispatch uses.
+func resolveGraphBackend(ref string) (registry.Adapter, error) {
+	reg, err := builtinGraphRegistry()
+	if err != nil {
+		return nil, err
+	}
+	return reg.Resolve(ref)
+}

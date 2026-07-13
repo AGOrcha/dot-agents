@@ -14,13 +14,26 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
-// This file adds the tier-2 (packages) source-type plumbing: the OCI registry
-// pull path plus the http-as-packages path's shared types, and the signing-
-// posture stub. Per config-distribution-model §4 the tier constraint is that
-// `oci` is packages-only (never valid for extends) and `http` is valid for both
-// tiers. The extends-only SelectFetcher (in fetcher.go) therefore continues to
-// reject `oci`; package resolution (pass 2, p6) selects through
-// SelectPackageFetcher here instead.
+// This file adds the OCI registry source-type plumbing: the shared blob pull
+// (manifest + blob fetch, token auth, digest/posture/cache) plus the artifact
+// (packages) fetcher built on it. Per config-distribution-model §15 D8+D13 any
+// source type may serve any unit kind — `oci` is valid for both `packages`
+// (artifacts) and `extends` (config layers). What stays meaningful is the unit's
+// media type: an artifact pull must carry the artifact-bundle media type and a
+// layer pull the config-layer media type (the guard below + its mirror in
+// fetcher_oci_layer.go), so `kind` is enforced by the blob, not by which source
+// is permitted. The shared pull is factored here and reused by the layer fetcher.
+
+const (
+	// ociArtifactMediaType is the media type of a tier-2 package artifact bundle
+	// published to OCI (config-distribution-model §15 D8). A `packages` pull must
+	// resolve to this media type.
+	ociArtifactMediaType = "application/vnd.dot-agents.artifact-bundle.v1+tar+gzip"
+	// ociLayerMediaType is the dedicated media type of a config layer published to
+	// OCI as a single blob carrying the layer.json document (config-distribution-
+	// model §15 D13). An `extends` pull must resolve to this media type.
+	ociLayerMediaType = "application/vnd.dot-agents.config-layer.v1+json"
+)
 
 // SigningPosture is the declared verification stance for a fetched package
 // artifact (config-distribution-model §12 scope boundary; signing brought in
@@ -94,6 +107,12 @@ type FetchedArtifact struct {
 	CacheHit bool
 	// Posture is the signing posture applied to this pull.
 	Posture SigningPosture
+	// KeyInputs carries the resolved facts for the source's effective content
+	// cache key (config-distribution-model §7A.4): the manifest digest for oci,
+	// the digest (plus any ETag/Last-Modified validator) for http-as-packages, so
+	// the package resolver can derive an effective key via EffectiveCacheKey. A
+	// zero value falls back to the kind default keyed on Digest.
+	KeyInputs CacheKeyInputs
 }
 
 // PackageRefParts is the parsed form of a "source-id:artifact-path@version-spec"
@@ -132,7 +151,7 @@ func ParsePackageRef(ref string) (PackageRefParts, error) {
 }
 
 // PackageFetcher pulls a tier-2 package artifact from a resolved source. One
-// impl per packages-valid source type (oci, http). The interface is the test
+// impl per source type (oci, http, git, local). The interface is the test
 // seam: a fake stands in so no test touches a real registry or the network.
 type PackageFetcher interface {
 	// FetchArtifact returns the artifact blob for parts.ArtifactPath@VersionSpec
@@ -141,17 +160,22 @@ type PackageFetcher interface {
 }
 
 // SelectPackageFetcher returns the PackageFetcher for a source type, or an error
-// for a source type that is not valid for packages. This is the pass-2 (p6)
-// counterpart to SelectFetcher: packages accept oci and http; git and local are
-// rejected as a tier/schema violation (spec §4).
+// for an unsupported source type. This is the packages counterpart to
+// SelectFetcher: per config-distribution-model §15 D3+D8+D13, any source type
+// may serve any unit kind — the KIND (governed by the unit's media type), not
+// the source, decides merge/trust. Packages/artifacts accept all four source
+// types (git, local, http, oci), and after D13 so does extends; there is no
+// remaining source/kind asymmetry.
 func SelectPackageFetcher(sourceType string) (PackageFetcher, error) {
 	switch sourceType {
 	case "oci":
 		return &ociFetcher{}, nil
 	case "http":
 		return &httpArtifactFetcher{}, nil
-	case "git", "local":
-		return nil, fmt.Errorf("source type %q is not valid for packages (use oci or http)", sourceType)
+	case "git":
+		return &gitArtifactFetcher{}, nil
+	case "local":
+		return &localArtifactFetcher{}, nil
 	default:
 		return nil, fmt.Errorf("unsupported source type %q", sourceType)
 	}
@@ -228,18 +252,35 @@ func writeCachedArtifact(digest string, data []byte) error {
 
 // --- oci fetcher -----------------------------------------------------------
 
+// ociBlob is the result of a single OCI blob pull: the blob bytes, the
+// registry-reported content digest ("" lets the caller compute it), and the
+// blob's media type (from the resolving manifest's config/layer descriptor).
+// The media type is what keeps `kind` meaningful now that any source serves any
+// kind (config-distribution-model §15 D13): an artifact pull and a layer pull
+// share this pull but guard on different media types.
+type ociBlob struct {
+	Data      []byte
+	Digest    string
+	MediaType string
+}
+
+// ociPuller is the shared OCI Distribution pull seam used by both the artifact
+// fetcher and the layer fetcher. Nil uses ociPull, the not-yet-wired real
+// registry client (returns a transport error until the live wire protocol lands;
+// the seam lets tests and the resolver drive the caching/posture/media-type
+// logic without a live registry).
+type ociPuller func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error)
+
 // ociFetcher pulls a package artifact over the OCI Distribution wire protocol
 // and caches it content-addressed by digest. The wire protocol (manifest +
-// blob fetch, token auth) is owned by the external-agent-sources spec; this
-// p5 plumbing models the registry pull behind a `puller` test seam so pass-2
-// (p6) and tests can drive it without a live registry. The signing-posture stub
-// gates whether an unverifiable pull is allowed.
+// blob fetch, token auth) is owned by the external-agent-sources spec; the
+// registry pull is modeled behind the shared `puller` seam so the resolver and
+// tests can drive it without a live registry. The signing-posture stub gates
+// whether an unverifiable pull is allowed; the media-type guard rejects a
+// config-layer blob served to a `packages` ref (mirror of the layer fetcher's
+// guard), so `kind` stays meaningful.
 type ociFetcher struct {
-	// puller is the test seam over the real OCI Distribution pull. Nil uses
-	// ociPull, which is the not-yet-wired real registry client (returns a
-	// transport error in p5 — the live wire protocol lands with p6). It returns
-	// the artifact bytes and the registry-reported digest.
-	puller func(ctx context.Context, ref ociRef, auth []byte) (data []byte, digest string, err error)
+	puller ociPuller
 }
 
 // ociRef is a resolved OCI reference: registry + repository + the tag or digest
@@ -302,55 +343,103 @@ func digestFromVersionSpec(spec string) (string, bool) {
 }
 
 func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedArtifact, error) {
-	posture := PostureFromSource(src)
+	importRef := parts.SourceID + ":" + parts.ArtifactPath
 	ref, err := parseOCIRef(src, parts)
 	if err != nil {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonSchema, Err: err}
+		return FetchedArtifact{}, &ImportError{Ref: importRef, SourceID: parts.SourceID, Reason: ReasonSchema, Err: err}
 	}
+	pulled, err := pullOCIContent(f.puller, src, ref, importRef, parts.SourceID, ociArtifactMediaType)
+	if err != nil {
+		return FetchedArtifact{}, err
+	}
+	if err := writeCachedArtifact(pulled.Digest, pulled.Data); err != nil {
+		return FetchedArtifact{}, err
+	}
+	return FetchedArtifact{
+		Data:      pulled.Data,
+		Digest:    pulled.Digest,
+		CacheHit:  pulled.CacheHit,
+		Posture:   pulled.Posture,
+		KeyInputs: CacheKeyInputs{OCIDigest: pulled.Digest},
+	}, nil
+}
 
+// ociContent is the shared, kind-agnostic result of pullOCIContent: the resolved
+// blob bytes + canonical digest, whether they came from cache, and the signing
+// posture applied. The caller persists them under its own cache root (packages
+// vs config) and wraps them in its own typed result.
+type ociContent struct {
+	Data     []byte
+	Digest   string
+	CacheHit bool
+	Posture  SigningPosture
+}
+
+// pullOCIContent is the single OCI pull shared by the artifact and layer
+// fetchers (config-distribution-model §15 D13: one pull, two kinds). It applies
+// the offline digest-pin cache fast path, runs the pull seam, computes/validates
+// the digest, enforces the signing posture, and guards the media type so the
+// pulled blob's kind matches the caller's declared kind. wantMediaType is the
+// media type the caller (packages vs extends) requires; a mismatch is a clear
+// schema error so `kind` stays meaningful even though source is unrestricted.
+func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceID, wantMediaType string) (ociContent, error) {
+	posture := PostureFromSource(src)
 	// A digest-pinned ref is content-addressed up front, so the cache is checked
-	// before any network work (offline fast path, spec §8).
+	// before any network work (offline fast path, spec §8). A cache hit has no
+	// manifest to re-read, so the media type was already validated when it was
+	// first pulled and cached.
 	if ref.Digest != "" {
 		if cached, ok := readCachedArtifact(ref.Digest); ok {
 			if err := verifySignature(posture, ref.Digest, false); err != nil {
-				return FetchedArtifact{}, err
+				return ociContent{}, err
 			}
-			return FetchedArtifact{Data: cached, Digest: ref.Digest, CacheHit: true, Posture: posture}, nil
+			return ociContent{Data: cached, Digest: ref.Digest, CacheHit: true, Posture: posture}, nil
 		}
 	}
 
-	pull := f.puller
+	pull := puller
 	if pull == nil {
 		pull = ociPull
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	data, digest, err := pull(ctx, ref, src.Auth)
+	blob, err := pull(ctx, ref, src.Auth)
 	if err != nil {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonTransport, Err: err}
+		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonTransport, Err: err}
 	}
+	digest := blob.Digest
 	if digest == "" {
-		digest = artifactDigest(data)
+		digest = artifactDigest(blob.Data)
 	}
-	// A digest pin must match the registry-reported digest, else the content is
-	// not what was requested (tamper / mismatch -> content failure).
-	if ref.Digest != "" && digest != ref.Digest {
-		return FetchedArtifact{}, &ImportError{Ref: parts.SourceID + ":" + parts.ArtifactPath, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but registry served %s", ref.Digest, digest)}
+	if err := guardOCIPull(ref, digest, blob.MediaType, wantMediaType, importRef, sourceID); err != nil {
+		return ociContent{}, err
 	}
 	if err := verifySignature(posture, digest, false); err != nil {
-		return FetchedArtifact{}, err
+		return ociContent{}, err
 	}
-	if err := writeCachedArtifact(digest, data); err != nil {
-		return FetchedArtifact{}, err
-	}
-	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture}, nil
+	return ociContent{Data: blob.Data, Digest: digest, CacheHit: false, Posture: posture}, nil
 }
 
-// ociPull is the real OCI Distribution pull, not yet wired in p5. The live wire
-// protocol (manifest fetch, blob fetch, token auth) lands with pass-2 (p6); for
-// now it deterministically reports a transport error so a misconfigured run
-// fails loudly rather than silently, while the `puller` seam lets tests and p6
-// drive the fetcher's caching/posture logic.
-func ociPull(_ context.Context, ref ociRef, _ []byte) ([]byte, string, error) {
-	return nil, "", fmt.Errorf("oci wire protocol not yet wired (registry=%s repo=%s); pass-2 packages resolution implements the pull", ref.Registry, ref.Repository)
+// guardOCIPull validates a freshly pulled blob: the digest must match a pin
+// (tamper guard) and the media type must match the caller's declared kind (the
+// §15 D13 kind guard). An empty served media type is tolerated as the requested
+// kind so a registry that omits the descriptor type still resolves.
+func guardOCIPull(ref ociRef, digest, gotMediaType, wantMediaType, importRef, sourceID string) error {
+	if ref.Digest != "" && digest != ref.Digest {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but registry served %s", ref.Digest, digest)}
+	}
+	if gotMediaType != "" && gotMediaType != wantMediaType {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci media type %q does not match required %q", gotMediaType, wantMediaType)}
+	}
+	return nil
+}
+
+// ociPull is the real OCI Distribution pull, not yet wired. The live wire
+// protocol (manifest fetch, blob fetch, token auth) lands with pass-2 packages
+// resolution; for now it deterministically reports a transport error so a
+// misconfigured run fails loudly rather than silently, while the `puller` seam
+// lets tests and the resolver drive the fetcher's caching/posture/media-type
+// logic.
+func ociPull(_ context.Context, ref ociRef, _ []byte) (ociBlob, error) {
+	return ociBlob{}, fmt.Errorf("oci wire protocol not yet wired (registry=%s repo=%s); the live registry pull implements this", ref.Registry, ref.Repository)
 }

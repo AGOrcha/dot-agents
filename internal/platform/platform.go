@@ -79,6 +79,7 @@ func All() []Platform {
 		NewCodex(),
 		NewOpenCode(),
 		NewCopilot(),
+		NewAntigravity(),
 	}
 }
 
@@ -90,4 +91,63 @@ func ByID(id string) Platform {
 		}
 	}
 	return nil
+}
+
+// ManagedOutputReporter is implemented by platforms whose generated repo-local
+// outputs are dynamic enough (or divergent enough from the static table) to
+// warrant per-platform enumeration — e.g. Copilot's rendered .github/hooks/*.json
+// fanout, which is not a single owned directory like the other platforms'
+// surfaces. A platform that does not implement it falls back to the
+// staticManagedOutputs table in CollectManagedOutputs. The returned entries are
+// repo-relative .gitignore patterns (forward-slash, trailing slash for
+// directories) for the managed-.gitignore block (config-distribution-model §15
+// / D14 / R8).
+type ManagedOutputReporter interface {
+	ManagedOutputs() []string
+}
+
+// staticManagedOutputs maps a platform ID to the repo-relative .gitignore
+// patterns for the outputs `da refresh` projects/generates into a consuming
+// project (config-distribution-model §15 / D14): projected platform links,
+// generated platform configs, and the shared skills/agents mirrors. These are
+// machine-materialized outputs that must stay out of git; the committed
+// resolved-state contract (.agentsrc.json/.agentsrc.lock) is filtered back out
+// by links.EnsureManagedGitignore, so it is never listed here even though
+// refresh materializes the lock. Platforms with a dynamic surface implement
+// ManagedOutputReporter instead of appearing here (see copilot).
+// skillsSubdir is the repo-relative shared-skills mirror suffix several
+// platforms project; a named const avoids the S1192 duplicate-literal smell.
+const skillsSubdir = "/skills/"
+
+var staticManagedOutputs = map[string][]string{
+	"cursor": {cursorDir + "/", ".cursorrules", ".cursorignore"},
+	"claude": {
+		claudeDir + "/",
+		claudeMCPFile,
+		"CLAUDE.md",
+		claudeAgentsBucketDir + "/agents/",
+		claudeAgentsBucketDir + skillsSubdir,
+	},
+	"codex":       {codexDir + "/", codexAgentsMarkdown, codexAgentsDir + skillsSubdir},
+	"opencode":    {opencodeDir + "/", opencodeJSON, opencodeAgentsDir + skillsSubdir},
+	"antigravity": {antigravityDir + "/"},
+}
+
+// CollectManagedOutputs aggregates the repo-relative managed-output .gitignore
+// patterns for the given platforms (typically the enabled set). A platform that
+// implements ManagedOutputReporter supplies its own patterns; otherwise the
+// static staticManagedOutputs table is consulted. The raw union is returned
+// unsorted and possibly duplicated — links.EnsureManagedGitignore normalizes,
+// de-duplicates, sorts, and filters the never-ignored contract files, so this
+// collector never has to.
+func CollectManagedOutputs(platforms []Platform) []string {
+	var out []string
+	for _, p := range platforms {
+		if r, ok := p.(ManagedOutputReporter); ok {
+			out = append(out, r.ManagedOutputs()...)
+			continue
+		}
+		out = append(out, staticManagedOutputs[p.ID()]...)
+	}
+	return out
 }

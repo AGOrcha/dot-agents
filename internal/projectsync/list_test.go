@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/projectsync"
+	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
 func TestReadFrontmatterDescription_QuotedAndUnquoted(t *testing.T) {
@@ -92,5 +93,29 @@ func TestListBucket_SkipsNonDirAndCountsValid(t *testing.T) {
 		Plural:       "Skills",
 	}); err != nil {
 		t.Fatalf("ListBucket: %v", err)
+	}
+}
+
+// TestListBucket_ReadDirRealErrorSurfaces exercises the should-be-LOUD fix:
+// a real ReadDir failure on an existing bucket dir must not be reported to
+// the user identically to "empty bucket."
+func TestListBucket_ReadDirRealErrorSurfaces(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	scopeDir := filepath.Join(agentsHome, "skills", "global")
+	if err := os.MkdirAll(scopeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, scopeDir)
+
+	err := projectsync.ListBucket("global", projectsync.BucketSpec{
+		Bucket:       "skills",
+		ManifestName: "SKILL.md",
+		Singular:     "skill",
+		Plural:       "Skills",
+	})
+	if err == nil {
+		t.Fatal("want a surfaced error for a real ReadDir failure, not the 'No skills found' no-op")
 	}
 }

@@ -147,8 +147,10 @@ func TestCreateSkill_MkdirError(t *testing.T) {
 
 // ─── ensureUserSkillLinks MkdirAll branch (continue path) ────────────────────
 
-// When MkdirAll fails for both targets, ensureUserSkillLinks silently moves
-// on. Verify by also installing a fatal symlink stub — it must not be reached.
+// When MkdirAll fails for both targets, ensureUserSkillLinks moves on to try
+// the next target but joins the failure into its returned error. Verify by
+// also installing a fatal symlink stub — it must not be reached for either
+// target.
 func TestEnsureUserSkillLinks_MkdirAllFailsContinue(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -161,7 +163,10 @@ func TestEnsureUserSkillLinks_MkdirAllFailsContinue(t *testing.T) {
 		},
 	)
 
-	ensureUserSkillLinks(fakeIO, filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
+	err := ensureUserSkillLinks(fakeIO, filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
+	if err == nil {
+		t.Error("expected a joined error when MkdirAll fails for every target")
+	}
 }
 
 // When the link already exists, symlink must not be re-attempted.
@@ -179,15 +184,21 @@ func TestEnsureUserSkillLinks_SkipsExisting(t *testing.T) {
 		return nil
 	})
 
-	ensureUserSkillLinks(fakeIO, filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo"))
+	if err := ensureUserSkillLinks(fakeIO, filepath.Join(tmp, ".agents"), "demo", filepath.Join(tmp, ".agents", "skills", "global", "demo")); err != nil {
+		t.Errorf("unexpected error when targets already exist: %v", err)
+	}
 }
 
 // ─── appendSkillToAgentsRC ConfigLoad branch ─────────────────────────────────
 
 func TestAppendSkillToAgentsRC_ConfigLoadError(t *testing.T) {
 	fakeIO := newFakeIOConfigLoadStub(func() (*config.Config, error) { return nil, errors.New("load boom") })
-	if got := appendSkillToAgentsRC(fakeIO, "demo", "missing-proj"); got != "" {
+	got, err := appendSkillToAgentsRC(fakeIO, "demo", "missing-proj")
+	if got != "" {
 		t.Errorf("expected empty string on load error, got %q", got)
+	}
+	if err == nil {
+		t.Error("expected a non-nil error on ConfigLoad failure")
 	}
 }
 

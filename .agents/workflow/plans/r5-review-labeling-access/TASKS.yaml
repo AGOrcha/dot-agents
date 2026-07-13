@@ -16,17 +16,19 @@ tasks:
       verification_required: false
       notes: |-
         Landed via the R5 planner output 2026-05-25: D5.1 YAML sidecar
-        storage; D5.2 RubricVersion 3.0.0 bump with new human_label
-        signal (weight ~0.15); D5.3 Bearer-token RBAC via local users
-        file (Authenticator interface for OIDC swap-out); D5.4 JSON-
-        lines audit log with SHA-256 prev_hash chain, indefinite
-        retention; D5.5 5-route HTTP mount surface into R3; D5.6 only
-        R2 base shell needed (not real-time push).
+        storage; D5.2 major RubricVersion bump with new human_label
+        signal (weight ~0.15) — version resolved at task time, NOT
+        hardcoded 3.0.0 (R1.5 shipped 2.1.0 since this was written; see
+        r1-integration task notes); D5.3 Bearer-token RBAC via local
+        users file at ~/.config/da/review/users.yaml, argon2id-hashed
+        (Authenticator interface for OIDC swap-out); D5.4 JSON-lines
+        audit log with SHA-256 prev_hash chain, indefinite retention;
+        D5.5 5-route HTTP mount surface into R3; D5.6 only R2 base
+        shell needed (not real-time push).
       app_type: research
-
     - id: rbac-identity
       title: RBAC identity layer (users file, token issuance, Authenticator interface)
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -40,14 +42,23 @@ tasks:
       verification_required: true
       notes: |-
         Implement Authenticator interface + LocalUsersAuthenticator
-        backed by ~/.agents/review/users.yaml (bcrypt-hashed token,
-        role enum reviewer|admin|readonly). Token issuance helper.
-        No HTTP yet — pure package, unit-tested. Decision D5.3.
+        backed by the local users file (argon2id-hashed token, role
+        enum reviewer|admin|readonly). Token issuance helper. No HTTP
+        yet — pure package, unit-tested. Decision D5.3.
+        Users-file path = ~/.config/da/review/users.yaml honoring
+        $XDG_CONFIG_HOME (per spec D5.3 "secrets never live in
+        AGENTS_HOME"); NOT ~/.agents/review/ (the earlier draft path
+        would git-sync hashed secrets). Hash = argon2id, NOT bcrypt.
+        SHIPPED (coherence 2026-06-25): internal/review/auth/ landed
+        (authenticator.go + token.go + users.go + role.go + tests);
+        commit 854821bc moved users.yaml out of AGENTS_HOME to
+        ~/.config/da; commit e3995d80 swapped bcrypt→argon2id. Marked
+        completed. Earlier ~/.agents/review + bcrypt note was stale;
+        spec D5.3 + shipped code are the single source.
       app_type: go-cli
-
     - id: label-model
       title: Label data model + persistence (iter-N.labels.yaml sidecars)
-      status: pending
+      status: completed
       depends_on:
         - design-doc
       blocks:
@@ -58,16 +69,22 @@ tasks:
         - internal/review/labels/
       verification_required: true
       notes: |-
-        Define Label struct (structured fields per D5.4 deferred
-        decision + free_text), atomic YAML sidecar reader/writer
-        mirroring internal/scoring/persist.go style. Multi-label
-        per iteration; each label carries id (uuid), actor, role,
-        timestamps, edit-history. Pure package.
+        Define Label struct (structured fields per spec D5.7 —
+        correctness 0-3, scope_judgement, hallucination, free_text;
+        plus label_schema_version per OQ3), atomic YAML sidecar
+        reader/writer mirroring internal/scoring/persist.go style.
+        Multi-label per iteration; each label carries id (uuid),
+        actor, role, timestamps, edit-history. Pure package.
+        SHIPPED (coherence 2026-06-25): internal/review/labels/
+        (label.go + persist.go + tests) landed via PR #177
+        (feature/r5-label-model); persist writes
+        iter-N.labels.yaml adjacent to iter-N.yaml. The shared
+        atomic writer was later extracted to internal/fsops
+        (WriteFileAtomic, commit ed978961). Marked completed.
       app_type: go-cli
-
     - id: audit-log
       title: Append-only chained JSON-lines audit log + verifier
-      status: pending
+      status: completed
       depends_on:
         - rbac-identity
       blocks:
@@ -83,10 +100,9 @@ tasks:
         (SHA-256). Append + Verify. Yearly rotation hook. Pure file
         IO; no HTTP yet.
       app_type: go-cli
-
     - id: collection-endpoint
       title: HTTP route handlers + auth/audit middleware (mounts into R3 server)
-      status: pending
+      status: completed
       depends_on:
         - rbac-identity
         - label-model
@@ -99,24 +115,36 @@ tasks:
         - internal/review/http/
       verification_required: true
       notes: |-
-        Defines an HTTPMount that R3 imports and mounts under /api.
-        Handlers: POST/PATCH /api/runs/:iteration/labels, GET
-        /api/runs/:iteration/labels, GET /api/review/audit (admin),
-        users CRUD (admin). AuthMiddleware reads Bearer token via
-        Authenticator; AuditMiddleware emits one record per mutating
-        call. R3 integration point is a single
-        `func Mount(r chi.Router, deps Deps)` (or equivalent — pick
-        R3's router). Per spec D2, the route ownership stays in this
-        package.
+        RESCOPED 2026-07-02 (§2A coherence): these review routes are
+        browser-facing / external-tool-consumed, so they take the
+        HTTP arm of r3's §2A surface→transport map — they mount on
+        R3's HTTP/SSE edge via the stdlib
+        RegisterMount(prefix, handler) surface (net/http; NO
+        chi/router dep — the earlier "func Mount(r chi.Router, deps
+        Deps)" sketch is superseded; R3's server is framework-free).
+        They do NOT ride the UDS control plane. No EventBus access is
+        needed for v1 (r3 §D4.3: R5 mounts an HTTP handler that does
+        not need bus access); if a later slice subscribes to events,
+        it binds to the §D4.1 EventBus INTERFACE, never *events.Bus.
 
-        Cross-plan dep: R3 http-server (RegisterMount surface) must
-        ship before this can be wired in-process. Until then, this
-        package ships a standalone http.Handler usable in tests.
+        Defines an HTTPMount that R3 imports and mounts under
+        /api/reviews. Handlers: POST/PATCH
+        /api/runs/:iteration/labels, GET /api/runs/:iteration/labels,
+        GET /api/review/audit (admin), users CRUD (admin).
+        AuthMiddleware reads Bearer token via Authenticator;
+        AuditMiddleware emits one record per mutating call. Route
+        ownership stays in this package (spec D5.5); R3 owns the
+        host, middleware chain, and lifecycle.
+
+        Cross-plan dep: r3 http-server — now the §2A transport-layer
+        task (UDS control plane + HTTP/SSE edge, RegisterMount on the
+        edge) — must ship before this can be wired in-process. Until
+        then, this package ships a standalone http.Handler usable in
+        tests.
       app_type: go-cli
-
     - id: r1-integration
-      title: Human-label signal + RubricVersion 3.0.0 bump
-      status: pending
+      title: Human-label signal + RubricVersion major/minor bump (resolve at task time)
+      status: completed
       depends_on:
         - label-model
       blocks:
@@ -132,20 +160,30 @@ tasks:
       verification_required: true
       notes: |-
         Per D5.2: add SignalHumanLabel (weight ~0.15, re-balance the
-        existing six down), extend SignalSet with HumanLabel
-        SignalValue, add ExtractHumanLabelSignals(iterLogDir, n)
-        reading iter-N.labels.yaml, wire it through
-        AssembleSignalSet and BuildSignalSets. Bump RubricVersion to
-        3.0.0 (major: signal set changed). Update
-        docs/OUTCOME_SCORING_RUBRIC.md with the new signal + new
-        weight table + rationale. Multi-label aggregation rule: mean
-        of latest-per-reviewer.
+        existing SEVEN signals down — note the shipped rubric now has
+        seven, not six: R1.5 added hook_outcomes at 2.1.0), extend
+        SignalSet with HumanLabel SignalValue, add
+        ExtractHumanLabelSignals(iterLogDir, n) reading
+        iter-N.labels.yaml, wire it through AssembleSignalSet and
+        BuildSignalSets. Update docs/OUTCOME_SCORING_RUBRIC.md with
+        the new signal + new weight table + rationale. Multi-label
+        aggregation rule: mean of latest-per-reviewer.
+
+        RUBRIC VERSION (resolve at task time, do NOT hardcode 3.0.0):
+        R1.5 shipped first and bumped to 2.1.0 (confirmed in
+        internal/scoring/rubric.go: `const RubricVersion = "2.1.0"`).
+        Per the R1.5 design D5 / OUTCOME_SCORING_RUBRIC.md ordering
+        policy, R5 (the FIRST signal depending on external human input)
+        owns the next MAJOR bump → target 3.0.0 only if the constant is
+        still 2.1.0 at task time; if another rubric mutation lands
+        first, rebase to the next available major/minor per that
+        policy. The earlier "3.0.0" plan text predated R1.5 shipping
+        2.1.0 — read the constant, do not assume.
 
         Note: this task touches R1's shipped surface area
         (RubricVersion is global). Coordinate via the umbrella spec
-        before opening.
+        and the R1.5 ordering policy before opening.
       app_type: go-cli
-
     - id: review-ui
       title: Review surface in R2 (list, inspect, label form, role-aware controls)
       status: pending
@@ -169,10 +207,9 @@ tasks:
         The exact write_scope path is locked once R2's frontend
         layout exists.
       app_type: web
-
     - id: admin-cli
       title: '`da review` CLI for user/audit administration'
-      status: pending
+      status: completed
       depends_on:
         - rbac-identity
         - audit-log
@@ -185,13 +222,43 @@ tasks:
       verification_required: true
       notes: |-
         Distinct from the existing `da review` (review-mode).
-        Sub-tree `da review users add|list|remove --role`,
-        `da review audit verify|prune --before`. Admin-only;
-        operates on local YAML/JSONL — no network. If name clash
-        with existing review.go is real, rename subgroup to
-        `da reviewer` or nest under `da workflow review-admin`.
+        NAME CLASH IS REAL (verified 2026-06-25): commands/review.go
+        already registers `da review` with subcommands show|approve|
+        reject (NewReviewCmd). The admin surface (users add|list|
+        remove --role; audit tail|verify|repair|prune --before-year) therefore CANNOT
+        nest under `da review` without colliding. Resolution: nest the
+        admin subtree under the existing `da review` group as
+        `da review users ...` / `da review audit ...` ONLY if those
+        subcommand names do not collide with show/approve/reject
+        RATIFIED 2026-07-02 (admin-cli review): the audit surface is
+        `tail|verify|repair|prune --before-year`. `tail` (not `view`) is the
+        canonical recent-entries verb (spec appendix line 174). `--before-year`
+        (not bare `--before`) is the operator flag — rotation is year-keyed
+        (spec: "compact older years") so a 4-digit year cutoff is the natural,
+        unambiguous granularity. `repair` is an authorized addition exposing
+        audit.RepairHead for the torn-append recovery case (#250); it is not an
+        R6 mutating action (prune/repair are archive maintenance, not live-chain
+        mutations).
+        (they don't) — i.e. extend NewReviewCmd with new subcommands
+        rather than a second top-level group. Otherwise use
+        `da review-admin` or `da workflow review-admin`. Pick one and
+        pin it before opening; update write_scope (commands/review.go
+        if extending the existing group, vs commands/review_admin.go
+        if a new group). Admin-only; operates on local YAML/JSONL —
+        no network.
+        RATIFIED 2026-07-02: prune uses --before-year (year-keyed
+        rotation), superseding the earlier --before <date> sketch.
+        Audit log rotation is year-keyed (archive names encode year),
+        so year-granular prune is the correct contract. The
+        internal/review/audit/ prune implementation uses this flag.
+        RATIFIED 2026-07-02 (audit surface): the full `da review audit`
+        command set is tail | verify | repair | prune. `repair`
+        (RepairHead) advances the head anchor to the actual log tail
+        after an operator has manually confirmed a torn-append tail
+        record is legitimate. It is admin-only (mutates the head
+        sidecar) and intentionally separate from verify (which is
+        token-free) so that the CI gate cannot self-heal.
       app_type: go-cli
-
     - id: e2e-smoke
       title: End-to-end test — reviewer labels run, label feeds R1 on next recompute
       status: pending
@@ -213,7 +280,6 @@ tasks:
         tamper with the audit log → `da review audit verify` reports
         it.
       app_type: go-cli
-
     - id: docs
       title: Documentation — REVIEW_LABELING_GUIDE.md, RBAC_AND_AUDIT.md, rubric v3 changelog
       status: pending
@@ -234,7 +300,6 @@ tasks:
         verify the audit chain. Cross-reference from the umbrella
         spec.
       app_type: docs
-
     - id: release-minor
       title: 'Release: bump VERSION + finalize CHANGELOG for the review/labeling minor'
       status: pending
@@ -263,9 +328,10 @@ tasks:
         is additive; no existing public surface removed or incompatibly
         changed).
         Target version = next minor computed from current VERSION at
-        ready-time (do NOT hardcode). With VERSION at 0.3.2 today the next
-        minor is 0.4.0, but resolve from VERSION when this task becomes
-        ready; serialize at the VERSION bump if another minor ships first.
+        ready-time (do NOT hardcode). VERSION is 0.4.1 today (R1.5's minor
+        shipped), so the next minor is 0.5.0; resolve from VERSION when this
+        task becomes ready; serialize at the VERSION bump if another minor
+        ships first.
         Action: bump VERSION to the resolved next minor and finalize the
         CHANGELOG "## [<target>]" section, moving the review/labeling
         entries out of Unreleased. Merge to master fires auto-release.yml.

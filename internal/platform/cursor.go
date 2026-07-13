@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +16,9 @@ import (
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
+	"github.com/AGOrcha/dot-agents/internal/ui"
 	"golang.org/x/sys/execabs"
 	_ "modernc.org/sqlite" // register SQLite driver for database/sql
 )
@@ -266,8 +269,12 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 		return err
 	}
 	desired := map[string]string{}
-	c.collectRuleLinks(filepath.Join(agentsHome, "rules", "global"), globalRulesPrefix, desired)
-	c.collectRuleLinks(filepath.Join(agentsHome, "rules", project), project+"--", desired)
+	if err := c.collectRuleLinks(filepath.Join(agentsHome, "rules", "global"), globalRulesPrefix, desired); err != nil {
+		return err
+	}
+	if err := c.collectRuleLinks(filepath.Join(agentsHome, "rules", project), project+"--", desired); err != nil {
+		return err
+	}
 	if err := c.pruneRuleLinks(rulesDir, project, desired); err != nil {
 		return err
 	}
@@ -286,14 +293,18 @@ func (c *cursor) createRuleLinks(project, repoPath, agentsHome string) error {
 	return nil
 }
 
-func (c *cursor) collectRuleLinks(sourceDir, prefix string, desired map[string]string) {
-	entries, err := os.ReadDir(sourceDir)
+func (c *cursor) collectRuleLinks(sourceDir, prefix string, desired map[string]string) error {
+	entries, found, err := fsops.ReadDirAllowMissing(sourceDir)
 	if err != nil {
-		return
+		return err
+	}
+	if !found {
+		return nil
 	}
 	for _, entry := range entries {
 		c.collectRuleEntry(entry, sourceDir, prefix, desired)
 	}
+	return nil
 }
 
 func (c *cursor) collectRuleEntry(entry os.DirEntry, sourceDir, prefix string, desired map[string]string) {
@@ -380,11 +391,15 @@ func (c *cursor) writeRepoHooks(project, repoPath, agentsHome string) error {
 	if err := c.io.MkdirAll(filepath.Join(repoPath, cursorDir), 0755); err != nil {
 		return err
 	}
+	spec, err := resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON)
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFile(
 		c.io,
 		repoTarget,
 		renderCursorHookConfig,
-		resolveHookSpec(agentsHome, []string{"hooks"}, project, cursorJSON),
+		spec,
 		directHardlinkHookMode,
 		func(p string) error { return removeRenderedCursorHookConfig(c.io, p) },
 		repoBundles,
@@ -396,11 +411,15 @@ func (c *cursor) writeUserHomeHooks(project, agentsHome string) error {
 	if err != nil {
 		return err
 	}
+	spec, err := resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON)
+	if err != nil {
+		return err
+	}
 	return emitPreferredHookFileToUserHomes(
 		c.io,
 		filepath.Join(cursorDir, cursorHooksFile),
 		renderCursorHookConfig,
-		resolveHookSpecInScope(agentsHome, []string{"hooks"}, "global", cursorJSON),
+		spec,
 		directHardlinkHookMode,
 		func(p string) error { return removeRenderedCursorHookConfig(c.io, p) },
 		globalBundles,
@@ -494,6 +513,128 @@ func cursorRuleSources(agentsHome, scope, name string) []string {
 	}
 }
 
+// cursorUserConfigFiles returns the managed single-file references cursor
+// maintains under the user's home directory: ~/.cursor/hooks.json. dot-agents
+// wires this file from ~/.agents/hooks/{scope}/cursor.json via
+// writeUserHomeHooks (see PLATFORM_DIRS_DOCS "User-home wiring" — cursor IS
+// wired at user scope, parallel to codex's ~/.codex/hooks.json). Cursor's
+// broader documented user-config layer (~/.cursor/agents/, ~/.cursor/mcp.json,
+// ~/.cursor/rules, ~/.cursor/plugins/local/) is NOT yet wired by dot-agents, so
+// only the hooks file is reported as a managed link today.
+func cursorUserConfigFiles(home string) []string {
+	return []string{filepath.Join(home, cursorDir, cursorHooksFile)}
+}
+
+// UserBrokenLinks implements UserConfigReporter for the cursor platform. The
+// managed user-home surface is ~/.cursor/hooks.json (the only user-scope target
+// writeUserHomeHooks emits); every reported entry carries PlatformID="cursor".
+// A rendered managed file or healthy hard link is silently skipped — only a
+// resolvable managed link whose target is missing is reported broken, matching
+// the shared scanUserBrokenLinks contract used by claude/codex/opencode.
+func (c *cursor) UserBrokenLinks(home string) []BrokenLink {
+	return scanUserBrokenLinks("cursor", cursorUserConfigFiles(home), nil)
+}
+
+// UserBadge implements UserConfigReporter for the cursor platform: the
+// user-config badge over ~/.cursor/hooks.json. Present is true when the managed
+// hooks file exists (rendered file or hard link), Broken when it is a dangling
+// managed link — mirroring the codex UserBadge badge math over its own
+// ~/.codex/hooks.json.
+func (c *cursor) UserBadge(home string) PlatformBadge {
+	ok, broken := scanUserConfigCounts(cursorUserConfigFiles(home), nil)
+	return PlatformBadge{Name: c.DisplayName(), Present: ok > 0, Broken: broken > 0}
+}
+
+// PrintAudit implements AuditPrinter for the cursor platform: it renders the
+// per-project `.cursor/rules/` rule links and the `.cursor/mcp.json` link.
+// Moved verbatim (output preserved byte-for-byte) from the lifecycle-side
+// printCursorAudit in Phase 5.
+func (c *cursor) PrintAudit(w io.Writer, project, repoPath, agentsHome string) {
+	fmt.Fprintf(w, "    %sCursor%s\n", ui.Cyan, ui.Reset)
+	rulesDir := filepath.Join(repoPath, cursorDir, "rules")
+	entries, err := os.ReadDir(rulesDir)
+	if err != nil {
+		fmt.Fprintf(w, "      %s(no .cursor/rules/)%s\n", ui.Dim, ui.Reset)
+		return
+	}
+	if cursorPrintRules(w, project, rulesDir, agentsHome, entries) == 0 {
+		fmt.Fprintf(w, "      %s(no rules)%s\n", ui.Dim, ui.Reset)
+	}
+	cursorPrintMCPLink(w, repoPath)
+	fmt.Fprintln(w)
+}
+
+// cursorRuleSourceInfo classifies a cursor rule entry into srcType
+// ("global"|"project"|"local"), the user-display path it should link to
+// (empty for local files), and the canonical scope/filename used to resolve
+// the on-disk source under <agentsHome>/rules/. scope and srcName are empty
+// for local files.
+func cursorRuleSourceInfo(entryName, projectName string) (srcType, linkedTo, scope, srcName string) {
+	switch {
+	case strings.HasPrefix(entryName, globalRulesPrefix):
+		srcName := strings.TrimPrefix(entryName, globalRulesPrefix)
+		return "global", "~/.agents/rules/global/" + srcName, "global", srcName
+	case strings.HasPrefix(entryName, projectName+"--"):
+		srcName := strings.TrimPrefix(entryName, projectName+"--")
+		return "project", "~/.agents/rules/" + projectName + "/" + srcName, projectName, srcName
+	}
+	return "local", "", "", ""
+}
+
+// cursorPrintRuleEntry renders one cursor rule entry's audit line to w.
+func cursorPrintRuleEntry(w io.Writer, project, rulesDir, agentsHome, entryName string) {
+	srcType, linkedTo, scope, srcName := cursorRuleSourceInfo(entryName, project)
+	if srcType == "local" {
+		fmt.Fprintf(w, auditLocalFileIndentedFmt, ui.Dim, ui.Reset, entryName, ui.Dim, ui.Reset)
+		return
+	}
+	f := filepath.Join(rulesDir, entryName)
+	// Resolve the canonical source under agentsHome with filepath.Join rather
+	// than tilde string-substitution: on Windows agentsHome can contain an 8.3
+	// short-path segment (e.g. RUNNER~1) whose literal '~' a naive
+	// strings.Replace(…, "~", …) would clobber, corrupting the path so the
+	// healthy hard link is misreported as "not linked".
+	srcPath := filepath.Join(agentsHome, "rules", scope, srcName)
+	if linked, _ := links.AreHardlinked(f, srcPath); linked {
+		fmt.Fprintf(w, "      %s✓%s %s %s← %s%s\n", ui.Green, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
+	} else {
+		fmt.Fprintf(w, "      %s!%s %s %s(not linked to %s)%s\n", ui.Yellow, ui.Reset, entryName, ui.Dim, linkedTo, ui.Reset)
+	}
+}
+
+// cursorPrintRules renders all valid cursor rule entries in rulesDir to w;
+// returns the count of entries actually rendered (used to detect empty sets).
+func cursorPrintRules(w io.Writer, project, rulesDir, agentsHome string, entries []os.DirEntry) int {
+	count := 0
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".mdc") || strings.Contains(e.Name(), backupSuffix) {
+			continue
+		}
+		cursorPrintRuleEntry(w, project, rulesDir, agentsHome, e.Name())
+		count++
+	}
+	return count
+}
+
+// cursorPrintMCPLink renders the .cursor/mcp.json audit line to w.
+func cursorPrintMCPLink(w io.Writer, repoPath string) {
+	cursorMCPPath := filepath.Join(repoPath, cursorDir, cursorMCPJSON)
+	if _, err := os.Lstat(cursorMCPPath); err != nil {
+		fmt.Fprintf(w, "      %s-%s .cursor/mcp.json %s(not linked)%s\n", ui.Dim, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	state, raw := classifyManagedLink(cursorMCPPath)
+	if state == linkStateNotALink {
+		fmt.Fprintf(w, "      %s✓%s .cursor/mcp.json %s(hard link or local file)%s\n", ui.Green, ui.Reset, ui.Dim, ui.Reset)
+		return
+	}
+	if state == linkStateBroken {
+		fmt.Fprintf(w, "      %s✗%s .cursor/mcp.json %s→ %s (broken)%s\n", ui.Red, ui.Reset, ui.Dim, displayDest(cursorMCPPath, raw), ui.Reset)
+	} else {
+		fmt.Fprintf(w, "      %s✓%s .cursor/mcp.json %s→ %s%s\n", ui.Green, ui.Reset, ui.Dim, displayDest(cursorMCPPath, raw), ui.Reset)
+	}
+}
+
 func (c *cursor) SharedTargetIntents(project string) ([]ResourceIntent, error) {
 	// Same repo-relative targets as Claude so duplicate intents merge in the shared plan.
 	return BuildSharedAgentMirrorIntents(project, filepath.Join(".claude", "agents"))
@@ -539,7 +680,7 @@ func cursorCountRules(project, repoPath, agentsHome string) (ok, broken int) {
 		return 0, 0
 	}
 	for _, e := range entries {
-		if strings.Contains(e.Name(), ".dot-agents-backup") || !strings.HasSuffix(e.Name(), ".mdc") {
+		if strings.Contains(e.Name(), backupSuffix) || !strings.HasSuffix(e.Name(), ".mdc") {
 			continue
 		}
 		scope, rest, isManaged := cursorEntryScope(e.Name(), project)
@@ -644,7 +785,7 @@ func cursorBrokenRuleEntry(entry os.DirEntry, rulesDir, project, agentsHome stri
 // existing classification semantics are preserved verbatim.
 func cursorBrokenRuleScope(entryName, projectName string) (scope, rest string, ok bool) {
 	switch {
-	case strings.Contains(entryName, ".dot-agents-backup"):
+	case strings.Contains(entryName, backupSuffix):
 		return "", "", false
 	case !strings.HasSuffix(entryName, ".mdc"):
 		return "", "", false

@@ -77,7 +77,7 @@ tasks:
       app_type: go-cli
     - id: p4-orphan-canonicals-and-userconfig
       title: 'P4: OrphanCanonicalReporter + UserConfigReporter'
-      status: awaiting_owner_review
+      status: completed
       depends_on:
         - p3-badge-and-countlinks
       blocks: []
@@ -96,7 +96,7 @@ tasks:
       app_type: go-cli
     - id: p5-audit-printer-and-cleanup
       title: 'P5: AuditPrinter + delete per-platform helpers'
-      status: pending
+      status: completed
       depends_on:
         - p4-orphan-canonicals-and-userconfig
       blocks: []
@@ -110,11 +110,11 @@ tasks:
         - commands/lifecycle/status.go
         - commands/lifecycle/doctor.go
       verification_required: true
-      notes: printCursorAudit/printClaudeAudit/etc. move to AuditPrinter impls. printAudit becomes loop respecting agentFilter via p.ID() + platform.Filter(all, agentFilter). All per-platform-by-name helpers deleted.
+      notes: 'printCursorAudit/printClaudeAudit/etc. move to AuditPrinter impls. printAudit becomes loop respecting agentFilter via p.ID() + platform.Filter(all, agentFilter). All per-platform-by-name helpers deleted. Landed: merged to master via PR #132 (wave-2 state sync).'
       app_type: go-cli
     - id: p6-proof-of-abstraction
       title: 'P6: Contract test + stub-platform proof'
-      status: pending
+      status: completed
       depends_on:
         - p5-audit-printer-and-cleanup
       blocks: []
@@ -123,11 +123,11 @@ tasks:
         - internal/platform/contract_test.go
         - internal/platform/noop_test.go
       verification_required: true
-      notes: Contract test asserts every platform.All() entry implements every sister interface it advertises. Stub noopPlatform proves abstraction (single-file change surfaces in doctor + status automatically).
+      notes: 'Contract test asserts every platform.All() entry implements every sister interface it advertises. Stub noopPlatform proves abstraction (single-file change surfaces in doctor + status automatically). Landed: merged to master via PR #202 (commit 8c42c028; internal/platform/contract_test.go + noop_test.go on master) (wave-2 state sync).'
       app_type: go-cli
     - id: release-record-0.3.3-fold
       title: 'Release record: capability folds into 0.3.3 (no separate bump)'
-      status: pending
+      status: completed
       depends_on:
         - p0-types-and-helpers
         - p1-broken-links-cursor-claude

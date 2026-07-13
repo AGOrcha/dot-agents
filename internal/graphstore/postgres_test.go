@@ -2,6 +2,7 @@ package graphstore_test
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -213,6 +214,55 @@ func TestPG_StoreFileNodesEdges_Atomic(t *testing.T) {
 	if len(got) != 1 {
 		t.Errorf("want 1 node after replace, got %d", len(got))
 	}
+}
+
+// TestPG_StoreFileNodesEdges_EncodeExtraError_RollsBack mirrors the SQLite
+// coverage: an unencodable Extra value (NaN) on either a node or an edge
+// must abort the whole transaction rather than substituting "{}" for that
+// one row while the rest of the batch commits.
+func TestPG_StoreFileNodesEdges_EncodeExtraError_RollsBack(t *testing.T) {
+	t.Run("bad node", func(t *testing.T) {
+		s := openPGTestStore(t)
+		file := "pg_nan_node_unique.go"
+		nodes := []graphstore.NodeInfo{
+			makeNode("pgGood", graphstore.NodeKindFunction, file),
+			{Kind: graphstore.NodeKindFunction, Name: "pgBad", FilePath: file,
+				Extra: map[string]any{"v": math.NaN()}},
+		}
+		if err := s.StoreFileNodesEdges(file, nodes, nil, "pg_nan_hash"); err == nil {
+			t.Fatal("expected error from unencodable (NaN) node Extra")
+		}
+		got, err := s.GetNode(file + "::pgGood")
+		if err != nil {
+			t.Fatalf("GetNode: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected the tx to roll back entirely — no partial row, got %+v", got)
+		}
+	})
+
+	t.Run("bad edge", func(t *testing.T) {
+		s := openPGTestStore(t)
+		file := "pg_nan_edge_unique.go"
+		nodes := []graphstore.NodeInfo{
+			makeNode("pgA", graphstore.NodeKindFunction, file),
+			makeNode("pgB", graphstore.NodeKindFunction, file),
+		}
+		edges := []graphstore.EdgeInfo{
+			{Kind: graphstore.EdgeKindCalls, Source: file + "::pgA", Target: file + "::pgB",
+				FilePath: file, Extra: map[string]any{"v": math.NaN()}},
+		}
+		if err := s.StoreFileNodesEdges(file, nodes, edges, "pg_nan_hash2"); err == nil {
+			t.Fatal("expected error from unencodable (NaN) edge Extra")
+		}
+		got, err := s.GetNode(file + "::pgA")
+		if err != nil {
+			t.Fatalf("GetNode: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expected the tx to roll back entirely — no partial row, got %+v", got)
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

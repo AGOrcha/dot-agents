@@ -15,8 +15,7 @@
 
 ## Validate Task State Against Reality Before Fanout
 
-- `workflow eligible` reports TASKS.yaml `status`, which drifts behind merged PRs after parallel-worker batches. Always cross-check the task ID against merged PRs (`gh pr list --state merged --search "<task-id>"` or your forge's equivalent) before fanning out. If the work shipped, run `workflow delegation closeout --decision accept` instead — that step advances status AND archives the artifacts.
-- Bundle write_scope decays as the tree moves. Confirm every file in your proposed `--write-scope` exists on HEAD, and run a code-graph + grep pass for symbol callers to catch test files and cross-package call sites the static plan notes missed. A stale bundle either spawns on already-shipped work or forces a fold-back when the worker hits a missing-file deviation.
+- The full pre-fanout gate is canonical in **`delegation-lifecycle` → `instructions/workflow.md` § 0** (status-vs-PRs, write_scope-on-HEAD, caller walk, coverage-delta forecast, no-overlap). Clear that gate before every fanout — it is a hard MUST, not advice. Lessons: `[[validate-bundle-against-head]]`, `[[bundle-scope-via-code-graph]]`, `[[stale-local-master-ref]]`.
 
 ## Graph-First Does Not Mean Graph-Only
 

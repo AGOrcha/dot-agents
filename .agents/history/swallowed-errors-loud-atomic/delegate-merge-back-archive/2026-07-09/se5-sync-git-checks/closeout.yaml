@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: swallowed-errors-loud-atomic
+task_id: se5-sync-git-checks
+delegation_id: del-se5-sync-git-checks-1783565715
+decision: accept
+closed_at: "2026-07-09T03:05:43Z"

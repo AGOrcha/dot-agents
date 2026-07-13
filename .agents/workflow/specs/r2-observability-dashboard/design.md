@@ -112,7 +112,7 @@ No authn/authz in v1. The service is single-tenant and listens on `127.0.0.1`. N
 ## Relationship to other specs and plans
 
 - **[`agent-run-scoring-observability-platform`](../agent-run-scoring-observability-platform/design.md)** — parent; D4 is the live-updates requirement R2 implements; D2 says R3 hosts R2's API.
-- **`r3-background-worker-service`** (sibling plan, no spec yet) — owns the service host, the publish primitive, and the lifecycle. R2 cannot ship without R3's publish primitive interface. Both can be implemented in parallel against a placeholder publisher, but the integration smoke test gates on R3 milestone.
+- **`r3-background-worker-service`** (sibling plan, no spec yet) — owns the service host, the publish primitive, and the lifecycle. R2 cannot ship without R3's publish primitive interface. Both can be implemented in parallel against a placeholder publisher, but the integration smoke test gates on R3 milestone. **Transport is single-sourced in R3 §2A:** R2's browser surface is the HTTP/SSE arm of that map (the SSE push of D2.2 is exactly the browser-facing case the selection rule keeps on HTTP); R2 does not re-decide transport.
 - **[`r4-code-task-generation-eval`](../r4-code-task-generation-eval/design.md)** — produces additional iter-log roots (`.agents/eval/runs/<id>/iteration-log/`) the dashboard must learn to discover. The contract pinned in OQ1 covers this.
 - **[`r5-review-labeling-access`](../r5-review-labeling-access/design.md)** — extends R2's routes with `labels[]` payload augmentation behind a composition point; consumes R2's API client + auth-header plumbing.
 - **`r1-outcome-scoring`** (completed) — supplies every score and signal R2 renders.

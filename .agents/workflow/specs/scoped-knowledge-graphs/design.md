@@ -167,9 +167,25 @@ and the code graph has edges between symbols. Stored notes also implicitly
 cite other node/note ids — this revision makes those cites **explicit and
 stored**.
 
-When a driver fires on node X, staleness propagates outward along
-derivation edges up to a bounded depth. Reachable entries are marked
-`derivation-stale`, distinct from `source-stale`.
+When a driver fires on node X, staleness propagates **outward to the entries
+that DERIVE FROM X** — i.e. the propagator walks `derived_from` edges in
+**reverse** (from the cited source toward its dependants), up to a bounded
+depth. Reachable entries are marked `derivation-stale`, distinct from
+`source-stale`.
+
+**Direction is explicit, not implied.** A `derived_from` edge points
+*dependant → source* (the entry → the thing it cites). Staleness flows the
+**opposite** way: a mutation on a base/source entry must reach every entry that
+cited it, so the propagator reverse-traverses `derived_from`. Implementations
+that prefer a forward walk may materialize the inverse `derives` edge
+(source → dependant) and walk it directly — the two are equivalent. The
+companion SDD-entity KG schema makes this concrete for spec→spec derivation: it
+carries both `derived_from_spec` (dependant→source) and the inverse
+`derives_spec` (source→dependant), both tagged `derivation: true`, so a change
+to a base spec is guaranteed to reach the specs derived from it
+([`sdd-entity-kg-schema-draft.md` §2.1](../work-tracking-storage-abstraction/sdd-entity-kg-schema-draft.md)).
+Without this, a base-spec change would never propagate to its derivatives — the
+exact silent-staleness failure §2.5 forbids.
 
 **Why mandatory:** if a rename of one function silently leaves fifty
 decisions citing its old name as "fresh," the graph is actively misleading.
@@ -292,9 +308,26 @@ unanswerable. Scoped KGs would multiply that problem.
 
 Must be resolved by the plan.
 
+> **O5 resolution (2026-06-23, single-source).** The staleness-driver and
+> derivation-propagation sub-decisions in §4.1 and §4.2 are **resolved** by
+> O5 of the
+> [graph-backend-adapter-contract open-questions dossier](../graph-backend-adapter-contract/open-questions-resolutions.md#o5--scoped-kg-driver-taxonomy--derivation-propagation-depthdecay):
+> all five spec recommendations are adopted as written —
+> **source mutation = content-hash change**, **revocation = new note with
+> `revokes: <id>`**, **code-graph derivation depth = 1 hop** with
+> **unbounded note→note chains** (opt-in per the adapter contract §7.3
+> `derivation: true` gate), **taint persists until an explicit
+> `kg refresh --scope`** (never fade-on-read), and the **edge-type allowlist
+> = load-bearing `LinkKind`s (`documents`, `implements`, `decided_on`),
+> excluding `mentions`**. O5 shows each is *forced* by an already-ratified §5
+> design commitment, not a free choice. The §4.1/§4.2 text below is retained as
+> the rationale-of-record; the canonical answers are O5. The remaining §4.3–§4.9
+> sub-decisions are unaffected and stay open.
+
 ### 4.1 Driver taxonomy — what counts, what fires
 
-The plan must pin down:
+Recommendations below are **resolved per O5** (content-hash mutation;
+new-note revocation). The plan must pin down:
 
 - **Source mutation.** What "change" means for a cited symbol. Options:
   any upsert, signature-only change, content-hash change. Recommended:
@@ -322,12 +355,24 @@ The plan must pin down:
     `mentions`.
   - Explicit `derived_from` cites stored on the written entry.
   - Code-graph edges between cited symbols, bounded (§depth).
-- **Depth limit.** Recommended: **1** for code-graph hops; **unbounded
+- **Propagation direction (unambiguous).** All three edge kinds are stored
+  *dependant → source* (the entry → what it cites). Staleness propagation walks
+  them in **reverse**: when a source mutates, the propagator follows incoming
+  `derived_from` / `NoteSymbolLink` / code-graph edges to reach the dependants
+  and stamps them `derivation-stale` (§2.6). A forward walk over the materialized
+  inverse (`derives`) is equivalent. The plan must pin which representation the
+  write pipeline (§5.6) actually walks, but the *direction* — source change
+  reaches its dependants — is fixed here and must not be inverted.
+- **Depth limit.** **Resolved per O5: 1** for code-graph hops; **unbounded
   within note→note chains** (if A cites B cites C and C mutates, A is
-  tainted). Plan must commit.
-- **Edge-type allowlist.** Which `LinkKind`s propagate.
-- **Taint decay.** Once marked derivation-stale, does the tag persist
-  until explicit refresh, or fade on re-verification?
+  tainted), gated per-relationship by the adapter contract §7.3
+  `derivation: true` opt-in.
+- **Edge-type allowlist.** **Resolved per O5:** load-bearing `LinkKind`s
+  (`documents`, `implements`, `decided_on`) propagate; weak kinds
+  (`mentions`) do not.
+- **Taint decay.** **Resolved per O5: persist until explicit
+  `kg refresh --scope`** (never fade-on-read — fade-on-read would violate
+  §5.6 write-time-only propagation and §2.8 resolver purity).
 
 ### 4.3 Review-nudge policy expression
 

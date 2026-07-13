@@ -1,0 +1,24 @@
+run_id: r2contract-go-impl-pure-fn
+base_commit: 9f3c1a4e7b2d8c05f61a9e4d3b7c8f20a1e6d4b9
+task_id: go-impl-pure-fn-001
+language: go
+difficulty: medium
+agent:
+    harness: claude-code
+    model: claude-opus-4-8
+    session_id: b7f4e2a0-9c1d-4e83-a6b2-3f5d8c7e1a04
+    retries: 0
+    exit_code: 0
+    duration: 47s
+    prompt_digest: sha256:185fb4a031d8f5b32bce63177e7f0bf7e4365adcf0d0c4dc45e61849d0ccaf48
+    output_digest: sha256:e38bf5638432311f3f14613294f5da53e80e172a6fd155b23a957607fe4f533a
+verify:
+    passed: true
+    phase: test
+    exit_code: 0
+    duration: 6.3s
+score:
+    value: 0.9366666666666665
+    band: excellent
+    scored: true
+    rubric_version: 3.0.0

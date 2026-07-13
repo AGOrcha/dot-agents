@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/docs/web"
+    schedule:
+      interval: "weekly"
+    groups:
+      docs:
+        applies-to: version-updates
+        patterns:
+          - "*"
+    ignore:
+      # Starlight pins a specific Astro major; let the Starlight bump drive
+      # the Astro major so the two stay compatible. Allow minor/patch only.
+      - dependency-name: "astro"
+        update-types:
+          - "version-update:semver-major"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      go:
+        applies-to: version-updates
+        patterns:
+          - "*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        applies-to: version-updates
+        patterns:
+          - "*"

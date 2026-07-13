@@ -1,11 +1,14 @@
 package scoring
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -430,6 +433,40 @@ func TestBackfillIterationsMissingTranscriptDir(t *testing.T) {
 	if got[0].TokenEfficiency.Present {
 		t.Errorf("no transcript should yield an absent signal, got %+v",
 			got[0].TokenEfficiency)
+	}
+}
+
+func TestBackfillIterationsUnreadableTranscriptRoot(t *testing.T) {
+	// A permission-denied transcript root degrades the same as a missing one
+	// (not fatal, absent signal) but must now be logged so the swallow is
+	// distinguishable from legitimate absence. Deny traversal on the PARENT
+	// dir: os.Stat(child) needs execute on the parent, not on the child
+	// itself, so chmod-ing the child would not reproduce the failure.
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "transcripts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MakeDirUnreadable(t, parent)
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	repo := bfNewGitRepo(t)
+	sha := commitInRepo(t, repo, "only")
+	records := []IterationRecord{{Iteration: 1, Commit: sha}}
+	got, err := BackfillIterations(records, repo, dir)
+	if err != nil {
+		t.Fatalf("BackfillIterations() = %v, want nil (permission-denied root degrades, not fatal)", err)
+	}
+	if got[0].TokenEfficiency.Present {
+		t.Errorf("unreadable transcript root should yield an absent signal, got %+v",
+			got[0].TokenEfficiency)
+	}
+	if !strings.Contains(buf.String(), "transcript root") {
+		t.Errorf("expected a warning log naming the unreadable transcript root, got %q", buf.String())
 	}
 }
 

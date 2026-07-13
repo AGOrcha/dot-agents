@@ -3,13 +3,17 @@ package config
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"time"
 
+	"github.com/go-git/go-git/v6"
+
 	"github.com/AGOrcha/dot-agents/internal/events"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
 )
 
@@ -25,37 +29,131 @@ import (
 // leave repo_id blank rather than fabricate one (spec §5.3 fallback).
 var gitRemoteOriginURL = gitremote.ReadOriginURL
 
-// DeriveRepoIDFromGit returns the canonical repo_id for the project at
-// repoPath, derived from its `origin` git remote. The canonical form is
-// `<host>/<path>` with the `.git` suffix stripped and the host lowercased,
-// e.g. `github.com/acme/po-core-api-se` (per org-config-resolution §5.2).
-//
-// Accepted remote forms:
-//   - SSH:    git@github.com:acme/repo.git              → github.com/acme/repo
-//   - SCP-style with user: ssh://git@github.com/acme/repo.git → github.com/acme/repo
-//   - HTTPS:  https://github.com/acme/repo.git          → github.com/acme/repo
-//   - HTTP:   http://gitlab.acme.internal/g/r           → gitlab.acme.internal/g/r
-//   - git://: git://github.com/acme/repo.git            → github.com/acme/repo
-//
 // Returns "" (no error) when:
 //   - the directory is not a git checkout
 //   - the repo has no `origin` remote (e.g. `git init` only)
 //   - the remote URL cannot be parsed into a host+path pair
+//   - the repo exists but its `.git/config` is genuinely corrupt (a
+//     structured warning is emitted in this case via warnOnCorruptGitConfig,
+//     but the "" fallback contract below still holds)
 //
 // Per spec §5.3 git derivation is a FALLBACK — callers must not overwrite
 // an explicit repo_id set in the manifest. See MergeGenerateAgentsRC.
 func DeriveRepoIDFromGit(repoPath string) string {
 	raw, err := gitRemoteOriginURL(repoPath)
-	if err != nil || raw == "" {
+	if err != nil {
+		warnOnCorruptGitConfig(repoPath, err)
+		return ""
+	}
+	if raw == "" {
 		return ""
 	}
 	return gitremote.CanonicalRepoID(raw)
 }
 
-// isDirEntry reports whether the path is a directory, following symlinks.
-func isDirEntry(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && info.IsDir()
+// warnOnCorruptGitConfig emits a structured warning when gitRemoteOriginURL
+// fails for a reason other than the two documented, legitimately non-fatal
+// cases: gitremote.ErrNoOrigin (repo exists, no `origin` remote configured)
+// and git.ErrRepositoryNotExists (repoPath is not a git checkout at all).
+// Anything else reaching here is most commonly a malformed .git/config that
+// go-git's Config() parse rejects during Open — a genuine corruption that
+// DeriveRepoIDFromGit's "" fallback (spec §5.3) was silently swallowing.
+// DeriveRepoIDFromGit still returns "" either way; this only adds a signal.
+func warnOnCorruptGitConfig(repoPath string, err error) {
+	if errors.Is(err, gitremote.ErrNoOrigin) || errors.Is(err, git.ErrRepositoryNotExists) {
+		return
+	}
+	env, envErr := events.NewEnvelope(
+		"event.config.git_origin_unreadable",
+		"config.DeriveRepoIDFromGit",
+		repoPath,
+		time.Time{},
+		[]byte(fmt.Sprintf(`{"repo_path":%q,"error":%q}`, repoPath, err.Error())),
+	)
+	if envErr != nil {
+		return
+	}
+	emitConfigWarning(env)
+}
+
+// emitConfigWarning is the seam that surfaces a structured config-warning
+// Envelope produced by warnOnCorruptGitConfig. Defaults to a single stderr
+// line; tests override the seam to assert a warning fired without depending
+// on process output.
+var emitConfigWarning = func(env events.Envelope) {
+	fmt.Fprintf(os.Stderr, "warning: %s: %s\n", env.Type, string(env.Payload))
+}
+
+// gitRemoteAllURLs is the seam returning every configured remote's URLs for a
+// repo path. Defaults to gitremote.ReadAllRemotes; tests override it to inject
+// multi-remote / divergent-origin topologies without standing up real .git
+// directories.
+var gitRemoteAllURLs = gitremote.ReadAllRemotes
+
+// DeriveTrustedRepoID returns the canonical repo_id for the project at repoPath
+// ONLY when the git origin is unambiguous (FORK-1 hybrid / R12). The second
+// return is true when origin cannot be trusted as a portable identity:
+//
+//   - origin has multiple configured URLs, OR
+//   - another remote canonicalizes to a DIFFERENT repo_id than origin
+//     (e.g. the AGOrcha case: origin=NikashPrakash fork vs org=AGOrcha).
+//
+// On a non-git path, a repo with no/empty origin, or an unparseable origin URL
+// the result is ("", false): not ambiguous, just no portable key — the caller
+// falls back to the logical id (the registry map key). Callers MUST NOT trust
+// repoID when ambiguous is true.
+func DeriveTrustedRepoID(repoPath string) (repoID string, ambiguous bool) {
+	remotes, err := gitRemoteAllURLs(repoPath)
+	if err != nil || len(remotes) == 0 {
+		return "", false
+	}
+	origin := remotes["origin"]
+	if len(origin) == 0 || origin[0] == "" {
+		return "", false
+	}
+	if len(origin) > 1 {
+		return "", true // multiple origin URLs — not a single trusted identity
+	}
+	originID := gitremote.CanonicalRepoID(origin[0])
+	if originID == "" {
+		return "", false
+	}
+	if hasDivergentRemote(remotes, originID) {
+		return "", true
+	}
+	return originID, false
+}
+
+// hasDivergentRemote reports whether any non-origin remote canonicalizes to a
+// repo_id different from origin's — the signal that origin is not a trustworthy
+// portable identity (R12, e.g. AGOrcha origin=fork vs org=canonical).
+func hasDivergentRemote(remotes map[string][]string, originID string) bool {
+	for name, urls := range remotes {
+		if name == "origin" {
+			continue
+		}
+		for _, u := range urls {
+			if id := gitremote.CanonicalRepoID(u); id != "" && id != originID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isDirEntry reports whether the path is a directory, following symlinks. A
+// legitimately absent path returns (false, nil); a real Stat error (e.g.
+// permission denied) is surfaced instead of being silently treated as
+// "not a directory".
+func isDirEntry(path string) (bool, error) {
+	info, found, err := fsops.StatAllowMissing(path)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	return info.IsDir(), nil
 }
 
 // StringsOrBool holds either a boolean flag (all/none) or a named list.
@@ -166,18 +264,17 @@ type AgentsRCKG struct {
 //
 // See specs config-distribution-model §3-§5 + org-config-resolution §15.2.
 type AgentsRC struct {
-	Schema   string           `json:"$schema,omitempty"`
-	Version  int              `json:"version"`
-	Project  string           `json:"project,omitempty"`
-	Skills   []string         `json:"skills,omitempty"`
-	Rules    []string         `json:"rules,omitempty"`
-	Agents   []string         `json:"agents,omitempty"`
-	Hooks    StringsOrBool    `json:"hooks"`
-	MCP      StringsOrBool    `json:"mcp"`
-	Settings bool             `json:"settings"`
-	Sources  []Source         `json:"sources"`
-	KG       *AgentsRCKG      `json:"kg,omitempty"`
-	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+	Schema   string        `json:"$schema,omitempty"`
+	Version  int           `json:"version"`
+	Project  string        `json:"project,omitempty"`
+	Skills   []string      `json:"skills,omitempty"`
+	Rules    []string      `json:"rules,omitempty"`
+	Agents   []string      `json:"agents,omitempty"`
+	Hooks    StringsOrBool `json:"hooks"`
+	MCP      StringsOrBool `json:"mcp"`
+	Settings bool          `json:"settings"`
+	Sources  []Source      `json:"sources"`
+	KG       *AgentsRCKG   `json:"kg,omitempty"`
 
 	// --- v2 additive fields (config-distribution-model §3) ---
 
@@ -189,8 +286,9 @@ type AgentsRC struct {
 	// Tier constraint (enforced at schema validation): extends entries must reference
 	// git|http|local sources — see config-distribution-model §4.
 	Extends []LayerRef `json:"extends,omitempty"`
-	// Packages references executable OCI/HTTP packages in the form
-	// "source-id:artifact-path@version-spec". Tier constraint: oci|http sources only.
+	// Packages references executable artifact bundles in the form
+	// `source-id:artifact-path@version-spec`. Any source kind (git|local|http|oci)
+	// may supply an artifact (config-distribution-model §15 D8).
 	Packages []PackageRef `json:"packages,omitempty"`
 	// Features overrides feature-flag defaults (config-distribution-model §3.6).
 	Features map[string]string `json:"features,omitempty"`
@@ -218,9 +316,75 @@ type AgentsRC struct {
 	// UnmarshalJSON / foldLegacyProfiles) and are never re-emitted.
 	StageProfiles map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
 
+	// PreconditionPolicies is the top-level named registry of verifier
+	// precondition policies (verifier-precondition-policy plan, Slice B). Each
+	// entry is a named policy = an ordered list of predicates over the unified
+	// event/signal contract. A stage profile references a policy by name via
+	// StageProfile.PreconditionPolicy; the verifier reads the resolved policy
+	// from the lockfile. Absent ⇒ the built-in `default` gate applies.
+	PreconditionPolicies map[string]PreconditionPolicySpec `json:"precondition_policies,omitempty"`
+
+	// Locks is the §15 D1a authority-axis lock block a layer emits in the
+	// policy-authority pass (Phase 1): value_locks (pin a field, rejecting lower
+	// writes) and deny_locks (subtract a set member, deny-overrides). force_allow
+	// is invalid and aborts the resolve. A lock binds only scopes ranked below
+	// its owner's AUTHORITY-RANK (org > team > repo > user). See authority.go.
+	Locks *PolicyLockSpec `json:"locks,omitempty"`
+
+	// AuthorityGrants is the §15 D1a source-authority registry block: a per-source
+	// allowlist "source-id → scope it may carry." It is honored only when written
+	// by a layer whose own authority is at least the conferred scope — a lower
+	// scope cannot self-bless authority (a resolve-time rejection). See
+	// resolveAuthorityGrants in authority.go.
+	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
+
+	// LayeringPolicy is the scope-attached unified-config-profiles (L1) policy
+	// unit: the Phase-1 layering governance a scope emits — precedence, absolute
+	// locks (deny/value, no force-allow), the Decision-2 three-state
+	// override_permissions, and the Q4 replace-mode marker. Its owning authority
+	// scope is SOURCE-derived (set by the resolver from the owning layer), never
+	// authored on the unit. See internal/config/profile.go and the
+	// unified-config-profiles design (§2.3).
+	LayeringPolicy *LayeringPolicy `json:"layering_policy,omitempty"`
+
+	// Manifests are the scope-attached distributable config manifest units (L2),
+	// keyed by name; each manifest's absolute ref is <owning-source>:<name>. A
+	// manifest REFERENCES (by ref) the sources to pull, the layering policy/profiles
+	// that bind, and (optionally) the project-set to manage — it never inlines
+	// copies (distributable-config-manifest D1/D2/R2). This lenient typed shape is
+	// what round-trips; the strict fail-closed decode (no manifest->manifest edge,
+	// no self-declared authority, no force-allow) runs at resolve time in
+	// manifest.go. Its owning authority is SOURCE-derived, never authored here (D4).
+	Manifests map[string]ManifestSpec `json:"manifests,omitempty"`
+
 	// ExtraFields captures unknown JSON keys so Save() can round-trip them
 	// instead of silently dropping legacy or custom fields.
 	ExtraFields map[string]json.RawMessage `json:"-"`
+
+	// LegacyKeys lists the deprecated v1 JSON keys observed in the source
+	// manifest during UnmarshalJSON (verifier_profiles / reviewer_profiles /
+	// app_type_verifier_map). These keys are silently folded into the unified
+	// stage_profiles / execution_profile model (see foldLegacyProfiles) and
+	// never re-emitted; recording them here lets `da init` / `da doctor`
+	// surface a deprecation warning without re-parsing the file (config-v2
+	// §15.3 deprecation cadence). Not serialized.
+	LegacyKeys []string `json:"-"`
+}
+
+// PredicateSpec is the config-facing mirror of the commands/workflow Predicate:
+// one predicate over a single registered event/signal kind. Signal is the
+// registered kind (e.g. "event.pr.open", "gate.quality.sonar"); Args are
+// kind-specific (e.g. {"equals":"green"}).
+type PredicateSpec struct {
+	Signal string            `json:"signal"`
+	Args   map[string]string `json:"args,omitempty"`
+}
+
+// PreconditionPolicySpec is one named entry in the precondition_policies
+// registry: an ordered list of predicates all of which must hold for the
+// in_progress → awaiting_agent_review gate to open.
+type PreconditionPolicySpec struct {
+	Predicates []PredicateSpec `json:"predicates"`
 }
 
 // AgentsRCPRSource is the .agentsrc.json `pr_source` block (pr-event-source D4).
@@ -488,38 +652,44 @@ func (r *PromptFileRef) UnmarshalJSON(data []byte) error {
 }
 
 // StageProfile is one named entry in an AgentsRC.StageProfiles stage map
-// (executor | verifier | reviewer | orchestrator). A profile is a label for
-// display plus a base-first ordered prompt_files composition. The same type
-// serves every stage — the stage is the outer map key — so the four agentic
-// stages are uniform, composable primitives. PromptFiles is source-aware (see
-// PromptFileRef) so an org layer can pin a prompt to a remote config source
-// while a repo keeps the legacy local string form.
+// (executor | verifier | reviewer | orchestrator). A profile is a label,
+// explicit OMP model route, and base-first ordered prompt_files composition.
+// The same type serves every stage — the stage is the outer map key — so the
+// four agentic stages are uniform, composable primitives. PromptFiles is
+// source-aware (see PromptFileRef) so an org layer can pin a prompt to a remote
+// config source while a repo keeps the legacy local string form.
 type StageProfile struct {
 	// Label is the human-readable profile name shown in fanout/explain output.
 	Label string `json:"label,omitempty"`
+	// Model is the concrete OMP model identifier used to run this stage.
+	Model string `json:"model,omitempty"`
+	// ModelFamily is the semantic family used for cross-family diversity gates.
+	// It is intentionally open-ended; diversity requires inequality, not a
+	// closed vendor list.
+	ModelFamily string `json:"model_family,omitempty"`
 	// PromptFiles is the base-first ordered prompt composition for the profile.
 	PromptFiles []PromptFileRef `json:"prompt_files,omitempty"`
+	// PreconditionPolicy names the verifier precondition policy (a key in the
+	// top-level precondition_policies registry) that gates this profile's
+	// in_progress → awaiting_agent_review transition. Unset ⇒ the built-in
+	// `default` gate (verifier-precondition-policy plan, Slice B).
+	PreconditionPolicy string `json:"precondition_policy,omitempty"`
 }
 
-// RefreshMetadata records the latest da install/refresh that updated a project.
+// RefreshMetadata records the latest da install/refresh that updated a
+// project. It is a LOCK type (config-distribution-model §7A /
+// refresh-metadata-to-lock): the payload for .agentsrc.lock's "refresh"
+// section, written via WriteRefreshLock and read via ReadRefreshLock — never
+// a field of the committed .agentsrc.json manifest. Refresh metadata is
+// resolved STATE about the project (what was last refreshed, with which da
+// build), not manifest content, so it does not participate in schema
+// validation of the manifest and is not carried through
+// MergeGenerateAgentsRC.
 type RefreshMetadata struct {
 	Version     string `json:"version,omitempty"`
 	Commit      string `json:"commit,omitempty"`
 	Describe    string `json:"describe,omitempty"`
 	RefreshedAt string `json:"refreshedAt,omitempty"`
-}
-
-// SetRefreshMetadata stores the latest refresh details in the manifest.
-func (a *AgentsRC) SetRefreshMetadata(version, commit, describe string, refreshedAt time.Time) {
-	if a == nil {
-		return
-	}
-	a.Refresh = &RefreshMetadata{
-		Version:     version,
-		Commit:      commit,
-		Describe:    describe,
-		RefreshedAt: refreshedAt.UTC().Format(time.RFC3339),
-	}
 }
 
 // agentsRCKnown lists all JSON keys owned by AgentsRC's known fields.
@@ -530,7 +700,15 @@ var agentsRCKnown = map[string]bool{
 	"$schema": true, "version": true, "project": true,
 	"skills": true, "rules": true, "agents": true,
 	"hooks": true, "mcp": true, "settings": true, "sources": true,
-	"kg": true, "refresh": true,
+	"kg": true,
+	// refresh is a legacy pre-refresh-metadata-to-lock manifest key: refresh
+	// metadata now lives in .agentsrc.lock's "refresh" section (RefreshMetadata /
+	// WriteRefreshLock), never the committed manifest. It stays "known" here so a
+	// legacy value is silently ignored during UnmarshalJSON — never captured into
+	// ExtraFields (which would re-emit it) — instead of erroring; AgentsRC has no
+	// Refresh field to decode it into, so it is dropped and the next
+	// `da refresh`/Save naturally strips it from the manifest.
+	"refresh": true,
 	// v2 additive fields (config-distribution-model §3)
 	"repo_id": true, "extends": true, "packages": true, "features": true,
 	// execution-profile layer (config relevance / skill-relevance-filter)
@@ -540,6 +718,15 @@ var agentsRCKnown = map[string]bool{
 	// stage_profiles: unified per-stage named prompt-composition primitive
 	// (config-v2 Q1; supersedes verifier_profiles/reviewer_profiles)
 	"stage_profiles": true,
+	// precondition_policies: top-level named registry of verifier precondition
+	// policies (verifier-precondition-policy plan, Slice B)
+	"precondition_policies": true,
+	// §15 D1a authority/value two-axis resolver fields (config-distribution-model §15.9)
+	"locks": true, "authority_grants": true,
+	// unified-config-profiles (L1): scope-attached layering policy unit
+	"layering_policy": true,
+	// distributable-config-manifest (L2): scope-attached manifest units
+	"manifests": true,
 	// deprecated legacy keys — read and folded into stage_profiles /
 	// execution_profile for back-compat, never re-emitted (see foldLegacyProfiles).
 	// Listed as "known" so they are not captured into ExtraFields (which would
@@ -553,18 +740,17 @@ var agentsRCKnown = map[string]bool{
 // infinite recursion while still using the standard json encoder.
 // Per [[schema-usage]]: this MUST mirror AgentsRC's typed fields exactly.
 type agentsRCCore struct {
-	Schema   string           `json:"$schema,omitempty"`
-	Version  int              `json:"version"`
-	Project  string           `json:"project,omitempty"`
-	Skills   []string         `json:"skills,omitempty"`
-	Rules    []string         `json:"rules,omitempty"`
-	Agents   []string         `json:"agents,omitempty"`
-	Hooks    StringsOrBool    `json:"hooks"`
-	MCP      StringsOrBool    `json:"mcp"`
-	Settings bool             `json:"settings"`
-	Sources  []Source         `json:"sources"`
-	KG       *AgentsRCKG      `json:"kg,omitempty"`
-	Refresh  *RefreshMetadata `json:"refresh,omitempty"`
+	Schema   string        `json:"$schema,omitempty"`
+	Version  int           `json:"version"`
+	Project  string        `json:"project,omitempty"`
+	Skills   []string      `json:"skills,omitempty"`
+	Rules    []string      `json:"rules,omitempty"`
+	Agents   []string      `json:"agents,omitempty"`
+	Hooks    StringsOrBool `json:"hooks"`
+	MCP      StringsOrBool `json:"mcp"`
+	Settings bool          `json:"settings"`
+	Sources  []Source      `json:"sources"`
+	KG       *AgentsRCKG   `json:"kg,omitempty"`
 
 	// v2 additive fields (config-distribution-model §3)
 	RepoID           string            `json:"repo_id,omitempty"`
@@ -574,7 +760,13 @@ type agentsRCCore struct {
 	ExecutionProfile *ExecutionProfile `json:"execution_profile,omitempty"`
 	PRSource         *AgentsRCPRSource `json:"pr_source,omitempty"`
 
-	StageProfiles map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
+	StageProfiles        map[string]map[string]StageProfile `json:"stage_profiles,omitempty"`
+	PreconditionPolicies map[string]PreconditionPolicySpec  `json:"precondition_policies,omitempty"`
+
+	Locks           *PolicyLockSpec           `json:"locks,omitempty"`
+	AuthorityGrants map[string]AuthorityScope `json:"authority_grants,omitempty"`
+	LayeringPolicy  *LayeringPolicy           `json:"layering_policy,omitempty"`
+	Manifests       map[string]ManifestSpec   `json:"manifests,omitempty"`
 }
 
 func (a *AgentsRC) UnmarshalJSON(data []byte) error {
@@ -593,7 +785,6 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.Settings = core.Settings
 	a.Sources = core.Sources
 	a.KG = core.KG
-	a.Refresh = core.Refresh
 	a.RepoID = core.RepoID
 	a.Extends = core.Extends
 	a.Packages = core.Packages
@@ -601,6 +792,11 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 	a.ExecutionProfile = core.ExecutionProfile
 	a.PRSource = core.PRSource
 	a.StageProfiles = core.StageProfiles
+	a.PreconditionPolicies = core.PreconditionPolicies
+	a.Locks = core.Locks
+	a.AuthorityGrants = core.AuthorityGrants
+	a.LayeringPolicy = core.LayeringPolicy
+	a.Manifests = core.Manifests
 
 	// Back-compat: read the deprecated verifier_profiles / reviewer_profiles /
 	// app_type_verifier_map keys and fold them into the unified stage_profiles +
@@ -628,30 +824,49 @@ func (a *AgentsRC) UnmarshalJSON(data []byte) error {
 			a.ExtraFields[k] = v
 		}
 	}
+	a.recordLegacyKeys(all)
 	return nil
+}
+
+// recordLegacyKeys captures any deprecated v1 keys present in the raw manifest
+// into a.LegacyKeys (sorted for stable output). The keys are decoded and folded
+// elsewhere; this is purely the bookkeeping that lets init/doctor warn.
+func (a *AgentsRC) recordLegacyKeys(all map[string]json.RawMessage) {
+	var seen []string
+	for _, k := range deprecatedV1Keys {
+		if _, ok := all[k]; ok {
+			seen = append(seen, k)
+		}
+	}
+	sort.Strings(seen)
+	a.LegacyKeys = seen
 }
 
 func (a AgentsRC) MarshalJSON() ([]byte, error) {
 	core := agentsRCCore{
-		Schema:           a.Schema,
-		Version:          a.Version,
-		Project:          a.Project,
-		Skills:           a.Skills,
-		Rules:            a.Rules,
-		Agents:           a.Agents,
-		Hooks:            a.Hooks,
-		MCP:              a.MCP,
-		Settings:         a.Settings,
-		Sources:          a.Sources,
-		KG:               a.KG,
-		Refresh:          a.Refresh,
-		RepoID:           a.RepoID,
-		Extends:          a.Extends,
-		Packages:         a.Packages,
-		Features:         a.Features,
-		ExecutionProfile: a.ExecutionProfile,
-		PRSource:         a.PRSource,
-		StageProfiles:    a.StageProfiles,
+		Schema:               a.Schema,
+		Version:              a.Version,
+		Project:              a.Project,
+		Skills:               a.Skills,
+		Rules:                a.Rules,
+		Agents:               a.Agents,
+		Hooks:                a.Hooks,
+		MCP:                  a.MCP,
+		Settings:             a.Settings,
+		Sources:              a.Sources,
+		KG:                   a.KG,
+		RepoID:               a.RepoID,
+		Extends:              a.Extends,
+		Packages:             a.Packages,
+		Features:             a.Features,
+		ExecutionProfile:     a.ExecutionProfile,
+		PRSource:             a.PRSource,
+		StageProfiles:        a.StageProfiles,
+		PreconditionPolicies: a.PreconditionPolicies,
+		Locks:                a.Locks,
+		AuthorityGrants:      a.AuthorityGrants,
+		LayeringPolicy:       a.LayeringPolicy,
+		Manifests:            a.Manifests,
 	}
 	data, err := json.Marshal(core)
 	if err != nil {
@@ -761,12 +976,32 @@ func AppendUnique(slice []string, s string) []string {
 	return append(slice, s)
 }
 
-// GenerateAgentsRC inspects ~/.agents/ and builds a manifest for the given project.
+// GenerateAgentsRC inspects ~/.agents/ and builds a manifest for the given
+// project. It is fail-or-full: every scan it performs (skills/agents/rules/
+// hooks/mcp/settings dirs) distinguishes a legitimately absent resource from
+// a real I/O error (permission denied, unreadable directory, ...) via the
+// internal/fsops allow-missing helpers, and any real failure anywhere
+// aggregates (errors.Join) into a single (nil, err) return instead of
+// silently degrading to an empty/zero manifest. Git origin lookup
+// (DeriveRepoIDFromGit) keeps its own documented "" fallback per spec §5.3
+// and is not part of this aggregation.
+//
+// Every scan below is PROJECT-SCOPE ONLY. A "global" scoped resource
+// (skills/agents/rules/hooks/mcp/settings living under
+// ~/.agents/<bucket>/global/) auto-resolves at the user level for every
+// project via each platform adapter's scopedNames(project) = [project,
+// "global"] link pass (internal/platform/resources.go) — it materializes to
+// ~/.claude (or the platform-equivalent user home) regardless of whether any
+// project declares it. Recording it in a project's committed .agentsrc.json
+// would therefore be redundant at best and, worse, goes stale the moment the
+// user's global set changes on another machine that lacks it. Declaring a
+// project-scope resource is the only thing a project manifest can
+// meaningfully own.
 func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
 	rc := &AgentsRC{
-		Schema:  "https://dot-agents.dev/schemas/agentsrc.json",
+		Schema:  "https://agorcha.dev/schemas/agentsrc.schema.json",
 		Version: 1,
 		Project: projectName,
 		Sources: []Source{{Type: "local"}},
@@ -777,13 +1012,37 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	// blank rather than fabricated so `da doctor` can warn (p2+ scope).
 	rc.RepoID = DeriveRepoIDFromGit(projectPath)
 
-	scopes := []string{"global", projectName}
-	rc.Skills = collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
-	rc.Agents = collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
-	rc.Rules = detectRuleScopes(agentsHome, projectName)
-	rc.Hooks = detectHookEvents(agentsHome, projectName)
-	rc.MCP = detectMCPServers(agentsHome, projectName)
-	rc.Settings = detectPlatformSettings(agentsHome, projectName)
+	scopes := []string{projectName}
+
+	var errs []error
+
+	skills, err := collectScopedDirs(agentsHome, "skills", scopes, "SKILL.md")
+	errs = append(errs, err)
+	rc.Skills = skills
+
+	agentsList, err := collectScopedDirs(agentsHome, "agents", scopes, "AGENT.md")
+	errs = append(errs, err)
+	rc.Agents = agentsList
+
+	rules, err := detectRuleScopes(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.Rules = rules
+
+	hooks, err := detectHookEvents(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.Hooks = hooks
+
+	mcp, err := detectMCPServers(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.MCP = mcp
+
+	settings, err := detectPlatformSettings(agentsHome, projectName)
+	errs = append(errs, err)
+	rc.Settings = settings
+
+	if joined := errors.Join(errs...); joined != nil {
+		return nil, joined
+	}
 
 	return rc, nil
 }
@@ -825,10 +1084,33 @@ func MergeGenerateAgentsRC(existing, generated *AgentsRC) *AgentsRC {
 	if len(existing.StageProfiles) > 0 {
 		out.StageProfiles = cloneStageProfiles(existing.StageProfiles)
 	}
-	if existing.Refresh != nil {
-		out.Refresh = existing.Refresh
+	// manifests are author-owned config like stage_profiles: now that they are a
+	// typed field (L2) they no longer ride along in ExtraFields, so a generate /
+	// refresh rewrite must carry a committed set over explicitly or `da install` /
+	// refresh would silently drop a project's authored manifests (the
+	// schema-usage.md typed-field/ExtraFields breakage rule).
+	if len(existing.Manifests) > 0 {
+		out.Manifests = cloneManifests(existing.Manifests)
 	}
 	return &out
+}
+
+// cloneManifests deep-copies a manifests map (name → spec, including each spec's
+// source/bind ref slices) so the merged manifest does not alias the existing
+// manifest's data.
+func cloneManifests(m map[string]ManifestSpec) map[string]ManifestSpec {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]ManifestSpec, len(m))
+	for name, spec := range m {
+		out[name] = ManifestSpec{
+			Sources:    append([]string(nil), spec.Sources...),
+			Binds:      append([]string(nil), spec.Binds...),
+			ProjectSet: spec.ProjectSet,
+		}
+	}
+	return out
 }
 
 // cloneStageProfiles deep-copies a stage_profiles map (stage → slug → profile,
@@ -843,8 +1125,11 @@ func cloneStageProfiles(m map[string]map[string]StageProfile) map[string]map[str
 		inner := make(map[string]StageProfile, len(profiles))
 		for slug, p := range profiles {
 			inner[slug] = StageProfile{
-				Label:       p.Label,
-				PromptFiles: append([]PromptFileRef(nil), p.PromptFiles...),
+				Label:              p.Label,
+				Model:              p.Model,
+				ModelFamily:        p.ModelFamily,
+				PromptFiles:        append([]PromptFileRef(nil), p.PromptFiles...),
+				PreconditionPolicy: p.PreconditionPolicy,
 			}
 		}
 		out[stage] = inner
@@ -945,77 +1230,120 @@ func sourceMergeKey(s Source) string {
 	}
 }
 
-// collectScopedDirs returns unique entry names from resource subdirs that contain markerFile.
-func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) []string {
+// collectScopedDirs returns unique entry names from resource subdirs that
+// contain markerFile. A real I/O error (as opposed to a scope dir simply not
+// existing yet) is aggregated and returned alongside whatever entries were
+// found before the failure, so callers on the fail-or-full path (see
+// GenerateAgentsRC) can distinguish "no skills configured" from "couldn't
+// read the skills directory".
+func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerFile string) ([]string, error) {
 	var names []string
+	var errs []error
 	for _, scope := range scopes {
 		dir := filepath.Join(agentsHome, resourceType, scope)
-		entries, err := os.ReadDir(dir)
+		entries, found, err := fsops.ReadDirAllowMissing(dir)
 		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !found {
 			continue
 		}
 		for _, e := range entries {
 			entryPath := filepath.Join(dir, e.Name())
-			if !isDirEntry(entryPath) {
+			isDir, err := isDirEntry(entryPath)
+			if err != nil {
+				errs = append(errs, err)
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(entryPath, markerFile)); err == nil {
+			if !isDir {
+				continue
+			}
+			_, markerFound, err := fsops.StatAllowMissing(filepath.Join(entryPath, markerFile))
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if markerFound {
 				names = AppendUnique(names, e.Name())
 			}
 		}
 	}
-	return names
+	return names, errors.Join(errs...)
 }
 
-// detectHookEvents reads the project claude-code.json and returns a StringsOrBool
-// listing hook event names that have at least one entry.
-func detectHookEvents(agentsHome, projectName string) StringsOrBool {
-	for _, scope := range []string{projectName, "global"} {
-		if hasYAMLHooks(filepath.Join(agentsHome, "hooks", scope)) {
-			return StringsOrBool{All: true}
-		}
-	}
-	for _, scope := range []string{projectName, "global"} {
-		if result := detectSettingsHookEvents(agentsHome, scope); result.IsEnabled() {
-			return result
-		}
-	}
-	return StringsOrBool{}
-}
-
-func hasYAMLHooks(hooksDir string) bool {
-	entries, err := os.ReadDir(hooksDir)
+// detectHookEvents reads the project claude-code.json and returns a
+// StringsOrBool listing hook event names that have at least one entry.
+// PROJECT-SCOPE ONLY — see the GenerateAgentsRC doc comment: a global hook
+// bundle/settings file auto-resolves to every project via each platform
+// adapter's scopedNames(project) = [project, "global"] link pass regardless
+// of manifest declaration, so folding "global" in here would only make the
+// generated manifest misrepresent global state as project-owned. Real I/O
+// errors from either underlying check are aggregated and returned so a
+// chmod'd hooks or settings scope directory surfaces as a failure instead of
+// "no hooks configured".
+func detectHookEvents(agentsHome, projectName string) (StringsOrBool, error) {
+	var errs []error
+	hasYAML, err := hasYAMLHooks(filepath.Join(agentsHome, "hooks", projectName))
 	if err != nil {
-		return false
+		errs = append(errs, err)
+	} else if hasYAML {
+		return StringsOrBool{All: true}, errors.Join(errs...)
 	}
+	result, err := detectSettingsHookEvents(agentsHome, projectName)
+	if err != nil {
+		errs = append(errs, err)
+	} else if result.IsEnabled() {
+		return result, errors.Join(errs...)
+	}
+	return StringsOrBool{}, errors.Join(errs...)
+}
+
+func hasYAMLHooks(hooksDir string) (bool, error) {
+	entries, found, err := fsops.ReadDirAllowMissing(hooksDir)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, nil
+	}
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml")); err == nil {
-			return true
+		_, markerFound, err := fsops.StatAllowMissing(filepath.Join(hooksDir, entry.Name(), "HOOK.yaml"))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if markerFound {
+			return true, errors.Join(errs...)
 		}
 	}
-	return false
+	return false, errors.Join(errs...)
 }
 
-func detectSettingsHookEvents(agentsHome, scope string) StringsOrBool {
+func detectSettingsHookEvents(agentsHome, scope string) (StringsOrBool, error) {
 	settingsPath := filepath.Join(agentsHome, "settings", scope, "claude-code.json")
-	data, err := os.ReadFile(settingsPath)
+	data, found, err := fsops.ReadFileAllowMissing(settingsPath)
 	if err != nil {
-		return StringsOrBool{}
+		return StringsOrBool{}, err
+	}
+	if !found {
+		return StringsOrBool{}, nil
 	}
 	var settings map[string]any
 	if json.Unmarshal(data, &settings) != nil {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	hooksVal, ok := settings["hooks"]
 	if !ok {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	hooksMap, ok := hooksVal.(map[string]any)
 	if !ok {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	var hookEvents []string
 	for event, val := range hooksMap {
@@ -1024,30 +1352,34 @@ func detectSettingsHookEvents(agentsHome, scope string) StringsOrBool {
 		}
 	}
 	if len(hookEvents) == 0 {
-		return StringsOrBool{}
+		return StringsOrBool{}, nil
 	}
 	sort.Strings(hookEvents)
-	return StringsOrBool{Names: hookEvents}
+	return StringsOrBool{Names: hookEvents}, nil
 }
 
-// detectMCPServers scans MCP config files for the project and global scopes
-// and returns a StringsOrBool listing named server entries.
-func detectMCPServers(agentsHome, projectName string) StringsOrBool {
-	for _, scope := range []string{projectName, "global"} {
-		if result := readMCPScope(agentsHome, scope); result.IsEnabled() {
-			return result
-		}
-	}
-	return StringsOrBool{}
+// detectMCPServers scans the project-scope MCP config file and returns a
+// StringsOrBool listing named server entries. PROJECT-SCOPE ONLY — see the
+// GenerateAgentsRC doc comment: a global MCP server config auto-resolves to
+// every project via scopedNames(project) = [project, "global"] regardless of
+// manifest declaration.
+func detectMCPServers(agentsHome, projectName string) (StringsOrBool, error) {
+	return readMCPScope(agentsHome, projectName)
 }
 
-// readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope directory
-// and returns the server list from the first readable file.
-func readMCPScope(agentsHome, scope string) StringsOrBool {
+// readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope
+// directory and returns the server list from the first readable file. A real
+// read error on any candidate file aborts immediately (rather than masking it
+// by falling through to the next filename) so a chmod'd mcp scope directory
+// surfaces as a failure.
+func readMCPScope(agentsHome, scope string) (StringsOrBool, error) {
 	for _, fname := range []string{"claude.json", "mcp.json", ".mcp.json"} {
 		mcpPath := filepath.Join(agentsHome, "mcp", scope, fname)
-		data, err := os.ReadFile(mcpPath)
+		data, found, err := fsops.ReadFileAllowMissing(mcpPath)
 		if err != nil {
+			return StringsOrBool{}, err
+		}
+		if !found {
 			continue
 		}
 		var mcpConfig map[string]any
@@ -1067,36 +1399,43 @@ func readMCPScope(agentsHome, scope string) StringsOrBool {
 		}
 		if len(names) > 0 {
 			sort.Strings(names)
-			return StringsOrBool{Names: names}
+			return StringsOrBool{Names: names}, nil
 		}
 		break // found a file, stop trying filenames
 	}
-	return StringsOrBool{}
+	return StringsOrBool{}, nil
 }
 
 // detectPlatformSettings returns true if a cursor.json settings file exists
-// for the project or global scope.
-func detectPlatformSettings(agentsHome, projectName string) bool {
-	for _, scope := range []string{projectName, "global"} {
-		if _, err := os.Stat(filepath.Join(agentsHome, "settings", scope, "cursor.json")); err == nil {
-			return true
-		}
-	}
-	return false
+// for the project scope. PROJECT-SCOPE ONLY — see the GenerateAgentsRC doc
+// comment: a global cursor.json auto-resolves to every project via
+// scopedNames(project) = [project, "global"] regardless of manifest
+// declaration.
+func detectPlatformSettings(agentsHome, projectName string) (bool, error) {
+	_, found, err := fsops.StatAllowMissing(filepath.Join(agentsHome, "settings", projectName, "cursor.json"))
+	return found, err
 }
 
-func detectRuleScopes(agentsHome, projectName string) []string {
-	scopes := []string{"global"}
+// detectRuleScopes returns ["project"] when the project has at least one
+// project-scoped rule file, else nil. PROJECT-SCOPE ONLY — see the
+// GenerateAgentsRC doc comment: a global rule file auto-resolves to every
+// project via scopedNames(project) = [project, "global"] regardless of
+// manifest declaration, so it is never folded in here (the prior
+// unconditional "global" entry didn't even check the global file existed).
+func detectRuleScopes(agentsHome, projectName string) ([]string, error) {
 	projectRulesDir := filepath.Join(agentsHome, "rules", projectName)
-	entries, err := os.ReadDir(projectRulesDir)
+	entries, found, err := fsops.ReadDirAllowMissing(projectRulesDir)
 	if err != nil {
-		return scopes
+		return nil, err
+	}
+	if !found {
+		return nil, nil
 	}
 	for _, entry := range entries {
 		ext := filepath.Ext(entry.Name())
 		if ext == ".md" || ext == ".mdc" || ext == ".txt" {
-			return append(scopes, "project")
+			return []string{"project"}, nil
 		}
 	}
-	return scopes
+	return nil, nil
 }

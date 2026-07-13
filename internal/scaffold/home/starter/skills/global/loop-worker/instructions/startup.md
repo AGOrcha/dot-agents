@@ -45,6 +45,32 @@ If uncommitted changes from a prior iteration exist:
 - If they belong to your write_scope: review, stage, and commit them before starting
 - If they belong outside your write_scope: do not touch them; note in your iteration log
 
+## Step 4 — Write the stop-gate sentinel
+
+After the 3-step startup (you now know `plan_id`, `task_id`, and the delegated
+`write_scope` from the bundle), write the sentinel **once**, before making any
+scoped edit or running any workflow closeout command:
+
+```bash
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+
+da workflow hook-sentinel write loop-worker \
+  --run-id "$RUN_ID" \
+  --plan <plan_id from bundle> \
+  --task <task_id from bundle> \
+  --agent-type loop-worker \
+  --write-scope <path-or-glob from bundle> \
+  --write-scope <next write_scope entry>   # repeat for every entry
+```
+
+Pass one `--write-scope` flag per entry in the bundle's `write_scope` list,
+verbatim. The SubagentStop gate diffs the files your subagent changed against
+this recorded scope and hard-remediates any edit outside it; the sentinel is the
+single source of truth for "what was this worker allowed to touch?" (D6 — the
+gate self-filters on the sentinel's `agent_type == "loop-worker"`). If you never
+write the sentinel, the gate exits 0 and no scope enforcement runs for your
+turn.
+
 ## What NOT to do at startup
 
 - Do NOT run `workflow orient` — it's an orchestrator tool
