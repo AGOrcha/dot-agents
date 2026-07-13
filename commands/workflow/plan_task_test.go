@@ -320,6 +320,22 @@ func TestArchiveSinglePlan_DryRun(t *testing.T) {
 	}
 }
 
+func TestStampPlanArchived_SaveError(t *testing.T) {
+	sentinel := errors.New("synthetic plan write failure")
+	withWriteFileStub(t, func(string, []byte, os.FileMode) error {
+		return sentinel
+	})
+
+	plan := &CanonicalPlan{ID: "myplan"}
+	err := stampPlanArchived(t.TempDir(), plan.ID, plan, false)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected wrapped write error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "stamp archived status") {
+		t.Fatalf("expected archive-stamp context, got %v", err)
+	}
+}
+
 // Case 7: non-completed status → error with hint
 func TestArchiveSinglePlan_NonCompletedGuard(t *testing.T) {
 	proj := t.TempDir()
