@@ -18,14 +18,23 @@
     "provider-consumer-pair",
     "isp",
     "release-cut",
-    "pipeline-architect"
+    "pipeline-architect",
+    "research-intake",
+    "research-evaluate",
+    "knowledge-fold-back",
+    "article-extract",
+    "playwright",
+    "platform-docs-refresh"
   ],
   "rules": [
     "global",
     "project"
   ],
   "agents": [
-    "loop-worker"
+    "loop-worker",
+    "orchestrator",
+    "platform-dirs-change-analyst",
+    "promise-gap-analyst"
   ],
   "hooks": true,
   "mcp": [
@@ -172,7 +181,6 @@
           "orchestrate": {
             "core": [
               "kg-ideate",
-              "deep-research",
               "plan-wave-picker"
             ],
             "situational": [
