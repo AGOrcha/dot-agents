@@ -1,0 +1,8 @@
+schema_version: 1
+id: cross-family-gate-not-fail-closed-specialized
+plan_id: agent-ops-hardening
+task_id: ""
+observation: Cross-family gate is not fail-closed for specialized app_type profiles — BuildPipelineSpec (internal/platform/pipeline_projection.go) requires the cross-harness-adversarial gate only for the generic skeleton; a specialized app_type profile that omits the gate pin yields CrossFamily==nil and passes validation (TestBuildPipelineSpecNoCrossFamily). For the Pareto live-wave contrasts the blocking gate is REQUIRED, so a specialized profile silently omitting it is a fail-open gap. Wanted — require the cross-family gate (or an explicit recorded opt-out) for profiles used in pareto live-wave contrasts, or make omission fail-closed at wave prep. Surfaced by the cross-family gate re-run H3 (2026-07-13); additive, gate-neutral for existing non-pareto profiles.
+classification: small
+routed_to: plan_summary:agent-ops-hardening
+created_at: "2026-07-13T14:30:49Z"

@@ -28,9 +28,13 @@ digests, EACH formatted `sha256:<64 lowercase hex>` (this `sha256:`-prefixed for
 convention, not bare hex; previously 120 truncated + 69 null); 197/198 recompute against their anchored
 source, the SOLE exception being the live-session VOID row `019f4eea` whose external source was
 compacted post-capture so its committed byte-prefix no longer reproduces — by-design point-in-time/VOID,
-explicitly labeled, NOT a regeneration error; and EVERY non-provenance field (tokens, cost, model,
-accuracy_proxy, status, wallclock, iteration) is byte-identical to before the regeneration (JSON
-whitespace aside). For the two live-session cost rows it is CLAIMED they are
+explicitly labeled, NOT a regeneration error; and EVERY non-provenance DATA field — exactly `tokens`,
+`cost_usd`, `model`, `model_family`, `accuracy_proxy`, `status`, `wallclock`, `iteration` — is
+byte-identical to before the regeneration. The PROVENANCE LAYER that was intentionally regenerated is
+`digest` + `anchor` + `excerpt` + provenance `flags`/`note` (the R4 re-emit), so a whole-row diff that
+removes only `digest` will still show ~193 rows differing in those provenance fields — that is the
+intended regeneration, NOT a data change; only the named DATA fields are asserted immutable. For the
+two live-session cost rows it is CLAIMED they are
 re-anchored onto a VERIFIABLE-PREFIX HASH-COMMITMENT (content_sha256 + record_count + content_bytes
 over an append-only external file), NOT a byte-level frozen copy — and that the artifacts honestly
 carry an explicit per-session verification status: 019f4eda PROVEN (byte-prefix re-hashes to

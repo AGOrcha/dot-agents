@@ -18,7 +18,9 @@ Aggregate stats; sensitive sessions = numbers only. [INFERENCE] where reconstruc
 | 019f3cf2 | dot-agents | complete | 353 | 88,877,412 | 40.75 | 65% | 6 | signal/SIGHUP |
 | 019f3f23 | payout | complete | 1457 | 707,823,313 | 491.84 | 69% | 3 | signal/SIGHUP |
 | 019f4eda | payout | cutoff | 341 | 104,872,253 | 81.78 | 62% | 1 | none(cutoff) |
-| 019f4eea | dot-agents | cutoff | 981 | 405,390,538 | 319.66 | 63% | 3 | none(cutoff) |
+| 019f4eea | dot-agents | cutoff/**VOID** | 981 | 405,390,538 | 319.66 | 63% | 3 | none(cutoff) |
+
+> **`019f4eea` is VOID / point-in-time as of 2026-07-13** — the currently-running analysis session; its $319.66 / 405,390,538-token / 981-turn aggregate is a point-in-time snapshot whose source was compacted post-capture (committed prefix-hash no longer reproduces), so it is NOT independently verifiable. Corroboration only — cost conclusions rest on the quiescent sessions `019f3cf2`/`019f3f23`/`019f4eda`. See item `omp-cost-totals-019f4eea`.
 
 **OMP tool-call counts (aggregate, sensitive sessions — counts only, R5).**
 - 019f3cf2 (dot-agents): bash=278, read=187, job=47, grep=43, todo=31, glob=14, edit=12, task=10, write=8, lsp=7, irc=5, rewind=4
@@ -89,7 +91,7 @@ Cross-session cost shape: cacheRead = **96-98% of tokens** and **61-69% of dolla
 | 53 | omp | 019f3cf2 | dot-agents | complete | 1876 | S | I | items: omp-cost-cursor-routed-zero-dollar,omp-cost-totals-019f3cf2,omp-provider-model-switch-midsession,… |
 | 54 | omp | 019f3f23 | payout | complete | 5693 | S | I | items: cost-cacheread-dominates-context,omp-cost-totals-019f3f23,omp-session-exit-distribution,… |
 | 55 | omp | 019f4eda | payout | cutoff | 1126 | S | I | items: omp-cost-totals-019f4eda |
-| 56 | omp | 019f4eea | dot-agents | cutoff | 3122 | S | I | items: omp-cost-totals-019f4eea,omp-provider-model-switch-midsession |
+| 56 | omp | 019f4eea | dot-agents | cutoff/**VOID** | 3122 | S | I | items: omp-cost-totals-019f4eea,omp-provider-model-switch-midsession |
 
 ## D12 hop-chain experiment batch (aggregate)
 20 sessions live under one scratchpad path (`.../depth-exp-v2/trials_v2/D12/t1`): 18 are hop-chain trials, 2 are metadata-only stubs. Each trial = one 'HOP N of 12 fresh agents' doing a single Read(own level file)+Write to build one shared artifact (context-propagation / telephone-chain test). Not workflow loops. Per-trial: 2-5 assistant turns, 1-2 tool calls, 0.2-3.8k output tokens, sub-minute spans. Statuses (all 20): cutoff=8, complete=12. Representative anchor: item `cc-d12-hopchain-experiment-batch` (096bddb0).

@@ -17,7 +17,7 @@ into their parent session (see Exclusions); `record_count` counts the **primary*
 | `omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9` | ~/proj-docs/dot-agents | 2026-07-07T14:19:35Z | 2026-07-11T01:06:41Z | 1876 | 39 | y | y | y | claude-opus-4-8, claude-sonnet-5-high, glm-5.2-high, gpt-5.4, gpt-5.4-high, gpt-5.4-mini, gpt-5.5, gpt-5.5-medium | complete | sensitive |
 | `omp:2026-07-08T00-32-22-093Z_019f3f23-da4d-7000-8465-d94a0d720d5b:019f3f23-da4d-7000-8465-d94a0d720d5b` | ~/proj-docs/payout | 2026-07-08T00:32:22Z | 2026-07-11T01:06:39Z | 5693 | 165 | y | y | y | claude-opus-4-6, claude-opus-4-8, claude-sonnet-5, gpt-5.4, gpt-5.4-high, gpt-5.4-mini, gpt-5.5, gpt-5.5-medium | complete | sensitive |
 | `omp:2026-07-11T01-46-34-249Z_019f4eda-dd88-7000-b275-af8a46192d29:019f4eda-dd88-7000-b275-af8a46192d29` | ~/proj-docs/payout | 2026-07-11T01:46:34Z | 2026-07-12T02:26:17Z | 1126 | 1 | y | y | y | claude-fable-5, claude-opus-4-8 | cutoff | sensitive |
-| `omp:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02` | ~/proj-docs/dot-agents | 2026-07-11T02:03:44Z | 2026-07-12T06:24:07Z | 3122 | 48 | y | y | y | claude-fable-5, claude-opus-4-8, gpt-5.4-mini, gpt-5.5, gpt-5.6-sol | cutoff | sensitive |
+| `omp:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02` | ~/proj-docs/dot-agents | 2026-07-11T02:03:44Z | 2026-07-12T06:24:07Z | 3122 | 48 | y | y | y | claude-fable-5, claude-opus-4-8, gpt-5.4-mini, gpt-5.5, gpt-5.6-sol | cutoff/**VOID** | sensitive |
 
 ## Known-absent sources
 OpenCode: not installed on this machine (checked 2026-07-12: `~/.opencode`, `~/.local/share/opencode`, `~/.config/opencode` all absent). Recorded as known-absent, not a gap.
@@ -26,5 +26,5 @@ OpenCode: not installed on this machine (checked 2026-07-12: `~/.opencode`, `~/.
 - Derived per-run artifacts excluded per rubric: `*.md` summaries (154), `*.log` (934), `.DS_Store` (2).
 - 253 subagent/scout transcripts (in `<ts>_<uuid>/` run dirs, incl. nested per-agent subdirs) are folded into their parent session; not separate rows. `models`/`has_*` are unioned across primary+subagents; `record_count` is the primary transcript only.
 - Empty slug dir `--private-tmp--` contained no `.jsonl` and no run dirs — no session.
-- 2 sessions are still being written at snapshot time (status `cutoff`): the current run `019f4eea` (this analysis) and `019f4eda`. Counts are a 2026-07-12 snapshot.
+- 2 sessions are still being written at snapshot time (status `cutoff`): the current run `019f4eea` (this analysis) and `019f4eda`. Counts are a 2026-07-12 snapshot. **`019f4eea` is VOID / point-in-time as of 2026-07-13** — source compacted post-capture, committed prefix-hash no longer reproduces, NOT independently verifiable; `019f4eda` is PROVEN (prefix reproduces). See `../inventory/live-session-frozen-snapshots.jsonl`.
 - No `memory/` or `tool-results/` dirs exist under OMP session dirs on this machine.

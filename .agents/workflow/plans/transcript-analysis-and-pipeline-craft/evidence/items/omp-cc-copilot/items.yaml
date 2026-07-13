@@ -77,23 +77,23 @@ items:
     point_in_time: true
     pinned_at: "2026-07-12T16:07:04Z"
     frozen_snapshot: "omp-frozen:2026-07-11T01-46-34-249Z_019f4eda-dd88-7000-b275-af8a46192d29:019f4eda-dd88-7000-b275-af8a46192d29:frozen@2026-07-12T16:07:04Z"
-    note: "Live append-only session at capture (status=cutoff); annotated point-in-time. The aggregate recomputes EXACT as of the original capture (recompute-exact-as-of-2026-07-12T02:26:17Z, session ended_at / inventory record_count 1126; confirmed by prior validity audits) and the #L1 anchor digest still verifies against current line 1 (sha256:018a218c… re-verified 2026-07-12T16:07:04Z). Session has since drifted to record_count 1175 (content_sha256:48234163…), so the cost is a point-in-time snapshot, not a final total. Frozen immutable snapshot: ../inventory/live-session-frozen-snapshots.jsonl."
+    note: "Live append-only session at capture (status=cutoff); annotated point-in-time. The aggregate recomputes EXACT as of the original capture (recompute-exact-as-of-2026-07-12T02:26:17Z, session ended_at / inventory record_count 1126; confirmed by prior validity audits) and the #L1 anchor digest still verifies against current line 1 (sha256:018a218c… re-verified 2026-07-12T16:07:04Z). Session has since drifted to record_count 1175 (content_sha256:48234163…), so the cost is a point-in-time snapshot, not a final total. Verifiable-prefix hash-commitment (PROVEN 2026-07-13 — head -c content_bytes of the external source reproduces content_sha256): ../inventory/live-session-frozen-snapshots.jsonl."
   - item_id: "omp-cost-totals-019f4eea"
-    claim: "OMP session 019f4eea (07-11T02-03 dot-agents, cutoff): 981 assistant turns, 405,390,538 total tokens, $319.66 cost (input $15.88 / output $30.16 / cacheRead $202.57 / cacheWrite $71.05); cacheRead tokens 390,224,170 = 96% of tokens and 63% of dollar cost."
+    claim: "VOID / point-in-time as of 2026-07-13 (source compacted post-capture, committed prefix-hash no longer reproduces, NOT independently verifiable — corroboration only, conclusions rest on quiescent sessions) — OMP session 019f4eea (07-11T02-03 dot-agents, cutoff): 981 assistant turns, 405,390,538 total tokens, $319.66 cost (input $15.88 / output $30.16 / cacheRead $202.57 / cacheWrite $71.05); cacheRead tokens 390,224,170 = 96% of tokens and 63% of dollar cost."
     class: cost
     anchors:
       - ref: "omp:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02#L1"
         digest: "sha256:0fa32eda74bb2edccf517c4ae5a9f93f93d06dd37c55aad73c5b3902d4d0c111"
         excerpt: null   # sensitive session: aggregate-only, no excerpt (R5)
     sensitivity: sensitive
-    confidence: high
+    confidence: low   # VOID/point-in-time as of 2026-07-13 — source compacted, not independently verifiable
     inference_flags: []
     rubric_version: null
     related_prior: []
     point_in_time: true
     pinned_at: "2026-07-12T16:07:04Z"
     frozen_snapshot: "omp-frozen:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02:frozen@2026-07-12T16:07:04Z"
-    note: "Session live at capture; cost is a point-in-time snapshot, not a final total. This is the currently-running analysis session (status=cutoff): the 981-turn / $319.66 / 405,390,538-token aggregate is STALE/unverifiable-live — the append-only session drifted from inventory record_count 3122 to 4322 (frozen @ 2026-07-12T16:07:04Z) and keeps growing. The #L1 anchor digest (sha256:0fa32eda…) no longer verifies against current line 1 (re-checked 2026-07-12T16:07:04Z: line 1 mutated), so treat both the claim and the #L1 digest as point-in-time/unverifiable-live. Anchor instead onto the frozen immutable snapshot: ../inventory/live-session-frozen-snapshots.jsonl (content_sha256:b08dc54b…, record_count 4322)."
+    note: "VOID as of 2026-07-13 — this is the currently-running analysis session (status=cutoff); the 981-turn / $319.66 / 405,390,538-token aggregate is a point-in-time snapshot that is NOT independently verifiable and must not be consumed as current-validity cost evidence. The append-only source drifted from inventory record_count 3122 to 4322 (frozen @ 2026-07-12T16:07:04Z) and kept growing; the committed verifiable-prefix hash-commitment (content_sha256:b08dc54b…, content_bytes 17,275,624) NO LONGER reproduces (re-checked 2026-07-13: head -c content_bytes of the external source hashes to eefb5c4e…, i.e. the source was compacted past the frozen prefix), and the #L1 anchor digest (sha256:0fa32eda…) likewise no longer verifies. Treat the claim, the #L1 digest, AND the frozen snapshot as VOID/unrecoverable; conclusions rest on the quiescent sessions 019f3cf2/019f3f23/019f4eda."
   - item_id: "cost-cacheread-dominates-context"
     claim: "Cache-read dwarfs fresh input in long agent turns: a mid-run CC turn (1699c371 L28) billed input_tokens=2 against cache_read=28,175 + cache_creation=10,726; across all 4 sensitive OMP mega-sessions cacheRead is 96-98% of tokens and 61-69% of dollar cost."
     class: cost
