@@ -61,3 +61,6 @@ Stayed within write_scope. Delivered the overlay merge + 100%-covered tests in
 project, overlay override + no-overlay negative). Did NOT edit `resolve_locked.go`
 or `explain.go`. Recorded this fold-back so the parent can route the consumer
 wiring.
+
+---
+**Archived 2026-07-13 (owning plan config-v2-coherence is complete/archived).** The consumer-wiring recommendation (resolve_locked.go overlay append + explain.go loadFlatSnapshot retirement) was verified STILL UNADDRESSED on 2026-07-13 and RE-RAISED so it is not lost — see proposal `~/.agents/proposals/obs-config-overlay-consumer-wiring-bypass.md` (fold-back `config-overlay-consumer-wiring-bypass`, plan config-transitive-layering).
