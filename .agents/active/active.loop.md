@@ -20,7 +20,7 @@ Copy the prompt below into a worker agent as: `/loop 1hr <prompt>` (or paste `<p
 ```
 ## Startup (3 steps)
 1. If present, read `.agents/active/loop-state.md` → `## Current Position`; also read the last 2 `.agents/active/iteration-log/iter-*.yaml` files if present
-2. `go run ./cmd/dot-agents workflow tasks <plan_id from bundle>` — confirm task status and dependencies
+2. `go run ./cmd/da workflow tasks <plan_id from bundle>` — confirm task status and dependencies
 3. `git status --short` — if prior dirty state exists, commit it before starting
 
 Do NOT run `workflow orient`, `workflow next`, or `workflow status` at startup — your bundle is the authoritative task scope.
@@ -41,7 +41,7 @@ When the iteration is state catch-up only (advancing YAML tasks already implemen
    - Prefer table-driven or parallel subtests for multiple success/failure combinations
 6. Run regression: `go test ./...` — must stay green; do not commit with red tests
 7. Run the CLI command nearest to what you changed (one primary evidence chain, 1–3 commands):
-   - If unclear which command: `go run ./cmd/dot-agents workflow tasks <plan>` is always valid
+   - If unclear which command: `go run ./cmd/da workflow tasks <plan>` is always valid
    - Classify each result: `[ok]` | `[ok-warning]` | `[impl-bug]` | `[tool-bug]` | `[missing-feature]` | `[blocked]`
    - `[impl-bug]`: fix in this iteration before committing
    - `[tool-bug]`: fold-back immediately (see Iteration End), then continue
@@ -51,18 +51,18 @@ When the iteration is state catch-up only (advancing YAML tasks already implemen
 ## CLI Commands (worker subset)
 
 Read-only (always safe):
-- `go run ./cmd/dot-agents workflow tasks <plan>` — show task list and statuses
-- `go run ./cmd/dot-agents workflow verify log` — show recorded verification history
-- `go run ./cmd/dot-agents workflow health` — workflow health snapshot
-- `go run ./cmd/dot-agents status` — project health
-- `go run ./cmd/dot-agents kg health` — knowledge graph health
-- `go run ./cmd/dot-agents kg query <intent>` — query the KG
+- `go run ./cmd/da workflow tasks <plan>` — show task list and statuses
+- `go run ./cmd/da workflow verify log` — show recorded verification history
+- `go run ./cmd/da workflow health` — workflow health snapshot
+- `go run ./cmd/da status` — project health
+- `go run ./cmd/da kg health` — knowledge graph health
+- `go run ./cmd/da kg query <intent>` — query the KG
 
 Write (not approval-gated — run as part of normal closeout):
-- `go run ./cmd/dot-agents workflow verify record --kind test --status pass --summary "<test results>"`
-- `go run ./cmd/dot-agents workflow checkpoint --message "<summary>" --verification-status pass`
-- **Delegated:** `go run ./cmd/dot-agents workflow merge-back --task <id> --summary "..." --verification-status pass`
-- **Direct:** `go run ./cmd/dot-agents workflow advance <plan> --task <id> --status completed`
+- `go run ./cmd/da workflow verify record --kind test --status pass --summary "<test results>"`
+- `go run ./cmd/da workflow checkpoint --message "<summary>" --verification-status pass`
+- **Delegated:** `go run ./cmd/da workflow merge-back --task <id> --summary "..." --verification-status pass`
+- **Direct:** `go run ./cmd/da workflow advance <plan> --task <id> --status completed`
 
 Approval-gated (only when the task explicitly requires it):
 - `workflow fanout`, `workflow sweep --apply`, `kg setup`, `kg sync`, `review approve/reject`
@@ -79,12 +79,12 @@ Approval-gated (only when the task explicitly requires it):
 10. Run `/iteration-close`
     - Full closeout: verify record → checkpoint → merge-back (delegated) or advance (direct) → iteration log → self-assessment.
     - **Loop-state writes (two-author protocol):**
-      1. Run `go run ./cmd/dot-agents workflow checkpoint --log-to-iter <N>` — creates `.agents/active/iteration-log/iter-N.yaml` with all CLI-deterministic fields. Prints the file path.
+      1. Run `go run ./cmd/da workflow checkpoint --log-to-iter <N>` — creates `.agents/active/iteration-log/iter-N.yaml` with all CLI-deterministic fields. Prints the file path.
       2. Fill agent fields in `iter-N.yaml`: `item`, `scenario_tags`, `feedback_goal`, `tests_added`, `tests_total_pass`, `retries`, `scope_note`, `summary`, and the full `self_assessment` block.
       3. If `loop-state.md` exists, update `## Loop Health` and `## Next Iteration Playbook`; do not synthesize a stale live-state file when it is absent.
       **Do NOT update `## Current Position`** — that is orchestrator scope.
       **Do NOT append to `## Iteration Log`** — that section no longer exists in loop-state.md.
-    - **CLI broken fallback:** if the binary won't build, mark `persisted_via_workflow_commands: paused — <reason>`, fold-back the blocker immediately (`go run ./cmd/dot-agents workflow fold-back create --plan <id> --observation '[tool-bug]: <detail>' --propose`), and continue. Run deferred persist commands at the start of the next iteration.
+    - **CLI broken fallback:** if the binary won't build, mark `persisted_via_workflow_commands: paused — <reason>`, fold-back the blocker immediately (`go run ./cmd/da workflow fold-back create --plan <id> --observation '[tool-bug]: <detail>' --propose`), and continue. Run deferred persist commands at the start of the next iteration.
 
 ## What NOT to spend time on
 - Workspace hygiene beyond what the current task requires
