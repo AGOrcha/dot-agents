@@ -2208,14 +2208,8 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 	dstDir := filepath.Join(historyBaseDir(projectPath), planID)
 
 	// Stamp status=archived + updated_at BEFORE move.
-	if !dryRun {
-		plan.Status = "archived"
-		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		if err := saveCanonicalPlan(projectPath, plan); err != nil {
-			return fmt.Errorf("stamp archived status: %w", err)
-		}
-	} else {
-		fmt.Printf("  [dry-run] stamp %s status=archived\n", planID)
+	if err := stampPlanArchived(projectPath, planID, plan, dryRun); err != nil {
+		return err
 	}
 
 	// Merge or rename into history.
@@ -2257,6 +2251,20 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 		fmt.Printf("  [dry-run] remove source dir %s\n", srcDir)
 	}
 
+	return nil
+}
+
+func stampPlanArchived(projectPath, planID string, plan *CanonicalPlan, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("  [dry-run] stamp %s status=archived\n", planID)
+		return nil
+	}
+
+	plan.Status = "archived"
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := saveCanonicalPlan(projectPath, plan); err != nil {
+		return fmt.Errorf("stamp archived status: %w", err)
+	}
 	return nil
 }
 
