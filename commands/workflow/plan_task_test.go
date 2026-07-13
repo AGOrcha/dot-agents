@@ -118,6 +118,25 @@ func TestArchiveSinglePlan_ArchivesLinkedSpec(t *testing.T) {
 	}
 }
 
+func TestArchiveLinkedSpec_DryRunDoesNotCopy(t *testing.T) {
+	proj := t.TempDir()
+	specPath := filepath.Join(proj, ".agents", "workflow", "specs", "myplan", "design.md")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("# Spec myplan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+	if err := archiveLinkedSpec(proj, "myplan", dstDir, true); err != nil {
+		t.Fatalf("dry-run archive linked spec: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, workflowDesignFileName)); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not copy linked spec, stat err = %v", err)
+	}
+}
+
 // A plan with NO linked spec — archive succeeds and creates no design.md.
 func TestArchiveSinglePlan_NoLinkedSpecNoop(t *testing.T) {
 	proj := t.TempDir()
