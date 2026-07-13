@@ -59,7 +59,7 @@ After identifying the task, select one primary evidence command (1–3 commands)
 - Cross-project workflow: `workflow drift`, `workflow sweep`, `status`, `doctor`
 - No closer surface: `status` → `doctor` → `workflow health`
 
-If unclear: `go run ./cmd/dot-agents workflow tasks <plan>` is always valid.
+If unclear: `go run ./cmd/da workflow tasks <plan>` is always valid.
 
 ---
 
@@ -73,7 +73,7 @@ After selecting a task:
 - The task is implementation, not research or architectural design
 
 ```bash
-go run ./cmd/dot-agents workflow fanout \
+go run ./cmd/da workflow fanout \
   --plan <plan-id> \
   --task <task-id> \
   --owner <delegate-name> \

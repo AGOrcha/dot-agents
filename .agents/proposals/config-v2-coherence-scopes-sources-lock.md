@@ -1,6 +1,6 @@
 # Proposal: Config-v2 Coherence — Scopes, Sources, the Asset Store, and the Lock
 
-Status: draft for review (design analysis; not yet a canonical spec upgrade or plan)
+Status: SUPERSEDED 2026-06-08 — graduated to the canonical workflow/specs/config-v2-coherence/design.md + plan. Was: draft for review (design analysis).
 Created: 2026-05-30
 Context: emerged from designing a uv-style auto-syncing lockfile (`.agentsrc.lock`).
 The auto-sync work surfaced a deeper incoherence that must be resolved first, so that

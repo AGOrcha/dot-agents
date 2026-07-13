@@ -1,6 +1,6 @@
 # Proposal: PR Review + Comment Routing Contract for Monitor and Daemon
 
-**Status:** draft
+**Status:** IMPLEMENTED 2026-06-08 — folded into pr-event-source; `internal/events/pr.go` implements the §4 events (`event.pr.review_requested_change`, `event.pr.comment_posted`) + the comments fetch block. Was: draft.
 **Created:** 2026-05-28
 **Scope:** project-local (dot-agents)
 **Related:** `[[r3-background-worker-service]]` (background-worker service), `[[layered-pr-fanout-spec]]`

@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: cj-outputs-exact-prune
+parent_plan_id: config-v2-coherence
+verifier_type: merge-back
+status: pass
+summary: 'Deferred (fold-back, out of this task write scope): the --inexact cobra flag wiring in commands/internal/lifecycle/refresh.go + lifecycle.Deps signature (refreshInexact package var defaults to exact, satisfying the spec default). Defensive prune-after-execute error branch in RunSharedTargetProjectionExact is the one uncovered line (mutually-exclusive with a writable target dir). refresh.go stays on the coverage allowlist (legacy-tail); new ensureLockFreshForRefresh is 100%.'
+recorded_at: "2026-06-06T22:07:19Z"
+delegation_id: del-cj-outputs-exact-prune-1780782536
+artifact_paths:
+    - .agents/workflow/plans/config-v2-coherence/TASKS.yaml

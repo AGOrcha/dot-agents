@@ -23,6 +23,7 @@ import (
 const (
 	workflowTasksFileName      = "TASKS.yaml"
 	workflowPlanFileName       = "PLAN.yaml"
+	workflowDesignFileName     = "design.md"
 	errPlanNotFoundFmt         = "plan %q not found"
 	errPlanNotFoundWithCause   = "plan %q not found: %w"
 	errTaskNotFoundInPlanFmt   = "task %q not found in plan %q"
@@ -2207,19 +2208,20 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 	dstDir := filepath.Join(historyBaseDir(projectPath), planID)
 
 	// Stamp status=archived + updated_at BEFORE move.
-	if !dryRun {
-		plan.Status = "archived"
-		plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-		if err := saveCanonicalPlan(projectPath, plan); err != nil {
-			return fmt.Errorf("stamp archived status: %w", err)
-		}
-	} else {
-		fmt.Printf("  [dry-run] stamp %s status=archived\n", planID)
+	if err := stampPlanArchived(projectPath, planID, plan, dryRun); err != nil {
+		return err
 	}
 
 	// Merge or rename into history.
 	if err := mergeWorkflowPlanDir(planID, srcDir, dstDir, dryRun); err != nil {
 		return fmt.Errorf("merge plan dir: %w", err)
+	}
+
+	// Archive the linked spec alongside the plan so the permanent record is complete
+	// (workflow-artifact-model: history captures the spec too). A missing spec is a
+	// no-op — not every plan has a 1:1 spec.
+	if err := archiveLinkedSpec(projectPath, planID, dstDir, dryRun); err != nil {
+		return fmt.Errorf("archive linked spec: %w", err)
 	}
 
 	// Remove the source directory after a successful merge.
@@ -2249,6 +2251,47 @@ func archiveSinglePlan(projectPath, planID string, force, dryRun, noCommit bool)
 		fmt.Printf("  [dry-run] remove source dir %s\n", srcDir)
 	}
 
+	return nil
+}
+
+func stampPlanArchived(projectPath, planID string, plan *CanonicalPlan, dryRun bool) error {
+	if dryRun {
+		fmt.Printf("  [dry-run] stamp %s status=archived\n", planID)
+		return nil
+	}
+
+	plan.Status = "archived"
+	plan.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	if err := saveCanonicalPlan(projectPath, plan); err != nil {
+		return fmt.Errorf("stamp archived status: %w", err)
+	}
+	return nil
+}
+
+// archiveLinkedSpec copies the plan's linked spec (workflow/specs/<planID>/design.md,
+// by the plan-id == spec-id convention) into the plan's history archive so the
+// permanent record is complete. The spec is COPIED, not moved: other active specs
+// cross-link it by relative path, so the editable copy stays under workflow/specs.
+// A missing spec is a no-op (not every plan has a 1:1 spec).
+func archiveLinkedSpec(projectPath, planID, dstDir string, dryRun bool) error {
+	specPath := filepath.Join(specsBaseDir(projectPath), planID, workflowDesignFileName)
+	info, err := os.Stat(specPath)
+	if err != nil || info.IsDir() {
+		return nil // no linked spec to archive
+	}
+	dst := filepath.Join(dstDir, workflowDesignFileName)
+	if dryRun {
+		fmt.Printf("  [dry-run] archive linked spec %s -> %s\n", config.DisplayPath(specPath), config.DisplayPath(dst))
+		return nil
+	}
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		return fmt.Errorf("read linked spec %s: %w", specPath, err)
+	}
+	if err := os.WriteFile(dst, data, 0644); err != nil {
+		return fmt.Errorf("write archived spec %s: %w", dst, err)
+	}
+	ui.Success(fmt.Sprintf("Archived linked spec for %q to %s", planID, config.DisplayPath(dst)))
 	return nil
 }
 

@@ -1,0 +1,8 @@
+schema_version: 1
+id: verifier-preconditions-should-be-configurable
+plan_id: layered-pr-fanout
+task_id: ""
+observation: 'RESOLVED design (user steer): precondition policy = predicates over the unified event contract, but a policy is a NAMED entry in a top-level precondition_policies registry (mirrors verifier_profiles, object-keyed, schema-additive, no enum), referenced by name from stage profiles — so an org/team defines a policy once and layers/reuses it across many app_types via the same sources/extends delivery (Payout case). Resolution reads the LOCKFILE (the merged/locked final config, config-v2 SOT for what is actually set up), NOT raw .agentsrc.json. Built-in default policy = the historical PR/go-cli gate (event.pr.open + ci.rollup green + gate.quality.sonar + new_code_issues==0). Spec amended at layered-pr-fanout 2.3/3.2/6.1. Impl = Slice A (transitions.go generic predicate registry + evaluator + built-in default, self-contained, on the #51 branch) then Slice B (top-level precondition_policies registry config across the 6 AgentsRC sync points + stage-profile reference-by-name + lockfile resolution).'
+classification: small
+routed_to: plan_summary:layered-pr-fanout
+created_at: "2026-06-22T15:11:44Z"

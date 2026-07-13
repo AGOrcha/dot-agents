@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: cj-outputs-exact-prune
+parent_plan_id: config-v2-coherence
+verifier_type: unit
+status: pass
+summary: 'unit: exact/prune projection + refresh lock-fresh — 19 new tests (positive + negative) pass; resource_plan.go 96.34% stmt-weighted clears 95% per-file gate; gofmt/vet clean'
+recorded_at: "2026-06-06T22:06:54Z"
+delegation_id: del-cj-outputs-exact-prune-1780782536
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/platform/ ./commands/

@@ -1,6 +1,6 @@
 # Proposal: Unify history archive locations
 
-**Status:** draft (decision artifact)
+**Status:** DECIDED + IMPLEMENTED 2026-06-08 — history unified at `.agents/history/` (single location). Was: draft (decision artifact).
 **Created:** 2026-05-28
 **Owner:** pr10-branch-split / history-archive-location-unify
 **Cross-refs:** [[workflow-archive-orphan-sweep]], [[delegation-bundle-contract-divergence]], [[resource-model-current-state]]

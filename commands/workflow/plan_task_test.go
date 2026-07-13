@@ -87,6 +87,68 @@ func TestArchiveSinglePlan_RenameWhenNoHistory(t *testing.T) {
 	}
 }
 
+// A plan with a linked spec — the spec is COPIED into the history archive
+// (permanent-record completeness) while the editable copy stays under workflow/specs.
+func TestArchiveSinglePlan_ArchivesLinkedSpec(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+	specPath := filepath.Join(proj, ".agents", "workflow", "specs", "myplan", "design.md")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("# Spec myplan\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	archived := filepath.Join(proj, ".agents", "history", "myplan", "design.md")
+	data, err := os.ReadFile(archived)
+	if err != nil {
+		t.Fatalf("archived spec should exist: %v", err)
+	}
+	if !strings.Contains(string(data), "# Spec myplan") {
+		t.Errorf("archived spec content wrong: %q", data)
+	}
+	// Editable copy NOT moved (other specs cross-link it by relative path).
+	if _, err := os.Stat(specPath); err != nil {
+		t.Errorf("workflow/specs copy should remain (copy, not move): %v", err)
+	}
+}
+
+func TestArchiveLinkedSpec_DryRunDoesNotCopy(t *testing.T) {
+	proj := t.TempDir()
+	specPath := filepath.Join(proj, ".agents", "workflow", "specs", "myplan", "design.md")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("# Spec myplan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+	if err := archiveLinkedSpec(proj, "myplan", dstDir, true); err != nil {
+		t.Fatalf("dry-run archive linked spec: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, workflowDesignFileName)); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not copy linked spec, stat err = %v", err)
+	}
+}
+
+// A plan with NO linked spec — archive succeeds and creates no design.md.
+func TestArchiveSinglePlan_NoLinkedSpecNoop(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "nospec", "completed")
+	if err := archiveSinglePlan(proj, "nospec", false, false, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".agents", "history", "nospec", "design.md")); !os.IsNotExist(err) {
+		t.Error("no design.md should be created when there is no linked spec")
+	}
+}
+
 // Case 2: history dir exists with DMA artifact → merge: DMA untouched, PLAN+TASKS+plan.md overwritten, source removed
 func TestArchiveSinglePlan_MergeWithDMASkip(t *testing.T) {
 	proj := t.TempDir()
@@ -274,6 +336,22 @@ func TestArchiveSinglePlan_DryRun(t *testing.T) {
 	}
 	if strings.Contains(string(data), "status: archived") {
 		t.Error("dry-run should not stamp status=archived")
+	}
+}
+
+func TestStampPlanArchived_SaveError(t *testing.T) {
+	sentinel := errors.New("synthetic plan write failure")
+	withWriteFileStub(t, func(string, []byte, os.FileMode) error {
+		return sentinel
+	})
+
+	plan := &CanonicalPlan{ID: "myplan"}
+	err := stampPlanArchived(t.TempDir(), plan.ID, plan, false)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected wrapped write error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "stamp archived status") {
+		t.Fatalf("expected archive-stamp context, got %v", err)
 	}
 }
 

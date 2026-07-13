@@ -1,0 +1,23 @@
+schema_version: 1
+id: del-lpf-e-transitions-poll-1782133593
+mode: delegated
+parent_plan_id: layered-pr-fanout
+parent_task_id: lpf-e-transitions-poll
+title: Verifier/lens/owner transition split + PR poll detector (§6, §3.2)
+summary: 'Delegated from plan Layered PR fanout: awaiting_review status + slot/dep accounting + blocked-on'
+write_scope:
+    - commands/workflow/transitions.go
+    - commands/workflow/transitions_test.go
+success_criteria: |-
+    Per §6 + §3.2. Verifier owns in_progress->awaiting_agent_review (terminal-green + PR open + Sonar OK + 0 open
+    issues, §2.3); lens-gate owns awaiting_agent_review->awaiting_owner_review; owner-merge owns
+    awaiting_owner_review->completed. The PR poll detector CONSUMES event.pr.* (merged/closed/force_rebased/
+    review_requested_change) from the internal/events registry (lpf-pr-producer) — NO direct gh calls here — and
+    maps them to transitions: merged->completed, request-changes->in_progress, close->blocked cascade (§2.6),
+    force-rebase (SHA1 set diff §2.7)->rebase. Also wires the §3.4.5 auto-resume predicate evaluators.
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: loop-worker
+status: active
+created_at: "2026-06-22T13:06:33Z"
+updated_at: "2026-06-22T13:06:33Z"

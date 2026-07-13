@@ -4,7 +4,9 @@
 exposed a structural flaw, not just a bug. **Rev 2 (2026-06-07):** incorporates the KG-as-SOT
 direction — the `kg` graph store is the source of truth for the SDD artifacts (not just their status),
 files become projections, and work results correlate to the artifacts/primitives that produced them
-(D1′, D8, §3A); converges this spec with `knowledge-architecture-graph-views`.
+(D1′, D8, §3A); converges this spec with `knowledge-architecture-graph-views`. **Rev 3 (2026-06-07):**
+adds D9 — Jira/Linear upstream tools map at *milestone* grain (our plan/task/stage decomposition stays
+KG-canonical; upstream advances on PR-merge, via subtasks or attribution notes), not per internal step.
 **Relationship:** the coordination-plane sibling of
 [`agorcha-public-vs-internal-and-obs-deploy.md`](../../proposals/agorcha-public-vs-internal-and-obs-deploy.md)
 (that proposal owns the *telemetry/observability* plane; this spec owns the *coordination/work-tracking*
@@ -107,7 +109,9 @@ Pluggable backends, **scope-configured** (org/team/project via config-v2):
 - **D6 — Two integration layers (the two ideas).** (a) A **generic PM-upstream adapter** (Jira/Linear)
   mapping `Plan→epic`, `Task→issue`, status→workflow-state, with custom fields for write_scope /
   verifier_sequence / depends_on. (b) The **native CF DO backend** for teams without a PM tool. Both
-  behind the same `WorkStore`. Multi-upstream fan-out (Jira *and* CF DO) is deferred (§6).
+  behind the same `WorkStore`. Multi-upstream fan-out (Jira *and* CF DO) is deferred (§6). The
+  `Plan→epic` / `Task→issue` 1:1 mapping here is the *fine-grained* option; **D9 makes milestone-grain
+  the default** (our task/stage churn stays in the KG; upstream advances on PR-merge, not per step).
 - **D7 — CLI surface.** `da workflow …` reads/writes through `WorkStore` instead of raw YAML;
   `da config … work_tracking.backend=<local|kg|cloudflare-do|jira|linear>` selects it per scope (a new
   config-v2 layer, org→team→project overridable); `da service run [-d]` runs the daemon. Backend
@@ -120,6 +124,23 @@ Pluggable backends, **scope-configured** (org/team/project via config-v2):
   `execution_profile`). Absent any declaration the backend is `local` (today's behaviour); any *shared*
   SOT — the thing that makes cross-worktree status atomic and cross-artifact correlation possible — is
   opt-in by scope, so two projects never silently share or split a graph.
+- **D9 — Upstream PM tools (Jira/Linear) map at MILESTONE grain, not internal-task grain.** A
+  company's ticket is a **coarse** unit of work — a whole story/feature — and teams want "the ticket's
+  work done" as one deliverable, not their board churned by our internal loop. So the `Plan→epic` /
+  `Task→issue` 1:1 mapping in D6 is only the *fine-grained* option; the **default is coarser** and
+  scope-selectable:
+  - **Our decomposition lives in the KG.** The plan + tasks (how *we* break the ticket's work down) and
+    all per-stage / in-flight / awaiting-review status are KG-canonical (D1′). They are not pushed as
+    upstream workflow-state transitions.
+  - **Upstream representation is scope-configurable** to the team's process: either map our tasks → the
+    ticket's native **subtasks** (when the team uses them), or keep tasks KG-only and attach a
+    **note / attribution link** on the ticket pointing back at the KG plan — no upstream state mutation
+    per internal step.
+  - **Upstream state is debounced to coarse milestones.** The upstream ticket advances (e.g.
+    `In Progress → In Review / Done`) only on a **milestone event — primarily the PR merge** — never on
+    every internal in-flight / awaiting-review / per-stage transition. Internal churn stays in the KG;
+    only milestone events propagate upstream, keeping the company's board stable while the KG drives the
+    loop. (Inbound: an upstream ticket close/reopen is a milestone the daemon reconciles into KG state.)
 
 ## 3A. Knowledge-graph SOT: typed views + cross-artifact correlation
 
@@ -230,8 +251,12 @@ agent's side of the projection.
   before the transition lands (TTL lease? compare-and-set in the backend?).
 - **Conflict resolution per field** — status (backend-wins) vs content (local-wins) is the starting
   rule; needs precise field ownership + a merge story for concurrent edits.
-- **Mapping fidelity** — canonical `Task` ↔ Jira/Linear issue: write_scope, verifier_sequence,
-  cross-plan `depends_on` as custom fields vs links; round-trip without loss.
+- **Mapping fidelity** — *granularity resolved by D9* (milestone grain; tasks → subtasks OR KG-only +
+  attribution; upstream debounced to PR-merge). Remaining: for the fine-grained option, canonical
+  `Task` ↔ Jira/Linear issue field mapping (write_scope, verifier_sequence, cross-plan `depends_on` as
+  custom fields vs links; round-trip without loss); and for the milestone option, the exact
+  milestone→workflow-state map per team + handling **multiple PRs per ticket** (which merge advances
+  the ticket?) and an **upstream reopen** racing in-flight KG work.
 - **Multi-upstream** — sync to >1 backend (e.g. Jira for humans + CF DO for the engine)? Or one
   primary + read-only mirrors?
 - **Git vs backend double-tracking** — *resolved by D1′*: prose git-canonical, structure+state

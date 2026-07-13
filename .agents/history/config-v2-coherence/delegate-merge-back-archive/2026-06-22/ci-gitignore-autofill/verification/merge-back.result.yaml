@@ -1,0 +1,10 @@
+schema_version: 1
+task_id: ci-gitignore-autofill
+parent_plan_id: config-v2-coherence
+verifier_type: merge-back
+status: pass
+summary: 'Branch feature/config-v2-coherence-ci-gitignore-autofill off master (deps_in_flight empty; dep cd-ensure-resolved-seam already completed on master). Pushed to org; PR https://github.com/AGOrcha/dot-agents/pull/34 (base master). Pre-push gates passed (build+vet POSIX+windows, coverage>=95, sonar-scanner). Library only — wiring EnsureManagedGitignore into install/refresh/sync is a follow-on task. Note: bundle/contract live in main checkout .agents/active/ (worktree .agents not shared); closeout run from main checkout.'
+recorded_at: "2026-06-06T21:36:47Z"
+delegation_id: del-ci-gitignore-autofill-1780781063
+artifact_paths:
+    - .agents/workflow/plans/config-v2-coherence/TASKS.yaml
