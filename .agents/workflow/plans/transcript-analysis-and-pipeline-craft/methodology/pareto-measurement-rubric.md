@@ -59,9 +59,11 @@ Never compare rows across cells; the frontier is per-cell first, pooled second.
 
 The blocking cross-family adversarial gate (RULE 7; `falsification-review-rubric.md:23-25`) is a
 **review-validity stage, not a measured routing axis.** This resolves the RULE-7 self-collision that
-would otherwise make contrasts C3/C4/C5-gpt-legs/C6-haiku-leg unexecutable (a gpt-family executor with
-the historically-fixed gpt-family adversarial lens → `reviewer.family == executor.family` →
-`pipeline_projection.go:409` and `cc_pipeline.go:277` hard-refuse the gate). The code gate is correct
+would otherwise make contrasts C3, C4, and C5-gpt-legs unexecutable (a gpt-family executor with the
+historically-fixed gpt-family adversarial lens → `reviewer.family == executor.family`) AND the
+C6-`haiku-4-5`-gate leg illegal (a claude-family gate on the claude-family C6 baseline executor — the
+same-family collision from the other direction) → `pipeline_projection.go:409` and `cc_pipeline.go:277`
+hard-refuse the gate. The code gate is correct
 and stays unweakened; the fix is in how the live protocol assigns the gate's route:
 
 7. **The adversarial gate's `model_family` is a DEPENDENT variable, pinned OPPOSITE the executor family
@@ -87,8 +89,11 @@ and stays unweakened; the fix is in how the live protocol assigns the gate's rou
    gate's verdict distribution (accept/reject/block counts) and induced re-work iteration count alongside
    the cell.** A frontier claim is invalid if the executor-swap delta cannot be separated from the
    gate-strictness delta at the reported block rates. Executable-as-preregistered without the flip:
-   C1, C2, C5-claude-legs (`sonnet-5`/`haiku-4-5`), C6-`gpt-5.6-sol`-leg. Requiring the flip: C3, C4,
-   C5-gpt-legs (`terra`/`sol`), C6-`haiku-4-5`-leg. Deterministic per-contrast route map:
+   C1, C2, C5-claude-legs (`sonnet-5`/`haiku-4-5`), C6-`gpt-5.6-sol`-gate-leg. Requiring the flip
+   (use `cross-harness-adversarial-claude`): C3, C4, C5-gpt-legs (`terra`/`sol`). ILLEGAL as a
+   cross-family GATE leg (not a flip case): C6-`haiku-4-5` — haiku is claude-family, same as the C6
+   baseline executor, so it can never be the cross-family gate; it is valid only as a cheapened
+   routine verifier/lens slot. Deterministic per-contrast route map:
    `evidence/pareto/live-contrast-lens-map.md`.
 
 ## C0 null contrast — gating amendment (2026-07-12)

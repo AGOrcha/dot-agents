@@ -51,8 +51,12 @@ Baseline executor = `claude-opus-4-8` (`claude`). "Swap" = the single measured-s
 
 **Executable now, no flip:** **C0 (first, gating)**, C1, C2, C5-claude-legs (`sonnet-5`/`haiku-4-5`), C6-`gpt-5.6-sol`-gate-leg.
 **Require the opposite-family flip (use `cross-harness-adversarial-claude`):** C3, C4,
-C5-gpt-legs (`terra`/`sol`), C6-`haiku-4-5`-gate-leg (illegal on the gate — reroute `haiku-4-5`
-to a routine verifier slot instead).
+C5-gpt-legs (`terra`/`sol`).
+**Illegal as a cross-family GATE leg (NOT a flip case):** C6-`haiku-4-5` — haiku-4-5 is
+claude-family, same as the C6 baseline executor, so it can never be the cross-family adversarial
+gate (RULE-7). It is valid ONLY as a cheapened **routine** verifier/lens slot; if C6 means to
+cheapen the adversarial gate itself, the only legal claude-executor option is a gpt-family gate
+(`gpt-5.6-sol`). Flipping does not apply here.
 
 ## Measurement rules carried from the rubric
 

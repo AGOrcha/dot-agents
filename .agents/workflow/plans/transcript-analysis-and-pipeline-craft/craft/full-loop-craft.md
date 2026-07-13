@@ -259,18 +259,23 @@ review-debt, not a live signal.
 ## 5. Cost mechanics
 
 **Cache-read dominance is the load-bearing fact (T-c1 / H1 / H2, high, corpus-wide).** Re-sent cached
-context is 89–99% of token volume in **every** telemetry-bearing harness: OMP `cacheRead` is 96–98% of
-tokens and 62–69% of `$` across the four mega-sessions (`omp-cost-totals-*`,
-`cost-cacheread-dominates-context`); codex median cached 88–89%; one CC turn recorded
-`input=2 / cache_read=28,175` (`historical-hypotheses.md:10-21`). Productive work — output + reasoning
-— is a *tiny slice*: codex median 12,070 tok = **1.26%** of total (max 5.14%), OMP ≈ 2–4%
-(`historical-hypotheses.md:15-17`). The negative controls show this is **structural to long agent
-context, not an artifact of the loop or the sampler** (`cx-cost-negctrl-01..12` show cache/input
-63–98%, mean ~85%; `negative-control-analysis.md` point 1).
+context dominates token volume — but the magnitude is denominator- and harness-dependent, so it is
+**not** a single cross-harness band (erratum #1/#2, `historical-hypotheses.md`). OMP `cacheRead/total`
+is 96–98% of tokens and 62–69% of `$` across the four mega-sessions (`omp-cost-totals-*`,
+`cost-cacheread-dominates-context`); one CC turn recorded `input=2 / cache_read=28,175`
+(`historical-hypotheses.md:10-21`). Codex is lower and denominator-sensitive: `cached_input/input`
+median 88.8% (44/120 rows below the 85% cache-hot line), `cached/total` median 87.7% (48/120 below) —
+codex's own token schema, not directly comparable to OMP's `cacheRead/total`. Productive work — output
+plus non-cached input (reasoning ⊆ output, never added again) — is a *modest slice*: codex per-row
+median 124,297 tok = **12.28%** of total, OMP ≈ 2–4% (`historical-hypotheses.md` erratum #1). The
+negative controls show cache dominance is **structural to long agent context, not an artifact of the
+loop or the sampler** (`cx-cost-negctrl-01..12` show cache/input 63–98%, mean ~85%;
+`negative-control-analysis.md` point 1).
 
-**Productive-token accounting (O3).** Raw `total_tokens` overstates cost ~50× on codex. Token-volume
-and token-cost axes MUST be computed on the *productive* figure (output + reasoning + non-cached
-input), reporting raw + cache-adjusted (O3; `pareto-measurement-rubric.md:17-18`). Dollar attribution
+**Productive-token accounting (O3).** Raw `total_tokens` overstates codex cost ~5.6× (corrected from a
+prior ~50× that double-counted reasoning; erratum #1). Token-volume and token-cost axes MUST be
+computed on the *productive* figure (output + non-cached input; reasoning is a subset of output, never
+added again), reporting raw + cache-adjusted (O3; `pareto-measurement-rubric.md:17-18`). Dollar attribution
 is gappy and route-dependent — only OMP + copilot record cost, CC/codex are token-only, cursor records
 nothing, and some OMP provider routes bill `$0` (gpt-5.4 turns $0.00 vs anthropic/codex billed) — so
 any cross-harness `$` comparison reconstructs CC/codex from `tokens×published-rate` flagged
@@ -292,19 +297,21 @@ and this floor is task-complexity-independent (`negative-control-analysis.md` po
   length*; the shortest tasks yield the least because the fixed tool-def block is model-priced but
   volume-fixed. Don't route a trivial task through a heavy tool-def context (H4, O13;
   `historical-hypotheses.md:116-123`).
-- **Accuracy risk is localized to the productive fraction (H5).** A weaker model degrades accuracy
-  only in proportion to a task's productive share; low-productive stages (context-shuffling, review)
-  are near-zero-risk cheap-route targets (`historical-hypotheses.md:125-136`).
-- **The review/verifier stage is the highest-leverage cheap route (H6).** Review turns carry very low
-  productive tokens (220–720) — a classification, not a generation, workload — so routing review to a
-  cheap tier saves at near-zero accuracy risk, provided the cross-family gate is preserved (RULE 7)
-  (`historical-hypotheses.md:138-147`).
+- **Accuracy risk is localized to the generated-output fraction (H5).** A weaker model degrades accuracy
+  only in proportion to a task's model-generated output share; low-**generation** stages
+  (context-shuffling, review) are near-zero-risk cheap-route targets — even though, post-erratum, their
+  *productive/uncached volume* can be high (review is cache-cold). Accuracy risk follows generation, not
+  productive volume (`historical-hypotheses.md:125-136`).
+- **The review/verifier stage is the highest-leverage cheap route (H6).** Review turns generate very low
+  output (145–1,036 tok, median 326) — a classification, not a generation, workload (their uncached read
+  volume is larger, ~27K median) — so routing review to a cheap tier saves at near-zero accuracy risk,
+  provided the cross-family gate is preserved (RULE 7) (`historical-hypotheses.md:138-147`).
 
 All effect sizes are hypothesis-only from observational data; a frontier is a **live** paired-contrast
 artifact (`pareto-measurement-rubric.md:42-53`), never claimed from history.
 
 **Architect rules.**
-- Normalize every token-cost/volume axis on productive tokens (output+reasoning+non-cached input);
+- Normalize every token-cost/volume axis on productive tokens (output + non-cached input; reasoning ⊆ output);
   report raw + cache-adjusted. NEVER price a stage on raw `total_tokens`. [T-c1, O3,
   `pareto-measurement-rubric.md:17-18`]
 - Reconstruct any missing-`$` harness from `tokens×published-rate`, flag it `[INFERENCE]`, and never
@@ -315,8 +322,9 @@ artifact (`pareto-measurement-rubric.md:42-53`), never claimed from history.
 - Prefer coarse stage granularity on short tasks: don't route a trivial task through a full tool-def
   context; cheap-tier savings scale with task length. [H4, T-c4, O13,
   `copilot-tooldef-fixed-overhead`]
-- Route cheap tiers at low-productive stages first (review/verify), holding the executor at baseline,
-  and keep the cross-family gate. [H5, H6, C6, `historical-hypotheses.md:125-147`]
+- Route cheap tiers at low-**generation** stages first (review/verify), holding the executor at
+  baseline; the executor is the LAST stage to cheap-route. Keep the cross-family gate. [H5, H6, C6,
+  `historical-hypotheses.md:125-147`]
 - NEVER assert a cost/efficiency frontier from historical rows; require CI-backed paired live
   contrasts. [`pareto-measurement-rubric.md:42-53`]
 

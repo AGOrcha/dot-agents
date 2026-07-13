@@ -42,16 +42,19 @@ mask so a cell is never scored on an axis its harness cannot supply.
 
 ## O3 — Normalize cross-harness token cost on productive tokens (output + non-cached input; reasoning ⊆ output, never added), not raw totals
 
-**Statement.** Cache-read dominates token volume — 96–98% on the OMP/CC/anthropic mega-sessions,
-but the codex census weakens to a median 87.7% (range 16.2–97.8%, 48/120 rows below the 85%
-cache-hot line) — so raw `total_tokens` overstates codex cost ~5.6×. The token-volume and
-token-cost axes must be computed on the productive figure (output + non-cached input; reasoning is
-a subset of output, never added again), reporting raw + cache-adjusted per the rubric.
+**Statement.** Cache-read dominates token volume — 96–98% on the OMP/CC/anthropic mega-sessions
+(`cacheRead/total`), but the codex census weakens and is denominator-dependent: `cached/total` median
+87.7% (48/120 rows below the 85% cache-hot line), `cached_input/input` median 88.8% (44/120 below),
+range ~16–98% — not a single comparable band. Raw `total_tokens` overstates codex cost ~5.6×. The
+token-volume and token-cost axes must be computed on the productive figure (output + non-cached input;
+reasoning is a subset of output, never added again), reporting raw + cache-adjusted per the rubric.
 **Supporting.** `cost-cacheread-dominates-context` (CC `input=2 / cache_read=28,175`),
 `cx-cost-permodel-01..04` (median cached/input 89%; productive median 124,297 tok = 12.28% of total),
-`cx-cost-top-01..12`, `omp-cost-totals-019f3cf2/019f3f23/019f4eda/019f4eea` (cacheRead 96–98% of
-tokens, 61–69% of $); EFF-LC1 (T-c1).
-**Confidence.** high (omp + cc + codex).
+`cx-cost-top-01..12`, `omp-cost-totals-019f3cf2/019f3f23/019f4eda` (quiescent, verifiable) + `019f4eea`
+(**point-in-time / VOID as of 2026-07-13** — source compacted post-capture, digest no longer recomputes,
+not independently verifiable) (cacheRead 96–98% of tokens, 61–69% of $); EFF-LC1 (T-c1).
+**Confidence.** high on the three verifiable OMP sessions (`019f3cf2`/`019f3f23`/`019f4eda`) + cc + codex;
+the `019f4eea` leg is point-in-time corroboration only, not independently re-verifiable.
 **CONSUMER.** config/code change → token-cost + token-volume axis definitions in
 `methodology/pareto-measurement-rubric.md:17-18` and the eventual `evidence/pareto/frontier-report.md`
 + `rows.jsonl` normalization.

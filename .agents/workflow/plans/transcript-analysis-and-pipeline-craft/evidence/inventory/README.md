@@ -9,7 +9,7 @@ All committed anchors/paths use `~` for the home dir — no absolute `/Users/<us
 - `inventory.jsonl` — machine-readable, **one row per session** (806 rows). Canonical enumeration.
 - `source-inventory-<harness>.md` — rubric §1 table per harness (omp, claude-code, codex, cursor, copilot).
 - `README.md` — this summary.
-- `live-session-frozen-snapshots.jsonl` — immutable point-in-time freeze (pinned `2026-07-12T16:07:04Z`) of the 2 LIVE `cutoff` OMP sessions (`019f4eea`, `019f4eda`): current `content_sha256` + `record_count` at capture, mirroring the inventory row schema. Live-at-capture, **not** final; **not** part of the 806-row canonical enumeration.
+- `live-session-frozen-snapshots.jsonl` — verifiable-prefix **hash-commitment** (pinned `2026-07-12T16:07:04Z`) over the 2 LIVE `cutoff` OMP sessions (`019f4eea`, `019f4eda`): `content_sha256` + `record_count` + `content_bytes` at capture, mirroring the inventory row schema. **NOT a byte-level copy** — raw bytes are deliberately not committed (large + sensitive); re-verify per record via `head -c <content_bytes> <path> | sha256sum` vs `content_sha256` (OMP JSONL is append-only, so a prefix match proves the frozen state; a mismatch means the source was rewritten/compacted → commitment VOID, bytes unrecoverable). Live-at-capture, **not** final; **not** part of the 806-row canonical enumeration. Status (2026-07-13): `019f4eda` **PROVEN** (prefix reproduces, source unchanged); `019f4eea` **VOID** (source compacted post-capture, point-in-time only).
 
 ## Per-harness summary
 
@@ -94,7 +94,7 @@ high-confidence secret-shaped span was detected in the primary or a folded subag
 - Cursor (158 sessions): no in-record timestamps → `started_at`/`ended_at` unavailable (mtime forbidden). Time-based axes cannot use Cursor.
 - Codex: 56 older sessions record rate-limit % but not token totals (`tokens=n`).
 - Claude Code: 1 summary-only stub session has no message timestamps.
-- 2 OMP sessions were live at snapshot (`cutoff`); their `record_count`/`ended_at` are a 2026-07-12 point-in-time. Immutable frozen snapshots (current `content_sha256`+`record_count`, pinned `2026-07-12T16:07:04Z`) are captured in `live-session-frozen-snapshots.jsonl`; `019f4eea` also drifted its `#L1` anchor (line 1 mutated), `019f4eda`'s `#L1` still verifies.
+- 2 OMP sessions were live at snapshot (`cutoff`); their `record_count`/`ended_at` are a 2026-07-12 point-in-time. Verifiable-prefix hash-commitments (`content_sha256`+`record_count`+`content_bytes`, pinned `2026-07-12T16:07:04Z`, NOT byte copies) are in `live-session-frozen-snapshots.jsonl`; status 2026-07-13 — `019f4eda` PROVEN (prefix reproduces), `019f4eea` VOID (source compacted post-capture). `019f4eea` also drifted its `#L1` anchor (line 1 mutated); `019f4eda`'s `#L1` still verifies.
 
 ## Known-absent sources
 - **OpenCode** — not installed (checked 2026-07-12: `~/.opencode`, `~/.local/share/opencode`, `~/.config/opencode` absent). Known-absent, not a gap.

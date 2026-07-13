@@ -56,6 +56,14 @@ map: `evidence/pareto/live-contrast-lens-map.md`. Rubric amendments:
 Executable as-preregistered without the flip: C1, C2, C5-claude-legs, C6-`gpt-5.6-sol`-gate-leg.
 Requiring the opposite-family flip: C3, C4, C5-gpt-legs, C6-`haiku-4-5`-gate-leg.
 
+**Correction (2026-07-13, from the cross-family gate re-run).** The `C6-haiku` references above
+(lines 42, 57) are imprecise: C6's executor is claude-family (baseline `claude-opus-4-8`), so the
+C6-`haiku-4-5` collision is a **claude-gate-on-claude-executor** case (NOT a gpt-family executor as
+line 42 implies). It is therefore **ILLEGAL as a cross-family gate, not a flip case** — `haiku-4-5`
+can never be the cross-family adversarial gate for a claude executor; it is valid only as a cheapened
+routine verifier/lens slot. Authoritative statement: `evidence/pareto/live-contrast-lens-map.md` and
+`methodology/pareto-measurement-rubric.md` (both corrected 2026-07-13).
+
 ## Still outstanding (separate, not this validation)
 
 - **True cross-family adversarial gate** (falsification-review-rubric §5, GPT-family reviewer):

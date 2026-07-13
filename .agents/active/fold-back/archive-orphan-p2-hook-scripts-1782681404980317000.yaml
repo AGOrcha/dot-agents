@@ -1,8 +1,0 @@
-schema_version: 1
-id: archive-orphan-p2-hook-scripts-1782681404980317000
-plan_id: loop-discipline-stop-hooks
-task_id: p2-hook-scripts
-observation: 'archive-orphan-sweep: p2-hook-scripts — task loop-discipline-stop-hooks/p2-hook-scripts is completed in active plan (not a sweep candidate)'
-classification: small
-routed_to: active/fold-back
-created_at: "2026-06-28T21:16:44Z"

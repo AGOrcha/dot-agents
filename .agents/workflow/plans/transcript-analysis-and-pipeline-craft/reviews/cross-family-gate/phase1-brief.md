@@ -16,19 +16,36 @@ family OPPOSITE the executor family satisfies RULE-7; a new claude-family advers
 registered; and the gate is treated as a review-VALIDITY stage EXCLUDED from the measured Pareto
 cell, with the cell attributed to first-pass executor+verifier and gate-induced re-work +
 verdict/block-rate reported per-contrast to expose a reviewer-family strictness confound. A
-per-contrast map claims which of contrasts C1..C6 are executable as-is vs need the family flip.
+per-contrast map claims which of C1..C6 are executable as-is, which need the opposite-family lens flip,
+and which are ILLEGAL-as-gate (C6-`haiku-4-5` is claude-family = the claude C6 baseline executor, so it
+can never be the cross-family gate — not a flip case). The C1..C6 EXECUTOR MODELS are pinned
+per-contrast at wave-prep in runtime swarm YAMLs, NOT registered in `.agentsrc.json` (which holds only
+lens/verifier stage profiles) — their absence from `.agentsrc.json` is by design, not a gap; and no code
+auto-selects the opposite-family lens (a documented deferral, arms pin it manually at wave prep).
 
-C-B. Provenance regeneration integrity. It is CLAIMED that a rows file now has 198/198 full 64-hex
-digests (previously 120 truncated + 69 null), every digest recomputes against its anchored source,
-two live-session cost rows were re-anchored point-in-time onto frozen snapshots, and EVERY
-non-provenance field (tokens, cost, model, accuracy_proxy, status, wallclock, iteration) is
-byte-identical to before the regeneration.
+C-B. Provenance regeneration integrity. It is CLAIMED that a rows file now has 198/198 provenance
+digests, EACH formatted `sha256:<64 lowercase hex>` (this `sha256:`-prefixed form is the corpus
+convention, not bare hex; previously 120 truncated + 69 null); 197/198 recompute against their anchored
+source, the SOLE exception being the live-session VOID row `019f4eea` whose external source was
+compacted post-capture so its committed byte-prefix no longer reproduces — by-design point-in-time/VOID,
+explicitly labeled, NOT a regeneration error; and EVERY non-provenance field (tokens, cost, model,
+accuracy_proxy, status, wallclock, iteration) is byte-identical to before the regeneration (JSON
+whitespace aside). For the two live-session cost rows it is CLAIMED they are
+re-anchored onto a VERIFIABLE-PREFIX HASH-COMMITMENT (content_sha256 + record_count + content_bytes
+over an append-only external file), NOT a byte-level frozen copy — and that the artifacts honestly
+carry an explicit per-session verification status: 019f4eda PROVEN (byte-prefix re-hashes to
+content_sha256, source unchanged), 019f4eea VOID (source compacted after capture, prefix no longer
+reproduces, labeled point-in-time-only and bytes unrecoverable).
 
 C-C. Erratum arithmetic. It is CLAIMED that productive tokens = output + uncached_input (reasoning
 is a SUBSET of output, never added again); codex productive median = 124,297 tok = 12.28% of total;
-raw total_tokens overstates codex cost ~5.6x (a correction from a prior ~50x); and the cache-read
-band is 96-98% for OMP/CC/anthropic but codex median 87.7% (range 16.2-97.8%, 48/120 rows below the
-85% line) — replacing a prior "89-99% across every harness" claim.
+raw total_tokens overstates codex cost ~5.6x (a correction from a prior ~50x); OMP/CC/anthropic
+cache-read is 96-98% by cacheRead/total; and codex cache-read is DENOMINATOR-DEPENDENT and explicitly
+labeled as such everywhere — cached/total median 87.7% (48/120 rows below the 85% line),
+cached_input/input median 88.8% (44/120 below) — NOT a single comparable cross-harness band. It is
+further CLAIMED that NO superseded prose survives in any current normative/summary text (no "89-99%
+every harness", no "~50x", no "output+reasoning" productive definition) outside clearly-labeled
+erratum/historical quotations.
 
 C-D. Two new tests. It is CLAIMED that "39 architect-rules preserved 1:1" HOLDS between a craft doc
 and a skill, and that there are "0 genuine unanchored prescriptions" (26 earlier flags all being

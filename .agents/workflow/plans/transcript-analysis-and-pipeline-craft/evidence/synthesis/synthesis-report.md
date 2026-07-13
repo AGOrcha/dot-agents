@@ -81,7 +81,7 @@ anchors from ≥2 local harnesses, **or** ≥1 local-harness primary + ≥1 conv
 | **T-b3** | Cutoffs / mid-turn termination recur across harnesses (no clean close) | cc, codex, cursor | EFF-LC4 | **high** |
 | **T-b4** | Redaction gap: a committed cursor item excerpt leaks a `/home/<user>/` absolute path (R3 violation in a sibling artifact) | cursor | (R3 rubric) | **medium** |
 | **T-b5** | Cursor persists **no** `tool_result`: tool outcomes/exit-codes/errors unrecoverable; failures visible only as narration | cursor | — | **high** |
-| **T-c1** | Cache-read dominates token volume — 96–98% on OMP/CC/anthropic mega-sessions, but the codex census weakens (median 87.7%, range 16.2–97.8%, 48/120 rows below the 85% cache-hot line) | omp, cc, codex | EFF-LC1 | **high** |
+| **T-c1** | Cache-read dominates token volume — 96–98% on OMP/CC/anthropic mega-sessions (`cacheRead/total`), but the codex census weakens and is denominator-dependent (`cached/total` median 87.7%, 48/120 below the 85% line; `cached_input/input` median 88.8%, 44/120 below; range ~16–98%) — not a single comparable band (erratum #1) | omp, cc, codex | EFF-LC1 | **high** |
 | **T-c2** | Dollar-cost attribution is gappy: only OMP+copilot record cost; CC/codex tokens-only; cursor records nothing; some OMP provider routes bill $0 | omp, cc, codex, cursor, copilot | EFF-LC1, EFF-RI1 | **high** |
 | **T-c3** | Per-harness telemetry capability is uneven → dictates which harness can feed which Pareto axis | all 5 | EFF-S2, PLAN-G1 | **high** |
 | **T-c4** | Fixed context overhead (tool defs + system prompt) is large: 67% of a trivial copilot task's context was tool definitions | copilot | — | **medium** |
@@ -107,7 +107,7 @@ Anchor rollup (handles cited by theme):
 - **T-b5**: `cursor-gap-no-tool-results`, `cursor-applypatch-context-failure`, `cursor-schema-narration-only`,
   `cursor-schemaA-reasoning-redacted`.
 - **T-c1**: `cost-cacheread-dominates-context`; `cx-cost-permodel-01..04`, `cx-cost-top-01..12`;
-  `omp-cost-totals-019f3cf2/019f3f23/019f4eda/019f4eea`.
+  `omp-cost-totals-019f3cf2/019f3f23/019f4eda` (quiescent/verifiable) + `019f4eea` (VOID/point-in-time as of 2026-07-13 — source compacted, digest unrecoverable; corroboration only).
 - **T-c2**: `cc-tokens-recorded-no-dollar-cost`; `omp-cost-cursor-routed-zero-dollar`;
   `cursor-gap-no-token-cost-wallclock`; `copilot-tooldef-fixed-overhead`; codex `has_cost=false` (notes);
   EFF-LC1.

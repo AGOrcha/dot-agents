@@ -8,7 +8,7 @@ observational and confounded (task mix, cache state, retries, prompt drift co-va
 
 Anchoring corpus facts (all from `rows.jsonl` / `items/*`):
 - **Cache-read dominates $ and volume — unevenly.** OMP/anthropic mega-sessions: cacheRead = **96-98%**
-  of tokens and **62-69%** of $ across the 4 large sessions (`omp:019f3cf2/019f3f23/019f4eda/019f4eea`;
+  of tokens and **62-69%** of $ across the 4 large sessions (`omp:019f3cf2/019f3f23/019f4eda` quiescent/verifiable + `019f4eea` **VOID/point-in-time as of 2026-07-13** — source compacted, digest unrecoverable, NOT independently verifiable; every `019f4eea` / `omp-cost-totals-019f4eea` citation in this doc inherits this qualifier and conclusions rest on the quiescent sessions;
   items `omp-cost-totals-*`, `cost-cacheread-dominates-context`). Codex census: cached_input/input median
   **88.8%**, cached/total median **87.7%** — but with a wide spread (**16-98%** of total; 48/120 rows below
   the 85% cache-hot line); cache-cold review turns run 45-82% cached (`codex:*`, item block
@@ -50,7 +50,7 @@ Anchoring corpus facts (all from `rows.jsonl` / `items/*`):
 
 ### mixed / cursor-routed cells (OMP; $ recorded, model blended)
 - **`mixed / orchestration-impl / cache-hot / unknown` (n=3):** OMP `019f3cf2`, `019f3f23`,
-  `019f4eea` — the only **recorded-$** workflow rows; cacheRead 62-69% of $. Model-blended
+  `019f4eea` (**VOID/point-in-time** — see cache-dominance qualifier above) — the only **recorded-$** workflow rows; cacheRead 62-69% of $. Model-blended
   (`model_change` boundaries present) → not model-attributable except via the 019f3cf2 partition.
   Feeds the cost-decomposition prior (H2) as an *observation of the $ shape*, not a routing verdict.
 - **`anthropic / orchestration-impl / cache-hot` (019f4eda)** and **`mixed / failure` (019f3cbc):**
@@ -107,7 +107,7 @@ model choice, not the pipeline, is moving volume. **To move volume you must chan
 model-independent. So the **outcome-addressable $ swing** (input+output+cacheWrite) is **≤ ~38%** of
 total $; the remaining ≥62% re-prices purely by the swapped tier's **cache-read rate ratio**. A
 cheap-tier swap's $ reduction ≈ `0.38·(1−r_prod) + 0.62·(1−r_cacheread)` where `r_*` are the cheap
-tier's price ratios vs baseline. Source: `omp-cost-totals-019f3cf2/019f3f23/019f4eda/019f4eea`.
+tier's price ratios vs baseline. Source: `omp-cost-totals-019f3cf2/019f3f23/019f4eda` (+ `019f4eea` VOID/point-in-time — see cache-dominance qualifier above).
 **Refuted if:** the C2 $ reduction **exceeds** the cache-read-rate-ratio prediction (would prove the
 swap also shrank context/tool volume — a *pipeline* effect misattributed to the model), **or** falls
 to ≈0 when the cheap tier's cache-read rate ≈ baseline (confirming cache-read pricing, not model
@@ -233,10 +233,14 @@ OMP figures are **unchanged**: cacheRead 96-98% of tokens (96.20-97.71%) and 62-
 - **H2, H3, H4**: no numbers shifted (OMP $ shares, wall-clock, copilot fixed-tax are unaffected).
 
 ### Headline claims, re-verified honestly
-- **"cache-read ~89-99% of volume":** HOLDS for the OMP/CC/anthropic mega-sessions (96-98% of tokens; iter
-  63/64 96.1/98.7%). For the **codex census it weakens** — cached/total median 87.7%, range **16.2-97.8%**,
-  48/120 rows below the 85% cache-hot line, cache-cold tail (3 review + 1 experiment turn) below 50%. Not a
-  single 89-99% band; it is source- and task-dependent.
+- **"cache-read ~89-99% of volume":** HOLDS for the OMP/CC/anthropic mega-sessions (96-98% of tokens
+  by `cacheRead/total`; iter 63/64 96.1/98.7%). For the **codex census it weakens, and the figure is
+  denominator-dependent** — by `cached/total` median **87.7%** (48/120 rows below the 85% cache-hot
+  line); by `cached_input/input` median **88.8%** (44/120 below). Range **16.2-97.8%** (cached/total) /
+  16.6-97.9% (cached/input), cache-cold tail (3 review + 1 experiment turn) below 50%. The below-85%
+  count and median both move with the denominator, and codex's token schema differs from OMP's
+  (`cacheRead/total`), so these are **not** a single comparable 89-99% band — the headline is
+  source-, task-, AND denominator-dependent. State the denominator with every codex cache figure.
 - **"productive ~1-4%":** TRUE only when "productive" means the **model-generated output** (codex median
   0.93%, max 4.05%; OMP <1%). Under the corrected **uncached/fresh-volume** definition it is **2-4% for OMP
   but ~12% median (up to ~84%) for codex** — materially higher, because codex sessions accumulate less cache

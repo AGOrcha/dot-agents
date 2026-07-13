@@ -967,7 +967,7 @@ items:
     rubric_version: null
     related_prior: []
   - item_id: cx-cost-permodel-01
-    claim: "Cross-harness cost row (model gpt-5.4): total_tokens=62,156,886, cached/input=95%, output+reasoning=277,199 (the non-cached productive spend)."
+    claim: "Cross-harness cost row (model gpt-5.4): total_tokens=62,156,886, cached/input=95%, output+reasoning=277,199 (NOT productive — output+reasoning double-counts reasoning ⊆ output and omits non-cached input; superseded, see erratum #1)."
     class: cost
     anchors:
       - ref: "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0#L3526"
@@ -979,7 +979,7 @@ items:
     rubric_version: null
     related_prior: []
   - item_id: cx-cost-permodel-02
-    claim: "Cross-harness cost row (model gpt-5.5): total_tokens=33,718,670, cached/input=98%, output+reasoning=66,013 (the non-cached productive spend)."
+    claim: "Cross-harness cost row (model gpt-5.5): total_tokens=33,718,670, cached/input=98%, output+reasoning=66,013 (NOT productive — output+reasoning double-counts reasoning ⊆ output and omits non-cached input; superseded, see erratum #1)."
     class: cost
     anchors:
       - ref: "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4#L1869"
@@ -991,7 +991,7 @@ items:
     rubric_version: null
     related_prior: []
   - item_id: cx-cost-permodel-03
-    claim: "Cross-harness cost row (model gpt-5.4-mini): total_tokens=31,491,218, cached/input=94%, output+reasoning=292,878 (the non-cached productive spend)."
+    claim: "Cross-harness cost row (model gpt-5.4-mini): total_tokens=31,491,218, cached/input=94%, output+reasoning=292,878 (NOT productive — output+reasoning double-counts reasoning ⊆ output and omits non-cached input; superseded, see erratum #1)."
     class: cost
     anchors:
       - ref: "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31#L1854"
@@ -1003,7 +1003,7 @@ items:
     rubric_version: null
     related_prior: []
   - item_id: cx-cost-permodel-04
-    claim: "Cross-harness cost row (model gpt-5.3-codex): total_tokens=23,397,798, cached/input=97%, output+reasoning=140,099 (the non-cached productive spend)."
+    claim: "Cross-harness cost row (model gpt-5.3-codex): total_tokens=23,397,798, cached/input=97%, output+reasoning=140,099 (NOT productive — output+reasoning double-counts reasoning ⊆ output and omits non-cached input; superseded, see erratum #1)."
     class: cost
     anchors:
       - ref: "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de#L2099"
