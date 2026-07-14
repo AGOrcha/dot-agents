@@ -173,3 +173,46 @@ Part K. All numeric claims in this batch are linkless/secondhand → [UNVERIFIED
   candidate FUTURE blocking axis (open question — not a mid-freeze cell change). METR flag
   joins #9 as grader-integrity justification; the frozen-verifier ground-truth rule in
   disposable-tasks.md already guards "tests it wrote itself."
+
+---
+
+## 2026-07-13 addendum — Part L measured anchors (delegation-economics / harness-config batch)
+
+Additive, gate-neutral — no wave decision reopened. Full evaluation:
+`research/articles-evaluation-kg-and-adjacent.md` Part L; distilled
+`research/extracts/harness-and-delegation-2026-07.md`. These UPGRADE prior [UNVERIFIED]
+growth-account leads in this digest to `measured-with-method` where the batch supplies data.
+
+### 11. joon-lee (Cognition/Devin): Making Fable Cheaper Than Opus (X, 2026-07-13) — MEASURED
+- 3,000 instrumented sessions on FrontierCode 1.1 (every LLM call parsed) + 40-task
+  trajectory dive. Fable+cheap-sidekick costs LESS than Opus+sidekick ($1.86 vs $2.04) AND
+  scores higher (60.7 vs 54.6) despite Fable being 2x per-token; Fable+sidekick cuts cost 54%
+  vs pure Fable at ~unchanged score. Cost is dominated by lead turns (11.5 vs 26.5), context
+  dragged (545k vs 1,679k tok), and what the lead does NOT do (Fable lead makes zero edits in
+  81% of runs). Constraint-enumerating brief mediates correctness AND cost (O(1) example — 94
+  vs a constraint-dropping hand-impl at 25).
+- **Consumer — this is the MEASURED sibling to #10's [UNVERIFIED] "96% at 46%".** It does not
+  reopen a cell; it strengthens the C1/C2 prior (frontier-lead + cheap-executor ≈ frontier
+  quality at lower cost) with data. PARTIALLY resolves Part K open-Q #2 — a measured member of
+  the class exists, though Anthropic's exact 96%/46% number is still uncited (chase stands).
+- **NEW AXIS (parked, post-freeze):** L.1's cost variance lives in the LEAD/orchestrator's
+  delegation BEHAVIOR (early vs late, brief quality, pull-back rate), not the executor swap
+  our C1-C6 cells vary — not a contradiction with H1 (which holds the orchestrator fixed).
+  Candidate post-freeze wave — swap the orchestrator model, hold the executor, measure
+  brief-quality as the mediator. Sits with the K.3 effort-dial axis (Part K open-Q #3).
+- **Bundle-authoring sharpen:** the constraint-enumerating design-doc brief is now a MEASURED
+  justification for `orchestrator-session-start`'s "write constraints into TASKS.yaml notes"
+  and the J.6 Deviations log — the brief's constraints/edge-cases/done-definition are the
+  load-bearing contract fields (with J.3 never-compress-contract-fields).
+
+### 12. LangChain harness profiles (L.5, MEASURED +10-20pt) + Alex Ker harness guide (L.6)
+- Per-model harness customization (prompt/tool/middleware overrides) is measured to matter
+  (+10-20pt tau2 subset; Terminal-Bench "same model, different harness, very different
+  score"). Independent measured version of #10's "benchmarks are marketing — measure on YOUR
+  harness/cells." Does NOT touch a frozen cell.
+- **Consumer — this plan's epistemics** (own-cell measurement) gains a measured external
+  prior. The per-model-family override-layer adoptable is routed OUT of this plan to
+  `config-transitive-layering` / `pipeline-architect` (proposal
+  `obs-per-model-family-harness-override-layer`) — NOT a transcript-plan change. Cache-aware
+  routing + minimal-repair re-entry routed to `full-loop-orchestration-runtime` (fold-backs
+  `cache-aware-model-routing`, `minimal-repair-freeze-validated-regions`).

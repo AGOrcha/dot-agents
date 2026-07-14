@@ -1,0 +1,8 @@
+schema_version: 1
+id: bilevel-meta-loop-mechanism-generation
+plan_id: full-loop-orchestration-runtime
+task_id: ""
+observation: Bilevel meta-loop (mechanism generation) — PARKED, admission criteria sharpened by ideation-cycle cross-brain audit 2026-07-13 (evidence .agents/active/ideation/2026-07-13-research-forks/evidence/forkA-crossbrain-audit.md). The Bilevel Autoresearch paper (arXiv 2603.23420v2, eval Part M) shows an outer loop autonomously authoring+injecting new mechanisms beats parameter-tuning (~5x), carrier generalizing to skills/rules/prompts/evaluators — the dot-agents artifact model. RATIFIED decision — make NO standing routing change now (do NOT add a mechanism-over-parameter heuristic to knowledge-fold-back — preliminary evidence, would be slogan-level noise and bias triage) and keep autonomy parked. Cite the paper for DIRECTION only (mechanism-change beats parameter-change as a research hypothesis), never as a production rule (n=3, one benchmark, one bilevel step). CORRECTION from the audit — skill-architect + da review is structural + human validation, NOT a runtime safety envelope. Admission criteria to reconsider autonomous generation — (1) replicated cross-task evidence beyond the paper's n=3 single-benchmark result, AND (2) a real runtime envelope, namely fail-closed transactional promotion with automatic rollback (isolate candidate, preserve prior mechanism, failed validation cannot silently mutate active state) PLUS provenance of machine-authored mechanisms PLUS bounded canary/blast-radius. No wave decision reopened.
+classification: small
+routed_to: plan_summary:full-loop-orchestration-runtime
+created_at: "2026-07-14T00:52:39Z"
