@@ -1,0 +1,26 @@
+schema_version: 1
+delegation_id: del-p4-sentinel-wiring-1782133737
+plan_id: loop-discipline-stop-hooks
+task_id: p4-sentinel-wiring
+owner: loop-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-22T13:08:57Z"
+scope:
+    write_scope:
+        - internal/scaffold/home/starter/skills/global/iteration-close/
+        - internal/scaffold/home/starter/skills/global/isp/
+        - internal/scaffold/home/starter/skills/global/loop-worker/
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

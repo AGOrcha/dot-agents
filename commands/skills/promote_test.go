@@ -12,6 +12,16 @@ import (
 	"github.com/AGOrcha/dot-agents/internal/testutil"
 )
 
+// TestMain is a package-wide hermeticity guard: it fails the whole test
+// binary if any test in this package writes into the developer's real
+// ~/.claude/skills or ~/.agents/skills (e.g. a promote/mirror test that
+// resolves os.UserHomeDir() without isolating HOME via t.Setenv first). See
+// testutil.RunPackageTestsWithHomeGuard and
+// .agents/lessons/hermetic-home-for-state-resolving-tests/LESSON.md.
+func TestMain(m *testing.M) {
+	os.Exit(testutil.RunPackageTestsWithHomeGuard(m))
+}
+
 // ── PromoteSkillIn success ────────────────────────────────────────────────────
 
 func TestPromoteSkillIn_ConvergesRepoLocalToManagedSymlink(t *testing.T) {

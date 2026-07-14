@@ -2,7 +2,8 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from 'astro-mermaid';
-import { visit } from 'unist-util-visit';
+import { satteri } from '@astrojs/markdown-satteri';
+import { defineHastPlugin } from 'satteri';
 import { PUBLIC_PAGES, PUBLIC_SLUG_BY_SRC } from './src/public-pages.mjs';
 
 // SITE_BASE / SITE_URL switch between the two supported hosts:
@@ -13,7 +14,7 @@ import { PUBLIC_PAGES, PUBLIC_SLUG_BY_SRC } from './src/public-pages.mjs';
 const DEPLOY_TARGET = process.env.DEPLOY_TARGET ?? 'github-pages';
 const IS_CLOUDFLARE = DEPLOY_TARGET === 'cloudflare';
 
-// Visibility partition (dm3 / D4). The two-pass `npm run build` sets this flag
+// Visibility partition (dm3 / D4). The two-pass `pnpm run build` sets this flag
 // only on the second (internal) pass:
 //   * off → outDir dist/          : PUBLIC only (internal entries aren't loaded)
 //   * on  → outDir dist-internal/ : EVERYTHING (public + internal sections)
@@ -37,46 +38,56 @@ const GITHUB_BLOB = 'https://github.com/AGOrcha/dot-agents/blob/master';
 // loader uses (src/public-pages.mjs) — one source of truth. Resolving to the
 // repo-relative path also fixes the bare-filename 404: a bare `<name>.md` under
 // docs/ no longer loses its `docs/` prefix.
+//
+// Ported to a Sätteri HAST plugin (Astro 6.4+ `markdown.processor` API —
+// Sätteri does not run remark/rehype plugins, see astro.build/blog/astro-640).
+// `ctx.setProperty` is Sätteri's mutation API: the visited node is a readonly
+// snapshot of Rust-arena memory, so direct `node.properties.href = …`
+// assignment (the old rehype-plugin style) is silently dropped.
 function rewriteRelativeLinks() {
-  return (/** @type {import('hast').Root} */ tree) => {
-    visit(tree, 'element', (node) => {
-      if (node.tagName !== 'a' || !node.properties?.href) return;
-      const href = String(node.properties.href);
-      // Skip absolute URLs, mailto, anchors, root-relative paths.
-      if (/^(https?:|mailto:|#|\/)/i.test(href)) return;
+  return defineHastPlugin({
+    name: 'rewrite-relative-links',
+    element: {
+      filter: ['a'],
+      visit(node, ctx) {
+        const href = node.properties?.href;
+        if (typeof href !== 'string' || !href) return;
+        // Skip absolute URLs, mailto, anchors, root-relative paths.
+        if (/^(https?:|mailto:|#|\/)/i.test(href)) return;
 
-      // Split off any #anchor, then resolve the path to a repo-relative form.
-      const hashIdx = href.indexOf('#');
-      const anchor = hashIdx >= 0 ? href.slice(hashIdx) : '';
-      const pathPart = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+        // Split off any #anchor, then resolve the path to a repo-relative form.
+        const hashIdx = href.indexOf('#');
+        const anchor = hashIdx >= 0 ? href.slice(hashIdx) : '';
+        const pathPart = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
 
-      let repoPath = pathPart;
-      if (repoPath.startsWith('./')) {
-        repoPath = `docs/${repoPath.slice(2)}`;
-      } else if (repoPath.startsWith('../')) {
-        repoPath = repoPath.slice(3);
-      } else if (!repoPath.includes('/') && repoPath.endsWith('.md')) {
-        // Bare sibling .md filename on a docs/ page (the 404 bug class). Scoped
-        // to .md so a bare repo-root file (LICENSE, NOTICE) on the README/index
-        // page is NOT wrongly pushed under docs/.
-        repoPath = `docs/${repoPath}`;
-      }
-      // else: already repo-relative (e.g. docs/X.md, .agents/foo, LICENSE) — leave as-is.
+        let repoPath = pathPart;
+        if (repoPath.startsWith('./')) {
+          repoPath = `docs/${repoPath.slice(2)}`;
+        } else if (repoPath.startsWith('../')) {
+          repoPath = repoPath.slice(3);
+        } else if (!repoPath.includes('/') && repoPath.endsWith('.md')) {
+          // Bare sibling .md filename on a docs/ page (the 404 bug class). Scoped
+          // to .md so a bare repo-root file (LICENSE, NOTICE) on the README/index
+          // page is NOT wrongly pushed under docs/.
+          repoPath = `docs/${repoPath}`;
+        }
+        // else: already repo-relative (e.g. docs/X.md, .agents/foo, LICENSE) — leave as-is.
 
-      // Public target → in-site link. Starlight prepends `base`; use a
-      // root-relative path. The `index` page is the site root (`/`).
-      const slug = PUBLIC_SLUG_BY_SRC.get(repoPath);
-      if (slug) {
-        node.properties.href = slug === 'index' ? `/${anchor}` : `/${slug}/${anchor}`;
-        return;
-      }
+        // Public target → in-site link. Starlight prepends `base`; use a
+        // root-relative path. The `index` page is the site root (`/`).
+        const slug = PUBLIC_SLUG_BY_SRC.get(repoPath);
+        if (slug) {
+          ctx.setProperty(node, 'href', slug === 'index' ? `/${anchor}` : `/${slug}/${anchor}`);
+          return;
+        }
 
-      // Non-public relative target → canonical GitHub blob URL.
-      node.properties.href = `${GITHUB_BLOB}/${repoPath}${anchor}`;
-      node.properties.target = '_blank';
-      node.properties.rel = 'noopener';
-    });
-  };
+        // Non-public relative target → canonical GitHub blob URL.
+        ctx.setProperty(node, 'href', `${GITHUB_BLOB}/${repoPath}${anchor}`);
+        ctx.setProperty(node, 'target', '_blank');
+        ctx.setProperty(node, 'rel', 'noopener');
+      },
+    },
+  });
 }
 
 // Public information architecture — four curated sections (D3). Entries are
@@ -165,6 +176,15 @@ export default defineConfig({
     }),
   ],
   markdown: {
-    rehypePlugins: [rewriteRelativeLinks],
+    // Rust-based Sätteri processor (astro.build/blog/astro-640) — faster than
+    // the unified()-default pipeline. Sätteri doesn't run remark/rehype
+    // plugins, so rewriteRelativeLinks is ported above to a Sätteri HAST
+    // plugin; astro-mermaid (>=2.1.0) and @astrojs/starlight both detect and
+    // configure themselves against `markdown.processor.name === 'satteri'`
+    // natively, no porting needed for those two.
+    processor: satteri({
+      features: { directive: true },
+      hastPlugins: [rewriteRelativeLinks],
+    }),
   },
 });

@@ -1,6 +1,6 @@
 # Graph Backend Adapter Contract — Design Spec
 
-**Status:** draft v6.1 (canonical)
+**Status:** active v6.1 (canonical)
 **Written:** 2026-05-09 (proposal v1) → 2026-05-09 v2 → 2026-05-09 v3 graduated to sibling spec → 2026-05-09 v4 → 2026-05-09 v4.1 → 2026-05-11 v5 → 2026-05-19 v6 → v6.1 (this revision)
 **Plan:** [`.agents/workflow/plans/graph-backend-adapter-contract/graph-backend-adapter-contract.plan.md`](../../plans/graph-backend-adapter-contract/graph-backend-adapter-contract.plan.md) — implementation-detail companion (DSL grammar conformance test catalog, lockfile state-machine implementation, namespace token SDK shape, TTRPG grammar-extension decision)
 **Supersedes:** `.agents/proposals/graph-backend-adapter-contract.md` (proposal accepted; this spec is the canonical artifact)

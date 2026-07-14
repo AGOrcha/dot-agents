@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: cj-outputs-exact-prune
+parent_plan_id: config-v2-coherence
+verifier_type: cli-runner
+status: pass
+summary: 'cli-runner: pre-push gates all green (build+vet POSIX+windows, coverage gate >=95% per package, sonar-scanner containerized); branch pushed to org; PR #38 opened against AGOrcha master'
+recorded_at: "2026-06-06T22:06:58Z"
+delegation_id: del-cj-outputs-exact-prune-1780782536
+recorded_by: da workflow verify record
+commands:
+    - git push org (pre-push gates) + gh pr create

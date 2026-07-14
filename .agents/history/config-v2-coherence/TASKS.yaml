@@ -263,3 +263,22 @@ tasks:
       verification_required: true
       notes: Wire the parsed cache_keys primitive into behavior. EffectiveCacheKey and DefaultCacheKey have no non-test callers today; the http/oci fetchers and resolver must consult per-source cache keys and per-kind staleness defaults when computing cache paths and staleness, so cache_keys in .agentsrc.json stops being a silent no-op. See fold-back cache-keys-unconsumed. Depends on cc (the parser, completed).
       app_type: go-cli
+    - id: cl-cache-keys-consume
+      title: Consume cache_keys + per-kind staleness in fetcher/resolver (cc was inert)
+      status: awaiting_owner_review
+      depends_on:
+        - cc-cache-keys-per-source
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/cache_keys.go
+        - internal/config/staleness.go
+        - internal/config/fetcher.go
+        - internal/config/fetcher_http.go
+        - internal/config/fetcher_oci.go
+        - internal/config/resolver.go
+        - internal/config/fetcher_test.go
+        - internal/config/staleness_test.go
+      verification_required: true
+      notes: Wire the parsed cache_keys primitive into behavior. EffectiveCacheKey and DefaultCacheKey have no non-test callers today; the http/oci fetchers and resolver must consult per-source cache keys and per-kind staleness defaults when computing cache paths and staleness, so cache_keys in .agentsrc.json stops being a silent no-op. See fold-back cache-keys-unconsumed. Depends on cc (the parser, completed).
+      app_type: go-cli

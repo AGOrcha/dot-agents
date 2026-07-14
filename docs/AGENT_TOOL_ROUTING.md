@@ -1,71 +1,66 @@
 ---
-title: Agent Tool Routing
-description: When to route work to Claude versus Codex across the agent toolchain.
+title: Agent Model Routing
+description: How OMP routes work across Claude, GPT, and future model families.
 sidebar:
   order: 12
 ---
 
-# Agent tool routing (Claude vs Codex)
+# Agent model routing through OMP
 
-This document records how work is routed between the two agent toolchains used on
-dot-agents: **Claude** (the primary implementation agent) and **Codex** (the
-secondary review agent). It is the concise operational form of the routing
-decision in the agent-ops-hardening design (§3, P3.12); see
-[`.agents/workflow/specs/agent-ops-hardening/design.md`](../.agents/workflow/specs/agent-ops-hardening/design.md)
-§1 and §3 for the source framing and the session-transcript evidence behind it.
+dot-agents uses **OMP as the execution harness** for both Claude- and GPT-family
+models. Model selection and harness selection are separate concerns:
+
+- `stage_profiles.<stage>.<slug>.model` selects a concrete OMP model.
+- `stage_profiles.<stage>.<slug>.model_family` records the semantic family used
+  to enforce reviewer diversity.
+- Choosing a GPT-family model through OMP does **not** invoke the Codex CLI and
+  does not inherit Codex CLI sandbox, writable-root, or permission-whitelist
+  behavior.
+- Codex CLI guidance applies only to legacy or explicit code paths that launch
+  the `codex` binary directly.
+
+This supersedes the older assumption that model-family diversity required
+switching agent harnesses.
+
+## Routing policy
+
+The default balances available capacity with independent review:
+
+- **Claude-family through OMP:** implementation, routine verification, routine
+  review lenses, orchestration, and other high-volume stages.
+- **GPT-family through OMP:** the blocking cross-family adversarial lens and
+  selected independent second-opinion work.
+- **Additional families:** allowed without schema changes. `model_family` is an
+  open identifier; diversity gates compare family identity rather than a closed
+  vendor enum.
+
+Every stage used by the full-loop runtime must resolve a non-empty `model` and
+`model_family`. A blocking diversity gate must use a family different from the
+implementer/routine-review family. The named
+`cross-harness-adversarial` slug is retained for compatibility, but its contract
+is now **cross-model-family under OMP**, not cross-CLI dispatch.
 
 ## Why route at all
 
-The two toolchains have measured, complementary strengths and weaknesses, not
-just preferences:
+Measured review evidence shows that an independent model family catches defects
+that same-family implementation and review can jointly miss. The invariant is
+therefore model-family disagreement, not a particular binary, sandbox, or vendor
+permission model.
 
-- **Codex** showed clean cross-tool resume of rate-limited Claude sessions,
-  impeccable read-only adversarial review (it caught a `sync.go` lock-writer and
-  a `docsaccess/client.go` HTTP-token leak), and native spawn/wait/close staged
-  delegation. Its dominant mechanical tax was its sandbox: it could not write the
-  default Go build cache, producing more than a thousand `GOCACHE=/tmp`
-  workarounds, and rate-limit caps with no failover once killed a pipeline.
-- **Claude** carried the heavy iterative build-test loops in this run, but paid
-  its own environment taxes (the macOS `~/Documents` TCC lock; the Sonar pre-push
-  scanner flaking on `dist/`/`.scannerwork`).
+The historical runs below used Codex CLI as the available GPT-family second
+brain. Their defect-finding evidence remains valid; their mechanical
+Codex-sandbox constraints do not describe GPT-family stages running through OMP.
 
-Routing is therefore about playing to each tool's strength and away from its tax,
-until the environment fixes (agent-ops-hardening P0) remove the taxes — after
-which either tool can take either kind of work.
+## Required blocking gate
 
-## Route to Codex
+- Substantive implementation work receives a read-only, cited adversarial review
+  from a model family different from the implementation family.
+- Any BLOCKER/HIGH finding rejects the task.
+- The gate re-runs after every fix batch.
+- If the configured cross-family model cannot run, the gate blocks explicitly;
+  it does not silently pass or degrade to same-family review.
 
-- **Adversarial / second-opinion review — recommended as a BLOCKING gate on
-  substantive impl work.** Read-only, cited code review where the goal is to find
-  what the implementing agent missed. Codex must stay read-only on these tasks and
-  cite the file and line for every finding. The gate must re-run after every fix
-  batch; catching incomplete fixes on re-review is part of its measured value (see
-  [Cross-harness evidence](#cross-harness-evidence) below).
-- **Cross-tool resume of rate-limited sessions.** When a Claude session hits a
-  rate-limit cap mid-flight, Codex can pick up and continue the work rather than
-  stalling the pipeline.
-- **Bounded, staged delegation.** Well-scoped tasks with explicit write-scopes and
-  a clear stage boundary (impl / verify / review), where Codex's native
-  spawn/wait/close delegation fits.
-
-## Keep on Claude
-
-- **Heavy iterative Go build-test loops.** Tight edit/`go test`/re-edit cycles —
-  the work that depends on a fast, writable local toolchain — stay on Claude
-  while Codex's sandbox cannot write the default Go cache and Claude's own env
-  taxes are being fixed.
-- **Publishing and running the per-file coverage gate.** Even when Codex implements
-  a slice cleanly, Codex's sandbox cannot self-publish (push, open PRs, run the
-  per-file gate tool). Claude handles the land-it step. This is the current sandbox
-  tax, not a capability judgment — route this step to either tool once the tax is
-  removed.
-
-Once the environment taxes are fixed at the source (Codex sandbox `GOCACHE`/
-`GOTMPDIR` writable; the `~/Documents` TCC move; Sonar scanner exclusions), the
-build-test and publish steps are no longer Claude-only — route them to **either**
-tool by availability and load.
-
-## Cross-harness evidence
+## Historical cross-model evidence
 
 This section records dated, first-hand routing evidence. It is the empirical basis
 for the BLOCKING-gate recommendation above.
@@ -112,20 +107,20 @@ corroborating instances of the same pattern.
 
 ### Pattern summary
 
-Green CI plus same-model self-review is not sufficient to catch correctness bugs on
-substantive impl work. Independent cross-model adversarial review (Codex) closes
-the blind spot. The gate must be:
+Green CI plus same-family self-review is not sufficient to catch correctness bugs
+on substantive implementation work. Independent cross-model-family adversarial
+review closes the blind spot. The gate must be:
 
-- **Blocking, not advisory** — the pattern has reproduced across multiple waves and
-  PRs on unrelated features.
+- **Blocking, not advisory** — the pattern reproduced across multiple waves and
+  unrelated features.
 - **Re-run after every fix batch** — incomplete fixes are a real failure mode.
+- **Explicitly routed** — the resolved stage records both concrete OMP model and
+  semantic family.
 
-## Notes
+## Legacy direct-CLI note
 
-- Keep the read-only boundary explicit in any review or plan task brief routed to
-  Codex; front-loading it is one of the brief-template hardening rules in the same
-  design (§3, P2).
-- The adversarial-review gate for substantive impl work is now a **blocking-gate
-  recommendation**, not a soft preference. The environment-tax routing (Codex
-  sandbox / Claude TCC lock) remains conditional and should be revisited when those
-  taxes are removed.
+The dated evidence above came from Codex CLI runs. Direct Codex invocations still
+need explicit read-only scope, sandbox writable-root configuration, and the
+platform's permission model. Those constraints are **not applicable** when OMP
+runs a GPT-family model. Do not branch orchestration logic on `claude` versus
+`codex` binaries for the full-loop runtime.

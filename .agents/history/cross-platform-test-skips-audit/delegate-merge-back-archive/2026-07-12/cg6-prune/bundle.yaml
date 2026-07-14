@@ -1,0 +1,28 @@
+schema_version: 1
+delegation_id: del-cg6-prune-1782133592
+plan_id: cross-platform-test-skips-audit
+task_id: cg6-prune
+owner: loop-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-22T13:06:32Z"
+scope:
+    write_scope:
+        - scripts/coverage-exceptions.txt
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+        - cli-runner
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

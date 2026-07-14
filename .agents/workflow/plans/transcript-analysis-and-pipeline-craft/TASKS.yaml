@@ -1,0 +1,206 @@
+schema_version: 1
+plan_id: transcript-analysis-and-pipeline-craft
+tasks:
+    - id: methodology-rubrics
+      title: Author evidence, falsification-review, and Pareto rubrics + templates (gate for all analysis)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/methodology/
+      verification_required: true
+      notes: 'Hard gate: no transcript collection or scoring before these are user-approved. Artifacts: evidence-rubric.md, falsification-review-rubric.md, pareto-measurement-rubric.md, templates/.'
+      app_type: docs
+    - id: corpus-inventory
+      title: Inventory all local transcript corpora per evidence rubric
+      status: completed
+      depends_on:
+        - methodology-rubrics
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/inventory/
+      verification_required: true
+      notes: OMP/CC/Codex/Cursor/Copilot; rubric §1 fields; OpenCode recorded known-absent; read-only over harness dirs.
+      app_type: docs
+    - id: evidence-extraction
+      title: Extract anchored evidence items from local transcripts
+      status: completed
+      depends_on:
+        - corpus-inventory
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/items/
+      verification_required: true
+      notes: Rubric §2 classes (mechanism/failure/cost/craft/outcome); anchors mandatory; no dedup at collection.
+      app_type: docs
+    - id: prior-analysis-sync
+      title: Fetch + integrate prior analyses (payout/dot-agents branch, provadm/roos)
+      status: completed
+      depends_on:
+        - methodology-rubrics
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/prior/
+      verification_required: true
+      notes: git fetch origin analysis/top-level-basic-from-coordination-state (read-only); provadm-agc feature/analysis-doc toolkit is the methodology spine.
+      app_type: docs
+    - id: synthesis
+      title: Synthesize local + prior evidence into actionable outcomes
+      status: completed
+      depends_on:
+        - evidence-extraction
+        - prior-analysis-sync
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/synthesis/
+      verification_required: true
+      notes: Canonical section order; convergence computed here; each actionable outcome needs >=medium confidence.
+      app_type: docs
+    - id: pareto-historical
+      title: Score historical transcripts into Pareto cells (4-axis)
+      status: completed
+      depends_on:
+        - methodology-rubrics
+        - evidence-extraction
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/pareto/
+      verification_required: true
+      notes: Frozen accuracy proxy; rubric-version-matched; rows.jsonl re-derivable from anchors.
+      app_type: go-cli
+    - id: pareto-live-waves
+      title: 'Live A/B waves: cheap-tier stage swaps on disposable tasks'
+      status: pending
+      depends_on:
+        - pareto-historical
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/pareto/
+        - .agents/workflow/runtime/full-loop/
+      verification_required: true
+      notes: |-
+        Candidates CORRECTED after registry probe (omp models): PRIMARY = claude-sonnet-5 (anthropic, 1M ctx) + gpt-5.6-terra (openai-codex, 372K ctx) per user's original ask - both ARE resolvable; earlier absence claim was a config.yml-role-alias artifact. SECONDARY cheap tier = claude-haiku-4-5 + gpt-5.6-sol (user-picked). Baseline claude-opus-4-8 executor. One stage swap per contrast, snapshot-identical paired runs, >=3 repeats, bounded --max-waves. RULE-7 self-collision RESOLVED (2026-07-12): the cross-family adversarial gate is a review-VALIDITY stage whose family is pinned OPPOSITE the executor family (registered cross-harness-adversarial-claude=claude-opus-4-8/claude for gpt-family executors), EXCLUDED from the measured cell; first-pass executor/verifier attribution, gate-induced re-work + verdict/block-rate reported per-contrast. Deterministic route map: evidence/pareto/live-contrast-lens-map.md. Executable now w/o flip: C1,C2,C5-claude-legs,C6-sol-gate-leg; C3/C4/C5-gpt-legs need the opposite-family flip; C6-haiku-4-5-gate-leg is ILLEGAL (haiku is claude-family, same as the claude C6 executor) — valid only as a cheapened routine verifier/lens slot, never the cross-family gate. PRE-EXECUTION DESIGN GATE CLEARED; live runs remain user-gated (cost).
+        - (fb:evidence-rubric-token-field-trust) RESOLVED 2026-07-12 — graduated into evidence-rubric clause E6 (per-harness token-field-trust table, CC requestId last-entry-wins dedup, mandatory corpus-slice pinning). Ground truth strengthened by devforth mitmproxy capture (API charges once per requestId; research/articles/devforth-cc-usage-overestimates-output-tokens.md). No open decision — apply E6.
+        - (fb:merge-back-deviations-section) RESOLVED 2026-07-12 — Deviations now mandatory in merge-back --integration-notes per the iteration-close skill instruction (.agents/skills/iteration-close/instructions/workflow.md, Merge-back section); explicit 'Deviations — none' when clean. Template-level as planned; schema field deferred unless queries need it.
+        - (fb:c0-null-contrast-gate) RESOLVED (design) 2026-07-12 — C0 (A/A null, opus-4-8 both arms, n>=5) registered as gating step 4a in methodology/pareto-measurement-rubric.md and as the first row of evidence/pareto/live-contrast-lens-map.md; runs FIRST as wave 0 of this task and gates C1-C6 (gate = C0 delta CI vs 3.5 percent volume). Thresholds re-based per historical-hypotheses Erratum 3 (H1 boundary now ±7 percent). Execution rides this task; no mid-wave decision remains.
+        - (fb:disposable-task-substrate) RESOLVED 2026-07-12 — evidence/pareto/disposable-tasks.md authored (definition with 4 qualifying properties; Tier-A historical-task replays from .agents/history with ground-truth landed diffs; Tier-B synthetic calibration controls hard-excluded from frontier cells per O13; empirical cell-matching via C0 profiling; anti-Goodhart non-goals). Wave prep resolves exact task ids per its selection rules.
+        - (fb:external-digest-stat-corrections) RESOLVED 2026-07-12 — digest item 1 corrected in place (slice-pinned dedup ratios, input/output placeholder field-swap fixed, unreconstructable-corpus note) plus devforth mitmproxy corroboration added; historical-hypotheses.md Erratum 3 restates H1 max (6.44 percent full corpus → ±7 percent boundary) and widens T-c1/H2 bands (95-98 percent tokens, 58-69 percent dollars).
+        - (fb:scorer-3-0-0-shadow-burn-in) RESOLVED 2026-07-12 — shadow-scored iters 55-66 under rubric 3.0.0 in a scratch iter-log (canonical 2.1.0 sidecars untouched); 11/12 reconcile within ±0.004, one explainable band change from git-topology drift (iter-66 landed signal). Burn-in PASSED; see evidence/pareto/scorer-3.0.0-shadow-burn-in.md. In-situ validation on wave rows rides C0.
+        - (fb:lens-transfer-trap-test) RESOLVED 2026-07-13 — Tier-B trap-test transfer check added to evidence/pareto/disposable-tasks.md (planted-defect calibration task gates instrument trust when a stage prompt ports to a SECONDARY-tier arm; fail routes to bounded single-section prompt regeneration; O13-compatible, never a frontier row). No wave decision reopened.
+        - (fb:cross-family-lens-autoswap) REDESIGNED 2026-07-13 (user steer + research) — this is a bug / incomplete design, not merely a deferral. Automatic opposite-family lens selection is acceptable, BUT it must key on (a) the MODEL REGISTRY of what is actually available to this user/setup, and (b) EVAL-MEASURED capability and failure-mode COMPLEMENTARITY against the executor — NOT the declared model_family STRING alone. Model capabilities overlap but differ slightly, so 'opposite family' must resolve to the available model whose measured failure mode most complements the executor (GPT-family hallucinate-confident-wrong vs Claude-family refuse/give-up, research context-rot PART 7), scored against the capability eval. Role labels do not create diversity and inter-agent agreement is a diversity-failure signal (research long-horizon-prompting, R5). Sibling of agent-ops-hardening cross-family-gate-not-fail-closed-specialized — both pick a genuinely-diverse adversary from available models by capability and share the fresh-context emulation fallback when no complementary model exists. Anchor research/articles-evaluation-context-engineering-and-foldback-design.md R2/R5. The lens-map operational MUST-pin note stands until this lands.
+      app_type: go-cli
+    - id: craft-extraction
+      title: Extract full-loop pipeline craft into reusable methodology doc
+      status: completed
+      depends_on:
+        - synthesis
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/
+      verification_required: true
+      notes: 'What the OMP full-loop exercise encoded deterministically: slots/waves/fold-back/gates/model-routing; source for the skill.'
+      app_type: docs
+    - id: pipeline-architect-skill
+      title: Build pipeline-architect skill (create/edit/maintain full-loop + custom profiles)
+      status: completed
+      depends_on:
+        - craft-extraction
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/skills/pipeline-architect/
+      verification_required: true
+      notes: Layer-1 (canonical IR) skill; onboards new/custom execution profiles + config; promoted via da skills promote after review.
+      app_type: docs
+    - id: platform-projection-layer
+      title: Config->materialized-pipeline transformer layer (OMP beachhead)
+      status: completed
+      depends_on:
+        - craft-extraction
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+        - commands/workflow/
+        - schemas/
+      verification_required: true
+      notes: Analogous to hook projection per platform; consumes omp-platform-handling proposal; swarm YAMLs become emitted projections not sources.
+      app_type: go-cli
+    - id: cc-workflows-consumer
+      title: Project pipeline to Claude Code dynamic workflows
+      status: completed
+      depends_on:
+        - platform-projection-layer
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/
+        - .claude/workflows/
+      verification_required: true
+      notes: ultracode-wave-engine.mjs already mirrors da config relevance envelope = proven consumer; emit a generated workflow from the same IR.
+      app_type: go-cli
+    - id: falsification-review
+      title: Falsification-first review of all substantive slices
+      status: in_progress
+      depends_on:
+        - synthesis
+        - pipeline-architect-skill
+        - platform-projection-layer
+        - cc-workflows-consumer
+        - pareto-historical
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/reviews/
+      verification_required: true
+      notes: |-
+        Per falsification-review-rubric.md; cross-family blocking gate; zero-refutation reviews returned as not-performed. Covers every substantive slice EXCEPT pareto-live-waves (user-gated; reviewed post-hoc when it runs).
+        - (fb:cross-family-reject-remediation) TERMINAL 2026-07-13 (three blind re-runs). The cross-family gate CONVERGED on all real artifact defects — H7/H9/H11/H12/H13 SURVIVED run3 (arithmetic, cache denominators, superseded-prose, 39-rule 1:1, 26-flag classification all clean). Real findings across runs, all FIXED — H6/H9/H10 (run1 hash-commitment/denominator/craft-prose), H8 VOID-labeling now closed at EVERY consumer (O3, historical x3, synthesis anchors, items.yaml claim+note+confidence, notes.md table+D-table+caveat, source-inventory-omp.md, README, rows flags, frozen-record verification_status), H2 C6-haiku illegal-not-flip across 5 artifacts, H12 craft+skill generation-share alignment. Real code observation ROUTED — H3 cross-family gate not fail-closed for specialized profiles → agent-ops-hardening fold-back cross-family-gate-not-fail-closed-specialized. Remaining refutations DEMOTED with reasons (structural; will not converge without a design change or live data) — H1 (RULE-7 open model_family is documented design, no allowlist), H2-arms (C1-C6 runtime arms are user-gated pre-execution, absent by design), H5 (row status is session-lifecycle cutoff; VOID is a distinct provenance dimension in flags/note/verification_status), H6 (the ~193 whole-row diffs are the intended R4 provenance regen; named DATA fields byte-identical, protected_diffs 0). Inconclusive H4/H10-cache need user-gated live-wave data. Re-run loop STOPPED (diverges on fresh blind hypotheses each pass); every artifact-level defect any run found is fixed or demoted. Final green requires the live-wave data at pareto-live-waves (user-gated) — this record stays OPEN on that trigger. Verdicts preserved — cross-family-review-2026-07-12-reject.json, -2026-07-13-reject-run2.json, and cross-family-review.json (run3).
+      app_type: docs
+    - id: acceptance-closeout
+      title: 'Integration acceptance: OMP + CC projections from same IR, drift/idempotence'
+      status: pending
+      depends_on:
+        - falsification-review
+        - pareto-live-review
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/acceptance/
+      verification_required: true
+      notes: Generate both projections from one canonical IR fixture; re-run = byte-identical (idempotent); profile_drift detects seeded divergence; plan closes only when green.
+      app_type: go-cli
+    - id: pareto-live-review
+      title: Falsification review of live Pareto contrasts
+      status: pending
+      depends_on:
+        - pareto-live-waves
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/reviews/
+      verification_required: true
+      notes: |-
+        Same rubric as falsification-review; CI-backed contrasts only; frontier claims without CI exclusion of dominance reversal are rejected.
+        - (fb:review-gate-deterministic-pre-llm-tier) REDESIGNED 2026-07-13 (user affirms merit + research R3). Adopt a DETERMINISTIC PRE-LLM TIER on the review gate — config/deny-list/size/state/contract checks that are NON-JUDGMENT (known or pre-configurable), fail-closed, where the LLM lens may only TIGHTEN never loosen, so auto-rejectable or auto-passable work never spends review-lens tokens (faster and cheaper). EXTEND the same treatment to a PRE-VERIFIER deterministic gate — deterministic checks we can pre-config (build/format/lint/contract/schema) run before the LLM verifier stage. Harness-enforced not prompt-advisory (research long-horizon-prompting — constraints that must survive optimization pressure live in the harness). Candidate deterministic checks include context-engineering gates from research context-rot PART 10 (context-budget cap near 25-30 percent of advertised window, structure/middle-position exposure). Live-wave data (gate-induced re-work + verdict/block-rate per contrast) still MEASURES the savings and tunes the deny-list, and a proposal routes the concrete tier once the plan can implement. Anchor research/articles-evaluation-context-engineering-and-foldback-design.md R3. Supersedes the assess-whether framing with adopt-both-tiers, data-tuned.
+      app_type: docs
+    - id: craft-reference-stable-relocation
+      title: Relocate tailored full-loop craft reference to docs/ and repoint pipeline-architect skill
+      status: pending
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - docs/full-loop-pipeline-craft.md
+        - .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/
+      verification_required: true
+      notes: FINAL LOCATION DECIDED (no longer deferred) — the pipeline-architect skill cites the plan-scoped .agents/workflow/plans/transcript-analysis-and-pipeline-craft/craft/full-loop-craft.md (SKILL.md lines 3+12, and instructions gotchas/design-pipeline/cost-tuning/verification-review/platform-capabilities line 4); plan archive would move that file to history and break the citation. Two-version split — (1) author a TAILORED operational reference at the tracked, stable home docs/full-loop-pipeline-craft.md (the sections 1-7 rules + how-to-apply, model/registry-agnostic, NO plan-evidence anchors) and repoint all 6 skill citations to it; (2) the plan-scoped craft/full-loop-craft.md STAYS as the evidence-linked design-spec record (keeps historical-hypotheses/rows anchors, archived with the plan). Add a context-budget/compaction section to the docs reference per research/articles-evaluation-context-engineering-and-foldback-design.md R4 (context-rot — effective context under 30 percent of advertised; compaction+file-systems+memory). NOTE the pipeline-architect skill is currently untracked machine state (not in any tracked scaffold) — coordinate with agent-ops-hardening fold-back scaffold-home-skill-sync-mechanism to add pipeline-architect to a tracked scaffold source so the reference and repointed citations are portable to a fresh machine. The Go projector cites 'craft section N' path-free (no repoint needed there).
+      app_type: docs

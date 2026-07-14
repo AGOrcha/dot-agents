@@ -1,69 +1,128 @@
 ---
-name: "Self-Review"
-description: "Review your own changes before committing or creating a pull request"
+name: self-review
+description: "Review your own changes and produce a structured pass/fail verdict before committing or creating a pull request. Use before any git commit of significant changes, before creating a PR, or when invoked as part of iteration-close's review step."
+tier: T2
+contract:
+  reads:
+    - "git diff (staged + unstaged) — the change set under review"
+    - "git status — untracked files that may need review"
+    - "active delegation contract or `workflow status` — to resolve <task_id> when fired inside iteration-close"
+    - "`da kg changes --brief` and `da kg impact <files>` output — Step 0 graph context (see instructions/kg-context.md). Optional: gracefully degrades when the KG bridge is unavailable."
+    - "instructions/{kg-context,code-quality,security,performance,gotchas,output-format}.md — per-step rules"
+    - "eval/{advisory-board,checklist}.md — multi-persona review and final pass/fail gate"
+  writes:
+    - ".agents/active/verification/<task_id>/review-decision.yaml — strict on-disk schema; see instructions/output-format.md for the full field contract."
+  escape_hatches:
+    - "Pause for human (overall_decision = escalate) when: ambiguous architectural intent that is not resolvable from diff + KG context alone; security-sensitive change touching auth, secrets, or external boundaries with no clear precedent; review uncovers behavioral drift from a referenced spec or design doc. Always populate `escalation_reason` with the concrete trigger; the schema rejects empty escalations."
+    - "Skip Step 0 (graceful degradation) when the KG bridge is unavailable. Emit a single-line WARN, capture it into reviewer_notes, and continue — do not abort self-review. See instructions/kg-context.md."
 ---
 
-# Self-Review
+# Self-Review Orchestrator
 
-Review your own changes before committing or creating a pull request.
+This skill orchestrates a structured self-review of your changes. Each step loads only the relevant instruction file to keep context lean.
 
-## When to Use
+The skill's load-bearing deliverable is the structured artifact at
+`.agents/active/verification/<task_id>/review-decision.yaml` (schema
+documented in `instructions/output-format.md`). Your chat-narrative
+summary is secondary — the YAML is what the rest of the workflow
+pipeline (`workflow checkpoint --log-to-iter --role review`) consumes.
+When fired inside iteration-close, the skill runs after `verify record
+--kind test` and before `workflow checkpoint`.
 
-- Before committing significant changes
-- Before creating a pull request
-- After implementing a feature or fix
-- When you want to catch issues before code review
+## Workflow
 
-## Steps
+### Step 0: KG Context
 
-1. **Review the diff**
-   - Run `git diff` to see all changes
-   - Optional graph-backed context: `da kg changes --brief` (same code graph as `kg update` / review skills) when the change touches structural risk
-   - Check each file for unintended modifications
-   - Look for debugging code or console.logs to remove
+Load → `instructions/kg-context.md`
 
-2. **Code quality check**
-   - Are variable and function names clear?
-   - Is the code readable and well-organized?
-   - Are there any code smells or anti-patterns?
-   - Is error handling appropriate?
+- Run `da kg changes --brief` and `da kg impact <changed_files>` against the staged diff.
+- Capture stdout verbatim into the running review narrative; this becomes part of `reviewer_notes` in the final artifact.
+- Degrade gracefully if the KG bridge is unavailable (warn, skip the failed sub-call, proceed).
 
-3. **Logic verification**
-   - Does the code do what it's supposed to?
-   - Are edge cases handled?
-   - Are there any potential bugs or race conditions?
+Per-file review starts with global blast-radius, not in the blind — this
+step exists so later steps can reason about downstream impact instead of
+reviewing each file in isolation.
 
-4. **Test coverage**
-   - Are there tests for new functionality?
-   - Do existing tests still pass?
-   - Are error cases tested?
+### Step 1: Gather the Diff
 
-5. **Documentation**
-   - Are complex sections commented?
-   - Is public API documented?
-   - Are any README updates needed?
+- Run `git diff` (unstaged) and `git diff --cached` (staged) to collect all changes.
+- Run `git status` to identify untracked files that may need review.
+- Note which files changed and categorize them (source, test, config, docs).
 
-6. **Security check**
-   - No hardcoded secrets or credentials?
-   - Input validation present where needed?
-   - No SQL injection or XSS vulnerabilities?
+### Step 2: Code Quality Review
 
-7. **Performance consideration**
-   - Any obvious performance issues?
-   - Unnecessary loops or API calls?
-   - Large data structures handled efficiently?
+Load → `instructions/code-quality.md`
 
-## Checklist
+- Apply code quality rules to every changed file.
+- Flag anything that violates naming, readability, or error handling standards.
 
-- [ ] No debugging code left in
-- [ ] All tests pass
-- [ ] No linting errors
-- [ ] Commit message is clear and descriptive
-- [ ] Changes are focused (single responsibility)
-- [ ] No unrelated changes included
+### Step 3: Security Scan
 
-## Notes
+Load → `instructions/security.md`
 
-- Take your time - catching issues now saves review cycles
-- If unsure about something, ask before committing
-- It's okay to split large changes into multiple commits
+- Run through the security checklist against all changes.
+- Pay extra attention to files handling user input, authentication, or external data.
+
+### Step 4: Performance Check
+
+Load → `instructions/performance.md`
+
+- Evaluate changed code for performance concerns.
+- Only flag issues that are realistic for the scope of the change.
+
+### Step 5: Gotchas Sweep
+
+Load → `instructions/gotchas.md`
+
+- Check for the most commonly missed issues.
+- These are fast to check and frequently caught in real code reviews.
+
+### Step 6: Advisory Board
+
+Load → `eval/advisory-board.md`
+
+- Run the three reviewer personas in parallel against the changes.
+- Collect their independent findings.
+
+### Step 7: Final Checklist
+
+Load → `eval/checklist.md`
+
+- Run the pass/fail checklist.
+- Every item must pass before the review is considered complete.
+- If any item fails, fix it and re-run from the relevant step.
+
+### Step 8: Write the Structured Output
+
+Load → `instructions/output-format.md`
+
+- Produce the `review-decision.yaml` artifact at `.agents/active/verification/<task_id>/review-decision.yaml`.
+- Resolve `<task_id>` from the active iteration context (or synthesize `adhoc-<RFC3339>` for standalone runs).
+- When fired inside iteration-close, prefer `da workflow verify record --kind review` so the CLI validates the file against its schema before persisting.
+- Pack the telemetry envelope (resource_type, outcome, post_invocation, improvement_signals) into `reviewer_notes` as a fenced YAML block — the on-disk schema is `additionalProperties: false` today, so envelope fields are not promoted to top-level keys.
+
+## Output Format
+
+The structured YAML artifact is the load-bearing deliverable. The
+chat narrative below is a human-readable summary; it does **not**
+replace Step 8.
+
+```
+## Self-Review Summary
+
+**Files reviewed:** [count]
+**Issues found:** [count]
+**Severity breakdown:** [critical/warning/info counts]
+
+### Findings
+[List each finding with file, line, severity, and recommendation]
+
+### Checklist Result
+[Pass/Fail with any failing items noted]
+
+### Verdict
+[PASS — ready to commit | NEEDS FIXES — list what to address]
+
+### Artifact
+Wrote review-decision.yaml at .agents/active/verification/<task_id>/
+```

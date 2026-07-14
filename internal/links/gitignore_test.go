@@ -102,6 +102,30 @@ func TestEnsureManagedGitignore_NeverIgnoresCommittedContract(t *testing.T) {
 	}
 }
 
+func TestEnsureManagedGitignore_NeverIgnoredContractSurvivesPatterns(t *testing.T) {
+	root := t.TempDir()
+	// Gitignore GLOBS that would each match a committed-contract file must be
+	// filtered out — the contract holds against patterns, not just exact
+	// literals (BLOCKER 2). A dir-anchored pattern that does NOT match a root
+	// contract file must survive (no false positive).
+	err := links.EnsureManagedGitignore(root, []string{
+		"*.lock", ".agentsrc.*", "/.agentsrc.lock", "**/*.lock", "**/.agentsrc.json",
+		".github/hooks/*.json",
+	})
+	if err != nil {
+		t.Fatalf("EnsureManagedGitignore: %v", err)
+	}
+	section := managedSection(t, readGitignore(t, root))
+	for _, forbidden := range []string{"*.lock", ".agentsrc.*", ".agentsrc.lock", "/.agentsrc.lock", "**/*.lock", "**/.agentsrc.json"} {
+		if strings.Contains(section, "\n"+forbidden+"\n") {
+			t.Errorf("pattern %q would ignore a committed contract file; must be filtered:\n%s", forbidden, section)
+		}
+	}
+	if !strings.Contains(section, ".github/hooks/*.json") {
+		t.Errorf("dir-anchored output pattern must survive (no false positive):\n%s", section)
+	}
+}
+
 func TestEnsureManagedGitignore_ConvergesOnRerun(t *testing.T) {
 	root := t.TempDir()
 	inputs := []string{".cursor/rules", ".claude/", "AGENTS.md"}
@@ -307,5 +331,27 @@ func TestEnsureManagedGitignore_WriteErrorIsPropagated(t *testing.T) {
 
 	if err := links.EnsureManagedGitignore(root, []string{".claude/"}); err == nil {
 		t.Error("expected a write error in a read-only repo root, got nil")
+	}
+}
+
+// TestEnsureManagedGitignore_UnchangedRerunSkipsWrite proves the content guard:
+// a second identical call is a true no-op. The dir is made read-only before the
+// re-run, so ANY write attempt (temp+rename) would fail — the call returning nil
+// proves the guard skipped the write when the rendered block was unchanged.
+func TestEnsureManagedGitignore_UnchangedRerunSkipsWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits do not gate writes the same way on windows")
+	}
+	root := t.TempDir()
+	inputs := []string{".claude/", ".cursor/"}
+	if err := links.EnsureManagedGitignore(root, inputs); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if err := os.Chmod(root, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(root, 0o755)
+	if err := links.EnsureManagedGitignore(root, inputs); err != nil {
+		t.Errorf("identical re-run must be a no-op (unchanged-content guard), got %v", err)
 	}
 }

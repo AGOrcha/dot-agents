@@ -10,9 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -82,6 +84,68 @@ func TestArchiveSinglePlan_RenameWhenNoHistory(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "archived") {
 		t.Error("PLAN.yaml should have status=archived")
+	}
+}
+
+// A plan with a linked spec — the spec is COPIED into the history archive
+// (permanent-record completeness) while the editable copy stays under workflow/specs.
+func TestArchiveSinglePlan_ArchivesLinkedSpec(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "myplan", "completed")
+	specPath := filepath.Join(proj, ".agents", "workflow", "specs", "myplan", "design.md")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("# Spec myplan\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := archiveSinglePlan(proj, "myplan", false, false, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	archived := filepath.Join(proj, ".agents", "history", "myplan", "design.md")
+	data, err := os.ReadFile(archived)
+	if err != nil {
+		t.Fatalf("archived spec should exist: %v", err)
+	}
+	if !strings.Contains(string(data), "# Spec myplan") {
+		t.Errorf("archived spec content wrong: %q", data)
+	}
+	// Editable copy NOT moved (other specs cross-link it by relative path).
+	if _, err := os.Stat(specPath); err != nil {
+		t.Errorf("workflow/specs copy should remain (copy, not move): %v", err)
+	}
+}
+
+func TestArchiveLinkedSpec_DryRunDoesNotCopy(t *testing.T) {
+	proj := t.TempDir()
+	specPath := filepath.Join(proj, ".agents", "workflow", "specs", "myplan", "design.md")
+	if err := os.MkdirAll(filepath.Dir(specPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(specPath, []byte("# Spec myplan\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	dstDir := filepath.Join(proj, ".agents", "history", "myplan")
+	if err := archiveLinkedSpec(proj, "myplan", dstDir, true); err != nil {
+		t.Fatalf("dry-run archive linked spec: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dstDir, workflowDesignFileName)); !os.IsNotExist(err) {
+		t.Fatalf("dry-run should not copy linked spec, stat err = %v", err)
+	}
+}
+
+// A plan with NO linked spec — archive succeeds and creates no design.md.
+func TestArchiveSinglePlan_NoLinkedSpecNoop(t *testing.T) {
+	proj := t.TempDir()
+	setupArchivePlan(t, proj, "nospec", "completed")
+	if err := archiveSinglePlan(proj, "nospec", false, false, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".agents", "history", "nospec", "design.md")); !os.IsNotExist(err) {
+		t.Error("no design.md should be created when there is no linked spec")
 	}
 }
 
@@ -272,6 +336,22 @@ func TestArchiveSinglePlan_DryRun(t *testing.T) {
 	}
 	if strings.Contains(string(data), "status: archived") {
 		t.Error("dry-run should not stamp status=archived")
+	}
+}
+
+func TestStampPlanArchived_SaveError(t *testing.T) {
+	sentinel := errors.New("synthetic plan write failure")
+	withWriteFileStub(t, func(string, []byte, os.FileMode) error {
+		return sentinel
+	})
+
+	plan := &CanonicalPlan{ID: "myplan"}
+	err := stampPlanArchived(t.TempDir(), plan.ID, plan, false)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected wrapped write error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "stamp archived status") {
+		t.Fatalf("expected archive-stamp context, got %v", err)
 	}
 }
 
@@ -1742,7 +1822,7 @@ func TestRunWorkflowTaskUpdate_UpdatesFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/"); err != nil {
+	if err := runWorkflowTaskUpdate("wave-2", "t2", "new title", "fresh notes", "x/, y/", "", ""); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 
@@ -1777,7 +1857,7 @@ func TestRunWorkflowTaskUpdate_PreservesUnsetFields(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", ""); err != nil {
+	if err := runWorkflowTaskUpdate("wave-2", "t1", "", "", "", "", ""); err != nil {
 		t.Fatalf("runWorkflowTaskUpdate: %v", err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "wave-2")
@@ -1794,9 +1874,80 @@ func TestRunWorkflowTaskUpdate_MissingTaskReturnsError(t *testing.T) {
 	addCanonicalPlanFixture(t, repo)
 	chdirRepo(t, repo)
 
-	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "")
+	err := runWorkflowTaskUpdate("wave-2", "nope", "x", "", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("expected missing-task error; got: %v", err)
+	}
+}
+
+// TestRunWorkflowTaskUpdate_DependsOnAndBlocks verifies that --depends-on and
+// --blocks CSVs persist to TASKS.yaml with replace semantics matching `task
+// add`, and that the new depends_on edge is live in the schedule graph
+// without further plumbing.
+func TestRunWorkflowTaskUpdate_DependsOnAndBlocks(t *testing.T) {
+	repo := initWorkflowTestRepo(t)
+	addCanonicalPlanFixture(t, repo)
+	chdirRepo(t, repo)
+
+	if err := runWorkflowTaskAdd(taskAddInputs{
+		PlanID: "wave-2",
+		TaskID: "t4",
+		Title:  "new task with no deps",
+	}); err != nil {
+		t.Fatalf("runWorkflowTaskAdd: %v", err)
+	}
+
+	if err := runWorkflowTaskUpdate("wave-2", "t4", "", "", "", "t1", "t2"); err != nil {
+		t.Fatalf("runWorkflowTaskUpdate: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "wave-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t4Idx := taskIndexByID(tf, "t4")
+	t1Idx := taskIndexByID(tf, "t1")
+	if t4Idx == -1 {
+		t.Fatal("t4 missing after update")
+	}
+	t4 := &tf.Tasks[t4Idx]
+	if len(t4.DependsOn) != 1 || t4.DependsOn[0] != "t1" {
+		t.Errorf("depends_on = %v, want [t1]", t4.DependsOn)
+	}
+	if len(t4.Blocks) != 1 || t4.Blocks[0] != "t2" {
+		t.Errorf("blocks = %v, want [t2]", t4.Blocks)
+	}
+
+	inDegree, adj := buildPlanScheduleGraph(tf)
+	assertScheduleEdge(t, inDegree, adj, t1Idx, t4Idx)
+}
+
+// taskIndexByID returns the index of the task with the given ID in tf.Tasks,
+// or -1 if not present.
+func taskIndexByID(tf *CanonicalTaskFile, id string) int {
+	for i := range tf.Tasks {
+		if tf.Tasks[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+// assertScheduleEdge fails t unless the schedule graph records exactly one
+// incoming edge into dst and adj[src] contains dst — i.e. src → dst is live.
+func assertScheduleEdge(t *testing.T, inDegree []int, adj [][]int, src, dst int) {
+	t.Helper()
+	if inDegree[dst] != 1 {
+		t.Errorf("in-degree of dst = %d, want 1 (edge from src not picked up)", inDegree[dst])
+	}
+	found := false
+	for _, d := range adj[src] {
+		if d == dst {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("adjacency of src = %v, want to contain dst's index %d", adj[src], dst)
 	}
 }
 
@@ -3120,7 +3271,7 @@ func TestRunWorkflowTaskAdd_MissingPlan(t *testing.T) {
 func TestRunWorkflowTaskUpdate_MissingTask(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirForCov(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "")
+	err := runWorkflowTaskUpdate("plan-001", "no-such", "title", "", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -3270,7 +3421,7 @@ func TestRunWorkflowTaskUpdate_SaveErr(t *testing.T) {
 	chdirForCov(t, repo)
 	sentinel := errors.New("yaml boom")
 	withYAMLMarshalStub(t, yamlMarshalErrStub(sentinel))
-	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "")
+	err := runWorkflowTaskUpdate("plan-001", "task-001", "newtitle", "", "", "", "")
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected sentinel, got %v", err)
 	}
@@ -3988,7 +4139,7 @@ func TestRunWorkflowAdvance_CompleteResetsFocus(t *testing.T) {
 func TestRunWorkflowTaskUpdate_UpdatesNotesAndWriteScope(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/"); err != nil {
+	if err := runWorkflowTaskUpdate("plan-001", "task-001", "", "new note", "x/,y/", "", ""); err != nil {
 		t.Fatal(err)
 	}
 	tf, _ := loadCanonicalTasks(repo, "plan-001")
@@ -4426,7 +4577,7 @@ func TestRunWorkflowTaskAdd_PlanMissingTasksFile(t *testing.T) {
 func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "")
+	err := runWorkflowTaskUpdate("plan-001", "ghost-task", "T", "N", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "ghost-task") {
 		t.Fatalf("expected task-not-found, got %v", err)
 	}
@@ -4435,7 +4586,7 @@ func TestRunWorkflowTaskUpdate_TaskNotFound(t *testing.T) {
 func TestRunWorkflowTaskUpdate_PlanMissing(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirRepo(t, repo)
-	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "")
+	err := runWorkflowTaskUpdate("ghost-plan", "task-001", "T", "N", "", "", "")
 	if err == nil {
 		t.Fatal("expected plan-not-found error")
 	}
@@ -4542,5 +4693,111 @@ func TestEligibleOutput_JSONRoundTrip(t *testing.T) {
 	}
 	if len(decoded.EligibleTasks) != 0 {
 		t.Fatalf("decoded mismatch: %+v", decoded)
+	}
+}
+
+// tasksYamlLockTestMutator performs the same load -> mutate -> save shape as
+// runWorkflowTaskUpdate, guarded by the production withTasksLock helper, but
+// deliberately widens the window between load and save with a short sleep.
+// That makes a would-be lost-update race manifest deterministically: without
+// serialization, a second goroutine's load (which starts immediately, since
+// load itself is near-instant) captures the pre-mutation snapshot, and its
+// later save clobbers whatever the first goroutine wrote. Under the lock, the
+// second goroutine's load cannot begin until the first's entire critical
+// section (including the save) has completed and released.
+func tasksYamlLockTestMutator(projectPath, planID, taskID, note string) error {
+	return withTasksLock(projectPath, planID, func() error {
+		tf, err := loadCanonicalTasks(projectPath, planID)
+		if err != nil {
+			return err
+		}
+		time.Sleep(20 * time.Millisecond)
+		found := false
+		for i := range tf.Tasks {
+			if tf.Tasks[i].ID == taskID {
+				tf.Tasks[i].Notes = note
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("task %q not found", taskID)
+		}
+		return saveCanonicalTasks(projectPath, tf)
+	})
+}
+
+// TestTasksYamlLock_ConcurrentUpdatesNoLostUpdate proves withTasksLock closes
+// the loadCanonicalTasks/saveCanonicalTasks lost-update race: two goroutines
+// concurrently mutate DIFFERENT tasks' notes in the SAME plan's TASKS.yaml;
+// without the lock serializing the read-modify-write, one goroutine's save
+// would clobber the other's update (see tasksYamlLockTestMutator). Run with
+// -race: go test ./commands/workflow/... -run TestTasksYamlLock -race -v
+func TestTasksYamlLock_ConcurrentUpdatesNoLostUpdate(t *testing.T) {
+	repo := setupTestProject(t)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := tasksYamlLockTestMutator(repo, "plan-001", "task-001", "note from A"); err != nil {
+			errs <- fmt.Errorf("goroutine A: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := tasksYamlLockTestMutator(repo, "plan-001", "task-002", "note from B"); err != nil {
+			errs <- fmt.Errorf("goroutine B: %w", err)
+		}
+	}()
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent tasks-lock mutation failed: %v", err)
+	}
+
+	tf, err := loadCanonicalTasks(repo, "plan-001")
+	if err != nil {
+		t.Fatalf("reload tasks: %v", err)
+	}
+	var gotA, gotB string
+	for _, task := range tf.Tasks {
+		switch task.ID {
+		case "task-001":
+			gotA = task.Notes
+		case "task-002":
+			gotB = task.Notes
+		}
+	}
+	if gotA != "note from A" {
+		t.Errorf("task-001 update lost — got notes %q, want %q (lock failed to serialize)", gotA, "note from A")
+	}
+	if gotB != "note from B" {
+		t.Errorf("task-002 update lost — got notes %q, want %q (lock failed to serialize)", gotB, "note from B")
+	}
+}
+
+// TestTasksYamlLock_TimeoutWrapsClearError proves that when AcquireFileLock
+// cannot claim the TASKS.yaml lock (held by another caller), withTasksLock
+// surfaces a clear wrapped error instead of proceeding unlocked.
+func TestTasksYamlLock_TimeoutWrapsClearError(t *testing.T) {
+	repo := setupTestProject(t)
+	path := tasksLockPath(repo, "plan-001")
+	release, err := agentslock.AcquireFileLock(path)
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+	t.Cleanup(func() { _ = release() })
+
+	err = withTasksLock(repo, "plan-001", func() error {
+		t.Fatal("fn must not run while the lock is held by another caller")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "TASKS.yaml locked by another process, timed out waiting") {
+		t.Fatalf("expected wrapped timeout message, got: %v", err)
 	}
 }

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: ci-gitignore-autofill
+parent_plan_id: config-v2-coherence
+verifier_type: unit
+status: pass
+summary: 14 cases (positive + negative) pass; gitignore.go per-file coverage 96.4 pct (>=95); internal and commands regression green
+recorded_at: "2026-06-06T21:36:16Z"
+delegation_id: del-ci-gitignore-autofill-1780781063
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/links/ -run TestEnsureManagedGitignore -v

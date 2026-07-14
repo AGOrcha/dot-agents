@@ -4,7 +4,9 @@
 exposed a structural flaw, not just a bug. **Rev 2 (2026-06-07):** incorporates the KG-as-SOT
 direction — the `kg` graph store is the source of truth for the SDD artifacts (not just their status),
 files become projections, and work results correlate to the artifacts/primitives that produced them
-(D1′, D8, §3A); converges this spec with `knowledge-architecture-graph-views`.
+(D1′, D8, §3A); converges this spec with `knowledge-architecture-graph-views`. **Rev 3 (2026-06-07):**
+adds D9 — Jira/Linear upstream tools map at *milestone* grain (our plan/task/stage decomposition stays
+KG-canonical; upstream advances on PR-merge, via subtasks or attribution notes), not per internal step.
 **Relationship:** the coordination-plane sibling of
 [`agorcha-public-vs-internal-and-obs-deploy.md`](../../proposals/agorcha-public-vs-internal-and-obs-deploy.md)
 (that proposal owns the *telemetry/observability* plane; this spec owns the *coordination/work-tracking*
@@ -107,7 +109,9 @@ Pluggable backends, **scope-configured** (org/team/project via config-v2):
 - **D6 — Two integration layers (the two ideas).** (a) A **generic PM-upstream adapter** (Jira/Linear)
   mapping `Plan→epic`, `Task→issue`, status→workflow-state, with custom fields for write_scope /
   verifier_sequence / depends_on. (b) The **native CF DO backend** for teams without a PM tool. Both
-  behind the same `WorkStore`. Multi-upstream fan-out (Jira *and* CF DO) is deferred (§6).
+  behind the same `WorkStore`. Multi-upstream fan-out (Jira *and* CF DO) is deferred (§6). The
+  `Plan→epic` / `Task→issue` 1:1 mapping here is the *fine-grained* option; **D9 makes milestone-grain
+  the default** (our task/stage churn stays in the KG; upstream advances on PR-merge, not per step).
 - **D7 — CLI surface.** `da workflow …` reads/writes through `WorkStore` instead of raw YAML;
   `da config … work_tracking.backend=<local|kg|cloudflare-do|jira|linear>` selects it per scope (a new
   config-v2 layer, org→team→project overridable); `da service run [-d]` runs the daemon. Backend
@@ -120,6 +124,23 @@ Pluggable backends, **scope-configured** (org/team/project via config-v2):
   `execution_profile`). Absent any declaration the backend is `local` (today's behaviour); any *shared*
   SOT — the thing that makes cross-worktree status atomic and cross-artifact correlation possible — is
   opt-in by scope, so two projects never silently share or split a graph.
+- **D9 — Upstream PM tools (Jira/Linear) map at MILESTONE grain, not internal-task grain.** A
+  company's ticket is a **coarse** unit of work — a whole story/feature — and teams want "the ticket's
+  work done" as one deliverable, not their board churned by our internal loop. So the `Plan→epic` /
+  `Task→issue` 1:1 mapping in D6 is only the *fine-grained* option; the **default is coarser** and
+  scope-selectable:
+  - **Our decomposition lives in the KG.** The plan + tasks (how *we* break the ticket's work down) and
+    all per-stage / in-flight / awaiting-review status are KG-canonical (D1′). They are not pushed as
+    upstream workflow-state transitions.
+  - **Upstream representation is scope-configurable** to the team's process: either map our tasks → the
+    ticket's native **subtasks** (when the team uses them), or keep tasks KG-only and attach a
+    **note / attribution link** on the ticket pointing back at the KG plan — no upstream state mutation
+    per internal step.
+  - **Upstream state is debounced to coarse milestones.** The upstream ticket advances (e.g.
+    `In Progress → In Review / Done`) only on a **milestone event — primarily the PR merge** — never on
+    every internal in-flight / awaiting-review / per-stage transition. Internal churn stays in the KG;
+    only milestone events propagate upstream, keeping the company's board stable while the KG drives the
+    loop. (Inbound: an upstream ticket close/reopen is a milestone the daemon reconciles into KG state.)
 
 ## 3A. Knowledge-graph SOT: typed views + cross-artifact correlation
 
@@ -230,8 +251,12 @@ agent's side of the projection.
   before the transition lands (TTL lease? compare-and-set in the backend?).
 - **Conflict resolution per field** — status (backend-wins) vs content (local-wins) is the starting
   rule; needs precise field ownership + a merge story for concurrent edits.
-- **Mapping fidelity** — canonical `Task` ↔ Jira/Linear issue: write_scope, verifier_sequence,
-  cross-plan `depends_on` as custom fields vs links; round-trip without loss.
+- **Mapping fidelity** — *granularity resolved by D9* (milestone grain; tasks → subtasks OR KG-only +
+  attribution; upstream debounced to PR-merge). Remaining: for the fine-grained option, canonical
+  `Task` ↔ Jira/Linear issue field mapping (write_scope, verifier_sequence, cross-plan `depends_on` as
+  custom fields vs links; round-trip without loss); and for the milestone option, the exact
+  milestone→workflow-state map per team + handling **multiple PRs per ticket** (which merge advances
+  the ticket?) and an **upstream reopen** racing in-flight KG work.
 - **Multi-upstream** — sync to >1 backend (e.g. Jira for humans + CF DO for the engine)? Or one
   primary + read-only mirrors?
 - **Git vs backend double-tracking** — *resolved by D1′*: prose git-canonical, structure+state
@@ -278,3 +303,78 @@ agent's side of the projection.
   node type that result nodes correlate against (§3A); cleaner primitives ⇒ a cleaner feedback graph.
 - **Motivating failure** — the wave-engine re-dispatch storm (5×p1c) is the canonical regression test
   for done-criterion #2.
+
+## 9. Amendment (2026-07-11): the `git-ref` backend + read-from-master shim
+
+**Provenance.** kg-ideate run on proposal `.agents/proposals/read-task-state-from-master-source.md`
+(owner ask: "read task state from a master source"). Phase-1 briefing: KG has no SDD
+decision nodes for this topic yet (code-graph only), so this grounds in §1–§8 above +
+lessons `worktree-isolation-defeats-status-tracking`, `stale-local-master-ref`,
+`stale-local-checkout-mass-drift`, `single-source-of-truth-across-specs-and-plans`.
+This section **adds** a backend; it does not revise D1–D8.
+
+The §2 backend ladder jumps from `local` (per-worktree files, **no** shared SOT) straight
+to `kg` (needs the `da service` daemon + graph store). That gap is the common case: a team
+wants cross-worktree **atomic status** (the D2/D5 re-dispatch fix) without standing up the
+KG/DO daemon. A **git-native shared SOT** fills it.
+
+- **D9 — `git-ref` WorkStore backend (git-native shared SOT).** Coordination state lives on
+  a dedicated ref — `refs/agents/state` (configurable) — **orthogonal to the code branch**:
+  worktrees on `feature/x`, `feature/y`, or detached HEAD all resolve status against the one
+  ref. **Read:** via git (`git cat-file`/`show <ref>:<path>`), or a single shared linked
+  worktree of the ref that all agents read — this is D2 ("status reads resolve against the
+  backend, not the per-worktree YAML") in pure git. **Write:** a transition commits the
+  changed state file(s) to the ref via atomic compare-and-swap (`git update-ref <ref> <new>
+  <old>`, retry-on-mismatch) — the interprocess-safe RMW that today's `agentslock` only
+  half-covers (only `plan_task.go` locks; `delegation.go`/`contract.go`/`eligible_accounting.go`
+  don't), now serialized at the ref. **Conflict granularity:** split status into **per-task
+  state files** under the ref so two workers transitioning *different* tasks never hit a
+  line-level `TASKS.yaml` conflict (this also realizes D5's per-task lease/claim); the
+  ref-level CAS-retry loop is the fallback. Rides the same `WorkStore` interface (D3) and the
+  same D8 scope ladder — the backend value becomes
+  `work_tracking.backend = local | git-ref | kg | cloudflare-do | jira | linear`. **This is
+  the sane default upgrade from `local`:** no daemon, no external service, works offline (local
+  ref is the degenerate SOT), and a team graduates `local → git-ref → kg` without changing the
+  agent-facing file interface.
+
+- **D10 — the state ref is NOT merged into the default (code) branch (answers the sync question).**
+  It is a **parallel lineage** (like `refs/notes/*`), never an ancestor/descendant of `main`.
+  Merging it into `main` would re-entangle the two planes D1 separates — pollute code history
+  with status churn and force merges between two unrelated trees. What *does* sync:
+  - **ref ↔ remote:** push/fetch `refs/agents/state` to/from `origin` so every clone/host shares
+    one authority (`git push origin refs/agents/state`, a configured refspec). This is
+    "replicate the ref," not "merge the ref into a branch."
+  - **cross-worktree on one host:** nothing to sync — linked worktrees share the same object
+    store + refs, so all worktrees see the ref natively (one ref, many worktrees).
+  - **optional one-way audit snapshot:** if a human-readable copy in the code tree is wanted
+    (D1′: "committed YAML is a periodic snapshot for audit, never the authority"), project the
+    ref → a periodic snapshot commit/export on `main` — **one-way, never a merge back**; the ref
+    stays the authority. This resolves §6's "Git vs backend double-tracking" for `git-ref`.
+
+- **§3B compliance.** The git-ref backend still **projects into a readable file path** (a shared
+  linked worktree of the state ref, or a read-through checkout into `.agents/workflow/`), so an
+  agent keeps reading/editing a plain file with zero new semantics. The ref, the CAS write, and
+  the remote sync are **system-side** (D4-style reconciliation, but git instead of a daemon) —
+  the projection remains the agent's interface, honoring §3B's net rule.
+
+- **Near-term read-from-master shim (ship first).** Before the full `WorkStore`/git-ref backend
+  lands, add `work_tracking.read_from = worktree|master`: when `master`, `loadCanonicalTasks`
+  (`commands/workflow/plan_task.go`) and the scout's eligibility/next read resolve `TASKS.yaml`
+  from the canonical ref / `origin/<default-branch>` instead of the per-worktree working copy;
+  writes land as today. Read-side-only, but it kills the re-dispatch storm (done-criterion #2's
+  motivating 5×p1c failure) at the cost of one `git show`-backed read path — worth doing
+  regardless of the full backend.
+
+- **Resolves/re-scopes the commit-scope thread.** With coordination state on its own ref, task
+  state is no longer committed into **code** branches at all — the whole-store-vs-task-scoped
+  commit problem (`obs-da-workflow-commit-scope-safety.md`; payout `worker-bundle-authoring`
+  tasks `commit-1-task-pathset`/`commit-2-cli-scoped-mode`) largely evaporates. Those tasks
+  should be re-scoped as "write coordination state to the state ref," not "scope the code-branch
+  commit." Recorded so the two planes get separate lineages.
+
+**Added open question (§6):** CAS contention granularity under high fan-out — per-task state
+files (preferred) vs ref-level CAS-retry — and whether the shared linked-worktree projection or
+a read-through checkout is the cleaner §3B-compliant read path. Not blocking the read-from-master
+shim.
+
+**Execution:** plan `git-ref-work-backend` (dot-agents) carries the tasks; see its `.plan.md`.

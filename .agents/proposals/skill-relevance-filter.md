@@ -1,6 +1,6 @@
 # Design: `config relevance` — workflow execution profiles (config-v2-native)
 
-**Status:** proposal (project-local design artifact; not yet graduated to a spec).
+**Status:** IMPLEMENTED 2026-06-08 — shipped as `internal/config/execution_profile.go` (relevance/topology/lenses facets) + `da config relevance` / `relevance recompute`. Was: proposal (not yet graduated to a spec).
 **Depends on:** `config-distribution-model` §15 (the v2 coherence model — scopes / sources /
 units / lock). This rides on the §15 units model as mergeable layers, not a parallel mechanism.
 **Feeds on:** `r1-outcome-scoring` (iter-log + `da score` telemetry), `r1-5-hook-enforcement-telemetry`.

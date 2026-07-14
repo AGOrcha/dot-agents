@@ -34,26 +34,39 @@ The four-tier artifact model (spec → plan → tasks → history) governs all o
 ## Tiered composition
 
 `kg-ideate` is a **T2 compound orchestrator**. It does not inline the phase logic; it
-**dispatches in order** to four **T1 molecule** skills, each independently invocable
-and separately authored (the `calls:` list above). Composition is declared, not
-discovered at runtime. Dispatch depth is compound → molecule → atom = **2 hops** —
-within the reliable bound and honoring "push composition into the skill."
+**dispatches in order** to four **T1 molecule** skills (the `calls:` list above).
+Composition is declared, not discovered at runtime. Dispatch depth is compound → molecule
+→ atom = **2 hops** — within the reliable bound and honoring "push composition into the
+skill."
 
-| Phase | Molecule | Tier | Owns | Verifier |
-|-------|----------|------|------|----------|
-| 1 | `kg-brief` | molecule | KG/research/lessons traversal → the shared briefing block | batch |
-| 2 | `spec-scaffold` | molecule | briefing → decisions/open-questions → `design.md` | batch |
-| 3 | `plan-scaffold` | molecule | spec → tasks/write-scopes/dep-order → PLAN/TASKS | batch |
-| 4 | `staged-execution-handoff` | molecule | spec+plan → fanout/ISP staged execution | batch |
+**Discoverability is split by design.** The skill loader scans each `skills/<scope>/`
+directory ONE level deep, so only a top-level directory is a discoverable, independently
+invocable skill — a molecule nested a second level under `kg-ideate/` is not. Two
+molecules genuinely need standalone invocation and live as top-level `skills/global/`
+siblings of `kg-ideate` for that reason: `spec-scaffold` (invoke when a briefing already
+exists) and `plan-scaffold` (invoke when a spec is already stable). The other two,
+`kg-brief` and `staged-execution-handoff`, are compound-only — they stay nested under
+`kg-ideate/` and are dispatched only as a step of this orchestrator's own flow; they are
+deliberately not independently discoverable.
 
-Each molecule's step-by-step body is authored in its own sibling `SKILL.md`; the
-orchestrator's own logic is only: brief → (spec ⇄ plan, per the D5 concurrency fork
-below) → handoff, passing the shared briefing/spec/plan artifacts between molecules. A
-molecule may be invoked standalone (e.g. `spec-scaffold` when a briefing already exists,
-`plan-scaffold` when a spec is stable) — the orchestrator is the convenience path over
-reusable primitives, not the only entry point.
+| Phase | Molecule | Tier | Owns | Verifier | Standalone? |
+|-------|----------|------|------|----------|-------------|
+| 1 | `kg-brief` | molecule | KG/research/lessons traversal → the shared briefing block | batch | No — nested under `kg-ideate/`, compound-only |
+| 2 | `spec-scaffold` | molecule | briefing → decisions/open-questions → `design.md` | batch | Yes — top-level `skills/global/spec-scaffold/` |
+| 3 | `plan-scaffold` | molecule | spec → tasks/write-scopes/dep-order → PLAN/TASKS | batch | Yes — top-level `skills/global/plan-scaffold/` |
+| 4 | `staged-execution-handoff` | molecule | spec+plan → fanout/ISP staged execution | batch | No — nested under `kg-ideate/`, compound-only |
+
+`kg-brief` and `staged-execution-handoff`'s step-by-step bodies are authored in their own
+`SKILL.md` nested under `kg-ideate/`. `spec-scaffold` and `plan-scaffold`'s bodies live in
+top-level sibling skill directories, so they can be invoked directly — the orchestrator is
+the convenience path over those two reusable primitives, not their only entry point. The
+orchestrator's own logic is only: brief → (spec ⇄ plan, per the D5 concurrency fork below)
+→ handoff, passing the shared briefing/spec/plan artifacts between molecules.
 
 ## Orchestration flow
+
+Before dispatching Phase 1, review common failure points across the whole pipeline.
+Load → `instructions/gotchas.md`
 
 ### Phase 1 — Briefing Producer → `kg-brief`
 
@@ -73,7 +86,8 @@ conditional per `kg-brief`'s kg-queries.md preflight), done criteria draft, and 
 `.agents/workflow/specs/<id>/design.md`. Canonical spec root is always
 `.agents/workflow/specs/` — never the bare `workflow/specs/` path.
 
-See `spec-scaffold/SKILL.md` for the full molecule workflow (steps 5–9).
+See `[[spec-scaffold]]` (top-level `skills/global/spec-scaffold/SKILL.md`) for the full
+molecule workflow (steps 5–9).
 
 ### Phase 3 — Plan Scaffolding → `plan-scaffold` (spec⇄plan concurrency fork)
 
@@ -91,9 +105,10 @@ Before dispatching to `plan-scaffold`, decide the concurrency mode per the
 
 The chosen mode and rationale are passed to `plan-scaffold` and recorded in plan notes.
 
-See `plan-scaffold/SKILL.md` for the full molecule workflow (steps 10–14: concurrency
-decision, task breakdown, write-scope derivation from Phase 1 impact radius,
-verification strategy, plan authoring via `da workflow plan create <id>`).
+See `[[plan-scaffold]]` (top-level `skills/global/plan-scaffold/SKILL.md`) for the full
+molecule workflow (steps 10–14: concurrency decision, task breakdown, write-scope
+derivation from Phase 1 impact radius, verification strategy, plan authoring via
+`da workflow plan create <id>`).
 
 ### Phase 4 — Execution Handoff → `staged-execution-handoff`
 

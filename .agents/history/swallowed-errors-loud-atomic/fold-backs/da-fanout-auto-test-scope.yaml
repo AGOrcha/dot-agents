@@ -1,0 +1,8 @@
+schema_version: 1
+id: da-fanout-auto-test-scope
+plan_id: swallowed-errors-loud-atomic
+task_id: ""
+observation: da workflow fanout --write-scope does not auto-include the target's *_test.go, so a loop-worker's regression tests fall outside the bounded scope and the contract+bundle must be patched mid-flight (hit on se3 and every code slice). Expand Go write_scope to include sibling _test.go, or add --with-tests, consistent with the existing TDD gate.
+classification: proposal
+routed_to: proposal:obs-da-fanout-auto-test-scope.md
+created_at: "2026-07-09T03:00:53Z"

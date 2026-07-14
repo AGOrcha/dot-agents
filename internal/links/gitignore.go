@@ -28,6 +28,7 @@ package links
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -63,6 +64,31 @@ var neverIgnored = map[string]bool{
 	".agentsrc.lock": true,
 }
 
+// matchesNeverIgnored reports whether a candidate managed-block entry would
+// exclude a committed-contract file (neverIgnored) — not only its exact literal
+// spelling but any gitignore pattern that matches it (e.g. "*.lock",
+// ".agentsrc.*", "/.agentsrc.lock"). path.Match uses "/" semantics, so a
+// dir-anchored entry like ".github/hooks/*.json" correctly does NOT match a
+// root contract file, while an unanchored "*.lock" does. The managed block must
+// never make the lock or manifest invisible to git, whatever a caller passes.
+func matchesNeverIgnored(entry string) bool {
+	cand := strings.TrimSuffix(strings.TrimPrefix(entry, "/"), "/")
+	// gitignore "**/" matches zero-or-more leading dirs, so "**/*.lock" ignores
+	// a root file too; path.Match has no "**" semantics, so strip leading "**/".
+	for strings.HasPrefix(cand, "**/") {
+		cand = cand[3:]
+	}
+	if neverIgnored[cand] {
+		return true
+	}
+	for contract := range neverIgnored {
+		if ok, _ := path.Match(cand, contract); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // EnsureManagedGitignore writes the idempotent da-owned block into the
 // consuming project's `.gitignore` (rooted at repoRoot) so every materialized
 // output in ignorePaths — projected links, generated platform configs,
@@ -87,6 +113,13 @@ func EnsureManagedGitignore(repoRoot string, ignorePaths []string) error {
 	}
 	outside := stripManagedGitignoreBlock(existing)
 	next := joinManagedGitignore(outside, renderManagedGitignoreBlock(ignorePaths))
+	// Skip the write when the rendered result is byte-identical to what is
+	// already on disk: a `da refresh` where the managed section did not change
+	// must be a true no-op (no mtime churn, no spurious VCS diff), not just a
+	// convergent rewrite.
+	if next == existing {
+		return nil
+	}
 	if err := fsops.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("links: gitignore auto-fill: mkdir %s: %w", filepath.Dir(path), err)
 	}
@@ -157,7 +190,7 @@ func normalizeIgnoreEntries(paths []string) []string {
 		if norm == "" || seen[norm] {
 			continue
 		}
-		if neverIgnored[strings.TrimSuffix(norm, "/")] {
+		if matchesNeverIgnored(norm) {
 			continue
 		}
 		seen[norm] = true

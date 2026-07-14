@@ -652,15 +652,21 @@ func (r *PromptFileRef) UnmarshalJSON(data []byte) error {
 }
 
 // StageProfile is one named entry in an AgentsRC.StageProfiles stage map
-// (executor | verifier | reviewer | orchestrator). A profile is a label for
-// display plus a base-first ordered prompt_files composition. The same type
-// serves every stage — the stage is the outer map key — so the four agentic
-// stages are uniform, composable primitives. PromptFiles is source-aware (see
-// PromptFileRef) so an org layer can pin a prompt to a remote config source
-// while a repo keeps the legacy local string form.
+// (executor | verifier | reviewer | orchestrator). A profile is a label,
+// explicit OMP model route, and base-first ordered prompt_files composition.
+// The same type serves every stage — the stage is the outer map key — so the
+// four agentic stages are uniform, composable primitives. PromptFiles is
+// source-aware (see PromptFileRef) so an org layer can pin a prompt to a remote
+// config source while a repo keeps the legacy local string form.
 type StageProfile struct {
 	// Label is the human-readable profile name shown in fanout/explain output.
 	Label string `json:"label,omitempty"`
+	// Model is the concrete OMP model identifier used to run this stage.
+	Model string `json:"model,omitempty"`
+	// ModelFamily is the semantic family used for cross-family diversity gates.
+	// It is intentionally open-ended; diversity requires inequality, not a
+	// closed vendor list.
+	ModelFamily string `json:"model_family,omitempty"`
 	// PromptFiles is the base-first ordered prompt composition for the profile.
 	PromptFiles []PromptFileRef `json:"prompt_files,omitempty"`
 	// PreconditionPolicy names the verifier precondition policy (a key in the
@@ -979,6 +985,18 @@ func AppendUnique(slice []string, s string) []string {
 // silently degrading to an empty/zero manifest. Git origin lookup
 // (DeriveRepoIDFromGit) keeps its own documented "" fallback per spec §5.3
 // and is not part of this aggregation.
+//
+// Every scan below is PROJECT-SCOPE ONLY. A "global" scoped resource
+// (skills/agents/rules/hooks/mcp/settings living under
+// ~/.agents/<bucket>/global/) auto-resolves at the user level for every
+// project via each platform adapter's scopedNames(project) = [project,
+// "global"] link pass (internal/platform/resources.go) — it materializes to
+// ~/.claude (or the platform-equivalent user home) regardless of whether any
+// project declares it. Recording it in a project's committed .agentsrc.json
+// would therefore be redundant at best and, worse, goes stale the moment the
+// user's global set changes on another machine that lacks it. Declaring a
+// project-scope resource is the only thing a project manifest can
+// meaningfully own.
 func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	agentsHome := AgentsHome()
 
@@ -994,7 +1012,7 @@ func GenerateAgentsRC(projectName, projectPath string) (*AgentsRC, error) {
 	// blank rather than fabricated so `da doctor` can warn (p2+ scope).
 	rc.RepoID = DeriveRepoIDFromGit(projectPath)
 
-	scopes := []string{"global", projectName}
+	scopes := []string{projectName}
 
 	var errs []error
 
@@ -1108,6 +1126,8 @@ func cloneStageProfiles(m map[string]map[string]StageProfile) map[string]map[str
 		for slug, p := range profiles {
 			inner[slug] = StageProfile{
 				Label:              p.Label,
+				Model:              p.Model,
+				ModelFamily:        p.ModelFamily,
 				PromptFiles:        append([]PromptFileRef(nil), p.PromptFiles...),
 				PreconditionPolicy: p.PreconditionPolicy,
 			}
@@ -1253,31 +1273,28 @@ func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerF
 }
 
 // detectHookEvents reads the project claude-code.json and returns a
-// StringsOrBool listing hook event names that have at least one entry. Real
-// I/O errors from either underlying check are aggregated and returned so a
+// StringsOrBool listing hook event names that have at least one entry.
+// PROJECT-SCOPE ONLY — see the GenerateAgentsRC doc comment: a global hook
+// bundle/settings file auto-resolves to every project via each platform
+// adapter's scopedNames(project) = [project, "global"] link pass regardless
+// of manifest declaration, so folding "global" in here would only make the
+// generated manifest misrepresent global state as project-owned. Real I/O
+// errors from either underlying check are aggregated and returned so a
 // chmod'd hooks or settings scope directory surfaces as a failure instead of
 // "no hooks configured".
 func detectHookEvents(agentsHome, projectName string) (StringsOrBool, error) {
 	var errs []error
-	for _, scope := range []string{projectName, "global"} {
-		hasYAML, err := hasYAMLHooks(filepath.Join(agentsHome, "hooks", scope))
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if hasYAML {
-			return StringsOrBool{All: true}, errors.Join(errs...)
-		}
+	hasYAML, err := hasYAMLHooks(filepath.Join(agentsHome, "hooks", projectName))
+	if err != nil {
+		errs = append(errs, err)
+	} else if hasYAML {
+		return StringsOrBool{All: true}, errors.Join(errs...)
 	}
-	for _, scope := range []string{projectName, "global"} {
-		result, err := detectSettingsHookEvents(agentsHome, scope)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if result.IsEnabled() {
-			return result, errors.Join(errs...)
-		}
+	result, err := detectSettingsHookEvents(agentsHome, projectName)
+	if err != nil {
+		errs = append(errs, err)
+	} else if result.IsEnabled() {
+		return result, errors.Join(errs...)
 	}
 	return StringsOrBool{}, errors.Join(errs...)
 }
@@ -1341,21 +1358,13 @@ func detectSettingsHookEvents(agentsHome, scope string) (StringsOrBool, error) {
 	return StringsOrBool{Names: hookEvents}, nil
 }
 
-// detectMCPServers scans MCP config files for the project and global scopes
-// and returns a StringsOrBool listing named server entries.
+// detectMCPServers scans the project-scope MCP config file and returns a
+// StringsOrBool listing named server entries. PROJECT-SCOPE ONLY — see the
+// GenerateAgentsRC doc comment: a global MCP server config auto-resolves to
+// every project via scopedNames(project) = [project, "global"] regardless of
+// manifest declaration.
 func detectMCPServers(agentsHome, projectName string) (StringsOrBool, error) {
-	var errs []error
-	for _, scope := range []string{projectName, "global"} {
-		result, err := readMCPScope(agentsHome, scope)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if result.IsEnabled() {
-			return result, errors.Join(errs...)
-		}
-	}
-	return StringsOrBool{}, errors.Join(errs...)
+	return readMCPScope(agentsHome, projectName)
 }
 
 // readMCPScope tries claude.json, mcp.json, then .mcp.json for a single scope
@@ -1398,37 +1407,35 @@ func readMCPScope(agentsHome, scope string) (StringsOrBool, error) {
 }
 
 // detectPlatformSettings returns true if a cursor.json settings file exists
-// for the project or global scope.
+// for the project scope. PROJECT-SCOPE ONLY — see the GenerateAgentsRC doc
+// comment: a global cursor.json auto-resolves to every project via
+// scopedNames(project) = [project, "global"] regardless of manifest
+// declaration.
 func detectPlatformSettings(agentsHome, projectName string) (bool, error) {
-	var errs []error
-	for _, scope := range []string{projectName, "global"} {
-		_, found, err := fsops.StatAllowMissing(filepath.Join(agentsHome, "settings", scope, "cursor.json"))
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		if found {
-			return true, errors.Join(errs...)
-		}
-	}
-	return false, errors.Join(errs...)
+	_, found, err := fsops.StatAllowMissing(filepath.Join(agentsHome, "settings", projectName, "cursor.json"))
+	return found, err
 }
 
+// detectRuleScopes returns ["project"] when the project has at least one
+// project-scoped rule file, else nil. PROJECT-SCOPE ONLY — see the
+// GenerateAgentsRC doc comment: a global rule file auto-resolves to every
+// project via scopedNames(project) = [project, "global"] regardless of
+// manifest declaration, so it is never folded in here (the prior
+// unconditional "global" entry didn't even check the global file existed).
 func detectRuleScopes(agentsHome, projectName string) ([]string, error) {
-	scopes := []string{"global"}
 	projectRulesDir := filepath.Join(agentsHome, "rules", projectName)
 	entries, found, err := fsops.ReadDirAllowMissing(projectRulesDir)
 	if err != nil {
 		return nil, err
 	}
 	if !found {
-		return scopes, nil
+		return nil, nil
 	}
 	for _, entry := range entries {
 		ext := filepath.Ext(entry.Name())
 		if ext == ".md" || ext == ".mdc" || ext == ".txt" {
-			return append(scopes, "project"), nil
+			return []string{"project"}, nil
 		}
 	}
-	return scopes, nil
+	return nil, nil
 }

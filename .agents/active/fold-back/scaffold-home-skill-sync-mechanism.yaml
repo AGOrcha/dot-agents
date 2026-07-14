@@ -1,0 +1,8 @@
+schema_version: 1
+id: scaffold-home-skill-sync-mechanism
+plan_id: agent-ops-hardening
+task_id: ""
+observation: OPEN (e2e pipeline audit 2026-07-13) — no CLI step syncs or drift-detects internal/scaffold/home/starter/skills/ vs an already-onboarded ~/.agents/skills/ tree; da refresh only re-links. Consequences found — the completed kg-ideate family invisible on this machine; 7 dot-agents-namespace skill copies stale vs global (isp was missing the REQUIRED stop-gate sentinel step); skill-architect missing the landed provider-pluggable scripts; kg-brief forked bidirectionally. All synced manually today. Wanted — a refresh-time (or status --audit) scaffold↔home content-digest check plus a sync verb; ALSO a promote-time divergence warning when ~/.agents/<bucket>/global/<name> exists alongside the project-scoped copy (internal/projectsync/promote.go has none); ALSO drop the inert .gitignore un-ignore for .agents/skills/knowledge-fold-back. Trigger — next CLI hardening pass.
+classification: small
+routed_to: plan_summary:agent-ops-hardening
+created_at: "2026-07-13T06:22:05Z"

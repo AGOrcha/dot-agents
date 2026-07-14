@@ -1,0 +1,52 @@
+schema_version: 1
+task_id: adhoc-2026-07-14T00-40-00Z
+parent_plan_id: adhoc
+phase_1_decision: accept
+phase_2_decision: accept
+overall_decision: accept
+failed_gates: []
+reviewer_notes: |-
+  ## KG Context (Step 0)
+
+  ### kg changes --brief
+  WARN: code graph not built; the graph tool then failed under Python 3.14 while importing networkx.
+
+  ### kg impact internal/platform/omp_pipeline_test.go
+  WARN: impact query unavailable because the code_review_graph module was not importable.
+
+  ## Per-file review
+
+  - internal/platform/omp_pipeline_test.go
+    - Code-quality: focused test-only change; import and assertions follow local conventions.
+    - Security: N/A; no production input or credential handling changed.
+    - Performance: N/A; the test reuses the existing in-memory fixture and emitter.
+    - Gotchas: positive runtime-directory/artifact contract and negative invalid-spec/no-artifact behavior are both asserted.
+    - Verdict: accept.
+
+  ## §1.6 telemetry envelope
+
+  ```yaml
+  resource_type: skill
+  resource_id: self-review
+  invoked_at: "2026-07-14T00:40:00Z"
+  invoked_by: user
+  task_id: adhoc-2026-07-14T00-40-00Z
+
+  outcome:
+    declared: partial
+    agent_self_assessment: "The focused package passed; the broader local workflow package required isolated home configuration after sandbox-home failures."
+
+  post_invocation:
+    agent_actions_after_skill_returned: []
+    user_corrections: []
+    retries_in_loop: 0
+
+  improvement_signals:
+    missing_in_skill: []
+    redundant_in_skill: []
+    tooling_gap: { present: true, note: "code-review-graph dependency import failed under Python 3.14" }
+    script_gap: { present: false, note: "" }
+    instruction_gap: { present: false, note: "" }
+  ```
+recorded_at: "2026-07-14T00:40:00Z"
+recorded_by: self-review (skill)

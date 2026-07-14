@@ -211,7 +211,14 @@ for structured project memory, bridge queries, and code-to-note context.`,
 			return runKGLinkRemove(deps, cmd, args)
 		},
 	}
-	kgLinkCmd.AddCommand(kgLinkAddCmd, kgLinkListCmd, kgLinkRemoveCmd)
+	kgLinkImportCmd := &cobra.Command{
+		Use:   "import <manifest-file>",
+		Short: "Bulk-apply note→symbol links from a manifest (one `note-id qualified-name [kind]` per line)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runKGLinkImport(deps, cmd, args)
+		},
+	}
+	kgLinkCmd.AddCommand(kgLinkAddCmd, kgLinkListCmd, kgLinkRemoveCmd, kgLinkImportCmd)
 
 	// Phase B: CRG code-graph subcommands
 	kgBuildCmd := &cobra.Command{

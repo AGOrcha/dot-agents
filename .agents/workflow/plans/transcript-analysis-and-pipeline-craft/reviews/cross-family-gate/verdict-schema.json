@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviewer_model_family", "reviewer_engine", "hypotheses", "unrun", "verdict", "summary"],
+  "properties": {
+    "reviewer_model_family": { "type": "string" },
+    "reviewer_engine": { "type": "string" },
+    "hypotheses": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["statement", "test", "outcome", "evidence"],
+        "properties": {
+          "statement": { "type": "string" },
+          "test": { "type": "string" },
+          "outcome": { "type": "string", "enum": ["refuted-the-work", "survived", "inconclusive"] },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "unrun": { "type": "array", "items": { "type": "string" } },
+    "verdict": { "type": "string", "enum": ["accept", "reject"] },
+    "summary": { "type": "string" }
+  }
+}
