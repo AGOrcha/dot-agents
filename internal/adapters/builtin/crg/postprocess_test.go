@@ -84,33 +84,54 @@ func TestPostprocessParity_TenCommitDualRead(t *testing.T) {
 		nativePP := postprocessOf(t, nativeStore, Name)
 		bridgePP := postprocessOf(t, bridgeStore, bridgeNS)
 
-		// flows — set equality
-		if rep := CompareFlowMemberships(nativePP.FlowMemberships, bridgePP.FlowMemberships); !rep.Pass {
-			t.Fatalf("commit %d flows parity FAILED: %v", i, rep.Detail)
-		}
-		if len(nativePP.FlowMemberships) == 0 {
-			t.Fatalf("commit %d: expected nonempty flow_memberships", i)
-		}
-		// communities — partition equivalence
-		agree, ok := graphstore.PartitionAgreement(nativePP.Communities, bridgePP.Communities)
-		if !ok || agree != 1.0 {
-			t.Fatalf("commit %d communities parity FAILED: agreement=%v ok=%v (want 1.0,true)", i, agree, ok)
-		}
-		if n := distinctClusters(nativePP.Communities); n < 2 {
-			t.Fatalf("commit %d: community partition should be non-trivial, got %d clusters", i, n)
-		}
-		// risk_index — Spearman rank correlation
-		tau, ok := graphstore.SpearmanTau(nativePP.RiskIndex, bridgePP.RiskIndex)
-		if !ok || tau < graphstore.DefaultSpearmanTau {
-			t.Fatalf("commit %d risk_index parity FAILED: tau=%v ok=%v (want >= %v,true)", i, tau, ok, graphstore.DefaultSpearmanTau)
-		}
-		// fts — token-set equality
-		if rep := CompareFTS(nativePP.FTS, bridgePP.FTS); !rep.Pass {
-			t.Fatalf("commit %d fts parity FAILED: %v", i, rep.Detail)
-		}
-		if len(nativePP.FTS) != len(c.Symbols) {
-			t.Fatalf("commit %d: fts token count = %d, want %d (one per distinct symbol)", i, len(nativePP.FTS), len(c.Symbols))
-		}
+		assertPostprocessParity(t, i, c, nativePP, bridgePP)
+	}
+}
+
+func assertPostprocessParity(t *testing.T, commit int, c Corpus, native, bridge Postprocess) {
+	t.Helper()
+	assertFlowMembershipParity(t, commit, native, bridge)
+	assertCommunityParity(t, commit, native, bridge)
+	assertRiskIndexParity(t, commit, native, bridge)
+	assertFTSParity(t, commit, c, native, bridge)
+}
+
+func assertFlowMembershipParity(t *testing.T, commit int, native, bridge Postprocess) {
+	t.Helper()
+	if rep := CompareFlowMemberships(native.FlowMemberships, bridge.FlowMemberships); !rep.Pass {
+		t.Fatalf("commit %d flows parity FAILED: %v", commit, rep.Detail)
+	}
+	if len(native.FlowMemberships) == 0 {
+		t.Fatalf("commit %d: expected nonempty flow_memberships", commit)
+	}
+}
+
+func assertCommunityParity(t *testing.T, commit int, native, bridge Postprocess) {
+	t.Helper()
+	agree, ok := graphstore.PartitionAgreement(native.Communities, bridge.Communities)
+	if !ok || agree != 1.0 {
+		t.Fatalf("commit %d communities parity FAILED: agreement=%v ok=%v (want 1.0,true)", commit, agree, ok)
+	}
+	if n := distinctClusters(native.Communities); n < 2 {
+		t.Fatalf("commit %d: community partition should be non-trivial, got %d clusters", commit, n)
+	}
+}
+
+func assertRiskIndexParity(t *testing.T, commit int, native, bridge Postprocess) {
+	t.Helper()
+	tau, ok := graphstore.SpearmanTau(native.RiskIndex, bridge.RiskIndex)
+	if !ok || tau < graphstore.DefaultSpearmanTau {
+		t.Fatalf("commit %d risk_index parity FAILED: tau=%v ok=%v (want >= %v,true)", commit, tau, ok, graphstore.DefaultSpearmanTau)
+	}
+}
+
+func assertFTSParity(t *testing.T, commit int, c Corpus, native, bridge Postprocess) {
+	t.Helper()
+	if rep := CompareFTS(native.FTS, bridge.FTS); !rep.Pass {
+		t.Fatalf("commit %d fts parity FAILED: %v", commit, rep.Detail)
+	}
+	if len(native.FTS) != len(c.Symbols) {
+		t.Fatalf("commit %d: fts token count = %d, want %d (one per distinct symbol)", commit, len(native.FTS), len(c.Symbols))
 	}
 }
 
@@ -190,7 +211,18 @@ func removeSymbolByID(c Corpus, dropID string) Corpus {
 }
 
 func TestFlowsFromStore_EntryPointsAndOrdering(t *testing.T) {
-	c := Corpus{
+	c := flowCorpus()
+	store := bootstrapNative(t, c)
+	flows := flowsFromStore(t, store)
+	flow := requireSingleFlow(t, flows)
+
+	assertFlowEntryPoint(t, c, flow)
+	assertFlowMembers(t, c, flow)
+	assertFlowMembershipRows(t, flow, flowMembershipsFromStore(t, store))
+}
+
+func flowCorpus() Corpus {
+	return Corpus{
 		Commit: "flows",
 		Symbols: []Symbol{
 			{QualifiedName: "a", Kind: kindFn, Language: "go", FilePath: "a.go", ContentHash: "h"},
@@ -205,42 +237,65 @@ func TestFlowsFromStore_EntryPointsAndOrdering(t *testing.T) {
 			{Kind: edgeCalls, From: "a", To: "d"},
 		},
 	}
-	store := bootstrapNative(t, c)
+}
+
+func flowsFromStore(t *testing.T, store *sdk.MemStore) []Flow {
+	t.Helper()
 	flows, err := FlowsFromStore(store, Name)
 	if err != nil {
 		t.Fatalf("flows: %v", err)
 	}
+	return flows
+}
+
+func requireSingleFlow(t *testing.T, flows []Flow) Flow {
+	t.Helper()
 	if len(flows) != 1 {
 		t.Fatalf("expected exactly 1 flow (entry point a), got %d: %+v", len(flows), flows)
 	}
-	f := flows[0]
-	if f.EntryPoint != "a" {
-		t.Fatalf("entry point = %q, want a", f.EntryPoint)
+	return flows[0]
+}
+
+func assertFlowEntryPoint(t *testing.T, c Corpus, flow Flow) {
+	t.Helper()
+	if flow.EntryPoint != "a" {
+		t.Fatalf("entry point = %q, want a", flow.EntryPoint)
 	}
-	if len(f.Members) == 0 || f.Members[0] != SymbolID(c.Symbols[0]) {
-		t.Fatalf("flow member[0] must be the entry point id, got %v", f.Members)
+	if len(flow.Members) == 0 || flow.Members[0] != symIDOf(c, "a") {
+		t.Fatalf("flow member[0] must be the entry point id, got %v", flow.Members)
 	}
-	if f.Criticality != 4 {
-		t.Fatalf("criticality = %v, want 4 (a,b,c,d reachable)", f.Criticality)
+	if flow.Criticality != 4 {
+		t.Fatalf("criticality = %v, want 4 (a,b,c,d reachable)", flow.Criticality)
 	}
+}
+
+func assertFlowMembers(t *testing.T, c Corpus, flow Flow) {
+	t.Helper()
 	members := map[string]bool{}
-	for _, m := range f.Members {
+	for _, m := range flow.Members {
 		members[m] = true
 	}
 	for _, qn := range []string{"b", "c", "d"} {
 		if !members[symIDOf(c, qn)] {
-			t.Fatalf("flow should contain %q; members = %v", qn, f.Members)
+			t.Fatalf("flow should contain %q; members = %v", qn, flow.Members)
 		}
 	}
 	if members[symIDOf(c, "iso")] {
 		t.Fatal("isolated non-called node must not be a flow member")
 	}
+}
 
-	// flow_memberships positions are contiguous from 0 for the single flow.
+func flowMembershipsFromStore(t *testing.T, store *sdk.MemStore) []FlowMembership {
+	t.Helper()
 	rows, err := FlowMembershipsFromStore(store, Name)
 	if err != nil {
 		t.Fatalf("flow memberships: %v", err)
 	}
+	return rows
+}
+
+func assertFlowMembershipRows(t *testing.T, flow Flow, rows []FlowMembership) {
+	t.Helper()
 	if len(rows) != 4 {
 		t.Fatalf("expected 4 flow_membership rows, got %d", len(rows))
 	}
@@ -248,8 +303,8 @@ func TestFlowsFromStore_EntryPointsAndOrdering(t *testing.T) {
 		if r.Position != pos {
 			t.Fatalf("row %d position = %d, want %d (contiguous)", pos, r.Position, pos)
 		}
-		if r.FlowID != f.ID {
-			t.Fatalf("row %d flow id = %q, want %q", pos, r.FlowID, f.ID)
+		if r.FlowID != flow.ID {
+			t.Fatalf("row %d flow id = %q, want %q", pos, r.FlowID, flow.ID)
 		}
 	}
 }
