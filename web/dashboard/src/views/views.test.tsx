@@ -20,6 +20,16 @@ import RunDetailView from './RunDetailView'
 import IterationDetailView from './IterationDetailView'
 import RubricView from './RubricView'
 
+// Recharts' ResponsiveContainer needs ResizeObserver, which jsdom lacks (real
+// browsers provide it). Stub it so the populated aggregate view exercises the
+// successful dashboard path instead of tripping its error boundary.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+
 // ---- helpers ---------------------------------------------------------------
 
 function makeClient() {
