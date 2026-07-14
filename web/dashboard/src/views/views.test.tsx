@@ -20,6 +20,10 @@ import RunDetailView from './RunDetailView'
 import IterationDetailView from './IterationDetailView'
 import RubricView from './RubricView'
 
+// The jsdom ResizeObserver stub Recharts' charts need is installed globally in
+// src/test-setup.ts, so the populated AggregateView case mounts without tripping
+// the dashboard error boundary here.
+
 // ---- helpers ---------------------------------------------------------------
 
 function makeClient() {
