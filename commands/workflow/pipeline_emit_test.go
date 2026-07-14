@@ -11,7 +11,18 @@ import (
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/platform"
 )
+
+type failingPipelineProjector struct{}
+
+func (failingPipelineProjector) Platform() string { return "test" }
+
+func (failingPipelineProjector) RuntimeRelDir() string { return ".test" }
+
+func (failingPipelineProjector) Emit(platform.PipelineSpec) ([]platform.PipelineArtifact, error) {
+	return nil, errors.New("projector emit failed")
+}
 
 func pipelineFixtureSnapshot() *config.Snapshot {
 	claude := config.StageProfile{Model: "claude-opus-4-8", ModelFamily: "claude"}
@@ -216,6 +227,20 @@ func TestPipelineEmitBadAppType(t *testing.T) {
 	_, err := runPipelineEmit(t, false, "--platform", "omp", "--app-type", "nonexistent")
 	if err == nil || !strings.Contains(err.Error(), "no entry for app_type") {
 		t.Fatalf("want unknown app_type error, got %v", err)
+	}
+}
+
+func TestPipelineEmitProjectorError(t *testing.T) {
+	withPipelineFixture(t, func(string) (*config.Snapshot, error) { return pipelineFixtureSnapshot(), nil })
+	orig := pipelineProjectorFor
+	t.Cleanup(func() { pipelineProjectorFor = orig })
+	pipelineProjectorFor = func(string) (platform.PipelineProjector, error) {
+		return failingPipelineProjector{}, nil
+	}
+
+	_, err := runPipelineEmit(t, false, "--platform", "omp")
+	if err == nil || !strings.Contains(err.Error(), "projector emit failed") {
+		t.Fatalf("want projector emission error, got %v", err)
 	}
 }
 

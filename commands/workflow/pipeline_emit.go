@@ -41,6 +41,8 @@ type pipelineEmitResult struct {
 	Artifacts []pipelineEmitArtifact `json:"artifacts"`
 }
 
+var pipelineProjectorFor = platform.PipelineProjectorFor
+
 func newWorkflowPipelineCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "pipeline",
@@ -99,7 +101,7 @@ func runWorkflowPipelineEmit(cmd *cobra.Command, platformID, appType, plan strin
 	if platformID == "" {
 		return deps.UsageError("--platform is required", "Supported platforms: "+strings.Join(platform.SupportedPipelinePlatforms(), ", "))
 	}
-	projector, err := platform.PipelineProjectorFor(platformID)
+	projector, err := pipelineProjectorFor(platformID)
 	if err != nil {
 		return err
 	}
