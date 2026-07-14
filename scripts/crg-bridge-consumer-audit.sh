@@ -37,20 +37,37 @@ GO_ROOTS=(internal commands cmd)
 
 # Files (relative paths) under GO_ROOTS matching the pattern, non-test only.
 prod_go_files() {
-  grep -rlE "$1" --include='*.go' "${GO_ROOTS[@]}" 2>/dev/null \
+  local pattern="$1"
+  grep -rlE "$pattern" --include='*.go' "${GO_ROOTS[@]}" 2>/dev/null \
     | grep -v '_test\.go$' | LC_ALL=C sort -u
+  return 0
 }
 # Test-only files under GO_ROOTS matching the pattern.
 test_go_files() {
-  grep -rlE "$1" --include='*.go' "${GO_ROOTS[@]}" 2>/dev/null \
+  local pattern="$1"
+  grep -rlE "$pattern" --include='*.go' "${GO_ROOTS[@]}" 2>/dev/null \
     | grep '_test\.go$' | LC_ALL=C sort -u
+  return 0
 }
 # Count non-empty lines on stdin.
-nlines() { grep -c . || true; }
+nlines() {
+  grep -c . || true
+  return 0
+}
 # Matching lines within one file (0 if none / absent).
-file_hits() { grep -cE "$2" "$1" 2>/dev/null || echo 0; }
+file_hits() {
+  local file="$1"
+  local pattern="$2"
+  grep -cE "$pattern" "$file" 2>/dev/null || echo 0
+  return 0
+}
 # "present"/"absent" for a fixed string in a file.
-present_if() { if grep -qF "$2" "$1" 2>/dev/null; then echo present; else echo absent; fi; }
+present_if() {
+  local file="$1"
+  local needle="$2"
+  if grep -qF "$needle" "$file" 2>/dev/null; then echo present; else echo absent; fi
+  return 0
+}
 
 # ── [A] Python CRG subprocess bridge (internal/graphstore/crg.go) ──
 # Consumer = constructs a CRGBridge (NewCRGBridge(...) or &CRGBridge{...}),
@@ -96,7 +113,7 @@ E_DRIFT_WIRED="$(if grep -rqF 'BridgeConsumers(' commands/workflow 2>/dev/null; 
 # ── Verdict (derivable half of §11.4): bridge is deletable only when the
 # Python machinery has zero live consumers AND no view reads the mirror. The
 # CI-soak halves (§11.4 conditions 1-2) are external facts, reported not derived.
-if [ "$A_PROD_N" -gt 0 ] || [ "$B_READS_N" -gt 0 ]; then
+if [[ "$A_PROD_N" -gt 0 ]] || [[ "$B_READS_N" -gt 0 ]]; then
   VERDICT="NOT-READY — KEEP THE BRIDGE"
 else
   VERDICT="IN-REPO-CLEAR (bridge deletable pending external §11.4 CI soak)"
@@ -114,13 +131,13 @@ removes together: [A] Python subprocess bridge, [B] crg-bridge mirror adapter.
     Production consumers  : ${A_PROD_N} file(s)
 $(printf '%s\n' "$A_PROD" | sed '/^$/d' | while read -r f; do printf '      %s  (%s ref-lines)\n' "$f" "$(file_hits "$f" "$A_PAT")"; done)
     Test-only consumers  : ${A_TEST_N} file(s)
-    STATUS: $( [ "$A_PROD_N" -gt 0 ] && echo 'LIVE / load-bearing — da kg code ops + MCP server route here.' || echo 'no live consumers.' )
+    STATUS: $( [[ "$A_PROD_N" -gt 0 ]] && echo 'LIVE / load-bearing — da kg code ops + MCP server route here.' || echo 'no live consumers.' )
 
 [B] Migration-only crg-bridge mirror adapter  (internal/adapters/builtin/crg-bridge/)
     Production registration (RegisterCRGFamily / adapter import) : ${B_REG_N}
     reads_from:[crg-bridge] declarations (schemas + lockfiles)   : ${B_READS_N}
     MirrorSnapshot production callers                            : ${B_MIRROR_N}
-    STATUS: $( { [ "$B_REG_N" -eq 0 ] && [ "$B_READS_N" -eq 0 ] && [ "$B_MIRROR_N" -eq 0 ]; } && echo 'DEAD WEIGHT — registered nowhere; zero consumers.' || echo 'has consumers — see counts.' )
+    STATUS: $( { [[ "$B_REG_N" -eq 0 ]] && [[ "$B_READS_N" -eq 0 ]] && [[ "$B_MIRROR_N" -eq 0 ]]; } && echo 'DEAD WEIGHT — registered nowhere; zero consumers.' || echo 'has consumers — see counts.' )
 
 [C] graph_backend profile references selecting crg-bridge : ${C_N}
     (built-in graph backends are crg / none; the migration-only mirror is not selectable)
@@ -145,16 +162,19 @@ $(printf '%s\n' "$A_PROD" | sed '/^$/d' | while read -r f; do printf '      %s  
 
 VERDICT: ${VERDICT}
 EOF
+  return 0
 }
 
 # Extract the fenced audit block embedded between the doc markers.
 extract_doc_block() {
+  local doc="$1"
   awk '
     /<!-- BEGIN crg-bridge-consumer-audit.sh output -->/ { inblk=1; next }
     /<!-- END crg-bridge-consumer-audit.sh output -->/   { inblk=0 }
     inblk && /^```/ { infence = !infence; next }
     inblk && infence { print }
-  ' "$1"
+  ' "$doc"
+  return 0
 }
 
 case "${1:-}" in
