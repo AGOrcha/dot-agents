@@ -20,6 +20,18 @@ import RunDetailView from './RunDetailView'
 import IterationDetailView from './IterationDetailView'
 import RubricView from './RubricView'
 
+// Recharts' ResponsiveContainer (used by the AggregateView trend charts) needs
+// ResizeObserver, which jsdom lacks (real browsers provide it). Without this
+// stub the populated AggregateView case throws while mounting the charts and
+// trips the dashboard error boundary, hiding the runs-count text. Matches the
+// stub used by the sibling component tests.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+
 // ---- helpers ---------------------------------------------------------------
 
 function makeClient() {
