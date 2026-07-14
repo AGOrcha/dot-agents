@@ -40,6 +40,18 @@ const COLUMNS: readonly Column[] = [
   { key: 'last_update', label: 'Last update' },
 ]
 
+/** aria-sort value for a column header given whether it is the active sort. */
+function ariaSortFor(active: boolean, dir: SortDir): 'ascending' | 'descending' | 'none' {
+  if (!active) return 'none'
+  return dir === 'asc' ? 'ascending' : 'descending'
+}
+
+/** Sort-direction glyph for the active column header ('' when inactive). */
+function sortArrow(active: boolean, dir: SortDir): string {
+  if (!active) return ''
+  return dir === 'asc' ? '▲' : '▼'
+}
+
 const BAND_RANK: Record<ScoreBand, number> = {
   excellent: 4,
   good: 3,
@@ -156,7 +168,7 @@ export default function RunsGrid({
                   <th
                     key={col.key}
                     scope="col"
-                    aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    aria-sort={ariaSortFor(active, sortDir)}
                     className={`px-3 py-2 font-medium ${col.numeric ? 'text-right' : 'text-left'}`}
                   >
                     <button
@@ -167,7 +179,7 @@ export default function RunsGrid({
                     >
                       {col.label}
                       <span aria-hidden="true" className="text-xs">
-                        {active ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                        {sortArrow(active, sortDir)}
                       </span>
                     </button>
                   </th>

@@ -50,11 +50,10 @@ export default function IterationTimeline({
   const ordered = [...iterations].sort((a, b) => a.iteration - b.iteration)
 
   return (
-    <div
+    <fieldset
       data-testid="iteration-timeline"
-      role="group"
       aria-label="Iteration timeline"
-      className={`flex flex-wrap items-end gap-1 ${className}`}
+      className={`m-0 min-w-0 border-0 p-0 flex flex-wrap items-end gap-1 ${className}`}
     >
       {ordered.map((it) => {
         const isSelected = selected === it.iteration
@@ -74,6 +73,6 @@ export default function IterationTimeline({
           />
         )
       })}
-    </div>
+    </fieldset>
   )
 }
