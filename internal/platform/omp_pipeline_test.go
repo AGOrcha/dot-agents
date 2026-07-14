@@ -2,6 +2,7 @@ package platform
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -308,14 +309,33 @@ func TestOMPEmitModelOverride(t *testing.T) {
 }
 
 func TestOMPEmitValidateError(t *testing.T) {
-	_, err := ompPipelineProjector{}.Emit(PipelineSpec{Workspace: ""})
-	if err == nil {
-		t.Fatal("emit should reject an invalid spec")
+	arts, err := ompPipelineProjector{}.Emit(PipelineSpec{Workspace: ""})
+	if err == nil || !strings.Contains(err.Error(), "empty workspace") {
+		t.Fatalf("emit should reject an invalid spec with validation detail, got %v", err)
+	}
+	if arts != nil {
+		t.Fatalf("invalid spec must not produce artifacts, got %+v", arts)
 	}
 }
 
 func TestOMPPlatform(t *testing.T) {
-	if (ompPipelineProjector{}).Platform() != "omp" {
-		t.Fatal("platform id")
+	p := ompPipelineProjector{}
+	if p.Platform() != "omp" {
+		t.Fatalf("platform id = %q, want omp", p.Platform())
+	}
+	if got := p.RuntimeRelDir(); got != filepath.Join(".agents", "workflow", "runtime", "full-loop") {
+		t.Fatalf("runtime directory = %q, want .agents/workflow/runtime/full-loop", got)
+	}
+
+	// The directory contract and the artifact contract must agree: a successful
+	// emission targets files relative to the projector-owned runtime directory.
+	arts := emitOMP(t, skeletonSpec("/repo"))
+	for _, art := range arts {
+		if filepath.Dir(art.Name) != "." {
+			t.Fatalf("artifact %q unexpectedly escapes the runtime directory", art.Name)
+		}
+		if art.Content == "" {
+			t.Fatalf("artifact %q is empty", art.Name)
+		}
 	}
 }
