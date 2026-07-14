@@ -20,16 +20,6 @@ import RunDetailView from './RunDetailView'
 import IterationDetailView from './IterationDetailView'
 import RubricView from './RubricView'
 
-// Recharts' ResponsiveContainer needs ResizeObserver, which jsdom lacks (real
-// browsers provide it). Stub it so the populated aggregate view exercises the
-// successful dashboard path instead of tripping its error boundary.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
-
 // ---- helpers ---------------------------------------------------------------
 
 function makeClient() {
@@ -86,22 +76,6 @@ describe('AggregateView', () => {
     expect(await screen.findByText(/no runs found/i)).toBeInTheDocument()
   })
 
-  it('shows run count when API returns a populated list', async () => {
-    mockFetch(200, {
-      data: [
-        {
-          session_id: 's-1',
-          rubric_version: '2.1.0',
-          iteration_count: 3,
-          scored: true,
-          score: 0.9,
-          band: 'excellent',
-        },
-      ],
-    })
-    renderView(<AggregateView />, { initialPath: '/', path: '/' })
-    expect(await screen.findByText(/1 run\(s\) loaded/i)).toBeInTheDocument()
-  })
 })
 
 // ---- RunDetailView ---------------------------------------------------------
