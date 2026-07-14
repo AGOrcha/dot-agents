@@ -25,33 +25,14 @@ describe('ScoreBadge', () => {
     expect(screen.getByTestId('score-badge')).toHaveTextContent('good (82%)')
   })
 
-  it('uses green styling for excellent band', () => {
-    render(<ScoreBadge band="excellent" />)
-    const badge = screen.getByTestId('score-badge')
-    expect(badge.className).toContain('green')
-  })
-
-  it('uses blue styling for good band', () => {
-    render(<ScoreBadge band="good" />)
-    const badge = screen.getByTestId('score-badge')
-    expect(badge.className).toContain('blue')
-  })
-
-  it('uses yellow styling for fair band', () => {
-    render(<ScoreBadge band="fair" />)
-    const badge = screen.getByTestId('score-badge')
-    expect(badge.className).toContain('yellow')
-  })
-
-  it('uses red styling for poor band', () => {
-    render(<ScoreBadge band="poor" />)
-    const badge = screen.getByTestId('score-badge')
-    expect(badge.className).toContain('red')
-  })
-
-  it('uses gray styling for unscored band', () => {
-    render(<ScoreBadge band="unscored" />)
-    const badge = screen.getByTestId('score-badge')
-    expect(badge.className).toContain('gray')
+  it.each([
+    ['excellent', 'green'],
+    ['good', 'blue'],
+    ['fair', 'yellow'],
+    ['poor', 'red'],
+    ['unscored', 'gray'],
+  ] as [ScoreBand, string][])('styles the "%s" band with %s-family classes', (band, color) => {
+    render(<ScoreBadge band={band} />)
+    expect(screen.getByTestId('score-badge').className).toContain(color)
   })
 })
