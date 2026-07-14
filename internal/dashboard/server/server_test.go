@@ -20,7 +20,21 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/AGOrcha/dot-agents/internal/dashboard/handlers"
+	"github.com/AGOrcha/dot-agents/internal/dashboard/watch"
 )
+
+// failingMountBuilder is a mountBuilder whose build always fails, driving
+// newServer's handlers-build error branch. That branch is unreachable through
+// the real wiring (handlers.New only errors on a nil Store, which the store
+// wiring never produces), so injecting a failing builder is the only way to
+// prove it.
+type failingMountBuilder struct{ err error }
+
+func (f failingMountBuilder) build(handlers.Deps) (*handlers.Mount, error) {
+	return nil, f.err
+}
 
 // serve drives one GET through the composed handler with no socket and returns
 // the status code and the full response body.
@@ -335,5 +349,34 @@ func TestServeReportsUnexpectedBackgroundFailure(t *testing.T) {
 	srv.serveErr <- want
 	if got := <-done; !errors.Is(got, want) {
 		t.Fatalf("Serve unexpected failure = %v, want %v", got, want)
+	}
+}
+
+// TestNewSurfacesHandlersBuildError injects a failing mountBuilder to prove
+// newServer wraps and returns a handlers-mount construction failure — the
+// error-propagation branch the production wiring can never reach.
+func TestNewSurfacesHandlersBuildError(t *testing.T) {
+	want := errors.New("boom")
+	if _, err := newServer(Config{}, failingMountBuilder{err: want}); err == nil {
+		t.Fatal("newServer ignored a handlers build failure, want error")
+	} else if !errors.Is(err, want) {
+		t.Fatalf("newServer error = %v, want it to wrap %v", err, want)
+	}
+}
+
+// TestStartSurfacesDeadWatcher swaps in a watcher with no roots and the poll
+// fallback disabled: startFSNotify reports an inactive source and, with poll
+// off, Start must surface that as an error rather than serve on a dead watcher.
+func TestStartSurfacesDeadWatcher(t *testing.T) {
+	srv, err := New(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	srv.watcher = watch.New(nil, srv.broker, watch.WithPollInterval(-1))
+	t.Cleanup(func() { srv.watcher.Close() })
+
+	if err := srv.Start(); err == nil {
+		_ = srv.Stop(context.Background())
+		t.Fatal("Start ignored a dead (source-less, poll-off) watcher, want error")
 	}
 }

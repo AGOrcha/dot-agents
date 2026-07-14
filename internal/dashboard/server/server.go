@@ -92,11 +92,33 @@ type Server struct {
 	serveErr chan error
 }
 
+// mountBuilder constructs the API handlers mount. Production wires
+// stdMountBuilder (handlers.New); newServer takes it as a parameter so tests
+// can inject a builder that fails, exercising newServer's build-error branch.
+// handlers.New itself only errors on a nil Store, which the real store wiring
+// never produces, so this narrow seam is the only way to prove that branch.
+type mountBuilder interface {
+	build(handlers.Deps) (*handlers.Mount, error)
+}
+
+// stdMountBuilder is the production mountBuilder: it delegates to handlers.New.
+type stdMountBuilder struct{}
+
+func (stdMountBuilder) build(d handlers.Deps) (*handlers.Mount, error) {
+	return handlers.New(d)
+}
+
 // New builds a Server over cfg, wiring the store → broker → handlers → watcher
 // collaborators and composing the HTTP handler. It binds no socket; call Start
 // or Serve for that. It fails only when the handlers mount or the static asset
 // FS cannot be constructed.
 func New(cfg Config) (*Server, error) {
+	return newServer(cfg, stdMountBuilder{})
+}
+
+// newServer is New's testable core: the mountBuilder is injected so tests can
+// drive the handlers-build failure path that the production wiring can't reach.
+func newServer(cfg Config, mb mountBuilder) (*Server, error) {
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -119,16 +141,13 @@ func New(cfg Config) (*Server, error) {
 	disk := store.New(roots,
 		store.WithLogger(logger),
 		store.WithSubscriberCounter(func() int {
-			if broker == nil {
-				return 0
-			}
 			return broker.SubscriberCount()
 		}),
 	)
 	broker = events.New(events.Options{Evictor: disk})
 	recStore := store.NewRecompute(disk, repoDir, cfg.TranscriptDirs...)
 
-	mount, err := handlers.New(handlers.Deps{
+	mount, err := mb.build(handlers.Deps{
 		Store:  recStore,
 		Logger: logger,
 		Broker: broker,
