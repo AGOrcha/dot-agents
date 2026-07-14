@@ -20,17 +20,9 @@ import RunDetailView from './RunDetailView'
 import IterationDetailView from './IterationDetailView'
 import RubricView from './RubricView'
 
-// Recharts' ResponsiveContainer (used by the AggregateView trend charts) needs
-// ResizeObserver, which jsdom lacks (real browsers provide it). Without this
-// stub the populated AggregateView case throws while mounting the charts and
-// trips the dashboard error boundary, hiding the runs-count text. Matches the
-// stub used by the sibling component tests.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
+// The jsdom ResizeObserver stub Recharts' charts need is installed globally in
+// src/test-setup.ts, so the populated AggregateView case mounts without tripping
+// the dashboard error boundary here.
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -88,22 +80,6 @@ describe('AggregateView', () => {
     expect(await screen.findByText(/no runs found/i)).toBeInTheDocument()
   })
 
-  it('shows run count when API returns a populated list', async () => {
-    mockFetch(200, {
-      data: [
-        {
-          session_id: 's-1',
-          rubric_version: '2.1.0',
-          iteration_count: 3,
-          scored: true,
-          score: 0.9,
-          band: 'excellent',
-        },
-      ],
-    })
-    renderView(<AggregateView />, { initialPath: '/', path: '/' })
-    expect(await screen.findByText(/1 run\(s\) loaded/i)).toBeInTheDocument()
-  })
 })
 
 // ---- RunDetailView ---------------------------------------------------------

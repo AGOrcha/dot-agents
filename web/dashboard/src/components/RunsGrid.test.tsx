@@ -82,5 +82,9 @@ describe('RunsGrid', () => {
     fireEvent.click(screen.getByTestId('sort-iteration_count'))
     const header = screen.getByTestId('sort-iteration_count').closest('th')!
     expect(header).toHaveAttribute('aria-sort', 'ascending')
+    expect(screen.getByTestId('sort-session_id').closest('th')).toHaveAttribute('aria-sort', 'none')
+
+    fireEvent.click(screen.getByTestId('sort-iteration_count'))
+    expect(header).toHaveAttribute('aria-sort', 'descending')
   })
 })

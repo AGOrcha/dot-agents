@@ -2,15 +2,6 @@ import { render, screen, within } from '@testing-library/react'
 import CacheTrendChart, { buildCacheSeries } from './CacheTrendChart'
 import type { R2DashboardRunSessionDTO } from '../api/types.gen'
 
-// Recharts' ResponsiveContainer needs ResizeObserver, which jsdom lacks (real
-// browsers provide it). Stub it so the chart mounts under the test renderer.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
-
 function run(over: Partial<R2DashboardRunSessionDTO> & { session_id: string }): R2DashboardRunSessionDTO {
   return {
     session_id: over.session_id,
@@ -44,7 +35,7 @@ describe('buildCacheSeries', () => {
     const series = buildCacheSeries([
       run({ session_id: 'a', mean_cache_hit_rate: 0.83, last_iteration: 4, last_update: '2026-01-01T00:00:00Z' }),
     ])
-    expect(series[0]).toMatchObject({ key: 'a', label: '#4', rate: 0.83 })
+    expect(series[0]).toMatchObject({ key: 'a', label: '#4', value: 0.83 })
   })
 })
 
