@@ -359,13 +359,23 @@
     },
     "stageProfileMap": {
       "type": "object",
-      "description": "A map of profile slug -> stage profile (label + base-first prompt_files composition).",
+      "description": "A map of profile slug -> stage profile (label + explicit OMP model route + base-first prompt_files composition).",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "label": {
             "type": "string"
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Concrete OMP model identifier for this stage. This does not select or imply a vendor-specific CLI harness."
+          },
+          "model_family": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Open-ended semantic model family used to enforce cross-family reviewer diversity (for example claude, gpt, gemini). Diversity checks compare family identity; this is intentionally not a closed enum."
           },
           "prompt_files": {
             "$ref": "#/$defs/promptFileList"

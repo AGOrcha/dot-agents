@@ -1,23 +1,34 @@
 # Orchestrator Overlay (dot-agents)
 
-Passed via `--project-overlay .agents/active/orchestrator.loop.md` when running the
-orchestrator agent (`ralph-orchestrate.sh`, `/orchestrator-session-start` turns).
+Passed as the repo-local orchestrator overlay for `/orchestrator-session-start`
+and the OMP full-loop runtime.
 
 ## Role
 
 You are the orchestrator. Select work, bound scope, create delegation bundles. **Do not implement.**
 Your turn ends when bundles exist and TASKS.yaml notes are up to date.
 
+## Temporary backend transition override
+
+Read `.agents/active/state-ref-transition.md` before any workflow-state read or
+write. Until its migration gate opens, repository worktree state remains
+canonical and `refs/agents/state` is coordination-only. Build/use repository-HEAD
+da; workers emit artifacts, while Main serializes every canonical mutation.
+
 ---
 
-## Startup (4 steps)
+## Startup
 
-1. If present, read `.agents/active/loop-state.md` → `## Current Position`, `## Loop Health`, `## Next Iteration Playbook`; also read the last 2 `.agents/active/iteration-log/iter-*.yaml` files if present
-2. `go run ./cmd/dot-agents workflow orient` — git summary, active plans, canonical plan summaries, checkpoint pointer, delegation/merge-back hints
-3. `go run ./cmd/dot-agents workflow next` — canonical task selector; treat as authoritative when canonical plans exist
-4. `go run ./cmd/dot-agents workflow tasks <plan_id>` — full task list for the selected plan
+1. Read `.agents/active/state-ref-transition.md`, if present.
+2. Build repository-HEAD da, then run `da workflow orient`.
+3. Run `da --json workflow slots` and `da --json workflow eligible`; use
+   `eligible_tasks` plus conflict-free `max_batch` as the primary selection
+   surface across all active plans.
+4. Use `da workflow next` only as a cross-check, then read the selected plans'
+   complete task graphs through da.
 
-If `workflow orient` conflicts with canonical task state, log the mismatch under `## Loop Health` — canonical YAML wins.
+If orientation conflicts with canonical task state, stop selection, record the
+mismatch, and reconcile through da. Never repair it by editing YAML directly.
 
 ---
 
@@ -35,7 +46,7 @@ Rules:
 - If no actionable task exists, write the finding to `## Loop Health` and stop
 - Use `/plan-wave-picker` skill (`.agents/skills/plan-wave-picker/`) when multiple plans are active and priority is unclear
 
-Canonical alignment: after selecting a wave, run `go run ./cmd/dot-agents workflow tasks <id>` for the matching plan and use canonical task IDs, dependency state, and current focus as the machine-readable source of truth.
+Canonical alignment: after selecting a wave, re-read every selected task through da and verify its qualified ID, dependencies, write scope, base lineage, and current status before fanout.
 
 ---
 
@@ -48,7 +59,7 @@ After identifying the task, select one primary evidence command (1–3 commands)
 - Cross-project workflow: `workflow drift`, `workflow sweep`, `status`, `doctor`
 - No closer surface: `status` → `doctor` → `workflow health`
 
-If unclear: `go run ./cmd/dot-agents workflow tasks <plan>` is always valid.
+If unclear: `go run ./cmd/da workflow tasks <plan>` is always valid.
 
 ---
 
@@ -62,7 +73,7 @@ After selecting a task:
 - The task is implementation, not research or architectural design
 
 ```bash
-go run ./cmd/dot-agents workflow fanout \
+go run ./cmd/da workflow fanout \
   --plan <plan-id> \
   --task <task-id> \
   --owner <delegate-name> \

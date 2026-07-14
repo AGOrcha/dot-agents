@@ -170,3 +170,16 @@ tasks:
         0.3.3 CHANGELOG section (it is, via #145); only bump VERSION if a
         genuinely unreleased new surface remains. Otherwise close as no-op.
       app_type: release
+    - id: p4b-copilot-user-config
+      title: Wire + report copilot user-config (mirror cursor user-home hooks)
+      status: awaiting_owner_review
+      depends_on:
+        - p4-orphan-canonicals-and-userconfig
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/copilot.go
+        - internal/platform/copilot_test.go
+      verification_required: true
+      notes: 'Copilot has a documented user-config layer (~/.copilot/hooks/, copilot-instructions.md, skills, agents, mcp-config) but dot-agents wires no copilot user-scope today, so #52 left copilot UserConfigReporter returning empty. Wire copilot user-home hooks to ~/.copilot/hooks/ mirroring cursor writeUserHomeHooks plus emitPreferredHookFileToUserHomes, and replace the copilot UserConfigReporter empty stub with one reporting the now-managed user link (UserBrokenLinks plus UserBadge). Add copilot_test.go coverage matching cursor_test.go. Branch off the #52 branch which carries the UserConfigReporter infra.'
+      app_type: go-cli

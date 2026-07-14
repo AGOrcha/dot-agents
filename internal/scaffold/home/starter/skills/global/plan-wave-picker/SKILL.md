@@ -1,6 +1,6 @@
 ---
 name: plan-wave-picker
-description: "Use when multiple active workflow or KG plan files exist and you need to choose the next wave or phase to work on without manually rereading every plan."
+description: "Use when multiple active workflow or KG plan files exist and you need to choose the next wave or phase to work on without manually rereading every plan. Use ONLY once orchestrator-session-start's pre-flight has already run this session, or the repo has no .agents/workflow/ + active.loop.md loop-orchestration surface at all — otherwise run orchestrator-session-start first; its pre-flight and eligible-orientation steps supersede this skill's eligible-surface and drift-check logic."
 ---
 
 # Plan Wave Picker

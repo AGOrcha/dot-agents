@@ -24,17 +24,16 @@ Your `task_id` must be `in_progress` or `pending` with dependencies met. If it i
 **Step 3 — Verify target exists**
 Confirm the `target` resolves to a real branch / PR / commit before reviewing. If the target is unresolvable, stop and write a fold-back observation; do not invent findings against a missing target.
 
+**Step 4 — Resolve the composed lens prompt**
+This lens composes two files base-first; resolve them so you run the current checklist:
+```
+da workflow resolve-prompt --kind reviewer --slug architecture-standards
+```
+Read each resolved file: `reviewers/reviewer.base.md` (contract), `reviewers/architecture-standards.md` (lens checklist).
+
 # Review execution
 
-Apply the architecture-standards lens to the target. Read changed files, traced into surrounding context as needed via Read / Grep / Glob. Use Bash only for non-mutating inspection (`git diff`, `git log`, `gh pr diff`, `go vet ./...` if helpful as evidence). **No production edits.** No `git commit`, no `gh pr edit`, no test-suite mutation.
-
-Concretely check:
-
-- Module / package / file placement against the repo's established layout conventions
-- Public interface and data-shape design (cohesion, minimal surface area, named-vs-anonymous types, struct field naming consistency with neighbors)
-- Separation of concerns between layers (commands ↔ internal packages, scaffold-time vs runtime code, CLI vs library)
-- Identifier naming consistency with the surrounding subpackage
-- Rule adherence: project `CLAUDE.md`, repository `agents.md`, `schema-usage`, `workflow-artifact-model`, plus any other rule files loaded into the bundle's required-context
+Apply the architecture-standards lens per the resolved prompt files (Step 4). Use Read/Grep/Glob to map the blast radius; Bash only for non-mutating inspection. No production edits.
 
 # Findings format
 

@@ -1,0 +1,31 @@
+schema_version: 1
+delegation_id: del-cj-outputs-exact-prune-1780782536
+plan_id: config-v2-coherence
+task_id: cj-outputs-exact-prune
+owner: unspecified
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-06T21:48:56Z"
+scope:
+    write_scope:
+        - internal/platform/resource_plan.go
+        - internal/platform/resource_plan_test.go
+        - commands/refresh.go
+        - commands/refresh_test.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+        - cli-runner
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

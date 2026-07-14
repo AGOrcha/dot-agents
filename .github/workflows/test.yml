@@ -649,20 +649,32 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: bash scripts/sonar-new-issues-gate.sh
 
-      # Phase 2 (cg6) = PER-FILE ENFORCE via the ratchet.
-      # The merged multi-OS profile is STRICTER than the old per-OS gate:
-      # it surfaces *_windows.go statements Windows's POSIX-skipping suite
-      # covers weakly. Rather than block on remediating the whole legacy
-      # tail, the 44 known sub-95 files are seeded into the rationale'd
-      # coverage-exceptions allowlist; per-file now ENFORCES, so the ~140
-      # already-clean files can never regress and every NEW file must hit
-      # 95%. The cg6 side-loop raises allowlisted files and deletes their
-      # entries — enforcement only tightens. Per-package stays warn until
-      # its own baseline (cg5) is worked (separate from the per-file tail).
-      - name: Coverage gate (Phase 2 — per-file enforce, ratchet)
+      # Retain the former 95% hard floor before applying the 100% target.
+      # Its narrower exceptions set prevents newly grandfathered target-debt
+      # files from regressing below the floor that was enforced before #391.
+      - name: Coverage floor (95% compatibility ratchet)
         env:
           COVERAGE_FILE: coverage.out
           COVERAGE_THRESHOLD: '95'
+          COVERAGE_PKG_MODE: warn
+          COVERAGE_FILE_MODE: enforce
+          COVERAGE_EXCEPTIONS: scripts/coverage-floor-exceptions.txt
+        run: bash scripts/coverage-gate.sh
+
+      # Phase 2 (cg6) = PER-FILE ENFORCE via the 100% target ratchet.
+      # The merged multi-OS profile is STRICTER than the old per-OS gate:
+      # it surfaces *_windows.go statements Windows's POSIX-skipping suite
+      # covers weakly. Rather than block on remediating the whole legacy
+      # tail, known sub-100 files are seeded into the rationale'd
+      # coverage-exceptions allowlist; per-file now ENFORCES, so the
+      # already-clean files can never regress and every NEW file must hit
+      # 100%. The cg6 side-loop raises allowlisted files and deletes their
+      # entries — enforcement only tightens. Per-package stays warn until
+      # its own baseline (cg5) is worked (separate from the per-file tail).
+      - name: Coverage target (100% per-file ratchet)
+        env:
+          COVERAGE_FILE: coverage.out
+          COVERAGE_THRESHOLD: '100'
           COVERAGE_PKG_MODE: warn
           COVERAGE_FILE_MODE: enforce
         run: bash scripts/coverage-gate.sh

@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: cc-cache-keys-per-source
+parent_plan_id: config-v2-coherence
+verifier_type: unit
+status: pass
+summary: internal/config green (97.7% pkg); cache_keys.go per-file 100% (gate 95%); 16 test funcs covering per-kind defaults, all four selectors, force escapes, round-trip, and negative paths (type-mismatch + schema unknown-key reject); gofmt -l empty; go vet clean
+recorded_at: "2026-06-06T22:15:10Z"
+delegation_id: del-cc-cache-keys-per-source-1780784092
+recorded_by: da workflow verify record
+commands:
+    - go test ./internal/config/... -coverprofile=/tmp/cover.out; go tool cover -func

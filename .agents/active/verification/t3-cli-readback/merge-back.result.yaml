@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: t3-cli-readback
-parent_plan_id: r1-5-hook-enforcement-telemetry
-verifier_type: merge-back
-status: pass
-summary: Branch t3-cli-readback (commit b10d59f5) ready for PR. Touches only commands/score.go + commands/score_test.go per write_scope. No internal/scoring/ edits per anti-scope. Uses existing wf.HookOutcomeSidecar type from commands/workflow.
-recorded_at: "2026-05-27T00:38:38Z"
-delegation_id: del-t3-cli-readback-1779841781

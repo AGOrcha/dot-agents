@@ -1,0 +1,11 @@
+schema_version: 1
+task_id: cc-cache-keys-per-source
+parent_plan_id: config-v2-coherence
+verifier_type: cli-runner
+status: pass
+summary: 'CLI parses+round-trips Source.cache_keys end-to-end: explain sources --json emits git {commit,tags} + local {file,env,dir} blocks (positive); schema additionalProperties:false rejects unknown cache_keys key and type-mismatch (negative, via internal/config schema tests). da binary builds + go build ./... green'
+recorded_at: "2026-06-06T22:15:16Z"
+delegation_id: del-cc-cache-keys-per-source-1780784092
+recorded_by: da workflow verify record
+commands:
+    - da config explain sources --json (fixture with git+local cache_keys)

@@ -1,0 +1,8 @@
+schema_version: 1
+id: c0-null-contrast-gate
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: pareto-live-waves
+observation: RESOLVED (design) 2026-07-12 — C0 (A/A null, opus-4-8 both arms, n>=5) registered as gating step 4a in methodology/pareto-measurement-rubric.md and as the first row of evidence/pareto/live-contrast-lens-map.md; runs FIRST as wave 0 of this task and gates C1-C6 (gate = C0 delta CI vs 3.5 percent volume). Thresholds re-based per historical-hypotheses Erratum 3 (H1 boundary now ±7 percent). Execution rides this task; no mid-wave decision remains.
+classification: small
+routed_to: task_note:transcript-analysis-and-pipeline-craft/pareto-live-waves
+created_at: "2026-07-12T23:59:09Z"

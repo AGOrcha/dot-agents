@@ -139,13 +139,21 @@ merge_enforce() {
   # shellcheck disable=SC2064
   trap "rm -f '$merged'" RETURN
   covmerge "$lp" "$wp" > "$merged" || fail "coverage merge failed (gocovmerge)"
-  say merge "merged local + Windows -> multi-OS per-file profile; enforcing >=${COVERAGE_THRESHOLD:-95}%"
   COVERAGE_FILE="$merged" \
-  COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-95}" \
+  COVERAGE_THRESHOLD=95 \
+  COVERAGE_PKG_MODE=warn \
+  COVERAGE_FILE_MODE=enforce \
+  COVERAGE_EXCEPTIONS="${COVERAGE_FLOOR_EXCEPTIONS:-scripts/coverage-floor-exceptions.txt}" \
+    bash "$repo_root/scripts/coverage-gate.sh" \
+    || fail "cross coverage floor: a changed-package file regressed below 95% (not floor-allowlisted)"
+
+  say merge "merged local + Windows -> multi-OS per-file profile; enforcing >=${COVERAGE_THRESHOLD:-100}%"
+  COVERAGE_FILE="$merged" \
+  COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-100}" \
   COVERAGE_PKG_MODE=warn \
   COVERAGE_FILE_MODE=enforce \
     bash "$repo_root/scripts/coverage-gate.sh" \
-    || fail "cross coverage gate: a changed-package file is below ${COVERAGE_THRESHOLD:-95}% on the merged multi-OS profile (not allowlisted)"
+    || fail "cross coverage gate: a changed-package file is below ${COVERAGE_THRESHOLD:-100}% on the merged multi-OS profile (not allowlisted)"
 }
 
 # changed_packages — echo the unique, still-existing Go package dirs (as ./import

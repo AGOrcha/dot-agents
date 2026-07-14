@@ -1,0 +1,8 @@
+schema_version: 1
+id: per-file-coverage-target-100
+plan_id: coverage-gate-per-file
+task_id: cg6b-ratchet-loop
+observation: OPEN 2026-07-13 — PR 391 implements a retained 95 percent compatibility floor plus a 100 percent per-file target ratchet; the merged multi-OS baseline has 173 target exceptions and the gate remains green without weakening the former floor. Scope follow-up behavior-driven task batches that remove every exception; waiting on task decomposition and no current wave decision reopened
+classification: small
+routed_to: task_note:coverage-gate-per-file/cg6b-ratchet-loop
+created_at: "2026-07-13T07:20:42Z"

@@ -15,7 +15,7 @@
 #   2. go build ./...
 #   3. go vet ./...
 #   4. GOOS=windows go build ./...  +  GOOS=windows go vet ./...  (cross parity)
-#   5. per-file coverage ENFORCE >=95% over the FULL-suite profile, EXACTLY as CI
+#   5. per-file coverage ENFORCE 100% over the FULL-suite profile, EXACTLY as CI
 #      runs it — COVERAGE_FILE_MODE=enforce with CI's same scripts/
 #      coverage-exceptions.txt allowlist + threshold. This is faithful to CI by
 #      construction (zero coverage-mode drift between the hook and CI even before
@@ -32,7 +32,7 @@
 #      An earlier revision scoped per-file enforce to the changed `.go` files; a
 #      cross-harness (Codex) adversarial review showed that diff-scoping reopens
 #      pass-local-fail-CI holes (zero-row platform files passed locally;
-#      test-only changes dropped a production file <95% but were skipped because
+#      test-only changes dropped a production file below 100% but were skipped because
 #      no production .go "changed"). The pivot to full enforce closes both.
 #
 # The fast tier no longer needs a diff base at all (coverage is full-suite, not
@@ -49,9 +49,11 @@
 # `make gate` always generates the real profile via `go test` and enforces on it.
 #
 # Env knobs (these only tune thresholds/paths to MATCH CI — none can skip a step):
-#   COVERAGE_THRESHOLD    per-file threshold (default 95, matches CI).
+#   COVERAGE_THRESHOLD    per-file threshold (default 100, matches CI).
 #   COVERAGE_EXCEPTIONS   allowlist path (default scripts/coverage-exceptions.txt,
 #                         same file CI uses).
+#   COVERAGE_FLOOR_EXCEPTIONS  retained-95% allowlist (default
+#                         scripts/coverage-floor-exceptions.txt).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -76,11 +78,19 @@ fail() { printf '\n\033[31m[gate] BLOCKED: %s\033[0m\n' "${1:-}" >&2; exit 1; }
 enforce_coverage_profile() {
   local profile="$1"
   COVERAGE_FILE="$profile" \
-  COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-95}" \
+  COVERAGE_THRESHOLD=95 \
+  COVERAGE_PKG_MODE=warn \
+  COVERAGE_FILE_MODE=enforce \
+  COVERAGE_EXCEPTIONS="${COVERAGE_FLOOR_EXCEPTIONS:-scripts/coverage-floor-exceptions.txt}" \
+    bash "$repo_root/scripts/coverage-gate.sh" \
+    || fail "coverage floor: a file regressed below 95% per-file coverage (not floor-allowlisted)"
+
+  COVERAGE_FILE="$profile" \
+  COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-100}" \
   COVERAGE_PKG_MODE=warn \
   COVERAGE_FILE_MODE=enforce \
     bash "$repo_root/scripts/coverage-gate.sh" \
-    || fail "coverage gate: a file is below ${COVERAGE_THRESHOLD:-95}% per-file coverage (not allowlisted)"
+    || fail "coverage gate: a file is below ${COVERAGE_THRESHOLD:-100}% per-file coverage (not allowlisted)"
 }
 
 # run_coverage — PRODUCTION coverage step: always generate the real full-suite
@@ -89,7 +99,7 @@ enforce_coverage_profile() {
 # only adds the race detector). The profile is a temp file so `make gate` never
 # mutates the worktree (determinism + prek never sees a hook-modified file).
 run_coverage() {
-  say coverage "full-suite per-file enforce (>=${COVERAGE_THRESHOLD:-95}%, CI's coverage-exceptions allowlist)"
+  say coverage "full-suite per-file enforce (>=${COVERAGE_THRESHOLD:-100}%, CI's coverage-exceptions allowlist)"
   local cov_out
   cov_out="$(mktemp -t gate-cov.XXXXXX)"
   trap 'rm -f "$cov_out"' EXIT

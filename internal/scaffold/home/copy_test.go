@@ -1,6 +1,7 @@
 package home
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -32,6 +33,7 @@ func TestCopyMissingStarterAssetsCopiesStarterBundle(t *testing.T) {
 	}
 	for _, rel := range []string{
 		".gitignore",
+		".agentsrc.json",
 		"README.md",
 		"rules/global/rules.mdc",
 		"settings/global/claude-code.json",
@@ -319,6 +321,62 @@ func TestCopyStarterAssetsIncludesReviewerLensAgents(t *testing.T) {
 		path := filepath.Join(tmp, "agents", "global", lens+"-reviewer", "AGENT.md")
 		if _, err := os.Stat(path); err != nil {
 			t.Errorf("expected reviewer lens agent file missing: %s (err: %v)", path, err)
+		}
+	}
+}
+
+// TestCopyStarterAssetsSeedsReviewerStageProfiles asserts the starter's
+// .agentsrc.json seed — landed at <AGENTS_HOME>/.agentsrc.json, the
+// user-local config layer every project resolves alongside product defaults
+// and its own repo-local manifest (internal/config.FlatResolver.loadLayers)
+// — registers stage_profiles.reviewer for all four review lenses, and that
+// every prompt_files entry it declares resolves to a real file under
+// prompts/reviewers/. Without this seed a freshly da-init'd machine resolves
+// `matched: false` for every lens (`da workflow resolve-prompt --kind
+// reviewer --slug <lens>`), silently dropping the four-lens contract
+// staged-runtime.md documents (stage_profiles is author-owned/not
+// scan-derived by GenerateAgentsRC, so it cannot come from `da install
+// --generate` — see MergeGenerateAgentsRC's stage_profiles-preservation
+// comment).
+func TestCopyStarterAssetsSeedsReviewerStageProfiles(t *testing.T) {
+	tmp := t.TempDir()
+	if err := CopyMissingStarterAssets(tmp); err != nil {
+		t.Fatalf("CopyMissingStarterAssets: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(tmp, ".agentsrc.json"))
+	if err != nil {
+		t.Fatalf("read seeded .agentsrc.json: %v", err)
+	}
+	var doc struct {
+		StageProfiles struct {
+			Reviewer map[string]struct {
+				Label       string   `json:"label"`
+				PromptFiles []string `json:"prompt_files"`
+			} `json:"reviewer"`
+		} `json:"stage_profiles"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse seeded .agentsrc.json: %v", err)
+	}
+
+	for _, lens := range []string{"architecture-standards", "acceptance-invariants", "adversarial", "cross-harness-adversarial"} {
+		profile, ok := doc.StageProfiles.Reviewer[lens]
+		if !ok {
+			t.Errorf("stage_profiles.reviewer missing lens %q", lens)
+			continue
+		}
+		if profile.Label == "" {
+			t.Errorf("lens %q has empty label", lens)
+		}
+		if len(profile.PromptFiles) == 0 {
+			t.Errorf("lens %q has no prompt_files", lens)
+		}
+		for _, ref := range profile.PromptFiles {
+			path := filepath.Join(tmp, "prompts", filepath.FromSlash(ref))
+			if _, statErr := os.Stat(path); statErr != nil {
+				t.Errorf("lens %q prompt_files entry %q does not resolve: %v", lens, ref, statErr)
+			}
 		}
 	}
 }

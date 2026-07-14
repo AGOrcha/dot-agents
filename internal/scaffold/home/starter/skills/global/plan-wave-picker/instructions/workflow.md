@@ -28,29 +28,22 @@ Use this skill at the start of a session when multiple canonical plans exist und
 
 3. Pick the lowest-priority unblocked wave or phase via the eligible surface.
 
-   Do not pick by reading plan markdown — the eligible surface already encodes dependency satisfaction, conflict detection, and evidence confidence:
+   Do not pick by reading plan markdown — the eligible surface already encodes dependency satisfaction, conflict detection, and evidence confidence. Run the same `da --json workflow eligible [--plan <scope>]` call and field walkthrough as `orchestrator-session-start/instructions/eligible-orientation.md` — this skill assumes that pass already ran this session, or that the repo has no orchestrator-session-start surface at all, and does not re-derive the walkthrough here.
 
-   ```bash
-   da --json workflow eligible
-   da --json workflow eligible --plan <plan-id-1>,<plan-id-2>
-   ```
-
-   See `instructions/eligible.md` for which fields to extract and `instructions/annotate.md` for the recommended-batch presentation. The CLI's `max_batch` is pre-computed for non-conflicting parallel execution — do not recompute it.
+   See `instructions/eligible.md` for the readiness-label mapping this skill layers on top, and `instructions/annotate.md` for the recommended-batch presentation — that labeling/presentation step is plan-wave-picker's own value-add and is not covered by eligible-orientation.md. The CLI's `max_batch` is pre-computed for non-conflicting parallel execution — do not recompute it.
 
    Waves are typically ordered `Wave 1`, `Wave 2`, ...; phases similarly `Phase 1`, `Phase 2`, ... When dependencies allow, run waves or phases from independent plan tracks in parallel for the same loop iteration.
 
 4. Check for existing partial work before announcing a fresh selection.
 
-   Untracked or modified files in `git status` (or a non-empty `.agents/active/delegation-bundles/`) can indicate a phase already started:
+   Same active-bundle check as `orchestrator-session-start/instructions/preflight.md` item 2 — see that file for the full walkthrough (`.agents/active/delegation-bundles/`, `.agents/active/merge-back/`, stale-contract detection). This skill additionally checks local tree state, which preflight.md does not cover:
 
    ```bash
    git status --short
-   ls .agents/active/delegation-bundles/ 2>/dev/null
-   ls .agents/active/merge-back/ 2>/dev/null
    ```
 
    If a delegation bundle already exists for the task `workflow eligible` would select, **do not re-fanout** — hand off to `delegation-lifecycle` with the existing bundle path.
 
 5. Cross-check task status against shipped PRs before fanout.
 
-   `da workflow eligible` reports tasks whose `status: pending|in_progress` in TASKS.yaml. It does not cross-check whether the work already shipped via a merged PR — status commonly drifts after parallel-worker batches. For each task in `max_batch`, run a quick merged-PR / commit search on the task ID before fanning out (`gh pr list --state merged --search "<task-id>"` or the equivalent for your forge). If the work shipped, run `da workflow delegation closeout --plan <plan> --task <task> --decision accept` instead of fanning out.
+   Same stale-status drift check as `orchestrator-session-start/instructions/eligible-orientation.md` § "Stale-status drift check" — see that file for the full `gh pr list --state merged` walkthrough. If the work already shipped, run `da workflow delegation closeout --plan <plan> --task <task> --decision accept` instead of fanning out.

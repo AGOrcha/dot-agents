@@ -1,0 +1,24 @@
+schema_version: 1
+id: del-cc-cache-keys-per-source-1780784092
+mode: delegated
+parent_plan_id: config-v2-coherence
+parent_task_id: cc-cache-keys-per-source
+title: Per-source cache_keys (uv model) + per-kind staleness defaults
+summary: 'Delegated from plan Config-v2 coherence: unified units, content-hash auto-sync, scope/source model'
+write_scope:
+    - internal/config/cache_keys.go
+    - internal/config/cache_keys_test.go
+    - internal/config/agentsrc.go
+    - schemas/agentsrc.schema.json
+success_criteria: |-
+    Per §7A.4. Default content key per source kind: git -> resolved commit; local -> resolved commit PLUS
+    working-tree content (catches uncommitted authoring); http -> ETag/Last-Modified else digest; oci -> digest.
+    Add Source.cache_keys ({file}/glob, {git:{commit,tags}}, {env}, {dir}) per [[schema-usage]] four-place
+    AgentsRC rule + schema. Force escapes: per-unit --refresh and an always-revalidate marker. Land-it-once:
+    fold onto PR #209 (p5).
+verification_expectations: ""
+may_mutate_workflow_state: false
+owner: ""
+status: completed
+created_at: "2026-06-06T22:14:52Z"
+updated_at: "2026-06-06T22:15:36Z"

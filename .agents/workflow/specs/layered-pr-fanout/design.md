@@ -22,6 +22,9 @@ via three project renderings (dot-agents / payout / ResumeAgent).
 
 ---
 
+> **Consolidation update (2026-06-07) — `stage-profile-and-routing-consolidation`:** `verifier_profiles` + `reviewer_profiles` are now unified into one **typed** `stage_profiles` map (stage `executor`/`verifier`/`reviewer`/`orchestrator` → slug → `{label, prompt_files}`), and `app_type_verifier_map` is **retired** into `execution_profile.by_app_type.<type>.topology.verifier_sequence`. Legacy keys still load (folded, deprecated). Mentions of those keys below describe the pre-consolidation surface — read them as the new model.
+
+
 ## 1. Problem & Goals
 
 ### 1.1 Problem
@@ -95,23 +98,67 @@ The new status is named `awaiting_review`, not `pr_open`.
 
 ### 2.3 Precondition for entering `awaiting_review`
 
-Transition `in_progress → awaiting_agent_review` is allowed only when
-**all** of the following hold:
+The `in_progress → awaiting_agent_review` transition is gated by a
+**precondition policy**: an unordered set of **predicates over the unified
+event contract** (`[[unified-event-contract]]` D1–D3). A policy is a **named
+entry in a top-level `precondition_policies` registry** (mirroring
+`verifier_profiles` — object-keyed-by-name, schema-additive, no `enum`), so it
+is defined **once** and **referenced by name** from any number of stage
+profiles. This lets an org/team author a policy once and reuse/layer it across
+many `app_type`s, delivered through the same sources/`extends` mechanism as the
+other profiles (the Payout case: several app-types sharing one org-standard
+delivery gate). The task's stage profile (by `app_type` —
+`[[stage-profile-and-routing-consolidation]]`) selects which policy applies,
+alongside `verifier_sequence`.
 
-- Branch pushed.
-- PR opened on GitHub.
-- Primary verifier chain (e.g. `pr-ci`) terminal green.
-- SonarCloud quality gate OK.
-- Zero OPEN new-code issues.
+The verifier reads the **resolved, locked policy from the lockfile** — the
+merged/locked final config that config-v2 treats as the source of truth for
+"what is actually set up for this project" — **not** raw `.agentsrc.json`
+(which is only the input manifest before scope/source/`extends` layering). It
+opens the gate only when **every** predicate in the resolved policy is
+satisfied. No partial-green shortcut.
 
-No partial-green shortcut. The verifier owns this transition (see §6).
+**A precondition is a predicate, not a hardcoded field.** Each predicate names a
+registered signal kind and the condition under which it is satisfied:
 
-- **Rationale:** half-green tasks polluting downstream eligibility
-  would force downstream rework when the upstream finally fails its
-  remaining checks; the cost of waiting for full green is paid once,
-  not amortized into cascade-rework.
-- **Rejected:** allow `pr-mark-open` before all CI complete (proposal
-  §6.1) — silent downstream-rework risk too high.
+| Predicate (signal kind) | Satisfied when | Notes |
+| --- | --- | --- |
+| `event.pr.open` | a PR is open for the task branch | PR-backed profiles only |
+| `signal.ci.rollup` | rollup == `green` | rollup of the `verifier_sequence` |
+| `gate.quality.<provider>` | the named gate passed | `<provider>` ∈ {sonar, codeql, semgrep, …}; **pluggable** |
+| `metric.new_code_issues` | count == 0 | new-code-period issues |
+
+Predicates are looked up **table-driven in the kind registry** (D2/D3): a new
+precondition kind is a *registration*, never a struct/`switch` edit, and never an
+`enum` at schema-load (`[[schema-usage]]`). `gate.quality.sonar` is just one
+instance — SonarCloud is *an* SAST/quality gate, not a privileged field; a
+profile may name a different provider or omit it.
+
+**The required set is named, registered config.** A built-in `default` policy in
+the registry ships the historical PR/`go-cli` gate:
+`event.pr.open ∧ signal.ci.rollup=green ∧ gate.quality.sonar=pass ∧
+metric.new_code_issues=0` (code-side default per `[[unified-event-contract]]`,
+applied when a profile names no policy). Other policies are registered by name
+and referenced from the relevant stage profiles — a docs pipeline's policy gates
+on `event.doc.section_approved`, a dataset job's on
+`event.dataset.partition_ready` (§2 already admits these kinds). The verifier
+evaluates whatever the resolved (locked) policy declares and embeds **no**
+GitHub-PR or SonarCloud assumption.
+
+- **Rationale:** half-green tasks polluting downstream eligibility would force
+  downstream rework when the upstream finally fails its remaining checks; the
+  cost of waiting for full policy-satisfaction is paid once, not amortized into
+  cascade-rework. Making the policy configurable lets different
+  projects/app-types/loop structures express their own verification surface
+  *without a central code edit* — honoring the unified event contract and the
+  configurable loop structure.
+- **Rejected:** a fixed precondition struct with `PROpen`/`SonarOK`/… fields
+  (the lpf-e first cut) — couples the gate to one VCS + one quality tool and
+  forces a central edit per new signal kind, breaking D2/D3 and stage-profile
+  configurability. Superseded by this policy model (fold-back
+  `verifier-preconditions-should-be-configurable`).
+- **Rejected:** allow `pr-mark-open` before all CI complete — silent
+  downstream-rework risk too high.
 
 ### 2.4 Lens reviewers gate the merge transition, not the eligibility transition
 
@@ -300,7 +347,7 @@ pending
 | From → To | Trigger | Actor | Precondition |
 | --- | --- | --- | --- |
 | `pending → in_progress` | task picked | worker | dependencies satisfied per §4 |
-| `in_progress → awaiting_agent_review` | verifier sequence terminal green + PR open + Sonar OK + 0 OPEN issues | verifier (auto) | §2.3 fully met |
+| `in_progress → awaiting_agent_review` | resolved precondition policy satisfied (default PR profile: rollup green + PR open + quality-gate pass + 0 OPEN issues) | verifier (auto) | §2.3 policy met |
 | `in_progress → blocked` | external dependency missed / unrecoverable verify failure | worker/orchestrator | manual or after `primary_chain_max` exhaustion |
 | `in_progress → cancelled` | manual | user | — |
 | `awaiting_agent_review → awaiting_owner_review` | all lens verdicts accept (per `lens_concurrency` policy) | lens-gate dispatcher | §5.3 met |
@@ -641,8 +688,12 @@ owned by distinct dispatchers:
   `verifier_sequence`, terminating on either green-all or
   retry-budget exhaustion (`primary_chain_max` / future
   `verifier_chain_max` — see §10 F2).
-- On terminal green: calls the equivalent of `pr-mark-open` (verifies
-  §2.3 preconditions, transitions task to `awaiting_agent_review`).
+- On terminal green: evaluates the **resolved precondition policy** (§2.3)
+  generically against the current event/signal set — table-driven over the kind
+  registry, no hardcoded predicate fields — and on full satisfaction transitions
+  the task to `awaiting_agent_review`. The policy is resolved from the lockfile
+  via the stage profile (`app_type`) → `precondition_policies` registry, so the
+  verifier embeds no GitHub-PR/SonarCloud assumption.
 - On exhaustion: transitions to `blocked` with a fold-back artifact.
 
 ### 6.2 Lens-gate owns `awaiting_agent_review → awaiting_owner_review`

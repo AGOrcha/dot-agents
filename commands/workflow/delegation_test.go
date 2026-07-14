@@ -794,6 +794,78 @@ func TestResolveFanoutTargetTask_BadStatus(t *testing.T) {
 	}
 }
 
+func TestAddSiblingTestFiles_AddsMissingSibling(t *testing.T) {
+	got := addSiblingTestFiles([]string{"commands/workflow/foo.go"})
+	want := []string{"commands/workflow/foo.go", "commands/workflow/foo_test.go"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("addSiblingTestFiles = %+v, want %+v", got, want)
+	}
+}
+
+func TestAddSiblingTestFiles_SkipsAlreadyPresentSibling(t *testing.T) {
+	in := []string{"commands/workflow/foo.go", "commands/workflow/foo_test.go"}
+	got := addSiblingTestFiles(in)
+	if len(got) != 2 {
+		t.Fatalf("expected no duplicate sibling added, got %+v", got)
+	}
+}
+
+func TestAddSiblingTestFiles_SkipsNonGoAndExistingTestEntries(t *testing.T) {
+	in := []string{"docs/README.md", "commands/workflow/bar_test.go"}
+	got := addSiblingTestFiles(in)
+	if len(got) != 2 || got[0] != "docs/README.md" || got[1] != "commands/workflow/bar_test.go" {
+		t.Fatalf("expected pass-through for non-.go and _test.go entries, got %+v", got)
+	}
+}
+
+// TestRunWorkflowFanout_WithTestsAddsMissingSibling covers the acceptance
+// scenario: fanout a Go file with no sibling test on disk, pass
+// --with-tests, and the resulting delegation contract's write_scope must
+// include the sibling _test.go path even though it does not exist yet
+// (create-if-absent — a TDD worker writes it fresh).
+func TestRunWorkflowFanout_WithTestsAddsMissingSibling(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--write-scope", "commands/foo.go", "--with-tests"); err != nil {
+		t.Fatalf("fanout with --with-tests: %v", err)
+	}
+	contract, _ := loadFanoutContractAndBundle(t, repo, "task-001")
+	assertFanoutContract(t, contract, "w", "task-001", []string{"commands/foo.go", "commands/foo_test.go"})
+
+	if _, err := os.Stat(filepath.Join(repo, "commands", "foo_test.go")); !os.IsNotExist(err) {
+		t.Fatalf("sibling test file must not be created on disk by fanout, stat err = %v", err)
+	}
+}
+
+// TestRunWorkflowFanout_WithoutWithTestsLeavesWriteScopeUnchanged is the
+// regression guard: omitting --with-tests must not change write_scope
+// resolution at all.
+func TestRunWorkflowFanout_WithoutWithTestsLeavesWriteScopeUnchanged(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--write-scope", "commands/foo.go"); err != nil {
+		t.Fatalf("fanout: %v", err)
+	}
+	contract, _ := loadFanoutContractAndBundle(t, repo, "task-001")
+	assertFanoutContract(t, contract, "w", "task-001", []string{"commands/foo.go"})
+}
+
+// TestRunWorkflowFanout_WithTestsSkipsExistingSiblingInScope asserts
+// create-if-absent semantics: when the sibling test path is already present
+// in the explicit write_scope, --with-tests must not add a duplicate entry.
+func TestRunWorkflowFanout_WithTestsSkipsExistingSiblingInScope(t *testing.T) {
+	repo := setupTestProject(t)
+	if err := executeWorkflowCommand(t, repo, "fanout",
+		"--plan", "plan-001", "--task", "task-001", "--owner", "w",
+		"--write-scope", "commands/foo.go,commands/foo_test.go", "--with-tests"); err != nil {
+		t.Fatalf("fanout with --with-tests: %v", err)
+	}
+	contract, _ := loadFanoutContractAndBundle(t, repo, "task-001")
+	assertFanoutContract(t, contract, "w", "task-001", []string{"commands/foo.go", "commands/foo_test.go"})
+}
+
 func TestParseFoldBackUpsertInputs_Happy(t *testing.T) {
 	in, err := parseFoldBackUpsertInputs(newFoldBackTestCmd("body", "valid-slug", "p1"), false)
 	if err != nil {

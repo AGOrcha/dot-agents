@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-hook-outcome.schema.json
+schema_version: 1
+records:
+    - schema_version: 1
+      sentinel_id: iteration-close-20260707T011428Z
+      skill: iteration-close
+      lifecycle_point: stop
+      intervention_class: remediate_at_stop
+      result: remediate
+      rule_id: iteration-close.R1.1
+      platform: claude
+      ts: "2026-07-07T12:12:05.147717Z"
+      correlation_id: iteration-close-20260707T011428Z
+    - schema_version: 1
+      sentinel_id: iteration-close-20260707T011428Z
+      skill: iteration-close
+      lifecycle_point: stop
+      intervention_class: remediate_at_stop
+      result: advise
+      rule_id: iteration-close.R1.4
+      platform: claude
+      ts: "2026-07-07T12:15:00.390169Z"
+      correlation_id: iteration-close-20260707T011428Z

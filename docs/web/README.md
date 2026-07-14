@@ -36,16 +36,16 @@ slices of the docs-starlight-migration plan.
 
 ```bash
 cd docs/web
-npm install
-npm run dev          # local dev server with HMR on http://localhost:4321
+pnpm install
+pnpm run dev          # local dev server with HMR on http://localhost:4321
 ```
 
 ## Build
 
 ```bash
 cd docs/web
-npm run build        # outputs static site to dist/  (GitHub-Pages base path)
-npm run preview      # serve dist/ locally to verify
+pnpm run build        # outputs static site to dist/  (GitHub-Pages base path)
+pnpm run preview      # serve dist/ locally to verify
 ```
 
 By default the build uses base `/dot-agents/` (suitable for
@@ -54,7 +54,7 @@ deploy at `agorcha.dev`, the CI workflow sets `DEPLOY_TARGET=cloudflare`
 so all asset URLs are root-relative:
 
 ```bash
-DEPLOY_TARGET=cloudflare npm run build
+DEPLOY_TARGET=cloudflare pnpm run build
 ```
 
 See the **Deploy** section below for the full Cloudflare flow.
@@ -154,11 +154,11 @@ After CI reports success:
 
 ```bash
 cd docs/web
-npm install
-npm run build                  # runs prebuild (copy-schemas) + astro build
-npm run preview                # serves dist/ via Astro's preview server
+pnpm install
+pnpm run build                  # runs prebuild (copy-schemas) + astro build
+pnpm run preview                # serves dist/ via Astro's preview server
 ```
 
 `wrangler dev` is also supported once `wrangler` is installed globally
 and `.dev.vars` is populated from `.dev.vars.example` — but the static
-output is identical, so `npm run preview` is usually sufficient.
+output is identical, so `pnpm run preview` is usually sufficient.

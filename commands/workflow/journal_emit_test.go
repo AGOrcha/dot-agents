@@ -286,7 +286,7 @@ func TestRunWorkflowTaskUpdate_DeltaChangedFields(t *testing.T) {
 	repo := setupTestProject(t)
 	chdirForCov(t, repo)
 	got := captureJournal(t)
-	if err := runWorkflowTaskUpdate("plan-001", "task-001", "Renamed", "fresh notes", ""); err != nil {
+	if err := runWorkflowTaskUpdate("plan-001", "task-001", "Renamed", "fresh notes", "", "", ""); err != nil {
 		t.Fatalf("task update: %v", err)
 	}
 	e := findEvent(t, *got, journal.CmdTaskUpdate)

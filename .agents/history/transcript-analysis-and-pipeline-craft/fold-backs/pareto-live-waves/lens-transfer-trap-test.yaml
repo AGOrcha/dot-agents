@@ -1,0 +1,8 @@
+schema_version: 1
+id: lens-transfer-trap-test
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: pareto-live-waves
+observation: RESOLVED 2026-07-13 — Tier-B trap-test transfer check added to evidence/pareto/disposable-tasks.md (planted-defect calibration task gates instrument trust when a stage prompt ports to a SECONDARY-tier arm; fail routes to bounded single-section prompt regeneration; O13-compatible, never a frontier row). No wave decision reopened.
+classification: small
+routed_to: task_note:transcript-analysis-and-pipeline-craft/pareto-live-waves
+created_at: "2026-07-13T04:51:36Z"

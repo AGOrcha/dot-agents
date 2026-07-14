@@ -1,0 +1,35 @@
+schema_version: 1
+delegation_id: del-p4-orphan-canonicals-and-userconfig-1782133595
+plan_id: platform-driven-diagnostics
+task_id: p4-orphan-canonicals-and-userconfig
+owner: loop-worker
+worker:
+    profile: loop-worker
+selection:
+    selected_by: workflow fanout
+    selected_at: "2026-06-22T13:06:35Z"
+scope:
+    write_scope:
+        - internal/platform/claude.go
+        - internal/platform/codex.go
+        - internal/platform/opencode.go
+        - internal/platform/claude_test.go
+        - internal/platform/codex_test.go
+        - internal/platform/opencode_test.go
+        - commands/lifecycle/doctor.go
+        - commands/lifecycle/status.go
+prompt: {}
+context: {}
+verification:
+    feedback_goal: Complete the delegated task within write scope with verification and merge-back.
+    app_type: go-cli
+    verifier_sequence:
+        - unit
+        - cli-runner
+closeout:
+    worker_must:
+        - workflow_verify_record
+        - workflow_checkpoint
+        - workflow_merge_back
+    parent_must:
+        - workflow_delegation_closeout

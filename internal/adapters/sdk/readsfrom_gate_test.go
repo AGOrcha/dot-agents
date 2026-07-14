@@ -184,8 +184,16 @@ func TestMaterializeViewAutoBindsStoreValidator(t *testing.T) {
 		t.Fatal("the auto-bound gate must reject BEFORE the runner executes")
 	}
 
-	// Clean dependency: admitted through the same auto-bound gate; output persists.
-	err = s.MaterializeView("ok_view", []string{"crg"}, nil, func(read func(string) ([]Note, error)) ([]Note, error) {
+	assertCleanDependencyAdmitted(t, s)
+}
+
+// assertCleanDependencyAdmitted runs the "clean dependency" half of
+// TestMaterializeViewAutoBindsStoreValidator: a non-migration_only reads_from
+// must be admitted through the same auto-bound gate, with output persisting
+// and reading back correctly.
+func assertCleanDependencyAdmitted(t *testing.T, s *SDK) {
+	t.Helper()
+	err := s.MaterializeView("ok_view", []string{"crg"}, nil, func(read func(string) ([]Note, error)) ([]Note, error) {
 		dep, err := read("crg")
 		if err != nil {
 			return nil, err

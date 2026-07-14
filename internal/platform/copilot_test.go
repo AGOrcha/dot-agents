@@ -769,3 +769,85 @@ func TestCopilotCreateLinks_UserHomeHookError(t *testing.T) {
 		t.Fatal("expected CreateLinks to surface the user-home MkdirAll fault")
 	}
 }
+
+// TestCopilotManagedOutputs_CoversSharedTargets pins the BLOCKER-1 root cause
+// (drift): every repo-local target copilot PROJECTS via SharedTargetIntents
+// (e.g. the .agents/skills/ mirror, .github/agents/*.agent.md) must be covered
+// by some ManagedOutputs() pattern, or `da refresh` leaves it un-ignored. This
+// catches a FUTURE output added without updating ManagedOutputs, not just the
+// one omission the cross-harness reviewer found. Authoritative output set:
+// docs/PLATFORM_DIRS_DOCS.md ("GitHub Copilot" impl-audit row).
+func TestCopilotManagedOutputs_CoversSharedTargets(t *testing.T) {
+	tmp := t.TempDir()
+	agentsHome := filepath.Join(tmp, ".agents")
+	t.Setenv("AGENTS_HOME", agentsHome)
+	for _, p := range [][]string{
+		{"skills", "proj", "alpha", "SKILL.md"},
+		{"agents", "proj", "reviewer", "AGENT.md"},
+	} {
+		dir := filepath.Join(append([]string{agentsHome}, p[:3]...)...)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, p[3]), []byte("body"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := NewCopilot()
+	intents, err := c.SharedTargetIntents("proj")
+	if err != nil {
+		t.Fatalf("SharedTargetIntents: %v", err)
+	}
+	if len(intents) == 0 {
+		t.Fatal("expected non-zero shared-target intents")
+	}
+	r, ok := c.(ManagedOutputReporter)
+	if !ok {
+		t.Fatal("copilot must implement ManagedOutputReporter")
+	}
+	outs := r.ManagedOutputs()
+	for _, in := range intents {
+		if !managedOutputsCover(outs, in.TargetPath) {
+			t.Errorf("copilot shared-target %q not covered by any ManagedOutputs entry %v; managed .gitignore would leak it", in.TargetPath, outs)
+		}
+	}
+}
+
+// managedOutputsCover reports whether some managed-output pattern covers target
+// (an exact dir match or a path under a dir pattern). Extracted to keep the
+// caller under the cognitive-complexity gate.
+func managedOutputsCover(outs []string, target string) bool {
+	target = strings.ReplaceAll(target, `\`, "/")
+	for _, o := range outs {
+		dir := strings.TrimSuffix(strings.ReplaceAll(o, `\`, "/"), "/")
+		if target == dir || strings.HasPrefix(target, dir+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestCollectManagedOutputs_ReporterAndStaticBranches covers both arms of
+// CollectManagedOutputs: a ManagedOutputReporter platform (copilot, dynamic) and
+// a static-table platform (cursor). Pins the D14 collector's coverage.
+func TestCollectManagedOutputs_ReporterAndStaticBranches(t *testing.T) {
+	got := CollectManagedOutputs([]Platform{NewCopilot(), NewCursor()})
+	has := func(want string) bool {
+		for _, g := range got {
+			if g == want {
+				return true
+			}
+		}
+		return false
+	}
+	// copilot (ManagedOutputReporter) dynamic outputs:
+	for _, w := range []string{".agents/skills/", ".github/hooks/*.json"} {
+		if !has(w) {
+			t.Errorf("CollectManagedOutputs missing copilot reporter output %q; got %v", w, got)
+		}
+	}
+	// cursor (static table) output:
+	if !has(cursorDir + "/") {
+		t.Errorf("CollectManagedOutputs missing cursor static output %q; got %v", cursorDir+"/", got)
+	}
+}

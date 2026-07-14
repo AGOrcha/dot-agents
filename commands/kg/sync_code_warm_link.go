@@ -846,6 +846,18 @@ func warmCodeLane(store graphstore.Store) (nodes, edges int, summary string) {
 	return nodesIn, edgesIn, fmt.Sprintf("  code-lane: %d nodes, %d edges imported from CRG", nodesIn, edgesIn)
 }
 
+// validLinkKinds is the set of accepted note→symbol link kinds, shared by
+// `kg link add` and `kg link import`.
+var validLinkKinds = map[string]bool{
+	"mentions": true, "implements": true, "documents": true,
+	"decides": true, "references": true,
+}
+
+// validLinkKindList is the human-readable comma-separated form for errors.
+const validLinkKindList = "mentions, implements, documents, decides, references"
+
+func isValidLinkKind(k string) bool { return validLinkKinds[k] }
+
 // runKGLinkAdd creates a note→symbol link.
 func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	if len(args) < 2 {
@@ -856,14 +868,15 @@ func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	if kind == "" {
 		kind = "mentions"
 	}
-	validLinkKinds := map[string]bool{
-		"mentions": true, "implements": true, "documents": true,
-		"decides": true, "references": true,
-	}
-	if !validLinkKinds[kind] {
+	if !isValidLinkKind(kind) {
 		return kgUsageError(deps,
-			fmt.Sprintf("invalid link kind %q: valid values are mentions, implements, documents, decides, references", kind),
-			"Pass one of: mentions, implements, documents, decides, references.")
+			fmt.Sprintf("invalid link kind %q: valid values are %s", kind, validLinkKindList),
+			"Pass one of: "+validLinkKindList+".")
+	}
+	if deps.Flags.DryRun {
+		ui.InfoBox("Dry run — would create link",
+			fmt.Sprintf("%s -[%s]-> %s", args[0], kind, args[1]))
+		return nil
 	}
 
 	// Content-delta event: record the link add as a count + the affected ids
@@ -895,6 +908,114 @@ func runKGLinkAdd(deps Deps, cmd *cobra.Command, args []string) error {
 	ok = true
 	ui.Success(fmt.Sprintf("Link created (id=%d): %s -[%s]-> %s", id, args[0], kind, args[1]))
 	return nil
+}
+
+// linkManifestRow is one parsed `kg link import` manifest line.
+type linkManifestRow struct {
+	noteID string
+	symbol string
+	kind   string
+}
+
+// parseLinkManifest parses a link manifest: each non-comment, non-blank line is
+// `<note-id> <qualified-name> [<kind>]` (whitespace-separated; kind defaults to
+// "mentions"). It returns the valid rows plus a per-line error slice (bad shape
+// or invalid kind) so every problem can be reported at once.
+func parseLinkManifest(content string) ([]linkManifestRow, []string) {
+	var rows []linkManifestRow
+	var errs []string
+	for n, raw := range strings.Split(content, "\n") {
+		line := strings.TrimSpace(strings.TrimSuffix(raw, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 || len(fields) > 3 {
+			errs = append(errs, fmt.Sprintf("line %d: expected `<note-id> <qualified-name> [kind]` (2 or 3 fields), got %d in %q", n+1, len(fields), line))
+			continue
+		}
+		kind := "mentions"
+		if len(fields) >= 3 {
+			kind = fields[2]
+		}
+		if !isValidLinkKind(kind) {
+			errs = append(errs, fmt.Sprintf("line %d: invalid kind %q (valid: %s)", n+1, kind, validLinkKindList))
+			continue
+		}
+		rows = append(rows, linkManifestRow{noteID: fields[0], symbol: fields[1], kind: kind})
+	}
+	return rows, errs
+}
+
+// runKGLinkImport bulk-applies note→symbol links from a manifest file. Deciding
+// which note documents/implements/references which symbol is a judgment call the
+// caller (agent/skill) makes when authoring the manifest; this command is the
+// mechanical batch execution. Invalid rows are collected and reported while the
+// valid rows are still applied (upsert is idempotent); the command exits
+// non-zero if any row failed so the caller sees every problem in one pass. With
+// --dry-run it validates + previews without writing.
+func runKGLinkImport(deps Deps, _ *cobra.Command, args []string) error {
+	if len(args) < 1 {
+		return kgUsageError(deps, "kg link import expects 1 argument",
+			"Usage: da kg link import <manifest-file>.")
+	}
+	data, err := os.ReadFile(args[0])
+	if err != nil {
+		return fmt.Errorf("read manifest %q: %w", args[0], err)
+	}
+	rows, failures := parseLinkManifest(string(data))
+
+	applied := len(rows)
+	if deps.Flags.DryRun {
+		previewLinkRows(rows)
+	} else {
+		var aerr error
+		if applied, failures, aerr = applyLinkRows(rows, failures); aerr != nil {
+			return aerr
+		}
+	}
+
+	verb := "linked"
+	if deps.Flags.DryRun {
+		verb = "would link"
+	}
+	ui.Success(fmt.Sprintf("%s %d note→symbol link(s); %d row(s) failed", verb, applied, len(failures)))
+	for _, f := range failures {
+		ui.Bullet("error", f)
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("kg link import: %d row(s) failed", len(failures))
+	}
+	return nil
+}
+
+// previewLinkRows prints the dry-run preview line for each parsed manifest row.
+func previewLinkRows(rows []linkManifestRow) {
+	for _, r := range rows {
+		ui.Bullet("info", fmt.Sprintf("would link: %s -[%s]-> %s", r.noteID, r.kind, r.symbol))
+	}
+}
+
+// applyLinkRows idempotently upserts each parsed row, returning the applied
+// count and the failure list (extended from the parse failures with any per-row
+// upsert error). A store-open failure aborts before any write.
+func applyLinkRows(rows []linkManifestRow, failures []string) (int, []string, error) {
+	store, err := openKGStore(kgHome())
+	if err != nil {
+		return 0, failures, fmt.Errorf(warmStoreOpenErrFmt, err)
+	}
+	defer store.Close()
+	applied := 0
+	for _, r := range rows {
+		if _, uerr := store.UpsertNoteSymbolLink(graphstore.NoteSymbolLink{
+			NoteID: r.noteID, QualifiedName: r.symbol, LinkKind: r.kind,
+		}); uerr != nil {
+			failures = append(failures, fmt.Sprintf("%s -[%s]-> %s: %v", r.noteID, r.kind, r.symbol, uerr))
+			continue
+		}
+		applied++
+	}
+	return applied, failures, nil
 }
 
 // runKGLinkList shows all symbol links for a note.
