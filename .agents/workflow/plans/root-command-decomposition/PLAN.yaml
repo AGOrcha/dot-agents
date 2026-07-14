@@ -4,8 +4,8 @@ title: Root commands package decomposition
 status: active
 summary: Extract the lifecycle/resource command cluster out of root commands into a subpackage so root is a thin composition root
 created_at: "2026-05-17T13:53:43Z"
-updated_at: "2026-06-24T05:01:40Z"
+updated_at: "2026-07-10T13:50:23Z"
 owner: dot-agents
 success_criteria: Root commands package contains only composition (root.go, flags.go, ux.go, explain.go, session_stats.go, review.go, wiring tests); lifecycle cluster lives in commands/lifecycle; mcp/settings/rules each in their own subpackage matching the existing convention; importguard CI gate enforces the boundary; t15 follow-up lands per-file interface-DI on the new subpackages; go test ./... and coverage gate green.
 verification_strategy: go test ./... after every move task; tools/importguard CI gate asserts package commands does not import internal/links, internal/projectsync, internal/scaffold/home, or internal/scaffold/hooks; per-cluster moves keep cmd/da/main.go compiling unchanged via the temporary root files preserved through t12, then deleted in t13; final state has no commands.NewXxxCmd export for lifecycle/resource commands.
-current_focus_task: ""
+current_focus_task: Convert commands/internal/lifecycle/ from func-var seams to interface-DI (deferred from t15)

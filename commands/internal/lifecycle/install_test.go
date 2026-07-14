@@ -858,7 +858,7 @@ func TestFinalizeInstall_DryRunIsNoop(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	if err := finalizeInstall("p", tmp); err != nil {
+	if err := finalizeInstall("p", tmp, installOptions{}); err != nil {
 		t.Fatalf("finalizeInstall dry-run: %v", err)
 	}
 }
@@ -881,7 +881,8 @@ func TestFinalizeInstall_WritesLockStampNotManifest(t *testing.T) {
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
 
-	if err := finalizeInstall("p", projectPath); err != nil {
+	opts := installOptions{version: "1.2.3", commit: "deadbeef", describe: "v1.2.3-0-gdeadbeef"}
+	if err := finalizeInstall("p", projectPath, opts); err != nil {
 		t.Fatalf("finalizeInstall: %v", err)
 	}
 
@@ -898,6 +899,9 @@ func TestFinalizeInstall_WritesLockStampNotManifest(t *testing.T) {
 	}
 	if stamp.Project != "p" || stamp.Stamped == "" {
 		t.Fatalf("install lock stamp = %+v", stamp)
+	}
+	if stamp.Version != "1.2.3" || stamp.Commit != "deadbeef" || stamp.Describe != "v1.2.3-0-gdeadbeef" {
+		t.Fatalf("finalizeInstall did not stamp build info from opts: %+v", stamp)
 	}
 }
 
@@ -1018,7 +1022,7 @@ func TestRunInstallSharedTargets_NoEnabledPlatforms(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
+	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p"), installOptions{}); err != nil {
 		t.Fatalf("runInstallSharedTargets: %v", err)
 	}
 }
@@ -1120,16 +1124,13 @@ func TestRunInstallSharedTargets_ExactPrunesStaleKeepsUser(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	savedInexact := installInexact
-	installInexact = false
-	defer func() { installInexact = savedInexact }()
 
 	platforms := []platform.Platform{fakeInstallPlatform{
 		id:        "fake",
 		installed: true,
 		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
 	}}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}); err != nil {
 		t.Fatalf("runInstallSharedTargetsFor exact: %v", err)
 	}
 
@@ -1151,16 +1152,13 @@ func TestRunInstallSharedTargets_InexactKeepsStale(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	savedInexact := installInexact
-	installInexact = true
-	defer func() { installInexact = savedInexact }()
 
 	platforms := []platform.Platform{fakeInstallPlatform{
 		id:        "fake",
 		installed: true,
 		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
 	}}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: true}); err != nil {
 		t.Fatalf("runInstallSharedTargetsFor inexact: %v", err)
 	}
 
@@ -1180,23 +1178,20 @@ func TestRunInstallSharedTargets_ExactIdempotent(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	savedInexact := installInexact
-	installInexact = false
-	defer func() { installInexact = savedInexact }()
 
 	platforms := []platform.Platform{fakeInstallPlatform{
 		id:        "fake",
 		installed: true,
 		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
 	}}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}); err != nil {
 		t.Fatalf("first projection: %v", err)
 	}
 	fi1, err := os.Lstat(wanted)
 	if err != nil {
 		t.Fatalf("wanted target missing after first run: %v", err)
 	}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}); err != nil {
 		t.Fatalf("second projection (must be a no-op): %v", err)
 	}
 	fi2, err := os.Lstat(wanted)
@@ -1656,7 +1651,7 @@ func TestFinalizeInstall_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	if err := finalizeInstall("p", t.TempDir()); err != nil {
+	if err := finalizeInstall("p", t.TempDir(), installOptions{}); err != nil {
 		t.Fatalf("finalizeInstall dry-run: %v", err)
 	}
 }
@@ -1669,7 +1664,7 @@ func TestFinalizeInstall_WriteFailReturnsError(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{}
 	defer func() { Flags = saved }()
-	if err := finalizeInstall("p", filepath.Join(tmp, "not-a-dir")); err == nil {
+	if err := finalizeInstall("p", filepath.Join(tmp, "not-a-dir"), installOptions{}); err == nil {
 		t.Fatal("expected finalizeInstall to return lock write error")
 	}
 }
@@ -1681,7 +1676,7 @@ func TestRunInstallSharedTargets_DryRun(t *testing.T) {
 	saved := Flags
 	Flags = GlobalFlags{DryRun: true}
 	defer func() { Flags = saved }()
-	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p")); err != nil {
+	if err := runInstallSharedTargets("p", filepath.Join(tmp, "p"), installOptions{}); err != nil {
 		t.Fatalf("runInstallSharedTargets dry-run: %v", err)
 	}
 }
@@ -1931,6 +1926,71 @@ func TestNewInstallCmd_RunEAppliesDepsToGlobals(t *testing.T) {
 	}
 	if !Flags.Verbose {
 		t.Errorf("RunE wrapper did not propagate FlagsFn().Verbose; got %+v", Flags)
+	}
+}
+
+// TestNewInstallCmd_ThreadsBuildInfoIntoLockStamp proves the full t17 chain:
+// deps build info → applyDepsToGlobals → installOptionsFromGlobals →
+// installOptions → finalizeInstall → the .agentsrc.lock install stamp. A real
+// (non-dry-run) install via the constructed cobra command must record the
+// deps-supplied Version/Commit/Describe, confirming NewInstallCmd's RunE builds
+// opts from live state rather than reading the removed install-local seam.
+func TestNewInstallCmd_ThreadsBuildInfoIntoLockStamp(t *testing.T) {
+	saved := Flags
+	savedV, savedC, savedD := Version, Commit, Describe
+	defer func() {
+		Flags = saved
+		Version, Commit, Describe = savedV, savedC, savedD
+	}()
+
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	seedClaudeInstalledSignalLifecycle(t, tmp)
+	agentsHome := filepath.Join(tmp, ".agents")
+	os.MkdirAll(agentsHome, 0755)
+	t.Setenv("AGENTS_HOME", agentsHome)
+	if err := os.WriteFile(filepath.Join(agentsHome, "config.json"), []byte(`{"version":1}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	projDir := filepath.Join(tmp, "proj")
+	os.MkdirAll(projDir, 0755)
+	rc := &config.AgentsRC{Version: 1, Project: "proj"}
+	if err := rc.Save(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	prev, _ := os.Getwd()
+	t.Cleanup(func() { os.Chdir(prev) })
+	if err := os.Chdir(projDir); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := Deps{
+		ExampleBlock:    stubExampleBlock,
+		NoArgsWithHints: stubNoArgsWithHints,
+		FlagsFn:         func() GlobalFlags { return GlobalFlags{Yes: true} },
+		Version:         "3.1.4",
+		Commit:          "c0ffee",
+		Describe:        "v3.1.4-2-gc0ffee",
+	}
+
+	cmd := NewInstallCmd(deps)
+	cmd.SetArgs(nil)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute install: %v", err)
+	}
+
+	lf, err := agentslock.Open(config.AgentsLockPath(projDir))
+	if err != nil {
+		t.Fatalf("open lock: %v", err)
+	}
+	var stamp installLockStamp
+	if ok, err := lf.Section(installLockSection, &stamp); err != nil || !ok {
+		t.Fatalf("install stamp missing: ok=%v err=%v", ok, err)
+	}
+	if stamp.Version != "3.1.4" || stamp.Commit != "c0ffee" || stamp.Describe != "v3.1.4-2-gc0ffee" {
+		t.Fatalf("NewInstallCmd did not thread deps build info into stamp: %+v", stamp)
 	}
 }
 
@@ -2211,7 +2271,7 @@ func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	platforms := []platform.Platform{
 		fakeInstallPlatform{id: "boom", installed: true, intentErr: errors.New("collect failed")},
 	}
-	if err := runInstallSharedTargetsFor("", filepath.Join(tmp, "no-such-parent", "p"), platforms); err == nil {
+	if err := runInstallSharedTargetsFor("", filepath.Join(tmp, "no-such-parent", "p"), platforms, installOptions{}); err == nil {
 		t.Fatal("expected shared target projection error")
 	}
 }
