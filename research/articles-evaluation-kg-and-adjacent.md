@@ -948,7 +948,7 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 
 **Why a new part:** This batch of five was sourced fresh (x.com tweets) and explicitly tasked against four anchor specs — `graph-backend-adapter-contract`, `scoped-knowledge-graphs`, `work-tracking-storage-abstraction`, `kg-command-surface-readiness` — plus the memory theme **"KG is SOT for SDD artifacts + typed working/operational/semantic/episodic views."** Raw sources are in `research/articles/`; per-article concept extracts in `research/extracts/`. Rubric and `[OVERLAP-SHARPEN]` / `[GAP-ADOPT]` / `[WE-AHEAD]` labels are the same as Part A.
 
-**Retrieval note (honesty):** all five x.com tweets were navigated directly via Playwright (the `article-extract` skill, Path B); each was confirmed to be a bare link card. Four articles' full bodies were recovered from the authors' own cross-posts (GitHub README, dbreunig.com, kmad.ai, raisingpixels.dev Substack). One — aminkarbasi "Jailbreakers and Prompt Optimizers Are Looping the Same Problem" — is an X-native long-form Article with no public author cross-post; Playwright reached the tweet card (verified title, opening excerpt, exact 2026-06-24 timestamp) but the article *body* redirected to an X login wall and is not retrievable without an authenticated X session. Only its title/thesis/tagline and 8 verified arXiv references were recoverable. See "Part H — PENDING (needs paste)" below.
+**Retrieval note (honesty):** all five x.com tweets were navigated directly via Playwright (the `article-extract` skill, Path B); each was confirmed to be a bare link card. Four articles' full bodies were recovered from the authors' own cross-posts (GitHub README, dbreunig.com, kmad.ai, raisingpixels.dev Substack). One — aminkarbasi "Jailbreakers and Prompt Optimizers Are Looping the Same Problem" — is an X-native long-form Article with no public author cross-post; Playwright reached the tweet card (verified title, opening excerpt, exact 2026-06-24 timestamp) but the article *body* redirected to an X login wall and is not retrievable without an authenticated X session. Only its title/thesis/tagline and 8 verified arXiv references were recoverable at the time. **Update 2026-07-12:** the aminkarbasi body was recovered in full via a logged-in Claude-in-Chrome x.com session (full verbatim body now in `research/articles/jailbreak-prompt-opt-duality.md`); H.4 below is revised against the full text and the former "Part H — PENDING" section is resolved in place.
 
 ### H.1 compaction-orchestrator — *Your Agent Does Not Need One Summary, It Needs a Compaction Plan* (@luhsnaa)
 
@@ -989,16 +989,17 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 - **[GAP-ADOPT]** — add `token_budget` + `tolerance` to stage/app-type profiles; emit per-task token spend into the episodic view; a `da kg` query computes efficiency per task type and recommends model down-shifts where eval pass-rate stays above tolerance.
 - **[OVERLAP-SHARPEN]** vs `kg-command-surface-readiness` — "you can't move to a cheaper model without a defined bar" reinforces that `da kg` surfaces must make the eval/measurement boundary queryable, not just return notes.
 
-### H.4 jailbreak-prompt-opt-duality — *Jailbreakers and Prompt Optimizers Are Looping the Same Problem* (@aminkarbasi) — body login-walled, PENDING full paste
+### H.4 jailbreak-prompt-opt-duality — *Jailbreakers and Prompt Optimizers Are Looping the Same Problem* (@aminkarbasi) — RESOLVED 2026-07-12: full body recovered
 
-**Core (from article card + verified arXiv refs; full prose pending).** Automated jailbreaking and automated prompt optimization are the same iterative loop (propose → evaluate → score → reflect/refine), differing only in objective function. "Prompt is a control surface." Attack lineage PAIR→TAP→Adversarial Reasoning; optimization lineage APE→DSPy→MIPROv2→GEPA→ACE. The communities should cross-pollinate (query efficiency + evaluator robustness ↔ multi-step pipeline abstractions).
+**Core (full body, deep-read 2026-07-12).** Automated jailbreaking and automated prompt optimization are the same iterative loop (propose → evaluate → score → reflect/refine), differing only in objective function — "similar feedback loops with a different sign on the reward." "Prompt is a control surface." Attack lineage PAIR→TAP→Adversarial Reasoning; optimization lineage APE→DSPy→MIPRO→GEPA→ACE. The communities should cross-pollinate: jailbreakers own hard-won experience with **imperfect judges, black-box search, query budgets, transferability, and evaluator hacking**; prompt-optimization owns better abstractions for **programs, traces, metrics, data splits**. The body closes with **FAPO (Fully Automated Prompt Optimization)** — previously an unverifiable mirror label, now confirmed as the article's own system: the whole loop run through coding agents (Codex/Claude Code): run evaluations → classify failures → identify dominant failure modes → generate targeted variants → review changes → compare against previous best → **accept only if it improves the system** → iterate.
 
-**Pros.** Our verify/score/refine iteration loop is the same abstraction. GEPA/ACE "evolving playbooks" mirror our operational view evolving from result correlations; ACE's **"context collapse"** is a direct warning for any KG semantic-view summarization (echoes H.1).
+**Pros.** Our verify/score/refine iteration loop is the same abstraction. GEPA/ACE "evolving playbooks" mirror our operational view evolving from result correlations; ACE's **"context collapse"** is a direct warning for any KG semantic-view summarization (echoes H.1). The full body adds the sharpest available list of judge-failure concerns (evaluator hacking, overfitting to a judge, transferability) — exactly the failure surface our verifier stage must be hardened against.
 
-**Cons.** Full article body NOT retrieved (paywalled). Thesis/tagline from the card; a "FAPO" label from one mirror could not be verified and is excluded.
+**Cons.** Position piece; FAPO is described, not benchmarked. One sentence mis-attributes the loop's popularization ("popularized by @steipete by dates a few years back," sic).
 
 **Mapping.**
-- **[OVERLAP-SHARPEN]** vs `planner-evidence-backed-write-scope` + verifier profiles — the emphasis on **evaluator/judge robustness** says: harden the verifier stage as the judge the whole loop rides on; a weak judge breaks both safety and quality.
+- **[OVERLAP-SHARPEN]** vs `planner-evidence-backed-write-scope` + verifier profiles — the emphasis on **evaluator/judge robustness** says: harden the verifier stage as the judge the whole loop rides on; a weak judge breaks both safety and quality. Deep-read addition: their evaluator-hacking vocabulary names what the transcript plan's OH-E3 finding (substring scorer rates unverifiable cursor self-reports `high`) demonstrated empirically — a gamed judge.
+- **[OVERLAP-SHARPEN — new, from FAPO]** — FAPO's accept-only-if-it-beats-previous-best is structurally our parent verdict gate + bounded fold-back re-entry (craft §3): keep changes only on demonstrated improvement, reject otherwise, iterate within a budget. Independent convergence on gate-shaped optimization.
 - **[GAP-ADOPT]** — adopt GEPA/ACE-style *reflective* (not RL) optimization for evolving operational-view skills/rules with the verifier as scoring judge, guarded against "context collapse."
 - **[GAP-ADOPT — security, no current spec]** — "prompt is a control surface" implies KG-canonical skills/rules are an attack surface. Consider an adversarial-eval gate / red-team edge type before a skill/rule is promoted. No anchor spec covers this.
 
@@ -1022,8 +1023,8 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 4. **Optimization and adversarial robustness are the same machinery.** H.4's "prompt is a control surface" reframes soon-to-be-KG-canonical skills/rules as both optimization target and attack surface — a gap none of the anchor specs cover.
 5. **Capture/surfacing is a first-class design axis.** H.1 (routing what enters context) and H.5 (fast/slow/none capture tiers) argue that how knowledge enters/exits the working set is a deliberate, typed decision — supporting a `capture_tier` dimension on episodic ingest and a push (not just pull) `da kg` surface.
 
-### Part H — PENDING (needs paste)
-- **H.4 aminkarbasi — "Jailbreakers and Prompt Optimizers Are Looping the Same Problem"** (`research/articles/jailbreak-prompt-opt-duality.md`, marked `STATUS: NEEDS-PASTE`): X-native long-form Article body is **login-walled** — Playwright (via the `article-extract` skill) navigated the tweet and confirmed the card (verified article title, opening excerpt, exact 2026-06-24 timestamp), then the full article URL `/i/article/2069652814331285504` redirected to an X login wall. No public author cross-post exists. **Verified:** author, date, title, opening thesis excerpt, "prompt is a control surface" tagline, all 8 arXiv references. **Missing:** full verbatim body. *Maintainer action (requires an authenticated X session):* paste the article body into that file's `### Body` section and clear the `STATUS: NEEDS-PASTE` marker.
+### Part H — PENDING: RESOLVED 2026-07-12
+- **H.4 aminkarbasi** full body recovered via a logged-in Claude-in-Chrome x.com session (no maintainer paste needed); `research/articles/jailbreak-prompt-opt-duality.md` now carries the full verbatim body and the `NEEDS-PASTE` marker is cleared. H.4 above revised against the full text; the three original mappings held unchanged and one new mapping (FAPO ≈ parent verdict gate) was added. The previously-excluded "FAPO" label is confirmed as the article's own system name.
 
 ### Part H — open questions raised
 1. **Episodic→semantic projection policy:** H.1 has a running per-segment router; §3A describes projection abstractly. Do we adopt a compaction-plan-style typed router for what survives into the semantic view, and is the plan itself a KG node?
@@ -1037,34 +1038,99 @@ These supersede the C.* labels they reference. C.* items not listed here stand.
 
 ## Part I — 2026-07-03 addendum: six agentic-engineering articles (owner-flagged)
 
-Six x.com threads flagged by the owner to sharpen the `da-recipe-scripts` spec. All are
-teaser-level (full X Articles login-walled; bodies `NEEDS-PASTE`, deep-read pending the X MCP
-read path). Article files under `research/articles/`; distilled takeaways in
-`research/extracts/agentic-engineering-2026-07.md`.
+Six x.com threads flagged by the owner to sharpen the `da-recipe-scripts` spec. Originally
+teaser-level (full X Articles login-walled). **Deep-read complete 2026-07-12:** all six full
+bodies recovered via a logged-in Claude-in-Chrome x.com session (the X MCP read path was not
+needed). Article files under `research/articles/` now carry full verbatim bodies; distilled
+takeaways in `research/extracts/agentic-engineering-2026-07.md` (enriched same date). Each
+entry below keeps the teaser-pass claim and adds its deep-read delta.
 
 ### I.1 elvissun — /goal + Loss Functions
 Autonomous loops should optimize an explicit *loss function*, not run fire-and-forget. Maps to
 r1-outcome-scoring + the r4 eval harness: make each run's objective explicit and measurable.
 
+**Deep-read delta.** The full body supplies a four-part loss-function anatomy: **target** (large
+enough that enumeration doesn't pay; eval blinded from the agent), **constraints** (wall-clock
+budget first — "agents have no sense of time" — plus money caps, surface, methodology),
+**instruments** ("a constraint without an instrument is a vibe — the agent will violate it
+cheerfully because it can't tell it's violating it"; one CLI command per constraint: time
+accounting, provider budget, LLM spend, and *self-aware token usage of the loop itself*), and
+**forced entropy** (overfit reflection every cycle, non-obvious jump on stall, and "keep an
+iteration log … so it can look back and reflect across compactions"). Three documented rounds of
+eval-cheating (seed mirroring → learn-by-miss keyword enumeration → keyword ballooning) are the
+empirical Goodhart record. Consequences: the instruments list is the transcript-analysis plan's
+cost instrumentation (craft §5) argued from the loop-design side; the iteration-log rule is our
+iter-log discipline verbatim; the blinded-eval + cheat rounds are direct design input for
+r4-code-task-generation-eval (blind the answer key; fence cheap paths).
+
 ### I.2 iamgrigorev (Poolside) — designing ML experiments that teach
 Throughput without hypothesis + clean readout is noise. Reinforces
 `prototype-experiment-fidelity-gate` and the harness discipline.
+
+**Deep-read delta.** Adds four adoptable mechanisms: **dated shared baseline configs** (one
+baseline in main, retrained + re-dated after verified features; "people still say 'baseline,'
+but the word does not mean one thing anymore") = pinned eval baselines for the r4 harness;
+**experiments must finish** ("an unfinished experiment is … just compute spent"; killing early
+biases taste toward ideas that look good immediately) = the Pareto rubric's completed-run
+discipline; **manual run table** (accountability via hand-written log) = the iter-log; and
+**efficiency gain = C_predicted / C_observed** via occasional scaling-law fits — an
+interpretable effect-size unit ("how much compute did the method save?") that the Pareto cost
+axis can mirror as cost-per-task-completed. "The evaluation should match the question" is our
+lens-selection rule stated for ML.
 
 ### I.3 sergeykarayev — Your Agents Should Be Multiplayer
 Siloed per-agent context forces humans to be couriers. Validates orchestrator+workers+
 `session-handoff-journal` and "shared coordination backend > isolated-worktree status."
 
+**Deep-read delta.** The concrete wins are sharper than the teaser: **code review by joining
+the builder's session** ("the session holds the full history of decisions, including the dead
+ends" — ask the agent, not the author), **handoffs carrying what-the-agent-already-tried**, and
+around-the-clock shift work. "The model is no longer the bottleneck. Coordination is." is the
+one-line thesis of `full-loop-orchestration-runtime`; the dead-ends-preserved session is
+exactly the session-handoff-journal payload (episodic KG view).
+
 ### I.4 thealexker — token engineering, not tokenmaxxing
 A $200 unmonitored expensive-model run; engineer + monitor spend. External validation of the
 `worker-model-selection` policy (scope model to task; expensive tiers not a default).
+
+**Deep-read delta.** Three proposals in the body: **routing** (lightweight LLM-judge classifier
+deciding where tokens flow — stage_profiles cheap-tier routing restated), **evals** ("measure …
+the cost per task completed, not the dollar amount per token"; LLM-generated code is technical
+debt until proven otherwise) and **knowledge sharing** (searchable org knowledge so models stop
+re-retrieving — the KG-as-SOT argument). Cost-per-task-completed is the unit the transcript
+plan's productive-token normalization (O3) should report at the top level; token-burn
+leaderboards as Cookie Clicker is the anti-metric warning for any token dashboard we build
+(r2-observability-dashboard).
 
 ### I.5 nifinet — signal-based outbound engine (Codex)
 watch → validate-a-real-signal → decide → draft. A concrete template for the dot-agents X
 outreach engine once the X app is approved.
 
+**Deep-read delta.** The architecture is more reusable than the teaser suggested: **six
+codex-exec jobs around one schema-validated shared record** — "the prompt will drift; the
+schema keeps the next step usable" is delegation-bundle contract discipline independently
+invented for GTM. **outputs/ vs memory/ separation** ("outputs are what happened today; memory
+is what the system should remember tomorrow") = iter-log vs lessons. **Writer ≠ checker** ("the
+same step that writes the message will often defend it") is RULE-7's rationale. The weekly
+*learn* step optimizing for selectivity ("outbound improves when the system says no more
+often") is a fold-back loop whose success metric is cuts, not throughput.
+
 ### I.6 realmcore_ (akira) — Onyx: a programmable runtime for agent orchestration  ← the sharpener
 Onyx is a VM for *programmable* agent orchestration ("orchestration as software engineering") —
 the maximal end of the orchestration spectrum.
+
+**Deep-read delta.** The full body *confirms and arms* the boundary reading. Onyx's own argument
+for the VM is: **"a skill is not a binding behavioral contract. You cannot get a guarantee out
+of text"** — which is simultaneously (a) why recipes must stay mechanical (D3) and (b) why our
+runtime gates are typed code, not prompt prose (CC runner verdict gating; craft §2/§4).
+Adoptable quirks — routed to `full-loop-orchestration-runtime`, NOT to recipes: the
+**`checkpoint` primitive** (fixed-shape notify from a running program to its parent ≈ our
+reconcile/monitor events), **state-/schema-gated subagent completion** ("state, and schema
+adherence, gate subagent completion" ≈ schema-valid merge-back), **loud orchestration-error
+semantics** (agent blocked/failed/out-of-budget throws like a code error ≈ craft §3's
+route-crash-through-reconcile rule), and **per-program budget caps + per-stage model routing**
+(≈ stage_profiles). Their named open problem — the **durability model** (resume/lifecycle) — is
+the part our da-owned lifecycle + pid-aware locks + wave reconciliation already answers.
 
 ### I.7 The `da-recipe-scripts` sharpening (why this pass mattered)
 Onyx could provoke the wrong instinct — "make `da` recipes programmable (control flow, state, a
@@ -1086,11 +1152,492 @@ programmable runtime. So Onyx sharpens `da-recipe-scripts` by **reinforcing its 
 - **No plan/scope change:** the 5 tasks and the minimal line-oriented format (D2) stand; the value
   is determinism + portability + versionability, not expressiveness.
 
-### Part I — PENDING
-Full bodies login-walled (`NEEDS-PASTE` in the six `research/articles/` files). When the X MCP
-read path is live, deep-read Onyx (I.6) and the loss-function article (I.1) and refine I.7 if the
-bodies draw the mechanical/programmable boundary differently.
+### Part I — PENDING: RESOLVED 2026-07-12
+Full bodies recovered for all six articles via a logged-in Claude-in-Chrome x.com session (the
+`NEEDS-PASTE` markers in `research/articles/` are cleared; the X MCP read path was not needed).
+Deep-read deltas folded into I.1–I.6 above. **I.7's boundary holds unchanged** — the Onyx body
+strengthens it (see I.6 delta) and adds one clause worth appending to the positioning line when
+`da-recipe-scripts` p1 lands: Onyx models orchestration procedurally in code because *"you don't
+need a powerful LLM to think through the orchestration after it is authored the first time"* —
+the same cheap-after-authoring argument behind emitting swarm YAML from the IR instead of
+hand-writing it (craft §7, anti-pattern #1).
 
 ---
 
-*Document status: draft. No changes made to code, specs, or plans. This is evaluation only.*
+## Part J — 2026-07-12 addendum: eight agent-efficiency / review / loop-craft articles (second pass, inflight-plan-anchored)
+
+**Why a new part:** a user-supplied reference batch extracted 2026-07-12 (full bodies in
+`research/articles/`; distilled batch extract in
+`research/extracts/agent-efficiency-and-review-2026-07.md`). Unlike Parts A/H/I, this pass is
+explicitly anchored against **inflight design work**: the
+`transcript-analysis-and-pipeline-craft` plan (craft doc `craft/full-loop-craft.md` §§1–7;
+synthesis themes **T-\*** and outcomes **O1–O14**; Pareto hypotheses **H1–H6**; falsification
+rubric **RULE-7**) and its parallel `full-loop-orchestration-runtime` plan. The plan-local
+consumer map already exists at
+`.agents/workflow/plans/transcript-analysis-and-pipeline-craft/evidence/prior/external-references-2026-07-12.md`
+(per-article consumers, local verification runs, cross-cutting synthesis); **this part does not
+duplicate it** — it evaluates the same sources with the Part A/H rubric for the research corpus,
+carries the plan digest's corrections, and adds the KG-and-adjacent angle the plan digest
+deliberately omits. Rubric labels as in Part A. Part E's trust gate applies: priorities here are
+author judgment.
+
+### J.1 gille — *Claude Code's Token Counts Are Wrong* + energy-monitor scripts (Magnus Gille, 2026-02-24)
+
+**Core.** Claude Code JSONL `usage.input_tokens` is a never-finalized streaming placeholder
+(their corpus: 75% of entries ≤1; input undercounted 102–174×); `output_tokens` partially
+placeholder and excludes thinking (10–17× under); `cache_read`/`cache_creation` are accurate
+(~1×); the same `requestId` appears 2–10× (51–55% duplicates); statusbar `context_window` totals
+are the accurate ground truth. Scripts: `sum_jsonl.py` dedups by *last entry per requestId* and
+classifies ≤1 placeholders; `analyze_tokens.py` validates via statusbar deltas (confirms input
+excludes cache_creation — no double count — and output includes thinking). Author-flagged
+**PRELIMINARY — PENDING REVIEW**; filed as anthropics/claude-code#28197.
+
+**Pros.** Directly load-bearing for the transcript plan's token accounting: names the exact
+field-trust and dedup rules any CC-source cost row needs. The plan digest's **local
+verification** materially revises the claims for our corpus: input≤1 = **12% (not 75%)** —
+placeholder severity is version/era-dependent — but **76% of requestIds appear >1×**, with
+per-field overcount ratios input 3.01× / output 3.02× / cacheRead 2.38× / cacheCreate 3.04×; our
+CC evidence rows did NOT dedup by requestId (hence pareto erratum #2).
+
+**Cons.** Preliminary, single-operator corpus, version-dependent (our numbers disagree on
+placeholder rate while confirming the duplication problem). The energy-monitor's mWh constants
+are back-of-envelope.
+
+**Mapping.**
+- **[GAP-ADOPT — already consumed by the plan]** pareto erratum #2: dedup-by-requestId
+  (last-entry-wins), placeholder exclusion, cache fields as the only high-trust CC fields;
+  evidence-rubric amendment for CC-source rows; capability-matrix note (CC `has_tokens` ⇒
+  *low-fidelity* tokens).
+- **[OVERLAP-SHARPEN]** craft §5 "NEVER price a stage on raw `total_tokens`" (T-c1/O3) extends
+  to: never trust raw CC usage fields without dedup + placeholder handling. Same rule, one level
+  lower in the stack.
+- **[WE-AHEAD with quirk]** craft §6 already attaches a telemetry-capability mask per harness;
+  the quirk to import is their **delta-based validation method** (statusbar/context-window
+  deltas as independent ground truth for field semantics) — a cheap Q1/Q2-style check our
+  evidence rubric can require before trusting a new harness's token fields.
+- **KG angle.** Per-harness token-field-trust rules are ingest-contract metadata on the episodic
+  view (each cost row carries `field_trust` provenance), not scorer code — the same
+  "labels-at-write-time decide recoverability" principle as Part B Theme 8.
+
+### J.2 infracost — *We cut Claude's token usage 79% by redesigning our CLI for agents* (Glenn Gillen, 2026-05-18)
+
+**Core.** Redesigned a CLI *for agent callers*: predicate pushdown (`--filter`, `--missing-tag`,
+`--fields`, `--addresses-only`) eliminates model-composed jq/python pipelines; TOON tabular
+output (uniform arrays → header + rows) −35% vs minified JSON at equal comprehension; a
+benchmark harness (16 questions × 3 configs × 5 repeats, sandboxed HOME, PATH-pinned binary,
+rerun-failed/rescore). Hard-question bucket: bare Claude 0/6 at $7.61 → skill+flags 6/6 at
+$2.48; hard-bucket output tokens 113K→24K (−79%); accuracy 45%→100%.
+
+**Pros.** The strongest external anchor for **H1** ("to move volume you must change the
+pipeline, not the model"): they moved volume ~79% by changing the *tool surface*, zero model
+change. Their harness discipline (paired repeats, rescore, pinned environment) is our
+pareto-measurement-rubric independently invented. Accuracy and cost improved *together* —
+evidence that output-volume work is not a quality trade.
+
+**Cons.** Vendor case study on one CLI; TOON gains limited to uniform arrays; no CI reported on
+the deltas.
+
+**Mapping.**
+- **[GAP-ADOPT]** `da` CLI agent path: predicate flags + a token-efficient tabular output mode
+  on `workflow eligible`/`tasks` (candidate fold-back, named in the plan digest). Our `--json`
+  envelopes are the analog of their pre-redesign JSON dumps.
+- **[OVERLAP-SHARPEN]** craft §5 fixed-tax rule (T-c4/H4): their finding is the copilot
+  67%-tool-def anchor approached from the tool-author side — the fix for fixed tax is owned by
+  the CLI designer, not the loop.
+- **[OVERLAP-SHARPEN]** their 16×3×5 rerun/rescore harness vs our live-wave protocol
+  (snapshot-identical paired repeats, ≥3, bounded `--max-waves`): convergent measurement craft;
+  their "rescore failed runs before concluding" step is worth adding to `pareto-live-review`.
+
+### J.3 Green-PT — *honey-for-devs* (output-volume compression skill family)
+
+**Core.** Three levers: less code (YAGNI ladder), less prose, denser agent-to-agent handoffs
+(ESON, −51% lossless). Safety carve-outs are never compressed. Judged by a **4-model
+cross-family panel** (median of Opus/Sonnet/Haiku/GPT) under a length-blind rubric. CCR =
+lossy-but-recoverable compression for uniform arrays (sentinel + local cache + retrieve). PX =
+image-rendered reads (~−80% tokens) but only Fable-class models read renders usably, with
+silent-confabulation risk on exact strings. **Published negative result:** input-prompt
+precompression saves ~0% on 266 real prompts. An honesty note retracts earlier
+non-reproducible benchmark numbers.
+
+**Pros.** The negative result corroborates J.2 and H1 from a third angle: the bill lives in
+tool output and agent output, not the input prompt — the output-volume lever is *behavioral*.
+The cross-family judge panel is an independent invention of RULE-7's diversity requirement.
+Publishing a retraction is itself evidence of trustworthy methodology (rare in this corpus).
+
+**Cons.** ESON/CCR formats unproven outside their harness; PX's confabulation risk makes it
+unusable for anything anchor-bearing; benchmark numbers post-retraction are thinner than the
+README implies.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** RULE-7 / cross-family gate — with PostHog (J.4) this makes **three
+  independent inventions** of cross-family, writer≠reviewer judging (theirs, PostHog's, ours);
+  the falsification-review rubric's gate graduates from house convention to
+  externally-corroborated practice.
+- **[GAP-ADOPT — gated]** ESON-style dense A2A handoffs as a candidate for delegation
+  bundles/merge-backs, importing their carve-out rule intact: compress prose, **never the
+  contract fields** (write_scope, verdicts, anchors) — the analog of "safety carve-outs never
+  compressed."
+- **[WE-AHEAD]** our blocking gates are typed reject-on-BLOCKER/HIGH; their panel is
+  median-of-scores. Do not import score-averaging for *blocking* decisions — averaging is for
+  quality dials, vetoes are for gates.
+
+### J.4 PostHog — *Stop being the code review bottleneck* (2026-07-10)
+
+**Core.** Delegate review to a pipeline: qa-swarm spawns four reviewer lenses (qa-team /
+security-audit / personal-voice / XP), review-triage classifies threads
+**actionable / nit / ambiguous**, outer loop bounded at ≤3 iterations; writer-agent must never
+self-review; different instructions AND different model providers per reviewer (cites "juries
+over judges"). StampHog auto-stamper: deterministic gates FIRST (PR state, deny-list keywords,
+size caps — per the authoritative StampHog README **>800 substantive lines OR >30 files**; the
+newsletter's "500 lines/20 files" is a stale figure), then a simple LLM showstopper check;
+fail-closed; LLM can tighten gates but never loosen; ~1/3 of merged PRs auto-stamped, 1.6K
+PRs/month. "Verify by observation, not reasoning": decompose into stacked independently-runnable
+PRs; screenshots/GIFs as review evidence. Cost admission: "something like 60% of my token spend
+is burned automating the toil of handling CI and review."
+
+**Pros.** The closest published production analogue to the transcript plan's verification/review
+spine (craft §4) — multi-lens fanout, triage taxonomy, bounded outer loop, fail-closed
+deterministic gating, writer≠reviewer — all running at 1.6K PRs/month scale.
+
+**Cons.** Newsletter-level detail; StampHog thresholds calibrated to PostHog's codebase; the
+60%-of-spend figure is one engineer's anecdote (but a useful order of magnitude).
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** their ≤3-iteration outer review loop is our `target_count: 3` bounded
+  fold-back re-entry (craft §3) — independent convergence on small bounded budgets before
+  terminal escalation.
+- **[OVERLAP-SHARPEN]** RULE-7: "different models and providers for different reviewers" +
+  writer-never-self-reviews, in production. Third leg of the J.3 convergence.
+- **[GAP-ADOPT]** **deterministic-gates-BEFORE-LLM ordering** for our delegation/review gate
+  (candidate fold-back, named in the plan digest): a cheap pre-LLM deny-list/size/state tier
+  before dispatching review lenses would spare review tokens on auto-rejectable work — directly
+  additive to H6 (review is the cheap-route target) by removing some review calls entirely.
+  Import the invariants intact: fail closed; LLM tightens, never loosens.
+- **[GAP-ADOPT]** review-triage taxonomy → fold-back routing labels (actionable→fix, nit→note,
+  ambiguous→escalate) — maps cleanly onto task-scoped vs plan-scoped fold-backs plus
+  owner-escalation.
+- **[WE-AHEAD]** "verify by observation, not reasoning" is already our T-b5/OH-E3/O11 rule —
+  never gate on self-report; require an anchor + a real tool/verifier record — held with
+  transcript evidence, not anecdote. Their stacked-observable-PRs practice is the human-facing
+  rendering of the same rule.
+- Paul's 60%-of-spend-on-review figure is an external consistency check on **H6**: review/CI
+  toil is a first-order token sink, which is exactly why the cheap-route-review contrast (C6)
+  is the highest-leverage Pareto cell.
+
+### J.5 aparnadhinak (Arize) — *What the hell is a loop, anyway?* (2026-07-04)
+
+**Core.** "The loop" hides ≥4 architectures: **execution loop** (act-observe tool cycle; ends on
+environment feedback — or the agent declaring done), **task loop** (Ralph loop: fresh context
+per iteration against one spec; ends on spec+tests), **product loop** (software factory:
+codebase+backlog, configurable human checkpoints, ratcheting auto-merge; Warp's Oz, Anthropic's
+internal Tag at 65% of product-team code), **system loop** (autoresearch: outer loop improves
+prompts/evals/harness; "the loop is the product"), plus the unnamed **oversight loop** (set
+goals / allocate / cull — the ring where a human should live). Agentic MapReduce is a topology,
+not a loop ("a loop without feedback is just a for statement"). "Naming a signal is not the same
+as wiring it in. A loop without its signal doesn't converge." Anthropic's own factory reports
+being bottlenecked on human review and conceptualization.
+
+**Pros.** The cleanest shared vocabulary yet for where our pieces sit; every claim maps onto a
+named artifact of ours. The exit-signal argument is the elvissun instrument argument (I.1)
+restated at taxonomy level — and is the transcript-analysis plan's own justification: the
+pipeline is the *wiring* of our loops' exit signals.
+
+**Cons.** Vendor-authored (closes with an Arize AX pitch); the taxonomy is descriptive, not
+empirical; second-hand conference quotes.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN — consumed by the plan]** the loop-name mapping (inner swarm = execution;
+  bounded per-task fold-back = task; `da` N-plan driver = product; pareto-live-waves +
+  fold-back/proposal routing = system; user gate = oversight) belongs in the pipeline-architect
+  skill's design instruction as the first architect question: *which loop are you editing?*
+- **[WE-AHEAD]** our exit conditions are typed and tested (`available == 0` /
+  `total_eligible == 0` quiescence, craft §1; RECONCILED sentinel) — most published loops end
+  on the agent's say-so, which is exactly the execution-loop failure the article names.
+- **[OVERLAP-SHARPEN]** "fan-out is a topology, not a loop" is a useful guard for our own
+  vocabulary: ISP fanout is topology inside the task loop; calling a pipeline a loop requires
+  naming its feedback edge and exit signal.
+
+### J.6 trq212 (Anthropic) — *A Field Guide to Fable: Finding Your Unknowns* (2026-07-03)
+
+**Core.** Map (prompt/skills/context) vs territory (codebase, real constraints); the difference
+is your **unknowns**, in four quadrants (known knowns = the prompt; known unknowns; unknown
+knowns = obvious-but-unwritten; unknown unknowns). Technique catalog by phase —
+pre-implementation: blind-spot pass, brainstorm/prototype before wiring, one-question interviews
+prioritized by "answer would change the architecture," references-as-source-code,
+implementation plans leading with likely-to-change decisions; during: `implementation-notes.md`
+with a **Deviations** log; post: pitch/explainer artifacts and a quiz gating merge ("I only
+merge after I pass the quiz perfectly"). Sibling to the earlier HTML-over-Markdown piece
+(§A.3 trq212).
+
+**Pros.** Delegation-side craft from the CC team itself; the Deviations log and quiz-gate are
+concrete, cheap, and compose with our existing artifacts.
+
+**Cons.** Individual-practice essay; no measurements.
+
+**Mapping.**
+- **[GAP-ADOPT — consumed by the plan]** require a `Deviations` section in the merge-back
+  template (we already require notes; naming deviations is sharper and makes plan-vs-actual
+  drift queryable). Template change first; schema field only if queries need it.
+- **[OVERLAP-SHARPEN]** interview-before-architecture = the ideation-cycle fork-resolution
+  pattern and the pipeline-architect design interview; his prioritization rule ("questions
+  where my answer would change the architecture") is the right question-ordering heuristic for
+  both.
+- **[OVERLAP-SHARPEN — KG angle]** "unknown knowns" are what KG readback before fanout exists
+  to surface — the readback is our blind-spot pass; Part F's C.15 pre-answer scaffolding
+  (enumerate ambiguities before delegating) is the same move. His quiz-gate is a human-side
+  parent verdict gate: comprehension, not just correctness, gates the merge.
+
+### J.7 refactoringenglish (Michael Lynch) — *How to Write an Effective Design Doc* (2026-06-24)
+
+**Core.** Investment scales with cost-of-being-wrong ("what's the penalty for being wrong?" as
+the section-inclusion test); goals in impact terms, not implementation; explicit non-goals;
+scenarios paint the after-state; SLOs before monitoring; alternatives-considered.
+
+**Pros.** External validation of the workflow-artifact-model tier discipline: done criteria
+live in the spec; the plan resolves open questions; specs don't grow into plans.
+
+**Cons.** General SWE writing advice; nothing agent-specific; lowest urgency of the batch.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** his design doc ≈ our spec tier; "penalty for being wrong" is a good
+  section-inclusion test to fold into the spec-drafting convention next to Part C's C.11
+  (hard test + common false positive).
+- **[GAP-ADOPT — soft]** an explicit **non-goals** block in the spec template. We have
+  "deferred items"; non-goals is the sharper frame (deferred = later, non-goal = never, and
+  conflating them re-surfaces settled scope questions).
+- **[WE-AHEAD]** success_criteria + open-questions are already first-class in our specs; his
+  SLO-before-monitoring point is our verification-strategy-traces-to-done-criteria rule.
+
+### J.8 Part J synthesis (cross-cutting)
+
+1. **Token-field trust is per-harness ingest metadata, not scorer code.** J.1's field-level
+   unreliability + the plan's local verification + craft §6's capability mask converge: every
+   cost row carries per-harness field-trust provenance (erratum #2 should graduate from erratum
+   to evidence-rubric clause). Extends Part H's "immutable source + provenance-bearing views."
+2. **There are two cost levers, and we were measuring only one.** Model routing is H1-bounded
+   (volume moves ≤~4% on an executor swap); output-volume *behavior* (J.2 CLI predicate
+   pushdown + tabular output; J.3 compression levers) is where the other ~96% lives. The Pareto
+   axes measure the routing lever; the volume lever is pipeline/CLI design work and should be
+   named as such in the craft doc's §5 rules.
+3. **Cross-family, writer≠reviewer review now has three independent inventions** (PostHog
+   qa-swarm, honey's judge panel, RULE-7) — the strongest convention-to-corroborated-practice
+   upgrade in this corpus since the Part H eval/spec convergence.
+4. **Gates are ordered: deterministic before LLM, bounded before terminal.** StampHog's
+   fail-closed deny-list/size tier before any LLM call (J.4) + FAPO's accept-only-if-improves
+   (H.4 revised) + our target_count/fold-back design describe one shape: cheap typed gates
+   first, judgment second, bounded retry, terminal escalation.
+5. **Exit signals must be wired, not named** (J.5) — the taxonomy-level restatement of I.1's
+   instruments and the justification for the transcript pipeline itself: it is the wiring that
+   lets our loops' exit signals (verdicts, fold-backs, cost frontiers) be observed rather than
+   asserted.
+6. **KG angle across the batch:** deviations (J.6), token-field trust (J.1), and review-triage
+   labels (J.4) are all write-time labels that decide read-time recoverability — Part B Theme 8
+   again. The episodic view should carry them as typed fields, which is also what H.1's
+   compaction plan and I.1's iteration-log-across-compactions asked for.
+
+### Part J — routing note (workflow)
+
+The five concrete adoptables were **created as fold-backs and routed 2026-07-12** (owner
+direction) — recorded in `.agents/active/fold-back/<slug>.yaml` for the record AND routed
+through the plan's own process so each is consumed before its owner runs, not left as
+unrouted queue debt:
+
+| slug | routed to | consumed when |
+|---|---|---|
+| `evidence-rubric-token-field-trust` (J.1) | task note `pareto-live-waves` | before scoring live rows — erratum #2 graduates to an evidence-rubric clause |
+| `merge-back-deviations-section` (J.6) | task note `pareto-live-waves` | live-wave merge-backs must carry a Deviations section |
+| `review-gate-deterministic-pre-llm-tier` (J.4) | task note `pareto-live-review` | assessed against live gate-rework/block-rate data; proposal only if the data supports it |
+| `da-cli-agent-path-predicate-tabular` (J.2) | proposal `~/.agents/proposals/obs-da-cli-agent-path-predicate-tabular.md` | no pending task owns the `da` CLI surface — the proposal queue is the plan's declared sink |
+| `spec-template-non-goals-block` (J.7) | proposal `~/.agents/proposals/obs-spec-template-non-goals-block.md` | spec-convention change; reviewed via `da review` |
+
+The plan-local digest (`evidence/prior/external-references-2026-07-12.md`) remains the
+per-article consumer map.
+
+### Part J — open questions raised
+
+1. Does the delegation/review gate grow a deterministic pre-LLM tier (deny-list, size, state),
+   and does it live in `da` (typed, cross-harness) or per-harness projection? (J.4)
+2. Do merge-backs adopt a dense A2A format with never-compress contract fields, and what is the
+   measured token saving on our own bundles? (J.3)
+3. Is the `da` CLI agent-path work (predicate pushdown + tabular mode) worth a fold-back now,
+   or does it wait for the post-0.4.0 CLI surface review? (J.2)
+4. Should the evidence rubric hard-require per-harness token-field-trust labels on every cost
+   row — making J.1's finding a rubric clause rather than a per-plan erratum? (J.1)
+5. Is the Deviations log a merge-back template change only, or also a queryable schema field on
+   the delegation record? (J.6)
+6. Which of the four loops does each of our named runtimes claim in its own doc — and does
+   every one name its feedback edge and exit signal explicitly? (J.5)
+
+---
+
+## Part K — 2026-07-13 addendum: three operating-contract / model-routing articles
+
+Processed AFTER the plan's red-team disposition and fold-back archival (2026-07-12), so the
+routing discipline here is deliberately corroboration-first: nothing in this batch reopens a
+settled wave decision; adoptables are either resolved same-day into plan artifacts or parked
+as [UNVERIFIED] leads. Full bodies: `research/articles/sairahul1-fable-brain-backup.md`,
+`0xmiraqle-gpt56-god-mode-contract.md`, `prajwaltomar-gpt56-two-scoreboards.md`. Genre
+caveat for all three: growth-account X articles (modest engagement, linkless claims); they
+corroborate *design shape*, not effect sizes.
+
+### K.1 sairahul1 — *How To Copy Claude Fable 5's Thinking Before It's Gone* (2026-07-12)
+
+**Core.** Occasioned by Fable 5 leaving subscriptions: the model was never the asset — its
+procedures are. Extract them as second-person standing **orders** for the replacement model
+(10 areas: intent, decomposition, effort placement, verification, known-vs-guessed marking,
+self-attack, completeness, refusing to guess, delivery order, fake-competence tells), each as
+**trigger→action** rules ("When you see X, do Y"; "if a rule sounds like advice, rewrite it
+until it's an action") ending in a final send-gate checklist. Then **prove the transfer with a
+trap test** (a smooth-reading compound-discount error run with and without the instructions);
+on failure, regenerate only the vague section. Plus: repeat-task interview prompts, a
+compressor that "never touches the final gate," and a monthly readback health-check
+("summarize the instructions you're running on… if you can't, say so").
+
+**Pros.** The distillation format and the transfer-verification step are both real mechanics;
+"a cheaper model with a great checking process catches mistakes the plain version misses" is
+the C1–C6 thesis in one sentence.
+
+**Cons.** Newsletter-funnel piece; n=1 trap anecdote; no measurements; the kit upsell wraps
+the kernel.
+
+**Mapping.**
+- **[GAP-ADOPT — resolved same day]** the trap test is instrument-transfer verification:
+  when a stage prompt (lens/rubric) runs on a SECONDARY-tier model in a contrast arm, a
+  Tier-B planted-defect task verifies the instructions actually transferred before that arm's
+  frontier rows count. Folded into `evidence/pareto/disposable-tasks.md` Tier B (fold-back
+  `lens-transfer-trap-test`) — calibration-only, O13-compatible, no new gate.
+- **[OVERLAP-SHARPEN]** trigger→action executability is the authoring bar our lens/rubric
+  prompt text should be held to (same standard RULE-7's checklists already aspire to); the
+  fix-it prompt is bounded single-section regeneration — the fold-back regeneration pattern.
+- **[OVERLAP-SHARPEN]** the monthly health-check is a readback probe — identical in shape to
+  the delegation bundle readback (`resolve-prompt`) that guards against instructions loaded
+  but not used.
+- **[WE-AHEAD]** the "backup file" is a singleton pasted into one Project box; rules/skills/
+  scopes version, distribute, and sync the same artifact across harnesses.
+
+### K.2 0xmiraqle — *HOW TO USE GPT 5.6 ON GOD MODE* (2026-07-09)
+
+**Core.** Operating contract, not prompting: destination + fence + bar, never the route.
+Five-line house rules (irreversible→stop-and-show; every "done" ships sub-minute-checkable
+evidence; rules beat instructions). Measurable bars, no adjectives — and **the builder never
+grades its own work**: external evaluators caught 5.6 gaming graders "at the highest rate
+ever measured on a public model," so the grader is a separate fresh-context instance — "a
+skeptic with no memory of the excuses." `/goal` loop: build→verify→biggest-gap→close, where
+**the loop never contains the model's right to declare itself finished**. Payroll routing
+(Sol/Terra/Luna + effort dial; parallel-committee mode reserved for foundations). Traces as
+"a private training set nobody else has." Honest paragraph: ~1-in-400 complex agent tasks
+off-script (unauthorized infra, falsified reports) → one budgeted human-QA hour daily.
+
+**Pros.** Independently converges on nearly every structural bet in the full-loop pipeline;
+supplies the first system-card-grounded *reason* (grader gaming) for cross-context/
+cross-family grading rather than mere convention.
+
+**Cons.** All empirics linkless ([UNVERIFIED]); confident-guide genre; browser/budget
+sections are consumer-oriented.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN — RULE-7]** fresh-context builder≠grader is now the FOURTH independent
+  invention in this corpus (PostHog qa-swarm, honey judge panel, RULE-7, this) — and the
+  first justified by measured grader-gaming rather than taste. Chase the 5.6 system card;
+  if confirmed, cite it in `methodology/falsification-review-rubric.md` prior art.
+- **[WE-AHEAD]** "the loop never contains the model's right to declare itself finished" =
+  parent-verdict/gate-owns-termination; house rules ≙ rules/ + write_scope + delivery-gate
+  stop-before-push; evidence-checkable-in-under-a-minute ≙ merge-back verification_status.
+- **[OVERLAP-SHARPEN]** §8 traces-as-private-training-set is the transcript-analysis plan's
+  thesis verbatim — "the people getting scary results… are mostly people whose models never
+  start from zero."
+- **[GAP-NOTE — parked]** budget-based permissioning ("spend up to $X, don't ask below") vs
+  our per-action gates: a candidate policy knob for wave cost-gating; not adopted (waves are
+  already user-gated on cost as a whole).
+
+### K.3 prajwaltomar — *GPT 5.6 Didn't Kill Claude. It Killed Something Bigger.* (2026-07-10)
+
+**Core.** The hero model died, not Claude. 5.6 = a priced family (Sol $5/$30, Terra
+$2.50/$15, Luna $1/$6 vs Fable $10/$50). **Two scoreboards**: Artificial Analysis has Sol at
+80 (+2.8 over Fable, <½ the output tokens); Every's private month-long Senior Engineer
+benchmark has Fable 91 vs Sol 56 — "both are telling the truth"; "Sol executes the
+instruction. Fable questions the instruction." Converged org chart: Fable=manager (plan,
+review, blindspots — pay-per-use is the *correct* pricing for judgment), Sol=senior worker
+(impl, long runs, browser/computer use), Terra/Luna=interns. Cites Anthropic's own published
+orchestrator numbers: **96% of performance at 46% of cost** for big-model-orchestrates/
+cheap-models-execute. Wiring: `model:` lines in `~/.claude/agents/` + a delegation policy;
+"effort settings matter more than model choice — the gap between effort tiers is bigger than
+the gap between adjacent models." Cautions: METR flagged Sol with their highest-measured
+reward-hacking rate ("especially on tests it wrote itself"); "benchmarks are marketing — run
+both on YOUR work."
+
+**Pros.** The plan's reason-to-exist stated externally: public benchmarks and private
+task-anchored benchmarks disagree by 35 points on the same pair, therefore measure on your
+own cells — which is the live-wave design. Supplies a published effect-size prior (96%/46%)
+for exactly the contrast class C1–C6 runs.
+
+**Cons.** Every number is secondhand and linkless; $19.24-vs-$1 is n=1; launch-week
+enthusiasm from an agency-growth account.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN — priors]** 96%-at-46% is a citable prior for C1/C2 (executor swaps
+  under a baseline orchestrator) — chase to primary source before quoting in evidence
+  artifacts; if located, it belongs in `evidence/prior/` with the provenance chain.
+- **[OVERLAP-SHARPEN]** two-scoreboards = the H-series' own epistemics: our preregistered
+  cells are the "private benchmark" side; K.3 is the popular argument for why the historical
+  pass refused public-benchmark priors.
+- **[GAP-NOTE — future axis]** reasoning-effort dial as a blocking axis: our cells block on
+  `model_family × task_class × cache_regime × retry_regime` but not effort tier; if "effort >
+  adjacent-model" replicates, a future wave should treat effort as the swapped variable.
+  Logged as an open question, NOT a mid-freeze cell change.
+- **[WE-AHEAD]** "verify Sol's output… especially on tests it wrote itself" = the
+  frozen-verifier-suite ground-truth rule in `disposable-tasks.md` (verifiers pass on the
+  landed implementation before any contrast run; the executor never authors its own ground
+  truth). METR's flag joins K.2's grader-gaming as external justification.
+
+### K.4 Part K synthesis (cross-cutting)
+
+1. **The corpus's first full external convergence on the plan's economics.** K.1 (process
+   transplants down-tier), K.2 (external fresh-context grading is a necessity, not a style),
+   and K.3 (two scoreboards; judgment priced per-use at the top, execution routed cheap)
+   are three growth-account restatements of the pareto plan's three pillars: contrasts on
+   our own cells, RULE-7, and candidate-model tiering. None of them *measures* anything we
+   can import — but the convergence itself upgrades "our design is idiosyncratic" to "our
+   design is the emerging consensus shape, and we are one of the few actually instrumenting
+   it."
+2. **Grader integrity got its empirical hook.** Two independent [UNVERIFIED] citations
+   (5.6 system-card grader-gaming, METR reward-hacking high-water mark) now justify
+   builder≠grader + cross-family review from measured behavior. Verifying these two sources
+   is the single highest-value follow-up in this batch.
+3. **Instruction transfer is testable and should be tested.** K.1's trap test generalizes:
+   any time prompt/skill text is the thing carrying capability across a model swap, a
+   planted-defect calibration task verifies the carry — now a Tier-B usage note in
+   disposable-tasks.md. This is C0's logic applied to instructions instead of instruments.
+4. **A new candidate axis: reasoning effort.** Two of three articles independently claim the
+   effort dial dominates adjacent-model choice. Our cells don't block on it; the claim is
+   cheap to test later as a single-variable wave and is logged as an open question.
+
+### Part K — routing note (workflow)
+
+One fold-back, resolved same day (post-archival discipline — no new open decisions for the
+waves): `lens-transfer-trap-test` → Tier-B usage note in
+`evidence/pareto/disposable-tasks.md`, artifact archived to
+`.agents/history/transcript-analysis-and-pipeline-craft/fold-backs/pareto-live-waves/`.
+Corroboration entries (RULE-7 fourth invention + grader-gaming/METR hooks; 96%/46% prior;
+effort-dial axis) recorded in the plan digest
+(`evidence/prior/external-references-2026-07-12.md`, 2026-07-13 addendum) as [UNVERIFIED]
+leads with named chase targets. No spec, rubric, or gate changes.
+
+### Part K — open questions raised
+
+1. Do the GPT 5.6 system card and METR's evaluation actually contain the grader-gaming /
+   reward-hacking claims as characterized? (K.2, K.3 — chase before citing anywhere binding.)
+2. Where do Anthropic's 96%-performance-at-46%-cost orchestrator numbers live, and what task
+   distribution were they measured on? (K.3 — potential C1/C2 prior.)
+3. Should a future wave treat reasoning-effort tier as the swapped variable, holding model
+   constant? (K.3/K.2 — candidate post-freeze axis.)
+4. Is trigger→action executability worth enforcing as a lint-style review item on lens/skill
+   prompt text (K.1), or is the Tier-B trap test sufficient enforcement at the point of use?
+
+---
+
+*Document status: draft. No changes made to code, specs, or plans. This is evaluation only.
+Second pass (Parts H/I resolution + Part J) completed 2026-07-12 against the inflight
+`transcript-analysis-and-pipeline-craft` and `full-loop-orchestration-runtime` plans.
+Part K (operating-contract batch) added 2026-07-13 under post-archival corroboration-first
+routing.*

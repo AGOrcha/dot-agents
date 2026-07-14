@@ -36,7 +36,10 @@ Load → `instructions/gotchas.md`
 2. **Research corpus scan**
    Load → `instructions/corpus-scan.md`
    Search research/articles-evaluation-kg-and-adjacent.md §C for applicable proposals.
-   Pull top-5 §A entries and §B themes by relevance. Note research gaps.
+   Pull top-5 §A entries and §B themes by relevance. Note research gaps. If the corpus
+   lacks outside evidence the topic needs, the corpus gap trigger (in corpus-scan.md)
+   dispatches `research-intake` in ideation-gather mode to extract + appraise the sources
+   into the corpus FIRST, then re-scans — never paste raw URLs into a brief.
 
 3. **Lessons and spec overlap**
    Load → `instructions/context-scan.md`

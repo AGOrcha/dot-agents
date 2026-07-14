@@ -1,0 +1,8 @@
+schema_version: 1
+id: article-extract-tier0-api-mirror
+plan_id: agent-ops-hardening
+task_id: ""
+observation: article-extract detection ladder should add a Tier-0 API-MIRROR rung for social posts BEFORE escalating to the Tier-2 credentialed browser. fxtwitter (api.fxtwitter.com/<user>/status/<id>) and the syndication endpoint (cdn.syndication.twimg.com/tweet-result) return public tweet text PLUS the full X-native ARTICLE body and media metadata as JSON with NO login. This session recovered two full X-native articles (context-rot, langchain framing) that detection.md currently routes straight to Tier-2a Claude-in-Chrome — the mirror skipped the whole Tier-1/2 ladder. Add the mirror as Tier-0 for x.com/twitter.com (escalate only on a mirror miss), and note equivalent read-only mirrors for other login-walled social domains. Caveat — mirrors cannot transcribe VIDEO (0xCodez was a 40-min video, only the tweet text was recoverable); a video/STT path is still a gap, flag untranscribed video as UNVERIFIED chase. Surfaced 2026-07-13 during the context-engineering research-intake batch.
+classification: proposal
+routed_to: proposal:obs-article-extract-tier0-api-mirror.md
+created_at: "2026-07-13T20:14:58Z"

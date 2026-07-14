@@ -1,0 +1,8 @@
+schema_version: 1
+id: kg-ideate-scaffold-home-sync
+plan_id: kg-ideate-skill
+task_id: ""
+observation: RESOLVED 2026-07-13 (e2e pipeline audit) — the completed kg-ideate family (t2-t5) existed ONLY in the git-tracked scaffold (internal/scaffold/home/starter/skills/global/) and was never materialized to this machine's live ~/.agents/skills/global/, so the pipeline's authoring front-end was uninstallable for 2 days; spec-scaffold/plan-scaffold live as TOP-LEVEL siblings by design (one-level loader, commit e2bbbcb5). Fixed — compound + spec-scaffold + plan-scaffold + nested kg-brief/staged-execution-handoff materialized scaffold→home, platform links live (verified in loaded skill set). The kg-brief bidirectional fork was reconciled INTO scaffold first (live-only corpus gap trigger + Parts D+ note merged; scaffold-only gotchas.md/subagent-planner content now live). skill-architect provider scripts synced home. ideation-cycle calls frontmatter fixed to match instruction filenames (converge/dogfood) in scaffold+live; kg-ideate conformance test + go build pass. Root-cause mechanism gap tracked separately as scaffold-home-skill-sync-mechanism on agent-ops-hardening.
+classification: small
+routed_to: plan_summary:kg-ideate-skill
+created_at: "2026-07-13T06:22:05Z"

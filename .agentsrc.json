@@ -1,10 +1,132 @@
 {
   "$schema": "https://agorcha.dev/schemas/agentsrc.schema.json",
+  "version": 1,
+  "project": "dot-agents",
+  "skills": [
+    "agent-handoff",
+    "agent-start",
+    "build-graph",
+    "review-delta",
+    "review-pr",
+    "self-review",
+    "skill-architect",
+    "delegation-lifecycle",
+    "iteration-close",
+    "loop-worker",
+    "orchestrator-session-start",
+    "plan-wave-picker",
+    "provider-consumer-pair",
+    "isp",
+    "release-cut",
+    "pipeline-architect",
+    "research-intake",
+    "research-evaluate",
+    "knowledge-fold-back",
+    "article-extract",
+    "playwright",
+    "platform-docs-refresh"
+  ],
+  "rules": [
+    "global",
+    "project"
+  ],
   "agents": [
-    "loop-worker"
+    "loop-worker",
+    "orchestrator",
+    "platform-dirs-change-analyst",
+    "promise-gap-analyst"
+  ],
+  "hooks": true,
+  "mcp": [
+    "code-review-graph",
+    "sonarqube"
+  ],
+  "settings": false,
+  "sources": [
+    {
+      "type": "local"
+    }
   ],
   "execution_profile": {
     "by_app_type": {
+      "daemon": {
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 2,
+          "reviewers": "per_verifier",
+          "verifier_sequence": [
+            "unit",
+            "race",
+            "integration",
+            "comms-contract",
+            "auth-proxy-security",
+            "kg-integration",
+            "load-soak"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "adversarial",
+            "cross-harness-adversarial",
+            "concurrency-safety",
+            "security"
+          ],
+          "lens_concurrency": "gated"
+        }
+      },
+      "docs": {
+        "relevance": {
+          "review": {
+            "core": [
+              "architecture-standards",
+              "acceptance-invariants"
+            ]
+          },
+          "verify": {
+            "core": [
+              "verifier"
+            ]
+          }
+        },
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 1,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "citation-check",
+            "cli-runner"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants"
+          ],
+          "lens_concurrency": "parallel"
+        }
+      },
+      "docs/web": {
+        "topology": {
+          "executors": 1,
+          "verifiers_per_executor": 1,
+          "reviewers": "per_executor",
+          "verifier_sequence": [
+            "schema-check",
+            "citation-check",
+            "link-check",
+            "build-site"
+          ]
+        },
+        "lenses": {
+          "lens_set": [
+            "architecture-standards",
+            "acceptance-invariants"
+          ],
+          "lens_concurrency": "parallel"
+        }
+      },
       "go-cli": {
         "relevance": {
           "orchestrate": {
@@ -18,12 +140,6 @@
               "playwright"
             ]
           },
-          "verify": {
-            "core": [
-              "verifier",
-              "test-runner"
-            ]
-          },
           "review": {
             "core": [
               "thermo-nuclear-code-quality-review",
@@ -32,6 +148,12 @@
             "situational": [
               "self-review",
               "review-delta"
+            ]
+          },
+          "verify": {
+            "core": [
+              "verifier",
+              "test-runner"
             ]
           }
         },
@@ -59,7 +181,6 @@
           "orchestrate": {
             "core": [
               "kg-ideate",
-              "deep-research",
               "plan-wave-picker"
             ],
             "situational": [
@@ -70,16 +191,16 @@
               "loop-worker"
             ]
           },
-          "verify": {
-            "core": [
-              "verifier"
-            ]
-          },
           "review": {
             "core": [
               "architecture-standards",
               "acceptance-invariants",
               "adversarial"
+            ]
+          },
+          "verify": {
+            "core": [
+              "verifier"
             ]
           }
         },
@@ -98,80 +219,6 @@
             "architecture-standards",
             "acceptance-invariants",
             "adversarial"
-          ],
-          "lens_concurrency": "parallel"
-        }
-      },
-      "docs": {
-        "relevance": {
-          "verify": {
-            "core": [
-              "verifier"
-            ]
-          },
-          "review": {
-            "core": [
-              "architecture-standards",
-              "acceptance-invariants"
-            ]
-          }
-        },
-        "topology": {
-          "executors": 1,
-          "verifiers_per_executor": 1,
-          "reviewers": "per_executor",
-          "verifier_sequence": [
-            "schema-check",
-            "citation-check",
-            "cli-runner"
-          ]
-        },
-        "lenses": {
-          "lens_set": [
-            "architecture-standards",
-            "acceptance-invariants"
-          ],
-          "lens_concurrency": "parallel"
-        }
-      },
-      "web": {
-        "topology": {
-          "executors": 1,
-          "verifiers_per_executor": 2,
-          "reviewers": "per_verifier",
-          "verifier_sequence": [
-            "unit",
-            "integration",
-            "ui-e2e"
-          ]
-        },
-        "lenses": {
-          "lens_set": [
-            "architecture-standards",
-            "acceptance-invariants",
-            "adversarial",
-            "cross-harness-adversarial",
-            "web-a11y"
-          ],
-          "lens_concurrency": "gated"
-        }
-      },
-      "docs/web": {
-        "topology": {
-          "executors": 1,
-          "verifiers_per_executor": 1,
-          "reviewers": "per_executor",
-          "verifier_sequence": [
-            "schema-check",
-            "citation-check",
-            "link-check",
-            "build-site"
-          ]
-        },
-        "lenses": {
-          "lens_set": [
-            "architecture-standards",
-            "acceptance-invariants"
           ],
           "lens_concurrency": "parallel"
         }
@@ -197,28 +244,24 @@
           "lens_concurrency": "gated"
         }
       },
-      "daemon": {
+      "web": {
         "topology": {
           "executors": 1,
           "verifiers_per_executor": 2,
           "reviewers": "per_verifier",
           "verifier_sequence": [
             "unit",
-            "race",
             "integration",
-            "comms-contract",
-            "auth-proxy-security",
-            "kg-integration",
-            "load-soak"
+            "ui-e2e"
           ]
         },
         "lenses": {
           "lens_set": [
             "architecture-standards",
+            "acceptance-invariants",
             "adversarial",
             "cross-harness-adversarial",
-            "concurrency-safety",
-            "security"
+            "web-a11y"
           ],
           "lens_concurrency": "gated"
         }
@@ -226,203 +269,24 @@
     },
     "default_class": "situational"
   },
-  "hooks": true,
-  "mcp": [
-    "code-review-graph",
-    "sonarqube"
-  ],
-  "project": "dot-agents",
-  "refresh": {
-    "version": "dev",
-    "refreshedAt": "2026-05-22T03:56:52Z"
-  },
-  "rules": [
-    "global",
-    "project"
-  ],
-  "settings": false,
-  "skills": [
-    "agent-handoff",
-    "agent-start",
-    "build-graph",
-    "review-delta",
-    "review-pr",
-    "self-review",
-    "skill-architect",
-    "delegation-lifecycle",
-    "iteration-close",
-    "loop-worker",
-    "orchestrator-session-start",
-    "plan-wave-picker",
-    "provider-consumer-pair",
-    "isp",
-    "release-cut"
-  ],
-  "sources": [
-    {
-      "type": "local"
-    }
-  ],
   "stage_profiles": {
-    "verifier": {
-      "citation-check": {
-        "label": "Citation check (references resolve)",
+    "executor": {
+      "default": {
+        "label": "Default implementation executor",
         "model": "claude-opus-4-8",
         "model_family": "claude",
         "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/citation-check.md",
-          "verifiers/citation-check.project.md"
+          "impl-agent.project.md"
         ]
-      },
-      "cli-runner": {
-        "label": "CLI runner (built-binary smoke)",
+      }
+    },
+    "orchestrator": {
+      "default": {
+        "label": "Default workflow orchestrator",
         "model": "claude-opus-4-8",
         "model_family": "claude",
         "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/cli-runner.md",
-          "verifiers/cli-runner.project.md"
-        ]
-      },
-      "schema-check": {
-        "label": "Schema check (artifacts validate)",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/schema-check.md",
-          "verifiers/schema-check.project.md"
-        ]
-      },
-      "task-schedule": {
-        "label": "Task schedule (DAG sound)",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/task-schedule.md",
-          "verifiers/task-schedule.project.md"
-        ]
-      },
-      "unit": {
-        "label": "Unit (Go)",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/unit.md",
-          "verifiers/unit.project.md"
-        ]
-      },
-      "integration": {
-        "label": "Integration (http/API)",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/integration.md",
-          "verifiers/integration.project.md"
-        ]
-      },
-      "ui-e2e": {
-        "label": "UI e2e (browser, proof-capture)",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/ui-e2e.md",
-          "verifiers/ui-e2e.project.md"
-        ]
-      },
-      "link-check": {
-        "label": "Link check (docs)",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/link-check.md",
-          "verifiers/link-check.project.md"
-        ]
-      },
-      "build-site": {
-        "label": "Docs-site build",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/build-site.md",
-          "verifiers/build-site.project.md"
-        ]
-      },
-      "pipeline-lint": {
-        "label": "Pipeline/agent-def lint",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/pipeline-lint.md",
-          "verifiers/pipeline-lint.project.md"
-        ]
-      },
-      "eval-fidelity": {
-        "label": "Eval/experiment fidelity",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/eval-fidelity.md",
-          "verifiers/eval-fidelity.project.md"
-        ]
-      },
-      "race": {
-        "label": "Race detector",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/race.md",
-          "verifiers/race.project.md"
-        ]
-      },
-      "comms-contract": {
-        "label": "HBHF comms contract",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/comms-contract.md",
-          "verifiers/comms-contract.project.md"
-        ]
-      },
-      "auth-proxy-security": {
-        "label": "Auth-proxy + secure handling",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/auth-proxy-security.md",
-          "verifiers/auth-proxy-security.project.md"
-        ]
-      },
-      "kg-integration": {
-        "label": "KG integration",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/kg-integration.md",
-          "verifiers/kg-integration.project.md"
-        ]
-      },
-      "load-soak": {
-        "label": "Load/soak",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "verifiers/verifier.base.md",
-          "verifiers/load-soak.md",
-          "verifiers/load-soak.project.md"
+          "isp.prompt.md"
         ]
       }
     },
@@ -457,6 +321,16 @@
           "reviewers/architecture-standards.project.md"
         ]
       },
+      "concurrency-safety": {
+        "label": "Concurrency-safety lens",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "reviewers/reviewer.base.md",
+          "reviewers/concurrency-safety.md",
+          "reviewers/concurrency-safety.project.md"
+        ]
+      },
       "cross-harness-adversarial": {
         "label": "Cross-harness adversarial lens",
         "model": "gpt-5.4",
@@ -467,14 +341,14 @@
           "reviewers/cross-harness-adversarial.project.md"
         ]
       },
-      "web-a11y": {
-        "label": "Web accessibility lens",
+      "cross-harness-adversarial-claude": {
+        "label": "Cross-harness adversarial lens (claude-family, for gpt-family executors)",
         "model": "claude-opus-4-8",
         "model_family": "claude",
         "prompt_files": [
           "reviewers/reviewer.base.md",
-          "reviewers/web-a11y.md",
-          "reviewers/web-a11y.project.md"
+          "reviewers/cross-harness-adversarial.md",
+          "reviewers/cross-harness-adversarial.project.md"
         ]
       },
       "scientific-method-fidelity": {
@@ -487,16 +361,6 @@
           "reviewers/scientific-method-fidelity.project.md"
         ]
       },
-      "concurrency-safety": {
-        "label": "Concurrency-safety lens",
-        "model": "claude-opus-4-8",
-        "model_family": "claude",
-        "prompt_files": [
-          "reviewers/reviewer.base.md",
-          "reviewers/concurrency-safety.md",
-          "reviewers/concurrency-safety.project.md"
-        ]
-      },
       "security": {
         "label": "Security lens",
         "model": "claude-opus-4-8",
@@ -506,28 +370,179 @@
           "reviewers/security.md",
           "reviewers/security.project.md"
         ]
-      }
-    },
-    "executor": {
-      "default": {
-        "label": "Default implementation executor",
+      },
+      "web-a11y": {
+        "label": "Web accessibility lens",
         "model": "claude-opus-4-8",
         "model_family": "claude",
         "prompt_files": [
-          "impl-agent.project.md"
+          "reviewers/reviewer.base.md",
+          "reviewers/web-a11y.md",
+          "reviewers/web-a11y.project.md"
         ]
       }
     },
-    "orchestrator": {
-      "default": {
-        "label": "Default workflow orchestrator",
+    "verifier": {
+      "auth-proxy-security": {
+        "label": "Auth-proxy + secure handling",
         "model": "claude-opus-4-8",
         "model_family": "claude",
         "prompt_files": [
-          "isp.prompt.md"
+          "verifiers/verifier.base.md",
+          "verifiers/auth-proxy-security.md",
+          "verifiers/auth-proxy-security.project.md"
+        ]
+      },
+      "build-site": {
+        "label": "Docs-site build",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/build-site.md",
+          "verifiers/build-site.project.md"
+        ]
+      },
+      "citation-check": {
+        "label": "Citation check (references resolve)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/citation-check.md",
+          "verifiers/citation-check.project.md"
+        ]
+      },
+      "cli-runner": {
+        "label": "CLI runner (built-binary smoke)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/cli-runner.md",
+          "verifiers/cli-runner.project.md"
+        ]
+      },
+      "comms-contract": {
+        "label": "HBHF comms contract",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/comms-contract.md",
+          "verifiers/comms-contract.project.md"
+        ]
+      },
+      "eval-fidelity": {
+        "label": "Eval/experiment fidelity",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/eval-fidelity.md",
+          "verifiers/eval-fidelity.project.md"
+        ]
+      },
+      "integration": {
+        "label": "Integration (http/API)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/integration.md",
+          "verifiers/integration.project.md"
+        ]
+      },
+      "kg-integration": {
+        "label": "KG integration",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/kg-integration.md",
+          "verifiers/kg-integration.project.md"
+        ]
+      },
+      "link-check": {
+        "label": "Link check (docs)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/link-check.md",
+          "verifiers/link-check.project.md"
+        ]
+      },
+      "load-soak": {
+        "label": "Load/soak",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/load-soak.md",
+          "verifiers/load-soak.project.md"
+        ]
+      },
+      "pipeline-lint": {
+        "label": "Pipeline/agent-def lint",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/pipeline-lint.md",
+          "verifiers/pipeline-lint.project.md"
+        ]
+      },
+      "race": {
+        "label": "Race detector",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/race.md",
+          "verifiers/race.project.md"
+        ]
+      },
+      "schema-check": {
+        "label": "Schema check (artifacts validate)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/schema-check.md",
+          "verifiers/schema-check.project.md"
+        ]
+      },
+      "task-schedule": {
+        "label": "Task schedule (DAG sound)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/task-schedule.md",
+          "verifiers/task-schedule.project.md"
+        ]
+      },
+      "ui-e2e": {
+        "label": "UI e2e (browser, proof-capture)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/ui-e2e.md",
+          "verifiers/ui-e2e.project.md"
+        ]
+      },
+      "unit": {
+        "label": "Unit (Go)",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
+        "prompt_files": [
+          "verifiers/verifier.base.md",
+          "verifiers/unit.md",
+          "verifiers/unit.project.md"
         ]
       }
     }
-  },
-  "version": 1
+  }
 }

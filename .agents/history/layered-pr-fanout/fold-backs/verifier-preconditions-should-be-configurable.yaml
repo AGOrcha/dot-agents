@@ -6,3 +6,4 @@ observation: 'RESOLVED design (user steer): precondition policy = predicates ove
 classification: small
 routed_to: plan_summary:layered-pr-fanout
 created_at: "2026-06-22T15:11:44Z"
+resolution: 'CONSUMED 2026-07-13 — design RESOLVED (user steer), spec amended at layered-pr-fanout 2.3/3.2/6.1; impl tracked as that plan work. Staging archived.'

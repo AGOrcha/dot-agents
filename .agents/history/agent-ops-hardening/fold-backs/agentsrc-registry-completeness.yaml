@@ -1,0 +1,8 @@
+schema_version: 1
+id: agentsrc-registry-completeness
+plan_id: agent-ops-hardening
+task_id: ""
+observation: RESOLVED 2026-07-13 (e2e pipeline audit) — .agentsrc.json registries drifted from disk because manual file drops bypass the promote/new append paths. Fixed — skills array gained article-extract, playwright, platform-docs-refresh (they were live-linked but unregistered, so a fresh da install would silently skip them); agents array gained orchestrator, platform-dirs-change-analyst, promise-gap-analyst (3 of 4 in-use .claude/agents were unregistered); dead deep-research reference removed from ideation orchestrate.core (skill never existed; kg-ideate now resolves after the scaffold sync). JSON validates; da refresh clean. Follow-up idea for the same pass as the sync-mechanism record — a status --audit registry-vs-disk completeness check.
+classification: small
+routed_to: plan_summary:agent-ops-hardening
+created_at: "2026-07-13T06:22:20Z"

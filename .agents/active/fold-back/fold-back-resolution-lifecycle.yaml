@@ -1,8 +1,0 @@
-schema_version: 1
-id: fold-back-resolution-lifecycle
-plan_id: agent-ops-hardening
-task_id: ""
-observation: 'Fold-back artifacts need an explicit lifecycle after routing: pending -> consumed|rejected (with resolution metadata), then archive out of .agents/active. Add a CLI resolve/reject surface that verifies the durable route, updates status/resolution evidence, and archives plan-scoped observations to .agents/history/<plan-id>/fold-back/<id>.yaml and task-scoped observations to .agents/history/<plan-id>/fold-back/<task-id>/<id>.yaml. Plan archive and drift/health should not leave terminal fold-backs active.'
-classification: proposal
-routed_to: proposal:obs-fold-back-resolution-lifecycle.md
-created_at: "2026-07-13T03:12:06Z"

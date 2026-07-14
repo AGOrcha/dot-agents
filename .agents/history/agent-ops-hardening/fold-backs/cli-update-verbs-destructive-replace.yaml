@@ -1,0 +1,8 @@
+schema_version: 1
+id: cli-update-verbs-destructive-replace
+plan_id: agent-ops-hardening
+task_id: ""
+observation: da workflow mutation verbs replace-by-default with no --append and no preview of what gets rewritten — a CLI-wide convention gap, not two isolated bugs. fold-back update --observation on a proposal-routed fold-back rewrites the destination ~/.agents/proposals/obs-slug.md body (destroys the original, often an untracked file); task update --notes replaces the notes field (lesson workflow-task-update-replaces-notes). Wanted — an --append mode and/or a dry-run preview of the destination rewrite across the update family; and the planned fold-back resolve/reject surface (obs-fold-back-resolution-lifecycle.md) MUST refine only the staging observation, NEVER touch proposal files, and archive to the PLURAL history/<plan>/fold-backs/ path. Recovery is documented in lesson foldback-update-clobbers-proposal-body.
+classification: proposal
+routed_to: proposal:obs-cli-update-verbs-destructive-replace.md
+created_at: "2026-07-13T13:57:57Z"
