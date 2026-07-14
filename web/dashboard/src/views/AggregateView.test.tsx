@@ -4,15 +4,6 @@ import { MemoryRouter } from 'react-router-dom'
 import AggregateView from './AggregateView'
 import type { R2DashboardRunSessionDTO } from '../api/types.gen'
 
-// Recharts' ResponsiveContainer needs ResizeObserver, which jsdom lacks (real
-// browsers provide it). Stub it so the trend charts mount under the renderer.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
-
 function makeClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: 0 } } })
 }
