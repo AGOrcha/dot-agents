@@ -69,7 +69,34 @@ impl:
 // front-end and a browser are available.
 func TestLiveIterationPropagatesToSSEClientWithinBudget(t *testing.T) {
 	iterLogDir := t.TempDir()
+	srv := startLiveDashboard(t, iterLogDir)
 
+	// Connect and read past the connect-time padding comment. Once the padding
+	// arrives the server's broker.Subscribe has registered this client, so an
+	// event published immediately after cannot race ahead of registration and
+	// be dropped (broker delivery is at-most-once, no replay).
+	streamCtx, cancelStream := context.WithCancel(context.Background())
+	defer cancelStream()
+	resp, reader := openSSEStream(t, streamCtx, "http://"+srv.Addr())
+	defer resp.Body.Close()
+
+	// Emit the live iteration: a brand-new iter-1.yaml under the watched root,
+	// written AFTER the subscription is live so the fan-out has a subscriber.
+	// It did not exist at the watcher's startup baseline, so it publishes.
+	start := time.Now()
+	if err := os.WriteFile(filepath.Join(iterLogDir, "iter-1.yaml"), []byte(liveIterationRecord), 0o644); err != nil {
+		t.Fatalf("write iteration record: %v", err)
+	}
+
+	fields := awaitFirstEventFrame(t, reader)
+	assertLiveIterationFrame(t, fields, time.Since(start))
+}
+
+// startLiveDashboard boots the standalone dashboard server on an ephemeral
+// loopback port with iterLogDir as its watched root, registers teardown, and
+// returns the started server.
+func startLiveDashboard(t *testing.T, iterLogDir string) *server.Server {
+	t.Helper()
 	srv, err := server.New(server.Config{
 		// :0 binds an ephemeral port; Addr() resolves it after Start.
 		Addr:        "127.0.0.1:0",
@@ -90,34 +117,22 @@ func TestLiveIterationPropagatesToSSEClientWithinBudget(t *testing.T) {
 		defer cancel()
 		_ = srv.Stop(ctx)
 	})
+	return srv
+}
 
-	baseURL := "http://" + srv.Addr()
+type frameResult struct {
+	fields map[string]string
+	err    error
+}
 
-	// Connect and read past the connect-time padding comment. Once the padding
-	// arrives the server's broker.Subscribe has registered this client, so an
-	// event published immediately after cannot race ahead of registration and
-	// be dropped (broker delivery is at-most-once, no replay).
-	streamCtx, cancelStream := context.WithCancel(context.Background())
-	defer cancelStream()
-	resp, reader := openSSEStream(t, streamCtx, baseURL)
-	defer resp.Body.Close()
-
-	// Emit the live iteration: a brand-new iter-1.yaml under the watched root,
-	// written AFTER the subscription is live so the fan-out has a subscriber.
-	// It did not exist at the watcher's startup baseline, so it publishes.
-	start := time.Now()
-	if err := os.WriteFile(filepath.Join(iterLogDir, "iter-1.yaml"), []byte(liveIterationRecord), 0o644); err != nil {
-		t.Fatalf("write iteration record: %v", err)
-	}
-
-	// Read frames off the socket in the background so the propagation budget is
-	// enforced by a select against a timer rather than a blocking read. The
-	// channel is buffered so the reader never leaks if the budget expires: the
-	// deferred cancel/close unblocks its read and it exits.
-	type frameResult struct {
-		fields map[string]string
-		err    error
-	}
+// awaitFirstEventFrame reads SSE frames off the socket in the background and
+// returns the first non-heartbeat frame's fields, failing the test if none
+// arrives within the propagation budget. The background read keeps the budget
+// enforced by a select against a timer rather than a blocking read; the
+// buffered channel means the reader never leaks if the budget expires (the
+// caller's deferred stream cancel unblocks it).
+func awaitFirstEventFrame(t *testing.T, reader *bufio.Reader) map[string]string {
+	t.Helper()
 	frames := make(chan frameResult, 1)
 	go func() {
 		for {
@@ -140,41 +155,47 @@ func TestLiveIterationPropagatesToSSEClientWithinBudget(t *testing.T) {
 	select {
 	case <-time.After(propagationBudget):
 		t.Fatalf("live iteration did not reach the SSE client within the %s propagation budget", propagationBudget)
+		return nil
 	case fr := <-frames:
 		if fr.err != nil {
 			t.Fatalf("read SSE frame: %v", fr.err)
 		}
-		elapsed := time.Since(start)
-
-		if got := fr.fields["event"]; got != scoredTopic {
-			t.Fatalf("SSE event topic = %q, want %q", got, scoredTopic)
-		}
-
-		var frame struct {
-			Type    string `json:"type"`
-			Seq     uint64 `json:"seq"`
-			Payload struct {
-				SessionID string `json:"session_id"`
-				Iteration int    `json:"iteration"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal([]byte(fr.fields["data"]), &frame); err != nil {
-			t.Fatalf("unmarshal SSE data %q: %v", fr.fields["data"], err)
-		}
-		if frame.Type != scoredTopic {
-			t.Errorf("frame data type = %q, want %q", frame.Type, scoredTopic)
-		}
-		if frame.Payload.Iteration != 1 {
-			t.Errorf("payload.iteration = %d, want 1", frame.Payload.Iteration)
-		}
-		if frame.Payload.SessionID != "sess-live-e2e" {
-			t.Errorf("payload.session_id = %q, want %q", frame.Payload.SessionID, "sess-live-e2e")
-		}
-		if elapsed > propagationBudget {
-			t.Errorf("propagation took %s, want <= %s", elapsed, propagationBudget)
-		}
-		t.Logf("live iteration propagated to SSE client in %s (budget %s)", elapsed, propagationBudget)
+		return fr.fields
 	}
+}
+
+// assertLiveIterationFrame checks that fields is the expected iteration.scored
+// frame for the written record and that it arrived inside the budget.
+func assertLiveIterationFrame(t *testing.T, fields map[string]string, elapsed time.Duration) {
+	t.Helper()
+	if got := fields["event"]; got != scoredTopic {
+		t.Fatalf("SSE event topic = %q, want %q", got, scoredTopic)
+	}
+
+	var frame struct {
+		Type    string `json:"type"`
+		Seq     uint64 `json:"seq"`
+		Payload struct {
+			SessionID string `json:"session_id"`
+			Iteration int    `json:"iteration"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(fields["data"]), &frame); err != nil {
+		t.Fatalf("unmarshal SSE data %q: %v", fields["data"], err)
+	}
+	if frame.Type != scoredTopic {
+		t.Errorf("frame data type = %q, want %q", frame.Type, scoredTopic)
+	}
+	if frame.Payload.Iteration != 1 {
+		t.Errorf("payload.iteration = %d, want 1", frame.Payload.Iteration)
+	}
+	if frame.Payload.SessionID != "sess-live-e2e" {
+		t.Errorf("payload.session_id = %q, want %q", frame.Payload.SessionID, "sess-live-e2e")
+	}
+	if elapsed > propagationBudget {
+		t.Errorf("propagation took %s, want <= %s", elapsed, propagationBudget)
+	}
+	t.Logf("live iteration propagated to SSE client in %s (budget %s)", elapsed, propagationBudget)
 }
 
 // openSSEStream dials {baseURL}/api/v1/observability/events, verifies the
