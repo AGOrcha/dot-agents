@@ -1,7 +1,7 @@
 # KG & Adjacent Articles — Evaluation Against dot-agents
 
-**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17; 2026-06-24 added Part H — five new x.com-sourced articles (compaction-orchestrator, prompt-debt, token-capital-efficiency, jailbreak-prompt-opt-duality [NEEDS-PASTE], agent-without-phone) evaluated against graph-backend-adapter-contract / scoped-knowledge-graphs / work-tracking-storage-abstraction / kg-command-surface-readiness + the KG-as-SOT typed-views theme; 2026-06-24 re-extracted all five via the `article-extract` skill Playwright path and conformed articles/ + extracts/ to the skill's title/author/date/method/body/key-quotes template — confirmed aminkarbasi's X-native article body is login-walled, not retrievable unauthenticated)
-**Scope:** 33 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
+**Written:** 2026-04-21 (addenda: 2026-04-23 added shivsakhuja Skill Graphs 2.0 as §A.1 entry 5; 2026-04-23 added akshay_pachaar *Build Agents that never forget* as §A.1 entry 6; 2026-04-27 added workflow spec/plan inventory corrections; 2026-05-03 added annimaniac *Six Levels of AI-Pilled Organizations* as new §A.5 group plus Part B theme 7 and §C.10/C.11/C.12; 2026-05-03 added ashwingop *Company Brain* series (Part 2 Factual Memory + Part 3 Interaction Memory) as §A.2 entry 6 plus Part B theme 8 and §C.13/C.14; 2026-05-08 added ashwingop Parts 4–7 (Action Memory, Memory as State, Year of Building, Semantics+Ontology) extending §A.2 entry 6; added alphasignalai *Single vs Multi-Agent* as §A.4 entry 5; added Part B theme 9; added §C.14/C.15; added Part G research-profile verification pass; added akshay_pachaar *IdeaBlocks* as §A.1 entry 7; added mem0ai *Memory Decay* as §A.2 entry 7; added ghumare64 *Runbooks* + trq212 *HTML* as §A.3 entries 5–6; added Part B theme 10; added §C.16/C.17; 2026-06-24 added Part H — five new x.com-sourced articles (compaction-orchestrator, prompt-debt, token-capital-efficiency, jailbreak-prompt-opt-duality [NEEDS-PASTE], agent-without-phone) evaluated against graph-backend-adapter-contract / scoped-knowledge-graphs / work-tracking-storage-abstraction / kg-command-surface-readiness + the KG-as-SOT typed-views theme; 2026-06-24 re-extracted all five via the `article-extract` skill Playwright path and conformed articles/ + extracts/ to the skill's title/author/date/method/body/key-quotes template — confirmed aminkarbasi's X-native article body is login-walled, not retrievable unauthenticated); 2026-07-13 added Part L — six delegation-economics / loop-craft / harness-config X sources (joon-lee Fable-vs-Opus delegation economics, blomfield self-improving-company, intuitmachine/arXiv Atomic Task Graph, jasonzhou loop-engineering, vtrivedy LangChain harness-profiles, thealexker harness-engineering guide) supplying measured anchors for the Part J/K delegation + model-routing clusters); 2026-07-13 added Part M — the *Bilevel Autoresearch* meta-loop paper (arXiv 2603.23420v2), theoretical anchor for the self-improvement/meta-loop thesis (mechanism-change ≫ parameter-change) plus safety corroboration for the skill-validation gate)
+**Scope:** 40 articles in `research/articles/` (KG + memory + harness + multi-agent + hooks/platform + delegation-economics + loop-craft + meta-loop/self-improvement). Compared against current specs in `.agents/workflow/specs/`, plans in `.agents/workflow/plans/`, proposals in `.agents/proposals/`, lessons in `.agents/lessons/`, and the scoped-KG / graph-bridge / app-type-profile / skill-tiering specs.
 **Rubric per article:** core idea → pros → cons/tradeoffs → mapping to our stack with one of three labels:
 - **[OVERLAP-SHARPEN]** — we do it, they do it better or differently in a way we should learn from
 - **[GAP-ADOPT]** — we don't do it, worth adding
@@ -1628,7 +1628,10 @@ leads with named chase targets. No spec, rubric, or gate changes.
 1. Do the GPT 5.6 system card and METR's evaluation actually contain the grader-gaming /
    reward-hacking claims as characterized? (K.2, K.3 — chase before citing anywhere binding.)
 2. Where do Anthropic's 96%-performance-at-46%-cost orchestrator numbers live, and what task
-   distribution were they measured on? (K.3 — potential C1/C2 prior.)
+   distribution were they measured on? (K.3 — potential C1/C2 prior.) **[2026-07-13 update: a
+   MEASURED member of this class now exists — L.1 (Cognition, N=3,000): Fable+sidekick beats
+   Opus+sidekick on both cost and score. Anthropic's exact number stays uncited; chase stands,
+   but the prior is no longer purely [UNVERIFIED].]**
 3. Should a future wave treat reasoning-effort tier as the swapped variable, holding model
    constant? (K.3/K.2 — candidate post-freeze axis.)
 4. Is trigger→action executability worth enforcing as a lint-style review item on lens/skill
@@ -1636,8 +1639,470 @@ leads with named chase targets. No spec, rubric, or gate changes.
 
 ---
 
+## Part L — 2026-07-13 addendum: six delegation-economics / loop-craft / harness-config articles
+
+**Why a new part / provenance (§2).** Six user-dropped X links (batch theme: *delegation
+economics, self-improving loops, and per-model harness configuration*), extracted 2026-07-13
+via the Claude-in-Chrome Tier-2a path; full bodies in `research/articles/`, distilled batch
+extract in `research/extracts/harness-and-delegation-2026-07.md`. Selection = owner feed pick,
+not a cited-by chase — so the convergence in §L.7 is *independent-feed* convergence, weightier
+than a citation cluster (with one exception: L.6 Alex Ker explicitly cites L.5 LangChain, so
+that pair is ~1.5 independent, not 2). All six dedup MISS against the corpus.
+
+**The headline (why this batch matters).** Parts J/K reached the delegation-economics and
+model-routing consensus **from linkless growth-account sources** ([UNVERIFIED] 96%/46%,
+"Fable=manager/Sol=worker," effort-dial). This batch supplies the **measured anchors** those
+parts were groping toward: **L.1 (Cognition/Devin, 3,000-session instrumented study)** is a
+measured instance of the lead+cheap-sidekick economics, and **L.5 (LangChain, +10–20pt
+tau2-bench)** is the first measured anchor for the *per-model harness-config* lever that J/K
+never covered. **L.3 (ATG, arXiv paper)** grounds the plan-as-explicit-graph substrate. So the
+batch's job is upgrading three corpus clusters from `asserted` → `measured-with-method`.
+
+**Freeze discipline (§6).** The `transcript-analysis-and-pipeline-craft` plan is past its
+red-team disposition + fold-back archival (per Part K preamble); its pareto waves are frozen.
+Post-freeze discipline applies: items touching those waves are corroboration-first (additive,
+gate-neutral) or `[GAP-NOTE]` parked with a trigger. **But** several adoptables here target
+*other* active plans/skills NOT under that freeze — `config-transitive-layering`,
+the `pipeline-architect` skill, `full-loop-orchestration-runtime` — and those may take live
+fold-backs. Routing below is explicit about which plan owns each item. Rubric labels as Part A.
+
+### L.1 Joon Lee (Cognition/Devin) — *Making Fable Cheaper Than Opus* (2026-07-13)
+
+**Core.** 3,000 eval sessions on FrontierCode 1.1 across four configs (Fable-5 / Opus-4.8 lead
+× ±cheap sidekick), with every LLM call parsed (model, tool, tokens, cost) + a 40-task
+side-by-side trajectory dive. Fable costs **2× per token** yet **Fable+Sidekick costs less than
+Opus+Sidekick** ($1.86 vs $2.04) *and* scores higher (60.7 vs 54.6); Fable+Sidekick cuts cost
+**54%** vs pure Fable at ~unchanged score. Mechanism is **management style, not per-token
+price**: both leads delegate ~3×/run, but Fable delegates *early* with *constraint-enumerating
+design-doc briefs* and doesn't pull work back; Opus explores/implements solo for 20–45 turns
+then delegates the mechanical tail, pulls sidekick files into context 2× more, makes 4× more
+corrective edits at lead prices. Cost is dominated by **lead turns (11.5 vs 26.5), context
+dragged (545k vs 1,679k input tok), and what the lead decides *not* to do** (Fable lead makes
+zero code edits in 81% of runs vs 24% for Opus). Stark quality example: a brief stating
+"operator() must be O(1) in pointer length: NO full token scan" → sidekick scored 94; Opus
+hand-implemented, silently forgot the constraint, shipped O(n) → scored 25. Delegation fails
+when the task has no delegable components (short tasks; serial debugging where accumulated
+context *is* the work) — and Fable correctly barely delegates there.
+
+**Evidence grade: `measured-with-method`** — the best-graded item in this batch (large N,
+per-call instrumentation, method described). Genre cap: vendor (Cognition) blog on their own
+harness (Fusion) and bench (FrontierCode 1.1) — self-interested, so treat the *absolute* effect
+sizes as vendor-measured-on-own-bench, but the *mechanism decomposition* (turns/context/edits)
+is unusually falsifiable for this corpus.
+
+**Pros.** Closes the spirit of **Part K open-Q #2**: it is a *measured* member of the class
+K.3 asserted with the linkless "96%-at-46%." Independently reproduces K.3's org chart
+(judgment/planning priced per-use at the top; execution cheap) and K.2's routing — from data.
+The O(1) example is a measured demonstration that **brief quality mediates both cost and
+correctness**, which no prior source in the corpus quantified.
+
+**Cons.** Vendor bench; "score" is FrontierCode-1.1-specific; four configs is a narrow grid;
+the management-style claim is inferred from 40 hand-picked trajectories.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN — measured prior, additive to the frozen plan]** L.1 belongs in the plan
+  digest `evidence/prior/` as a **measured** sibling to the [UNVERIFIED] 96%/46% lead — it does
+  not reopen a cell; it strengthens the C1/C2 prior (frontier-lead + cheap-executor ≈ frontier
+  quality at lower cost). "Additive, gate-neutral, no reopened decision."
+- **[GAP-NOTE — parked, new axis, trigger: post-freeze wave]** L.1's cost variance lives in the
+  **lead/orchestrator** model's delegation *behavior*, not the executor swap our cells vary
+  (C1–C6 swap the executor under a fixed orchestrator). This is a genuinely different axis than
+  H1 ("volume moves ≤~4% on an executor swap") — and not a contradiction: H1 holds the
+  orchestrator fixed. Candidate post-freeze wave: **swap the orchestrator model, hold the
+  executor, and measure brief-quality as the mediator.** Sits next to K.3's effort-dial axis
+  (Part K open-Q #3). Logged, not a mid-freeze cell change.
+- **[OVERLAP-SHARPEN]** the constraint-enumerating brief ("enumerate constraints, edge cases,
+  and a definition of done") is a **measured** justification for the delegation-bundle authoring
+  convention (`orchestrator-session-start`: "write constraints into TASKS.yaml notes"; bundle
+  write_scope + acceptance criteria). The O(1) example is the citable evidence that vague briefs
+  cost correctness *and* lead tokens. Routes to the `delegation-lifecycle` / bundle-authoring
+  guidance as a sharpen (not the frozen plan).
+- **[WE-AHEAD with quirk]** "delegate early, don't pull work back, review with one cheap diff
+  pass, prefer another cheap handoff over a lead-rewrite" is exactly the ISP staged-runtime
+  ethos (parent reviews verdicts, doesn't re-implement). The quirk worth naming in the
+  pipeline-architect doc: **"lead distrust doesn't increase correctness"** — a caution against
+  over-verifying passing slices (see L.3 minimal-repair).
+
+### L.2 Guillermo Flor (summarizing Tom Blomfield / YC) — *How to Build a Self-Improving Company with AI* (2026-07-13)
+
+**Core.** Four-layer recursive self-improving loop for *every* company function: **sensor**
+(emails, tickets, telemetry, churn) → **policy** (what AI does autonomously vs. needs human
+sign-off) → **tool** (deterministic APIs) → **quality gate + learning** (evals, safety filters,
+loop failures back to the top). "Copilots / 20% productivity gains are the wrong frame." The
+leap = a monitoring agent that watches failed queries, diagnoses, writes+merges+deploys a fix
+overnight, no human. "Make the company legible": record everything, then **diarize +
+synthesize** (can't pump 100k hours into a context window raw) — n=1 anecdote: YC rebuilt its
+founder manual from 2,000 hours of office-hours recordings "in one weekend, now self-updates
+monthly."
+
+**Evidence grade: `asserted` / `practitioner-report`** — a third-party infographic summary of a
+talk; the YC-manual numbers are n=1 asserted. Genre: founder-audience growth summary
+(productmarketfit.tech funnel). Corroborates *shape*, not effect sizes; the concrete claims are
+`[UNVERIFIED]`.
+
+**Pros.** Its 4-layer loop is another clean articulation of the **J.5 loop taxonomy** (sensor≈
+signal-gathering orchestrator; policy≈boundary/fence; tool≈deterministic pre-stage; quality
+gate+learning≈evolve). "Record everything → diarize+synthesize" is K.2's "traces as a private
+training set" and the knowledge-architecture episodic/semantic-view thesis, from the
+organization side.
+
+**Cons.** No mechanism depth; the self-repair "overnight, no human" is the aspirational end of
+the product loop, presented without the review-bandwidth guardrail L.4 insists on.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** the sensor/policy/tool/quality-gate decomposition is worth citing in the
+  loop taxonomy note (pipeline-architect first-question "which loop are you editing?", per J.5)
+  as the *function-level* framing that complements the execution/task/product/system loops.
+  Digest note only.
+- **[OVERLAP-SHARPEN — KG angle]** "diarize + synthesize, don't dump raw" is the compaction/
+  synthesis argument (Part H compaction-orchestrator, I.1 iteration-log) at org scale: the
+  episodic view stores synthesized traces, not raw transcripts. Corroboration for
+  knowledge-architecture typed views.
+- **[WE-AHEAD]** the "quality gate + loop failures back to the top" is our fold-back→lesson
+  distillation + typed exit signals — we wire the failure edge (J.5); the talk names it without
+  wiring. No action.
+
+### L.3 Carlos Perez / arXiv 2607.01942 — *Atomic Task Graph (ATG)* (paper, 2026-07-02; thread 07-12)
+
+**Core.** Replace the linear **text trajectory** execution substrate with an explicit **DAG**:
+each node = one tool call, edges = data dependencies. Three moves: **interface-preserving
+recursion** (decompose while keeping I/O contracts clean, graph evolution traced), **dependency-
+aware execution** (independent branches in parallel; validate the plan before running),
+**minimal repair** (on failure, fix only the affected subgraph, leave validated regions
+frozen). Paper abstract: "consistently outperforms strong baselines in success rate and
+execution efficiency across three interactive benchmarks (ALFWorld, WebShop, ScienceWorld)
+using only 7B–8B backbones," training-free. Thread adds specific figures (20–40% step
+reduction, 70%+ hallucination drop, 3× faster recovery, "8B beats GPT-4+ReAct").
+
+**Evidence grade: `measured-with-method`** for the abstract's qualitative claims (peer-reviewable
+paper, named benchmarks, ablation-style framing). The **thread's specific percentages are
+`[UNVERIFIED]` against the paper body** (chase target named below) — n=thread-author framing.
+
+**Pros.** The paper-grade theoretical anchor for a bet our stack already makes structurally:
+**TASKS.yaml `depends_on` is the DAG; the trajectory is not the plan.** "Context narrowing —
+each node sees only local inputs, no bloated history" is the subagent-per-stage clean-context
+principle (Alex Ker property 1, J.5 execution loop) with a mechanism. "Pre-execution validation
+catches bad plans before running" is the `validate-bundle-against-HEAD` lesson generalized.
+
+**Cons.** 7–8B / household-task benchmarks are far from our repo-scale coding loops; "node = one
+tool call" is finer-grained than our task-level DAG; the thread over-claims vs the abstract.
+
+**Mapping.**
+- **[WE-AHEAD, with a sharpen]** plan-level we are already graph-structured (`depends_on`,
+  cross-plan `<plan>/<task>` deps, layered-pr-fanout topology, `symbol-only-references` anchors).
+  ATG's sharpen: the *runtime* still hands each agent a text trajectory *inside* a stage — the
+  DAG discipline stops at the task boundary. Naming this in the pipeline-architect doc (plan is a
+  DAG; the in-stage trajectory is not, and that's the remaining context-rot surface) is additive.
+- **[GAP-ADOPT — candidate, owner: `full-loop-orchestration-runtime`]** **minimal repair =
+  "freeze validated regions on re-run."** Our bounded fold-back / ISP re-entry (`target_count:3`)
+  re-runs a stage; ATG repairs only the affected subgraph and **does not re-verify passing
+  regions.** For a wave that re-runs after a single-slice fold-back, skipping re-verification of
+  already-passing disjoint slices is an efficiency win that composes with the L.1 "don't
+  over-verify passing work" caution. Route as a fold-back to `full-loop-orchestration-runtime`
+  (not the frozen transcript plan).
+- **[OVERLAP-SHARPEN]** "dependency-aware parallel execution of independent branches" +
+  "pre-execution validation" = our disjoint-write_scope wave fanout + HEAD-validate-before-fanout.
+  Independent theoretical confirmation; digest note.
+
+### L.4 Jason Zhou (SuperDesign) — *What I Learnt After Running Loops for 1 Month* (2026-07-09)
+
+**Core.** Loop anatomy = four parts: **(1) contract** (one md injected every run: Goal /
+Boundaries / SOP — the *boundary/fence* between ship-on-its-own and stop-and-ask is what lets you
+walk away, and is the most under-invested); **(2) state + logs** (durable small state read at top
++ append-only logs; state absorbs earned lessons → "a loop is worth more in month three than week
+one"); **(3) /verify** (token-efficient, evidence-producing — a PR arrives "with a video of the
+thing working," approvable by behavior not diff; "a verifier is the deciding factor in whether a
+loop is even a good idea"); **(4) trigger** (continuous for-loop / time / event — picking it is
+half the cost model; gate cheaply so empty runs cost nothing). Scaling shape: **orchestrator
+(finds the work) + executor (isolated worktree) + verifier (proves + attaches evidence)** — but
+not all loops need all three; build the 1-layer version first. **Evolve role** (Taleb
+antifragile): a separate run reads the last dozen runs and edits *the loop itself* (contract,
+state conventions, triggers, scripts, skills) — "a loop to improve the loop." Concrete contract
+templates for doc-maintainer, error-sweep/bug-hunter, support-triage, CRM. Open-sourced Loopany
++ a verifier-setup skill. "A loop has to respect your review bandwidth, not just its own
+throughput" (React Doctor's "don't open a 2nd PR while the last is unmerged").
+
+**Evidence grade: `practitioner-report`** — one month, one team, concrete artifacts, no
+measurements. Open-sourced tooling raises credibility above the growth-account tier. Genre:
+product-adjacent practitioner essay (Loopany funnel) but with real reproducible templates.
+
+**Pros.** The **fullest external articulation of our own loop stack**: contract ≈ active.loop.md
++ rules/ + boundaries; state+logs ≈ workflow state + iteration-log; /verify ≈ verifier profiles +
+`verify` skill + evidence; orchestrator+executor+verifier ≈ our exact ISP role split; **evolve ≈
+our fold-back→lesson→skill distillation** and the J.5 "system loop." Independent convergence on
+nearly every structural bet.
+
+**Cons.** No numbers; contracts are SuperDesign-shaped; the "evolve" role is described, not
+measured for payoff.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** the four-part contract (Goal/Boundaries/SOP/State/Logs) is a citable
+  external template that matches our loop-discipline artifacts; the **boundary/fence** ("ship on
+  its own vs ask a human, the exact line") is K.2's operating contract restated and directly
+  corroborates `loop-discipline-stop-hooks` + the delivery-gate stop-before-push rule. Digest +
+  loop-taxonomy note.
+- **[OVERLAP-SHARPEN]** **evolve** as a first-class *run role* is the sharpest naming yet for
+  what our fold-back/lesson machinery does — but Zhou makes it a scheduled loop-over-loops, where
+  ours is human-triggered per session. Cite in the knowledge-fold-back / lessons framing as the
+  "system loop" instance. Additive.
+- **[GAP-NOTE — parked, trigger: full-loop-orchestration-runtime maturity]** "gate cheaply so
+  empty runs cost nothing" (event/time hybrid: tick checks for work, silences if none) is the
+  cost-aware trigger our autonomous-loop runtime wants; ties to lesson `agents-lack-autonomous-
+  timers` (v2 daemon owns the scheduler). Parked until the runtime lands the scheduler.
+- **[WE-AHEAD]** "verify by observation, evidence attached to the PR" is already T-b5/O11 +
+  merge-back `verification_status`; his screenshot/video-in-PR is the human-facing rendering (same
+  as J.4 PostHog). No new decision.
+
+### L.5 Viv / LangChain — *Tuning Deep Agents to Work Well with Different Models (Harness Profiles)* (2026-04-29)
+
+**Core.** A **harness profile** = a declarative override layer for the parts of the harness that
+vary per model: system-prompt prefix/suffix, tool inclusion + naming, middleware selection,
+subagent config, skills. Register per model/provider (Python or YAML), `create_deep_agent` adapts
+on model swap, **call-site unchanged**; ship defaults for OpenAI/Anthropic/Google; override,
+layer, or distribute as plugins. Sourced from each vendor's prompting guide: **Codex** → swap
+`file_edit`→`apply_patch`, alias `execute`→`shell_command`, "batch independent tool calls in
+parallel"; **Opus** → `<tool_result_reflection>` + `<tool_usage>` prompt blocks. Measured
+**+10–20 points on a curated hard subset of tau2-bench** over the default harness; prior work took
+gpt-5.2-codex 52.8→66.5 on Terminal-Bench 2.0 by harness-layer changes alone; "the Claude Code
+harness ranks last among Opus-4.6 Terminal-Bench submissions" — same model, different harness,
+very different score.
+
+**Evidence grade: `measured-opaque`→`measured-with-method`** — names the bench (tau2-bench
+curated subset) and the delta (10–20pt) but not the full protocol; the Terminal-Bench 52.8→66.5
+is a cited public number. Genre: vendor (LangChain) product launch — self-interested, but the
+"same model in a different harness scores very differently" claim is externally checkable
+(Terminal-Bench leaderboard).
+
+**Pros.** The **first measured anchor for the per-model harness-config lever** — the axis Parts
+J/K (economics) and A (KG) never covered. It is **our `stage_profiles` + `execution_profile` +
+`config-transitive-layering` (declarative org→team→repo layering) + craft §6 harness-capability-
+mask, independently invented and measured to matter.** The override surface (prompt affixes / tool
+inclusion+naming / middleware / subagent / skills) is almost field-for-field our profile surface.
+
+**Cons.** Vendor launch; "10–20pt on a curated subset" is a favorable slice; Python/YAML API is
+Deep-Agents-specific.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN]** strongest external corroboration that per-stage/per-profile prompt+tool+
+  middleware overrides are worth a declarative config layer — cite in the `pipeline-architect`
+  design instruction and the `config-transitive-layering` spec as prior art (declarative override
+  + merge semantics + call-site-stable + plugin distribution = our layering model). Measured
+  justification for a shape we already ship. Additive.
+- **[GAP-ADOPT — candidate, owner: `pipeline-architect` skill + config surface]** their profiles
+  key overrides on **model/provider**; check whether our `stage_profiles` key on stage/app_type
+  **but not model-family**. If so, a per-model override key (Codex `apply_patch`/`shell_command`
+  tool aliasing; Opus `<tool_usage>` prompt block) is a real gap — a model-specific tool-naming +
+  prompt-suffix layer under an existing profile. Route as a fold-back to the `pipeline-architect`
+  skill / config-transitive-layering (NOT the frozen transcript plan). The 10–20pt is the
+  justification; scope it as a proposal since it touches the config surface.
+- **[OVERLAP-SHARPEN]** "same model, different harness, very different score" (Terminal-Bench) is
+  the measured version of J.5/K.3's "benchmarks are marketing, measure on your harness" — a
+  citable external prior for why the transcript plan measures on its own cells. Digest note.
+
+### L.6 Alex Ker — *The Architect's Guide to Harness Engineering* (2026-07-13)
+
+**Core.** Buy / customize / build by role (non-engineers *buy* + be good context engineers;
+engineers customize/BYO-model). Three harness categories (frameworks/SDKs → extensible → turnkey).
+Decision = **harness-task fit** (post-trained with your models/tools? right abstraction?) +
+**fluency** (do you know how to drive it?). **Eight diagnostic properties**: context+state,
+memory-across-tasks, MCP/tool support, **standard adherence** (open spec vs proprietary — OpenCode
+SQLite+open conventions vs Claude Code's claude.md/dedicated-dir/proprietary session format),
+model-selection flexibility, remote access, observability/debugging (rollback + self-repair),
+**hackability spectrum** (opinionated↔composable). Future = **route** (lightweight classifier →
+cheap-default / fine-tuned / frontier-review; **cache-aware** so requests hit the warm cache per
+model) + **serve** (BYO-model / dedicated infra for rate limits, caching, batching). Explicitly
+cites **L.5 LangChain Harness Profiles**.
+
+**Evidence grade: `practitioner-report` / `asserted`** — essay, no measurements; "frontier teams
+at OpenEvidence/Notion/Cursor" is name-drop color. Timeless-principles framing by design.
+
+**Pros.** The 8 properties are a ready-made **self-assessment rubric for dot-agents-as-a-harness**
+— and we score well on most (context/state via ISP subagents; memory via KG typed views; MCP
+support; observability via iteration-log + verifier evidence; model-selection via `model:` routing;
+hackability = composable). "Standard adherence" is the sharpest external framing of the config-v2
+portability/lock-in question. "Cache-aware routing" is a concrete operational caution.
+
+**Cons.** No measurements; not independent of L.5 (cites it — the harness-profile cluster is ~1.5
+sources, not 2); enterprise-strategy altitude, low direct actionability.
+
+**Mapping.**
+- **[GAP-NOTE — parked, trigger: docs/positioning pass]** run the **8-property diagnostic** as a
+  self-assessment of dot-agents-as-harness and capture the weak axes (candidates: remote access;
+  self-repair/rollback observability). Feeds a positioning/first-class-resource-docs artifact, not
+  a wave. Parked with named trigger.
+- **[GAP-ADOPT — small, owner: model-routing / full-loop-orchestration-runtime]** **cache-aware
+  routing**: routing to different models mid-session incurs a cache miss; a router should prefer
+  the warm-cache model when quality permits. A real operational note for our `model:`-per-agent
+  routing (r-series / runtime) — additive note, not a gate. Route as a task-note.
+- **[OVERLAP-SHARPEN]** "standard adherence: open conventions vs proprietary structure" directly
+  frames config-v2's portability goal (open, inspectable `.agentsrc.json` + scopes vs harness-
+  proprietary lock-in). Cite in config-v2/first-class-resource-docs. Digest note.
+- **[OVERLAP-SHARPEN]** routing = Karpathy's jagged-intelligence → specialization → subagents-as-
+  OOP-encapsulation is J.5/K.2/K.3 restated; no new decision.
+
+### L.7 Part L synthesis (cross-cutting)
+
+1. **Three corpus clusters got their first measured member this batch.** (a) *Lead+cheap-executor
+   delegation economics*: L.1 (measured, N=3,000) joins K.2/K.3/Alex-Ker/Blomfield (asserted) —
+   the cluster graduates from "emerging consensus we're one of the few instrumenting" (K.4.1) to
+   "consensus with a measured exemplar." (b) *Per-model harness-config lever*: L.5 (measured,
+   +10–20pt) is the first anchor for the config axis J/K skipped; L.6 corroborates but cites L.5
+   (so ~1.5 independent). (c) *Plan-as-explicit-graph substrate*: L.3 (paper) grounds what
+   TASKS.yaml already is. **Never pool the numbers** — L.1's FrontierCode score, L.5's tau2-bench
+   subset, and L.3's ALFWorld success rate are different instruments; they converge on *shape*.
+2. **L.1 splits the delegation lever in a way our cells don't measure.** Our C1–C6 swap the
+   *executor* under a fixed orchestrator (H1: ≤~4% volume move). L.1 finds the dominant cost
+   variance is in the *lead/orchestrator's delegation behavior* (early vs late, brief quality,
+   pull-back rate) — a different axis, not a contradiction (H1 holds the orchestrator fixed). The
+   corpus now has two orthogonal cost levers on the delegation side: *which model executes*
+   (H1-bounded) and *how the lead delegates* (L.1, large). The latter joins the J.8.2 output-
+   volume lever and K.3's effort-dial as un-instrumented axes — candidate post-freeze waves.
+3. **Brief quality is now a measured mediator, not a style note.** L.1's O(1) example (constraint-
+   enumerating brief → sidekick 94; vague hand-impl → 25) is the first *measured* evidence that
+   delegation-bundle quality drives both correctness and lead cost. It sharpens
+   `orchestrator-session-start` ("write constraints into TASKS.yaml notes"), J.6's Deviations log,
+   and J.3's never-compress-contract-fields into one rule: **the brief's constraints/edge-cases/
+   done-definition are the load-bearing contract fields.**
+4. **The graph/text-substrate distinction has a paper now, and it exposes our remaining gap.**
+   L.3: plan-level we're a DAG; in-stage we still hand agents a text trajectory (the context-rot
+   surface). L.3's minimal-repair (freeze validated regions on re-run) + L.1's "lead distrust
+   doesn't increase correctness" converge on one efficiency rule: **don't re-verify passing
+   disjoint slices on a bounded re-run.** New candidate for `full-loop-orchestration-runtime`.
+5. **Loop anatomy convergence is now 4-deep and template-grade.** L.4 (contract/state/verify/
+   trigger + orchestrator/executor/verifier + evolve) + L.2 (sensor/policy/tool/quality-gate) +
+   J.5 (execution/task/product/system loop) + K.2 (operating contract) all describe our stack.
+   The **evolve role** (L.4) is the sharpest name for our fold-back→lesson→skill distillation. No
+   new decision — but the loop-taxonomy note (pipeline-architect first-question) should cite L.4's
+   template and L.2's function-layer framing as the canonical external articulations.
+6. **KG angle:** L.2's "diarize+synthesize, don't dump raw," L.1's per-call trace parsing (traces
+   as the analysis substrate), and L.4's "state absorbs earned lessons" all restate Part B Theme 8
+   / K.2 §8: the episodic view stores *synthesized, provenance-bearing* traces, and write-time
+   structure decides read-time value. L.1 is a worked example of exactly the transcript-analysis
+   the plan is built to do (parse every call → attribute cost → find the mechanism).
+
+### Part L — routing note (workflow)
+
+Post-freeze discipline for the transcript plan (corroboration-first). Items split by owning plan
+— those NOT under the frozen transcript waves take live fold-backs; frozen-adjacent items are
+digest/parked. See the adoptables table handed to `knowledge-fold-back` for final routes.
+
+### Part L — open questions raised
+
+1. Do our `stage_profiles` key overrides on **model-family** at all, or only stage/app_type? If
+   only the latter, the per-model tool-naming + prompt-suffix layer (L.5) is a real config gap.
+2. Should a post-freeze wave **swap the orchestrator model (hold the executor)** and measure
+   brief-quality as the mediator (L.1) — alongside the K.3 effort-dial axis? Both are orthogonal
+   to the current executor-swap cells.
+3. Do the ATG paper's specific figures (20–40% step / 70%+ hallucination / 3× recovery) appear in
+   the paper body, or are they thread-author framing? (L.3 — chase arXiv 2607.01942 before citing.)
+4. Is "freeze validated regions on bounded re-run" (L.3 minimal repair) worth building into the
+   `full-loop-orchestration-runtime` re-entry path, or is full stage re-run cheap enough at our
+   task granularity?
+5. Where do the Blomfield "2,000 hours → 150-page manual in a weekend, self-updates monthly"
+   figures come from, if anywhere citable? (L.2 — n=1 asserted; low priority.)
+
+---
+
+## Part M — 2026-07-13 addendum: Bilevel Autoresearch (meta-loop / self-improvement paper)
+
+**Why / provenance (§2).** One user-dropped arXiv paper (2603.23420v2), targeted single-source
+pass, added after Part L closed. Full body + relevance in
+`research/articles/bilevel-autoresearch-meta-autoresearching-itself.md`. Theme: the **mechanism-
+level meta-loop** — the deepest member of this session's evolve/system-loop thread (L.4, J.5,
+L.2). Comparator: the dot-agents **self-improvement / meta-loop** machinery (fold-back → lesson /
+rule / skill distillation; the meta-loop reconciliation in `full-loop-orchestration-runtime`; the
+`skill-architect` validation gate; project memory "meta-loop launch 2026-06-25").
+
+### M.1 Qu & Lu — *Bilevel Autoresearch: Meta-Autoresearching Itself* (arXiv 2603.23420v2, 2026-06-02)
+
+**Core.** A bilevel loop: the **inner** loop optimizes the task; the **outer** loop optimizes
+*how the inner loop searches* by generating and injecting **new search mechanisms as code at
+runtime** (Level 2, via a 4-round explore→critique→specify→generate dialogue), distinct from
+merely adjusting search *parameters* (Level 1.5). Both loops use the **same LLM** (no stronger
+meta-model). On Karpathy's GPT-pretraining benchmark, full bilevel (Group C) hits −0.045 val_bpb
+vs −0.009 for the inner loop alone (~5×); **parameter-only change (Group B) yields no reliable
+gain — mechanism change does.** Mechanisms were instantiated from adjacent fields (tabu search,
+multi-armed bandits, design of experiments) with no human spec; trace analysis attributes the
+gain to **breaking the inner loop's deterministic search patterns, forcing exploration of
+directions the LLM's priors systematically avoid** (the concrete win: discovering that *smaller*
+batch size helped, against an initial "bigger is better" prior). The authors generalize the
+carrier explicitly: "Python code is the carrier… but skills, prompts, workflows, scripts,
+evaluators, domain principles, world-model assumptions, and memory schemas can also encode
+modifiable mechanisms."
+
+**Evidence grade: `measured-with-method` but PRELIMINARY** — authors' own caveats are heavy (n=3;
+Group C std = 67% of mean; single benchmark; one bilevel step, recursion unproven). Genre:
+independent-researcher academic preprint (CC BY, code released) — low incentive bias, high
+transparency, but thin statistics. Cite for **shape and direction**, never the 5× as an
+importable effect size.
+
+**Pros.** The clearest theoretical grounding in the corpus for the dot-agents self-improvement
+thesis: it names the exact distinction our fold-back machinery lives on — **mechanism change vs
+parameter change** — and measures that mechanism change is where the leverage is. Its carrier
+generalization is a one-to-one map onto our artifact model (skills, rules, prompts, workflows,
+lessons, KG schemas as "modifiable mechanisms"). Its failure-mode honesty (runtime injection is
+fragile; silent fallback is dangerous; arbitrary imports) is a gift — it independently motivates
+our `skill-architect` validation gate.
+
+**Cons.** n=3 on one benchmark; the meta-loop's extra inference/wall-clock cost is acknowledged
+but not quantified against the gain; only the Python-code carrier is actually tested (the
+skills/prompts/workflows generalization is asserted, not evaluated); recursion (meta-meta) unproven.
+
+**Mapping.**
+- **[OVERLAP-SHARPEN — theoretical anchor, high value]** "mechanism change ≫ parameter change"
+  is a **measured** justification for the whole fold-back → lesson/rule/skill pipeline: durable
+  self-improvement comes from routing observations into NEW mechanisms (a new lesson, a new
+  reviewer lens, a new skill, an evaluator), not from re-tuning an existing task note's params.
+  Cite in the `knowledge-fold-back` routing rationale + the meta-loop framing. Consume-now
+  (corroboration note); no gate change.
+- **[OVERLAP-SHARPEN]** "mechanisms win by breaking the inner loop's deterministic patterns /
+  exploring directions the LLM's priors avoid" is the meta-level statement of RULE-7 diversity +
+  cross-family review + Karpathy's jagged-intelligence (L.6): a same-family same-prompt loop
+  systematically under-explores; injecting a *different mechanism* (or a cross-family reviewer) is
+  how you escape the prior. Strengthens the diversity/cross-family convention. Digest note.
+- **[OVERLAP-SHARPEN — safety, corroborates a lesson]** the runtime-injection failure modes
+  (silent fallback without error; a mechanism reverted on a missing `sklearn` dep; arbitrary
+  imports) are exactly why generated mechanisms must pass a **validation gate before use** —
+  corroborates lesson `use-skill-architect-for-skill-generation` (skills validated before treated
+  as usable). Add the citation to that lesson as external, measured motivation. Consume-now.
+- **[GAP-NOTE — parked, trigger: meta-loop runtime maturity]** the bilevel architecture itself —
+  an outer loop that autonomously *authors and injects* new dot-agents mechanisms (skills/rules/
+  evaluators) to improve the inner ISP/fanout loop — is the aspirational end state of our
+  meta-loop (`full-loop-orchestration-runtime` meta-loop reconciliation + the "meta-loop launch"
+  work). Not buildable now (recursion + safety unproven even in the paper); logged as a lead with
+  a named trigger, NOT a task. Its precondition is our `skill-architect` validation gate as the
+  safety envelope the paper lacks.
+- **[WE-AHEAD]** our self-improvement carrier is human-gated distillation (fold-back → reviewed
+  lesson/skill via `da review` / `skill-architect`), which is exactly the **validation + rollback
+  envelope the paper flags as missing** ("no stability guarantee… silent fallback is dangerous").
+  We are behind on autonomy (theirs generates mechanisms unattended) and ahead on safety. Record
+  so the trade stays explicit.
+
+### Part M — routing note
+
+One item is genuinely actionable beyond corroboration and NOT under any freeze — the safety/
+validation corroboration folds into an existing lesson. The mechanism≫parameter anchor and the
+diversity restatement are consume-now digest/citation notes. The bilevel-as-our-meta-loop
+architecture is a parked lead (trigger: meta-loop runtime + validation-gate maturity). See the
+fold-back report for routes.
+
+### Part M — open questions raised
+
+1. Does the `knowledge-fold-back` routing rationale explicitly encode "prefer a new mechanism
+   over a parameter tweak" as a routing heuristic, or is it left implicit? (M.1)
+2. What is the safety envelope for any future dot-agents auto-mechanism-generation, and is
+   `skill-architect` validation + `da review` sufficient as the rollback/validation gate the
+   paper lacks? (M.1 — precondition for the parked bilevel-meta-loop lead.)
+
+---
+
 *Document status: draft. No changes made to code, specs, or plans. This is evaluation only.
 Second pass (Parts H/I resolution + Part J) completed 2026-07-12 against the inflight
 `transcript-analysis-and-pipeline-craft` and `full-loop-orchestration-runtime` plans.
 Part K (operating-contract batch) added 2026-07-13 under post-archival corroboration-first
-routing.*
+routing. Part L (delegation-economics / loop-craft / harness-config batch — six X sources)
+added 2026-07-13: supplies measured anchors (Cognition L.1, LangChain L.5, ATG paper L.3) for
+clusters Parts J/K corroborated only from linkless sources; frozen-plan items corroboration-
+first, config/pipeline/runtime items routed live to their own plans. Part M (Bilevel Autoresearch
+meta-loop paper) added 2026-07-13: theoretical anchor for the self-improvement/meta-loop thesis
+(mechanism-change ≫ parameter-change) + safety corroboration for the skill-validation gate.*
