@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: exec-bit
-parent_plan_id: cross-platform-test-skips-audit
-verifier_type: merge-back
-status: pass
-summary: 'Doc-only change, zero overlap with concurrent perms-dir/perms-readonly/symlinks workers (different package). PR #69 is open and NOT merged — parent should review and advance. Verification: go build ./..., go test ./internal/scaffold/home -count=1 (ok 0.326s), gofmt -l internal/scaffold/home/ (clean).'
-recorded_at: "2026-05-25T01:18:19Z"
-delegation_id: del-exec-bit-1779671676

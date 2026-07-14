@@ -1,6 +1,6 @@
 # §7A units-lock wiring — make local sources first-class in the lockfile
 
-Status: proposed (next config-v2 task after 0.3.4)
+Status: LANDED 2026-06-08 — §7A units-lock wiring shipped in internal/config (lock_units.go, ensure_resolved.go, staleness.go, overlay.go). Was: proposed (next config-v2 task after 0.3.4).
 Decision owner: maintainer (sequencing confirmed 2026-06-02: land #7 §7-baseline, then this)
 
 ## Problem

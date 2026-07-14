@@ -32,10 +32,12 @@ var profileStages = []string{profileKindExecutor, profileKindVerifier, profileKi
 // orchestrator/ISP calls when dispatching a verifier or reviewer so the worker
 // gets the same merged prompt every other surface resolves.
 type composedPromptView struct {
-	Kind    string                `json:"kind"`    // stage: executor | verifier | reviewer | orchestrator
-	Slug    string                `json:"slug"`    // profile slug (verifier_type, reviewer lens, …)
-	Matched bool                  `json:"matched"` // a profile entry exists in the merged config
-	Entries []composedPromptEntry `json:"entries"`
+	Kind        string                `json:"kind"`         // stage: executor | verifier | reviewer | orchestrator
+	Slug        string                `json:"slug"`         // profile slug (verifier_type, reviewer lens, …)
+	Matched     bool                  `json:"matched"`      // a profile entry exists in the merged config
+	Model       string                `json:"model"`        // concrete OMP model identifier
+	ModelFamily string                `json:"model_family"` // semantic family for diversity gates
+	Entries     []composedPromptEntry `json:"entries"`
 }
 
 // composedPromptEntry is one resolved prompt_files reference, preserving the
@@ -87,6 +89,27 @@ func decodeProfilePromptFiles(raw map[string]any, stage, slug string) ([]string,
 		}
 	}
 	return out, true
+}
+
+// decodeProfileModelRoute reads the explicit OMP model route from the same
+// effective profile object as prompt_files. Unknown family values are preserved:
+// cross-family checks compare identity and do not require a closed vendor list.
+func decodeProfileModelRoute(raw map[string]any, stage, slug string) (model, family string) {
+	stages, ok := raw["stage_profiles"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	profiles, ok := stages[stage].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	prof, ok := profiles[slug].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	model, _ = prof["model"].(string)
+	family, _ = prof["model_family"].(string)
+	return strings.TrimSpace(model), strings.TrimSpace(family)
 }
 
 // promptRefPath extracts the path from a prompt_files entry in either form: a
@@ -165,7 +188,8 @@ func composeProfilePrompt(projectPath, agentsHome, kind, slug string) (composedP
 		return composedPromptView{}, err
 	}
 	entries, matched := decodeProfilePromptFiles(raw, kind, slug)
-	view := composedPromptView{Kind: kind, Slug: slug, Matched: matched}
+	model, family := decodeProfileModelRoute(raw, kind, slug)
+	view := composedPromptView{Kind: kind, Slug: slug, Matched: matched, Model: model, ModelFamily: family}
 	for _, entry := range entries {
 		view.Entries = append(view.Entries, resolvePromptRef(projectPath, agentsHome, entry))
 	}
@@ -224,6 +248,8 @@ func renderComposedPrompt(view composedPromptView) {
 	fmt.Fprintf(os.Stdout, "  kind    : %s\n", view.Kind)
 	fmt.Fprintf(os.Stdout, "  slug    : %s\n", view.Slug)
 	fmt.Fprintf(os.Stdout, "  matched : %t\n", view.Matched)
+	fmt.Fprintf(os.Stdout, "  model   : %s\n", view.Model)
+	fmt.Fprintf(os.Stdout, "  family  : %s\n", view.ModelFamily)
 	fmt.Fprintln(os.Stdout)
 	if !view.Matched {
 		fmt.Fprintf(os.Stdout, "  no stage_profiles.%s entry for %q in the effective config.\n", view.Kind, view.Slug)

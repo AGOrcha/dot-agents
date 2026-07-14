@@ -2,15 +2,6 @@ import { render, screen, within } from '@testing-library/react'
 import ScoreTrendChart, { buildScoreSeries } from './ScoreTrendChart'
 import type { R2DashboardRunSessionDTO } from '../api/types.gen'
 
-// Recharts' ResponsiveContainer needs ResizeObserver, which jsdom lacks (real
-// browsers provide it). Stub it so the chart mounts under the test renderer.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver
-
 function run(over: Partial<R2DashboardRunSessionDTO> & { session_id: string }): R2DashboardRunSessionDTO {
   return {
     session_id: over.session_id,

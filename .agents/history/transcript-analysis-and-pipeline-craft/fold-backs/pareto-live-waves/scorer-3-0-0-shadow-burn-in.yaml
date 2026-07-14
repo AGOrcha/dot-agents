@@ -1,0 +1,8 @@
+schema_version: 1
+id: scorer-3-0-0-shadow-burn-in
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: pareto-live-waves
+observation: RESOLVED 2026-07-12 — shadow-scored iters 55-66 under rubric 3.0.0 in a scratch iter-log (canonical 2.1.0 sidecars untouched); 11/12 reconcile within ±0.004, one explainable band change from git-topology drift (iter-66 landed signal). Burn-in PASSED; see evidence/pareto/scorer-3.0.0-shadow-burn-in.md. In-situ validation on wave rows rides C0.
+classification: small
+routed_to: task_note:transcript-analysis-and-pipeline-craft/pareto-live-waves
+created_at: "2026-07-12T23:59:09Z"

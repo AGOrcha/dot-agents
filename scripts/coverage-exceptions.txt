@@ -1,7 +1,7 @@
 # coverage-gate per-file exceptions allowlist
 #
 # === RATCHET ===
-# ratchet-max-entries: 24
+# ratchet-max-entries: 173
 # The coverage gate fails if the allowlist grows above this number.
 # To add a new entry: prove there is no test-driven path to the threshold,
 # bump this line in the same commit, and include the rationale in PR review.
@@ -20,34 +20,187 @@
 #
 # === RATCHET STATE (coverage-gate-per-file / cg6) ===
 # Per-file gate is ENFORCE. Every entry below is tracked legacy debt: the
-# cg6 side-loop raises files to >=95% and DELETES the entry (enforcement
-# only ever tightens, never regresses the ~140 already-clean files).
+# cg6 side-loop raises files to 100% and DELETES the entry (enforcement
+# only ever tightens, never regresses fully covered files).
 # Two rationale classes:
 #   [legacy-tail]      ordinary file, just needs more tests — loop target.
 #   [platform-tag]     build-tagged *_windows/_unix; residual lines may be
 #                      unreachable on the merged multi-OS profile — loop
 #                      must confirm-or-raise (not assume untestable).
-commands/add.go                                            # [legacy-tail] 93.84%; cg6 ratchet-loop raises to >=95%
-commands/agents/promote.go                                 # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
-commands/import_plugins.go                                 # [legacy-tail] 93.44%; cg6 ratchet-loop raises to >=95%
-commands/init.go                                           # [legacy-tail] 81.91%; cg6 ratchet-loop raises to >=95%
-commands/kg/query_lint_maintain.go                         # [legacy-tail] 92.47%; cg6 ratchet-loop raises to >=95%
-commands/refresh.go                                        # [legacy-tail] 93.53%; cg6 ratchet-loop raises to >=95%
-commands/sync.go                                           # [legacy-tail] 85.71%; cg6 ratchet-loop raises to >=95%
-commands/sync/pull.go                                      # [legacy-tail] 88.89%; cg6 ratchet-loop raises to >=95%
+commands/add.go                                            # [legacy-tail] 93.84%; cg6 ratchet-loop raises to 100%
+commands/agents/promote.go                                 # [legacy-tail] 85.71%; cg6 ratchet-loop raises to 100%
+commands/import_plugins.go                                 # [legacy-tail] 93.44%; cg6 ratchet-loop raises to 100%
+commands/init.go                                           # [legacy-tail] 81.91%; cg6 ratchet-loop raises to 100%
+commands/kg/query_lint_maintain.go                         # [legacy-tail] 92.47%; cg6 ratchet-loop raises to 100%
+commands/refresh.go                                        # [legacy-tail] 93.53%; cg6 ratchet-loop raises to 100%
+commands/sync.go                                           # [legacy-tail] 85.71%; cg6 ratchet-loop raises to 100%
+commands/sync/pull.go                                      # [legacy-tail] 88.89%; cg6 ratchet-loop raises to 100%
 internal/fsops/fsops_windows.go                            # [platform-tag] 0.00% on merged profile; cg6 confirm-or-raise
-internal/graphstore/crg.go                                 # [legacy-tail] 94.69%; cg6 ratchet-loop raises to >=95%
-internal/graphstore/postgres.go                            # [legacy-tail] 91.56%; cg6 ratchet-loop raises to >=95%
-internal/graphstore/sqlite.go                              # [legacy-tail] 94.65%; cg6 ratchet-loop raises to >=95%
+internal/graphstore/crg.go                                 # [legacy-tail] 94.69%; cg6 ratchet-loop raises to 100%
+internal/graphstore/postgres.go                            # [legacy-tail] 91.56%; cg6 ratchet-loop raises to 100%
+internal/graphstore/sqlite.go                              # [legacy-tail] 94.65%; cg6 ratchet-loop raises to 100%
 internal/links/inode_unix.go                               # [platform-tag] 88.89% on merged profile; cg6 confirm-or-raise
 internal/platform/claude_linkcount_unix.go                 # [platform-tag] residue is the defensive info.Sys().(*syscall.Stat_t) ok-false guard, unreachable when os.Lstat succeeds on a real path. Relocated from commands/internal/lifecycle/linkcount_unix.go during P3 (platform-driven diagnostics); semantics + rationale identical to the predecessor entry it replaces.
 internal/platform/claude_linkcount_windows.go              # [platform-tag] residue is best-effort syscall.OpenFile / GetFileInformationByHandle error guards on Windows, unreachable for real existing files on the merged profile. Relocated from commands/internal/lifecycle/linkcount_windows.go during P3 (platform-driven diagnostics); mirrors internal/links/inode_windows.go's pattern.
 internal/links/inode_windows.go                            # [platform-tag] 79.41% on merged profile; cg6 confirm-or-raise
 internal/links/symlink_windows.go                          # [platform-tag] 77.08% on merged profile; cg6 confirm-or-raise
-internal/platform/cursor.go                                # [legacy-tail] 92.58%; cg6 ratchet-loop raises to >=95%
-internal/platform/mcp_settings.go                          # [legacy-tail] 94.74%; cg6 ratchet-loop raises to >=95%
-internal/platform/opencode.go                              # [legacy-tail] 91.78%; cg6 ratchet-loop raises to >=95%
-internal/platform/plugins.go                               # [legacy-tail] 93.41%; cg6 ratchet-loop raises to >=95%
-internal/platform/render_manifest.go                       # [legacy-tail] 93.94%; cg6 ratchet-loop raises to >=95%
+internal/platform/cursor.go                                # [legacy-tail] 92.58%; cg6 ratchet-loop raises to 100%
+internal/platform/mcp_settings.go                          # [legacy-tail] 94.74%; cg6 ratchet-loop raises to 100%
+internal/platform/opencode.go                              # [legacy-tail] 91.78%; cg6 ratchet-loop raises to 100%
+internal/platform/plugins.go                               # [legacy-tail] 93.41%; cg6 ratchet-loop raises to 100%
+internal/platform/render_manifest.go                       # [legacy-tail] 93.94%; cg6 ratchet-loop raises to 100%
 internal/globalflagcov/analyze.go                          # [defensive-guards] 89.58% local; residue is unreachable pc==0 / FuncForPC==nil guards on a known-valid handler func, plus the "no handler symbol" note unproducible by a wired cobra command
 internal/config/lock_refresh.go                            # [defensive-guards] WriteRefreshLock's SetSection error return is unreachable — RefreshMetadata is a struct of strings that json.Marshal never fails on; the Open-error, ReadRefreshLock decode-error, and happy paths are all covered.
+
+# === 100% TARGET BASELINE (PR #391, merged multi-OS) ===
+# These entries preserve CI while the owning cg6b task scopes behavior-driven
+# follow-up batches. Remove an entry only when the file reaches 100%.
+commands/agents/import.go                                    # [100-target-baseline] 97.78% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/agents/new.go                                       # [100-target-baseline] 95.35% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/config/explain.go                                   # [100-target-baseline] 97.27% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/config/lint.go                                      # [100-target-baseline] 95.54% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/config/relevance.go                                 # [100-target-baseline] 98.61% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/config/relevance_lessons.go                         # [100-target-baseline] 99.53% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/config/sync.go                                      # [100-target-baseline] 99.00% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/config/verify.go                                    # [100-target-baseline] 96.69% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/eval/gen.go                                         # [100-target-baseline] 95.74% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/eval/ls.go                                          # [100-target-baseline] 98.48% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/eval/run.go                                         # [100-target-baseline] 99.05% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/hooks/list.go                                       # [100-target-baseline] 97.89% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/import.go                                           # [100-target-baseline] 95.69% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/backup.go                        # [100-target-baseline] 99.12% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/doctor.go                        # [100-target-baseline] 95.11% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/init.go                          # [100-target-baseline] 95.86% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/init_from.go                     # [100-target-baseline] 97.45% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/install.go                       # [100-target-baseline] 96.55% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/kgmcp.go                         # [100-target-baseline] 97.50% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/lifecycle/status.go                        # [100-target-baseline] 95.56% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/internal/rules/show.go                              # [100-target-baseline] 96.15% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/kg/bridge.go                                        # [100-target-baseline] 98.43% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/kg/cmd.go                                           # [100-target-baseline] 96.12% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/kg/kg.go                                            # [100-target-baseline] 95.61% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/kg/sync_code_warm_link.go                           # [100-target-baseline] 97.84% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/remove.go                                           # [100-target-baseline] 96.09% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/review.go                                           # [100-target-baseline] 96.09% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/root.go                                             # [100-target-baseline] 98.04% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/run.go                                              # [100-target-baseline] 97.57% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/score.go                                            # [100-target-baseline] 95.61% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/session_stats.go                                    # [100-target-baseline] 98.80% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/skills/cmd.go                                       # [100-target-baseline] 95.24% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/skills/new.go                                       # [100-target-baseline] 95.95% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/sync/helpers.go                                     # [100-target-baseline] 96.20% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/sync/init.go                                        # [100-target-baseline] 96.15% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/sync/push.go                                        # [100-target-baseline] 97.67% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/app_types.go                               # [100-target-baseline] 95.33% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/archive_orphans.go                         # [100-target-baseline] 96.75% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/cmd.go                                     # [100-target-baseline] 98.23% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/commit_cmd.go                              # [100-target-baseline] 95.65% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/commit_pathset.go                          # [100-target-baseline] 96.43% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/contract.go                                # [100-target-baseline] 96.85% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/delegation.go                              # [100-target-baseline] 95.85% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/drift.go                                   # [100-target-baseline] 98.24% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/eligible_accounting.go                     # [100-target-baseline] 96.67% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/fs.go                                      # [100-target-baseline] 97.12% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/graph.go                                   # [100-target-baseline] 96.09% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/health.go                                  # [100-target-baseline] 97.33% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/hook_outcome.go                            # [100-target-baseline] 96.26% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/hook_sentinel.go                           # [100-target-baseline] 96.85% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/iter_log.go                                # [100-target-baseline] 95.70% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/iter_log_autoderive.go                     # [100-target-baseline] 95.00% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/journal.go                                 # [100-target-baseline] 95.48% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/plan_task.go                               # [100-target-baseline] 96.66% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/preconditions.go                           # [100-target-baseline] 98.41% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/prefs.go                                   # [100-target-baseline] 96.67% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/profile_prompt.go                          # [100-target-baseline] 96.55% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/review_gate.go                             # [100-target-baseline] 97.73% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/state.go                                   # [100-target-baseline] 95.46% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/sweep.go                                   # [100-target-baseline] 99.12% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/transitions.go                             # [100-target-baseline] 96.63% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+commands/workflow/verification.go                            # [100-target-baseline] 96.36% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/adapters/builtin/compliance-register/staleness.go   # [100-target-baseline] 98.08% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/adapters/builtin/sdd-register/ingest.go             # [100-target-baseline] 98.37% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/agentslock/lockfile.go                              # [100-target-baseline] 98.29% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/agentsrc.go                                  # [100-target-baseline] 96.23% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/audit.go                                     # [100-target-baseline] 97.30% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/authority_apply.go                           # [100-target-baseline] 97.89% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/cache_keys.go                                # [100-target-baseline] 97.33% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/config.go                                    # [100-target-baseline] 95.76% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/fetcher.go                                   # [100-target-baseline] 96.88% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/fetcher_http.go                              # [100-target-baseline] 96.61% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/lockstatus.go                                # [100-target-baseline] 95.16% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/manifest.go                                  # [100-target-baseline] 99.18% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/migrate.go                                   # [100-target-baseline] 97.96% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/profile.go                                   # [100-target-baseline] 99.24% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/profile_lockfile.go                          # [100-target-baseline] 98.11% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/profile_locks.go                             # [100-target-baseline] 99.07% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/profile_resolver.go                          # [100-target-baseline] 97.67% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/proposals.go                                 # [100-target-baseline] 97.35% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/resolve_locked.go                            # [100-target-baseline] 96.55% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/resolver.go                                  # [100-target-baseline] 97.10% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/snapshot.go                                  # [100-target-baseline] 96.00% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/staleness.go                                 # [100-target-baseline] 97.99% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/config/verify_layers.go                             # [100-target-baseline] 97.83% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/credstore/loader.go                                 # [100-target-baseline] 97.06% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/credstore/store.go                                  # [100-target-baseline] 95.94% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/dashboard/store/store.go                            # [100-target-baseline] 99.32% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/dashboard/watch/watch.go                            # [100-target-baseline] 97.28% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/eval/gen/gencore/generator.go                       # [100-target-baseline] 98.04% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/eval/gen/gencore/normalize.go                       # [100-target-baseline] 98.68% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/eval/sandbox/worktree.go                            # [100-target-baseline] 96.69% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/eval/scoringbridge/bridge.go                        # [100-target-baseline] 97.50% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/eval/store/store.go                                 # [100-target-baseline] 98.36% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/events/jsonpath.go                                  # [100-target-baseline] 99.20% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/events/pr.go                                        # [100-target-baseline] 96.12% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/events/producer.go                                  # [100-target-baseline] 96.43% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/gitremote/gitremote.go                              # [100-target-baseline] 95.74% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/gitwt/gogit.go                                      # [100-target-baseline] 96.15% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/globalflagcov/static.go                             # [100-target-baseline] 98.36% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/graphstore/impact.go                                # [100-target-baseline] 98.59% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/graphstore/mcp_server.go                            # [100-target-baseline] 98.68% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/journal/append.go                                   # [100-target-baseline] 96.97% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/journal/recover.go                                  # [100-target-baseline] 99.60% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/compare.go                                   # [100-target-baseline] 96.67% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/cross-namespace/crossnamespace.go            # [100-target-baseline] 97.27% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/env_predicates.go                            # [100-target-baseline] 95.74% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/eval_match.go                                # [100-target-baseline] 95.76% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/eval_resolve.go                              # [100-target-baseline] 97.87% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/eval_where.go                                # [100-target-baseline] 97.73% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/lexer.go                                     # [100-target-baseline] 98.59% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/parser.go                                    # [100-target-baseline] 96.03% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/parser_clauses.go                            # [100-target-baseline] 95.24% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/parser_return.go                             # [100-target-baseline] 95.06% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/dsl/schema.go                                    # [100-target-baseline] 97.46% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/lockfile/lockfile.go                             # [100-target-baseline] 97.78% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/registry/loader.go                               # [100-target-baseline] 97.22% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/kg/registry/ref.go                                  # [100-target-baseline] 98.36% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/links/links.go                                      # [100-target-baseline] 96.95% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/antigravity.go                             # [100-target-baseline] 97.67% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/claude.go                                  # [100-target-baseline] 95.77% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/codex.go                                   # [100-target-baseline] 96.19% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/copilot.go                                 # [100-target-baseline] 95.27% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/hooks.go                                   # [100-target-baseline] 95.69% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/resource_plan.go                           # [100-target-baseline] 96.36% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/resources.go                               # [100-target-baseline] 96.04% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/rules.go                                   # [100-target-baseline] 95.65% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/platform/session.go                                 # [100-target-baseline] 97.41% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/projectsync/journal.go                              # [100-target-baseline] 95.56% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/projectsync/promote.go                              # [100-target-baseline] 98.32% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/review/labels/persist.go                            # [100-target-baseline] 98.72% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/iterlog.go                                  # [100-target-baseline] 96.20% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/objective_checks.go                         # [100-target-baseline] 95.45% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/persist.go                                  # [100-target-baseline] 98.53% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/signal_backfill.go                          # [100-target-baseline] 97.37% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/signal_git.go                               # [100-target-baseline] 95.65% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/signal_hook_outcomes.go                     # [100-target-baseline] 98.46% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/scoring/signals.go                                  # [100-target-baseline] 98.18% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/events/eventbustest/conformance.go          # [100-target-baseline] 98.31% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/http/control.go                             # [100-target-baseline] 98.51% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/http/control_unix.go                        # [100-target-baseline] 96.15% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/http/server.go                              # [100-target-baseline] 98.33% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/scheduler/scheduler.go                      # [100-target-baseline] 98.50% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/scheduler/trigger.go                        # [100-target-baseline] 98.36% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/service/service.go                                  # [100-target-baseline] 98.70% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/ui/confirm.go                                       # [100-target-baseline] 95.00% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+internal/ui/output.go                                        # [100-target-baseline] 98.00% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+tools/fsguard/main.go                                        # [100-target-baseline] 98.88% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%
+tools/importguard/main.go                                    # [100-target-baseline] 96.83% on PR #391 merged multi-OS baseline; scope behavior-driven tests to reach 100%

@@ -1,0 +1,8 @@
+schema_version: 1
+id: plan-archive-foldback-sweep
+plan_id: agent-ops-hardening
+task_id: ""
+observation: MERGED 2026-07-13 into proposal obs-fold-back-resolution-lifecycle (both valid, per user steer). The lifecycle proposal is the PRIMARY path — consumed/rejected fold-backs are archived by the lifecycle BEFORE a plan is archived, so plan archive is not the primary archiver. plan-archive-foldback-sweep RETAINS value only as a BAD-STATE RECONCILIATION safety net — catching terminal-but-unarchived orphans when the lifecycle was not followed, plus removing the dead isDMAFile fold-back path segment (commands/workflow/fs.go). HARD RULE — the sweep MUST NOT touch DEFERRED (open, waiting-on-a-named-trigger) fold-backs; only terminal records left unarchived are swept, and a deferred fold-back on an archiving plan is surfaced for re-homing not silently archived. Manual sweep of 8 archived-plan orphans already done. Detail in obs-fold-back-resolution-lifecycle.md Merged section.
+classification: small
+routed_to: plan_summary:agent-ops-hardening
+created_at: "2026-07-13T06:22:20Z"

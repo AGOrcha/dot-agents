@@ -1,14 +1,27 @@
 name: guard-commands
-description: Block exact destructive command patterns before shell execution
+description: |-
+  Block destructive command patterns before shell execution.
+  The rm-analysis is the STANDARD robust algorithm (empty-expansion + catastrophic
+  target detection), implemented once and kept in lockstep in two forms:
+    - guard.sh — POSIX/bash shell gate for claude/codex/cursor/copilot.
+    - omp/guard-rm.ts — omp-native `tool_call` pre-hook (TypeScript).
+  Both refuse a recursive/force `rm` whose target can expand to empty
+  (`rm -rf ""`, `rm -rf "$(...)"`, `rm -rf $VAR`, or no target) — an empty path
+  operand deletes the CURRENT DIRECTORY in the omp embedded shell (2026-07-10
+  payout workspace-deletion incident) — plus catastrophic roots (/ ~ . .. *
+  $HOME $PWD). Explicit non-empty literal paths pass. Also blocks force-push to
+  main/master, DROP DATABASE/TABLE, and the fork bomb.
+  Materializing omp/guard-rm.ts to ~/.omp/agent/hooks/pre/ requires omp platform
+  handling in da — see proposal omp-platform-handling.
 when: pre_tool_use
 match:
   tools:
     - Bash
 run:
   command: ./guard.sh
-  timeout_ms: 5000
 enabled_on:
   - claude
   - codex
   - cursor
   - copilot
+  - omp

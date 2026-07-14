@@ -23,6 +23,9 @@ Load → `instructions/execution-handoff.md`
 
 ## Workflow
 
+Review failure points before starting.
+Load → `instructions/gotchas.md`
+
 15. **Direct vs fanout decision**
     Decide whether the work is implemented directly (solo) or fanned out to subagents.
     For fanout, write per-task constraints into TASKS.yaml notes and produce delegation

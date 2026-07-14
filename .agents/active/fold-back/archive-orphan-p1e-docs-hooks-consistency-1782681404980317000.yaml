@@ -1,8 +1,0 @@
-schema_version: 1
-id: archive-orphan-p1e-docs-hooks-consistency-1782681404980317000
-plan_id: loop-discipline-stop-hooks
-task_id: p1e-docs-hooks-consistency
-observation: 'archive-orphan-sweep: p1e-docs-hooks-consistency — task loop-discipline-stop-hooks/p1e-docs-hooks-consistency is completed in active plan (not a sweep candidate)'
-classification: small
-routed_to: active/fold-back
-created_at: "2026-06-28T21:16:44Z"

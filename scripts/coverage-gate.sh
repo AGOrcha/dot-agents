@@ -16,7 +16,7 @@
 #
 # Env vars:
 #   COVERAGE_FILE        profile path (default: coverage.out)
-#   COVERAGE_THRESHOLD   minimum % (default: 95)
+#   COVERAGE_THRESHOLD   minimum % (default: 100)
 #   COVERAGE_EXCLUDE     regex of paths to skip (package- and file-level)
 #   COVERAGE_PKG_MODE    enforce|warn|off  (default: enforce)
 #   COVERAGE_FILE_MODE   enforce|warn|off  (default: warn  — Phase 1)
@@ -29,7 +29,7 @@
 set -euo pipefail
 
 COVERAGE_FILE="${COVERAGE_FILE:-coverage.out}"
-THRESHOLD="${COVERAGE_THRESHOLD:-95}"
+THRESHOLD="${COVERAGE_THRESHOLD:-100}"
 PKG_MODE="${COVERAGE_PKG_MODE:-enforce}"
 FILE_MODE="${COVERAGE_FILE_MODE:-warn}"
 EXCEPTIONS_FILE="${COVERAGE_EXCEPTIONS:-scripts/coverage-exceptions.txt}"

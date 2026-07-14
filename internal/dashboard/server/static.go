@@ -24,6 +24,9 @@ var embeddedDist embed.FS
 // go:embed'd dist/ subtree.
 func distFS(staticDir string) (fs.FS, error) {
 	if staticDir != "" {
+		if _, err := os.Stat(staticDir); err != nil {
+			return nil, err
+		}
 		return os.DirFS(staticDir), nil
 	}
 	return fs.Sub(embeddedDist, "dist")

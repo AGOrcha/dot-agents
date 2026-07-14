@@ -1,6 +1,6 @@
 # Spec: shared-target-projection-wiring
 
-**Status:** draft (decision locked — forward-port, not redesign)
+**Status:** active (decision locked — forward-port, not redesign)
 **Created:** 2026-05-18
 **Origin:** `.agents/proposals/codex-hooks-agents-linking-gap.md` (audit, 2026-05-18)
 **Related:** `pr10-branch-split` (this is a missing-change the split did not carry),

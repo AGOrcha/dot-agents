@@ -1,0 +1,395 @@
+{
+  "executor_role": "neutral test executor (no verdicts; GPT-family judge issues verdicts)",
+  "repo": "/Users/nikashp/proj-docs/dot-agents",
+  "branch": "feat/transcript-analysis-pipeline-craft",
+  "path_resolution": {
+    "plan_dir": "/Users/nikashp/proj-docs/dot-agents/.agents/workflow/plans/transcript-analysis-and-pipeline-craft",
+    "S1_S2_S3_evidence_paths": "relative to plan_dir (evidence/... resolved under plan_dir)",
+    "S4_go_tests": "relative to repo root (./internal/platform, ./commands/workflow)",
+    "S4_adversarial_fixtures": "built binary at /tmp/da-fixture/da from `go build ./cmd/da`; fixture agentsrc under /tmp/s4fix/* (never in-repo)",
+    "S5_skill_paths": ".agents/skills/pipeline-architect relative to repo root",
+    "S5H2_craft_path": "craft/full-loop-craft.md resolved to plan_dir/craft/full-loop-craft.md (not present at repo root)"
+  },
+  "read_only_confirmation": "no reviewed artifact edited; `git status --short .agents/workflow/runtime/full-loop/` clean after runs; all writes confined to /tmp",
+  "hypotheses": [
+    {
+      "id": "S1-H1",
+      "commands_run": [
+        "cwd=plan_dir; python3 heredoc VERBATIM over evidence/inventory/inventory.jsonl (unique session_id/harness/file_path; assert 806/5/2733)",
+        "cwd=plan_dir; closest-faithful mapping session_id->evidence_id, file_path->path"
+      ],
+      "raw_output": "VERBATIM: 'rows 806 unique_sessions 0 unique_harnesses 5 files 0' then AssertionError (asserted unique_sessions==806, got 0). CLOSEST-FAITHFUL: rows 806, unique_evidence_id 806, unique_harness 5, unique_path 806, sum_subagent_files 1927, rows+sub 2733. Actual row keys: evidence_id,harness,project_slug,started_at,ended_at,record_count,has_tokens,has_cost,has_wallclock,models,status,sensitivity,subagent_files,role,repository,branch,parent_thread_id,content_sha256,path.",
+      "deviations": "Verbatim assumed fields session_id/file_path; inventory.jsonl schema uses evidence_id (unique session) / path / subagent_files. Ran closest-faithful field-mapping run in addition to verbatim.",
+      "exit_status": {
+        "verbatim": 1,
+        "closest_faithful": 0
+      }
+    },
+    {
+      "id": "S1-H2",
+      "commands_run": [
+        "cwd=plan_dir; python3 heredoc VERBATIM globbing evidence/items/**/*.jsonl (assert count==195, each has sha256 + anchor)",
+        "cwd=plan_dir; closest-faithful over evidence/items/*/items.yaml (PyYAML) counting items, anchors, digests"
+      ],
+      "raw_output": "VERBATIM: 'anchored_items 0 bad 0', jsonl_files [] then AssertionError (no .jsonl files under evidence/items). Items stored as: codex/items.yaml(107951B), cursor/items.yaml(29433B), omp-cc-copilot/items.yaml(26601B) + notes.md + sampling-manifest.json. CLOSEST-FAITHFUL over items.yaml: total_items 195 (codex 143 dict, cursor 26 list, omp-cc-copilot 26 dict), missing_anchor 0, missing_digest 0 (every anchor carries digest 'sha256:<64hex>').",
+      "deviations": "Layout is per-harness items.yaml (YAML lists/dicts of items with anchors[].digest), NOT evidence/items/**/*.jsonl. Ran closest-faithful YAML parse in addition to verbatim.",
+      "exit_status": {
+        "verbatim": 1,
+        "closest_faithful": 0
+      }
+    },
+    {
+      "id": "S1-H3",
+      "commands_run": [
+        "cwd=plan_dir; python3 heredoc VERBATIM: rglob evidence/ for 6 regexes (/Users/, 'raw transcript', 'user path', 'session id[:=]', 'prompt:.*', 'assistant:.*'); assert no hits",
+        "captured 40-char context around first hit per matched file"
+      ],
+      "raw_output": "VERBATIM: num_hits 6 then AssertionError. Hits + snippets: (1) synthesis/synthesis-report.md 'raw transcript' -> '...Redaction gate R1-R5 applies: no raw transcript'; (2) prior/prior-findings-index.md 'raw transcript' -> '...committed analysis prose (no raw transcript'; (3) prior/methodology-deltas.md 'raw transcript' -> '...R1 (`evidence-rubric.md:49-51`): raw transcript'; (4) inventory/README.md '/Users/...' -> '...use `~` for the home dir - no absolute `/Users/<user>`'; (5) items/omp-cc-copilot/items.yaml 'prompt:' -> '...excerpt: \"user prompt: \\\"You are HOP 8 of 12...'; (6) items/codex/items.yaml 'prompt:' -> '...verification follows the repo verifier prompt: scoped packages first...'.",
+      "deviations": "Patterns are broad; every hit occurs in a negation/methodology/instruction context or an anchored excerpt field (not raw dumped transcript). Reported as raw matches without adjudication.",
+      "exit_status": {
+        "verbatim": 1
+      }
+    },
+    {
+      "id": "S2-H1",
+      "commands_run": [
+        "cwd=plan_dir; python3 VERBATIM over evidence/synthesis/synthesis-report.md ('^#+ Theme' headings; lines matching confidence high/medium; assert 18/14/4)",
+        "cwd=plan_dir; closest-faithful parse of the '| **T-xN** ... | confidence |' theme convergence table"
+      ],
+      "raw_output": "VERBATIM: 'themes 1 high 1 med 0' then AssertionError. CLOSEST-FAITHFUL: 18 theme rows T-a1,T-a2,T-a3,T-b1..T-b5,T-c1..T-c4,T-d1..T-d4,T-e1,T-e2; confidence_counts {high:14, medium:4}.",
+      "deviations": "Themes are markdown table rows '| **T-xN** | ... | **high/medium** |' under '### Theme convergence table', not '# Theme' headings; confidence is the table's last column. Ran closest-faithful table parse.",
+      "exit_status": {
+        "verbatim": 1,
+        "closest_faithful": 0
+      }
+    },
+    {
+      "id": "S2-H2",
+      "commands_run": [
+        "cwd=plan_dir; python3 VERBATIM over evidence/synthesis/actionable-outcomes.md ('^#+ Outcome' headings; confidence-low lines; assert 14 outcomes, 0 low)",
+        "cwd=plan_dir; closest-faithful count of '## O#' headings + low-confidence lines"
+      ],
+      "raw_output": "VERBATIM: 'outcomes 0 low_lines 0' then AssertionError (len(outcomes)!=14). CLOSEST-FAITHFUL: 14 outcome headings O1..O14; low_confidence_lines 0.",
+      "deviations": "Outcome headings are '## ON \u2014 <title>' (e.g. '## O1 \u2014 ...'), not '# Outcome'. Verbatim low-line count (0) was already satisfied. Ran closest-faithful heading count.",
+      "exit_status": {
+        "verbatim": 1,
+        "closest_faithful": 0
+      }
+    },
+    {
+      "id": "S2-H3",
+      "commands_run": [
+        "cwd=plan_dir; python3 VERBATIM over evidence/synthesis/synthesis-report.md counting bare words confirmed/partial/open/refuted; assert 1/3/10/0",
+        "cwd=plan_dir; closest-faithful over evidence/synthesis/actionable-outcomes.md 'OH-* reconciliation' table"
+      ],
+      "raw_output": "VERBATIM (synthesis-report.md): status_counts {open:2, partial:1, confirmed:1}, OH_line_counts {} then AssertionError. CLOSEST-FAITHFUL (actionable-outcomes.md OH-* reconciliation table): 14 OH rows OH-A1..OH-E3; per-row status: still-open 10, partial 3 (OH-D1,OH-E1,OH-E2), confirmed 1 (OH-E3), refuted 0. open-hypotheses.md distinct OH ids = 14. NOTE: the artifact's own prose 'Tally:' line reads '**confirmed 1**, **partial 3**, **still-open 11**, **refuted 0**' and its heading says '(all 15 hypotheses)' \u2014 inconsistent with the 14-row table (10 still-open).",
+      "deviations": "Reconciliation lives in actionable-outcomes.md (## OH-* reconciliation), not synthesis-report.md that the verbatim test scans; statuses are worded ('still-open','confirmed unsafe','partial (\u2026)'). Recorded both the table counts and the artifact's self-tally discrepancy without adjudication.",
+      "exit_status": {
+        "verbatim": 1,
+        "closest_faithful": 0
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=plan_dir; python3 VERBATIM re-scan evidence/synthesis/synthesis-report.md bare-word counts confirmed/partial/open/refuted",
+          "cwd=plan_dir; python3 closest-faithful re-parse evidence/synthesis/actionable-outcomes.md OH-* reconciliation table + prose 'Tally:' line + heading; assert TALLY==TABLE and HEADING==ROWS==SUM",
+          "cwd=repo; git show 3dcf753b -- evidence/synthesis/{synthesis-report,actionable-outcomes}.md (diff of the tally corrections)"
+        ],
+        "raw_output": "VERBATIM (synthesis-report.md bare words): status_counts {open:2, partial:1, confirmed:1} \u2014 UNCHANGED from pre-fix; the verbatim regex scans the wrong file (reconciliation lives in actionable-outcomes.md), so its assertion still fails. CLOSEST-FAITHFUL (actionable-outcomes.md): 14 distinct OH rows (OH-A1..OH-E3); table status {still-open 10, partial 3 (OH-D1,OH-E1,OH-E2), confirmed 1 (OH-E3), refuted 0}; heading now '## OH-* reconciliation (all 14 hypotheses)'; prose line 'Tally: **confirmed 1**, **partial 3**, **still-open 10**, **refuted 0**' (sum=14). CONSISTENCY: TALLY==TABLE True; HEADING==ROWS==SUM True. git show 3dcf753b confirms the corrections in BOTH files: '(all 15 hypotheses)'->'(all 14 hypotheses)', 'still-open 11'->'still-open 10', '15 open hypotheses'->'14 open hypotheses', 'full 15-row'->'full 14-row'.",
+        "exit_status": {
+          "verbatim": 1,
+          "closest_faithful": 0
+        },
+        "delta_vs_pre_fix": "RESOLVED. Pre-fix flagged the artifact's self-tally ('still-open 11') and heading ('all 15 hypotheses') as inconsistent with the 14-row table (10 still-open). Post-fix the prose tally and heading are corrected to the true 14 and are now internally consistent with the table (TALLY==TABLE, HEADING==ROWS==SUM). The verbatim bare-word scan of synthesis-report.md is unchanged ({open:2,partial:1,confirmed:1}) \u2014 it targets the wrong file by construction and is not what the fix addressed."
+      }
+    },
+    {
+      "id": "S3-H1",
+      "commands_run": [
+        "cwd=plan_dir; python3 VERBATIM: assert preregistration.md mtime < rows.jsonl mtime AND no 'frontier|dominance' in preregistration.md",
+        "captured frontier/dominance match contexts"
+      ],
+      "raw_output": "VERBATIM: mtime_pre 1783840347.1255805 < mtime_rows 1783840351.833309 (mtime assertion PASSES); then AssertionError on the frontier/dominance regex. Matches in preregistration.md: 'pareto-measurement-rubric.md (frontier protocol step 1)'; 'proxy definition, cell axes/bins, dominance directions, exclusion rules'; '## 3. Dominance directions (FROZEN \u2014 for the LIVE frontier only)'; 'no dominance/frontier/accuracy conclusion is drawn'; 'contain zero dominance or frontier claims by construction'; 'a frontier or an accuracy verdict (rubric step 3)'.",
+      "deviations": "Two-part assertion: mtime ordering holds (pre earlier than rows). The frozen-preregistration doc intentionally names its dominance directions / frontier protocol as methodology and disclaims post-hoc conclusions; the regex bans the words outright. Reported raw.",
+      "exit_status": {
+        "verbatim": 1
+      },
+      "freeze_basis_correction": "MTIME-SUPERSEDED. The verbatim check asserts mtime(preregistration.md) < mtime(rows.jsonl); mtime is filesystem-/checkout-dependent and not a durable freeze signal. Authoritative freeze basis (commit + content hash): preregistration.md is byte-frozen at git blob 5b974b3a (last touched commit c049747d, 2026-07-12 04:20:42 -0400) BEFORE rows.jsonl at git blob f45c447f (last touched commit 3dcf753b, 2026-07-12 06:02:36 -0400). Freeze holds by commit ordering + content hash independent of mtime; outcome UNCHANGED (preregistration frozen before rows written)."
+    },
+    {
+      "id": "S3-H2",
+      "commands_run": [
+        "cwd=plan_dir; python3 VERBATIM over evidence/pareto/rows.jsonl (assert 198 rows, none missing anchor/anchors/anchor_id)"
+      ],
+      "raw_output": "VERBATIM: 'rows 198 missing_anchor 0'; EXIT=0 (assertions passed).",
+      "deviations": "None.",
+      "exit_status": {
+        "verbatim": 0
+      }
+    },
+    {
+      "id": "S3-H3",
+      "commands_run": [
+        "cwd=plan_dir; python3 VERBATIM: concat evidence/pareto/*.{md,jsonl,json,txt,csv}; assert no 'dominance|frontier'",
+        "per-file match counts + contexts"
+      ],
+      "raw_output": "VERBATIM: AssertionError. Per-file matches: cells-manifest.json 2 ('No dominance/frontier/accuracy conclusions are drawn'); historical-hypotheses.md 6 ('nothing below is a dominance, frontier, or accuracy conclusion'); preregistration.md 9 ('frontier protocol step 1', 'dominance directions', etc.). All occurrences are in negation or methodology-reference context.",
+      "deviations": "Regex bans the substrings entirely, including disclaimers/negations ('No dominance/frontier\u2026') and the frozen methodology references. Reported raw counts + contexts without adjudication.",
+      "exit_status": {
+        "verbatim": 1
+      },
+      "count_refresh": "STALE-COUNT SUPERSEDED. raw_output reports historical-hypotheses.md 6 (pre-fix capture); after erratum #2 was appended the current count is 8 dominance/frontier occurrences (lines 5, 76, 144, 170, 171, 246). All 8 remain in negation or methodology-reference context ('nothing below is a dominance, frontier, or accuracy conclusion'; 'those are live-only'); no post-hoc dominance/frontier claim was introduced. Outcome UNCHANGED: 0 genuine dominance/frontier conclusions."
+    },
+    {
+      "id": "S4-H1",
+      "commands_run": [
+        "cwd=repo; go test ./internal/platform -run 'Test.*Pipeline.*Validate|Test.*Caps|Test.*Projection' -count=1 -v"
+      ],
+      "raw_output": "PASS ok github.com/AGOrcha/dot-agents/internal/platform. Included TestPipelineSpecValidate with subtests: empty-workspace, bad-target, bad-executor, no-verifiers, too-many-verifiers, bad-verifier, too-many-lenses, bad-lens, bad-cross, cross-same-family \u2014 all PASS; plus TestRunSharedTargetProjection* all PASS.",
+      "deviations": "None (regex matched the cap/validation/projection tests).",
+      "exit_status": {
+        "verbatim": 0
+      }
+    },
+    {
+      "id": "S4-H2",
+      "commands_run": [
+        "cwd=repo; go test ./internal/platform -run 'Test.*RULE.?7|Test.*Adversarial.*Lens|Test.*ModelFamily.*ExecutorFamily' -count=1 -v",
+        "ADVERSARIAL FIXTURE: built /tmp/da-fixture/da (go build ./cmd/da); /tmp/s4fix/rule7bypass/.agentsrc.json with executor family=claude AND reviewer.cross-harness-adversarial model=claude-opus-4-8-adversary family=claude (== executor family); ran `da workflow pipeline emit --platform omp --dry-run` (skeleton) AND `--app-type go-cli --dry-run`"
+      ],
+      "raw_output": "VERBATIM: 'testing: warning: no tests to run' / 'PASS ... [no tests to run]' \u2014 the regex matched ZERO test names. (RULE-7 is covered by TestPipelineSpecValidate/cross-same-family in S4-H1 and enforced in pipeline_projection.go lines 133-135 (Validate) and 409-410 (resolveCrossFamily).) ADVERSARIAL FIXTURE: both skeleton and --app-type emit HARD-ERROR, exit 1: 'Error: cross-family lens family \"claude\" must differ from executor family \"claude\" (craft \u00a72 RULE-7)'.",
+      "deviations": "Pre-registered regex assumed test names RULE7/Adversarial.Lens/ModelFamily.ExecutorFamily; none exist -> 'no tests to run' (exit 0 but zero coverage exercised). Built an adversarial /tmp fixture (never in-repo) run against the built binary to exercise the RULE-7 bypass path end-to-end; it hard-errors as designed.",
+      "exit_status": {
+        "verbatim": 0,
+        "note_verbatim": "0 but no tests matched",
+        "fixture_skeleton_emit": 1,
+        "fixture_apptype_emit": 1
+      },
+      "cite_correction": "Main's original S4-H2 cite named resolveCrossFamily at 361-363; the actual RULE-7 family-inequality enforcement in resolveCrossFamily is at internal/platform/pipeline_projection.go:409-410 (Validate's enforcement at 133-135 is correct). Corrected in raw_output above."
+    },
+    {
+      "id": "S4-H3",
+      "commands_run": [
+        "cwd=repo; go test ./internal/platform -run 'Test.*Emitter|Test.*Idempotent|Test.*Digest|Test.*Reemit' -count=1 -v",
+        "REORDERED-MAP FIXTURE: /tmp/s4fix/reordered/.agentsrc.json = /tmp/s4fix/valid with stage_profiles map keys reversed (reviewer + verifier + stage order); emitted skeleton, reconcile, and --app-type go-cli in the SAME dir under both orderings; compared sha256 + digest"
+      ],
+      "raw_output": "VERBATIM: PASS \u2014 TestCCEmitByteIdempotent, TestCursorCreateLinks_SecondRunIdempotent, TestOMPEmitByteIdempotent, TestPipelineSpecDigestDeterministicAndSensitive, TestSyncScopedFileSymlinks_Idempotent. REORDERED-MAP FIXTURE (same-dir swap, workspace path held constant): skeleton match=YES (82c9f713\u2026), reconcile match=YES (08f3c53b\u2026), app-type go-cli match=YES (4b2f6626\u2026); config digest identical d6e234c83ca9 across orderings. (Cross-dir emit differed only on the 'workspace:' path line \u2014 a fixture-dir artifact, not map order.)",
+      "deviations": "Verbatim regex passed. Added reordered-map adversarial fixture; byte-identical outputs confirm map-iteration-order stability. Digest payload = routing+topology only (app_type/target_count/executor/verifiers/routine_lenses/cross_family route digests).",
+      "exit_status": {
+        "verbatim": 0,
+        "fixture": 0
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; go test ./internal/platform -run 'Test.*Emitter|Test.*Idempotent|Test.*Digest|Test.*Reemit' -count=1 -v",
+          "REORDERED-MAP FIXTURE: /tmp/s4fix/reordered/.agentsrc.json (repo config); `da workflow pipeline emit --platform omp` (skeleton) + `--app-type go-cli` in the SAME dir under normal vs reversed stage_profiles map key order (stage-level AND slug-level reversed); compared sha256 of all 4 artifacts + config digest",
+          "REGENERATED-ARTIFACTS: emit --platform omp from /tmp fixture with pristine repo config; diff checked-in .agents/workflow/runtime/full-loop/{profile-driven,reconcile}.swarm.yaml vs fresh HEAD emit (normalizing the 'workspace:' line)"
+        ],
+        "raw_output": "GO TESTS: PASS \u2014 TestCCEmitByteIdempotent, TestCursorCreateLinks_SecondRunIdempotent, TestOMPEmitByteIdempotent, TestPipelineSpecDigestDeterministicAndSensitive, TestSyncScopedFileSymlinks_Idempotent. REORDERED-MAP: byte-identical across orderings \u2014 profile-driven.swarm.yaml 4ebcca4e\u2026, reconcile.swarm.yaml 5bdcb6b8\u2026, profile-driven.go-cli.swarm.yaml ea30a432\u2026, reconcile.go-cli.swarm.yaml e98cdb0d\u2026; config digest 6048023e37af identical under both orderings; diff empty (IDENTICAL). REGENERATED-ARTIFACTS: checked-in repo YAMLs == fresh HEAD emit, sole raw diff is the 'workspace:' path line (fixture /tmp/s4fix/reordered vs repo abs path) \u2014 artifacts are regeneration-current with post-fix code.",
+        "exit_status": {
+          "go_tests": 0,
+          "reordered_fixture": 0,
+          "regenerated_artifacts_match": 0
+        },
+        "delta_vs_pre_fix": "STABLE (no regression) + NEW confirmation. Pre-fix Go tests + reordered-map fixture already passed byte-identical; post-fix they still pass and remain map-iteration-order-invariant. NEW: fix-wave 3dcf753b regenerated the checked-in swarm YAMLs (2-line change each); confirmed the checked-in artifacts are byte-identical to a fresh HEAD emit modulo the per-workspace 'workspace:' line, i.e. current not stale. Digest here is 6048023e37af (full repo config) vs pre-fix reordered fixture's d6e234c83ca9 (that pre-fix run used a minimal 'valid' fixture, not the repo config) \u2014 expected config-dependent difference; within-run order-invariance and byte-stability hold."
+      }
+    },
+    {
+      "id": "S4-H4",
+      "commands_run": [
+        "cwd=repo; bash -lc 'go test ./internal/platform -run \"Test.*CC.*MJS|Test.*NodeCheck|Test.*ManifestRegion|Test.*StableRunner\" -count=1 && node --check $(find . -path \"*cc_pipeline*.mjs\" -o -path \"*generated*.mjs\" | head -n 1)'",
+        "FAITHFUL: emitted CC via fixture `da workflow pipeline emit --platform claude-code` (skeleton + --app-type go-cli); ran `node --check` on all 4 emitted .mjs"
+      ],
+      "raw_output": "VERBATIM: go test 'ok ... 0.360s' PASS; the `find` matched NOTHING (CC emits profile-pipeline.mjs / profile-reconcile.mjs, not *cc_pipeline*.mjs / *generated*.mjs), so `node --check` ran with no file argument (reads empty stdin) -> exit 0; overall EXIT=0 but node-check was a no-op. node v26.4.0. FAITHFUL: emitted profile-pipeline.mjs, profile-pipeline.go-cli.mjs, profile-reconcile.mjs, profile-reconcile.go-cli.mjs. `node --check` FAILS on ALL FOUR: 'SyntaxError: Illegal return statement' at the trailing top-level `return { note: ... }` (line ~242/213/61). This top-level return is the documented ultracode-wave-engine idiom (cc_pipeline.go lines 13-16: 'trailing top-level return consumed as the run result'; harness injects function scope). No `node --check` appears anywhere in the repo's CC emitter/validation code (grep of cc_pipeline*.go: none).",
+      "deviations": "Verbatim find pattern doesn't match the real generated filenames, making the node-check clause a no-op. Faithful run emitted the actual CC .mjs and node-checked them: they are NOT node --check-clean because of the intentional top-level `return`. Reported raw; no adjudication of design intent vs. hypothesis.",
+      "exit_status": {
+        "verbatim": 0,
+        "note_verbatim": "node-check was no-op (no matching file)",
+        "faithful_node_check_all_four": 1
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; go test ./internal/platform -run 'TestCCEmittedMjsHarnessFormPassesNodeCheck' -count=1 -v (node v26.4.0)",
+          "cwd=repo; read header docs internal/platform/cc_pipeline.go (NODE VALIDATION comments lines 239-244 and 470-474)",
+          "FAITHFUL: /tmp/da-fixture/da (HEAD) emit --platform claude-code (skeleton + --app-type go-cli) into /tmp/s4fix/cc; ran raw `node --check` AND harness-eval-form `node --check` on all 4 emitted .mjs"
+        ],
+        "raw_output": "GO TEST: PASS TestCCEmittedMjsHarnessFormPassesNodeCheck \u2014 node-checks the harness-eval form (module-only `export` stripped, whole body INCLUDING the trailing top-level return wrapped in an async function, the bytes the CC harness actually evaluates). HEADER DOCS: cc_pipeline.go lines 239-244 & 470-474 now state 'this is NOT a plain ES module and does not pass a raw node --check \u2026 a raw module rejects that return by design. Validate the harness-eval form, never the raw module.' FAITHFUL (4 emitted .mjs): raw `node --check` FAILS ALL FOUR ('SyntaxError: Illegal return statement' at the trailing top-level `return {`) \u2014 profile-pipeline.mjs:311, profile-pipeline.go-cli.mjs:281, profile-reconcile.mjs:65, profile-reconcile.go-cli.mjs:65; harness-eval-form `node --check` PASSES ALL FOUR.",
+        "exit_status": {
+          "go_harness_form_test": 0,
+          "header_docs_present": 0,
+          "faithful_raw_node_check_all_four": 1,
+          "faithful_harness_form_node_check_all_four": 0
+        },
+        "delta_vs_pre_fix": "RESOLVED (honesty). Pre-fix the emitted .mjs failed raw node --check with no test or header addressing it (the hypothesis's concern). Post-fix: (1) emitter header docs explicitly document that raw node --check is out of scope by design (top-level-return ultracode-wave-engine idiom); (2) a new test, TestCCEmittedMjsHarnessFormPassesNodeCheck, node-checks the harness-eval form and PASSES. The raw .mjs still (correctly) fail raw node --check exactly as pre-fix \u2014 now documented as intentional and validated in the real evaluation form rather than left implicitly claimed valid."
+      }
+    },
+    {
+      "id": "S4-H5",
+      "commands_run": [
+        "cwd=repo; go test ./commands/workflow -run 'Test.*PipelineEmit|Test.*CLI.*Platform|Test.*DryRun|Test.*JSON' -count=1 -v",
+        "cwd=repo; go test ./commands/workflow -run 'TestPipelineEmit' -count=1 -v",
+        "BINARY: /tmp/da-fixture/da --help + --json emit for omp and claude-code + missing-platform"
+      ],
+      "raw_output": "VERBATIM (broad regex): PASS ok ./commands/workflow (matched many unrelated DryRun/JSON tests too). TestPipelineEmit* (15): WritesSkeleton, Specialized, DryRunWritesNothing, JSON, MissingPlatform, UnknownPlatform, ClaudeCode, ClaudeCodeSpecialized, MissingManifest, SnapshotError, BadAppType, PlanValidation, MkdirError, WriteError, GetwdError \u2014 all PASS. BINARY --help exposes --platform (required; 'claude-code, omp'), --app-type, --dry-run, --plan. --json omp -> valid JSON {platform, config_digest, dry_run, artifacts:[profile-driven.swarm.yaml, reconcile.swarm.yaml]}. --json claude-code --app-type go-cli -> {platform:claude-code, app_type:go-cli, artifacts:[profile-pipeline.go-cli.mjs, profile-reconcile.go-cli.mjs]}. missing --platform -> 'Error: --platform is required' exit 1. Both platforms emit valid artifacts.",
+      "deviations": "Regex is broad (swept unrelated *DryRun*/*JSON* tests); confirmed the pipeline-emit-specific tests separately and verified the four documented flags on the built binary. Note: --json digest key is 'config_digest' and dry-run key is 'dry_run' (snake_case), '--json' is a global flag (not a subcommand flag).",
+      "exit_status": {
+        "verbatim": 0,
+        "binary_checks": 0,
+        "missing_platform": 1
+      }
+    },
+    {
+      "id": "S4-H6",
+      "commands_run": [
+        "cwd=repo; grep -n 'profile-driven' bin/tests/omp-full-loop",
+        "cwd=repo; grep 'Model' internal/platform/pipeline_projection.go; read buildSkeletonSpec (lines 280-292)",
+        "FIXTURE /tmp/s4fix/h6/.agentsrc.json (executor=claude-opus-4-8/claude; verifier.unit=claude-sonnet-5/claude, verifier.cli-runner=claude-haiku-5/claude; reviewer.cross-harness-adversarial=gpt-5.6-terra/gpt): `da workflow pipeline emit --platform omp` (skeleton) AND `--app-type go-cli`; grep model routes in both YAMLs"
+      ],
+      "raw_output": "DRIVER: bin/tests/omp-full-loop line 13: INNER_YAML=\"${FULL_LOOP_INNER_YAML:-$REPO_ROOT/.agents/workflow/runtime/full-loop/profile-driven.swarm.yaml}\" (line 14 RECONCILE_YAML -> reconcile.swarm.yaml). Default = the app_type-agnostic SKELETON; only FULL_LOOP_INNER_YAML env overrides it; it never names profile-driven.<app_type>.swarm.yaml. buildSkeletonSpec (pipeline_projection.go 280-292): 'for range maxPipelineVerifiers { spec.Verifiers = append(spec.Verifiers, spec.Executor) }' and same for RoutineLenses -> every verify/routine slot carries the EXECUTOR route; only the cross-family gate is resolved by named slug. SKELETON profile-driven.swarm.yaml model routes: 6\u00d7 claude-opus-4-8 + 1\u00d7 gpt-5.6-terra; claude-sonnet-5 ABSENT (grep count 0); claude-haiku-5 absent. APP-TYPE profile-driven.go-cli.swarm.yaml: claude-opus-4-8 \u00d75, claude-sonnet-5 \u00d71, claude-haiku-5 \u00d71, gpt-5.6-terra present. => the per-stage verifier routes (sonnet-5/haiku-5) appear ONLY in the specialized app-type YAML, which the driver's default INNER_YAML never selects; the launched skeleton pins verify slots to the executor model.",
+      "deviations": "Fixture agentsrc built per parent's spec (executor=claude-opus-4-8, verifier=claude-sonnet-5, cross lens=gpt-5.6-terra) in /tmp (never in-repo). Note gpt-5.6-terra is the cross-harness-adversarial reviewer route (family gpt != claude executor), valid under RULE-7. Reported mechanism raw; no adjudication.",
+      "exit_status": {
+        "driver_grep": 0,
+        "skeleton_emit": 0,
+        "apptype_emit": 0
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; go build -o /tmp/da-fixture/da ./cmd/da (HEAD b1f5f5a0)",
+          "FIXTURE /tmp/s4fix/h6/.agentsrc.json (copy of repo config; executor=claude-opus-4-8/claude, verifier.unit=claude-sonnet-5/claude [one verifier diverged], reviewer.cross-harness-adversarial=gpt-5.6-sol/gpt [one lens]); AGENTS_HOME=/tmp/s4fix/fakehome to isolate the user layer",
+          "`da workflow pipeline emit --platform omp` (skeleton \u2014 expect divergence refusal) AND `--app-type go-cli` (expect success); grep model routes in the specialized YAML",
+          "cwd=repo; bash bin/tests/omp-full-loop_test.sh (incl. specialized-selection scenario); read select_inner_yaml in bin/tests/omp-full-loop"
+        ],
+        "raw_output": "SKELETON EMIT: HARD ERROR exit 1 \u2014 'model-diverse stage_profiles require --app-type: verifier slugs route to different models (\"claude-opus-4-8\"/\"claude\" vs \"claude-sonnet-5\"/\"claude\"); the app_type-agnostic skeleton cannot bind one'. APP-TYPE go-cli EMIT: exit 0, wrote profile-driven.go-cli.swarm.yaml (config-digest abce58b224b0). SPECIALIZED YAML per-stage model routes: swarm.model + executor=claude-opus-4-8 (lines 9/30); verify_1 (unit)=claude-sonnet-5 (line 42); verify_2 (cli-runner)=claude-opus-4-8 (line 52); 3 routine lenses=claude-opus-4-8; review_cross_family=gpt-5.6-sol family gpt (lines 78/82). Route counts: claude-opus-4-8 x7, claude-sonnet-5 x1, gpt-5.6-sol x2. DRIVER: bin/tests/omp-full-loop now defines select_inner_yaml() (lines 151-174): FULL_LOOP_INNER_YAML override is highest precedence, else a task with an app_type selects profile-driven.<app_type>.swarm.yaml ('/'->'-') when present, else the skeleton fallback. bin/tests/omp-full-loop_test.sh: 'omp-full-loop tests: PASS' exit 0 \u2014 its specialized scenario asserts task-a (go-cli) runs profile-driven.go-cli.swarm.yaml while task-b (web, no specialized file) falls back to profile-driven.swarm.yaml.",
+        "exit_status": {
+          "build": 0,
+          "skeleton_emit_divergence_refusal": 1,
+          "apptype_emit": 0,
+          "specialized_yaml_carries_routes": 0,
+          "driver_test": 0
+        },
+        "delta_vs_pre_fix": "REFUTED\u2192FIXED. Pre-fix found the per-stage verifier routes (sonnet/haiku) appeared ONLY in the specialized YAML which the driver's default INNER_YAML never selected, and buildSkeletonSpec silently pinned every verify/routine slot to the executor model. Post-fix three changes close the gap: (1) the skeleton no longer silently pins \u2014 a model-diverse stage_profiles config HARD-ERRORS with 'require --app-type' (exit 1) instead of guessing/truncating; (2) the go-cli specialized YAML genuinely carries the per-stage routes (unit\u2192claude-sonnet-5, cli-runner\u2192claude-opus-4-8, cross-family\u2192gpt-5.6-sol); (3) the driver's new select_inner_yaml() selects profile-driven.<app_type>.swarm.yaml per task (skeleton only as fallback; FULL_LOOP_INNER_YAML still highest precedence), proven by the new specialized-selection scenario in omp-full-loop_test.sh. Lens model gpt-5.6-sol used per this pass's spec (pre-fix used gpt-5.6-terra); both are gpt-family and RULE-7-valid."
+      }
+    },
+    {
+      "id": "S4-H7",
+      "note": "Added to preregistered-hypotheses.json mid-review (commit b1f5f5a0, after this execution-evidence.json's pre-fix pass was captured). No pre-fix block exists; the post_fix block below is its first execution.",
+      "classification": "LANDED-CONTRACT (not a fixed-defect): S4-H7 was added to preregistered-hypotheses.json in commit b1f5f5a0, AFTER this file's pre-fix pass was captured, so there is no pre-fix baseline and nothing was 'fixed'. Both dedicated tests (TestCCParseVerdictUnderNode, TestCCRunnerGatingUnderNode) PASS, proving the verdict-parse + verify-FAIL short-circuit gating contract LANDED in b1f5f5a0 -- a newly landed contract, not a repaired defect.",
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; go test ./internal/platform -run 'TestCCParseVerdictUnderNode|TestCCRunnerGatingUnderNode' -count=1 -v (node v26.4.0)"
+        ],
+        "raw_output": "PASS both. TestCCParseVerdictUnderNode: exercises the pure verdict parser under node \u2014 case-sensitive tokens, last-occurrence-wins, FAIL-safe UNKNOWN for text naming no token. TestCCRunnerGatingUnderNode: drives the real runner body with mocked agent/parallel/phase/log globals \u2014 a verify FAIL short-circuits the remaining verify slots + routine + cross-family (asserts verify:T1:2, review:T1:1, review-cross-family:T1 are NOT among the launched labels) while the gate still runs with the FAIL serialized into its prompt; a cross-family REJECT is recorded without skipping the gate. ok github.com/AGOrcha/dot-agents/internal/platform.",
+        "exit_status": {
+          "verdict_gating_tests": 0
+        },
+        "delta_vs_pre_fix": "NO PRE-FIX BASELINE \u2014 S4-H7 was added to preregistered-hypotheses.json mid-review (commit b1f5f5a0, after this execution-evidence.json was captured), so no pre-fix block exists; this is its first (post-fix) execution. It proves the gating contract landed in b1f5f5a0: parseVerdict + short-circuit on verify FAIL (routine/cross skipped downstream), and the gate always runs with prior outcomes serialized into its prompt. Both dedicated tests PASS."
+      }
+    },
+    {
+      "id": "S5-H1",
+      "commands_run": [
+        "cwd=repo; python3 VERBATIM: concat .agents/skills/pipeline-architect/**.{md,yaml,yml,txt}; flag every '^[-*] ' or '^N. ' line lacking '[craft ' and 'anchors'; assert none"
+      ],
+      "raw_output": "VERBATIM: num_bad_rules 26 then AssertionError. Representative flagged lines: config-path bullets ('- `.agentsrc.json` -> `stage_profiles`...', '- `.agents/workflow/runtime/full-loop/*.swarm.yaml` -> generated...'), Workflow step headers ('0. Frame the task.', '1. Design the loop + routing.', ... '5. Design against the anti-patterns.'), Verify step lines ('1. Lint the config layers', '2. Resolve topology + lenses', '3. Spot-check the projection surface', '4. Emit + validate the swarm projection'), cost-tuning bullets ('1. Routine review lenses ... [H6]', '2. Verifiers ... [H5]', '3. Executor ...'), and reference bullets (resolve-prompt/precondition-policy).",
+      "deviations": "Test treats EVERY markdown bullet/numbered line as a 'rule/prescription'; it therefore flags narrative bullets, procedural step headers, config-path references, and lines whose anchor tag uses a different form (e.g. '[H6]' craft-hypothesis tags, backtick file:line refs). Reported the 26 raw matches without adjudication of which are genuine unanchored prescriptions.",
+      "exit_status": {
+        "verbatim": 1
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; python3 VERBATIM re-scan .agents/skills/pipeline-architect/**.{md,yaml,yml,txt}: flag every '^[-*] ' or '^N. ' line lacking BOTH '[craft ' and 'anchors'; assert none"
+        ],
+        "raw_output": "VERBATIM: num_bad_rules 26 (UNCHANGED from pre-fix 26) then AssertionError. Same categories flagged: config-path bullets ('- `.agentsrc.json` -> `stage_profiles`...'), Workflow step headers ('0. Frame the task.'..'5. Design against the anti-patterns.'), Verify step lines ('1. Lint the config layers'..'4. Emit + validate the swarm projection'), cost-tuning.md 'Where cheap-tier is safe' bullets ('1. Routine review lenses \u2026 [H6]', '2. Verifiers \u2026 [H5]', '3. Executor \u2026 [H5, O14]'), archetype/app_type bullets, and reference bullets. The cost-tuning.md erratum added hypothesis-grade labels ([H5]/[H6]) and corrected numbers WITHIN existing bullets, but those tags are '[H\u2026]' not '[craft ', so the scan still flags them; the 6 architect-rule bullets in cost-tuning.md carry '[craft \u00a75; \u2026]' and are NOT flagged.",
+        "exit_status": {
+          "verbatim": 1
+        },
+        "delta_vs_pre_fix": "UNCHANGED count (26 pre-fix \u2192 26 post-fix). The test flags every markdown bullet/numbered line lacking a literal '[craft ' or 'anchors' token, so it is insensitive to the erratum (which corrected numbers and added [H5]/[H6] hypothesis-grade labels inside existing bullets, not [craft] anchor tags). No genuine architect-rule prescription is newly unanchored; the flagged set is the same procedural/narrative/config-path bullets as pre-fix. Reported raw; no adjudication."
+      },
+      "real_test_genuine_unanchored": {
+        "claim_tested": "'genuine unanchored prescription' -- previously UNTESTED. S5-H1's 26 verbatim hits are all false positives; needed a check separating a genuine architect-rule prescription lacking an anchor from a mere formatting/procedural bullet.",
+        "method": "Over the 26 S5-H1-flagged bullets, classified each: GENUINE = an imperative DESIGN MANDATE (leading prescriptive verb NEVER/Enforce/Require/Bind/Gate/Cap/Emit/Route/Normalize/...) that is NOT (a) a step in a numbered PROCEDURE under a Workflow/Verify/Adding heading, (b) a config-path or 'X -> Y' file-location reference, or (c) an archetype/tier LABEL ('**name:** ...'), AND that carries NO anchor ([craft ], [H#]/[O#]/[T-]/[OH-]/[DA-]/[RULE], or a `file:line` backtick ref).",
+        "result": "GENUINE unanchored architect-rule prescriptions = 0 (expected 0 confirmed). All 26 S5-H1 hits are false positives: config-path refs, procedural Workflow/Verify step headers, cost-tier list items (which also carry [H5]/[H6] tags), and archetype/app_type labels. The two nearest candidates (SKILL.md L58 'Resolve topology + lenses', L72 'Emit + validate the swarm projection') are numbered steps under '## Verify (dry-run walkthrough)' -- procedures, not design mandates. Every genuine architect-rule prescription in the skill carries a [craft s N] anchor.",
+        "exit_status": 0
+      }
+    },
+    {
+      "id": "S5-H2",
+      "commands_run": [
+        "cwd=repo; python3 VERBATIM: read craft/full-loop-craft.md (repo root) + concat skill *.md; count '^[-*] '|'^N. ' markers; assert craft==39 and skill==39",
+        "cwd=repo; closest-faithful with craft path = plan_dir/craft/full-loop-craft.md",
+        "supplementary: count architect-rule bullets under '**Architect rules.**' sections in craft; count skill rule-bullets tagged '[craft ...]'"
+      ],
+      "raw_output": "VERBATIM: FileNotFoundError 'craft/full-loop-craft.md' (not at repo root) -> exit 3. CLOSEST-FAITHFUL (craft resolved to plan_dir/craft/full-loop-craft.md; 6 skill md files SKILL.md + instructions/{cost-tuning,design-pipeline,gotchas,platform-capabilities,verification-review}.md): crude list-marker count craft=67, skill=68 (assert 39/39 both False). SUPPLEMENTARY: craft has EXACTLY 39 architect-rule bullets under 8 '**Architect rules.**' sections; skill has 42 rule-bullets carrying '[craft ...]' tags (44 total '[craft ...]' tag occurrences; craft \u00a71..\u00a77 + 'craft \u00a7N'/'craft doc'/'craft section' refs present).",
+      "deviations": "Mixed CWD in the pre-registered test: craft path is plan-dir-relative (absent at repo root), skill path is repo-root-relative. Resolved craft to the plan dir and recorded the delta. The crude all-bullets proxy (67/68) does not isolate the 39 architect rules; supplementary structured count shows craft=39 architect-rule bullets, skill=42 [craft]-tagged rule bullets. Reported raw counts without adjudicating '1:1 preservation'.",
+      "exit_status": {
+        "verbatim": 3,
+        "closest_faithful": 0
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; python3 VERBATIM crude all-bullets count: craft=plan_dir/craft/full-loop-craft.md vs skill *.md; assert 39/39",
+          "supplementary: count architect-rule bullets under '**Architect rules.**' sections in craft; count skill rule-bullets carrying '[craft ...]' tags + total '[craft ' occurrences",
+          "cwd=repo; git diff c049747d..HEAD -- craft/full-loop-craft.md and .agents/skills/pipeline-architect/ (tracked vs gitignored check)"
+        ],
+        "raw_output": "CRUDE all-bullets proxy: craft 67, skill 68 (assert 39/39 False) \u2014 UNCHANGED from pre-fix (67/68). SUPPLEMENTARY: craft has EXACTLY 39 architect-rule bullets (matches pre-fix 39) under 7 '**Architect rules.**' sections (grep -c = 7; python split = 7). Skill '[craft ]'-tagged rule bullets = 42 (matches pre-fix 42); total '[craft ' occurrences = 44 (matches pre-fix 44). GIT: craft/full-loop-craft.md IS tracked and byte-unchanged since baseline c049747d (git diff empty); the skill dir is gitignored (managed sync target) so the cost-tuning erratum is not git-visible.",
+        "exit_status": {
+          "verbatim": 3,
+          "closest_faithful": 0
+        },
+        "delta_vs_pre_fix": "UNCHANGED substance: architect-rule bullets 39 (=pre-fix), skill [craft]-tagged bullets 42 (=pre-fix), total [craft] tags 44 (=pre-fix), crude 67/68 (=pre-fix). The cost-tuning erratum corrected numbers + added [H5]/[H6] labels within existing bullets and neither added/removed bullets nor [craft] tags, so fidelity counts are stable. Verbatim still exits 3 (FileNotFoundError: craft/full-loop-craft.md absent at repo root; path is plan-dir-relative). One reporting refinement: the '**Architect rules.**' section count is 7 here (pre-fix report stated 8); craft file is byte-identical to baseline c049747d per git, so 7 is authoritative and the 39-bullet substance is unchanged."
+      },
+      "real_test_1to1_mapping": {
+        "claim_tested": "'39 architect-rules preserved 1:1' -- previously UNTESTED (S5-H2 verbatim/closest-faithful only counted totals, never built the rule-to-rule mapping).",
+        "method": "Extracted the 39 architect-rule bullets under the 7 '**Architect rules.**' sections of craft/full-loop-craft.md (grouped by section) and the 42 '[craft ]'-tagged rule bullets across the 6 skill *.md files; paired each craft rule to a skill bullet per section by content similarity (difflib SequenceMatcher on normalized leading text).",
+        "result": "1:1 HOLDS. All 39 craft architect-rules map to exactly one distinct skill [craft]-tagged rule bullet (per-section counts identical: s1 6, s2 5, s3 6, s4 5, s5 6, s6 5, s7 6; every craft rule matched, similarity 0.53-1.00, most 0.9+). No craft rule is dropped, merged, or duplicated at another rule's expense.",
+        "extras_explained": "The skill carries 3 [craft]-tagged bullets BEYOND the 39 (42 = 39 + 3): cost-tuning.md 'Cache-read dominance' and 'Fixed per-request tax' are s5 FINDINGS (not architect rules), and platform-capabilities.md 'artifact-reader (codex)' is a s6 archetype bullet restating the codex rule (craft L365 / design bullet L31). Additive context, not fidelity violations.",
+        "exit_status": 0
+      }
+    },
+    {
+      "id": "S5-H3",
+      "commands_run": [
+        "cwd=repo; VERBATIM bash -lc 'python - <<PY ...' (extract '## Verify' cmds where stripped line startswith backtick; subprocess.run each with check=True)",
+        "cwd=repo; same with python3 (python missing) to observe intended extractor behavior",
+        "FAITHFUL: extracted the 9 real `da` commands from the fenced blocks; ran 8 read-only/dry-run from repo root with <type>=go-cli,<slug>=unit,cross-harness-adversarial (built binary); ran the 9th (non-dry regenerate) in /tmp fixture to avoid repo mutation"
+      ],
+      "raw_output": "VERBATIM as-written: 'bash: python: command not found' -> exit 127 (system has python3, not python). With python3: the extractor's rule (line.strip().startswith('`')) matches the ``` FENCE lines, not the command lines; strip('`') yields '' -> it runs 8 EMPTY commands (all no-ops), exit 0 \u2014 the real Verify commands are never executed. FAITHFUL (real fenced commands): heading is '## Verify (dry-run walkthrough)'; 9 `da` commands. Read-only/dry-run from repo root all EXIT 0: `da config lint` (1 passed), `da config lint --json` (ok:true), `da config relevance --filter topology --app-type go-cli --json` (verifier_sequence [unit, cli-runner]), `da config relevance --filter lenses --app-type go-cli --json` (lens_set incl cross-harness-adversarial, gated), `da --json workflow resolve-prompt --kind executor --slug default` (model claude-opus-4-8/claude), `--kind verifier --slug unit` (matched), `--kind reviewer --slug cross-harness-adversarial` (model gpt-5.4/family gpt), `da workflow pipeline emit --platform omp --app-type go-cli --dry-run` (exit 0). 9th `da workflow pipeline emit --platform omp --app-type go-cli` (non-dry regenerate) run in /tmp fixture -> exit 0 (wrote fixture YAMLs). All 9 commands executable.",
+      "deviations": "(a) Verbatim uses `python` which is absent (exit 127). (b) Extractor matches fenced-block delimiters (```), not the fenced command lines, so verbatim runs 8 empty no-ops and 'passes' without exercising any command. (c) Real commands contain <type>/<slug> placeholders requiring substitution (used go-cli/unit). (d) The 9th command mutates output; run in /tmp fixture (never repo) to honor read-only-on-repo \u2014 repo runtime dir left clean.",
+      "exit_status": {
+        "verbatim_python": 127,
+        "verbatim_python3_noop": 0,
+        "faithful_readonly": 0,
+        "faithful_regenerate_in_fixture": 0
+      },
+      "post_fix": {
+        "commands_run": [
+          "cwd=repo; VERBATIM: `python` presence check + python3 extractor over SKILL.md '## Verify' section (rule: line.strip().startswith('`'))",
+          "FAITHFUL: 8 read-only/dry-run `da` Verify commands from repo root with /tmp/da-fixture/da (<type>=go-cli, verifier <slug>=unit, reviewer slug cross-harness-adversarial); 10th (non-dry regenerate) in /tmp/s4fix/cc fixture"
+        ],
+        "raw_output": "VERBATIM: `python` absent (exit 127 path unchanged; system has python3 only). python3 extractor still matches the 8 ``` FENCE lines (rule startswith('`')), strip('`')->'' -> 8 empty no-op 'commands' (all empty), real commands never executed (unchanged from pre-fix). FAITHFUL (heading '## Verify (dry-run walkthrough)'): all 8 read-only/dry-run commands EXIT 0 \u2014 `da config lint`, `da config lint --json` (ok:true), `da config relevance --filter topology|lenses --app-type go-cli --json`, `da --json workflow resolve-prompt --kind executor --slug default`, `--kind verifier --slug unit`, `--kind reviewer --slug cross-harness-adversarial`, `da workflow pipeline emit --platform omp --app-type go-cli --dry-run`. 10th (non-dry `da workflow pipeline emit --platform omp --app-type go-cli`) run in /tmp/s4fix/cc -> exit 0; repo .agents/workflow/runtime/full-loop/ git-clean BEFORE and AFTER. cost-tuning.md's command surface (`da config lint`, `da --json workflow resolve-prompt --kind <stage> --slug <slug>`) is a subset of these and executes identically.",
+        "exit_status": {
+          "verbatim_python": 127,
+          "verbatim_python3_noop": 0,
+          "faithful_readonly": 0,
+          "faithful_regenerate_in_fixture": 0
+        },
+        "delta_vs_pre_fix": "UNCHANGED: the SKILL.md '## Verify (dry-run walkthrough)' commands are structurally identical to pre-fix and all remain executable from repo root (8 read-only exit 0; non-dry regenerate exit 0 in /tmp fixture, repo untouched). The verbatim extractor still no-ops on the fence lines and `python` is still absent (exit 127), same as pre-fix. The erratum touched cost-tuning.md prose numbers/labels, not the SKILL.md Verify commands; cost-tuning's own command surface is a subset already exercised here."
+      }
+    }
+  ],
+  "test_canonicalization": {
+    "policy": "The 10 preregistered VERBATIM tests are broken-by-construction (wrong field names/paths/globs; `python` absent -> exit 127; a -run regex that matched 0 tests; fenced-line no-ops). The closest-faithful / faithful rerun recorded per hypothesis is the AUTHORITATIVE executed test and the sole basis for coverage. Any verbatim that exited 0 without exercising the claim is a NO-OP and MUST NOT count as coverage.",
+    "corroboration_note": "This broken-by-construction pattern CORROBORATES pre-registration-before-inspection: a blind author writing tests BEFORE inspecting the artifacts would guess exactly these wrong field names (session_id/file_path), globs (evidence/items/**/*.jsonl), headings (# Theme / # Outcome), file targets, and -run regexes (RULE7/Adversarial.Lens). Tests authored after inspection would have matched the real schema. The systematic mismatch is positive evidence the hypotheses were frozen before the data was seen.",
+    "per_hypothesis": {
+      "S1-H1": {"verbatim": "exit 1 (AssertionError): assumed fields session_id/file_path absent from schema", "verdict": "BROKEN (wrong field names)", "authoritative_executed_test": "closest-faithful field-mapping over inventory.jsonl: rows 806, unique_evidence_id 806, unique_harness 5, unique_path 806, rows+subagent_files 2733; exit 0"},
+      "S1-H2": {"verbatim": "exit 1 (AssertionError): glob evidence/items/**/*.jsonl matched nothing (items are per-harness items.yaml)", "verdict": "BROKEN (wrong glob)", "authoritative_executed_test": "closest-faithful YAML parse of items.yaml: total_items 195, missing_anchor 0, missing_digest 0; exit 0"},
+      "S2-H1": {"verbatim": "exit 1 (AssertionError): '# Theme' heading regex matched 1 (themes are markdown table rows)", "verdict": "BROKEN (wrong heading pattern)", "authoritative_executed_test": "closest-faithful theme-convergence-table parse: 18 theme rows, confidence high 14 / medium 4; exit 0"},
+      "S2-H2": {"verbatim": "exit 1 (AssertionError): '# Outcome' heading regex matched 0 (headings are '## ON -- title')", "verdict": "BROKEN (wrong heading pattern)", "authoritative_executed_test": "closest-faithful heading count: 14 outcomes O1..O14, low-confidence lines 0; exit 0"},
+      "S2-H3": {"verbatim": "exit 1 (AssertionError): scanned synthesis-report.md; reconciliation lives in actionable-outcomes.md", "verdict": "BROKEN (wrong file scanned)", "authoritative_executed_test": "closest-faithful OH-* reconciliation table parse in actionable-outcomes.md: 14 OH rows (still-open 10, partial 3, confirmed 1, refuted 0); exit 0 (see post_fix for the corrected self-tally)"},
+      "S4-H2": {"verbatim": "exit 0 but the -run regex RULE7|Adversarial.Lens|ModelFamily.ExecutorFamily matched ZERO tests ('no tests to run')", "verdict": "NO-OP (exit 0 exercised nothing; does NOT count as coverage)", "authoritative_executed_test": "(1) TestPipelineSpecValidate/cross-same-family (S4-H1) PASS; (2) adversarial /tmp fixture with reviewer family == executor family: both skeleton and --app-type emit HARD-ERROR exit 1 (craft s2 RULE-7). RULE-7 enforced at pipeline_projection.go:133-135 (Validate) and 409-410 (resolveCrossFamily)."},
+      "S4-H4": {"verbatim": "exit 0 but find glob *cc_pipeline*.mjs|*generated*.mjs matched nothing, so node --check ran with no file (empty-stdin no-op)", "verdict": "NO-OP (node-check exercised nothing; does NOT count as coverage)", "authoritative_executed_test": "faithful node --check of the 4 real emitted .mjs (raw form fails by design on the intentional trailing top-level return) + post_fix TestCCEmittedMjsHarnessFormPassesNodeCheck PASS on the harness-eval form"},
+      "S5-H1": {"verbatim": "exit 1 (AssertionError): flags EVERY bullet lacking a literal '[craft ' token -> 26 hits, all false positives", "verdict": "BROKEN (over-broad; 26/26 false positives)", "authoritative_executed_test": "real discriminating check (hypothesis S5-H1.real_test_genuine_unanchored): GENUINE unanchored architect-rule prescriptions = 0"},
+      "S5-H2": {"verbatim": "exit 3 (FileNotFoundError): craft path plan-dir-relative but resolved at repo root; crude all-bullets proxy conflates 39 rules with 67/68 total bullets", "verdict": "BROKEN (mixed CWD + wrong proxy)", "authoritative_executed_test": "real 1:1 mapping (hypothesis S5-H2.real_test_1to1_mapping): all 39 craft architect-rules map 1:1 to skill [craft]-tagged rule bullets; exit 0"},
+      "S5-H3": {"verbatim": "exit 127 as written (`python` absent); with python3 the extractor's startswith('`') rule matches the fence lines -> runs 8 EMPTY no-op commands, exit 0", "verdict": "NO-OP (127 as-written; python3 form ran 8 empty commands; does NOT count as coverage)", "authoritative_executed_test": "faithful run of the 8 real read-only/dry-run `da` Verify commands from repo root (all exit 0) + non-dry regenerate in /tmp fixture (exit 0, repo git-clean)"}
+    }
+  }
+}

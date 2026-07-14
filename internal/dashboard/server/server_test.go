@@ -8,6 +8,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -18,7 +19,22 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/AGOrcha/dot-agents/internal/dashboard/handlers"
+	"github.com/AGOrcha/dot-agents/internal/dashboard/watch"
 )
+
+// failingMountBuilder is a mountBuilder whose build always fails, driving
+// newServer's handlers-build error branch. That branch is unreachable through
+// the real wiring (handlers.New only errors on a nil Store, which the store
+// wiring never produces), so injecting a failing builder is the only way to
+// prove it.
+type failingMountBuilder struct{ err error }
+
+func (f failingMountBuilder) build(handlers.Deps) (*handlers.Mount, error) {
+	return nil, f.err
+}
 
 // serve drives one GET through the composed handler with no socket and returns
 // the status code and the full response body.
@@ -182,4 +198,185 @@ func TestStaticDirOverride(t *testing.T) {
 			t.Errorf("GET /deep/unknown/route body missing STATIC-ROOT; got %q", body)
 		}
 	})
+}
+
+func TestNewRejectsMissingStaticDir(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-dist")
+	if _, err := New(Config{StaticDir: missing}); err == nil {
+		t.Fatalf("New(static dir %q) succeeded, want missing-directory error", missing)
+	}
+}
+
+func TestComposedAPIHealthUsesInitializedBroker(t *testing.T) {
+	srv, err := New(Config{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+
+	code, body := serve(t, srv.Handler(), "/api/v1/observability/health")
+	if code != http.StatusOK {
+		t.Fatalf("GET composed health status = %d, want 200", code)
+	}
+	if !strings.Contains(body, `"subscriber_count":0`) {
+		t.Errorf("GET composed health body = %q, want a zero subscriber count", body)
+	}
+}
+
+func TestDevAssetProxyRoutesAssetsAndRejectsMalformedURL(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.String(); got != "/assets/dashboard.js?rev=42" {
+			t.Errorf("proxied URL = %q, want %q", got, "/assets/dashboard.js?rev=42")
+		}
+		_, _ = io.WriteString(w, "vite asset")
+	}))
+	t.Cleanup(upstream.Close)
+
+	srv, err := New(Config{DevAssetProxy: upstream.URL})
+	if err != nil {
+		t.Fatalf("New(dev proxy): %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+
+	code, body := serve(t, srv.Handler(), "/assets/dashboard.js?rev=42")
+	if code != http.StatusOK {
+		t.Fatalf("GET proxied asset status = %d, want 200", code)
+	}
+	if body != "vite asset" {
+		t.Errorf("GET proxied asset body = %q, want %q", body, "vite asset")
+	}
+
+	if _, err := New(Config{DevAssetProxy: "http://[::1"}); err == nil {
+		t.Fatal("New(malformed dev proxy) succeeded, want URL parse error")
+	}
+}
+
+func TestStartRejectsOccupiedAddress(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve address: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	srv, err := New(Config{Addr: listener.Addr().String()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+
+	if err := srv.Start(); err == nil {
+		t.Fatal("Start on an occupied address succeeded, want listen error")
+	}
+}
+
+func TestServeStopsWhenContextIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	srv, err := New(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := srv.Serve(ctx); err != nil {
+		t.Fatalf("Serve(cancelled context): %v", err)
+	}
+}
+
+func TestServeReturnsListenError(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve address: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	srv, err := New(Config{Addr: listener.Addr().String()})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+
+	if err := srv.Serve(context.Background()); err == nil {
+		t.Fatal("Serve on an occupied address succeeded, want listen error")
+	}
+}
+
+func TestServeStopsWhenHTTPServerCloses(t *testing.T) {
+	const configuredAddr = "127.0.0.1:0"
+	srv, err := New(Config{Addr: configuredAddr})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(context.Background()) }()
+
+	deadline := time.After(time.Second)
+	for srv.Addr() == configuredAddr {
+		select {
+		case <-deadline:
+			t.Fatal("Serve did not bind its configured wildcard address")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if err := srv.httpSrv.Close(); err != nil {
+		t.Fatalf("close HTTP server: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Serve after HTTP close: %v", err)
+	}
+}
+
+func TestServeReportsUnexpectedBackgroundFailure(t *testing.T) {
+	const configuredAddr = "127.0.0.1:0"
+	srv, err := New(Config{Addr: configuredAddr})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(context.Background()) }()
+
+	deadline := time.After(time.Second)
+	for srv.Addr() == configuredAddr {
+		select {
+		case <-deadline:
+			t.Fatal("Serve did not bind its configured wildcard address")
+		case <-time.After(time.Millisecond):
+		}
+	}
+
+	want := errors.New("listener failed unexpectedly")
+	srv.serveErr <- want
+	if got := <-done; !errors.Is(got, want) {
+		t.Fatalf("Serve unexpected failure = %v, want %v", got, want)
+	}
+}
+
+// TestNewSurfacesHandlersBuildError injects a failing mountBuilder to prove
+// newServer wraps and returns a handlers-mount construction failure — the
+// error-propagation branch the production wiring can never reach.
+func TestNewSurfacesHandlersBuildError(t *testing.T) {
+	want := errors.New("boom")
+	if _, err := newServer(Config{}, failingMountBuilder{err: want}); err == nil {
+		t.Fatal("newServer ignored a handlers build failure, want error")
+	} else if !errors.Is(err, want) {
+		t.Fatalf("newServer error = %v, want it to wrap %v", err, want)
+	}
+}
+
+// TestStartSurfacesDeadWatcher swaps in a watcher with no roots and the poll
+// fallback disabled: startFSNotify reports an inactive source and, with poll
+// off, Start must surface that as an error rather than serve on a dead watcher.
+func TestStartSurfacesDeadWatcher(t *testing.T) {
+	srv, err := New(Config{Addr: "127.0.0.1:0"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	srv.watcher = watch.New(nil, srv.broker, watch.WithPollInterval(-1))
+	t.Cleanup(func() { srv.watcher.Close() })
+
+	if err := srv.Start(); err == nil {
+		_ = srv.Stop(context.Background())
+		t.Fatal("Start ignored a dead (source-less, poll-off) watcher, want error")
+	}
 }

@@ -1,6 +1,6 @@
 # Spec: managed worktree platform for delegation/branch isolation
 
-Status: draft / **wt0 + wt1 VERIFIED COMPLETE** (spike merged via PR #171,
+Status: active / **wt0 + wt1 VERIFIED COMPLETE** (spike merged via PR #171,
 2026-05-28; typed interface merged via PR #181, 2026-05-29 — both
 re-confirmed against the actual repo, not just TASKS.yaml, on 2026-07-10).
 `internal/gitwt` ships a tested `Manager`/`Worktree` implementation richer

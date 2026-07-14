@@ -1,0 +1,418 @@
+# Evidence items — Cursor corpus (36 sessions)
+# Rubric: evidence-rubric.md §2 (E1-E5) + §2b (R1-R5). Template: templates/evidence-item.md
+# Anchors use `~`-normalized evidence_ids; digests are sha256 of raw anchored line(s); whole-file (#L1-N) digests = inventory content_sha256.
+# Cursor records NO tokens/cost/wallclock/timestamps/model in any session -> cost & timeline axes documented as gaps (see cursor-gap-* items).
+
+- item_id: "cursor-gap-no-token-cost-wallclock"
+  claim: "All 36 sampled Cursor sessions record no token counts, no cost, and no wall-clock/duration fields in any record, so Cursor transcripts cannot feed the tokens, cost, or latency evidence axes."
+  class: cost
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L1-120"
+      digest: "sha256:8c8d81f391d7395ae1acab68ff5f810e37762dc4caa1e83bf9b3b590987c58a1"
+      excerpt: "120-record Schema-A worker session: no usage/tokens/cost/timing key in any record (inventory has_tokens/has_cost/has_wallclock=false)"
+    - ref: "cursor:~-Documents-payout/a9684182-cb5f-4ca5-8b8b-4c3c84ef682e:a9684182-cb5f-4ca5-8b8b-4c3c84ef682e#L1-115"
+      digest: "sha256:38e4e0b7a030c6bbfed7689d19d83f89236be9a9d8e915915c71e523201e00ec"
+      excerpt: "115-record payout migration session, same absence"
+    - ref: "cursor:~-Documents-ResumeAgent/d706fa5f-aff6-4dfe-8a51-5d14e60d2b3b:d706fa5f-aff6-4dfe-8a51-5d14e60d2b3b#L1-80"
+      digest: "sha256:54364b27b33de1141f2c8f3ecf93df6d64cd07356f4c8dc8a10835e603c89034"
+      excerpt: "80-record Schema-B interactive session, same absence"
+    - ref: "cursor:~-Documents-payout/9948dc94-b1bc-41de-9d05-c3212f23de8f:9948dc94-b1bc-41de-9d05-c3212f23de8f#L1-2"
+      digest: "sha256:812c344ac6db229c28fb6dcb1b44f884de64d40248b88bcda6267e0aca614136"
+      excerpt: "2-record session, same absence"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-gap-no-timestamps"
+  claim: "No Cursor session record carries a timestamp (started_at/ended_at null for all 36 in inventory; raw records have no time field), so per-session timelines, stage durations, and time-ordering cannot be reconstructed from Cursor data."
+  class: cost
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L1-120"
+      digest: "sha256:8c8d81f391d7395ae1acab68ff5f810e37762dc4caa1e83bf9b3b590987c58a1"
+      excerpt: "no timestamp/createdAt/ts key in any of 120 records; inventory started_at=null, ended_at=null"
+    - ref: "cursor:~-Documents-payout/db36ad38-8d3c-4998-897d-a8b61a760efc:db36ad38-8d3c-4998-897d-a8b61a760efc#L1-64"
+      digest: "sha256:79b4848195a533e946fbc16788bc6c75ac5867085c4adb3ebc591d6a90970a3d"
+      excerpt: "Schema-B session, no timestamp field; inventory started_at=null"
+  sensitivity: internal
+  confidence: high
+  inference_flags: ["[INFERENCE] absence-of-timestamp is a full-file scan result, not a per-line quote"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-gap-no-model-attribution"
+  claim: "Cursor transcripts do not record which model served a session (inventory models=[] for all 36); the only 'model' token in the corpus is an argument inside a nested Task tool call, not a session-level attribution."
+  class: cost
+  anchors:
+    - ref: "cursor:~-Documents-payout/a9684182-cb5f-4ca5-8b8b-4c3c84ef682e:a9684182-cb5f-4ca5-8b8b-4c3c84ef682e#L1-115"
+      digest: "sha256:38e4e0b7a030c6bbfed7689d19d83f89236be9a9d8e915915c71e523201e00ec"
+      excerpt: "inventory models=[]; no model field on any record"
+    - ref: "cursor:~-Documents-dot-agents-pattern-e-20260414-223713/1aff5366-7352-49e5-a1b3-2a1fa4981a34:1aff5366-7352-49e5-a1b3-2a1fa4981a34#L41"
+      digest: "sha256:ecf996860474c7c904840f7a193c522203a0d7a8ab6f67e61eeeeef5d9c90916"
+      excerpt: "[REDACTED] ⟨tools: Task, Read⟩"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-gap-no-tool-results"
+  claim: "No Cursor session in the sample contains a single tool_result record: assistant turns carry tool_use requests but the transcript omits every tool output/exit-code/error, so tool outcomes cannot be verified from Cursor transcripts."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L1-120"
+      digest: "sha256:8c8d81f391d7395ae1acab68ff5f810e37762dc4caa1e83bf9b3b590987c58a1"
+      excerpt: "160 tool_use blocks across 120 records, 0 tool_result blocks"
+    - ref: "cursor:private-tmp-payout-submodule-backup-client-se/6ec974a3-5254-4662-85e4-da99ce1c43c7:6ec974a3-5254-4662-85e4-da99ce1c43c7#L1-15"
+      digest: "sha256:6490ceb7036fe019c47e4d3ee688cb4f6a3b1b9f7f5760a364bf6fa9978aa9d7"
+      excerpt: "negative-control session references an ApplyPatch failure in prose but has 0 tool_result records to confirm it"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-schema-narration-only"
+  claim: "13 of 36 Cursor sessions use a narration-only schema: assistant records contain natural-language intent text but zero tool_use and zero tool_result blocks, giving those sessions no tool-call fidelity at all."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-payout/db36ad38-8d3c-4998-897d-a8b61a760efc:db36ad38-8d3c-4998-897d-a8b61a760efc#L2"
+      digest: "sha256:3ed87a8ccfb2fc08dcc89eb6a6c6651fcd79df38bb2eca4178c650104e21340e"
+      excerpt: "Searching for v29 releases and auditing usage of `docker/cli` and `docker/docker` in the codebase."
+    - ref: "cursor:~-Documents-payout/9948dc94-b1bc-41de-9d05-c3212f23de8f:9948dc94-b1bc-41de-9d05-c3212f23de8f#L2"
+      digest: "sha256:c97df7a22f084b0c241ff9c8e9cd51b0afb7f98946b6ff0b9096b8e1762f6dd8"
+      excerpt: "Running the auth passwordless tests to capture the current failure state."
+  sensitivity: internal
+  confidence: high
+  inference_flags: ["[INFERENCE] 13/36 count is a corpus-wide parse aggregate"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-schemaA-reasoning-redacted"
+  claim: "In tool-bearing (Schema A) Cursor sessions the extended assistant reasoning is stored as the literal string '[REDACTED]'; e.g. 106 of 120 assistant turns in one worker session are redacted, leaving only a short action headline plus tool calls recoverable."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L2"
+      digest: "sha256:456b3d7bfaf50109fa4e543b6a6b3390825d770879bf898e5e8d6f939a6d12da"
+      excerpt: "Implementing p10-workflow-command-decomposition: loading the delegation bundle, loop-worker instructions, and current st ⟨tools: Read×5⟩"
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L1-120"
+      digest: "sha256:8c8d81f391d7395ae1acab68ff5f810e37762dc4caa1e83bf9b3b590987c58a1"
+      excerpt: "106/120 assistant text blocks == '[REDACTED]', 14 preserved headlines"
+    - ref: "cursor:~-Documents-payout/b07903bd-27db-42d9-be67-f6251bd33eb7:b07903bd-27db-42d9-be67-f6251bd33eb7#L1-89"
+      digest: "sha256:f879c5706450370bd8828fc96ad235781cf6f5bcabe8f7e6fea8c126528a8979"
+      excerpt: "80/89 assistant text blocks redacted"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-loop-worker-harness"
+  claim: "Cursor executes the dot-agents bounded loop-worker contract: a worker session opens with a delegation-bundle brief naming plan, task, and write scope, identical to the harness used by other engines."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L1"
+      digest: "sha256:0b9d908f66e637c4958debcd83865e876c758fe05736c43e056aeef665077082"
+      excerpt: "u are a bounded implementation worker for task p10-workflow-command-decomposition in plan loop-agent-pipeline. ## Delegation bundle (your authoritative task scope) Bundle path: ~/Documents/dot-agents/.agents"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-batched-tool-calls"
+  claim: "Cursor assistant turns batch multiple tool_use calls into a single turn (e.g. five parallel Read calls in one assistant record), rather than one tool call per turn."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L2"
+      digest: "sha256:456b3d7bfaf50109fa4e543b6a6b3390825d770879bf898e5e8d6f939a6d12da"
+      excerpt: "Implementing p10-workflow-command-decomposition: loading the delegation bundle, loop-worke ⟨tools: Read×5⟩"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-nested-delegation"
+  claim: "Cursor sessions spawn nested subagents via a Task tool, including subagent_type 'loop-worker' with its own delegation bundle and a model-routing argument, so multi-agent orchestration runs inside a single Cursor session."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents-pattern-e-20260414-223713/1aff5366-7352-49e5-a1b3-2a1fa4981a34:1aff5366-7352-49e5-a1b3-2a1fa4981a34#L41"
+      digest: "sha256:ecf996860474c7c904840f7a193c522203a0d7a8ab6f67e61eeeeef5d9c90916"
+      excerpt: "[REDACTED] ⟨tools: Task, Read⟩"
+    - ref: "cursor:~-Documents-dot-agents/2880b770-97a5-47bb-8d85-6a902e445e87:2880b770-97a5-47bb-8d85-6a902e445e87#L22"
+      digest: "sha256:381e03b8cf2980a43949427a7ba8d1b02780fa8d119dc28d4559435e3f1e252f"
+      excerpt: "ing two parallel agents: one adds Phase 8 documentation and a repo-local bundle template; the other drafts skill instruction updates (we'll apply repo-safe ed ⟨tools: Task×2⟩"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-orchestrator-role-boundary"
+  claim: "Cursor runs a distinct dot-agents 'loop orchestrator' role whose brief says 'decide which tasks to delegate. Do NOT implement anything'; such sessions are short, read canonical state, and emit a bundling decision table (Task | Bundle | Proceed?) rather than editing code."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/684414e2-90fa-472c-be6c-37c8e61132e6:684414e2-90fa-472c-be6c-37c8e61132e6#L1"
+      digest: "sha256:9dfde56db53cbb0796cd0289ddee9c0af9066133445941a99752b12d8e8ed55b"
+      excerpt: "are the loop orchestrator for this repository (dot-agents workflow). Your job this pass: decide which tasks to delegate. Do NOT implement anything. ## Orchestrator overlay # Orchestrator"
+    - ref: "cursor:~-Documents-dot-agents/684414e2-90fa-472c-be6c-37c8e61132e6:684414e2-90fa-472c-be6c-37c8e61132e6#L4"
+      digest: "sha256:f888edb086205c6cc2ea7e8aebed5ba175a301e635d12fd9de94e915a52d74b4"
+      excerpt: "## 1. Bundled tasks (this run) | Task | Bundle | Proceed? | |------|--------|----------| | **`p3e-batch-verifier`** | `~/Documents/dot-agents/.agents/activ"
+    - ref: "cursor:~-Documents-dot-agents/47e62b6c-3e06-48d9-9916-468773be2bf3:47e62b6c-3e06-48d9-9916-468773be2bf3#L7"
+      digest: "sha256:77c05847646daeba0f4f5b46a577042fe1f5c83d4d67d35ff05865b9b8e20e79"
+      excerpt: "## 1) Bundles this pass **Bundled (proceed):** `typescript-port` / **`phase-4-advanced-surface-decision`** — single delegation bundle: `RALPH_BUNDLE: ~/Do"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-tool-vocabularies"
+  claim: "Cursor transcripts use two distinct tool vocabularies across the corpus: a composer set (Read/StrReplace/Shell/Grep/Glob/Write/ReadLints) and an agent set (ApplyPatch/ReadFile/run_terminal_cmd/SemanticSearch/call_mcp_tool), sometimes mixed within one session."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L3"
+      digest: "sha256:7f860a99cb73e7c0da8305f080a4ad8ee669b339a91270c7e0ecb1d40dcc3098"
+      excerpt: "[REDACTED] ⟨tools: Shell, Read×2, Glob⟩"
+    - ref: "cursor:~-Documents-dot-agents/a2563484-e231-402c-95d7-e862a7f5d6bd:a2563484-e231-402c-95d7-e862a7f5d6bd#L12"
+      digest: "sha256:a8e31a9d89273cb430bcb0794f7f2d2d0b69d7dc0542c429df9cef03678fa78b"
+      excerpt: "⟨tools: ReadLints⟩"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-edit-primitive-strreplace"
+  claim: "The dominant Cursor edit primitive is StrReplace with path/old_string/new_string arguments (393 occurrences across the sampled corpus), i.e. targeted anchored string replacement rather than diff/patch application."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L47"
+      digest: "sha256:c5927f1964856bdfeea395e5a4acac9eeaa7b251ca0774be7e96a7cfd476b3d0"
+      excerpt: "Copying the static schema into `commands/workflow/static` (required for `go:embed`). Applying remaining edits. [REDACTED] ⟨tools: Shell, StrReplace×2⟩"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: ["[INFERENCE] 393 count is a corpus-wide tool census"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-plan-artifacts"
+  claim: "Cursor plan-mode produces .cursor/plans/*.plan.md artifacts handed back into the conversation as file attachments; the transcript captures the attachment but not the tool call that wrote the plan."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents-dot-agents-code-workspace/878a6961-8534-4ab2-bc8d-993a2edd628c:878a6961-8534-4ab2-bc8d-993a2edd628c#L38"
+      digest: "sha256:89640bd201cef98b4bbc330aca4def14aa33b9b9f22bc33bbdef5368df23f0b7"
+      excerpt: ".cursor/plans/go_output_improvements_e33a9f75.plan.md\" lines=\"1-169\"> 1|--- 2|name: Go Output Improvements 3|overview: Improve the Go CLI outpu"
+    - ref: "cursor:~-Documents-payout-payout-code-workspace/6c1f7726-dfcc-4ca6-9b75-42a0f41a1841:6c1f7726-dfcc-4ca6-9b75-42a0f41a1841#L28"
+      digest: "sha256:95fb886cd2e6700bafe8b22b3fa67fe4baeee46433081a06e0fec4c6dcf148cc"
+      excerpt: ".cursor/plans/change_streams_implementation_704a9273.plan.md\" lines=\"1-161\"> 1|--- 2|name: Change Streams Implementation 3|overview: \"Implement"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-sonar-mcp-discipline"
+  claim: "Cursor worker sessions follow the SonarQube MCP discipline end to end: disabling automatic analysis at start per workspace rules, then running mcp_sonarqube_analyze_file_list on changed files after a go-test verification step."
+  class: craft
+  anchors:
+    - ref: "cursor:~-Documents-payout/a9684182-cb5f-4ca5-8b8b-4c3c84ef682e:a9684182-cb5f-4ca5-8b8b-4c3c84ef682e#L2"
+      digest: "sha256:6ee1d76d4d7a93e29fe3c3cef15c91d435ce7f4d693032038807eaeb9a964518"
+      excerpt: "us, and disabling SonarQube automatic analysis per workspace rules. [REDACTED] ⟨tools: Read, Shell, mcp_sonarqube_toggle_automatic_analysis⟩"
+    - ref: "cursor:~-Documents-payout/a9684182-cb5f-4ca5-8b8b-4c3c84ef682e:a9684182-cb5f-4ca5-8b8b-4c3c84ef682e#L23"
+      digest: "sha256:36e2ca5d0d780f2945da39d8398e175590db504f4eecf80353cfd9bf2a6a4c3d"
+      excerpt: "[REDACTED] ⟨tools: Shell, mcp_sonarqube_analyze_file_list⟩"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-orchestrator-readback"
+  claim: "A Cursor orchestrator session performs canonical workflow readback (workflow orient), detects that the checkpoint text is stale versus canonical state, applies the 'canonical state wins' gotcha, and selects non-overlapping tasks."
+  class: craft
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/46f9657b-26ab-4d1d-872e-aec2293b674e:46f9657b-26ab-4d1d-872e-aec2293b674e#L6"
+      digest: "sha256:f5c4b85c1763577f8c788d9e24d9b3e357b8505a3deb23eb312cdada86e908a0"
+      excerpt: "mpleted orchestrator readback: `workflow orient` shows canonical next focus is **loop-orchestrator-layer** Phase 5; checkpoint text is stale (Phase E) — aligned with gotchas: **canonical state wins**. Picking three non ⟨tools: Task×3⟩"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-parallel-agent-orchestration"
+  claim: "A Cursor session orchestrates two parallel agents on deliberately non-overlapping scopes (documentation vs skill-instruction edits) to avoid write collisions."
+  class: craft
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/2880b770-97a5-47bb-8d85-6a902e445e87:2880b770-97a5-47bb-8d85-6a902e445e87#L22"
+      digest: "sha256:381e03b8cf2980a43949427a7ba8d1b02780fa8d119dc28d4559435e3f1e252f"
+      excerpt: "ing two parallel agents: one adds Phase 8 documentation and a repo-local bundle template; the other drafts skill instruction updates (we'll apply repo-safe edits here). [REDACTED] ⟨tools: Task×2⟩"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-readlints-verification"
+  claim: "Cursor sessions use a native ReadLints tool to check lint state on edited files as a verification step, distinct from running the compiler/tests."
+  class: craft
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/a2563484-e231-402c-95d7-e862a7f5d6bd:a2563484-e231-402c-95d7-e862a7f5d6bd#L12"
+      digest: "sha256:a8e31a9d89273cb430bcb0794f7f2d2d0b69d7dc0542c429df9cef03678fa78b"
+      excerpt: "⟨tools: ReadLints⟩"
+    - ref: "cursor:~-Documents-payout/dd6d2e2f-8ac7-4ce0-8b9f-0d64945866dc:dd6d2e2f-8ac7-4ce0-8b9f-0d64945866dc#L22"
+      digest: "sha256:649d4d11aeeb7b7b8da248c7f9979280feb1b77a6c0476387c7f9bc46bf8179f"
+      excerpt: "[REDACTED] ⟨tools: ReadLints⟩"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-git-workflow-grounding"
+  claim: "Cursor worker sessions ground themselves at start by running the project's workflow CLI and git status in one Shell call (e.g. 'go run ./cmd/dot-agents workflow tasks <plan> && git status --short') before editing."
+  class: craft
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L3"
+      digest: "sha256:7f860a99cb73e7c0da8305f080a4ad8ee669b339a91270c7e0ecb1d40dcc3098"
+      excerpt: "[REDACTED] ⟨tools: Shell, Read×2, Glob⟩"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-interactive-reasoning-preserved"
+  claim: "Interactive (non-worker) Cursor sessions preserve a full multi-step root-cause narration and fix plan in assistant text, in contrast to worker sessions where the same reasoning is '[REDACTED]'; e.g. a login-bug session narrates the defect, the code path, and a two-part fix."
+  class: craft
+  anchors:
+    - ref: "cursor:~-Documents-payout/9ba190ca-7306-4322-bb77-52a106a7c828:9ba190ca-7306-4322-bb77-52a106a7c828#L5"
+      digest: "sha256:e95b8beec6ee068d3c5cd87e12479998454a659a0d14cab08728df83f7583380"
+      excerpt: "Now I understand the issue. When `deviceID` is missing/blank (lines 100–108), `getTokens` dispatches an `addNotice` action and returns early. But the login page uses its own local `error"
+    - ref: "cursor:~-Documents-payout/9ba190ca-7306-4322-bb77-52a106a7c828:9ba190ca-7306-4322-bb77-52a106a7c828#L7"
+      digest: "sha256:c18b75718d65b3dc9ef691254f944d4e1717aa20aa4c621d0d0c451afe937e69"
+      excerpt: "Now I have a clear picture. The fix involves two changes: 1. In `getTokens`: throw instead of return when `deviceID` is missing (so `handleGenericLogin` catches it) 2. I"
+  sensitivity: public-ok
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-applypatch-context-failure"
+  claim: "In a negative-control session the ApplyPatch tool failed because the supplied context included blank lines with hyphen markers the tool rejects, forcing the agent to reconstruct a simpler patch; the failure is visible only in narration, with no tool_result to confirm it."
+  class: failure
+  anchors:
+    - ref: "cursor:private-tmp-payout-submodule-backup-client-se/6ec974a3-5254-4662-85e4-da99ce1c43c7:6ec974a3-5254-4662-85e4-da99ce1c43c7#L12"
+      digest: "sha256:cc6104e838ead660c654919d7238a1c3d5975011fbac1c84dc124a994c2be705"
+      excerpt: "hat the ApplyPatch is failing because the context includes blank lines with hyphen markers. The tool needs the exact content, and those '-' markers just aren't allowed. I need to create a"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-cutoff-plan-handoff-a"
+  claim: "Cursor session 878a6961 ends mid-flow (status=cutoff): the agent announces it will produce the plan, the plan is attached back into the conversation, and the transcript stops with no execution or closing turn."
+  class: failure
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents-dot-agents-code-workspace/878a6961-8534-4ab2-bc8d-993a2edd628c:878a6961-8534-4ab2-bc8d-993a2edd628c#L37"
+      digest: "sha256:71dac121c27185ace2ed266792a907a6bc5a72be7a339ec62d1f723a4bde4672"
+      excerpt: "have a complete picture of all command outputs. Let me produce the plan based on a thorough analysis."
+    - ref: "cursor:~-Documents-dot-agents-dot-agents-code-workspace/878a6961-8534-4ab2-bc8d-993a2edd628c:878a6961-8534-4ab2-bc8d-993a2edd628c#L38"
+      digest: "sha256:89640bd201cef98b4bbc330aca4def14aa33b9b9f22bc33bbdef5368df23f0b7"
+      excerpt: ".cursor/plans/go_output_improvements_e33a9f75.plan.md\" lines=\"1-169\"> 1|--- 2|name: Go Output Improvements 3|over"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: ["[INFERENCE] cutoff-as-abandonment inferred from transcript ending on a user attachment with no closing assistant turn"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-cutoff-plan-handoff-b"
+  claim: "Cursor session 6c1f7726 ends mid-flow (status=cutoff): the agent posts a plan-update summary, the updated plan is attached back, and the transcript stops before the 'Manager task group' work requested in the opening query is executed."
+  class: failure
+  anchors:
+    - ref: "cursor:~-Documents-payout-payout-code-workspace/6c1f7726-dfcc-4ca6-9b75-42a0f41a1841:6c1f7726-dfcc-4ca6-9b75-42a0f41a1841#L27"
+      digest: "sha256:f2877ea87adb0111d6a75f9ed15334e587bc83bfa4edaf14b27830f32e570f34"
+      excerpt: "Summary of updates to the plan: **1. Runner location** - Shared change-stream runner is now **[internal/producer/mongo_watcher.go](payout-backend-g"
+    - ref: "cursor:~-Documents-payout-payout-code-workspace/6c1f7726-dfcc-4ca6-9b75-42a0f41a1841:6c1f7726-dfcc-4ca6-9b75-42a0f41a1841#L1-28"
+      digest: "sha256:1428dbc6c8e11ee98cb945787923daddbe060ad7eba3886c164c2bf0da95c984"
+      excerpt: "28-record session, inventory status=cutoff, ends on user plan attachment"
+  sensitivity: internal
+  confidence: medium
+  inference_flags: ["[INFERENCE] cutoff-as-abandonment inferred from transcript ending on a user attachment with no closing assistant turn"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-abandoned-tiny-session"
+  claim: "A 2-record Cursor session opens with 'read over @HANDOFF... then continue', the agent states it will run the auth tests to capture the failure state, and the transcript ends there; the outcome is unrecoverable."
+  class: failure
+  anchors:
+    - ref: "cursor:~-Documents-payout/9948dc94-b1bc-41de-9d05-c3212f23de8f:9948dc94-b1bc-41de-9d05-c3212f23de8f#L1"
+      digest: "sha256:a3a8bdcb6ed02033487a761005492665ccd2995ecab41b788233dfe39564d144"
+      excerpt: "/active/HANDOFF-auth-tests-and-fixes.md then continue </user_query>"
+    - ref: "cursor:~-Documents-payout/9948dc94-b1bc-41de-9d05-c3212f23de8f:9948dc94-b1bc-41de-9d05-c3212f23de8f#L2"
+      digest: "sha256:c97df7a22f084b0c241ff9c8e9cd51b0afb7f98946b6ff0b9096b8e1762f6dd8"
+      excerpt: "Running the auth passwordless tests to capture the current failure state."
+  sensitivity: public-ok
+  confidence: medium
+  inference_flags: ["[INFERENCE] abandonment/no-outcome inferred from 2-record length and absence of any closing turn"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-completion-reports"
+  claim: "Schema-A Cursor worker sessions close with a structured self-reported deliverable summary (headings like '## Result', '## Done', 'Iteration N complete') naming changed files and, in some cases, a commit SHA; this final turn is preserved even though intermediate reasoning is redacted."
+  class: outcome
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac#L120"
+      digest: "sha256:de85522b00c1c038bb625b5608926fca99e785dd6ed2b49c93dad4e99b41e4f2"
+      excerpt: "## Result (p10-workflow-command-decomposition) **What changed** - **`commands/workflow/`** is now the real implementation (`package"
+    - ref: "cursor:~-Documents-payout/b07903bd-27db-42d9-be67-f6251bd33eb7:b07903bd-27db-42d9-be67-f6251bd33eb7#L89"
+      digest: "sha256:21832fcd9d6497da895c6bad4b30a4887f71b0b5781e42f4b2cc773c75e05f32"
+      excerpt: "## Iteration 12 complete ### Code (`po-core-api-se` — `b52589a`) - **`NewMongoWorker`** now calls **`EnsureIndexes`** so unique inde"
+    - ref: "cursor:~-Documents-dot-agents/4acb0439-aa64-4369-9f0c-a21e8c2db013:4acb0439-aa64-4369-9f0c-a21e8c2db013#L52"
+      digest: "sha256:e520fa3e2e5180782016df576325c4d0f8d47f0772277b4faa7a72496bb29ae4"
+      excerpt: "## Done (`p3a-result-schema`) ### Contract - **`schemas/verification-result.schema.json`** — JSON Schema (draft 2020-12) f"
+    - ref: "cursor:~-Documents-dot-agents/967c3251-37b4-44fa-ab27-e4d992aabe0d:967c3251-37b4-44fa-ab27-e4d992aabe0d#L59"
+      digest: "sha256:732811e3601d5630099b1cd648b555d0808b79f3c988fd726e1b912a8d349afa"
+      excerpt: "hat was delivered for **`p3f-streaming-verifier`** (bundle write scope: `streaming.project.md` + `docs/LOOP_ORCHESTRATION_SPEC.m"
+  sensitivity: internal
+  confidence: high
+  inference_flags: ["[INFERENCE] task completion is self-reported by the agent; no in-transcript tool_result corroborates the claimed changes"]
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-negctrl-conversational-diagnosis"
+  claim: "The negative-control session 830f6693 is a pure conversational SSH/git-auth diagnosis with no file edits, no workflow harness, and no captured tool calls, confirming non-workflow Cursor sessions are advisory chat and the mechanism/craft findings do not generalize to them."
+  class: mechanism
+  anchors:
+    - ref: "cursor:~-Documents-dot-agents-dot-agents-code-workspace/830f6693-0b38-471c-8b99-13e754db7bde:830f6693-0b38-471c-8b99-13e754db7bde#L1"
+      digest: "sha256:0723ed3fd525f2a6a0ba10149bf7b799307e789ba379f80c643701b6b5140597"
+      excerpt: "<user_query> @~/.cursor/projects/~-Documents-dot-agents-dot-agents-code-workspace/terminals/8.txt:390-396 </user_query>"
+    - ref: "cursor:~-Documents-dot-agents-dot-agents-code-workspace/830f6693-0b38-471c-8b99-13e754db7bde:830f6693-0b38-471c-8b99-13e754db7bde#L2"
+      digest: "sha256:4bf83c20e048c26a41c984b6a579a68a0e7e2588d99a78aec7e22c1988afa418"
+      excerpt: "epted (`Permission denied (publickey)`). ### Why it often happens here The clone path is under **`/home/<user>/...`**, which usually means this ran **on a r"
+      excerpt_note: "home username redacted post-hoc (R3); digest remains over the RAW line, so digest-verify tolerates this documented delta"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []
+
+- item_id: "cursor-negctrl-refactor-for-sonar"
+  claim: "In negative-control session 6ec974a3 the agent refactors verify_totp_and_generate_tokens into helper functions specifically to lower cognitive complexity for SonarQube rule python:S3358, showing Sonar-rule-driven refactoring craft outside the workflow harness."
+  class: craft
+  anchors:
+    - ref: "cursor:private-tmp-payout-submodule-backup-client-se/6ec974a3-5254-4662-85e4-da99ce1c43c7:6ec974a3-5254-4662-85e4-da99ce1c43c7#L11"
+      digest: "sha256:342d851e28c16186767f6ecff31a2689e0b347aca750237fe354e289d4dfe73a"
+      excerpt: "wer its cognitive complexity while preserving behavior."
+    - ref: "cursor:private-tmp-payout-submodule-backup-client-se/6ec974a3-5254-4662-85e4-da99ce1c43c7:6ec974a3-5254-4662-85e4-da99ce1c43c7#L13"
+      digest: "sha256:4d32fae5558987ca2e07ac8b4c7e876100a3df70055ebe893d0f58aeae072815"
+      excerpt: "ed - **Refactored logic into helpers** to reduce cognitive complexity of `verify_totp_and_generate_tokens`: ```12:574:/private/tmp/<path> async def _verif"
+  sensitivity: internal
+  confidence: high
+  inference_flags: []
+  rubric_version: null
+  related_prior: []

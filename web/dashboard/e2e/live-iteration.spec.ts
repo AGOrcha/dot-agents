@@ -37,6 +37,9 @@ const PROPAGATION_BUDGET_MS = 2000
 const EVENTS_PATH = '/api/v1/observability/events'
 const HEALTH_PATH = '/api/v1/observability/health'
 
+/** The SSE event topic (and frame data type) a scored iteration publishes. */
+const SCORED_TOPIC = 'iteration.scored'
+
 const READY =
   process.env.E2E_LIVE_ITERATION === '1' &&
   !!process.env.E2E_DASHBOARD_URL &&
@@ -121,17 +124,20 @@ test.describe('t12 live iteration → dashboard within the 2s budget', () => {
     // Subscribe exactly as the SPA's createEventStream does: a browser
     // EventSource against the §3.7 endpoint, stamping each frame's receipt
     // time so the propagation window is measured client-side.
-    await page.evaluate((eventsPath) => {
-      const state: LiveState = { received: [] }
-      window.__liveSSE = state
-      const es = new EventSource(eventsPath)
-      state.es = es
-      es.addEventListener('iteration.scored', (event) => {
-        // `in`-narrowing keeps event.data checked (MessageEvent-only field).
-        const data = 'data' in event ? String(event.data) : ''
-        state.received.push({ at: Date.now(), topic: 'iteration.scored', data })
-      })
-    }, EVENTS_PATH)
+    await page.evaluate(
+      ({ eventsPath, topic }) => {
+        const state: LiveState = { received: [] }
+        window.__liveSSE = state
+        const es = new EventSource(eventsPath)
+        state.es = es
+        es.addEventListener(topic, (event) => {
+          // `in`-narrowing keeps event.data checked (MessageEvent-only field).
+          const data = 'data' in event ? String(event.data) : ''
+          state.received.push({ at: Date.now(), topic, data })
+        })
+      },
+      { eventsPath: EVENTS_PATH, topic: SCORED_TOPIC },
+    )
 
     // Wait for the stream to OPEN before emitting, so the broker has registered
     // this subscriber (an event published before then would fan out to nobody).
@@ -154,10 +160,10 @@ test.describe('t12 live iteration → dashboard within the 2s budget', () => {
 
     expect(received.length, 'expected an iteration.scored frame within the budget').toBeGreaterThan(0)
     const frame = received[0]
-    expect(frame.topic).toBe('iteration.scored')
+    expect(frame.topic).toBe(SCORED_TOPIC)
 
     const payload = JSON.parse(frame.data)
-    expect(payload.type).toBe('iteration.scored')
+    expect(payload.type).toBe(SCORED_TOPIC)
     expect(payload.payload.iteration).toBe(iterN)
     expect(payload.payload.session_id).toBe(sessionId)
   })

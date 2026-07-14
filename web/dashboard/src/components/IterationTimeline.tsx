@@ -50,9 +50,8 @@ export default function IterationTimeline({
   const ordered = [...iterations].sort((a, b) => a.iteration - b.iteration)
 
   return (
-    <div
+    <section
       data-testid="iteration-timeline"
-      role="group"
       aria-label="Iteration timeline"
       className={`flex flex-wrap items-end gap-1 ${className}`}
     >
@@ -74,6 +73,6 @@ export default function IterationTimeline({
           />
         )
       })}
-    </div>
+    </section>
   )
 }

@@ -1,0 +1,8 @@
+schema_version: 1
+id: craft-doc-stable-location
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: ""
+observation: RESOLVED-INTO-TASK 2026-07-13 (no longer deferred to archive time). Final location DECIDED — the tailored operational craft reference goes to the tracked stable home docs/full-loop-pipeline-craft.md (survives plan archive; docs/ is git-tracked, the skill dir is gitignored machine state); the plan-scoped craft/full-loop-craft.md STAYS as the evidence-linked design-spec record. Captured as canonical task craft-reference-stable-relocation on this plan with the full repoint surface (pipeline-architect SKILL.md 3+12 and 5 instruction files line 4), the two-version operational-vs-evidence split, R4 context-budget/compaction section (research/articles-evaluation-context-engineering-and-foldback-design.md), and a coordination note that pipeline-architect is untracked machine state needing a tracked scaffold source (agent-ops-hardening scaffold-home-skill-sync-mechanism).
+classification: small
+routed_to: plan_summary:transcript-analysis-and-pipeline-craft
+created_at: "2026-07-13T06:22:34Z"

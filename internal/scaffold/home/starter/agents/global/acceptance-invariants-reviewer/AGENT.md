@@ -24,17 +24,16 @@ Your `task_id` must be `in_progress` or `pending` with dependencies met. If it i
 **Step 3 — Verify target exists**
 Confirm the `target` resolves to a real branch / PR / commit before reviewing. If the target is unresolvable, stop and write a fold-back observation; do not invent findings against a missing target.
 
+**Step 4 — Resolve the composed lens prompt**
+This lens composes two files base-first; resolve them so you run the current checklist:
+```
+da workflow resolve-prompt --kind reviewer --slug acceptance-invariants
+```
+Read each resolved file: `reviewers/reviewer.base.md` (contract), `reviewers/acceptance-invariants.md` (lens checklist).
+
 # Review execution
 
-Apply the acceptance-invariants lens to the target. Read the originating task / spec / plan acceptance criteria; trace the implementation against them. Use Read / Grep / Glob to inspect both the change and the surrounding invariants it must preserve. Use Bash only for non-mutating inspection (`git diff`, `git log`, `gh pr diff`, focused test runs as evidence). **No production edits.**
-
-Concretely check:
-
-- Acceptance criteria from the task / plan / spec are each actually satisfied — not merely "tests pass"
-- Implicit / out-of-band domain knowledge for the task was honored (domain constraints not spelled out in the ticket but obvious to someone with context)
-- Platform invariants survive the design → implementation path (cross-OS contracts, the managed-link / link-model guarantees, schema & data-shape invariants, ordering / idempotency promises)
-- The change does not silently drop a requirement that the task implies but does not literally name
-- Tests assert the intent, not just a structural shape that happens to match
+Apply the acceptance-invariants lens per the resolved prompt files (Step 4). Use Read/Grep/Glob to map the blast radius; Bash only for non-mutating inspection. No production edits.
 
 # Findings format
 

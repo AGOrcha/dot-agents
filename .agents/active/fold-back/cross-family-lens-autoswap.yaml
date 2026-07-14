@@ -1,0 +1,8 @@
+schema_version: 1
+id: cross-family-lens-autoswap
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: pareto-live-waves
+observation: REDESIGNED 2026-07-13 (user steer + research) — this is a bug / incomplete design, not merely a deferral. Automatic opposite-family lens selection is acceptable, BUT it must key on (a) the MODEL REGISTRY of what is actually available to this user/setup, and (b) EVAL-MEASURED capability and failure-mode COMPLEMENTARITY against the executor — NOT the declared model_family STRING alone. Model capabilities overlap but differ slightly, so 'opposite family' must resolve to the available model whose measured failure mode most complements the executor (GPT-family hallucinate-confident-wrong vs Claude-family refuse/give-up, research context-rot PART 7), scored against the capability eval. Role labels do not create diversity and inter-agent agreement is a diversity-failure signal (research long-horizon-prompting, R5). Sibling of agent-ops-hardening cross-family-gate-not-fail-closed-specialized — both pick a genuinely-diverse adversary from available models by capability and share the fresh-context emulation fallback when no complementary model exists. Anchor research/articles-evaluation-context-engineering-and-foldback-design.md R2/R5. The lens-map operational MUST-pin note stands until this lands.
+classification: small
+routed_to: task_note:transcript-analysis-and-pipeline-craft/pareto-live-waves
+created_at: "2026-07-13T06:22:34Z"

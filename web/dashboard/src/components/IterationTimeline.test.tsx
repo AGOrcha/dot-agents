@@ -18,7 +18,7 @@ const UNSORTED: TimelineIteration[] = [
 ]
 
 describe('IterationTimeline', () => {
-  it('renders the empty-state placeholder and no group when there are no iterations', () => {
+  it('renders the empty-state placeholder and no timeline when there are no iterations', () => {
     render(<IterationTimeline iterations={[]} />)
     expect(screen.getByTestId('timeline-empty')).toHaveTextContent(
       'No iterations recorded for this run yet.',
@@ -28,6 +28,7 @@ describe('IterationTimeline', () => {
 
   it('renders one tick per iteration with its band, sorted ascending regardless of input order', () => {
     render(<IterationTimeline iterations={UNSORTED} />)
+    expect(screen.getByRole('region', { name: 'Iteration timeline' })).toBeInTheDocument()
     const ticks = screen.getAllByTestId(/^timeline-tick-/)
     expect(ticks.map((t) => t.getAttribute('data-testid'))).toEqual([
       'timeline-tick-1',

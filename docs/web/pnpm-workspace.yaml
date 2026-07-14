@@ -1,0 +1,12 @@
+# Standalone pnpm project boundary for docs/web. The repo root has its own
+# pnpm-workspace.yaml (scoped to web/dashboard) — this file stops pnpm's
+# upward workspace-root search here so docs/web gets its own local
+# pnpm-lock.yaml/node_modules instead of joining the root workspace.
+#
+# Native/build-script deps this project actually needs built (matches what
+# `npm install` ran implicitly before the pnpm migration): esbuild (miniflare
+# dev tooling), sharp (image processing), workerd (miniflare/wrangler runtime).
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

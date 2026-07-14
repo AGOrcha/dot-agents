@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../../../../schemas/workflow-iter-log.schema.json
+schema_version: 2
+iteration: 69
+date: "2026-07-09"
+wave: agent-ops-hardening
+task_id: p4-fanout-gate-enforcement
+commit: 97358a95a9bd586c6ded287ebbd84e59b70d479e
+files_changed: 58
+lines_added: 1303
+lines_removed: 850
+checkpoint_at: "2026-07-09T03:16:30Z"
+impl:
+    item: "t9-sdk-materializeview-readsfrom-gate: wire reads_from registry gate into SDK.MaterializeView"
+    summary: Added a ReadsFromGate parameter to SDK.MaterializeView (satisfied structurally by *registry.Registry.ValidateReadsFrom) so the §11.2 migration_only rule is enforced on every materialize_view call, not just at adapter-load time (closes the gap codex flagged in t4 PR #172). Fail-closed on a nil gate. Added an integration test proving a migration_only-reads_from view is rejected before the runner runs or anything writes, and that a legitimate view still succeeds; mutation-verified by temporarily removing the gate.ValidateReadsFrom call and confirming the rejection tests fail, then restoring to green. PR #360 open base master, head feat/t9-sdk-readsfrom-gate; stopped before merge per delegation contract.
+    scope_note: on-target
+    feedback_goal: Does SDK.MaterializeView now reject a view whose reads_from names a migration_only adapter (and accept a legitimate one), and does removing the gate.ValidateReadsFrom call make the rejection tests fail (mutation-verified)?
+    retries: 0
+    focused_tests_added: 3
+    focused_tests_pass: true
+    self_assessment:
+        one_item_only: true
+        aligned_with_canonical_tasks: true
+        persisted_via_workflow_commands: "yes"
+        no_destructive_commands: true
+        scoped_tests_to_write_scope: true
+verifiers: []
+review:
+    phase_1_decision: ""
+    phase_2_decision: ""
+    overall_decision: ""
+    escalation_reason: ""
+    reviewer_notes: ""
+    decision_artifact: .agents/active/verification/p4-fanout-gate-enforcement/review-decision.yaml
+    verify_record_appended: false

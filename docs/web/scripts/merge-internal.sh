@@ -2,7 +2,7 @@
 # Post-build merge step (Option A): assemble the single asset directory the
 # Worker serves.
 #
-# The two-pass `npm run build` produces:
+# The two-pass `pnpm run build` produces:
 #   dist/           public only — with the CLEAN public pagefind search index
 #   dist-internal/  everything  — adds dist-internal/internal/{lessons,specs,proposals}/
 #                                 and a pagefind index that INCLUDES internal titles
@@ -13,7 +13,7 @@
 # titles never leak into the public search index. The Worker (src/worker.js)
 # gates /internal/* behind a Cloudflare Access JWT at request time.
 #
-# Idempotent — safe to run repeatedly. Runs from `npm run build:merged` /
+# Idempotent — safe to run repeatedly. Runs from `pnpm run build:merged` /
 # the deploy workflow after the Astro build.
 set -euo pipefail
 
@@ -29,7 +29,7 @@ if [ ! -d "${DIST}" ]; then
   exit 1
 fi
 if [ ! -d "${SRC_INTERNAL}" ]; then
-  echo "merge-internal: ${SRC_INTERNAL} not found — run the internal build pass (npm run build:internal) first" >&2
+  echo "merge-internal: ${SRC_INTERNAL} not found — run the internal build pass (pnpm run build:internal) first" >&2
   exit 1
 fi
 

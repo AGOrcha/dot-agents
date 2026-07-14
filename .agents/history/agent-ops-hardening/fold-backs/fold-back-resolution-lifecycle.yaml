@@ -1,0 +1,10 @@
+schema_version: 1
+id: fold-back-resolution-lifecycle
+plan_id: agent-ops-hardening
+task_id: ""
+observation: 'Fold-back artifacts need an explicit lifecycle after routing: pending -> consumed|rejected (with resolution metadata), then archive out of .agents/active. Add a CLI resolve/reject surface that verifies the durable route, updates status/resolution evidence, and archives plan-scoped observations to .agents/history/<plan-id>/fold-back/<id>.yaml and task-scoped observations to .agents/history/<plan-id>/fold-back/<task-id>/<id>.yaml. Plan archive and drift/health should not leave terminal fold-backs active.'
+classification: proposal
+routed_to: proposal:obs-fold-back-resolution-lifecycle.md
+created_at: "2026-07-13T03:12:06Z"
+resolution: 'CONSUMED 2026-07-13 — proposal obs-fold-back-resolution-lifecycle.md is filed and is the durable record (awaits da review); staging archived. NOTE do NOT run da workflow fold-back update on a proposal-routed fold-back — it overwrites the proposal body with the new observation.'
+path_note: 'The observation above prescribes the SINGULAR history/<plan-id>/fold-back/ path; normalize to PLURAL fold-backs/ (routing.md + all existing archives use fold-backs/). Implement the CLI against the plural path.'

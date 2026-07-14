@@ -99,6 +99,16 @@ function formatUpdate(ts: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? ts : d.toLocaleString()
 }
 
+function ariaSortValue(active: boolean, sortDir: SortDir): 'ascending' | 'descending' | 'none' {
+  if (!active) return 'none'
+  return sortDir === 'asc' ? 'ascending' : 'descending'
+}
+
+function sortIndicator(active: boolean, sortDir: SortDir): string {
+  if (!active) return ''
+  return sortDir === 'asc' ? '▲' : '▼'
+}
+
 interface RunsGridProps {
   runs: readonly R2DashboardRunSessionDTO[]
   initialSortKey?: SortKey
@@ -156,7 +166,7 @@ export default function RunsGrid({
                   <th
                     key={col.key}
                     scope="col"
-                    aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    aria-sort={ariaSortValue(active, sortDir)}
                     className={`px-3 py-2 font-medium ${col.numeric ? 'text-right' : 'text-left'}`}
                   >
                     <button
@@ -167,7 +177,7 @@ export default function RunsGrid({
                     >
                       {col.label}
                       <span aria-hidden="true" className="text-xs">
-                        {active ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                        {sortIndicator(active, sortDir)}
                       </span>
                     </button>
                   </th>
