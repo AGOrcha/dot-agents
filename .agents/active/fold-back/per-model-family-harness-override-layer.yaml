@@ -1,0 +1,8 @@
+schema_version: 1
+id: per-model-family-harness-override-layer
+plan_id: config-transitive-layering
+task_id: ""
+observation: Per-model-family harness-profile override layer — LangChain Deep Agents (research Part L.5, measured +10-20pt tau2-bench) ships a declarative override layer keyed by model/provider (system-prompt affixes, tool inclusion+naming, middleware, subagent config) that applies on model swap with an unchanged call-site. Our stage_profiles today pin model+model_family+prompt-set PER stage-profile, so Codex-specific tool aliasing (apply_patch, execute→shell_command) and Opus-specific prompt blocks (tool_usage, tool_result_reflection) must be duplicated into every profile rather than declared once per model-family and composed. Proposal — add a reusable per-model-family override layer to the pipeline-architect/config surface. Consumer — pipeline-architect skill design instruction plus config-transitive-layering spec. Evidence — research/articles/vtrivedy-deepagents-per-model-harness-profiles.md and eval Part L.5. Gated on open-Q whether a model-family layer earns the schema surface.
+classification: proposal
+routed_to: proposal:obs-per-model-family-harness-override-layer.md
+created_at: "2026-07-14T00:06:20Z"

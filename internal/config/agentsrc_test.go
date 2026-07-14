@@ -474,6 +474,70 @@ func TestMergeGenerateAgentsRCPreservesExtraFields(t *testing.T) {
 	}
 }
 
+// TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations proves
+// install --generate's repo-facing contract: re-generating over an existing
+// on-disk .agentsrc.json that carries pre-fix, over-captured global-scope
+// declarations (skills/agents/rules/hooks/mcp/settings all folding in
+// "global") REPLACES those scan-derived fields with the fresh project-only
+// scan rather than unioning onto the stale set — so a stale committed
+// manifest is cleaned up by the very next `da install --generate`, with no
+// separate prune step needed.
+func TestInstallGenerateOverStaleManifestDropsGlobalOverDeclarations(t *testing.T) {
+	home := agentsHomeFixture(t)
+	t.Setenv("AGENTS_HOME", home)
+
+	// Simulate a stale, pre-fix-generated manifest: it declared the global
+	// entries alongside the project ones for every scoped field.
+	existing := &AgentsRC{
+		Version:  1,
+		Project:  testProject,
+		Skills:   []string{"skill-global", "skill-proj"},
+		Rules:    []string{"global", "project"},
+		Agents:   []string{"agent-global", "agent-proj"},
+		Hooks:    StringsOrBool{All: true},
+		MCP:      StringsOrBool{Names: []string{"global-mcp-server", "server-a", "server-b"}},
+		Settings: true,
+		Sources:  []Source{{Type: testSourceTypeLocal}},
+	}
+
+	generated, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	out := MergeGenerateAgentsRC(existing, generated)
+
+	if !reflect.DeepEqual(out.Skills, []string{"skill-proj"}) {
+		t.Errorf("Skills: got %v, want [skill-proj] (stale global entry must be dropped)", out.Skills)
+	}
+	if !reflect.DeepEqual(out.Agents, []string{"agent-proj"}) {
+		t.Errorf("Agents: got %v, want [agent-proj] (stale global entry must be dropped)", out.Agents)
+	}
+	if !reflect.DeepEqual(out.Rules, []string{"project"}) {
+		t.Errorf("Rules: got %v, want [project] (stale global entry must be dropped)", out.Rules)
+	}
+	gotMCP := append([]string(nil), out.MCP.Names...)
+	sort.Strings(gotMCP)
+	wantMCP := []string{"server-a", "server-b"}
+	if !reflect.DeepEqual(gotMCP, wantMCP) {
+		t.Errorf("MCP.Names: got %v, want %v (stale global server must be dropped)", gotMCP, wantMCP)
+	}
+	if out.MCP.All {
+		t.Error("MCP.All should be false after regenerate")
+	}
+	gotHooks := append([]string(nil), out.Hooks.Names...)
+	sort.Strings(gotHooks)
+	wantHooks := []string{testHookPostToolUse, testHookPreToolUse}
+	if !reflect.DeepEqual(gotHooks, wantHooks) {
+		t.Errorf("Hooks.Names: got %v, want %v (stale All:true must be replaced by the project scan)", gotHooks, wantHooks)
+	}
+	if out.Hooks.All {
+		t.Error("Hooks.All should be false after regenerate — project scope only has named events")
+	}
+	if !out.Settings {
+		t.Error("Settings should stay true — driven by the project-scoped cursor.json, not the stale global declaration")
+	}
+}
+
 // ── GenerateAgentsRC ─────────────────────────────────────────────────────────
 
 // agentsHomeFixture builds a minimal ~/.agents/ tree under tmp and returns its path.
@@ -497,16 +561,19 @@ func agentsHomeFixture(t *testing.T) string {
 		}
 	}
 
-	// Skills: global/skill-global, myproject/skill-proj
+	// Skills: global/skill-global (global-only, must NOT be captured),
+	// myproject/skill-proj (project-scoped, must be captured)
 	writeFile(filepath.Join(mkdirAll("skills", "global", "skill-global"), testSkillMarkerFile), "# skill")
 	writeFile(filepath.Join(mkdirAll("skills", testProject, "skill-proj"), testSkillMarkerFile), "# skill")
 	// File (not dir) in skills — should be ignored
 	writeFile(filepath.Join(home, "skills", "global", "not-a-skill.txt"), "ignore me")
 
-	// Agents: global/agent-global
+	// Agents: global/agent-global (global-only, must NOT be captured),
+	// myproject/agent-proj (project-scoped, must be captured)
 	writeFile(filepath.Join(mkdirAll("agents", "global", "agent-global"), "AGENT.md"), "# agent")
+	writeFile(filepath.Join(mkdirAll("agents", testProject, "agent-proj"), "AGENT.md"), "# agent")
 
-	// Rules: global file + project file
+	// Rules: global file (must NOT be captured) + project file (must be captured)
 	writeFile(filepath.Join(home, "rules", "global", "base.md"), "# rule")
 	writeFile(filepath.Join(home, "rules", testProject, "custom.md"), "# rule")
 
@@ -527,8 +594,11 @@ func agentsHomeFixture(t *testing.T) string {
 		}
 	}`)
 
-	// Settings: cursor.json in global scope
+	// Settings: cursor.json in BOTH global (must NOT be captured on its own)
+	// and project (must be captured) scope, so TestGenerateAgentsRCSettings
+	// proves the project file — not the global one — drives Settings=true.
 	writeFile(filepath.Join(home, "settings", "global", "cursor.json"), "{}")
+	writeFile(filepath.Join(home, "settings", testProject, "cursor.json"), "{}")
 
 	return home
 }
@@ -542,10 +612,37 @@ func TestGenerateAgentsRCSkills(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	sort.Strings(rc.Skills)
-	want := []string{"skill-global", "skill-proj"}
+	// Project-scope only: skill-global exists on disk but must not appear —
+	// it auto-resolves at the user level for every project regardless of
+	// manifest declaration (see GenerateAgentsRC doc comment).
+	want := []string{"skill-proj"}
 	if !reflect.DeepEqual(rc.Skills, want) {
 		t.Errorf("Skills: got %v, want %v", rc.Skills, want)
+	}
+}
+
+// TestGenerateAgentsRCSkillsGlobalOnlyNotCaptured covers a project with NO
+// project-scoped skill at all: a global-only skill must not leak into the
+// generated manifest.
+func TestGenerateAgentsRCSkillsGlobalOnlyNotCaptured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	globalSkill := filepath.Join(home, "skills", "global", "skill-global")
+	if err := os.MkdirAll(globalSkill, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalSkill, testSkillMarkerFile), []byte("# skill"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if len(rc.Skills) != 0 {
+		t.Errorf("Skills: got %v, want none (global-only skill must not be captured)", rc.Skills)
 	}
 }
 
@@ -558,8 +655,36 @@ func TestGenerateAgentsRCAgents(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !reflect.DeepEqual(rc.Agents, []string{"agent-global"}) {
-		t.Errorf("Agents: got %v, want [agent-global]", rc.Agents)
+	// Project-scope only: agent-global exists on disk but must not appear —
+	// it auto-resolves at the user level for every project regardless of
+	// manifest declaration (see GenerateAgentsRC doc comment).
+	if !reflect.DeepEqual(rc.Agents, []string{"agent-proj"}) {
+		t.Errorf("Agents: got %v, want [agent-proj]", rc.Agents)
+	}
+}
+
+// TestGenerateAgentsRCAgentsGlobalOnlyNotCaptured covers a project with NO
+// project-scoped agent at all: a global-only agent must not leak into the
+// generated manifest.
+func TestGenerateAgentsRCAgentsGlobalOnlyNotCaptured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	globalAgent := filepath.Join(home, "agents", "global", "agent-global")
+	if err := os.MkdirAll(globalAgent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalAgent, "AGENT.md"), []byte("# agent"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if len(rc.Agents) != 0 {
+		t.Errorf("Agents: got %v, want none (global-only agent must not be captured)", rc.Agents)
 	}
 }
 
@@ -572,25 +697,34 @@ func TestGenerateAgentsRCRules(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	sort.Strings(rc.Rules)
-	want := []string{"global", "project"}
-	if !reflect.DeepEqual(rc.Rules, want) {
-		t.Errorf("Rules: got %v, want %v", rc.Rules, want)
+	// Project-scope only: the global rule file must not appear.
+	if !reflect.DeepEqual(rc.Rules, []string{"project"}) {
+		t.Errorf("Rules: got %v, want [project]", rc.Rules)
 	}
 }
 
-func TestGenerateAgentsRCRulesGlobalOnly(t *testing.T) {
+// TestGenerateAgentsRCRulesGlobalOnlyNotCaptured covers a project with NO
+// project-scoped rule file: a global-only rule file must not leak into the
+// generated manifest (it auto-resolves at the user level for every project).
+func TestGenerateAgentsRCRulesGlobalOnlyNotCaptured(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
-	// No project-scoped rules created
+
+	globalRules := filepath.Join(home, "rules", "global")
+	if err := os.MkdirAll(globalRules, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalRules, "base.md"), []byte("# rule"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	rc, err := GenerateAgentsRC(testProject, t.TempDir())
 	if err != nil {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !reflect.DeepEqual(rc.Rules, []string{"global"}) {
-		t.Errorf("Rules: got %v, want [global]", rc.Rules)
+	if len(rc.Rules) != 0 {
+		t.Errorf("Rules: got %v, want none (global-only rule must not be captured)", rc.Rules)
 	}
 }
 
@@ -633,7 +767,7 @@ func TestGenerateAgentsRCHooksCanonicalBundlesEnableAll(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
-	bundleDir := filepath.Join(home, "hooks", "global", "session-orient")
+	bundleDir := filepath.Join(home, "hooks", testProject, "session-orient")
 	if err := os.MkdirAll(bundleDir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -646,14 +780,41 @@ func TestGenerateAgentsRCHooksCanonicalBundlesEnableAll(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 	if !rc.Hooks.All {
-		t.Fatalf("Hooks.All = false, want true when canonical hook bundles exist; got %+v", rc.Hooks)
+		t.Fatalf("Hooks.All = false, want true when project-scoped canonical hook bundles exist; got %+v", rc.Hooks)
 	}
 	if len(rc.Hooks.Names) != 0 {
 		t.Fatalf("Hooks.Names = %v, want empty when Hooks.All is true", rc.Hooks.Names)
 	}
 }
 
-func TestGenerateAgentsRCHooksLegacySettingsFallBackToGlobal(t *testing.T) {
+// TestGenerateAgentsRCHooksCanonicalBundlesGlobalOnlyNotCaptured covers a
+// project with NO project-scoped hook bundle: a global-only canonical hook
+// bundle must not leak into the generated manifest.
+func TestGenerateAgentsRCHooksCanonicalBundlesGlobalOnlyNotCaptured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	bundleDir := filepath.Join(home, "hooks", "global", "session-orient")
+	if err := os.MkdirAll(bundleDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bundleDir, "HOOK.yaml"), []byte("name: session-orient\nwhen: session_start\nrun:\n  command: ./orient.sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+	if rc.Hooks.IsEnabled() {
+		t.Errorf("Hooks: got %+v, want disabled (global-only bundle must not be captured)", rc.Hooks)
+	}
+}
+
+// TestGenerateAgentsRCHooksLegacySettingsGlobalOnlyNotCaptured covers a
+// project with NO project-scoped settings hooks: global-only legacy
+// claude-code.json hooks must not leak into the generated manifest.
+func TestGenerateAgentsRCHooksLegacySettingsGlobalOnlyNotCaptured(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -677,11 +838,8 @@ func TestGenerateAgentsRCHooksLegacySettingsFallBackToGlobal(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	got := rc.Hooks.Names
-	sort.Strings(got)
-	want := []string{"PreToolUse", "Stop"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("Hooks.Names: got %v, want %v", got, want)
+	if rc.Hooks.IsEnabled() {
+		t.Errorf("Hooks: got %+v, want disabled (global-only legacy settings must not be captured)", rc.Hooks)
 	}
 }
 
@@ -705,7 +863,10 @@ func TestGenerateAgentsRCMCPNamedServers(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
+// TestGenerateAgentsRCMCPGlobalOnlyNotCaptured covers a project with NO
+// project-scoped MCP config: a global-only MCP server must not leak into
+// the generated manifest.
+func TestGenerateAgentsRCMCPGlobalOnlyNotCaptured(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -719,8 +880,8 @@ func TestGenerateAgentsRCMCPFallsBackToGlobal(t *testing.T) {
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
-		t.Errorf("MCP.Names: got %v, want [global-srv]", rc.MCP.Names)
+	if rc.MCP.IsEnabled() {
+		t.Errorf("MCP: got %+v, want disabled (global-only server must not be captured)", rc.MCP)
 	}
 }
 
@@ -754,7 +915,9 @@ func TestGenerateAgentsRCMCPReadsDocumentedMCPServersShape(t *testing.T) {
 	}
 }
 
-func TestGenerateAgentsRCMCPFallsBackToGlobalDocumentedMCPServersShape(t *testing.T) {
+// TestGenerateAgentsRCMCPGlobalOnlyNotCapturedDocumentedMCPServersShape is
+// the mcpServers-shape sibling of TestGenerateAgentsRCMCPGlobalOnlyNotCaptured.
+func TestGenerateAgentsRCMCPGlobalOnlyNotCapturedDocumentedMCPServersShape(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
@@ -771,8 +934,8 @@ func TestGenerateAgentsRCMCPFallsBackToGlobalDocumentedMCPServersShape(t *testin
 		t.Fatalf(errFmtGenerateRC, err)
 	}
 
-	if !reflect.DeepEqual(rc.MCP.Names, []string{"global-srv"}) {
-		t.Errorf("MCP.Names: got %v, want [global-srv]", rc.MCP.Names)
+	if rc.MCP.IsEnabled() {
+		t.Errorf("MCP: got %+v, want disabled (global-only server must not be captured)", rc.MCP)
 	}
 }
 
@@ -822,7 +985,32 @@ func TestGenerateAgentsRCSettings(t *testing.T) {
 	}
 
 	if !rc.Settings {
-		t.Error("Settings should be true when cursor.json exists")
+		t.Error("Settings should be true when the project-scoped cursor.json exists")
+	}
+}
+
+// TestGenerateAgentsRCSettingsGlobalOnlyNotCaptured covers a project with NO
+// project-scoped cursor.json: a global-only cursor.json must not flip
+// Settings to true.
+func TestGenerateAgentsRCSettingsGlobalOnlyNotCaptured(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	globalSettings := filepath.Join(home, "settings", "global")
+	if err := os.MkdirAll(globalSettings, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(globalSettings, "cursor.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rc, err := GenerateAgentsRC(testProject, t.TempDir())
+	if err != nil {
+		t.Fatalf(errFmtGenerateRC, err)
+	}
+
+	if rc.Settings {
+		t.Error("Settings should be false — a global-only cursor.json must not be captured")
 	}
 }
 
@@ -864,8 +1052,8 @@ func TestGenerateAgentsRCIgnoresNonDirectorySkills(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 
-	// Plain file in skills/global — should be ignored
-	skillsDir := filepath.Join(home, "skills", "global")
+	// Plain file in skills/<project> — should be ignored
+	skillsDir := filepath.Join(home, "skills", testProject)
 	os.MkdirAll(skillsDir, 0755)
 	os.WriteFile(filepath.Join(skillsDir, "not-a-skill"), []byte("text"), 0644)
 
@@ -1193,7 +1381,24 @@ func TestSourceMergeKeyUnknownType(t *testing.T) {
 	}
 }
 
-func TestDetectHookEvents_GlobalYAMLBundleEnablesAll(t *testing.T) {
+func TestDetectHookEvents_ProjectYAMLBundleEnablesAll(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "hooks", "myproj", "b1")
+	os.MkdirAll(dir, 0755)
+	os.WriteFile(filepath.Join(dir, "HOOK.yaml"), []byte("name: b1\n"), 0644)
+	got, err := detectHookEvents(home, "myproj")
+	if err != nil {
+		t.Fatalf("detectHookEvents: %v", err)
+	}
+	if !got.All {
+		t.Errorf("expected All=true with project-scoped yaml bundle, got %+v", got)
+	}
+}
+
+// TestDetectHookEvents_GlobalYAMLBundleNotCaptured proves a global-only
+// bundle (no project-scoped bundle) does not enable Hooks — it auto-resolves
+// at the user level for every project regardless of manifest declaration.
+func TestDetectHookEvents_GlobalYAMLBundleNotCaptured(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, "hooks", "global", "b1")
 	os.MkdirAll(dir, 0755)
@@ -1202,8 +1407,8 @@ func TestDetectHookEvents_GlobalYAMLBundleEnablesAll(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detectHookEvents: %v", err)
 	}
-	if !got.All {
-		t.Errorf("expected All=true with global yaml bundle, got %+v", got)
+	if got.IsEnabled() {
+		t.Errorf("expected disabled with global-only yaml bundle, got %+v", got)
 	}
 }
 
@@ -1322,8 +1527,8 @@ func TestDetectRuleScopes_OnlyOtherExt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detectRuleScopes: %v", err)
 	}
-	if len(got) != 1 || got[0] != "global" {
-		t.Errorf("expected only [global], got %v", got)
+	if len(got) != 0 {
+		t.Errorf("expected none (no .md/.mdc/.txt project rule file), got %v", got)
 	}
 }
 
@@ -1333,8 +1538,8 @@ func TestDetectRuleScopes_MissingDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detectRuleScopes: %v", err)
 	}
-	if len(got) != 1 || got[0] != "global" {
-		t.Errorf("expected only [global], got %v", got)
+	if len(got) != 0 {
+		t.Errorf("expected none (no project rules dir), got %v", got)
 	}
 }
 
@@ -1559,6 +1764,8 @@ func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
     "verifier": {
       "cli-runner": {
         "label": "CLI runner",
+        "model": "claude-opus-4-8",
+        "model_family": "claude",
         "prompt_files": [
           "verifiers/verifier.base.md",
           {"source": "acme", "path": "verifiers/cli-runner.md", "version": "v2"}
@@ -1577,7 +1784,7 @@ func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
 		t.Fatalf("stage_profiles leaked into ExtraFields instead of the typed field")
 	}
 	prof := rc.StageProfiles["verifier"]["cli-runner"]
-	if prof.Label != "CLI runner" || len(prof.PromptFiles) != 2 {
+	if prof.Label != "CLI runner" || prof.Model != "claude-opus-4-8" || prof.ModelFamily != "claude" || len(prof.PromptFiles) != 2 {
 		t.Fatalf("verifier profile decode wrong: %+v", prof)
 	}
 	if prof.PromptFiles[0].Source != "" || prof.PromptFiles[0].Path != "verifiers/verifier.base.md" {
@@ -1600,8 +1807,9 @@ func TestStageProfiles_NewKeyRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(out, &rc2); err != nil {
 		t.Fatalf("re-unmarshal: %v", err)
 	}
-	if rc2.StageProfiles["verifier"]["cli-runner"].PromptFiles[1].Source != "acme" {
-		t.Fatalf("round-trip lost typed prompt provenance: %+v", rc2.StageProfiles)
+	roundTrip := rc2.StageProfiles["verifier"]["cli-runner"]
+	if roundTrip.PromptFiles[1].Source != "acme" || roundTrip.Model != "claude-opus-4-8" || roundTrip.ModelFamily != "claude" {
+		t.Fatalf("round-trip lost profile model route or prompt provenance: %+v", rc2.StageProfiles)
 	}
 }
 

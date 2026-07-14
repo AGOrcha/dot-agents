@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -764,4 +765,346 @@ func TestShebangRecipe_Acceptance(t *testing.T) {
 	if !strings.HasPrefix(out, acceptanceVersionPfx) {
 		t.Errorf("expected output starting with %q, got %q", acceptanceVersionPfx, out)
 	}
+}
+
+// ----- mechanical loop (for … in <glob> … end) tests -----
+
+// touchFiles creates empty files under dir and returns dir. Used to build a
+// deterministic glob iteration set for loop tests.
+func touchFiles(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestRunRecipe_ForLoopIteratesGlobInSortedOrder(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "b.md", "a.md", "c.txt") // only *.md should match
+	t.Setenv("DIR", dir)
+	f := writeTempRecipe(t, "for F in ${DIR}/*.md\nkg ingest ${F}\nend\nkg warm\n")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	wantCalls := [][]string{
+		{"kg", "ingest", filepath.Join(dir, "a.md")},
+		{"kg", "ingest", filepath.Join(dir, "b.md")},
+		{"kg", "warm"},
+	}
+	assertCallSlice(t, rec.calls, wantCalls)
+}
+
+func TestRunRecipe_ForLoopEmptyGlobRunsBodyZeroTimes(t *testing.T) {
+	dir := t.TempDir() // no *.pdf present
+	t.Setenv("DIR", dir)
+	f := writeTempRecipe(t, "for F in ${DIR}/*.pdf\nkg ingest ${F}\nend\nkg warm\n")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("empty glob must be a clean no-op, got: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"kg", "warm"}})
+}
+
+func TestRunRecipe_ForLoopRestoresLoopVar(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "a.md")
+	t.Setenv("DIR", dir)
+	t.Setenv("F", "preexisting")
+	f := writeTempRecipe(t, "for F in ${DIR}/*.md\nkg ingest ${F}\nend\n")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := os.Getenv("F"); got != "preexisting" {
+		t.Fatalf("loop var not restored: got %q, want %q", got, "preexisting")
+	}
+}
+
+func TestRunRecipe_ForLoopFailFastAbortsMidIteration(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "a.md", "b.md", "c.md")
+	t.Setenv("DIR", dir)
+	// Fail on the 2nd dispatched command (index 1 = the b.md ingest).
+	rec := &recordingDispatcher{failAt: 1, failWith: errors.New("boom")}
+	f := writeTempRecipe(t, "for F in ${DIR}/*.md\nkg ingest ${F}\nend\nkg warm\n")
+	err := runRecipe(f, rec.dispatch)
+	if err == nil {
+		t.Fatal("expected fail-fast error")
+	}
+	if !strings.Contains(err.Error(), "step 2") {
+		t.Errorf("error should name the failing step index: %v", err)
+	}
+	// a.md ingested, b.md attempted (failed), c.md + warm never run.
+	if len(rec.calls) != 2 {
+		t.Fatalf("fail-fast should stop after the failing iteration: got %d calls %v", len(rec.calls), rec.calls)
+	}
+}
+
+func TestRunRecipe_NestedBlocksWithinCap(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "a.md")
+	t.Setenv("DIR", dir)
+	t.Setenv("GO", "1")
+	// depth 2: for → if (both open one level).
+	f := writeTempRecipe(t, "for F in ${DIR}/*.md\nif set GO\nkg ingest ${F}\nend\nend\n")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("depth-2 nesting must be allowed: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"kg", "ingest", filepath.Join(dir, "a.md")}})
+}
+
+func TestParseNodes_NestingExceedsCapErrors(t *testing.T) {
+	// depth 3: for → for → for exceeds the cap of 2.
+	lines := []string{"for A in x", "for B in y", "for C in z", "status", "end", "end", "end"}
+	if _, err := parseNodes(lines); err == nil || !strings.Contains(err.Error(), "depth cap") {
+		t.Fatalf("expected depth-cap error, got: %v", err)
+	}
+}
+
+func TestParseNodes_UnterminatedBlockErrors(t *testing.T) {
+	if _, err := parseNodes([]string{"for F in x", "status"}); err == nil || !strings.Contains(err.Error(), "unterminated") {
+		t.Fatalf("expected unterminated-block error, got: %v", err)
+	}
+}
+
+func TestParseNodes_EndWithoutOpenerErrors(t *testing.T) {
+	if _, err := parseNodes([]string{"status", "end"}); err == nil || !strings.Contains(err.Error(), "without a matching") {
+		t.Fatalf("expected dangling-end error, got: %v", err)
+	}
+}
+
+// ----- data-driven conditional (if … end) tests -----
+
+func TestRunRecipe_IfExistsGatesBody(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "present.md")
+	t.Setenv("DIR", dir)
+	rec := &recordingDispatcher{failAt: -1}
+	// true branch runs; false branch (no *.pdf) is skipped.
+	content := "if exists ${DIR}/*.md\nkg warm\nend\nif exists ${DIR}/*.pdf\nkg postprocess\nend\n"
+	f := writeTempRecipe(t, content)
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"kg", "warm"}})
+}
+
+func TestRunRecipe_IfSetGatesBody(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	t.Setenv("FLAG", "yes")
+	f := writeTempRecipe(t, "if set FLAG\nstatus\nend\nif set MISSING\nrefresh\nend\n")
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"status"}})
+}
+
+func TestRunRecipe_IfNotNegatesPredicate(t *testing.T) {
+	dir := t.TempDir() // no *.pdf
+	t.Setenv("DIR", dir)
+	rec := &recordingDispatcher{failAt: -1}
+	f := writeTempRecipe(t, "if not exists ${DIR}/*.pdf\nkg warm\nend\n")
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"kg", "warm"}})
+}
+
+func TestRunRecipe_IfSetMultiVarRequiresAllNonEmpty(t *testing.T) {
+	f := writeTempRecipe(t, "if set A B\nstatus\nend\n")
+	// both non-empty → body runs.
+	t.Setenv("A", "x")
+	t.Setenv("B", "y")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"status"}})
+	// one empty → whole guard false → body skipped (the empty-arg footgun kg-link.da relies on).
+	t.Setenv("B", "")
+	rec2 := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec2.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rec2.calls) != 0 {
+		t.Fatalf("multi-var `set` must skip when any var is empty, got %v", rec2.calls)
+	}
+}
+
+// ----- recursive glob (base/**/<filepat>) tests -----
+
+func TestRunRecipe_ForLoopRecursiveGlob(t *testing.T) {
+	dir := t.TempDir()
+	// tree: top-level, one level, two levels deep — plus a .txt that must NOT match.
+	if err := os.MkdirAll(filepath.Join(dir, "sub", "deep"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	touchFiles(t, dir, "top.md", "skip.txt")
+	touchFiles(t, filepath.Join(dir, "sub"), "mid.md")
+	touchFiles(t, filepath.Join(dir, "sub", "deep"), "low.md")
+	t.Setenv("DIR", dir)
+	f := writeTempRecipe(t, "for F in ${DIR}/**/*.md\nkg ingest ${F}\nend\n")
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// All three .md at any depth, sorted; the .txt excluded.
+	wantCalls := [][]string{
+		{"kg", "ingest", filepath.Join(dir, "sub", "deep", "low.md")},
+		{"kg", "ingest", filepath.Join(dir, "sub", "mid.md")},
+		{"kg", "ingest", filepath.Join(dir, "top.md")},
+	}
+	assertCallSlice(t, rec.calls, wantCalls)
+}
+
+func TestExpandGlob_NoDoublestarDelegatesToGlob(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "a.md", "b.md", "c.txt")
+	got, err := expandGlob(filepath.Join(dir, "*.md"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	sort.Strings(got)
+	want := []string{filepath.Join(dir, "a.md"), filepath.Join(dir, "b.md")}
+	assertStringSlice(t, got, want)
+}
+
+func TestExpandGlob_MissingBaseIsEmpty(t *testing.T) {
+	got, err := expandGlob(filepath.Join(t.TempDir(), "nope", "**", "*.md"))
+	if err != nil {
+		t.Fatalf("missing base must be a clean empty set, got: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected empty set, got %v", got)
+	}
+}
+
+// ----- error-path / edge coverage -----
+
+func TestRunRecipe_ParseErrorSurfacesThroughRunRecipe(t *testing.T) {
+	f := writeTempRecipe(t, "for F in x\nkg warm\n") // no matching `end`
+	rec := &recordingDispatcher{failAt: -1}
+	if err := runRecipe(f, rec.dispatch); err == nil || !strings.Contains(err.Error(), "unterminated") {
+		t.Fatalf("expected unterminated-block error from runRecipe, got: %v", err)
+	}
+	if len(rec.calls) != 0 {
+		t.Fatalf("no step should dispatch when parsing fails: %v", rec.calls)
+	}
+}
+
+func TestParseForHeader_RejectsMalformed(t *testing.T) {
+	for _, line := range []string{"for x", "for x y z", "notfor a in b"} {
+		if _, _, ok := parseForHeader(line); ok {
+			t.Errorf("expected %q rejected as a for-header", line)
+		}
+	}
+	if v, p, ok := parseForHeader("for F in dir/*.md"); !ok || v != "F" || p != "dir/*.md" {
+		t.Errorf("valid header mis-parsed: v=%q p=%q ok=%v", v, p, ok)
+	}
+}
+
+func TestParseIfHeader_RejectsMalformed(t *testing.T) {
+	for _, line := range []string{"if", "if set", "if bogus X", "notif set X", "if not"} {
+		if _, ok := parseIfHeader(line); ok {
+			t.Errorf("expected %q rejected as an if-header", line)
+		}
+	}
+	if c, ok := parseIfHeader("if not exists dir/*.md"); !ok || !c.negate || c.pred != "exists" {
+		t.Errorf("valid negated header mis-parsed: %+v ok=%v", c, ok)
+	}
+}
+
+func TestRunRecipe_ForBadGlobPatternErrors(t *testing.T) {
+	f := writeTempRecipe(t, "for F in [\nkg warm\nend\n")
+	if err := runRecipe(f, (&recordingDispatcher{failAt: -1}).dispatch); err == nil {
+		t.Fatal("expected error from a malformed loop glob")
+	}
+}
+
+func TestRunRecipe_IfBadGlobPatternErrors(t *testing.T) {
+	f := writeTempRecipe(t, "if exists [\nkg warm\nend\n")
+	if err := runRecipe(f, (&recordingDispatcher{failAt: -1}).dispatch); err == nil {
+		t.Fatal("expected error from a malformed exists glob")
+	}
+}
+
+func TestRunRecipe_LoopVarWithEqualsErrors(t *testing.T) {
+	dir := t.TempDir()
+	touchFiles(t, dir, "a.md")
+	t.Setenv("DIR", dir)
+	// `a=b` is an invalid env var name → os.Setenv fails → execLoop errors.
+	f := writeTempRecipe(t, "for a=b in ${DIR}/*.md\nkg warm\nend\n")
+	if err := runRecipe(f, (&recordingDispatcher{failAt: -1}).dispatch); err == nil {
+		t.Fatal("expected error binding an invalid loop-var name")
+	}
+}
+
+func TestExpandGlob_BadPatternAndDefaults(t *testing.T) {
+	if _, err := expandGlob("dir/**/["); err == nil {
+		t.Fatal("expected ErrBadPattern for a malformed ** tail")
+	}
+	if _, err := expandGlob("["); err == nil {
+		t.Fatal("expected ErrBadPattern for a malformed plain glob")
+	}
+	// trailing `**` → tail defaults to "*" and matches every file under base.
+	dir := t.TempDir()
+	touchFiles(t, dir, "x.md", "y.txt")
+	got, err := expandGlob(filepath.Join(dir, "**"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("dir/** (tail defaults to *) should match both files, got %v", got)
+	}
+}
+
+func TestParseNodes_NestedIfDepthCapErrors(t *testing.T) {
+	// for → if → if is depth 3 (>cap 2); exercises the if-header path in
+	// tryOpenBlock and openBlockBody's cap error.
+	lines := []string{"for F in x", "if set A", "if set B", "kg warm", "end", "end", "end"}
+	if _, err := parseNodes(lines); err == nil || !strings.Contains(err.Error(), "depth cap") {
+		t.Fatalf("expected depth-cap error via nested if, got: %v", err)
+	}
+}
+
+// ----- --dry-run propagation tests -----
+
+func TestWithDryRun_PrependsDryRunFlag(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	if err := withDryRun(rec.dispatch)([]string{"kg", "link", "import", "m"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertStringSlice(t, rec.calls[0], []string{"--dry-run", "kg", "link", "import", "m"})
+}
+
+func TestNewRunCmd_DryRunFlagPropagatesToEveryStep(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	runCmd := newRunCmd(rec.dispatch)
+	runCmd.Flags().Bool("dry-run", false, "") // stand in for the inherited global -n
+	f := writeTempRecipe(t, "kg warm\nstatus\n")
+	runCmd.SetArgs([]string{"--dry-run", f})
+	if err := runCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	wantCalls := [][]string{
+		{"--dry-run", "kg", "warm"},
+		{"--dry-run", "status"},
+	}
+	assertCallSlice(t, rec.calls, wantCalls)
+}
+
+func TestNewRunCmd_NoDryRunDispatchesUnchanged(t *testing.T) {
+	rec := &recordingDispatcher{failAt: -1}
+	runCmd := newRunCmd(rec.dispatch)
+	runCmd.Flags().Bool("dry-run", false, "")
+	f := writeTempRecipe(t, "kg warm\n")
+	runCmd.SetArgs([]string{f})
+	if err := runCmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	assertCallSlice(t, rec.calls, [][]string{{"kg", "warm"}})
 }

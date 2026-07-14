@@ -1,0 +1,941 @@
+{
+ "summary": {
+  "seed": 20260712,
+  "total_sessions": 806,
+  "selected": 226,
+  "excluded": 580,
+  "exclusion_reason": "not drawn by rules 1-4; remain available for targeted follow-up under same rubric",
+  "by_rule": {
+   "rule2": 50,
+   "rule1": 6,
+   "rule3": 155,
+   "rule4": 15
+  },
+  "by_harness": {
+   "claude-code": 50,
+   "copilot": 1,
+   "omp": 5,
+   "codex": 134,
+   "cursor": 36
+  }
+ },
+ "rules": {
+  "rule1": "all omp+copilot",
+  "rule2": "all claude-code",
+  "rule3": "codex/cursor stratified by (harness,project-bucket,status,has_tokens), 20%/cell floor 2, seed 20260712",
+  "rule4": "15 seeded negative controls from unselected pool",
+  "rule5": "sensitive => aggregate-only, no excerpts",
+  "r3-id-normalization": "idempotent: any home-directory slug segment (harness-encoded $HOME, dashed or slashed) -> '~' (deterministic, reversible via local $HOME; raw map never committed)"
+ },
+ "selections": [
+  {
+   "evidence_id": "claude-code:~-Documents-ResumeAgent/b41d7f0d-a68a-4dd7-ad66-9c3c89cc2bc5:b41d7f0d-a68a-4dd7-ad66-9c3c89cc2bc5",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-Documents-dot-agents/598c5d1e-5fb3-4b56-b0de-2adb96662bcd:598c5d1e-5fb3-4b56-b0de-2adb96662bcd",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-Documents-dot-agents/a344b377-3b0a-4c9e-9ebf-8284ca8935ab:a344b377-3b0a-4c9e-9ebf-8284ca8935ab",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-dot-agents/403af2d2-4706-49e9-b17f-05266a2cb94d:403af2d2-4706-49e9-b17f-05266a2cb94d",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-dot-agents/a5d6082b-0df3-4081-9d20-c1fca812bc6a:a5d6082b-0df3-4081-9d20-c1fca812bc6a",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/00b3e815-8f03-4541-957e-d7e2dd912320:00b3e815-8f03-4541-957e-d7e2dd912320",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/151d7271-b941-4eb5-aa23-94215e70d810:151d7271-b941-4eb5-aa23-94215e70d810",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/1699c371-bd64-4147-800e-a33e3a3187e5:1699c371-bd64-4147-800e-a33e3a3187e5",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/327154c6-3b96-4f48-b9c5-237263d27ec2:327154c6-3b96-4f48-b9c5-237263d27ec2",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/37db65d6-28a1-4036-90f5-39b1c1a69a42:37db65d6-28a1-4036-90f5-39b1c1a69a42",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/438f47a4-d325-46cf-8546-ffba224e9b8a:438f47a4-d325-46cf-8546-ffba224e9b8a",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/459ba08a-5038-46fa-be5e-585c461da167:459ba08a-5038-46fa-be5e-585c461da167",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/50a19fee-138b-4eb4-b173-5e39a56c84b6:50a19fee-138b-4eb4-b173-5e39a56c84b6",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/598c5d1e-5fb3-4b56-b0de-2adb96662bcd:598c5d1e-5fb3-4b56-b0de-2adb96662bcd",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/67f2f621-4c29-44a7-9b2c-cab9d1085291:67f2f621-4c29-44a7-9b2c-cab9d1085291",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/6d747126-2277-4355-b7e4-3b265cbb73e3:6d747126-2277-4355-b7e4-3b265cbb73e3",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/73309601-846c-4b6b-ab27-6bb55c1b1e8e:73309601-846c-4b6b-ab27-6bb55c1b1e8e",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/999f872a-1542-4651-9e1f-540062330cd5:999f872a-1542-4651-9e1f-540062330cd5",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/a344b377-3b0a-4c9e-9ebf-8284ca8935ab:a344b377-3b0a-4c9e-9ebf-8284ca8935ab",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-dot-agents/b1d48aff-3d70-4286-b329-9240a682af97:b1d48aff-3d70-4286-b329-9240a682af97",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/2c9ee562-f13a-4e38-b12f-e9c069ce9c6a:2c9ee562-f13a-4e38-b12f-e9c069ce9c6a",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/67c68b8f-2380-41b9-ac74-9b149ff4ab7c:67c68b8f-2380-41b9-ac74-9b149ff4ab7c",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/7b866571-820b-452d-b8c9-e67cf0b924c2:7b866571-820b-452d-b8c9-e67cf0b924c2",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/8a57a6f1-c804-42ea-a23b-df1b16ea72ef:8a57a6f1-c804-42ea-a23b-df1b16ea72ef",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/92697a8f-a003-40e3-a39d-85e0884335b3:92697a8f-a003-40e3-a39d-85e0884335b3",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/acc71d42-17b5-43e0-8905-1413ac20e45e:acc71d42-17b5-43e0-8905-1413ac20e45e",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/c0d52153-500a-4da8-8ed7-d13fedf38334:c0d52153-500a-4da8-8ed7-d13fedf38334",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~-proj-docs-payout/d6e1a088-406f-4e71-96b5-494e2d028e82:d6e1a088-406f-4e71-96b5-494e2d028e82",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~/1dc81dd7-939c-4ea3-940c-d538704a8d4a:1dc81dd7-939c-4ea3-940c-d538704a8d4a",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:~/8bc0a9a6-1304-4066-a30f-a9383342c0b1:8bc0a9a6-1304-4066-a30f-a9383342c0b1",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/00a944fd-9769-4186-9325-26eac46592e1:00a944fd-9769-4186-9325-26eac46592e1",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/00d8b88c-c30c-4627-b3fe-90bd93332fbe:00d8b88c-c30c-4627-b3fe-90bd93332fbe",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/096bddb0-2cba-4100-aa47-eb91ede0477c:096bddb0-2cba-4100-aa47-eb91ede0477c",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/0c0c9deb-dad2-4e98-aefd-32e3d15a151f:0c0c9deb-dad2-4e98-aefd-32e3d15a151f",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/240ebefe-8f34-47d7-bb11-60590b40ef47:240ebefe-8f34-47d7-bb11-60590b40ef47",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/30ff98e7-3269-463e-92c1-c17bdd95df60:30ff98e7-3269-463e-92c1-c17bdd95df60",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/6204d88e-5139-4a6f-a889-4814a0339009:6204d88e-5139-4a6f-a889-4814a0339009",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/734c099b-d2c5-4f84-89a0-90e41393173e:734c099b-d2c5-4f84-89a0-90e41393173e",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/83b0b248-ce6e-43fb-9049-9033623212b8:83b0b248-ce6e-43fb-9049-9033623212b8",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/9dfb972e-1982-4f64-9250-bc5051be8514:9dfb972e-1982-4f64-9250-bc5051be8514",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/b9ee5365-b3cb-4f39-a901-1389385b6393:b9ee5365-b3cb-4f39-a901-1389385b6393",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/bdc95f81-3ade-4150-9828-77e96b2615cc:bdc95f81-3ade-4150-9828-77e96b2615cc",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/c9d92522-b047-4dfe-ba3d-e5fa8b44b929:c9d92522-b047-4dfe-ba3d-e5fa8b44b929",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/ce455c31-37fc-4f16-b39b-38a23ba5ddee:ce455c31-37fc-4f16-b39b-38a23ba5ddee",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/d1af2072-2a05-4dfa-b637-4f13d63c5f0d:d1af2072-2a05-4dfa-b637-4f13d63c5f0d",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/d27dd3ab-9414-401e-8b30-bd3167ddc1d1:d27dd3ab-9414-401e-8b30-bd3167ddc1d1",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/ed0722b4-7304-4c25-9769-6df7ab518f03:ed0722b4-7304-4c25-9769-6df7ab518f03",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/f69e3fb6-3ab0-4ffe-a98c-e518caaeca46:f69e3fb6-3ab0-4ffe-a98c-e518caaeca46",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/fbfbb5b9-b882-4d3e-92c3-77ca47ff6e81:fbfbb5b9-b882-4d3e-92c3-77ca47ff6e81",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "claude-code:-private-tmp-claude-502-~-proj-docs-dot-agents-327154c6-3b96-4f48-b9c5-237263d27ec2-scratchpad-depth-exp-v2-trials-v2-D12-t1/fc543bfc-fa09-422b-8fd9-d56e8219558d:fc543bfc-fa09-422b-8fd9-d56e8219558d",
+   "rule": "rule2-all-cc"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-02-28T02-11-02-019ca316-225d-7ee3-ac1f-3c54c62eb9de:019ca316-225d-7ee3-ac1f-3c54c62eb9de",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-02T13-11-32-019cafbf-8f95-7673-9512-4141fbf61d08:019cafbf-8f95-7673-9512-4141fbf61d08",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-02T15-32-05-019cb040-3ca4-7021-ab77-ab0f215e0f89:019cb040-3ca4-7021-ab77-ab0f215e0f89",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-19T12-10-11-019d06dc-9040-74f3-ad3b-9659b753d96d:019d06dc-9040-74f3-ad3b-9659b753d96d",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-19T13-57-48-019d073f-177b-7631-b3fa-9d764674958e:019d073f-177b-7631-b3fa-9d764674958e",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-29T19-06-55-019d3bd9-aeaf-7780-a348-8281a1763a4f:019d3bd9-aeaf-7780-a348-8281a1763a4f",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T18-37-52-019d40e5-7438-7b81-aa31-2b82c654832d:019d40e5-7438-7b81-aa31-2b82c654832d",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T18-37-52-019d40e5-74cc-75b0-85a1-bb0d104e8823:019d40e5-74cc-75b0-85a1-bb0d104e8823",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T18-38-30-019d40e6-09c6-7821-b414-8138db97cd33:019d40e6-09c6-7821-b414-8138db97cd33",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T18-38-48-019d40e6-50a6-74c0-8310-630737ab8f4e:019d40e6-50a6-74c0-8310-630737ab8f4e",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T19-06-38-019d40ff-cb41-7bd1-a57a-9e5db6ece347:019d40ff-cb41-7bd1-a57a-9e5db6ece347",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T20-39-51-019d4155-20b9-7fb2-b3c4-6bc65474dd31:019d4155-20b9-7fb2-b3c4-6bc65474dd31",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T20-58-24-019d4166-1bea-7ca1-87eb-ad2598228d91:019d4166-1bea-7ca1-87eb-ad2598228d91",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-03-30T21-03-46-019d416b-05fa-7092-a0df-9f7ee15ec1a0:019d416b-05fa-7092-a0df-9f7ee15ec1a0",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-06T21-59-07-019d65aa-38a5-7371-8e92-428ee2b8d33f:019d65aa-38a5-7371-8e92-428ee2b8d33f",
+   "rule": "rule3-stratum-codex/workflow/cutoff/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-06T22-37-53-019d65cd-b6cb-7af0-8f93-d28f25cd2457:019d65cd-b6cb-7af0-8f93-d28f25cd2457",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-11T09-50-13-019d7cce-b173-7de2-8871-47a8dce5af22:019d7cce-b173-7de2-8871-47a8dce5af22",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T01-06-56-019d8015-f740-7360-a60c-e7d42c19ac82:019d8015-f740-7360-a60c-e7d42c19ac82",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T01-10-54-019d8019-97ca-7fc2-95bf-a7ffa930ca3f:019d8019-97ca-7fc2-95bf-a7ffa930ca3f",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T11-11-13-019d823f-35b4-7561-b213-c68a0dc8b88e:019d823f-35b4-7561-b213-c68a0dc8b88e",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T11-29-36-019d8250-070e-72a0-94a5-960f7bac17a7:019d8250-070e-72a0-94a5-960f7bac17a7",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T12-01-13-019d826c-fca9-78a2-8d62-6bbd92d26274:019d826c-fca9-78a2-8d62-6bbd92d26274",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T12-01-13-019d826c-fccc-7f01-9012-cf560494a5f5:019d826c-fccc-7f01-9012-cf560494a5f5",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T12-01-20-019d826d-164f-7cf2-b102-f65830ef293f:019d826d-164f-7cf2-b102-f65830ef293f",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T18-21-44-019d83c9-5962-7f00-91d2-cc8c18ca4df5:019d83c9-5962-7f00-91d2-cc8c18ca4df5",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-12T18-35-21-019d83d5-d2b7-75b2-861c-215717258746:019d83d5-d2b7-75b2-861c-215717258746",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-17T14-28-35-019d9cb3-b0dd-7f02-a202-9afba6d3b54c:019d9cb3-b0dd-7f02-a202-9afba6d3b54c",
+   "rule": "rule3-stratum-codex/workflow/cutoff/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-18T16-20-08-019da240-2ef5-74e1-a90e-95a828969ffd:019da240-2ef5-74e1-a90e-95a828969ffd",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-19T00-46-45-019da410-0075-7c12-845f-859f9544e7b0:019da410-0075-7c12-845f-859f9544e7b0",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-19T09-15-16-019da5e1-8fa1-7ad0-95d0-7ea484853490:019da5e1-8fa1-7ad0-95d0-7ea484853490",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-19T17-49-35-019da7b8-702b-72f2-bde7-3c38011c87ae:019da7b8-702b-72f2-bde7-3c38011c87ae",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-19T23-21-05-019da8e7-efcd-7993-9b0a-c0caf0f909db:019da8e7-efcd-7993-9b0a-c0caf0f909db",
+   "rule": "rule3-stratum-codex/workflow/cutoff/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-20T08-18-27-019daad3-e7c6-7662-bc15-7a711b059c54:019daad3-e7c6-7662-bc15-7a711b059c54",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-20T08-26-16-019daadb-0ed7-7a42-8514-3ee888c94fc9:019daadb-0ed7-7a42-8514-3ee888c94fc9",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-24T00-40-45-019dbdca-5037-7ad1-b65c-db927f74ede6:019dbdca-5037-7ad1-b65c-db927f74ede6",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-04-27T08-13-03-019dcedb-78bd-7ff1-9571-3dc5726e2938:019dcedb-78bd-7ff1-9571-3dc5726e2938",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-05-03T19-07-47-019df019-0e2e-77e1-9d72-1b8df97d979f:019df019-0e2e-77e1-9d72-1b8df97d979f",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-05-03T21-30-40-019df09b-dfc8-7840-8035-5c1c93e9d27a:019df09b-dfc8-7840-8035-5c1c93e9d27a",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-05-04T00-50-52-019df153-282f-7722-946f-1f5cebfd97b4:019df153-282f-7722-946f-1f5cebfd97b4",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-05-04T21-28-11-019df5bf-f48f-7950-b782-66e91a211966:019df5bf-f48f-7950-b782-66e91a211966",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-05-25T14-16-20-019e605a-24a1-7863-adc2-86e948545f5b:019e605a-24a1-7863-adc2-86e948545f5b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-05-26T19-06-19-019e6689-fc5a-7593-92e1-11d4aa70dc75:019e6689-fc5a-7593-92e1-11d4aa70dc75",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-14T13-09-56-019ec71c-8745-7ef0-88e7-b9ad0bf36baf:019ec71c-8745-7ef0-88e7-b9ad0bf36baf",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-14T22-10-55-019ec90b-d1a3-7e81-972d-a6fb520312f0:019ec90b-d1a3-7e81-972d-a6fb520312f0",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-22T21-39-15-019ef221-b57d-7ea2-b97e-5002bf5083e8:019ef221-b57d-7ea2-b97e-5002bf5083e8",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-24T11-24-30-019efa3b-992c-7291-9c7a-a825834932d8:019efa3b-992c-7291-9c7a-a825834932d8",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-25T17-42-27-019f00bb-fc2c-7d10-af15-0585929e3ed2:019f00bb-fc2c-7d10-af15-0585929e3ed2",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-25T18-19-35-019f00dd-fb6e-75b2-9563-c4f5d61b6183:019f00dd-fb6e-75b2-9563-c4f5d61b6183",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-25T20-47-14-019f0165-288c-7503-b2e1-b9a210e91afb:019f0165-288c-7503-b2e1-b9a210e91afb",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-25T21-12-32-019f017c-51ea-71b2-bc4f-fa4cd21a0178:019f017c-51ea-71b2-bc4f-fa4cd21a0178",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T09-38-34-019f0427-53e7-7d91-9af7-0105007165cd:019f0427-53e7-7d91-9af7-0105007165cd",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T11-56-27-019f04a5-924e-7102-99b3-76386d406f20:019f04a5-924e-7102-99b3-76386d406f20",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-16-16-019f04b7-b63e-7b01-9713-0d17e186c2a0:019f04b7-b63e-7b01-9713-0d17e186c2a0",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-18-20-019f04b9-9958-7b03-9f45-b2c594185e53:019f04b9-9958-7b03-9f45-b2c594185e53",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-19-40-019f04ba-d189-7920-8879-98ec0b176e50:019f04ba-d189-7920-8879-98ec0b176e50",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-20-38-019f04bb-b4a9-7931-bba2-f584582ed1f5:019f04bb-b4a9-7931-bba2-f584582ed1f5",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-21-03-019f04bc-1619-7900-a1cd-0e77e7bbf73d:019f04bc-1619-7900-a1cd-0e77e7bbf73d",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-21-26-019f04bc-7309-7ec2-936c-c7109e8f2980:019f04bc-7309-7ec2-936c-c7109e8f2980",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-22-34-019f04bd-79da-7a93-8b49-821fbaa68ce6:019f04bd-79da-7a93-8b49-821fbaa68ce6",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T12-23-47-019f04be-983a-7302-8061-2fa990249daf:019f04be-983a-7302-8061-2fa990249daf",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T14-50-02-019f0544-7e10-7222-a62e-6ffa47ecd1ef:019f0544-7e10-7222-a62e-6ffa47ecd1ef",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T14-50-50-019f0545-3a56-7492-a70d-85b4773dba36:019f0545-3a56-7492-a70d-85b4773dba36",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T14-52-23-019f0546-a39a-71c3-9765-9ec334bb0edd:019f0546-a39a-71c3-9765-9ec334bb0edd",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T14-52-50-019f0547-0f6f-7ff1-b92d-8b7a37c0ded7:019f0547-0f6f-7ff1-b92d-8b7a37c0ded7",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T14-54-29-019f0548-8eeb-7720-8788-4655cac920e5:019f0548-8eeb-7720-8788-4655cac920e5",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T17-28-11-019f05d5-4974-7333-8ee0-ae2ba514310b:019f05d5-4974-7333-8ee0-ae2ba514310b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-09-14-019f05fa-dd54-7db1-9238-34bf5c8f36e7:019f05fa-dd54-7db1-9238-34bf5c8f36e7",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-10-32-019f05fc-0c58-7a13-bd8e-35a4afda52d1:019f05fc-0c58-7a13-bd8e-35a4afda52d1",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-17-24-019f0602-5705-7220-9f41-abe843b8268b:019f0602-5705-7220-9f41-abe843b8268b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-18-39-019f0603-7c58-7ac2-a9bd-bd16c04141ff:019f0603-7c58-7ac2-a9bd-bd16c04141ff",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-20-54-019f0605-8c99-7b70-84dc-0f12f3f52d56:019f0605-8c99-7b70-84dc-0f12f3f52d56",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-27-12-019f060b-4e1f-7630-905f-652fb2cccd97:019f060b-4e1f-7630-905f-652fb2cccd97",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-28-39-019f060c-a3d7-7b60-99ca-b740cf7b9275:019f060c-a3d7-7b60-99ca-b740cf7b9275",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-41-47-019f0618-a92f-73e1-b54b-e17ff196ae47:019f0618-a92f-73e1-b54b-e17ff196ae47",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T18-55-45-019f0625-72bb-7d03-bae8-3801ebead09d:019f0625-72bb-7d03-bae8-3801ebead09d",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T19-18-10-019f0639-fa58-7633-aec6-cf8e63ddb048:019f0639-fa58-7633-aec6-cf8e63ddb048",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-26T22-35-58-019f06ef-126d-7ab2-970d-8a8d9a3f5e6f:019f06ef-126d-7ab2-970d-8a8d9a3f5e6f",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-27T16-16-28-019f0ab9-fb01-7852-b758-4bcf0001e1b9:019f0ab9-fb01-7852-b758-4bcf0001e1b9",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-27T16-34-16-019f0aca-4753-7521-b44f-2d3b7b92ae2e:019f0aca-4753-7521-b44f-2d3b7b92ae2e",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-27T19-00-12-019f0b4f-e237-74b2-ba9d-f893b8c39d57:019f0b4f-e237-74b2-ba9d-f893b8c39d57",
+   "rule": "rule3-stratum-codex/workflow/cutoff/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T13-00-37-019f0f2d-0792-7173-8a93-1957572474bf:019f0f2d-0792-7173-8a93-1957572474bf",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T13-14-20-019f0f39-9635-7b32-98a3-2208b05d6d0a:019f0f39-9635-7b32-98a3-2208b05d6d0a",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T13-20-00-019f0f3e-c7d4-7e12-80e6-8271a871c697:019f0f3e-c7d4-7e12-80e6-8271a871c697",
+   "rule": "rule3-stratum-codex/workflow/cutoff/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T22-11-54-019f1125-c1cd-74f3-9f2b-0a1683c6d80c:019f1125-c1cd-74f3-9f2b-0a1683c6d80c",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T22-43-29-019f1142-a96b-77a2-85b9-f3580d8b2f9f:019f1142-a96b-77a2-85b9-f3580d8b2f9f",
+   "rule": "rule3-stratum-codex/other/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T23-17-59-019f1162-3f72-7ba2-88bd-be3df5b99984:019f1162-3f72-7ba2-88bd-be3df5b99984",
+   "rule": "rule3-stratum-codex/other/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-28T23-46-46-019f117c-9902-72d2-bcce-b95ee05419bb:019f117c-9902-72d2-bcce-b95ee05419bb",
+   "rule": "rule3-stratum-codex/other/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T00-54-47-019f11ba-e0a2-7930-a56b-83672f37e92a:019f11ba-e0a2-7930-a56b-83672f37e92a",
+   "rule": "rule3-stratum-codex/other/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T09-17-18-019f1386-f0ee-7210-b34d-86355991eaf9:019f1386-f0ee-7210-b34d-86355991eaf9",
+   "rule": "rule3-stratum-codex/other/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T09-51-28-019f13a6-3925-7fc3-a6da-4096788dfdba:019f13a6-3925-7fc3-a6da-4096788dfdba",
+   "rule": "rule3-stratum-codex/other/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T10-16-36-019f13bd-3c2e-7d40-adf4-11042c90bf6a:019f13bd-3c2e-7d40-adf4-11042c90bf6a",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T11-08-46-019f13ec-fdc1-7eb2-8dac-463f751a0b0e:019f13ec-fdc1-7eb2-8dac-463f751a0b0e",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T11-08-46-019f13ec-ff32-7d61-a351-16f1b9fca3af:019f13ec-ff32-7d61-a351-16f1b9fca3af",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T11-45-55-019f140f-0295-7c03-97f4-c07364fb35d8:019f140f-0295-7c03-97f4-c07364fb35d8",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-29T18-24-45-019f157c-24ee-7f72-b0c3-5a63cb0615c3:019f157c-24ee-7f72-b0c3-5a63cb0615c3",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T00-02-20-019f16b1-3861-7821-963c-610257afa6e6:019f16b1-3861-7821-963c-610257afa6e6",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T00-02-21-019f16b1-3b51-7341-8554-4d3b6f9afb35:019f16b1-3b51-7341-8554-4d3b6f9afb35",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T00-11-48-019f16b9-e0a4-7e41-bfb9-feb0acd5c2a6:019f16b9-e0a4-7e41-bfb9-feb0acd5c2a6",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T00-52-08-019f16de-cf92-72e1-8457-41ede9bccd54:019f16de-cf92-72e1-8457-41ede9bccd54",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T00-56-15-019f16e2-923e-7451-8554-cfe48a5c8fd8:019f16e2-923e-7451-8554-cfe48a5c8fd8",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T08-28-38-019f1880-be1a-7512-8258-22d994b35c1c:019f1880-be1a-7512-8258-22d994b35c1c",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T08-37-37-019f1888-f83b-7be0-924a-e4b741951d30:019f1888-f83b-7be0-924a-e4b741951d30",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T10-23-52-019f18ea-3e71-7021-b4ee-47e24a629949:019f18ea-3e71-7021-b4ee-47e24a629949",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-06-30T10-31-13-019f18f0-f7a3-7ff2-bfc8-03e9b80f30d6:019f18f0-f7a3-7ff2-bfc8-03e9b80f30d6",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-01T08-22-47-019f1da1-bb0d-7ea3-bf2d-c1438ab8960b:019f1da1-bb0d-7ea3-bf2d-c1438ab8960b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-01T09-18-56-019f1dd5-282b-75b2-9fbf-8cce44930c46:019f1dd5-282b-75b2-9fbf-8cce44930c46",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-02T05-50-24-019f223c-99bd-77b1-b618-6e8e068a3f02:019f223c-99bd-77b1-b618-6e8e068a3f02",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-02T06-13-28-019f2251-b579-7de3-915a-12f7e370243f:019f2251-b579-7de3-915a-12f7e370243f",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-02T12-59-14-019f23c5-2e3d-7cb1-a27a-fe2a39d5535b:019f23c5-2e3d-7cb1-a27a-fe2a39d5535b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-02T20-11-10-019f2550-a595-76a3-81d9-7b038a05b7ba:019f2550-a595-76a3-81d9-7b038a05b7ba",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-02T23-37-13-019f260d-4a65-7693-a2d8-461447a09747:019f260d-4a65-7693-a2d8-461447a09747",
+   "rule": "rule3-stratum-codex/workflow/cutoff/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-02T23-53-31-019f261c-309d-7ce1-a6b6-e50a96634b7b:019f261c-309d-7ce1-a6b6-e50a96634b7b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T01-21-41-019f266c-ee28-74a3-8a58-efeb2a2196eb:019f266c-ee28-74a3-8a58-efeb2a2196eb",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T01-52-29-019f2689-1c9f-7360-bdee-4a9b07975467:019f2689-1c9f-7360-bdee-4a9b07975467",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T03-22-27-019f26db-7973-7a93-b1f8-3a16794be93d:019f26db-7973-7a93-b1f8-3a16794be93d",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T03-52-19-019f26f6-d819-7f61-b35e-286321ae7633:019f26f6-d819-7f61-b35e-286321ae7633",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T09-23-14-019f2825-c780-7bf1-96ac-24aab34268ab:019f2825-c780-7bf1-96ac-24aab34268ab",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T11-29-47-019f2899-abd7-76d1-9510-22690605e66d:019f2899-abd7-76d1-9510-22690605e66d",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T11-50-08-019f28ac-4b66-7702-ac6b-7ccb8a637201:019f28ac-4b66-7702-ac6b-7ccb8a637201",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T12-53-05-019f28e5-e7e2-7813-877c-c19ad2e32ebf:019f28e5-e7e2-7813-877c-c19ad2e32ebf",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-03T15-09-14-019f2962-9694-7392-98f2-81bcbf7240a7:019f2962-9694-7392-98f2-81bcbf7240a7",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T00-52-13-019f2b78-50ee-7ac2-af42-86b9a08fce24:019f2b78-50ee-7ac2-af42-86b9a08fce24",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T08-42-20-019f2d26-baed-7761-9b20-242185925096:019f2d26-baed-7761-9b20-242185925096",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T09-37-27-019f2d59-2e7d-7e53-a5fa-9ce96c106822:019f2d59-2e7d-7e53-a5fa-9ce96c106822",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T10-06-35-019f2d73-dbb6-7fc2-8d0d-a7bb76dc83c7:019f2d73-dbb6-7fc2-8d0d-a7bb76dc83c7",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T12-55-25-019f2e0e-6c56-74a1-8b87-346394b5a247:019f2e0e-6c56-74a1-8b87-346394b5a247",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T13-46-26-019f2e3d-21ce-7e00-961e-1c06efe4ab9b:019f2e3d-21ce-7e00-961e-1c06efe4ab9b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T13-47-04-019f2e3d-b7cb-7c63-9373-5f6c03d0d745:019f2e3d-b7cb-7c63-9373-5f6c03d0d745",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T14-14-06-019f2e56-75fb-7f41-b7b3-e7549dbcdb9b:019f2e56-75fb-7f41-b7b3-e7549dbcdb9b",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T14-14-21-019f2e56-b3aa-7451-95aa-dbf214a493ac:019f2e56-b3aa-7451-95aa-dbf214a493ac",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T14-25-03-019f2e60-7eb3-7771-a57a-e29212ffdb55:019f2e60-7eb3-7771-a57a-e29212ffdb55",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-04T15-15-40-019f2e8e-d6e2-7661-9309-21d2d34c21bc:019f2e8e-d6e2-7661-9309-21d2d34c21bc",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-06T15-34-57-019f38ed-3640-7ac3-948b-73b7b88aafb0:019f38ed-3640-7ac3-948b-73b7b88aafb0",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=True"
+  },
+  {
+   "evidence_id": "codex:rollout-2026-07-06T18-54-23-019f39a3-ca34-7f10-93f5-f9084cd5da65:019f39a3-ca34-7f10-93f5-f9084cd5da65",
+   "rule": "rule3-stratum-codex/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "copilot:23e45a55-b230-439a-9efb-4cc6cfa08f0e:23e45a55-b230-439a-9efb-4cc6cfa08f0e",
+   "rule": "rule1-all-copilot"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-ResumeAgent/d706fa5f-aff6-4dfe-8a51-5d14e60d2b3b:d706fa5f-aff6-4dfe-8a51-5d14e60d2b3b",
+   "rule": "rule3-stratum-cursor/other/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents-dot-agents-code-workspace/830f6693-0b38-471c-8b99-13e754db7bde:830f6693-0b38-471c-8b99-13e754db7bde",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents-dot-agents-code-workspace/878a6961-8534-4ab2-bc8d-993a2edd628c:878a6961-8534-4ab2-bc8d-993a2edd628c",
+   "rule": "rule3-stratum-cursor/workflow/cutoff/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents-dot-agents-code-workspace/8a92b83c-f809-4ca4-80b7-eda8c1b4aa49:8a92b83c-f809-4ca4-80b7-eda8c1b4aa49",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents-pattern-e-20260414-223713/1aff5366-7352-49e5-a1b3-2a1fa4981a34:1aff5366-7352-49e5-a1b3-2a1fa4981a34",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents-script-20260415-195750/0f185c98-08e1-4d14-a1e2-2a38639af719:0f185c98-08e1-4d14-a1e2-2a38639af719",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/2880b770-97a5-47bb-8d85-6a902e445e87:2880b770-97a5-47bb-8d85-6a902e445e87",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/3ac340f5-2ffc-4cf2-8f35-fdbe6c35846d:3ac340f5-2ffc-4cf2-8f35-fdbe6c35846d",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/46f9657b-26ab-4d1d-872e-aec2293b674e:46f9657b-26ab-4d1d-872e-aec2293b674e",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/47e62b6c-3e06-48d9-9916-468773be2bf3:47e62b6c-3e06-48d9-9916-468773be2bf3",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/4acb0439-aa64-4369-9f0c-a21e8c2db013:4acb0439-aa64-4369-9f0c-a21e8c2db013",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/5b6f50d7-8506-4625-9cf2-1798abba4069:5b6f50d7-8506-4625-9cf2-1798abba4069",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/64093e38-7ba7-43d7-a953-db4958952b53:64093e38-7ba7-43d7-a953-db4958952b53",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/684414e2-90fa-472c-be6c-37c8e61132e6:684414e2-90fa-472c-be6c-37c8e61132e6",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/6b2a7158-7406-4e61-ab13-15d67a43a8b0:6b2a7158-7406-4e61-ab13-15d67a43a8b0",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/869316af-1f0e-4822-9719-81a3c4aa8f6e:869316af-1f0e-4822-9719-81a3c4aa8f6e",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/8f5f7f3e-355d-483c-8835-616e86fae103:8f5f7f3e-355d-483c-8835-616e86fae103",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/967c3251-37b4-44fa-ab27-e4d992aabe0d:967c3251-37b4-44fa-ab27-e4d992aabe0d",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/a2563484-e231-402c-95d7-e862a7f5d6bd:a2563484-e231-402c-95d7-e862a7f5d6bd",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/ac89434f-fb6f-410a-82db-4aa4b79396a7:ac89434f-fb6f-410a-82db-4aa4b79396a7",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/bbad1924-c9e6-40df-bb1f-f00d096f10ac:bbad1924-c9e6-40df-bb1f-f00d096f10ac",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/ddb7a4d5-d8a4-4f1a-880b-6abaf2cc54e4:ddb7a4d5-d8a4-4f1a-880b-6abaf2cc54e4",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-dot-agents/df428b91-ac47-47aa-9cc1-434599d6f9f1:df428b91-ac47-47aa-9cc1-434599d6f9f1",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout-payout-code-workspace/6c1f7726-dfcc-4ca6-9b75-42a0f41a1841:6c1f7726-dfcc-4ca6-9b75-42a0f41a1841",
+   "rule": "rule3-stratum-cursor/workflow/cutoff/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout-payout-code-workspace/acaed551-937b-4175-8efa-5a019e177f85:acaed551-937b-4175-8efa-5a019e177f85",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout-worktrees-client-se-testsuit/65aec9af-0663-485c-aaa4-34fcccd0bf97:65aec9af-0663-485c-aaa4-34fcccd0bf97",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/9948dc94-b1bc-41de-9d05-c3212f23de8f:9948dc94-b1bc-41de-9d05-c3212f23de8f",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/9ba190ca-7306-4322-bb77-52a106a7c828:9ba190ca-7306-4322-bb77-52a106a7c828",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/9f35e3d3-86af-4342-8aa1-eeb36c1f357d:9f35e3d3-86af-4342-8aa1-eeb36c1f357d",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/a9684182-cb5f-4ca5-8b8b-4c3c84ef682e:a9684182-cb5f-4ca5-8b8b-4c3c84ef682e",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/b07903bd-27db-42d9-be67-f6251bd33eb7:b07903bd-27db-42d9-be67-f6251bd33eb7",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/bb9afbdf-da56-45a8-a784-6d02f0d4b2e2:bb9afbdf-da56-45a8-a784-6d02f0d4b2e2",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/d6392ce0-0b38-44af-a72d-930c367a1169:d6392ce0-0b38-44af-a72d-930c367a1169",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/db36ad38-8d3c-4998-897d-a8b61a760efc:db36ad38-8d3c-4998-897d-a8b61a760efc",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:~-Documents-payout/dd6d2e2f-8ac7-4ce0-8b9f-0d64945866dc:dd6d2e2f-8ac7-4ce0-8b9f-0d64945866dc",
+   "rule": "rule3-stratum-cursor/workflow/complete/tok=False"
+  },
+  {
+   "evidence_id": "cursor:private-tmp-payout-submodule-backup-client-se/6ec974a3-5254-4662-85e4-da99ce1c43c7:6ec974a3-5254-4662-85e4-da99ce1c43c7",
+   "rule": "rule4-negative-control"
+  },
+  {
+   "evidence_id": "omp:2026-07-07T13-19-53-265Z_019f3cbc-2db0-7000-a699-bfbf1274aa01:019f3cbc-2db0-7000-a699-bfbf1274aa01",
+   "rule": "rule1-all-omp"
+  },
+  {
+   "evidence_id": "omp:2026-07-07T14-19-35-847Z_019f3cf2-d826-7000-8626-166a741fd7d9:019f3cf2-d826-7000-8626-166a741fd7d9",
+   "rule": "rule1-all-omp"
+  },
+  {
+   "evidence_id": "omp:2026-07-08T00-32-22-093Z_019f3f23-da4d-7000-8465-d94a0d720d5b:019f3f23-da4d-7000-8465-d94a0d720d5b",
+   "rule": "rule1-all-omp"
+  },
+  {
+   "evidence_id": "omp:2026-07-11T01-46-34-249Z_019f4eda-dd88-7000-b275-af8a46192d29:019f4eda-dd88-7000-b275-af8a46192d29",
+   "rule": "rule1-all-omp"
+  },
+  {
+   "evidence_id": "omp:2026-07-11T02-03-44-211Z_019f4eea-94d3-7000-aee5-b7ce6fff0f02:019f4eea-94d3-7000-aee5-b7ce6fff0f02",
+   "rule": "rule1-all-omp"
+  }
+ ],
+ "provenance": {
+  "frozen": "selections drawn pre-R3-normalization (original slug sort order); FROZEN manifest is authoritative for extraction",
+  "generator": "generate-sampling-manifest.py (same seed/algorithm); on the normalized inventory it reproduces 226 selections with 201/226 overlap - the 25-item delta is the sort-order effect of the slug rewrite on rule3/rule4 rng draws, not a rule change",
+  "delta_note": "strata proportions identical; negative-control count identical"
+ }
+}

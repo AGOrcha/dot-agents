@@ -1,0 +1,32 @@
+# coverage-gate 95% compatibility-floor exceptions
+#
+# ratchet-max-entries: 24
+#
+# This is the pre-100% exceptions set. CI applies it first at 95% so files
+# newly grandfathered by the 100% target baseline cannot regress below the
+# former hard floor. Remove entries as files reach 95%; the 100% target list
+# remains authoritative until they are fully covered.
+commands/add.go                                            # [legacy-tail] below the retained 95% floor
+commands/agents/promote.go                                 # [legacy-tail] below the retained 95% floor
+commands/import_plugins.go                                 # [legacy-tail] below the retained 95% floor
+commands/init.go                                           # [legacy-tail] below the retained 95% floor
+commands/kg/query_lint_maintain.go                         # [legacy-tail] below the retained 95% floor
+commands/refresh.go                                        # [legacy-tail] below the retained 95% floor
+commands/sync.go                                           # [legacy-tail] below the retained 95% floor
+commands/sync/pull.go                                      # [legacy-tail] below the retained 95% floor
+internal/fsops/fsops_windows.go                            # [platform-tag] below the retained 95% floor
+internal/graphstore/crg.go                                 # [legacy-tail] below the retained 95% floor
+internal/graphstore/postgres.go                            # [legacy-tail] below the retained 95% floor
+internal/graphstore/sqlite.go                              # [legacy-tail] below the retained 95% floor
+internal/links/inode_unix.go                               # [platform-tag] below the retained 95% floor
+internal/platform/claude_linkcount_unix.go                 # [platform-tag] defensive platform branch below the retained 95% floor
+internal/platform/claude_linkcount_windows.go              # [platform-tag] defensive platform branch below the retained 95% floor
+internal/links/inode_windows.go                            # [platform-tag] below the retained 95% floor
+internal/links/symlink_windows.go                          # [platform-tag] below the retained 95% floor
+internal/platform/cursor.go                                # [legacy-tail] below the retained 95% floor
+internal/platform/mcp_settings.go                          # [legacy-tail] below the retained 95% floor
+internal/platform/opencode.go                              # [legacy-tail] below the retained 95% floor
+internal/platform/plugins.go                               # [legacy-tail] below the retained 95% floor
+internal/platform/render_manifest.go                       # [legacy-tail] below the retained 95% floor
+internal/globalflagcov/analyze.go                          # [defensive-guards] below the retained 95% floor
+internal/config/lock_refresh.go                            # [defensive-guards] below the retained 95% floor

@@ -1,8 +1,0 @@
-schema_version: 1
-task_id: t0-outcome-contract
-parent_plan_id: r1-5-hook-enforcement-telemetry
-verifier_type: merge-back
-status: pass
-summary: 'Parent: review PR #83 and merge before kicking t-schema-validator-wiring (which registers this schema in commands/workflow/static/schemas.go) and t1-capture-outcomes (which adds the CLI primitive).'
-recorded_at: "2026-05-26T11:39:16Z"
-delegation_id: del-t0-outcome-contract-1779795346

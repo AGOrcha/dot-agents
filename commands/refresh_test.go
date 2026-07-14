@@ -1376,3 +1376,164 @@ func TestRunRefresh_MaterializesCopilotUserHomeHooks(t *testing.T) {
 		t.Errorf("UserBadge = %+v, want Present=true Broken=false", badge)
 	}
 }
+
+// TestRunRefresh_WritesManagedGitignoreBlock proves the D14/R8 wiring end to
+// end: refresh collects the enabled platforms' generated outputs and writes the
+// single dot-agents-managed .gitignore block into the project. It drives the
+// real runRefresh → refreshOneProject → ensureManagedGitignoreForRefresh →
+// platform.CollectManagedOutputs → links.EnsureManagedGitignore path (RULE 7:
+// exercises the production seam, not a hand-rolled call). Copilot's per-machine
+// .github/hooks/*.json fanout must land INSIDE the block (retiring the #381
+// ad-hoc root rule), the committed .agentsrc.lock/.agentsrc.json contract must
+// never be ignored, a user-authored ignore outside the markers is preserved,
+// and a second refresh is byte-stable (regenerated, not appended).
+func TestRunRefresh_WritesManagedGitignoreBlock(t *testing.T) {
+	home := seedAllPlatformInstallSignals(t)
+	agentsHome := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AGENTS_HOME", agentsHome)
+
+	projectPath := filepath.Join(home, "gp")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A user-authored ignore that must survive outside the managed markers.
+	userLine := "my-secret-notes/\n"
+	if err := os.WriteFile(filepath.Join(projectPath, ".gitignore"), []byte(userLine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{Version: 1, Projects: map[string]config.Project{}, Agents: map[string]config.Agent{}}
+	cfg.AddProject("gp", projectPath)
+	cfg.SetPlatformState("copilot", true, "")
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	saved := Flags
+	Flags = GlobalFlags{Yes: true}
+	defer func() { Flags = saved }()
+
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("runRefresh: %v", err)
+	}
+
+	gitignorePath := filepath.Join(projectPath, ".gitignore")
+	first, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("expected refresh to write %s: %v", gitignorePath, err)
+	}
+	content := string(first)
+	const begin = "# >>> dot-agents managed (project outputs) >>>"
+	const end = "# <<< dot-agents managed (project outputs) <<<"
+	bi := strings.Index(content, begin)
+	ei := strings.Index(content, end)
+	if bi < 0 || ei < 0 || ei < bi {
+		t.Fatalf("managed markers missing/malformed in .gitignore:\n%s", content)
+	}
+	block := content[bi:ei]
+
+	// The user-authored ignore is preserved outside the managed block.
+	if !strings.Contains(content[:bi], "my-secret-notes/") {
+		t.Errorf("user-authored ignore not preserved outside markers:\n%s", content)
+	}
+
+	// Copilot's dynamic hook fanout + the always-ignored overlay live inside;
+	// the committed resolved-state contract is never ignored (neverIgnored).
+	assertManagedGitignoreBlock(t, block,
+		[]string{".github/hooks/*.json", ".agentsrc.local.json"},
+		[]string{".agentsrc.lock", ".agentsrc.json"})
+
+	// Byte-stable: a second refresh regenerates the identical file.
+	if err := runRefresh("", stdRefreshConfigLoader{}, stdImportDeps{}, stdAddDeps{}); err != nil {
+		t.Fatalf("second runRefresh: %v", err)
+	}
+	second, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatalf("re-read .gitignore: %v", err)
+	}
+	if string(second) != content {
+		t.Errorf("managed .gitignore not byte-stable across refreshes:\nfirst:\n%s\nsecond:\n%s", content, second)
+	}
+}
+
+// assertManagedGitignoreBlock asserts every wantAll entry is present in the
+// managed block and every wantNone entry is absent. Extracted so its callers
+// stay under the cognitive-complexity gate.
+func assertManagedGitignoreBlock(t *testing.T, block string, wantAll, wantNone []string) {
+	t.Helper()
+	for _, w := range wantAll {
+		if !strings.Contains(block, w) {
+			t.Errorf("managed block missing %q:\n%s", w, block)
+		}
+	}
+	for _, f := range wantNone {
+		if strings.Contains(block, f) {
+			t.Errorf("managed block must not contain %q:\n%s", f, block)
+		}
+	}
+}
+
+// TestCollectManagedOutputs_CopilotDynamicAndStaticPlatforms verifies the
+// per-platform output surface feeding the managed block: copilot supplies its
+// dynamic fanout via ManagedOutputReporter (including the .github/hooks/*.json
+// pattern that must be ignored via the block, not an ad-hoc root rule), while a
+// table-driven platform (claude) supplies its static config outputs — both flow
+// through platform.CollectManagedOutputs so refresh never hardcodes paths. The
+// committed contract is intentionally absent (it is filtered by
+// links.EnsureManagedGitignore, not here).
+func TestCollectManagedOutputs_CopilotDynamicAndStaticPlatforms(t *testing.T) {
+	got := platform.CollectManagedOutputs([]platform.Platform{platform.NewCopilot(), platform.NewClaude()})
+	set := map[string]bool{}
+	for _, g := range got {
+		set[g] = true
+	}
+	for _, want := range []string{
+		".github/hooks/*.json",
+		".github/copilot-instructions.md",
+		".claude/",
+		".mcp.json",
+	} {
+		if !set[want] {
+			t.Errorf("CollectManagedOutputs missing %q; got %v", want, got)
+		}
+	}
+	// The committed contract must not be surfaced as an output to ignore.
+	for _, forbidden := range []string{".agentsrc.lock", ".agentsrc.json"} {
+		if set[forbidden] {
+			t.Errorf("CollectManagedOutputs must not list committed contract %q; got %v", forbidden, got)
+		}
+	}
+}
+
+// TestEnsureManagedGitignoreForRefresh_DryRunAndError covers the D14 refresh
+// wiring's two uncovered branches: dry-run (preview, no write, no failure) and
+// the error path (EnsureManagedGitignore fails -> returns true so the caller
+// withholds the success stamp).
+func TestEnsureManagedGitignoreForRefresh_DryRunAndError(t *testing.T) {
+	prev := Flags.DryRun
+	defer func() { Flags.DryRun = prev }()
+
+	// Dry-run: previews without touching the file and reports no failure.
+	Flags.DryRun = true
+	dir := t.TempDir()
+	if ensureManagedGitignoreForRefresh(dir, nil) {
+		t.Error("dry-run must not report a write failure")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create .gitignore, stat err=%v", err)
+	}
+
+	// Error path: a directory where .gitignore must be makes the read fail, so
+	// the helper reports failure.
+	Flags.DryRun = false
+	errDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(errDir, ".gitignore"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !ensureManagedGitignoreForRefresh(errDir, nil) {
+		t.Error("expected failure when .gitignore cannot be read (it is a directory)")
+	}
+}

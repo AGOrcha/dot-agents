@@ -1,0 +1,8 @@
+schema_version: 1
+id: research-chain-ideation-integration
+plan_id: kg-ideate-skill
+task_id: ""
+observation: RESOLVED 2026-07-13 (owner-directed design pass) — the research chain and the ideation pipeline interweave beyond a terminal handoff; wiring shipped. (1) Two entrypoints into research-intake — link-drop, and ideation-gather dispatched from kg-brief's new corpus gap trigger (corpus-scan.md + SKILL.md step 2) — extract+appraise into research/articles/ FIRST, then the brief scans corpus files; the chain is the corpus write path, kg-brief the read path. (2) research-evaluate refactored — general systematic-review method (instructions/method.md, meta-analysis spine with evidence grading + KG-assisted current-state comparator) split from the dot-agents overlay (overlays/dot-agents.md — companion-doc parts/tags/extracts/digest formats + repo exploration map). (3) The broad full-pass review is an optional subtree gated by decision class (method §0 — permanent/live-with-it decisions get the full pass; smaller ones run --targeted and lean on kg-brief's focused queries). (4) knowledge-fold-back named the shared sink for research + ideation + loop producers. NOTED, not actioned — spec-scaffold and research-evaluate share the appraise-against-structure shape (competing-decisions fallback ≈ parked-lead adoptables); convergence of their conventions is a future pass once spec-scaffold sees more use.
+classification: small
+routed_to: plan_summary:kg-ideate-skill
+created_at: "2026-07-13T05:58:50Z"

@@ -1,0 +1,61 @@
+schema_version: 1
+plan_id: verifier-precondition-policy
+tasks:
+    - id: pa-predicate-evaluator
+      title: 'Slice A: predicate model + registry + evaluator; rework verifierTransition'
+      status: awaiting_owner_review
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - commands/workflow/preconditions.go
+        - commands/workflow/preconditions_test.go
+        - commands/workflow/transitions.go
+        - commands/workflow/transitions_test.go
+      verification_required: true
+      notes: Predicate/PreconditionPolicy/SignalSnapshot types + table-driven predicate-evaluator registry over the event kind registry + generic evaluatePolicy + built-in default policy (the historical 4); rework verifierTransition off the hardcoded verifierPreconditions struct. Full code-level design in verifier-precondition-policy.plan.md section Slice A.
+      app_type: go-cli
+    - id: pb-config-registry
+      title: 'Slice B1/B2: precondition_policies registry (6 sync points) + StageProfile ref'
+      status: awaiting_owner_review
+      depends_on:
+        - pa-predicate-evaluator
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - internal/config/agentsrc_test.go
+        - schemas/agentsrc.schema.json
+      verification_required: true
+      notes: Top-level precondition_policies registry across all 6 AgentsRC sync points (struct, agentsRCCore, UnmarshalJSON, MarshalJSON, agentsRCKnown, schema json), object-keyed no enum; plus StageProfile.precondition_policy name ref. Full design in plan.md section Slice B1/B2.
+      app_type: go-cli
+    - id: pc-lockfile-resolution
+      title: 'Slice B3/B4: resolve named policy from lockfile + wire verifier call site'
+      status: awaiting_owner_review
+      depends_on:
+        - pa-predicate-evaluator
+        - pb-config-registry
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/precondition_resolve.go
+        - internal/config/precondition_resolve_test.go
+        - commands/workflow/transitions.go
+      verification_required: true
+      notes: 'ResolvePreconditionPolicy reads RESOLVED config from the lockfile (ResolveLocked -> Snapshot), not raw .agentsrc.json: app_type -> stage profile -> precondition_policy name -> named entry -> commands/workflow PreconditionPolicy; unset -> built-in default; wire verifier dispatch call site. Depends on config-v2 lock surface exposing precondition_policies in the resolved Snapshot. Full design in plan.md section Slice B3/B4.'
+      app_type: go-cli
+    - id: pd-validation
+      title: 'Slice B5: config verify/lint fail-closed on bad policy ref + unknown signal kind'
+      status: pending
+      depends_on:
+        - pb-config-registry
+        - pc-lockfile-resolution
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/precondition_resolve.go
+        - commands/config/verify.go
+        - internal/config/verify_layers.go
+      verification_required: true
+      notes: 'Fail-closed validation via da config verify/lint: undefined precondition_policy reference -> error; predicate signal kind not in the registry -> error. Full design in plan.md section Slice B5.'
+      app_type: go-cli

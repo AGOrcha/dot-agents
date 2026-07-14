@@ -1,5 +1,8 @@
 # Organization Config Resolution And Repo Identity
 
+
+> **Consolidation update (2026-06-07) — `stage-profile-and-routing-consolidation`:** `verifier_profiles` + `reviewer_profiles` are now unified into one **typed** `stage_profiles` map (stage `executor`/`verifier`/`reviewer`/`orchestrator` → slug → `{label, prompt_files}`), and `app_type_verifier_map` is **retired** into `execution_profile.by_app_type.<type>.topology.verifier_sequence`. Legacy keys still load (folded, deprecated). Mentions of those keys below describe the pre-consolidation surface — read them as the new model.
+
 **Status:** design artifact
 
 **Purpose:** define how `dot-agents` should resolve shared configuration, verifier policy, and feature rollout for organizations that have many repositories, uneven local checkouts, and no guaranteed shared filesystem root.
@@ -83,9 +86,7 @@ That is a useful local dispatch rule.
 
 ### 2.2 Important implementation caveat
 
-The current config loader does not yet treat `verifier_profiles` and `app_type_verifier_map` as first-class typed `AgentsRC` fields. They are parsed by the workflow fanout path and otherwise preserved as extra JSON.
-
-That is acceptable for a local dispatch experiment, but it is too weak a contract for organization-wide layering and inheritance.
+~~The current config loader does not yet treat `verifier_profiles` and `app_type_verifier_map` as first-class typed `AgentsRC` fields. They are parsed by the workflow fanout path and otherwise preserved as extra JSON.~~ **(RESOLVED by `stage-profile-and-routing-consolidation`, 2026-06-07):** the profile surface is now the **typed** `stage_profiles` field (`map[stage]map[slug]StageProfile`) with the full `AgentsRC` lifecycle, and per-app_type verifier routing is the typed `execution_profile.by_app_type.<type>.topology.verifier_sequence`; `app_type_verifier_map` is retired (folded on load). The earlier "extra JSON / too weak a contract" caveat no longer holds.
 
 ### 2.3 Why `payout` is useful but not canonical
 

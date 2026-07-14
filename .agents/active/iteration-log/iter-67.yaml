@@ -1,0 +1,19 @@
+schema_version: 2
+iteration: 67
+plan_id: kg-ideate-skill
+task_id: t1-kg-brief-molecule
+item: "Phase 1 molecule kg-brief"
+scenario_tags:
+  - delegated
+  - recovery
+  - skill-scaffold
+feedback_goal: "Recover iteration-close after worker interruption so canonical verification can resume."
+tests_added: 0
+tests_total_pass: 0
+retries: 0
+scope_note: "Recovery artifact after worker usage-limit interruption during delegated closeout."
+summary: "Recovered missing iteration-log artifact for t1-kg-brief-molecule so the parent can rerun verify/checkpoint/merge-back."
+self_assessment:
+  status: partial
+  summary: "Implementation commit exists, but canonical verification and merge-back need to be rerun by the parent."
+persisted_via_workflow_commands: paused - worker interrupted before workflow closeout completed

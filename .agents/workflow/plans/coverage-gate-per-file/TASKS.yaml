@@ -167,6 +167,7 @@ tasks:
         pinned contract; this is the seam pattern that makes
         [defensive-unreachable] testable without per-backend forks.
         See: .agents/history/graphstore-concurrency-contract/impl-results.md
+        - (fb:per-file-coverage-target-100) OPEN 2026-07-13 — PR 391 implements a retained 95 percent compatibility floor plus a 100 percent per-file target ratchet; the merged multi-OS baseline has 173 target exceptions and the gate remains green without weakening the former floor. Scope follow-up behavior-driven task batches that remove every exception; waiting on task decomposition and no current wave decision reopened
     - id: cg-verify-close
       title: Verify spec done-criteria + close
       status: pending

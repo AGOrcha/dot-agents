@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reviewer_model_family", "reviewer_engine", "hypotheses"],
+  "properties": {
+    "reviewer_model_family": { "type": "string" },
+    "reviewer_engine": { "type": "string" },
+    "hypotheses": {
+      "type": "array",
+      "minItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "statement", "test"],
+        "properties": {
+          "id": { "type": "string" },
+          "statement": { "type": "string" },
+          "test": { "type": "string" }
+        }
+      }
+    }
+  }
+}

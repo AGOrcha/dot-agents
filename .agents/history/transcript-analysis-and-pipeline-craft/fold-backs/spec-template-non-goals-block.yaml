@@ -1,0 +1,9 @@
+schema_version: 1
+id: spec-template-non-goals-block
+plan_id: transcript-analysis-and-pipeline-craft
+task_id: ""
+observation: 'Spec drafting convention — add an explicit non-goals block (non-goal means never; deferred means later; conflating them re-surfaces settled scope) plus the penalty-for-being-wrong section-inclusion test. Source — refactoringenglish design-doc excerpt (Part J.7); pairs with Part C item C.11 (hard test + common false positive).'
+classification: proposal
+routed_to: proposal:obs-spec-template-non-goals-block.md
+created_at: "2026-07-12T23:38:34Z"
+resolution: 'CONSUMED 2026-07-13 — routed to proposal ~/.agents/proposals/obs-spec-template-non-goals-block.md (the durable record; awaits da review). Staging archived. Original observation restored above after a da workflow fold-back update erroneously overwrote it (update on a proposal-routed fold-back rewrites the proposal body).'

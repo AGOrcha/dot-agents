@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# Drive conflict-free eligible tasks across active plans through OMP.
+# da owns selection, slots, fanout, and lifecycle state. OMP owns agent execution.
+
+set -euo pipefail
+# Give each background inner pipeline its own process group so Ctrl-C/TERM can
+# terminate OMP and all of the agents it spawned, not only the wrapper subshell.
+set -m
+
+REPO_ROOT="${FULL_LOOP_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+DA_BIN="${FULL_LOOP_DA_BIN:-$REPO_ROOT/bin/da}"
+OMP_SWARM_BIN="${OMP_SWARM_BIN:-omp-swarm}"
+INNER_YAML_OVERRIDE="${FULL_LOOP_INNER_YAML:-}"
+INNER_YAML_SKELETON="$REPO_ROOT/.agents/workflow/runtime/full-loop/profile-driven.swarm.yaml"
+INNER_YAML="${INNER_YAML_OVERRIDE:-$INNER_YAML_SKELETON}"
+RECONCILE_YAML="${FULL_LOOP_RECONCILE_YAML:-$REPO_ROOT/.agents/workflow/runtime/full-loop/reconcile.swarm.yaml}"
+RUN_ROOT="${FULL_LOOP_RUN_ROOT:-$REPO_ROOT/.agents/worktrees/_state/full-loop-runs}"
+PLAN_SCOPE="${FULL_LOOP_PLAN_SCOPE:-}"
+MAX_WAVES="${FULL_LOOP_MAX_WAVES:-0}"
+RUN_ID="${FULL_LOOP_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+RUN_DIR="$RUN_ROOT/$RUN_ID"
+LOCK_DIR="$RUN_ROOT/.driver-lock"
+
+usage() {
+  cat <<'USAGE'
+Usage: omp-full-loop [--plan id[,id...]] [--max-waves N] [--run-id ID]
+
+Environment:
+  FULL_LOOP_DA_BIN       repository-HEAD da executable (default: ./bin/da)
+  OMP_SWARM_BIN          OMP swarm executable (default: omp-swarm)
+  FULL_LOOP_RUN_ROOT     coordination run root
+  FULL_LOOP_MAX_WAVES    0 means run until quiescent
+
+The driver never invokes claude, codex, copilot, cursor, or another vendor CLI.
+USAGE
+}
+
+while (($#)); do
+  case "$1" in
+    --plan) PLAN_SCOPE="${2:?missing --plan value}"; shift 2 ;;
+    --max-waves) MAX_WAVES="${2:?missing --max-waves value}"; shift 2 ;;
+    --run-id) RUN_ID="${2:?missing --run-id value}"; RUN_DIR="$RUN_ROOT/$RUN_ID"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "error: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$MAX_WAVES" in ''|*[!0-9]*) echo "error: --max-waves must be a non-negative integer" >&2; exit 2 ;; esac
+
+require_executable() {
+  local value="$1" label="$2"
+  if [[ "$value" == */* ]]; then
+    [[ -x "$value" ]] || { echo "error: $label not executable: $value" >&2; exit 1; }
+  else
+    command -v "$value" >/dev/null 2>&1 || { echo "error: $label not on PATH: $value" >&2; exit 1; }
+  fi
+}
+
+if [[ -z "${FULL_LOOP_DA_BIN:-}" ]]; then
+  mkdir -p "$(dirname "$DA_BIN")"
+  (cd "$REPO_ROOT" && go build -o "$DA_BIN" ./cmd/da)
+fi
+
+require_executable "$DA_BIN" da
+require_executable "$OMP_SWARM_BIN" omp-swarm
+[[ -f "$INNER_YAML" ]] || { echo "error: inner pipeline missing: $INNER_YAML" >&2; exit 1; }
+[[ -f "$RECONCILE_YAML" ]] || { echo "error: reconcile pipeline missing: $RECONCILE_YAML" >&2; exit 1; }
+
+mkdir -p "$RUN_ROOT"
+acquire_driver_lock() {
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" > "$LOCK_DIR/pid"
+    return
+  fi
+  local owner=""
+  [[ -f "$LOCK_DIR/pid" ]] && owner="$(cat "$LOCK_DIR/pid")"
+  if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+    echo "error: another omp-full-loop driver (pid $owner) owns $LOCK_DIR" >&2
+    exit 1
+  fi
+  rm -rf "$LOCK_DIR"
+  mkdir "$LOCK_DIR" 2>/dev/null || {
+    echo "error: failed to recover stale driver lock: $LOCK_DIR" >&2
+    exit 1
+  }
+  printf '%s\n' "$$" > "$LOCK_DIR/pid"
+}
+cleanup_driver() {
+  local pid
+  for pid in $(jobs -pr); do
+    kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  done
+  rm -rf "$LOCK_DIR"
+}
+acquire_driver_lock
+trap cleanup_driver EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+mkdir -p "$RUN_DIR"
+printf '%s\n' "$RUN_ID" > "$RUN_DIR/run-id"
+
+run_da() { (cd "$REPO_ROOT" && "$DA_BIN" "$@"); }
+
+slots_json() {
+  local args=(--json workflow slots)
+  [[ -n "$PLAN_SCOPE" ]] && args+=(--plan "$PLAN_SCOPE")
+  run_da "${args[@]}"
+}
+
+eligible_json() {
+  local limit="$1"
+  local args=(--json workflow eligible --limit "$limit")
+  [[ -n "$PLAN_SCOPE" ]] && args+=(--plan "$PLAN_SCOPE")
+  run_da "${args[@]}"
+}
+
+json_int() {
+  local key="$1"
+  python3 -c 'import json,sys; print(int(json.load(sys.stdin).get(sys.argv[1], 0)))' "$key"
+}
+
+select_wave() {
+  local limit="$1"
+  python3 -c '
+import json, sys
+limit = int(sys.argv[1])
+data = json.load(sys.stdin)
+allowed = set(data.get("max_batch") or [])
+selected = []
+for task in data.get("eligible_tasks") or []:
+    if task.get("task_id") not in allowed:
+        continue
+    selected.append({
+        "plan_id": task["plan_id"],
+        "task_id": task["task_id"],
+        "app_type": task.get("app_type") or "",
+        "write_scope": task.get("write_scope") or [],
+    })
+    if len(selected) >= limit:
+        break
+for task in selected:
+    print(json.dumps(task, separators=(",", ":")))
+' "$limit"
+}
+
+field_from_json() {
+  local key="$1" payload="$2"
+  python3 -c 'import json,sys; value=json.loads(sys.argv[2]).get(sys.argv[1], ""); print(value)' "$key" "$payload"
+}
+
+# select_inner_yaml resolves the inner per-task pipeline for a task's app_type.
+# FULL_LOOP_INNER_YAML (the override) wins for every task. Otherwise a task with
+# an app_type runs its specialized projection when one has been emitted
+# (profile-driven.<app_type>.swarm.yaml, "/"->"-" like the emitter), so per-stage
+# model routes actually reach the launched swarm. When no specialized file
+# exists the app_type-agnostic skeleton is the fallback; the emitter refuses a
+# model-diverse skeleton, so a model-diverse config with no specialized file has
+# no skeleton to fall back to and the startup check fails loudly rather than
+# launching wrong models.
+select_inner_yaml() {
+  local app_type="$1"
+  if [[ -n "$INNER_YAML_OVERRIDE" ]]; then
+    printf '%s\n' "$INNER_YAML_OVERRIDE"
+    return
+  fi
+  if [[ -n "$app_type" ]]; then
+    local specialized="$REPO_ROOT/.agents/workflow/runtime/full-loop/profile-driven.${app_type//\//-}.swarm.yaml"
+    if [[ -f "$specialized" ]]; then
+      printf '%s\n' "$specialized"
+      return
+    fi
+  fi
+  printf '%s\n' "$INNER_YAML_SKELETON"
+}
+
+bundle_for_task() {
+  local task_id="$1" contract="$REPO_ROOT/.agents/active/delegation/$task_id.yaml"
+  python3 - "$contract" "$REPO_ROOT" <<'PY'
+import sys
+from pathlib import Path
+contract = Path(sys.argv[1])
+root = Path(sys.argv[2])
+if not contract.is_file():
+    raise SystemExit(f"delegation contract missing: {contract}")
+for raw in contract.read_text().splitlines():
+    if raw.startswith("id:"):
+        delegation_id = raw.split(":", 1)[1].strip().strip('"')
+        bundle = root / ".agents" / "active" / "delegation-bundles" / f"{delegation_id}.yaml"
+        if not bundle.is_file():
+            raise SystemExit(f"delegation bundle missing: {bundle}")
+        print(bundle)
+        break
+else:
+    raise SystemExit(f"delegation id missing: {contract}")
+PY
+}
+
+fanout_task() {
+  local plan_id="$1" task_id="$2" owner="$3"
+  run_da workflow fanout --plan "$plan_id" --task "$task_id" --owner "$owner"
+}
+
+write_wave_manifest() {
+  local wave_dir="$1" selection_file="$2" manifest="$3"
+  python3 - "$wave_dir" "$selection_file" "$manifest" <<'PY'
+import json, sys
+from pathlib import Path
+wave = Path(sys.argv[1])
+selection = Path(sys.argv[2])
+out = Path(sys.argv[3])
+tasks = []
+for line in selection.read_text().splitlines():
+    if not line.strip():
+        continue
+    item = json.loads(line)
+    key = f"{item['plan_id']}__{item['task_id']}".replace("/", "_")
+    coord = wave / "tasks" / key
+    result = "UNKNOWN"
+    if (coord / "READY.md").is_file():
+        result = "READY"
+    elif (coord / "GATE.md").is_file():
+        result = "FOLD_BACK"
+    elif (coord / "BLOCKED.md").is_file():
+        result = "BLOCKED"
+    exit_path = coord / "exit-code"
+    exit_code = int(exit_path.read_text().strip()) if exit_path.is_file() else 255
+    item.update({"coord": str(coord), "result": result, "exit_code": exit_code})
+    tasks.append(item)
+out.write_text(json.dumps({"wave_dir": str(wave), "tasks": tasks}, indent=2) + "\n")
+PY
+}
+
+recover_incomplete_waves() {
+  local selection wave_dir coord pid manifest
+  for selection in "$RUN_ROOT"/*/wave-*/selection.jsonl; do
+    [[ -f "$selection" ]] || continue
+    wave_dir="$(dirname "$selection")"
+    [[ -f "$wave_dir/RECONCILED" ]] && continue
+    for coord in "$wave_dir"/tasks/*; do
+      [[ -d "$coord" && ! -f "$coord/exit-code" && -f "$coord/pid" ]] || continue
+      pid="$(cat "$coord/pid")"
+      if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+        echo "error: incomplete wave still has live OMP process $pid: $coord" >&2
+        return 1
+      fi
+    done
+    echo "full-loop: recovering incomplete wave $wave_dir"
+    manifest="$wave_dir/manifest.json"
+    write_wave_manifest "$wave_dir" "$selection" "$manifest"
+    WAVE_DIR="$wave_dir" WAVE_MANIFEST="$manifest" \
+      "$OMP_SWARM_BIN" "$RECONCILE_YAML" > "$wave_dir/reconcile.log" 2>&1
+    [[ -f "$wave_dir/RECONCILED" ]] || {
+      echo "error: recovery reconciliation did not write $wave_dir/RECONCILED" >&2
+      return 1
+    }
+  done
+}
+
+recover_incomplete_waves
+
+wave=0
+while :; do
+  if ((MAX_WAVES > 0 && wave >= MAX_WAVES)); then
+    echo "full-loop: reached max waves ($MAX_WAVES)"
+    break
+  fi
+
+  slot_payload="$(slots_json)"
+  available="$(printf '%s' "$slot_payload" | json_int available)"
+  occupied="$(printf '%s' "$slot_payload" | json_int occupied)"
+  if ((available == 0)); then
+    echo "full-loop: no available slots (occupied=$occupied); quiescent wait"
+    break
+  fi
+
+  eligible_payload="$(eligible_json "$available")"
+  total="$(printf '%s' "$eligible_payload" | json_int total_eligible)"
+  if ((total == 0)); then
+    echo "full-loop: no eligible tasks (occupied=$occupied)"
+    break
+  fi
+
+  wave=$((wave + 1))
+  wave_dir="$RUN_DIR/wave-$wave"
+  tasks_dir="$wave_dir/tasks"
+  selection_file="$wave_dir/selection.jsonl"
+  mkdir -p "$tasks_dir"
+  printf '%s' "$eligible_payload" | select_wave "$available" > "$selection_file"
+  selected_count="$(python3 -c 'import sys; print(sum(1 for line in open(sys.argv[1]) if line.strip()))' "$selection_file")"
+  if ((selected_count == 0)); then
+    echo "error: eligible reported $total tasks but max_batch selected none" >&2
+    exit 1
+  fi
+  echo "full-loop: wave $wave selects $selected_count task(s), available=$available"
+
+  declare -a pids=()
+  declare -a coords=()
+  index=0
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    index=$((index + 1))
+    plan_id="$(field_from_json plan_id "$item")"
+    task_id="$(field_from_json task_id "$item")"
+    app_type="$(field_from_json app_type "$item")"
+    inner_yaml="$(select_inner_yaml "$app_type")"
+    key="${plan_id//\//_}__${task_id//\//_}"
+    coord="$tasks_dir/$key"
+    owner="omp-full-loop-$RUN_ID-$index"
+    mkdir -p "$coord"
+    printf '%s\n' "$item" > "$coord/selection.json"
+    if ! fanout_task "$plan_id" "$task_id" "$owner" > "$coord/fanout.log" 2>&1; then
+      printf '70\n' > "$coord/exit-code"
+      printf 'FOLD-BACK: da workflow fanout failed; see fanout.log\n' > "$coord/GATE.md"
+      continue
+    fi
+    if ! bundle="$(bundle_for_task "$task_id" 2> "$coord/bundle-error.log")"; then
+      printf '71\n' > "$coord/exit-code"
+      printf 'FOLD-BACK: delegation bundle resolution failed; see bundle-error.log\n' > "$coord/GATE.md"
+      continue
+    fi
+    printf '%s\n' "$bundle" > "$coord/bundle-path"
+    (
+      set +e
+      TASK="$plan_id/$task_id" BUNDLE="$bundle" COORD="$coord" \
+        "$OMP_SWARM_BIN" "$inner_yaml" > "$coord/omp.log" 2>&1
+      rc=$?
+      printf '%s\n' "$rc" > "$coord/exit-code"
+      exit "$rc"
+    ) &
+    child_pid=$!
+    printf '%s\n' "$child_pid" > "$coord/pid"
+    pids+=("$child_pid")
+    coords+=("$coord")
+  done < "$selection_file"
+
+  wave_failed=0
+  for i in "${!pids[@]}"; do
+    if ! wait "${pids[$i]}"; then
+      wave_failed=1
+      echo "full-loop: inner pipeline failed: ${coords[$i]}" >&2
+    fi
+  done
+
+  manifest="$wave_dir/manifest.json"
+  write_wave_manifest "$wave_dir" "$selection_file" "$manifest"
+  if ((wave_failed)); then
+    echo "full-loop: wave $wave has failed inner pipelines; reconciling failures before continuing" >&2
+  fi
+
+  WAVE_DIR="$wave_dir" WAVE_MANIFEST="$manifest" \
+    "$OMP_SWARM_BIN" "$RECONCILE_YAML" > "$wave_dir/reconcile.log" 2>&1
+  [[ -f "$wave_dir/RECONCILED" ]] || {
+    echo "error: reconciliation did not write $wave_dir/RECONCILED" >&2
+    exit 1
+  }
+done
+
+printf '%s\n' "$RUN_DIR" > "$RUN_ROOT/latest"
+echo "FULL_LOOP_RUN: $RUN_DIR"

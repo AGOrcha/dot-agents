@@ -1,9 +1,0 @@
-schema_version: 1
-task_id: t0-outcome-contract
-parent_plan_id: r1-5-hook-enforcement-telemetry
-verifier_type: build
-status: pass
-summary: 'workflow-hook-outcome schema + bundled twin land at schemas/ and commands/workflow/static/; both files parse as JSON (python3 json.load); go build ./... clean in worktree. Disallowed-field rejection enforced via additionalProperties=false + propertyNames deny list per D2/R1.2; required-together lifecycle_point + intervention_class enforced via required list per R1.3. Branch feature/t0-outcome-contract, commit bd60d479, PR #83.'
-recorded_at: "2026-05-26T11:38:55Z"
-delegation_id: del-t0-outcome-contract-1779795346
-recorded_by: da workflow verify record

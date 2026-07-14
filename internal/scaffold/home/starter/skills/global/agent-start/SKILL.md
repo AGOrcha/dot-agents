@@ -1,30 +1,24 @@
 ---
-name: "Agent Start"
-description: "Begin each work session by understanding the current state and context"
+name: agent-start
+description: "Begin each work session by understanding the current state and context. Use at the start of any new conversation, when resuming work, or when switching tasks."
 ---
 
 # Agent Start
 
-Begin each work session by understanding the current state and context.
+Begin each work session by understanding the current state and context. Use at the start of any new conversation, when resuming work, or when switching tasks.
 
-## When to Use
+If `.agents/workflow/` and `active.loop.md` are present, prefer
+`orchestrator-session-start` instead — this skill is the generic,
+non-loop fallback for repos that aren't running a `da` workflow loop.
 
-- At the start of a new conversation or coding session
-- When resuming work after a break
-- When switching to a different task
+## Workflow
 
-## Steps
+1. **Gather context** (see `instructions/context-gathering.md`)
+   - Read project docs, check for active plans, review lessons learned
+   - If a code review graph is present, prefer graph or MCP tooling over broad manual scans
 
-1. **Check for existing context**
-   - Read any TODO comments or task lists in the codebase
-   - Check for .claude/rules/ or project documentation
-   - Review any pinned messages or session notes
-
-2. **Understand the current state**
-   - Run `git status` to see uncommitted changes
-   - In dot-agents projects, run `da workflow orient` for session readiness, and `da kg health` for knowledge-graph readiness
-   - Review recent commits with `git log --oneline -5`
-   - Check for any failing tests or build issues
+2. **Assess technical state** (see `instructions/state-check.md`)
+   - Git status, build health, branch state, stashed work
 
 3. **Identify the current task**
    - Ask the user what they want to work on if not clear
@@ -36,9 +30,5 @@ Begin each work session by understanding the current state and context.
    - Identify files that will need changes
    - Consider edge cases and potential issues
 
-## Notes
-
-- Don't start coding until you understand the goal
-- Ask clarifying questions if requirements are unclear
-- If picking up someone else's work, read their notes first
-- Check for any blockers or dependencies before diving in
+5. **Review gotchas** (see `instructions/gotchas.md`)
+   - Avoid common session-start mistakes

@@ -1,0 +1,8 @@
+schema_version: 1
+id: cache-aware-model-routing
+plan_id: full-loop-orchestration-runtime
+task_id: ""
+observation: Cache-aware model routing — Alex Ker harness-engineering guide (research Part L.6) notes routing to a different model mid-session incurs a prompt-cache miss, so a router should prefer the warm-cache model when quality permits. Small operational refinement for our per-agent model routing (explicit-model-routing, completed). Consumer — full-loop-orchestration-runtime routing note or r-series. Evidence — research/articles/thealexker-architects-guide-harness-engineering.md and eval Part L.6. Practitioner-grade, additive.
+classification: small
+routed_to: plan_summary:full-loop-orchestration-runtime
+created_at: "2026-07-14T00:06:21Z"

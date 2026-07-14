@@ -1,0 +1,103 @@
+schema_version: 1
+plan_id: full-loop-orchestration-runtime
+tasks:
+    - id: explicit-model-routing
+      title: Add explicit per-stage model-family routing
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/agentsrc.go
+        - schemas/agentsrc.schema.json
+        - commands/workflow/profile_prompt.go
+        - commands/workflow/profile_prompt_test.go
+        - internal/config/agentsrc_test.go
+        - .agentsrc.json
+        - internal/scaffold/home/starter/.agentsrc.json
+        - docs/concepts/verification-and-scoring.md
+        - docs/AGENT_TOOL_ROUTING.md
+      verification_required: true
+      notes: Add model/model_family authority to stage profiles and prompt resolution. Default high-volume stages to Claude through OMP; pin the blocking cross-model adversarial lens to GPT through OMP. Remove the obsolete inference that GPT use implies the Codex CLI harness or its permission whitelist.
+      app_type: go-cli
+    - id: per-task-omp-pipeline
+      title: Promote and correct the per-task OMP pipeline
+      status: completed
+      depends_on:
+        - explicit-model-routing
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/runtime/full-loop/profile-driven.swarm.yaml
+        - .agents/workflow/runtime/full-loop/reconcile.swarm.yaml
+      verification_required: true
+      notes: Promote the validated state-ref draft into a runtime asset; support all configured verifier/lens counts; reserve a dedicated GPT-family cross-model lens instead of binding diversity to a numeric lens index; make every stage model explicit.
+      app_type: meta
+    - id: n-plan-omp-driver
+      title: Implement the N-plan OMP outer-loop driver
+      status: completed
+      depends_on:
+        - per-task-omp-pipeline
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/omp-full-loop
+        - bin/tests/omp-full-loop_test.sh
+      verification_required: true
+      notes: Use da workflow slots/eligible/max_batch/fanout. Launch one omp-swarm inner pipeline per selected task, bounded by available slots, with separate coordination namespaces and a wave barrier. Never invoke Claude/Codex/Copilot CLIs directly.
+      app_type: meta
+    - id: lifecycle-refinement-reconcile
+      title: Integrate delegation lifecycle and meta-loop reconciliation
+      status: completed
+      depends_on:
+        - n-plan-omp-driver
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - bin/tests/omp-full-loop
+        - bin/tests/omp-full-loop_test.sh
+        - .agents/workflow/runtime/full-loop/reconcile.swarm.yaml
+      verification_required: true
+      notes: Serialize Main reconciliation after each wave; handle READY/FOLD-BACK, merge-back, delegation closeout boundaries, task/plan observations, proposal candidates, checkpoint/hook outcomes/score, and fresh slots+eligible reads. Workers emit artifacts only.
+      app_type: meta
+    - id: controlled-multiplan-validation
+      title: Validate a controlled multi-plan full-loop run
+      status: completed
+      depends_on:
+        - lifecycle-refinement-reconcile
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/full-loop-orchestration-runtime/evidence/
+      verification_required: true
+      notes: Run driver self-tests with fake omp-swarm and fixture plans, validate both swarm YAMLs, then controlled real OMP smoke over non-overlapping disposable tasks. Prove slot cap, model pinning, fold-back re-entry, proposal emission, wave barrier, and serialized board writes.
+      app_type: meta
+    - id: state-ref-transition-instructions
+      title: Add temporary state-ref transition instructions
+      status: completed
+      depends_on:
+        - controlled-multiplan-validation
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/scaffold/home/starter/skills/global/orchestrator-session-start/SKILL.md
+        - .agents/active/orchestrator.loop.md
+        - .agents/active/state-ref-transition.md
+      verification_required: true
+      notes: 'Temporary bounded instructions: detect active backend/ref, read/write only through da, forbid worktree TASKS.yaml edits, verify CAS/ref sync, and document rollback. Remove after git-ref becomes the default and the migration closes.'
+      app_type: docs
+    - id: migrate-workflow-state-ref
+      title: Migrate active workflow plans and task state to refs/agents/state
+      status: pending
+      depends_on:
+        - state-ref-transition-instructions
+        - git-ref-work-backend/document-and-default-git-ref
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agents/workflow/plans/
+        - .agents/active/
+        - refs/agents/state
+      verification_required: true
+      notes: Execute only after the git-ref WorkStore backend, per-task state files, and controlled full-loop validation are green. Snapshot source commit/ref, migrate all active plan triads and task state, compare projected views, verify rollback, then switch the active backend. No partial cutover.
+      app_type: meta

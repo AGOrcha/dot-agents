@@ -1,0 +1,8 @@
+schema_version: 1
+id: config-overlay-consumer-wiring-bypass
+plan_id: config-transitive-layering
+task_id: ""
+observation: Orphaned follow-up from ARCHIVED plan config-v2-coherence (original fold-back cg-project-local-overlay-consumer-wiring). The project-local .agentsrc.local.json overlay merges in the canonical internal/config resolver (FlatResolver/LayeredResolver.Resolve) but TWO consumers still bypass it (verified 2026-07-13) — resolve_locked.go (the extends-present locked stack has no loadProjectLocalOverlay append) and commands/config/explain.go (still runs a parallel loadFlatSnapshot merge instead of the canonical resolver), so overlay overrides are silently dropped on the locked path and in explain output. Fix — append loadProjectLocalOverlay to the locked stack in resolve_locked.go and retire explain.go loadFlatSnapshot in favor of the canonical resolver. Re-raised because config-v2-coherence archived without routing this consumer wiring.
+classification: proposal
+routed_to: proposal:obs-config-overlay-consumer-wiring-bypass.md
+created_at: "2026-07-13T14:24:58Z"

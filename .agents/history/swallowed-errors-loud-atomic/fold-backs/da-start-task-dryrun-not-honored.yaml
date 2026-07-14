@@ -1,0 +1,8 @@
+schema_version: 1
+id: da-start-task-dryrun-not-honored
+plan_id: swallowed-errors-loud-atomic
+task_id: ""
+observation: da workflow start-task --dry-run performs the REAL mutations and commits (plan activated, sidecar written, 45-path workflow commit) despite --dry-run. The composed client commands don't thread --dry-run into their sub-steps; make --dry-run a true no-write preview.
+classification: proposal
+routed_to: proposal:obs-da-start-task-dryrun-not-honored.md
+created_at: "2026-07-09T03:00:53Z"

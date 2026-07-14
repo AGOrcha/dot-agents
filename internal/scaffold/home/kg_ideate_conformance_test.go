@@ -24,16 +24,33 @@ const (
 	frontmatterMark = "---"
 )
 
+// kgIdeateFamilyRels lists every directory (relative to the scaffold root)
+// that carries part of the kg-ideate family: the compound itself, plus every
+// molecule that has been flattened to a top-level `skills/global/` sibling
+// because its own prose claims standalone invocability. The two compound-only
+// molecules (kg-brief, staged-execution-handoff) are deliberately NOT
+// top-level skills — they stay nested under kg-ideate/ and are walked as
+// part of that subtree, not listed separately here.
+var kgIdeateFamilyRels = []string{
+	kgIdeateRel,
+	"skills/global/spec-scaffold",
+	"skills/global/plan-scaffold",
+}
+
 // loadRefPattern captures the backtick-quoted `instructions/<x>.md` or
 // `templates/<y>.md` path in a `Load → ...` directive. The rendered arrow is
 // the Unicode U+2192; whitespace around it is tolerated.
 var loadRefPattern = regexp.MustCompile("Load\\s*→\\s*`((?:instructions|templates)/[^`]+)`")
 
 // TestKGIdeateCallsAndLoadRefsResolve asserts the whole shipped kg-ideate
-// tree (the compound + its four molecules) has ZERO dangling references:
+// family (the compound, its two compound-only nested molecules, and its two
+// standalone top-level molecules) has ZERO dangling references:
 //
-//   - every frontmatter `calls:` entry resolves — a compound call to a sibling
-//     molecule's SKILL.md, a molecule call to its `instructions/<call>.md`;
+//   - every frontmatter `calls:` entry resolves — a compound call to a
+//     molecule's SKILL.md (nested under the compound for a compound-only
+//     molecule, or a top-level sibling in the same scope root for a
+//     standalone-invocable one), a molecule call to its own
+//     `instructions/<call>.md`;
 //   - every `Load → `+"`"+`instructions/X.md`+"`"+` / `+"`"+`templates/Y.md`+"`"+`
 //     directive in any SKILL.md or instructions/*.md resolves under its skill dir.
 //
@@ -46,22 +63,27 @@ func TestKGIdeateCallsAndLoadRefsResolve(t *testing.T) {
 	if err := CopyMissingStarterAssets(tmp); err != nil {
 		t.Fatalf("CopyMissingStarterAssets: %v", err)
 	}
-	root := filepath.Join(tmp, filepath.FromSlash(kgIdeateRel))
 
-	skillFiles, loadRefFiles, err := collectKGIdeateFiles(root)
-	if err != nil {
-		t.Fatalf("walk kg-ideate tree: %v", err)
+	var skillFiles, loadRefFiles []string
+	for _, rel := range kgIdeateFamilyRels {
+		root := filepath.Join(tmp, filepath.FromSlash(rel))
+		sf, lf, err := collectKGIdeateFiles(root)
+		if err != nil {
+			t.Fatalf("walk %s: %v", rel, err)
+		}
+		skillFiles = append(skillFiles, sf...)
+		loadRefFiles = append(loadRefFiles, lf...)
 	}
 	if len(skillFiles) == 0 {
 		// Sentinel (mirrors TestStarterVerifierSurfaceCrossReference): a path
 		// change to the embedded tree must not silently no-op this test.
-		t.Fatal("no SKILL.md found under kg-ideate; embedded path may have changed")
+		t.Fatal("no SKILL.md found under the kg-ideate family; embedded path may have changed")
 	}
 
 	failures := checkAllCalls(skillFiles)
 	failures = append(failures, checkAllLoadRefs(loadRefFiles)...)
 	if len(failures) > 0 {
-		t.Fatalf("kg-ideate has %d dangling call/ref(s):\n  - %s",
+		t.Fatalf("kg-ideate family has %d dangling call/ref(s):\n  - %s",
 			len(failures), strings.Join(failures, "\n  - "))
 	}
 }
@@ -188,17 +210,32 @@ func parseFrontmatterTierAndCalls(fm string) (string, []string) {
 }
 
 // resolveCall returns the expected target path for a call and whether it exists.
-// A compound call targets a sibling molecule's SKILL.md; a molecule call targets
-// its own `instructions/<call>.md`.
+// A molecule call targets its own `instructions/<call>.md`. A compound call
+// targets a molecule's SKILL.md, which lives in one of two places depending on
+// whether that molecule needs standalone invocation: nested as a child of the
+// compound's own dir (compound-only, deliberately not loader-discoverable), or
+// as a top-level sibling in the compound's own scope root (standalone-invocable,
+// discoverable by the one-level-deep skill loader). Nested is checked first;
+// the top-level sibling path is reported as the target on a miss since that is
+// the loader-visible location a standalone molecule is expected to occupy.
 func resolveCall(skillDir, tier, call string) (string, bool) {
-	var target string
-	if tier == tierCompound {
-		target = filepath.Join(skillDir, call, skillFileName)
-	} else {
-		target = filepath.Join(skillDir, instructionsSeg, call+mdExt)
+	if tier != tierCompound {
+		target := filepath.Join(skillDir, instructionsSeg, call+mdExt)
+		_, err := os.Stat(target)
+		return target, err == nil
 	}
-	_, err := os.Stat(target)
-	return target, err == nil
+	if nested := filepath.Join(skillDir, call, skillFileName); fileExists(nested) {
+		return nested, true
+	}
+	topLevel := filepath.Join(filepath.Dir(skillDir), call, skillFileName)
+	return topLevel, fileExists(topLevel)
+}
+
+// fileExists reports whether path stats successfully as a regular readable
+// file (used by resolveCall's nested/top-level fallback check).
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // collectLoadRefs returns every backtick-quoted Load → ref (slash-relative to

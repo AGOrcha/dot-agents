@@ -1,0 +1,8 @@
+schema_version: 1
+id: article-extract-save-and-ingest-chain
+plan_id: kg-ideate-skill
+task_id: ""
+observation: RESOLVED 2026-07-13 (owner-directed, applied directly) — (1) article-extract gained the save/backfill terminal step (+--no-save) plus a 4-tier fetch escalation ladder (WebFetch → Playwright → Claude-in-Chrome → Codex app-server via /codex:codex-rescue or codex exec); (2) the ingest stage shipped as research-evaluate (analysis/evaluation) — the KG-fold half stays with the kg-ideate-skill plan tasks and chains downstream; (3) the end-to-end chain shipped as the research-intake orchestrator (extract → research-evaluate → knowledge-fold-back), promoted + refreshed. Proposal obs-article-extract-save-and-ingest-chain.md marked implemented.
+classification: proposal
+routed_to: proposal:obs-article-extract-save-and-ingest-chain.md
+created_at: "2026-06-26T22:03:06Z"

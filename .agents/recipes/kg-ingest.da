@@ -1,0 +1,53 @@
+#!/usr/bin/env -S da run
+# kg-ingest.da — mechanical KG ingestion of a FOLDER TREE, dynamic across source types.
+#
+# Ingests every supported file anywhere under a folder into the local knowledge
+# graph and materializes the notes into the warm query layer. Run this to warm the
+# KG before an inner-loop session so kg-brief / kg-ideate query fresh content
+# instead of degrading to "no prior decisions".
+#
+# Recursive + dynamic-by-source: one type-scoped `for … in <base>/**/<glob>` loop
+# per source kind. The `**` segment matches the base and every descendant at any
+# depth, so a single run ingests a whole TREE of mixed types — each file gets the
+# right --type, and a type with no files is a clean no-op (empty match → zero
+# iterations). Uses the mechanical control flow from da-recipe-scripts §8 (recursive
+# loops + the `if set` guard; nesting depth cap = 2, honored here as if→for).
+#
+# Env vars:
+#   KG_DIR   folder tree to ingest (required). The whole body is guarded by
+#            `if set KG_DIR`, so an unset KG_DIR is a TRUE no-op — nothing ingests,
+#            warm doesn't run, and the glob never walks the filesystem ROOT. Set it
+#            and everything below runs.
+#
+# Scope: this recipe ends at `kg warm` on purpose. Rebuilding FTS/flows/communities
+# is `kg postprocess`, part of the CODE-graph pipeline — it shells out to the
+# code-review-graph toolchain and hard-fails when that toolchain isn't runnable.
+# Keeping it out makes this recipe portable (exit 0 everywhere). Get code-graph
+# derived data via `da kg build` / `da kg update` (they auto-postprocess) where the
+# toolchain is installed; full FTS note-query is gated on that same toolchain.
+#
+# Not extension-mapped here (url | transcript | meeting_notes | repo_doc): ingest a
+# single such source with an explicit type, e.g.
+#   da kg ingest <file-or-url> --type transcript --title "<title>"
+# then run `da kg warm`. Mixed-inbox batch: queue sources, then `da kg ingest --all`.
+#
+# Paths are quoted ("${F}") so tree entries with spaces stay one token (expansion is
+# quote-blind and runs before tokenization; keep paths free of literal ").
+#
+# Requires `da run` (0.5.0+; the 0.4.2 binary lacks it — devs: `go run ./cmd/da run
+# .agents/recipes/kg-ingest.da`). Directly executable when chmod +x.
+if set KG_DIR
+  for F in ${KG_DIR}/**/*.md
+    kg ingest "${F}" --type markdown
+  end
+  for F in ${KG_DIR}/**/*.markdown
+    kg ingest "${F}" --type markdown
+  end
+  for F in ${KG_DIR}/**/*.txt
+    kg ingest "${F}" --type text
+  end
+  for F in ${KG_DIR}/**/*.pdf
+    kg ingest "${F}" --type pdf
+  end
+  kg warm
+end
