@@ -1241,35 +1241,49 @@ func collectScopedDirs(agentsHome, resourceType string, scopes []string, markerF
 	var errs []error
 	for _, scope := range scopes {
 		dir := filepath.Join(agentsHome, resourceType, scope)
-		entries, found, err := fsops.ReadDirAllowMissing(dir)
+		found, scopeErrs := markerDirsIn(dir, markerFile)
+		errs = append(errs, scopeErrs...)
+		for _, name := range found {
+			names = AppendUnique(names, name)
+		}
+	}
+	return names, errors.Join(errs...)
+}
+
+// markerDirsIn returns the names of immediate subdirectories of dir that
+// contain markerFile. A missing dir yields no names and no error; real I/O
+// errors (unreadable dir, un-stattable entry) are aggregated so the caller can
+// surface them rather than silently reporting "nothing configured".
+func markerDirsIn(dir, markerFile string) ([]string, []error) {
+	entries, found, err := fsops.ReadDirAllowMissing(dir)
+	if err != nil {
+		return nil, []error{err}
+	}
+	if !found {
+		return nil, nil
+	}
+	var names []string
+	var errs []error
+	for _, e := range entries {
+		entryPath := filepath.Join(dir, e.Name())
+		isDir, err := isDirEntry(entryPath)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		if !found {
+		if !isDir {
 			continue
 		}
-		for _, e := range entries {
-			entryPath := filepath.Join(dir, e.Name())
-			isDir, err := isDirEntry(entryPath)
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			if !isDir {
-				continue
-			}
-			_, markerFound, err := fsops.StatAllowMissing(filepath.Join(entryPath, markerFile))
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			if markerFound {
-				names = AppendUnique(names, e.Name())
-			}
+		_, markerFound, err := fsops.StatAllowMissing(filepath.Join(entryPath, markerFile))
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if markerFound {
+			names = append(names, e.Name())
 		}
 	}
-	return names, errors.Join(errs...)
+	return names, errs
 }
 
 // detectHookEvents reads the project claude-code.json and returns a
