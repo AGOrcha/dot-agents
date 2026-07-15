@@ -393,6 +393,60 @@ func TestCacheDigestPathTraversalGuard(t *testing.T) {
 	}
 }
 
+// TestReadConfinedCacheBlobRejectsOversized is the cache-read bound regression:
+// a cache blob larger than the cap is rejected (a miss) before the full read,
+// while an in-cap blob reads back — the local-path discipline applied to the
+// packages cache.
+func TestReadConfinedCacheBlobRejectsOversized(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "artifact.blob"), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	if _, ok := readConfinedCacheBlob(root, "artifact.blob", 1024); ok {
+		t.Fatal("expected an over-cap cache blob to be rejected before the full read")
+	}
+	if data, ok := readConfinedCacheBlob(root, "artifact.blob", 1<<20); !ok || len(data) != 4096 {
+		t.Fatalf("expected an in-cap cache blob to read back, ok=%v len=%d", ok, len(data))
+	}
+}
+
+// TestReadCachedArtifactRejectsSymlinkedCacheEntry is the cache-read identity
+// regression: the cache blob is a symlink whose target's content DOES hash to
+// the requested digest. The old symlink-following os.ReadFile would return that
+// target as a hit; the confined no-follow read rejects it (a miss) — an
+// attacker cannot substitute cache content via a symlink.
+func TestReadCachedArtifactRejectsSymlinkedCacheEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	content := []byte("cached-artifact-body")
+	digest := "sha256:" + sha256Hex(content)
+	blobPath := cachedArtifactPath(digest)
+	if err := os.MkdirAll(filepath.Dir(blobPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The real content lives outside the cache blob path; the cache "blob" is a
+	// symlink to it, and its target hashes to the requested digest.
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "real")
+	if err := os.WriteFile(target, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, blobPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readCachedArtifact(digest); ok {
+		t.Fatal("a symlinked cache entry must be rejected even when its target hashes to the digest")
+	}
+}
+
 // --- oci fetcher -----------------------------------------------------------
 
 func TestOCIFetcherPullsAndCaches(t *testing.T) {
@@ -2176,6 +2230,50 @@ func TestGitSubtreeWalkerEnforcesPerFileCap(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "git tree file") || !strings.Contains(err.Error(), "per-file cap") {
 		t.Fatalf("expected a walker-level per-file-cap rejection, got %v", err)
+	}
+}
+
+// unresolvableTreeCloner builds a repo whose HEAD resolves to a commit hash
+// that has NO commit object in storage — so repo.Head() succeeds but
+// CommitObject fails, leaving the committed tree unresolvable. The worktree
+// memfs still shows a "skill" directory, reproducing the gitlink error-path
+// bypass: a directory artifact whose committed tree cannot be resolved must
+// fail closed rather than skip the submodule check.
+func unresolvableTreeCloner(t *testing.T) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+	dangling := plumbing.NewHash("2222222222222222222222222222222222222222")
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", dangling)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+	wfs := memfs.New()
+	memfsWriteFile(t, wfs, "skill/SKILL.md", []byte("skill body"))
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
+// TestGitArtifactFetcherDirectoryRejectsUnresolvableTree is the gitlink
+// error-path regression: when the committed-tree lookup fails, a directory
+// artifact must fail closed (the submodule check cannot run without the tree)
+// rather than silently walk the worktree and succeed.
+func TestGitArtifactFetcherDirectoryRejectsUnresolvableTree(t *testing.T) {
+	withPackagesCache(t)
+	f := &gitArtifactFetcher{cloner: unresolvableTreeCloner(t)}
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error failing closed on an unresolvable committed tree, got %v", err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "committed tree") {
+		t.Fatalf("error should name the unresolvable committed tree, got %v", err)
 	}
 }
 

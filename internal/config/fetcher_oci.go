@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,11 +262,60 @@ func readCachedArtifact(digest string) ([]byte, bool) {
 	if !looksLikeSha256Digest(digest) {
 		return nil, false
 	}
-	data, err := os.ReadFile(cachedArtifactPath(digest))
+	// Confine the read to the packages cache root and apply the same discipline
+	// as the local tree reader: no-follow Lstat + fstat identity + size cap +
+	// bounded copy, so a huge or symlinked cache entry is neither followed nor
+	// fully allocated before the digest is verified.
+	root, err := os.OpenRoot(packagesCacheRoot())
 	if err != nil {
 		return nil, false
 	}
+	defer func() { _ = root.Close() }()
+	data, ok := readConfinedCacheBlob(root, filepath.Join(digestDir(digest), "artifact.blob"), DefaultBundleLimits().MaxFileBytes)
+	if !ok {
+		return nil, false
+	}
 	if artifactDigest(data) != digest {
+		return nil, false
+	}
+	return data, true
+}
+
+// readConfinedCacheBlob reads rel confined under root (the packages cache),
+// mirroring the local-tree read discipline: it Lstats (no-follow) and rejects
+// a symlinked or non-regular cache entry, rejects an over-cap size BEFORE
+// opening, verifies the opened fd's identity against the Lstat via os.SameFile
+// (defeating a symlink swapped in after the Lstat), and bounds the copy to
+// maxBytes+1. A huge or symlinked cache file is therefore never followed or
+// fully allocated before its digest is verified. Any anomaly is a cache miss.
+func readConfinedCacheBlob(root *os.Root, rel string, maxBytes int64) ([]byte, bool) {
+	li, err := root.Lstat(rel)
+	if err != nil {
+		return nil, false
+	}
+	if li.Mode()&fs.ModeSymlink != 0 || !li.Mode().IsRegular() {
+		return nil, false
+	}
+	if li.Size() > maxBytes {
+		return nil, false
+	}
+	fh, err := root.Open(rel)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = fh.Close() }()
+	fi, err := fh.Stat()
+	if err != nil {
+		return nil, false
+	}
+	if !fi.Mode().IsRegular() || !os.SameFile(li, fi) || fi.Size() > maxBytes {
+		return nil, false
+	}
+	data, err := io.ReadAll(io.LimitReader(fh, maxBytes+1))
+	if err != nil {
+		return nil, false
+	}
+	if int64(len(data)) > maxBytes {
 		return nil, false
 	}
 	return data, true

@@ -91,7 +91,7 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonSchema, fmt.Errorf("git artifact path: %w", err))
 	}
 
-	wfs, tree, commit, err := f.cloneAndResolve(src, parts)
+	wfs, tree, treeErr, commit, err := f.cloneAndResolve(src, parts)
 	if err != nil {
 		return FetchedArtifact{}, err
 	}
@@ -103,8 +103,13 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 	}
 	if info.IsDir() {
 		// Tree layout (spec D3): the ref names a resource directory, not a
-		// single file. Fetch walks the subtree into a normalized Bundle
-		// (H1) rather than treating it as an opaque blob.
+		// single file. The gitlink check REQUIRES the committed tree — without
+		// it a submodule flattened into an empty worktree dir would slip past
+		// rejectGitSubmodules and restore the pinning-defeat. So a directory
+		// artifact whose committed tree could not be resolved fails closed.
+		if tree == nil {
+			return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: cannot verify submodules — committed tree unavailable: %w", parts.ArtifactPath, commit, treeErr))
+		}
 		return f.fetchTreeBundle(wfs, tree, rootOS, rel, parts, commit, posture, isPinned, pinned)
 	}
 
@@ -171,12 +176,12 @@ func (f *gitArtifactFetcher) fetchTreeBundle(wfs billy.Filesystem, tree *object.
 // FetchArtifact): when a directory is visible in the worktree but the committed
 // tree cannot resolve that exact path, this refuses rather than returning
 // success, closing the noncanonical-path bypass where the lookup silently
-// missed a gitlink. A nil tree (a minimal cloner seam that exposes no tree
-// object) is treated as "nothing to inspect"; no live clone reaches here
-// without a tree.
+// missed a gitlink. A nil tree fails closed — the committed tree is REQUIRED to
+// verify a directory artifact carries no gitlink; the caller guarantees a
+// non-nil tree for any directory pull, and this guard is the defense in depth.
 func rejectGitSubmodules(tree *object.Tree, canonicalRel string) error {
 	if tree == nil {
-		return nil
+		return fmt.Errorf("committed tree unavailable; cannot verify submodules for %q", canonicalRel)
 	}
 	rel := strings.Trim(filepath.ToSlash(canonicalRel), "/")
 	if rel == "" || rel == "." {
@@ -360,14 +365,18 @@ func readArtifactFile(wfs billy.Filesystem, rootOS string, parts PackageRefParts
 
 // cloneAndResolve validates the source URL, shallow-clones at the resolved
 // ref, and resolves the cloned HEAD. It returns the worktree filesystem, the
-// committed HEAD tree object (for the gitlink inspection in fetchTreeBundle;
-// nil when the repository exposes no readable commit/tree object, e.g. a bare
-// test seam), and the resolved commit SHA, mapping each failure to its
-// ImportError reason. The caller (FetchArtifact) owns canonicalizing the
-// artifact path and deciding the content layout (tree vs single file).
-func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, tree *object.Tree, commit string, err error) {
+// committed HEAD tree object (for the gitlink inspection in fetchTreeBundle),
+// a treeErr describing why the committed tree could NOT be resolved (nil on
+// success), and the resolved commit SHA, mapping each failure to its
+// ImportError reason. treeErr is NOT fatal for a single-file artifact (which
+// needs no tree), but a directory artifact fails closed when the tree is
+// unresolvable — a nil tree must never let a worktree directory bypass the
+// gitlink check (that would restore the pinning-defeat). The caller
+// (FetchArtifact) owns canonicalizing the artifact path and deciding the
+// content layout.
+func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, tree *object.Tree, treeErr error, commit string, err error) {
 	if err := validateGitSourceURL(src.URL, parts); err != nil {
-		return nil, nil, "", err
+		return nil, nil, nil, "", err
 	}
 
 	ref := gitArtifactRef(src, parts)
@@ -375,23 +384,25 @@ func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) 
 	defer cancel()
 	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
 	if err != nil {
-		return nil, nil, "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
+		return nil, nil, nil, "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
 	}
 
 	head, err := repo.Head()
 	if err != nil {
-		return nil, nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
+		return nil, nil, nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
 	}
 	commit = head.Hash().String()
 
-	// The committed tree drives the gitlink check. A resolution failure here is
-	// not fatal — the worktree walk (with its own kind gates) still runs — so a
-	// minimal test seam that has a HEAD but no reachable commit object degrades
-	// gracefully rather than blocking the fetch.
-	if commitObj, cerr := repo.CommitObject(head.Hash()); cerr == nil {
-		if t, terr := commitObj.Tree(); terr == nil {
-			tree = t
-		}
+	// The committed tree drives the gitlink check. Any resolution failure is
+	// captured in treeErr and propagated so a directory artifact can fail closed
+	// (a single-file artifact ignores it — it needs no tree).
+	commitObj, cerr := repo.CommitObject(head.Hash())
+	if cerr != nil {
+		return wfs, nil, fmt.Errorf("resolve commit object %s: %w", commit, cerr), commit, nil
 	}
-	return wfs, tree, commit, nil
+	t, terr := commitObj.Tree()
+	if terr != nil {
+		return wfs, nil, fmt.Errorf("resolve tree for commit %s: %w", commit, terr), commit, nil
+	}
+	return wfs, t, nil, commit, nil
 }
