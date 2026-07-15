@@ -204,11 +204,38 @@ func cachedArtifactPath(digest string) string {
 
 // digestDir maps a canonical "sha256:<hex>" digest to its cache subdirectory
 // name (the bare hex), tolerating a digest passed without the algo prefix.
+// Callers that use the result as a filesystem path MUST first gate the digest
+// through looksLikeSha256Digest — otherwise a hostile "sha256:../../etc"
+// digest (e.g. from a `pinned:` version spec) would become a traversal segment.
 func digestDir(digest string) string {
 	if i := strings.IndexByte(digest, ':'); i >= 0 {
 		return digest[i+1:]
 	}
 	return digest
+}
+
+// looksLikeSha256Digest reports whether digest is a well-formed
+// "sha256:<64 lowercase hex>" string. It is the canonicalize-once gate that
+// keeps an attacker-influenced digest (e.g. a "pinned:sha256:../../etc"
+// version spec) from ever becoming a cache-path component: digestDir would
+// otherwise turn "../../etc" into a directory-traversal segment when joined
+// under the packages cache root.
+func looksLikeSha256Digest(digest string) bool {
+	const prefix = "sha256:"
+	if !strings.HasPrefix(digest, prefix) {
+		return false
+	}
+	hexPart := digest[len(prefix):]
+	if len(hexPart) != 64 {
+		return false
+	}
+	for i := 0; i < len(hexPart); i++ {
+		c := hexPart[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // artifactDigest computes the canonical "sha256:<hex>" content digest of data.
@@ -228,6 +255,11 @@ func artifactDigest(data []byte) string {
 // fetch instead of ever returning bytes that do not match what was asked
 // for.
 func readCachedArtifact(digest string) ([]byte, bool) {
+	// Refuse to turn a malformed/attacker-controlled digest into a cache path
+	// (traversal guard); an unparseable digest is simply a miss.
+	if !looksLikeSha256Digest(digest) {
+		return nil, false
+	}
 	data, err := os.ReadFile(cachedArtifactPath(digest))
 	if err != nil {
 		return nil, false
@@ -268,6 +300,11 @@ func authString(auth json.RawMessage, key string) string {
 // observes a partially-written file — closing the torn-read window a plain
 // truncate-and-write leaves open.
 func writeCachedArtifact(digest string, data []byte) error {
+	// A cache blob is only ever addressed by a well-formed content digest;
+	// refuse to write under a malformed digest that could escape the cache root.
+	if !looksLikeSha256Digest(digest) {
+		return fmt.Errorf("refusing to cache artifact under malformed digest %q", digest)
+	}
 	dir := filepath.Join(packagesCacheRoot(), digestDir(digest))
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating package cache dir: %w", err)

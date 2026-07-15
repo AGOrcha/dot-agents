@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -135,6 +136,19 @@ type BundleLimits struct {
 	MaxFileBytes int64
 	// MaxBytes caps the sum of expanded file content bytes across the bundle.
 	MaxBytes int64
+	// MaxStreamBytes caps the TOTAL number of decompressed bytes a tar/gzip
+	// source may pull from its stream across the whole archive — including the
+	// bytes tar.Reader.Next consumes internally for PAX/GNU extension headers
+	// (long names/link targets), which are otherwise outside MaxEntries and the
+	// per-file/total content budgets. This is the hard ceiling that bounds a
+	// long-name / PAX header bomb.
+	MaxStreamBytes int64
+	// MaxPathBytes caps a single entry's canonical path length, rejecting an
+	// individual oversized (e.g. PAX long-name) path.
+	MaxPathBytes int
+	// MaxTotalPathBytes caps the sum of canonical path lengths across the
+	// bundle, so a flood of individually-legal long names still fails closed.
+	MaxTotalPathBytes int
 }
 
 // DefaultBundleLimits returns the caps applied when a caller passes a zero
@@ -143,10 +157,13 @@ type BundleLimits struct {
 // handful of small files) while still bounding the worst case.
 func DefaultBundleLimits() BundleLimits {
 	return BundleLimits{
-		MaxEntries:   20000,
-		MaxFiles:     10000,
-		MaxFileBytes: 16 << 20, // 16 MiB per file
-		MaxBytes:     64 << 20, // 64 MiB total
+		MaxEntries:        20000,
+		MaxFiles:          10000,
+		MaxFileBytes:      16 << 20, // 16 MiB per file
+		MaxBytes:          64 << 20, // 64 MiB total content
+		MaxStreamBytes:    96 << 20, // 96 MiB total decompressed stream (content + headers)
+		MaxPathBytes:      4096,     // one path, ~PATH_MAX
+		MaxTotalPathBytes: 8 << 20,  // 8 MiB of path text across the bundle
 	}
 }
 
@@ -164,6 +181,15 @@ func (l BundleLimits) orDefault() BundleLimits {
 	}
 	if l.MaxBytes <= 0 {
 		l.MaxBytes = d.MaxBytes
+	}
+	if l.MaxStreamBytes <= 0 {
+		l.MaxStreamBytes = d.MaxStreamBytes
+	}
+	if l.MaxPathBytes <= 0 {
+		l.MaxPathBytes = d.MaxPathBytes
+	}
+	if l.MaxTotalPathBytes <= 0 {
+		l.MaxTotalPathBytes = d.MaxTotalPathBytes
 	}
 	return l
 }
@@ -280,12 +306,13 @@ func checkDuplicate(seen map[string]string, cp string) error {
 // failure anywhere exposes nothing (the H1 "validate the whole bundle before
 // admitting any of it" property, now without a re-read window).
 type bundleAccumulator struct {
-	limits     BundleLimits
-	seen       map[string]string
-	entries    []BundleEntry
-	entryCount int
-	fileCount  int
-	totalBytes int64
+	limits         BundleLimits
+	seen           map[string]string
+	entries        []BundleEntry
+	entryCount     int
+	fileCount      int
+	totalBytes     int64
+	totalPathBytes int
 }
 
 func newBundleAccumulator(limits BundleLimits) *bundleAccumulator {
@@ -321,6 +348,16 @@ func (a *bundleAccumulator) add(e RawBundleEntry) error {
 	cp, err := canonicalBundlePath(e.Path)
 	if err != nil {
 		return fmt.Errorf("bundle entry %q: %w", e.Path, err)
+	}
+	// Path/metadata-byte budget: an individual oversized path (a PAX long-name)
+	// and a flood of individually-legal long names both fail closed here, even
+	// though the raw PAX header bytes were already bounded by the stream ceiling.
+	if len(cp) > a.limits.MaxPathBytes {
+		return fmt.Errorf("bundle entry path exceeds per-path cap of %d bytes", a.limits.MaxPathBytes)
+	}
+	a.totalPathBytes += len(cp)
+	if a.totalPathBytes > a.limits.MaxTotalPathBytes {
+		return fmt.Errorf("bundle exceeds total path-byte cap of %d bytes", a.limits.MaxTotalPathBytes)
 	}
 	if err := checkDuplicate(a.seen, cp); err != nil {
 		return err
@@ -403,14 +440,43 @@ func rawKindForTarType(t byte) rawEntryKind {
 	}
 }
 
+// streamCeilingReader bounds the TOTAL number of bytes read from an
+// underlying reader, returning errStreamCeiling once the ceiling is crossed.
+// It wraps the gzip stream so every byte tar.Reader pulls — file content AND
+// the PAX/GNU extension-header bytes Next consumes internally — counts against
+// one hard budget, closing the long-name/PAX decompression bomb that the
+// per-entry and per-file caps cannot see.
+type streamCeilingReader struct {
+	r         io.Reader
+	remaining int64
+}
+
+// errStreamCeiling is returned when a tar/gzip source tries to pull more
+// decompressed bytes than BundleLimits.MaxStreamBytes.
+var errStreamCeiling = errors.New("bundle: decompressed stream exceeds ceiling")
+
+func (s *streamCeilingReader) Read(p []byte) (int, error) {
+	if s.remaining <= 0 {
+		return 0, errStreamCeiling
+	}
+	if int64(len(p)) > s.remaining {
+		p = p[:s.remaining]
+	}
+	n, err := s.r.Read(p)
+	s.remaining -= int64(n)
+	return n, err
+}
+
 // tarWalker returns a BundleWalker over a `+tar+gzip` blob. It advances the
 // tar reader exactly once, streaming each entry to emit as it is decoded, so
 // the accumulator's caps are enforced while the archive is being expanded —
-// never after a full listing is buffered. Two decompression-bomb classes are
+// never after a full listing is buffered. Three decompression-bomb classes are
 // bounded here: an entry flood halts because emit errors once MaxEntries is
-// exceeded (the loop then returns immediately), and each file's content is
-// copied through an io.LimitReader capped at the per-file budget, so a header
-// that under-declares a huge payload cannot expand memory past the cap.
+// exceeded; each file's content is copied through an io.LimitReader capped at
+// the per-file budget, so a header that under-declares a huge payload cannot
+// expand memory past the cap; and the whole decompressed stream (content plus
+// the PAX/GNU header bytes Next consumes out of band) is bounded by a hard
+// streamCeilingReader ceiling.
 func tarWalker(blob []byte, limits BundleLimits) BundleWalker {
 	limits = limits.orDefault()
 	return func(emit func(RawBundleEntry) error) error {
@@ -419,7 +485,7 @@ func tarWalker(blob []byte, limits BundleLimits) BundleWalker {
 			return fmt.Errorf("not a valid gzip stream: %w", err)
 		}
 		defer func() { _ = gz.Close() }()
-		tr := tar.NewReader(gz)
+		tr := tar.NewReader(&streamCeilingReader{r: gz, remaining: limits.MaxStreamBytes})
 
 		for {
 			hdr, err := tr.Next()

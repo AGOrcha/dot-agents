@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io/fs"
+	"strings"
 	"testing"
 )
 
@@ -605,6 +606,72 @@ func TestUntarBundleRejectsEmptyEntryFlood(t *testing.T) {
 	})
 	if _, err := UntarBundle(blob, BundleLimits{MaxEntries: 100, MaxFiles: 100, MaxBytes: 1 << 20}); err == nil {
 		t.Fatal("expected rejection of an empty-directory-entry flood")
+	}
+}
+
+// TestUntarBundleRejectsPAXLongNameBomb is the defect #1 regression: PAX
+// extension headers (which tar.Reader.Next consumes internally, outside the
+// per-file and per-entry budgets) carry long names/link targets. A flood of
+// oversized PAX long-name headers must be bounded by the total-stream ceiling
+// rather than expanding without limit. The stream ceiling is set small so the
+// bomb trips well before any gigabyte expansion.
+func TestUntarBundleRejectsPAXLongNameBomb(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	longSeg := strings.Repeat("a", 8192) // forces a PAX 'path' extension header per entry
+	for i := 0; i < 4000; i++ {
+		name := fmt.Sprintf("dir-%s-%d/file", longSeg, i)
+		hdr := &tar.Header{Name: name, Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Stream ceiling of 1 MiB: the PAX header bytes alone (4000 * ~8 KiB ≈ 32 MiB
+	// decompressed) must trip it. Per-file/total-byte caps are generous so ONLY
+	// the stream ceiling can reject this.
+	limits := BundleLimits{MaxEntries: 1_000_000, MaxFiles: 1_000_000, MaxFileBytes: 1 << 20, MaxBytes: 1 << 30, MaxStreamBytes: 1 << 20, MaxPathBytes: 1 << 20, MaxTotalPathBytes: 1 << 30}
+	if _, err := UntarBundle(buf.Bytes(), limits); err == nil {
+		t.Fatal("expected rejection of a PAX long-name header bomb via the stream ceiling")
+	}
+}
+
+// TestUntarBundleRejectsSingleOversizedPath is the defect #1 per-path-budget
+// regression: a single entry with an enormous (PAX long) name is rejected by
+// the per-path byte cap even when the stream ceiling and content caps are
+// generous.
+func TestUntarBundleRejectsSingleOversizedPath(t *testing.T) {
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, strings.Repeat("a", 200000)+"/x", 0o644, []byte("x"))
+	})
+	limits := BundleLimits{MaxEntries: 100, MaxFiles: 100, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 30, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 30}
+	if _, err := UntarBundle(blob, limits); err == nil {
+		t.Fatal("expected rejection of a single oversized (PAX long-name) path")
+	}
+}
+
+// TestUntarBundleRejectsTotalPathBytesFlood is the defect #1 total-metadata
+// regression: many individually-legal-length names collectively exceed the
+// total path-byte budget and fail closed.
+func TestUntarBundleRejectsTotalPathBytesFlood(t *testing.T) {
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		seg := strings.Repeat("a", 1000)
+		for i := 0; i < 500; i++ {
+			tarAddFile(t, tw, fmt.Sprintf("%s-%d.txt", seg, i), 0o644, []byte("x"))
+		}
+	})
+	limits := BundleLimits{MaxEntries: 100000, MaxFiles: 100000, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 30, MaxPathBytes: 4096, MaxTotalPathBytes: 100 << 10}
+	if _, err := UntarBundle(blob, limits); err == nil {
+		t.Fatal("expected rejection of a long-name flood via the total path-byte cap")
 	}
 }
 

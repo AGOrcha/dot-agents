@@ -363,6 +363,36 @@ func TestGitArtifactFetcherPinnedCacheHitRejectsCorruptBlob(t *testing.T) {
 	}
 }
 
+// TestCacheDigestPathTraversalGuard is the audit-preempt regression: a
+// malformed, attacker-influenced digest (e.g. from a `pinned:sha256:../...`
+// version spec) must never be turned into a cache-path component. writes are
+// refused and reads miss, so no file is created or read outside the cache root.
+func TestCacheDigestPathTraversalGuard(t *testing.T) {
+	withPackagesCache(t)
+	for _, bad := range []string{
+		"sha256:../../../../etc/passwd",
+		"sha256:..",
+		"sha256:" + strings.Repeat("z", 64), // right length, non-hex
+		"sha256:deadbeef",                   // valid hex, wrong length
+		"notadigest",
+	} {
+		if err := writeCachedArtifact(bad, []byte("x")); err == nil {
+			t.Fatalf("writeCachedArtifact(%q) must refuse a malformed digest", bad)
+		}
+		if _, ok := readCachedArtifact(bad); ok {
+			t.Fatalf("readCachedArtifact(%q) must miss on a malformed digest", bad)
+		}
+	}
+	// A well-formed digest still round-trips.
+	good := "sha256:" + sha256Hex([]byte("real"))
+	if err := writeCachedArtifact(good, []byte("real")); err != nil {
+		t.Fatalf("well-formed digest must still cache: %v", err)
+	}
+	if _, ok := readCachedArtifact(good); !ok {
+		t.Fatal("well-formed digest must read back")
+	}
+}
+
 // --- oci fetcher -----------------------------------------------------------
 
 func TestOCIFetcherPullsAndCaches(t *testing.T) {
@@ -2109,6 +2139,11 @@ func TestGitArtifactFetcherTreeLayoutRejectsSubmodule(t *testing.T) {
 	cases := map[string]string{
 		"submodule nested under the artifact dir": "skill",
 		"submodule is the artifact path":          "skill/vendored",
+		// Defect #3: noncanonical artifact paths resolve to the gitlink in the
+		// worktree memfs but must not slip past the committed-tree lookup.
+		"noncanonical dot-slit path":     "./skill/vendored",
+		"noncanonical dotdot round-trip": "skill/../skill/vendored",
+		"noncanonical repeated-sep path": "skill//vendored",
 	}
 	for name, artifactPath := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -2123,6 +2158,24 @@ func TestGitArtifactFetcherTreeLayoutRejectsSubmodule(t *testing.T) {
 				t.Fatalf("error should name the submodule defect, got %v", err)
 			}
 		})
+	}
+}
+
+// TestGitSubtreeWalkerEnforcesPerFileCap is the defect #4 regression: the
+// per-file cap must hold on the git ingestion path too — an oversized
+// committed file is rejected AT the walker (before the full read), not only
+// later by the accumulator. The error naming "git tree file" proves the
+// pre-read walker-level rejection.
+func TestGitSubtreeWalkerEnforcesPerFileCap(t *testing.T) {
+	wfs := memfs.New()
+	memfsWriteFile(t, wfs, "skill/big.txt", make([]byte, 4096))
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
+	_, err := NormalizeBundle(gitSubtreeWalker(wfs, "skill", limits), limits)
+	if err == nil {
+		t.Fatal("expected rejection of an oversized committed file on the git path")
+	}
+	if !strings.Contains(err.Error(), "git tree file") || !strings.Contains(err.Error(), "per-file cap") {
+		t.Fatalf("expected a walker-level per-file-cap rejection, got %v", err)
 	}
 }
 
@@ -2457,6 +2510,90 @@ func TestLocalArtifactFetcherRejectsSymlinkRoot(t *testing.T) {
 	}
 }
 
+// TestReadRootFileRejectsInRootSymlinkSwap is the defect #2 regression: after
+// the walker classifies a path as a regular file, the path is swapped for an
+// in-root symlink pointing at a DIFFERENT in-root file. os.Root would follow
+// that symlink, but the os.SameFile identity check between the pre-open Lstat
+// and the fstat of the opened fd catches the swap and fails closed — the
+// swapped-in decoy content is never returned.
+func TestReadRootFileRejectsInRootSymlinkSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	srcDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(srcDir, "realfile"), []byte("REAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "decoy"), []byte("DECOY-CONTENT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	// Classify "realfile" as a regular file, then swap it for an in-root symlink
+	// pointing at the decoy (the post-classify TOCTOU).
+	expected, err := root.Lstat("realfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(srcDir, "realfile")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoy", filepath.Join(srcDir, "realfile")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, data, err := readRootFile(root, "realfile", expected, DefaultBundleLimits())
+	if err == nil {
+		t.Fatal("expected identity-mismatch rejection of the swapped-in symlink")
+	}
+	if strings.Contains(string(data), "DECOY") {
+		t.Fatal("the swapped-in decoy content must never be returned")
+	}
+}
+
+// TestReadConfinedDirRejectsInRootSymlinkSwap is the directory half of defect
+// #2: a directory swapped for an in-root symlink to another in-root directory
+// after classification is caught by the same os.SameFile identity check.
+func TestReadConfinedDirRejectsInRootSymlinkSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "realdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(srcDir, "decoydir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "decoydir", "secret.txt"), []byte("DECOY"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	expected, err := root.Lstat("realdir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(srcDir, "realdir")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("decoydir", filepath.Join(srcDir, "realdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := readConfinedDir(root, "realdir", expected); err == nil {
+		t.Fatal("expected identity-mismatch rejection of the swapped-in directory symlink")
+	}
+}
+
 // TestLocalRootWalkerEnforcesPerFileCap covers the confined local read path
 // (readRootFile): a file larger than the per-file cap is rejected during the
 // bounded, fstat-revalidated read — the local-tree half of the defect #2/#3
@@ -2475,9 +2612,13 @@ func TestLocalRootWalkerEnforcesPerFileCap(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = root.Close() }()
+	rootInfo, err := root.Lstat("skill")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20}
-	if _, err := NormalizeBundle(localRootWalker(root, "skill", limits), limits); err == nil {
+	if _, err := NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits); err == nil {
 		t.Fatal("expected rejection of a local tree file exceeding the per-file cap")
 	}
 }

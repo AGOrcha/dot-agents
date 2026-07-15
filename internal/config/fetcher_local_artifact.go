@@ -82,10 +82,14 @@ func (f *localArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) 
 		// Tree layout (spec D3, mirrors the git subtree walk — a local
 		// source is the dev/test-fixture equivalent of a git tree): the ref
 		// names a resource directory, not a single file.
-		return f.fetchTreeBundle(root, rel, parts, posture, isPinned, pinned)
+		return f.fetchTreeBundle(root, rel, fi, parts, posture, isPinned, pinned)
 	}
 
-	data, err := root.ReadFile(relOS)
+	// The single-file read goes through the same confined + identity-checked +
+	// capped path as the tree files, so an in-root symlink swapped in after the
+	// Lstat above cannot redirect the read and an oversized file cannot force an
+	// unbounded allocation.
+	_, _, data, err := readRootFile(root, rel, fi, DefaultBundleLimits())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("local artifact %s not found: %w", rel, err))
@@ -121,8 +125,8 @@ func (f *localArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) 
 // single-blob packages cache (writeCachedArtifact addresses one blob, not a
 // multi-file tree); materialize (t2, spec H2) owns the tree's content-addressed
 // store.
-func (f *localArtifactFetcher) fetchTreeBundle(root *os.Root, artifactRel string, parts PackageRefParts, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
-	bundle, err := NormalizeBundle(localRootWalker(root, artifactRel, DefaultBundleLimits()), DefaultBundleLimits())
+func (f *localArtifactFetcher) fetchTreeBundle(root *os.Root, artifactRel string, rootInfo fs.FileInfo, parts PackageRefParts, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+	bundle, err := NormalizeBundle(localRootWalker(root, artifactRel, rootInfo, DefaultBundleLimits()), DefaultBundleLimits())
 	if err != nil {
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("local subtree %s: %w", parts.ArtifactPath, err))
 	}
@@ -141,25 +145,24 @@ func (f *localArtifactFetcher) fetchTreeBundle(root *os.Root, artifactRel string
 // localRootWalker returns a BundleWalker over the local directory subtree
 // rooted at artifactRel, with every operation confined to root (an os.Root on
 // the source base). It streams entries through emit in a single pass, reading
-// each regular file's content inline from the SAME confined open it fstats, so
-// there is no window between "stat" and "read" for a mutable local tree to be
-// swapped (the TOCTOU the former two-pass design left open). It Lstats each
-// entry (no-follow) and rejects symlinks outright; os.Root additionally makes
-// any escape past the source root impossible, and readRootFile's fstat
-// re-validates kind and size at read time.
-func localRootWalker(root *os.Root, artifactRel string, limits BundleLimits) BundleWalker {
+// each regular file's content inline from the SAME confined open it fstats.
+//
+// Because os.Root PERMITS in-root symlinks, a pre-open Lstat is not enough: a
+// path classified as a file/dir can be swapped for an in-root symlink before
+// the open, and os.Root would then follow it. So every directory and file
+// open verifies the OPENED object's identity against the pre-open Lstat via
+// os.SameFile (device+inode) — a mismatch means the entry was swapped between
+// classify and open, and the walk fails closed. Combined with the Lstat-based
+// symlink rejection and os.Root's no-escape guarantee, the symlink ban and the
+// subtree boundary hold even under a concurrent mutation.
+func localRootWalker(root *os.Root, artifactRel string, rootInfo fs.FileInfo, limits BundleLimits) BundleWalker {
 	limits = limits.orDefault()
 	return func(emit func(RawBundleEntry) error) error {
-		var walk func(rel string) error
-		walk = func(rel string) error {
-			dir, err := root.Open(filepath.FromSlash(rel))
+		var walk func(rel string, expected fs.FileInfo) error
+		walk = func(rel string, expected fs.FileInfo) error {
+			items, err := readConfinedDir(root, rel, expected)
 			if err != nil {
 				return err
-			}
-			items, readErr := dir.ReadDir(-1)
-			_ = dir.Close()
-			if readErr != nil {
-				return readErr
 			}
 			for _, item := range items {
 				childRel := path.Join(rel, item.Name())
@@ -178,11 +181,11 @@ func localRootWalker(root *os.Root, artifactRel string, limits BundleLimits) Bun
 					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindDir, Mode: info.Mode()}); err != nil {
 						return err
 					}
-					if err := walk(childRel); err != nil {
+					if err := walk(childRel, info); err != nil {
 						return err
 					}
 				case info.Mode().IsRegular():
-					mode, size, data, err := readRootFile(root, childRel, limits)
+					mode, size, data, err := readRootFile(root, childRel, info, limits)
 					if err != nil {
 						return err
 					}
@@ -197,8 +200,31 @@ func localRootWalker(root *os.Root, artifactRel string, limits BundleLimits) Bun
 			}
 			return nil
 		}
-		return walk(artifactRel)
+		return walk(artifactRel, rootInfo)
 	}
+}
+
+// readConfinedDir opens rel under root, verifies the opened directory's
+// identity against the pre-open Lstat (expected) via os.SameFile — defeating an
+// in-root symlink swapped in between classify and open — and returns its
+// entries. A non-directory or identity mismatch fails closed.
+func readConfinedDir(root *os.Root, rel string, expected fs.FileInfo) ([]os.DirEntry, error) {
+	fh, err := root.Open(filepath.FromSlash(rel))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fh.Close() }()
+	info, err := fh.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("local tree dir %q: not a directory at open time (mode %v)", rel, info.Mode())
+	}
+	if !os.SameFile(expected, info) {
+		return nil, fmt.Errorf("local tree dir %q: identity changed between classify and open (possible in-root symlink swap)", rel)
+	}
+	return fh.ReadDir(-1)
 }
 
 // bundleRelPath re-bases a source-root-relative path onto the artifact root so
@@ -212,13 +238,13 @@ func bundleRelPath(artifactRel, childRel string) string {
 }
 
 // readRootFile reads rel's content confined to root. It fstats the OPEN file
-// descriptor (not the pre-open Lstat) to re-validate kind and size at read
-// time, so a regular file swapped for a directory/other kind between the
-// walker's Lstat and this read is rejected, and the size the accumulator
-// checks is the size actually read. The copy is bounded to the per-file cap+1
-// independently of the fstat size, so a file that grows mid-read cannot expand
-// past the cap.
-func readRootFile(root *os.Root, rel string, limits BundleLimits) (fs.FileMode, int64, []byte, error) {
+// descriptor and (a) rejects a non-regular kind, (b) verifies the opened
+// object's identity against the pre-open Lstat (expected) via os.SameFile so an
+// in-root symlink swapped in between classify and open cannot redirect the read,
+// and (c) bounds the copy to the per-file cap+1 independently of the fstat size
+// so a file that grows mid-read cannot expand past the cap. The size the
+// accumulator validates is the fstat size, matched against the bytes read.
+func readRootFile(root *os.Root, rel string, expected fs.FileInfo, limits BundleLimits) (fs.FileMode, int64, []byte, error) {
 	fh, err := root.Open(filepath.FromSlash(rel))
 	if err != nil {
 		return 0, 0, nil, err
@@ -230,6 +256,9 @@ func readRootFile(root *os.Root, rel string, limits BundleLimits) (fs.FileMode, 
 	}
 	if !info.Mode().IsRegular() {
 		return 0, 0, nil, fmt.Errorf("local tree file %q: not a regular file at read time (mode %v)", rel, info.Mode())
+	}
+	if !os.SameFile(expected, info) {
+		return 0, 0, nil, fmt.Errorf("local tree file %q: identity changed between classify and open (possible in-root symlink swap)", rel)
 	}
 	size := info.Size()
 	if size > limits.MaxFileBytes {
