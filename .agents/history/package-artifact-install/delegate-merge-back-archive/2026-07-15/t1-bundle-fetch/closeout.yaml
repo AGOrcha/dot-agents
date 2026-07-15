@@ -1,0 +1,6 @@
+schema_version: 1
+plan_id: package-artifact-install
+task_id: t1-bundle-fetch
+delegation_id: del-t1-bundle-fetch-1784087692
+decision: accept
+closed_at: "2026-07-15T05:51:55Z"

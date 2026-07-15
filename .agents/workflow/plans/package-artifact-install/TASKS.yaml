@@ -1,0 +1,160 @@
+schema_version: 1
+plan_id: package-artifact-install
+tasks:
+    - id: t1-bundle-fetch
+      title: Normalize artifact fetch to a bundle (tree subtree + tarball)
+      status: completed
+      depends_on: []
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher_git_artifact.go
+        - internal/config/fetcher_local_artifact.go
+        - internal/config/fetcher_oci.go
+        - internal/config/fetcher_http.go
+        - internal/config/bundle_safety.go
+        - internal/config/bundle_safety_test.go
+        - internal/config/fetcher_test.go
+        - internal/config/fetcher_oci_layer_test.go
+      verification_required: true
+      notes: Normalize fetch to an in-memory bundle (git subtree walk + tarball untar). H1 — route every bundle through a fail-closed normalizer (canonical relative slash paths only; reject empty/dot/dotdot/absolute/drive/UNC/duplicate/case-collide and all symlink/hardlink/device entries; cap file count + expanded bytes). H8 — content-addressed cache publishes via same-dir temp+rename and re-verifies every cache hit against its digest. Adversarial tree+tar tests are a done-criterion. Keep the media-type envelope; no new kinds.
+      app_type: go-cli
+    - id: t2-materialize-store
+      title: Materialize a fetched bundle into the gitignored sourced-scope store
+      status: in_progress
+      depends_on:
+        - t1-bundle-fetch
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/materialize.go
+        - internal/config/local_source.go
+        - internal/links/gitignore.go
+        - internal/platform/resource_plan.go
+        - internal/platform/resources.go
+      verification_required: true
+      notes: Materialize into a content-addressed immutable store path (H2) and project it at the reserved _sourced namespace ~/.agents/<family>/_sourced/<source-id>/<name>/ (H3) — never a segment equal to a local scope (global, project name); refuse replacing any path lacking sourced provenance. H4 — the _sourced ignore is permanent, installed+verified BEFORE the tree is exposed, CAS/locked block rewrite, removed only on store deletion. Validate bundle then staging-dir + atomic rename. Reuse RunSharedTargetProjectionExact (D4), no parallel linker.
+      app_type: go-cli
+    - id: t3-lock-and-wire-pass2
+      title: Record kind:artifact lock unit and wire packages pass-2 into install/refresh
+      status: pending
+      depends_on:
+        - t2-materialize-store
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/resolver.go
+        - internal/config/ensure_resolved.go
+        - internal/config/unit_kinds.go
+        - commands/refresh.go
+        - commands/internal/lifecycle/install.go
+        - commands/config/verify.go
+      verification_required: true
+      notes: H9 — split pure resolve/lock-update from hydrate-from-lock; hydrate once through the real lifecycle (commands/internal/lifecycle/install.go, commands/refresh.go) BEFORE projection; never write on the frozen/locked-clean no-write contract except the explicit hydrate step. H7 — pass a production artifact-store digest resolver to BOTH EnsureResolved and config verify so post-install store tampering blocks projection. H10 — record the artifact as a kind:artifact units entry with the verified content digest; derive the install path deterministically (do NOT add install_path to LockedUnit). H13 (DRIVES the projection) — pass-2 resolves THIS project's packages into a resolved unit list of {family,name,source-id,digest,cas-path} and calls t2's caller-driven projection mechanism with exactly that set; projection is per-project CAS-direct (repo output links to ~/.agents/cache/artifacts/<family>/<digest>/ for the project's resolved digest), NEVER a global _sourced scan. commands/install.go path was stale (use commands/internal/lifecycle/install.go).
+      app_type: go-cli
+    - id: t4-author-da-agc
+      title: Populate the da-agc source (config layer + skill/agent resource trees)
+      status: pending
+      depends_on:
+        - t1-bundle-fetch
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - (external repo AGOrcha/da-agc; no in-tree files)
+      verification_required: true
+      notes: Author da-agc as a git source. Add the da-project/base config layer (execution_profile, stage_profiles, rules, skill/agent name arrays) and the tree-layout resource dirs (skill/<name>/, agent/<name>/) for the dot-agents specifics starting with release-docs-refresh and platform-dirs-change-analyst. Plain files, git-tracked in da-agc.
+      app_type: docs
+    - id: t5-wire-consumer-and-smoke
+      title: Wire dot-agents onto da-agc and add the tree content-install smoke test
+      status: pending
+      depends_on:
+        - t3-lock-and-wire-pass2
+        - t4-author-da-agc
+        - t2b-multiplatform-agent-projection
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - .agentsrc.json
+        - .agentsrc.lock
+        - scripts/verify.sh
+        - internal/config/resolver_test.go
+        - tests
+      verification_required: true
+      notes: Declare the da-agc git source plus extends (layer) and packages (artifacts) in dot-agents .agentsrc.json. Prove config-layer parity and that fetched skill/agent trees materialize gitignored + locked + invocable. Extend the git-source-smoke fixture from layer-only to content install (DC2).
+      app_type: go-cli
+    - id: t6-oci-consume
+      title: Consume OCI artifacts (fetch, tag/digest resolve, media-type validate)
+      status: pending
+      depends_on:
+        - t3-lock-and-wire-pass2
+        - t1b-fetch-materialization-bounds
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher_oci.go
+        - internal/config/resolver.go
+        - internal/config/oci_resolve.go
+      verification_required: true
+      notes: 'H5 — pinned: addresses the manifest; recompute SHA-256 over the fetched payload and compare to the layer descriptor BEFORE cache/untar; lock the verified content digest; handle manifest-digest not equal blob-digest. H6 — require manifest artifactType == artifact-bundle media type AND the family-specific type; reject empty/missing/mismatch (remove the empty-type tolerance at fetcher_oci.go:423-434). Reuse the t2 materialize path. SemVer ranges stay deferred.'
+      app_type: go-cli
+    - id: t7-oci-auth
+      title: OCI registry auth (bearer + credential-helper providers)
+      status: pending
+      depends_on:
+        - t6-oci-consume
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/oci_auth.go
+        - internal/config/fetcher_oci.go
+        - internal/config/audit.go
+        - internal/gitremote
+      verification_required: true
+      notes: H12 — auth config carries secret references only; resolved env/file/helper secrets never enter Source.Auth persistence, locks, cache metadata, errors, audit events (audit.go currently logs raw Err.Error()), logs, generated files, or argv. Helper queries over stdin; tokens in headers only; central error redaction. Providers — bearer + credential-helper only (oauth2/mtls stay owned by external-agent-sources). Sentinel-secret leak tests across lock/stderr/audit.
+      app_type: go-cli
+    - id: t8-oci-publish
+      title: OCI publish producer on the unified surface + round-trip byte-parity smoke
+      status: pending
+      depends_on:
+        - t2-materialize-store
+        - t6-oci-consume
+        - t7-oci-auth
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/artifact_bundle.go
+        - commands/config
+        - scripts/verify.sh
+        - internal/config/fetcher_oci_test.go
+      verification_required: true
+      notes: Publish producer on the CANONICAL UNIFIED resource CRUD surface (owner ruling 2026-07-15) — do NOT revive the retired da packages family / commands/packages. Pack a resource tree into a typed +tar+gzip artifact-bundle via the H1 normalizer, push to an OCI registry at namespace/family/name tag, emit the sha256 digest. OCI round-trip smoke — publish to a local test registry then pull via an oci source; assert materialize, H5/H6 media-type+digest validation, and RECURSIVE byte-parity of source vs materialized tree (R8). Depends on t7 for auth reuse.
+      app_type: go-cli
+    - id: t1b-fetch-materialization-bounds
+      title: Bound raw fetch/clone materialization before normalizer caps (go-git in-memory clone + directory enumeration)
+      status: pending
+      depends_on:
+        - t1-bundle-fetch
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/config/fetcher_git_artifact.go
+        - internal/config/fetcher_local_artifact.go
+        - internal/config/fetcher.go
+      verification_required: true
+      notes: From the t1 final cross-harness gate — two DoS residuals live in the clone/enumeration LAYER (raw input materialized before the normalizer bounds apply), distinct from the normalizer hardening. (a) go-git gitCloneShallow downloads+checks out the whole repo into an in-memory storer before the MaxFileBytes gate runs — use a disk or quota-backed storer, or a pre-checkout blob-size check, so an oversized git blob cannot exhaust memory. (b) os.ReadDir(-1) (local) and Billy ReadDir (git) materialize a full directory listing before MaxEntries can stop a flat-entry flood — enumerate in bounded batches, and for git traverse a quota-checked committed tree instead of the all-at-once worktree API. Gate BEFORE t6-oci-consume / t5 production use (first real untrusted-remote consume). BLOCKER host-file-read + pinning + injection are already closed in t1.
+      app_type: go-cli
+    - id: t2b-multiplatform-agent-projection
+      title: Extend CAS-aware sourced-unit projection to the file-shaped platform builders (Codex TOML, OpenCode, Copilot)
+      status: pending
+      depends_on:
+        - t2-materialize-store
+      blocks: []
+      owner: dot-agents
+      write_scope:
+        - internal/platform/resource_plan.go
+        - internal/platform/codex.go
+        - internal/platform/opencode.go
+        - internal/platform/copilot.go
+      verification_required: true
+      notes: From the t2 rework re-review — t2 wired CAS-aware sourced-unit projection only into the Claude dir-mirror builders (skills + agents dirs). The file-shaped agent builders (Codex .toml at resource_plan.go:472, OpenCode/Copilot agent-files at :514/:1060) still enumerate only local canonical agents, so a sourced agent (e.g. platform-dirs-change-analyst from da-agc) is ABSENT on Codex, OpenCode, and Copilot. Add CAS-aware render/file intent generation to both shape-specific builders, driven by the same caller-supplied resolved-unit set (H13), with exact-prune tests per platform. Gate BEFORE t5 (the da-agc end-to-end smoke must prove the agent projects across enabled platforms, not just Claude).
+      app_type: go-cli
