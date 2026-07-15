@@ -58,6 +58,15 @@ func ArtifactStorePath(agentsHome, family, digest string) string {
 	return filepath.Join(ArtifactStoreRoot(agentsHome, family), StoreDigestDir(digest))
 }
 
+// ArtifactsRoot returns the root of the whole content-addressed artifact
+// store ("<agentsHome>/cache/artifacts"). Exported so the projection layer
+// can assert that a symlink it is about to replace actually resolves INTO
+// managed CAS storage (H17: only an identity-verified managed CAS link may be
+// replaced — a foreign user symlink pointing elsewhere is left intact).
+func ArtifactsRoot(agentsHome string) string {
+	return filepath.Join(agentsHome, "cache", "artifacts")
+}
+
 // StoreDigestDir maps a canonical "sha256:<hex>" digest to its store
 // subdirectory name (the bare hex). Exported so the platform projection
 // layer can address the exact CAS path a resolved unit's digest names

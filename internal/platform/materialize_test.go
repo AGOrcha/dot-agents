@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -321,5 +322,141 @@ func TestProjectResolvedUnits_RejectsInvalidUnit(t *testing.T) {
 	bad := ResolvedUnit{Family: "skills", Name: "x", SourceID: "..", Digest: "sha256:" + strings.Repeat("0", 64), CASPath: config.ArtifactStorePath(home, "skills", "sha256:"+strings.Repeat("0", 64))}
 	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{bad}, []Platform{NewClaude()}, false, true); err == nil {
 		t.Fatalf("expected an invalid unit to fail the projection closed")
+	}
+}
+
+// --- FIX 1: concurrency isolation (no package-global projection context) ----
+
+// TestProjectResolvedUnits_ConcurrentNoCrossContamination is the fail-before-fix
+// guard for the concurrency leak: two projections running CONCURRENTLY with
+// DIFFERENT resolved-unit sets must never leak one project's package into the
+// other. With the previous package-global projection context a concurrent
+// plain/other projection could read the foreign units; now the units are pure
+// invocation-local parameters, so cross-contamination is impossible. Run under
+// -race, and repeated to widen the interleaving window.
+func TestProjectResolvedUnits_ConcurrentNoCrossContamination(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	unitA := materializeUnit(t, home, "skills", "da-agc", "only-a", map[string]string{"SKILL.md": "---\nname: only-a\n---\n"})
+	unitB := materializeUnit(t, home, "skills", "da-agc", "only-b", map[string]string{"SKILL.md": "---\nname: only-b\n---\n"})
+	platforms := []Platform{NewClaude()}
+
+	for iter := 0; iter < 12; iter++ {
+		repoA := filepath.Join(t.TempDir(), "A")
+		repoB := filepath.Join(t.TempDir(), "B")
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, errs[0] = ProjectResolvedUnits("projA", repoA, []ResolvedUnit{unitA}, platforms, false, true, "projA")
+		}()
+		go func() {
+			defer wg.Done()
+			_, errs[1] = ProjectResolvedUnits("projB", repoB, []ResolvedUnit{unitB}, platforms, false, true, "projB")
+		}()
+		wg.Wait()
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("iter %d goroutine %d: %v", iter, i, err)
+			}
+		}
+		// repoA must contain ONLY unit A; repoB ONLY unit B.
+		if _, err := os.Lstat(filepath.Join(repoA, ".claude", "skills", "only-a")); err != nil {
+			t.Fatalf("iter %d: repoA missing its own unit: %v", iter, err)
+		}
+		if _, err := os.Lstat(filepath.Join(repoA, ".claude", "skills", "only-b")); !os.IsNotExist(err) {
+			t.Fatalf("iter %d: CROSS-CONTAMINATION — projB's unit leaked into repoA (err=%v)", iter, err)
+		}
+		if _, err := os.Lstat(filepath.Join(repoB, ".claude", "skills", "only-b")); err != nil {
+			t.Fatalf("iter %d: repoB missing its own unit: %v", iter, err)
+		}
+		if _, err := os.Lstat(filepath.Join(repoB, ".claude", "skills", "only-a")); !os.IsNotExist(err) {
+			t.Fatalf("iter %d: CROSS-CONTAMINATION — projA's unit leaked into repoB (err=%v)", iter, err)
+		}
+	}
+}
+
+// --- FIX 2: H17 foreign-symlink refusal, no RemoveAll fallback ---------------
+
+// TestProjectResolvedUnits_RefusesForeignSymlink is the fail-before-fix guard
+// for the H17 gap: a FOREIGN user symlink (pointing OUTSIDE managed CAS
+// storage) sitting at the projection target must be left completely intact —
+// the atomic swap replaces only an identity-verified managed CAS link, and
+// fails closed otherwise (no RemoveAll fallback).
+func TestProjectResolvedUnits_RefusesForeignSymlink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnit(t, home, "skills", "da-agc", "release-docs-refresh", map[string]string{"SKILL.md": "---\nname: release-docs-refresh\n---\n"})
+
+	// A real user directory the foreign symlink points at (outside managed CAS).
+	userDir := filepath.Join(t.TempDir(), "user-owned")
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
+		t.Fatalf("seed user dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "keepme.txt"), []byte("precious"), 0o644); err != nil {
+		t.Fatalf("seed user file: %v", err)
+	}
+	target := filepath.Join(repo, ".claude", "skills", "release-docs-refresh")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir target parent: %v", err)
+	}
+	if err := os.Symlink(userDir, target); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, []Platform{NewClaude()}, false, true, "proj"); err == nil {
+		t.Fatalf("expected projection to fail closed against a foreign symlink")
+	}
+	// The foreign symlink must be untouched (still points at the user dir).
+	dest, err := os.Readlink(target)
+	if err != nil {
+		t.Fatalf("foreign symlink was removed/altered: %v", err)
+	}
+	if dest != userDir {
+		t.Fatalf("foreign symlink was repointed: got %q want %q", dest, userDir)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "keepme.txt")); err != nil {
+		t.Fatalf("user content behind the foreign symlink was disturbed: %v", err)
+	}
+}
+
+// --- FIX 3: one-to-zero prune -----------------------------------------------
+
+// TestProjectResolvedUnits_OneToZeroPrunes is the fail-before-fix guard for the
+// one-to-zero prune leak: projecting {unit} then {} (a bucket reduced to ZERO
+// units, with NO local sibling to keep the directory in the wanted scan) must
+// still prune the removed unit's managed link. The deterministic per-platform
+// dir-mirror prune roots make the bucket dir get scanned regardless of the
+// desired set.
+func TestProjectResolvedUnits_OneToZeroPrunes(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	u := materializeUnit(t, home, "skills", "da-agc", "release-docs-refresh", map[string]string{"SKILL.md": "---\nname: release-docs-refresh\n---\n"})
+	platforms := []Platform{NewClaude()}
+
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("project {unit}: %v", err)
+	}
+	link := filepath.Join(repo, ".claude", "skills", "release-docs-refresh")
+	if _, err := os.Lstat(link); err != nil {
+		t.Fatalf("expected the link present after {unit}: %v", err)
+	}
+
+	// Reduce to ZERO units — no local sibling exists in this project.
+	if _, err := ProjectResolvedUnits("proj", repo, nil, platforms, false, true, "proj"); err != nil {
+		t.Fatalf("project {}: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("one-to-zero prune leak: the removed unit's link survived, err=%v", err)
+	}
+	// Store entry survives (store GC deferred).
+	if _, err := os.Stat(u.CASPath); err != nil {
+		t.Fatalf("store entry must survive projection prune: %v", err)
 	}
 }

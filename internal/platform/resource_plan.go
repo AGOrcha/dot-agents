@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
@@ -321,17 +320,15 @@ type sharedMirrorIntentSpec struct {
 
 // buildSharedMirrorIntentsForRoot returns ResourceIntents for every bucket
 // entry under ~/.agents/<spec.Bucket>/<project>/ that owns spec.ManifestName
-// (LOCAL-authored resources), plus — when a caller-driven projection is
-// active (ProjectResolvedUnits) — one CAS-direct intent per caller-resolved
-// packages unit of this bucket, linking straight to the immutable store
-// digest path (H13). All three per-bucket helpers (skill / plugin / agent
-// dir mirror) delegate here.
+// (LOCAL-authored resources only). All three per-bucket dir-mirror helpers
+// (skill / plugin / agent) delegate here.
 //
-// Authority for the packages half is ENTIRELY the caller's resolved-unit set
-// (casUnitsForBucket) — never a scan of the global store — so a package
-// materialized for one project never leaks into another and two projects
-// pinning different digests of the same source/name cannot collide (the old
-// global "_sourced" scan that broke this is gone).
+// It deliberately does NOT know about packages/CAS units: caller-resolved
+// packages units are projected by ProjectResolvedUnits as INVOCATION-LOCAL
+// data (never a package global, never a filesystem scan), so this builder —
+// which runs inside every platform's SharedTargetIntents, including plain
+// `da refresh`/`install` with no caller units — can never observe another
+// projection's units.
 //
 // A missing canonical bucket dir (ENOENT) is treated as an empty local
 // resource set — projects without any skills/plugins/agents yet are
@@ -343,9 +340,7 @@ func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirr
 	entries, err := listScopedResourceDirs(agentsHome, spec.Bucket, project, spec.ManifestName)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// No local-authored resources; caller-resolved packages units may
-			// still project below.
-			return casMirrorIntents(project, targetRoot, spec.Bucket, spec.ManifestName, spec.Materializer), nil
+			return nil, nil
 		}
 		return nil, fmt.Errorf("listing canonical %s for project %q under %s: %w", spec.Bucket, project, targetRoot, err)
 	}
@@ -375,8 +370,6 @@ func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirr
 			MarkerFiles:   []string{spec.ManifestName},
 		})
 	}
-	// H13: append caller-resolved packages units of this bucket, CAS-direct.
-	intents = append(intents, casMirrorIntents(project, targetRoot, spec.Bucket, spec.ManifestName, spec.Materializer)...)
 	return intents, nil
 }
 
@@ -670,7 +663,22 @@ func dryRunExactProjectionLines(plan ResourcePlan, repoPath string) []string {
 // failure cannot hide the prune status of the rest and the caller never reports
 // a converged tree while a stale managed output is still live.
 func (p ResourcePlan) PruneStaleSharedTargets(repoPath, agentsHome string) ([]string, error) {
+	return p.pruneStaleSharedTargetsExtraDirs(repoPath, agentsHome, nil)
+}
+
+// pruneStaleSharedTargetsExtraDirs is PruneStaleSharedTargets with an
+// additional set of directories to scan beyond those a wanted ResourcePruneTarget
+// intent contributes. It exists for the one-to-zero case (H17/fix-3): when a
+// caller reduces a bucket to zero units, the plan carries no intent pointing at
+// that bucket's directory, so the default scan would never visit it and the
+// last stale managed link would survive forever. The caller (ProjectResolvedUnits)
+// passes the deterministic per-platform dir-mirror roots so the directory is
+// scanned regardless of the desired set. Prune semantics are unchanged: only a
+// managed link under agentsHome that is NOT a wanted target is removed, so a
+// plain user file or a link pointing outside agentsHome is never touched.
+func (p ResourcePlan) pruneStaleSharedTargetsExtraDirs(repoPath, agentsHome string, extraDirs []string) ([]string, error) {
 	wanted, dirs := p.prunableTargets(repoPath)
+	dirs = mergeSortedDirs(dirs, extraDirs)
 	var pruned []string
 	var errs []error
 	for _, dir := range dirs {
@@ -687,6 +695,23 @@ func (p ResourcePlan) PruneStaleSharedTargets(repoPath, agentsHome string) ([]st
 	}
 	sort.Strings(pruned)
 	return pruned, errors.Join(errs...)
+}
+
+// mergeSortedDirs unions two directory lists, de-duplicated and sorted.
+func mergeSortedDirs(a, b []string) []string {
+	set := map[string]bool{}
+	for _, d := range a {
+		set[d] = true
+	}
+	for _, d := range b {
+		set[d] = true
+	}
+	out := make([]string, 0, len(set))
+	for d := range set {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // pruneManagedEntries removes the managed outputs in a single scanned directory
@@ -976,55 +1001,32 @@ func ValidateResolvedUnit(agentsHome string, u ResolvedUnit, localScopes ...stri
 	return nil
 }
 
-// projectionUnitsState is the caller-supplied resolved-unit set for the
-// CURRENT caller-driven projection (H13). It is a package-scoped projection
-// context — the same established pattern as config.SetWindowsMirrorContext —
-// so the shared mirror-intent builders (which every platform's
-// SharedTargetIntents calls with ITS OWN per-bucket target roots) can emit
-// CAS-direct intents for the caller's units WITHOUT any platform-file change
-// and WITHOUT ever scanning ~/.agents for authority. projectionSerialize
-// ensures only one caller-driven projection populates the context at a time;
-// unitsMu guards the slice for race-detector cleanliness against a plain
-// RunSharedTargetProjectionExact call (refresh/install) that reads an empty
-// context concurrently.
-var (
-	projectionSerialize sync.Mutex
-	unitsMu             sync.Mutex
-	currentUnits        []ResolvedUnit
-)
-
-// casUnitsForBucket returns the caller-supplied resolved units whose Family
-// matches bucket (H13). Empty when no caller-driven projection is active
-// (the plain refresh/install path), so those callers project local-authored
-// resources only.
-func casUnitsForBucket(bucket string) []ResolvedUnit {
-	unitsMu.Lock()
-	defer unitsMu.Unlock()
-	var out []ResolvedUnit
-	for _, u := range currentUnits {
-		if u.Family == bucket {
-			out = append(out, u)
-		}
-	}
-	return out
-}
-
 // ProjectResolvedUnits projects a caller-supplied set of resolved packages
 // units into project's repo, each linking DIRECTLY to its immutable CAS
-// digest path (H13 per-project CAS-direct). It reuses the exact/prune
-// projection (D4: RunSharedTargetProjectionExact — not a parallel linker):
-// the caller's units are set as the projection context, so the shared
-// mirror-intent builders emit CAS-direct intents at each platform's own
-// target roots, composed and pruned in ONE plan alongside the project's
-// local-authored resources. Authority is entirely the caller's unit list —
-// nothing is discovered by scanning the global store, so a package
-// materialized for one project never leaks into another and two projects
-// pinning different digests of the same source/name never collide.
+// digest path (H13 per-project CAS-direct). The units are pure INVOCATION-
+// LOCAL data — a function parameter threaded straight into the CAS-intent
+// builder and never stored in any package-level variable — so two concurrent
+// projections with different resolved-unit sets cannot cross-contaminate
+// (the previous package-global projection context, which a concurrent plain
+// RunSharedTargetProjectionExact could read, is gone).
+//
+// It reuses the exact/prune projection machinery (D4: same BuildResourcePlan
+// / Execute / PruneStaleSharedTargets, not a parallel linker): local-authored
+// intents (from the platforms) and the caller's CAS-direct intents are merged
+// into ONE plan, executed, and pruned together. The per-platform dir-mirror
+// roots are resolved deterministically (sharedDirMirrorRoots) so a bucket
+// projects — and, critically, is PRUNE-SCANNED — even when the caller's set
+// for it is empty (H17/one-to-zero: dropping a bucket to zero units still
+// removes its stale link) and even when the project has no local-authored
+// sibling.
 //
 // Every unit is validated (H15 identity + H13/H16 CAS-path binding) before
 // projection; a single invalid unit fails the whole call closed. localScopes
 // are the reserved local scope names each unit's source id must not equal
-// (H3).
+// (H3). Scope note: CAS projection covers the DIR-MIRROR shapes (skills +
+// agents-dir + plugins). The file-shaped agent builders (Codex toml,
+// OpenCode/Copilot agent files) are deliberately untouched and completed in
+// t2b.
 func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platforms []Platform, dryRun, exact bool, localScopes ...string) ([]string, error) {
 	agentsHome := config.AgentsHome()
 	for _, u := range units {
@@ -1032,17 +1034,179 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 			return nil, err
 		}
 	}
-	projectionSerialize.Lock()
-	defer projectionSerialize.Unlock()
-	unitsMu.Lock()
-	currentUnits = units
-	unitsMu.Unlock()
-	defer func() {
-		unitsMu.Lock()
-		currentUnits = nil
-		unitsMu.Unlock()
-	}()
-	return RunSharedTargetProjectionExact(project, repoPath, platforms, dryRun, exact)
+	local, err := collectSharedTargetIntents(project, platforms)
+	if err != nil {
+		return nil, err
+	}
+	roots := unionDirMirrorRoots(platforms)
+	cas := buildCASIntents(project, units, roots)
+
+	plan, err := BuildResourcePlan(append(local, cas...))
+	if err != nil {
+		return nil, err
+	}
+	// Force the dir-mirror bucket roots into the prune scan even when a bucket
+	// has zero wanted targets this pass, so a bucket reduced to zero units
+	// still has its stale managed link removed (one-to-zero prune).
+	pruneDirs := resolvedPruneDirs(roots, repoPath)
+
+	if !exact {
+		if dryRun {
+			if len(plan.Resources) == 0 {
+				return []string{"shared targets: (none)"}, nil
+			}
+			return formatSharedTargetPlanForDryRun(plan, repoPath), nil
+		}
+		if len(plan.Resources) > 0 {
+			return nil, plan.Execute(repoPath, agentsHome)
+		}
+		return nil, nil
+	}
+	if dryRun {
+		lines := dryRunExactProjectionLines(plan, repoPath)
+		if len(lines) == 0 {
+			return []string{"shared targets: (none)"}, nil
+		}
+		return lines, nil
+	}
+	if len(plan.Resources) > 0 {
+		if err := executeResourcePlan(plan, repoPath, agentsHome); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := plan.pruneStaleSharedTargetsExtraDirs(repoPath, agentsHome, pruneDirs); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
+// sharedDirMirrorRoots returns a platform's DIR-MIRROR bucket roots (bucket →
+// repo-relative target roots) INDEPENDENT of any local content, so CAS
+// projection and one-to-zero pruning work even when a project has no
+// local-authored sibling and even when the caller's unit set for the bucket
+// is empty. It mirrors exactly the roots each platform passes to
+// BuildSharedSkillMirrorIntents / BuildSharedAgentMirrorIntents /
+// BuildSharedPluginBundleIntents inside its SharedTargetIntents. The
+// FILE-shaped agent builders (Codex toml, OpenCode/Copilot agent files) are
+// deliberately excluded — those shapes are t2b. (Consolidating this into a
+// first-class platform method is a t2b follow-on.)
+func sharedDirMirrorRoots(p Platform) map[string][]string {
+	switch p.(type) {
+	case *claude:
+		return map[string][]string{
+			"skills": {filepath.Join(claudeDir, "skills"), filepath.Join(claudeAgentsBucketDir, "skills")},
+			"agents": {filepath.Join(claudeDir, "agents")},
+		}
+	case *codex:
+		return map[string][]string{"skills": {filepath.Join(codexAgentsDir, "skills")}}
+	case *opencode:
+		return map[string][]string{
+			"skills":  {filepath.Join(opencodeAgentsDir, "skills")},
+			"plugins": {filepath.Join(opencodeDir, "plugins")},
+		}
+	case *copilot:
+		return map[string][]string{"skills": {filepath.Join(copilotAgentsDir, "skills")}}
+	case *cursor:
+		return map[string][]string{"agents": {filepath.Join(".claude", "agents")}}
+	case *antigravity:
+		return map[string][]string{
+			"skills": {filepath.Join(antigravityDir, "skills")},
+			"agents": {filepath.Join(antigravityDir, "agents")},
+		}
+	default:
+		return nil
+	}
+}
+
+// unionDirMirrorRoots unions sharedDirMirrorRoots across platforms, de-duped
+// and sorted, so a target root shared by two platforms (e.g. Claude and
+// Cursor both use .claude/agents) is projected/scanned once.
+func unionDirMirrorRoots(platforms []Platform) map[string][]string {
+	set := map[string]map[string]bool{}
+	for _, p := range platforms {
+		for bucket, roots := range sharedDirMirrorRoots(p) {
+			if set[bucket] == nil {
+				set[bucket] = map[string]bool{}
+			}
+			for _, r := range roots {
+				set[bucket][r] = true
+			}
+		}
+	}
+	out := make(map[string][]string, len(set))
+	for bucket, roots := range set {
+		list := make([]string, 0, len(roots))
+		for r := range roots {
+			list = append(list, r)
+		}
+		sort.Strings(list)
+		out[bucket] = list
+	}
+	return out
+}
+
+// resolvedPruneDirs flattens roots (bucket → repo-relative target roots) into
+// the absolute repo directories that must be prune-scanned regardless of
+// whether the current plan has any wanted target there (one-to-zero prune).
+func resolvedPruneDirs(roots map[string][]string, repoPath string) []string {
+	var dirs []string
+	for _, list := range roots {
+		for _, r := range list {
+			dirs = append(dirs, resolveIntentTargetPath(r, repoPath))
+		}
+	}
+	sort.Strings(dirs)
+	return dirs
+}
+
+// casDirMirrorSpec maps a dir-mirror bucket to the marker + materializer a
+// CAS-direct intent for it carries. Buckets absent here are NOT dir-mirror
+// shapes in t2 (file-shaped agent projection is t2b) and are skipped.
+var casDirMirrorSpec = map[string]struct{ marker, materializer string }{
+	"skills":  {skillManifestName, "shared-skill-dir-symlink"},
+	"agents":  {agentManifestName, "shared-agent-dir-symlink"},
+	"plugins": {PluginManifestName, "shared-plugin-dir-symlink"},
+}
+
+// buildCASIntents builds the CAS-direct ResourceIntents for the caller's
+// resolved units (H13) — pure invocation-local data. Each intent's SourceRef
+// addresses the immutable store path "<agentsHome>/cache/artifacts/<family>/<hex>"
+// directly (Scope "artifacts", Bucket "cache") — no shared mutable alias —
+// one per (unit, platform dir-mirror root) for the unit's bucket. ReplacePolicy
+// is ResourceReplaceNever and the casDirectOrigin marker routes the link step
+// through the H17 atomic managed-symlink swap.
+func buildCASIntents(project string, units []ResolvedUnit, roots map[string][]string) []ResourceIntent {
+	var intents []ResourceIntent
+	for _, u := range units {
+		spec, ok := casDirMirrorSpec[u.Family]
+		if !ok {
+			continue // non-dir-mirror bucket (file-shaped agents are t2b)
+		}
+		for _, targetRoot := range roots[u.Family] {
+			intents = append(intents, ResourceIntent{
+				IntentID:    fmt.Sprintf("%s.sourced.%s.%s.%s", u.Family, sanitizeIntentRoot(u.SourceID), u.Name, sanitizeIntentRoot(targetRoot)),
+				Project:     project,
+				Bucket:      u.Family,
+				LogicalName: u.Name,
+				TargetPath:  filepath.Join(targetRoot, u.Name),
+				Ownership:   ResourceOwnershipSharedRepo,
+				SourceRef: ResourceSourceRef{
+					Scope:        "artifacts",
+					Bucket:       "cache",
+					RelativePath: filepath.Join(u.Family, config.StoreDigestDir(u.Digest)),
+					Kind:         ResourceSourceCanonicalDir,
+					Origin:       casDirectOrigin,
+				},
+				Shape:         ResourceShapeDirectDir,
+				Transport:     ResourceTransportSymlink,
+				Materializer:  spec.materializer,
+				ReplacePolicy: ResourceReplaceNever,
+				PrunePolicy:   ResourcePruneTarget,
+				MarkerFiles:   []string{spec.marker},
+			})
+		}
+	}
+	return intents
 }
 
 // casDirectOrigin marks a ResourceIntent whose source is a resolved
@@ -1057,74 +1221,43 @@ func isCASDirectIntent(intent ResourceIntent) bool {
 	return intent.SourceRef.Origin == casDirectOrigin
 }
 
-// casMirrorIntents builds the CAS-direct ResourceIntents for the caller's
-// resolved units of one bucket at one target root (H13). Each intent's
-// SourceRef addresses the immutable store path
-// "<agentsHome>/cache/artifacts/<family>/<hex>" directly (Scope "artifacts",
-// Bucket "cache") — no shared mutable alias. ReplacePolicy is
-// ResourceReplaceNever so a real (non-symlink) occupant is refused, and the
-// casDirectOrigin marker routes the link step through the H17 atomic symlink
-// swap (repoint-or-refuse) rather than a RemoveAll-after-check.
-func casMirrorIntents(project, targetRoot, bucket, marker, materializer string) []ResourceIntent {
-	units := casUnitsForBucket(bucket)
-	intents := make([]ResourceIntent, 0, len(units))
-	for _, u := range units {
-		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("%s.sourced.%s.%s.%s", bucket, sanitizeIntentRoot(u.SourceID), u.Name, sanitizeIntentRoot(targetRoot)),
-			Project:     project,
-			Bucket:      bucket,
-			LogicalName: u.Name,
-			TargetPath:  filepath.Join(targetRoot, u.Name),
-			Ownership:   ResourceOwnershipSharedRepo,
-			SourceRef: ResourceSourceRef{
-				Scope:        "artifacts",
-				Bucket:       "cache",
-				RelativePath: filepath.Join(u.Family, config.StoreDigestDir(u.Digest)),
-				Kind:         ResourceSourceCanonicalDir,
-				Origin:       casDirectOrigin,
-			},
-			Shape:         ResourceShapeDirectDir,
-			Transport:     ResourceTransportSymlink,
-			Materializer:  materializer,
-			ReplacePolicy: ResourceReplaceNever,
-			PrunePolicy:   ResourcePruneTarget,
-			MarkerFiles:   []string{marker},
-		})
-	}
-	return intents
-}
-
-// atomicManagedSymlinkSwap creates or repoints a managed symlink at target
-// pointing to src with NO RemoveAll-after-check (H17). It refuses up front to
-// touch any occupant that is not itself a symlink (a real dir/file is
-// caller/user content), then publishes via a same-dir temp symlink + atomic
-// os.Rename — which replaces an existing SYMLINK in one step (no window where
-// target is absent) and FAILS closed against a real directory/file (rename of
-// a symlink onto a non-empty dir errors), so user content is never deleted
-// even if the entry changed between the check and the rename. On a platform
-// where os.Symlink is unavailable/again-privileged (Windows without symlink
-// privilege), it falls back to links.SymlinkReplacing so behavior is no worse
-// than the pre-existing shared path there.
+// atomicManagedSymlinkSwap creates or repoints a CAS-direct managed symlink at
+// target → src with NO RemoveAll-after-check and NO RemoveAll fallback (H17).
+// It replaces ONLY an identity-verified managed link whose resolved target is
+// UNDER managed CAS storage (config.ArtifactsRoot); a real file/dir OR a
+// FOREIGN symlink (one pointing outside managed storage) is left completely
+// untouched and the call fails closed. When a symlink cannot be created
+// (e.g. Windows without the privilege) it ALSO fails closed rather than
+// reaching any RemoveAll-based primitive. Publication is a same-dir temp
+// symlink + atomic os.Rename, so an existing managed link is replaced in one
+// step with no absent window, and a real dir/file at the target makes the
+// rename error out rather than deleting anything.
 func atomicManagedSymlinkSwap(src, target string) error {
 	if cur, err := os.Readlink(target); err == nil && cur == src {
 		return nil // already correct
 	}
-	if fi, err := os.Lstat(target); err == nil && fi.Mode()&os.ModeSymlink == 0 {
-		return fmt.Errorf("refusing to replace unmanaged entry %s (not a managed symlink)", target)
+	if _, err := os.Lstat(target); err == nil {
+		// Occupant present: only an identity-verified managed CAS link may be
+		// replaced. A real file/dir (Readlink would have failed) or a foreign
+		// symlink resolving outside managed storage is refused — fail closed,
+		// touch nothing.
+		if !links.IsManagedLinkUnder(target, config.ArtifactsRoot(config.AgentsHome())) {
+			return fmt.Errorf("refusing to replace %s: not a managed CAS link (foreign symlink or user content) — leaving it intact", target)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("lstat projection target %s: %w", target, err)
 	}
 	if err := fsops.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("creating parent dir for %s: %w", target, err)
 	}
 	tmp := fmt.Sprintf("%s.casswap-%d", target, time.Now().UnixNano())
 	if err := os.Symlink(src, tmp); err != nil {
-		// os.Symlink unsupported/again-denied (e.g. Windows without the
-		// privilege): fall back to the shared primitive rather than fail the
-		// whole projection. links refuses unmanaged occupants too.
-		return links.Symlink(src, target)
+		// Fail closed — never fall back to a RemoveAll-based primitive (H17).
+		return fmt.Errorf("H17 atomic swap: cannot create temp symlink for %s (no unsafe fallback): %w", target, err)
 	}
 	if err := fsops.Rename(tmp, target); err != nil {
 		_ = fsops.Remove(tmp)
-		return fmt.Errorf("atomic symlink swap %s -> %s: %w", target, src, err)
+		return fmt.Errorf("H17 atomic swap: rename %s -> %s: %w", target, src, err)
 	}
 	return nil
 }
