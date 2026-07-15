@@ -113,6 +113,14 @@ type FetchedArtifact struct {
 	// the package resolver can derive an effective key via EffectiveCacheKey. A
 	// zero value falls back to the kind default keyed on Digest.
 	KeyInputs CacheKeyInputs
+	// Bundle is the normalized, in-memory file tree (package-artifact-install
+	// spec D3/H1) for an artifact whose content layout is "tree" (a git/local
+	// subtree walk) or "tarball" (an archive untar, sniffed from Data). It is
+	// nil for a plain single-file artifact pull. Every non-nil Bundle has
+	// already passed the H1 fail-closed normalizer (NormalizeBundle /
+	// UntarBundle); Data/Digest continue to address the fetched bytes exactly
+	// as before a Bundle is populated, unaffected by it.
+	Bundle *Bundle
 }
 
 // PackageRefParts is the parsed form of a "source-id:artifact-path@version-spec"
@@ -209,10 +217,22 @@ func artifactDigest(data []byte) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-// readCachedArtifact returns the cached blob for digest, or (nil,false).
+// readCachedArtifact returns the cached blob for digest, or (nil,false). Per
+// H8 (package-artifact-install spec §3A), every cache hit is re-verified
+// against digest before it is trusted: a concurrent writer's same-dir
+// temp+rename (writeCachedArtifact) means a reader never observes a partial
+// file, but a corrupt or tampered blob that was fully written under the
+// wrong digest is still possible, so the digest is recomputed here rather
+// than trusted from the cache path alone. A verification failure is treated
+// exactly like a cache miss (ok=false): the caller falls through to a fresh
+// fetch instead of ever returning bytes that do not match what was asked
+// for.
 func readCachedArtifact(digest string) ([]byte, bool) {
 	data, err := os.ReadFile(cachedArtifactPath(digest))
 	if err != nil {
+		return nil, false
+	}
+	if artifactDigest(data) != digest {
 		return nil, false
 	}
 	return data, true
@@ -241,13 +261,21 @@ func authString(auth json.RawMessage, key string) string {
 	return s
 }
 
-// writeCachedArtifact persists blob under the content-addressed packages cache.
+// writeCachedArtifact persists blob under the content-addressed packages
+// cache. Per H8, the publish is a same-dir temp+rename
+// (fsops.WriteFileAtomic): the blob is written to a temp file in dir and
+// renamed into place, so a concurrent reader (readCachedArtifact) never
+// observes a partially-written file — closing the torn-read window a plain
+// truncate-and-write leaves open.
 func writeCachedArtifact(digest string, data []byte) error {
 	dir := filepath.Join(packagesCacheRoot(), digestDir(digest))
 	if err := fsops.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating package cache dir: %w", err)
 	}
-	return fsops.WriteFile(filepath.Join(dir, "artifact.blob"), data, 0o644)
+	if err := fsops.WriteFileAtomic(filepath.Join(dir, "artifact.blob"), data); err != nil {
+		return fmt.Errorf("writing package cache blob: %w", err)
+	}
+	return nil
 }
 
 // --- oci fetcher -----------------------------------------------------------

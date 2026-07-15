@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"time"
@@ -64,14 +66,34 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 	pinned, isPinned := digestFromVersionSpec(parts.VersionSpec)
 
 	// A digest-pinned artifact is content-addressed, so the shared packages cache
-	// is checked before any clone (offline fast path, spec §8).
+	// is checked before any clone (offline fast path, spec §8). This fast path
+	// only ever serves a single-file (blob) pull: a tree-layout pull's digest is
+	// a whole-subtree BundleDigest, never written to the flat blob cache (see
+	// fetchTreeBundle), so a pinned tree-layout ref always falls through to a
+	// real clone+walk below.
 	if isPinned {
 		if art, ok, err := readCachedPinnedGitArtifact(posture, pinned); ok {
 			return art, err
 		}
 	}
 
-	data, commit, err := f.cloneAndRead(src, parts)
+	wfs, root, commit, err := f.cloneAndResolve(src, parts)
+	if err != nil {
+		return FetchedArtifact{}, err
+	}
+
+	info, err := wfs.Lstat(root)
+	if err != nil {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git read %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
+	if info.IsDir() {
+		// Tree layout (spec D3): the ref names a resource directory, not a
+		// single file. Fetch walks the subtree into a normalized Bundle
+		// (H1) rather than treating it as an opaque blob.
+		return f.fetchTreeBundle(wfs, root, parts, commit, posture, isPinned, pinned)
+	}
+
+	data, err := readArtifactFile(wfs, parts, commit)
 	if err != nil {
 		return FetchedArtifact{}, err
 	}
@@ -92,6 +114,104 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 	// resolved commit recorded so the package resolver can derive an effective key
 	// sensitive to the source commit (config-distribution-model §7A.4).
 	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: digest, ResolvedCommit: commit}}, nil
+}
+
+// fetchTreeBundle walks the git subtree rooted at root (already confirmed to
+// be a directory) into a normalized Bundle (H1) and wraps it in a
+// FetchedArtifact. Digest is the whole-subtree content digest (BundleDigest)
+// — the tree-layout counterpart to a single blob's artifactDigest — so a
+// "pinned:sha256:..." version spec pins the whole subtree. Tree-layout
+// results are never written to the flat single-blob packages cache
+// (writeCachedArtifact addresses one blob, not a multi-file tree);
+// materialize (t2, spec H2) owns the tree's content-addressed store.
+func (f *gitArtifactFetcher) fetchTreeBundle(wfs billy.Filesystem, root string, parts PackageRefParts, commit string, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+	bundle, err := NormalizeBundle(gitSubtreeWalker(wfs, root), DefaultBundleLimits())
+	if err != nil {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
+	digest := BundleDigest(bundle)
+	if isPinned && digest != pinned {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("digest mismatch: pinned %s but git subtree served %s", pinned, digest))
+	}
+	if err := verifySignature(posture, digest, false); err != nil {
+		return FetchedArtifact{}, err
+	}
+	return FetchedArtifact{Digest: digest, Bundle: &bundle, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: digest, ResolvedCommit: commit}}, nil
+}
+
+// gitSubtreeWalker returns a BundleWalker over the git worktree subtree
+// rooted at root. It classifies each ReadDir entry from its own type bits
+// (a symlink is never followed to decide "is this a file or a dir" — H1
+// rejects a symlink entry outright, regardless of what it points to).
+func gitSubtreeWalker(wfs billy.Filesystem, root string) BundleWalker {
+	return func(readContent bool) ([]RawBundleEntry, error) {
+		var out []RawBundleEntry
+		var walk func(dir string) error
+		walk = func(dir string) error {
+			items, err := wfs.ReadDir(dir)
+			if err != nil {
+				return err
+			}
+			for _, item := range items {
+				full := wfs.Join(dir, item.Name())
+				rel := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(full, root), string(filepath.Separator)))
+
+				switch {
+				case item.Type()&fs.ModeSymlink != 0:
+					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindSymlink})
+				case item.IsDir():
+					info, err := item.Info()
+					if err != nil {
+						return err
+					}
+					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindDir, Mode: info.Mode()})
+					if err := walk(full); err != nil {
+						return err
+					}
+				case item.Type().IsRegular():
+					info, err := item.Info()
+					if err != nil {
+						return err
+					}
+					entry := RawBundleEntry{Path: rel, Kind: rawKindFile, Mode: info.Mode(), Size: info.Size()}
+					if readContent {
+						data, err := readGitTreeFile(wfs, full, info.Size())
+						if err != nil {
+							return err
+						}
+						entry.Data = data
+					}
+					out = append(out, entry)
+				default:
+					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindOther})
+				}
+			}
+			return nil
+		}
+		if err := walk(root); err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+}
+
+// readGitTreeFile reads full's content from wfs, bounded to size+1 bytes so
+// a filesystem entry that lies about its declared size cannot smuggle more
+// content past the bundle's already-validated byte-count cap (H1).
+func readGitTreeFile(wfs billy.Filesystem, full string, size int64) ([]byte, error) {
+	fh, err := wfs.Open(full)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = fh.Close() }()
+	data, err := io.ReadAll(io.LimitReader(fh, size+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) != size {
+		return nil, fmt.Errorf("git tree file %q: declared size %d does not match %d bytes read", full, size, len(data))
+	}
+	return data, nil
 }
 
 // readCachedPinnedGitArtifact returns a cache-hit FetchedArtifact when a
@@ -141,12 +261,15 @@ func readArtifactFile(wfs billy.Filesystem, parts PackageRefParts, commit string
 	return data, nil
 }
 
-// cloneAndRead validates the source URL, shallow-clones at the resolved ref, and
-// reads the artifact bytes at the cloned HEAD. It returns the artifact bytes and
-// the resolved commit SHA, mapping each failure to its ImportError reason.
-func (f *gitArtifactFetcher) cloneAndRead(src Source, parts PackageRefParts) ([]byte, string, error) {
+// cloneAndResolve validates the source URL, shallow-clones at the resolved
+// ref, and resolves the cloned HEAD. It returns the worktree filesystem, the
+// artifact path canonicalized to the worktree's join form (root — not yet
+// known to be a file or a directory), and the resolved commit SHA, mapping
+// each failure to its ImportError reason. The caller (FetchArtifact) decides
+// the content layout (tree vs single file) from root's Stat result.
+func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, root, commit string, err error) {
 	if err := validateGitSourceURL(src.URL, parts); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 
 	ref := gitArtifactRef(src, parts)
@@ -154,18 +277,14 @@ func (f *gitArtifactFetcher) cloneAndRead(src Source, parts PackageRefParts) ([]
 	defer cancel()
 	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
 	if err != nil {
-		return nil, "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
+		return nil, "", "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
 	}
 
 	head, err := repo.Head()
 	if err != nil {
-		return nil, "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
+		return nil, "", "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
 	}
-	commit := head.Hash().String()
-
-	data, err := readArtifactFile(wfs, parts, commit)
-	if err != nil {
-		return nil, "", err
-	}
-	return data, commit, nil
+	commit = head.Hash().String()
+	root = filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/"))
+	return wfs, root, commit, nil
 }
