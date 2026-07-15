@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 )
@@ -27,8 +28,10 @@ import (
 //
 //   - ReResolved (pass-1 wrote): resolvePackagesUnits fetches each declared
 //     ref at its manifest version-spec (may re-resolve to new upstream
-//     content), materializes it, and records/refreshes a kind:artifact lock
-//     unit (H10).
+//     content), materializes it, and commits ONE combined lock — layer/
+//     profile units (carried forward by pass-1) plus the fresh kind:artifact
+//     units plus their content-integrity anchors — only after EVERY package
+//     fetch + materialization succeeds (H10 + review #3 atomicity).
 //   - !ReResolved (pass-1 did not write — Frozen, Locked-fresh, Offline, or
 //     plain-fresh): hydratePackagesFromLock fetches each ref pinned to the
 //     digest ALREADY recorded in the lock and materializes it, without
@@ -36,6 +39,18 @@ import (
 //     committed lock but an empty local CAS store work: the lock doesn't
 //     need rewriting, but the store still needs populating before
 //     projection.
+
+// artifactContentLockSection is the sibling lock section (alongside "units")
+// that records, per resolved packages ref, the H16 content-integrity digest
+// (config.BundleContentDigest) of the materialized artifact. It is the
+// git-tracked anchor the offline H7 resolver re-verifies the CAS entry
+// against for ANY ref, independent of source type or declared version syntax
+// — the store-addressing digest in the units section (BundleDigest) embeds
+// modes + explicit dir entries and does NOT round-trip from an on-disk walk,
+// so it cannot serve as the from-disk integrity reference; the content digest
+// can. It is a plain sibling section (like the install stamp), so lock_units.go
+// / LockedUnit stay unchanged (out of scope).
+const artifactContentLockSection = "artifact-content"
 
 // packageFamilyBuckets maps a packages ref's artifact-path family label
 // (singular — "source-id:skill/name@version", the external-agent-sources §5 /
@@ -79,47 +94,90 @@ func findPackageSource(sources []config.Source, id string) (config.Source, bool)
 	return config.Source{}, false
 }
 
+// anyArtifactUnit reports whether units contains a kind:artifact entry — the
+// signal that this project has installed packages (so pass-2 must run to
+// prune them even when the manifest now declares none, review #4).
+func anyArtifactUnit(units map[string]config.LockedUnit) bool {
+	for _, u := range units {
+		if u.Kind == config.UnitKindArtifact {
+			return true
+		}
+	}
+	return false
+}
+
 // HydratePackagesUnits is pass 2's driver (D6). It reads the resolved
 // effective config's packages[] set and returns the caller-supplied
-// resolved-unit set H13 requires for platform.ProjectResolvedUnits. Pass 2 is
-// a no-op (nil, nil) when the effective config declares no packages, or when
-// ensureRes is nil (the dry-run caller convention — see hydrateInstallPackages/
-// hydrateRefreshPackages).
-func HydratePackagesUnits(projectPath, projectName string, ensureRes *config.EnsureResult) ([]platform.ResolvedUnit, error) {
-	if ensureRes == nil || ensureRes.Snapshot == nil || len(ensureRes.Snapshot.Effective.Packages) == 0 {
-		return nil, nil
+// resolved-unit set H13 requires for platform.ProjectResolvedUnits, plus a
+// `participated` flag.
+//
+// participated reports whether pass-2 had anything to do at all — either the
+// manifest declares packages, OR the lock still carries kind:artifact units
+// that a now-empty manifest must prune (review #4: without this the caller
+// would skip ProjectResolvedUnits on the last removal, and t2's one-to-zero
+// prune would never run, leaving the final CAS link orphaned). When
+// participated is true the caller MUST route projection through
+// ProjectResolvedUnits with exactly the returned set (even when empty), so the
+// prune scan runs; when false it takes the plain projection path unchanged
+// (R6 byte-parity for projects that never used packages).
+func HydratePackagesUnits(projectPath, projectName string, ensureRes *config.EnsureResult) (units []platform.ResolvedUnit, participated bool, err error) {
+	if ensureRes == nil || ensureRes.Snapshot == nil {
+		return nil, false, nil
 	}
-	snap := ensureRes.Snapshot
+	declared := ensureRes.Snapshot.Effective.Packages
+	existing, err := config.ReadUnits(projectPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("packages: reading lock: %w", err)
+	}
+	if len(declared) == 0 && !anyArtifactUnit(existing.Units) {
+		return nil, false, nil
+	}
+
 	agentsHome := config.AgentsHome()
 	localScopes := []string{projectName}
 
 	if ensureRes.ReResolved {
-		return resolvePackagesUnits(projectPath, agentsHome, snap, localScopes)
+		units, err = resolvePackagesUnits(projectPath, agentsHome, ensureRes.Snapshot, localScopes)
+	} else {
+		units, err = hydratePackagesFromLock(projectPath, agentsHome, ensureRes.Snapshot, localScopes)
 	}
-	return hydratePackagesFromLock(projectPath, agentsHome, snap, localScopes)
+	if err != nil {
+		return nil, true, err
+	}
+	return units, true, nil
 }
 
-// resolvePackagesUnits is H9's write half: each declared ref is fetched at
-// its manifest version-spec, materialized, and the project's lock gains a
-// refreshed kind:artifact unit per ref (H10) — merged with whatever pass-1
-// config resolution already wrote so neither write clobbers the other.
+// resolvePackagesUnits is H9's write half: every declared ref is fetched at
+// its manifest version-spec and materialized FIRST, accumulating the lock +
+// content-integrity candidates in memory; only after ALL of them succeed is a
+// SINGLE combined lock committed (review #3 atomicity — a mid-loop fetch
+// failure returns before any lock write, so the prior artifact lock survives
+// intact). A now-empty packages[] set commits an empty artifact set, dropping
+// stale artifact lock units + their content anchors (R5).
 func resolvePackagesUnits(projectPath, agentsHome string, snap *config.Snapshot, localScopes []string) ([]platform.ResolvedUnit, error) {
 	sources := snap.Effective.Sources
 	units := make([]platform.ResolvedUnit, 0, len(snap.Effective.Packages))
-	locked := make(map[string]config.LockedUnit, len(snap.Effective.Packages))
+	contentByUnit := make([]string, 0, len(snap.Effective.Packages))
+	artifactUnits := make(map[string]config.LockedUnit, len(snap.Effective.Packages))
+	contentDigests := make(map[string]string, len(snap.Effective.Packages))
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	for _, pkg := range snap.Effective.Packages {
-		unit, err := fetchAndMaterializePackage(agentsHome, sources, pkg.Ref, "", localScopes)
+		unit, contentDigest, err := fetchAndMaterializePackage(agentsHome, sources, pkg.Ref, "", localScopes)
 		if err != nil {
 			return nil, err
 		}
 		units = append(units, unit)
-		locked[pkg.Ref] = config.LockedUnit{Kind: config.UnitKindArtifact, Digest: unit.Digest, FetchedAt: now, LastCheckedAt: now}
+		contentByUnit = append(contentByUnit, contentDigest)
+		artifactUnits[pkg.Ref] = config.LockedUnit{Kind: config.UnitKindArtifact, Digest: unit.Digest, FetchedAt: now, LastCheckedAt: now}
+		contentDigests[pkg.Ref] = contentDigest
 	}
 
-	if err := mergeArtifactUnitsIntoLock(projectPath, locked); err != nil {
+	if err := commitArtifactLock(projectPath, artifactUnits, contentDigests); err != nil {
 		return nil, fmt.Errorf("packages: recording lock units: %w", err)
+	}
+	if err := verifyProjectionInputs(agentsHome, units, contentByUnit); err != nil {
+		return nil, err
 	}
 	return units, nil
 }
@@ -138,13 +196,14 @@ func hydratePackagesFromLock(projectPath, agentsHome string, snap *config.Snapsh
 	}
 	sources := snap.Effective.Sources
 	units := make([]platform.ResolvedUnit, 0, len(snap.Effective.Packages))
+	contentByUnit := make([]string, 0, len(snap.Effective.Packages))
 
 	for _, pkg := range snap.Effective.Packages {
 		lockedUnit, ok := existing.Units[pkg.Ref]
 		if !ok || lockedUnit.Kind != config.UnitKindArtifact {
 			return nil, fmt.Errorf("packages ref %q: no locked artifact entry to hydrate from — run `da config sync` first", pkg.Ref)
 		}
-		unit, err := fetchAndMaterializePackage(agentsHome, sources, pkg.Ref, lockedUnit.Digest, localScopes)
+		unit, contentDigest, err := fetchAndMaterializePackage(agentsHome, sources, pkg.Ref, lockedUnit.Digest, localScopes)
 		if err != nil {
 			return nil, fmt.Errorf("hydrate: %w", err)
 		}
@@ -152,6 +211,10 @@ func hydratePackagesFromLock(projectPath, agentsHome string, snap *config.Snapsh
 			return nil, fmt.Errorf("packages ref %q: hydrated digest %s does not match locked digest %s", pkg.Ref, unit.Digest, lockedUnit.Digest)
 		}
 		units = append(units, unit)
+		contentByUnit = append(contentByUnit, contentDigest)
+	}
+	if err := verifyProjectionInputs(agentsHome, units, contentByUnit); err != nil {
+		return nil, err
 	}
 	return units, nil
 }
@@ -161,64 +224,124 @@ func hydratePackagesFromLock(projectPath, agentsHome string, snap *config.Snapsh
 // may re-resolve to new upstream content), or PINNED to pinDigest when set
 // (the hydrate half, which must never drift from what the lock recorded even
 // if upstream has moved on) — then materializes the result through t2's
-// platform.MaterializeArtifact, returning the caller-ready ResolvedUnit.
-func fetchAndMaterializePackage(agentsHome string, sources []config.Source, ref, pinDigest string, localScopes []string) (platform.ResolvedUnit, error) {
+// platform.MaterializeArtifact, returning the caller-ready ResolvedUnit plus
+// the artifact's content-integrity digest (config.BundleContentDigest).
+func fetchAndMaterializePackage(agentsHome string, sources []config.Source, ref, pinDigest string, localScopes []string) (platform.ResolvedUnit, string, error) {
 	parts, err := config.ParsePackageRef(ref)
 	if err != nil {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: %w", ref, err)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: %w", ref, err)
 	}
 	if pinDigest != "" {
 		parts.VersionSpec = "pinned:" + pinDigest
 	}
 	src, ok := findPackageSource(sources, parts.SourceID)
 	if !ok {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: no declared source %q", ref, parts.SourceID)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: no declared source %q", ref, parts.SourceID)
+	}
+	// OCI consume is deferred to t6 (package-artifact-install t3 review #5): the
+	// OCI fetcher returns only Data/Digest, never a normalized Bundle, so an
+	// oci-source packages ref cannot be materialized yet. Fail with a clear,
+	// actionable message instead of the misleading "not a directory-shaped
+	// bundle" a nil Bundle would otherwise produce downstream.
+	if src.Type == "oci" {
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: OCI package consume is not yet wired (tracked in t6-oci-consume); use a git or local source for now", ref)
 	}
 	bucket, name, err := splitPackageArtifactFamily(parts.ArtifactPath)
 	if err != nil {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: %w", ref, err)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: %w", ref, err)
 	}
 	fetcher, err := config.SelectPackageFetcher(src.Type)
 	if err != nil {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: %w", ref, err)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: %w", ref, err)
 	}
 	fetched, err := fetcher.FetchArtifact(src, parts)
 	if err != nil {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: fetch: %w", ref, err)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: fetch: %w", ref, err)
 	}
 	if fetched.Bundle == nil {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: artifact is not a directory-shaped bundle (tree/tarball) — a plain file blob is not installable via packages", ref)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: artifact is not a directory-shaped bundle (tree/tarball) — a plain file blob is not installable via packages", ref)
 	}
 	casPath, digest, err := platform.MaterializeArtifact(agentsHome, bucket, parts.SourceID, name, *fetched.Bundle, localScopes...)
 	if err != nil {
-		return platform.ResolvedUnit{}, fmt.Errorf("packages ref %q: materialize: %w", ref, err)
+		return platform.ResolvedUnit{}, "", fmt.Errorf("packages ref %q: materialize: %w", ref, err)
 	}
-	return platform.ResolvedUnit{Family: bucket, Name: name, SourceID: parts.SourceID, Digest: digest, CASPath: casPath}, nil
+	contentDigest := config.BundleContentDigest(*fetched.Bundle)
+	return platform.ResolvedUnit{Family: bucket, Name: name, SourceID: parts.SourceID, Digest: digest, CASPath: casPath}, contentDigest, nil
 }
 
-// mergeArtifactUnitsIntoLock folds artifacts into the project's existing
-// units lock (layer + profile units already written by pass-1 config
-// resolution) without clobbering them: WriteUnitsLock replaces the whole
-// "units" section wholesale, so every write here re-reads first (H10;
-// lock_units.go's LockedUnit shape is unchanged and untouched). Every
-// existing kind:artifact entry is dropped and re-derived from artifacts —
-// never merely added to — so a packages[] ref removed from the manifest does
-// not leave an orphaned lock entry behind (R5: staleness's declared-set
-// comparison stays accurate).
-func mergeArtifactUnitsIntoLock(projectPath string, artifacts map[string]config.LockedUnit) error {
+// verifyProjectionInputs is the projection-boundary integrity re-check
+// (package-artifact-install t3 review #2b): every resolved unit's on-disk CAS
+// content is re-verified against the content-integrity digest computed from
+// the just-fetched bundle, immediately before the caller hands the set to
+// platform.ProjectResolvedUnits (which links on identity/path without
+// re-hashing CAS bytes). A mismatch — a store tamper landed AFTER materialize
+// but BEFORE projection — fails the whole pass closed, so a tampered artifact
+// is never linked/invoked. Combined with the read-only store hardening
+// (config.MaterializeToStore) this closes the materialize→symlink TOCTOU down
+// to a window that also requires a privilege escalation to exploit.
+func verifyProjectionInputs(agentsHome string, units []platform.ResolvedUnit, contentByUnit []string) error {
+	for i, u := range units {
+		present, matches := config.VerifyStoreContentDigest(agentsHome, u.Family, u.Digest, contentByUnit[i])
+		if !present {
+			return fmt.Errorf("packages %s/%s: CAS entry vanished before projection", u.Family, u.Name)
+		}
+		if !matches {
+			return fmt.Errorf("packages %s/%s: CAS content failed integrity re-check before projection (possible store tamper)", u.Family, u.Name)
+		}
+	}
+	return nil
+}
+
+// commitArtifactLock writes ONE combined lock (review #3 atomicity): the units
+// section — every existing non-artifact unit (the layer/profile units pass-1
+// carried forward) plus exactly the supplied artifact units — AND the sibling
+// artifact-content integrity section, in a single atomic agentslock flush that
+// preserves inputs_digest and every other sibling section (adapters, install
+// stamp). Existing artifact units are replaced wholesale (not merged), so a
+// packages[] ref removed from the manifest leaves neither an orphan lock unit
+// nor an orphan content anchor (R5). lock_units.go / LockedUnit are untouched.
+func commitArtifactLock(projectPath string, artifactUnits map[string]config.LockedUnit, contentDigests map[string]string) error {
 	existing, err := config.ReadUnits(projectPath)
 	if err != nil {
 		return err
 	}
-	merged := make(map[string]config.LockedUnit, len(existing.Units)+len(artifacts))
+	merged := make(map[string]config.LockedUnit, len(existing.Units)+len(artifactUnits))
 	for ref, u := range existing.Units {
 		if u.Kind == config.UnitKindArtifact {
 			continue
 		}
 		merged[ref] = u
 	}
-	for ref, u := range artifacts {
+	for ref, u := range artifactUnits {
 		merged[ref] = u
 	}
-	return config.WriteUnitsLock(projectPath, config.UnitsLock{Units: merged, InputsDigest: existing.InputsDigest})
+
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		return err
+	}
+	if err := lf.SetSection(config.LockSectionUnits, merged); err != nil {
+		return err
+	}
+	if err := lf.SetSection(artifactContentLockSection, contentDigests); err != nil {
+		return err
+	}
+	lf.SetInputsDigest(existing.InputsDigest)
+	return lf.Flush()
+}
+
+// readArtifactContentDigests loads the artifact-content integrity section
+// (ref → content digest). A missing section or read error yields an empty
+// (non-nil) map so the offline H7 resolver treats an unanchored ref as
+// "cannot verify" (skip) rather than crashing.
+func readArtifactContentDigests(projectPath string) map[string]string {
+	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
+	if err != nil {
+		return map[string]string{}
+	}
+	out := map[string]string{}
+	if _, err := lf.Section(artifactContentLockSection, &out); err != nil {
+		return map[string]string{}
+	}
+	return out
 }

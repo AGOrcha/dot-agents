@@ -694,6 +694,23 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 			CacheKey:      l.CacheKey,
 		}
 	}
+	// Cross-pass lock atomicity (package-artifact-install t3 review #3): pass 1
+	// (this write) resolves ONLY layers/profiles, but it must NOT drop the
+	// kind:artifact units the packages pass (pass 2, EnsureResolved's caller)
+	// recorded on a prior resolve. Replacing the whole units section with
+	// layers-only here would delete the prior artifact lock BEFORE pass 2 has
+	// re-fetched + re-materialized — so a mid-pass-2 failure would leave the
+	// artifact lock state already lost. Carrying existing artifact units
+	// forward keeps the prior lock intact until pass 2 atomically replaces them
+	// (all package fetches succeed first); a pass-2 failure leaves the previous
+	// artifacts locked exactly as they were.
+	if existing, rerr := ReadUnits(projectPath); rerr == nil {
+		for ref, u := range existing.Units {
+			if u.Kind == UnitKindArtifact {
+				units[ref] = u
+			}
+		}
+	}
 	// kind:profile units (R2): the resolved profile fragments are recorded as
 	// first-class lock units so a profile resolution reproduces from the lock
 	// without re-resolving. They are derived from the SAME snapshot the resolve just

@@ -219,6 +219,12 @@ func TestMaterializeToStoreVerifyOnHitReExtractsTamperedEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first materialize: %v", err)
 	}
+	// Published store files are read-only (t3 review #2c): a tamper must first
+	// escalate privilege by restoring the write bit — which is exactly the
+	// deliberate act the hardening forces.
+	if err := os.Chmod(filepath.Join(storePath, "SKILL.md"), 0o644); err != nil {
+		t.Fatalf("restore write bit for tamper: %v", err)
+	}
 	if err := os.WriteFile(filepath.Join(storePath, "SKILL.md"), []byte("TAMPERED\n"), 0o644); err != nil {
 		t.Fatalf("tamper store file: %v", err)
 	}
@@ -447,6 +453,11 @@ func TestVerifyArtifactStoreDigest_DetectsTamperWithoutWriting(t *testing.T) {
 	storePath, digest, _, err := MaterializeToStore(home, "skills", bundle)
 	if err != nil {
 		t.Fatalf("materialize: %v", err)
+	}
+	// Restore the write bit first (published store files are read-only, t3
+	// review #2c) to simulate a privileged tamper.
+	if err := os.Chmod(filepath.Join(storePath, "SKILL.md"), 0o644); err != nil {
+		t.Fatalf("restore write bit for tamper: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(storePath, "SKILL.md"), []byte("TAMPERED"), 0o644); err != nil {
 		t.Fatalf("tamper: %v", err)

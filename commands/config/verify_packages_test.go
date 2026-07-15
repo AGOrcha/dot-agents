@@ -11,10 +11,13 @@ import (
 
 // seedPackagesArtifactProject sets up an isolated ~/.agents + project pair
 // with one materialized, locked `packages[]` artifact — driven through the
-// SAME HydratePackagesUnits pass-2 driver `da install`/`da refresh` use — and
-// returns the project path plus the resolved digest for the caller to
-// tamper with.
-func seedPackagesArtifactProject(t *testing.T) (project, digest string) {
+// SAME HydratePackagesUnits pass-2 driver `da install`/`da refresh` use —
+// keyed by an ORDINARY `@1` ref (review #1: the H7 integrity check must work
+// for ordinary refs, not only `@pinned:` ones). It also aligns inputs_digest
+// to the manifest so verifyStaleness isolates the FAIL to unit-digest-mismatch
+// (a store tamper) rather than a coincidental local-scope drift. Returns the
+// project path and the CAS marker file to tamper with.
+func seedPackagesArtifactProject(t *testing.T) (project, casFile string) {
 	t.Helper()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -48,33 +51,23 @@ func seedPackagesArtifactProject(t *testing.T) (project, digest string) {
 		Snapshot:   &cfg.Snapshot{Effective: cfg.AgentsRC{Sources: sources, Packages: rc.Packages}},
 		ReResolved: true,
 	}
-	units, err := lifecycle.HydratePackagesUnits(project, "project", res)
+	units, _, err := lifecycle.HydratePackagesUnits(project, "project", res)
 	if err != nil {
 		t.Fatalf("seed HydratePackagesUnits: %v", err)
 	}
 	if len(units) != 1 {
 		t.Fatalf("expected 1 seeded unit, got %d", len(units))
 	}
-	digest = units[0].Digest
+	casFile = filepath.Join(units[0].CASPath, "SKILL.md")
 
-	// Re-key the lock entry under the PINNED form the H7 resolver can verify
-	// offline (an "@1" tag-shaped ref cannot be re-checked without network).
+	// inputs_digest is a pass-1 (config resolution) concern this fixture
+	// bypasses by seeding pass-2 directly; align it to the manifest so
+	// verifyStaleness sees a lock that matches local scope, isolating the FAIL
+	// under test to unit-digest-mismatch alone.
 	existing, err := cfg.ReadUnits(project)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pinnedRef := "da-agc:skill/demo@pinned:" + digest
-	existing.Units[pinnedRef] = existing.Units["da-agc:skill/demo@1"]
-	delete(existing.Units, "da-agc:skill/demo@1")
-	rc.Packages = []cfg.PackageRef{{Ref: pinnedRef}}
-	if err := rc.Save(project); err != nil {
-		t.Fatal(err)
-	}
-	// inputs_digest is a pass-1 (config resolution) concern this fixture
-	// bypasses by seeding pass-2 directly; compute it against the manifest's
-	// final (pinned-ref) state so verifyStaleness sees a lock that matches
-	// local scope — isolating the FAIL this test proves to unit-digest-
-	// mismatch alone, not a coincidental local-scope drift.
 	inputsDigest, err := cfg.ComputeInputsDigest(project, "")
 	if err != nil {
 		t.Fatal(err)
@@ -82,26 +75,36 @@ func seedPackagesArtifactProject(t *testing.T) (project, digest string) {
 	if err := cfg.WriteUnitsLock(project, cfg.UnitsLock{Units: existing.Units, InputsDigest: inputsDigest}); err != nil {
 		t.Fatal(err)
 	}
-	return project, digest
+	return project, casFile
+}
+
+// tamperCASFile restores the write bit (published store files are read-only,
+// t3 review #2c) and overwrites content — a privileged post-install tamper.
+func tamperCASFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("restore write bit: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("TAMPERED"), 0o644); err != nil {
+		t.Fatalf("tamper CAS content: %v", err)
+	}
 }
 
 // TestVerifyStaleness_DetectsPostInstallStoreTamper is H7's `config verify`
 // acceptance test: after a packages artifact is installed and its CAS content
 // is tampered with in place, `da config verify` must FAIL — not silently
 // report OK — because verifyStaleness now threads a real artifact-store
-// integrity resolver into cfg.Staleness instead of nil.
+// integrity resolver into cfg.Staleness instead of nil, verifying an ORDINARY
+// `@1` ref from the committed content anchor (review #1).
 func TestVerifyStaleness_DetectsPostInstallStoreTamper(t *testing.T) {
-	project, digest := seedPackagesArtifactProject(t)
+	project, casFile := seedPackagesArtifactProject(t)
 
 	clean := verifyStaleness(project)
 	if len(clean) != 1 || clean[0].Status != verifyPass {
 		t.Fatalf("expected a clean pass before tampering, got %+v", clean)
 	}
 
-	casPath := cfg.ArtifactStorePath(cfg.AgentsHome(), "skills", digest)
-	if err := os.WriteFile(filepath.Join(casPath, "SKILL.md"), []byte("TAMPERED"), 0o644); err != nil {
-		t.Fatalf("tamper CAS content: %v", err)
-	}
+	tamperCASFile(t, casFile)
 
 	tampered := verifyStaleness(project)
 	if len(tampered) != 1 || tampered[0].Status != verifyFail {
@@ -113,12 +116,9 @@ func TestVerifyStaleness_DetectsPostInstallStoreTamper(t *testing.T) {
 // actually flips the top-level report OK — the observable "config verify
 // blocks" signal a CI gate or operator would see.
 func TestBuildVerifyReport_PostInstallStoreTamperFlipsOK(t *testing.T) {
-	project, digest := seedPackagesArtifactProject(t)
+	project, casFile := seedPackagesArtifactProject(t)
 
-	casPath := cfg.ArtifactStorePath(cfg.AgentsHome(), "skills", digest)
-	if err := os.WriteFile(filepath.Join(casPath, "SKILL.md"), []byte("TAMPERED"), 0o644); err != nil {
-		t.Fatalf("tamper CAS content: %v", err)
-	}
+	tamperCASFile(t, casFile)
 
 	report := buildVerifyReport(mustVerifyOptions(project, false, okProbe))
 	if report.OK {

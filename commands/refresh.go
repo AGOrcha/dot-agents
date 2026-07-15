@@ -258,13 +258,13 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 
 	config.SetWindowsMirrorContext(path)
 
-	packagesUnits, err := hydrateRefreshPackages(path, name, ensureRes)
+	packagesUnits, packagesParticipated, err := hydrateRefreshPackages(path, name, ensureRes)
 	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("resolving packages: %v", err))
 		projectFailed = true
 	}
 
-	if runSharedTargetsForRefresh(name, path, installedEnabled, packagesUnits) {
+	if runSharedTargetsForRefresh(name, path, installedEnabled, packagesUnits, packagesParticipated) {
 		projectFailed = true
 	}
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
@@ -341,9 +341,9 @@ func ensureLockFreshForRefresh(path string) *config.EnsureResult {
 // refresh already warns on the latter and proceeds against the existing lock,
 // so pass-2 is a no-op rather than compounding the warning) or the effective
 // config declares no packages[] (HydratePackagesUnits).
-func hydrateRefreshPackages(path, name string, ensureRes *config.EnsureResult) ([]platform.ResolvedUnit, error) {
+func hydrateRefreshPackages(path, name string, ensureRes *config.EnsureResult) ([]platform.ResolvedUnit, bool, error) {
 	if ensureRes == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	return lifecycle.HydratePackagesUnits(path, name, ensureRes)
 }
@@ -359,10 +359,10 @@ func hydrateRefreshPackages(path, name string, ensureRes *config.EnsureResult) (
 // opts out, keeping the additive write-only behavior. A prune failure is folded
 // into the same warn-and-fail path as a write failure so a partial application
 // withholds the success stamp.
-func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform, units []platform.ResolvedUnit) bool {
+func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform, units []platform.ResolvedUnit, packagesParticipated bool) bool {
 	var lines []string
 	var err error
-	if len(units) > 0 {
+	if packagesParticipated {
 		lines, err = platform.ProjectResolvedUnits(name, path, units, installedEnabled, Flags.DryRun, !refreshInexact, name)
 	} else {
 		lines, err = platform.RunSharedTargetProjectionExact(name, path, installedEnabled, Flags.DryRun, !refreshInexact)

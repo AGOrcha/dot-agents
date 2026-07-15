@@ -1130,7 +1130,7 @@ func TestRunInstallSharedTargets_ExactPrunesStaleKeepsUser(t *testing.T) {
 		installed: true,
 		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
 	}}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}, nil); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}, nil, false); err != nil {
 		t.Fatalf("runInstallSharedTargetsFor exact: %v", err)
 	}
 
@@ -1158,7 +1158,7 @@ func TestRunInstallSharedTargets_InexactKeepsStale(t *testing.T) {
 		installed: true,
 		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
 	}}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: true}, nil); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: true}, nil, false); err != nil {
 		t.Fatalf("runInstallSharedTargetsFor inexact: %v", err)
 	}
 
@@ -1184,14 +1184,14 @@ func TestRunInstallSharedTargets_ExactIdempotent(t *testing.T) {
 		installed: true,
 		intents:   []platform.ResourceIntent{sharedSkillIntentForInstall(relDir)},
 	}}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}, nil); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}, nil, false); err != nil {
 		t.Fatalf("first projection: %v", err)
 	}
 	fi1, err := os.Lstat(wanted)
 	if err != nil {
 		t.Fatalf("wanted target missing after first run: %v", err)
 	}
-	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}, nil); err != nil {
+	if err := runInstallSharedTargetsFor("proj", repo, platforms, installOptions{inexact: false}, nil, false); err != nil {
 		t.Fatalf("second projection (must be a no-op): %v", err)
 	}
 	fi2, err := os.Lstat(wanted)
@@ -2271,7 +2271,7 @@ func TestRunInstallSharedTargets_ProjectionErrorDryRun(t *testing.T) {
 	platforms := []platform.Platform{
 		fakeInstallPlatform{id: "boom", installed: true, intentErr: errors.New("collect failed")},
 	}
-	if err := runInstallSharedTargetsFor("", filepath.Join(tmp, "no-such-parent", "p"), platforms, installOptions{}, nil); err == nil {
+	if err := runInstallSharedTargetsFor("", filepath.Join(tmp, "no-such-parent", "p"), platforms, installOptions{}, nil, false); err == nil {
 		t.Fatal("expected shared target projection error")
 	}
 }

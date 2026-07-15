@@ -203,7 +203,88 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 		}
 		return "", "", false, fmt.Errorf("materialize: publish store path %s: %w", storePath, err)
 	}
+	// H-hardening (package-artifact-install t3 review #2c): tighten the just-
+	// published, content-addressed entry to read-only so a casual post-install
+	// overwrite of store bytes needs an explicit privilege escalation (a chmod
+	// +w first) rather than a bare write — turning silent tamper into a
+	// deliberate, detectable act on top of the H7 integrity check. Best-effort:
+	// an exotic filesystem that cannot chmod does not fail the materialize (the
+	// H7/projection-boundary content check remains the authoritative guard).
+	makeStoreEntryReadOnly(storePath)
 	return storePath, digest, true, nil
+}
+
+// makeStoreEntryReadOnly walks a published store entry and drops the write
+// bit on every FILE (→ 0o444) so the immutable, content-addressed tree
+// resists a casual in-place overwrite — the dominant tamper vector (mutating
+// existing bytes) now needs an explicit `chmod +w` first. Directories are
+// LEFT writable on purpose: a read-only directory would block unlink of its
+// own children (unlink needs write on the parent dir), breaking deferred
+// store GC and every caller's cleanup, while buying little — an ADDED or
+// DELETED file is already caught by the H7 content-digest check (the on-disk
+// walk hashes exactly the files present), so read-only files close the one
+// tamper vector that content-hashing alone cannot make expensive.
+//
+// It is defense-in-depth on top of the H7 integrity check and the
+// projection-boundary re-verify. Errors are swallowed (best-effort
+// hardening) — a filesystem that cannot chmod still gets a correct,
+// verifiable store; only the extra privilege barrier is absent there.
+func makeStoreEntryReadOnly(root string) {
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil || d.IsDir() {
+			return nil
+		}
+		_ = os.Chmod(p, 0o444)
+		return nil
+	})
+}
+
+// BundleContentDigest is the exported form of bundleContentDigest: the H16
+// content-only integrity digest of a bundle (canonical hash over every
+// regular-file entry's relative slash path + content, sorted, modes/dir
+// entries excluded so it round-trips from a later on-disk walk). t3 records
+// this as the git-tracked integrity anchor for a materialized artifact so the
+// CAS entry can be re-verified offline against the lock, independent of the
+// bundle-addressing digest (BundleDigest) that keys the store path but does
+// NOT round-trip from disk (it embeds modes + explicit dir entries).
+func BundleContentDigest(b Bundle) string {
+	return bundleContentDigest(b)
+}
+
+// StoreContentDigest is the exported form of storeContentDigest: it recomputes
+// the H16 content-only integrity digest from an on-disk store tree using the
+// SAME canonicalization as BundleContentDigest, so the two are directly
+// comparable. It is the primitive the offline H7 integrity resolver uses to
+// detect a post-install CAS tamper without a network re-fetch or the original
+// bundle.
+func StoreContentDigest(dir string) (string, error) {
+	return storeContentDigest(dir)
+}
+
+// VerifyStoreContentDigest reports whether the CAS entry at
+// ArtifactStorePath(agentsHome, family, digest) is present and, when present,
+// whether its on-disk content still matches expectedContentDigest (a value
+// produced by BundleContentDigest at materialize time and recorded in the
+// git-tracked lock). It is the bundle-free, network-free H7 primitive: unlike
+// VerifyArtifactStoreDigest it needs no in-memory Bundle, so an offline caller
+// (config verify / EnsureResolved staleness) that only has the committed
+// integrity anchor — never the source bytes — can still catch a store tamper
+// for ANY packages ref, regardless of source type or declared version syntax.
+//
+// present=false means the entry is not materialized on this machine (the
+// caller's "not hydrated yet" state, not a tamper signal). present=true,
+// matches=false is the tamper signal.
+func VerifyStoreContentDigest(agentsHome, family, digest, expectedContentDigest string) (present, matches bool) {
+	storePath := ArtifactStorePath(agentsHome, family, digest)
+	fi, err := os.Stat(storePath)
+	if err != nil || !fi.IsDir() {
+		return false, false
+	}
+	got, err := storeContentDigest(storePath)
+	if err != nil {
+		return true, false
+	}
+	return true, got == expectedContentDigest
 }
 
 // writeBundleTree extracts every entry of bundle under root. It does not
@@ -366,11 +447,5 @@ func quarantineStoreEntry(storePath string) error {
 // present=true, matches=false means the entry exists but its content no
 // longer matches bundle — the H7 tamper signal.
 func VerifyArtifactStoreDigest(agentsHome, family, digest string, bundle Bundle) (present, matches bool) {
-	storePath := ArtifactStorePath(agentsHome, family, digest)
-	fi, err := os.Stat(storePath)
-	if err != nil || !fi.IsDir() {
-		return false, false
-	}
-	ok, _ := verifyStoreContent(storePath, bundleContentDigest(bundle))
-	return true, ok
+	return VerifyStoreContentDigest(agentsHome, family, digest, bundleContentDigest(bundle))
 }
