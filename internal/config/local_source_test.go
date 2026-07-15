@@ -343,20 +343,20 @@ func TestEnsureProvenanceGitignorePreservesUserContent(t *testing.T) {
 	}
 }
 
-// TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock proves the H4 fix: an
-// empty remotePaths set (e.g. the last package for a source was removed) MUST
-// NOT remove the managed block entirely — it always retains the permanent
-// sourced-namespace pattern. Only the caller-supplied path ("cache/") is
-// dropped; user content outside the block is untouched.
+// TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock proves the H14 fix:
+// an empty remotePaths set (e.g. the last package for a source was removed)
+// MUST NOT remove the managed block entirely — it always retains the
+// permanent CAS pattern. Only the caller-supplied path ("misc/") is dropped;
+// user content outside the block is untouched.
 func TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, gitignoreFileName)
 	s := NewLocalSource(root, &fakeGit{isRepo: true, head: testHead})
-	if err := s.EnsureProvenanceGitignore([]string{"cache/"}); err != nil {
+	if err := s.EnsureProvenanceGitignore([]string{"misc/"}); err != nil {
 		t.Fatalf("seed managed block: %v", err)
 	}
-	if err := os.WriteFile(path, []byte("# user\nlogs/\n"+gitignoreBlockBegin+"\ncache/\n"+strings.Join(alwaysIgnoredSourced, "\n")+"\n"+gitignoreBlockEnd+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("# user\nlogs/\n"+gitignoreBlockBegin+"\nmisc/\n"+strings.Join(alwaysIgnoredCAS, "\n")+"\n"+gitignoreBlockEnd+"\n"), 0o644); err != nil {
 		t.Fatalf("seed mixed: %v", err)
 	}
 	if err := s.EnsureProvenanceGitignore(nil); err != nil {
@@ -364,14 +364,14 @@ func TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock(t *testing.T) {
 	}
 	got := readFile(t, path)
 	if !strings.Contains(got, gitignoreBlockBegin) {
-		t.Fatalf("H4: permanent managed block was removed by an empty remotePaths call:\n%s", got)
+		t.Fatalf("H14: permanent managed block was removed by an empty remotePaths call:\n%s", got)
 	}
-	for _, pattern := range alwaysIgnoredSourced {
+	for _, pattern := range alwaysIgnoredCAS {
 		if !strings.Contains(got, pattern) {
-			t.Fatalf("H4: permanent sourced-namespace pattern %q missing after empty remotePaths call:\n%s", pattern, got)
+			t.Fatalf("H14: permanent CAS pattern %q missing after empty remotePaths call:\n%s", pattern, got)
 		}
 	}
-	if strings.Contains(got, "cache/") {
+	if strings.Contains(got, "misc/") {
 		t.Fatalf("caller-supplied path should have been dropped once no longer passed:\n%s", got)
 	}
 	if !strings.Contains(got, "logs/") {
@@ -380,8 +380,8 @@ func TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock(t *testing.T) {
 }
 
 // TestEnsureProvenanceGitignoreEmptyEverything proves the block is NEVER
-// empty (H4): even with no prior file and only blank-string paths, the
-// permanent sourced-namespace pattern is written.
+// empty (H14): even with no prior file and only blank-string paths, the
+// permanent CAS pattern is written.
 func TestEnsureProvenanceGitignoreEmptyEverything(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -391,11 +391,11 @@ func TestEnsureProvenanceGitignoreEmptyEverything(t *testing.T) {
 	}
 	got := readFile(t, filepath.Join(root, gitignoreFileName))
 	if got == "" {
-		t.Fatalf("H4: expected the permanent sourced-namespace block, got empty gitignore")
+		t.Fatalf("H14: expected the permanent CAS block, got empty gitignore")
 	}
-	for _, pattern := range alwaysIgnoredSourced {
+	for _, pattern := range alwaysIgnoredCAS {
 		if !strings.Contains(got, pattern) {
-			t.Fatalf("H4: permanent sourced-namespace pattern %q missing, got %q", pattern, got)
+			t.Fatalf("H14: permanent CAS pattern %q missing, got %q", pattern, got)
 		}
 	}
 }

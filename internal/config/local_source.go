@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	git "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing/format/gitignore"
 
 	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
@@ -70,19 +71,17 @@ const (
 	gitignoreFileName   = ".gitignore"
 )
 
-// alwaysIgnoredSourced is the permanent H4 pattern: the reserved sourced
-// namespace under EVERY resource family ("<family>/_sourced/") is
-// gitignored regardless of which packages are currently materialized.
-// Mirrors links.alwaysIgnored's "present even with no caller-supplied
-// paths" contract, and fixes the block-removal leak this pattern's absence
-// caused: previously managedBlock returned "" (dropping the WHOLE managed
-// block, not just one path) whenever remotePaths shrank to empty — e.g. the
-// last package for a source was removed — which un-ignored every OTHER
-// still-materialized sourced path too. Being unconditionally present here
-// means package removal can shrink remotePaths freely without ever
-// un-ignoring the reserved namespace; only deleting the store itself (a
-// separate, not-yet-built operation) is expected to drop it.
-var alwaysIgnoredSourced = []string{"*/" + SourcedScopeSegment + "/"}
+// alwaysIgnoredCAS is the permanent H14 pattern: the ENTIRE content-
+// addressed store root ("cache/", covering cache/artifacts/<family>/<digest>)
+// is gitignored from the local source's own git regardless of which
+// packages are currently materialized. It is present unconditionally so a
+// package removal (which shrinks the caller's materialized-path list, even
+// to empty) can never un-ignore the store; only deleting the store itself
+// (a separate, not-yet-built operation) would drop it. Mirrors
+// links.alwaysIgnored's "present even with no caller-supplied paths"
+// contract, and fixes the block-removal leak whereby an empty path list
+// used to drop the WHOLE managed block.
+var alwaysIgnoredCAS = []string{"cache/"}
 
 // GitRepo is the seam over the git operations the local source needs. The
 // production implementation is in-process via go-git (no `git` subprocess, no
@@ -295,14 +294,17 @@ func underRoot(slashRoot, slashPath string) (string, bool) {
 // de-duplicates the managed paths for a stable diff, and is a no-op-stable
 // rewrite (calling it twice with the same inputs yields the same bytes). An
 // empty path set still leaves the block present — it always carries the
-// permanent H4 sourced-namespace pattern (alwaysIgnoredSourced) — so package
-// removal shrinking remotePaths to empty can never un-ignore the reserved
-// namespace (H4).
+// permanent H14 CAS pattern (alwaysIgnoredCAS) — so package removal shrinking
+// remotePaths to empty can never un-ignore the content-addressed store (H14).
 //
 // The read-merge-write is guarded by the package's shared inter-process file
 // lock (agentslock.AcquireFileLock) so two concurrent `da install`/`refresh`
-// processes writing this same .gitignore cannot race a read-modify-write
-// into a torn or regressed block (H4 "CAS/locked block rewrite").
+// da PROCESSES cannot race their own read-modify-writes of this .gitignore
+// into a torn or regressed block. The advisory lock excludes only other da
+// writers of this file — it does NOT serialize an out-of-band `git`
+// invocation or a user hand-edit, which is why materialize additionally
+// re-verifies the CAS ignore with git's own semantics before writing
+// (EnsureAndVerifyCASIgnore), rather than trusting this write in isolation.
 func (s *LocalSource) EnsureProvenanceGitignore(remotePaths []string) error {
 	if s.Root == "" {
 		return errors.New(errEmptyRoot)
@@ -326,15 +328,14 @@ func (s *LocalSource) EnsureProvenanceGitignore(remotePaths []string) error {
 	return fsops.WriteFileAtomic(path, []byte(next))
 }
 
-// SourcedIgnoreInstalled reports whether the local source's .gitignore
-// currently carries the permanent H4 sourced-namespace pattern
-// (alwaysIgnoredSourced). Materialize calls this immediately after
-// EnsureProvenanceGitignore (H4: "installed AND verified before the tree is
-// exposed") so a write that silently failed to land — a concurrent
-// hand-edit racing the lock's own read window, a filesystem anomaly — is
-// caught before any fetched content is ever placed where a `git status`
-// could observe it.
-func (s *LocalSource) SourcedIgnoreInstalled() (bool, error) {
+// CASPathIgnored reports whether relPath (a slash- or OS-separated path
+// RELATIVE to the local source root, e.g. "cache/artifacts/<family>/<hex>")
+// is gitignored by the local source's .gitignore, evaluated with git's OWN
+// ignore semantics (the go-git gitignore matcher) rather than a substring
+// check. This is the H14 verification that closes the gap a naive
+// strings.Contains would miss — a pattern present but shadowed by a later
+// negation, or a path the pattern does not actually cover.
+func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 	if s.Root == "" {
 		return false, errors.New(errEmptyRoot)
 	}
@@ -342,32 +343,40 @@ func (s *LocalSource) SourcedIgnoreInstalled() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, pattern := range alwaysIgnoredSourced {
-		if !strings.Contains(content, pattern) {
-			return false, nil
+	var patterns []gitignore.Pattern
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
 		}
+		patterns = append(patterns, gitignore.ParsePattern(trimmed, nil))
 	}
-	return true, nil
+	matcher := gitignore.NewMatcher(patterns)
+	segs := strings.Split(strings.Trim(filepath.ToSlash(relPath), "/"), "/")
+	return matcher.Match(segs, true), nil
 }
 
-// EnsureAndVerifySourcedIgnore installs the permanent H4 sourced-namespace
-// gitignore pattern in the local source rooted at agentsHome and reads it
-// back to confirm the write landed, failing closed if not. It is the
-// package-level convenience form of EnsureProvenanceGitignore +
-// SourcedIgnoreInstalled for callers (platform.MaterializeArtifact) that
-// only need "make sure the permanent ignore is live" and do not otherwise
-// hold a *LocalSource.
-func EnsureAndVerifySourcedIgnore(agentsHome string) error {
+// EnsureAndVerifyCASIgnore installs the permanent H14 CAS gitignore pattern
+// in the local source rooted at agentsHome and then verifies — with git's
+// own ignore semantics, on the CAS path itself — that the specific store
+// path for (family, digest) is ignored, failing closed if not. Materialize
+// calls this BEFORE writing any store byte (H14: "installed + verified
+// before any CAS byte is written"), so a fetched artifact can never enter
+// the local source's git tracking, and a write that silently failed to land
+// (a concurrent hand-edit, a filesystem anomaly) is caught before content
+// is exposed.
+func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 	ls := NewLocalSource(agentsHome, nil)
 	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
-		return fmt.Errorf("materialize: install sourced ignore: %w", err)
+		return fmt.Errorf("materialize: install CAS ignore: %w", err)
 	}
-	ok, err := ls.SourcedIgnoreInstalled()
+	casRel := filepath.Join("cache", "artifacts", family, StoreDigestDir(digest))
+	ok, err := ls.CASPathIgnored(casRel)
 	if err != nil {
-		return fmt.Errorf("materialize: verify sourced ignore: %w", err)
+		return fmt.Errorf("materialize: verify CAS ignore: %w", err)
 	}
 	if !ok {
-		return fmt.Errorf("materialize: sourced ignore did not verify after install at %s — refusing to expose fetched content", agentsHome)
+		return fmt.Errorf("materialize: CAS path %q is not gitignored after install at %s — refusing to write fetched content into a git-tracked store", casRel, agentsHome)
 	}
 	return nil
 }
@@ -405,12 +414,12 @@ func stripManagedBlock(content string) string {
 }
 
 // managedBlock renders the da-owned block for the given remote asset paths,
-// ALWAYS including the permanent H4 sourced-namespace pattern
-// (alwaysIgnoredSourced) regardless of remotePaths — so the block is never
-// empty and is therefore never omitted (H4: package removal shrinking
-// remotePaths to empty must not un-ignore the reserved namespace).
+// ALWAYS including the permanent H14 CAS pattern (alwaysIgnoredCAS)
+// regardless of remotePaths — so the block is never empty and is therefore
+// never omitted (H14: package removal shrinking remotePaths to empty must
+// not un-ignore the content-addressed store).
 func managedBlock(remotePaths []string) string {
-	normalized := normalizePaths(append(append([]string{}, alwaysIgnoredSourced...), remotePaths...))
+	normalized := normalizePaths(append(append([]string{}, alwaysIgnoredCAS...), remotePaths...))
 	if len(normalized) == 0 {
 		return ""
 	}

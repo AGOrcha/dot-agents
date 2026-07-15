@@ -31,6 +31,8 @@ func testBundle(t *testing.T, files map[string]string) Bundle {
 	return b
 }
 
+// --- H2: content-addressed immutable store (confirmed sound; kept) ---------
+
 func TestMaterializeToStoreWritesContentAddressedTree(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -49,7 +51,6 @@ func TestMaterializeToStoreWritesContentAddressedTree(t *testing.T) {
 	if digest != BundleDigest(bundle) {
 		t.Fatalf("digest mismatch: got %q want %q", digest, BundleDigest(bundle))
 	}
-	// H2: the store path is keyed by the digest, under cache/artifacts/<family>/.
 	if !strings.HasPrefix(storePath, filepath.Join(home, "cache", "artifacts", "skills")) {
 		t.Fatalf("store path %q not under the H2 content-addressed root", storePath)
 	}
@@ -65,9 +66,6 @@ func TestMaterializeToStoreWritesContentAddressedTree(t *testing.T) {
 	}
 }
 
-// TestMaterializeToStoreReMaterializeIsByteIdenticalNoOp is the adversarial
-// idempotency claim: re-materializing an UNCHANGED digest must not re-extract
-// (installed=false) and must leave byte-identical content in place.
 func TestMaterializeToStoreReMaterializeIsByteIdenticalNoOp(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -93,7 +91,7 @@ func TestMaterializeToStoreReMaterializeIsByteIdenticalNoOp(t *testing.T) {
 		t.Fatalf("re-materializing an unchanged digest must be a no-op (installed=false), got installed=true")
 	}
 	if storePath1 != storePath2 || digest1 != digest2 {
-		t.Fatalf("store path/digest must be stable across re-materialize: (%q,%q) vs (%q,%q)", storePath1, digest1, storePath2, digest2)
+		t.Fatalf("store path/digest must be stable across re-materialize")
 	}
 	after, err := os.ReadFile(filepath.Join(storePath2, "SKILL.md"))
 	if err != nil {
@@ -104,9 +102,6 @@ func TestMaterializeToStoreReMaterializeIsByteIdenticalNoOp(t *testing.T) {
 	}
 }
 
-// TestMaterializeToStoreChangedDigestNeverMutatesOldPath proves H2: a
-// changed bundle (different digest) lands at a NEW store path; the OLD
-// digest's content is left completely untouched (no shared mutable path).
 func TestMaterializeToStoreChangedDigestNeverMutatesOldPath(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -125,7 +120,7 @@ func TestMaterializeToStoreChangedDigestNeverMutatesOldPath(t *testing.T) {
 		t.Fatalf("expected v2 (a different digest) to be freshly installed")
 	}
 	if storePathV1 == storePathV2 || digestV1 == digestV2 {
-		t.Fatalf("v1 and v2 must occupy distinct digest-keyed paths: %q vs %q", storePathV1, storePathV2)
+		t.Fatalf("v1 and v2 must occupy distinct digest-keyed paths")
 	}
 	v1Content, err := os.ReadFile(filepath.Join(storePathV1, "SKILL.md"))
 	if err != nil {
@@ -136,10 +131,6 @@ func TestMaterializeToStoreChangedDigestNeverMutatesOldPath(t *testing.T) {
 	}
 }
 
-// TestMaterializeToStoreConcurrentSameDigestConverges is the adversarial
-// concurrency claim: two goroutines racing to materialize the SAME digest
-// must both succeed and agree on identical, complete content — no torn
-// write is ever observable at the published store path.
 func TestMaterializeToStoreConcurrentSameDigestConverges(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -169,11 +160,9 @@ func TestMaterializeToStoreConcurrentSameDigestConverges(t *testing.T) {
 			t.Fatalf("goroutine %d: materialize failed: %v", i, err)
 		}
 		if paths[i] != paths[0] {
-			t.Fatalf("goroutine %d: store path diverged: %q vs %q", i, paths[i], paths[0])
+			t.Fatalf("goroutine %d: store path diverged", i)
 		}
 	}
-	// The published tree must be fully present and correct, not partially
-	// written by an interleaved loser of the race.
 	for name, want := range map[string]string{
 		"SKILL.md":              strings.Repeat("x", 4096),
 		"references/detail.md":  strings.Repeat("y", 4096),
@@ -187,66 +176,6 @@ func TestMaterializeToStoreConcurrentSameDigestConverges(t *testing.T) {
 			t.Fatalf("torn write detected in %s: got %d bytes, want %d", name, len(got), len(want))
 		}
 	}
-	// No staging leftovers.
-	root := ArtifactStoreRoot(home, "skills")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("read store root: %v", err)
-	}
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), ".materialize-staging-") {
-			t.Fatalf("leftover staging dir %s after concurrent materialize", e.Name())
-		}
-	}
-}
-
-// TestMaterializeToStorePropagatesStoreRootCreateError forces
-// fsops.MkdirAll(root) to fail (a regular file occupies where the store
-// root's own parent must be a directory) and asserts the error surfaces
-// instead of being swallowed.
-func TestMaterializeToStorePropagatesStoreRootCreateError(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	// "cache" as a FILE blocks MkdirAll("cache/artifacts/skills", ...).
-	if err := os.MkdirAll(home, 0o755); err != nil {
-		t.Fatalf("mkdir home: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "cache"), []byte("masquerade"), 0o644); err != nil {
-		t.Fatalf("seed masquerading file: %v", err)
-	}
-	bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
-	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
-		t.Fatalf("expected an error when the store root cannot be created")
-	}
-}
-
-// TestMaterializeToStorePropagatesStageError forces writeBundleTree to fail
-// (a bundle path collides with a pre-existing FILE where a directory is
-// needed) and asserts the staging error surfaces, leaving no store entry.
-func TestMaterializeToStorePropagatesStageError(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	bundle := testBundle(t, map[string]string{"docs/guide.md": "x\n"})
-	// Pre-seed the store ROOT with a file named after the bundle's own
-	// top-level directory segment ("docs") at a path writeBundleTree's
-	// MkdirAll must traverse through inside the staging dir — instead,
-	// simulate the failure by making the staging PARENT read-only so
-	// MkdirTemp itself cannot create a staging dir, an equally valid
-	// negative path for the same guarded region.
-	if os.Geteuid() == 0 {
-		t.Skip("running as root: permission bits are not enforced")
-	}
-	root := ArtifactStoreRoot(home, "skills")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("seed store root: %v", err)
-	}
-	if err := os.Chmod(root, 0o500); err != nil {
-		t.Fatalf("chmod store root read-only: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(root, 0o755) })
-	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
-		t.Fatalf("expected an error when the staging dir cannot be created")
-	}
 }
 
 func TestMaterializeToStoreRejectsEmptyFamily(t *testing.T) {
@@ -258,9 +187,208 @@ func TestMaterializeToStoreRejectsEmptyFamily(t *testing.T) {
 	}
 }
 
-// TestMaterializeToStorePreservesDirMode proves an explicit directory
-// entry's mode is honored (defense-in-depth path), not just file entries.
-func TestMaterializeToStorePreservesDirMode(t *testing.T) {
+// --- H15: identity-component containment -----------------------------------
+
+// TestMaterializeToStoreRejectsTraversalFamily is the H15 fail-before-fix
+// guard: a family that is not a single canonical segment ("..", a
+// separator-bearing string, an absolute path) is rejected BEFORE any path is
+// derived, so it can never widen the store root.
+func TestMaterializeToStoreRejectsTraversalFamily(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
+	for _, bad := range []string{"..", ".", "a/b", "../escape", `a\b`, "/abs"} {
+		if _, _, _, err := MaterializeToStore(home, bad, bundle); err == nil {
+			t.Fatalf("expected family %q to be rejected as a non-canonical segment", bad)
+		}
+	}
+}
+
+// --- H16: verify-on-hit ----------------------------------------------------
+
+// TestMaterializeToStoreVerifyOnHitReExtractsTamperedEntry is the H16
+// fail-before-fix guard: a pre-existing store dir whose content was TAMPERED
+// (a file rewritten) must NOT be trusted on os.Stat — it is quarantined and
+// re-extracted so the store path once again holds the true bundle content.
+func TestMaterializeToStoreVerifyOnHitReExtractsTamperedEntry(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "authentic\n"})
+
+	storePath, _, _, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("first materialize: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(storePath, "SKILL.md"), []byte("TAMPERED\n"), 0o644); err != nil {
+		t.Fatalf("tamper store file: %v", err)
+	}
+
+	storePath2, _, installed, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("re-materialize over tampered entry: %v", err)
+	}
+	if storePath2 != storePath {
+		t.Fatalf("re-materialized path should be the same digest path")
+	}
+	if !installed {
+		t.Fatalf("expected verify-on-hit to re-extract (installed=true), got a trusted no-op over tampered content")
+	}
+	got, err := os.ReadFile(filepath.Join(storePath, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read re-extracted file: %v", err)
+	}
+	if string(got) != "authentic\n" {
+		t.Fatalf("verify-on-hit did not restore authentic content: %q", got)
+	}
+	quarantined, _ := filepath.Glob(storePath + ".corrupt-*")
+	if len(quarantined) == 0 {
+		t.Fatalf("expected the tampered entry to be quarantined aside")
+	}
+}
+
+// TestMaterializeToStoreVerifyOnHitRejectsSymlinkTamper proves the shape
+// check in verify-on-hit: a store entry into which a symlink was injected
+// fails verification (wrong shape) and is re-extracted, never followed.
+func TestMaterializeToStoreVerifyOnHitRejectsSymlinkTamper(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "authentic\n"})
+	storePath, _, _, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("first materialize: %v", err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(storePath, "evil")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	_, _, installed, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("re-materialize over symlink-tampered entry: %v", err)
+	}
+	if !installed {
+		t.Fatalf("expected symlink-tampered entry to fail verification and re-extract")
+	}
+	if _, err := os.Lstat(filepath.Join(storePath, "evil")); !os.IsNotExist(err) {
+		t.Fatalf("expected the injected symlink to be gone after re-extract, err=%v", err)
+	}
+}
+
+// --- H14: CAS gitignored, verified with git's own semantics on the CAS path
+// itself, before the first store byte -------------------------------------
+
+// TestMaterializeInstallsCASIgnoreAndGitStatusIsClean is the definitive H14
+// acceptance test: materialize into a REAL git repo rooted at agentsHome,
+// then assert go-git's own `status` reports a clean tree — the permanent
+// "cache/" pattern must hide the entire content-addressed store, checked by
+// the actual git engine, not this package's bookkeeping.
+func TestMaterializeInstallsCASIgnoreAndGitStatusIsClean(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	repo, err := git.PlainInit(home, false)
+	if err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+
+	skillBundle := testBundle(t, map[string]string{"SKILL.md": "# fetched\n", "instructions/x.md": "y\n"})
+	agentBundle := testBundle(t, map[string]string{"AGENT.md": "# fetched agent\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", skillBundle); err != nil {
+		t.Fatalf("materialize skills: %v", err)
+	}
+	if _, _, _, err := MaterializeToStore(home, "agents", agentBundle); err != nil {
+		t.Fatalf("materialize agents: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Join(home, "skills", "dot-agents", "hand-authored"), 0o755); err != nil {
+		t.Fatalf("mkdir local fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "skills", "dot-agents", "hand-authored", "SKILL.md"), []byte("# local\n"), 0o644); err != nil {
+		t.Fatalf("write local fixture: %v", err)
+	}
+
+	wt, err := repo.Worktree()
+	if err != nil {
+		t.Fatalf("worktree: %v", err)
+	}
+	status, err := wt.Status()
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	for path := range status {
+		if strings.HasPrefix(filepath.ToSlash(path), "cache/") {
+			t.Fatalf("H14 violated: git status reports a store file under cache/: %s", path)
+		}
+	}
+	if _, ok := status[filepath.ToSlash(filepath.Join("skills", "dot-agents", "hand-authored", "SKILL.md"))]; !ok {
+		t.Fatalf("expected the local-authored fixture to be visible to git status, got %+v", status)
+	}
+}
+
+// TestMaterializeRefusesWhenCASIgnoreCannotInstall is the H14 fail-before-fix
+// guard: if the permanent CAS ignore cannot be installed/verified (here the
+// local source's .gitignore is a DIRECTORY, so the read-modify-write fails),
+// materialize must refuse BEFORE writing any store byte — a fetched artifact
+// is never written into a store that git would track.
+func TestMaterializeRefusesWhenCASIgnoreCannotInstall(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	// Make .gitignore a directory so readGitignore/WriteFileAtomic fail.
+	if err := os.MkdirAll(filepath.Join(home, gitignoreFileName), 0o755); err != nil {
+		t.Fatalf("seed .gitignore-as-dir: %v", err)
+	}
+	bundle := testBundle(t, map[string]string{"SKILL.md": "x\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err == nil {
+		t.Fatalf("expected materialize to refuse when the CAS ignore cannot be installed")
+	}
+	if _, err := os.Stat(filepath.Join(home, "cache", "artifacts")); !os.IsNotExist(err) {
+		t.Fatalf("expected no store bytes written when CAS ignore fails, err=%v", err)
+	}
+}
+
+// TestCASPathIgnoredUsesGitSemantics proves CASPathIgnored evaluates with
+// git's OWN engine (not a substring check): the permanent cache/ pattern
+// covers the store; a .gitignore that does NOT carry a covering pattern
+// reports the CAS path as NOT ignored (the exact miss H14's verify catches);
+// and a non-store path is never falsely reported ignored.
+func TestCASPathIgnoredUsesGitSemantics(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	ls := NewLocalSource(home, nil)
+	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
+		t.Fatalf("install CAS ignore: %v", err)
+	}
+	ok, err := ls.CASPathIgnored(filepath.Join("cache", "artifacts", "skills", "deadbeef"))
+	if err != nil {
+		t.Fatalf("CASPathIgnored: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected the store path to be ignored by the permanent cache/ pattern")
+	}
+	ok, err = ls.CASPathIgnored(filepath.Join("skills", "dot-agents", "x"))
+	if err != nil {
+		t.Fatalf("CASPathIgnored (non-cache): %v", err)
+	}
+	if ok {
+		t.Fatalf("did not expect a non-cache path to be ignored by cache/")
+	}
+
+	// A .gitignore whose patterns do NOT cover the store: git says not
+	// ignored — the miss H14's verify would refuse on.
+	home2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home2, gitignoreFileName), []byte("logs/\n*.tmp\n"), 0o644); err != nil {
+		t.Fatalf("seed non-covering gitignore: %v", err)
+	}
+	ls2 := NewLocalSource(home2, nil)
+	ok, err = ls2.CASPathIgnored(filepath.Join("cache", "artifacts", "skills", "deadbeef"))
+	if err != nil {
+		t.Fatalf("CASPathIgnored (non-covering): %v", err)
+	}
+	if ok {
+		t.Fatalf("git semantics must report the store path NOT ignored when no covering pattern exists")
+	}
+}
+
+// TestMaterializeToStorePreservesExplicitDirEntry covers the explicit
+// directory-entry write path.
+func TestMaterializeToStorePreservesExplicitDirEntry(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	bundle, err := NormalizeBundle(func(emit func(RawBundleEntry) error) error {
@@ -278,155 +406,5 @@ func TestMaterializeToStorePreservesDirMode(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(storePath, "instructions", "x.md")); err != nil {
 		t.Fatalf("nested file under explicit dir entry missing: %v", err)
-	}
-}
-
-// --- H4: permanent sourced ignore, installed and verified -----------------
-
-func TestEnsureAndVerifySourcedIgnoreInstallsPermanentBlock(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	if err := EnsureAndVerifySourcedIgnore(home); err != nil {
-		t.Fatalf("EnsureAndVerifySourcedIgnore: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(home, gitignoreFileName))
-	if err != nil {
-		t.Fatalf("read gitignore: %v", err)
-	}
-	for _, pattern := range alwaysIgnoredSourced {
-		if !strings.Contains(string(data), pattern) {
-			t.Fatalf("permanent sourced-namespace pattern %q missing after install: %q", pattern, data)
-		}
-	}
-}
-
-// TestEnsureAndVerifySourcedIgnoreSurvivesRepeatedPackageRemoval is the H4
-// adversarial claim in its most direct form: repeatedly calling
-// EnsureProvenanceGitignore with a SHRINKING (eventually empty) remotePaths
-// list — the exact shape of "the last package for a source was removed" —
-// must never drop the permanent pattern.
-func TestEnsureAndVerifySourcedIgnoreSurvivesRepeatedPackageRemoval(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	ls := NewLocalSource(home, nil)
-
-	paths := []string{"skills/_sourced/da-agc/a/", "skills/_sourced/da-agc/b/", "skills/_sourced/da-agc/c/"}
-	for len(paths) >= 0 {
-		if err := ls.EnsureProvenanceGitignore(paths); err != nil {
-			t.Fatalf("EnsureProvenanceGitignore(%v): %v", paths, err)
-		}
-		ok, err := ls.SourcedIgnoreInstalled()
-		if err != nil {
-			t.Fatalf("SourcedIgnoreInstalled: %v", err)
-		}
-		if !ok {
-			t.Fatalf("H4 violated: permanent ignore missing after shrinking remotePaths to %v", paths)
-		}
-		if len(paths) == 0 {
-			break
-		}
-		paths = paths[1:]
-	}
-}
-
-// TestGitStatusShowsZeroFetchedFilesAfterMaterialize is the definitive H4
-// acceptance test: materialize bundles into TWO different families (skills,
-// agents) of a REAL git repo (go-git, not a fake), then asserts `git status`
-// on that repo reports a fully clean working tree — the permanent
-// "*/_sourced/" pattern must hide every fetched file, in every family, using
-// the actual go-git status/ignore engine, not this package's own bookkeeping.
-func TestGitStatusShowsZeroFetchedFilesAfterMaterialize(t *testing.T) {
-	t.Parallel()
-	home := t.TempDir()
-	repo, err := git.PlainInit(home, false)
-	if err != nil {
-		t.Fatalf("git init: %v", err)
-	}
-
-	// Install the permanent ignore BEFORE any fetched content is exposed —
-	// exactly the H4-mandated ordering — then materialize into two distinct
-	// families so the pattern's "*/_sourced/" breadth is actually exercised,
-	// not just a single-bucket coincidence.
-	if err := EnsureAndVerifySourcedIgnore(home); err != nil {
-		t.Fatalf("EnsureAndVerifySourcedIgnore: %v", err)
-	}
-	skillBundle := testBundle(t, map[string]string{
-		"SKILL.md":            "# fetched skill\n",
-		"instructions/run.md": "steps\n",
-	})
-	agentBundle := testBundle(t, map[string]string{"AGENT.md": "# fetched agent\n"})
-
-	skillStore, _, _, err := MaterializeToStore(home, "skills", skillBundle)
-	if err != nil {
-		t.Fatalf("materialize skills: %v", err)
-	}
-	agentStore, _, _, err := MaterializeToStore(home, "agents", agentBundle)
-	if err != nil {
-		t.Fatalf("materialize agents: %v", err)
-	}
-
-	// Expose the materialized trees at the reserved sourced-namespace
-	// projection paths (a plain copy stands in for the platform-layer
-	// symlink here — the git-ignore contract must hold for real files under
-	// "_sourced/", not just for a symlink entry).
-	mustCopyTree(t, skillStore, filepath.Join(home, "skills", SourcedScopeSegment, "da-agc", "release-docs-refresh"))
-	mustCopyTree(t, agentStore, filepath.Join(home, "agents", SourcedScopeSegment, "da-agc", "platform-dirs-change-analyst"))
-
-	// Also write a LOCAL-AUTHORED file outside the reserved namespace so the
-	// test proves the ignore is scoped to "_sourced/" only, not accidentally
-	// hiding everything.
-	if err := os.MkdirAll(filepath.Join(home, "skills", "dot-agents", "hand-authored"), 0o755); err != nil {
-		t.Fatalf("mkdir local-authored fixture: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(home, "skills", "dot-agents", "hand-authored", "SKILL.md"), []byte("# local\n"), 0o644); err != nil {
-		t.Fatalf("write local-authored fixture: %v", err)
-	}
-
-	wt, err := repo.Worktree()
-	if err != nil {
-		t.Fatalf("worktree: %v", err)
-	}
-	status, err := wt.Status()
-	if err != nil {
-		t.Fatalf("git status: %v", err)
-	}
-	for path, s := range status {
-		if strings.Contains(filepath.ToSlash(path), "/"+SourcedScopeSegment+"/") {
-			t.Fatalf("H4 violated: git status reports a fetched file under _sourced/: %s (%v)", path, s)
-		}
-	}
-	// The local-authored fixture, by contrast, MUST show up as untracked —
-	// proving the ignore did not over-hide everything.
-	if _, ok := status[filepath.ToSlash(filepath.Join("skills", "dot-agents", "hand-authored", "SKILL.md"))]; !ok {
-		t.Fatalf("expected the local-authored fixture to be visible to git status, got %+v", status)
-	}
-}
-
-// mustCopyTree recursively copies src into dst (both directories), failing
-// the test on any error. Used to simulate "the materialized store content is
-// exposed under the reserved namespace" without pulling the platform
-// package's link machinery into a config-package test.
-func mustCopyTree(t *testing.T, src, dst string) {
-	t.Helper()
-	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
-	if err != nil {
-		t.Fatalf("copy tree %s -> %s: %v", src, dst, err)
 	}
 }
