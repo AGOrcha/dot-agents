@@ -100,15 +100,16 @@ const (
 	rawKindOther
 )
 
-// RawBundleEntry is one unvalidated entry collected by a bundle source
-// walker (the git/local subtree walker or the tar reader) before
-// NormalizeBundle runs. Path is the raw, as-observed path — it may be
-// absolute, may use backslashes, may be "../escape"; canonicalBundlePath is
-// exactly what makes it safe to accept or reject. Size is the entry's
-// declared size, known cheaply (a stat or a tar header) without reading
-// content; Data is populated only by the walker's content-reading pass, and
-// only after every entry in the bundle has already passed metadata
-// validation.
+// RawBundleEntry is one entry a bundle source walker (the git/local subtree
+// walker or the tar reader) hands to NormalizeBundle's single validate-and-
+// read pass. Path is the raw, as-observed path — it may be absolute, may use
+// backslashes, may be "../escape"; canonicalBundlePath is exactly what makes
+// it safe to accept or reject. For a regular file the walker has already read
+// Data under confinement and Size is the authoritative size the content was
+// read at (an fstat on the open fd, or a tar header validated against the
+// bytes actually read) — the accumulator asserts len(Data) == Size so a
+// walker cannot admit an entry whose content diverged from its declared
+// size. Directory entries carry no Data.
 type RawBundleEntry struct {
 	Path string
 	Kind rawEntryKind
@@ -119,11 +120,20 @@ type RawBundleEntry struct {
 
 // BundleLimits caps a normalized Bundle so a hostile or runaway source
 // cannot exhaust memory/disk via file-count or decompression-bomb
-// amplification, independent of the per-entry path-traversal defenses.
+// amplification, independent of the per-entry path-traversal defenses. Every
+// budget is enforced *while the source is being walked* (see bundleAccumulator
+// and tarWalker), never only after a full listing is materialized, so a
+// decompression bomb is rejected before its expansion is accumulated.
 type BundleLimits struct {
+	// MaxEntries caps the total number of entries (files AND directories),
+	// bounding an archive that floods millions of empty entries.
+	MaxEntries int
 	// MaxFiles caps the number of regular-file entries.
 	MaxFiles int
-	// MaxBytes caps the sum of declared/expanded file content bytes.
+	// MaxFileBytes caps a single file's expanded content, bounding the
+	// per-entry allocation the walker performs before an entry is admitted.
+	MaxFileBytes int64
+	// MaxBytes caps the sum of expanded file content bytes across the bundle.
 	MaxBytes int64
 }
 
@@ -132,14 +142,25 @@ type BundleLimits struct {
 // (skill-tiering-contract §5: SKILL.md + instructions/ + references/ + a
 // handful of small files) while still bounding the worst case.
 func DefaultBundleLimits() BundleLimits {
-	return BundleLimits{MaxFiles: 10000, MaxBytes: 64 << 20} // 64 MiB
+	return BundleLimits{
+		MaxEntries:   20000,
+		MaxFiles:     10000,
+		MaxFileBytes: 16 << 20, // 16 MiB per file
+		MaxBytes:     64 << 20, // 64 MiB total
+	}
 }
 
 // orDefault fills any unset (<=0) field with DefaultBundleLimits' value.
 func (l BundleLimits) orDefault() BundleLimits {
 	d := DefaultBundleLimits()
+	if l.MaxEntries <= 0 {
+		l.MaxEntries = d.MaxEntries
+	}
 	if l.MaxFiles <= 0 {
 		l.MaxFiles = d.MaxFiles
+	}
+	if l.MaxFileBytes <= 0 {
+		l.MaxFileBytes = d.MaxFileBytes
 	}
 	if l.MaxBytes <= 0 {
 		l.MaxBytes = d.MaxBytes
@@ -193,6 +214,45 @@ func canonicalBundlePath(raw string) (string, error) {
 	return clean, nil
 }
 
+// validateArtifactSubpath validates the artifact path from a packages ref
+// (`source:<artifact-path>@version`) before it is joined onto a source root
+// on disk. The artifact path addresses a resource dir/file WITHIN the source;
+// it must stay inside the root — so absolute, drive-letter, UNC, backslash,
+// and any `..` component are rejected here, BEFORE the join, closing the
+// classic `Source.Path=/safe/root` + `ArtifactPath=../../private` local-root
+// escape. It returns the cleaned, forward-slash relative path (an empty or
+// "/" path canonicalizes to "." — the source root itself).
+func validateArtifactSubpath(raw string) (string, error) {
+	if raw == "" {
+		return ".", nil
+	}
+	if strings.ContainsRune(raw, '\\') {
+		return "", fmt.Errorf("artifact path %q uses a backslash path separator", raw)
+	}
+	if len(raw) >= 2 && raw[1] == ':' {
+		return "", fmt.Errorf("artifact path %q looks like a drive-letter path", raw)
+	}
+	if strings.HasPrefix(raw, "//") {
+		return "", fmt.Errorf("artifact path %q looks like a UNC path", raw)
+	}
+	if path.IsAbs(raw) {
+		return "", fmt.Errorf("artifact path %q is absolute", raw)
+	}
+	clean := path.Clean(raw)
+	if clean == "." {
+		return ".", nil
+	}
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("artifact path %q escapes the source root", raw)
+	}
+	for _, seg := range strings.Split(clean, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("artifact path %q escapes the source root", raw)
+		}
+	}
+	return clean, nil
+}
+
 // checkDuplicate records cp's lowercase form in seen, rejecting an exact
 // duplicate path and a case-only collision between two distinct paths (H1:
 // "duplicate/case-colliding entries").
@@ -208,114 +268,116 @@ func checkDuplicate(seen map[string]string, cp string) error {
 	return nil
 }
 
-// validateRawEntries runs the H1 metadata-only pass over meta: entry type,
-// canonical path, duplicate/case-collision, and the running file-count/
-// expanded-byte caps (checked against each entry's declared Size). No
-// content is read here — meta is expected to have been collected without
-// reading file bytes, so this pass can reject the whole bundle before a
-// single content byte is ever touched.
-func validateRawEntries(meta []RawBundleEntry, limits BundleLimits) error {
-	seen := make(map[string]string, len(meta))
-	fileCount := 0
-	var totalBytes int64
+// bundleAccumulator is the single validation choke point every bundle source
+// streams through. It replaces the former two-pass (validate-metadata, then
+// re-read) design, whose gap between passes let a symlink, an oversized file,
+// or an extra entry be swapped in on a mutable local tree after validation
+// (a TOCTOU window). Here each entry is validated and admitted in one step,
+// during the walk, from the SAME read that produced its content — kind, path,
+// size, and every cap are checked together, and the first violation aborts
+// the whole walk. Entries are appended as they pass, but NormalizeBundle only
+// returns the assembled Bundle after the walk completes with no error, so a
+// failure anywhere exposes nothing (the H1 "validate the whole bundle before
+// admitting any of it" property, now without a re-read window).
+type bundleAccumulator struct {
+	limits     BundleLimits
+	seen       map[string]string
+	entries    []BundleEntry
+	entryCount int
+	fileCount  int
+	totalBytes int64
+}
 
-	for _, e := range meta {
-		switch e.Kind {
-		case rawKindFile, rawKindDir:
-			// continues to path validation below
-		case rawKindSymlink:
-			return fmt.Errorf("bundle entry %q: symlinks are not permitted", e.Path)
-		case rawKindHardlink:
-			return fmt.Errorf("bundle entry %q: hardlinks are not permitted", e.Path)
-		case rawKindDevice:
-			return fmt.Errorf("bundle entry %q: device/fifo entries are not permitted", e.Path)
-		default:
-			return fmt.Errorf("bundle entry %q: unsupported entry type", e.Path)
-		}
+func newBundleAccumulator(limits BundleLimits) *bundleAccumulator {
+	return &bundleAccumulator{limits: limits, seen: map[string]string{}}
+}
 
-		cp, err := canonicalBundlePath(e.Path)
-		if err != nil {
-			return fmt.Errorf("bundle entry %q: %w", e.Path, err)
-		}
-		if err := checkDuplicate(seen, cp); err != nil {
-			return err
-		}
+// add validates one raw entry — total-entry cap, kind gate, canonical path,
+// duplicate/case-collision, and (for files) the size/count/byte caps plus the
+// len(Data)==Size invariant — and, on success, appends the corresponding
+// BundleEntry. A walker calls add for every entry it produces; the first
+// error aborts the walk. Every cap is enforced here, incrementally, so a
+// runaway source is rejected as it is walked rather than after it is fully
+// buffered.
+func (a *bundleAccumulator) add(e RawBundleEntry) error {
+	a.entryCount++
+	if a.entryCount > a.limits.MaxEntries {
+		return fmt.Errorf("bundle exceeds entry-count cap of %d", a.limits.MaxEntries)
+	}
 
-		if e.Kind == rawKindFile {
-			if e.Size < 0 {
-				return fmt.Errorf("bundle entry %q: negative declared size", cp)
-			}
-			fileCount++
-			if fileCount > limits.MaxFiles {
-				return fmt.Errorf("bundle exceeds file-count cap of %d", limits.MaxFiles)
-			}
-			totalBytes += e.Size
-			if totalBytes > limits.MaxBytes {
-				return fmt.Errorf("bundle exceeds expanded-size cap of %d bytes", limits.MaxBytes)
-			}
+	switch e.Kind {
+	case rawKindFile, rawKindDir:
+		// continues to path validation below
+	case rawKindSymlink:
+		return fmt.Errorf("bundle entry %q: symlinks are not permitted", e.Path)
+	case rawKindHardlink:
+		return fmt.Errorf("bundle entry %q: hardlinks are not permitted", e.Path)
+	case rawKindDevice:
+		return fmt.Errorf("bundle entry %q: device/fifo entries are not permitted", e.Path)
+	default:
+		return fmt.Errorf("bundle entry %q: unsupported entry type", e.Path)
+	}
+
+	cp, err := canonicalBundlePath(e.Path)
+	if err != nil {
+		return fmt.Errorf("bundle entry %q: %w", e.Path, err)
+	}
+	if err := checkDuplicate(a.seen, cp); err != nil {
+		return err
+	}
+
+	if e.Kind == rawKindFile {
+		if e.Size < 0 {
+			return fmt.Errorf("bundle entry %q: negative declared size", cp)
+		}
+		// The walker must hand over content read at the SAME size it declares,
+		// so a between-stat-and-read divergence (a file that grew, or an entry
+		// whose header lied about its length) cannot be admitted.
+		if int64(len(e.Data)) != e.Size {
+			return fmt.Errorf("bundle entry %q: declared size %d does not match %d bytes read", cp, e.Size, len(e.Data))
+		}
+		if e.Size > a.limits.MaxFileBytes {
+			return fmt.Errorf("bundle entry %q: exceeds per-file cap of %d bytes", cp, a.limits.MaxFileBytes)
+		}
+		a.fileCount++
+		if a.fileCount > a.limits.MaxFiles {
+			return fmt.Errorf("bundle exceeds file-count cap of %d", a.limits.MaxFiles)
+		}
+		a.totalBytes += e.Size
+		if a.totalBytes > a.limits.MaxBytes {
+			return fmt.Errorf("bundle exceeds expanded-size cap of %d bytes", a.limits.MaxBytes)
 		}
 	}
+
+	a.entries = append(a.entries, BundleEntry{Path: cp, IsDir: e.Kind == rawKindDir, Mode: e.Mode, Data: e.Data})
 	return nil
 }
 
-// buildBundleEntries converts an already-validated full (content-populated)
-// raw listing into the sorted Bundle.Entries form. It re-derives the
-// canonical path per entry (a pure, deterministic function of e.Path,
-// already proven valid by validateRawEntries) rather than threading state
-// between the two passes.
-func buildBundleEntries(full []RawBundleEntry) ([]BundleEntry, error) {
-	entries := make([]BundleEntry, len(full))
-	for i, e := range full {
-		cp, err := canonicalBundlePath(e.Path)
-		if err != nil {
-			// Unreachable if full mirrors an already-validated meta listing;
-			// guarded rather than assumed so a caller mismatch fails loudly.
-			return nil, fmt.Errorf("bundle entry %q: %w", e.Path, err)
-		}
-		entries[i] = BundleEntry{Path: cp, IsDir: e.Kind == rawKindDir, Mode: e.Mode, Data: e.Data}
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
-	return entries, nil
-}
-
-// BundleWalker collects a bundle source's raw entry listing. When
-// readContent is false the walker returns only cheap metadata (path, type,
-// mode, declared size) and MUST NOT read any entry's content. When true it
-// additionally populates each regular-file entry's Data. NormalizeBundle
-// calls a BundleWalker twice — once for validation, once (only on success)
-// to materialize content — so a single walker implementation drives both the
-// safety check and the real read.
-type BundleWalker func(readContent bool) ([]RawBundleEntry, error)
+// BundleWalker drives a bundle source (git-subtree walk, local-subtree walk,
+// or tar reader) in a single streaming pass, calling emit for every entry it
+// produces. A regular-file entry MUST already carry its content, read under
+// confinement and bounded to the per-file cap, with Size set to the length
+// actually read. The walker MUST stop and propagate the error the moment emit
+// returns one — that is how the accumulator's caps bound the walk (e.g. an
+// entry-flood is halted after MaxEntries+1 iterations rather than fully
+// enumerated).
+type BundleWalker func(emit func(RawBundleEntry) error) error
 
 // NormalizeBundle is the H1 entry point shared by every bundle-shaped fetch
-// (git-subtree walk, local-subtree walk, tarball untar): it calls walker
-// twice. The first call must be metadata-only (readContent=false) and is
-// validated in full — type, canonical path, duplicate/case-collision, and
-// the running file-count/expanded-byte caps — before the second,
-// content-reading call ever happens. Any violation returns an error and the
-// second call never runs, so nothing from a bad bundle, not even a
-// well-formed entry that preceded the bad one, ever reaches the returned
-// Bundle.
-func NormalizeBundle(walker BundleWalker, limits BundleLimits) (Bundle, error) {
-	limits = limits.orDefault()
-
-	meta, err := walker(false)
-	if err != nil {
-		return Bundle{}, fmt.Errorf("bundle: listing entries: %w", err)
-	}
-	if err := validateRawEntries(meta, limits); err != nil {
+// (git-subtree walk, local-subtree walk, tarball untar). It drives the walker
+// once, streaming every entry through the accumulator's single validate-and-
+// admit step. Any violation — bad kind, unsafe path, duplicate/case-collision,
+// size divergence, or an exceeded cap — aborts the walk and returns an error;
+// the assembled Bundle is returned only on a fully clean walk, so nothing from
+// a bad bundle (not even a well-formed entry that preceded the bad one) ever
+// reaches a caller.
+func NormalizeBundle(walk BundleWalker, limits BundleLimits) (Bundle, error) {
+	acc := newBundleAccumulator(limits.orDefault())
+	if err := walk(acc.add); err != nil {
 		return Bundle{}, err
 	}
-
-	full, err := walker(true)
-	if err != nil {
-		return Bundle{}, fmt.Errorf("bundle: reading entries: %w", err)
-	}
-	entries, err := buildBundleEntries(full)
-	if err != nil {
-		return Bundle{}, err
-	}
-	return Bundle{Entries: entries}, nil
+	sort.Slice(acc.entries, func(i, j int) bool { return acc.entries[i].Path < acc.entries[j].Path })
+	return Bundle{Entries: acc.entries}, nil
 }
 
 // --- tarball layout ---------------------------------------------------------
@@ -341,59 +403,83 @@ func rawKindForTarType(t byte) rawEntryKind {
 	}
 }
 
-// tarWalker returns a BundleWalker over a `+tar+gzip` blob. Because
-// tar.Reader is forward-only, the metadata-only and content-reading passes
-// each open an independent gzip+tar reader over the same in-memory blob
-// bytes rather than trying to replay a single stream — the blob is already
-// fully buffered (the fetch transport already capped its size), so
-// re-decoding it is cheap and keeps the two passes fully independent: the
-// content pass can never run for an entry the metadata pass has not already
-// cleared.
-func tarWalker(blob []byte) BundleWalker {
-	return func(readContent bool) ([]RawBundleEntry, error) {
+// tarWalker returns a BundleWalker over a `+tar+gzip` blob. It advances the
+// tar reader exactly once, streaming each entry to emit as it is decoded, so
+// the accumulator's caps are enforced while the archive is being expanded —
+// never after a full listing is buffered. Two decompression-bomb classes are
+// bounded here: an entry flood halts because emit errors once MaxEntries is
+// exceeded (the loop then returns immediately), and each file's content is
+// copied through an io.LimitReader capped at the per-file budget, so a header
+// that under-declares a huge payload cannot expand memory past the cap.
+func tarWalker(blob []byte, limits BundleLimits) BundleWalker {
+	limits = limits.orDefault()
+	return func(emit func(RawBundleEntry) error) error {
 		gz, err := gzip.NewReader(bytes.NewReader(blob))
 		if err != nil {
-			return nil, fmt.Errorf("not a valid gzip stream: %w", err)
+			return fmt.Errorf("not a valid gzip stream: %w", err)
 		}
 		defer func() { _ = gz.Close() }()
 		tr := tar.NewReader(gz)
 
-		var out []RawBundleEntry
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {
-				return out, nil
+				return nil
 			}
 			if err != nil {
-				return nil, fmt.Errorf("reading tar entry: %w", err)
+				return fmt.Errorf("reading tar entry: %w", err)
 			}
 			kind := rawKindForTarType(hdr.Typeflag)
 			entry := RawBundleEntry{Path: hdr.Name, Kind: kind, Mode: hdr.FileInfo().Mode(), Size: hdr.Size}
-			if readContent && kind == rawKindFile {
-				if hdr.Size < 0 {
-					return nil, fmt.Errorf("tar entry %q: negative declared size", hdr.Name)
-				}
-				data, err := io.ReadAll(io.LimitReader(tr, hdr.Size+1))
+			if kind == rawKindFile {
+				data, err := readTarFile(tr, hdr, limits)
 				if err != nil {
-					return nil, fmt.Errorf("tar entry %q: reading content: %w", hdr.Name, err)
-				}
-				if int64(len(data)) != hdr.Size {
-					return nil, fmt.Errorf("tar entry %q: declared size %d does not match %d bytes read", hdr.Name, hdr.Size, len(data))
+					return err
 				}
 				entry.Data = data
+				entry.Size = int64(len(data))
 			}
-			out = append(out, entry)
+			if err := emit(entry); err != nil {
+				return err
+			}
 		}
 	}
+}
+
+// readTarFile copies a tar file entry's content, bounded independently of the
+// header's declared size so a lying header cannot expand past the per-file
+// cap. It rejects a negative or over-cap declared size before reading and
+// re-checks the bytes actually read, returning content whose length is the
+// authoritative size the accumulator validates against.
+func readTarFile(tr *tar.Reader, hdr *tar.Header, limits BundleLimits) ([]byte, error) {
+	if hdr.Size < 0 {
+		return nil, fmt.Errorf("tar entry %q: negative declared size", hdr.Name)
+	}
+	if hdr.Size > limits.MaxFileBytes {
+		return nil, fmt.Errorf("tar entry %q: declared size %d exceeds per-file cap of %d bytes", hdr.Name, hdr.Size, limits.MaxFileBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(tr, limits.MaxFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("tar entry %q: reading content: %w", hdr.Name, err)
+	}
+	if int64(len(data)) > limits.MaxFileBytes {
+		return nil, fmt.Errorf("tar entry %q: content exceeds per-file cap of %d bytes", hdr.Name, limits.MaxFileBytes)
+	}
+	if int64(len(data)) != hdr.Size {
+		return nil, fmt.Errorf("tar entry %q: declared size %d does not match %d bytes read", hdr.Name, hdr.Size, len(data))
+	}
+	return data, nil
 }
 
 // UntarBundle decodes a `+tar+gzip` artifact-bundle blob into a normalized
 // Bundle, routed through the same H1 fail-closed contract as the tree-layout
 // walkers (package-artifact-install spec D3/H1): a `../escape` entry, an
-// absolute path, or a symlink anywhere in the archive is rejected before any
-// entry's content is read.
+// absolute path, a symlink anywhere in the archive, or a decompression bomb
+// (entry flood or over-cap expansion) is rejected during the single decode
+// pass, before the returned Bundle admits anything.
 func UntarBundle(blob []byte, limits BundleLimits) (Bundle, error) {
-	return NormalizeBundle(tarWalker(blob), limits)
+	limits = limits.orDefault()
+	return NormalizeBundle(tarWalker(blob, limits), limits)
 }
 
 // looksLikeGzip reports whether data begins with the gzip magic bytes

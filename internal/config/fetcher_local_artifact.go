@@ -5,6 +5,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -43,28 +44,53 @@ func (f *localArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) 
 	if base == "" {
 		base = src.URL
 	}
-	path := filepath.Join(base, filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/")))
 
-	fi, statErr := os.Lstat(path)
+	// The artifact path is validated BEFORE it is joined (rejecting `..`,
+	// absolute, drive-letter, UNC), and ALL traversal + reads are confined to
+	// an os.Root opened on the source base. os.Root refuses any path — or any
+	// symlink component — that resolves outside the root, so a
+	// `Source.Path=/safe/root` + `ArtifactPath=../../private` reference, or an
+	// intermediate/root symlink pointing out of the tree, cannot escape.
+	rel, err := validateArtifactSubpath(parts.ArtifactPath)
+	if err != nil {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonSchema, fmt.Errorf("local artifact path: %w", err))
+	}
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("local source root %s not found: %w", base, err))
+		}
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("opening local source root %s: %w", base, err))
+	}
+	defer func() { _ = root.Close() }()
+
+	relOS := filepath.FromSlash(rel)
+	fi, statErr := root.Lstat(relOS)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
-			return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("local artifact %s not found: %w", path, statErr))
+			return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("local artifact %s not found: %w", rel, statErr))
 		}
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("stat local artifact %s: %w", path, statErr))
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("stat local artifact %s: %w", rel, statErr))
+	}
+	// A symlink AT the artifact path (a "symlink root") is rejected outright —
+	// H1 admits no symlink entry, and confining the walk is only meaningful if
+	// the entry point itself is not a link out of the tree.
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("local artifact %s is a symlink; symlinks are not permitted", rel))
 	}
 	if fi.IsDir() {
 		// Tree layout (spec D3, mirrors the git subtree walk — a local
 		// source is the dev/test-fixture equivalent of a git tree): the ref
 		// names a resource directory, not a single file.
-		return f.fetchTreeBundle(path, parts, posture, isPinned, pinned)
+		return f.fetchTreeBundle(root, rel, parts, posture, isPinned, pinned)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := root.ReadFile(relOS)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("local artifact %s not found: %w", path, err))
+			return FetchedArtifact{}, newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("local artifact %s not found: %w", rel, err))
 		}
-		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("reading local artifact %s: %w", path, err))
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("reading local artifact %s: %w", rel, err))
 	}
 
 	digest := artifactDigest(data)
@@ -86,16 +112,17 @@ func (f *localArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) 
 	return FetchedArtifact{Data: data, Digest: digest, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{WorktreeDirty: true, WorktreeContentHash: digest, ContentDigest: digest}}, nil
 }
 
-// fetchTreeBundle walks the local directory at path (already confirmed to be
-// a directory) into a normalized Bundle (H1) and wraps it in a
-// FetchedArtifact. Digest is the whole-subtree content digest (BundleDigest)
-// — the tree-layout counterpart to a single file's artifactDigest — so a
-// "pinned:sha256:..." version spec pins the whole subtree. Tree-layout
-// results are never written to the flat single-blob packages cache
-// (writeCachedArtifact addresses one blob, not a multi-file tree);
-// materialize (t2, spec H2) owns the tree's content-addressed store.
-func (f *localArtifactFetcher) fetchTreeBundle(path string, parts PackageRefParts, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
-	bundle, err := NormalizeBundle(localSubtreeWalker(path), DefaultBundleLimits())
+// fetchTreeBundle walks the local subtree at artifactRel (already confirmed a
+// directory) — confined under root (an os.Root on the source base) — into a
+// normalized Bundle (H1) and wraps it in a FetchedArtifact. Digest is the
+// whole-subtree content digest (BundleDigest), the tree-layout counterpart to
+// a single file's artifactDigest, so a "pinned:sha256:..." version spec pins
+// the whole subtree. Tree-layout results are never written to the flat
+// single-blob packages cache (writeCachedArtifact addresses one blob, not a
+// multi-file tree); materialize (t2, spec H2) owns the tree's content-addressed
+// store.
+func (f *localArtifactFetcher) fetchTreeBundle(root *os.Root, artifactRel string, parts PackageRefParts, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+	bundle, err := NormalizeBundle(localRootWalker(root, artifactRel, DefaultBundleLimits()), DefaultBundleLimits())
 	if err != nil {
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("local subtree %s: %w", parts.ArtifactPath, err))
 	}
@@ -111,73 +138,112 @@ func (f *localArtifactFetcher) fetchTreeBundle(path string, parts PackageRefPart
 	return FetchedArtifact{Digest: digest, Bundle: &bundle, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{WorktreeDirty: true, WorktreeContentHash: digest, ContentDigest: digest}}, nil
 }
 
-// localSubtreeWalker returns a BundleWalker over the local directory rooted
-// at root. It uses os.Lstat (not os.Stat) so a symlink is classified as
-// rawKindSymlink without following it — H1 rejects a symlink entry outright,
-// regardless of what it points to.
-func localSubtreeWalker(root string) BundleWalker {
-	return func(readContent bool) ([]RawBundleEntry, error) {
-		var out []RawBundleEntry
-		var walk func(dir string) error
-		walk = func(dir string) error {
-			items, err := os.ReadDir(dir)
+// localRootWalker returns a BundleWalker over the local directory subtree
+// rooted at artifactRel, with every operation confined to root (an os.Root on
+// the source base). It streams entries through emit in a single pass, reading
+// each regular file's content inline from the SAME confined open it fstats, so
+// there is no window between "stat" and "read" for a mutable local tree to be
+// swapped (the TOCTOU the former two-pass design left open). It Lstats each
+// entry (no-follow) and rejects symlinks outright; os.Root additionally makes
+// any escape past the source root impossible, and readRootFile's fstat
+// re-validates kind and size at read time.
+func localRootWalker(root *os.Root, artifactRel string, limits BundleLimits) BundleWalker {
+	limits = limits.orDefault()
+	return func(emit func(RawBundleEntry) error) error {
+		var walk func(rel string) error
+		walk = func(rel string) error {
+			dir, err := root.Open(filepath.FromSlash(rel))
 			if err != nil {
 				return err
 			}
+			items, readErr := dir.ReadDir(-1)
+			_ = dir.Close()
+			if readErr != nil {
+				return readErr
+			}
 			for _, item := range items {
-				full := filepath.Join(dir, item.Name())
-				rel := filepath.ToSlash(strings.TrimPrefix(strings.TrimPrefix(full, root), string(filepath.Separator)))
+				childRel := path.Join(rel, item.Name())
+				bundleRel := bundleRelPath(artifactRel, childRel)
 
-				info, err := os.Lstat(full)
+				info, err := root.Lstat(filepath.FromSlash(childRel))
 				if err != nil {
 					return err
 				}
 				switch {
 				case info.Mode()&fs.ModeSymlink != 0:
-					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindSymlink})
+					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindSymlink}); err != nil {
+						return err
+					}
 				case info.IsDir():
-					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindDir, Mode: info.Mode()})
-					if err := walk(full); err != nil {
+					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindDir, Mode: info.Mode()}); err != nil {
+						return err
+					}
+					if err := walk(childRel); err != nil {
 						return err
 					}
 				case info.Mode().IsRegular():
-					entry := RawBundleEntry{Path: rel, Kind: rawKindFile, Mode: info.Mode(), Size: info.Size()}
-					if readContent {
-						data, err := readLocalTreeFile(full, info.Size())
-						if err != nil {
-							return err
-						}
-						entry.Data = data
+					mode, size, data, err := readRootFile(root, childRel, limits)
+					if err != nil {
+						return err
 					}
-					out = append(out, entry)
+					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindFile, Mode: mode, Size: size, Data: data}); err != nil {
+						return err
+					}
 				default:
-					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindOther})
+					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindOther}); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
 		}
-		if err := walk(root); err != nil {
-			return nil, err
-		}
-		return out, nil
+		return walk(artifactRel)
 	}
 }
 
-// readLocalTreeFile reads full's content, bounded to size+1 bytes so a file
-// that grows between the metadata pass and the content pass cannot smuggle
-// more content past the bundle's already-validated byte-count cap (H1).
-func readLocalTreeFile(full string, size int64) ([]byte, error) {
-	fh, err := os.Open(full)
+// bundleRelPath re-bases a source-root-relative path onto the artifact root so
+// the bundle entry path is relative to the requested resource dir (nested
+// `<artifact>/instructions/x.md` becomes `instructions/x.md`).
+func bundleRelPath(artifactRel, childRel string) string {
+	if artifactRel == "." {
+		return childRel
+	}
+	return strings.TrimPrefix(childRel, artifactRel+"/")
+}
+
+// readRootFile reads rel's content confined to root. It fstats the OPEN file
+// descriptor (not the pre-open Lstat) to re-validate kind and size at read
+// time, so a regular file swapped for a directory/other kind between the
+// walker's Lstat and this read is rejected, and the size the accumulator
+// checks is the size actually read. The copy is bounded to the per-file cap+1
+// independently of the fstat size, so a file that grows mid-read cannot expand
+// past the cap.
+func readRootFile(root *os.Root, rel string, limits BundleLimits) (fs.FileMode, int64, []byte, error) {
+	fh, err := root.Open(filepath.FromSlash(rel))
 	if err != nil {
-		return nil, err
+		return 0, 0, nil, err
 	}
 	defer func() { _ = fh.Close() }()
-	data, err := io.ReadAll(io.LimitReader(fh, size+1))
+	info, err := fh.Stat()
 	if err != nil {
-		return nil, err
+		return 0, 0, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return 0, 0, nil, fmt.Errorf("local tree file %q: not a regular file at read time (mode %v)", rel, info.Mode())
+	}
+	size := info.Size()
+	if size > limits.MaxFileBytes {
+		return 0, 0, nil, fmt.Errorf("local tree file %q: size %d exceeds per-file cap of %d bytes", rel, size, limits.MaxFileBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(fh, limits.MaxFileBytes+1))
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	if int64(len(data)) > limits.MaxFileBytes {
+		return 0, 0, nil, fmt.Errorf("local tree file %q: content exceeds per-file cap of %d bytes", rel, limits.MaxFileBytes)
 	}
 	if int64(len(data)) != size {
-		return nil, fmt.Errorf("local tree file %q: declared size %d does not match %d bytes read", full, size, len(data))
+		return 0, 0, nil, fmt.Errorf("local tree file %q: fstat size %d does not match %d bytes read", rel, size, len(data))
 	}
-	return data, nil
+	return info.Mode(), size, data, nil
 }

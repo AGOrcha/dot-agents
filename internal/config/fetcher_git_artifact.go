@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/go-git/go-billy/v6"
 	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing/filemode"
+	"github.com/go-git/go-git/v6/plumbing/object"
 
 	"github.com/AGOrcha/dot-agents/internal/gitremote"
 )
@@ -77,7 +80,7 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 		}
 	}
 
-	wfs, root, commit, err := f.cloneAndResolve(src, parts)
+	wfs, tree, root, commit, err := f.cloneAndResolve(src, parts)
 	if err != nil {
 		return FetchedArtifact{}, err
 	}
@@ -90,7 +93,7 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 		// Tree layout (spec D3): the ref names a resource directory, not a
 		// single file. Fetch walks the subtree into a normalized Bundle
 		// (H1) rather than treating it as an opaque blob.
-		return f.fetchTreeBundle(wfs, root, parts, commit, posture, isPinned, pinned)
+		return f.fetchTreeBundle(wfs, tree, root, parts, commit, posture, isPinned, pinned)
 	}
 
 	data, err := readArtifactFile(wfs, parts, commit)
@@ -118,13 +121,21 @@ func (f *gitArtifactFetcher) FetchArtifact(src Source, parts PackageRefParts) (F
 
 // fetchTreeBundle walks the git subtree rooted at root (already confirmed to
 // be a directory) into a normalized Bundle (H1) and wraps it in a
-// FetchedArtifact. Digest is the whole-subtree content digest (BundleDigest)
-// — the tree-layout counterpart to a single blob's artifactDigest — so a
-// "pinned:sha256:..." version spec pins the whole subtree. Tree-layout
-// results are never written to the flat single-blob packages cache
-// (writeCachedArtifact addresses one blob, not a multi-file tree);
-// materialize (t2, spec H2) owns the tree's content-addressed store.
-func (f *gitArtifactFetcher) fetchTreeBundle(wfs billy.Filesystem, root string, parts PackageRefParts, commit string, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+// FetchedArtifact. Before walking the checked-out worktree it inspects the
+// committed git tree object and rejects any gitlink (submodule) entry: go-git
+// flattens a `160000` submodule into an empty directory in the worktree, so a
+// worktree-only walk would silently drop the gitlink's commit OID and let two
+// different referenced commits produce the same BundleDigest — a digest-defeat.
+// Digest is the whole-subtree content digest (BundleDigest), the tree-layout
+// counterpart to a single blob's artifactDigest, so a "pinned:sha256:..."
+// version spec pins the whole subtree. Tree-layout results are never written
+// to the flat single-blob packages cache (writeCachedArtifact addresses one
+// blob, not a multi-file tree); materialize (t2, spec H2) owns the tree's
+// content-addressed store.
+func (f *gitArtifactFetcher) fetchTreeBundle(wfs billy.Filesystem, tree *object.Tree, root string, parts PackageRefParts, commit string, posture SigningPosture, isPinned bool, pinned string) (FetchedArtifact, error) {
+	if err := rejectGitSubmodules(tree, parts.ArtifactPath); err != nil {
+		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
+	}
 	bundle, err := NormalizeBundle(gitSubtreeWalker(wfs, root), DefaultBundleLimits())
 	if err != nil {
 		return FetchedArtifact{}, newArtifactImportError(parts, ReasonContent, fmt.Errorf("git subtree %s@%s: %w", parts.ArtifactPath, commit, err))
@@ -139,13 +150,64 @@ func (f *gitArtifactFetcher) fetchTreeBundle(wfs billy.Filesystem, root string, 
 	return FetchedArtifact{Digest: digest, Bundle: &bundle, CacheHit: false, Posture: posture, KeyInputs: CacheKeyInputs{OCIDigest: digest, ResolvedCommit: commit}}, nil
 }
 
+// rejectGitSubmodules fails closed if the committed git tree at artifactPath,
+// or anything beneath it, is a gitlink (filemode.Submodule / `160000`). It
+// inspects the tree object graph directly — not the flattened worktree — so a
+// submodule that go-git checked out as an empty directory is still caught. A
+// nil tree (a cloner seam that supplies no tree object) is treated as "nothing
+// to inspect": the worktree-level symlink/kind gates still apply, and no live
+// clone reaches here without a tree.
+func rejectGitSubmodules(tree *object.Tree, artifactPath string) error {
+	if tree == nil {
+		return nil
+	}
+	rel := strings.Trim(filepath.ToSlash(strings.TrimLeft(artifactPath, "/")), "/")
+
+	// The artifact path may itself name a submodule (a gitlink at the root of
+	// the requested resource), which tree.Tree cannot descend into.
+	if rel != "" && rel != "." {
+		if entry, err := tree.FindEntry(rel); err == nil && entry.Mode == filemode.Submodule {
+			return fmt.Errorf("path %q is a git submodule (gitlink); submodules are not permitted in an artifact bundle", rel)
+		}
+	}
+
+	sub := tree
+	if rel != "" && rel != "." {
+		descended, err := tree.Tree(rel)
+		if err != nil {
+			// The path is not a descendable subtree (e.g. it resolves to a blob
+			// or a gitlink already handled above); nothing further to inspect.
+			return nil
+		}
+		sub = descended
+	}
+
+	walker := object.NewTreeWalker(sub, true, nil)
+	defer walker.Close()
+	for {
+		name, entry, err := walker.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("walking git tree: %w", err)
+		}
+		if entry.Mode == filemode.Submodule {
+			return fmt.Errorf("tree entry %q is a git submodule (gitlink); submodules are not permitted in an artifact bundle", path.Join(rel, name))
+		}
+	}
+}
+
 // gitSubtreeWalker returns a BundleWalker over the git worktree subtree
-// rooted at root. It classifies each ReadDir entry from its own type bits
-// (a symlink is never followed to decide "is this a file or a dir" — H1
-// rejects a symlink entry outright, regardless of what it points to).
+// rooted at root. It streams every entry through emit in a single pass,
+// classifying each ReadDir entry from its own type bits (a symlink is never
+// followed to decide "is this a file or a dir" — H1 rejects a symlink entry
+// outright, regardless of what it points to) and reading each regular file's
+// content inline. The worktree is go-git's in-memory checkout (memfs), so
+// there is no real-filesystem TOCTOU window here; the confinement that
+// matters for git is the gitlink rejection in fetchTreeBundle.
 func gitSubtreeWalker(wfs billy.Filesystem, root string) BundleWalker {
-	return func(readContent bool) ([]RawBundleEntry, error) {
-		var out []RawBundleEntry
+	return func(emit func(RawBundleEntry) error) error {
 		var walk func(dir string) error
 		walk = func(dir string) error {
 			items, err := wfs.ReadDir(dir)
@@ -158,13 +220,17 @@ func gitSubtreeWalker(wfs billy.Filesystem, root string) BundleWalker {
 
 				switch {
 				case item.Type()&fs.ModeSymlink != 0:
-					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindSymlink})
+					if err := emit(RawBundleEntry{Path: rel, Kind: rawKindSymlink}); err != nil {
+						return err
+					}
 				case item.IsDir():
 					info, err := item.Info()
 					if err != nil {
 						return err
 					}
-					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindDir, Mode: info.Mode()})
+					if err := emit(RawBundleEntry{Path: rel, Kind: rawKindDir, Mode: info.Mode()}); err != nil {
+						return err
+					}
 					if err := walk(full); err != nil {
 						return err
 					}
@@ -173,25 +239,22 @@ func gitSubtreeWalker(wfs billy.Filesystem, root string) BundleWalker {
 					if err != nil {
 						return err
 					}
-					entry := RawBundleEntry{Path: rel, Kind: rawKindFile, Mode: info.Mode(), Size: info.Size()}
-					if readContent {
-						data, err := readGitTreeFile(wfs, full, info.Size())
-						if err != nil {
-							return err
-						}
-						entry.Data = data
+					data, err := readGitTreeFile(wfs, full, info.Size())
+					if err != nil {
+						return err
 					}
-					out = append(out, entry)
+					if err := emit(RawBundleEntry{Path: rel, Kind: rawKindFile, Mode: info.Mode(), Size: int64(len(data)), Data: data}); err != nil {
+						return err
+					}
 				default:
-					out = append(out, RawBundleEntry{Path: rel, Kind: rawKindOther})
+					if err := emit(RawBundleEntry{Path: rel, Kind: rawKindOther}); err != nil {
+						return err
+					}
 				}
 			}
 			return nil
 		}
-		if err := walk(root); err != nil {
-			return nil, err
-		}
-		return out, nil
+		return walk(root)
 	}
 }
 
@@ -263,13 +326,16 @@ func readArtifactFile(wfs billy.Filesystem, parts PackageRefParts, commit string
 
 // cloneAndResolve validates the source URL, shallow-clones at the resolved
 // ref, and resolves the cloned HEAD. It returns the worktree filesystem, the
-// artifact path canonicalized to the worktree's join form (root — not yet
-// known to be a file or a directory), and the resolved commit SHA, mapping
-// each failure to its ImportError reason. The caller (FetchArtifact) decides
-// the content layout (tree vs single file) from root's Stat result.
-func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, root, commit string, err error) {
+// committed HEAD tree object (for the gitlink inspection in fetchTreeBundle;
+// nil when the repository exposes no readable commit/tree object, e.g. a bare
+// test seam), the artifact path canonicalized to the worktree's join form
+// (root — not yet known to be a file or a directory), and the resolved commit
+// SHA, mapping each failure to its ImportError reason. The caller
+// (FetchArtifact) decides the content layout (tree vs single file) from root's
+// Stat result.
+func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) (wfs billy.Filesystem, tree *object.Tree, root, commit string, err error) {
 	if err := validateGitSourceURL(src.URL, parts); err != nil {
-		return nil, "", "", err
+		return nil, nil, "", "", err
 	}
 
 	ref := gitArtifactRef(src, parts)
@@ -277,14 +343,24 @@ func (f *gitArtifactFetcher) cloneAndResolve(src Source, parts PackageRefParts) 
 	defer cancel()
 	repo, wfs, err := f.clone(ctx, src.URL, gitFullRef(ref))
 	if err != nil {
-		return nil, "", "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
+		return nil, nil, "", "", newArtifactImportError(parts, ReasonTransport, fmt.Errorf("git clone %s @ %s: %w", src.URL, ref, err))
 	}
 
 	head, err := repo.Head()
 	if err != nil {
-		return nil, "", "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
+		return nil, nil, "", "", newArtifactImportError(parts, ReasonNotFound, fmt.Errorf("git resolve HEAD for %s @ %s: %w", src.URL, ref, err))
 	}
 	commit = head.Hash().String()
 	root = filepath.FromSlash(strings.TrimLeft(parts.ArtifactPath, "/"))
-	return wfs, root, commit, nil
+
+	// The committed tree drives the gitlink check. A resolution failure here is
+	// not fatal — the worktree walk (with its own kind gates) still runs — so a
+	// minimal test seam that has a HEAD but no reachable commit object degrades
+	// gracefully rather than blocking the fetch.
+	if commitObj, cerr := repo.CommitObject(head.Hash()); cerr == nil {
+		if t, terr := commitObj.Tree(); terr == nil {
+			tree = t
+		}
+	}
+	return wfs, tree, root, commit, nil
 }

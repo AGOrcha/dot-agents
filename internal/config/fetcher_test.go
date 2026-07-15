@@ -22,6 +22,8 @@ import (
 	"github.com/go-git/go-billy/v6"
 	"github.com/go-git/go-billy/v6/memfs"
 	gogit "github.com/go-git/go-git/v6"
+	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/go-git/go-git/v6/plumbing/filemode"
 	"github.com/go-git/go-git/v6/plumbing/object"
 	gogitssh "github.com/go-git/go-git/v6/plumbing/transport/ssh"
 	"github.com/go-git/go-git/v6/storage/memory"
@@ -2008,6 +2010,122 @@ func TestGitArtifactFetcherTreeLayoutRequiredPostureFails(t *testing.T) {
 	}
 }
 
+// submoduleCloner builds an in-memory repo whose committed tree at subPath
+// contains a gitlink (filemode.Submodule) entry, paired with a worktree memfs
+// that mimics go-git flattening that submodule into an empty directory — the
+// exact shape defect #4 exploits. The returned cloner drives the real
+// gitArtifactFetcher path (cloneAndResolve loads the commit tree from the same
+// storer).
+func submoduleCloner(t *testing.T) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+
+	blob := st.NewEncodedObject()
+	blob.SetType(plumbing.BlobObject)
+	w, err := blob.Writer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("skill body")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	blobHash, err := st.SetEncodedObject(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A gitlink points at some commit OID that need not exist in this store.
+	subCommit := plumbing.NewHash("1111111111111111111111111111111111111111")
+
+	skillTree := &object.Tree{Entries: []object.TreeEntry{
+		{Name: "SKILL.md", Mode: filemode.Regular, Hash: blobHash},
+		{Name: "vendored", Mode: filemode.Submodule, Hash: subCommit},
+	}}
+	skillHash := encodeTree(t, st, skillTree)
+
+	rootTree := &object.Tree{Entries: []object.TreeEntry{
+		{Name: "skill", Mode: filemode.Dir, Hash: skillHash},
+	}}
+	rootHash := encodeTree(t, st, rootTree)
+
+	sig := object.Signature{Name: "t", Email: "t@example"}
+	commit := &object.Commit{Author: sig, Committer: sig, Message: "with submodule", TreeHash: rootHash}
+	commitObj := st.NewEncodedObject()
+	if err := commit.Encode(commitObj); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := st.SetEncodedObject(commitObj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", commitHash)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+
+	wfs := memfs.New()
+	memfsWriteFile(t, wfs, "skill/SKILL.md", []byte("skill body"))
+	// go-git flattens the gitlink into an empty directory in the checkout.
+	if err := wfs.MkdirAll("skill/vendored", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
+func encodeTree(t *testing.T, st *memory.Storage, tree *object.Tree) plumbing.Hash {
+	t.Helper()
+	obj := st.NewEncodedObject()
+	if err := tree.Encode(obj); err != nil {
+		t.Fatal(err)
+	}
+	h, err := st.SetEncodedObject(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
+// TestGitArtifactFetcherTreeLayoutRejectsSubmodule is the defect #4
+// regression: the committed subtree carries a gitlink (mode 160000) that
+// go-git flattened into an empty worktree directory. A worktree-only walk
+// would silently drop the gitlink OID (letting two different referenced
+// commits yield the same BundleDigest); inspecting the committed tree modes
+// catches and rejects it. The two cases cover a submodule NESTED under the
+// artifact dir (the recursive tree-walk branch) and a submodule that IS the
+// artifact path (the FindEntry branch).
+func TestGitArtifactFetcherTreeLayoutRejectsSubmodule(t *testing.T) {
+	cases := map[string]string{
+		"submodule nested under the artifact dir": "skill",
+		"submodule is the artifact path":          "skill/vendored",
+	}
+	for name, artifactPath := range cases {
+		t.Run(name, func(t *testing.T) {
+			withPackagesCache(t)
+			f := &gitArtifactFetcher{cloner: submoduleCloner(t)}
+			_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: artifactPath, VersionSpec: "1"})
+			var ie *ImportError
+			if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+				t.Fatalf("want content error rejecting a git submodule (gitlink) entry, got %v", err)
+			}
+			if err != nil && !strings.Contains(err.Error(), "submodule") {
+				t.Fatalf("error should name the submodule defect, got %v", err)
+			}
+		})
+	}
+}
+
 // --- local artifact fetcher ------------------------------------------------
 
 func TestLocalArtifactFetcherReadsAndCaches(t *testing.T) {
@@ -2242,6 +2360,125 @@ func TestLocalArtifactFetcherTreeLayoutRejectsSymlinkEscape(t *testing.T) {
 	var ie *ImportError
 	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
 		t.Fatalf("want content error rejecting the symlink, got %v", err)
+	}
+}
+
+// TestLocalArtifactFetcherRejectsParentEscape is the defect #1 regression:
+// Source.Path is a real root and ArtifactPath walks OUT of it via "..".
+// The subpath is rejected before any filesystem join, so the secret that
+// lives outside the root is never opened or read.
+func TestLocalArtifactFetcherRejectsParentEscape(t *testing.T) {
+	withPackagesCache(t)
+	outer := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outer, "hostname"), []byte("SECRET-OUTSIDE-ROOT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(outer, "root")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	for _, escape := range []string{"../hostname", "../../etc/hostname"} {
+		got, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: escape, VersionSpec: "1"})
+		var ie *ImportError
+		if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+			t.Fatalf("ArtifactPath %q: want schema error rejecting the parent escape before any join, got %v", escape, err)
+		}
+		if got.Data != nil || got.Bundle != nil {
+			t.Fatalf("ArtifactPath %q: nothing outside the root may be read", escape)
+		}
+		if strings.Contains(string(got.Data), "SECRET") {
+			t.Fatalf("ArtifactPath %q: leaked out-of-root content", escape)
+		}
+	}
+}
+
+// TestLocalArtifactFetcherRejectsSymlinkComponentEscape is the defect #1
+// intermediate-symlink half: a symlink INSIDE the root points OUT of it, and
+// an artifact path threaded through that component is refused by the os.Root
+// confinement — an Lstat that only checked the final component would have
+// followed it.
+func TestLocalArtifactFetcherRejectsSymlinkComponentEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	outer := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outer, "hostname"), []byte("SECRET-OUTSIDE-ROOT"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(outer, "root")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink inside the root that escapes to the parent directory.
+	if err := os.Symlink(outer, filepath.Join(srcDir, "out")); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	got, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "out/hostname", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || (ie.Reason != ReasonContent && ie.Reason != ReasonNotFound) {
+		t.Fatalf("want content/not-found rejection of an escape via an intermediate symlink, got %v", err)
+	}
+	if strings.Contains(string(got.Data), "SECRET") || got.Bundle != nil {
+		t.Fatal("nothing reached through the escaping symlink may be read")
+	}
+}
+
+// TestLocalArtifactFetcherRejectsSymlinkRoot is the defect #1 symlink-root
+// half: the artifact path IS a symlink; it is rejected outright (H1 admits no
+// symlink), even though os.Root's Lstat of the final component does not follow
+// it.
+func TestLocalArtifactFetcherRejectsSymlinkRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on windows")
+	}
+	withPackagesCache(t)
+	outer := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outer, "secretdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	srcDir := filepath.Join(outer, "root")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outer, "secretdir"), filepath.Join(srcDir, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	f := &localArtifactFetcher{}
+	_, err := f.FetchArtifact(Source{Type: "local", Path: srcDir}, PackageRefParts{SourceID: "s", ArtifactPath: "linkdir", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting a symlink at the artifact root, got %v", err)
+	}
+}
+
+// TestLocalRootWalkerEnforcesPerFileCap covers the confined local read path
+// (readRootFile): a file larger than the per-file cap is rejected during the
+// bounded, fstat-revalidated read — the local-tree half of the defect #2/#3
+// budget enforcement, exercised directly so a small cap can be injected.
+func TestLocalRootWalkerEnforcesPerFileCap(t *testing.T) {
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "big.txt"), make([]byte, 4096), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20}
+	if _, err := NormalizeBundle(localRootWalker(root, "skill", limits), limits); err == nil {
+		t.Fatal("expected rejection of a local tree file exceeding the per-file cap")
 	}
 }
 

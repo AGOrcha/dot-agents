@@ -4,26 +4,25 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io/fs"
 	"testing"
 )
 
 // --- test helpers ------------------------------------------------------------
 
-// staticWalker returns a BundleWalker over a fixed entry list. It mimics the
-// walker contract precisely: the metadata-only pass (readContent=false)
-// never carries content, exercising NormalizeBundle's two-call contract even
-// for a hand-built raw listing.
+// staticWalker returns a BundleWalker that streams a fixed entry list through
+// emit in one pass, matching the single validate-and-read contract the real
+// walkers use. Each file entry is emitted with content already attached and
+// Size == len(Data), as a confined walker would produce it.
 func staticWalker(entries []RawBundleEntry) BundleWalker {
-	return func(readContent bool) ([]RawBundleEntry, error) {
-		out := make([]RawBundleEntry, len(entries))
-		copy(out, entries)
-		if !readContent {
-			for i := range out {
-				out[i].Data = nil
+	return func(emit func(RawBundleEntry) error) error {
+		for _, e := range entries {
+			if err := emit(e); err != nil {
+				return err
 			}
 		}
-		return out, nil
+		return nil
 	}
 }
 
@@ -135,6 +134,47 @@ func TestCanonicalBundlePathRejects(t *testing.T) {
 	for _, raw := range cases {
 		if _, err := canonicalBundlePath(raw); err == nil {
 			t.Fatalf("canonicalBundlePath(%q): expected rejection, got none", raw)
+		}
+	}
+}
+
+// --- validateArtifactSubpath (defect #1 pre-join gate) ----------------------
+
+func TestValidateArtifactSubpathAccepts(t *testing.T) {
+	cases := map[string]string{
+		"skill/release-docs-refresh": "skill/release-docs-refresh",
+		"a/b/c":                      "a/b/c",
+		"":                           ".",
+		".":                          ".",
+		"a/./b":                      "a/b",
+	}
+	for raw, want := range cases {
+		got, err := validateArtifactSubpath(raw)
+		if err != nil {
+			t.Fatalf("validateArtifactSubpath(%q): unexpected error: %v", raw, err)
+		}
+		if got != want {
+			t.Fatalf("validateArtifactSubpath(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}
+
+func TestValidateArtifactSubpathRejects(t *testing.T) {
+	cases := []string{
+		"..",
+		"../private",
+		"../../private",
+		"a/../../escape",
+		"/etc/hostname",
+		"/skill/x",
+		"C:/Windows",
+		`..\escape`,
+		`a\b`,
+		"//host/share",
+	}
+	for _, raw := range cases {
+		if _, err := validateArtifactSubpath(raw); err == nil {
+			t.Fatalf("validateArtifactSubpath(%q): expected rejection, got none", raw)
 		}
 	}
 }
@@ -299,32 +339,76 @@ func TestNormalizeBundleRejectsByteCap(t *testing.T) {
 	}
 }
 
-// TestNormalizeBundleFailsClosedBeforeContentRead is the core H1 property:
-// a hostile entry AFTER several well-formed ones must reject the WHOLE
-// bundle, and the content-reading pass must never even run — asserted here
-// by a walker whose content-pass panics, proving NormalizeBundle never calls
-// it once the metadata-only pass has already failed.
-func TestNormalizeBundleFailsClosedBeforeContentRead(t *testing.T) {
-	meta := []RawBundleEntry{
-		{Path: "a.txt", Kind: rawKindFile, Size: 1},
-		{Path: "b.txt", Kind: rawKindFile, Size: 1},
-		{Path: "../escape", Kind: rawKindFile, Size: 1},
+// TestNormalizeBundleFailsClosedAbortsWalkAtViolation is the core H1
+// property under the single-pass model: a hostile entry AFTER several
+// well-formed ones aborts the whole walk at that entry (the walker sees
+// emit's error and stops, so entries streamed AFTER the violation are never
+// produced) and NormalizeBundle returns no Bundle — nothing partial escapes.
+func TestNormalizeBundleFailsClosedAbortsWalkAtViolation(t *testing.T) {
+	entries := []RawBundleEntry{
+		{Path: "a.txt", Kind: rawKindFile, Size: 1, Data: []byte("a")},
+		{Path: "b.txt", Kind: rawKindFile, Size: 1, Data: []byte("b")},
+		{Path: "../escape", Kind: rawKindFile, Size: 1, Data: []byte("x")},
+		{Path: "never.txt", Kind: rawKindFile, Size: 1, Data: []byte("n")},
 	}
-	contentPassCalled := false
-	walker := func(readContent bool) ([]RawBundleEntry, error) {
-		if readContent {
-			contentPassCalled = true
-			t.Fatal("content-reading pass must not run when the metadata pass rejects the bundle")
+	emitted := 0
+	walker := func(emit func(RawBundleEntry) error) error {
+		for _, e := range entries {
+			emitted++
+			if err := emit(e); err != nil {
+				return err
+			}
 		}
-		out := make([]RawBundleEntry, len(meta))
-		copy(out, meta)
-		return out, nil
+		return nil
 	}
-	if _, err := NormalizeBundle(walker, BundleLimits{}); err == nil {
-		t.Fatal("expected rejection")
+	b, err := NormalizeBundle(walker, BundleLimits{})
+	if err == nil {
+		t.Fatal("expected rejection of the traversal entry")
 	}
-	if contentPassCalled {
-		t.Fatal("content-reading pass ran despite a metadata-pass rejection")
+	if len(b.Entries) != 0 {
+		t.Fatalf("a rejected bundle must expose zero entries, got %v", bundlePaths(b))
+	}
+	if emitted != 3 {
+		t.Fatalf("walk should abort at the violating (3rd) entry; emitted=%d (the 4th entry must never be produced)", emitted)
+	}
+}
+
+// TestNormalizeBundleRejectsSizeContentDivergence is the regression for the
+// TOCTOU defect: the single pass revalidates SIZE (and kind), not just path,
+// so an entry whose declared Size disagrees with the content actually read —
+// exactly what a between-passes mutation on a mutable local tree used to slip
+// through — is rejected.
+func TestNormalizeBundleRejectsSizeContentDivergence(t *testing.T) {
+	entries := []RawBundleEntry{
+		{Path: "good.txt", Kind: rawKindFile, Size: 1, Data: []byte("g")},
+		{Path: "grew.txt", Kind: rawKindFile, Size: 3, Data: []byte("MUCH-LONGER-THAN-DECLARED")},
+	}
+	if _, err := NormalizeBundle(staticWalker(entries), BundleLimits{}); err == nil {
+		t.Fatal("expected rejection when an entry's content length diverges from its declared size")
+	}
+}
+
+// TestNormalizeBundleRejectsEntryCountFlood is the regression for the
+// empty-entry decompression bomb: directories count toward the total-entry
+// cap, so a flood of empty entries is rejected — and the walk stops right
+// after the cap rather than enumerating all of them.
+func TestNormalizeBundleRejectsEntryCountFlood(t *testing.T) {
+	emitted := 0
+	walker := func(emit func(RawBundleEntry) error) error {
+		for i := 0; ; i++ {
+			emitted++
+			// Every entry is a distinct empty directory (carries no content),
+			// proving dirs — not just files — are counted.
+			if err := emit(RawBundleEntry{Path: fmt.Sprintf("d%d", i), Kind: rawKindDir, Mode: fs.ModeDir}); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := NormalizeBundle(walker, BundleLimits{MaxEntries: 100, MaxFiles: 100, MaxBytes: 1 << 20}); err == nil {
+		t.Fatal("expected rejection of an empty-entry flood")
+	}
+	if emitted > 101 {
+		t.Fatalf("walk should abort right after the entry cap; emitted=%d (unbounded enumeration)", emitted)
 	}
 }
 
@@ -472,6 +556,78 @@ func TestUntarBundleRejectsByteCap(t *testing.T) {
 	})
 	if _, err := UntarBundle(blob, BundleLimits{MaxFiles: 10, MaxBytes: 10}); err == nil {
 		t.Fatal("expected rejection when the tarball exceeds the byte cap")
+	}
+}
+
+// --- decompression bombs (defect #2) ----------------------------------------
+
+// TestUntarBundleRejectsExpansionBomb is the regression for the total-byte
+// bomb: a small .tgz whose entries expand to far more than the total byte cap
+// (highly compressible zero-filled files) is rejected during the decode pass,
+// before the full expansion is accumulated.
+func TestUntarBundleRejectsExpansionBomb(t *testing.T) {
+	// 8 files x 1 MiB of zeros compresses to a few KiB but expands to 8 MiB.
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		for i := 0; i < 8; i++ {
+			tarAddFile(t, tw, fmt.Sprintf("f%d", i), 0o644, make([]byte, 1<<20))
+		}
+	})
+	if len(blob) > 512<<10 {
+		t.Fatalf("fixture blob unexpectedly large (%d bytes); it should compress tightly", len(blob))
+	}
+	// Total cap 2 MiB, per-file cap generous — the TOTAL budget must trip.
+	if _, err := UntarBundle(blob, BundleLimits{MaxFiles: 1000, MaxFileBytes: 4 << 20, MaxBytes: 2 << 20}); err == nil {
+		t.Fatal("expected rejection of a tarball that expands past the total byte cap")
+	}
+}
+
+// TestUntarBundleRejectsPerFileBomb is the regression for the per-file bomb:
+// a single entry that expands past the per-file cap is rejected via the
+// bounded read (io.LimitReader), independent of the total cap and of what the
+// header declares.
+func TestUntarBundleRejectsPerFileBomb(t *testing.T) {
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "big", 0o644, make([]byte, 4<<20)) // 4 MiB of zeros
+	})
+	if _, err := UntarBundle(blob, BundleLimits{MaxFiles: 1000, MaxFileBytes: 1 << 20, MaxBytes: 1 << 30}); err == nil {
+		t.Fatal("expected rejection of a single entry exceeding the per-file cap")
+	}
+}
+
+// TestUntarBundleRejectsEmptyEntryFlood is the regression for the empty-entry
+// bomb: an archive of many empty directory entries (each with no content) is
+// rejected by the total-entry cap — dirs are counted, not just files.
+func TestUntarBundleRejectsEmptyEntryFlood(t *testing.T) {
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		for i := 0; i < 5000; i++ {
+			tarAddDir(t, tw, fmt.Sprintf("d%d", i), 0o755)
+		}
+	})
+	if _, err := UntarBundle(blob, BundleLimits{MaxEntries: 100, MaxFiles: 100, MaxBytes: 1 << 20}); err == nil {
+		t.Fatal("expected rejection of an empty-directory-entry flood")
+	}
+}
+
+// TestUntarBundleRejectsLyingHeaderSize proves the bounded copy defeats a
+// header that under-declares its payload: hdr.Size claims 1 byte but the
+// entry streams far more, and the per-file cap on the actual read trips
+// regardless of the declared size.
+func TestUntarBundleRejectsLyingHeaderSize(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	body := make([]byte, 2<<20) // 2 MiB actual
+	// Declare a size that matches the body so tar.Writer accepts it, but cap
+	// the per-file budget well below it: the read-time bound must trip.
+	tarAddFile(t, tw, "liar", 0o644, body)
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UntarBundle(buf.Bytes(), BundleLimits{MaxFiles: 10, MaxFileBytes: 1 << 20, MaxBytes: 1 << 30}); err == nil {
+		t.Fatal("expected rejection when an entry's content exceeds the per-file cap")
 	}
 }
 
