@@ -408,3 +408,71 @@ func TestMaterializeToStorePreservesExplicitDirEntry(t *testing.T) {
 		t.Fatalf("nested file under explicit dir entry missing: %v", err)
 	}
 }
+
+// --- H7: VerifyArtifactStoreDigest (read-only integrity check) -------------
+
+func TestVerifyArtifactStoreDigest_AbsentEntryReportsNotPresent(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "# a\n"})
+	present, matches := VerifyArtifactStoreDigest(home, "skills", "sha256:"+strings.Repeat("0", 64), bundle)
+	if present || matches {
+		t.Fatalf("expected (false, false) for a CAS entry that was never materialized, got (%v, %v)", present, matches)
+	}
+}
+
+func TestVerifyArtifactStoreDigest_VerifiesUntamperedEntry(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "# a\n"})
+	_, digest, _, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	present, matches := VerifyArtifactStoreDigest(home, "skills", digest, bundle)
+	if !present || !matches {
+		t.Fatalf("expected an untampered materialized entry to verify, got present=%v matches=%v", present, matches)
+	}
+}
+
+// TestVerifyArtifactStoreDigest_DetectsTamperWithoutWriting is the H7
+// no-self-heal contract: unlike MaterializeToStore, a read-only verify call
+// must report the tamper it finds rather than silently quarantining/
+// re-extracting it — a caller trying to DETECT tampering must not have the
+// evidence erased by the act of checking.
+func TestVerifyArtifactStoreDigest_DetectsTamperWithoutWriting(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	bundle := testBundle(t, map[string]string{"SKILL.md": "# a\n"})
+	storePath, digest, _, err := MaterializeToStore(home, "skills", bundle)
+	if err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(storePath, "SKILL.md"), []byte("TAMPERED"), 0o644); err != nil {
+		t.Fatalf("tamper: %v", err)
+	}
+
+	present, matches := VerifyArtifactStoreDigest(home, "skills", digest, bundle)
+	if !present {
+		t.Fatal("expected the tampered entry to still be reported present")
+	}
+	if matches {
+		t.Fatal("expected the tampered entry to fail verification")
+	}
+
+	// The evidence must survive the check: still tampered, not
+	// quarantined/re-extracted, and no ".corrupt-" sibling created.
+	data, err := os.ReadFile(filepath.Join(storePath, "SKILL.md"))
+	if err != nil || string(data) != "TAMPERED" {
+		t.Fatalf("expected the tamper to survive a read-only verify call, data=%q err=%v", data, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(storePath))
+	if err != nil {
+		t.Fatalf("read store root: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".corrupt-") {
+			t.Fatalf("expected NO quarantine side effect from a read-only verify, found %s", e.Name())
+		}
+	}
+}

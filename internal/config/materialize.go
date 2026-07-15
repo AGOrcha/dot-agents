@@ -349,3 +349,28 @@ func quarantineStoreEntry(storePath string) error {
 	dst := fmt.Sprintf("%s.corrupt-%d", storePath, time.Now().UnixNano())
 	return fsops.Rename(storePath, dst)
 }
+
+// VerifyArtifactStoreDigest is the READ-ONLY sibling of MaterializeToStore's
+// H16 verify-on-hit check (package-artifact-install spec H7): it reports
+// whether the CAS entry at ArtifactStorePath(agentsHome, family, digest) is
+// present, and — only when present — whether its on-disk content still
+// verifies against bundle's own content. Unlike MaterializeToStore it NEVER
+// writes, quarantines, or re-extracts; it exists so a purely-diagnostic
+// caller (a staleness/integrity resolver threaded into EnsureResolved or
+// `config verify`) can detect a tampered CAS entry offline, using bundle
+// bytes it already has locally (e.g. from a pinned-cache-hit fetch), without
+// silently self-healing the tamper as a side effect of checking it.
+//
+// present=false means the CAS entry does not exist (or is not a directory) —
+// the caller's usual "not hydrated yet" state, not evidence of tampering.
+// present=true, matches=false means the entry exists but its content no
+// longer matches bundle — the H7 tamper signal.
+func VerifyArtifactStoreDigest(agentsHome, family, digest string, bundle Bundle) (present, matches bool) {
+	storePath := ArtifactStorePath(agentsHome, family, digest)
+	fi, err := os.Stat(storePath)
+	if err != nil || !fi.IsDir() {
+		return false, false
+	}
+	ok, _ := verifyStoreContent(storePath, bundleContentDigest(bundle))
+	return true, ok
+}

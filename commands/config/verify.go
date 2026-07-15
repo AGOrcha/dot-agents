@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/commands/internal/lifecycle"
 	"github.com/AGOrcha/dot-agents/commands/workflow"
 	cfg "github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/graphstore"
@@ -280,14 +281,27 @@ func verifyLayerLocks(cwd string) []VerifyCheck {
 //     flip the report's OK.
 //   - warn  — the lock/manifest could not be read (the manifest check above owns
 //     the hard failure; a lock read error here is reported but not fatal).
+//   - FAIL  — unit-digest-mismatch ONLY (package-artifact-install spec H7): a
+//     `kind:artifact` unit whose installed CAS content no longer matches its
+//     locked digest — a post-install store tamper, not a benign local-scope
+//     edit — surfaces here as a hard failure so `config verify` cannot report
+//     OK while the installed content is not what the lock says it is.
+//
+// H7 wires cfg.Staleness's UnitDigestFunc to the production artifact-store
+// integrity resolver (previously nil here, per the spec's own gap callout),
+// so this offline/no-refetch check can detect a tamper it previously had no
+// way to see.
 func verifyStaleness(cwd string) []VerifyCheck {
 	const name = "config-staleness"
-	res, err := cfg.Staleness(cwd, "", nil)
+	res, err := cfg.Staleness(cwd, "", lifecycle.PackagesArtifactDigestResolver(cwd))
 	if err != nil {
 		return []VerifyCheck{{name, verifyWarn, "could not compute staleness: " + err.Error()}}
 	}
 	if res.Fresh {
 		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevSHA(res.ExpectedInputsDigest) + ")"}}
+	}
+	if unitDigestMismatchOnly(res.Reasons) {
+		return []VerifyCheck{{name, verifyFail, "an installed packages artifact no longer matches its locked digest (possible store tamper) — run `da install` to re-verify/re-materialize"}}
 	}
 
 	recorded := recordedInputsDigest(cwd)
@@ -297,6 +311,16 @@ func verifyStaleness(cwd string) []VerifyCheck {
 	return []VerifyCheck{{name, verifyWarn, fmt.Sprintf(
 		"local config changed since last resolve (lock %s, now %s) — run `da config sync`",
 		abbrevSHA(recorded), abbrevSHA(res.ExpectedInputsDigest))}}
+}
+
+// unitDigestMismatchOnly reports whether reasons is exactly [ReasonUnitDigest]
+// — a unit-content drift with NO accompanying local-scope drift (inputs-
+// digest or declared-set change). Isolating this combination is what lets
+// verifyStaleness escalate a store tamper to a hard failure while still
+// treating an ordinary local-scope edit (which always/also carries
+// ReasonInputsDigest or ReasonDeclaredSet) as the existing recoverable warn.
+func unitDigestMismatchOnly(reasons []cfg.StalenessReason) bool {
+	return len(reasons) == 1 && reasons[0] == cfg.ReasonUnitDigest
 }
 
 // recordedInputsDigest reads the inputs_digest the lockfile currently pins, or

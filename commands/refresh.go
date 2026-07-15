@@ -254,11 +254,17 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 		}
 	}
 
-	ensureLockFreshForRefresh(path)
+	ensureRes := ensureLockFreshForRefresh(path)
 
 	config.SetWindowsMirrorContext(path)
 
-	if runSharedTargetsForRefresh(name, path, installedEnabled) {
+	packagesUnits, err := hydrateRefreshPackages(path, name, ensureRes)
+	if err != nil {
+		ui.Bullet("warn", fmt.Sprintf("resolving packages: %v", err))
+		projectFailed = true
+	}
+
+	if runSharedTargetsForRefresh(name, path, installedEnabled, packagesUnits) {
 		projectFailed = true
 	}
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
@@ -307,16 +313,39 @@ func ensureManagedGitignoreForRefresh(path string, enabledPlatforms []platform.P
 // lock. Refresh re-resolves LOCAL scopes only (default EnsureResolved); the
 // explicit upstream re-check is `da config sync`, never refresh (D10/D12).
 // Dry-run skips the (lock-writing) re-resolve entirely.
-func ensureLockFreshForRefresh(path string) {
+//
+// Returns the EnsureResult (nil under dry-run, manifest-less, or a resolution
+// error) so hydrateRefreshPackages can mirror pass-1's write/no-write
+// decision (H9) instead of re-deriving it. UnitDigest is the H7 production
+// artifact-store integrity resolver — see packagesArtifactDigestResolver.
+func ensureLockFreshForRefresh(path string) *config.EnsureResult {
 	if Flags.DryRun {
-		return
+		return nil
 	}
 	if _, err := config.LoadAgentsRC(path); err != nil {
-		return
+		return nil
 	}
-	if _, err := config.EnsureResolved(path, config.EnsureOpts{}); err != nil {
+	res, err := config.EnsureResolved(path, config.EnsureOpts{
+		UnitDigest: lifecycle.PackagesArtifactDigestResolver(path),
+	})
+	if err != nil {
 		ui.Bullet("warn", fmt.Sprintf("ensure lock fresh: %v", err))
+		return nil
 	}
+	return res
+}
+
+// hydrateRefreshPackages runs pass 2 (H9/H13) after pass-1 config resolution
+// and before shared-target projection. Skipped (nil, nil) whenever
+// ensureRes is nil (dry-run, manifest-less, or a pass-1 resolution failure —
+// refresh already warns on the latter and proceeds against the existing lock,
+// so pass-2 is a no-op rather than compounding the warning) or the effective
+// config declares no packages[] (HydratePackagesUnits).
+func hydrateRefreshPackages(path, name string, ensureRes *config.EnsureResult) ([]platform.ResolvedUnit, error) {
+	if ensureRes == nil {
+		return nil, nil
+	}
+	return lifecycle.HydratePackagesUnits(path, name, ensureRes)
 }
 
 // runSharedTargetsForRefresh runs the shared-target projection and prints any
@@ -330,8 +359,14 @@ func ensureLockFreshForRefresh(path string) {
 // opts out, keeping the additive write-only behavior. A prune failure is folded
 // into the same warn-and-fail path as a write failure so a partial application
 // withholds the success stamp.
-func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform) bool {
-	lines, err := platform.RunSharedTargetProjectionExact(name, path, installedEnabled, Flags.DryRun, !refreshInexact)
+func runSharedTargetsForRefresh(name, path string, installedEnabled []platform.Platform, units []platform.ResolvedUnit) bool {
+	var lines []string
+	var err error
+	if len(units) > 0 {
+		lines, err = platform.ProjectResolvedUnits(name, path, units, installedEnabled, Flags.DryRun, !refreshInexact, name)
+	} else {
+		lines, err = platform.RunSharedTargetProjectionExact(name, path, installedEnabled, Flags.DryRun, !refreshInexact)
+	}
 	if err != nil {
 		if Flags.DryRun {
 			ui.Bullet("warn", fmt.Sprintf("shared targets plan: %v", err))
