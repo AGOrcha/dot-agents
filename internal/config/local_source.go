@@ -29,6 +29,7 @@ import (
 
 	git "github.com/go-git/go-git/v6"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/fsops"
 )
 
@@ -68,6 +69,20 @@ const (
 	gitignoreBlockEnd   = "# <<< dot-agents managed (local source provenance) <<<"
 	gitignoreFileName   = ".gitignore"
 )
+
+// alwaysIgnoredSourced is the permanent H4 pattern: the reserved sourced
+// namespace under EVERY resource family ("<family>/_sourced/") is
+// gitignored regardless of which packages are currently materialized.
+// Mirrors links.alwaysIgnored's "present even with no caller-supplied
+// paths" contract, and fixes the block-removal leak this pattern's absence
+// caused: previously managedBlock returned "" (dropping the WHOLE managed
+// block, not just one path) whenever remotePaths shrank to empty — e.g. the
+// last package for a source was removed — which un-ignored every OTHER
+// still-materialized sourced path too. Being unconditionally present here
+// means package removal can shrink remotePaths freely without ever
+// un-ignoring the reserved namespace; only deleting the store itself (a
+// separate, not-yet-built operation) is expected to drop it.
+var alwaysIgnoredSourced = []string{"*/" + SourcedScopeSegment + "/"}
 
 // GitRepo is the seam over the git operations the local source needs. The
 // production implementation is in-process via go-git (no `git` subprocess, no
@@ -279,19 +294,82 @@ func underRoot(slashRoot, slashPath string) (string, bool) {
 // It preserves any user-authored content outside the managed markers, sorts and
 // de-duplicates the managed paths for a stable diff, and is a no-op-stable
 // rewrite (calling it twice with the same inputs yields the same bytes). An
-// empty path set removes the managed block entirely.
+// empty path set still leaves the block present — it always carries the
+// permanent H4 sourced-namespace pattern (alwaysIgnoredSourced) — so package
+// removal shrinking remotePaths to empty can never un-ignore the reserved
+// namespace (H4).
+//
+// The read-merge-write is guarded by the package's shared inter-process file
+// lock (agentslock.AcquireFileLock) so two concurrent `da install`/`refresh`
+// processes writing this same .gitignore cannot race a read-modify-write
+// into a torn or regressed block (H4 "CAS/locked block rewrite").
 func (s *LocalSource) EnsureProvenanceGitignore(remotePaths []string) error {
 	if s.Root == "" {
 		return errors.New(errEmptyRoot)
 	}
 	path := filepath.Join(s.Root, gitignoreFileName)
+	release, err := agentslock.AcquireFileLock(path)
+	if err != nil {
+		return fmt.Errorf("local source: acquire gitignore lock: %w", err)
+	}
+	defer func() { _ = release() }()
+
 	existing, err := readGitignore(path)
 	if err != nil {
 		return err
 	}
 	outside := stripManagedBlock(existing)
 	next := joinGitignore(outside, managedBlock(remotePaths))
+	if next == existing {
+		return nil
+	}
 	return fsops.WriteFileAtomic(path, []byte(next))
+}
+
+// SourcedIgnoreInstalled reports whether the local source's .gitignore
+// currently carries the permanent H4 sourced-namespace pattern
+// (alwaysIgnoredSourced). Materialize calls this immediately after
+// EnsureProvenanceGitignore (H4: "installed AND verified before the tree is
+// exposed") so a write that silently failed to land — a concurrent
+// hand-edit racing the lock's own read window, a filesystem anomaly — is
+// caught before any fetched content is ever placed where a `git status`
+// could observe it.
+func (s *LocalSource) SourcedIgnoreInstalled() (bool, error) {
+	if s.Root == "" {
+		return false, errors.New(errEmptyRoot)
+	}
+	content, err := readGitignore(filepath.Join(s.Root, gitignoreFileName))
+	if err != nil {
+		return false, err
+	}
+	for _, pattern := range alwaysIgnoredSourced {
+		if !strings.Contains(content, pattern) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// EnsureAndVerifySourcedIgnore installs the permanent H4 sourced-namespace
+// gitignore pattern in the local source rooted at agentsHome and reads it
+// back to confirm the write landed, failing closed if not. It is the
+// package-level convenience form of EnsureProvenanceGitignore +
+// SourcedIgnoreInstalled for callers (platform.MaterializeArtifact) that
+// only need "make sure the permanent ignore is live" and do not otherwise
+// hold a *LocalSource.
+func EnsureAndVerifySourcedIgnore(agentsHome string) error {
+	ls := NewLocalSource(agentsHome, nil)
+	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
+		return fmt.Errorf("materialize: install sourced ignore: %w", err)
+	}
+	ok, err := ls.SourcedIgnoreInstalled()
+	if err != nil {
+		return fmt.Errorf("materialize: verify sourced ignore: %w", err)
+	}
+	if !ok {
+		return fmt.Errorf("materialize: sourced ignore did not verify after install at %s — refusing to expose fetched content", agentsHome)
+	}
+	return nil
 }
 
 // readGitignore reads the .gitignore at path, treating a missing file as empty.
@@ -326,10 +404,13 @@ func stripManagedBlock(content string) string {
 	return strings.Join(kept, "\n")
 }
 
-// managedBlock renders the da-owned block for the given remote asset paths. An
-// empty path set yields an empty string so the block is omitted entirely.
+// managedBlock renders the da-owned block for the given remote asset paths,
+// ALWAYS including the permanent H4 sourced-namespace pattern
+// (alwaysIgnoredSourced) regardless of remotePaths — so the block is never
+// empty and is therefore never omitted (H4: package removal shrinking
+// remotePaths to empty must not un-ignore the reserved namespace).
 func managedBlock(remotePaths []string) string {
-	normalized := normalizePaths(remotePaths)
+	normalized := normalizePaths(append(append([]string{}, alwaysIgnoredSourced...), remotePaths...))
 	if len(normalized) == 0 {
 		return ""
 	}

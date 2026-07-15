@@ -2,12 +2,14 @@ package platform
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
@@ -15,6 +17,92 @@ type resourceDir struct {
 	Name string
 	Dir  string
 	File string
+	// Scope is the scope segment this entry was listed under — the project's
+	// own local scope, or "_sourced/<source-id>" for a packages-materialized
+	// entry (H3). Callers that reconstruct a ResourceSourceRef from a
+	// resourceDir MUST use this, not a hardcoded project name, or a
+	// sourced-scope entry's canonical path resolves to the wrong location.
+	Scope string
+}
+
+// ErrReservedSourceID reports a packages ref whose source id collides with a
+// local scope segment (package-artifact-install spec §3A H3): the universal
+// "global" scope, the reserved sourced-namespace literal itself, or a
+// caller-supplied local project scope name. errors.Is lets a caller
+// distinguish this from any other materialize failure.
+var ErrReservedSourceID = errors.New("platform: source id collides with a reserved local scope")
+
+// ValidateSourceID rejects a packages source id that would collide with a
+// local scope (H3) — the universal "global" scope, the reserved
+// "_sourced" namespace literal, or any of the caller-supplied local scope
+// names (typically the consuming project's own scope) — BEFORE any
+// materialize filesystem write. Two sources are never checked against each
+// other here: distinct source ids are collision-free by construction (each
+// gets its own "_sourced/<source-id>/" subtree, H3).
+func ValidateSourceID(sourceID string, localScopes ...string) error {
+	if sourceID == "" {
+		return fmt.Errorf("platform: empty source id")
+	}
+	if sourceID == "global" || sourceID == config.SourcedScopeSegment {
+		return fmt.Errorf("%w: %q", ErrReservedSourceID, sourceID)
+	}
+	for _, scope := range localScopes {
+		if scope != "" && sourceID == scope {
+			return fmt.Errorf("%w: %q", ErrReservedSourceID, sourceID)
+		}
+	}
+	return nil
+}
+
+// SourcedProjectionPath returns the H3 reserved-namespace projection path
+// for a materialized resource: "<agentsHome>/<family>/_sourced/<source-id>/<name>/".
+func SourcedProjectionPath(agentsHome, family, sourceID, name string) string {
+	return filepath.Join(agentsHome, family, config.SourcedScopeSegment, sourceID, name)
+}
+
+// listSourcedScopeIDs lists the source-id subdirectories currently
+// materialized under "<agentsHome>/<bucket>/_sourced/" — the set of
+// installed packages sources contributing resources to bucket. A missing
+// "_sourced" dir (no packages materialized for this bucket yet) is a
+// legitimate empty result, not an error.
+func listSourcedScopeIDs(agentsHome, bucket string) ([]string, error) {
+	root := filepath.Join(agentsHome, bucket, config.SourcedScopeSegment)
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	ids := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if links.IsDirEntry(filepath.Join(root, e.Name())) {
+			ids = append(ids, e.Name())
+		}
+	}
+	return ids, nil
+}
+
+// sharedMirrorScopes returns every scope buildSharedMirrorIntentsForRoot (and
+// listCanonicalAgentEntries) should scan for bucket: the project's own local
+// scope, plus one "_sourced/<source-id>" scope per installed packages source
+// (package-artifact-install spec §3A H3/D4/Q3). This is the smallest
+// extension that lets RunSharedTargetProjectionExact treat a materialized
+// sourced scope as an additional input set — listScopedResourceDirs already
+// accepts an arbitrary scope string and joins it onto agentsHome/bucket, so
+// "_sourced/<source-id>" needs no new listing primitive, only a wider scope
+// set to iterate.
+func sharedMirrorScopes(agentsHome, project, bucket string) ([]string, error) {
+	ids, err := listSourcedScopeIDs(agentsHome, bucket)
+	if err != nil {
+		return nil, err
+	}
+	scopes := make([]string, 0, len(ids)+1)
+	scopes = append(scopes, project)
+	for _, id := range ids {
+		scopes = append(scopes, filepath.Join(config.SourcedScopeSegment, id))
+	}
+	return scopes, nil
 }
 
 // removeHardlinkedManaged is the error-propagating adapter every RemoveLinks
@@ -139,9 +227,10 @@ func listScopedResourceDirs(agentsHome, bucket, scope, marker string) ([]resourc
 			continue
 		}
 		out = append(out, resourceDir{
-			Name: e.Name(),
-			Dir:  dir,
-			File: markerPath,
+			Name:  e.Name(),
+			Dir:   dir,
+			File:  markerPath,
+			Scope: scope,
 		})
 	}
 	return out, nil

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/AGOrcha/dot-agents/internal/config"
+	"github.com/AGOrcha/dot-agents/internal/fsops"
 	"github.com/AGOrcha/dot-agents/internal/links"
 )
 
@@ -303,39 +304,65 @@ type sharedMirrorIntentSpec struct {
 	Materializer string             // ResourceIntent.Materializer
 }
 
-// buildSharedMirrorIntentsForRoot returns ResourceIntents for every
-// bucket entry under ~/.agents/<spec.Bucket>/<project>/ that owns
-// spec.ManifestName, projecting them into targetRoot via symlink.
-// All three per-bucket helpers (skill / plugin / agent) delegate
-// here.
+// buildSharedMirrorIntentsForRoot returns ResourceIntents for every bucket
+// entry under ~/.agents/<spec.Bucket>/<project>/ (local-authored) AND under
+// ~/.agents/<spec.Bucket>/_sourced/<source-id>/ for every currently
+// materialized packages source (package-artifact-install spec §3A H3/D4/Q3)
+// that owns spec.ManifestName, projecting them into targetRoot via symlink.
+// All three per-bucket helpers (skill / plugin / agent) delegate here. This
+// is the "smallest extension" D4/Q3 call for: RunSharedTargetProjectionExact
+// (which this function ultimately feeds) treats a materialized sourced
+// scope as just another scope to list, composing local-authored and
+// packages-materialized resources under one plan/prune pass rather than a
+// parallel linker.
 //
-// A missing canonical bucket dir (ENOENT) is treated as an empty
-// resource set — projects without any skills/plugins/agents yet are
-// legitimate and should yield no intents, not a hard failure. Other
-// errors (permission denied, IO) propagate so callers can surface
-// them instead of silently producing an empty plan.
+// A missing canonical bucket dir (ENOENT) for any one scope is treated as an
+// empty resource set for that scope — projects/sources without any
+// skills/plugins/agents yet are legitimate and should yield no intents for
+// that scope, not a hard failure. Other errors (permission denied, IO)
+// propagate so callers can surface them instead of silently producing an
+// incomplete plan.
 func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirrorIntentSpec) ([]ResourceIntent, error) {
 	agentsHome := config.AgentsHome()
-	entries, err := listScopedResourceDirs(agentsHome, spec.Bucket, project, spec.ManifestName)
+	scopes, err := sharedMirrorScopes(agentsHome, project, spec.Bucket)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("listing canonical %s for project %q under %s: %w", spec.Bucket, project, targetRoot, err)
+		return nil, fmt.Errorf("listing sourced scopes for %s under %s: %w", spec.Bucket, targetRoot, err)
 	}
 
+	var intents []ResourceIntent
+	for _, scope := range scopes {
+		entries, err := listScopedResourceDirs(agentsHome, spec.Bucket, scope, spec.ManifestName)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, fmt.Errorf("listing canonical %s for project %q under %s: %w", spec.Bucket, project, targetRoot, err)
+		}
+		intents = append(intents, mirrorIntentsForScope(entries, project, scope, targetRoot, spec)...)
+	}
+	return intents, nil
+}
+
+// mirrorIntentsForScope builds one ResourceIntent per entry found in a
+// single scope (the project's own local scope, or a "_sourced/<source-id>"
+// scope). IntentID keeps the exact pre-H3 format for the base project scope
+// (scope == project) so existing intent-id expectations are unaffected;
+// sourced-scope intents get a distinct id derived from the scope itself, so
+// two sources shipping a same-named resource never collide (H3: source-id
+// namespacing is collision-free by construction).
+func mirrorIntentsForScope(entries []resourceDir, project, scope, targetRoot string, spec sharedMirrorIntentSpec) []ResourceIntent {
 	intents := make([]ResourceIntent, 0, len(entries))
 	for _, entry := range entries {
 		targetPath := filepath.Join(targetRoot, entry.Name)
 		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("%s.%s.%s.%s", spec.Bucket, project, entry.Name, sanitizeIntentRoot(targetRoot)),
+			IntentID:    mirrorIntentID(spec.Bucket, project, scope, entry.Name, targetRoot),
 			Project:     project,
 			Bucket:      spec.Bucket,
 			LogicalName: entry.Name,
 			TargetPath:  targetPath,
 			Ownership:   ResourceOwnershipSharedRepo,
 			SourceRef: ResourceSourceRef{
-				Scope:        project,
+				Scope:        scope,
 				Bucket:       spec.Bucket,
 				RelativePath: entry.Name,
 				Kind:         spec.SourceKind,
@@ -349,7 +376,18 @@ func buildSharedMirrorIntentsForRoot(project, targetRoot string, spec sharedMirr
 			MarkerFiles:   []string{spec.ManifestName},
 		})
 	}
-	return intents, nil
+	return intents
+}
+
+// mirrorIntentID renders a stable, scope-aware intent id: the unmodified
+// pre-H3 format for the project's own scope, and a sanitized-scope variant
+// for any other scope (sourced scopes contain a "/" and must not collide
+// with the project format).
+func mirrorIntentID(bucket, project, scope, entryName, targetRoot string) string {
+	if scope == project {
+		return fmt.Sprintf("%s.%s.%s.%s", bucket, project, entryName, sanitizeIntentRoot(targetRoot))
+	}
+	return fmt.Sprintf("%s.%s.%s.%s", bucket, sanitizeIntentRoot(scope), entryName, sanitizeIntentRoot(targetRoot))
 }
 
 func buildSharedSkillMirrorIntentsForRoot(project, targetRoot string) ([]ResourceIntent, error) {
@@ -431,14 +469,25 @@ func BuildSharedAgentMirrorIntents(project string, targetRoots ...string) ([]Res
 // <errContext>: %w (e.g. "under .opencode" or "(codex toml intents)").
 func listCanonicalAgentEntries(project, errContext string) (entries []resourceDir, ok bool, err error) {
 	agentsHome := config.AgentsHome()
-	entries, err = listScopedResourceDirs(agentsHome, "agents", project, agentManifestName)
+	scopes, err := sharedMirrorScopes(agentsHome, project, "agents")
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, false, nil
-		}
-		return nil, false, fmt.Errorf("listing canonical agents for project %q %s: %w", project, errContext, err)
+		return nil, false, fmt.Errorf("listing sourced agent scopes %s: %w", errContext, err)
 	}
-	return entries, true, nil
+	var all []resourceDir
+	for _, scope := range scopes {
+		scopeEntries, err := listScopedResourceDirs(agentsHome, "agents", scope, agentManifestName)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			return nil, false, fmt.Errorf("listing canonical agents for project %q %s: %w", project, errContext, err)
+		}
+		all = append(all, scopeEntries...)
+	}
+	if len(all) == 0 {
+		return nil, false, nil
+	}
+	return all, true, nil
 }
 
 // BuildSharedAgentFileSymlinkIntents builds symlink intents from each canonical
@@ -460,14 +509,14 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 	for _, entry := range entries {
 		targetPath := filepath.Join(targetRoot, entry.Name+destFileSuffix)
 		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("agents.file.%s.%s.%s", project, entry.Name, sanitizeIntentRoot(targetRoot)),
+			IntentID:    fmt.Sprintf("agents.file.%s.%s.%s", sanitizeScopeForIntentID(entry.Scope, project), entry.Name, sanitizeIntentRoot(targetRoot)),
 			Project:     project,
 			Bucket:      "agents",
 			LogicalName: entry.Name,
 			TargetPath:  targetPath,
 			Ownership:   ResourceOwnershipSharedRepo,
 			SourceRef: ResourceSourceRef{
-				Scope:        project,
+				Scope:        entry.Scope,
 				Bucket:       "agents",
 				RelativePath: filepath.Join(entry.Name, agentManifestName),
 				Kind:         ResourceSourceCanonicalFile,
@@ -481,6 +530,17 @@ func BuildSharedAgentFileSymlinkIntents(project, targetRoot, destFileSuffix stri
 		})
 	}
 	return intents, nil
+}
+
+// sanitizeScopeForIntentID returns project unmodified when scope IS the
+// project's own local scope (preserving the exact pre-H3 intent-id format),
+// and a sanitized form of scope otherwise (a "_sourced/<source-id>" scope
+// contains a "/" and must not collide with the project format).
+func sanitizeScopeForIntentID(scope, project string) string {
+	if scope == project {
+		return project
+	}
+	return sanitizeIntentRoot(scope)
 }
 
 // BuildSharedCodexAgentTomlIntents builds render intents for `.codex/agents/*.toml`
@@ -502,14 +562,14 @@ func BuildSharedCodexAgentTomlIntents(project string) ([]ResourceIntent, error) 
 	for _, entry := range entries {
 		targetPath := filepath.Join(".codex", "agents", entry.Name+".toml")
 		intents = append(intents, ResourceIntent{
-			IntentID:    fmt.Sprintf("agents.codex-toml.%s.%s", project, entry.Name),
+			IntentID:    fmt.Sprintf("agents.codex-toml.%s.%s", sanitizeScopeForIntentID(entry.Scope, project), entry.Name),
 			Project:     project,
 			Bucket:      "agents",
 			LogicalName: entry.Name,
 			TargetPath:  targetPath,
 			Ownership:   ResourceOwnershipSharedRepo,
 			SourceRef: ResourceSourceRef{
-				Scope:        project,
+				Scope:        entry.Scope,
 				Bucket:       "agents",
 				RelativePath: filepath.Join(entry.Name, agentManifestName),
 				Kind:         ResourceSourceCanonicalFile,
@@ -877,4 +937,81 @@ func ExecuteSharedSkillMirrorPlan(project, repoPath string, targetRoots ...strin
 		return err
 	}
 	return plan.Execute(repoPath, config.AgentsHome())
+}
+
+// MaterializeArtifact installs an H1-normalized bundle into the H2 content-
+// addressed store (config.MaterializeToStore) and projects it at the H3
+// reserved sourced-namespace path: a managed link to the immutable
+// digest-keyed store entry, never a copy, so a changed locked digest moves
+// the link rather than mutating shared content in place (H2: "two projects
+// on different digests never write one mutable path").
+//
+// This is materialize's SOLE filesystem-linking entry point (D4: no
+// parallel linker) — RunSharedTargetProjectionExact discovers the projected
+// resource dir through the SAME listScopedResourceDirs / mirror-intent path
+// as any local-authored unit (sharedMirrorScopes), because the projection
+// dir this function creates literally IS a "<bucket>/_sourced/<source-id>"
+// scope.
+//
+// localScopes are the local scope names ValidateSourceID rejects a
+// collision against (H3) — typically the consuming project's own scope
+// name; the universal "global" and "_sourced" literals are always rejected
+// regardless of what is passed. The H4 permanent sourced-namespace ignore
+// is installed and verified BEFORE the projection link is created, so the
+// materialized tree is never exposed ahead of the ignore that keeps it out
+// of the local source's git tracking.
+//
+// Callers MUST pass agentsHome == config.AgentsHome(): links.Symlink's
+// "is this an existing entry one we already own" ownership check resolves
+// against the package-global config.AgentsHome() (env-var backed), not this
+// function's agentsHome parameter. Calling with a mismatched agentsHome
+// (as a naive test harness might) makes a legitimate re-point of a PRIOR
+// materialize's own link at a DIFFERENT digest misjudge that link as an
+// unmanaged occupant and refuse it.
+func MaterializeArtifact(agentsHome, family, sourceID, name string, bundle config.Bundle, localScopes ...string) (projectionPath, digest string, err error) {
+	if err := ValidateSourceID(sourceID, localScopes...); err != nil {
+		return "", "", err
+	}
+	if name == "" {
+		return "", "", fmt.Errorf("platform: materialize: empty resource name")
+	}
+	storePath, digest, _, err := config.MaterializeToStore(agentsHome, family, bundle)
+	if err != nil {
+		return "", "", err
+	}
+	// H4: the permanent sourced-namespace ignore MUST be installed and
+	// VERIFIED before the materialized tree is ever exposed at the
+	// projection path.
+	if err := config.EnsureAndVerifySourcedIgnore(agentsHome); err != nil {
+		return "", "", err
+	}
+	projPath := SourcedProjectionPath(agentsHome, family, sourceID, name)
+	if err := fsops.MkdirAll(filepath.Dir(projPath), 0o755); err != nil {
+		return "", "", fmt.Errorf("platform: materialize: create projection parent for %s: %w", projPath, err)
+	}
+	// links.Symlink refuses to replace an occupant that is not itself a
+	// managed link resolving under agentsHome (H3: "refuse to replace any
+	// path lacking sourced provenance") — a directory a user (or a bug)
+	// placed directly at the reserved path, or any other non-managed entry,
+	// is left untouched and this call fails closed instead of clobbering it.
+	// A prior materialize of the SAME (family, sourceID, name) at a
+	// DIFFERENT digest is a managed link under agentsHome, so it is
+	// re-pointed idempotently — re-materializing the SAME digest resolves
+	// to the identical target and is a true no-op (R4).
+	if err := links.Symlink(storePath, projPath); err != nil {
+		return "", "", fmt.Errorf("platform: materialize: project %s: %w", projPath, err)
+	}
+	return projPath, digest, nil
+}
+
+// RemoveMaterializedArtifact prunes the H3 projected view for a
+// materialized resource. The immutable H2 store entry is left alone (store
+// -tree garbage collection of no-longer-referenced digests is deferred, out
+// of scope). The permanent H4 sourced-namespace ignore is untouched by
+// design — removing one package must never re-expose the reserved
+// namespace to the local source's git tracking; only deleting the whole
+// store (a separate, not-yet-built operation) is expected to drop it.
+func RemoveMaterializedArtifact(agentsHome, family, sourceID, name string) error {
+	projPath := SourcedProjectionPath(agentsHome, family, sourceID, name)
+	return links.RemoveIfSymlinkUnder(projPath, agentsHome)
 }

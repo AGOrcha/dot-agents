@@ -343,7 +343,12 @@ func TestEnsureProvenanceGitignorePreservesUserContent(t *testing.T) {
 	}
 }
 
-func TestEnsureProvenanceGitignoreEmptyRemovesBlock(t *testing.T) {
+// TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock proves the H4 fix: an
+// empty remotePaths set (e.g. the last package for a source was removed) MUST
+// NOT remove the managed block entirely — it always retains the permanent
+// sourced-namespace pattern. Only the caller-supplied path ("cache/") is
+// dropped; user content outside the block is untouched.
+func TestEnsureProvenanceGitignoreEmptyKeepsPermanentBlock(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, gitignoreFileName)
@@ -351,32 +356,47 @@ func TestEnsureProvenanceGitignoreEmptyRemovesBlock(t *testing.T) {
 	if err := s.EnsureProvenanceGitignore([]string{"cache/"}); err != nil {
 		t.Fatalf("seed managed block: %v", err)
 	}
-	// Empty set, but user content present: block removed, user content kept.
-	if err := os.WriteFile(path, []byte("# user\nlogs/\n"+gitignoreBlockBegin+"\ncache/\n"+gitignoreBlockEnd+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("# user\nlogs/\n"+gitignoreBlockBegin+"\ncache/\n"+strings.Join(alwaysIgnoredSourced, "\n")+"\n"+gitignoreBlockEnd+"\n"), 0o644); err != nil {
 		t.Fatalf("seed mixed: %v", err)
 	}
 	if err := s.EnsureProvenanceGitignore(nil); err != nil {
 		t.Fatalf("clear: %v", err)
 	}
 	got := readFile(t, path)
-	if strings.Contains(got, gitignoreBlockBegin) {
-		t.Fatalf("managed block not removed:\n%s", got)
+	if !strings.Contains(got, gitignoreBlockBegin) {
+		t.Fatalf("H4: permanent managed block was removed by an empty remotePaths call:\n%s", got)
+	}
+	for _, pattern := range alwaysIgnoredSourced {
+		if !strings.Contains(got, pattern) {
+			t.Fatalf("H4: permanent sourced-namespace pattern %q missing after empty remotePaths call:\n%s", pattern, got)
+		}
+	}
+	if strings.Contains(got, "cache/") {
+		t.Fatalf("caller-supplied path should have been dropped once no longer passed:\n%s", got)
 	}
 	if !strings.Contains(got, "logs/") {
 		t.Fatalf("user content lost:\n%s", got)
 	}
 }
 
+// TestEnsureProvenanceGitignoreEmptyEverything proves the block is NEVER
+// empty (H4): even with no prior file and only blank-string paths, the
+// permanent sourced-namespace pattern is written.
 func TestEnsureProvenanceGitignoreEmptyEverything(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	s := NewLocalSource(root, &fakeGit{isRepo: true})
-	// Only blank-string paths and no prior file => empty result file.
 	if err := s.EnsureProvenanceGitignore([]string{"", "   "}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if got := readFile(t, filepath.Join(root, gitignoreFileName)); got != "" {
-		t.Fatalf("expected empty gitignore, got %q", got)
+	got := readFile(t, filepath.Join(root, gitignoreFileName))
+	if got == "" {
+		t.Fatalf("H4: expected the permanent sourced-namespace block, got empty gitignore")
+	}
+	for _, pattern := range alwaysIgnoredSourced {
+		if !strings.Contains(got, pattern) {
+			t.Fatalf("H4: permanent sourced-namespace pattern %q missing, got %q", pattern, got)
+		}
 	}
 }
 
