@@ -117,7 +117,7 @@ sys.exit(0 if (${pyexpr}) else 1)" 2>/dev/null; then
   return 0
 }
 
-# retry_test DESC CMD — test_command that RETRIES CMD (up to ~5s, 200ms apart)
+# retry_test DESC CMD — test_command that RETRIES CMD (up to ~60s, 200ms apart)
 # until it exits 0. A read that immediately follows an install/materialize can
 # transiently fail on the windows-latest runner: a filesystem filter driver
 # (Windows Defender) briefly holds a file `da` just atomically re-wrote
@@ -128,7 +128,7 @@ sys.exit(0 if (${pyexpr}) else 1)" 2>/dev/null; then
 retry_test() {
   local name="$1" cmd="$2" i last
   echo -n "  Testing $name... "
-  for i in $(seq 1 75); do
+  for i in $(seq 1 300); do
     if last="$(eval "$cmd" 2>&1)"; then
       echo -e "${GREEN}✓${NC}"
       passed=$((passed + 1))
@@ -137,7 +137,7 @@ retry_test() {
     sleep 0.2
   done
   echo -e "${RED}✗${NC}"
-  echo "    retry_test exhausted (~15s); last output: ${last}" >&2
+  echo "    retry_test exhausted (~60s); last output: ${last}" >&2
   failed=$((failed + 1))
   return 0
 }
@@ -485,16 +485,12 @@ assert_contains "git-source content-install: config verify -> OK" \
 # (d) a SECOND run with the lock present is a no-op: the units + artifact-
 # content sections are byte-unchanged (only the install-stamp timestamp
 # moves), and the projected files are byte-identical (H9 frozen = no rewrite).
-# TEMP-DIAG10 (revert before merge): show the ACTUAL cp error + a python-open probe.
-echo "DIAG10 cp-err=$(cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json" 2>&1; echo " exit=$?")" >&2
-echo "DIAG10 pyopen=$(python3 -c "import sys; d=open(sys.argv[1]).read(); print('okbytes=%d' % len(d))" "${PKG_PROJ}/.agentsrc.lock" 2>&1)" >&2
-echo "DIAG10 before-exists=$(test -f "${SMOKE_ROOT}/pkg-lock-before.json" && echo yes || echo NO)" >&2
 # Snapshot the pre-2nd-install lock + projected skill. The source lock was just
 # touched by `config verify`; on windows-latest a filter driver can briefly hold it,
 # so a bare cp would silently fail and leave the snapshot missing (every later read
 # of it then throws FileNotFoundError). Retry the cp until the source is readable.
-for _i in $(seq 1 75); do cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json" 2>/dev/null && break; sleep 0.2; done
-for _i in $(seq 1 75); do cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md" 2>/dev/null && break; sleep 0.2; done
+for _i in $(seq 1 300); do cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json" 2>/dev/null && break; sleep 0.2; done
+for _i in $(seq 1 300); do cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md" 2>/dev/null && break; sleep 0.2; done
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
 # retry_test: the lock read immediately follows the install's atomic re-write and
@@ -512,13 +508,12 @@ test_command "git-source content-install: projected skill byte-identical after t
 # read-after-write race, and if it returned empty the CAS path below would be
 # permanently malformed (a retry on `test -f` could never recover).
 PKG_SKILL_DIGEST=""
-for _i in $(seq 1 75); do
+for _i in $(seq 1 300); do
   PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])" 2>/dev/null)"
   case "${PKG_SKILL_DIGEST}" in sha256:*) break ;; esac
   sleep 0.2
 done
 PKG_CAS_FILE="${AGENTS_HOME}/cache/artifacts/skills/${PKG_SKILL_DIGEST#sha256:}/SKILL.md"
-echo "    DIAG7 PKG_SKILL_DIGEST=${PKG_SKILL_DIGEST} CAS=${PKG_CAS_FILE}" >&2
 # retry_test: same windows read-after-write race on the CAS entry probe.
 retry_test "git-source content-install: skill CAS entry exists before tamper" "test -f '${PKG_CAS_FILE}'"
 chmod +w "${PKG_CAS_FILE}"
