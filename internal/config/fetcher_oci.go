@@ -378,6 +378,14 @@ type ociBlob struct {
 	Data      []byte
 	Digest    string
 	MediaType string
+	// ArtifactType is the OCI 1.1 manifest-level `artifactType` field (distinct
+	// from MediaType, which is the layer/blob descriptor's own media type).
+	// H6 (package-artifact-install spec §3A) requires a packages/artifact pull
+	// to validate BOTH independently against the artifact-bundle media type —
+	// a registry that is consistent at one level but wrong/omitted at the
+	// other must still fail closed. Empty for a layer pull (fetcher_oci_layer.go
+	// does not require it) and for any puller/test fixture that predates H6.
+	ArtifactType string
 }
 
 // ociPuller is the shared OCI Distribution pull seam used by both the artifact
@@ -410,7 +418,10 @@ type ociRef struct {
 
 // parseOCIRef builds an ociRef from a source URL (oci://registry/base-path) and
 // a package ref's artifact path + version spec. A "pinned:sha256:..." version
-// spec (spec §5) becomes a digest pin; any other spec is treated as a tag.
+// spec (spec §5) becomes a digest pin; any other spec is treated as a literal
+// tag, EXCEPT a spec that looks like a still-deferred SemVer range (spec §6),
+// which is rejected up front by classifyOCIVersionSpec (oci_resolve.go) rather
+// than silently sent to the registry as a nonsense tag name.
 func parseOCIRef(src Source, parts PackageRefParts) (ociRef, error) {
 	url := strings.TrimSpace(src.URL)
 	if url == "" {
@@ -437,11 +448,11 @@ func parseOCIRef(src Source, parts PackageRefParts) (ociRef, error) {
 		repo = basePath + "/" + repo
 	}
 	ref := ociRef{Registry: registry, Repository: repo}
-	if d, ok := digestFromVersionSpec(parts.VersionSpec); ok {
-		ref.Digest = d
-	} else {
-		ref.Tag = parts.VersionSpec
+	tag, digest, err := classifyOCIVersionSpec(parts.VersionSpec)
+	if err != nil {
+		return ociRef{}, err
 	}
+	ref.Tag, ref.Digest = tag, digest
 	return ref, nil
 }
 
@@ -468,6 +479,33 @@ func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedAr
 	if err != nil {
 		return FetchedArtifact{}, err
 	}
+	// H6 — a fresh pull's declared types are the only signal available; a
+	// cache hit has no manifest to re-read, so its media type was already
+	// validated at this same strictness when it was first pulled and cached
+	// (pullOCIContent's cache-hit comment). This is deliberately stricter than
+	// the shared pullOCIContent/guardOCIPull check below it (which stays
+	// tolerant of an empty served media type for the `extends`/config-layer
+	// OCI path — fetcher_oci_layer.go — where that tolerance is still relied
+	// on): a packages/artifact pull rejects empty/missing/mismatched types at
+	// BOTH the manifest and the blob/descriptor level, before the payload is
+	// ever cached or untarred.
+	if !pulled.CacheHit {
+		if err := guardOCIArtifactType(pulled, importRef, parts.SourceID); err != nil {
+			return FetchedArtifact{}, err
+		}
+	}
+	// CRITICAL (t3 review #5) — an OCI artifact-bundle pull is always
+	// tree-shaped (`+tar+gzip`); without this, FetchedArtifact.Bundle stayed
+	// nil for every OCI ref and the pass-2 driver rejected it as "not a
+	// directory-shaped bundle". Route both a fresh pull and a digest-pinned
+	// cache hit through the same H1 fail-closed normalizer the git/local/http
+	// fetchers use (MaybeUntarBundle), so an OCI ref materializes exactly like
+	// any other content layout. Data/Digest continue to address the fetched
+	// bytes exactly as before — Bundle is an additional, derived view.
+	bundle, err := MaybeUntarBundle(pulled.Data, DefaultBundleLimits())
+	if err != nil {
+		return FetchedArtifact{}, &ImportError{Ref: importRef, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("oci artifact bundle: %w", err)}
+	}
 	if err := writeCachedArtifact(pulled.Digest, pulled.Data); err != nil {
 		return FetchedArtifact{}, err
 	}
@@ -477,7 +515,33 @@ func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedAr
 		CacheHit:  pulled.CacheHit,
 		Posture:   pulled.Posture,
 		KeyInputs: CacheKeyInputs{OCIDigest: pulled.Digest},
+		Bundle:    bundle,
 	}, nil
+}
+
+// guardOCIArtifactType is the H6 strict guard applied only to a FRESH OCI
+// packages/artifact pull (package-artifact-install spec §3A H6): the
+// manifest-level artifactType AND the blob/descriptor media type must BOTH
+// independently declare the artifact-bundle type, with no empty-type
+// tolerance — a registry that omits either, or serves the wrong type at
+// either level, fails before the payload is cached or untarred. "No new
+// UnitKind is introduced" (H6): the lock's kind stays "artifact" for every
+// family; this guards the OCI wire-level type declarations, not the lock
+// shape.
+func guardOCIArtifactType(pulled ociContent, importRef, sourceID string) error {
+	if pulled.ArtifactType == "" {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci manifest is missing the required artifactType %q", ociArtifactMediaType)}
+	}
+	if pulled.ArtifactType != ociArtifactMediaType {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci manifest artifactType %q does not match required %q", pulled.ArtifactType, ociArtifactMediaType)}
+	}
+	if pulled.MediaType == "" {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci layer descriptor is missing the required media type %q", ociArtifactMediaType)}
+	}
+	if pulled.MediaType != ociArtifactMediaType {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci layer media type %q does not match required %q", pulled.MediaType, ociArtifactMediaType)}
+	}
+	return nil
 }
 
 // ociContent is the shared, kind-agnostic result of pullOCIContent: the resolved
@@ -489,6 +553,13 @@ type ociContent struct {
 	Digest   string
 	CacheHit bool
 	Posture  SigningPosture
+	// MediaType and ArtifactType carry the raw blob descriptor media type and
+	// manifest-level artifactType from a FRESH pull (both "" on a cache hit,
+	// which has no manifest to re-read). The layer fetcher (fetcher_oci_layer.go)
+	// ignores them, preserving its existing tolerant contract; the packages
+	// fetcher (below) applies its own stricter H6 guard on them.
+	MediaType    string
+	ArtifactType string
 }
 
 // pullOCIContent is the single OCI pull shared by the artifact and layer
@@ -523,26 +594,49 @@ func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceI
 	if err != nil {
 		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonTransport, Err: err}
 	}
-	digest := blob.Digest
-	if digest == "" {
-		digest = artifactDigest(blob.Data)
-	}
+	// H5 (BLOCKER: digest conflation) — the content digest is ALWAYS recomputed
+	// over the fetched payload here, never taken as-is from blob.Digest. The old
+	// "trust the reported digest when non-empty" shape let a registry (or a
+	// tampering man-in-the-middle) SERVE bytes that don't match a pin while
+	// LABELING them with the pinned digest, defeating the pin check below
+	// entirely. Recomputing means the label is never trusted for anything —
+	// this is the same content-addressing discipline the git/local/http
+	// fetchers already apply. `pinned:sha256:...` (ref.Digest) addresses this
+	// recomputed payload digest, the same content-addressing contract every
+	// other fetcher uses for its own `pinned:` form; a future revision that
+	// wires the real manifest-fetch step and exposes a distinct manifest
+	// digest can compare the pin against that manifest digest instead without
+	// weakening this payload recomputation, which remains the tamper-evidence
+	// anchor regardless of what the pin semantically addresses. blob.Digest
+	// (whatever the registry reported for the manifest or the layer
+	// descriptor) is deliberately never compared to the recomputed digest as
+	// if the two must be equal: a manifest digest and a blob digest are
+	// different objects' hashes and legitimately differ — that divergence is
+	// simply not an error here (it is "handled explicitly" by not conflating
+	// them, rather than by asserting they match).
+	digest := artifactDigest(blob.Data)
 	if err := guardOCIPull(ref, digest, blob.MediaType, wantMediaType, importRef, sourceID); err != nil {
 		return ociContent{}, err
 	}
 	if err := verifySignature(posture, digest, false); err != nil {
 		return ociContent{}, err
 	}
-	return ociContent{Data: blob.Data, Digest: digest, CacheHit: false, Posture: posture}, nil
+	return ociContent{Data: blob.Data, Digest: digest, CacheHit: false, Posture: posture, MediaType: blob.MediaType, ArtifactType: blob.ArtifactType}, nil
 }
 
-// guardOCIPull validates a freshly pulled blob: the digest must match a pin
-// (tamper guard) and the media type must match the caller's declared kind (the
-// §15 D13 kind guard). An empty served media type is tolerated as the requested
-// kind so a registry that omits the descriptor type still resolves.
+// guardOCIPull validates a freshly pulled blob: the recomputed payload digest
+// must match a pin (tamper guard — see pullOCIContent's H5 comment on why the
+// digest passed in here is always recomputed, never the registry-reported
+// label) and the media type must match the caller's declared kind (the §15
+// D13 kind guard). An empty served media type is tolerated as the requested
+// kind so a registry that omits the descriptor type still resolves; the
+// packages/artifact path applies a stricter, non-tolerant guard of its own on
+// top of this one (guardOCIArtifactType, H6) — this shared guard stays
+// tolerant because the `extends`/config-layer OCI path relies on that
+// tolerance (fetcher_oci_layer.go).
 func guardOCIPull(ref ociRef, digest, gotMediaType, wantMediaType, importRef, sourceID string) error {
 	if ref.Digest != "" && digest != ref.Digest {
-		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but registry served %s", ref.Digest, digest)}
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but recomputed payload digest is %s", ref.Digest, digest)}
 	}
 	if gotMediaType != "" && gotMediaType != wantMediaType {
 		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci media type %q does not match required %q", gotMediaType, wantMediaType)}

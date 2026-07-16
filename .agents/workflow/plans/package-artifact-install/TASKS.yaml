@@ -95,7 +95,9 @@ tasks:
         - internal/config/resolver.go
         - internal/config/oci_resolve.go
       verification_required: true
-      notes: 'H5 — pinned: addresses the manifest; recompute SHA-256 over the fetched payload and compare to the layer descriptor BEFORE cache/untar; lock the verified content digest; handle manifest-digest not equal blob-digest. H6 — require manifest artifactType == artifact-bundle media type AND the family-specific type; reject empty/missing/mismatch (remove the empty-type tolerance at fetcher_oci.go:423-434). Reuse the t2 materialize path. SemVer ranges stay deferred.'
+      notes: |-
+        H5 — pinned: addresses the manifest; recompute SHA-256 over the fetched payload and compare to the layer descriptor BEFORE cache/untar; lock the verified content digest; handle manifest-digest not equal blob-digest. H6 — require manifest artifactType == artifact-bundle media type AND the family-specific type; reject empty/missing/mismatch (remove the empty-type tolerance at fetcher_oci.go:423-434). Reuse the t2 materialize path. SemVer ranges stay deferred.
+        - (fb:oci-consume-pass2-guard-blocks-e2e) t6 write_scope (fetcher_oci.go/resolver.go/oci_resolve.go) fixed the CRITICAL Bundle-population gap plus H5/H6, all proven by unit + a full materialize+project e2e test in internal/config, but commands/internal/lifecycle/packages_pass2.go:246-248 still hard-rejects src.Type == oci before ever calling FetchArtifact (a stale t3 review #5 stopgap, out of t6 write_scope). Real da install/refresh against an OCI source will still fail with the old deferred-to-t6 message until that 3-line guard is deleted; every other OCI consume behavior (H1 Bundle, H5 digest, H6 media-type) is ready and tested.
       app_type: go-cli
     - id: t7-oci-auth
       title: OCI registry auth (bearer + credential-helper providers)

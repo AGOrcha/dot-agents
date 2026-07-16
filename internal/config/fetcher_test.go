@@ -461,7 +461,7 @@ func TestOCIFetcherPullsAndCaches(t *testing.T) {
 		if ref.Registry != "reg.example" {
 			t.Fatalf("registry = %q", ref.Registry)
 		}
-		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
 	}}
 	src := Source{Type: "oci", URL: "oci://reg.example/base"}
 	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
@@ -530,7 +530,7 @@ func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("no-digest-from-reg")
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, MediaType: ociArtifactMediaType}, nil // registry omits digest
+		return ociBlob{Data: blob, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil // registry omits digest
 	}}
 	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err != nil {
@@ -603,7 +603,7 @@ func TestOCIFetcherCacheWriteError(t *testing.T) {
 	}
 	blob := []byte("b")
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType}, nil
+		return ociBlob{Data: blob, Digest: "sha256:" + sha256Hex(blob), MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
 	}}
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
@@ -625,6 +625,258 @@ func TestOCIFetcherDefaultPullerErrors(t *testing.T) {
 	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
 	if err == nil {
 		t.Fatal("expected error from unwired default puller")
+	}
+}
+
+// TestOCIFetcherPopulatesBundleFromFreshPull is the core t6 verification bar
+// (CRITICAL, t3 review #5): a fresh OCI pull whose payload is a `+tar+gzip`
+// artifact bundle must populate FetchedArtifact.Bundle through the H1
+// fail-closed normalizer, exactly like the git/local/http fetchers, so the
+// pass-2 driver's "not a directory-shaped bundle" rejection no longer fires
+// for an OCI ref.
+func TestOCIFetcherPopulatesBundleFromFreshPull(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("skill body"))
+		tarAddDir(t, tw, "instructions", 0o755)
+		tarAddFile(t, tw, "instructions/x.md", 0o644, []byte("nested body"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example/base"}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle for a gzip-sniffed OCI artifact payload")
+	}
+	if string(got.Data) != string(blob) {
+		t.Fatal("expected Data to still carry the raw compressed bytes alongside Bundle")
+	}
+	byPath := make(map[string]BundleEntry, len(got.Bundle.Entries))
+	for _, e := range got.Bundle.Entries {
+		byPath[e.Path] = e
+	}
+	nested, ok := byPath["instructions/x.md"]
+	if !ok || string(nested.Data) != "nested body" {
+		t.Fatalf("expected nested instructions/x.md relative to the resource root, got paths %v", bundlePaths(*got.Bundle))
+	}
+}
+
+// TestOCIFetcherPopulatesBundleFromCachedPin proves a digest-pinned OCI pull
+// served from the local packages cache (no pull, no manifest to re-read) is
+// still decoded into a Bundle — the cache-hit path must not silently drop the
+// H1 normalization a fresh pull gets.
+func TestOCIFetcherPopulatesBundleFromCachedPin(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("cached body"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{}, errors.New("should not pull on a pinned cache hit")
+	}}
+	src := Source{Type: "oci", URL: "oci://reg.example"}
+	got, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit {
+		t.Fatal("expected a cache hit")
+	}
+	if got.Bundle == nil {
+		t.Fatal("expected a Bundle decoded from the cached pinned payload")
+	}
+	if len(got.Bundle.Entries) == 0 || got.Bundle.Entries[0].Path != "SKILL.md" {
+		t.Fatalf("unexpected bundle entries %+v", got.Bundle.Entries)
+	}
+}
+
+// TestOCIFetcherNonGzipBodyHasNoBundle mirrors the http fetcher's legacy
+// opaque-blob contract: a payload that does not sniff as gzip is not an
+// error, it simply carries no Bundle (spec D3: a plain single-file artifact
+// pull is not installable via packages, but the fetcher itself does not
+// decide that — the pass-2 driver does).
+func TestOCIFetcherNonGzipBodyHasNoBundle(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("plain single-file blob")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if got.Bundle != nil {
+		t.Fatalf("expected no Bundle for a non-gzip payload, got %+v", got.Bundle)
+	}
+}
+
+// TestOCIFetcherRejectsAdversarialBundle is the OCI half of the H1 adversarial
+// requirement, exercised through the REAL fetch path: a `../escape` entry in
+// the tar payload is rejected before FetchArtifact returns, and critically,
+// before the payload is ever written to the packages cache.
+func TestOCIFetcherRejectsAdversarialBundle(t *testing.T) {
+	withPackagesCache(t)
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "good.txt", 0o644, []byte("g"))
+		tarAddFile(t, tw, "../escape", 0o644, []byte("evil"))
+	})
+	digest := "sha256:" + sha256Hex(blob)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting the adversarial tarball, got %v", err)
+	}
+	if _, ok := readCachedArtifact(digest); ok {
+		t.Fatal("a rejected OCI bundle must not be written to the packages cache")
+	}
+}
+
+// TestOCIFetcherRejectsSpoofedDigestLabel is the H5 regression test (BLOCKER:
+// digest conflation): a registry (or a tampering man-in-the-middle) that
+// serves DIFFERENT bytes than a pin addresses, while LABELING the blob with
+// the pinned digest, must be rejected. The old "trust the reported digest
+// when non-empty" shape compared the spoofed label against the pin and let
+// this through; the fix recomputes SHA-256 over the actual payload, which
+// never matches the pin here.
+func TestOCIFetcherRejectsSpoofedDigestLabel(t *testing.T) {
+	withPackagesCache(t)
+	real := []byte("real-content")
+	tampered := []byte("tampered-content")
+	pin := "sha256:" + sha256Hex(real)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: tampered, Digest: pin, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	src := Source{URL: "oci://reg.example"}
+	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + pin})
+	if err == nil {
+		t.Fatal("expected a digest-mismatch error from the recomputed payload hash, not the spoofed label")
+	}
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error, got %v", err)
+	}
+	if _, ok := readCachedArtifact(pin); ok {
+		t.Fatal("a payload whose bytes don't match the pin must never be cached under that pin")
+	}
+}
+
+// TestOCIFetcherRejectsMissingManifestArtifactType is an H6 negative test: a
+// registry that omits the manifest-level artifactType must fail closed for a
+// packages/artifact pull — the old guard tolerated an empty served media type;
+// H6 removes that tolerance.
+func TestOCIFetcherRejectsMissingManifestArtifactType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), MediaType: ociArtifactMediaType}, nil // ArtifactType omitted
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for a missing manifest artifactType, got %v", err)
+	}
+}
+
+// TestOCIFetcherRejectsMismatchedManifestArtifactType is an H6 negative test:
+// a manifest declaring a different artifactType (e.g. the config-layer type,
+// which some other OCI blob in the same registry legitimately carries) must
+// be rejected before it is ever treated as an artifact bundle.
+func TestOCIFetcherRejectsMismatchedManifestArtifactType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), MediaType: ociArtifactMediaType, ArtifactType: ociLayerMediaType}, nil
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for a mismatched manifest artifactType, got %v", err)
+	}
+}
+
+// TestOCIFetcherRejectsMissingLayerMediaType is an H6 negative test: the
+// blob/descriptor's own media type must also be present — a manifest with a
+// correct artifactType but a registry that omits the layer descriptor's media
+// type must still fail (H6 requires BOTH checks, independently).
+func TestOCIFetcherRejectsMissingLayerMediaType(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("artifact-bytes")
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{Data: blob, Digest: artifactDigest(blob), ArtifactType: ociArtifactMediaType}, nil // MediaType omitted
+	}}
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonSchema {
+		t.Fatalf("want schema error for a missing layer media type, got %v", err)
+	}
+}
+
+// TestOCIFetcherCacheHitSkipsManifestTypeGuard proves a digest-pinned cache
+// hit is not held to the strict fresh-pull type guard (it has no manifest to
+// re-read; its type was already validated when first pulled and cached, per
+// pullOCIContent's cache-hit comment) — a cache hit succeeds even though the
+// stored bytes alone carry no type metadata.
+func TestOCIFetcherCacheHitSkipsManifestTypeGuard(t *testing.T) {
+	withPackagesCache(t)
+	blob := []byte("cached-artifact-bytes")
+	digest := "sha256:" + sha256Hex(blob)
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		return ociBlob{}, errors.New("should not pull on a pinned cache hit")
+	}}
+	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
+	if err != nil {
+		t.Fatalf("FetchArtifact: %v", err)
+	}
+	if !got.CacheHit {
+		t.Fatal("expected a cache hit")
+	}
+}
+
+// TestParseOCIRefRejectsSemVerRange proves a SemVer range version-spec is
+// rejected up front (spec §6: ranges stay deferred) rather than silently
+// forwarded to the registry as a literal (and almost certainly wrong) tag.
+func TestParseOCIRefRejectsSemVerRange(t *testing.T) {
+	cases := []string{"^1.2", "~1.2.3", ">=1.0", "1.x", "1.2.0 - 1.3.0", "*"}
+	src := Source{URL: "oci://reg.example/base"}
+	for _, spec := range cases {
+		t.Run(spec, func(t *testing.T) {
+			_, err := parseOCIRef(src, PackageRefParts{ArtifactPath: "skill/x", VersionSpec: spec})
+			if err == nil {
+				t.Fatalf("expected a deferred-range error for version-spec %q", spec)
+			}
+		})
+	}
+}
+
+// TestParseOCIRefAcceptsLiteralTags proves ordinary tag-shaped version specs
+// (unaffected by the SemVer-range guard) still resolve as literal tags.
+func TestParseOCIRefAcceptsLiteralTags(t *testing.T) {
+	cases := []string{"1.2.3", "latest", "main", "v2", ""}
+	src := Source{URL: "oci://reg.example/base"}
+	for _, spec := range cases {
+		t.Run(spec, func(t *testing.T) {
+			ref, err := parseOCIRef(src, PackageRefParts{ArtifactPath: "skill/x", VersionSpec: spec})
+			if err != nil {
+				t.Fatalf("parseOCIRef(%q): unexpected error %v", spec, err)
+			}
+			if ref.Tag != spec || ref.Digest != "" {
+				t.Fatalf("parseOCIRef(%q) = %+v, want Tag=%q Digest=\"\"", spec, ref, spec)
+			}
+		})
 	}
 }
 
@@ -1424,7 +1676,7 @@ func TestOCIFetcherCapturesDigestCacheKey(t *testing.T) {
 	blob := []byte("artifact-bytes")
 	digest := artifactDigest(blob)
 	f := &ociFetcher{puller: func(_ context.Context, _ ociRef, _ []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType}, nil
+		return ociBlob{Data: blob, Digest: digest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
 	}}
 	got, err := f.FetchArtifact(Source{Type: "oci", URL: "oci://reg.test/base"}, PackageRefParts{SourceID: "acme", ArtifactPath: "skill/x", VersionSpec: "1.0.0"})
 	if err != nil {
