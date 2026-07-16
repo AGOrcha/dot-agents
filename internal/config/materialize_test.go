@@ -665,6 +665,101 @@ func TestGCOrphanedArtifactStore_MissingStoreRootIsNotAnError(t *testing.T) {
 	}
 }
 
+// TestLiveArtifactDigests_UnreadableBoundLockFailsClosed is the t3b round-2
+// data-loss BLOCKER regression: a BOUND project whose .agentsrc.lock EXISTS
+// but cannot be parsed (a concurrent agentslock.Update mid-write, an IO/NFS
+// hiccup, a partial/corrupt write) must make LiveArtifactDigests return an
+// ERROR — never a silently-partial union that would let GC treat that
+// project's live digests as orphans and delete them. The critical assertion
+// is the full sequence a real caller runs: LiveArtifactDigests errors, so GC
+// is NEVER reached, so the store entry that project references SURVIVES.
+func TestLiveArtifactDigests_UnreadableBoundLockFailsClosed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	// A CAS entry only this project references — if the union under-collects,
+	// GC would delete it. It must survive the whole test.
+	liveBundle := testBundle(t, map[string]string{"SKILL.md": "# still referenced\n"})
+	livePath, liveDigest, _, err := MaterializeToStore(home, "skills", liveBundle)
+	if err != nil {
+		t.Fatalf("materialize live: %v", err)
+	}
+
+	// Bind the project and write a LEGITIMATE lock referencing liveDigest…
+	projPath := filepath.Join(t.TempDir(), "proj")
+	lockLiveArtifact(t, home, "proj", projPath, "src:skill/live@main", liveDigest)
+	// …then CORRUPT that on-disk lock so ReadUnits fails to parse it (the file
+	// exists — this is the UNSAFE case, distinct from a never-written lock).
+	lockPath := AgentsLockPath(projPath)
+	if err := os.WriteFile(lockPath, []byte("{ this is not valid json"), 0o644); err != nil {
+		t.Fatalf("corrupt lock: %v", err)
+	}
+
+	// Fail-closed contract: the union must be an ERROR, not a partial set.
+	live, err := LiveArtifactDigests()
+	if err == nil {
+		t.Fatalf("expected LiveArtifactDigests to fail closed on an unreadable bound lock, got live=%v", live)
+	}
+	if live != nil {
+		t.Fatalf("expected a nil digest set alongside the error, got %v", live)
+	}
+
+	// The real caller aborts here (never calls GC on an errored union). Prove
+	// the live entry is untouched — the data-loss path is closed.
+	if _, statErr := os.Stat(livePath); statErr != nil {
+		t.Fatalf("expected the still-referenced CAS entry to survive when the union errors, got err=%v", statErr)
+	}
+}
+
+// TestLiveArtifactDigests_MissingLockContributesEmptyNotError is the other
+// half of the round-2 fix: a BOUND, never-installed project (no .agentsrc.lock
+// on disk at all) is the SAFE case — it provably has zero artifact units, so
+// it contributes nothing WITHOUT erroring. The fail-closed branch must fire
+// only for a present-but-unreadable lock, not for a legitimately-absent one,
+// or GC could never run whenever any registered project simply never installed
+// packages.
+func TestLiveArtifactDigests_MissingLockContributesEmptyNotError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+
+	// Bind a project but write NO lock for it (never installed anything).
+	emptyProj := filepath.Join(t.TempDir(), "empty-proj")
+	if err := os.MkdirAll(emptyProj, 0o755); err != nil {
+		t.Fatalf("mkdir empty project: %v", err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.AddProject("empty-proj", emptyProj)
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if _, statErr := os.Stat(AgentsLockPath(emptyProj)); !os.IsNotExist(statErr) {
+		t.Fatalf("precondition: expected NO lock on disk for the never-installed project, stat err=%v", statErr)
+	}
+
+	// A second project with a REAL artifact lock, so the union is non-empty and
+	// we prove the missing-lock project neither errored nor polluted it.
+	liveBundle := testBundle(t, map[string]string{"SKILL.md": "# live\n"})
+	_, liveDigest, _, err := MaterializeToStore(home, "skills", liveBundle)
+	if err != nil {
+		t.Fatalf("materialize live: %v", err)
+	}
+	lockLiveArtifact(t, home, "installed-proj", filepath.Join(t.TempDir(), "installed"), "src:skill/live@main", liveDigest)
+
+	live, err := LiveArtifactDigests()
+	if err != nil {
+		t.Fatalf("expected a missing (never-installed) lock to be a clean empty contribution, got err=%v", err)
+	}
+	if !live[liveDigest] {
+		t.Fatalf("expected the installed project's digest %q in the union", liveDigest)
+	}
+	if len(live) != 1 {
+		t.Fatalf("expected exactly the one real digest in the union, got %v", live)
+	}
+}
+
 // TestGCOrphanedArtifactStore_ConcurrentCallersDoNotRace exercises repeated
 // concurrent GC sweeps over the SAME store+family (e.g. two overlapping
 // install/refresh invocations both triggering GC) under -race: every

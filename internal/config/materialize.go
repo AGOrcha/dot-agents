@@ -471,24 +471,41 @@ func VerifyArtifactStoreDigest(agentsHome, family, digest string, bundle Bundle)
 
 // LiveArtifactDigests unions the kind:artifact content digests referenced by
 // every known, machine-bound project's lock (H11: this union MUST be
-// computed before any GC deletion — a digest referenced by even one project
-// is never treated as orphaned). It reads the identity registry (Load) to
-// discover every registered project, resolves each to its machine-local
-// bound path (GetProjectPath — an unbound project has no local lock to read
-// and is skipped, not an error), and reads that project's units lock
+// computed — COMPLETELY — before any GC deletion, because a digest referenced
+// by even one project is never an orphan). It reads the identity registry
+// (Load) to discover every registered project, resolves each to its
+// machine-local bound path (GetProjectPath — an unbound project has no local
+// lock and contributes nothing), and reads that project's units lock
 // (ReadUnits) for every kind:artifact entry's Digest.
 //
-// A project whose lock cannot be read (never installed, corrupt, or removed
-// from disk since registration) is skipped rather than failing the whole
-// union closed: GC is best-effort reclamation, not a correctness-critical
-// path, and one bad project's lock must not block reclaiming orphans for
-// every other project. The returned set is family-agnostic (a raw digest
-// string, not scoped to skills/agents/plugins) — deliberately conservative:
-// treating a digest referenced under a DIFFERENT family as "live" only means
-// GCOrphanedArtifactStore under-collects (skips something it could have
-// safely removed), never that it removes something still referenced. H11
-// forbids the latter; the former is merely a smaller reclaim, not a
-// correctness violation.
+// CRITICAL fail-closed contract (t3b round-2 — a data-loss BLOCKER fix): the
+// union is either COMPLETE or an ERROR — never a silent partial. Under-
+// collecting the LIVE set is not "conservative", it is the OVER-DELETE bug:
+// GCOrphanedArtifactStore treats any digest ABSENT from this set as an orphan
+// and RemoveAll's it, so a live digest omitted here is a live CAS entry
+// deleted out from under a project that still references it. Therefore, for a
+// BOUND project (path != ""), the two failure modes of ReadUnits are treated
+// differently:
+//
+//   - lock file DOES NOT EXIST (os.IsNotExist): SAFE — the project simply has
+//     no lock / no artifact units yet (never installed), so it provably
+//     contributes zero digests. Continue. (agentslock.Open already maps a
+//     missing file to an empty, error-free lockfile, so ReadUnits does not
+//     even surface this as an error today; the explicit IsNotExist branch is
+//     belt-and-suspenders against a future Open that propagates it.)
+//   - lock EXISTS but WON'T READ/PARSE (any other error — a concurrent
+//     agentslock.Update mid-write, an IO/NFS hiccup, a partial or corrupt
+//     write): UNSAFE — we cannot prove what that project references, so we
+//     MUST NOT skip it and let its digests look orphaned. Fail the whole
+//     union closed, wrapped with the project name+path, so no caller ever
+//     runs GC against a union that could be missing a live entry.
+//
+// The returned set is family-agnostic (a raw digest string, not scoped to
+// skills/agents/plugins) — deliberately conservative in the SAFE direction:
+// treating a digest referenced under a DIFFERENT family as "live" only makes
+// GCOrphanedArtifactStore under-COLLECT (skip something it could have safely
+// removed), which is a smaller reclaim, never a data-loss. That is the only
+// direction over-inclusion is allowed; under-including the live set is not.
 func LiveArtifactDigests() (map[string]bool, error) {
 	cfg, err := Load()
 	if err != nil {
@@ -502,7 +519,13 @@ func LiveArtifactDigests() (map[string]bool, error) {
 		}
 		units, err := ReadUnits(path)
 		if err != nil {
-			continue // unreadable/corrupt lock — best-effort union, skip
+			if os.IsNotExist(err) {
+				continue // no lock yet — provably zero artifact units, safe to skip
+			}
+			// Present-but-unreadable lock: we cannot prove this project's live
+			// set, so the union would be silently partial. Fail closed rather
+			// than let GC over-delete a digest this project may still reference.
+			return nil, fmt.Errorf("gc: project %q lock at %s is unreadable — refusing to compute a partial live-digest set (would risk deleting a live CAS entry): %w", name, path, err)
 		}
 		for _, u := range units.Units {
 			if u.Kind == UnitKindArtifact && u.Digest != "" {
@@ -535,6 +558,17 @@ func looksLikeStoreDigestDirName(name string) bool {
 // installs already take on the project's .agentsrc.lock (agentslock.Update) —
 // this function does not take that lock itself because it operates on the
 // SHARED store root, not any one project's lock file.
+//
+// CONTRACT (t3b round-2, data-loss fail-closed): liveDigests MUST be a
+// COMPLETE union — the value returned by a NON-error LiveArtifactDigests
+// call. A caller that got an error from LiveArtifactDigests MUST abort and
+// never reach here: this function deletes every digest-shaped entry absent
+// from the set it is handed, so a partial set silently becomes a delete list
+// of live entries. GCOrphanedArtifactStore cannot itself detect an under-
+// complete set (it has no way to tell "no project references D" from "the
+// project that references D failed to load"), which is exactly why the
+// completeness guarantee lives in LiveArtifactDigests' error channel and the
+// caller must honor it.
 //
 // H17 (no unsafe RemoveAll after an ownership check alone): every deletion
 // candidate must satisfy ALL three gates before RemoveAll runs —
