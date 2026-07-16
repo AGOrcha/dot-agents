@@ -1,0 +1,8 @@
+schema_version: 1
+id: eligible-probe-landed-work-at-orientation
+plan_id: full-loop-orchestration-runtime
+task_id: ""
+observation: Orientation gap surfaced TWICE in wave-1 (2026-07-16) — da workflow eligible marked t12-e2e-smoke-live-iteration and (partially) t15-rubric-versioning-ui as fresh implementation tasks when their write_scope files were ALREADY landed on master (t12 fully at commit 86ed255d; t15 RubricView skeleton), with only the task status stale-pending. The reconcile-task-status-on-pr-merge lesson fires at PR-merge time, NOT at orientation, so the orchestrator fanned out a full worker just to discover the work was already done. FIX — eligible accounting (commands/workflow/eligible_accounting.go) should run a cheap deterministic read-only write_scope-vs-master probe per candidate (git cat-file -e master path, or git log for the scope) and annotate each eligible task with a landed-work signal (scope_already_present true|partial|false) so the orchestrator routes landed work to a status-reconcile closeout instead of a fresh implementation bundle. Saves a whole worker dispatch per stale task; deterministic and read-only. Escalates the existing reconcile-task-status-on-pr-merge lesson from PR-merge-time to orientation-time.
+classification: proposal
+routed_to: proposal:obs-eligible-probe-landed-work-at-orientation.md
+created_at: "2026-07-16T05:17:10Z"
