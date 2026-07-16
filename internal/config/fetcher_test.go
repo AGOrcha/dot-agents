@@ -451,6 +451,22 @@ func TestReadCachedArtifactRejectsSymlinkedCacheEntry(t *testing.T) {
 
 // --- oci fetcher -----------------------------------------------------------
 
+// seedOCIArtifactCache writes both the content-addressed blob AND its OCI type
+// sidecar, mirroring what a validated fresh OCI artifact pull leaves on disk.
+// A digest-pinned cache hit is only trusted when the sidecar is present
+// (Finding 2 / H6-on-cache-hit), so a test that wants to exercise the cache
+// fast path must seed both — seeding the blob alone now (correctly) reads back
+// as a miss.
+func seedOCIArtifactCache(t *testing.T, digest string, blob []byte) {
+	t.Helper()
+	if err := writeCachedArtifact(digest, blob); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeOCITypeSidecar(digest, ociArtifactMediaType, ociArtifactMediaType); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOCIFetcherPullsAndCaches(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("artifact-bytes")
@@ -487,9 +503,7 @@ func TestOCIFetcherDigestPinCacheHit(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("pinned-blob")
 	digest := "sha256:" + sha256Hex(blob)
-	if err := writeCachedArtifact(digest, blob); err != nil {
-		t.Fatal(err)
-	}
+	seedOCIArtifactCache(t, digest, blob)
 	pulled := false
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
 		pulled = true
@@ -581,9 +595,7 @@ func TestOCIFetcherRequiredPostureCacheHitFails(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("pinblob")
 	digest := "sha256:" + sha256Hex(blob)
-	if err := writeCachedArtifact(digest, blob); err != nil {
-		t.Fatal(err)
-	}
+	seedOCIArtifactCache(t, digest, blob)
 	f := &ociFetcher{}
 	src := Source{URL: "oci://reg.example", Auth: json.RawMessage(`{"signing":"required"}`)}
 	_, err := f.FetchArtifact(src, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "pinned:" + digest})
@@ -676,9 +688,7 @@ func TestOCIFetcherPopulatesBundleFromCachedPin(t *testing.T) {
 		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("cached body"))
 	})
 	digest := "sha256:" + sha256Hex(blob)
-	if err := writeCachedArtifact(digest, blob); err != nil {
-		t.Fatal(err)
-	}
+	seedOCIArtifactCache(t, digest, blob)
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
 		return ociBlob{}, errors.New("should not pull on a pinned cache hit")
 	}}
@@ -771,6 +781,76 @@ func TestOCIFetcherRejectsSpoofedDigestLabel(t *testing.T) {
 	}
 }
 
+// TestOCIFetcherRejectsTamperedTagPull is the Finding 1 (BLOCKER) regression
+// test: a TAG pull (no pin) whose manifest layer-descriptor declares digest D
+// but whose registry serves bytes that hash to D' must be rejected BEFORE the
+// bytes reach the untar decoder or the cache. The earlier shape discarded the
+// declared layer-descriptor digest and only compared against a pin, so a tag
+// pull had NO integrity check at all — a MITM serving tampered bytes under a
+// valid tag + correct media labels flowed straight through. TestOCIFetcher-
+// RejectsSpoofedDigestLabel only covered the pinned path.
+func TestOCIFetcherRejectsTamperedTagPull(t *testing.T) {
+	withPackagesCache(t)
+	declared := []byte("what the manifest was signed for")
+	tampered := []byte("what the MITM actually served")
+	declaredLayerDigest := "sha256:" + sha256Hex(declared)
+	tamperedDigest := "sha256:" + sha256Hex(tampered)
+	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
+		// Correct media labels, correct declared layer digest — but the bytes
+		// don't match the declared digest.
+		return ociBlob{Data: tampered, Digest: declaredLayerDigest, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil
+	}}
+	// A plain tag version-spec: ref.Digest is empty, so there is no pin.
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "1.0"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting the tampered tag pull, got %v", err)
+	}
+	// Rejected before cache/untar: neither the tampered nor the declared digest
+	// was written to the cache.
+	if _, ok := readCachedArtifact(tamperedDigest); ok {
+		t.Fatal("tampered tag-pull bytes must never be cached")
+	}
+	if _, ok := readCachedArtifact(declaredLayerDigest); ok {
+		t.Fatal("nothing must be cached under the declared layer digest for a rejected pull")
+	}
+}
+
+// TestWriteConfinedPackagesCacheFileRejectsSymlinkedDigestDir is the Finding 3
+// regression test: a symlink pre-created at the digest dir inside the packages
+// cache (an attacker-planted redirect) must not let a cache write escape the
+// cache root. The confined writer rejects a symlinked digest-dir component
+// outright.
+func TestWriteConfinedPackagesCacheFileRejectsSymlinkedDigestDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics; junction coverage is exercised via os.Root confinement")
+	}
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	digest := "sha256:" + sha256Hex([]byte("x"))
+	hexDir := digest[len("sha256:"):]
+	cacheRoot := filepath.Join(home, "cache", "packages")
+	if err := os.MkdirAll(cacheRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Plant a symlink at <cache>/<hexDir> pointing at an attacker-chosen dir
+	// OUTSIDE the cache.
+	victimDir := filepath.Join(home, "victim")
+	if err := os.MkdirAll(victimDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victimDir, filepath.Join(cacheRoot, hexDir)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCachedArtifact(digest, []byte("payload")); err == nil {
+		t.Fatal("expected a symlinked digest dir to be rejected")
+	}
+	// The write must NOT have landed in the symlink target outside the cache.
+	if _, err := os.Stat(filepath.Join(victimDir, "artifact.blob")); err == nil {
+		t.Fatal("cache write escaped the cache root through a symlinked digest dir")
+	}
+}
+
 // TestOCIFetcherRejectsMissingManifestArtifactType is an H6 negative test: a
 // registry that omits the manifest-level artifactType must fail closed for a
 // packages/artifact pull — the old guard tolerated an empty served media type;
@@ -822,27 +902,47 @@ func TestOCIFetcherRejectsMissingLayerMediaType(t *testing.T) {
 	}
 }
 
-// TestOCIFetcherCacheHitSkipsManifestTypeGuard proves a digest-pinned cache
-// hit is not held to the strict fresh-pull type guard (it has no manifest to
-// re-read; its type was already validated when first pulled and cached, per
-// pullOCIContent's cache-hit comment) — a cache hit succeeds even though the
-// stored bytes alone carry no type metadata.
-func TestOCIFetcherCacheHitSkipsManifestTypeGuard(t *testing.T) {
+// TestOCIFetcherCacheHitWithoutSidecarIsNotTrusted is the Finding 2 regression
+// test: a valid tar seeded into the shared packages cache WITHOUT the OCI type
+// sidecar (as another source type — git/local/http — or a direct seed would
+// leave it) must NOT be trusted as an OCI artifact on a digest-pinned hit. The
+// blob alone carries no manifest artifactType / layer media type, so the fetcher
+// must treat the entry as a MISS and re-resolve the manifest. Here the puller is
+// the unwired stub, so the fall-through surfaces as a transport error rather
+// than silently materializing the unvalidated bytes (fail closed).
+func TestOCIFetcherCacheHitWithoutSidecarIsNotTrusted(t *testing.T) {
 	withPackagesCache(t)
-	blob := []byte("cached-artifact-bytes")
+	blob := buildTarGz(t, func(tw *tar.Writer) {
+		tarAddFile(t, tw, "SKILL.md", 0o644, []byte("seeded by another route"))
+	})
 	digest := "sha256:" + sha256Hex(blob)
+	// Blob present, but NO sidecar — mimics a non-OCI seed of the shared cache.
 	if err := writeCachedArtifact(digest, blob); err != nil {
 		t.Fatal(err)
 	}
-	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
-		return ociBlob{}, errors.New("should not pull on a pinned cache hit")
-	}}
+	f := &ociFetcher{} // unwired puller -> any fall-through is a transport error
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
+	if err == nil {
+		t.Fatal("a sidecar-less cached blob must not be trusted as an OCI artifact; expected a fall-through error")
+	}
+	// Corrupting the sidecar's declared type must likewise NOT be trusted.
+	if err := writeOCITypeSidecar(digest, ociLayerMediaType, ociLayerMediaType); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest}); err == nil {
+		t.Fatal("a cached blob whose sidecar declares the wrong type must not be trusted")
+	}
+	// With the correct sidecar the SAME cached blob is trusted — proving the
+	// gate keys on the sidecar, not on some incidental difference.
+	if err := writeOCITypeSidecar(digest, ociArtifactMediaType, ociArtifactMediaType); err != nil {
+		t.Fatal(err)
+	}
 	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill/x", VersionSpec: "pinned:" + digest})
 	if err != nil {
-		t.Fatalf("FetchArtifact: %v", err)
+		t.Fatalf("FetchArtifact with valid sidecar: %v", err)
 	}
-	if !got.CacheHit {
-		t.Fatal("expected a cache hit")
+	if !got.CacheHit || got.Bundle == nil {
+		t.Fatalf("expected a trusted cache hit with a Bundle, got %+v", got)
 	}
 }
 

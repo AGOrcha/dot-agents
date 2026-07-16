@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -345,39 +346,186 @@ func authString(auth json.RawMessage, key string) string {
 }
 
 // writeCachedArtifact persists blob under the content-addressed packages
-// cache. Per H8, the publish is a same-dir temp+rename
-// (fsops.WriteFileAtomic): the blob is written to a temp file in dir and
-// renamed into place, so a concurrent reader (readCachedArtifact) never
-// observes a partially-written file — closing the torn-read window a plain
-// truncate-and-write leaves open.
+// cache. Per H8, the publish is a same-dir temp+rename so a concurrent reader
+// (readCachedArtifact) never observes a partially-written file — closing the
+// torn-read window a plain truncate-and-write leaves open. The write is
+// confined beneath the cache root through an os.Root handle (Finding 3): the
+// digest subdir is the only attacker-influenceable path component, so a
+// symlink/junction pre-created or raced at that component cannot redirect the
+// write outside the cache.
 func writeCachedArtifact(digest string, data []byte) error {
 	// A cache blob is only ever addressed by a well-formed content digest;
 	// refuse to write under a malformed digest that could escape the cache root.
 	if !looksLikeSha256Digest(digest) {
 		return fmt.Errorf("refusing to cache artifact under malformed digest %q", digest)
 	}
-	dir := filepath.Join(packagesCacheRoot(), digestDir(digest))
-	if err := fsops.MkdirAll(dir, 0o755); err != nil {
+	return writeConfinedPackagesCacheFile(digestDir(digest), "artifact.blob", data)
+}
+
+// ociTypeSidecarName is the per-digest sidecar recording the OCI type metadata
+// (manifest artifactType + layer media type) that a fresh packages/artifact
+// pull validated before caching the blob. Its PRESENCE (alongside a matching
+// content-addressed blob) is the trust signal that a cached blob was admitted
+// as an OCI artifact-bundle; a blob seeded into the shared cache by another
+// source type (git/local/http) or by direct seeding carries no sidecar and is
+// therefore never trusted as an OCI artifact on a cache hit (Finding 2 / H6).
+const ociTypeSidecarName = "oci-type.json"
+
+// ociTypeSidecar is the on-disk shape of the OCI type sidecar.
+type ociTypeSidecar struct {
+	ArtifactType string `json:"artifactType"`
+	MediaType    string `json:"mediaType"`
+}
+
+// writeOCITypeSidecar records the validated OCI type metadata for a cached
+// artifact blob, confined beneath the packages cache root exactly like the
+// blob write. It is written only after guardOCIArtifactType has accepted a
+// fresh pull, so a present sidecar always attests a validated artifact-bundle.
+func writeOCITypeSidecar(digest, artifactType, mediaType string) error {
+	if !looksLikeSha256Digest(digest) {
+		return fmt.Errorf("refusing to cache oci type metadata under malformed digest %q", digest)
+	}
+	payload, err := json.Marshal(ociTypeSidecar{ArtifactType: artifactType, MediaType: mediaType})
+	if err != nil {
+		return fmt.Errorf("marshaling oci type sidecar: %w", err)
+	}
+	return writeConfinedPackagesCacheFile(digestDir(digest), ociTypeSidecarName, payload)
+}
+
+// readOCITypeSidecar loads the OCI type sidecar for a digest, confined beneath
+// the packages cache root with the same no-follow + bounded-read discipline as
+// readCachedArtifact. A missing, oversized, symlinked, or malformed sidecar is
+// simply absent (ok=false), never an error the caller must special-case.
+func readOCITypeSidecar(digest string) (ociTypeSidecar, bool) {
+	if !looksLikeSha256Digest(digest) {
+		return ociTypeSidecar{}, false
+	}
+	root, err := os.OpenRoot(packagesCacheRoot())
+	if err != nil {
+		return ociTypeSidecar{}, false
+	}
+	defer func() { _ = root.Close() }()
+	data, ok := readConfinedCacheBlob(root, filepath.Join(digestDir(digest), ociTypeSidecarName), 4096)
+	if !ok {
+		return ociTypeSidecar{}, false
+	}
+	var sc ociTypeSidecar
+	if err := json.Unmarshal(data, &sc); err != nil {
+		return ociTypeSidecar{}, false
+	}
+	return sc, true
+}
+
+// readCachedOCIArtifact returns the cached blob for digest ONLY when it is
+// backed by a valid OCI type sidecar declaring the artifact-bundle media type
+// at BOTH the manifest (artifactType) and layer (mediaType) levels (H6 on
+// cache hits, Finding 2). A cached blob with no sidecar, or one whose recorded
+// types do not match, is reported as a MISS so the caller re-resolves the
+// manifest and re-validates the types before trusting the bytes — a blob
+// seeded through any non-OCI route is never materialized as an OCI artifact
+// without the OCI type contract being met.
+func readCachedOCIArtifact(digest string) ([]byte, bool) {
+	data, ok := readCachedArtifact(digest)
+	if !ok {
+		return nil, false
+	}
+	sc, ok := readOCITypeSidecar(digest)
+	if !ok || sc.ArtifactType != ociArtifactMediaType || sc.MediaType != ociArtifactMediaType {
+		return nil, false
+	}
+	return data, true
+}
+
+// writeConfinedPackagesCacheFile writes data to <packagesCacheRoot>/<relDir>/
+// <name> via a same-dir temp+rename performed entirely through an os.Root
+// confined beneath the cache root. The cache ROOT path is derived from
+// AgentsHome (trusted) and created unconfined; every step BELOW it — the
+// digest subdir create, the temp create/write, and the atomic rename — goes
+// through the root handle, so no attacker-controlled component (a symlink or
+// Windows junction pre-created at the digest dir) can redirect the write
+// outside the cache (Finding 3). A digest dir that is itself a symlink is
+// rejected outright as defense in depth over os.Root's escape check.
+func writeConfinedPackagesCacheFile(relDir, name string, data []byte) error {
+	if err := fsops.MkdirAll(packagesCacheRoot(), 0o755); err != nil {
+		return fmt.Errorf("creating package cache root: %w", err)
+	}
+	root, err := os.OpenRoot(packagesCacheRoot())
+	if err != nil {
+		return fmt.Errorf("opening package cache root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	if err := root.MkdirAll(relDir, 0o755); err != nil {
 		return fmt.Errorf("creating package cache dir: %w", err)
 	}
-	if err := fsops.WriteFileAtomic(filepath.Join(dir, "artifact.blob"), data); err != nil {
-		return fmt.Errorf("writing package cache blob: %w", err)
+	if li, err := root.Lstat(relDir); err != nil {
+		return fmt.Errorf("stat package cache dir: %w", err)
+	} else if li.Mode()&fs.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write through a symlinked package cache dir %q", relDir)
+	}
+	tmpName, err := randomTempName(name)
+	if err != nil {
+		return err
+	}
+	tmpRel := filepath.Join(relDir, tmpName)
+	fh, err := root.OpenFile(tmpRel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("creating package cache temp: %w", err)
+	}
+	if _, err := fh.Write(data); err != nil {
+		_ = fh.Close()
+		_ = root.Remove(tmpRel)
+		return fmt.Errorf("writing package cache temp: %w", err)
+	}
+	if err := fh.Close(); err != nil {
+		_ = root.Remove(tmpRel)
+		return fmt.Errorf("closing package cache temp: %w", err)
+	}
+	if err := root.Rename(tmpRel, filepath.Join(relDir, name)); err != nil {
+		_ = root.Remove(tmpRel)
+		return fmt.Errorf("renaming package cache file: %w", err)
 	}
 	return nil
 }
 
+// randomTempName derives a collision-resistant, hidden temp filename for a
+// same-dir atomic write, so concurrent writers of the same digest never race
+// on a shared temp path.
+func randomTempName(base string) (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generating package cache temp name: %w", err)
+	}
+	return "." + base + ".tmp-" + hex.EncodeToString(b[:]), nil
+}
+
 // --- oci fetcher -----------------------------------------------------------
 
-// ociBlob is the result of a single OCI blob pull: the blob bytes, the
-// registry-reported content digest ("" lets the caller compute it), and the
-// blob's media type (from the resolving manifest's config/layer descriptor).
-// The media type is what keeps `kind` meaningful now that any source serves any
-// kind (config-distribution-model §15 D13): an artifact pull and a layer pull
-// share this pull but guard on different media types.
+// ociBlob is the result of a single OCI blob pull: the blob bytes, the two
+// distinct digests the manifest resolution surfaces (H5: the layer-descriptor
+// digest of the payload vs the manifest's own digest — these are DIFFERENT
+// objects and must never be conflated), and the blob's media type (from the
+// resolving manifest's config/layer descriptor). The media type is what keeps
+// `kind` meaningful now that any source serves any kind (config-distribution-
+// model §15 D13): an artifact pull and a layer pull share this pull but guard
+// on different media types.
 type ociBlob struct {
-	Data      []byte
-	Digest    string
-	MediaType string
+	Data []byte
+	// Digest is the manifest's LAYER/BLOB-DESCRIPTOR digest — the registry's
+	// declared digest of Data (the payload/layer). It is NOT trusted as a label:
+	// pullOCIContent ALWAYS recomputes sha256(Data) and, when this is non-empty,
+	// requires it to match before the payload is type-checked, untarred, or
+	// cached (H5 integrity). This is the only integrity anchor on a tag pull
+	// (no pin) and is enforced on pinned pulls too. Empty is tolerated only for
+	// a registry that omits the descriptor digest.
+	Digest string
+	// ManifestDigest is the manifest's OWN digest — the value a `pinned:sha256:`
+	// ref addresses (H5: "pinned addresses the manifest"). It is a DIFFERENT
+	// object than the layer blob, so a pin is validated against THIS, not the
+	// payload digest (verifyOCIPin). Empty until the live wire protocol that
+	// fetches+hashes the manifest is wired; while empty, a pin falls back to the
+	// content-addressed payload digest so the offline cache round-trips.
+	ManifestDigest string
+	MediaType      string
 	// ArtifactType is the OCI 1.1 manifest-level `artifactType` field (distinct
 	// from MediaType, which is the layer/blob descriptor's own media type).
 	// H6 (package-artifact-install spec §3A) requires a packages/artifact pull
@@ -479,16 +627,16 @@ func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedAr
 	if err != nil {
 		return FetchedArtifact{}, err
 	}
-	// H6 — a fresh pull's declared types are the only signal available; a
-	// cache hit has no manifest to re-read, so its media type was already
-	// validated at this same strictness when it was first pulled and cached
-	// (pullOCIContent's cache-hit comment). This is deliberately stricter than
-	// the shared pullOCIContent/guardOCIPull check below it (which stays
-	// tolerant of an empty served media type for the `extends`/config-layer
-	// OCI path — fetcher_oci_layer.go — where that tolerance is still relied
-	// on): a packages/artifact pull rejects empty/missing/mismatched types at
-	// BOTH the manifest and the blob/descriptor level, before the payload is
-	// ever cached or untarred.
+	// H6 — a fresh pull's declared types are the only signal available; a cache
+	// hit has already been validated by readCachedOCIArtifact against its OCI
+	// type sidecar inside pullOCIContent (Finding 2), so guardOCIArtifactType
+	// is the fresh-pull-only leg of the same contract. This is deliberately
+	// stricter than the shared media-type check pullOCIContent applies (which
+	// stays tolerant of an empty served media type for the `extends`/config-
+	// layer OCI path — fetcher_oci_layer.go — where that tolerance is still
+	// relied on): a packages/artifact pull rejects empty/missing/mismatched
+	// types at BOTH the manifest and the blob/descriptor level, before the
+	// payload is ever cached or untarred.
 	if !pulled.CacheHit {
 		if err := guardOCIArtifactType(pulled, importRef, parts.SourceID); err != nil {
 			return FetchedArtifact{}, err
@@ -506,8 +654,18 @@ func (f *ociFetcher) FetchArtifact(src Source, parts PackageRefParts) (FetchedAr
 	if err != nil {
 		return FetchedArtifact{}, &ImportError{Ref: importRef, SourceID: parts.SourceID, Reason: ReasonContent, Err: fmt.Errorf("oci artifact bundle: %w", err)}
 	}
-	if err := writeCachedArtifact(pulled.Digest, pulled.Data); err != nil {
-		return FetchedArtifact{}, err
+	// Persist the validated blob AND its OCI type sidecar only on a fresh pull:
+	// a cache hit was already served from a sidecar-validated entry, and
+	// rewriting it with the (empty) cache-hit type metadata would corrupt the
+	// sidecar. The sidecar is written after the blob so a present sidecar always
+	// implies a fully-written, digest-matching, type-validated blob (Finding 2).
+	if !pulled.CacheHit {
+		if err := writeCachedArtifact(pulled.Digest, pulled.Data); err != nil {
+			return FetchedArtifact{}, err
+		}
+		if err := writeOCITypeSidecar(pulled.Digest, pulled.ArtifactType, pulled.MediaType); err != nil {
+			return FetchedArtifact{}, err
+		}
 	}
 	return FetchedArtifact{
 		Data:      pulled.Data,
@@ -572,11 +730,15 @@ type ociContent struct {
 func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceID, wantMediaType string) (ociContent, error) {
 	posture := PostureFromSource(src)
 	// A digest-pinned ref is content-addressed up front, so the cache is checked
-	// before any network work (offline fast path, spec §8). A cache hit has no
-	// manifest to re-read, so the media type was already validated when it was
-	// first pulled and cached.
+	// before any network work (offline fast path, spec §8). For the packages/
+	// artifact path the cache hit MUST be backed by a validated OCI type sidecar
+	// (readCachedOCIArtifact, Finding 2): a blob seeded into the shared cache by
+	// another source type carries no sidecar and is treated as a miss so the
+	// manifest is re-resolved and its types re-validated. The config-layer path
+	// has its own media-type contract and reads the blob directly.
 	if ref.Digest != "" {
-		if cached, ok := readCachedArtifact(ref.Digest); ok {
+		cached, ok := readCachedPinnedOCIBlob(ref.Digest, wantMediaType)
+		if ok {
 			if err := verifySignature(posture, ref.Digest, false); err != nil {
 				return ociContent{}, err
 			}
@@ -595,51 +757,74 @@ func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceI
 		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonTransport, Err: err}
 	}
 	// H5 (BLOCKER: digest conflation) — the content digest is ALWAYS recomputed
-	// over the fetched payload here, never taken as-is from blob.Digest. The old
-	// "trust the reported digest when non-empty" shape let a registry (or a
-	// tampering man-in-the-middle) SERVE bytes that don't match a pin while
-	// LABELING them with the pinned digest, defeating the pin check below
-	// entirely. Recomputing means the label is never trusted for anything —
-	// this is the same content-addressing discipline the git/local/http
-	// fetchers already apply. `pinned:sha256:...` (ref.Digest) addresses this
-	// recomputed payload digest, the same content-addressing contract every
-	// other fetcher uses for its own `pinned:` form; a future revision that
-	// wires the real manifest-fetch step and exposes a distinct manifest
-	// digest can compare the pin against that manifest digest instead without
-	// weakening this payload recomputation, which remains the tamper-evidence
-	// anchor regardless of what the pin semantically addresses. blob.Digest
-	// (whatever the registry reported for the manifest or the layer
-	// descriptor) is deliberately never compared to the recomputed digest as
-	// if the two must be equal: a manifest digest and a blob digest are
-	// different objects' hashes and legitimately differ — that divergence is
-	// simply not an error here (it is "handled explicitly" by not conflating
-	// them, rather than by asserting they match).
-	digest := artifactDigest(blob.Data)
-	if err := guardOCIPull(ref, digest, blob.MediaType, wantMediaType, importRef, sourceID); err != nil {
+	// over the fetched payload, never taken as-is from a registry-reported label.
+	payloadDigest := artifactDigest(blob.Data)
+	// H5 integrity (BLOCKER, Finding 1) — the manifest's layer/blob DESCRIPTOR
+	// declares the digest of the payload; when present it is ALWAYS compared to
+	// the recomputed payload digest, before type-check/untar/cache, for BOTH tag
+	// and pinned pulls. This is the only integrity anchor a tag pull has — the
+	// earlier shape discarded blob.Digest and only compared against a pin, so a
+	// MITM serving tampered bytes under a valid tag with correct media labels
+	// flowed straight through. A registry that omits the descriptor digest is
+	// tolerated here; the packages path still requires the type metadata below.
+	if blob.Digest != "" && payloadDigest != blob.Digest {
+		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("layer digest mismatch: manifest declared %s but payload hashes to %s", blob.Digest, payloadDigest)}
+	}
+	// H5 pin (Finding 1) — a `pinned:sha256:` ref addresses the MANIFEST digest,
+	// a different object than the payload/layer blob, so the pin is validated
+	// against the manifest digest (verifyOCIPin), never conflated with the
+	// payload digest. Until the live manifest-fetch wire protocol is wired the
+	// manifest digest is unknown, so verifyOCIPin falls back to the recomputed
+	// payload digest — preserving the content-addressed offline-cache contract.
+	if err := verifyOCIPin(ref.Digest, blob.ManifestDigest, payloadDigest, importRef, sourceID); err != nil {
 		return ociContent{}, err
 	}
-	if err := verifySignature(posture, digest, false); err != nil {
+	// D13 kind guard: the shared media-type tolerance (an empty served type is
+	// accepted as the requested kind so a registry that omits the descriptor
+	// type still resolves) — the `extends`/config-layer path relies on this;
+	// the packages path layers guardOCIArtifactType (H6, non-tolerant) on top.
+	if blob.MediaType != "" && blob.MediaType != wantMediaType {
+		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci media type %q does not match required %q", blob.MediaType, wantMediaType)}
+	}
+	if err := verifySignature(posture, payloadDigest, false); err != nil {
 		return ociContent{}, err
 	}
-	return ociContent{Data: blob.Data, Digest: digest, CacheHit: false, Posture: posture, MediaType: blob.MediaType, ArtifactType: blob.ArtifactType}, nil
+	return ociContent{Data: blob.Data, Digest: payloadDigest, CacheHit: false, Posture: posture, MediaType: blob.MediaType, ArtifactType: blob.ArtifactType}, nil
 }
 
-// guardOCIPull validates a freshly pulled blob: the recomputed payload digest
-// must match a pin (tamper guard — see pullOCIContent's H5 comment on why the
-// digest passed in here is always recomputed, never the registry-reported
-// label) and the media type must match the caller's declared kind (the §15
-// D13 kind guard). An empty served media type is tolerated as the requested
-// kind so a registry that omits the descriptor type still resolves; the
-// packages/artifact path applies a stricter, non-tolerant guard of its own on
-// top of this one (guardOCIArtifactType, H6) — this shared guard stays
-// tolerant because the `extends`/config-layer OCI path relies on that
-// tolerance (fetcher_oci_layer.go).
-func guardOCIPull(ref ociRef, digest, gotMediaType, wantMediaType, importRef, sourceID string) error {
-	if ref.Digest != "" && digest != ref.Digest {
-		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but recomputed payload digest is %s", ref.Digest, digest)}
+// readCachedPinnedOCIBlob resolves a digest-pinned offline cache hit for
+// pullOCIContent. The packages/artifact path (wantMediaType is the artifact-
+// bundle type) requires the cached blob to be backed by a validated OCI type
+// sidecar (readCachedOCIArtifact, Finding 2 / H6-on-cache-hit); every other
+// caller (the config-layer path) reads the digest-verified blob directly, as
+// before. A miss (including a sidecar-less artifact blob) returns ok=false so
+// the caller falls through to a fresh manifest resolution.
+func readCachedPinnedOCIBlob(digest, wantMediaType string) ([]byte, bool) {
+	if wantMediaType == ociArtifactMediaType {
+		return readCachedOCIArtifact(digest)
 	}
-	if gotMediaType != "" && gotMediaType != wantMediaType {
-		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonSchema, Err: fmt.Errorf("oci media type %q does not match required %q", gotMediaType, wantMediaType)}
+	return readCachedArtifact(digest)
+}
+
+// verifyOCIPin validates a `pinned:sha256:` ref against the digest it
+// addresses. Per H5 a pin addresses the MANIFEST digest, so when the puller
+// resolved a manifest digest the pin is checked against THAT. When no manifest
+// digest is available (the offline content-addressed cache fast path, or a
+// puller that does not surface it) the pin falls back to the recomputed
+// payload/content digest — the value the cache is keyed by and the lock
+// records — so a pinned offline hit still round-trips. The layer-descriptor
+// integrity check (payload vs blob.Digest) is separate and always runs; this
+// only guards the pin, and only when a pin is present.
+func verifyOCIPin(pin, manifestDigest, payloadDigest, importRef, sourceID string) error {
+	if pin == "" {
+		return nil
+	}
+	want := manifestDigest
+	if want == "" {
+		want = payloadDigest
+	}
+	if pin != want {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but resolved %s", pin, want)}
 	}
 	return nil
 }

@@ -133,15 +133,23 @@ func sha256HexForTest(data []byte) string {
 
 func writeCachedArtifactForTest(t *testing.T, digest string, data []byte) error {
 	t.Helper()
-	// The packages cache layout (~/.agents/cache/packages/<hex>/artifact.blob)
-	// is an internal, unexported contract; recreate it here via the same
-	// AGENTS_HOME env var config.AgentsHome() reads, rather than importing an
-	// unexported helper.
+	// The packages cache layout (~/.agents/cache/packages/<hex>/artifact.blob
+	// plus the oci-type.json sidecar) is an internal, unexported contract;
+	// recreate it here via the same AGENTS_HOME env var config.AgentsHome()
+	// reads, rather than importing an unexported helper. The sidecar is
+	// required for a digest-pinned OCI cache hit to be trusted (Finding 2), so
+	// a validated OCI cache entry seeds BOTH files. The media-type literal
+	// matches config's unexported ociArtifactMediaType constant.
+	const artifactMediaType = "application/vnd.dot-agents.artifact-bundle.v1+tar+gzip"
 	home := os.Getenv("AGENTS_HOME")
 	hexDigest := strings.TrimPrefix(digest, "sha256:")
 	dir := filepath.Join(home, "cache", "packages", hexDigest)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, "artifact.blob"), data, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "artifact.blob"), data, 0o644); err != nil {
+		return err
+	}
+	sidecar := `{"artifactType":"` + artifactMediaType + `","mediaType":"` + artifactMediaType + `"}`
+	return os.WriteFile(filepath.Join(dir, "oci-type.json"), []byte(sidecar), 0o644)
 }
