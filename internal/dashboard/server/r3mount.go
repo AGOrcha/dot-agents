@@ -27,7 +27,6 @@ import (
 
 	"github.com/AGOrcha/dot-agents/internal/dashboard/events"
 	"github.com/AGOrcha/dot-agents/internal/dashboard/handlers"
-	"github.com/AGOrcha/dot-agents/internal/dashboard/store"
 	"github.com/AGOrcha/dot-agents/internal/scoring"
 	svcevents "github.com/AGOrcha/dot-agents/internal/service/events"
 )
@@ -103,28 +102,10 @@ func Mount(edge R3Edge, cfg MountConfig) (io.Closer, error) {
 	}
 	roots := append([]string(nil), cfg.IterLogDirs...)
 
-	// The store↔broker cycle (store reports the live subscriber count; the
-	// broker evicts the store's cache) is broken with a late-bound closure, as
-	// in the standalone Server: the counter is read only when a health request
-	// lands, by which point broker is assigned.
-	var broker *events.Broker
-	disk := store.New(roots,
-		store.WithLogger(logger),
-		store.WithSubscriberCounter(func() int {
-			return broker.SubscriberCount()
-		}),
-	)
-	broker = events.New(events.Options{Evictor: disk})
-	recStore := store.NewRecompute(disk, repoDir, cfg.TranscriptDirs...)
-
-	mount, err := newHandlers(handlers.Deps{
-		Store:  recStore,
-		Logger: logger,
-		Broker: broker,
-	})
+	broker, _, mount, err := dashboardCore(roots, repoDir, cfg.TranscriptDirs, logger, newHandlers)
 	if err != nil {
 		broker.Close()
-		return nil, fmt.Errorf("dashboard/server: build handlers: %w", err)
+		return nil, err
 	}
 
 	if err := edge.RegisterMount(mount.Prefix(), mount); err != nil {
