@@ -759,16 +759,14 @@ func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceI
 	// H5 (BLOCKER: digest conflation) — the content digest is ALWAYS recomputed
 	// over the fetched payload, never taken as-is from a registry-reported label.
 	payloadDigest := artifactDigest(blob.Data)
-	// H5 integrity (BLOCKER, Finding 1) — the manifest's layer/blob DESCRIPTOR
-	// declares the digest of the payload; when present it is ALWAYS compared to
-	// the recomputed payload digest, before type-check/untar/cache, for BOTH tag
-	// and pinned pulls. This is the only integrity anchor a tag pull has — the
-	// earlier shape discarded blob.Digest and only compared against a pin, so a
-	// MITM serving tampered bytes under a valid tag with correct media labels
-	// flowed straight through. A registry that omits the descriptor digest is
-	// tolerated here; the packages path still requires the type metadata below.
-	if blob.Digest != "" && payloadDigest != blob.Digest {
-		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("layer digest mismatch: manifest declared %s but payload hashes to %s", blob.Digest, payloadDigest)}
+	// H5 integrity (BLOCKER, Finding 1 + round-3 item 1) — the manifest's layer/
+	// blob DESCRIPTOR declares the digest of the payload; the recomputed payload
+	// digest is compared to it before type-check/untar/cache. For the packages/
+	// artifact path this is MANDATORY (an omitted/malformed descriptor digest is
+	// rejected outright — otherwise a MITM could simply omit it on a tag pull and
+	// bypass the comparison), so the artifact path always has an integrity anchor.
+	if err := verifyOCILayerDescriptorDigest(payloadDigest, blob.Digest, wantMediaType, importRef, sourceID); err != nil {
+		return ociContent{}, err
 	}
 	// H5 pin (Finding 1) — a `pinned:sha256:` ref addresses the MANIFEST digest,
 	// a different object than the payload/layer blob, so the pin is validated
@@ -792,18 +790,70 @@ func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceI
 	return ociContent{Data: blob.Data, Digest: payloadDigest, CacheHit: false, Posture: posture, MediaType: blob.MediaType, ArtifactType: blob.ArtifactType}, nil
 }
 
-// readCachedPinnedOCIBlob resolves a digest-pinned offline cache hit for
-// pullOCIContent. The packages/artifact path (wantMediaType is the artifact-
-// bundle type) requires the cached blob to be backed by a validated OCI type
-// sidecar (readCachedOCIArtifact, Finding 2 / H6-on-cache-hit); every other
-// caller (the config-layer path) reads the digest-verified blob directly, as
-// before. A miss (including a sidecar-less artifact blob) returns ok=false so
-// the caller falls through to a fresh manifest resolution.
-func readCachedPinnedOCIBlob(digest, wantMediaType string) ([]byte, bool) {
+// verifyOCILayerDescriptorDigest compares the recomputed payload digest against
+// the manifest's declared layer/blob-descriptor digest. For the packages/
+// artifact path (wantMediaType is the artifact-bundle type) a well-formed
+// descriptor digest is MANDATORY: a well-formed OCI manifest always declares
+// it, so an empty or malformed value is malformed/malicious and rejected
+// outright — this makes the integrity comparison unconditional for artifacts,
+// closing the "just omit the digest to bypass" gap (round-3 item 1). The
+// extends/config-layer path keeps the D13 tolerance for a legitimately fresh,
+// non-seeded pull that omits the descriptor digest, but still rejects a
+// declared-but-mismatched digest; its cache-hit provenance is enforced
+// separately by readCachedOCILayer.
+func verifyOCILayerDescriptorDigest(payloadDigest, declared, wantMediaType, importRef, sourceID string) error {
 	if wantMediaType == ociArtifactMediaType {
-		return readCachedOCIArtifact(digest)
+		if !looksLikeSha256Digest(declared) {
+			return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("oci artifact manifest must declare a well-formed layer descriptor digest, got %q", declared)}
+		}
+		if payloadDigest != declared {
+			return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("layer digest mismatch: manifest declared %s but payload hashes to %s", declared, payloadDigest)}
+		}
+		return nil
 	}
-	return readCachedArtifact(digest)
+	if declared != "" && payloadDigest != declared {
+		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("layer digest mismatch: manifest declared %s but payload hashes to %s", declared, payloadDigest)}
+	}
+	return nil
+}
+
+// readCachedPinnedOCIBlob resolves a digest-pinned offline cache hit for
+// pullOCIContent. BOTH OCI kinds require the cached blob to be backed by an
+// OCI-derived type sidecar so a blob seeded into the shared, digest-keyed
+// packages cache by a NON-OCI packages fetcher (git/local/http) is never
+// trusted without OCI type provenance — the packages/artifact path via
+// readCachedOCIArtifact (Finding 2), the config-layer/extends path via
+// readCachedOCILayer (round-3 item 2, closing the same confused-deputy for
+// layers). A miss (including a sidecar-less blob of either kind) returns
+// ok=false so the caller falls through to a fresh manifest resolution.
+func readCachedPinnedOCIBlob(digest, wantMediaType string) ([]byte, bool) {
+	switch wantMediaType {
+	case ociArtifactMediaType:
+		return readCachedOCIArtifact(digest)
+	case ociLayerMediaType:
+		return readCachedOCILayer(digest)
+	default:
+		return readCachedArtifact(digest)
+	}
+}
+
+// readCachedOCILayer returns a cached config-layer blob ONLY when it is backed
+// by an OCI-layer type sidecar (mediaType == ociLayerMediaType), written by a
+// fresh OCI-layer pull. It is the config-layer mirror of readCachedOCIArtifact:
+// a blob seeded into the shared packages cache by a non-OCI packages fetcher
+// carries no OCI sidecar and is reported as a MISS, so an OCI `extends` ref
+// pinned to that digest re-resolves the manifest instead of trusting foreign
+// bytes as a validated config layer (round-3 item 2).
+func readCachedOCILayer(digest string) ([]byte, bool) {
+	data, ok := readCachedArtifact(digest)
+	if !ok {
+		return nil, false
+	}
+	sc, ok := readOCITypeSidecar(digest)
+	if !ok || sc.MediaType != ociLayerMediaType {
+		return nil, false
+	}
+	return data, true
 }
 
 // verifyOCIPin validates a `pinned:sha256:` ref against the digest it

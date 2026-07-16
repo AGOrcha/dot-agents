@@ -540,18 +540,27 @@ func TestOCIFetcherDigestMismatch(t *testing.T) {
 	}
 }
 
-func TestOCIFetcherComputesDigestWhenRegistryOmits(t *testing.T) {
+// TestOCIFetcherRejectsMissingLayerDescriptorDigest is the round-3 item 1
+// regression test: a fresh packages/artifact TAG pull whose manifest OMITS the
+// layer-descriptor digest must be rejected before untar/cache, even with
+// correct media labels. A well-formed OCI manifest always declares the layer
+// descriptor digest, so an omission is malformed/malicious — and, critically,
+// leaving it fail-open would let a MITM bypass the integrity comparison simply
+// by not sending the digest. (Supersedes the old fail-OPEN
+// "computes digest when registry omits" assertion.)
+func TestOCIFetcherRejectsMissingLayerDescriptorDigest(t *testing.T) {
 	withPackagesCache(t)
 	blob := []byte("no-digest-from-reg")
 	f := &ociFetcher{puller: func(context.Context, ociRef, []byte) (ociBlob, error) {
-		return ociBlob{Data: blob, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil // registry omits digest
+		return ociBlob{Data: blob, MediaType: ociArtifactMediaType, ArtifactType: ociArtifactMediaType}, nil // registry omits the layer descriptor digest
 	}}
-	got, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
-	if err != nil {
-		t.Fatalf("FetchArtifact: %v", err)
+	_, err := f.FetchArtifact(Source{URL: "oci://reg.example"}, PackageRefParts{SourceID: "s", ArtifactPath: "a", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting a manifest with no layer descriptor digest, got %v", err)
 	}
-	if got.Digest != "sha256:"+sha256Hex(blob) {
-		t.Fatalf("computed digest = %q", got.Digest)
+	if _, ok := readCachedArtifact("sha256:" + sha256Hex(blob)); ok {
+		t.Fatal("a pull with no integrity anchor must never be cached")
 	}
 }
 
