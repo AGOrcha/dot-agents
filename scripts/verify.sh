@@ -470,6 +470,18 @@ assert_json_field "git-source content-install: units+artifact-content unchanged 
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
+# TEMP-DIAG5 (revert before merge): capture the churn + CAS files at the failing
+# moment. NO extra `da` calls (a `config verify` here confounds the churn).
+DIAG_BEFORE="${SMOKE_ROOT}/pkg-lock-before.json" DIAG_AFTER="${PKG_PROJ}/.agentsrc.lock" python3 - >&2 <<'PY' || true
+import json, os
+b = json.load(open(os.environ['DIAG_BEFORE'])); a = json.load(open(os.environ['DIAG_AFTER']))
+print('DIAG5 units_equal', a['units'] == b['units'], 'ac_equal', a.get('artifact-content') == b.get('artifact-content'))
+for k in sorted(set(a['units']) | set(b['units'])):
+    if a['units'].get(k) != b['units'].get(k):
+        print('DIAG5 UNIT-DIFF', k, '| before=', b['units'].get(k), '| after=', a['units'].get(k))
+PY
+echo "DIAG5 casfiles=$(find "${AGENTS_HOME}/cache/artifacts" -type f 2>&1 | tr '\n' '|')" >&2
+
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
 PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
