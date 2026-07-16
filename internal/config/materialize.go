@@ -215,7 +215,7 @@ func MaterializeToStore(agentsHome, family string, bundle Bundle) (storePath, di
 }
 
 // makeStoreEntryReadOnly walks a published store entry and drops the write
-// bit on every FILE (→ 0o444) so the immutable, content-addressed tree
+// bit on every FILE (→ 0o400, owner read-only) so the immutable, content-addressed tree
 // resists a casual in-place overwrite — the dominant tamper vector (mutating
 // existing bytes) now needs an explicit `chmod +w` first. Directories are
 // LEFT writable on purpose: a read-only directory would block unlink of its
@@ -234,7 +234,7 @@ func makeStoreEntryReadOnly(root string) {
 		if walkErr != nil || d.IsDir() {
 			return nil
 		}
-		_ = os.Chmod(p, 0o444)
+		_ = os.Chmod(p, 0o400)
 		return nil
 	})
 }
