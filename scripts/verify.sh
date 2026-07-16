@@ -470,6 +470,21 @@ assert_json_field "git-source content-install: units+artifact-content unchanged 
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
 
+# TEMP-DIAG6 (revert before merge): dump the exact units-section bytes of both
+# locks + a top-level key diff. No extra `da` calls.
+DIAG_BEFORE="${SMOKE_ROOT}/pkg-lock-before.json" DIAG_AFTER="${PKG_PROJ}/.agentsrc.lock" python3 - >&2 <<'PY' || true
+import json, os
+b = json.load(open(os.environ['DIAG_BEFORE'])); a = json.load(open(os.environ['DIAG_AFTER']))
+print('DIAG6 units_eq', a['units'] == b['units'], 'ac_eq', a.get('artifact-content') == b.get('artifact-content'))
+print('DIAG6 topkeys_before', sorted(b.keys()))
+print('DIAG6 topkeys_after ', sorted(a.keys()))
+print('DIAG6 units_before', json.dumps(b['units'], sort_keys=True))
+print('DIAG6 units_after ', json.dumps(a['units'], sort_keys=True))
+for k in ('artifact-content',):
+    if a.get(k) != b.get(k):
+        print('DIAG6 SECTION-DIFF', k, '| before=', json.dumps(b.get(k), sort_keys=True), '| after=', json.dumps(a.get(k), sort_keys=True))
+PY
+
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
 PKG_SKILL_DIGEST="$(python3 -c "import json; print(json.load(open('${PKG_PROJ}/.agentsrc.lock'))['units']['da-agc:skill/release-docs-refresh@main']['digest'])")"
