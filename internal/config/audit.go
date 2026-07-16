@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -312,13 +313,49 @@ func registerSecret(secret string) {
 // redactSecrets replaces every registered secret substring in s with a fixed
 // marker. Safe to call on any string, including one with no registered
 // secrets present (returned unchanged).
+//
+// Secrets are replaced LONGEST-FIRST (Codex round-2 HIGH — order-dependent
+// partial leak). Replacing in registration order lets a shorter secret that
+// is a substring of a longer one fragment the longer one first — e.g. with
+// "abc" registered before "abcdef", redacting "abcdef" yields "[REDACTED]def"
+// and the later "abcdef" pass no longer matches, leaking the "def" tail.
+// Descending-length order guarantees the longest containing secret is
+// scrubbed before any of its substrings can fragment it.
 func redactSecrets(s string) string {
 	secretRedactorMu.Lock()
 	secrets := make([]string, len(registeredSecrets))
 	copy(secrets, registeredSecrets)
 	secretRedactorMu.Unlock()
+	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
 	for _, secret := range secrets {
 		s = strings.ReplaceAll(s, secret, "[REDACTED]")
 	}
 	return s
 }
+
+// redactedError wraps a cause so its rendered message is scrubbed of every
+// registered secret at the moment it is formatted — the H12 error-BOUNDARY
+// control (Codex round-2 HIGH #3). redactSecrets was previously wired only
+// into the audit event's copied detail field, so the error VALUE returned to
+// callers (printed to stderr, logged) was never scrubbed. Wrapping a cause in
+// a redactedError before it is placed on an ImportError.Err means every
+// consumer of the resulting error — ImportError.Error(), a CLI, a log line —
+// sees the redacted text, not just the audit detail. Unwrap is preserved so
+// errors.Is / errors.As still reach the original cause; only the rendered
+// string is scrubbed.
+type redactedError struct{ err error }
+
+// newRedactedError wraps err so its Error() output is redacted. A nil cause
+// stays nil so callers can wrap unconditionally.
+func newRedactedError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return redactedError{err: err}
+}
+
+// Error renders the wrapped cause with all registered secrets scrubbed.
+func (e redactedError) Error() string { return redactSecrets(e.err.Error()) }
+
+// Unwrap exposes the original cause for errors.Is / errors.As.
+func (e redactedError) Unwrap() error { return e.err }

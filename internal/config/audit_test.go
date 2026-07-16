@@ -233,6 +233,30 @@ func TestRedactSecretsScrubsRegisteredSecret(t *testing.T) {
 	}
 }
 
+// TestRedactSecretsLongestFirstNoFragment is the HIGH-#2 regression: a
+// shorter secret registered BEFORE a longer one that contains it must not
+// fragment the longer one. Registering "abc" then "abcdef" and redacting a
+// string containing "abcdef" must leave NO fragment of "abcdef" behind —
+// order-dependent replacement would have produced "[REDACTED]def", leaking
+// the "def" tail of the real credential.
+func TestRedactSecretsLongestFirstNoFragment(t *testing.T) {
+	short := "sfrag-abc-" + "u1"
+	long := short + "-longer-tail-secret"
+	registerSecret(short) // shorter, registered first
+	registerSecret(long)  // longer, contains short as a prefix
+
+	got := redactSecrets("prefix " + long + " suffix")
+	if strings.Contains(got, "longer-tail-secret") {
+		t.Fatalf("redactSecrets left a fragment of the longer secret: %q", got)
+	}
+	if strings.Contains(got, short) {
+		t.Fatalf("redactSecrets left the shorter secret verbatim: %q", got)
+	}
+	if got != "prefix [REDACTED] suffix" {
+		t.Errorf("redactSecrets = %q, want %q", got, "prefix [REDACTED] suffix")
+	}
+}
+
 // TestRegisterSecretDeduplicates confirms registering the same secret value
 // twice does not grow the registry (bounding its process-lifetime size when
 // a credential is re-resolved across repeated fetches).
@@ -256,6 +280,33 @@ func TestRedactSecretsEmptyStringNoOp(t *testing.T) {
 	}
 	if got := redactSecrets("some text"); got != "some text" {
 		t.Errorf("redactSecrets corrupted unrelated text: %q", got)
+	}
+}
+
+// TestNewRedactedErrorScrubsErrorString is the HIGH-#3 error-boundary test:
+// a cause whose message embeds a registered secret must render scrubbed via
+// the wrapper's Error(), while errors.As/Is still reach the original cause
+// through Unwrap (only the rendered string is redacted, not the error graph).
+func TestNewRedactedErrorScrubsErrorString(t *testing.T) {
+	sentinel := "sentinel-boundary-err-1c2d3e"
+	registerSecret(sentinel)
+
+	cause := &ImportError{Ref: "acme:x@1", Reason: ReasonTransport, Err: errors.New("sent Bearer " + sentinel)}
+	wrapped := newRedactedError(cause)
+	if strings.Contains(wrapped.Error(), sentinel) {
+		t.Fatalf("redactedError leaked the sentinel in its rendered string: %q", wrapped.Error())
+	}
+	if !strings.Contains(wrapped.Error(), "[REDACTED]") {
+		t.Errorf("redactedError did not redact the sentinel: %q", wrapped.Error())
+	}
+	// Unwrap chain intact: the typed cause is still reachable.
+	var ie *ImportError
+	if !errors.As(wrapped, &ie) || ie != cause {
+		t.Errorf("redactedError broke the Unwrap chain: %v", wrapped)
+	}
+	// A nil cause wraps to nil so callers can wrap unconditionally.
+	if newRedactedError(nil) != nil {
+		t.Error("newRedactedError(nil) should be nil")
 	}
 }
 

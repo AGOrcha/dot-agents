@@ -151,10 +151,12 @@ var ociCredentialHelperRunner = runOCICredentialHelper
 // provider's secret by invoking cfg.Helper with the request JSON on stdin
 // and parsing its stdout as JSON. Both the argv (only "get", never the
 // request or a secret) and stdin-only discipline are enforced by
-// runOCICredentialHelper. Every error path deliberately omits the helper's
-// raw stdout/stderr from the error text: a misbehaving helper's output may
-// itself carry partial secret material, so it is never echoed (H12).
-func resolveCredentialHelperCredential(cfg ociAuthConfig, registry, repository string) (resolvedOCICredential, error) {
+// runOCICredentialHelper. ctx is threaded through so a hung helper is
+// cancelled when the caller's OCI pull deadline fires. Every error path
+// deliberately omits the helper's raw stdout/stderr from the error text: a
+// misbehaving helper's output may itself carry partial secret material, so
+// it is never echoed (H12).
+func resolveCredentialHelperCredential(ctx context.Context, cfg ociAuthConfig, registry, repository string) (resolvedOCICredential, error) {
 	if cfg.Helper == "" {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: helper is not set")
 	}
@@ -162,7 +164,7 @@ func resolveCredentialHelperCredential(cfg ociAuthConfig, registry, repository s
 	if err != nil {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: encoding request: %w", err)
 	}
-	out, err := ociCredentialHelperRunner(cfg.Helper, reqBody)
+	out, err := ociCredentialHelperRunner(ctx, cfg.Helper, reqBody)
 	if err != nil {
 		return resolvedOCICredential{}, fmt.Errorf("oci credential-helper auth: helper %q failed", cfg.Helper)
 	}
@@ -182,16 +184,54 @@ func resolveCredentialHelperCredential(cfg ociAuthConfig, registry, repository s
 	}
 }
 
+// credentialHelperEnvAllowlist is the fixed set of environment variable NAMES
+// a credential helper subprocess is allowed to inherit. cmd.Env is built from
+// only these (runOCICredentialHelper) rather than the full parent environment:
+// the parent process may hold OTHER sources' bearer tokens in their own
+// TokenEnv variables, and a misconfigured or compromised helper must not be
+// handed credentials beyond the stdin request scoped to its own registry
+// (Codex round-2 HIGH — helper env inheritance). PATH is required so the
+// helper's own external commands resolve; the Windows-specific names keep the
+// helper runnable there without widening the allowlist to arbitrary secrets.
+var credentialHelperEnvAllowlist = []string{
+	"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL",
+	"SystemRoot", "USERPROFILE", "TEMP", "TMP", "PATHEXT", "ComSpec",
+}
+
+// allowlistedHelperEnv returns the current process's values for exactly the
+// allowlisted variable names, in "KEY=VALUE" form for exec.Cmd.Env. A name
+// that is unset in the parent is simply omitted.
+func allowlistedHelperEnv() []string {
+	env := make([]string, 0, len(credentialHelperEnvAllowlist))
+	for _, k := range credentialHelperEnvAllowlist {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+		}
+	}
+	return env
+}
+
 // runOCICredentialHelper invokes name as a subprocess, writing reqBody to
 // its stdin and returning its stdout. name is invoked with a single fixed
 // "get" argument (git-credential-style) — the request document and any
 // secret the helper resolves NEVER cross the process boundary via argv,
-// only via the stdin/stdout pipes (H12). The subprocess's stderr is
-// intentionally discarded rather than captured: a misbehaving helper could
-// otherwise leak partial secret material into an error via CombinedOutput.
-func runOCICredentialHelper(name string, reqBody []byte) ([]byte, error) {
-	cmd := exec.Command(name, "get")
+// only via the stdin/stdout pipes (H12). Hardening (Codex round-2):
+//   - ctx is honored via exec.CommandContext so a hung helper is cancelled
+//     when the caller's OCI pull deadline fires.
+//   - cmd.Stderr is set to io.Discard so the helper's stderr is genuinely
+//     dropped: with a nil Stderr, cmd.Output() would instead capture up to
+//     ~64 KiB of it into *exec.ExitError.Stderr, placing any credential the
+//     helper printed to stderr into a returned error object.
+//   - cmd.Env is the allowlist only, so the helper cannot read other
+//     sources' token env vars out of the inherited environment.
+//
+// On failure only the raw (already secret-free by construction) exec error is
+// returned to the caller, which itself never echoes it.
+func runOCICredentialHelper(ctx context.Context, name string, reqBody []byte) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, "get")
 	cmd.Stdin = bytes.NewReader(reqBody)
+	cmd.Stderr = io.Discard
+	cmd.Env = allowlistedHelperEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -263,9 +303,33 @@ func splitAuthParams(s string) []string {
 	return parts
 }
 
+// rejectNonHTTPSRedirect is the token client's redirect policy (Codex round-2
+// HIGH — credential downgrade). Go's default redirect handling strips the
+// Authorization header only across DIFFERENT hosts; a same-host (or
+// subdomain) redirect from https to http, or to a different port, STILL
+// forwards the credential — the stdlib copy check keys on host, not scheme.
+// So the token exchange refuses to follow ANY redirect whose target is not
+// https: a malicious/MITM token endpoint cannot bounce a Basic credential or
+// bearer token to a cleartext http URL. The 10-redirect cap mirrors the
+// stdlib default the custom policy replaces.
+func rejectNonHTTPSRedirect(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("oci auth: refusing redirect to non-https token endpoint (scheme %q)", req.URL.Scheme)
+	}
+	if len(via) >= 10 {
+		return fmt.Errorf("oci auth: stopped after 10 redirects")
+	}
+	return nil
+}
+
 // ociTokenHTTPClient is the HTTP client seam for the token-endpoint
-// exchange, overridable in tests so no test touches the network.
-var ociTokenHTTPClient = &http.Client{Timeout: 15 * time.Second}
+// exchange, overridable in tests so no test touches the network. It carries
+// rejectNonHTTPSRedirect so a credential is never forwarded across an
+// https→http downgrade redirect.
+var ociTokenHTTPClient = &http.Client{
+	Timeout:       15 * time.Second,
+	CheckRedirect: rejectNonHTTPSRedirect,
+}
 
 // tokenEndpointResponse is the subset of the OCI Distribution token
 // endpoint response this package reads: "token" or the legacy "access_token"
@@ -289,6 +353,14 @@ func exchangeBearerToken(ctx context.Context, challenge ociAuthChallenge, cred r
 	u, err := url.Parse(challenge.Realm)
 	if err != nil {
 		return "", fmt.Errorf("oci auth: malformed token endpoint realm %q: %w", challenge.Realm, err)
+	}
+	// The realm comes verbatim from the registry's WWW-Authenticate header —
+	// attacker-influenceable. Refuse to present the credential to anything but
+	// an https endpoint so a MITM/malicious registry cannot name an http (or
+	// otherwise cleartext) realm and harvest it (Codex round-2 HIGH). This is
+	// checked BEFORE any credential is attached to a request.
+	if u.Scheme != "https" {
+		return "", fmt.Errorf("oci auth: refusing to send credential to non-https token endpoint (realm scheme %q; must be https)", u.Scheme)
 	}
 	q := u.Query()
 	if challenge.Service != "" {
@@ -367,7 +439,7 @@ func resolveOCIAuthorizationHeader(ctx context.Context, auth json.RawMessage, re
 	case ociAuthProviderBearer:
 		cred, err = resolveBearerCredential(cfg)
 	case ociAuthProviderCredentialHelper:
-		cred, err = resolveCredentialHelperCredential(cfg, registry, repository)
+		cred, err = resolveCredentialHelperCredential(ctx, cfg, registry, repository)
 	default:
 		return "", fmt.Errorf("oci auth: unsupported provider %q (bearer/credential-helper only; oauth2/mtls are external-agent-sources)", cfg.Provider)
 	}

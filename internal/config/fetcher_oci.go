@@ -772,7 +772,16 @@ func pullOCIContent(puller ociPuller, src Source, ref ociRef, importRef, sourceI
 	defer cancel()
 	blob, err := pull(ctx, ref, src.Auth)
 	if err != nil {
-		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonTransport, Err: err}
+		// The puller is where the OCI auth seam (ociAuthHeaderForRef) is
+		// consumed per request (t8's live registry client), so a puller error
+		// is the one transport error on this path that could carry a resolved
+		// Authorization header if the puller were careless. Wrap it at this
+		// boundary in a redactedError so the credential is scrubbed from the
+		// error VALUE returned to every caller — CLI stderr, logs — not only
+		// the audit detail field (Codex round-2 HIGH #3). ImportError.Error()
+		// (fetcher.go, out of this task's write scope) is unchanged; the
+		// wrapper makes the returned error self-redacting instead.
+		return ociContent{}, &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonTransport, Err: newRedactedError(err)}
 	}
 	// H5 (BLOCKER: digest conflation) — the content digest is ALWAYS recomputed
 	// over the fetched payload, never taken as-is from a registry-reported label.

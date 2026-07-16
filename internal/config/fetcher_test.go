@@ -3872,22 +3872,30 @@ func TestOCIAuthHeaderForRefWiredThroughPuller(t *testing.T) {
 }
 
 // TestOCIAuthHeaderForRefForcedErrorNoLeak forces a downstream transport
-// failure after the header was resolved and confirms the wrapped
-// ImportError's Error() text — the "forced error's string/stderr" surface —
-// never contains the sentinel secret.
+// failure whose error message DELIBERATELY embeds the resolved Authorization
+// header (simulating a future puller that is careless with the credential),
+// and confirms the error-boundary redaction (newRedactedError, Codex round-2
+// HIGH #3) scrubs it from BOTH the caller-visible error string AND the audit
+// event. This is the non-vacuous replacement for the prior version, which
+// returned a constant error the secret was never interpolated into — proving
+// nothing. With the boundary redaction removed, this test FAILS (the sentinel
+// survives in err.Error()), so it now guards the fix for the right reason.
 func TestOCIAuthHeaderForRefForcedErrorNoLeak(t *testing.T) {
 	withPackagesCache(t)
 	sentinel := "sentinel-forced-error-6f7e8d"
 	t.Setenv("OCI_TEST_FORCED_ERROR_TOKEN", sentinel)
 
+	var resolvedHeader string
 	f := &ociFetcher{puller: func(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error) {
-		if _, err := ociAuthHeaderForRef(ctx, auth, ref, ""); err != nil {
+		header, err := ociAuthHeaderForRef(ctx, auth, ref, "")
+		if err != nil {
 			t.Fatalf("ociAuthHeaderForRef: %v", err)
 		}
-		// Simulate a registry transport failure AFTER auth resolved — the
-		// puller's own error must not (and, per its construction, does not)
-		// embed the header/secret it just used.
-		return ociBlob{}, fmt.Errorf("registry connection reset")
+		resolvedHeader = header
+		// Embed the resolved header (which carries the sentinel token) in the
+		// transport error, exactly the careless-puller case the boundary
+		// redaction must defend against.
+		return ociBlob{}, fmt.Errorf("registry probe failed after presenting %s", header)
 	}}
 	src := Source{
 		Type: "oci",
@@ -3898,14 +3906,20 @@ func TestOCIAuthHeaderForRefForcedErrorNoLeak(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a transport error")
 	}
-	if strings.Contains(err.Error(), sentinel) {
-		t.Fatalf("forced error leaked the sentinel: %v", err)
+	// Guard against a vacuous pass: the header the puller embedded must
+	// actually contain the sentinel, otherwise the assertions below are
+	// true-by-construction.
+	if !strings.Contains(resolvedHeader, sentinel) {
+		t.Fatalf("test setup invalid: resolved header %q did not carry the sentinel", resolvedHeader)
 	}
-	// The audit-facing detail (importFailedEvent) redacts through the
-	// central registry too, so even an error that DID embed the sentinel
-	// would not leak into the audit stream (audit_test.go covers this
-	// directly; asserted here again against the real error produced by this
-	// fetch path).
+	// Caller-visible error string (CLI stderr / logs) is scrubbed.
+	if strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("caller-visible error leaked the sentinel: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("expected the caller-visible error to show a redaction marker: %v", err)
+	}
+	// Audit event detail is scrubbed too.
 	var ie *ImportError
 	if !errors.As(err, &ie) {
 		t.Fatal("expected an *ImportError")
