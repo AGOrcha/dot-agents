@@ -336,14 +336,26 @@ func (s *LocalSource) EnsureProvenanceGitignore(remotePaths []string) error {
 // strings.Contains would miss — a pattern present but shadowed by a later
 // negation, or a path the pattern does not actually cover.
 //
-// t9 round-2 (cross-harness finding): only TRAILING whitespace (and a
-// trailing \r, for a CRLF-authored file) is stripped per line, mirroring
-// real git's gitignore(5) semantics — LEADING whitespace is significant
-// there (a line like " cache/" does NOT ignore "cache/"). The previous
-// strings.TrimSpace here stripped BOTH ends, so a leading-whitespace
-// pattern silently matched here while real `git status`/`git check-ignore`
-// would not treat it as ignored — a false "ignored" verdict for exactly the
-// gate H14 exists to prevent.
+// t9 round-2 (cross-harness finding): only a trailing \r (a CRLF-authored
+// file's line terminator) is stripped per line — LEADING whitespace is
+// significant under real git's gitignore(5) (a line like " cache/" does NOT
+// ignore "cache/"), and trailing whitespace handling is delegated to
+// gitignore.ParsePattern itself (which already strips trailing UNESCAPED
+// spaces the same way git does) rather than re-implemented here.
+//
+// t9 round-3 (cross-harness finding): TRAILING TABS must NOT be stripped
+// either. Real git strips only trailing unescaped SPACES, never tabs — a
+// line "cache/\t" is a DIFFERENT, non-matching pattern from "cache/" under
+// real git. The round-2 fix still stripped " \t\r" (spaces AND tabs), so a
+// gitignore ending in "cache/<TAB>" was silently canonicalized to match
+// "cache/" here while real git would not treat it as the same rule — which
+// mattered because a later negation line (e.g. "!cache/") could then be the
+// TRUE last-match-winner under real git while this matcher still credited
+// the (wrongly trimmed) tab-suffixed "cache/" line as ignoring the path.
+// Trailing-space stripping is intentionally NOT duplicated here — go-git's
+// own ParsePattern already applies it (see its TrimRight(p, " ") with the
+// "\ " escape exception), so doing it again here would only risk drifting
+// out of sync with that logic.
 func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 	if s.Root == "" {
 		return false, errors.New(errEmptyRoot)
@@ -354,7 +366,7 @@ func (s *LocalSource) CASPathIgnored(relPath string) (bool, error) {
 	}
 	var patterns []gitignore.Pattern
 	for _, raw := range strings.Split(content, "\n") {
-		line := strings.TrimRight(raw, " \t\r")
+		line := strings.TrimRight(raw, "\r")
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -438,6 +450,25 @@ func EnsureAndVerifyCASIgnore(agentsHome, family, digest string) error {
 // require the block contain ONLY that line: an EnsureProvenanceGitignore
 // call carrying additional remotePaths still produces a canonical block the
 // fast path correctly recognizes.
+//
+// t9 round-3 (cross-harness BLOCKER finding — the same divergence CLASS,
+// closed structurally): CASPathIgnored keeps chasing individual gitignore
+// syntax edge cases (round 2 fixed leading whitespace and a symlinked
+// occupant); round 3 found YET ANOTHER variant — a re-inclusion
+// ("!cache/") after the managed block, paired with a trailing-tab shadow
+// ("cache/<TAB>") that a matcher-trim subtlety could misjudge as either
+// matching or not matching the managed line. Chasing each new syntax edge
+// individually does not close the CLASS. The structural fix: real git's
+// ignore rules are LAST-MATCH-WINS, so the managed block's "cache/" line
+// only reliably controls the outcome when NOTHING PATTERN-BEARING follows
+// it. This function now requires the managed block to be TERMINAL — every
+// line after its closing marker must be blank or a comment; any pattern
+// line (negation, shadow-variant, or anything else) after the block means
+// the file is NOT canonical, regardless of what it says or how any
+// particular matcher would trim it. This closes the whole divergence class
+// (not just the reported variant) independent of trim/whitespace/matcher
+// subtleties, because a genuinely terminal block cannot be shadowed by
+// definition.
 func gitignoreIsCanonicalCASIgnore(path string) (bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
@@ -462,17 +493,35 @@ func gitignoreIsCanonicalCASIgnore(path string) (bool, error) {
 		required[p] = true
 	}
 	inBlock := false
+	blockClosed := false
 	for _, line := range splitLines(string(data)) {
 		switch {
 		case line == gitignoreBlockBegin:
 			inBlock = true
 		case line == gitignoreBlockEnd:
 			inBlock = false
+			blockClosed = true
 		case inBlock:
 			delete(required, line)
+		case blockClosed:
+			// Terminal-block requirement: nothing but a blank or comment
+			// line may follow the managed block's closing marker. Any
+			// pattern line here — a negation, a re-inclusion, a
+			// whitespace-shadow variant, anything — could, under real
+			// git's last-match-wins semantics, override the managed
+			// "cache/" line no matter how this specific check trims or
+			// parses it. Trailing \r is stripped only for the blank/comment
+			// classification itself (mirroring CASPathIgnored's own
+			// trim rule); the line's actual pattern semantics are
+			// irrelevant here — its mere PRESENCE after the block disqualifies
+			// canonicity.
+			trimmed := strings.TrimRight(line, "\r")
+			if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+				return false, nil
+			}
 		}
 	}
-	return len(required) == 0, nil
+	return blockClosed && len(required) == 0, nil
 }
 
 // readGitignore reads the .gitignore at path, treating a missing file as empty.

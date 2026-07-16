@@ -425,6 +425,36 @@ func TestCASPathIgnored_LeadingWhitespaceNotSignificant(t *testing.T) {
 	assertRealGitDoesNotIgnore(t, home, filepath.Join("cache", "artifacts", "skills", "deadbeef", "layer.json"))
 }
 
+// TestCASPathIgnored_TrailingTabNotStripped is the t9 round-3 cross-harness
+// regression test isolating finding #2 on its own (independent of the
+// structural terminal-block fix): a gitignore line "cache/<TAB>" is a
+// DIFFERENT pattern from "cache/" under real git — git strips only trailing
+// UNESCAPED SPACES, never tabs. Before the round-3 fix, CASPathIgnored's
+// per-line trim stripped " \t\r" (spaces AND tabs), silently canonicalizing
+// "cache/\t" to "cache/" and reporting "ignored" when real git would not.
+func TestCASPathIgnored_TrailingTabNotStripped(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if _, err := git.PlainInit(home, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, gitignoreFileName), []byte("cache/\t\n"), 0o644); err != nil {
+		t.Fatalf("seed trailing-tab gitignore: %v", err)
+	}
+	casRel := filepath.Join("cache", "artifacts", "skills", "deadbeef")
+
+	ls := NewLocalSource(home, nil)
+	ok, err := ls.CASPathIgnored(casRel)
+	if err != nil {
+		t.Fatalf("CASPathIgnored: %v", err)
+	}
+	if ok {
+		t.Fatalf(`CASPathIgnored must NOT treat "cache/<TAB>" as matching "cache/" — real git strips only trailing spaces, never tabs`)
+	}
+
+	assertRealGitDoesNotIgnore(t, home, filepath.Join("cache", "artifacts", "skills", "deadbeef", "layer.json"))
+}
+
 // TestEnsureAndVerifyCASIgnore_LeadingWhitespaceCanonicalizes is the t9
 // round-2 regression test proving the fast path in EnsureAndVerifyCASIgnore
 // does not trust a non-canonical " cache/" gitignore: it must fall through
@@ -517,6 +547,115 @@ func TestEnsureAndVerifyCASIgnore_SymlinkedGitignoreCanonicalizes(t *testing.T) 
 	assertRealGitDoesIgnore(t, home, "cache/artifacts/skills/deadbeef/layer.json")
 }
 
+// TestEnsureAndVerifyCASIgnore_TrailingTabNegationShadowCanonicalizes is the
+// t9 round-3 cross-harness regression test for the third variant of the
+// same divergence class: a canonical managed block FOLLOWED BY a
+// re-inclusion ("!cache/") and a trailing-tab shadow variant ("cache/\t").
+//
+//	# >>> dot-agents managed (local source provenance) >>>
+//	cache/
+//	# <<< dot-agents managed (local source provenance) <<<
+//	!cache/
+//	cache/<TAB>
+//
+// Under real git's last-match-wins semantics, "!cache/" is the last rule
+// that actually matches "cache/..." paths (git strips only trailing
+// unescaped SPACES, never tabs, so "cache/\t" is a distinct, non-matching
+// pattern and does NOT re-shadow the negation back to ignored) — so real
+// git does NOT ignore the store. Before the round-3 fix,
+// gitignoreIsCanonicalCASIgnore only checked that the block CONTAINED the
+// managed line (true here) without checking what followed it, so it wrongly
+// reported this file as canonical and the fast path skipped the
+// canonicalizing install — leaving the store git-tracked.
+func TestEnsureAndVerifyCASIgnore_TrailingTabNegationShadowCanonicalizes(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	if _, err := git.PlainInit(home, false); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	content := gitignoreBlockBegin + "\n" +
+		"cache/\n" +
+		gitignoreBlockEnd + "\n" +
+		"!cache/\n" +
+		"cache/\t\n"
+	gitignorePath := filepath.Join(home, gitignoreFileName)
+	if err := os.WriteFile(gitignorePath, []byte(content), 0o644); err != nil {
+		t.Fatalf("seed trailing-tab negation-shadow gitignore: %v", err)
+	}
+
+	// The structural terminal-block check must reject this file: a pattern
+	// line (the negation) follows the managed block's closing marker.
+	if canonical, err := gitignoreIsCanonicalCASIgnore(gitignorePath); err != nil || canonical {
+		t.Fatalf("gitignoreIsCanonicalCASIgnore(negation-shadowed) = (%v, %v), want (false, nil)", canonical, err)
+	}
+
+	// Ground truth: real git does NOT ignore the store here (the negation
+	// wins), confirming the scenario is a genuine divergence, not a test
+	// artifact.
+	assertRealGitDoesNotIgnore(t, home, "cache/artifacts/skills/deadbeef/layer.json")
+
+	bundle := testBundle(t, map[string]string{"SKILL.md": "# fetched\n"})
+	if _, _, _, err := MaterializeToStore(home, "skills", bundle); err != nil {
+		t.Fatalf("MaterializeToStore: %v", err)
+	}
+
+	// After canonicalization the negation/shadow lines must be gone (the
+	// managed block owner rewrites the WHOLE file's managed content; the
+	// stray post-block lines are user-authored content EnsureProvenanceGitignore
+	// preserves verbatim outside the block, so assert the STORE is now
+	// genuinely ignored per real git rather than assuming the shadow lines
+	// were dropped).
+	assertRealGitDoesIgnore(t, home, "cache/artifacts/skills/deadbeef/layer.json")
+}
+
+// TestGitignoreIsCanonicalCASIgnore_TerminalBlockHappyPathFastReturns proves
+// the perf win survives the round-3 structural fix: a canonical regular
+// file whose managed block is genuinely TERMINAL (nothing but blank/comment
+// lines follow it) still reports canonical, so EnsureAndVerifyCASIgnore's
+// fast path still fires on the steady-state happy path.
+func TestGitignoreIsCanonicalCASIgnore_TerminalBlockHappyPathFastReturns(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	ls := NewLocalSource(home, nil)
+	if err := ls.EnsureProvenanceGitignore(nil); err != nil {
+		t.Fatalf("install CAS ignore: %v", err)
+	}
+	gitignorePath := filepath.Join(home, gitignoreFileName)
+	canonical, err := gitignoreIsCanonicalCASIgnore(gitignorePath)
+	if err != nil {
+		t.Fatalf("gitignoreIsCanonicalCASIgnore: %v", err)
+	}
+	if !canonical {
+		data, _ := os.ReadFile(gitignorePath)
+		t.Fatalf("expected the canonical happy-path .gitignore to satisfy the fast-path gate, content=%q", data)
+	}
+
+	// A trailing comment or blank line after the block must still be
+	// tolerated (the terminal-block rule only disqualifies PATTERN lines).
+	withTrailingComment := string(mustReadFile(t, gitignorePath)) + "\n# a trailing user comment\n\n"
+	if err := os.WriteFile(gitignorePath, []byte(withTrailingComment), 0o644); err != nil {
+		t.Fatalf("seed trailing comment: %v", err)
+	}
+	canonical, err = gitignoreIsCanonicalCASIgnore(gitignorePath)
+	if err != nil {
+		t.Fatalf("gitignoreIsCanonicalCASIgnore (trailing comment): %v", err)
+	}
+	if !canonical {
+		t.Fatalf("expected a trailing comment/blank line after the block to still satisfy the fast-path gate")
+	}
+}
+
+// mustReadFile is a tiny t.Fatal-on-error os.ReadFile wrapper, local to this
+// file's real-git-backed regression tests.
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return data
+}
+
 // realGitAvailable reports whether the real `git` binary can be invoked, and
 // skips the calling test if not (CI-portable: these regression tests assert
 // against the REAL git engine, not go-git, per the t9 round-2 finding that
@@ -563,7 +702,17 @@ func assertRealGitIgnoreState(t *testing.T, repoRoot, relPath string, wantIgnore
 	// so the match below checks whether any reported entry is a PREFIX of
 	// our probe path (covers both the exact-file and the collapsed-dir
 	// cases) rather than requiring an exact path match.
-	cmd := exec.Command(gitBin, "-C", repoRoot, "status", "--porcelain=v1", "--ignored=matching", "--untracked-files=all")
+	//
+	// t9 round-3 hermeticity hardening: -c core.excludesFile=/dev/null plus
+	// GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM=/dev/null neutralize the invoking
+	// user's/machine's global and system git config for this subprocess, so
+	// a developer or CI image with a global ignore of "cache/" (or any
+	// other rule that happens to affect these probe paths) cannot silently
+	// pollute the NEGATIVE assertions (assertRealGitDoesNotIgnore) into a
+	// false pass.
+	cmd := exec.Command(gitBin, "-C", repoRoot, "-c", "core.excludesFile=/dev/null",
+		"status", "--porcelain=v1", "--ignored=matching", "--untracked-files=all")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git status --porcelain --ignored: %v\n%s", err, out)

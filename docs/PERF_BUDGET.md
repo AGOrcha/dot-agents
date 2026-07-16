@@ -271,6 +271,36 @@ suite because it fires on BOTH the cold (`resolvePackagesUnits`) and warm
 install`/`da refresh` invocation, regardless of whether the packages set
 itself changed.
 
+**Round-3 (cross-harness review, same divergence class, closed structurally)**:
+round 2 fixed two individual gitignore-syntax edge cases (symlink, leading
+whitespace) but kept chasing the CLASS one variant at a time; round 3 found a
+third — a re-inclusion (`!cache/`) plus a trailing-tab shadow (`cache/<TAB>`)
+placed AFTER the managed block, which `gitignoreIsCanonicalCASIgnore` did not
+check for (it only verified the block CONTAINED the managed line, not that
+nothing PATTERN-BEARING followed it) and which the round-2 trim
+(`strings.TrimRight(raw, " \t\r")`, still stripping tabs) made worse by
+letting `CASPathIgnored` mis-trim the tab-suffixed shadow line into a false
+match. Fixed structurally rather than variant-by-variant:
+`gitignoreIsCanonicalCASIgnore` now requires the managed block to be
+TERMINAL — every line after its closing marker must be blank or a comment,
+or canonicity is refused — which closes the whole divergence class (real
+git's ignore rules are last-match-wins, so a genuinely terminal block cannot
+be shadowed by ANY later pattern, regardless of its exact syntax).
+`CASPathIgnored`'s trim was also corrected to strip only a trailing `\r`
+(real git strips only trailing unescaped spaces, delegated to
+`gitignore.ParsePattern` itself, and never tabs).
+
+Cost of the round-3 structural check (one more linear scan over already-read
+file content, no additional I/O) was within measurement noise —
+`BenchmarkHydratePackagesUnits_{Cold,Warm}_50Packages` after round 3:
+9,885,950 ns/op (cold) / 9,310,122 ns/op (warm), statistically indistinguishable
+from the round-2 numbers above. The 68-70%-faster-than-no-fast-path
+conclusion is unchanged.
+`TestGitignoreIsCanonicalCASIgnore_TerminalBlockHappyPathFastReturns`
+confirms the canonical (terminal-block, regular-file) happy path still
+fast-returns, including when a trailing comment/blank line follows the
+block (only PATTERN lines disqualify canonicity).
+
 ## Already-fast / deliberately not optimized
 
 ### `agentslock.Update` / `AcquireFileLock` (the `.agentsrc.lock` read-modify-write itself)
