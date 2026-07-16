@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -160,11 +161,7 @@ func localRootWalker(root *os.Root, artifactRel string, rootInfo fs.FileInfo, li
 	return func(emit func(RawBundleEntry) error) error {
 		var walk func(rel string, expected fs.FileInfo) error
 		walk = func(rel string, expected fs.FileInfo) error {
-			items, err := readConfinedDir(root, rel, expected)
-			if err != nil {
-				return err
-			}
-			for _, item := range items {
+			return streamConfinedDir(root, rel, expected, func(item os.DirEntry) error {
 				childRel := path.Join(rel, item.Name())
 				bundleRel := bundleRelPath(artifactRel, childRel)
 
@@ -174,57 +171,78 @@ func localRootWalker(root *os.Root, artifactRel string, rootInfo fs.FileInfo, li
 				}
 				switch {
 				case info.Mode()&fs.ModeSymlink != 0:
-					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindSymlink}); err != nil {
-						return err
-					}
+					return emit(RawBundleEntry{Path: bundleRel, Kind: rawKindSymlink})
 				case info.IsDir():
 					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindDir, Mode: info.Mode()}); err != nil {
 						return err
 					}
-					if err := walk(childRel, info); err != nil {
-						return err
-					}
+					return walk(childRel, info)
 				case info.Mode().IsRegular():
 					mode, size, data, err := readRootFile(root, childRel, info, limits)
 					if err != nil {
 						return err
 					}
-					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindFile, Mode: mode, Size: size, Data: data}); err != nil {
-						return err
-					}
+					return emit(RawBundleEntry{Path: bundleRel, Kind: rawKindFile, Mode: mode, Size: size, Data: data})
 				default:
-					if err := emit(RawBundleEntry{Path: bundleRel, Kind: rawKindOther}); err != nil {
-						return err
-					}
+					return emit(RawBundleEntry{Path: bundleRel, Kind: rawKindOther})
 				}
-			}
-			return nil
+			})
 		}
 		return walk(artifactRel, rootInfo)
 	}
 }
 
-// readConfinedDir opens rel under root, verifies the opened directory's
-// identity against the pre-open Lstat (expected) via os.SameFile — defeating an
-// in-root symlink swapped in between classify and open — and returns its
-// entries. A non-directory or identity mismatch fails closed.
-func readConfinedDir(root *os.Root, rel string, expected fs.FileInfo) ([]os.DirEntry, error) {
+// dirReadBatchSize bounds how many directory entries streamConfinedDir
+// requests from the filesystem in a single ReadDir call. os.ReadDir(-1) (and
+// (*os.File).ReadDir(-1)) materializes a directory's ENTIRE listing in one
+// allocation before a caller ever sees an entry — for a directory flooded
+// with millions of flat entries, that single call is the unbounded
+// allocation MaxEntries is supposed to prevent (t1b). Reading in small,
+// fixed-size batches instead means a flood is rejected within one batch's
+// worth of over-read, not after the whole directory has been buffered.
+const dirReadBatchSize = 1024
+
+// streamConfinedDir opens rel under root, verifies the opened directory's
+// identity against the pre-open Lstat (expected) via os.SameFile — defeating
+// an in-root symlink swapped in between classify and open — and streams its
+// entries to visit in dirReadBatchSize batches (never one unbounded
+// ReadDir(-1)). It stops the moment visit returns an error, so once the
+// accumulator's MaxEntries cap trips (via emit, inside visit) the read halts
+// immediately rather than continuing to enumerate the rest of a flooded
+// directory.
+func streamConfinedDir(root *os.Root, rel string, expected fs.FileInfo, visit func(os.DirEntry) error) error {
 	fh, err := root.Open(filepath.FromSlash(rel))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = fh.Close() }()
 	info, err := fh.Stat()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if !info.IsDir() {
-		return nil, fmt.Errorf("local tree dir %q: not a directory at open time (mode %v)", rel, info.Mode())
+		return fmt.Errorf("local tree dir %q: not a directory at open time (mode %v)", rel, info.Mode())
 	}
 	if !os.SameFile(expected, info) {
-		return nil, fmt.Errorf("local tree dir %q: identity changed between classify and open (possible in-root symlink swap)", rel)
+		return fmt.Errorf("local tree dir %q: identity changed between classify and open (possible in-root symlink swap)", rel)
 	}
-	return fh.ReadDir(-1)
+	for {
+		batch, err := fh.ReadDir(dirReadBatchSize)
+		for _, item := range batch {
+			if verr := visit(item); verr != nil {
+				return verr
+			}
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		if len(batch) == 0 {
+			return nil
+		}
+	}
 }
 
 // bundleRelPath re-bases a source-root-relative path onto the artifact root so

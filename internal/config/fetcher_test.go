@@ -16,11 +16,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-git/go-billy/v6"
 	"github.com/go-git/go-billy/v6/memfs"
+	"github.com/go-git/go-billy/v6/osfs"
 	gogit "github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/filemode"
@@ -1994,13 +1996,11 @@ func memfsWriteFile(t *testing.T, fs billy.Filesystem, name string, body []byte)
 // appears as instructions/x.md), and dirs + modes + dotfiles survive.
 func TestGitArtifactFetcherTreeLayoutSurvivesStructure(t *testing.T) {
 	withPackagesCache(t)
-	dir := t.TempDir()
-	makeGitFixtureAt(t, dir, "skill/SKILL.md", []byte("root"))
-	f := &gitArtifactFetcher{cloner: populatedRepoFS(t, dir, func(fs billy.Filesystem) {
-		memfsWriteFile(t, fs, "skill/SKILL.md", []byte("skill body"))
-		memfsWriteFile(t, fs, "skill/instructions/x.md", []byte("nested body"))
-		memfsWriteFile(t, fs, "skill/.env", []byte(""))
-	})}
+	f := &gitArtifactFetcher{cloner: gitTreeFixtureCloner(t, map[string][]byte{
+		"skill/SKILL.md":          []byte("skill body"),
+		"skill/instructions/x.md": []byte("nested body"),
+		"skill/.env":              []byte(""),
+	}, nil)}
 
 	got, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
 	if err != nil {
@@ -2041,13 +2041,10 @@ func TestGitArtifactFetcherTreeLayoutSurvivesStructure(t *testing.T) {
 // succeeds, and no Bundle is returned.
 func TestGitArtifactFetcherTreeLayoutRejectsSymlinkEscape(t *testing.T) {
 	withPackagesCache(t)
-	dir := t.TempDir()
-	makeGitFixtureAt(t, dir, "skill/SKILL.md", []byte("root"))
-	f := &gitArtifactFetcher{cloner: populatedRepoFS(t, dir, func(fs billy.Filesystem) {
-		memfsWriteFile(t, fs, "skill/SKILL.md", []byte("skill body"))
-		if err := fs.Symlink("../../../etc/passwd", "skill/escape-link"); err != nil {
-			t.Fatalf("Symlink: %v", err)
-		}
+	f := &gitArtifactFetcher{cloner: gitTreeFixtureCloner(t, map[string][]byte{
+		"skill/SKILL.md": []byte("skill body"),
+	}, map[string]string{
+		"skill/escape-link": "../../../etc/passwd",
 	})}
 
 	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
@@ -2181,6 +2178,153 @@ func encodeTree(t *testing.T, st *memory.Storage, tree *object.Tree) plumbing.Ha
 	return h
 }
 
+// treeFixtureNode is one node (file, symlink, or dir) in the tree a
+// buildCommittedTree call assembles. A dir node's Children key is the child's
+// path segment; a leaf node (Data non-nil or Symlink set) has no children.
+type treeFixtureNode struct {
+	Data     []byte // non-nil for a regular file (may be empty)
+	Symlink  string // non-empty target for a symlink leaf
+	Children map[string]*treeFixtureNode
+}
+
+// buildCommittedTree writes files (path -> content) and symlinks (path ->
+// target) directly into st's object graph as real committed blob/tree
+// objects — no memfs, no real disk I/O — and returns the root tree's hash.
+// It is the t1b test counterpart to the git-ingestion path's switch to
+// committed-tree/blob reads (gitCommittedTreeWalker): unlike the worktree-fs
+// fixtures used elsewhere in this file (populatedRepoFS et al.), every path a
+// test declares here is REAL committed content, so a tree-based content
+// reader sees exactly the shape the test intends.
+func buildCommittedTree(t *testing.T, st *memory.Storage, files map[string][]byte, symlinks map[string]string) plumbing.Hash {
+	t.Helper()
+	root := &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
+	insert := func(p string, leaf *treeFixtureNode) {
+		parts := strings.Split(p, "/")
+		cur := root
+		for i, part := range parts {
+			if i == len(parts)-1 {
+				cur.Children[part] = leaf
+				return
+			}
+			next, ok := cur.Children[part]
+			if !ok || next.Children == nil {
+				next = &treeFixtureNode{Children: map[string]*treeFixtureNode{}}
+				cur.Children[part] = next
+			}
+			cur = next
+		}
+	}
+	for p, body := range files {
+		insert(p, &treeFixtureNode{Data: body})
+	}
+	for p, target := range symlinks {
+		insert(p, &treeFixtureNode{Symlink: target})
+	}
+
+	writeBlob := func(body []byte) plumbing.Hash {
+		blob := st.NewEncodedObject()
+		blob.SetType(plumbing.BlobObject)
+		w, err := blob.Writer()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(body); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		h, err := st.SetEncodedObject(blob)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+
+	var encode func(n *treeFixtureNode) plumbing.Hash
+	encode = func(n *treeFixtureNode) plumbing.Hash {
+		names := make([]string, 0, len(n.Children))
+		for name := range n.Children {
+			names = append(names, name)
+		}
+		// Git's tree encoding requires entries sorted as if a directory name
+		// carried a trailing slash (treeEntrySortName) — sort accordingly so
+		// Tree.Validate (called by Encode) accepts the constructed tree.
+		sort.Slice(names, func(i, j int) bool {
+			a, b := names[i], names[j]
+			if n.Children[names[i]].Symlink == "" && n.Children[names[i]].Data == nil {
+				a += "/"
+			}
+			if n.Children[names[j]].Symlink == "" && n.Children[names[j]].Data == nil {
+				b += "/"
+			}
+			return a < b
+		})
+		tree := &object.Tree{}
+		for _, name := range names {
+			child := n.Children[name]
+			switch {
+			case child.Symlink != "":
+				tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Symlink, Hash: writeBlob([]byte(child.Symlink))})
+			case child.Data != nil:
+				tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Regular, Hash: writeBlob(child.Data)})
+			default:
+				tree.Entries = append(tree.Entries, object.TreeEntry{Name: name, Mode: filemode.Dir, Hash: encode(child)})
+			}
+		}
+		return encodeTree(t, st, tree)
+	}
+	return encode(root)
+}
+
+// gitTreeFixtureCloner returns a cloner (the gitArtifactFetcher.cloner test
+// seam) whose repo's HEAD resolves to a commit over a tree built from files
+// and symlinks by buildCommittedTree. No memfs is populated: with content
+// reads sourced from the committed tree/blob graph (t1b), the worktree
+// filesystem is never consulted for a tree-layout pull, so an empty memfs is
+// sufficient here (FetchArtifact's directory-vs-file Lstat classification
+// still needs the artifact root to exist somewhere in the worktree fs for a
+// single-file pull, but every caller of this helper exercises a tree-layout
+// pull, which classifies via the committed tree once inside fetchTreeBundle).
+func gitTreeFixtureCloner(t *testing.T, files map[string][]byte, symlinks map[string]string) func(context.Context, string, string) (*gogit.Repository, billy.Filesystem, error) {
+	t.Helper()
+	st := memory.NewStorage()
+	rootHash := buildCommittedTree(t, st, files, symlinks)
+
+	sig := object.Signature{Name: "t", Email: "t@example"}
+	commit := &object.Commit{Author: sig, Committer: sig, Message: "fixture", TreeHash: rootHash}
+	commitObj := st.NewEncodedObject()
+	if err := commit.Encode(commitObj); err != nil {
+		t.Fatal(err)
+	}
+	commitHash, err := st.SetEncodedObject(commitObj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewHashReference("refs/heads/main", commitHash)); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetReference(plumbing.NewSymbolicReference(plumbing.HEAD, "refs/heads/main")); err != nil {
+		t.Fatal(err)
+	}
+
+	return func(_ context.Context, _, _ string) (*gogit.Repository, billy.Filesystem, error) {
+		wfs := memfs.New()
+		// The top-level artifact path must exist in the worktree fs as a
+		// directory for FetchArtifact's initial Lstat classification — content
+		// underneath it is irrelevant since fetchTreeBundle reads the committed
+		// tree, not this fs.
+		if err := wfs.MkdirAll("skill", 0o755); err != nil {
+			return nil, nil, err
+		}
+		repo, err := gogit.Open(st, wfs)
+		if err != nil {
+			return nil, nil, err
+		}
+		return repo, wfs, nil
+	}
+}
+
 // TestGitArtifactFetcherTreeLayoutRejectsSubmodule is the defect #4
 // regression: the committed subtree carries a gitlink (mode 160000) that
 // go-git flattened into an empty worktree directory. A worktree-only walk
@@ -2215,21 +2359,80 @@ func TestGitArtifactFetcherTreeLayoutRejectsSubmodule(t *testing.T) {
 	}
 }
 
-// TestGitSubtreeWalkerEnforcesPerFileCap is the defect #4 regression: the
-// per-file cap must hold on the git ingestion path too — an oversized
-// committed file is rejected AT the walker (before the full read), not only
-// later by the accumulator. The error naming "git tree file" proves the
-// pre-read walker-level rejection.
-func TestGitSubtreeWalkerEnforcesPerFileCap(t *testing.T) {
-	wfs := memfs.New()
-	memfsWriteFile(t, wfs, "skill/big.txt", make([]byte, 4096))
+// TestGitCommittedTreeWalkerEnforcesPerFileCap is the defect #4 regression
+// (t1b re-shape: the walker now reads from the committed tree, not the
+// worktree): the per-file cap must hold on the git ingestion path too — an
+// oversized committed blob is rejected AT the walker (before the full read,
+// via the blob's declared Size), not only later by the accumulator. The
+// error naming "git tree file" proves the pre-read walker-level rejection.
+func TestGitCommittedTreeWalkerEnforcesPerFileCap(t *testing.T) {
+	st := memory.NewStorage()
+	rootHash := buildCommittedTree(t, st, map[string][]byte{"big.txt": make([]byte, 4096)}, nil)
+	root, err := object.GetTree(st, rootHash)
+	if err != nil {
+		t.Fatal(err)
+	}
 	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
-	_, err := NormalizeBundle(gitSubtreeWalker(wfs, "skill", limits), limits)
+	_, err = NormalizeBundle(gitCommittedTreeWalker(root, limits), limits)
 	if err == nil {
 		t.Fatal("expected rejection of an oversized committed file on the git path")
 	}
 	if !strings.Contains(err.Error(), "git tree file") || !strings.Contains(err.Error(), "per-file cap") {
 		t.Fatalf("expected a walker-level per-file-cap rejection, got %v", err)
+	}
+}
+
+// TestGitArtifactFetcherTreeLayoutRejectsOversizedBlob is the t1b end-to-end
+// adversarial test: a committed blob larger than BundleLimits.MaxFileBytes
+// inside a tree-layout pull is rejected by FetchArtifact itself (real
+// DefaultBundleLimits, not an injected tiny cap), proving the walker-level
+// per-file bound (TestGitCommittedTreeWalkerEnforcesPerFileCap) holds through
+// the full FetchArtifact -> fetchTreeBundle path, and that the blob's
+// declared Size is checked before its content is read (readCommittedBlobFile)
+// rather than after an unbounded read.
+func TestGitArtifactFetcherTreeLayoutRejectsOversizedBlob(t *testing.T) {
+	withPackagesCache(t)
+	big := make([]byte, DefaultBundleLimits().MaxFileBytes+1)
+	f := &gitArtifactFetcher{cloner: gitTreeFixtureCloner(t, map[string][]byte{
+		"skill/big.bin": big,
+	}, nil)}
+
+	_, err := f.FetchArtifact(Source{Type: "git", URL: "file:///r", Ref: "main"}, PackageRefParts{SourceID: "s", ArtifactPath: "skill", VersionSpec: "1"})
+	var ie *ImportError
+	if !errors.As(err, &ie) || ie.Reason != ReasonContent {
+		t.Fatalf("want content error rejecting an oversized committed blob, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "per-file cap") {
+		t.Fatalf("expected a per-file-cap rejection, got %v", err)
+	}
+}
+
+// TestGitCommittedTreeWalkerRejectsEntryFlood is the git half of the t1b
+// directory-flood adversarial test: unlike billy.Filesystem.ReadDir (no
+// bounded/batched form — always the whole listing in one call),
+// object.TreeWalker resolves and streams exactly one entry at a time as it
+// descends, so the accumulator's MaxEntries cap trips within one entry's
+// worth of over-read rather than after the whole subtree is buffered. A
+// small actual entry count against a tiny injected cap exercises the SAME
+// mechanism a real multi-million-entry flood would hit, at test speed.
+func TestGitCommittedTreeWalkerRejectsEntryFlood(t *testing.T) {
+	st := memory.NewStorage()
+	files := make(map[string][]byte, 50)
+	for i := 0; i < 50; i++ {
+		files[fmt.Sprintf("f%03d.txt", i)] = []byte("x")
+	}
+	rootHash := buildCommittedTree(t, st, files, nil)
+	root, err := object.GetTree(st, rootHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 100, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
+	_, err = NormalizeBundle(gitCommittedTreeWalker(root, limits), limits)
+	if err == nil {
+		t.Fatal("expected rejection of a git tree entry-count flood")
+	}
+	if !strings.Contains(err.Error(), "entry-count cap") {
+		t.Fatalf("expected an entry-count-cap rejection, got %v", err)
 	}
 }
 
@@ -2687,7 +2890,7 @@ func TestReadConfinedDirRejectsInRootSymlinkSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := readConfinedDir(root, "realdir", expected); err == nil {
+	if err := streamConfinedDir(root, "realdir", expected, func(os.DirEntry) error { return nil }); err == nil {
 		t.Fatal("expected identity-mismatch rejection of the swapped-in directory symlink")
 	}
 }
@@ -2718,6 +2921,117 @@ func TestLocalRootWalkerEnforcesPerFileCap(t *testing.T) {
 	limits := BundleLimits{MaxEntries: 10, MaxFiles: 10, MaxFileBytes: 1024, MaxBytes: 1 << 20}
 	if _, err := NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits); err == nil {
 		t.Fatal("expected rejection of a local tree file exceeding the per-file cap")
+	}
+}
+
+// TestLocalRootWalkerRejectsEntryFlood is the t1b directory-flood adversarial
+// test: os.ReadDir(-1) (and (*os.File).ReadDir(-1)) would materialize a
+// directory's ENTIRE listing — a flood of millions of flat entries — into one
+// slice before MaxEntries ever got a chance to reject it. streamConfinedDir
+// instead reads in dirReadBatchSize batches, so the accumulator's MaxEntries
+// cap trips within one batch's worth of over-read rather than after the
+// whole directory is buffered. A small actual entry count against a tiny
+// injected cap exercises the SAME mechanism a real multi-million-entry flood
+// would hit, at test speed.
+func TestLocalRootWalkerRejectsEntryFlood(t *testing.T) {
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		name := filepath.Join(skillDir, fmt.Sprintf("f%03d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	rootInfo, err := root.Lstat("skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limits := BundleLimits{MaxEntries: 10, MaxFiles: 100, MaxFileBytes: 1 << 20, MaxBytes: 1 << 20, MaxStreamBytes: 1 << 20, MaxPathBytes: 4096, MaxTotalPathBytes: 1 << 20}
+	_, err = NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits)
+	if err == nil {
+		t.Fatal("expected rejection of a local directory entry-count flood")
+	}
+	if !strings.Contains(err.Error(), "entry-count cap") {
+		t.Fatalf("expected an entry-count-cap rejection, got %v", err)
+	}
+}
+
+// TestLocalRootWalkerStreamsAcrossBatchBoundary proves streamConfinedDir's
+// batched ReadDir loop enumerates EVERY entry across more than one
+// dirReadBatchSize batch, not just the first — a directory bigger than one
+// batch must still fully succeed under a generous cap (regression guard for
+// an off-by-one in the batch loop introduced by t1b's move off ReadDir(-1)).
+func TestLocalRootWalkerStreamsAcrossBatchBoundary(t *testing.T) {
+	srcDir := t.TempDir()
+	skillDir := filepath.Join(srcDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = dirReadBatchSize + 25
+	for i := 0; i < n; i++ {
+		name := filepath.Join(skillDir, fmt.Sprintf("f%05d.txt", i))
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := os.OpenRoot(srcDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = root.Close() }()
+	rootInfo, err := root.Lstat("skill")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	limits := DefaultBundleLimits()
+	bundle, err := NormalizeBundle(localRootWalker(root, "skill", rootInfo, limits), limits)
+	if err != nil {
+		t.Fatalf("NormalizeBundle: %v", err)
+	}
+	fileCount := 0
+	for _, e := range bundle.Entries {
+		if !e.IsDir {
+			fileCount++
+		}
+	}
+	if fileCount != n {
+		t.Fatalf("expected all %d files to survive a multi-batch read, got %d", n, fileCount)
+	}
+}
+
+// TestQuotaFilesystemRejectsOverBudgetWrite is the t1b unit test for the
+// clone-quota mechanism gitCloneShallowQuotaBounded relies on: a write whose
+// declared bytes would drive the shared budget negative fails closed BEFORE
+// it reaches disk, instead of the unbounded write gitCloneShallow's default
+// in-memory storer+memfs would allow for an oversized upstream repository.
+// This proves the quota wrapper's mechanism directly at a small injected
+// budget — the same mechanism the real 256 MiB gitArtifactCloneQuotaBytes
+// ceiling applies against an oversized clone.
+func TestQuotaFilesystemRejectsOverBudgetWrite(t *testing.T) {
+	dir := t.TempDir()
+	qfs := newQuotaFilesystem(osfs.New(dir), 10)
+
+	f, err := qfs.Create("x.bin")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := f.Write(make([]byte, 5)); err != nil {
+		t.Fatalf("first write within budget: %v", err)
+	}
+	if _, err := f.Write(make([]byte, 10)); !errors.Is(err, errCloneQuotaExceeded) {
+		t.Fatalf("expected errCloneQuotaExceeded once a write exceeds the remaining budget, got %v", err)
 	}
 }
 
