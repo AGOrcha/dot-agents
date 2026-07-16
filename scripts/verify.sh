@@ -462,9 +462,6 @@ assert_contains "git-source content-install: config verify -> OK" \
 # moves), and the projected files are byte-identical (H9 frozen = no rewrite).
 cp "${PKG_PROJ}/.agentsrc.lock" "${SMOKE_ROOT}/pkg-lock-before.json"
 cp "${SKILL_PROJECTED}" "${SMOKE_ROOT}/pkg-skill-before.md"
-# TEMP-DIAG3 (revert before merge): capture staleness + CAS BEFORE the 2nd install.
-echo "DIAG3 casfiles_before=$(find "${AGENTS_HOME}/cache/artifacts" -type d 2>&1 | tr '\n' '|')" >&2
-echo "DIAG3 verify_before=$( (cd "${PKG_PROJ}" && $DOT_AGENTS_ABS config verify 2>&1) | grep -i 'stale\|artifact\|package\|FAIL\|Summary' | tr '\n' '|')" >&2
 test_command "git-source content-install: install --yes (second run, frozen no-op)" \
   "(cd '${PKG_PROJ}' && $DOT_AGENTS_ABS install --yes)"
 assert_json_field "git-source content-install: units+artifact-content unchanged across the no-op re-run" \
@@ -472,21 +469,6 @@ assert_json_field "git-source content-install: units+artifact-content unchanged 
   "d['ok'] is True"
 test_command "git-source content-install: projected skill byte-identical after the no-op re-run" \
   "diff -q '${SMOKE_ROOT}/pkg-skill-before.md' '${SKILL_PROJECTED}'"
-
-# TEMP-DIAG (remove before merge): pinpoint the windows-only churn + missing CAS.
-DIAG_BEFORE="${SMOKE_ROOT}/pkg-lock-before.json" DIAG_AFTER="${PKG_PROJ}/.agentsrc.lock" python3 - >&2 <<'PY' || true
-import json, os
-try:
-    b = json.load(open(os.environ['DIAG_BEFORE'])); a = json.load(open(os.environ['DIAG_AFTER']))
-    print('DIAG units_equal', a['units'] == b['units'])
-    print('DIAG ac_equal', a.get('artifact-content') == b.get('artifact-content'))
-    for k in sorted(set(a['units']) | set(b['units'])):
-        if a['units'].get(k) != b['units'].get(k):
-            print('DIAG UNIT-DIFF', k, '| before=', b['units'].get(k), '| after=', a['units'].get(k))
-except Exception as e:
-    print('DIAG python error:', repr(e))
-PY
-echo "DIAG casfiles_after=$(find "${AGENTS_HOME}/cache/artifacts" -type d 2>&1 | tr '\n' '|')" >&2
 
 # ── Adversarial: a tampered CAS entry fails verify, and a normal re-install
 # self-heals it (H16 quarantine + re-extract) ─────────────────────────────
