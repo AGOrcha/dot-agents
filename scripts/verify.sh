@@ -478,12 +478,11 @@ DIAG_BEFORE="${SMOKE_ROOT}/pkg-lock-before.json" DIAG_AFTER="${PKG_PROJ}/.agents
 import json, os
 try:
     b = json.load(open(os.environ['DIAG_BEFORE'])); a = json.load(open(os.environ['DIAG_AFTER']))
-    sk = 'da-agc:skill/release-docs-refresh@main'
-    print('DIAG dbefore', b['units'].get(sk, {}).get('digest'))
-    print('DIAG dafter ', a['units'].get(sk, {}).get('digest'))
-    print('DIAG digest_changed', b['units'].get(sk, {}).get('digest') != a['units'].get(sk, {}).get('digest'))
-    print('DIAG acbefore', b.get('artifact-content'))
-    print('DIAG acafter ', a.get('artifact-content'))
+    print('DIAG units_equal', a['units'] == b['units'])
+    print('DIAG ac_equal', a.get('artifact-content') == b.get('artifact-content'))
+    for k in sorted(set(a['units']) | set(b['units'])):
+        if a['units'].get(k) != b['units'].get(k):
+            print('DIAG UNIT-DIFF', k, '| before=', b['units'].get(k), '| after=', a['units'].get(k))
 except Exception as e:
     print('DIAG python error:', repr(e))
 PY
