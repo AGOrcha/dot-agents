@@ -444,8 +444,9 @@ func TestWriteCodexAgentTomlFile_RemoveErrorSurfaces(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "foo.toml")
-	// Pre-existing target so the Lstat branch is taken and Remove is called.
-	if err := os.WriteFile(dst, []byte("stale"), 0644); err != nil {
+	// Pre-existing MANAGED render so the ownership check passes and the
+	// prior-render Remove is called (a user file would fail closed earlier).
+	if err := os.WriteFile(dst, []byte(codexManagedTomlMarker+"\nname = \"old\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	fakeIO := withRemoveError(t, "foo.toml")
@@ -504,30 +505,22 @@ func TestCodexWriteCodexAgents_WriteTomlErrorSurfaces(t *testing.T) {
 }
 
 // TestCodexPruneManagedCodexAgentTomls_RemoveErrorSurfaces drives the per-entry
-// osRemove error branch.
+// Remove error branch: a MANAGED render (marker present) is selected for
+// removal, and the injected Remove failure is aggregated + surfaced.
 func TestCodexPruneManagedCodexAgentTomls_RemoveErrorSurfaces(t *testing.T) {
 	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, "home")
-	// Seed canonical agent so the loop runs at least once.
-	agentDir := filepath.Join(agentsHome, "agents", "global", "reviewer")
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentDir, codexAgentMDFile), []byte("---\nname: reviewer\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
 	dst := filepath.Join(tmp, "dst")
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		t.Fatal(err)
 	}
-	// Seed an existing toml so osRemove has a real target.
-	if err := os.WriteFile(filepath.Join(dst, "reviewer.toml"), []byte(""), 0644); err != nil {
+	// A managed render so the ownership check passes and Remove is attempted.
+	if err := os.WriteFile(filepath.Join(dst, "reviewer.toml"), []byte(codexManagedTomlMarker+"\nname = \"reviewer\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	fakeIO := withRemoveError(t, "reviewer.toml")
 
 	c := &codex{io: fakeIO}
-	err := c.pruneManagedCodexAgentTomls(agentsHome, "global", filepath.Join(tmp, "repo"), dst)
+	err := c.pruneManagedCodexAgentTomls(dst)
 	if !errors.Is(err, errSeamSynthetic) {
 		t.Fatalf("pruneManagedCodexAgentTomls err = %v, want %v", err, errSeamSynthetic)
 	}
@@ -549,8 +542,14 @@ func TestCodexWriteCodexAgents_PrunesStaleTomls(t *testing.T) {
 	if err := os.MkdirAll(dst, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// A stale MANAGED render (marker present) is pruned; a user-authored
+	// sibling must survive (defect 1: ownership-gated prune).
 	stale := filepath.Join(dst, "stale.toml")
-	if err := os.WriteFile(stale, []byte("old"), 0644); err != nil {
+	if err := os.WriteFile(stale, []byte(codexManagedTomlMarker+"\nname = \"stale\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	userToml := filepath.Join(dst, "mine.toml")
+	if err := os.WriteFile(userToml, []byte("name = \"mine\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -559,7 +558,10 @@ func TestCodexWriteCodexAgents_PrunesStaleTomls(t *testing.T) {
 		t.Fatalf("writeCodexAgents: %v", err)
 	}
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Errorf("stale toml should have been pruned, stat err = %v", err)
+		t.Errorf("stale managed toml should have been pruned, stat err = %v", err)
+	}
+	if _, err := os.Stat(userToml); err != nil {
+		t.Errorf("user-authored .toml must survive writeCodexAgents prune: %v", err)
 	}
 }
 

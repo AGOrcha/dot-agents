@@ -2333,8 +2333,10 @@ func TestProjectResolvedUnits_SourcedAgentExactPruneRemovesFileShapedOutputs(t *
 		}
 	}
 
-	// Re-project with zero units → exact/prune must remove the SYMLINK-shaped
-	// outputs (OpenCode/Copilot) directly, via the one-to-zero prune floor.
+	// Re-project with zero units → the SINGLE exact projection call must prune
+	// ALL THREE file-shaped outputs uniformly (defect 3): OpenCode/Copilot
+	// symlinks via the one-to-zero symlink prune, AND Codex's rendered .toml
+	// via the managed-RENDER prune — no separate CreateLinks pass required.
 	if _, err := ProjectResolvedUnits("proj", repo, nil, platforms, false, true, "proj"); err != nil {
 		t.Fatalf("project {}: %v", err)
 	}
@@ -2344,62 +2346,123 @@ func TestProjectResolvedUnits_SourcedAgentExactPruneRemovesFileShapedOutputs(t *
 	if _, err := os.Lstat(copilotLink); !os.IsNotExist(err) {
 		t.Fatalf("expected copilot agent link pruned, err=%v", err)
 	}
-
-	// Codex's rendered .toml is a plain file, invisible to the generic
-	// symlink-only prune scan regardless of forced dirs — its removal is the
-	// dedicated pruneCodexRepoAgentTomls complement, which the real
-	// install/refresh flow runs via CreateLinks AFTER ProjectResolvedUnits
-	// (see commands/internal/lifecycle/install.go's runInstallSharedTargetsFor
-	// -> createInstallPlatformLink ordering). With no lock entry for the
-	// removed unit (this test never wrote one), pruneCodexRepoAgentTomls sees
-	// no sourced names to protect and removes the orphaned toml.
-	if err := NewCodex().CreateLinks("proj", repo); err != nil {
-		t.Fatalf("codex CreateLinks (prune pass): %v", err)
-	}
 	if _, err := os.Lstat(tomlPath); !os.IsNotExist(err) {
-		t.Fatalf("expected codex toml pruned via pruneCodexRepoAgentTomls, err=%v", err)
+		t.Fatalf("expected codex toml pruned by the exact projection itself, err=%v", err)
 	}
 }
 
-// TestPruneCodexRepoAgentTomls_PreservesSourcedAgentToml is the fail-before-
-// fix guard for the legacy-prune interaction t2b had to close: codex's own
-// CreateLinks-time prune step (pruneCodexRepoAgentTomls) only knew about
-// LOCAL canonical agents, so it would delete a sourced agent's rendered
-// `.toml` moments after ProjectResolvedUnits created it. A `.toml` whose name
-// matches a locked kind:artifact "agent/<name>" unit must survive; an
-// unrelated stale `.toml` must still be pruned.
-func TestPruneCodexRepoAgentTomls_PreservesSourcedAgentToml(t *testing.T) {
-	tmp := t.TempDir()
-	agentsHome := filepath.Join(tmp, ".agents")
-	repo := filepath.Join(tmp, "repo")
+// TestProjectResolvedUnits_ExactPrunePreservesUserCodexToml is the defect 1+3
+// fail-before-fix guard: the managed-render prune the exact projection now runs
+// for Codex must delete only dot-agents renders — a USER-authored `.codex/
+// agents/<name>.toml` sitting in the same directory is never touched, even when
+// it is not in the projected set.
+func TestProjectResolvedUnits_ExactPrunePreservesUserCodexToml(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	repo := filepath.Join(t.TempDir(), "repo")
+
+	// A user-authored .toml (no managed marker) the projection must never touch.
 	dstRoot := filepath.Join(repo, codexDir, "agents")
 	if err := os.MkdirAll(dstRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dstRoot, "platform-dirs-change-analyst.toml"), []byte("name = \"platform-dirs-change-analyst\"\n"), 0o644); err != nil {
+	userToml := filepath.Join(dstRoot, "my-own-agent.toml")
+	const userContent = "# hand-written\nname = \"my-own-agent\"\n"
+	if err := os.WriteFile(userToml, []byte(userContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dstRoot, "unrelated-stale.toml"), []byte("name = \"unrelated-stale\"\n"), 0o644); err != nil {
+	// A stale MANAGED render that IS in the prune's territory but not wanted.
+	staleManaged := filepath.Join(dstRoot, "stale-managed.toml")
+	if err := os.WriteFile(staleManaged, []byte(codexManagedTomlMarker+"\nname = \"stale-managed\"\n"), 0o644); err != nil {
 		t.Fatal(err)
-	}
-	// No local canonical agents bucket at all — the sourced name is the ONLY
-	// reason platform-dirs-change-analyst.toml should survive.
-	digest := "sha256:" + strings.Repeat("1", 64)
-	if err := config.WriteUnitsLock(repo, config.UnitsLock{
-		Units: map[string]config.LockedUnit{
-			"da-agc:agent/platform-dirs-change-analyst@main": {Kind: config.UnitKindArtifact, Digest: digest, FetchedAt: "2026-07-15T00:00:00Z"},
-		},
-	}); err != nil {
-		t.Fatalf("seed lock: %v", err)
 	}
 
-	if err := pruneCodexRepoAgentTomls("proj", repo, agentsHome); err != nil {
-		t.Fatalf("pruneCodexRepoAgentTomls: %v", err)
+	u := materializeUnit(t, home, "agents", "da-agc", "platform-dirs-change-analyst", sourcedAgentBundle("platform-dirs-change-analyst", "reviews platform dir changes"))
+	if _, err := ProjectResolvedUnits("proj", repo, []ResolvedUnit{u}, []Platform{NewCodex()}, false, true, "proj"); err != nil {
+		t.Fatalf("ProjectResolvedUnits: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(dstRoot, "platform-dirs-change-analyst.toml")); err != nil {
-		t.Fatalf("sourced agent toml was pruned: %v", err)
+
+	// The user's file survives untouched.
+	got, err := os.ReadFile(userToml)
+	if err != nil {
+		t.Fatalf("user-authored codex toml was removed: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(dstRoot, "unrelated-stale.toml")); !os.IsNotExist(err) {
-		t.Fatalf("expected the unrelated stale toml to be pruned, err=%v", err)
+	if string(got) != userContent {
+		t.Fatalf("user-authored codex toml was modified: %q", got)
+	}
+	// The stale managed render is pruned.
+	if _, err := os.Lstat(staleManaged); !os.IsNotExist(err) {
+		t.Fatalf("expected the stale managed render pruned, err=%v", err)
+	}
+	// The sourced agent's render is present + carries provenance.
+	rendered, err := os.ReadFile(filepath.Join(dstRoot, "platform-dirs-change-analyst.toml"))
+	if err != nil {
+		t.Fatalf("expected the sourced agent render present: %v", err)
+	}
+	if !isManagedCodexTomlBytes(rendered) {
+		t.Fatalf("sourced render missing managed marker: %q", rendered)
+	}
+}
+
+// TestAtomicSwapReplaceManagedLink_RestoresRacedUserFile is the defect 2
+// fail-before-fix guard for the verify→mutate TOCTOU: atomicSwapReplaceManagedLink
+// is called with a target that (from its caller's view) was a managed link but
+// is ACTUALLY a foreign symlink pointing at real user content — modelling a
+// racer that swapped a user file into the target between the provenance check
+// and the mutating syscall. The atomic exchange must inspect the post-exchange
+// occupant, discover it is not ours, REVERSE the exchange to restore the user
+// content to target, and fail closed — never deleting the user's file.
+func TestAtomicSwapReplaceManagedLink_RestoresRacedUserFile(t *testing.T) {
+	testutil.SymlinkOrSkip(t)
+	home := t.TempDir()
+	t.Setenv("AGENTS_HOME", home)
+	artifactsRoot := config.ArtifactsRoot(home)
+
+	// Real user content + a "foreign" symlink at target pointing to it (outside
+	// managed CAS): stands in for the file a racer slipped into target.
+	userDir := filepath.Join(t.TempDir(), "user-owned")
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	userFile := filepath.Join(userDir, "precious.txt")
+	if err := os.WriteFile(userFile, []byte("PRECIOUS"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "proj", ".codex", "target-link")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(userDir, target); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	// src is an arbitrary in-CAS-shaped path (its existence is irrelevant — the
+	// call must fail before it would ever be trusted).
+	src := filepath.Join(artifactsRoot, "skills", "deadbeef")
+	err := atomicSwapReplaceManagedLink(src, target, artifactsRoot)
+	if err == nil {
+		t.Fatal("expected atomicSwapReplaceManagedLink to fail closed against a non-managed occupant")
+	}
+
+	// The foreign symlink must be restored to target, still pointing at the
+	// user dir, and the user's content must be intact.
+	dest, rlErr := os.Readlink(target)
+	if rlErr != nil {
+		t.Fatalf("user's symlink was not restored to target: %v", rlErr)
+	}
+	if dest != userDir {
+		t.Fatalf("target restored to wrong dest: got %q want %q", dest, userDir)
+	}
+	got, err := os.ReadFile(userFile)
+	if err != nil || string(got) != "PRECIOUS" {
+		t.Fatalf("user content disturbed: data=%q err=%v", got, err)
+	}
+	// No temp swap artifact leaks in the target dir.
+	entries, _ := os.ReadDir(filepath.Dir(target))
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".casswap-") {
+			t.Fatalf("leaked swap temp artifact: %s", e.Name())
+		}
 	}
 }

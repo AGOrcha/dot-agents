@@ -268,7 +268,8 @@ func TestWriteCodexAgentTomlFile_ExistingFileReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 	dst := filepath.Join(tmp, "x.toml")
-	if err := os.WriteFile(dst, []byte("stale\n"), 0644); err != nil {
+	// A MANAGED stale render (carries the marker) is ours to replace.
+	if err := os.WriteFile(dst, []byte(codexManagedTomlMarker+"\nname = \"old\"\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err != nil {
@@ -280,6 +281,36 @@ func TestWriteCodexAgentTomlFile_ExistingFileReplaced(t *testing.T) {
 	}
 	if !strings.Contains(string(got), `name = "x"`) {
 		t.Errorf("file content not refreshed: %q", got)
+	}
+	if !isManagedCodexTomlBytes(got) {
+		t.Errorf("rewritten toml lost its managed provenance marker: %q", got)
+	}
+}
+
+// TestWriteCodexAgentTomlFile_RefusesUserAuthoredFile is the defect 1
+// fail-before-fix guard: a NON-managed `.toml` (no marker = user-authored)
+// occupying the target must NOT be overwritten — the write fails closed and
+// the user's bytes survive untouched.
+func TestWriteCodexAgentTomlFile_RefusesUserAuthoredFile(t *testing.T) {
+	tmp := t.TempDir()
+	agent := filepath.Join(tmp, "AGENT.md")
+	if err := os.WriteFile(agent, []byte("---\nname: x\n---\nbody\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(tmp, "x.toml")
+	const userContent = "# my hand-written codex agent\nname = \"mine\"\n"
+	if err := os.WriteFile(dst, []byte(userContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCodexAgentTomlFile(stdPlatformIO{}, dst, agent); err == nil {
+		t.Fatal("expected writeCodexAgentTomlFile to refuse overwriting a user-authored .toml")
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != userContent {
+		t.Fatalf("user-authored .toml was modified: %q", got)
 	}
 }
 
@@ -376,16 +407,36 @@ func TestResolveCodexModelFromJSONL_NoModel(t *testing.T) {
 	}
 }
 
-// TestPruneCodexRepoAgentTomls_NoEntries covers the early no-entries branch.
-func TestPruneCodexRepoAgentTomls_NoEntries(t *testing.T) {
+// TestIsManagedCodexToml classifies a managed render, a user file, an absent
+// path, and a symlink (defect 1 provenance predicate).
+func TestIsManagedCodexToml(t *testing.T) {
 	tmp := t.TempDir()
-	repo := filepath.Join(tmp, "repo")
-	if err := os.MkdirAll(repo, 0755); err != nil {
+
+	managed := filepath.Join(tmp, "managed.toml")
+	if err := os.WriteFile(managed, []byte(codexManagedTomlMarker+"\nname = \"x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// agentsHome with no agents bucket → listScopedResourceDirs errors → nil.
-	if err := pruneCodexRepoAgentTomls("proj", repo, filepath.Join(tmp, "missing")); err != nil {
-		t.Errorf("expected no error for missing agents bucket, got %v", err)
+	if ok, err := isManagedCodexToml(managed); err != nil || !ok {
+		t.Fatalf("managed render: ok=%v err=%v, want true,nil", ok, err)
+	}
+
+	user := filepath.Join(tmp, "user.toml")
+	if err := os.WriteFile(user, []byte("name = \"user-authored\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := isManagedCodexToml(user); err != nil || ok {
+		t.Fatalf("user file: ok=%v err=%v, want false,nil", ok, err)
+	}
+
+	if ok, err := isManagedCodexToml(filepath.Join(tmp, "absent.toml")); err != nil || ok {
+		t.Fatalf("absent: ok=%v err=%v, want false,nil", ok, err)
+	}
+
+	link := filepath.Join(tmp, "link.toml")
+	if err := os.Symlink(managed, link); err == nil {
+		if ok, err := isManagedCodexToml(link); err != nil || ok {
+			t.Fatalf("symlink: ok=%v err=%v, want false,nil (only regular files are ours)", ok, err)
+		}
 	}
 }
 

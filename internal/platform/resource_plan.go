@@ -618,7 +618,7 @@ func RunSharedTargetProjectionExact(project, repoPath string, platforms []Platfo
 		return nil, err
 	}
 	if dryRun {
-		lines := dryRunExactProjectionLines(plan, repoPath)
+		lines := dryRunExactProjectionLines(plan, platforms, repoPath)
 		if len(lines) == 0 {
 			return []string{"shared targets: (none)"}, nil
 		}
@@ -632,14 +632,26 @@ func RunSharedTargetProjectionExact(project, repoPath string, platforms []Platfo
 	if _, err := plan.PruneStaleSharedTargets(repoPath, config.AgentsHome()); err != nil {
 		return nil, err
 	}
+	// Managed-RENDER prune (codex .toml): the generic PruneStaleSharedTargets
+	// scan reaps only managed symlinks, so a stale codex render — a plain file —
+	// is reaped here, driven by the SAME plan wanted-set. This is what lets the
+	// exact projection (not a separate CreateLinks pass) own codex toml pruning
+	// uniformly for local-authored AND sourced agents (defect 3).
+	wanted, _ := plan.prunableTargets(repoPath)
+	if _, err := pruneManagedRenders(platforms, repoPath, wanted); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
 // dryRunExactProjectionLines is the dry-run preview for the exact projection:
 // the additive write lines (formatSharedTargetPlanForDryRun) followed by a
-// "prune managed" line for every managed output PruneStaleSharedTargets would
-// delete. It never mutates the filesystem — the prune scan only reads.
-func dryRunExactProjectionLines(plan ResourcePlan, repoPath string) []string {
+// "prune managed" line for every managed output the exact prune would delete —
+// both the managed SYMLINKS PruneStaleSharedTargets scans AND the managed
+// RENDERS (codex .toml) staleManagedRenderTargets scans (defect 3: exact +
+// dry-run are uniform across all file-shaped platforms). It never mutates the
+// filesystem — both scans only read.
+func dryRunExactProjectionLines(plan ResourcePlan, platforms []Platform, repoPath string) []string {
 	var lines []string
 	if len(plan.Resources) > 0 {
 		lines = append(lines, formatSharedTargetPlanForDryRun(plan, repoPath)...)
@@ -647,7 +659,105 @@ func dryRunExactProjectionLines(plan ResourcePlan, repoPath string) []string {
 	for _, target := range plan.staleManagedTargets(repoPath, config.AgentsHome()) {
 		lines = append(lines, fmt.Sprintf("shared target: prune managed %s", filepath.ToSlash(config.DisplayPath(target))))
 	}
+	for _, target := range staleManagedRenderTargets(plan, platforms, repoPath) {
+		lines = append(lines, fmt.Sprintf("shared target: prune managed %s", filepath.ToSlash(config.DisplayPath(target))))
+	}
 	return lines
+}
+
+// ManagedRenderProjector is implemented by a platform whose shared agents
+// surface is a MANAGED RENDERED FILE (codex `.toml`) rather than a symlink.
+// Such a file is a plain regular file — never a managed symlink — so the
+// generic exact/prune scan (pruneManagedEntries, which only reaps symlinks via
+// links.IsManagedLinkUnder) cannot see it. These methods let the exact
+// projection reap a stale managed render uniformly with the symlink shapes
+// (defect 3), driven by the SAME wanted-target set the plan already carries.
+type ManagedRenderProjector interface {
+	// ManagedRenderDir is the repo-relative directory the platform renders its
+	// managed files into (e.g. .codex/agents). Forced into the exact scan even
+	// on a one-to-zero pass, so a render dropped to zero is still pruned.
+	ManagedRenderDir() string
+	// IsManagedRender reports whether path is one of THIS platform's managed
+	// rendered files — identity-verified provenance, never a bare name/suffix
+	// match — so a user-authored file in the same directory is never pruned.
+	IsManagedRender(path string) (bool, error)
+}
+
+// pruneManagedRenders removes each ManagedRenderProjector platform's managed
+// rendered files that the exact plan no longer wants. It is the render-shape
+// analogue of pruneManagedEntries: ownership is proven per-file via
+// IsManagedRender (never a blind name/extension match), so a user-authored
+// file in the same directory is never deleted. wanted is the plan's absolute
+// wanted-target set (from prunableTargets). Returns the pruned absolute paths
+// and an aggregated error.
+func pruneManagedRenders(platforms []Platform, repoPath string, wanted map[string]bool) ([]string, error) {
+	var pruned []string
+	var errs []error
+	for _, p := range platforms {
+		rp, ok := p.(ManagedRenderProjector)
+		if !ok {
+			continue
+		}
+		dir := resolveIntentTargetPath(rp.ManagedRenderDir(), repoPath)
+		entries, err := osReadDir(dir)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("listing managed render dir %s: %w", dir, err))
+			}
+			continue
+		}
+		for _, e := range entries {
+			candidate := filepath.Join(dir, e.Name())
+			if wanted[candidate] {
+				continue
+			}
+			isRender, provErr := rp.IsManagedRender(candidate)
+			if provErr != nil {
+				errs = append(errs, fmt.Errorf("managed render provenance %s: %w", candidate, provErr))
+				continue
+			}
+			if !isRender {
+				continue // user/foreign file — never touch
+			}
+			if err := os.Remove(candidate); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("prune managed render %s: %w", candidate, err))
+				continue
+			}
+			pruned = append(pruned, candidate)
+		}
+	}
+	sort.Strings(pruned)
+	return pruned, errors.Join(errs...)
+}
+
+// staleManagedRenderTargets is the read-only scan pruneManagedRenders and the
+// dry-run preview share: it returns the managed renders the exact prune would
+// delete, without removing anything.
+func staleManagedRenderTargets(plan ResourcePlan, platforms []Platform, repoPath string) []string {
+	wanted, _ := plan.prunableTargets(repoPath)
+	var stale []string
+	for _, p := range platforms {
+		rp, ok := p.(ManagedRenderProjector)
+		if !ok {
+			continue
+		}
+		dir := resolveIntentTargetPath(rp.ManagedRenderDir(), repoPath)
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			candidate := filepath.Join(dir, e.Name())
+			if wanted[candidate] {
+				continue
+			}
+			if isRender, err := rp.IsManagedRender(candidate); err == nil && isRender {
+				stale = append(stale, candidate)
+			}
+		}
+	}
+	sort.Strings(stale)
+	return stale
 }
 
 // PruneStaleSharedTargets deletes managed outputs that are no longer in the
@@ -1052,13 +1162,13 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 		return nil, err
 	}
 	// Force the dir-mirror bucket roots — AND the file-shaped SYMLINK agents
-	// roots (t2b: OpenCode/Copilot) — into the prune scan even when a bucket
-	// has zero wanted targets this pass, so a bucket reduced to zero units
-	// still has its stale managed link removed (one-to-zero prune). Codex's
-	// rendered `.toml` is excluded: it is never a symlink, so the generic
-	// prune scan can never reap it regardless of whether its directory is
-	// forced in — that shape's removal is pruneCodexRepoAgentTomls'/
-	// pruneManagedCodexAgentTomls' dedicated job (sourcedCodexAgentNames).
+	// roots (t2b: OpenCode/Copilot) — into the SYMLINK prune scan even when a
+	// bucket has zero wanted targets this pass, so a bucket reduced to zero
+	// units still has its stale managed link removed (one-to-zero prune).
+	// Codex's rendered `.toml` is not a symlink, so it is reaped instead by the
+	// managed-RENDER prune (pruneManagedRenders), which scans each codex
+	// platform's ManagedRenderDir unconditionally for the same one-to-zero
+	// guarantee (defect 3).
 	pruneDirs := mergeSortedDirs(resolvedPruneDirs(roots, repoPath), resolvedFileShapedAgentPruneDirs(platforms, repoPath))
 
 	if !exact {
@@ -1074,7 +1184,7 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 		return nil, nil
 	}
 	if dryRun {
-		lines := dryRunExactProjectionLines(plan, repoPath)
+		lines := dryRunExactProjectionLines(plan, platforms, repoPath)
 		if len(lines) == 0 {
 			return []string{"shared targets: (none)"}, nil
 		}
@@ -1086,6 +1196,10 @@ func ProjectResolvedUnits(project, repoPath string, units []ResolvedUnit, platfo
 		}
 	}
 	if _, err := plan.pruneStaleSharedTargetsExtraDirs(repoPath, agentsHome, pruneDirs); err != nil {
+		return nil, err
+	}
+	wanted, _ := plan.prunableTargets(repoPath)
+	if _, err := pruneManagedRenders(platforms, repoPath, wanted); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -1193,8 +1307,9 @@ func resolvedPruneDirs(roots map[string][]string, repoPath string) []string {
 // then fully removed leaves an orphaned managed symlink behind forever,
 // since no intent this call touches that directory at all. Codex does NOT
 // implement this: its rendered `.toml` is never a symlink, so forcing its
-// directory into the generic prune scan would not help — that shape's
-// removal is pruneCodexRepoAgentTomls'/pruneManagedCodexAgentTomls' own job.
+// directory into the generic symlink prune scan would not help — that shape's
+// removal is the managed-RENDER prune (pruneManagedRenders via
+// ManagedRenderProjector), which scans the codex render dir separately.
 type SourcedAgentFilePruneRoot interface {
 	SourcedAgentFilePruneRoot() string
 }
@@ -1350,67 +1465,113 @@ func isCASDirectIntent(intent ResourceIntent) bool {
 	return intent.SourceRef.Origin == casDirectOrigin
 }
 
+// errSwapUnsupported is returned by atomicSwapRename on an OS that has no
+// atomic path-exchange primitive (see resource_plan_swap_other.go). It is the
+// signal that a managed-link REPOINT cannot be done safely, so
+// atomicManagedSymlinkSwap fails closed rather than reaching any
+// unlink-by-pathname fallback.
+var errSwapUnsupported = errors.New("atomic path-exchange unsupported on this OS")
+
 // atomicManagedSymlinkSwap creates or repoints a CAS-direct managed symlink at
-// target → src with NO RemoveAll-after-check and NO RemoveAll fallback (H17).
-// It replaces ONLY an identity-verified managed link whose resolved target is
-// UNDER managed CAS storage (config.ArtifactsRoot); a real file/dir OR a
-// FOREIGN symlink (one pointing outside managed storage) is left completely
-// untouched and the call fails closed. When a symlink cannot be created
-// (e.g. Windows without the privilege) it ALSO fails closed rather than
-// reaching any RemoveAll-based primitive.
+// target → src with NO unlink-by-pathname and NO RemoveAll fallback (H17 +
+// defect 2). It NEVER deletes or overwrites anything that is not, at the
+// moment of the mutating syscall, provably one of our own managed CAS links.
 //
-// t2b hardening (verified-managed-link -> user-file rename TOCTOU): the
-// window this closes is between the identity verification above and the
-// final rename — if some other actor replaces target with real content in
-// that gap, the swap must never silently clobber it. On Linux the occupant
-// (already verified as OUR OWN managed link) is unlinked narrowly and the
-// new symlink is placed with renameNoClobber's RENAME_NOREPLACE, so a file
-// that lands in that gap makes the rename fail closed (EEXIST) instead of
-// being overwritten. Every other OS lacks a portable no-clobber rename
-// primitive in the stdlib; there renameNoClobber falls back to a plain
-// rename immediately followed by a read-back verification that the live
-// target now resolves to src, so a lost race against a concurrent writer is
-// at least detected and reported rather than silently believed successful
-// (a strictly weaker guarantee than Linux's — see resource_plan_renameat_*.go).
+// Two disjoint cases, each closed against the verify→mutate TOCTOU:
+//
+//   - CREATE (target absent): os.Symlink(src, target) is itself an atomic
+//     no-clobber create — the kernel fails with EEXIST if anything occupies
+//     target, so a racer that lands a file there is never clobbered. When the
+//     symlink cannot be made at all (e.g. Windows without the privilege) the
+//     call fails closed.
+//
+//   - REPOINT (target already our managed CAS link, pointing at a different
+//     digest): handled by atomicSwapReplaceManagedLink, which uses an OS-atomic
+//     path EXCHANGE (Linux RENAME_EXCHANGE / Darwin RENAME_SWAP) and re-checks
+//     provenance on the post-exchange occupant BEFORE unlinking it — so a racer
+//     that replaced target with a user file between our read and the exchange
+//     has its file safely restored (swap-back) and never deleted. On an OS with
+//     no exchange primitive the repoint fails closed.
+//
+// The former design unlinked target by pathname after a plain Lstat identity
+// check; a racer replacing the link in that window had its file deleted. That
+// unlink-by-pathname is gone.
 func atomicManagedSymlinkSwap(src, target string) error {
 	if cur, err := os.Readlink(target); err == nil && cur == src {
-		return nil // already correct
-	}
-	existed := false
-	if _, err := os.Lstat(target); err == nil {
-		// Occupant present: only an identity-verified managed CAS link may be
-		// replaced. A real file/dir (Readlink would have failed) or a foreign
-		// symlink resolving outside managed storage is refused — fail closed,
-		// touch nothing.
-		if !links.IsManagedLinkUnder(target, config.ArtifactsRoot(config.AgentsHome())) {
-			return fmt.Errorf("refusing to replace %s: not a managed CAS link (foreign symlink or user content) — leaving it intact", target)
-		}
-		existed = true
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("lstat projection target %s: %w", target, err)
+		return nil // already correct (idempotent)
 	}
 	if err := fsops.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return fmt.Errorf("creating parent dir for %s: %w", target, err)
 	}
+	// CREATE path: os.Symlink is an atomic no-clobber create (EEXIST if
+	// occupied). Success means target was absent and now points at src.
+	if err := os.Symlink(src, target); err == nil {
+		return nil
+	} else if !os.IsExist(err) {
+		// Not "already occupied" — e.g. symlinks unsupported/unprivileged.
+		// Fail closed; never reach an unlink-based fallback (H17).
+		return fmt.Errorf("H17 atomic swap: cannot create managed link %s (no unsafe fallback): %w", target, err)
+	}
+	// Occupied. Re-read to classify WITHOUT mutating anything yet.
+	cur, rlErr := os.Readlink(target)
+	if rlErr != nil {
+		// Not a symlink at all (a real file/dir = user content) → refuse.
+		return fmt.Errorf("refusing to replace %s: occupied by non-symlink content (user-authored) — leaving it intact", target)
+	}
+	if cur == src {
+		return nil // a concurrent projector already set exactly what we wanted
+	}
+	artifactsRoot := config.ArtifactsRoot(config.AgentsHome())
+	if !links.IsManagedLinkUnder(target, artifactsRoot) {
+		// A FOREIGN symlink (points outside managed CAS) → refuse, untouched.
+		return fmt.Errorf("refusing to replace %s: not a managed CAS link (foreign symlink or user content) — leaving it intact", target)
+	}
+	// REPOINT: target is our managed CAS link pointing at a different digest.
+	return atomicSwapReplaceManagedLink(src, target, artifactsRoot)
+}
+
+// atomicSwapReplaceManagedLink repoints an EXISTING managed CAS symlink at
+// target to src without ever unlinking target by pathname after a non-atomic
+// identity check (defect 2). It stages a temp symlink → src, then atomically
+// EXCHANGES it with target (RENAME_EXCHANGE / RENAME_SWAP): after the exchange
+// target is our new symlink and the FORMER occupant sits at a private tmp name
+// only this call knows — so it can be inspected free of any external race.
+//
+// If the former occupant is verifiably one of our managed CAS links, it is
+// unlinked (the repoint is complete). If it is anything else — meaning a racer
+// slipped a user file into target between our provenance check above and the
+// exchange — the exchange is REVERSED (restoring the user file to target and
+// our symlink to tmp), the tmp symlink is removed, and the call fails closed.
+// The user file is never deleted.
+//
+// On an OS without an atomic exchange primitive (errSwapUnsupported) the
+// repoint fails closed rather than falling back to an unsafe unlink+rename.
+func atomicSwapReplaceManagedLink(src, target, artifactsRoot string) error {
 	tmp := fmt.Sprintf("%s.casswap-%d", target, time.Now().UnixNano())
 	if err := os.Symlink(src, tmp); err != nil {
-		// Fail closed — never fall back to a RemoveAll-based primitive (H17).
-		return fmt.Errorf("H17 atomic swap: cannot create temp symlink for %s (no unsafe fallback): %w", target, err)
+		return fmt.Errorf("H17 atomic swap: cannot stage temp symlink for %s: %w", target, err)
 	}
-	if existed {
-		// Unlink ONLY the identity-verified managed link (never RemoveAll, and
-		// never an unverified occupant) so the rename below lands on an ABSENT
-		// target and can use a no-clobber primitive instead of a blind replace.
-		// This is a narrow single-file unlink of exactly the link this call just
-		// verified, not a re-derivation of "what's safe to delete".
-		if err := fsops.Remove(target); err != nil && !os.IsNotExist(err) {
-			_ = fsops.Remove(tmp)
-			return fmt.Errorf("H17 atomic swap: removing verified managed link %s: %w", target, err)
-		}
-	}
-	if err := renameNoClobber(tmp, target, src); err != nil {
+	if err := atomicSwapRename(tmp, target); err != nil {
 		_ = fsops.Remove(tmp)
-		return fmt.Errorf("H17 atomic swap: rename %s -> %s: %w", target, src, err)
+		if errors.Is(err, errSwapUnsupported) {
+			return fmt.Errorf("refusing to repoint occupied managed link %s: atomic exchange unavailable on this OS (fail closed) — %w", target, err)
+		}
+		return fmt.Errorf("H17 atomic swap: exchange %s <-> %s: %w", tmp, target, err)
 	}
-	return nil
+	// Post-exchange: target = our new symlink; tmp = the former occupant, now
+	// at a name only we hold (race-free to inspect).
+	if links.IsManagedLinkUnder(tmp, artifactsRoot) {
+		if err := fsops.Remove(tmp); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("H17 atomic swap: removing superseded managed link (now at %s): %w", tmp, err)
+		}
+		return nil
+	}
+	// The former occupant is NOT our managed link — a racer's user file landed
+	// in target after our provenance check. Reverse the exchange to restore it,
+	// then fail closed. The user file is returned to target untouched.
+	if err := atomicSwapRename(tmp, target); err != nil {
+		return fmt.Errorf("H17 atomic swap: CRITICAL — could not restore user content to %s after a racing write (it is currently at %s): %w", target, tmp, err)
+	}
+	_ = fsops.Remove(tmp)
+	return fmt.Errorf("refusing to replace %s: a non-managed file raced into the target during projection — restored it and left it intact", target)
 }
