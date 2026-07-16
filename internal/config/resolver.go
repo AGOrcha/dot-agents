@@ -684,31 +684,14 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 	if err != nil {
 		return err
 	}
-	units := make(map[string]LockedUnit, len(locked))
+	layerUnits := make(map[string]LockedUnit, len(locked))
 	for ref, l := range locked {
-		units[ref] = LockedUnit{
+		layerUnits[ref] = LockedUnit{
 			Kind:          UnitKindLayer,
 			Digest:        l.ResolvedSHA,
 			FetchedAt:     l.FetchedAt,
 			LastCheckedAt: l.FetchedAt,
 			CacheKey:      l.CacheKey,
-		}
-	}
-	// Cross-pass lock atomicity (package-artifact-install t3 review #3): pass 1
-	// (this write) resolves ONLY layers/profiles, but it must NOT drop the
-	// kind:artifact units the packages pass (pass 2, EnsureResolved's caller)
-	// recorded on a prior resolve. Replacing the whole units section with
-	// layers-only here would delete the prior artifact lock BEFORE pass 2 has
-	// re-fetched + re-materialized — so a mid-pass-2 failure would leave the
-	// artifact lock state already lost. Carrying existing artifact units
-	// forward keeps the prior lock intact until pass 2 atomically replaces them
-	// (all package fetches succeed first); a pass-2 failure leaves the previous
-	// artifacts locked exactly as they were.
-	if existing, rerr := ReadUnits(projectPath); rerr == nil {
-		for ref, u := range existing.Units {
-			if u.Kind == UnitKindArtifact {
-				units[ref] = u
-			}
 		}
 	}
 	// kind:profile units (R2): the resolved profile fragments are recorded as
@@ -723,7 +706,41 @@ func (r *LayeredResolver) writeUnitsLock(projectPath string, snap *Snapshot, loc
 	if err != nil {
 		return err
 	}
-	return WriteUnitsLock(projectPath, UnitsLock{Units: units, InputsDigest: digest, ProfileUnits: profileUnits})
+	// Cross-pass lock atomicity + lost-update fix (package-artifact-install t3
+	// review #3): pass 1 resolves ONLY layers/profiles, but it must NOT drop the
+	// kind:artifact units the packages pass (pass 2, EnsureResolved's caller)
+	// recorded — and it must read them UNDER THE SAME LOCK it writes under, so a
+	// pass 2 that committed artifact units between our resolve and this write is
+	// not clobbered by a stale snapshot. agentslock.Update holds the advisory
+	// lock across the read-modify-write; the artifact units read here are the
+	// latest committed, and pass 2's own combined write (commitArtifactLock) is
+	// symmetrically serialized, so interleaved pass-1/pass-2 writers preserve
+	// each other's keys instead of losing them.
+	return agentslock.Update(AgentsLockPath(projectPath), func(lf *agentslock.Lockfile) error {
+		merged := make(map[string]LockedUnit, len(layerUnits)+len(profileUnits))
+		existing := map[string]LockedUnit{}
+		if _, err := lf.Section(LockSectionUnits, &existing); err != nil {
+			return err
+		}
+		for ref, u := range existing {
+			if u.Kind == UnitKindArtifact {
+				merged[ref] = u
+			}
+		}
+		for ref, u := range layerUnits {
+			merged[ref] = u
+		}
+		// A profile key never collides with a layer/artifact ref; on the
+		// impossible collision the profile entry wins (mirrors UnitsLock.allUnits).
+		for key, u := range profileUnits {
+			merged[key] = u
+		}
+		if err := lf.SetSection(LockSectionUnits, merged); err != nil {
+			return err
+		}
+		lf.SetInputsDigest(digest)
+		return nil
+	})
 }
 
 // effectiveUserLocalPath returns the user-local manifest path the resolver

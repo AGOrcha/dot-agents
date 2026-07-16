@@ -125,3 +125,49 @@ func TestBuildVerifyReport_PostInstallStoreTamperFlipsOK(t *testing.T) {
 		t.Fatalf("expected a post-install store tamper to flip report.OK to false, got %+v", report)
 	}
 }
+
+// TestVerifyStaleness_TamperPlusInputsDriftStillFails is the review #1 BLOCKER
+// fix: a store tamper that CO-OCCURS with ordinary local-scope drift (an
+// inputs_digest change) must still FAIL — the previous "exactly
+// [ReasonUnitDigest]" gate let tamper-plus-any-drift downgrade to a warn with
+// OK=true, an integrity bypass.
+func TestVerifyStaleness_TamperPlusInputsDriftStillFails(t *testing.T) {
+	project, casFile := seedPackagesArtifactProject(t)
+
+	// Tamper the store AND introduce a simultaneous local-scope drift by
+	// editing the committed manifest (changes the inputs_digest), so staleness
+	// reports BOTH ReasonUnitDigest and ReasonInputsDigest.
+	tamperCASFile(t, casFile)
+	rc, err := cfg.LoadAgentsRC(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc.Skills = append(rc.Skills, "drift-marker")
+	if err := rc.Save(project); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity: staleness must actually report both reasons for this to be the
+	// combined case under test.
+	res, err := cfg.Staleness(project, "", lifecycle.PackagesArtifactDigestResolver(project))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawUnit, sawInputs bool
+	for _, r := range res.Reasons {
+		switch r {
+		case cfg.ReasonUnitDigest:
+			sawUnit = true
+		case cfg.ReasonInputsDigest:
+			sawInputs = true
+		}
+	}
+	if !sawUnit || !sawInputs {
+		t.Fatalf("fixture must produce BOTH unit-digest and inputs-digest drift, got %v", res.Reasons)
+	}
+
+	checks := verifyStaleness(project)
+	if len(checks) != 1 || checks[0].Status != verifyFail {
+		t.Fatalf("expected FAIL when a store tamper co-occurs with inputs drift, got %+v", checks)
+	}
+}

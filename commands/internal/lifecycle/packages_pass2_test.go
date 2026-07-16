@@ -4,8 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/AGOrcha/dot-agents/internal/agentslock"
 	"github.com/AGOrcha/dot-agents/internal/config"
 	"github.com/AGOrcha/dot-agents/internal/platform"
 )
@@ -577,5 +579,69 @@ func TestRunInstall_PackagesRefMaterializesLocksAndProjects(t *testing.T) {
 	data2, err := os.ReadFile(projected)
 	if err != nil || string(data2) != "# demo skill\n" {
 		t.Fatalf("expected the projected skill to survive a no-op re-run, data=%q err=%v", data2, err)
+	}
+}
+
+// TestCommitArtifactLock_InterleavedWithPass1PreservesBothKeys is the review #3
+// cross-pass lost-update proof: the REAL pass-2 writer (commitArtifactLock) and
+// a pass-1-shaped layer writer (the same agentslock.Update read-preserve-write
+// resolver.writeUnitsLock performs) run interleaved against one lock; afterward
+// BOTH a layer unit and an artifact unit must survive. Under the previous
+// read-outside-the-flush-lock shape, a pass-2 that read units before a
+// concurrent pass-1 layer write clobbered the layer key with its stale snapshot.
+func TestCommitArtifactLock_InterleavedWithPass1PreservesBothKeys(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
+	proj := filepath.Join(tmp, "proj")
+	os.MkdirAll(proj, 0o755)
+	lockPath := config.AgentsLockPath(proj)
+
+	const rounds = 24
+	artUnits := map[string]config.LockedUnit{"da-agc:skill/demo@1": {Kind: config.UnitKindArtifact, Digest: "sha256:art"}}
+	artAnchors := map[string]string{"da-agc:skill/demo@1": "sha256:content"}
+	layerUnit := config.LockedUnit{Kind: config.UnitKindLayer, Digest: "sha256:layer"}
+
+	// pass-1 mimic: exactly resolver.writeUnitsLock's Update shape — read units
+	// under the lock, preserve existing artifact units, (re)write the layer unit.
+	pass1 := func() error {
+		return agentslock.Update(lockPath, func(lf *agentslock.Lockfile) error {
+			existing := map[string]config.LockedUnit{}
+			if _, err := lf.Section(config.LockSectionUnits, &existing); err != nil {
+				return err
+			}
+			merged := map[string]config.LockedUnit{"da-agc:layer.json@main": layerUnit}
+			for ref, u := range existing {
+				if u.Kind == config.UnitKindArtifact {
+					merged[ref] = u
+				}
+			}
+			return lf.SetSection(config.LockSectionUnits, merged)
+		})
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, rounds*2)
+	for i := 0; i < rounds; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); errs <- commitArtifactLock(proj, artUnits, artAnchors) }()
+		go func() { defer wg.Done(); errs <- pass1() }()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("interleaved write: %v", err)
+		}
+	}
+
+	lock, err := config.ReadUnits(proj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, ok := lock.Units["da-agc:layer.json@main"]; !ok || u.Kind != config.UnitKindLayer {
+		t.Fatalf("pass-2 clobbered the concurrent pass-1 layer unit: %v", lock.Units)
+	}
+	if u, ok := lock.Units["da-agc:skill/demo@1"]; !ok || u.Kind != config.UnitKindArtifact {
+		t.Fatalf("pass-1 clobbered the concurrent pass-2 artifact unit: %v", lock.Units)
 	}
 }

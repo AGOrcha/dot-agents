@@ -300,8 +300,18 @@ func verifyStaleness(cwd string) []VerifyCheck {
 	if res.Fresh {
 		return []VerifyCheck{{name, verifyPass, "local config in sync (inputs_digest " + abbrevSHA(res.ExpectedInputsDigest) + ")"}}
 	}
-	if unitDigestMismatchOnly(res.Reasons) {
-		return []VerifyCheck{{name, verifyFail, "an installed packages artifact no longer matches its locked digest (possible store tamper) — run `da install` to re-verify/re-materialize"}}
+	// A unit-digest mismatch is ALWAYS a hard failure (review #1): a tampered
+	// store must FAIL verify regardless of whether ordinary local-scope drift
+	// (inputs/declared-set) is ALSO present. Requiring the reasons list to be
+	// EXACTLY [ReasonUnitDigest] let tamper-plus-any-drift downgrade to a warn
+	// with OK=true — an integrity bypass. Report the co-occurring drift in the
+	// detail, but the check is a failure.
+	if reasonsContainUnitDigest(res.Reasons) {
+		detail := "an installed packages artifact no longer matches its locked digest (possible store tamper) — run `da install` to re-verify/re-materialize"
+		if len(res.Reasons) > 1 {
+			detail += " (local config scopes also drifted; re-resolve after re-verifying the store)"
+		}
+		return []VerifyCheck{{name, verifyFail, detail}}
 	}
 
 	recorded := recordedInputsDigest(cwd)
@@ -313,14 +323,19 @@ func verifyStaleness(cwd string) []VerifyCheck {
 		abbrevSHA(recorded), abbrevSHA(res.ExpectedInputsDigest))}}
 }
 
-// unitDigestMismatchOnly reports whether reasons is exactly [ReasonUnitDigest]
-// — a unit-content drift with NO accompanying local-scope drift (inputs-
-// digest or declared-set change). Isolating this combination is what lets
-// verifyStaleness escalate a store tamper to a hard failure while still
-// treating an ordinary local-scope edit (which always/also carries
-// ReasonInputsDigest or ReasonDeclaredSet) as the existing recoverable warn.
-func unitDigestMismatchOnly(reasons []cfg.StalenessReason) bool {
-	return len(reasons) == 1 && reasons[0] == cfg.ReasonUnitDigest
+// reasonsContainUnitDigest reports whether a unit-digest mismatch is among the
+// staleness reasons. A store-integrity failure is a hard FAIL whether or not it
+// co-occurs with ordinary local-scope drift (inputs-digest / declared-set) —
+// requiring it to be the SOLE reason was an integrity bypass (review #1): a
+// tampered store that also had any config edit downgraded to a recoverable
+// warn with OK=true.
+func reasonsContainUnitDigest(reasons []cfg.StalenessReason) bool {
+	for _, r := range reasons {
+		if r == cfg.ReasonUnitDigest {
+			return true
+		}
+	}
+	return false
 }
 
 // recordedInputsDigest reads the inputs_digest the lockfile currently pins, or

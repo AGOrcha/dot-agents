@@ -296,14 +296,29 @@ func (lf *Lockfile) SetSection(name string, v any) error {
 // Flush writes the whole document to path atomically, preserving every section.
 // It is callable more than once (e.g. persist config before a slow adapter
 // activation, then flush adapters after). The parent directory must exist.
+//
+// Flush is NOT a serialized read-modify-write: it acquires the advisory lock
+// only for the write. A caller that must READ a shared section, compute a new
+// value from it, and WRITE it back atomically — with no concurrent writer
+// slipping in between the read and the write (the classic lost-update on a
+// section BOTH processes write, e.g. the config/packages "units" section) —
+// must use Update instead, which holds the lock across the whole cycle.
 func (lf *Lockfile) Flush() error {
-	lf.mu.Lock()
-	defer lf.mu.Unlock()
 	unlock, err := acquireFileLock(lf.path)
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	return lf.writeLocked()
+}
+
+// writeLocked merges the latest on-disk document with this Lockfile's staged
+// keys and writes atomically. The caller MUST already hold the advisory file
+// lock (Flush and Update both do). Split out of Flush so Update can perform a
+// read-open + mutate + write entirely inside ONE lock hold.
+func (lf *Lockfile) writeLocked() error {
+	lf.mu.Lock()
+	defer lf.mu.Unlock()
 	if err := lf.mergeDiskLocked(); err != nil {
 		return err
 	}
@@ -316,6 +331,37 @@ func (lf *Lockfile) Flush() error {
 		return fmt.Errorf("agentslock: write %s: %w", lf.path, err)
 	}
 	return nil
+}
+
+// Update runs a serialized read-modify-write against the lockfile at path: it
+// acquires the advisory file lock, opens the CURRENT on-disk document UNDER
+// that lock, invokes fn to stage changes (SetSection / SetInputsDigest against
+// the just-read state), then writes atomically and releases — all inside one
+// lock hold. This closes the lost-update window that an unsynchronized
+// Open→read→…→Flush leaves: when two processes both read-modify-write the SAME
+// shared section (the config/packages "units" section), a plain Flush reapplies
+// each process's stale whole-section snapshot and silently drops the other's
+// keys. Update makes the read happen under the same lock as the write, so each
+// writer observes the other's committed keys and preserves them.
+//
+// fn returns a non-nil error to ABORT with no write (the lock is released and
+// the document is left untouched). fn must not call Flush/Update on the same
+// Lockfile (the lock is not reentrant); it only stages via SetSection /
+// SetInputsDigest and reads via Section.
+func Update(path string, fn func(*Lockfile) error) error {
+	unlock, err := acquireFileLock(path)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	lf, err := Open(path)
+	if err != nil {
+		return err
+	}
+	if err := fn(lf); err != nil {
+		return err
+	}
+	return lf.writeLocked()
 }
 
 func (lf *Lockfile) mergeDiskLocked() error {

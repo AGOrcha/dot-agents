@@ -292,42 +292,41 @@ func verifyProjectionInputs(agentsHome string, units []platform.ResolvedUnit, co
 	return nil
 }
 
-// commitArtifactLock writes ONE combined lock (review #3 atomicity): the units
-// section — every existing non-artifact unit (the layer/profile units pass-1
-// carried forward) plus exactly the supplied artifact units — AND the sibling
-// artifact-content integrity section, in a single atomic agentslock flush that
-// preserves inputs_digest and every other sibling section (adapters, install
-// stamp). Existing artifact units are replaced wholesale (not merged), so a
-// packages[] ref removed from the manifest leaves neither an orphan lock unit
-// nor an orphan content anchor (R5). lock_units.go / LockedUnit are untouched.
+// commitArtifactLock writes ONE combined lock (review #3 atomicity + lost-update
+// fix): the units section — every existing NON-artifact unit (the layer/profile
+// units pass-1 wrote) plus exactly the supplied artifact units — AND the sibling
+// artifact-content integrity section, in a single serialized read-modify-write
+// (agentslock.Update). Update holds the advisory lock across the read of the
+// current units AND the write, so a concurrent pass-1 that committed fresh
+// layer/profile units between our resolve and this write is observed and
+// preserved instead of clobbered by a stale snapshot (the previous
+// Open→read-outside-lock→Flush shape lost such updates). inputs_digest and every
+// other sibling section (adapters, install stamp) are preserved by NOT staging
+// them (mergeDiskLocked reapplies only this write's dirty keys). Existing
+// artifact units are replaced wholesale, so a removed packages[] ref leaves
+// neither an orphan lock unit nor an orphan content anchor (R5). lock_units.go /
+// LockedUnit are untouched.
 func commitArtifactLock(projectPath string, artifactUnits map[string]config.LockedUnit, contentDigests map[string]string) error {
-	existing, err := config.ReadUnits(projectPath)
-	if err != nil {
-		return err
-	}
-	merged := make(map[string]config.LockedUnit, len(existing.Units)+len(artifactUnits))
-	for ref, u := range existing.Units {
-		if u.Kind == config.UnitKindArtifact {
-			continue
+	return agentslock.Update(config.AgentsLockPath(projectPath), func(lf *agentslock.Lockfile) error {
+		existing := map[string]config.LockedUnit{}
+		if _, err := lf.Section(config.LockSectionUnits, &existing); err != nil {
+			return err
 		}
-		merged[ref] = u
-	}
-	for ref, u := range artifactUnits {
-		merged[ref] = u
-	}
-
-	lf, err := agentslock.Open(config.AgentsLockPath(projectPath))
-	if err != nil {
-		return err
-	}
-	if err := lf.SetSection(config.LockSectionUnits, merged); err != nil {
-		return err
-	}
-	if err := lf.SetSection(artifactContentLockSection, contentDigests); err != nil {
-		return err
-	}
-	lf.SetInputsDigest(existing.InputsDigest)
-	return lf.Flush()
+		merged := make(map[string]config.LockedUnit, len(existing)+len(artifactUnits))
+		for ref, u := range existing {
+			if u.Kind == config.UnitKindArtifact {
+				continue
+			}
+			merged[ref] = u
+		}
+		for ref, u := range artifactUnits {
+			merged[ref] = u
+		}
+		if err := lf.SetSection(config.LockSectionUnits, merged); err != nil {
+			return err
+		}
+		return lf.SetSection(artifactContentLockSection, contentDigests)
+	})
 }
 
 // readArtifactContentDigests loads the artifact-content integrity section

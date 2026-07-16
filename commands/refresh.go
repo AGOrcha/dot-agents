@@ -258,13 +258,19 @@ func refreshOneProject(name, path string, enabledPlatforms, installedEnabled []p
 
 	config.SetWindowsMirrorContext(path)
 
-	packagesUnits, packagesParticipated, err := hydrateRefreshPackages(path, name, ensureRes)
-	if err != nil {
-		ui.Bullet("warn", fmt.Sprintf("resolving packages: %v", err))
+	packagesUnits, packagesParticipated, perr := hydrateRefreshPackages(path, name, ensureRes)
+	if perr != nil {
+		// A packages hydration failure (e.g. a transient fetch error) must NOT
+		// fall through to an exact projection with an EMPTY package set: its
+		// forced one-to-zero prune would delete the project's already-installed
+		// package links, so a momentary fetch failure would destroy installed
+		// packages. Skip shared-target projection for this project entirely,
+		// leaving every prior link (local-authored and package) intact; the
+		// per-platform CreateLinks below is additive (no prune) so the rest of
+		// the refresh still runs. (review #2)
+		ui.Bullet("warn", fmt.Sprintf("resolving packages: %v — leaving existing links untouched (skipping projection)", perr))
 		projectFailed = true
-	}
-
-	if runSharedTargetsForRefresh(name, path, installedEnabled, packagesUnits, packagesParticipated) {
+	} else if runSharedTargetsForRefresh(name, path, installedEnabled, packagesUnits, packagesParticipated) {
 		projectFailed = true
 	}
 	if recreatePlatformLinks(name, path, enabledPlatforms) {
