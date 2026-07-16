@@ -108,13 +108,16 @@ func TestHydratePackagesUnits_UnknownSourceErrors(t *testing.T) {
 // packages ref must fail with a clear "not yet wired (t6)" message, not the
 // confusing "not a directory-shaped bundle" a nil OCI Bundle would produce.
 // TestHydratePackagesUnits_OCISourceReachesWirePull confirms t6 wired OCI
-// consume into pass-2: an oci-source packages ref is no longer short-circuited
-// by the old "not yet wired" stopgap — it flows through the real consume path
-// (fetch -> digest/type gate -> materialize) and fails only at the still-stubbed
-// live wire pull (ociPull), not at a lifecycle guard. When the wire protocol
-// lands this becomes a full round-trip; until then the failure must come from
-// the registry pull, never the removed stopgap or the confusing bundle-shape
-// message a nil Bundle used to produce.
+// consume into pass-2, and (t8) that ociPull is now the REAL OCI Distribution
+// client rather than the "not yet wired" transport stub: an oci-source
+// packages ref flows through the real consume path (fetch -> digest/type gate
+// -> materialize) all the way to a genuine network attempt against the
+// declared registry host, which fails here only because "reg.example" is not
+// a real, resolvable registry in this test — never at a lifecycle guard, the
+// removed pass-2 stopgap, or the confusing bundle-shape message a nil Bundle
+// used to produce. The full round-trip (a real registry actually answering)
+// is covered end-to-end in internal/config/fetcher_oci_test.go against an
+// in-process test registry.
 func TestHydratePackagesUnits_OCISourceReachesWirePull(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("AGENTS_HOME", filepath.Join(tmp, ".agents"))
@@ -125,16 +128,19 @@ func TestHydratePackagesUnits_OCISourceReachesWirePull(t *testing.T) {
 	res := &config.EnsureResult{Snapshot: snapWithPackages(sources, "reg:skill/demo@1"), ReResolved: true}
 	_, _, err := HydratePackagesUnits(proj, "proj", res)
 	if err == nil {
-		t.Fatal("expected an oci-source packages ref to fail at the unwired wire pull")
+		t.Fatal("expected an oci-source packages ref against an unreachable registry to fail")
 	}
-	if !strings.Contains(err.Error(), "oci wire protocol not yet wired") {
-		t.Fatalf("expected the real ociPull transport-stub error, got: %v", err)
+	if !strings.Contains(err.Error(), "reg.example") {
+		t.Fatalf("expected the real ociPull client's error to name the registry host it tried to reach, got: %v", err)
 	}
 	if strings.Contains(err.Error(), "not a directory-shaped bundle") {
 		t.Fatalf("OCI now populates Bundle — must not hit the bundle-shape rejection: %v", err)
 	}
 	if strings.Contains(err.Error(), "not yet wired (tracked in t6") {
 		t.Fatalf("the pass-2 OCI stopgap should be gone, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "oci wire protocol not yet wired") {
+		t.Fatalf("ociPull is now wired to a real client and must not report the retired transport stub, got: %v", err)
 	}
 }
 

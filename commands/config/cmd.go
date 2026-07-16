@@ -112,6 +112,7 @@ which prints human concept documentation rather than live repo state.`,
 			"  da config relevance --filter topology --app-type go-cli",
 			"  da config migrate",
 			"  da config migrate --dry-run",
+			"  da config publish ./skills/review-pr acme-oci:skill/review-pr@v1.0.0",
 		),
 	}
 	cmd.AddCommand(newExplainCmd(deps))
@@ -120,6 +121,7 @@ which prints human concept documentation rather than live repo state.`,
 	cmd.AddCommand(newVerifyCmd(deps))
 	cmd.AddCommand(newRelevanceCmd(deps))
 	cmd.AddCommand(newMigrateCmd(deps))
+	cmd.AddCommand(newPublishCmd(deps))
 	return cmd
 }
 

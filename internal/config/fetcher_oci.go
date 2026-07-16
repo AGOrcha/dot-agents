@@ -371,21 +371,45 @@ func writeCachedArtifact(digest string, data []byte) error {
 // therefore never trusted as an OCI artifact on a cache hit (Finding 2 / H6).
 const ociTypeSidecarName = "oci-type.json"
 
+// ociTypeSidecarSchemaVersion is the current schema version stamped onto
+// every ociTypeSidecar this binary writes (closes the tracked
+// oci-sidecar-schema-versioning residual). sidecarSchemaTrusted is the read
+// gate: it accepts the current version AND the unset/zero value (a sidecar
+// with no schema_version key at all — every sidecar written before this
+// field existed, which already only ever came from a fresh pull that passed
+// the mandatory verifyOCILayerDescriptorDigest check, so backdating it to
+// "trusted" changes nothing about what it attests to). A sidecar carrying
+// some OTHER explicit version — a value this binary never wrote, e.g. a
+// future schema bump this build predates, or a past bump this build has
+// since moved beyond — is rejected as untrusted (a MISS, not a silent
+// grandfather-in). Bump ociTypeSidecarSchemaVersion whenever the integrity
+// contract a written sidecar attests to actually changes, so an old cache
+// entry is never trusted under a NEW, stronger meaning it never satisfied.
+const ociTypeSidecarSchemaVersion = 1
+
+// sidecarSchemaTrusted reports whether a sidecar's schema version should be
+// trusted by a cache-hit read. See ociTypeSidecarSchemaVersion's doc comment.
+func sidecarSchemaTrusted(v int) bool {
+	return v == 0 || v == ociTypeSidecarSchemaVersion
+}
+
 // ociTypeSidecar is the on-disk shape of the OCI type sidecar.
 type ociTypeSidecar struct {
-	ArtifactType string `json:"artifactType"`
-	MediaType    string `json:"mediaType"`
+	SchemaVersion int    `json:"schema_version"`
+	ArtifactType  string `json:"artifactType"`
+	MediaType     string `json:"mediaType"`
 }
 
 // writeOCITypeSidecar records the validated OCI type metadata for a cached
 // artifact blob, confined beneath the packages cache root exactly like the
 // blob write. It is written only after guardOCIArtifactType has accepted a
-// fresh pull, so a present sidecar always attests a validated artifact-bundle.
+// fresh pull, so a present sidecar always attests a validated artifact-bundle
+// at the CURRENT schema version.
 func writeOCITypeSidecar(digest, artifactType, mediaType string) error {
 	if !looksLikeSha256Digest(digest) {
 		return fmt.Errorf("refusing to cache oci type metadata under malformed digest %q", digest)
 	}
-	payload, err := json.Marshal(ociTypeSidecar{ArtifactType: artifactType, MediaType: mediaType})
+	payload, err := json.Marshal(ociTypeSidecar{SchemaVersion: ociTypeSidecarSchemaVersion, ArtifactType: artifactType, MediaType: mediaType})
 	if err != nil {
 		return fmt.Errorf("marshaling oci type sidecar: %w", err)
 	}
@@ -430,7 +454,7 @@ func readCachedOCIArtifact(digest string) ([]byte, bool) {
 		return nil, false
 	}
 	sc, ok := readOCITypeSidecar(digest)
-	if !ok || sc.ArtifactType != ociArtifactMediaType || sc.MediaType != ociArtifactMediaType {
+	if !ok || !sidecarSchemaTrusted(sc.SchemaVersion) || sc.ArtifactType != ociArtifactMediaType || sc.MediaType != ociArtifactMediaType {
 		return nil, false
 	}
 	return data, true
@@ -518,12 +542,13 @@ type ociBlob struct {
 	// (no pin) and is enforced on pinned pulls too. Empty is tolerated only for
 	// a registry that omits the descriptor digest.
 	Digest string
-	// ManifestDigest is the manifest's OWN digest — the value a `pinned:sha256:`
-	// ref addresses (H5: "pinned addresses the manifest"). It is a DIFFERENT
-	// object than the layer blob, so a pin is validated against THIS, not the
-	// payload digest (verifyOCIPin). Empty until the live wire protocol that
-	// fetches+hashes the manifest is wired; while empty, a pin falls back to the
-	// content-addressed payload digest so the offline cache round-trips.
+	// ManifestDigest is the manifest's OWN digest — a DIFFERENT object than the
+	// layer blob (H5). ociPullLive (artifact_bundle.go, t8) populates it from
+	// every live pull by recomputing sha256 over the exact manifest bytes
+	// served (never a registry-reported label). verifyOCIPin accepts a pin
+	// that matches EITHER this or the payload digest; empty here (a puller
+	// that predates the live wire protocol, e.g. an older test fake) still
+	// round-trips via the payload-digest match alone.
 	ManifestDigest string
 	MediaType      string
 	// ArtifactType is the OCI 1.1 manifest-level `artifactType` field (distinct
@@ -877,41 +902,58 @@ func readCachedOCILayer(digest string) ([]byte, bool) {
 		return nil, false
 	}
 	sc, ok := readOCITypeSidecar(digest)
-	if !ok || sc.MediaType != ociLayerMediaType {
+	if !ok || !sidecarSchemaTrusted(sc.SchemaVersion) || sc.MediaType != ociLayerMediaType {
 		return nil, false
 	}
 	return data, true
 }
 
-// verifyOCIPin validates a `pinned:sha256:` ref against the digest it
-// addresses. Per H5 a pin addresses the MANIFEST digest, so when the puller
-// resolved a manifest digest the pin is checked against THAT. When no manifest
-// digest is available (the offline content-addressed cache fast path, or a
-// puller that does not surface it) the pin falls back to the recomputed
-// payload/content digest — the value the cache is keyed by and the lock
-// records — so a pinned offline hit still round-trips. The layer-descriptor
-// integrity check (payload vs blob.Digest) is separate and always runs; this
-// only guards the pin, and only when a pin is present.
+// verifyOCIPin validates a `pinned:sha256:` ref against the digest(s) it could
+// address. t8 wired the live wire protocol, so manifestDigest is now
+// genuinely populated on every fresh pull (ociPullLive, artifact_bundle.go) —
+// closing the tracked oci-pin-manifest-digest-deadcode residual's "this never
+// activates" complaint. A pin is accepted if it matches EITHER object:
+//
+//   - payloadDigest — the value the shared, content-addressed packages cache
+//     (readCachedPinnedOCIBlob/writeCachedArtifact) and the lock's
+//     KeyInputs.OCIDigest key on UNIFORMLY across every source type
+//     (git/http/local/oci). This is the authoritative match for the offline
+//     cache round trip: `da config publish` returns LayerDigest (the payload
+//     digest) precisely so a subsequent `pinned:sha256:<LayerDigest>` pull
+//     cache-hits (R8). Switching the cache/lock key itself to the manifest
+//     digest would be a cross-cutting change to all four fetchers' shared
+//     content-addressing contract, well outside this pin check's scope.
+//   - manifestDigest — the object H5 states a pin conceptually addresses (a
+//     DIFFERENT object than the payload, deliberately not conflated). Once
+//     populated this is now a live, exercised comparison (see
+//     TestVerifyOCIPinAcceptsManifestDigest) rather than always-empty dead
+//     code; an operator who deliberately pins the manifest digest instead of
+//     the payload digest is honored too, even though that specific pin will
+//     not itself become a future cache key (a distinct, lesser concern from
+//     "does the pull's integrity check accept it").
+//
+// The layer-descriptor integrity check (payload vs blob.Digest) is separate
+// and always runs; this only guards the pin, and only when one is present.
 func verifyOCIPin(pin, manifestDigest, payloadDigest, importRef, sourceID string) error {
 	if pin == "" {
 		return nil
 	}
-	want := manifestDigest
-	if want == "" {
-		want = payloadDigest
+	if pin == payloadDigest || (manifestDigest != "" && pin == manifestDigest) {
+		return nil
 	}
-	if pin != want {
-		return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but resolved %s", pin, want)}
+	want := payloadDigest
+	if manifestDigest != "" {
+		want = fmt.Sprintf("%s (payload) or %s (manifest)", payloadDigest, manifestDigest)
 	}
-	return nil
+	return &ImportError{Ref: importRef, SourceID: sourceID, Reason: ReasonContent, Err: fmt.Errorf("digest mismatch: pinned %s but resolved %s", pin, want)}
 }
 
-// ociPull is the real OCI Distribution pull, not yet wired. The live wire
-// protocol (manifest fetch, blob fetch, token auth) lands with pass-2 packages
-// resolution; for now it deterministically reports a transport error so a
-// misconfigured run fails loudly rather than silently, while the `puller` seam
-// lets tests and the resolver drive the fetcher's caching/posture/media-type
-// logic.
-func ociPull(_ context.Context, ref ociRef, _ []byte) (ociBlob, error) {
-	return ociBlob{}, fmt.Errorf("oci wire protocol not yet wired (registry=%s repo=%s); the live registry pull implements this", ref.Registry, ref.Repository)
+// ociPull is the real OCI Distribution pull (t8, package-artifact-install
+// spec D9): manifest fetch, blob fetch, and per-request auth (t7's
+// ociAuthHeaderForRef) live in ociPullLive (artifact_bundle.go), which this
+// wires to. The `puller` seam on ociFetcher/pullOCIContent still lets tests
+// and the resolver drive the fetcher's caching/posture/media-type logic
+// without a live registry; this is only the production default.
+func ociPull(ctx context.Context, ref ociRef, auth []byte) (ociBlob, error) {
+	return ociPullLive(ctx, ref, auth)
 }

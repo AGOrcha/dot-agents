@@ -154,6 +154,7 @@ test_command "config explain --help" "$DOT_AGENTS config explain --help"
 test_command "config sync --help" "$DOT_AGENTS config sync --help"
 test_command "config lint --help" "$DOT_AGENTS config lint --help"
 test_command "config verify --help" "$DOT_AGENTS config verify --help"
+test_command "config publish --help" "$DOT_AGENTS config publish --help"
 
 echo ""
 echo -e "${BOLD}Config-v2 + Mutations (isolated managed home)${NC}"
