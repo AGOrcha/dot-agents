@@ -405,6 +405,16 @@ func TestProjectResolvedUnits_RefusesToDeleteRealUserDir(t *testing.T) {
 // atomic swap correctly REPOINTS an existing managed symlink (the normal
 // digest-change case) without a RemoveAll and with no absent window.
 func TestProjectResolvedUnits_RepointsExistingManagedSymlink(t *testing.T) {
+	// The safe managed-link REPOINT relies on an atomic path-exchange primitive
+	// (Linux RENAME_EXCHANGE / Darwin RENAME_SWAP). On an OS without it (Windows,
+	// remaining BSDs) atomicSwapReplaceManagedLink deliberately fails the repoint
+	// CLOSED rather than falling back to an unsafe unlink (see
+	// resource_plan_swap_other.go), so a successful in-place repoint is not
+	// expected there. Probe the actual primitive instead of matching GOOS strings
+	// so the guard can never drift from the build-tagged implementation.
+	if probe := t.TempDir(); errors.Is(atomicSwapRename(filepath.Join(probe, "a"), filepath.Join(probe, "b")), errSwapUnsupported) {
+		t.Skip("atomic path-exchange unsupported on this OS; managed-link repoint fails closed by design")
+	}
 	home := t.TempDir()
 	t.Setenv("AGENTS_HOME", home)
 	repo := filepath.Join(t.TempDir(), "repo")

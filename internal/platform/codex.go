@@ -454,11 +454,24 @@ func (c *codex) writeCodexAgents(agentsHome, scope, dstRoot string) error {
 // are aggregated and surfaced rather than silently swallowed (false
 // convergence, defect 4).
 func (c *codex) pruneManagedCodexAgentTomls(dstRoot string) error {
-	existing, err := os.ReadDir(dstRoot)
+	// Stat first so "absent" (convergence, nothing to prune) is distinguished from
+	// "present but not a directory" (a real error to surface) by the file's TYPE,
+	// not by ReadDir's error value. os.ReadDir on a regular file returns ENOTDIR on
+	// unix but a differently-classified error on Windows (swallowed by os.IsNotExist
+	// → the masquerade would be silently treated as converged); an explicit IsDir()
+	// gate fails closed identically on every platform.
+	info, err := os.Stat(dstRoot)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
+		return fmt.Errorf("stat codex agents dir %s: %w", dstRoot, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("codex agents dir %s is not a directory", dstRoot)
+	}
+	existing, err := os.ReadDir(dstRoot)
+	if err != nil {
 		return fmt.Errorf("listing codex agents dir %s: %w", dstRoot, err)
 	}
 	var errs []error

@@ -410,7 +410,18 @@ func declaredUnitRefs(rc AgentsRC) map[string]bool {
 // pin a version) against resolved lock keys.
 func lockedUnitRefs(units map[string]LockedUnit) map[string]bool {
 	refs := make(map[string]bool, len(units))
-	for key := range units {
+	for key, u := range units {
+		// Only layer (from `extends`) and artifact (from `packages`) units are
+		// DECLARED in the manifest, so only they belong in the declared-set
+		// comparison. Derived units the resolver folds into the lock — kind:profile
+		// (R2 stage profiles), project-set, descriptor — are never declared; counting
+		// them here permanently trips ReasonDeclaredSet (their ref is not in the
+		// manifest's declared set), forcing a re-resolve on EVERY run. That re-stamps
+		// fetched_at/last_checked_at on every unit and breaks the H9 frozen-no-op
+		// contract (a lock-clean re-install must not churn the lock).
+		if u.Kind != UnitKindLayer && u.Kind != UnitKindArtifact {
+			continue
+		}
 		refs[declaredRefOf(key)] = true
 	}
 	return refs
