@@ -297,3 +297,29 @@ func TestCloseDetachesAttachedR3Bus(t *testing.T) {
 		t.Errorf("bus.Publish after broker Close: %v, want nil (bus unaffected)", err)
 	}
 }
+
+// TestTranslateR3EventDropsOffContract pins the two remaining drop arms of
+// translateR3Event that AttachR3Bus cannot reach through a live bus: a bridged
+// topic whose payload is the WRONG type (rescore.done carrying a non-RescoreDone
+// value) and a topic outside r3BridgedTopics (never subscribed, so it never
+// arrives via forwardR3). Both must translate to ok=false so the caller drops
+// them rather than fan out off-schema.
+func TestTranslateR3EventDropsOffContract(t *testing.T) {
+	cfg := r3Config{resolve: func(string, int) string { return "" }}
+
+	// rescore.done with a payload that is not svcevents.RescoreDone.
+	if topic, payload, ok := translateR3Event(svcevents.Event{
+		Topic:   svcevents.TopicRescoreDone,
+		Payload: "not-a-rescore-done",
+	}, cfg); ok || topic != "" || payload != nil {
+		t.Errorf("rescore.done off-contract payload = (%q, %v, %v), want (empty, nil, false)", topic, payload, ok)
+	}
+
+	// A topic with no dashboard surface (e.g. task.error) hits the default arm.
+	if topic, payload, ok := translateR3Event(svcevents.Event{
+		Topic:   svcevents.TopicTaskError,
+		Payload: svcevents.RescoreDone{ToVersion: "1.2.3"},
+	}, cfg); ok || topic != "" || payload != nil {
+		t.Errorf("unknown topic = (%q, %v, %v), want (empty, nil, false)", topic, payload, ok)
+	}
+}

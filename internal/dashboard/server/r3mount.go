@@ -40,6 +40,12 @@ var ErrNilEdge = errors.New("dashboard/server: R3 edge is required")
 // stream, so a nil bus is a wiring error, not a silently REST-only mode.
 var ErrNilBus = errors.New("dashboard/server: R3 edge exposes no event bus")
 
+// newHandlers builds the dashboard REST/SSE Mount. It is a package var so a
+// test can drive Mount's build-handlers error arm: with a live recompute store
+// and broker, handlers.New only fails on a nil Store, a combination Mount never
+// constructs, so the failure path is otherwise unreachable.
+var newHandlers = handlers.New
+
 // R3Edge is the slice of the R3 HTTP/SSE edge (internal/service/http.Server)
 // the dashboard mount needs: the RegisterMount reservation point and the D4.1
 // EventBus the runtime's background tasks publish on. *service/http.Server
@@ -111,7 +117,7 @@ func Mount(edge R3Edge, cfg MountConfig) (io.Closer, error) {
 	broker = events.New(events.Options{Evictor: disk})
 	recStore := store.NewRecompute(disk, repoDir, cfg.TranscriptDirs...)
 
-	mount, err := handlers.New(handlers.Deps{
+	mount, err := newHandlers(handlers.Deps{
 		Store:  recStore,
 		Logger: logger,
 		Broker: broker,

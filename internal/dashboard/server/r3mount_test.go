@@ -7,18 +7,22 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/AGOrcha/dot-agents/internal/dashboard/handlers"
 	svcevents "github.com/AGOrcha/dot-agents/internal/service/events"
 	servicehttp "github.com/AGOrcha/dot-agents/internal/service/http"
 	"github.com/AGOrcha/dot-agents/internal/service/scheduler"
@@ -226,4 +230,173 @@ func readSSEFrame(reader *bufio.Reader) (map[string]string, error) {
 // discardLogger is a no-op structured logger for tests that do not assert logs.
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// fakeEdge is a minimal R3Edge double used to drive Mount's failure arms
+// (RegisterMount error, bus-attach error, handlers-build error) that the real
+// service edge does not exercise.
+type fakeEdge struct {
+	bus         svcevents.EventBus
+	registerErr error
+}
+
+func (e *fakeEdge) RegisterMount(string, http.Handler) error { return e.registerErr }
+func (e *fakeEdge) Bus() svcevents.EventBus                  { return e.bus }
+
+// failingBus is an EventBus whose Subscribe always fails, forcing
+// broker.AttachR3Bus (and thus Mount) to error.
+type failingBus struct{ err error }
+
+func (b *failingBus) Publish(string, any) error { return nil }
+func (b *failingBus) Subscribe(string) (<-chan svcevents.Event, func(), error) {
+	return nil, nil, b.err
+}
+func (b *failingBus) Close() error { return nil }
+
+// assertNoLeak proves Mount released the broker it built on a failure path: the
+// broker's heartbeat goroutine only exits when Close runs (Close joins it via
+// wg.Wait), so a goroutine count that never falls back to baseline means the
+// broker leaked.
+func assertNoLeak(t *testing.T, before int) {
+	t.Helper()
+	for range 50 {
+		if runtime.NumGoroutine() <= before {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("goroutine leak after Mount failure: before=%d now=%d (broker not closed)",
+		before, runtime.NumGoroutine())
+}
+
+// healthSubscriberCount reads the dashboard /health envelope's subscriber_count.
+func healthSubscriberCount(t *testing.T, ts *httptest.Server) int {
+	t.Helper()
+	resp, err := http.Get(ts.URL + dashboardBase + "/health")
+	if err != nil {
+		t.Fatalf("GET health: %v", err)
+	}
+	defer resp.Body.Close()
+	var env struct {
+		Data struct {
+			SubscriberCount int `json:"subscriber_count"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	return env.Data.SubscriberCount
+}
+
+// TestMountHealthReadsBrokerSubscriberCount exercises the late-bound
+// subscriber-counter closure Mount hands the store: /health reads it live, so
+// it must report the broker's current SSE subscriber count (0 before any
+// client, 1 once an SSE stream attaches).
+func TestMountHealthReadsBrokerSubscriberCount(t *testing.T) {
+	edge := newEdge(t)
+	closer, err := Mount(edge, MountConfig{IterLogDirs: []string{t.TempDir()}})
+	if err != nil {
+		t.Fatalf("Mount: %v", err)
+	}
+	defer func() { _ = closer.Close() }()
+
+	ts := httptest.NewServer(edge.Handler())
+	defer ts.Close()
+
+	if got := healthSubscriberCount(t, ts); got != 0 {
+		t.Fatalf("subscriber_count before subscribe = %d, want 0", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	resp, _ := openSSE(t, ts, ctx)
+	defer resp.Body.Close()
+
+	if got := healthSubscriberCount(t, ts); got != 1 {
+		t.Fatalf("subscriber_count with one SSE client = %d, want 1", got)
+	}
+}
+
+// TestMountRegisterMountErrorClosesBroker drives the RegisterMount failure arm:
+// Mount must return the wrapped edge error and release the broker it built.
+func TestMountRegisterMountErrorClosesBroker(t *testing.T) {
+	bus := svcevents.NewInProcBus()
+	t.Cleanup(func() { _ = bus.Close() })
+	boom := errors.New("register boom")
+	edge := &fakeEdge{bus: bus, registerErr: boom}
+
+	before := runtime.NumGoroutine()
+	closer, err := Mount(edge, MountConfig{})
+	if closer != nil {
+		t.Fatalf("Mount returned a closer on failure: %v", closer)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("Mount err = %v, want wrap of %v", err, boom)
+	}
+	assertNoLeak(t, before)
+}
+
+// TestMountAttachBusErrorClosesBroker drives the AttachR3Bus failure arm:
+// RegisterMount succeeds, then the bus refuses every Subscribe, so Mount must
+// return the wrapped bridge error and release the broker.
+func TestMountAttachBusErrorClosesBroker(t *testing.T) {
+	boom := errors.New("subscribe boom")
+	edge := &fakeEdge{bus: &failingBus{err: boom}}
+
+	before := runtime.NumGoroutine()
+	closer, err := Mount(edge, MountConfig{})
+	if closer != nil {
+		t.Fatalf("Mount returned a closer on failure: %v", closer)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("Mount err = %v, want wrap of %v", err, boom)
+	}
+	assertNoLeak(t, before)
+}
+
+// TestMountHandlersErrorClosesBroker covers Mount's build-handlers failure arm.
+// With a live recompute store and broker, handlers.New only errors on a nil
+// Store — a combination Mount never constructs — so the arm is driven through
+// the newHandlers seam, still asserting Mount wraps the error and releases the
+// broker.
+func TestMountHandlersErrorClosesBroker(t *testing.T) {
+	boom := errors.New("handlers boom")
+	orig := newHandlers
+	newHandlers = func(handlers.Deps) (*handlers.Mount, error) { return nil, boom }
+	t.Cleanup(func() { newHandlers = orig })
+
+	bus := svcevents.NewInProcBus()
+	t.Cleanup(func() { _ = bus.Close() })
+	edge := &fakeEdge{bus: bus}
+
+	before := runtime.NumGoroutine()
+	closer, err := Mount(edge, MountConfig{})
+	if closer != nil {
+		t.Fatalf("Mount returned a closer on failure: %v", closer)
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("Mount err = %v, want wrap of %v", err, boom)
+	}
+	assertNoLeak(t, before)
+}
+
+// TestMountResolverUnparseableRecordWarns covers diskSessionResolver's
+// malformed-record arm: a present-but-unparseable iter-<n>.yaml must degrade to
+// an empty session id AND emit the warn (the read-error and empty-dir arms are
+// covered by TestMountResolvesSessionFromDisk).
+func TestMountResolverUnparseableRecordWarns(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "iter-4.yaml"),
+		[]byte("iteration: [unterminated"), 0o644); err != nil {
+		t.Fatalf("write malformed record: %v", err)
+	}
+	var buf bytes.Buffer
+	resolve := diskSessionResolver(slog.New(slog.NewTextHandler(&buf, nil)))
+
+	if got := resolve(dir, 4); got != "" {
+		t.Errorf("resolve(unparseable) = %q, want empty", got)
+	}
+	if !strings.Contains(buf.String(), "unparseable iter record") {
+		t.Errorf("expected unparseable-record warning, got log: %q", buf.String())
+	}
 }
